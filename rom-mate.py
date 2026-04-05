@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QListWidgetItem,
     QLineEdit,
     QMainWindow,
     QMessageBox,
@@ -1174,7 +1175,15 @@ class MainWindow(QMainWindow):
                             return resolved
             return ""
 
-        for key in ("cover_url", "cover_image", "cover_path", "image_url"):
+        for key in (
+            "url_cover",
+            "path_cover_large",
+            "path_cover_small",
+            "cover_url",
+            "cover_image",
+            "cover_path",
+            "image_url",
+        ):
             value = payload.get(key)
             resolved = resolve_cover_value(value)
             if resolved:
@@ -1682,14 +1691,25 @@ class MainWindow(QMainWindow):
     def _game_key(self, game: dict[str, str]) -> tuple[str, str]:
         return (game.get("title", "").strip().lower(), game.get("platform", "").strip().lower())
 
+    def _rom_id_key(self, game: dict[str, str]) -> str:
+        rom_id_value = game.get("rom_id", "")
+        if not isinstance(rom_id_value, str):
+            return ""
+        return rom_id_value.strip().casefold()
+
+    def _games_match_identity(self, left: dict[str, str], right: dict[str, str]) -> bool:
+        left_rom_id = self._rom_id_key(left)
+        right_rom_id = self._rom_id_key(right)
+        if left_rom_id and right_rom_id:
+            return left_rom_id == right_rom_id
+        return self._game_key(left) == self._game_key(right)
+
     def _is_game_installed(self, game: dict[str, str]) -> bool:
-        target = self._game_key(game)
-        return any(self._game_key(installed) == target for installed in self.library_games)
+        return any(self._games_match_identity(installed, game) for installed in self.library_games)
 
     def _installed_game_record(self, game: dict[str, str]) -> dict[str, str] | None:
-        target = self._game_key(game)
         for installed in self.library_games:
-            if self._game_key(installed) == target:
+            if self._games_match_identity(installed, game):
                 return installed
         return None
 
@@ -1714,6 +1734,7 @@ class MainWindow(QMainWindow):
     def _register_installed_game(self, game: dict[str, str], archive_path: Path) -> None:
         extracted_path = game.get("extracted_path", "").strip()
         stored_archive_path = "" if extracted_path else str(archive_path)
+        rom_id = game.get("rom_id", "").strip()
         self.library_games.append(
             {
                 "title": game.get("title", "").strip(),
@@ -1722,6 +1743,7 @@ class MainWindow(QMainWindow):
                 "description": game.get("description", "No description available.").strip() or "No description available.",
                 "cover_url": game.get("cover_url", "").strip(),
                 "screenshot_urls": game.get("screenshot_urls", "").strip(),
+                "rom_id": rom_id,
                 "rom_file_name": game.get("rom_file_name", "").strip(),
                 "extracted_path": extracted_path,
                 "extracted_dir": game.get("extracted_dir", "").strip(),
@@ -1839,7 +1861,7 @@ class MainWindow(QMainWindow):
         return platform_value.strip().casefold() == "emulators"
 
     def _default_assignable_server_platforms(self) -> list[str]:
-        hidden_platforms = {"windows", "emulators"}
+        hidden_platforms = {"windows", "windows 9x", "emulators"}
         return [
             platform
             for platform in self.server_platform_ids.keys()
@@ -1866,12 +1888,19 @@ class MainWindow(QMainWindow):
                     title_text = game.get("title", "")
                     title = title_text.strip().casefold() if isinstance(title_text, str) else ""
                     title_tokens = [token for token in re.split(r"[^a-z0-9]+", title) if len(token) > 2]
+                    preferred_executable_names: set[str] = set()
+                    if "nintendo switch" in title or "switch" in title:
+                        preferred_executable_names.add("eden.exe")
+                    if "nintendo 3ds" in title or "3ds" in title:
+                        preferred_executable_names.add("azahar.exe")
 
                     def score(candidate: Path) -> tuple[int, int, int, str]:
+                        candidate_file_name = candidate.name.casefold()
+                        preferred_name = 0 if candidate_file_name in preferred_executable_names else 1
                         candidate_name = candidate.stem.casefold()
                         token_hits = sum(1 for token in title_tokens if token in candidate_name)
                         preferred_binary = 0 if candidate.suffix.casefold() == ".exe" else 1
-                        return (-token_hits, preferred_binary, len(candidate.parts), str(candidate).casefold())
+                        return (preferred_name, -token_hits, preferred_binary, len(candidate.parts), str(candidate).casefold())
 
                     candidates.sort(key=score)
                     return str(candidates[0])
@@ -2051,7 +2080,6 @@ class MainWindow(QMainWindow):
 
         self._refresh_emulator_views()
         self._save_config(self.config)
-        return True
 
     def _archive_name_for_game(self, game: dict[str, str]) -> str:
         rom_file_name_value = game.get("rom_file_name", "")
@@ -2212,6 +2240,60 @@ class MainWindow(QMainWindow):
                 return False
         return True if removed_any else True
 
+    def _path_key(self, path: Path) -> str:
+        expanded = path.expanduser()
+        try:
+            return str(expanded.resolve(strict=False)).casefold()
+        except OSError:
+            return str(expanded).casefold()
+
+    def _path_within_path(self, path: Path, root: Path) -> bool:
+        path_key = self._path_key(path)
+        root_key = self._path_key(root).rstrip("\\/")
+        if not root_key:
+            return False
+        return path_key == root_key or path_key.startswith(f"{root_key}\\") or path_key.startswith(f"{root_key}/")
+
+    def _matching_installed_emulator_games(self, emulator_path: Path) -> list[dict[str, str]]:
+        matches: list[dict[str, str]] = []
+        target_key = self._path_key(emulator_path)
+        for game in self.library_games:
+            if not self._is_emulators_platform(game):
+                continue
+
+            file_candidates = self._candidate_archive_paths_for_game(game) + self._candidate_extracted_paths_for_game(game)
+            if any(self._path_key(candidate) == target_key for candidate in file_candidates):
+                matches.append(game)
+                continue
+
+            dir_candidates = self._candidate_extracted_dirs_for_game(game)
+            if any(self._path_within_path(emulator_path, candidate) for candidate in dir_candidates):
+                matches.append(game)
+        return matches
+
+    def _uninstall_emulator_files(self, emulator: dict[str, str]) -> bool:
+        emulator_path_value = emulator.get("path", "")
+        emulator_path_text = emulator_path_value.strip() if isinstance(emulator_path_value, str) else ""
+        if not emulator_path_text:
+            return True
+
+        emulator_path = Path(emulator_path_text)
+        matches = self._matching_installed_emulator_games(emulator_path)
+        if not matches:
+            return True
+
+        keys_to_remove = {self._game_key(game) for game in matches}
+        for game in matches:
+            if not self._remove_game_files(game):
+                return False
+
+        before = len(self.library_games)
+        self.library_games = [entry for entry in self.library_games if self._game_key(entry) not in keys_to_remove]
+        if len(self.library_games) != before:
+            self._refresh_library_grid()
+            self._persist_installed_games()
+        return True
+
     def _uninstall_game(self, game: dict[str, str]) -> bool:
         target = self._game_key(game)
         matching_games = [entry for entry in self.library_games if self._game_key(entry) == target]
@@ -2339,24 +2421,24 @@ class MainWindow(QMainWindow):
         self._save_config(self.config)
 
     def _resolve_rom_id_for_game(self, game: dict[str, str]) -> str:
-        direct = game.get("rom_id", "")
-        if isinstance(direct, str) and direct.strip():
-            return direct.strip()
+        direct = str(game.get("rom_id", "")).strip()
+        if direct:
+            return direct
 
         cache_key = self._details_rom_id_cache_key(game)
         cache = self._details_rom_id_cache()
-        cached = cache.get(cache_key, "")
-        if isinstance(cached, str) and cached.strip():
-            return cached.strip()
+        cached = str(cache.get(cache_key, "")).strip()
+        if cached:
+            return cached
 
         target = self._game_key(game)
         for games in self.server_games_by_platform.values():
             for server_game in games:
                 if self._game_key(server_game) != target:
                     continue
-                server_rom_id = server_game.get("rom_id", "")
-                if isinstance(server_rom_id, str) and server_rom_id.strip():
-                    return server_rom_id.strip()
+                server_rom_id = str(server_game.get("rom_id", "")).strip()
+                if server_rom_id:
+                    return server_rom_id
         return ""
 
     def _cleanup_details_view_state(self) -> None:
@@ -3312,6 +3394,7 @@ class MainWindow(QMainWindow):
             description = item.get("description")
             cover_url = item.get("cover_url")
             screenshot_urls = item.get("screenshot_urls")
+            rom_id = item.get("rom_id")
             rom_file_name = item.get("rom_file_name")
             extracted_path = item.get("extracted_path")
             extracted_dir = item.get("extracted_dir")
@@ -3323,6 +3406,7 @@ class MainWindow(QMainWindow):
                 "description": description.strip() if isinstance(description, str) and description.strip() else "No description available.",
                 "cover_url": cover_url.strip() if isinstance(cover_url, str) else "",
                 "screenshot_urls": screenshot_urls.strip() if isinstance(screenshot_urls, str) else "",
+                "rom_id": rom_id.strip() if isinstance(rom_id, str) else "",
                 "rom_file_name": rom_file_name.strip() if isinstance(rom_file_name, str) else "",
                 "extracted_path": extracted_path.strip() if isinstance(extracted_path, str) else "",
                 "extracted_dir": extracted_dir.strip() if isinstance(extracted_dir, str) else "",
@@ -3347,8 +3431,42 @@ class MainWindow(QMainWindow):
         emulators = self._normalize_emulators(self._emulators())
         self.config["emulators"] = emulators
 
+        selected_name = ""
+        selected_index = self.emulator_list.currentRow()
+        if 0 <= selected_index < len(emulators):
+            existing_name = emulators[selected_index].get("name", "")
+            if isinstance(existing_name, str):
+                selected_name = existing_name.strip()
+
         self.emulator_list.clear()
-        self.emulator_list.addItems([entry["name"] for entry in emulators])
+        for row, entry in enumerate(emulators):
+            item = QListWidgetItem()
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(6, 2, 6, 2)
+            row_layout.setSpacing(8)
+
+            name_button = QPushButton(entry["name"])
+            name_button.setFlat(True)
+            name_button.setStyleSheet("text-align: left; padding: 4px 0;")
+            name_button.clicked.connect(lambda checked=False, current_row=row: self.emulator_list.setCurrentRow(current_row))
+            row_layout.addWidget(name_button, 1)
+
+            uninstall_button = QPushButton("Uninstall")
+            uninstall_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            uninstall_button.clicked.connect(lambda checked=False, current_row=row: self._remove_emulator_at_index(current_row))
+            row_layout.addWidget(uninstall_button)
+
+            item.setSizeHint(row_widget.sizeHint())
+            self.emulator_list.addItem(item)
+            self.emulator_list.setItemWidget(item, row_widget)
+
+        if selected_name:
+            for row, emulator in enumerate(emulators):
+                emulator_name = emulator.get("name", "")
+                if isinstance(emulator_name, str) and emulator_name.strip().casefold() == selected_name.casefold():
+                    self.emulator_list.setCurrentRow(row)
+                    break
 
         if self.default_emulator_combo is not None:
             selected_name = self.default_emulator_combo.currentText()
@@ -3422,15 +3540,16 @@ class MainWindow(QMainWindow):
         self._refresh_emulator_views()
         self._save_config(self.config)
 
-    def _remove_emulator(self) -> None:
-        if self.emulator_list is None:
-            return
-        index = self.emulator_list.currentRow()
+    def _remove_emulator_at_index(self, index: int) -> None:
         emulators = self._emulators()
         if index < 0 or index >= len(emulators):
             return
 
-        removed_name = emulators[index]["name"]
+        emulator_to_remove = emulators[index]
+        if not self._uninstall_emulator_files(emulator_to_remove):
+            return
+
+        removed_name = emulator_to_remove["name"]
         emulators.pop(index)
         self.config["emulators"] = self._normalize_emulators(emulators)
 
@@ -3448,6 +3567,12 @@ class MainWindow(QMainWindow):
 
         self._refresh_emulator_views()
         self._save_config(self.config)
+
+    def _remove_emulator(self) -> None:
+        if self.emulator_list is None:
+            return
+        index = self.emulator_list.currentRow()
+        self._remove_emulator_at_index(index)
 
     def _clear_emulator_selection(self) -> None:
         if self.emulator_list is not None:
