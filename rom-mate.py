@@ -20,6 +20,8 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequ
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFrame,
     QFormLayout,
@@ -77,7 +79,7 @@ class InstallDownloadWorker(QObject):
                         self.progress.emit(downloaded_bytes, total_bytes, speed_bps)
             self.finished.emit(str(self.archive_path), "")
         except (HTTPError, URLError, OSError, ValueError, OverflowError) as error:
-            if self.archive_path.exists():
+            if self.archive_path.exists() and self.archive_path.is_file():
                 try:
                     self.archive_path.unlink()
                 except OSError:
@@ -116,6 +118,7 @@ class MainWindow(QMainWindow):
         self.details_screenshot_labels: list[QLabel] = []
         self.details_screenshots_scroll: QScrollArea | None = None
         self.details_primary_button: QPushButton | None = None
+        self.details_config_button: QPushButton | None = None
         self.details_secondary_button: QPushButton | None = None
         self.server_platforms_list: QListWidget | None = None
         self.server_games_grid: QGridLayout | None = None
@@ -752,6 +755,12 @@ class MainWindow(QMainWindow):
         primary.clicked.connect(self._perform_game_action)
         self.details_primary_button = primary
         action_row.addWidget(primary)
+
+        config_button = QPushButton("Config")
+        config_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        config_button.clicked.connect(self._perform_game_config_action)
+        self.details_config_button = config_button
+        action_row.addWidget(config_button)
 
         secondary = QPushButton("Uninstall Game")
         secondary.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -1525,50 +1534,69 @@ class MainWindow(QMainWindow):
         if platform_id is None:
             return
 
+        page_size = 200
+        all_items: list[dict[str, Any]] = []
+        offset = 0
         try:
-            payload = self._api_get(
-                "/api/roms",
-                {
-                    "platform_ids": [platform_id],
-                    "limit": 200,
-                    "offset": 0,
-                    "with_char_index": "false",
-                    "with_filter_values": "false",
-                },
-            )
+            while True:
+                payload = self._api_get(
+                    "/api/roms",
+                    {
+                        "platform_ids": [platform_id],
+                        "limit": page_size,
+                        "offset": offset,
+                        "with_char_index": "false",
+                        "with_filter_values": "false",
+                    },
+                )
+                if not isinstance(payload, dict):
+                    break
+
+                page_items = payload.get("items")
+                if not isinstance(page_items, list) or not page_items:
+                    break
+
+                for item in page_items:
+                    if isinstance(item, dict):
+                        all_items.append(item)
+
+                total = payload.get("total")
+                if isinstance(total, int) and len(all_items) >= total:
+                    break
+
+                if len(page_items) < page_size:
+                    break
+
+                offset += page_size
         except (HTTPError, URLError, ValueError, json.JSONDecodeError):
             self.server_games_by_platform[platform_label] = []
             self._set_server_status("Connected, but failed to load games", "#fbbf24")
             return
 
         games: list[dict[str, str]] = []
-        items = payload.get("items") if isinstance(payload, dict) else None
-        if isinstance(items, list):
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                title = item.get("name") or item.get("fs_name_no_ext")
-                if not isinstance(title, str) or not title.strip():
-                    continue
-                rom_id = str(item.get("id", "")).strip()
-                if rom_id:
-                    self.server_rom_payloads[rom_id] = item
-                platform_name = item.get("platform_display_name")
-                summary = item.get("summary")
-                cover_url = self._cover_url_from_rom_payload(item)
-                screenshot_urls = self._screenshot_urls_from_rom_payload(item)
-                games.append(
-                    {
-                        "title": title.strip(),
-                        "platform": platform_name.strip() if isinstance(platform_name, str) and platform_name.strip() else platform_label,
-                        "rating": "N/A",
-                        "description": summary.strip() if isinstance(summary, str) and summary.strip() else "No description available.",
-                        "cover_url": cover_url,
-                        "screenshot_urls": "\n".join(screenshot_urls),
-                        "rom_id": rom_id,
-                        "rom_file_name": item.get("fs_name", "").strip() if isinstance(item.get("fs_name", ""), str) else "",
-                    }
-                )
+        for item in all_items:
+            title = item.get("name") or item.get("fs_name_no_ext")
+            if not isinstance(title, str) or not title.strip():
+                continue
+            rom_id = str(item.get("id", "")).strip()
+            if rom_id:
+                self.server_rom_payloads[rom_id] = item
+            platform_name = item.get("platform_display_name")
+            summary = item.get("summary")
+            cover_url = self._cover_url_from_rom_payload(item)
+            screenshot_urls = self._screenshot_urls_from_rom_payload(item)
+            games.append(
+                {
+                    "title": title.strip(),
+                    "platform": platform_name.strip() if isinstance(platform_name, str) and platform_name.strip() else platform_label,
+                    "rating": "N/A",
+                    "description": summary.strip() if isinstance(summary, str) and summary.strip() else "No description available.",
+                    "cover_url": cover_url,
+                    "screenshot_urls": "\n".join(screenshot_urls),
+                    "rom_id": rom_id,
+                    "rom_file_name": item.get("fs_name", "").strip() if isinstance(item.get("fs_name", ""), str) else "",
+                }
+            )
 
         self.server_games_by_platform[platform_label] = games
 
@@ -1760,15 +1788,28 @@ class MainWindow(QMainWindow):
         arcade_tokens = ("arcade", "mame", "fbneo", "final burn")
         return any(token in platform for token in arcade_tokens)
 
+    def _is_ps3_platform(self, game: dict[str, str]) -> bool:
+        platform_value = game.get("platform", "")
+        platform = platform_value.strip().casefold() if isinstance(platform_value, str) else ""
+        return platform in {"playstation 3", "ps3"}
+
     def _should_extract_archive_for_game(self, game: dict[str, str], archive_path: Path) -> bool:
+        if self._is_native_executable_platform(game):
+            return True
         if self._is_arcade_platform(game):
             return False
+        if self._is_ps3_platform(game):
+            return archive_path.suffix.casefold() in {".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz"}
         return archive_path.suffix.lower() in {".7z", ".zip"}
 
     def _extracted_dir_for_archive_path(self, archive_path: Path) -> Path:
-        return archive_path.parent / archive_path.stem
+        extracted_name = archive_path.stem or archive_path.name
+        extracted_dir = archive_path.parent / extracted_name
+        if extracted_dir == archive_path or (extracted_dir.exists() and extracted_dir.is_file()):
+            return archive_path.parent / f"{extracted_name}_extracted"
+        return extracted_dir
 
-    def _select_extracted_launch_file(self, extracted_dir: Path, archive_path: Path) -> Path | None:
+    def _select_extracted_launch_file(self, game: dict[str, str], extracted_dir: Path, archive_path: Path) -> Path | None:
         files = [candidate for candidate in extracted_dir.rglob("*") if candidate.is_file()]
         if not files:
             return None
@@ -1777,29 +1818,175 @@ class MainWindow(QMainWindow):
         non_archive_files = [candidate for candidate in files if candidate.suffix.lower() not in archive_suffixes]
         pool = non_archive_files if non_archive_files else files
 
-        preferred_extensions = [".m3u", ".cue", ".chd", ".iso", ".bin"]
-        for extension in preferred_extensions:
-            for candidate in pool:
-                if candidate.suffix.lower() == extension:
-                    return candidate
+        preferred_extensions = [
+            ".m3u",
+            ".cue",
+            ".chd",
+            ".iso",
+            ".bin",
+            ".pbp",
+            ".cso",
+            ".img",
+            ".ccd",
+            ".nrg",
+            ".mdf",
+            ".gdi",
+            ".rvz",
+            ".gcz",
+            ".wbfs",
+            ".gcm",
+            ".dol",
+            ".elf",
+            ".nes",
+            ".fds",
+            ".sfc",
+            ".smc",
+            ".gba",
+            ".gb",
+            ".gbc",
+            ".n64",
+            ".z64",
+            ".v64",
+            ".nds",
+            ".3ds",
+            ".cia",
+            ".xci",
+            ".nsp",
+            ".gen",
+            ".smd",
+            ".md",
+            ".32x",
+            ".sms",
+            ".gg",
+            ".pce",
+            ".sgx",
+            ".a26",
+            ".a52",
+            ".a78",
+            ".lnx",
+            ".ws",
+            ".wsc",
+            ".ngp",
+            ".ngc",
+            ".jag",
+            ".rom",
+        ]
+        if self._is_ps3_platform(game):
+            preferred_extensions = [".pkg", *preferred_extensions]
+        extension_priority = {extension: index for index, extension in enumerate(preferred_extensions)}
+        support_extensions = {
+            ".txt",
+            ".nfo",
+            ".diz",
+            ".log",
+            ".json",
+            ".xml",
+            ".ini",
+            ".cfg",
+            ".conf",
+            ".url",
+            ".pdf",
+            ".html",
+            ".htm",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".bmp",
+            ".webp",
+            ".svg",
+            ".ico",
+            ".dll",
+            ".so",
+            ".dylib",
+            ".py",
+            ".lua",
+            ".js",
+            ".css",
+            ".db",
+            ".sqlite",
+            ".tmp",
+            ".cache",
+            ".sav",
+            ".srm",
+            ".state",
+            ".states",
+            ".cht",
+            ".slangp",
+            ".slang",
+            ".glsl",
+            ".vert",
+            ".frag",
+        }
+        support_directories = {
+            "__macosx",
+            "glcache",
+            "cache",
+            "caches",
+            "shadercache",
+            "shaders",
+            "docs",
+            "doc",
+            "manual",
+            "manuals",
+            "readme",
+            "licenses",
+            "license",
+            "resources",
+        }
 
-        archive_stem = archive_path.stem.lower()
-        stem_matches = [candidate for candidate in pool if candidate.stem.lower() == archive_stem]
+        archive_stem = archive_path.stem.casefold()
+
+        def _candidate_sort_key(candidate: Path) -> tuple[int, int, int, int, str]:
+            try:
+                relative_parts = [part.casefold() for part in candidate.relative_to(extracted_dir).parts]
+            except ValueError:
+                relative_parts = [part.casefold() for part in candidate.parts]
+
+            suffix = candidate.suffix.casefold()
+            support_dir_penalty = 1 if any(part in support_directories for part in relative_parts[:-1]) else 0
+            support_ext_penalty = 1 if suffix in support_extensions else 0
+            extension_rank = extension_priority.get(suffix, len(extension_priority) + 10)
+            stem = candidate.stem.casefold()
+            stem_rank = 0 if stem == archive_stem else 1
+            return (
+                support_dir_penalty + support_ext_penalty,
+                extension_rank,
+                stem_rank,
+                len(relative_parts),
+                str(candidate).casefold(),
+            )
+
+        playable_candidates = [candidate for candidate in pool if candidate.suffix.casefold() in extension_priority]
+        if playable_candidates:
+            playable_candidates.sort(key=_candidate_sort_key)
+            return playable_candidates[0]
+
+        non_support_candidates = [candidate for candidate in pool if _candidate_sort_key(candidate)[0] == 0]
+        selection_pool = non_support_candidates if non_support_candidates else pool
+
+        stem_matches = [candidate for candidate in selection_pool if candidate.stem.casefold() == archive_stem]
         if stem_matches:
-            stem_matches.sort(key=lambda candidate: (len(candidate.parts), str(candidate).lower()))
+            stem_matches.sort(key=_candidate_sort_key)
             return stem_matches[0]
 
-        pool.sort(key=lambda candidate: (len(candidate.parts), str(candidate).lower()))
-        return pool[0]
+        selection_pool.sort(key=_candidate_sort_key)
+        return selection_pool[0]
 
     def _extract_archive_for_game(self, game: dict[str, str], archive_path: Path) -> tuple[Path, Path]:
         extracted_dir = self._extracted_dir_for_archive_path(archive_path)
         if extracted_dir.exists():
-            shutil.rmtree(extracted_dir, ignore_errors=True)
+            if extracted_dir.is_dir():
+                shutil.rmtree(extracted_dir, ignore_errors=True)
+            else:
+                try:
+                    extracted_dir.unlink()
+                except OSError:
+                    pass
         extracted_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            if archive_path.suffix.lower() == ".zip":
+            if zipfile.is_zipfile(archive_path):
                 with zipfile.ZipFile(archive_path) as archive:
                     archive.extractall(extracted_dir)
             else:
@@ -1816,7 +2003,7 @@ class MainWindow(QMainWindow):
             shutil.rmtree(extracted_dir, ignore_errors=True)
             raise
 
-        launch_file = self._select_extracted_launch_file(extracted_dir, archive_path)
+        launch_file = self._select_extracted_launch_file(game, extracted_dir, archive_path)
         if launch_file is None:
             shutil.rmtree(extracted_dir, ignore_errors=True)
             raise OSError("Archive extracted but no ROM file was found")
@@ -1859,6 +2046,61 @@ class MainWindow(QMainWindow):
         if not isinstance(platform_value, str):
             return False
         return platform_value.strip().casefold() == "emulators"
+
+    def _is_native_executable_platform(self, game: dict[str, str]) -> bool:
+        platform_value = game.get("platform", "")
+        if not isinstance(platform_value, str):
+            return False
+        platform = platform_value.strip().casefold()
+        return platform in {"windows", "windows 9x"}
+
+    def _launchable_native_game_file(self, path: Path) -> bool:
+        launchable_suffixes = {".exe", ".bat", ".cmd", ".ps1", ".sh"}
+        return path.suffix.casefold() in launchable_suffixes
+
+    def _native_install_dir_for_game(self, game: dict[str, str]) -> Path | None:
+        extracted_dir_value = game.get("extracted_dir", "")
+        if isinstance(extracted_dir_value, str) and extracted_dir_value.strip():
+            extracted_dir = Path(extracted_dir_value).expanduser()
+            if extracted_dir.exists() and extracted_dir.is_dir():
+                return extracted_dir
+
+        extracted_path_value = game.get("extracted_path", "")
+        if isinstance(extracted_path_value, str) and extracted_path_value.strip():
+            extracted_path = Path(extracted_path_value).expanduser()
+            if extracted_path.exists() and extracted_path.is_file():
+                return extracted_path.parent
+
+        for archive_path in self._candidate_archive_paths_for_game(game):
+            if archive_path.exists() and archive_path.is_file():
+                return archive_path.parent
+        return None
+
+    def _native_executable_candidates_for_game(self, game: dict[str, str]) -> list[Path]:
+        install_dir = self._native_install_dir_for_game(game)
+        if install_dir is None:
+            return []
+
+        candidates = [
+            candidate
+            for candidate in install_dir.rglob("*")
+            if candidate.is_file() and self._launchable_native_game_file(candidate)
+        ]
+        candidates.sort(key=lambda candidate: (len(candidate.parts), str(candidate).casefold()))
+        return candidates
+
+    def _resolved_native_executable_path_for_game(self, game: dict[str, str]) -> Path | None:
+        selected_value = game.get("native_executable_path", "")
+        selected_path_text = selected_value.strip() if isinstance(selected_value, str) else ""
+        if selected_path_text:
+            selected_path = Path(selected_path_text).expanduser()
+            if selected_path.exists() and selected_path.is_file() and self._launchable_native_game_file(selected_path):
+                return selected_path
+
+        executable_candidates = self._native_executable_candidates_for_game(game)
+        if executable_candidates:
+            return executable_candidates[0]
+        return None
 
     def _default_assignable_server_platforms(self) -> list[str]:
         hidden_platforms = {"windows", "windows 9x", "emulators"}
@@ -1943,21 +2185,21 @@ class MainWindow(QMainWindow):
             {
                 "match_tokens": ["duckstation"],
                 "name": "DuckStation",
-                "args": "%rom%",
+                "args": '-fullscreen -batch "%rom%"',
                 "all_platforms": False,
                 "platform_keywords": ["playstation", "ps1"],
             },
             {
                 "match_tokens": ["pcsx2"],
                 "name": "PCSX2",
-                "args": "%rom%",
+                "args": '-fullscreen -batch "%rom%"',
                 "all_platforms": False,
                 "platform_keywords": ["playstation 2", "ps2"],
             },
             {
                 "match_tokens": ["ppsspp"],
                 "name": "PPSSPP",
-                "args": "%rom%",
+                "args": '--fullscreen --pause-menu-exit "%rom%"',
                 "all_platforms": False,
                 "platform_keywords": ["playstation portable", "psp"],
             },
@@ -1971,16 +2213,44 @@ class MainWindow(QMainWindow):
             {
                 "match_tokens": ["dolphin"],
                 "name": "Dolphin",
-                "args": "%rom%",
+                "args": '-b -e "%rom%"',
                 "all_platforms": False,
                 "platform_keywords": ["gamecube", "wii"],
             },
             {
                 "match_tokens": ["cemu"],
                 "name": "Cemu",
-                "args": "%rom%",
+                "args": "-f -g \"%rom%\"",
                 "all_platforms": False,
                 "platform_keywords": ["wii u"],
+            },
+            {
+                "match_tokens": ["azahar"],
+                "name": "Azahar",
+                "args": '-f "%rom%"',
+                "all_platforms": False,
+                "platform_keywords": ["nintendo 3ds", "3ds"],
+            },
+            {
+                "match_tokens": ["pico"],
+                "name": "Pico",
+                "args": '-run "%rom%"',
+                "all_platforms": False,
+                "platform_keywords": ["pico-8", "pico 8"],
+            },
+            {
+                "match_tokens": ["xemu"],
+                "name": "Xemu",
+                "args": "-full-screen -dvd_path \"%rom%\"",
+                "all_platforms": False,
+                "platform_keywords": ["xbox"],
+            },
+            {
+                "match_tokens": ["eden"],
+                "name": "Eden",
+                "args": '-f -g "%rom%"',
+                "all_platforms": False,
+                "platform_keywords": ["switch", "nintendo switch"],
             },
             {
                 "match_tokens": ["yuzu", "ryujinx", "sudachi"],
@@ -2073,7 +2343,7 @@ class MainWindow(QMainWindow):
                 existing_core = core_defaults.get(platform, "")
                 if isinstance(existing_core, str) and existing_core.strip():
                     continue
-                cores = self._retroarch_cores_for_platform(platform)
+                cores = self._installed_retroarch_cores_for_platform(platform, emulator_name)
                 if cores:
                     core_defaults[platform] = cores[0]
         self.config["default_retroarch_cores"] = core_defaults
@@ -2086,8 +2356,7 @@ class MainWindow(QMainWindow):
         if isinstance(rom_file_name_value, str):
             rom_file_name = rom_file_name_value.strip().replace("\\", "/").split("/")[-1]
             if rom_file_name:
-                fallback_name = f"{self._sanitize_path_component(game.get('title', 'Game'), 'game')}.zip"
-                return self._sanitize_path_component(rom_file_name, fallback_name)
+                return rom_file_name
 
         title_value = game.get("title", "Game")
         platform_value = game.get("platform", "Platform")
@@ -2096,6 +2365,104 @@ class MainWindow(QMainWindow):
         safe_title = self._sanitize_path_component(title, "game")
         safe_platform = self._sanitize_path_component(platform, "platform")
         return f"{safe_title}-{safe_platform}.zip"
+
+    def _server_content_file_name_for_game(self, game: dict[str, str]) -> str:
+        rom_file_name_value = game.get("rom_file_name", "")
+        if isinstance(rom_file_name_value, str):
+            rom_file_name = rom_file_name_value.strip().replace("\\", "/").lstrip("/")
+            if rom_file_name:
+                return rom_file_name
+        return ""
+
+    def _rom_file_name_from_payload(self, payload: dict[str, Any]) -> str:
+        candidate_fields = (
+            "fs_name",
+            "file_name",
+            "filename",
+            "rom_file_name",
+            "download_path",
+            "file_path",
+            "full_path",
+            "path",
+            "url",
+        )
+        candidates: list[str] = []
+        for field in candidate_fields:
+            value = payload.get(field, "")
+            if not isinstance(value, str):
+                continue
+            candidate = value.strip().replace("\\", "/")
+            if field == "url":
+                candidate = urlsplit(candidate).path
+            candidate = candidate.strip().lstrip("/")
+            if candidate:
+                candidates.append(candidate)
+
+        if not candidates:
+            return ""
+
+        with_suffix = [candidate for candidate in candidates if Path(candidate.split("/")[-1]).suffix]
+        return with_suffix[0] if with_suffix else candidates[0]
+
+    def _fetch_server_rom_payload(self, rom_id: str, force_refresh: bool = False) -> dict[str, Any] | None:
+        rom_id_key = rom_id.strip()
+        if not rom_id_key:
+            return None
+
+        cached_payload = self.server_rom_payloads.get(rom_id_key)
+        if not force_refresh and isinstance(cached_payload, dict):
+            return cached_payload
+
+        rom_id_path = quote(rom_id_key, safe="")
+        try:
+            payload = self._api_get(f"/api/roms/{rom_id_path}")
+        except (HTTPError, URLError, ValueError, json.JSONDecodeError):
+            return None
+
+        detail_payload: dict[str, Any] | None = None
+        if isinstance(payload, dict):
+            if any(key in payload for key in ("fs_name", "file_name", "filename", "rom_file_name")):
+                detail_payload = payload
+            else:
+                for nested_key in ("item", "rom", "data"):
+                    nested = payload.get(nested_key)
+                    if isinstance(nested, dict):
+                        detail_payload = nested
+                        break
+
+        if detail_payload is None:
+            return None
+
+        self.server_rom_payloads[rom_id_key] = detail_payload
+        return detail_payload
+
+    def _resolved_rom_file_name_for_game(self, game: dict[str, str], rom_id: str) -> str:
+        current_value = game.get("rom_file_name", "")
+        current_name = current_value.strip().replace("\\", "/").lstrip("/") if isinstance(current_value, str) else ""
+        if current_name and Path(current_name.split("/")[-1]).suffix:
+            return current_name
+
+        fallback_name = current_name if current_name else ""
+
+        payload = self.server_rom_payloads.get(rom_id)
+        if not isinstance(payload, dict):
+            payload = self._fetch_server_rom_payload(rom_id)
+        if isinstance(payload, dict):
+            payload_name = self._rom_file_name_from_payload(payload)
+            if payload_name and Path(payload_name.split("/")[-1]).suffix:
+                return payload_name
+            if payload_name and not fallback_name:
+                fallback_name = payload_name
+
+        payload = self._fetch_server_rom_payload(rom_id, force_refresh=True)
+        if isinstance(payload, dict):
+            payload_name = self._rom_file_name_from_payload(payload)
+            if payload_name and Path(payload_name.split("/")[-1]).suffix:
+                return payload_name
+            if payload_name and not fallback_name:
+                fallback_name = payload_name
+
+        return fallback_name
 
     def _sanitize_path_component(self, value: str, fallback: str) -> str:
         illegal_characters = set('<>:"/\\|?*')
@@ -2125,6 +2492,16 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Install Error", "This game cannot be installed because it has no ROM id.")
             return None
 
+        resolved_file_name = self._resolved_rom_file_name_for_game(game, rom_id)
+        if not resolved_file_name:
+            QMessageBox.warning(
+                self,
+                "Install Error",
+                "Server did not return a usable ROM filename/path for this title. Refresh server metadata and try again.",
+            )
+            return None
+        game["rom_file_name"] = resolved_file_name
+
         install_path = self._platform_library_dir(game)
         if install_path is None:
             QMessageBox.warning(self, "Install Error", "Set a Library Path in Settings before installing games.")
@@ -2140,7 +2517,7 @@ class MainWindow(QMainWindow):
         archive_name = self._archive_name_for_game(game)
         archive_path = install_path / archive_name
         rom_id_path = quote(rom_id, safe="")
-        file_name_path = quote(archive_name, safe="")
+        file_name_path = quote(self._server_content_file_name_for_game(game), safe="")
 
         try:
             payload = self._api_get_bytes(f"/api/roms/{rom_id_path}/content/{file_name_path}")
@@ -2176,17 +2553,19 @@ class MainWindow(QMainWindow):
 
     def _candidate_extracted_paths_for_game(self, game: dict[str, str]) -> list[Path]:
         candidates: list[Path] = []
-        extracted_path_value = game.get("extracted_path", "")
-        if isinstance(extracted_path_value, str) and extracted_path_value.strip():
-            candidates.append(Path(extracted_path_value).expanduser())
-
         extracted_dir_value = game.get("extracted_dir", "")
         if isinstance(extracted_dir_value, str) and extracted_dir_value.strip():
             extracted_dir = Path(extracted_dir_value).expanduser()
             if extracted_dir.exists() and extracted_dir.is_dir():
-                selected = self._select_extracted_launch_file(extracted_dir, Path(game.get("archive_path", "") or "archive"))
+                selected = self._select_extracted_launch_file(game, extracted_dir, Path(game.get("archive_path", "") or "archive"))
                 if selected is not None:
                     candidates.append(selected)
+
+        extracted_path_value = game.get("extracted_path", "")
+        if isinstance(extracted_path_value, str) and extracted_path_value.strip():
+            extracted_path = Path(extracted_path_value).expanduser()
+            if extracted_path.exists() and extracted_path.is_file():
+                candidates.append(extracted_path)
 
         unique: list[Path] = []
         seen: set[str] = set()
@@ -2218,6 +2597,17 @@ class MainWindow(QMainWindow):
         return unique
 
     def _remove_game_files(self, game: dict[str, str]) -> bool:
+        if self._is_native_executable_platform(game):
+            for extracted_dir in self._candidate_extracted_dirs_for_game(game):
+                if not extracted_dir.exists() or not extracted_dir.is_dir():
+                    continue
+                try:
+                    shutil.rmtree(extracted_dir)
+                except OSError as error:
+                    QMessageBox.warning(self, "Uninstall Error", f"Could not remove folder: {extracted_dir}\n{error}")
+                    return False
+            return True
+
         removed_any = False
         for candidate in self._candidate_archive_paths_for_game(game):
             if not candidate.exists() or not candidate.is_file():
@@ -2360,6 +2750,10 @@ class MainWindow(QMainWindow):
                 button_text = "Install Game"
             self.details_primary_button.setText(button_text)
             self.details_primary_button.setEnabled(not installing_current and not queued_current)
+        if self.details_config_button is not None:
+            show_config = installed and self._is_native_executable_platform(self.current_details_game)
+            self.details_config_button.setVisible(show_config)
+            self.details_config_button.setEnabled(show_config and not installing_current)
         if self.details_secondary_button is not None:
             self.details_secondary_button.setVisible(installed)
             self.details_secondary_button.setEnabled(installed and not installing_current)
@@ -2453,8 +2847,18 @@ class MainWindow(QMainWindow):
 
         install_game = dict(game)
         install_game["rom_id"] = rom_id
+        resolved_file_name = self._resolved_rom_file_name_for_game(install_game, rom_id)
+        if not resolved_file_name:
+            QMessageBox.warning(
+                self,
+                "Install Error",
+                "Server did not return a usable ROM filename/path for this title. Refresh server metadata and try again.",
+            )
+            return False
+        install_game["rom_file_name"] = resolved_file_name
         if self.current_details_game is not None and self._game_key(self.current_details_game) == self._game_key(install_game):
             self.current_details_game["rom_id"] = rom_id
+            self.current_details_game["rom_file_name"] = resolved_file_name
 
         install_path = self._platform_library_dir(install_game)
         if install_path is None:
@@ -2475,7 +2879,7 @@ class MainWindow(QMainWindow):
         archive_name = self._archive_name_for_game(install_game)
         archive_path = install_path / archive_name
         rom_id_path = quote(rom_id, safe="")
-        file_name_path = quote(archive_name, safe="")
+        file_name_path = quote(self._server_content_file_name_for_game(install_game), safe="")
         download_url = f"{base_url}/api/roms/{rom_id_path}/content/{file_name_path}"
 
         install_key = self._game_key(install_game)
@@ -2933,12 +3337,35 @@ class MainWindow(QMainWindow):
             if isinstance(platform, str) and platform.strip():
                 configured_core = self._mapping_value_for_platform(core_defaults, platform)
                 if configured_core:
-                    core_value = configured_core
+                    core_value = self._retroarch_core_argument_path(configured_core)
 
         return {
             "%rom%": rom_path,
             "%core%": core_value,
         }
+
+    def _retroarch_core_argument_path(self, configured_core: str) -> str:
+        core = configured_core.strip()
+        if not core:
+            return ""
+
+        normalized = core.replace("\\", "/")
+        if "/" in normalized:
+            return normalized
+
+        if normalized.casefold().endswith(".dll"):
+            core_file = normalized
+        elif normalized.casefold().endswith("_libretro"):
+            core_file = f"{normalized}.dll"
+        else:
+            core_file = f"{normalized}_libretro.dll"
+        return f"cores/{core_file}"
+
+    def _strip_wrapping_quotes(self, token: str) -> str:
+        stripped = token.strip()
+        if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in {'"', "'"}:
+            return stripped[1:-1]
+        return stripped
 
     def _apply_launch_placeholders_to_args(self, args: list[str], placeholders: dict[str, str]) -> list[str]:
         resolved_args: list[str] = []
@@ -2949,6 +3376,7 @@ class MainWindow(QMainWindow):
             resolved = arg
             for token, value in placeholders.items():
                 resolved = resolved.replace(token, value)
+            resolved = self._strip_wrapping_quotes(resolved)
             if had_core_placeholder and core_missing:
                 if resolved_args and resolved_args[-1] in {"-L", "--libretro", "--core"}:
                     resolved_args.pop()
@@ -2956,6 +3384,15 @@ class MainWindow(QMainWindow):
             if resolved:
                 resolved_args.append(resolved)
         return resolved_args
+
+    def _split_launch_template_args(self, template: str) -> list[str]:
+        if not template.strip():
+            return []
+
+        try:
+            return shlex.split(template, posix=True)
+        except ValueError:
+            return shlex.split(template, posix=False)
 
     def _resolved_launch_arguments_for_game(self, game: dict[str, str]) -> tuple[str, list[str]]:
         platform_value = game.get("platform", "")
@@ -2973,7 +3410,7 @@ class MainWindow(QMainWindow):
         global_args = global_args_value.strip() if isinstance(global_args_value, str) else ""
         combined_template = " ".join(part for part in (emulator_args, global_args) if part).strip()
 
-        parsed_template_args = shlex.split(combined_template, posix=False) if combined_template else []
+        parsed_template_args = self._split_launch_template_args(combined_template)
         placeholders = self._launch_placeholders_for_game(game, emulator_name)
         if "%core%" in combined_template and not placeholders.get("%core%", "").strip():
             raise ValueError("No RetroArch core is configured for this platform. Set one in Emulators > Defaults.")
@@ -2994,7 +3431,46 @@ class MainWindow(QMainWindow):
             return archive_path_value.strip()
         return ""
 
+    def _normalized_retroarch_core_args(self, emulator_dir: Path, args: list[str]) -> list[str]:
+        normalized_args = list(args)
+        core_option_tokens = {"-L", "--libretro", "--core"}
+        for index, token in enumerate(normalized_args[:-1]):
+            if token not in core_option_tokens:
+                continue
+
+            core_token = normalized_args[index + 1].strip()
+            if not core_token:
+                continue
+
+            core_path = Path(core_token).expanduser()
+            if core_path.is_absolute():
+                continue
+
+            candidate = (emulator_dir / core_path).resolve(strict=False)
+            if candidate.exists() and candidate.is_file():
+                normalized_args[index + 1] = str(candidate)
+        return normalized_args
+
     def _launch_installed_game(self, game: dict[str, str]) -> bool:
+        if self._is_native_executable_platform(game):
+            native_executable = self._resolved_native_executable_path_for_game(game)
+            if native_executable is None:
+                QMessageBox.warning(
+                    self,
+                    "Launch Error",
+                    "No launchable native executable is configured for this game. Use Game Settings to select one.",
+                )
+                return False
+
+            command = [str(native_executable)]
+            try:
+                process = subprocess.Popen(command, cwd=str(native_executable.parent))
+                QTimer.singleShot(500, lambda p=process, c=command: self._warn_if_process_exited_early(p, c))
+                return True
+            except OSError as error:
+                QMessageBox.warning(self, "Launch Error", f"Failed to launch game:\n{error}")
+                return False
+
         platform_value = game.get("platform", "")
         platform = platform_value.strip() if isinstance(platform_value, str) else ""
         emulator_name = self._default_emulator_name_for_platform(platform)
@@ -3034,6 +3510,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Launch Error", f"Invalid launch arguments: {error}")
             return False
 
+        if self._is_retroarch_emulator_name(emulator_name):
+            parsed_args = self._normalized_retroarch_core_args(emulator_path.parent, parsed_args)
+
         command = [str(emulator_path), *parsed_args]
         try:
             process = subprocess.Popen(command, cwd=str(emulator_path.parent))
@@ -3051,7 +3530,7 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(
             self,
             "Launch Error",
-            f"Emulator exited immediately (code {exit_code}).\nCommand:\n{command_text}",
+            f"Process exited immediately (code {exit_code}).\nCommand:\n{command_text}",
         )
 
     def _perform_game_action(self) -> None:
@@ -3064,6 +3543,77 @@ class MainWindow(QMainWindow):
             return
 
         self._start_async_install(self.current_details_game)
+
+    def _perform_game_config_action(self) -> None:
+        if self.current_details_game is None:
+            return
+        installed_game = self._installed_game_record(self.current_details_game)
+        if installed_game is None:
+            return
+        if not self._is_native_executable_platform(self.current_details_game):
+            return
+
+        install_dir = self._native_install_dir_for_game(installed_game)
+        executable_candidates = self._native_executable_candidates_for_game(installed_game)
+        if install_dir is None or not executable_candidates:
+            QMessageBox.warning(
+                self,
+                "Game Settings",
+                "No launchable executables were found in this game's install directory.",
+            )
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Game Settings - {installed_game.get('title', 'Game')}")
+        dialog.setModal(True)
+        dialog.resize(700, 220)
+
+        dialog_layout = QVBoxLayout(dialog)
+        form_layout = QFormLayout()
+
+        install_dir_label = QLabel(str(install_dir))
+        install_dir_label.setWordWrap(True)
+        form_layout.addRow("Install Directory", install_dir_label)
+
+        executable_combo = QComboBox()
+        executable_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        for candidate in executable_candidates:
+            try:
+                display_name = str(candidate.relative_to(install_dir))
+            except ValueError:
+                display_name = str(candidate)
+            executable_combo.addItem(display_name, str(candidate))
+
+        selected_path = installed_game.get("native_executable_path", "")
+        selected_executable_path = selected_path.strip() if isinstance(selected_path, str) else ""
+        if selected_executable_path:
+            selected_index = executable_combo.findData(selected_executable_path)
+            if selected_index >= 0:
+                executable_combo.setCurrentIndex(selected_index)
+        form_layout.addRow("Executable", executable_combo)
+
+        dialog_layout.addLayout(form_layout)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        dialog_layout.addWidget(buttons)
+
+        if dialog.exec() != int(QDialog.DialogCode.Accepted):
+            return
+
+        selected_value = executable_combo.currentData()
+        selected_executable = selected_value.strip() if isinstance(selected_value, str) else ""
+        if not selected_executable:
+            QMessageBox.warning(self, "Game Settings", "Please select an executable to launch.")
+            return
+
+        installed_game["native_executable_path"] = selected_executable
+        if self.current_details_game is not None:
+            self.current_details_game["native_executable_path"] = selected_executable
+        self._persist_installed_games()
+
+        QMessageBox.information(self, "Game Settings", "Saved game executable selection.")
 
     def _perform_game_secondary_action(self) -> None:
         if self.current_details_game is None:
@@ -3139,7 +3689,7 @@ class MainWindow(QMainWindow):
         return "retroarch" in emulator_name.strip().lower()
 
     def _retroarch_core_list_path(self) -> Path:
-        return Path(__file__).resolve().parent / "retroarch-core-list.md"
+        return Path(__file__).resolve().parent / "retroarch-core-list.json"
 
     def _retroarch_markdown_label(self, value: str) -> str:
         text = value.strip()
@@ -3194,6 +3744,18 @@ class MainWindow(QMainWindow):
 
         return "".join(sanitized).strip("_")
 
+    def _retroarch_core_id_from_file_name(self, core_file_name: str) -> str:
+        normalized = core_file_name.strip().replace("\\", "/")
+        if not normalized:
+            return ""
+
+        file_name = normalized.rsplit("/", 1)[-1].casefold()
+        if file_name.endswith(".dll"):
+            file_name = file_name[:-4]
+        if file_name.endswith("_libretro"):
+            file_name = file_name[: -len("_libretro")]
+        return file_name.strip()
+
     def _retroarch_compatibility_map_from_markdown(self) -> dict[str, list[str]]:
         if isinstance(self.retroarch_compatibility_map, dict):
             return self.retroarch_compatibility_map
@@ -3205,10 +3767,45 @@ class MainWindow(QMainWindow):
             return compatibility
 
         try:
-            lines = path.read_text(encoding="utf-8").splitlines()
+            raw_content = path.read_text(encoding="utf-8")
         except OSError:
             self.retroarch_compatibility_map = compatibility
             return compatibility
+
+        try:
+            entries = json.loads(raw_content)
+        except json.JSONDecodeError:
+            entries = None
+
+        if isinstance(entries, list):
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+
+                core_file = entry.get("core_file", "")
+                if not isinstance(core_file, str) or not core_file.strip():
+                    continue
+                core_id = self._retroarch_core_id_from_file_name(core_file)
+                if not core_id:
+                    continue
+
+                platforms = entry.get("platforms", [])
+                if not isinstance(platforms, list):
+                    continue
+                for platform in platforms:
+                    if not isinstance(platform, str):
+                        continue
+                    system_key = self._normalize_retroarch_platform_key(platform)
+                    if not system_key:
+                        continue
+                    known = compatibility.setdefault(system_key, [])
+                    if core_id not in known:
+                        known.append(core_id)
+
+            self.retroarch_compatibility_map = compatibility
+            return compatibility
+
+        lines = raw_content.splitlines()
 
         for line in lines:
             if not line.strip().startswith("|"):
@@ -3225,7 +3822,7 @@ class MainWindow(QMainWindow):
                 continue
 
             core_id = self._retroarch_core_id_from_name(core_cell)
-            system_key = system_cell.casefold()
+            system_key = self._normalize_retroarch_platform_key(system_cell)
             if not core_id or not system_key:
                 continue
 
@@ -3236,71 +3833,75 @@ class MainWindow(QMainWindow):
         self.retroarch_compatibility_map = compatibility
         return compatibility
 
-    def _retroarch_system_keys_for_platform(self, platform: str) -> list[str]:
-        normalized = platform.strip().casefold()
+    def _normalize_retroarch_platform_key(self, value: str) -> str:
+        normalized = value.strip().casefold()
         if not normalized:
+            return ""
+
+        normalized = normalized.replace("\\", "/")
+        normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+        normalized = re.sub(r"\s+", " ", normalized)
+        return normalized.strip()
+
+    def _retroarch_platform_tokens(self, value: str) -> set[str]:
+        normalized = re.sub(r"[^a-z0-9]+", " ", value.strip().casefold())
+        ignored_tokens = {"the", "and", "of", "for", "system"}
+        return {token for token in normalized.split() if token and token not in ignored_tokens}
+
+    def _all_retroarch_cores(self, compatibility: dict[str, list[str]]) -> list[str]:
+        cores: list[str] = []
+        for mapped_cores in compatibility.values():
+            for core in mapped_cores:
+                if core not in cores:
+                    cores.append(core)
+        return cores
+
+    def _retroarch_installed_core_ids_for_emulator(self, emulator_name: str) -> set[str]:
+        if not self._is_retroarch_emulator_name(emulator_name):
+            return set()
+
+        emulator_entry = self._emulator_entry_by_name(emulator_name)
+        if emulator_entry is None:
+            return set()
+
+        emulator_path_value = emulator_entry.get("path", "")
+        emulator_path_text = emulator_path_value.strip() if isinstance(emulator_path_value, str) else ""
+        if not emulator_path_text:
+            return set()
+
+        emulator_path = Path(emulator_path_text).expanduser()
+        if not emulator_path.exists() or not emulator_path.is_file():
+            return set()
+
+        cores_dir = emulator_path.parent / "cores"
+        if not cores_dir.exists() or not cores_dir.is_dir():
+            return set()
+
+        installed_core_ids: set[str] = set()
+        for candidate in cores_dir.glob("*.dll"):
+            if not candidate.is_file():
+                continue
+            core_id = self._retroarch_core_id_from_file_name(candidate.name)
+            if core_id:
+                installed_core_ids.add(core_id)
+        return installed_core_ids
+
+    def _installed_retroarch_cores_for_platform(self, platform: str, emulator_name: str) -> list[str]:
+        platform_cores = self._retroarch_cores_for_platform(platform)
+        installed_core_ids = self._retroarch_installed_core_ids_for_emulator(emulator_name)
+        if not installed_core_ids:
+            return []
+        return [core for core in platform_cores if core in installed_core_ids]
+
+    def _retroarch_system_keys_for_platform(self, platform: str) -> list[str]:
+        compatibility = self._retroarch_compatibility_map_from_markdown()
+        normalized = self._normalize_retroarch_platform_key(platform)
+        if not normalized or not compatibility:
             return []
 
-        aliases = (
-            ("arcade", ["arcade", "arcade/console/various"]),
-            ("mame", ["arcade", "arcade/console/various"]),
-            ("final burn", ["arcade/console/various"]),
-            ("fbneo", ["arcade/console/various"]),
-            ("nintendo entertainment", ["nintendo nes/famicom"]),
-            ("nes", ["nintendo nes/famicom"]),
-            ("super nintendo", ["nintendo snes/sfc"]),
-            ("snes", ["nintendo snes/sfc"]),
-            ("nintendo 64", ["nintendo 64"]),
-            ("n64", ["nintendo 64"]),
-            ("game boy advance", ["game boy advance"]),
-            ("gba", ["game boy advance"]),
-            ("game boy color", ["game boy/color"]),
-            ("game boy", ["game boy/color"]),
-            ("gbc", ["game boy/color"]),
-            ("gb", ["game boy/color"]),
-            ("nintendo ds", ["nintendo ds", "nintendo ds/dsi"]),
-            ("nintendo 3ds", ["nintendo 3ds"]),
-            ("playstation 2", ["sony playstation 2"]),
-            ("ps2", ["sony playstation 2"]),
-            ("playstation portable", ["playstation portable"]),
-            ("psp", ["playstation portable"]),
-            ("playstation", ["sony playstation"]),
-            ("ps1", ["sony playstation"]),
-            ("dreamcast", ["sega dreamcast/naomi"]),
-            ("naomi", ["sega dreamcast/naomi"]),
-            ("saturn", ["sega saturn", "sega saturn/st-v"]),
-            ("megadrive", ["sega genesis (mega drive)", "sega ms/gg/md/cd", "sega ms/gg/md/cd/32x"]),
-            ("mega drive", ["sega genesis (mega drive)", "sega ms/gg/md/cd", "sega ms/gg/md/cd/32x"]),
-            ("genesis", ["sega genesis (mega drive)", "sega ms/gg/md/cd", "sega ms/gg/md/cd/32x"]),
-            ("sega cd", ["sega md/cd", "sega ms/gg/md/cd", "sega ms/gg/md/cd/32x"]),
-            ("32x", ["sega ms/gg/md/cd/32x"]),
-            ("master system", ["sega master system", "sega ms/gg", "sega ms/gg/sg-1000"]),
-            ("game gear", ["sega ms/gg", "sega ms/gg/sg-1000"]),
-            ("pc engine", ["nec pc engine/supergrafx/cd", "nec pc engine/supergrafx", "nec pc engine/cd"]),
-            ("turbografx", ["nec pc engine/supergrafx/cd", "nec pc engine/supergrafx", "nec pc engine/cd"]),
-            ("atari lynx", ["atari lynx"]),
-            ("atari jaguar", ["atari jaguar"]),
-            ("atari 7800", ["atari 7800"]),
-            ("atari 5200", ["atari 5200"]),
-            ("neo geo pocket", ["neo geo pocket/color"]),
-            ("neo geo cd", ["neo geo cd"]),
-            ("neo geo", ["snk neo geo aes/mvs", "neo geo", "arcade/console/various"]),
-            ("3do", ["3do"]),
-            ("wonderswan", ["bandai wonderswan/color"]),
-            ("virtual boy", ["nintendo virtual boy"]),
-            ("dos", ["dos"]),
-            ("amiga", ["commodore amiga"]),
-            ("msx", ["msx/msx2/msx2+", "msx/svi/colecovision/sg-1000"]),
-            ("coleco", ["coleco colecovision", "colecovision/creativision/my vision", "msx/svi/colecovision/sg-1000"]),
-        )
-
-        keys: list[str] = []
-        for alias, systems in aliases:
-            if alias in normalized:
-                for system in systems:
-                    if system not in keys:
-                        keys.append(system)
-        return keys
+        if normalized in compatibility:
+            return [normalized]
+        return []
 
     def _retroarch_cores_for_platform(self, platform: str) -> list[str]:
         compatibility = self._retroarch_compatibility_map_from_markdown()
@@ -3313,18 +3914,9 @@ class MainWindow(QMainWindow):
                 if core not in resolved_cores:
                     resolved_cores.append(core)
 
-        normalized_platform = platform.strip().casefold()
-        if normalized_platform:
-            for system_key, cores in compatibility.items():
-                if normalized_platform not in system_key and system_key not in normalized_platform:
-                    continue
-                for core in cores:
-                    if core not in resolved_cores:
-                        resolved_cores.append(core)
-
         if resolved_cores:
             return resolved_cores
-        return ["fbneo", "mame2003_plus"]
+        return []
 
     def _refresh_retroarch_core_options(self) -> None:
         if self.default_core_combo is None or self.default_platform_combo is None or self.default_emulator_combo is None:
@@ -3340,7 +3932,7 @@ class MainWindow(QMainWindow):
 
         self.default_core_combo.blockSignals(True)
         self.default_core_combo.clear()
-        for core in self._retroarch_cores_for_platform(platform):
+        for core in self._installed_retroarch_cores_for_platform(platform, emulator_name):
             self.default_core_combo.addItem(core, core)
 
         if not is_retroarch:
@@ -3348,13 +3940,14 @@ class MainWindow(QMainWindow):
         else:
             if saved_core:
                 saved_index = self.default_core_combo.findData(saved_core)
-                if saved_index < 0:
-                    self.default_core_combo.addItem(saved_core, saved_core)
-                    saved_index = self.default_core_combo.findData(saved_core)
                 if saved_index >= 0:
                     self.default_core_combo.setCurrentIndex(saved_index)
+                elif self.default_core_combo.count() > 0:
+                    self.default_core_combo.setCurrentIndex(0)
+                else:
+                    self.default_core_combo.setCurrentIndex(-1)
             else:
-                self.default_core_combo.setCurrentIndex(0)
+                self.default_core_combo.setCurrentIndex(0 if self.default_core_combo.count() > 0 else -1)
 
         self.default_core_combo.setEnabled(is_retroarch)
         self.default_core_combo.blockSignals(False)
@@ -3399,6 +3992,7 @@ class MainWindow(QMainWindow):
             extracted_path = item.get("extracted_path")
             extracted_dir = item.get("extracted_dir")
             archive_path = item.get("archive_path")
+            native_executable_path = item.get("native_executable_path")
             normalized_game = {
                 "title": title.strip(),
                 "platform": platform.strip(),
@@ -3411,6 +4005,7 @@ class MainWindow(QMainWindow):
                 "extracted_path": extracted_path.strip() if isinstance(extracted_path, str) else "",
                 "extracted_dir": extracted_dir.strip() if isinstance(extracted_dir, str) else "",
                 "archive_path": archive_path.strip() if isinstance(archive_path, str) else "",
+                "native_executable_path": native_executable_path.strip() if isinstance(native_executable_path, str) else "",
             }
             key = self._game_key(normalized_game)
             if key in seen:
