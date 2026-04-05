@@ -19,6 +19,7 @@
         - Need to figure out how to handle the different types of games (ISO, PKG+RAP).
     - [ ] ShadPS4
         - Not sure games are loaded here, need to investigate.
+- [ ] Implement updating installed games from the server.
 
 # Medium Priority
 - [x] Switch emulator default exe should be eden.exe.
