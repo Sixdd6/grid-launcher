@@ -8,9 +8,9 @@ A nice looking launcher for RomM
 - [x] Connection to RomM server via API
 - [x] Game launching functionality
 - Game management
-    [x] install
-    [ ] update
-    [x] delete
+    - [x] install
+    - [ ] update
+    - [x] delete
 - [ ] Light/Dark Themes
 - [x] Responsive layout
 - [ ] Cross-platform support (Windows, Linux)
