@@ -2,12 +2,15 @@
 A nice looking launcher for RomM
 
 ## Features
-- [ ] Library view with cover art grid
-- [ ] Server view with platform list and game grid
-- [ ] Settings view with various configuration options
-- [ ] Connection to RomM server via API
-- [ ] Game launching functionality
-- [ ] Game management (install, update, delete)
-- [ ] Theme support (light/dark mode)
-- [ ] Responsive layout
+- [x] Library view with cover art grid
+- [x] Server view with platform list and game grid
+- [x] Settings view with various configuration options
+- [x] Connection to RomM server via API
+- [x] Game launching functionality
+- Game management
+    [x] install
+    [ ] update
+    [x] delete
+- [ ] Light/Dark Themes
+- [x] Responsive layout
 - [ ] Cross-platform support (Windows, Linux)
