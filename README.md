@@ -1,5 +1,6 @@
 # rom-mate-neo
-A simple, nice-looking launcher for RomM. [![Build Windows EXE](https://github.com/Sixdd6/rom-mate-neo/actions/workflows/pyinstaller-windows.yml/badge.svg)](https://github.com/Sixdd6/rom-mate-neo/actions/workflows/pyinstaller-windows.yml)
+A simple, nice-looking launcher for RomM.
+[![Windows Build](https://github.com/Sixdd6/rom-mate-neo/actions/workflows/pyinstaller-windows.yml/badge.svg)](https://github.com/Sixdd6/rom-mate-neo/actions/workflows/pyinstaller-windows.yml)
 
 ## Feature Checklist
 - [x] Library view with cover art grid for installed games
