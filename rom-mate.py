@@ -3114,11 +3114,6 @@ class MainWindow(QMainWindow):
 
         if self.install_in_progress:
             if install_key == pending_key or install_key in queued_keys:
-                QMessageBox.information(
-                    self,
-                    "Install In Progress",
-                    f"{install_game['title']} is already downloading or queued.",
-                )
                 return False
             queued_game = dict(install_game)
             entry_id = self._create_download_entry(queued_game, "queued")
@@ -3126,11 +3121,6 @@ class MainWindow(QMainWindow):
             self.install_queue.append(queued_game)
             self._update_details_action_buttons()
             self._update_download_status_ui()
-            QMessageBox.information(
-                self,
-                "Install Queued",
-                f"Queued {install_game['title']} for download.",
-            )
             return True
 
         pending_entry_id = game.get("_download_entry_id", "") if isinstance(game.get("_download_entry_id", ""), str) else ""
@@ -3195,9 +3185,7 @@ class MainWindow(QMainWindow):
                 self._set_download_entry_status(entry_id, status, error)
             self._update_download_status_ui()
             self._update_details_action_buttons()
-            if "cancel" in error.lower():
-                QMessageBox.information(self, "Install Cancelled", f"Cancelled download for {title}.")
-            else:
+            if "cancel" not in error.lower():
                 QMessageBox.warning(self, "Install Error", f"Failed to download {title} from server.")
             self._start_next_queued_install()
             return
@@ -3207,11 +3195,6 @@ class MainWindow(QMainWindow):
                 self._set_download_entry_status(entry_id, "completed")
             self._update_download_status_ui()
             self._update_details_action_buttons()
-            QMessageBox.information(
-                self,
-                "Game Action",
-                f"{title} is already installed.",
-            )
             self._start_next_queued_install()
             return
 
@@ -3231,19 +3214,11 @@ class MainWindow(QMainWindow):
             return
 
         self._register_installed_game(installed_game, archive_file)
-        configured_emulator = self._auto_configure_installed_emulator(installed_game, archive_file)
+        self._auto_configure_installed_emulator(installed_game, archive_file)
         if entry_id:
             self._set_download_entry_status(entry_id, "completed")
         self._update_download_status_ui()
         self._update_details_action_buttons()
-        install_message = f"Installed {title} to Library."
-        if configured_emulator:
-            install_message = f"Installed {title} to Library and updated emulator settings."
-        QMessageBox.information(
-            self,
-            "Install Complete",
-            install_message,
-        )
         self._start_next_queued_install()
 
     def _on_install_thread_finished(self) -> None:
@@ -3831,15 +3806,12 @@ class MainWindow(QMainWindow):
         selected_value = executable_combo.currentData()
         selected_executable = selected_value.strip() if isinstance(selected_value, str) else ""
         if not selected_executable:
-            QMessageBox.warning(self, "Game Settings", "Please select an executable to launch.")
             return
 
         installed_game["native_executable_path"] = selected_executable
         if self.current_details_game is not None:
             self.current_details_game["native_executable_path"] = selected_executable
         self._persist_installed_games()
-
-        QMessageBox.information(self, "Game Settings", "Saved game executable selection.")
 
     def _perform_game_secondary_action(self) -> None:
         if self.current_details_game is None:
@@ -3854,18 +3826,7 @@ class MainWindow(QMainWindow):
 
         if self._uninstall_game(self.current_details_game):
             self._update_details_action_buttons()
-            QMessageBox.information(
-                self,
-                "Uninstall Complete",
-                f"Removed {self.current_details_game['title']} from Library.",
-            )
             return
-
-        QMessageBox.information(
-            self,
-            "Game Action",
-            f"{self.current_details_game['title']} is not currently installed.",
-        )
 
     def _normalize_emulators(self, value: Any) -> list[dict[str, str]]:
         if not isinstance(value, list):
@@ -4629,7 +4590,6 @@ class MainWindow(QMainWindow):
         index = self.emulator_list.currentRow()
         emulators = self._emulators()
         if index < 0 or index >= len(emulators):
-            QMessageBox.information(self, "Launch Emulator", "Select an emulator to launch.")
             return
 
         emulator = emulators[index]
