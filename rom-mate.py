@@ -123,6 +123,8 @@ class MainWindow(QMainWindow):
         self.server_platforms_list: QListWidget | None = None
         self.server_games_grid: QGridLayout | None = None
         self.server_games_content: QWidget | None = None
+        self.server_search_input: QLineEdit | None = None
+        self.server_search_clear_button: QPushButton | None = None
         self.library_scroll: QScrollArea | None = None
         self.library_empty_label: QLabel | None = None
         self.server_games_scroll: QScrollArea | None = None
@@ -315,6 +317,34 @@ class MainWindow(QMainWindow):
                 border-radius: 6px;
                 padding: 6px 8px;
             }
+            QFrame#serverSearchContainer {
+                background-color: #111827;
+                border: 1px solid #4b5563;
+                border-radius: 6px;
+            }
+            QLineEdit#serverSearchInput {
+                background-color: transparent;
+                border: none;
+                padding: 6px 2px 6px 8px;
+            }
+            QPushButton#serverSearchClearButton {
+                background-color: transparent;
+                border: none;
+                color: #ffffff;
+                font-weight: 700;
+                border-radius: 0;
+                padding: 0;
+            }
+            QPushButton#serverSearchClearButton:hover {
+                border: none;
+                color: #ffffff;
+                background-color: #1f2937;
+            }
+            QPushButton#serverSearchClearButton:pressed {
+                border: none;
+                color: #ffffff;
+                background-color: #374151;
+            }
             QFrame#panel {
                 background-color: #1f2937;
                 border: 1px solid #374151;
@@ -438,9 +468,46 @@ class MainWindow(QMainWindow):
         right_layout.setContentsMargins(12, 10, 12, 10)
         right_layout.setSpacing(10)
 
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(8)
+
         header = QLabel("Server Games")
         header.setStyleSheet("font-size: 20px; font-weight: 700;")
-        right_layout.addWidget(header)
+        header_row.addWidget(header)
+        header_row.addStretch()
+
+        search_container = QFrame()
+        search_container.setObjectName("serverSearchContainer")
+        search_container.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        search_container.setFixedWidth(260)
+        search_layout = QHBoxLayout(search_container)
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        search_layout.setSpacing(0)
+
+        server_search_input = QLineEdit()
+        server_search_input.setObjectName("serverSearchInput")
+        server_search_input.setPlaceholderText("Search games...")
+        server_search_input.setClearButtonEnabled(False)
+        server_search_input.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        server_search_input.textChanged.connect(self._on_server_search_changed)
+        self.server_search_input = server_search_input
+        search_layout.addWidget(server_search_input)
+
+        server_search_clear_button = QPushButton("X")
+        server_search_clear_button.setObjectName("serverSearchClearButton")
+        server_search_clear_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        server_search_clear_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        server_search_clear_button.setFixedWidth(26)
+        server_search_clear_button.setFixedHeight(28)
+        server_search_clear_button.setVisible(False)
+        server_search_clear_button.clicked.connect(self._clear_server_search)
+        self.server_search_clear_button = server_search_clear_button
+        search_layout.addWidget(server_search_clear_button)
+
+        header_row.addWidget(search_container)
+
+        right_layout.addLayout(header_row)
 
         self.server_status_label = QLabel("Not connected")
         self.server_status_label.setStyleSheet("color: #fca5a5;")
@@ -1560,6 +1627,21 @@ class MainWindow(QMainWindow):
             self._load_server_games(platform_label)
         self._render_server_games(platform_label)
 
+    def _on_server_search_changed(self, search_text: str) -> None:
+        if self.server_search_clear_button is not None:
+            self.server_search_clear_button.setVisible(bool(search_text.strip()))
+        if self.server_platforms_list is None:
+            return
+        selected_item = self.server_platforms_list.currentItem()
+        if selected_item is None:
+            return
+        self._render_server_games(selected_item.text())
+
+    def _clear_server_search(self) -> None:
+        if self.server_search_input is None:
+            return
+        self.server_search_input.clear()
+
     def _load_server_games(self, platform_label: str) -> None:
         if not self.server_connected:
             return
@@ -1729,6 +1811,17 @@ class MainWindow(QMainWindow):
         if self.server_games_grid is None or self.server_games_scroll is None:
             return
         games = self.server_games_by_platform.get(platform, [])
+        query = ""
+        if self.server_search_input is not None:
+            query = self.server_search_input.text().strip().casefold()
+        if query:
+            filtered_games: list[dict[str, str]] = []
+            for game in games:
+                title = game.get("title", "").casefold()
+                game_platform = game.get("platform", "").casefold()
+                if query in title or query in game_platform:
+                    filtered_games.append(game)
+            games = filtered_games
         self._clear_layout(self.server_games_grid)
         columns = self._grid_columns_for_width(self.server_games_scroll, self.server_games_grid)
         for i, game in enumerate(games):
