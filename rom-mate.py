@@ -2649,10 +2649,11 @@ class MainWindow(QMainWindow):
         if self.details_description_label is not None:
             self.details_description_label.setText(game["description"])
         self._update_details_screenshots(game)
-        self._update_details_layout_metrics()
         self._update_details_action_buttons()
 
         self.stack.setCurrentIndex(5)
+        self._update_details_layout_metrics()
+        QTimer.singleShot(0, self._update_details_layout_metrics)
         for button in self.nav_buttons:
             button.setChecked(False)
 

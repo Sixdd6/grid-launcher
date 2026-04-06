@@ -23,13 +23,13 @@
 
 # Medium Priority
 - [x] Switch emulator default exe should be eden.exe.
-- [ ] Slight scaling issue with game details, if window is maximized before viewing game details the layout is off.
+- [x] Slight scaling issue with game details, if window is maximized before viewing game details the layout is off.
 
 # Low Priority
 - [x] Also hide the 'Windows 9x' platform in the default emulator selection list.
 
 # Future Ideas
-- [ ] Offload emulator configurations to a separate file that can be updated independently.
+- [x] Offload emulator configurations to a separate file that can be updated independently.
 - [ ] Implement the Dracula theme as the main dark theme.
 - [ ] Implement cloud sync integration for game saves.
 - [ ] Implement PCGamingWiki integration for Windows game information and default save locations.
