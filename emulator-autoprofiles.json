@@ -1,7 +1,7 @@
 [
   {
     "match_tokens": ["retroarch.exe"],
-    "name": "RetroArch",
+    "name": "RetroArch (Multi-System)",
     "args": "-L \"%core%\" \"%rom%\"",
     "all_platforms": true,
     "platform_keywords": [],
@@ -9,7 +9,7 @@
   },
   {
     "match_tokens": ["duckstation-qt-x64-ReleaseLTCG.exe"],
-    "name": "DuckStation",
+    "name": "DuckStation (Playstation 1)",
     "args": "-fullscreen -batch \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation", "ps1", "psx"],
@@ -17,7 +17,7 @@
   },
   {
     "match_tokens": ["pcsx2-qt.exe"],
-    "name": "PCSX2",
+    "name": "PCSX2 (Playstation 2)",
     "args": "-fullscreen -batch \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation 2", "ps2"],
@@ -25,7 +25,7 @@
   },
   {
     "match_tokens": ["PPSSPPWindows64.exe"],
-    "name": "PPSSPP",
+    "name": "PPSSPP (Playstation Portable)",
     "args": "--fullscreen --pause-menu-exit \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation portable", "psp"],
@@ -33,15 +33,15 @@
   },
   {
     "match_tokens": ["rpcs3.exe"],
-    "name": "RPCS3",
-    "args": "\"%rom%\"",
+    "name": "RPCS3 (Playstation 3)",
+    "args": "--no-gui \"%RPCS3_GAMEID%:%ps3_gameid%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation 3", "ps3"],
     "use_game_title_as_name": false
   },
   {
     "match_tokens": ["shadPS4.exe"],
-    "name": "ShadPS4",
+    "name": "ShadPS4 (Playstation 4)",
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation 4", "ps4"],
@@ -57,7 +57,7 @@
   },
   {
     "match_tokens": ["cemu.exe"],
-    "name": "Cemu",
+    "name": "Cemu (Wii U)",
     "args": "-f -g \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["wii u", "wiiu"],
@@ -65,7 +65,7 @@
   },
   {
     "match_tokens": ["azahar.exe"],
-    "name": "Azahar",
+    "name": "Azahar (Nintendo 3DS)",
     "args": "-f \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["3ds"],
@@ -89,7 +89,7 @@
   },
   {
     "match_tokens": ["eden.exe"],
-    "name": "Eden",
+    "name": "Eden (Nintendo Switch)",
     "args": "-f -g \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["switch", "nintendo switch"],
@@ -97,7 +97,7 @@
   },
   {
     "match_tokens": ["yuzu.exe"],
-    "name": "Yuzu",
+    "name": "Yuzu (Nintendo Switch)",
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["switch", "nintendo switch"],
@@ -105,7 +105,7 @@
   },
   {
     "match_tokens": ["ryujinx.exe"],
-    "name": "Ryujinx",
+    "name": "Ryujinx (Nintendo Switch)",
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["switch", "nintendo switch"],
@@ -113,7 +113,7 @@
   },
   {
     "match_tokens": ["sudachi.exe"],
-    "name": "Sudachi",
+    "name": "Sudachi (Nintendo Switch)",
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["switch", "nintendo switch"],
@@ -121,7 +121,7 @@
   },
   {
     "match_tokens": ["mame.exe"],
-    "name": "MAME",
+    "name": "MAME (Arcade)",
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["arcade", "mame"],
@@ -129,7 +129,7 @@
   },
   {
     "match_tokens": ["fbneo.exe"],
-    "name": "FBNeo",
+    "name": "FBNeo (Arcade)",
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
@@ -137,7 +137,7 @@
   },
   {
     "match_tokens": ["xenia_canary.exe"],
-    "name": "Xenia Canary",
+    "name": "Xenia Canary (Xbox 360)",
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["xbox 360", "microsoft xbox 360", "xbox360"],
@@ -145,7 +145,7 @@
   },
   {
     "match_tokens": ["redream.exe"],
-    "name": "Redream",
+    "name": "Redream (Sega Dreamcast)",
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["dreamcast"],

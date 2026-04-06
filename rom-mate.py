@@ -89,6 +89,30 @@ class InstallDownloadWorker(QObject):
             self.finished.emit("", str(error))
 
 
+class InstallFinalizeWorker(QObject):
+    finished = Signal(object, str, str, str)
+
+    def __init__(self, window: "MainWindow", game: dict[str, str], archive_path: Path) -> None:
+        super().__init__()
+        self.window = window
+        self.game = dict(game)
+        self.archive_path = archive_path
+
+    def run(self) -> None:
+        try:
+            prepared_game, warning_text = self.window._prepare_installed_game_without_ui(
+                self.game,
+                self.archive_path,
+                configure_ps3_links=False,
+            )
+            if prepared_game is None:
+                self.finished.emit(None, str(self.archive_path), warning_text, "Install preparation failed")
+                return
+            self.finished.emit(prepared_game, str(self.archive_path), warning_text, "")
+        except (OSError, zipfile.BadZipFile) as error:
+            self.finished.emit(None, str(self.archive_path), "", str(error))
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -149,6 +173,11 @@ class MainWindow(QMainWindow):
         self.install_queue: list[dict[str, str]] = []
         self.install_thread: QThread | None = None
         self.install_worker: InstallDownloadWorker | None = None
+        self.install_finalize_in_progress = False
+        self.install_finalize_game: dict[str, str] | None = None
+        self.install_finalize_entry_id: str | None = None
+        self.install_finalize_thread: QThread | None = None
+        self.install_finalize_worker: InstallFinalizeWorker | None = None
         self.download_status_widget: QWidget | None = None
         self.download_count_label: QLabel | None = None
         self.download_progress_bar: QProgressBar | None = None
@@ -172,6 +201,7 @@ class MainWindow(QMainWindow):
         self.server_rom_payloads: dict[str, dict[str, Any]] = {}
         self.retroarch_compatibility_map: dict[str, list[str]] | None = None
         self.emulator_autoprofiles: list[dict[str, Any]] | None = None
+        self.ps3_file_symlink_elevation_consent: bool | None = None
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -513,7 +543,7 @@ class MainWindow(QMainWindow):
 
         details_form.addRow("Name", self.emulator_name_input)
         details_form.addRow("Executable Path", path_row)
-        details_form.addRow("Arguments (%rom%, %core%)", self.emulator_args_input)
+        details_form.addRow("Arguments (%rom%, %core%, %RPCS3_GAMEID%, %ps3_gameid%)", self.emulator_args_input)
         emulator_details_layout.addLayout(details_form)
 
         emulator_actions = QHBoxLayout()
@@ -635,7 +665,7 @@ class MainWindow(QMainWindow):
 
         launch_form = QFormLayout()
         self.launch_args_input = QLineEdit(self.config["launch_args"])
-        launch_form.addRow("Extra Arguments (%rom%, %core%)", self.launch_args_input)
+        launch_form.addRow("Extra Arguments (%rom%, %core%, %RPCS3_GAMEID%, %ps3_gameid%)", self.launch_args_input)
         launch_layout.addLayout(launch_form)
         layout.addWidget(launch_panel)
 
@@ -2066,6 +2096,10 @@ class MainWindow(QMainWindow):
         extracted_path = game.get("extracted_path", "").strip()
         stored_archive_path = "" if extracted_path else str(archive_path)
         rom_id = game.get("rom_id", "").strip()
+        ps3_links_value = game.get("ps3_links", "")
+        ps3_links = ps3_links_value.strip() if isinstance(ps3_links_value, str) else ""
+        ps3_game_id_value = game.get("ps3_game_id", "")
+        ps3_game_id = ps3_game_id_value.strip() if isinstance(ps3_game_id_value, str) else ""
         self.library_games.append(
             {
                 "title": game.get("title", "").strip(),
@@ -2079,6 +2113,8 @@ class MainWindow(QMainWindow):
                 "extracted_path": extracted_path,
                 "extracted_dir": game.get("extracted_dir", "").strip(),
                 "archive_path": stored_archive_path,
+                "ps3_links": ps3_links,
+                "ps3_game_id": ps3_game_id,
             }
         )
         self.library_games = self._normalize_installed_games(self.library_games)
@@ -2095,6 +2131,251 @@ class MainWindow(QMainWindow):
         platform_value = game.get("platform", "")
         platform = platform_value.strip().casefold() if isinstance(platform_value, str) else ""
         return platform in {"playstation 3", "ps3"}
+
+    def _ps3_emulator_root_for_game(self, game: dict[str, str]) -> Path | None:
+        platform_value = game.get("platform", "")
+        platform = platform_value.strip() if isinstance(platform_value, str) else ""
+        emulator_name = self._default_emulator_name_for_platform(platform)
+        if not emulator_name:
+            return None
+
+        emulator_entry = self._emulator_entry_by_name(emulator_name)
+        if emulator_entry is None:
+            return None
+
+        emulator_path_value = emulator_entry.get("path", "")
+        emulator_path_text = emulator_path_value.strip() if isinstance(emulator_path_value, str) else ""
+        if not emulator_path_text:
+            return None
+
+        emulator_path = Path(emulator_path_text).expanduser()
+        if emulator_path.exists() and emulator_path.is_dir():
+            return emulator_path
+        emulator_root = emulator_path.parent
+        if emulator_root.exists() and emulator_root.is_dir():
+            return emulator_root
+        return None
+
+    def _ps3_link_plan_for_extracted_dir(self, extracted_dir: Path, emulator_root: Path) -> list[tuple[Path, Path, bool]]:
+        candidates = [candidate for candidate in extracted_dir.rglob("*") if candidate.is_dir() or candidate.is_file()]
+        candidates.sort(
+            key=lambda path: (
+                len(path.relative_to(extracted_dir).parts),
+                0 if path.is_dir() else 1,
+                str(path).casefold(),
+            )
+        )
+
+        planned_links: list[tuple[Path, Path, bool]] = []
+        seen_targets: set[str] = set()
+        for source_path in candidates:
+            relative_parts = source_path.relative_to(extracted_dir).parts
+            target_cursor = emulator_root
+            for index, part in enumerate(relative_parts):
+                target_candidate = target_cursor / part
+                if target_candidate.exists():
+                    if target_candidate.is_dir() and index < len(relative_parts) - 1:
+                        target_cursor = target_candidate
+                        continue
+                    if target_candidate.is_dir() and source_path.is_dir() and index == len(relative_parts) - 1:
+                        target_cursor = target_candidate
+                        continue
+                    break
+
+                source_candidate = extracted_dir.joinpath(*relative_parts[: index + 1])
+                target_key = self._path_key(target_candidate)
+                if target_key not in seen_targets:
+                    planned_links.append((source_candidate, target_candidate, source_candidate.is_dir()))
+                    seen_targets.add(target_key)
+                break
+        return planned_links
+
+    def _ps3_game_id_from_text(self, value: str) -> str:
+        if not isinstance(value, str):
+            return ""
+        match = re.search(r"\b([A-Z]{4}\d{5})\b", value.upper())
+        if match is None:
+            return ""
+        return match.group(1)
+
+    def _ps3_game_id_from_paths(self, paths: list[Path]) -> str:
+        for path in paths:
+            for part in path.parts:
+                game_id = self._ps3_game_id_from_text(part)
+                if game_id:
+                    return game_id
+        return ""
+
+    def _detected_ps3_game_id(self, extracted_dir: Path, link_targets: list[Path]) -> str:
+        candidate_paths = [extracted_dir, *link_targets]
+        game_id = self._ps3_game_id_from_paths(candidate_paths)
+        if game_id:
+            return game_id
+
+        try:
+            for candidate in extracted_dir.rglob("*"):
+                game_id = self._ps3_game_id_from_text(candidate.name)
+                if game_id:
+                    return game_id
+        except OSError:
+            return ""
+        return ""
+
+    def _ps3_game_id_for_game(self, game: dict[str, str]) -> str:
+        existing_value = game.get("ps3_game_id", "")
+        existing = existing_value.strip().upper() if isinstance(existing_value, str) else ""
+        if self._ps3_game_id_from_text(existing):
+            return existing
+
+        rom_file_name_value = game.get("rom_file_name", "")
+        rom_file_name = rom_file_name_value.strip() if isinstance(rom_file_name_value, str) else ""
+        game_id = self._ps3_game_id_from_text(rom_file_name)
+        if game_id:
+            return game_id
+
+        title_value = game.get("title", "")
+        title = title_value.strip() if isinstance(title_value, str) else ""
+        game_id = self._ps3_game_id_from_text(title)
+        if game_id:
+            return game_id
+
+        link_paths = self._ps3_link_paths_from_game(game)
+        game_id = self._ps3_game_id_from_paths(link_paths)
+        if game_id:
+            return game_id
+
+        extracted_dir_value = game.get("extracted_dir", "")
+        extracted_dir_text = extracted_dir_value.strip() if isinstance(extracted_dir_value, str) else ""
+        if extracted_dir_text:
+            extracted_dir = Path(extracted_dir_text).expanduser()
+            if extracted_dir.exists() and extracted_dir.is_dir():
+                game_id = self._detected_ps3_game_id(extracted_dir, link_paths)
+                if game_id:
+                    return game_id
+        return ""
+
+    def _is_rpcs3_emulator_name(self, emulator_name: str) -> bool:
+        return "rpcs3" in emulator_name.strip().casefold()
+
+    def _create_link_path(self, source_path: Path, link_path: Path, is_directory: bool) -> None:
+        link_path.parent.mkdir(parents=True, exist_ok=True)
+        if link_path.exists():
+            return
+
+        if is_directory:
+            result = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(link_path), str(source_path)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode == 0:
+                return
+
+            try:
+                os.symlink(str(source_path), str(link_path), target_is_directory=True)
+                return
+            except (AttributeError, NotImplementedError, OSError):
+                pass
+
+            error_text = result.stderr.strip() or result.stdout.strip() or "Unknown link creation error"
+            raise OSError(error_text)
+
+        try:
+            os.symlink(str(source_path), str(link_path), target_is_directory=False)
+            return
+        except (AttributeError, NotImplementedError, OSError) as error:
+            if self._create_elevated_file_symlink(source_path, link_path):
+                return
+            raise OSError(str(error)) from error
+
+    def _create_elevated_file_symlink(self, source_path: Path, link_path: Path) -> bool:
+        if os.name != "nt":
+            return False
+
+        if self.ps3_file_symlink_elevation_consent is None:
+            answer = QMessageBox.question(
+                self,
+                "Administrator Permission Required",
+                "Creating file symlinks for this PS3 install requires administrator permission on Windows.\n\n"
+                "Do you want to allow a one-time elevation prompt for this operation?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            self.ps3_file_symlink_elevation_consent = answer == QMessageBox.StandardButton.Yes
+
+        if not self.ps3_file_symlink_elevation_consent:
+            return False
+
+        source_text = str(source_path)
+        link_text = str(link_path)
+        command_params = f'/c mklink "{link_text}" "{source_text}"'
+        result = ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", command_params, None, 0)
+        if result <= 32:
+            return False
+
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            if link_path.exists():
+                return True
+            time.sleep(0.1)
+        return link_path.exists()
+
+    def _remove_link_path(self, link_path: Path) -> None:
+        if not link_path.exists():
+            return
+        if link_path.is_symlink():
+            link_path.unlink()
+            return
+        os.rmdir(link_path)
+
+    def _ps3_link_paths_from_game(self, game: dict[str, str]) -> list[Path]:
+        raw_value = game.get("ps3_links", "")
+        if not isinstance(raw_value, str) or not raw_value.strip():
+            return []
+
+        try:
+            parsed = json.loads(raw_value)
+        except json.JSONDecodeError:
+            return []
+
+        if not isinstance(parsed, list):
+            return []
+
+        paths: list[Path] = []
+        for item in parsed:
+            if not isinstance(item, str):
+                continue
+            item_text = item.strip()
+            if item_text:
+                paths.append(Path(item_text).expanduser())
+        return paths
+
+    def _configure_ps3_install_links(self, game: dict[str, str], extracted_dir: Path) -> list[Path]:
+        emulator_root = self._ps3_emulator_root_for_game(game)
+        if emulator_root is None:
+            raise OSError("No default PS3 emulator path is configured for PlayStation 3 installs.")
+
+        link_plan = self._ps3_link_plan_for_extracted_dir(extracted_dir, emulator_root)
+        if not link_plan:
+            raise OSError("No PS3 directory branches could be mapped into the emulator directory.")
+
+        self.ps3_file_symlink_elevation_consent = None
+        created_links: list[Path] = []
+        try:
+            for source_path, link_target, is_directory in link_plan:
+                self._create_link_path(source_path, link_target, is_directory)
+                created_links.append(link_target)
+        except OSError:
+            for link_target in reversed(created_links):
+                try:
+                    self._remove_link_path(link_target)
+                except OSError:
+                    pass
+            raise
+        finally:
+            self.ps3_file_symlink_elevation_consent = None
+        return created_links
 
     def _should_extract_archive_for_game(self, game: dict[str, str], archive_path: Path) -> bool:
         if self._is_native_executable_platform(game):
@@ -2314,35 +2595,57 @@ class MainWindow(QMainWindow):
         return launch_file, extracted_dir
 
     def _prepare_installed_game(self, game: dict[str, str], archive_path: Path) -> dict[str, str] | None:
+        prepared, warning_text = self._prepare_installed_game_without_ui(game, archive_path, configure_ps3_links=True)
+        if prepared is None:
+            title = game.get("title", "Game")
+            error_text = warning_text or f"Failed to extract archive for {title}"
+            QMessageBox.warning(self, "Install Error", f"Failed to install {title}: {error_text}")
+            return None
+        if warning_text:
+            QMessageBox.warning(self, "Install Warning", warning_text)
+        return prepared
+
+    def _prepare_installed_game_without_ui(
+        self,
+        game: dict[str, str],
+        archive_path: Path,
+        *,
+        configure_ps3_links: bool,
+    ) -> tuple[dict[str, str] | None, str]:
         prepared = dict(game)
         prepared["extracted_path"] = ""
         prepared["extracted_dir"] = ""
+        prepared["ps3_links"] = ""
+        prepared["ps3_game_id"] = ""
         if not self._should_extract_archive_for_game(prepared, archive_path):
-            return prepared
+            return prepared, ""
 
         try:
             extracted_file, extracted_dir = self._extract_archive_for_game(prepared, archive_path)
         except (OSError, zipfile.BadZipFile) as error:
-            QMessageBox.warning(
-                self,
-                "Install Error",
-                f"Failed to extract archive for {prepared.get('title', 'Game')}: {error}",
-            )
-            return None
+            return None, str(error)
 
+        warning_text = ""
         if archive_path.exists() and archive_path.is_file():
             try:
                 archive_path.unlink()
             except OSError as error:
-                QMessageBox.warning(
-                    self,
-                    "Install Warning",
-                    f"Extracted {prepared.get('title', 'Game')}, but could not delete archive:\n{archive_path}\n{error}",
+                warning_text = (
+                    f"Extracted {prepared.get('title', 'Game')}, but could not delete archive:\n{archive_path}\n{error}"
                 )
 
         prepared["extracted_path"] = str(extracted_file)
         prepared["extracted_dir"] = str(extracted_dir)
-        return prepared
+
+        if self._is_ps3_platform(prepared) and configure_ps3_links:
+            try:
+                ps3_links = self._configure_ps3_install_links(prepared, extracted_dir)
+                prepared["ps3_links"] = json.dumps([str(path) for path in ps3_links])
+                prepared["ps3_game_id"] = self._detected_ps3_game_id(extracted_dir, ps3_links)
+            except OSError as error:
+                return None, f"Failed to prepare PS3 symlink layout for {prepared.get('title', 'Game')}: {error}"
+
+        return prepared, warning_text
 
     def _is_emulators_platform(self, game: dict[str, str]) -> bool:
         platform_value = game.get("platform", "")
@@ -2950,6 +3253,16 @@ class MainWindow(QMainWindow):
         return unique
 
     def _remove_game_files(self, game: dict[str, str]) -> bool:
+        if self._is_ps3_platform(game):
+            for link_path in self._ps3_link_paths_from_game(game):
+                if not link_path.exists():
+                    continue
+                try:
+                    self._remove_link_path(link_path)
+                except OSError as error:
+                    QMessageBox.warning(self, "Uninstall Error", f"Could not remove PS3 link: {link_path}\n{error}")
+                    return False
+
         if self._is_native_executable_platform(game):
             for extracted_dir in self._candidate_extracted_dirs_for_game(game):
                 if not extracted_dir.exists() or not extracted_dir.is_dir():
@@ -3105,6 +3418,12 @@ class MainWindow(QMainWindow):
             and self.install_pending_game is not None
             and self._game_key(self.current_details_game) == self._game_key(self.install_pending_game)
         )
+        if not installing_current:
+            installing_current = (
+                self.install_finalize_in_progress
+                and self.install_finalize_game is not None
+                and self._game_key(self.current_details_game) == self._game_key(self.install_finalize_game)
+            )
         if self.details_primary_button is not None:
             if installing_current:
                 button_text = "Installing..."
@@ -3131,7 +3450,7 @@ class MainWindow(QMainWindow):
         return any(self._game_key(queued_game) == target for queued_game in self.install_queue)
 
     def _start_next_queued_install(self) -> None:
-        if self.install_in_progress or not self.install_queue:
+        if self.install_in_progress or self.install_finalize_in_progress or not self.install_queue:
             self._update_details_action_buttons()
             self._update_download_status_ui()
             return
@@ -3251,10 +3570,14 @@ class MainWindow(QMainWindow):
         download_url = f"{base_url}/api/roms/{rom_id_path}/content/{file_name_path}"
 
         install_key = self._game_key(install_game)
-        pending_key = self._game_key(self.install_pending_game) if self.install_pending_game is not None else None
+        pending_key: tuple[str, str] | None = None
+        if self.install_in_progress and self.install_pending_game is not None:
+            pending_key = self._game_key(self.install_pending_game)
+        elif self.install_finalize_in_progress and self.install_finalize_game is not None:
+            pending_key = self._game_key(self.install_finalize_game)
         queued_keys = {self._game_key(queued_game) for queued_game in self.install_queue}
 
-        if self.install_in_progress:
+        if self.install_in_progress or self.install_finalize_in_progress:
             if install_key == pending_key or install_key in queued_keys:
                 return False
             queued_game = dict(install_game)
@@ -3341,10 +3664,51 @@ class MainWindow(QMainWindow):
             return
 
         archive_file = Path(archive_path)
-        installed_game = self._prepare_installed_game(game, archive_file)
-        if installed_game is None:
+        if entry_id:
+            self._set_download_entry_status(entry_id, "installing")
+        self._start_async_install_finalize(game, archive_file, entry_id)
+
+    def _start_async_install_finalize(self, game: dict[str, str], archive_file: Path, entry_id: str | None) -> None:
+        self.install_finalize_in_progress = True
+        self.install_finalize_game = dict(game)
+        self.install_finalize_entry_id = entry_id
+        self._update_download_status_ui()
+        self._update_details_action_buttons()
+
+        thread = QThread(self)
+        worker = InstallFinalizeWorker(self, game, archive_file)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_async_install_finalize_finished)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_install_finalize_thread_finished)
+
+        self.install_finalize_thread = thread
+        self.install_finalize_worker = worker
+        thread.start()
+
+    def _on_async_install_finalize_finished(
+        self,
+        prepared_game: object,
+        archive_path: str,
+        warning_text: str,
+        error: str,
+    ) -> None:
+        game = self.install_finalize_game
+        entry_id = self.install_finalize_entry_id
+        self.install_finalize_in_progress = False
+        self.install_finalize_game = None
+        self.install_finalize_entry_id = None
+
+        title = game.get("title", "Game") if isinstance(game, dict) else "Game"
+
+        if error or not isinstance(prepared_game, dict):
             if entry_id:
-                self._set_download_entry_status(entry_id, "failed", "Failed to extract downloaded archive")
+                failure_text = error.strip() if isinstance(error, str) and error.strip() else "Failed to extract downloaded archive"
+                self._set_download_entry_status(entry_id, "failed", failure_text)
+            archive_file = Path(archive_path)
             if archive_file.exists() and archive_file.is_file():
                 try:
                     archive_file.unlink()
@@ -3352,13 +3716,39 @@ class MainWindow(QMainWindow):
                     pass
             self._update_download_status_ui()
             self._update_details_action_buttons()
+            if error:
+                QMessageBox.warning(self, "Install Error", f"Failed to install {title}: {error}")
             self._start_next_queued_install()
             return
 
+        installed_game = dict(prepared_game)
+        extracted_dir_text = installed_game.get("extracted_dir", "")
+        if self._is_ps3_platform(installed_game) and isinstance(extracted_dir_text, str) and extracted_dir_text.strip():
+            try:
+                extracted_dir = Path(extracted_dir_text)
+                ps3_links = self._configure_ps3_install_links(installed_game, extracted_dir)
+                installed_game["ps3_links"] = json.dumps([str(path) for path in ps3_links])
+                installed_game["ps3_game_id"] = self._detected_ps3_game_id(extracted_dir, ps3_links)
+            except OSError as ps3_error:
+                if entry_id:
+                    self._set_download_entry_status(entry_id, "failed", str(ps3_error))
+                self._update_download_status_ui()
+                self._update_details_action_buttons()
+                QMessageBox.warning(
+                    self,
+                    "Install Error",
+                    f"Failed to prepare PS3 symlink layout for {title}: {ps3_error}",
+                )
+                self._start_next_queued_install()
+                return
+
+        archive_file = Path(archive_path)
         self._register_installed_game(installed_game, archive_file)
         self._auto_configure_installed_emulator(installed_game, archive_file)
         if entry_id:
             self._set_download_entry_status(entry_id, "completed")
+        if warning_text.strip():
+            QMessageBox.warning(self, "Install Warning", warning_text.strip())
         self._update_download_status_ui()
         self._update_details_action_buttons()
         self._start_next_queued_install()
@@ -3366,6 +3756,10 @@ class MainWindow(QMainWindow):
     def _on_install_thread_finished(self) -> None:
         self.install_thread = None
         self.install_worker = None
+
+    def _on_install_finalize_thread_finished(self) -> None:
+        self.install_finalize_thread = None
+        self.install_finalize_worker = None
 
     def _on_async_install_progress(self, downloaded_bytes: int, total_bytes: int, speed_bps: float) -> None:
         downloaded = int(downloaded_bytes) if isinstance(downloaded_bytes, (int, float)) else 0
@@ -3397,11 +3791,19 @@ class MainWindow(QMainWindow):
             return
         queued_count = len(self.install_queue)
         has_active_downloads = self.active_download_count > 0
-        has_install_work = has_active_downloads or queued_count > 0
+        has_install_work = has_active_downloads or queued_count > 0 or self.install_finalize_in_progress
         self.download_status_widget.setVisible(has_install_work)
         if self.download_count_label is not None:
             active_suffix = "s" if self.active_download_count != 1 else ""
-            if queued_count > 0:
+            if self.install_finalize_in_progress and not has_active_downloads:
+                if queued_count > 0:
+                    queued_suffix = "s" if queued_count != 1 else ""
+                    self.download_count_label.setText(
+                        f"Installing 1 game ({queued_count} queued download{queued_suffix})"
+                    )
+                else:
+                    self.download_count_label.setText("Installing 1 game")
+            elif queued_count > 0:
                 queued_suffix = "s" if queued_count != 1 else ""
                 self.download_count_label.setText(
                     f"{self.active_download_count} active download{active_suffix} ({queued_count} queued download{queued_suffix})"
@@ -3422,13 +3824,19 @@ class MainWindow(QMainWindow):
                 self.download_progress_bar.setRange(0, 100)
                 self.download_progress_bar.setValue(0)
                 self.download_progress_bar.setFormat("Queued")
+            elif self.install_finalize_in_progress:
+                self.download_progress_bar.setRange(0, 0)
+                self.download_progress_bar.setFormat("Installing...")
             else:
                 self.download_progress_bar.setRange(0, 100)
                 self.download_progress_bar.setValue(0)
                 self.download_progress_bar.setFormat("0%")
         if self.download_speed_label is not None:
-            speed_text = self._format_size(self.active_download_speed_bps)
-            self.download_speed_label.setText(f"{speed_text}/s")
+            if self.install_finalize_in_progress and not has_active_downloads:
+                self.download_speed_label.setText("Installing...")
+            else:
+                speed_text = self._format_size(self.active_download_speed_bps)
+                self.download_speed_label.setText(f"{speed_text}/s")
 
     def _create_download_entry(self, game: dict[str, Any], status: str, error: str = "") -> str:
         title_value = game.get("title", "Game")
@@ -3535,6 +3943,8 @@ class MainWindow(QMainWindow):
                     f" • {self._format_size(speed_bps)}/s"
                 )
             return f"Downloading • {self._format_size(downloaded)} • {self._format_size(speed_bps)}/s"
+        if status == "installing":
+            return "Installing..."
         if status == "cancelling":
             return "Cancelling..."
         if status == "completed":
@@ -3581,6 +3991,10 @@ class MainWindow(QMainWindow):
             cancel_button.setEnabled(status != "cancelling")
             cancel_button.clicked.connect(lambda checked=False, target=entry_id: self._cancel_download_entry(target))
             actions.addWidget(cancel_button)
+        elif status == "installing":
+            installing_label = QLabel("Installing...")
+            installing_label.setStyleSheet(f"color: {self._theme_color('muted', '#6272a4')};")
+            actions.addWidget(installing_label)
         elif status in ("failed", "cancelled"):
             retry_button = QPushButton("Retry")
             retry_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -3682,9 +4096,17 @@ class MainWindow(QMainWindow):
                 if configured_core:
                     core_value = self._retroarch_core_argument_path(configured_core)
 
+        ps3_game_id = ""
+        rpcs3_game_token = ""
+        if self._is_rpcs3_emulator_name(emulator_name):
+            rpcs3_game_token = "%RPCS3_GAMEID%"
+            ps3_game_id = self._ps3_game_id_for_game(game)
+
         return {
             "%rom%": rom_path,
             "%core%": core_value,
+            "%RPCS3_GAMEID%": rpcs3_game_token,
+            "%ps3_gameid%": ps3_game_id,
         }
 
     def _retroarch_core_argument_path(self, configured_core: str) -> str:
@@ -3757,6 +4179,10 @@ class MainWindow(QMainWindow):
         placeholders = self._launch_placeholders_for_game(game, emulator_name)
         if "%core%" in combined_template and not placeholders.get("%core%", "").strip():
             raise ValueError("No RetroArch core is configured for this platform. Set one in Emulators > Defaults.")
+        if "%RPCS3_GAMEID%" in combined_template and not placeholders.get("%RPCS3_GAMEID%", "").strip():
+            raise ValueError("No PS3 game ID was found for this title. Reinstall or verify extracted content includes a valid PS3 title ID.")
+        if "%ps3_gameid%" in combined_template and not placeholders.get("%ps3_gameid%", "").strip():
+            raise ValueError("No PS3 game ID was found for this title. Reinstall or verify extracted content includes a valid PS3 title ID.")
         resolved_args = self._apply_launch_placeholders_to_args(parsed_template_args, placeholders)
         return emulator_name, resolved_args
 
@@ -4553,6 +4979,8 @@ class MainWindow(QMainWindow):
             extracted_dir = item.get("extracted_dir")
             archive_path = item.get("archive_path")
             native_executable_path = item.get("native_executable_path")
+            ps3_links = item.get("ps3_links")
+            ps3_game_id = item.get("ps3_game_id")
             normalized_game = {
                 "title": title.strip(),
                 "platform": platform.strip(),
@@ -4566,6 +4994,8 @@ class MainWindow(QMainWindow):
                 "extracted_dir": extracted_dir.strip() if isinstance(extracted_dir, str) else "",
                 "archive_path": archive_path.strip() if isinstance(archive_path, str) else "",
                 "native_executable_path": native_executable_path.strip() if isinstance(native_executable_path, str) else "",
+                "ps3_links": ps3_links.strip() if isinstance(ps3_links, str) else "",
+                "ps3_game_id": ps3_game_id.strip().upper() if isinstance(ps3_game_id, str) else "",
             }
             key = self._game_key(normalized_game)
             if key in seen:
