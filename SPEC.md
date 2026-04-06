@@ -27,3 +27,11 @@ There are several main sections to the application with buttons across the top b
 
 > Specifically for Windows games: The game details sub view should include a button for a "game settings" dialog where the player can configure the launch executable and arguments to use when launching the game, valid executables should be scanned for from the game's directory and include exe, bat, cmd, ps1, sh. There should also be a button the game settings window to set the game save directory, this will be the used in the future for monitoring save files.
 
+# Cloud Saves
+The following is the desired functionality for cloud saves:
+
+## Folder-based saves
+For emulators which store saves in a subfolder, the archive should include that subfolder and it's contents.
+
+## Single-file saves
+For emulators which store saves as a single file in a common location, memory cards for example, the archive should include just the file relevant to the game being saved.

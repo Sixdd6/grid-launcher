@@ -5,7 +5,9 @@
     "args": "-L \"%core%\" \"%rom%\"",
     "all_platforms": true,
     "platform_keywords": [],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": ["saves"],
+    "state_directories": ["states"]
   },
   {
     "match_tokens": ["duckstation-qt-x64-ReleaseLTCG.exe"],
@@ -13,7 +15,9 @@
     "args": "-fullscreen -batch \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation", "ps1", "psx"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": [],
+    "state_directories": []
   },
   {
     "match_tokens": ["pcsx2-qt.exe"],
@@ -21,7 +25,9 @@
     "args": "-fullscreen -batch \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation 2", "ps2"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": [],
+    "state_directories": []
   },
   {
     "match_tokens": ["PPSSPPWindows64.exe"],
@@ -29,7 +35,9 @@
     "args": "--fullscreen --pause-menu-exit \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation portable", "psp"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": ["memstick\\PSP\\SAVEDATA"],
+    "state_directories": ["memstick\\PSP\\PPSSPP_STATE"]
   },
   {
     "match_tokens": ["rpcs3.exe"],
@@ -37,7 +45,9 @@
     "args": "--no-gui \"%RPCS3_GAMEID%:%ps3_gameid%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation 3", "ps3"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": ["dev_hdd0\\home\\00000001\\savedata"],
+    "state_directories": []
   },
   {
     "match_tokens": ["shadPS4.exe"],
@@ -45,7 +55,9 @@
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation 4", "ps4"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": [],
+    "state_directories": []
   },
   {
     "match_tokens": ["dolphin.exe"],
@@ -53,7 +65,9 @@
     "args": "-b -e \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["gamecube", "wii"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": [],
+    "state_directories": []
   },
   {
     "match_tokens": ["cemu.exe"],
@@ -61,7 +75,9 @@
     "args": "-f -g \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["wii u", "wiiu"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": [],
+    "state_directories": []
   },
   {
     "match_tokens": ["azahar.exe"],
@@ -69,7 +85,9 @@
     "args": "-f \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["3ds"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": [],
+    "state_directories": []
   },
   {
     "match_tokens": ["pico8.exe"],
@@ -77,7 +95,9 @@
     "args": "-run \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["pico 8", "pico8"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": [],
+    "state_directories": []
   },
   {
     "match_tokens": ["xemu.exe"],
@@ -85,7 +105,9 @@
     "args": "-full-screen -dvd_path \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["xbox"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": [],
+    "state_directories": []
   },
   {
     "match_tokens": ["eden.exe"],
@@ -93,7 +115,9 @@
     "args": "-f -g \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["switch", "nintendo switch"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": [],
+    "state_directories": []
   },
   {
     "match_tokens": ["yuzu.exe"],
@@ -101,7 +125,9 @@
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["switch", "nintendo switch"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": [],
+    "state_directories": []
   },
   {
     "match_tokens": ["ryujinx.exe"],
@@ -109,7 +135,9 @@
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["switch", "nintendo switch"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": [],
+    "state_directories": []
   },
   {
     "match_tokens": ["sudachi.exe"],
@@ -117,7 +145,9 @@
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["switch", "nintendo switch"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": [],
+    "state_directories": []
   },
   {
     "match_tokens": ["mame.exe"],
@@ -125,7 +155,9 @@
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["arcade", "mame"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": [],
+    "state_directories": []
   },
   {
     "match_tokens": ["fbneo.exe"],
@@ -133,7 +165,9 @@
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": [],
+    "state_directories": []
   },
   {
     "match_tokens": ["xenia_canary.exe"],
@@ -141,7 +175,9 @@
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["xbox 360", "microsoft xbox 360", "xbox360"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": [],
+    "state_directories": []
   },
   {
     "match_tokens": ["redream.exe"],
@@ -149,6 +185,8 @@
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["dreamcast"],
-    "use_game_title_as_name": false
+    "use_game_title_as_name": false,
+    "save_directories": [],
+    "state_directories": []
   }
 ]
