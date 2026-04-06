@@ -34,7 +34,7 @@
   {
     "match_tokens": ["rpcs3.exe"],
     "name": "RPCS3",
-    "args": "%rom%",
+    "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation 3", "ps3"],
     "use_game_title_as_name": false
@@ -42,7 +42,7 @@
   {
     "match_tokens": ["shadPS4.exe"],
     "name": "ShadPS4",
-    "args": "%rom%",
+    "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation 4", "ps4"],
     "use_game_title_as_name": false
@@ -98,7 +98,7 @@
   {
     "match_tokens": ["yuzu.exe"],
     "name": "Yuzu",
-    "args": "%rom%",
+    "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["switch", "nintendo switch"],
     "use_game_title_as_name": false
@@ -106,7 +106,7 @@
   {
     "match_tokens": ["ryujinx.exe"],
     "name": "Ryujinx",
-    "args": "%rom%",
+    "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["switch", "nintendo switch"],
     "use_game_title_as_name": false
@@ -114,7 +114,7 @@
   {
     "match_tokens": ["sudachi.exe"],
     "name": "Sudachi",
-    "args": "%rom%",
+    "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["switch", "nintendo switch"],
     "use_game_title_as_name": false
@@ -122,7 +122,7 @@
   {
     "match_tokens": ["mame.exe"],
     "name": "MAME",
-    "args": "%rom%",
+    "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["arcade", "mame"],
     "use_game_title_as_name": false
@@ -130,7 +130,7 @@
   {
     "match_tokens": ["fbneo.exe"],
     "name": "FBNeo",
-    "args": "%rom%",
+    "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
     "use_game_title_as_name": false
@@ -138,7 +138,7 @@
   {
     "match_tokens": ["xenia_canary.exe"],
     "name": "Xenia Canary",
-    "args": "%rom%",
+    "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["xbox 360"],
     "use_game_title_as_name": false
@@ -146,7 +146,7 @@
   {
     "match_tokens": ["redream.exe"],
     "name": "Redream",
-    "args": "%rom%",
+    "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["dreamcast"],
     "use_game_title_as_name": false
