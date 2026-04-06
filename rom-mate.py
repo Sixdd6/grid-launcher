@@ -867,6 +867,43 @@ class MainWindow(QMainWindow):
             QMainWindow {{
                 background-color: {colors['window']};
             }}
+            QDialog,
+            QMessageBox,
+            QInputDialog,
+            QFileDialog,
+            QColorDialog,
+            QFontDialog,
+            QDialog QWidget,
+            QMessageBox QWidget,
+            QInputDialog QWidget,
+            QFileDialog QWidget,
+            QColorDialog QWidget,
+            QFontDialog QWidget {{
+                background-color: {colors['surface']};
+                color: {colors['text']};
+            }}
+            QMessageBox QLabel,
+            QDialog QLabel,
+            QInputDialog QLabel,
+            QFileDialog QLabel,
+            QColorDialog QLabel,
+            QFontDialog QLabel {{
+                color: {colors['text']};
+            }}
+            QMenu {{
+                background-color: {colors['surface']};
+                color: {colors['text']};
+                border: 1px solid {colors['border']};
+            }}
+            QMenu::item:selected {{
+                background-color: {colors['surface_alt']};
+                color: {colors['text']};
+            }}
+            QToolTip {{
+                background-color: {colors['surface']};
+                color: {colors['text']};
+                border: 1px solid {colors['border']};
+            }}
             QLabel {{
                 color: {colors['text']};
             }}
@@ -2918,6 +2955,7 @@ class MainWindow(QMainWindow):
     def _update_details_action_buttons(self) -> None:
         if self.current_details_game is None:
             return
+        is_emulator_entry = self._is_emulators_platform(self.current_details_game)
         installed = self._is_game_installed(self.current_details_game)
         queued_current = self._is_game_install_queued(self.current_details_game)
         installing_current = (
@@ -2934,15 +2972,17 @@ class MainWindow(QMainWindow):
                 button_text = "Play"
             else:
                 button_text = "Install Game"
+            show_primary = not (is_emulator_entry and installed)
             self.details_primary_button.setText(button_text)
-            self.details_primary_button.setEnabled(not installing_current and not queued_current)
+            self.details_primary_button.setVisible(show_primary)
+            self.details_primary_button.setEnabled(show_primary and not installing_current and not queued_current)
         if self.details_config_button is not None:
             show_config = installed and self._is_native_executable_platform(self.current_details_game)
             self.details_config_button.setVisible(show_config)
             self.details_config_button.setEnabled(show_config and not installing_current)
         if self.details_secondary_button is not None:
-            self.details_secondary_button.setVisible(installed)
-            self.details_secondary_button.setEnabled(installed and not installing_current)
+            self.details_secondary_button.setVisible(installed and not is_emulator_entry)
+            self.details_secondary_button.setEnabled(installed and not is_emulator_entry and not installing_current)
 
     def _is_game_install_queued(self, game: dict[str, str]) -> bool:
         target = self._game_key(game)
