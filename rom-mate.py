@@ -2,7 +2,9 @@ import sys
 import json
 import base64
 import ctypes
+import os
 import re
+import stat
 import time
 import shlex
 import shutil
@@ -2483,6 +2485,70 @@ class MainWindow(QMainWindow):
                     break
         return matches
 
+    def _emulator_profile_for_entry(self, emulator: dict[str, str]) -> dict[str, Any] | None:
+        name_value = emulator.get("name", "")
+        path_value = emulator.get("path", "")
+        name = name_value.strip().casefold() if isinstance(name_value, str) else ""
+        executable_name = Path(path_value).name.strip().casefold() if isinstance(path_value, str) else ""
+        executable_stem = Path(executable_name).stem.casefold() if executable_name else ""
+
+        profiles = self._emulator_autoprofiles()
+        for profile in profiles:
+            profile_name = profile.get("name", "")
+            profile_name_folded = profile_name.strip().casefold() if isinstance(profile_name, str) else ""
+            if name and profile_name_folded == name:
+                return profile
+
+            match_tokens = profile.get("match_tokens", [])
+            if not isinstance(match_tokens, list):
+                continue
+            normalized_tokens = {
+                token.strip().casefold()
+                for token in match_tokens
+                if isinstance(token, str) and token.strip()
+            }
+            if not normalized_tokens:
+                continue
+
+            if executable_name and executable_name in normalized_tokens:
+                return profile
+
+            if executable_stem and any(Path(token).stem.casefold() == executable_stem for token in normalized_tokens):
+                return profile
+
+        return None
+
+    def _emulator_supports_platform(self, emulator: dict[str, str], platform: str) -> bool:
+        selected_platform = platform.strip()
+        if not selected_platform:
+            return True
+
+        profile = self._emulator_profile_for_entry(emulator)
+        if profile is None:
+            return True
+
+        if bool(profile.get("all_platforms", False)):
+            return True
+
+        keywords = profile.get("platform_keywords", [])
+        if not isinstance(keywords, list):
+            return False
+
+        supported_platforms = self._matching_platforms_for_emulator_keywords(keywords)
+        selected_folded = selected_platform.casefold()
+        return any(isinstance(candidate, str) and candidate.strip().casefold() == selected_folded for candidate in supported_platforms)
+
+    def _compatible_emulator_names_for_platform(self, platform: str) -> list[str]:
+        compatible: list[str] = []
+        for emulator in self._normalize_emulators(self._emulators()):
+            name_value = emulator.get("name", "")
+            name = name_value.strip() if isinstance(name_value, str) else ""
+            if not name:
+                continue
+            if self._emulator_supports_platform(emulator, platform):
+                compatible.append(name)
+        return compatible
+
     def _emulator_profile_for_game(self, game: dict[str, str], executable_path: str) -> dict[str, Any]:
         title_value = game.get("title", "")
         title = title_value.strip() if isinstance(title_value, str) else ""
@@ -2509,6 +2575,60 @@ class MainWindow(QMainWindow):
             "platform_keywords": [],
         }
 
+    def _dolphin_variant_label_for_game(self, game: dict[str, str]) -> str:
+        candidates: list[str] = []
+        for field in ("title", "platform", "rom_file_name"):
+            value = game.get(field, "")
+            if isinstance(value, str) and value.strip():
+                candidates.append(value.strip())
+
+        if not candidates:
+            return ""
+
+        combined = " ".join(candidates).casefold()
+        normalized = re.sub(r"[^a-z0-9]+", " ", combined).strip()
+        compact = normalized.replace(" ", "")
+        tokens = set(normalized.split())
+
+        if "gamecube" in compact:
+            return "GameCube"
+        if "wiiu" in compact:
+            return ""
+        if "wii" in tokens:
+            return "Wii"
+        return ""
+
+    def _auto_configured_emulator_name(self, base_name: str, game: dict[str, str]) -> str:
+        normalized_name = base_name.strip()
+        if normalized_name.casefold() != "dolphin":
+            return normalized_name
+
+        variant = self._dolphin_variant_label_for_game(game)
+        if not variant:
+            return normalized_name
+        return f"{normalized_name} ({variant})"
+
+    def _dolphin_target_platforms_for_variant(self, variant: str) -> list[str]:
+        selected_variant = variant.strip().casefold()
+        if selected_variant not in {"gamecube", "wii"}:
+            return []
+
+        matches: list[str] = []
+        for platform in self._default_assignable_server_platforms():
+            normalized = re.sub(r"[^a-z0-9]+", " ", platform.casefold()).strip()
+            compact = normalized.replace(" ", "")
+            tokens = set(normalized.split())
+
+            if selected_variant == "gamecube":
+                if "gamecube" in compact:
+                    matches.append(platform)
+                continue
+
+            if "wii" in tokens and "wiiu" not in compact:
+                matches.append(platform)
+
+        return matches
+
     def _auto_configure_installed_emulator(self, game: dict[str, str], archive_path: Path) -> bool:
         if not self._is_emulators_platform(game):
             return False
@@ -2517,7 +2637,7 @@ class MainWindow(QMainWindow):
         if not executable_path:
             return False
         profile = self._emulator_profile_for_game(game, executable_path)
-        emulator_name = profile["name"]
+        emulator_name = self._auto_configured_emulator_name(profile["name"], game)
 
         emulators = self._normalize_emulators(self._emulators())
         args_template = profile["args"].strip() or "%rom%"
@@ -2546,6 +2666,12 @@ class MainWindow(QMainWindow):
             target_platforms = self._default_assignable_server_platforms()
         else:
             target_platforms = self._matching_platforms_for_emulator_keywords(profile["platform_keywords"])
+            profile_name = profile.get("name", "")
+            if isinstance(profile_name, str) and profile_name.strip().casefold() == "dolphin":
+                variant = self._dolphin_variant_label_for_game(game)
+                variant_platforms = self._dolphin_target_platforms_for_variant(variant)
+                if variant_platforms:
+                    target_platforms = variant_platforms
 
         for platform in target_platforms:
             current_value = defaults.get(platform, "")
@@ -2824,7 +2950,7 @@ class MainWindow(QMainWindow):
                 if not extracted_dir.exists() or not extracted_dir.is_dir():
                     continue
                 try:
-                    shutil.rmtree(extracted_dir)
+                    self._remove_directory_tree(extracted_dir)
                 except OSError as error:
                     QMessageBox.warning(self, "Uninstall Error", f"Could not remove folder: {extracted_dir}\n{error}")
                     return False
@@ -2845,12 +2971,23 @@ class MainWindow(QMainWindow):
             if not extracted_dir.exists() or not extracted_dir.is_dir():
                 continue
             try:
-                shutil.rmtree(extracted_dir)
+                self._remove_directory_tree(extracted_dir)
                 removed_any = True
             except OSError as error:
                 QMessageBox.warning(self, "Uninstall Error", f"Could not remove folder: {extracted_dir}\n{error}")
                 return False
         return True if removed_any else True
+
+    def _remove_directory_tree(self, directory: Path) -> None:
+        def onerror(func: Any, path: str, exc_info: tuple[Any, Any, Any]) -> None:
+            del exc_info
+            try:
+                os.chmod(path, stat.S_IWRITE)
+                func(path)
+            except OSError as error:
+                raise error
+
+        shutil.rmtree(directory, onerror=onerror)
 
     def _path_key(self, path: Path) -> str:
         expanded = path.expanduser()
@@ -3509,13 +3646,13 @@ class MainWindow(QMainWindow):
         defaults = self._normalize_default_emulators(self.config.get("default_emulators", {}))
         configured = self._mapping_value_for_platform(defaults, platform)
         if configured:
-            return configured
+            configured_entry = self._emulator_entry_by_name(configured)
+            if configured_entry is not None and self._emulator_supports_platform(configured_entry, platform):
+                return configured
 
-        emulators = self._normalize_emulators(self._emulators())
-        if emulators:
-            fallback_name = emulators[0].get("name", "")
-            if isinstance(fallback_name, str):
-                return fallback_name.strip()
+        compatible = self._compatible_emulator_names_for_platform(platform)
+        if compatible:
+            return compatible[0]
         return ""
 
     def _emulator_entry_by_name(self, emulator_name: str) -> dict[str, str] | None:
@@ -4365,12 +4502,21 @@ class MainWindow(QMainWindow):
         if self.default_emulator_combo is None:
             return
 
+        selected_before_refresh = self.default_emulator_combo.currentText().strip()
+        compatible_emulators = self._compatible_emulator_names_for_platform(platform)
+        self.default_emulator_combo.blockSignals(True)
+        self.default_emulator_combo.clear()
+        self.default_emulator_combo.addItems(compatible_emulators)
+        self.default_emulator_combo.blockSignals(False)
+
         defaults = self._normalize_default_emulators(self.config.get("default_emulators", {}))
         self.config["default_emulators"] = defaults
         preferred_emulator = self._mapping_value_for_platform(defaults, platform)
 
-        if preferred_emulator:
+        if preferred_emulator and self.default_emulator_combo.findText(preferred_emulator) >= 0:
             self.default_emulator_combo.setCurrentText(preferred_emulator)
+        elif selected_before_refresh and self.default_emulator_combo.findText(selected_before_refresh) >= 0:
+            self.default_emulator_combo.setCurrentText(selected_before_refresh)
 
         if not self.default_emulator_combo.currentText().strip() and self.default_emulator_combo.count() > 0:
             self.default_emulator_combo.setCurrentIndex(0)
@@ -4471,13 +4617,6 @@ class MainWindow(QMainWindow):
                 if isinstance(emulator_name, str) and emulator_name.strip().casefold() == selected_name.casefold():
                     self.emulator_list.setCurrentRow(row)
                     break
-
-        if self.default_emulator_combo is not None:
-            selected_name = self.default_emulator_combo.currentText()
-            self.default_emulator_combo.clear()
-            self.default_emulator_combo.addItems([entry["name"] for entry in emulators])
-            if selected_name:
-                self.default_emulator_combo.setCurrentText(selected_name)
 
         server_platforms = self._default_assignable_server_platforms()
         if self.default_platform_combo is not None:
@@ -4621,6 +4760,10 @@ class MainWindow(QMainWindow):
             return
 
         defaults = self._normalize_default_emulators(self.config.get("default_emulators", {}))
+        emulator_entry = self._emulator_entry_by_name(emulator_name)
+        if emulator_entry is None or not self._emulator_supports_platform(emulator_entry, platform):
+            QMessageBox.warning(self, "Validation", f"Emulator '{emulator_name}' does not match platform '{platform}'.")
+            return
         defaults[platform] = emulator_name
         self.config["default_emulators"] = defaults
 

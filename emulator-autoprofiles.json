@@ -73,10 +73,10 @@
   },
   {
     "match_tokens": ["pico8.exe"],
-    "name": "Pico",
+    "name": "Pico-8",
     "args": "-run \"%rom%\"",
     "all_platforms": false,
-    "platform_keywords": ["pico-8", "pico 8", "pico8"],
+    "platform_keywords": ["pico 8", "pico8"],
     "use_game_title_as_name": false
   },
   {
