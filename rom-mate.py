@@ -15,7 +15,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QObject, QThread, QTimer, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QPixmap
+from PySide6.QtGui import QCloseEvent, QDesktopServices, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
@@ -342,7 +342,12 @@ class MainWindow(QMainWindow):
 
         self._refresh_library_grid()
         self._refresh_emulator_views()
+        self._restore_window_geometry()
         self._connect_to_server(show_errors=False)
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._persist_window_geometry()
+        super().closeEvent(event)
 
     def _switch_page(self, index: int) -> None:
         previous_index = self.stack.currentIndex()
@@ -853,11 +858,37 @@ class MainWindow(QMainWindow):
             "library_path": "",
             "launch_args": "",
             "theme": "system",
+            "window_geometry": "",
+            "window_state": "normal",
             "emulators": [],
             "default_emulators": {},
             "default_retroarch_cores": {},
             "installed_games": [],
         }
+
+    def _persist_window_geometry(self) -> None:
+        try:
+            geometry_payload = base64.b64encode(bytes(self.saveGeometry())).decode("ascii")
+        except (RuntimeError, ValueError):
+            return
+
+        self.config["window_geometry"] = geometry_payload
+        self.config["window_state"] = "maximized" if self.isMaximized() else "normal"
+        self._save_config(self.config)
+
+    def _restore_window_geometry(self) -> None:
+        geometry_value = self.config.get("window_geometry", "")
+        if isinstance(geometry_value, str) and geometry_value.strip():
+            try:
+                geometry_bytes = base64.b64decode(geometry_value.encode("ascii"), validate=True)
+            except (ValueError, UnicodeEncodeError):
+                geometry_bytes = b""
+            if geometry_bytes:
+                self.restoreGeometry(geometry_bytes)
+
+        window_state = self.config.get("window_state", "normal")
+        if isinstance(window_state, str) and window_state.strip().casefold() == "maximized":
+            self.setWindowState(self.windowState() | Qt.WindowState.WindowMaximized)
 
     def _config_dir(self) -> Path:
         return Path.home() / ".rom-mate"
@@ -1034,6 +1065,8 @@ class MainWindow(QMainWindow):
         values["emulators"] = self.config.get("emulators", [])
         values["default_emulators"] = self.config.get("default_emulators", {})
         values["default_retroarch_cores"] = self.config.get("default_retroarch_cores", {})
+        values["window_geometry"] = self.config.get("window_geometry", "")
+        values["window_state"] = self.config.get("window_state", "normal")
         values["installed_games"] = self.library_games
         return values
 
