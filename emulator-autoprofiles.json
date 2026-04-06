@@ -1,0 +1,154 @@
+[
+  {
+    "match_tokens": ["retroarch.exe"],
+    "name": "RetroArch",
+    "args": "-L \"%core%\" \"%rom%\"",
+    "all_platforms": true,
+    "platform_keywords": [],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["duckstation-qt-x64-ReleaseLTCG.exe"],
+    "name": "DuckStation",
+    "args": "-fullscreen -batch \"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["playstation", "ps1", "psx"],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["pcsx2-qt.exe"],
+    "name": "PCSX2",
+    "args": "-fullscreen -batch \"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["playstation 2", "ps2"],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["PPSSPPWindows64.exe"],
+    "name": "PPSSPP",
+    "args": "--fullscreen --pause-menu-exit \"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["playstation portable", "psp"],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["rpcs3.exe"],
+    "name": "RPCS3",
+    "args": "%rom%",
+    "all_platforms": false,
+    "platform_keywords": ["playstation 3", "ps3"],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["shadPS4.exe"],
+    "name": "ShadPS4",
+    "args": "%rom%",
+    "all_platforms": false,
+    "platform_keywords": ["playstation 4", "ps4"],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["dolphin.exe"],
+    "name": "Dolphin",
+    "args": "-b -e \"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["gamecube", "wii"],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["cemu.exe"],
+    "name": "Cemu",
+    "args": "-f -g \"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["wii u", "wiiu"],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["azahar.exe"],
+    "name": "Azahar",
+    "args": "-f \"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["3ds"],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["pico8.exe"],
+    "name": "Pico",
+    "args": "-run \"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["pico-8", "pico 8", "pico8"],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["xemu.exe"],
+    "name": "Xemu",
+    "args": "-full-screen -dvd_path \"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["xbox"],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["eden.exe"],
+    "name": "Eden",
+    "args": "-f -g \"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["switch", "nintendo switch"],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["yuzu.exe"],
+    "name": "Yuzu",
+    "args": "%rom%",
+    "all_platforms": false,
+    "platform_keywords": ["switch", "nintendo switch"],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["ryujinx.exe"],
+    "name": "Ryujinx",
+    "args": "%rom%",
+    "all_platforms": false,
+    "platform_keywords": ["switch", "nintendo switch"],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["sudachi.exe"],
+    "name": "Sudachi",
+    "args": "%rom%",
+    "all_platforms": false,
+    "platform_keywords": ["switch", "nintendo switch"],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["mame.exe"],
+    "name": "MAME",
+    "args": "%rom%",
+    "all_platforms": false,
+    "platform_keywords": ["arcade", "mame"],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["fbneo.exe"],
+    "name": "FBNeo",
+    "args": "%rom%",
+    "all_platforms": false,
+    "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["xenia_canary.exe"],
+    "name": "Xenia Canary",
+    "args": "%rom%",
+    "all_platforms": false,
+    "platform_keywords": ["xbox 360"],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": ["redream.exe"],
+    "name": "Redream",
+    "args": "%rom%",
+    "all_platforms": false,
+    "platform_keywords": ["dreamcast"],
+    "use_game_title_as_name": false
+  }
+]

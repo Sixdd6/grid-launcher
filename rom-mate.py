@@ -164,6 +164,7 @@ class MainWindow(QMainWindow):
         self.server_games_by_platform: dict[str, list[dict[str, str]]] = {}
         self.server_rom_payloads: dict[str, dict[str, Any]] = {}
         self.retroarch_compatibility_map: dict[str, list[str]] | None = None
+        self.emulator_autoprofiles: list[dict[str, Any]] | None = None
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -2156,122 +2157,48 @@ class MainWindow(QMainWindow):
         if not keywords:
             return []
 
+        def token_set(value: str) -> set[str]:
+            return set(re.findall(r"[a-z0-9]+", value.casefold()))
+
         matches: list[str] = []
         for platform in self._default_assignable_server_platforms():
-            normalized_platform = platform.casefold()
+            platform_tokens = token_set(platform)
+            if not platform_tokens:
+                continue
+
             for keyword in keywords:
-                normalized_keyword = keyword.casefold().strip()
-                if not normalized_keyword:
+                if not isinstance(keyword, str):
                     continue
-                if normalized_keyword in normalized_platform or normalized_platform in normalized_keyword:
+                keyword_tokens = token_set(keyword.strip())
+                if not keyword_tokens:
+                    continue
+
+                if not keyword_tokens.issubset(platform_tokens):
+                    continue
+
+                extra_tokens = platform_tokens - keyword_tokens
+                keyword_has_numeric_token = any(token.isdigit() for token in keyword_tokens)
+                extra_has_numeric_token = any(token.isdigit() for token in extra_tokens)
+                if extra_has_numeric_token and not keyword_has_numeric_token:
+                    continue
+
+                if keyword_tokens.issubset(platform_tokens):
                     if platform not in matches:
                         matches.append(platform)
                     break
         return matches
 
-    def _emulator_profile_for_game(self, game: dict[str, str]) -> dict[str, Any]:
+    def _emulator_profile_for_game(self, game: dict[str, str], executable_path: str) -> dict[str, Any]:
         title_value = game.get("title", "")
         title = title_value.strip() if isinstance(title_value, str) else ""
-        normalized = title.casefold()
+        executable_name = Path(executable_path).name.strip().casefold()
 
-        profiles = [
-            {
-                "match_tokens": ["retroarch"],
-                "name": "RetroArch",
-                "args": '-L "%core%" "%rom%"',
-                "all_platforms": True,
-                "platform_keywords": [],
-            },
-            {
-                "match_tokens": ["duckstation"],
-                "name": "DuckStation",
-                "args": '-fullscreen -batch "%rom%"',
-                "all_platforms": False,
-                "platform_keywords": ["playstation", "ps1"],
-            },
-            {
-                "match_tokens": ["pcsx2"],
-                "name": "PCSX2",
-                "args": '-fullscreen -batch "%rom%"',
-                "all_platforms": False,
-                "platform_keywords": ["playstation 2", "ps2"],
-            },
-            {
-                "match_tokens": ["ppsspp"],
-                "name": "PPSSPP",
-                "args": '--fullscreen --pause-menu-exit "%rom%"',
-                "all_platforms": False,
-                "platform_keywords": ["playstation portable", "psp"],
-            },
-            {
-                "match_tokens": ["rpcs3"],
-                "name": "RPCS3",
-                "args": "%rom%",
-                "all_platforms": False,
-                "platform_keywords": ["playstation 3", "ps3"],
-            },
-            {
-                "match_tokens": ["dolphin"],
-                "name": "Dolphin",
-                "args": '-b -e "%rom%"',
-                "all_platforms": False,
-                "platform_keywords": ["gamecube", "wii"],
-            },
-            {
-                "match_tokens": ["cemu"],
-                "name": "Cemu",
-                "args": "-f -g \"%rom%\"",
-                "all_platforms": False,
-                "platform_keywords": ["wii u"],
-            },
-            {
-                "match_tokens": ["azahar"],
-                "name": "Azahar",
-                "args": '-f "%rom%"',
-                "all_platforms": False,
-                "platform_keywords": ["nintendo 3ds", "3ds"],
-            },
-            {
-                "match_tokens": ["pico"],
-                "name": "Pico",
-                "args": '-run "%rom%"',
-                "all_platforms": False,
-                "platform_keywords": ["pico-8", "pico 8"],
-            },
-            {
-                "match_tokens": ["xemu"],
-                "name": "Xemu",
-                "args": "-full-screen -dvd_path \"%rom%\"",
-                "all_platforms": False,
-                "platform_keywords": ["xbox"],
-            },
-            {
-                "match_tokens": ["eden"],
-                "name": "Eden",
-                "args": '-f -g "%rom%"',
-                "all_platforms": False,
-                "platform_keywords": ["switch", "nintendo switch"],
-            },
-            {
-                "match_tokens": ["yuzu", "ryujinx", "sudachi"],
-                "name": "Nintendo Switch Emulator",
-                "args": "%rom%",
-                "all_platforms": False,
-                "platform_keywords": ["switch", "nintendo switch"],
-            },
-            {
-                "match_tokens": ["mame", "fbneo", "final burn"],
-                "name": "Arcade Emulator",
-                "args": "%rom%",
-                "all_platforms": False,
-                "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
-            },
-        ]
+        profiles = self._emulator_autoprofiles()
 
         for profile in profiles:
-            if any(token in normalized for token in profile["match_tokens"]):
+            if executable_name and any(token == executable_name for token in profile["match_tokens"]):
                 resolved_name = profile["name"]
-                if profile["name"] in {"Nintendo Switch Emulator", "Arcade Emulator"}:
+                if profile.get("use_game_title_as_name", False):
                     resolved_name = title or profile["name"]
                 return {
                     "name": resolved_name,
@@ -2291,11 +2218,11 @@ class MainWindow(QMainWindow):
         if not self._is_emulators_platform(game):
             return False
 
-        profile = self._emulator_profile_for_game(game)
-        emulator_name = profile["name"]
         executable_path = self._select_emulator_executable_path(game, archive_path)
         if not executable_path:
             return False
+        profile = self._emulator_profile_for_game(game, executable_path)
+        emulator_name = profile["name"]
 
         emulators = self._normalize_emulators(self._emulators())
         args_template = profile["args"].strip() or "%rom%"
@@ -3687,6 +3614,228 @@ class MainWindow(QMainWindow):
 
     def _is_retroarch_emulator_name(self, emulator_name: str) -> bool:
         return "retroarch" in emulator_name.strip().lower()
+
+    def _emulator_autoprofiles_path(self) -> Path:
+        return Path(__file__).resolve().parent / "emulator-autoprofiles.json"
+
+    def _default_emulator_autoprofiles(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "match_tokens": ["retroarch.exe"],
+                "name": "RetroArch",
+                "args": '-L "%core%" "%rom%"',
+                "all_platforms": True,
+                "platform_keywords": [],
+                "use_game_title_as_name": False,
+            },
+            {
+                "match_tokens": ["duckstation.exe"],
+                "name": "DuckStation",
+                "args": '-fullscreen -batch "%rom%"',
+                "all_platforms": False,
+                "platform_keywords": ["playstation", "ps1"],
+                "use_game_title_as_name": False,
+            },
+            {
+                "match_tokens": ["pcsx2-qt.exe"],
+                "name": "PCSX2",
+                "args": '-fullscreen -batch "%rom%"',
+                "all_platforms": False,
+                "platform_keywords": ["playstation 2", "ps2"],
+                "use_game_title_as_name": False,
+            },
+            {
+                "match_tokens": ["ppssppqt.exe"],
+                "name": "PPSSPP",
+                "args": '--fullscreen --pause-menu-exit "%rom%"',
+                "all_platforms": False,
+                "platform_keywords": ["playstation portable", "psp"],
+                "use_game_title_as_name": False,
+            },
+            {
+                "match_tokens": ["rpcs3.exe"],
+                "name": "RPCS3",
+                "args": "%rom%",
+                "all_platforms": False,
+                "platform_keywords": ["playstation 3", "ps3"],
+                "use_game_title_as_name": False,
+            },
+            {
+                "match_tokens": ["dolphin.exe"],
+                "name": "Dolphin",
+                "args": '-b -e "%rom%"',
+                "all_platforms": False,
+                "platform_keywords": ["gamecube", "wii"],
+                "use_game_title_as_name": False,
+            },
+            {
+                "match_tokens": ["cemu.exe"],
+                "name": "Cemu",
+                "args": '-f -g "%rom%"',
+                "all_platforms": False,
+                "platform_keywords": ["wii u"],
+                "use_game_title_as_name": False,
+            },
+            {
+                "match_tokens": ["azahar.exe"],
+                "name": "Azahar",
+                "args": '-f "%rom%"',
+                "all_platforms": False,
+                "platform_keywords": ["nintendo 3ds", "3ds"],
+                "use_game_title_as_name": False,
+            },
+            {
+                "match_tokens": ["pico8.exe"],
+                "name": "Pico",
+                "args": '-run "%rom%"',
+                "all_platforms": False,
+                "platform_keywords": ["pico-8", "pico 8"],
+                "use_game_title_as_name": False,
+            },
+            {
+                "match_tokens": ["xemu.exe"],
+                "name": "Xemu",
+                "args": '-full-screen -dvd_path "%rom%"',
+                "all_platforms": False,
+                "platform_keywords": ["xbox"],
+                "use_game_title_as_name": False,
+            },
+            {
+                "match_tokens": ["eden.exe"],
+                "name": "Eden",
+                "args": '-f -g "%rom%"',
+                "all_platforms": False,
+                "platform_keywords": ["switch", "nintendo switch"],
+                "use_game_title_as_name": False,
+            },
+            {
+                "match_tokens": ["yuzu.exe"],
+                "name": "Yuzu",
+                "args": "%rom%",
+                "all_platforms": False,
+                "platform_keywords": ["switch", "nintendo switch"],
+                "use_game_title_as_name": False,
+            },
+            {
+                "match_tokens": ["ryujinx.exe"],
+                "name": "Ryujinx",
+                "args": "%rom%",
+                "all_platforms": False,
+                "platform_keywords": ["switch", "nintendo switch"],
+                "use_game_title_as_name": False,
+            },
+            {
+                "match_tokens": ["sudachi.exe"],
+                "name": "Sudachi",
+                "args": "%rom%",
+                "all_platforms": False,
+                "platform_keywords": ["switch", "nintendo switch"],
+                "use_game_title_as_name": False,
+            },
+            {
+                "match_tokens": ["mame.exe"],
+                "name": "MAME",
+                "args": "%rom%",
+                "all_platforms": False,
+                "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
+                "use_game_title_as_name": False,
+            },
+            {
+                "match_tokens": ["fbneo.exe"],
+                "name": "FBNeo",
+                "args": "%rom%",
+                "all_platforms": False,
+                "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
+                "use_game_title_as_name": False,
+            },
+            {
+                "match_tokens": ["finalburnneo.exe"],
+                "name": "FinalBurn Neo",
+                "args": "%rom%",
+                "all_platforms": False,
+                "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
+                "use_game_title_as_name": False,
+            },
+        ]
+
+    def _normalize_emulator_autoprofiles(self, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+
+        normalized: list[dict[str, Any]] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+
+            match_tokens = item.get("match_tokens", [])
+            if not isinstance(match_tokens, list):
+                continue
+            normalized_tokens = [
+                token.strip().casefold()
+                for token in match_tokens
+                if isinstance(token, str) and token.strip()
+            ]
+            if not normalized_tokens:
+                continue
+            primary_token = normalized_tokens[0]
+
+            name = item.get("name", "")
+            if not isinstance(name, str) or not name.strip():
+                continue
+
+            args = item.get("args", "%rom%")
+            if not isinstance(args, str):
+                args = "%rom%"
+
+            all_platforms = bool(item.get("all_platforms", False))
+
+            platform_keywords = item.get("platform_keywords", [])
+            normalized_keywords: list[str] = []
+            if isinstance(platform_keywords, list):
+                normalized_keywords = [
+                    keyword.strip()
+                    for keyword in platform_keywords
+                    if isinstance(keyword, str) and keyword.strip()
+                ]
+
+            use_game_title_as_name = bool(item.get("use_game_title_as_name", False))
+
+            normalized.append(
+                {
+                    "match_tokens": [primary_token],
+                    "name": name.strip(),
+                    "args": args.strip() or "%rom%",
+                    "all_platforms": all_platforms,
+                    "platform_keywords": normalized_keywords,
+                    "use_game_title_as_name": use_game_title_as_name,
+                }
+            )
+
+        return normalized
+
+    def _emulator_autoprofiles(self) -> list[dict[str, Any]]:
+        if isinstance(self.emulator_autoprofiles, list):
+            return self.emulator_autoprofiles
+
+        defaults = self._normalize_emulator_autoprofiles(self._default_emulator_autoprofiles())
+        autoprofiles_path = self._emulator_autoprofiles_path()
+        if not autoprofiles_path.exists():
+            self.emulator_autoprofiles = defaults
+            return defaults
+
+        try:
+            parsed = json.loads(autoprofiles_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            self.emulator_autoprofiles = defaults
+            return defaults
+
+        normalized = self._normalize_emulator_autoprofiles(parsed)
+        if normalized:
+            self.emulator_autoprofiles = normalized
+            return normalized
+
+        self.emulator_autoprofiles = defaults
+        return defaults
 
     def _retroarch_core_list_path(self) -> Path:
         return Path(__file__).resolve().parent / "retroarch-core-list.json"
