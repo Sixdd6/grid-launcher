@@ -11,7 +11,7 @@ A nice looking launcher for RomM
     - [x] install
     - [ ] update
     - [x] delete
-- [ ] Light/Dark Themes
+- [x] Light/Dark Themes
 - [x] Responsive layout
 - [ ] Cross-platform support (Windows, Linux)
 - [ ] Cloud save support

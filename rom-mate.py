@@ -15,7 +15,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QObject, QThread, QTimer, Qt, QUrl, Signal
-from PySide6.QtGui import QCloseEvent, QDesktopServices, QPixmap
+from PySide6.QtGui import QCloseEvent, QDesktopServices, QPalette, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
@@ -94,6 +94,9 @@ class MainWindow(QMainWindow):
         self.resize(1200, 760)
 
         self.config = self._load_config()
+        self.active_theme_choice = self._normalized_theme_choice(self.config.get("theme", "system"))
+        self.active_theme_variant = self._resolved_theme_variant(self.active_theme_choice)
+        self.active_theme_colors = self._theme_colors(self.active_theme_variant)
         self.server_url_input: QLineEdit | None = None
         self.api_token_input: QLineEdit | None = None
         self.library_path_input: QLineEdit | None = None
@@ -216,7 +219,7 @@ class MainWindow(QMainWindow):
         download_layout.setSpacing(8)
 
         download_count = QLabel("0 active downloads")
-        download_count.setStyleSheet("font-weight: 600; color: #cbd5e1;")
+        download_count.setStyleSheet(f"font-weight: 600; color: {self._theme_color('text', '#f8f8f2')};")
         self.download_count_label = download_count
         download_layout.addWidget(download_count)
 
@@ -230,7 +233,7 @@ class MainWindow(QMainWindow):
         download_layout.addWidget(download_progress)
 
         download_speed = QLabel("0 B/s")
-        download_speed.setStyleSheet("font-weight: 600; color: #93c5fd;")
+        download_speed.setStyleSheet(f"font-weight: 600; color: {self._theme_color('accent', '#8be9fd')};")
         self.download_speed_label = download_speed
         download_layout.addWidget(download_speed)
 
@@ -241,134 +244,14 @@ class MainWindow(QMainWindow):
         nav_row.addStretch()
 
         self.account_status_label = QLabel()
-        self.account_status_label.setStyleSheet("font-weight: 600; color: #cbd5e1;")
+        self.account_status_label.setStyleSheet(f"font-weight: 600; color: {self._theme_color('text', '#f8f8f2')};")
         nav_row.addWidget(self.account_status_label)
 
         nav_row.addWidget(nav_buttons_by_label["Emulators"])
         nav_row.addWidget(nav_buttons_by_label["Settings"])
         self._update_top_bar_identity()
         self._switch_page(0)
-
-        self.setStyleSheet(
-            """
-            QMainWindow {
-                background-color: #111827;
-            }
-            QLabel {
-                color: #e5e7eb;
-            }
-            QPushButton {
-                background-color: #1f2937;
-                color: #e5e7eb;
-                border: 1px solid #374151;
-                border-radius: 8px;
-                padding: 8px 14px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                border-color: #60a5fa;
-            }
-            QPushButton:pressed {
-                background-color: #374151;
-                border-color: #60a5fa;
-            }
-            QPushButton:checked {
-                background-color: #2563eb;
-                border-color: #3b82f6;
-                color: #ffffff;
-            }
-            QWidget#downloadStatusWidget {
-                background-color: #0f172a;
-                border: 1px solid #334155;
-                border-radius: 8px;
-            }
-            QProgressBar {
-                border: 1px solid #334155;
-                border-radius: 6px;
-                background-color: #111827;
-                color: #e5e7eb;
-                text-align: center;
-            }
-            QProgressBar::chunk {
-                background-color: #22c55e;
-                border-radius: 5px;
-            }
-            QPushButton#gameCard {
-                text-align: left;
-                background-color: #1f2937;
-                border: 1px solid #374151;
-                border-radius: 10px;
-                padding: 0;
-            }
-            QPushButton#gameCard:hover {
-                border-color: #60a5fa;
-            }
-            QListWidget {
-                background-color: #1f2937;
-                color: #e5e7eb;
-                border: 1px solid #374151;
-                border-radius: 8px;
-                padding: 4px;
-            }
-            QLineEdit, QComboBox {
-                background-color: #111827;
-                color: #e5e7eb;
-                border: 1px solid #4b5563;
-                border-radius: 6px;
-                padding: 6px 8px;
-            }
-            QFrame#serverSearchContainer {
-                background-color: #111827;
-                border: 1px solid #4b5563;
-                border-radius: 6px;
-            }
-            QLineEdit#serverSearchInput {
-                background-color: transparent;
-                border: none;
-                padding: 6px 2px 6px 8px;
-            }
-            QPushButton#serverSearchClearButton {
-                background-color: transparent;
-                border: none;
-                color: #ffffff;
-                font-weight: 700;
-                border-radius: 0;
-                padding: 0;
-            }
-            QPushButton#serverSearchClearButton:hover {
-                border: none;
-                color: #ffffff;
-                background-color: #1f2937;
-            }
-            QPushButton#serverSearchClearButton:pressed {
-                border: none;
-                color: #ffffff;
-                background-color: #374151;
-            }
-            QFrame#panel {
-                background-color: #1f2937;
-                border: 1px solid #374151;
-                border-radius: 10px;
-            }
-            QScrollArea#libraryScroll,
-            QScrollArea#serverGamesScroll,
-            QScrollArea#downloadsScroll {
-                background-color: transparent;
-                border: none;
-            }
-            QWidget#libraryScrollViewport,
-            QWidget#serverGamesScrollViewport,
-            QWidget#downloadsScrollViewport,
-            QWidget#libraryGridContent,
-            QWidget#serverGamesContent,
-            QWidget#downloadsContent {
-                background-color: transparent;
-            }
-            QListWidget#serverPlatformsList {
-                background-color: transparent;
-            }
-            """
-        )
+        self._apply_theme(self.active_theme_choice)
 
         self._refresh_library_grid()
         self._refresh_emulator_views()
@@ -419,7 +302,7 @@ class MainWindow(QMainWindow):
         empty_label = QLabel("No games installed...")
         empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        empty_label.setStyleSheet("color: #9ca3af; font-size: 16px; font-weight: 600;")
+        empty_label.setStyleSheet("color: #6272a4; font-size: 16px; font-weight: 600;")
         self.library_empty_label = empty_label
         content_layout.addWidget(empty_label)
 
@@ -510,7 +393,7 @@ class MainWindow(QMainWindow):
         right_layout.addLayout(header_row)
 
         self.server_status_label = QLabel("Not connected")
-        self.server_status_label.setStyleSheet("color: #fca5a5;")
+        self.server_status_label.setStyleSheet("color: #ff5555;")
         right_layout.addWidget(self.server_status_label)
 
         scroll = QScrollArea()
@@ -552,7 +435,7 @@ class MainWindow(QMainWindow):
         empty_label = QLabel("No downloads yet.")
         empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        empty_label.setStyleSheet("color: #9ca3af; font-size: 16px; font-weight: 600;")
+        empty_label.setStyleSheet("color: #6272a4; font-size: 16px; font-weight: 600;")
         self.downloads_empty_label = empty_label
         content_layout.addWidget(empty_label)
 
@@ -760,8 +643,9 @@ class MainWindow(QMainWindow):
 
         appearance_form = QFormLayout()
         self.theme_input = QComboBox()
-        self.theme_input.addItems(["system", "light", "dark"])
-        self.theme_input.setCurrentText(self.config["theme"])
+        self.theme_input.addItems(["system", "dark", "light"])
+        self.theme_input.setCurrentText(self._normalized_theme_choice(self.config.get("theme", "system")))
+        self.theme_input.currentTextChanged.connect(self._on_theme_selection_changed)
         appearance_form.addRow("Theme", self.theme_input)
         appearance_layout.addLayout(appearance_form)
         layout.addWidget(appearance_panel)
@@ -808,7 +692,7 @@ class MainWindow(QMainWindow):
         cover.setMinimumSize(260, 340)
         cover.setMaximumSize(860, 1120)
         cover.setStyleSheet(
-            "background-color: #111827; border: 1px dashed #4b5563; border-radius: 8px; font-size: 20px;"
+            "background-color: #282a36; border: 1px dashed #6272a4; border-radius: 8px; font-size: 20px;"
         )
         self.details_cover_label = cover
         cover_col.addWidget(cover)
@@ -898,7 +782,7 @@ class MainWindow(QMainWindow):
             screenshot_label.setMinimumSize(210, 118)
             screenshot_label.setMaximumSize(520, 320)
             screenshot_label.setStyleSheet(
-                "background-color: #111827; border: 1px dashed #4b5563; border-radius: 8px;"
+                "background-color: #282a36; border: 1px dashed #6272a4; border-radius: 8px;"
             )
             self.details_screenshot_labels.append(screenshot_label)
             screenshots_content_layout.addWidget(screenshot_label)
@@ -916,6 +800,251 @@ class MainWindow(QMainWindow):
         label = QLabel(title)
         label.setStyleSheet("font-size: 15px; font-weight: 600;")
         return label
+
+    def _normalized_theme_choice(self, value: Any) -> str:
+        if not isinstance(value, str):
+            return "system"
+        normalized = value.strip().casefold()
+        if normalized in {"system", "dark", "light"}:
+            return normalized
+        return "system"
+
+    def _resolved_theme_variant(self, theme_choice: str) -> str:
+        if theme_choice != "system":
+            return theme_choice
+        app = QApplication.instance()
+        if app is None:
+            return "dark"
+        window_color = app.palette().color(QPalette.ColorRole.Window)
+        return "dark" if window_color.lightness() < 128 else "light"
+
+    def _theme_colors(self, theme_variant: str) -> dict[str, str]:
+        if theme_variant == "light":
+            return {
+                "window": "#f6f6fb",
+                "text": "#282a36",
+                "surface": "#e9eaf3",
+                "surface_alt": "#dde0ee",
+                "surface_press": "#cfd4e6",
+                "border": "#aeb7d6",
+                "input_bg": "#ffffff",
+                "input_text": "#282a36",
+                "accent": "#268bd2",
+                "active": "#7f5fd1",
+                "active_text": "#ffffff",
+                "success": "#1f9d55",
+                "muted": "#5f6aa8",
+                "error": "#d13f4b",
+                "warning": "#c37a2c",
+            }
+        return {
+            "window": "#282a36",
+            "text": "#f8f8f2",
+            "surface": "#44475a",
+            "surface_alt": "#535873",
+            "surface_press": "#3b3f51",
+            "border": "#6272a4",
+            "input_bg": "#282a36",
+            "input_text": "#f8f8f2",
+            "accent": "#8be9fd",
+            "active": "#bd93f9",
+            "active_text": "#282a36",
+            "success": "#50fa7b",
+            "muted": "#6272a4",
+            "error": "#ff5555",
+            "warning": "#ffb86c",
+        }
+
+    def _theme_color(self, key: str, fallback: str) -> str:
+        value = self.active_theme_colors.get(key, "") if isinstance(self.active_theme_colors, dict) else ""
+        if isinstance(value, str) and value.strip():
+            return value
+        return fallback
+
+    def _theme_stylesheet(self) -> str:
+        colors = self.active_theme_colors
+        return f"""
+            QMainWindow {{
+                background-color: {colors['window']};
+            }}
+            QLabel {{
+                color: {colors['text']};
+            }}
+            QPushButton {{
+                background-color: {colors['surface']};
+                color: {colors['text']};
+                border: 1px solid {colors['border']};
+                border-radius: 8px;
+                padding: 8px 14px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                border-color: {colors['accent']};
+                background-color: {colors['surface_alt']};
+            }}
+            QPushButton:pressed {{
+                background-color: {colors['surface_press']};
+                border-color: {colors['accent']};
+            }}
+            QPushButton:checked {{
+                background-color: {colors['active']};
+                border-color: {colors['active']};
+                color: {colors['active_text']};
+            }}
+            QWidget#downloadStatusWidget {{
+                background-color: {colors['surface']};
+                border: 1px solid {colors['border']};
+                border-radius: 8px;
+            }}
+            QProgressBar {{
+                border: 1px solid {colors['border']};
+                border-radius: 6px;
+                background-color: {colors['window']};
+                color: {colors['text']};
+                text-align: center;
+            }}
+            QProgressBar::chunk {{
+                background-color: {colors['success']};
+                border-radius: 5px;
+            }}
+            QPushButton#gameCard {{
+                text-align: left;
+                background-color: {colors['surface']};
+                border: 1px solid {colors['border']};
+                border-radius: 10px;
+                padding: 0;
+            }}
+            QPushButton#gameCard:hover {{
+                border-color: {colors['accent']};
+            }}
+            QListWidget {{
+                background-color: {colors['surface']};
+                color: {colors['text']};
+                border: 1px solid {colors['border']};
+                border-radius: 8px;
+                padding: 4px;
+            }}
+            QListWidget::item:selected {{
+                background-color: {colors['border']};
+                color: {colors['text']};
+                border-radius: 5px;
+            }}
+            QLineEdit, QComboBox {{
+                background-color: {colors['input_bg']};
+                color: {colors['input_text']};
+                border: 1px solid {colors['border']};
+                border-radius: 6px;
+                padding: 6px 8px;
+            }}
+            QLineEdit:focus, QComboBox:focus {{
+                border: 1px solid {colors['accent']};
+            }}
+            QFrame#serverSearchContainer {{
+                background-color: {colors['input_bg']};
+                border: 1px solid {colors['border']};
+                border-radius: 6px;
+            }}
+            QLineEdit#serverSearchInput {{
+                background-color: transparent;
+                border: none;
+                padding: 6px 2px 6px 8px;
+            }}
+            QPushButton#serverSearchClearButton {{
+                background-color: transparent;
+                border: none;
+                color: {colors['text']};
+                font-weight: 700;
+                border-radius: 0;
+                padding: 0;
+            }}
+            QPushButton#serverSearchClearButton:hover {{
+                border: none;
+                color: {colors['text']};
+                background-color: {colors['surface']};
+            }}
+            QPushButton#serverSearchClearButton:pressed {{
+                border: none;
+                color: {colors['text']};
+                background-color: {colors['surface_press']};
+            }}
+            QFrame#panel {{
+                background-color: {colors['surface']};
+                border: 1px solid {colors['border']};
+                border-radius: 10px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {colors['surface']};
+                color: {colors['text']};
+                border: 1px solid {colors['border']};
+                selection-background-color: {colors['border']};
+                selection-color: {colors['text']};
+            }}
+            QScrollArea#libraryScroll,
+            QScrollArea#serverGamesScroll,
+            QScrollArea#downloadsScroll {{
+                background-color: transparent;
+                border: none;
+            }}
+            QWidget#libraryScrollViewport,
+            QWidget#serverGamesScrollViewport,
+            QWidget#downloadsScrollViewport,
+            QWidget#libraryGridContent,
+            QWidget#serverGamesContent,
+            QWidget#downloadsContent {{
+                background-color: transparent;
+            }}
+            QListWidget#serverPlatformsList {{
+                background-color: transparent;
+            }}
+            QListWidget#serverPlatformsList::item:hover {{
+                background-color: {colors['surface_alt']};
+                border-radius: 5px;
+            }}
+        """
+
+    def _apply_theme_inline_styles(self) -> None:
+        text = self._theme_color("text", "#f8f8f2")
+        muted = self._theme_color("muted", "#6272a4")
+        accent = self._theme_color("accent", "#8be9fd")
+        window = self._theme_color("window", "#282a36")
+        border = self._theme_color("border", "#6272a4")
+
+        if self.download_count_label is not None:
+            self.download_count_label.setStyleSheet(f"font-weight: 600; color: {text};")
+        if self.download_speed_label is not None:
+            self.download_speed_label.setStyleSheet(f"font-weight: 600; color: {accent};")
+        if self.account_status_label is not None:
+            self.account_status_label.setStyleSheet(f"font-weight: 600; color: {text};")
+        if self.library_empty_label is not None:
+            self.library_empty_label.setStyleSheet(f"color: {muted}; font-size: 16px; font-weight: 600;")
+        if self.downloads_empty_label is not None:
+            self.downloads_empty_label.setStyleSheet(f"color: {muted}; font-size: 16px; font-weight: 600;")
+        if self.details_cover_label is not None:
+            self.details_cover_label.setStyleSheet(
+                f"background-color: {window}; border: 1px dashed {border}; border-radius: 8px; font-size: 20px;"
+            )
+        for screenshot_label in self.details_screenshot_labels:
+            screenshot_label.setStyleSheet(
+                f"background-color: {window}; border: 1px dashed {border}; border-radius: 8px;"
+            )
+
+    def _apply_theme(self, theme_choice: str) -> None:
+        normalized = self._normalized_theme_choice(theme_choice)
+        self.active_theme_choice = normalized
+        self.active_theme_variant = self._resolved_theme_variant(normalized)
+        self.active_theme_colors = self._theme_colors(self.active_theme_variant)
+        self.setStyleSheet(self._theme_stylesheet())
+        self._apply_theme_inline_styles()
+
+    def _on_theme_selection_changed(self, selected_theme: str) -> None:
+        normalized = self._normalized_theme_choice(selected_theme)
+        self.config["theme"] = normalized
+        self._apply_theme(normalized)
+        self._refresh_library_grid()
+        self._refresh_downloads_page()
+        saved = self._save_config(self.config)
+        if saved and self.settings_status_label is not None:
+            self.settings_status_label.setText("Theme saved")
 
     def _config_defaults(self) -> dict[str, Any]:
         return {
@@ -1128,7 +1257,7 @@ class MainWindow(QMainWindow):
         if self.launch_args_input is not None:
             values["launch_args"] = self.launch_args_input.text().strip()
         if self.theme_input is not None:
-            values["theme"] = self.theme_input.currentText().strip() or "system"
+            values["theme"] = self._normalized_theme_choice(self.theme_input.currentText())
         values["emulators"] = self.config.get("emulators", [])
         values["default_emulators"] = self.config.get("default_emulators", {})
         values["default_retroarch_cores"] = self.config.get("default_retroarch_cores", {})
@@ -1151,7 +1280,7 @@ class MainWindow(QMainWindow):
         if self.settings_status_label is not None and saved:
             self.settings_status_label.setText("Settings saved")
         self._clear_server_connection_data()
-        self._set_server_status("Not connected", "#fca5a5")
+        self._set_server_status("Not connected", self._theme_color("error", "#ff5555"))
         self._update_top_bar_identity()
 
         if self._credentials_present() and self.server_auto_reconnect:
@@ -1200,7 +1329,7 @@ class MainWindow(QMainWindow):
         del checked
         self.server_auto_reconnect = False
         self._clear_server_connection_data()
-        self._set_server_status("Disconnected", "#fca5a5")
+        self._set_server_status("Disconnected", self._theme_color("error", "#ff5555"))
         self.config["username"] = ""
         self._update_top_bar_identity()
 
@@ -1529,21 +1658,23 @@ class MainWindow(QMainWindow):
         with urlopen(request, timeout=60) as response:
             return response.read()
 
-    def _set_server_status(self, text: str, color: str = "#9ca3af") -> None:
+    def _set_server_status(self, text: str, color: str | None = None) -> None:
         if self.server_status_label is None:
             return
         self.server_status_label.setText(text)
+        if color is None:
+            color = self._theme_color("muted", "#6272a4")
         self.server_status_label.setStyleSheet(f"color: {color};")
 
     def _connect_to_server(self, checked: bool = False, show_errors: bool = True) -> None:
         del checked
         if not self._credentials_present():
             self._clear_server_connection_data()
-            self._set_server_status("Missing server URL or API token", "#fca5a5")
+            self._set_server_status("Missing server URL or API token", self._theme_color("error", "#ff5555"))
             self._update_top_bar_identity()
             return
 
-        self._set_server_status("Connecting...", "#93c5fd")
+        self._set_server_status("Connecting...", self._theme_color("accent", "#8be9fd"))
         last_error: Exception | None = None
         try:
             me = self._api_get("/api/users/me")
@@ -1551,7 +1682,7 @@ class MainWindow(QMainWindow):
             self.server_connected = True
             self._apply_connected_user(me)
             self._populate_server_platforms(platforms)
-            self._set_server_status("Connected", "#86efac")
+            self._set_server_status("Connected", self._theme_color("success", "#50fa7b"))
             self._update_top_bar_identity()
             return
         except (HTTPError, URLError, ValueError, json.JSONDecodeError) as error:
@@ -1565,7 +1696,7 @@ class MainWindow(QMainWindow):
             error_text = f"Connection failed ({last_error.code})"
         elif isinstance(last_error, URLError):
             error_text = "Connection failed (network error)"
-        self._set_server_status(error_text, "#fca5a5")
+        self._set_server_status(error_text, self._theme_color("error", "#ff5555"))
 
         if show_errors:
             QMessageBox.warning(self, "Server Connection", error_text)
@@ -1686,7 +1817,7 @@ class MainWindow(QMainWindow):
                 offset += page_size
         except (HTTPError, URLError, ValueError, json.JSONDecodeError):
             self.server_games_by_platform[platform_label] = []
-            self._set_server_status("Connected, but failed to load games", "#fbbf24")
+            self._set_server_status("Connected, but failed to load games", self._theme_color("warning", "#ffb86c"))
             return
 
         games: list[dict[str, str]] = []
@@ -1759,7 +1890,8 @@ class MainWindow(QMainWindow):
         cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cover.setFixedHeight(170)
         cover.setStyleSheet(
-            "background-color: #111827; border: 1px dashed #4b5563; border-radius: 6px;"
+            f"background-color: {self._theme_color('window', '#282a36')}; "
+            f"border: 1px dashed {self._theme_color('border', '#6272a4')}; border-radius: 6px;"
         )
 
         cover_url = game.get("cover_url", "")
@@ -1773,7 +1905,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(title_label)
 
         platform_label = QLabel(game["platform"])
-        platform_label.setStyleSheet("color: #9ca3af;")
+        platform_label.setStyleSheet(f"color: {self._theme_color('muted', '#6272a4')};")
         layout.addWidget(platform_label)
 
         return frame
@@ -3276,7 +3408,7 @@ class MainWindow(QMainWindow):
 
         detail_label = QLabel(self._download_entry_detail_text(entry))
         detail_label.setWordWrap(True)
-        detail_label.setStyleSheet("color: #cbd5e1;")
+        detail_label.setStyleSheet(f"color: {self._theme_color('muted', '#6272a4')};")
         text_col.addWidget(detail_label)
 
         frame_layout.addLayout(text_col, 1)

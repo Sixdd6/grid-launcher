@@ -30,7 +30,7 @@
 
 # Future Ideas
 - [x] Offload emulator configurations to a separate file that can be updated independently.
-- [ ] Implement the Dracula theme as the main dark theme.
+- [x] Implement the Dracula theme as the main dark theme.
 - [ ] Implement cloud sync integration for game saves.
 - [ ] Implement PCGamingWiki integration for Windows game information and default save locations.
 - [ ] Implement RetroAchievements integration for browsing achievements.
