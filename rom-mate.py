@@ -556,6 +556,8 @@ class MainWindow(QMainWindow):
         defaults_layout.addWidget(set_default_button)
 
         self.default_mapping_list = QListWidget()
+        self.default_mapping_list.setObjectName("defaultMappingList")
+        self.default_mapping_list.setAlternatingRowColors(True)
         defaults_layout.addWidget(self.default_mapping_list)
 
         right_column_layout.addWidget(defaults_panel)
@@ -967,6 +969,9 @@ class MainWindow(QMainWindow):
                 background-color: {colors['border']};
                 color: {colors['text']};
                 border-radius: 5px;
+            }}
+            QListWidget#defaultMappingList::item:alternate {{
+                background-color: {colors['surface_alt']};
             }}
             QLineEdit, QComboBox {{
                 background-color: {colors['input_bg']};

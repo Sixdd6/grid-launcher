@@ -147,7 +147,8 @@
   {
     "core_file": "mednafen_vb_libretro.dll",
     "platforms": [
-      "Nintendo Virtual Boy"
+      "Nintendo Virtual Boy",
+      "Virtual Boy"
     ]
   },
   {

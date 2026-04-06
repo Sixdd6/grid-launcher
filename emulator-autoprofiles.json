@@ -140,7 +140,7 @@
     "name": "Xenia Canary",
     "args": "\"%rom%\"",
     "all_platforms": false,
-    "platform_keywords": ["xbox 360"],
+    "platform_keywords": ["xbox 360", "microsoft xbox 360", "xbox360"],
     "use_game_title_as_name": false
   },
   {
