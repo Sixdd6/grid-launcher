@@ -14,3 +14,5 @@ A nice looking launcher for RomM
 - [ ] Light/Dark Themes
 - [x] Responsive layout
 - [ ] Cross-platform support (Windows, Linux)
+- [ ] Cloud save support
+- [ ] RetroAchievements integration
