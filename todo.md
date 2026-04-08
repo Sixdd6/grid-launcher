@@ -1,6 +1,4 @@
 # Top Priority
-- [x] Fix cover art not loading in server view.
-- [x] Launching a Windows game currently tries to use an emulator.
 - [x] Setup default launch arguments for emulators.
     - [x] Azahar
     - [x] Eden
@@ -18,47 +16,38 @@
     - [x] RPCS3
     - [ ] ShadPS4
         - Not sure how games are loaded here, need to investigate.
-- [ ] Implement updating installed games from the server.
-- [ ] Implement cloud sync integration for game saves and states.
-    - [x] PPSSPP
-    - [ ] PCSX2
-    - [x] RPCS3
-    - [x] RetroArch
-    - [ ] Duckstation
-    - [ ] ShadPS4
-    - [ ] Dolphin
-    - [ ] Cemu
-    - [ ] Citra
-    - [ ] Xemu
-    - [ ] Pico8
-    - [ ] ReDream
-    - [ ] Xenia
-    - [ ] Eden
-    - [ ] Ryujinx
-    - [ ] Yuzu
-    - [ ] Sudachi
-    - [ ] Redream
-    - [ ] Azahar
+- [ ] Design and implement reusable logic to locate saved game files/folders that can be reused across emulators for cloud sync. Add a new field to emulator-autoprofiles.json to specify the save strategy. Add the new field to the Emulators page UI for editing.
+    - [ ] Implement emulator-specific save location strategies for those that require custom handling.
+        - [x] PPSSPP
+        - [x] PCSX2
+        - [x] RPCS3
+        - [x] RetroArch
+        - [x] Duckstation
+        - [ ] ShadPS4
+        - [x] Dolphin
+        - [ ] Cemu
+        - [ ] Xemu
+        - [ ] Pico8
+        - [ ] ReDream
+        - [ ] Xenia
+        - [ ] Eden
+        - [ ] Redream
+        - [ ] Azahar
+- [ ] Design and Implement a method for detecting when server files have updated and allow updating games and emulators from the server without overwriting user configs or save files. This would mostly be used for updating emulators and native games.
 
 # Medium Priority
-- [x] Switch emulator default exe should be eden.exe.
-- [x] Slight scaling issue with game details, if window is maximized before viewing game details the layout is off.
-- [x] Tweak the download progress bar show the installing progressbar animation when there are queued downloads too.
-- [x] Show an install percentage next to the download progress bar when installing games, based on the total size of the files being installed.
-- [x] Cache game cover art when installed so it can be viewed while offline and cleanup the cached images when the game is uninstalled.
-- [ ] Implement a first-run wizard to setup the required paths and settings.
+- [x] Implement a first-run wizard to setup the required paths and settings.
 
 # Low Priority
 - all done
 
 # Future Ideas
-- [x] Offload emulator configurations to a separate file that can be updated independently.
-- [x] Implement the Dracula theme as the main dark theme.
-- [ ] Implement PCGamingWiki integration for Windows game information and default save locations.
+- [ ] Implement PCGamingWiki integration for Windows game information and grabbing default save locations.
 - [ ] Implement RetroAchievements integration for browsing achievements.
+- [ ] Implement cloud save manager, as a sub page of Game Details, to view and manage cloud saves and states.
 
 # Dream Features
 - [ ] Fullscreen experience that works like emulation station or bigbox.
 
 # Project Cleanup Tasks
-- [ ] Implement separation of concerns for better code organization.
+- [ ] Implement separation of concerns for better code organization and optimization. Codebase should be modular and easy for the AI to understand and modify.

@@ -126,36 +126,58 @@ class InstallFinalizeWorker(QObject):
 class AutoCloudSaveUploadWorker(QObject):
     finished = Signal(object, object)
 
-    def __init__(self, window: "MainWindow", game: dict[str, str], local_latest_mtime: float) -> None:
+    def __init__(
+        self,
+        window: "MainWindow",
+        game: dict[str, str],
+        upload_types: list[str],
+        local_latest_mtimes: dict[str, float],
+    ) -> None:
         super().__init__()
         self.window = window
         self.game = dict(game)
-        self.local_latest_mtime = local_latest_mtime
+        self.upload_types = [item for item in upload_types if item in {"save", "state"}]
+        self.local_latest_mtimes = {
+            key: float(value)
+            for key, value in local_latest_mtimes.items()
+            if key in {"save", "state"} and isinstance(value, (int, float))
+        }
 
     def run(self) -> None:
         try:
-            uploaded_count, total_count, failed_files = self.window._upload_cloud_files_for_game(
-                self.game,
-                "save",
-                show_dialogs=False,
-            )
-            self.finished.emit(
-                self.game,
-                {
+            per_type: dict[str, dict[str, Any]] = {}
+            for save_type in self.upload_types:
+                uploaded_count, total_count, failed_files = self.window._upload_cloud_files_for_game(
+                    self.game,
+                    save_type,
+                    show_dialogs=False,
+                )
+                per_type[save_type] = {
                     "uploaded_count": uploaded_count,
                     "total_count": total_count,
                     "failed_files": failed_files,
-                    "local_latest_mtime": self.local_latest_mtime,
+                }
+
+            self.finished.emit(
+                self.game,
+                {
+                    "per_type": per_type,
+                    "local_latest_mtimes": self.local_latest_mtimes,
                 },
             )
         except (HTTPError, URLError, OSError, ValueError, json.JSONDecodeError) as error:
             self.finished.emit(
                 self.game,
                 {
-                    "uploaded_count": 0,
-                    "total_count": 0,
-                    "failed_files": [str(error)],
-                    "local_latest_mtime": self.local_latest_mtime,
+                    "per_type": {
+                        save_type: {
+                            "uploaded_count": 0,
+                            "total_count": 0,
+                            "failed_files": [str(error)],
+                        }
+                        for save_type in self.upload_types
+                    },
+                    "local_latest_mtimes": self.local_latest_mtimes,
                 },
             )
 
@@ -279,6 +301,9 @@ class MainWindow(QMainWindow):
         self.emulator_name_input: QLineEdit | None = None
         self.emulator_path_input: QLineEdit | None = None
         self.emulator_args_input: QLineEdit | None = None
+        self.emulator_save_strategy_input: QComboBox | None = None
+        self.emulator_ignore_files_input: QLineEdit | None = None
+        self.emulator_ignore_extensions_input: QLineEdit | None = None
         self.emulator_save_paths_input: QLineEdit | None = None
         self.emulator_state_paths_input: QLineEdit | None = None
         self.default_platform_combo: QComboBox | None = None
@@ -298,6 +323,7 @@ class MainWindow(QMainWindow):
         self.details_upload_saves_button: QPushButton | None = None
         self.details_restore_saves_button: QPushButton | None = None
         self.details_upload_states_button: QPushButton | None = None
+        self.details_restore_states_button: QPushButton | None = None
         self.details_secondary_button: QPushButton | None = None
         self.server_platforms_list: QListWidget | None = None
         self.server_games_grid: QGridLayout | None = None
@@ -689,6 +715,10 @@ class MainWindow(QMainWindow):
         self.emulator_name_input = QLineEdit()
         self.emulator_path_input = QLineEdit()
         self.emulator_args_input = QLineEdit("%rom%")
+        self.emulator_save_strategy_input = QComboBox()
+        self.emulator_save_strategy_input.addItems(["auto", "single_file", "folder"])
+        self.emulator_ignore_files_input = QLineEdit()
+        self.emulator_ignore_extensions_input = QLineEdit()
         self.emulator_save_paths_input = QLineEdit()
         self.emulator_state_paths_input = QLineEdit()
 
@@ -706,6 +736,9 @@ class MainWindow(QMainWindow):
         details_form.addRow("Name", self.emulator_name_input)
         details_form.addRow("Executable Path", path_row)
         details_form.addRow("Arguments (%rom%, %core%, %RPCS3_GAMEID%, %ps3_gameid%)", self.emulator_args_input)
+        details_form.addRow("Save Strategy", self.emulator_save_strategy_input)
+        details_form.addRow("Ignore Files (; separated)", self.emulator_ignore_files_input)
+        details_form.addRow("Ignore Extensions (; separated)", self.emulator_ignore_extensions_input)
         details_form.addRow("Save Dirs (; separated)", self.emulator_save_paths_input)
         details_form.addRow("State Dirs (; separated)", self.emulator_state_paths_input)
         emulator_details_layout.addLayout(details_form)
@@ -950,6 +983,12 @@ class MainWindow(QMainWindow):
         upload_states_button.clicked.connect(self._perform_upload_states_action)
         self.details_upload_states_button = upload_states_button
         action_row.addWidget(upload_states_button)
+
+        restore_states_button = QPushButton("Restore States")
+        restore_states_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        restore_states_button.clicked.connect(self._perform_restore_states_action)
+        self.details_restore_states_button = restore_states_button
+        action_row.addWidget(restore_states_button)
 
         secondary = QPushButton("Uninstall Game")
         secondary.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -3840,6 +3879,11 @@ class MainWindow(QMainWindow):
                     "args": profile["args"],
                     "all_platforms": profile["all_platforms"],
                     "platform_keywords": profile["platform_keywords"],
+                    "save_strategy": profile.get("save_strategy", "auto"),
+                    "ignore_files": profile.get("ignore_files", []),
+                    "ignore_extensions": profile.get("ignore_extensions", []),
+                    "save_directories": profile.get("save_directories", []),
+                    "state_directories": profile.get("state_directories", []),
                 }
 
         return {
@@ -3847,6 +3891,11 @@ class MainWindow(QMainWindow):
             "args": "%rom%",
             "all_platforms": False,
             "platform_keywords": [],
+            "save_strategy": "auto",
+            "ignore_files": [],
+            "ignore_extensions": [],
+            "save_directories": [],
+            "state_directories": [],
         }
 
     def _dolphin_variant_label_for_game(self, game: dict[str, str]) -> str:
@@ -3915,6 +3964,27 @@ class MainWindow(QMainWindow):
 
         emulators = self._normalize_emulators(self._emulators())
         args_template = profile["args"].strip() or "%rom%"
+        profile_save_strategy = self._normalize_save_strategy_value(str(profile.get("save_strategy", "auto")))
+        profile_ignore_files = ";\n".join(
+            file_name.strip()
+            for file_name in profile.get("ignore_files", [])
+            if isinstance(file_name, str) and file_name.strip()
+        )
+        profile_ignore_extensions = ";\n".join(
+            extension.strip()
+            for extension in profile.get("ignore_extensions", [])
+            if isinstance(extension, str) and extension.strip()
+        )
+        profile_save_paths = ";\n".join(
+            directory.strip()
+            for directory in profile.get("save_directories", [])
+            if isinstance(directory, str) and directory.strip()
+        )
+        profile_state_paths = ";\n".join(
+            directory.strip()
+            for directory in profile.get("state_directories", [])
+            if isinstance(directory, str) and directory.strip()
+        )
         target_index = -1
         for index, emulator in enumerate(emulators):
             existing_name = emulator.get("name", "")
@@ -3925,14 +3995,39 @@ class MainWindow(QMainWindow):
         if target_index >= 0:
             existing = emulators[target_index]
             existing_args = existing.get("args", "%rom%")
+            existing_save_strategy = existing.get("save_strategy", "")
+            existing_ignore_files = existing.get("ignore_files", "")
+            existing_ignore_extensions = existing.get("ignore_extensions", "")
+            existing_save_paths = existing.get("save_paths", "")
+            existing_state_paths = existing.get("state_paths", "")
             should_update_args = self._is_retroarch_emulator_name(emulator_name) or not isinstance(existing_args, str) or not existing_args.strip() or existing_args.strip() == "%rom%"
             emulators[target_index] = {
                 "name": emulator_name,
                 "path": executable_path,
                 "args": args_template if should_update_args else existing_args.strip(),
+                "save_strategy": (
+                    self._normalize_save_strategy_value(existing_save_strategy)
+                    if isinstance(existing_save_strategy, str) and existing_save_strategy.strip()
+                    else profile_save_strategy
+                ),
+                "ignore_files": existing_ignore_files.strip() if isinstance(existing_ignore_files, str) and existing_ignore_files.strip() else profile_ignore_files,
+                "ignore_extensions": existing_ignore_extensions.strip() if isinstance(existing_ignore_extensions, str) and existing_ignore_extensions.strip() else profile_ignore_extensions,
+                "save_paths": existing_save_paths.strip() if isinstance(existing_save_paths, str) and existing_save_paths.strip() else profile_save_paths,
+                "state_paths": existing_state_paths.strip() if isinstance(existing_state_paths, str) and existing_state_paths.strip() else profile_state_paths,
             }
         else:
-            emulators.append({"name": emulator_name, "path": executable_path, "args": args_template})
+            emulators.append(
+                {
+                    "name": emulator_name,
+                    "path": executable_path,
+                    "args": args_template,
+                    "save_strategy": profile_save_strategy,
+                    "ignore_files": profile_ignore_files,
+                    "ignore_extensions": profile_ignore_extensions,
+                    "save_paths": profile_save_paths,
+                    "state_paths": profile_state_paths,
+                }
+            )
         self.config["emulators"] = self._normalize_emulators(emulators)
 
         defaults = self._normalize_default_emulators(self.config.get("default_emulators", {}))
@@ -4447,6 +4542,9 @@ class MainWindow(QMainWindow):
         if self.details_upload_states_button is not None:
             self.details_upload_states_button.setVisible(cloud_states_supported)
             self.details_upload_states_button.setEnabled(cloud_states_supported and not installing_current)
+        if self.details_restore_states_button is not None:
+            self.details_restore_states_button.setVisible(cloud_states_supported)
+            self.details_restore_states_button.setEnabled(cloud_states_supported and not installing_current)
         if self.details_secondary_button is not None:
             self.details_secondary_button.setVisible(installed and not is_emulator_entry)
             self.details_secondary_button.setEnabled(installed and not is_emulator_entry and not installing_current)
@@ -4511,6 +4609,26 @@ class MainWindow(QMainWindow):
             last_uploaded_at = raw_state.get("last_uploaded_at", "")
             if isinstance(last_uploaded_at, str) and last_uploaded_at.strip():
                 state["last_uploaded_at"] = last_uploaded_at.strip()
+
+            last_downloaded_state_id = raw_state.get("last_downloaded_state_id", "")
+            if isinstance(last_downloaded_state_id, str) and last_downloaded_state_id.strip():
+                state["last_downloaded_state_id"] = last_downloaded_state_id.strip()
+
+            last_uploaded_save_mtime = raw_state.get("last_uploaded_save_mtime", 0)
+            if isinstance(last_uploaded_save_mtime, (int, float)):
+                state["last_uploaded_save_mtime"] = float(last_uploaded_save_mtime)
+
+            last_uploaded_state_mtime = raw_state.get("last_uploaded_state_mtime", 0)
+            if isinstance(last_uploaded_state_mtime, (int, float)):
+                state["last_uploaded_state_mtime"] = float(last_uploaded_state_mtime)
+
+            last_session_started_at = raw_state.get("last_session_started_at", 0)
+            if isinstance(last_session_started_at, (int, float)):
+                state["last_session_started_at"] = float(last_session_started_at)
+
+            last_session_ended_at = raw_state.get("last_session_ended_at", 0)
+            if isinstance(last_session_ended_at, (int, float)):
+                state["last_session_ended_at"] = float(last_session_ended_at)
 
             if state:
                 normalized[key] = state
@@ -5684,6 +5802,262 @@ class MainWindow(QMainWindow):
             if isinstance(item, str) and item.strip()
         ]
 
+    def _normalize_save_strategy_value(self, value: str) -> str:
+        strategy = value.strip().casefold() if isinstance(value, str) else ""
+        aliases = {
+            "": "auto",
+            "auto": "auto",
+            "singlefile": "single_file",
+            "single_file": "single_file",
+            "single-file": "single_file",
+            "single file": "single_file",
+            "file": "single_file",
+            "folder": "folder",
+            "directory": "folder",
+            "folder_per_game": "folder",
+            "folder-per-game": "folder",
+        }
+        return aliases.get(strategy, "auto")
+
+    def _resolved_save_strategy_for_emulator(self, emulator: dict[str, str], save_type: str) -> str:
+        configured_value = emulator.get("save_strategy", "")
+        configured_strategy = self._normalize_save_strategy_value(configured_value) if isinstance(configured_value, str) else "auto"
+        if configured_strategy != "auto":
+            return configured_strategy
+
+        profile = self._emulator_profile_for_entry(emulator)
+        profile_value = profile.get("save_strategy", "") if isinstance(profile, dict) else ""
+        profile_strategy = self._normalize_save_strategy_value(profile_value) if isinstance(profile_value, str) else "auto"
+        if profile_strategy != "auto":
+            return profile_strategy
+
+        if save_type == "state":
+            return "single_file"
+        return "auto"
+
+    def _resolved_ignore_basenames_for_emulator(self, emulator: dict[str, str]) -> set[str]:
+        configured_value = emulator.get("ignore_files", "")
+        configured_values = self._split_configured_paths(configured_value) if isinstance(configured_value, str) else []
+
+        profile = self._emulator_profile_for_entry(emulator)
+        profile_values: list[str] = []
+        if isinstance(profile, dict):
+            raw_profile_values = profile.get("ignore_files", [])
+            if isinstance(raw_profile_values, list):
+                profile_values = [item.strip() for item in raw_profile_values if isinstance(item, str) and item.strip()]
+
+        all_values = configured_values if configured_values else profile_values
+        basenames: set[str] = set()
+        for value in all_values:
+            base_name = Path(value).name.strip().casefold()
+            if base_name and Path(base_name).suffix.casefold() not in {".jpg", ".jpeg"}:
+                basenames.add(base_name)
+        return basenames
+
+    def _normalize_ignore_extension_value(self, value: str) -> str:
+        if not isinstance(value, str):
+            return ""
+        normalized = value.strip().casefold()
+        if not normalized:
+            return ""
+        if "/" in normalized or "\\" in normalized:
+            normalized = Path(normalized).suffix.casefold()
+        if normalized.startswith("*."):
+            normalized = normalized[1:]
+        if not normalized.startswith("."):
+            normalized = f".{normalized.lstrip('*')}"
+        if not re.fullmatch(r"\.[a-z0-9]+", normalized):
+            return ""
+        if normalized in {".jpg", ".jpeg"}:
+            return ""
+        return normalized
+
+    def _resolved_ignore_extensions_for_emulator(self, emulator: dict[str, str]) -> set[str]:
+        configured_value = emulator.get("ignore_extensions", "")
+        configured_values = self._split_configured_paths(configured_value) if isinstance(configured_value, str) else []
+
+        profile = self._emulator_profile_for_entry(emulator)
+        profile_values: list[str] = []
+        if isinstance(profile, dict):
+            raw_profile_values = profile.get("ignore_extensions", [])
+            if isinstance(raw_profile_values, list):
+                profile_values = [item.strip() for item in raw_profile_values if isinstance(item, str) and item.strip()]
+
+        all_values = configured_values if configured_values else profile_values
+        normalized: set[str] = set()
+        for value in all_values:
+            normalized_value = self._normalize_ignore_extension_value(value)
+            if normalized_value:
+                normalized.add(normalized_value)
+        return normalized
+
+    def _sync_directory_ignore_basenames_for_emulator(
+        self,
+        emulator_name: str,
+        emulator: dict[str, str],
+        save_type: str,
+    ) -> set[str]:
+        ignore_basenames = set(self._resolved_ignore_basenames_for_emulator(emulator))
+        if save_type == "save" and self._is_pcsx2_emulator_name(emulator_name):
+            ignore_basenames.add("_pcsx2_superblock")
+        return ignore_basenames
+
+    def _sync_directory_ignore_extensions_for_emulator(self, emulator: dict[str, str]) -> set[str]:
+        return set(self._resolved_ignore_extensions_for_emulator(emulator))
+
+    def _session_filtered_file_candidates(self, game: dict[str, str], files: list[Path]) -> list[Path]:
+        session_window = self._session_window_for_state_upload(game)
+        if session_window is None:
+            return files
+        filtered = self._filter_files_by_mtime_window(files, session_window[0], session_window[1])
+        return filtered if filtered else files
+
+    def _session_filtered_directory_candidates(
+        self,
+        game: dict[str, str],
+        directories: list[Path],
+        *,
+        ignore_basenames: set[str] | None = None,
+        ignore_extensions: set[str] | None = None,
+    ) -> list[Path]:
+        session_window = self._session_window_for_state_upload(game)
+        if session_window is None:
+            return directories
+        filtered = self._filter_directories_by_mtime_window(
+            directories,
+            session_window[0],
+            session_window[1],
+            ignore_basenames=ignore_basenames,
+            ignore_extensions=ignore_extensions,
+        )
+        return filtered if filtered else directories
+
+    def _cloud_sync_directory_candidates_for_game(
+        self,
+        game: dict[str, str],
+        directories: list[Path],
+        *,
+        ignore_basenames: set[str] | None = None,
+        ignore_extensions: set[str] | None = None,
+    ) -> list[Path]:
+        tokens = self._game_save_match_tokens(game)
+        candidates: list[Path] = []
+        blocked_basenames = {
+            name.casefold()
+            for name in (ignore_basenames or set())
+            if isinstance(name, str) and name.strip()
+        }
+        blocked_extensions = {
+            extension.casefold()
+            for extension in (ignore_extensions or set())
+            if isinstance(extension, str) and extension.strip()
+        }
+
+        for directory in directories:
+            if not directory.exists() or not directory.is_dir():
+                continue
+            for child in directory.iterdir():
+                if not child.is_dir():
+                    continue
+                if not any(
+                    candidate.is_file()
+                    and (not blocked_basenames or candidate.name.casefold() not in blocked_basenames)
+                    and (not blocked_extensions or candidate.suffix.casefold() not in blocked_extensions)
+                    for candidate in child.rglob("*")
+                ):
+                    continue
+
+                normalized_name = re.sub(r"[^a-z0-9]+", "", child.name.casefold())
+                normalized_relative = re.sub(r"[^a-z0-9]+", "", str(child.relative_to(directory)).casefold())
+                if tokens and not any(token in normalized_name or token in normalized_relative for token in tokens):
+                    continue
+                candidates.append(child)
+
+        candidates.sort(
+            key=lambda item: self._latest_file_mtime_under_path(
+                item,
+                ignore_basenames=blocked_basenames,
+                ignore_extensions=blocked_extensions,
+            ),
+            reverse=True,
+        )
+
+        unique: list[Path] = []
+        seen: set[str] = set()
+        for path in candidates:
+            key_value = str(path).casefold()
+            if key_value in seen:
+                continue
+            seen.add(key_value)
+            unique.append(path)
+        return unique
+
+    def _cloud_sync_targets_for_game(
+        self,
+        game: dict[str, str],
+        emulator_name: str,
+        emulator: dict[str, str],
+        directories: list[Path],
+        save_type: str,
+    ) -> tuple[list[Path], list[Path]]:
+        files: list[Path] = []
+        folder_targets: list[Path] = []
+        save_strategy = self._resolved_save_strategy_for_emulator(emulator, save_type)
+        ignore_basenames = self._sync_directory_ignore_basenames_for_emulator(emulator_name, emulator, save_type)
+        ignore_extensions = self._sync_directory_ignore_extensions_for_emulator(emulator)
+
+        if save_type == "state":
+            files = self._cloud_sync_candidates_for_game(
+                game,
+                directories,
+                "state",
+                ignore_basenames=ignore_basenames,
+                ignore_extensions=ignore_extensions,
+            )
+            files = self._session_filtered_file_candidates(game, files)
+            return files, folder_targets
+
+        if save_strategy == "folder":
+            folder_targets = self._cloud_sync_directory_candidates_for_game(
+                game,
+                directories,
+                ignore_basenames=ignore_basenames,
+                ignore_extensions=ignore_extensions,
+            )
+        elif save_strategy == "single_file":
+            files = self._cloud_sync_candidates_for_game(
+                game,
+                directories,
+                "save",
+                ignore_basenames=ignore_basenames,
+                ignore_extensions=ignore_extensions,
+            )
+        elif self._is_ppsspp_emulator_name(emulator_name):
+            folder_targets = self._ppsspp_save_directories_for_game(game, directories)
+        elif self._is_rpcs3_emulator_name(emulator_name):
+            folder_targets = self._rpcs3_save_directories_for_game(game, directories)
+        elif self._is_pcsx2_emulator_name(emulator_name):
+            folder_targets = self._pcsx2_save_directories_for_game(game, directories)
+        else:
+            files = self._cloud_sync_candidates_for_game(
+                game,
+                directories,
+                "save",
+                ignore_basenames=ignore_basenames,
+                ignore_extensions=ignore_extensions,
+            )
+
+        if files:
+            files = self._session_filtered_file_candidates(game, files)
+        if folder_targets:
+            folder_targets = self._session_filtered_directory_candidates(
+                game,
+                folder_targets,
+                ignore_basenames=ignore_basenames,
+                ignore_extensions=ignore_extensions,
+            )
+        return files, folder_targets
+
     def _resolved_sync_directory_paths(self, emulator: dict[str, str], key: str) -> list[Path]:
         configured_value = emulator.get(key, "")
         configured_paths = self._split_configured_paths(configured_value) if isinstance(configured_value, str) else []
@@ -5738,6 +6112,104 @@ class MainWindow(QMainWindow):
             unique.append(path)
         return unique
 
+    def _pcsx2_save_directories_for_game(self, game: dict[str, str], directories: list[Path]) -> list[Path]:
+        id_tokens = self._ps2_game_id_tokens(game)
+        candidates: list[Path] = []
+
+        for directory in directories:
+            if not directory.exists() or not directory.is_dir():
+                continue
+            for child in directory.iterdir():
+                if not child.is_dir():
+                    continue
+                if not any(candidate.is_file() for candidate in child.rglob("*")):
+                    continue
+
+                normalized_name = re.sub(r"[^A-Z0-9]+", "", child.name.upper())
+                normalized_relative = re.sub(r"[^A-Z0-9]+", "", str(child.relative_to(directory)).upper())
+                if id_tokens and not any(token in normalized_name or token in normalized_relative for token in id_tokens):
+                    continue
+                candidates.append(child)
+
+        candidates.sort(key=lambda item: self._latest_file_mtime_under_path(item), reverse=True)
+        unique: list[Path] = []
+        seen: set[str] = set()
+        for path in candidates:
+            key_value = str(path).casefold()
+            if key_value in seen:
+                continue
+            seen.add(key_value)
+            unique.append(path)
+        return unique
+
+    def _session_window_for_state_upload(self, game: dict[str, str]) -> tuple[float, float] | None:
+        for session in reversed(self.active_game_sessions):
+            session_game = session.get("game")
+            if not isinstance(session_game, dict):
+                continue
+            if not self._games_match_identity(session_game, game):
+                continue
+            started_raw = session.get("started_at", 0)
+            try:
+                started_at = float(started_raw)
+            except (TypeError, ValueError):
+                started_at = 0.0
+            if started_at <= 0:
+                continue
+            ended_at = time.time()
+            return max(0.0, started_at - 2.0), ended_at + 30.0
+
+        sync_state = self._cloud_sync_state_for_game(game)
+        started_raw = sync_state.get("last_session_started_at", 0)
+        ended_raw = sync_state.get("last_session_ended_at", 0)
+        try:
+            started_at = float(started_raw)
+        except (TypeError, ValueError):
+            started_at = 0.0
+        try:
+            ended_at = float(ended_raw)
+        except (TypeError, ValueError):
+            ended_at = 0.0
+
+        if started_at <= 0:
+            return None
+        if ended_at <= 0:
+            ended_at = started_at
+        if ended_at < started_at:
+            ended_at = started_at
+        return max(0.0, started_at - 2.0), ended_at + 30.0
+
+    def _filter_files_by_mtime_window(self, files: list[Path], start_time: float, end_time: float) -> list[Path]:
+        filtered: list[Path] = []
+        for candidate in files:
+            try:
+                candidate_mtime = float(candidate.stat().st_mtime)
+            except (OSError, ValueError):
+                continue
+            if start_time <= candidate_mtime <= end_time:
+                filtered.append(candidate)
+        return filtered
+
+    def _filter_directories_by_mtime_window(
+        self,
+        directories: list[Path],
+        start_time: float,
+        end_time: float,
+        *,
+        ignore_basenames: set[str] | None = None,
+        ignore_extensions: set[str] | None = None,
+    ) -> list[Path]:
+        filtered: list[Path] = []
+        for directory in directories:
+            latest_mtime = self._latest_file_mtime_under_path(
+                directory,
+                ignore_basenames=ignore_basenames,
+                ignore_extensions=ignore_extensions,
+            )
+            if start_time <= latest_mtime <= end_time:
+                filtered.append(directory)
+        return filtered
+
     def _rpcs3_save_directories_for_game(self, game: dict[str, str], directories: list[Path]) -> list[Path]:
         game_ids = self._ps3_game_ids_for_game(game)
         candidates: list[Path] = []
@@ -5767,25 +6239,29 @@ class MainWindow(QMainWindow):
 
     def _game_save_match_tokens(self, game: dict[str, str]) -> set[str]:
         tokens: set[str] = set()
-        title_value = game.get("title", "")
-        if isinstance(title_value, str):
-            title = title_value.strip().casefold()
-            if title:
-                tokens.add(title)
-                compact = re.sub(r"[^a-z0-9]+", "", title)
+
+        def add_token_variants(value: str) -> None:
+            text = value.strip().casefold()
+            if not text:
+                return
+            variants = {text, re.sub(r"[’']s\b", "", text).strip()}
+            for variant in variants:
+                if not variant:
+                    continue
+                tokens.add(variant)
+                compact = re.sub(r"[^a-z0-9]+", "", variant)
                 if compact:
                     tokens.add(compact)
+
+        title_value = game.get("title", "")
+        if isinstance(title_value, str):
+            add_token_variants(title_value)
 
         for field in ("rom_file_name", "extracted_path", "archive_path"):
             value = game.get(field, "")
             if not isinstance(value, str) or not value.strip():
                 continue
-            stem = Path(value).stem.strip().casefold()
-            if stem:
-                tokens.add(stem)
-                compact = re.sub(r"[^a-z0-9]+", "", stem)
-                if compact:
-                    tokens.add(compact)
+            add_token_variants(Path(value).stem)
 
         ps3_game_id_value = game.get("ps3_game_id", "")
         ps3_game_id = ps3_game_id_value.strip().casefold() if isinstance(ps3_game_id_value, str) else ""
@@ -5805,6 +6281,22 @@ class MainWindow(QMainWindow):
 
     def _is_ppsspp_emulator_name(self, emulator_name: str) -> bool:
         return "ppsspp" in emulator_name.strip().casefold()
+
+    def _is_pcsx2_emulator_name(self, emulator_name: str) -> bool:
+        return "pcsx2" in emulator_name.strip().casefold()
+
+    def _ps2_game_id_tokens(self, game: dict[str, str]) -> set[str]:
+        tokens: set[str] = set()
+        for field in ("title", "rom_file_name", "extracted_path", "archive_path"):
+            value = game.get(field, "")
+            if not isinstance(value, str) or not value.strip():
+                continue
+            upper_value = value.strip().upper()
+            for matched in re.findall(r"[A-Z]{4}[-_ ]?\d{3}\.\d{2}|[A-Z]{4}[-_ ]?\d{5}", upper_value):
+                normalized = re.sub(r"[^A-Z0-9]+", "", matched)
+                if normalized:
+                    tokens.add(normalized)
+        return tokens
 
     def _psp_game_id_tokens(self, game: dict[str, str]) -> set[str]:
         tokens: set[str] = set()
@@ -5844,7 +6336,14 @@ class MainWindow(QMainWindow):
             unique.append(path)
         return unique
 
-    def _zip_directory_for_upload(self, directory: Path, game: dict[str, str]) -> Path:
+    def _zip_directory_for_upload(
+        self,
+        directory: Path,
+        game: dict[str, str],
+        *,
+        ignore_basenames: set[str] | None = None,
+        ignore_extensions: set[str] | None = None,
+    ) -> Path:
         title_value = game.get("title", "Game")
         title = title_value if isinstance(title_value, str) else "Game"
         safe_title = self._sanitize_path_component(title, "game")
@@ -5855,10 +6354,20 @@ class MainWindow(QMainWindow):
             suffix = int(time.time() * 1000)
             archive_path = Path(tempfile.gettempdir()) / f"{safe_title}-{timestamp_iso}-{suffix}.zip"
 
+        blocked_basenames = {
+            name.casefold()
+            for name in (ignore_basenames or set())
+            if isinstance(name, str) and name.strip()
+        }
+
         try:
             with zipfile.ZipFile(archive_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
                 for candidate in directory.rglob("*"):
                     if not candidate.is_file():
+                        continue
+                    if blocked_basenames and candidate.name.casefold() in blocked_basenames:
+                        continue
+                    if blocked_extensions and candidate.suffix.casefold() in blocked_extensions:
                         continue
                     relative_path = candidate.relative_to(directory)
                     archive_member_name = f"{directory.name}/{relative_path.as_posix()}"
@@ -5877,8 +6386,21 @@ class MainWindow(QMainWindow):
         game: dict[str, str],
         directories: list[Path],
         file_field: str,
+        *,
+        ignore_basenames: set[str] | None = None,
+        ignore_extensions: set[str] | None = None,
     ) -> list[tuple[str, dict[str, Path]]]:
         id_tokens = self._psp_game_id_tokens(game)
+        blocked_basenames = {
+            name.casefold()
+            for name in (ignore_basenames or set())
+            if isinstance(name, str) and name.strip()
+        }
+        blocked_extensions = {
+            extension.casefold()
+            for extension in (ignore_extensions or set())
+            if isinstance(extension, str) and extension.strip()
+        }
         candidates: list[tuple[Path, Path | None]] = []
 
         for directory in directories:
@@ -5886,6 +6408,10 @@ class MainWindow(QMainWindow):
                 continue
             for state_file in directory.glob("*.ppst"):
                 if not state_file.is_file():
+                    continue
+                if blocked_basenames and state_file.name.casefold() in blocked_basenames:
+                    continue
+                if blocked_extensions and state_file.suffix.casefold() in blocked_extensions:
                     continue
                 normalized_name = re.sub(r"[^A-Z0-9]+", "", state_file.name.upper())
                 if id_tokens and not any(token in normalized_name for token in id_tokens):
@@ -5927,13 +6453,59 @@ class MainWindow(QMainWindow):
                 continue
         return 0.0
 
-    def _latest_file_mtime_under_path(self, root: Path) -> float:
+    def _latest_file_mtime_under_path(
+        self,
+        root: Path,
+        *,
+        ignore_basenames: set[str] | None = None,
+        ignore_extensions: set[str] | None = None,
+    ) -> float:
         if not root.exists() or not root.is_dir():
             return 0.0
+        blocked_basenames = {
+            name.casefold()
+            for name in (ignore_basenames or set())
+            if isinstance(name, str) and name.strip()
+        }
+        blocked_extensions = {
+            extension.casefold()
+            for extension in (ignore_extensions or set())
+            if isinstance(extension, str) and extension.strip()
+        }
         latest = 0.0
         for candidate in root.rglob("*"):
             if not candidate.is_file():
                 continue
+            if blocked_basenames and candidate.name.casefold() in blocked_basenames:
+                continue
+            if blocked_extensions and candidate.suffix.casefold() in blocked_extensions:
+                continue
+            try:
+                latest = max(latest, candidate.stat().st_mtime)
+            except OSError:
+                continue
+        return latest
+
+    def _latest_local_state_mtime_for_game(
+        self,
+        game: dict[str, str],
+        emulator_name: str,
+        directories: list[Path],
+    ) -> float:
+        if not directories:
+            return 0.0
+
+        if self._is_rpcs3_emulator_name(emulator_name):
+            return 0.0
+
+        emulator_entry = self._emulator_entry_by_name(emulator_name)
+        if emulator_entry is None:
+            emulator_entry = {"name": emulator_name, "path": "", "args": "%rom%", "save_strategy": "auto"}
+
+        candidates, _ = self._cloud_sync_targets_for_game(game, emulator_name, emulator_entry, directories, "state")
+
+        latest = 0.0
+        for candidate in candidates:
             try:
                 latest = max(latest, candidate.stat().st_mtime)
             except OSError:
@@ -5949,25 +6521,28 @@ class MainWindow(QMainWindow):
         if not directories:
             return 0.0
 
-        if self._is_ppsspp_emulator_name(emulator_name):
-            latest = 0.0
-            for save_directory in self._ppsspp_save_directories_for_game(game, directories):
-                latest = max(latest, self._latest_file_mtime_under_path(save_directory))
-            return latest
+        emulator_entry = self._emulator_entry_by_name(emulator_name)
+        if emulator_entry is None:
+            emulator_entry = {"name": emulator_name, "path": "", "args": "%rom%", "save_strategy": "auto"}
 
-        if self._is_rpcs3_emulator_name(emulator_name):
-            latest = 0.0
-            for save_directory in self._rpcs3_save_directories_for_game(game, directories):
-                latest = max(latest, self._latest_file_mtime_under_path(save_directory))
-            return latest
-
-        candidates = self._cloud_sync_candidates_for_game(game, directories, "save")
+        files, folder_targets = self._cloud_sync_targets_for_game(game, emulator_name, emulator_entry, directories, "save")
+        ignore_basenames = self._sync_directory_ignore_basenames_for_emulator(emulator_name, emulator_entry, "save")
+        ignore_extensions = self._sync_directory_ignore_extensions_for_emulator(emulator_entry)
         latest = 0.0
-        for candidate in candidates:
+        for candidate in files:
             try:
                 latest = max(latest, candidate.stat().st_mtime)
             except OSError:
                 continue
+        for save_directory in folder_targets:
+            latest = max(
+                latest,
+                self._latest_file_mtime_under_path(
+                    save_directory,
+                    ignore_basenames=ignore_basenames,
+                    ignore_extensions=ignore_extensions,
+                ),
+            )
         return latest
 
     def _server_save_records_for_rom(self, rom_id: str) -> list[dict[str, Any]]:
@@ -5990,6 +6565,48 @@ class MainWindow(QMainWindow):
 
     def _latest_server_save_record(self, rom_id: str, emulator_name: str) -> dict[str, Any] | None:
         records = self._server_save_records_for_rom(rom_id)
+        if not records:
+            return None
+
+        emulator_key = emulator_name.strip().casefold()
+        emulator_records = [
+            item
+            for item in records
+            if isinstance(item.get("emulator"), str)
+            and item.get("emulator", "").strip().casefold() == emulator_key
+        ]
+        selection = emulator_records if emulator_records else records
+
+        def _id_rank(record: dict[str, Any]) -> int:
+            value = record.get("id", 0)
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return 0
+
+        selection.sort(key=lambda item: (self._save_record_timestamp(item), _id_rank(item)), reverse=True)
+        return selection[0]
+
+    def _server_state_records_for_rom(self, rom_id: str) -> list[dict[str, Any]]:
+        payload = self._api_get("/api/states", {"rom_id": rom_id})
+        if not isinstance(payload, list):
+            return []
+
+        records: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            state_id = str(item.get("id", "")).strip()
+            if not state_id or state_id in seen_ids:
+                continue
+            seen_ids.add(state_id)
+            records.append(item)
+
+        return records
+
+    def _latest_server_state_record(self, rom_id: str, emulator_name: str) -> dict[str, Any] | None:
+        records = self._server_state_records_for_rom(rom_id)
         if not records:
             return None
 
@@ -6082,8 +6699,54 @@ class MainWindow(QMainWindow):
         save_id_path = quote(save_id, safe="")
         return self._api_get_bytes(f"/api/saves/{save_id_path}/content")
 
-    def _extract_zip_archive_bytes_to_directory(self, payload: bytes, target_root: Path) -> int:
+    def _download_server_state_content(self, state_id: str) -> bytes:
+        state_id_path = quote(state_id, safe="")
+        state_record = self._api_get(f"/api/states/{state_id_path}")
+        if not isinstance(state_record, dict):
+            raise ValueError("State record payload is invalid.")
+
+        def normalize_candidate_url(value: str) -> str:
+            parsed = urlsplit(value)
+            encoded_path = quote(parsed.path, safe="/%")
+            query_items = parse_qsl(parsed.query, keep_blank_values=True)
+            encoded_query = urlencode(query_items, doseq=True, quote_via=quote)
+            return urlunsplit((parsed.scheme, parsed.netloc, encoded_path, encoded_query, parsed.fragment))
+
+        candidate_paths: list[str] = []
+        for key in ("download_path", "file_path", "full_path"):
+            value = state_record.get(key, "")
+            if not isinstance(value, str):
+                continue
+            candidate = value.strip()
+            if candidate:
+                candidate_paths.append(candidate)
+
+        for candidate in candidate_paths:
+            try:
+                if candidate.startswith(("http://", "https://")):
+                    request = Request(normalize_candidate_url(candidate), headers=self._authorized_headers(), method="GET")
+                    with urlopen(request, timeout=60) as response:
+                        return response.read()
+
+                relative_path = candidate if candidate.startswith("/") else f"/{candidate}"
+                relative_path = normalize_candidate_url(relative_path)
+                return self._api_get_bytes(relative_path)
+            except (HTTPError, URLError, OSError, ValueError):
+                continue
+
+        raise ValueError("State content path could not be resolved from server record.")
+
+    def _extract_zip_archive_bytes_to_directory(
+        self,
+        payload: bytes,
+        target_root: Path,
+        *,
+        skip_basenames: set[str] | None = None,
+        skip_extensions: set[str] | None = None,
+    ) -> int:
         temp_zip_path: Path | None = None
+        blocked_basenames = {name.casefold() for name in (skip_basenames or set()) if isinstance(name, str) and name.strip()}
+        blocked_extensions = {extension.casefold() for extension in (skip_extensions or set()) if isinstance(extension, str) and extension.strip()}
         try:
             fd, temp_path = tempfile.mkstemp(prefix="rom-mate-save-", suffix=".zip")
             os.close(fd)
@@ -6101,6 +6764,10 @@ class MainWindow(QMainWindow):
                         continue
                     relative_path = Path(member_name)
                     if relative_path.is_absolute() or any(part in {"", ".", ".."} for part in relative_path.parts):
+                        continue
+                    if blocked_basenames and relative_path.name.casefold() in blocked_basenames:
+                        continue
+                    if blocked_extensions and relative_path.suffix.casefold() in blocked_extensions:
                         continue
 
                     destination = (destination_root / relative_path).resolve()
@@ -6127,11 +6794,20 @@ class MainWindow(QMainWindow):
         directories: list[Path],
         save_record: dict[str, Any],
         payload: bytes,
+        *,
+        ignore_basenames: set[str] | None = None,
+        ignore_extensions: set[str] | None = None,
     ) -> Path | None:
         if not payload:
             return None
 
-        candidate_paths = self._cloud_sync_candidates_for_game(game, directories, "save")
+        candidate_paths = self._cloud_sync_candidates_for_game(
+            game,
+            directories,
+            "save",
+            ignore_basenames=ignore_basenames,
+            ignore_extensions=ignore_extensions,
+        )
         if candidate_paths:
             target_path = candidate_paths[0]
         else:
@@ -6140,6 +6816,45 @@ class MainWindow(QMainWindow):
             if not file_name:
                 file_name = f"{self._sanitize_path_component(game.get('title', 'game'), 'save')}.srm"
             target_path = directories[0] / file_name
+
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_bytes(payload)
+        return target_path
+
+    def _restore_single_state_file(
+        self,
+        game: dict[str, str],
+        directories: list[Path],
+        state_record: dict[str, Any],
+        payload: bytes,
+        *,
+        ignore_basenames: set[str] | None = None,
+        ignore_extensions: set[str] | None = None,
+    ) -> Path | None:
+        if not payload:
+            return None
+
+        file_name_value = state_record.get("file_name", "")
+        file_name = Path(file_name_value).name if isinstance(file_name_value, str) else ""
+        if file_name:
+            target_path = directories[0] / file_name
+            for directory in directories:
+                candidate = directory / file_name
+                if candidate.exists() and candidate.is_file():
+                    target_path = candidate
+                    break
+        else:
+            candidate_paths = self._cloud_sync_candidates_for_game(
+                game,
+                directories,
+                "state",
+                ignore_basenames=ignore_basenames,
+                ignore_extensions=ignore_extensions,
+            )
+            if candidate_paths:
+                target_path = candidate_paths[0]
+            else:
+                target_path = directories[0] / f"{self._sanitize_path_component(game.get('title', 'game'), 'state')}.state"
 
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_bytes(payload)
@@ -6201,24 +6916,39 @@ class MainWindow(QMainWindow):
             sync_state = self._cloud_sync_state_for_game(game)
             last_downloaded_save_id = str(sync_state.get("last_downloaded_save_id", "")).strip()
             if last_downloaded_save_id and last_downloaded_save_id == save_id:
-                if debug_enabled:
-                    print(
-                        f"[DEBUG][CloudSync] Restore skipped already_latest title={game.get('title', '')} "
-                        f"rom_id={rom_id} emulator={emulator_name} save_id={save_id}"
-                    )
-                return False
+                local_latest_mtime = self._latest_local_save_mtime_for_game(game, emulator_name, directories)
+                if local_latest_mtime <= 0:
+                    if debug_enabled:
+                        print(
+                            f"[DEBUG][CloudSync] Restore continuing local_missing title={game.get('title', '')} "
+                            f"rom_id={rom_id} emulator={emulator_name} save_id={save_id}"
+                        )
+                else:
+                    if debug_enabled:
+                        print(
+                            f"[DEBUG][CloudSync] Restore skipped already_latest title={game.get('title', '')} "
+                            f"rom_id={rom_id} emulator={emulator_name} save_id={save_id}"
+                        )
+                    return False
 
         if skip_if_local_newer:
-            local_latest_mtime = self._latest_local_save_mtime_for_game(game, emulator_name, directories)
-            server_latest_timestamp = self._save_record_timestamp(save_record)
-            if local_latest_mtime > 0 and local_latest_mtime > (server_latest_timestamp + 1.0):
+            if self._is_pcsx2_emulator_name(emulator_name) and not self._ps2_game_id_tokens(game):
                 if debug_enabled:
                     print(
-                        f"[DEBUG][CloudSync] Restore skipped local_newer title={game.get('title', '')} "
-                        f"rom_id={rom_id} emulator={emulator_name} local_mtime={local_latest_mtime:.0f} "
-                        f"server_ts={server_latest_timestamp:.0f} save_id={save_id}"
+                        f"[DEBUG][CloudSync] Restore local_newer_check_skipped title={game.get('title', '')} "
+                        f"rom_id={rom_id} emulator={emulator_name} reason=missing_ps2_id_tokens"
                     )
-                return False
+            else:
+                local_latest_mtime = self._latest_local_save_mtime_for_game(game, emulator_name, directories)
+                server_latest_timestamp = self._save_record_timestamp(save_record)
+                if local_latest_mtime > 0 and local_latest_mtime > (server_latest_timestamp + 1.0):
+                    if debug_enabled:
+                        print(
+                            f"[DEBUG][CloudSync] Restore skipped local_newer title={game.get('title', '')} "
+                            f"rom_id={rom_id} emulator={emulator_name} local_mtime={local_latest_mtime:.0f} "
+                            f"server_ts={server_latest_timestamp:.0f} save_id={save_id}"
+                        )
+                    return False
 
         try:
             payload = self._download_server_save_content(save_id)
@@ -6230,17 +6960,35 @@ class MainWindow(QMainWindow):
             show_warning("Downloaded cloud save content was empty.")
             return False
 
-        is_folder_save = self._is_ppsspp_emulator_name(emulator_name) or self._is_rpcs3_emulator_name(emulator_name)
+        is_folder_save = (
+            self._is_ppsspp_emulator_name(emulator_name)
+            or self._is_rpcs3_emulator_name(emulator_name)
+            or self._is_pcsx2_emulator_name(emulator_name)
+        )
+        skip_basenames = self._sync_directory_ignore_basenames_for_emulator(emulator_name, emulator_entry, "save")
+        skip_extensions = self._sync_directory_ignore_extensions_for_emulator(emulator_entry)
         restored_target = ""
         try:
             if is_folder_save:
-                restored_count = self._extract_zip_archive_bytes_to_directory(payload, directories[0])
+                restored_count = self._extract_zip_archive_bytes_to_directory(
+                    payload,
+                    directories[0],
+                    skip_basenames=skip_basenames,
+                    skip_extensions=skip_extensions,
+                )
                 if restored_count <= 0:
                     show_warning("Save archive downloaded, but no files were restored.")
                     return False
                 restored_target = str(directories[0])
             else:
-                restored_file = self._restore_single_save_file(game, directories, save_record, payload)
+                restored_file = self._restore_single_save_file(
+                    game,
+                    directories,
+                    save_record,
+                    payload,
+                    ignore_basenames=skip_basenames,
+                    ignore_extensions=skip_extensions,
+                )
                 if restored_file is None:
                     show_warning("Save content downloaded, but no file was restored.")
                     return False
@@ -6266,27 +7014,170 @@ class MainWindow(QMainWindow):
         show_info("Cloud save restored successfully.")
         return True
 
-    def _cloud_sync_candidates_for_game(self, game: dict[str, str], directories: list[Path], save_type: str) -> list[Path]:
+    def _restore_cloud_state_for_game(
+        self,
+        game: dict[str, str],
+        *,
+        show_dialogs: bool = True,
+        skip_if_known_latest: bool = False,
+    ) -> bool:
+        debug_enabled = self._debug_prints_enabled()
+
+        def show_warning(message: str) -> None:
+            if show_dialogs:
+                QMessageBox.warning(self, "Cloud Sync", message)
+
+        def show_info(message: str) -> None:
+            if show_dialogs:
+                QMessageBox.information(self, "Cloud Sync", message)
+
+        if self._is_native_executable_platform(game):
+            show_warning("Windows native state restore is not supported yet.")
+            return False
+
+        rom_id = self._resolve_rom_id_for_game(game)
+        if not rom_id:
+            show_warning("Missing ROM id for this game.")
+            return False
+
+        emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(game)
+        if emulator_entry is None:
+            show_warning("No default emulator is configured for this game's platform.")
+            return False
+
+        if self._is_rpcs3_emulator_name(emulator_name):
+            show_info("RPCS3 savestate restore is not supported yet.")
+            return False
+
+        directories = self._resolved_sync_directory_paths(emulator_entry, "state_paths")
+        if not directories:
+            show_warning(f"No state directories were found for emulator '{emulator_name}'. Configure them in Emulators.")
+            return False
+
+        try:
+            state_record = self._latest_server_state_record(rom_id, emulator_name)
+        except (HTTPError, URLError, ValueError, json.JSONDecodeError) as error:
+            show_warning(f"Failed to query server states: {error}")
+            return False
+
+        if state_record is None:
+            show_info("No cloud save state was found on the server for this game.")
+            return False
+
+        state_id = str(state_record.get("id", "")).strip()
+        if not state_id:
+            show_warning("Server state record is missing an id.")
+            return False
+
+        if skip_if_known_latest:
+            sync_state = self._cloud_sync_state_for_game(game)
+            last_downloaded_state_id = str(sync_state.get("last_downloaded_state_id", "")).strip()
+            if last_downloaded_state_id and last_downloaded_state_id == state_id:
+                local_latest_mtime = self._latest_local_state_mtime_for_game(game, emulator_name, directories)
+                if local_latest_mtime <= 0:
+                    if debug_enabled:
+                        print(
+                            f"[DEBUG][CloudSync] Restore continuing local_missing save_type=state title={game.get('title', '')} "
+                            f"rom_id={rom_id} emulator={emulator_name} state_id={state_id}"
+                        )
+                else:
+                    if debug_enabled:
+                        print(
+                            f"[DEBUG][CloudSync] Restore skipped already_latest save_type=state title={game.get('title', '')} "
+                            f"rom_id={rom_id} emulator={emulator_name} state_id={state_id}"
+                        )
+                    return False
+
+        try:
+            payload = self._download_server_state_content(state_id)
+        except (HTTPError, URLError, OSError, ValueError) as error:
+            show_warning(f"Failed to download cloud state content: {error}")
+            return False
+
+        if not payload:
+            show_warning("Downloaded cloud state content was empty.")
+            return False
+
+        try:
+            ignore_basenames = self._resolved_ignore_basenames_for_emulator(emulator_entry)
+            ignore_extensions = self._resolved_ignore_extensions_for_emulator(emulator_entry)
+            restored_file = self._restore_single_state_file(
+                game,
+                directories,
+                state_record,
+                payload,
+                ignore_basenames=ignore_basenames,
+                ignore_extensions=ignore_extensions,
+            )
+            if restored_file is None:
+                show_warning("State content downloaded, but no file was restored.")
+                return False
+        except OSError as error:
+            show_warning(f"Failed to restore cloud state: {error}")
+            return False
+
+        if debug_enabled:
+            print(
+                f"[DEBUG][CloudSync] Restore success save_type=state title={game.get('title', '')} "
+                f"rom_id={rom_id} emulator={emulator_name} state_id={state_id} target={restored_file}"
+            )
+
+        self._update_cloud_sync_state_for_game(
+            game,
+            {
+                "last_downloaded_state_id": state_id,
+            },
+        )
+
+        show_info("Cloud state restored successfully.")
+        return True
+
+    def _cloud_sync_candidates_for_game(
+        self,
+        game: dict[str, str],
+        directories: list[Path],
+        save_type: str,
+        *,
+        ignore_basenames: set[str] | None = None,
+        ignore_extensions: set[str] | None = None,
+    ) -> list[Path]:
+        if save_type not in {"save", "state"}:
+            return []
         tokens = self._game_save_match_tokens(game)
+        blocked_basenames = {
+            name.casefold()
+            for name in (ignore_basenames or set())
+            if isinstance(name, str) and name.strip()
+        }
+        blocked_extensions = {
+            extension.casefold()
+            for extension in (ignore_extensions or set())
+            if isinstance(extension, str) and extension.strip()
+        }
         candidates: list[Path] = []
+        state_candidates: list[Path] = []
 
         for directory in directories:
             for candidate in directory.rglob("*"):
                 if not candidate.is_file():
                     continue
-                suffix = candidate.suffix.casefold()
-                if save_type == "save":
-                    if suffix != ".srm":
-                        continue
-                else:
-                    if not self._is_state_file_candidate(candidate):
-                        continue
+                if blocked_basenames and candidate.name.casefold() in blocked_basenames:
+                    continue
+                if blocked_extensions and candidate.suffix.casefold() in blocked_extensions:
+                    continue
 
                 candidate_name = candidate.name.casefold()
                 candidate_stem_compact = re.sub(r"[^a-z0-9]+", "", candidate.stem.casefold())
-                if tokens and not any(token in candidate_name or (token in candidate_stem_compact and token) for token in tokens):
+                if save_type == "save" and tokens and not any(
+                    token in candidate_name or (token in candidate_stem_compact and token) for token in tokens
+                ):
                     continue
                 candidates.append(candidate)
+                if save_type == "state" and self._is_state_file_candidate(candidate):
+                    state_candidates.append(candidate)
+
+        if save_type == "state" and state_candidates:
+            candidates = state_candidates
 
         candidates.sort(key=lambda item: item.stat().st_mtime if item.exists() else 0, reverse=True)
 
@@ -6350,33 +7241,64 @@ class MainWindow(QMainWindow):
         upload_jobs: list[tuple[str, dict[str, Path]]] = []
         temporary_archives: list[Path] = []
 
-        if is_ppsspp and save_type == "save":
-            save_directories = self._ppsspp_save_directories_for_game(game, directories)
-            if not save_directories:
-                show_info("No matching PPSSPP save folders were found to upload.")
-                return 0, 0, []
+        if save_type == "save":
+            save_files, save_directories = self._cloud_sync_targets_for_game(
+                game,
+                emulator_name,
+                emulator_entry,
+                directories,
+                "save",
+            )
+            ignore_basenames = self._sync_directory_ignore_basenames_for_emulator(emulator_name, emulator_entry, "save")
+            ignore_extensions = self._sync_directory_ignore_extensions_for_emulator(emulator_entry)
             for save_directory in save_directories:
-                archive_path = self._zip_directory_for_upload(save_directory, game)
+                archive_path = self._zip_directory_for_upload(
+                    save_directory,
+                    game,
+                    ignore_basenames=ignore_basenames,
+                    ignore_extensions=ignore_extensions,
+                )
                 temporary_archives.append(archive_path)
                 upload_jobs.append((save_directory.name, {file_field: archive_path}))
+            upload_jobs.extend((file_path.name, {file_field: file_path}) for file_path in save_files)
+            if not upload_jobs:
+                show_info("No matching save files or save folders were found to upload.")
+                return 0, 0, []
         elif is_ppsspp and save_type == "state":
-            upload_jobs = self._ppsspp_state_upload_jobs(game, directories, file_field)
+            ignore_basenames = self._resolved_ignore_basenames_for_emulator(emulator_entry)
+            ignore_extensions = self._resolved_ignore_extensions_for_emulator(emulator_entry)
+            upload_jobs = self._ppsspp_state_upload_jobs(
+                game,
+                directories,
+                file_field,
+                ignore_basenames=ignore_basenames,
+                ignore_extensions=ignore_extensions,
+            )
+            session_window = self._session_window_for_state_upload(game)
+            if session_window is not None:
+                upload_jobs = [
+                    (display_name, files_payload)
+                    for display_name, files_payload in upload_jobs
+                    if any(
+                        isinstance(path, Path)
+                        and path.exists()
+                        and session_window[0] <= float(path.stat().st_mtime) <= session_window[1]
+                        for path in files_payload.values()
+                    )
+                ]
             if not upload_jobs:
                 show_info("No matching PPSSPP .ppst state files were found to upload.")
                 return 0, 0, []
-        elif is_rpcs3 and save_type == "save":
-            save_directories = self._rpcs3_save_directories_for_game(game, directories)
-            if not save_directories:
-                show_info("No matching RPCS3 save folders were found to upload.")
-                return 0, 0, []
-            for save_directory in save_directories:
-                archive_path = self._zip_directory_for_upload(save_directory, game)
-                temporary_archives.append(archive_path)
-                upload_jobs.append((save_directory.name, {file_field: archive_path}))
         else:
-            files = self._cloud_sync_candidates_for_game(game, directories, save_type)
+            files, _ = self._cloud_sync_targets_for_game(
+                game,
+                emulator_name,
+                emulator_entry,
+                directories,
+                save_type,
+            )
             if not files:
-                label = "SRM saves" if save_type == "save" else "save states"
+                label = "save files" if save_type == "save" else "save states"
                 show_info(f"No matching {label} files were found to upload.")
                 return 0, 0, []
             upload_jobs = [(file_path.name, {file_field: file_path}) for file_path in files]
@@ -6470,6 +7392,14 @@ class MainWindow(QMainWindow):
             return
         self._upload_cloud_files_for_game(installed_game, "state")
 
+    def _perform_restore_states_action(self) -> None:
+        if self.current_details_game is None:
+            return
+        installed_game = self._installed_game_record(self.current_details_game)
+        if installed_game is None:
+            return
+        self._restore_cloud_state_for_game(installed_game)
+
     def _auto_sync_before_launch(self, game: dict[str, str]) -> None:
         if self._is_native_executable_platform(game):
             return
@@ -6483,6 +7413,11 @@ class MainWindow(QMainWindow):
             skip_if_local_newer=self._auto_cloud_skip_download_if_local_newer(),
             skip_if_known_latest=True,
         )
+        self._restore_cloud_state_for_game(
+            game,
+            show_dialogs=False,
+            skip_if_known_latest=True,
+        )
 
     def _register_game_session_for_auto_upload(
         self,
@@ -6492,13 +7427,21 @@ class MainWindow(QMainWindow):
     ) -> None:
         if self._is_native_executable_platform(game):
             return
+        started_at = time.time()
         session = {
             "game": dict(game),
             "process": process,
             "emulator_name": emulator_name.strip(),
-            "started_at": time.time(),
+            "started_at": started_at,
         }
         self.active_game_sessions.append(session)
+        self._update_cloud_sync_state_for_game(
+            game,
+            {
+                "last_session_started_at": started_at,
+                "last_session_ended_at": 0.0,
+            },
+        )
 
     def _poll_active_game_sessions(self) -> None:
         if not self.active_game_sessions:
@@ -6517,6 +7460,24 @@ class MainWindow(QMainWindow):
         self.active_game_sessions = remaining
 
     def _handle_finished_game_session(self, session: dict[str, Any]) -> None:
+        game = session.get("game")
+        if isinstance(game, dict):
+            started_raw = session.get("started_at", 0)
+            try:
+                started_at = float(started_raw)
+            except (TypeError, ValueError):
+                started_at = 0.0
+            ended_at = time.time()
+            if started_at > 0:
+                self._update_cloud_sync_state_for_game(
+                    game,
+                    {
+                        "last_session_started_at": started_at,
+                        "last_session_ended_at": ended_at,
+                    },
+                )
+            session["ended_at"] = ended_at
+
         if not self._auto_cloud_save_upload_enabled():
             return
         if not self._credentials_present() or not self._server_connected():
@@ -6541,26 +7502,49 @@ class MainWindow(QMainWindow):
         if emulator_entry is None:
             return
 
-        directories = self._resolved_sync_directory_paths(emulator_entry, "save_paths")
-        local_latest_mtime = self._latest_local_save_mtime_for_game(game, emulator_name, directories)
-        if local_latest_mtime <= 0:
-            return
-
+        upload_types: list[str] = []
+        latest_mtimes: dict[str, float] = {}
         sync_state = self._cloud_sync_state_for_game(game)
-        last_uploaded_local_mtime = sync_state.get("last_uploaded_local_mtime", 0)
-        try:
-            previous_uploaded_mtime = float(last_uploaded_local_mtime)
-        except (TypeError, ValueError):
-            previous_uploaded_mtime = 0.0
 
-        if local_latest_mtime <= (previous_uploaded_mtime + 1.0):
+        save_directories = self._resolved_sync_directory_paths(emulator_entry, "save_paths")
+        if save_directories:
+            local_latest_save_mtime = self._latest_local_save_mtime_for_game(game, emulator_name, save_directories)
+            if local_latest_save_mtime > 0:
+                previous_save_mtime_raw = sync_state.get("last_uploaded_save_mtime", sync_state.get("last_uploaded_local_mtime", 0))
+                try:
+                    previous_save_mtime = float(previous_save_mtime_raw)
+                except (TypeError, ValueError):
+                    previous_save_mtime = 0.0
+                if local_latest_save_mtime > (previous_save_mtime + 1.0):
+                    upload_types.append("save")
+                    latest_mtimes["save"] = local_latest_save_mtime
+
+        state_directories = self._resolved_sync_directory_paths(emulator_entry, "state_paths")
+        if state_directories and not self._is_rpcs3_emulator_name(emulator_name):
+            local_latest_state_mtime = self._latest_local_state_mtime_for_game(game, emulator_name, state_directories)
+            if local_latest_state_mtime > 0:
+                previous_state_mtime_raw = sync_state.get("last_uploaded_state_mtime", 0)
+                try:
+                    previous_state_mtime = float(previous_state_mtime_raw)
+                except (TypeError, ValueError):
+                    previous_state_mtime = 0.0
+                if local_latest_state_mtime > (previous_state_mtime + 1.0):
+                    upload_types.append("state")
+                    latest_mtimes["state"] = local_latest_state_mtime
+
+        if not upload_types:
             return
 
-        self._start_auto_cloud_upload_worker(game, local_latest_mtime)
+        self._start_auto_cloud_upload_worker(game, upload_types, latest_mtimes)
 
-    def _start_auto_cloud_upload_worker(self, game: dict[str, str], local_latest_mtime: float) -> None:
+    def _start_auto_cloud_upload_worker(
+        self,
+        game: dict[str, str],
+        upload_types: list[str],
+        local_latest_mtimes: dict[str, float],
+    ) -> None:
         thread = QThread(self)
-        worker = AutoCloudSaveUploadWorker(self, game, local_latest_mtime)
+        worker = AutoCloudSaveUploadWorker(self, game, upload_types, local_latest_mtimes)
         worker.moveToThread(thread)
 
         thread.started.connect(worker.run)
@@ -6582,39 +7566,71 @@ class MainWindow(QMainWindow):
         if not isinstance(game, dict) or not isinstance(result, dict):
             return
 
-        uploaded_count = result.get("uploaded_count", 0)
-        total_count = result.get("total_count", 0)
-        failed_raw = result.get("failed_files", [])
-        local_latest_mtime_raw = result.get("local_latest_mtime", 0)
+        per_type_raw = result.get("per_type", {})
+        local_latest_mtimes_raw = result.get("local_latest_mtimes", {})
+        per_type = per_type_raw if isinstance(per_type_raw, dict) else {}
+        local_latest_mtimes = local_latest_mtimes_raw if isinstance(local_latest_mtimes_raw, dict) else {}
 
-        try:
-            uploaded = int(uploaded_count)
-        except (TypeError, ValueError):
-            uploaded = 0
-        try:
-            total = int(total_count)
-        except (TypeError, ValueError):
-            total = 0
-        failed = [str(item) for item in failed_raw] if isinstance(failed_raw, list) else []
-        try:
-            local_latest_mtime = float(local_latest_mtime_raw)
-        except (TypeError, ValueError):
-            local_latest_mtime = 0.0
+        updates: dict[str, Any] = {}
+        debug_segments: list[str] = []
+        any_uploaded = False
+        any_failed = False
 
-        if uploaded > 0:
-            self._update_cloud_sync_state_for_game(
-                game,
-                {
-                    "last_uploaded_local_mtime": local_latest_mtime,
-                    "last_uploaded_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
-                },
+        for save_type in ("save", "state"):
+            raw_entry = per_type.get(save_type, {})
+            entry = raw_entry if isinstance(raw_entry, dict) else {}
+
+            try:
+                uploaded = int(entry.get("uploaded_count", 0))
+            except (TypeError, ValueError):
+                uploaded = 0
+            try:
+                total = int(entry.get("total_count", 0))
+            except (TypeError, ValueError):
+                total = 0
+
+            failed_raw = entry.get("failed_files", [])
+            failed = [str(item) for item in failed_raw] if isinstance(failed_raw, list) else []
+
+            if total <= 0 and uploaded <= 0 and not failed:
+                continue
+
+            any_uploaded = any_uploaded or uploaded > 0
+            any_failed = any_failed or bool(failed)
+
+            if uploaded > 0:
+                latest_raw = local_latest_mtimes.get(save_type, 0)
+                try:
+                    latest_mtime = float(latest_raw)
+                except (TypeError, ValueError):
+                    latest_mtime = 0.0
+
+                if save_type == "save":
+                    updates["last_uploaded_save_mtime"] = latest_mtime
+                    updates["last_uploaded_local_mtime"] = latest_mtime
+                else:
+                    updates["last_uploaded_state_mtime"] = latest_mtime
+
+            debug_segments.append(
+                f"{save_type}={uploaded}/{max(total, uploaded)} failed={failed[:3]}"
             )
 
-        if self._debug_prints_enabled():
-            status = "success" if uploaded > 0 and not failed else ("partial" if uploaded > 0 else "failure")
+        if any_uploaded:
+            updates["last_uploaded_at"] = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+        if updates:
+            self._update_cloud_sync_state_for_game(game, updates)
+
+        if self._debug_prints_enabled() and debug_segments:
+            if any_uploaded and not any_failed:
+                status = "success"
+            elif any_uploaded:
+                status = "partial"
+            else:
+                status = "failure"
             print(
                 f"[DEBUG][CloudSync] Auto upload {status} title={game.get('title', '')} "
-                f"uploaded={uploaded}/{max(total, uploaded)} failed={failed[:5]}"
+                f"{' '.join(debug_segments)}"
             )
 
     def _normalize_emulators(self, value: Any) -> list[dict[str, str]]:
@@ -6627,6 +7643,9 @@ class MainWindow(QMainWindow):
             name = item.get("name")
             path = item.get("path")
             args = item.get("args")
+            save_strategy = item.get("save_strategy", "auto")
+            ignore_files = item.get("ignore_files", "")
+            ignore_extensions = item.get("ignore_extensions", "")
             save_paths = item.get("save_paths", "")
             state_paths = item.get("state_paths", "")
             if not isinstance(name, str) or not name.strip():
@@ -6635,6 +7654,12 @@ class MainWindow(QMainWindow):
                 path = ""
             if not isinstance(args, str):
                 args = "%rom%"
+            if not isinstance(save_strategy, str):
+                save_strategy = "auto"
+            if not isinstance(ignore_files, str):
+                ignore_files = ""
+            if not isinstance(ignore_extensions, str):
+                ignore_extensions = ""
             if not isinstance(save_paths, str):
                 save_paths = ""
             if not isinstance(state_paths, str):
@@ -6644,6 +7669,9 @@ class MainWindow(QMainWindow):
                     "name": name.strip(),
                     "path": path.strip(),
                     "args": args.strip() or "%rom%",
+                    "save_strategy": self._normalize_save_strategy_value(save_strategy),
+                    "ignore_files": ignore_files.strip(),
+                    "ignore_extensions": ignore_extensions.strip(),
                     "save_paths": save_paths.strip(),
                     "state_paths": state_paths.strip(),
                 }
@@ -6684,6 +7712,7 @@ class MainWindow(QMainWindow):
                 "all_platforms": True,
                 "platform_keywords": [],
                 "use_game_title_as_name": False,
+                "save_strategy": "single_file",
                 "save_directories": ["saves"],
                 "state_directories": ["states"],
             },
@@ -6694,6 +7723,7 @@ class MainWindow(QMainWindow):
                 "all_platforms": False,
                 "platform_keywords": ["playstation", "ps1"],
                 "use_game_title_as_name": False,
+                "save_strategy": "single_file",
                 "save_directories": [],
                 "state_directories": [],
             },
@@ -6704,6 +7734,7 @@ class MainWindow(QMainWindow):
                 "all_platforms": False,
                 "platform_keywords": ["playstation 2", "ps2"],
                 "use_game_title_as_name": False,
+                "save_strategy": "folder",
                 "save_directories": [],
                 "state_directories": [],
             },
@@ -6714,6 +7745,9 @@ class MainWindow(QMainWindow):
                 "all_platforms": False,
                 "platform_keywords": ["playstation portable", "psp"],
                 "use_game_title_as_name": False,
+                "save_strategy": "folder",
+                "ignore_files": ["load_undo.ppst"],
+                "ignore_extensions": [],
                 "save_directories": [],
                 "state_directories": [],
             },
@@ -6724,6 +7758,7 @@ class MainWindow(QMainWindow):
                 "all_platforms": False,
                 "platform_keywords": ["playstation 3", "ps3"],
                 "use_game_title_as_name": False,
+                "save_strategy": "folder",
                 "save_directories": [
                     "%EMULATOR_DIR%\\dev_hdd0\\home\\00000001\\savedata",
                     "%APPDATA%\\rpcs3\\dev_hdd0\\home\\00000001\\savedata",
@@ -6737,6 +7772,7 @@ class MainWindow(QMainWindow):
                 "all_platforms": False,
                 "platform_keywords": ["gamecube", "wii"],
                 "use_game_title_as_name": False,
+                "save_strategy": "single_file",
                 "save_directories": [],
                 "state_directories": [],
             },
@@ -6747,6 +7783,7 @@ class MainWindow(QMainWindow):
                 "all_platforms": False,
                 "platform_keywords": ["wii u"],
                 "use_game_title_as_name": False,
+                "save_strategy": "single_file",
                 "save_directories": [],
                 "state_directories": [],
             },
@@ -6757,6 +7794,7 @@ class MainWindow(QMainWindow):
                 "all_platforms": False,
                 "platform_keywords": ["nintendo 3ds", "3ds"],
                 "use_game_title_as_name": False,
+                "save_strategy": "single_file",
                 "save_directories": [],
                 "state_directories": [],
             },
@@ -6767,6 +7805,7 @@ class MainWindow(QMainWindow):
                 "all_platforms": False,
                 "platform_keywords": ["pico-8", "pico 8"],
                 "use_game_title_as_name": False,
+                "save_strategy": "single_file",
                 "save_directories": [],
                 "state_directories": [],
             },
@@ -6777,6 +7816,7 @@ class MainWindow(QMainWindow):
                 "all_platforms": False,
                 "platform_keywords": ["xbox"],
                 "use_game_title_as_name": False,
+                "save_strategy": "single_file",
                 "save_directories": [],
                 "state_directories": [],
             },
@@ -6787,6 +7827,7 @@ class MainWindow(QMainWindow):
                 "all_platforms": False,
                 "platform_keywords": ["switch", "nintendo switch"],
                 "use_game_title_as_name": False,
+                "save_strategy": "single_file",
                 "save_directories": [],
                 "state_directories": [],
             },
@@ -6797,6 +7838,7 @@ class MainWindow(QMainWindow):
                 "all_platforms": False,
                 "platform_keywords": ["switch", "nintendo switch"],
                 "use_game_title_as_name": False,
+                "save_strategy": "single_file",
                 "save_directories": [],
                 "state_directories": [],
             },
@@ -6807,6 +7849,7 @@ class MainWindow(QMainWindow):
                 "all_platforms": False,
                 "platform_keywords": ["switch", "nintendo switch"],
                 "use_game_title_as_name": False,
+                "save_strategy": "single_file",
                 "save_directories": [],
                 "state_directories": [],
             },
@@ -6817,6 +7860,7 @@ class MainWindow(QMainWindow):
                 "all_platforms": False,
                 "platform_keywords": ["switch", "nintendo switch"],
                 "use_game_title_as_name": False,
+                "save_strategy": "single_file",
                 "save_directories": [],
                 "state_directories": [],
             },
@@ -6827,6 +7871,7 @@ class MainWindow(QMainWindow):
                 "all_platforms": False,
                 "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
                 "use_game_title_as_name": False,
+                "save_strategy": "single_file",
                 "save_directories": [],
                 "state_directories": [],
             },
@@ -6837,6 +7882,7 @@ class MainWindow(QMainWindow):
                 "all_platforms": False,
                 "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
                 "use_game_title_as_name": False,
+                "save_strategy": "single_file",
                 "save_directories": [],
                 "state_directories": [],
             },
@@ -6847,6 +7893,7 @@ class MainWindow(QMainWindow):
                 "all_platforms": False,
                 "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
                 "use_game_title_as_name": False,
+                "save_strategy": "single_file",
                 "save_directories": [],
                 "state_directories": [],
             },
@@ -6894,6 +7941,31 @@ class MainWindow(QMainWindow):
 
             use_game_title_as_name = bool(item.get("use_game_title_as_name", False))
 
+            save_strategy = item.get("save_strategy", "auto")
+            if not isinstance(save_strategy, str):
+                save_strategy = "auto"
+            normalized_save_strategy = self._normalize_save_strategy_value(save_strategy)
+
+            ignore_files = item.get("ignore_files", [])
+            normalized_ignore_files: list[str] = []
+            if isinstance(ignore_files, list):
+                normalized_ignore_files = [
+                    file_name.strip()
+                    for file_name in ignore_files
+                    if isinstance(file_name, str) and file_name.strip()
+                ]
+
+            ignore_extensions = item.get("ignore_extensions", [])
+            normalized_ignore_extensions: list[str] = []
+            if isinstance(ignore_extensions, list):
+                normalized_ignore_extensions = [
+                    normalized
+                    for extension in ignore_extensions
+                    if isinstance(extension, str)
+                    for normalized in [self._normalize_ignore_extension_value(extension)]
+                    if normalized
+                ]
+
             save_directories = item.get("save_directories", [])
             normalized_save_directories: list[str] = []
             if isinstance(save_directories, list):
@@ -6920,6 +7992,9 @@ class MainWindow(QMainWindow):
                     "all_platforms": all_platforms,
                     "platform_keywords": normalized_keywords,
                     "use_game_title_as_name": use_game_title_as_name,
+                    "save_strategy": normalized_save_strategy,
+                    "ignore_files": normalized_ignore_files,
+                    "ignore_extensions": normalized_ignore_extensions,
                     "save_directories": normalized_save_directories,
                     "state_directories": normalized_state_directories,
                 }
@@ -7375,6 +8450,9 @@ class MainWindow(QMainWindow):
             self.emulator_name_input is None
             or self.emulator_path_input is None
             or self.emulator_args_input is None
+            or self.emulator_save_strategy_input is None
+            or self.emulator_ignore_files_input is None
+            or self.emulator_ignore_extensions_input is None
             or self.emulator_save_paths_input is None
             or self.emulator_state_paths_input is None
         ):
@@ -7384,6 +8462,9 @@ class MainWindow(QMainWindow):
             self.emulator_name_input.clear()
             self.emulator_path_input.clear()
             self.emulator_args_input.setText("%rom%")
+            self.emulator_save_strategy_input.setCurrentText("auto")
+            self.emulator_ignore_files_input.clear()
+            self.emulator_ignore_extensions_input.clear()
             self.emulator_save_paths_input.clear()
             self.emulator_state_paths_input.clear()
             return
@@ -7391,6 +8472,9 @@ class MainWindow(QMainWindow):
         self.emulator_name_input.setText(emulator["name"])
         self.emulator_path_input.setText(emulator["path"])
         self.emulator_args_input.setText(emulator["args"])
+        self.emulator_save_strategy_input.setCurrentText(self._normalize_save_strategy_value(emulator.get("save_strategy", "auto")))
+        self.emulator_ignore_files_input.setText(emulator.get("ignore_files", ""))
+        self.emulator_ignore_extensions_input.setText(emulator.get("ignore_extensions", ""))
         self.emulator_save_paths_input.setText(emulator.get("save_paths", ""))
         self.emulator_state_paths_input.setText(emulator.get("state_paths", ""))
 
@@ -7399,6 +8483,9 @@ class MainWindow(QMainWindow):
             self.emulator_name_input is None
             or self.emulator_path_input is None
             or self.emulator_args_input is None
+            or self.emulator_save_strategy_input is None
+            or self.emulator_ignore_files_input is None
+            or self.emulator_ignore_extensions_input is None
             or self.emulator_save_paths_input is None
             or self.emulator_state_paths_input is None
         ):
@@ -7410,6 +8497,9 @@ class MainWindow(QMainWindow):
 
         path = self.emulator_path_input.text().strip()
         args = self.emulator_args_input.text().strip() or "%rom%"
+        save_strategy = self._normalize_save_strategy_value(self.emulator_save_strategy_input.currentText())
+        ignore_files = self.emulator_ignore_files_input.text().strip()
+        ignore_extensions = self.emulator_ignore_extensions_input.text().strip()
         save_paths = self.emulator_save_paths_input.text().strip()
         state_paths = self.emulator_state_paths_input.text().strip()
 
@@ -7423,6 +8513,9 @@ class MainWindow(QMainWindow):
                 "name": name,
                 "path": path,
                 "args": args,
+                "save_strategy": save_strategy,
+                "ignore_files": ignore_files,
+                "ignore_extensions": ignore_extensions,
                 "save_paths": save_paths,
                 "state_paths": state_paths,
             }
@@ -7432,6 +8525,9 @@ class MainWindow(QMainWindow):
                     "name": name,
                     "path": path,
                     "args": args,
+                    "save_strategy": save_strategy,
+                    "ignore_files": ignore_files,
+                    "ignore_extensions": ignore_extensions,
                     "save_paths": save_paths,
                     "state_paths": state_paths,
                 }
