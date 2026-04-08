@@ -4,10 +4,12 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -112,3 +114,82 @@ class FirstRunSetupDialog(QDialog):
 
     def library_path(self) -> str:
         return self.library_path_input.text().strip()
+
+
+class NativeGameSettingsDialog(QDialog):
+    def __init__(
+        self,
+        parent: QWidget | None,
+        *,
+        game_title: str,
+        install_dir: Path,
+        executable_candidates: list[Path],
+        selected_executable_path: str = "",
+        existing_launch_parameters: str = "",
+        section_title_factory: callable | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"Game Settings - {game_title}")
+        self.setModal(True)
+        self.resize(700, 300)
+
+        dialog_layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        install_dir_label = QLabel(str(install_dir))
+        install_dir_label.setWordWrap(True)
+        form_layout.addRow("Install Directory", install_dir_label)
+
+        self.executable_combo = QComboBox()
+        self.executable_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        for candidate in executable_candidates:
+            try:
+                display_name = str(candidate.relative_to(install_dir))
+            except ValueError:
+                display_name = str(candidate)
+            self.executable_combo.addItem(display_name, str(candidate))
+
+        if selected_executable_path:
+            selected_index = self.executable_combo.findData(selected_executable_path)
+            if selected_index >= 0:
+                self.executable_combo.setCurrentIndex(selected_index)
+        form_layout.addRow("Executable", self.executable_combo)
+
+        dialog_layout.addLayout(form_layout)
+
+        launch_panel = QFrame()
+        launch_panel.setObjectName("panel")
+        launch_layout = QVBoxLayout(launch_panel)
+        launch_layout.setContentsMargins(12, 10, 12, 10)
+
+        panel_title = "Custom Launch Parameters"
+        if callable(section_title_factory):
+            launch_layout.addWidget(section_title_factory(panel_title))
+        else:
+            title_label = QLabel(panel_title)
+            title_label.setStyleSheet("font-size: 15px; font-weight: 600;")
+            launch_layout.addWidget(title_label)
+
+        custom_launch_form = QFormLayout()
+        self.native_launch_parameters_input = QLineEdit()
+        self.native_launch_parameters_input.setText(existing_launch_parameters)
+        custom_launch_form.addRow("Parameters", self.native_launch_parameters_input)
+        launch_layout.addLayout(custom_launch_form)
+
+        launch_hint = QLabel("Arguments are optional and appended when launching this game.")
+        launch_hint.setWordWrap(True)
+        launch_layout.addWidget(launch_hint)
+
+        dialog_layout.addWidget(launch_panel)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        dialog_layout.addWidget(buttons)
+
+    def selected_executable_path(self) -> str:
+        selected_value = self.executable_combo.currentData()
+        return selected_value.strip() if isinstance(selected_value, str) else ""
+
+    def launch_parameters(self) -> str:
+        return self.native_launch_parameters_input.text().strip()

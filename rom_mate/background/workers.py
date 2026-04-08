@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 from PySide6.QtCore import QObject, Signal
 
 if TYPE_CHECKING:
-    from .types import MainWindowProtocol
+    from ..core.types import MainWindowProtocol
 
 
 class InstallDownloadWorker(QObject):

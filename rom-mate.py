@@ -21,7 +21,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QObject, QThread, QTimer, Qt, QUrl, Signal
-from PySide6.QtGui import QCloseEvent, QDesktopServices, QPalette, QPixmap
+from PySide6.QtGui import QCloseEvent, QDesktopServices, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
@@ -49,42 +49,263 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from rom_mate.api_client import (
+from rom_mate.core import (
     api_get_bytes,
     api_get_json,
     api_post_json,
     api_post_multipart_json,
     build_auth_headers,
+    merge_config_with_defaults as resolve_merge_config_with_defaults,
+    normalize_default_emulators as resolve_normalize_default_emulators,
+    normalize_default_retroarch_cores as resolve_normalize_default_retroarch_cores,
+    normalize_emulators as resolve_normalize_emulators,
+    normalize_installed_games as resolve_normalize_installed_games,
+    load_api_token as resolve_load_api_token,
+    path_key,
+    path_within_path,
+    sanitize_path_component,
     multipart_payload,
+    save_api_token as resolve_save_api_token,
+    set_api_token as resolve_set_api_token,
+    windows_protect_data as resolve_windows_protect_data,
+    windows_unprotect_data as resolve_windows_unprotect_data,
+    write_config_file as resolve_write_config_file,
 )
-from rom_mate.cover_utils import (
+from rom_mate.library import (
+    active_download_count_after_finish,
+    apply_download_entry_install_progress,
+    apply_download_entry_progress,
+    apply_download_entry_status,
+    archive_name_for_game as resolve_archive_name_for_game,
+    auto_cloud_upload_plan,
+    build_installed_game_record as resolve_build_installed_game_record,
+    can_start_next_queued_install,
+    candidate_archive_paths_for_game as resolve_candidate_archive_paths_for_game,
+    candidate_extracted_dirs_for_game as resolve_candidate_extracted_dirs_for_game,
+    candidate_extracted_paths_for_game as resolve_candidate_extracted_paths_for_game,
+    cleanup_temporary_paths,
+    configure_ps3_install_links as resolve_configure_ps3_install_links,
+    cloud_sync_candidates_for_game,
+    cloud_sync_directory_candidates_for_game,
+    cloud_sync_state,
+    cloud_sync_state_for_game,
+    cloud_sync_state_key,
+    detected_ps3_game_id as resolve_detected_ps3_game_id,
+    directory_archive_upload_jobs,
+    directory_total_file_bytes as resolve_directory_total_file_bytes,
+    extract_zip_archive_bytes_to_directory,
+    extracted_dir_for_archive_path as resolve_extracted_dir_for_archive_path,
+    extract_archive_for_game as resolve_extract_archive_for_game,
+    file_upload_jobs,
+    filter_directories_by_mtime_window,
+    filter_files_by_mtime_window,
+    filter_upload_jobs_by_session_window,
+    is_local_newer_than_server,
+    latest_server_record,
+    library_games_without_keys as resolve_library_games_without_keys,
+    matching_installed_emulator_games as resolve_matching_installed_emulator_games,
+    native_executable_candidates_for_game as resolve_native_executable_candidates_for_game,
+    native_install_dir_for_game as resolve_native_install_dir_for_game,
+    no_matching_upload_message,
+    ps3_game_id_from_paths as resolve_ps3_game_id_from_paths,
+    ps3_game_id_from_text as resolve_ps3_game_id_from_text,
+    ps3_game_ids_for_game as resolve_ps3_game_ids_for_game,
+    ps3_games_yml_install_path as resolve_ps3_games_yml_install_path,
+    ps3_games_yml_path_for_game as resolve_ps3_games_yml_path_for_game,
+    ps3_games_yml_paths_for_game as resolve_ps3_games_yml_paths_for_game,
+    ps3_link_paths_from_game as resolve_ps3_link_paths_from_game,
+    ps3_link_plan_for_extracted_dir as resolve_ps3_link_plan_for_extracted_dir,
+    normalize_candidate_url,
+    download_count_text,
+    download_entry_detail_text,
+    download_progress_display,
+    download_speed_text,
+    download_entry_status_from_error,
+    filter_queue_by_download_entry_id,
+    find_download_entry,
+    format_size,
+    game_key,
+    hydrate_install_game_metadata as resolve_hydrate_install_game_metadata,
+    games_match_identity,
+    installed_game_record,
+    is_game_install_queued,
+    is_game_installed,
+    make_download_entry_data,
+    normalize_cloud_sync_state,
+    normalized_download_progress,
+    normalized_transfer_progress,
+    partition_active_game_sessions,
+    pending_install_key,
+    percent_text,
+    queued_install_keys,
+    remove_download_entry,
+    remove_game_files as resolve_remove_game_files,
+    uninstall_library_games as resolve_uninstall_library_games,
+    ppsspp_state_upload_jobs,
+    prepare_installed_game_without_ui as resolve_prepare_installed_game_without_ui,
+    restore_single_save_payload,
+    restore_single_state_payload,
+    retry_download_game,
+    remove_rpcs3_games_yml_entries as resolve_remove_rpcs3_games_yml_entries,
+    resolved_native_executable_path_for_game as resolve_resolved_native_executable_path_for_game,
+    rom_id_key,
+    server_content_file_name_for_game as resolve_server_content_file_name_for_game,
+    save_record_timestamp,
+    select_extracted_launch_file as resolve_select_extracted_launch_file,
+    server_records_from_payload,
+    should_extract_archive_for_game as resolve_should_extract_archive_for_game,
+    update_rpcs3_games_yml_for_install as resolve_update_rpcs3_games_yml_for_install,
+    upsert_rpcs3_games_yml_entry as resolve_upsert_rpcs3_games_yml_entry,
+    session_cloud_sync_updates,
+    should_skip_known_latest,
+    state_download_candidate_paths,
+    tar_archive_total_install_bytes as resolve_tar_archive_total_install_bytes,
+    tar_listing_line_size as resolve_tar_listing_line_size,
+    session_filtered_directory_candidates,
+    session_filtered_file_candidates,
+    session_window_for_state_upload,
+    should_reset_active_download_metrics,
+    upload_completion_message,
+    zip_directory_for_upload,
+    summarize_auto_cloud_upload_result,
+    sync_install_metadata_to_details_game as resolve_sync_install_metadata_to_details_game,
+    update_cloud_sync_state_for_game,
+)
+from rom_mate.cover import (
+    apply_cover_to_label,
+    cache_cover_image_for_game,
     cached_cover_cache_key,
+    cached_cover_for_game,
     cached_cover_path_from_game,
+    cached_cover_path_keys_for_games,
+    cleanup_cached_cover_for_game,
     cover_cache_extension_from_payload,
     cover_url_from_rom_payload,
     installed_cover_cache_key,
+    on_cover_reply,
+    queue_cover_load,
+    queue_game_cover_load,
+    rescale_details_media_for_current_sizes as resolve_rescale_details_media_for_current_sizes,
     resolve_cover_url,
+    resolved_cover_url_for_game as resolve_resolved_cover_url_for_game,
     screenshot_urls_from_game,
     screenshot_urls_from_rom_payload,
+    update_details_layout_metrics as resolve_update_details_layout_metrics,
+    update_details_screenshots as resolve_update_details_screenshots,
 )
-from rom_mate.cover_cache import cache_cover_image_for_game
-from rom_mate.cover_loader import apply_cover_to_label, on_cover_reply, queue_cover_load
-from rom_mate.cover_manager import (
-    cached_cover_for_game,
-    cached_cover_path_keys_for_games,
-    cleanup_cached_cover_for_game,
-    queue_game_cover_load,
+from rom_mate.emulator import (
+    all_retroarch_cores as resolve_all_retroarch_cores,
+    apply_launch_placeholders_to_args as resolve_apply_launch_placeholders_to_args,
+    auto_configure_emulator_settings as resolve_auto_configure_emulator_settings,
+    auto_configured_emulator_name as resolve_auto_configured_emulator_name,
+    available_emulator_name_for_platform as resolve_available_emulator_name_for_platform,
+    compatible_emulator_names_for_platform as resolve_compatible_emulator_names_for_platform,
+    default_assignable_server_platforms as resolve_default_assignable_server_platforms,
+    default_emulator_autoprofiles as resolve_default_emulator_autoprofiles,
+    default_emulator_name_for_platform as resolve_default_emulator_name_for_platform,
+    dolphin_target_platforms_for_variant as resolve_dolphin_target_platforms_for_variant,
+    dolphin_variant_label_for_game as resolve_dolphin_variant_label_for_game,
+    emulator_autoprofiles_path as resolve_emulator_autoprofiles_path,
+    emulator_entry_by_name as resolve_emulator_entry_by_name,
+    emulator_entry_has_usable_path as resolve_emulator_entry_has_usable_path,
+    emulator_profile_for_entry as resolve_emulator_profile_for_entry,
+    emulator_profile_for_game as resolve_emulator_profile_for_game,
+    install_block_reason_for_game as resolve_install_block_reason_for_game,
+    is_arcade_platform as resolve_is_arcade_platform,
+    is_emulators_platform as resolve_is_emulators_platform,
+    is_native_executable_platform as resolve_is_native_executable_platform,
+    is_ps3_emulator_entry as resolve_is_ps3_emulator_entry,
+    is_ps3_platform as resolve_is_ps3_platform,
+    is_rpcs3_emulator_name as resolve_is_rpcs3_emulator_name,
+    installed_retroarch_core_ids as resolve_installed_retroarch_core_ids,
+    launch_placeholders_for_game as build_launch_placeholders_for_game,
+    load_emulator_autoprofiles as resolve_emulator_autoprofiles,
+    load_retroarch_compatibility_map as resolve_load_retroarch_compatibility_map,
+    launchable_emulator_file as resolve_launchable_emulator_file,
+    launchable_native_game_file as resolve_launchable_native_game_file,
+    mapping_value_for_platform as resolve_mapping_value_for_platform,
+    matching_platforms_for_emulator_keywords as resolve_matching_platforms_for_emulator_keywords,
+    normalize_emulator_autoprofiles as resolve_normalize_emulator_autoprofiles,
+    normalize_ignore_extension_value as resolve_normalize_ignore_extension_value,
+    normalize_retroarch_platform_key as resolve_normalize_retroarch_platform_key,
+    normalize_save_strategy_value as resolve_normalize_save_strategy_value,
+    retroarch_core_id_from_file_name as resolve_retroarch_core_id_from_file_name,
+    retroarch_core_argument_path as resolve_retroarch_core_argument_path,
+    retroarch_core_id_from_name as resolve_retroarch_core_id_from_name,
+    retroarch_core_list_path as resolve_retroarch_core_list_path,
+    retroarch_core_value as resolve_retroarch_core_value,
+    retroarch_cores_for_platform as resolve_retroarch_cores_for_platform,
+    retroarch_markdown_label as resolve_retroarch_markdown_label,
+    retroarch_platform_tokens as resolve_retroarch_platform_tokens,
+    retroarch_system_keys_for_platform as resolve_retroarch_system_keys_for_platform,
+    prepare_emulator_launch_command as resolve_prepare_emulator_launch_command,
+    prepare_native_launch_command as resolve_prepare_native_launch_command,
+    process_exited_early_message as resolve_process_exited_early_message,
+    resolve_launch_arguments_for_game as resolve_launch_arguments_for_game,
+    resolve_rom_path_for_game as resolve_rom_path_for_game,
+    resolved_emulator_entry_for_game as resolve_resolved_emulator_entry_for_game,
+    resolved_ignore_basenames_for_emulator as resolve_resolved_ignore_basenames_for_emulator,
+    resolved_ignore_extensions_for_emulator as resolve_resolved_ignore_extensions_for_emulator,
+    resolved_save_strategy_for_emulator as resolve_resolved_save_strategy_for_emulator,
+    select_emulator_executable_path as resolve_select_emulator_executable_path,
+    normalized_retroarch_core_args as resolve_normalized_retroarch_core_args,
+    split_configured_paths as resolve_split_configured_paths,
+    split_launch_template_args as resolve_split_launch_template_args,
+    strip_wrapping_quotes as resolve_strip_wrapping_quotes,
+    validate_launch_placeholders as resolve_validate_launch_placeholders,
 )
-from rom_mate.dialogs import FirstRunSetupDialog
-from rom_mate.path_utils import path_key, path_within_path, sanitize_path_component
-from rom_mate.server_catalog import (
+from rom_mate.ui import (
+    FirstRunSetupDialog,
+    NativeGameSettingsDialog,
+    apply_theme_inline_styles as resolve_apply_theme_inline_styles,
+    build_downloads_page,
+    emulator_form_state_for_row,
+    make_emulator_entry_payload,
+    is_hidden_library_platform as resolve_is_hidden_library_platform,
+    make_download_entry_widget,
+    make_game_card as resolve_make_game_card,
+    mapping_list_entries,
+    normalized_theme_choice as resolve_normalized_theme_choice,
+    open_game_details as resolve_open_game_details,
+    preferred_emulator_selection,
+    refresh_downloads_page,
+    remove_emulator_default_mappings,
+    resolved_theme_variant as resolve_resolved_theme_variant,
+    selected_retroarch_core,
+    update_details_action_buttons as resolve_update_details_action_buttons,
+    theme_color as resolve_theme_color,
+    theme_colors as resolve_theme_colors,
+    theme_stylesheet as resolve_theme_stylesheet,
+    visible_library_games as resolve_visible_library_games,
+    upsert_emulator_entry,
+)
+from rom_mate.server import (
+    account_status_text,
+    apply_server_status,
+    cache_rom_id_for_details_game as resolve_cache_rom_id_for_details_game,
+    classify_connection_failure,
+    clear_cached_rom_id_for_details_game as resolve_clear_cached_rom_id_for_details_game,
+    clear_server_connection_data as resolve_clear_server_connection_data,
+    clear_server_search,
     connected_username,
+    credentials_present,
+    details_rom_id_cache as resolve_details_rom_id_cache,
+    details_rom_id_cache_key as resolve_details_rom_id_cache_key,
+    fetch_connection_payloads,
     fetch_platform_rom_items,
+    fetch_server_rom_payload as resolve_fetch_server_rom_payload,
     games_from_rom_items,
+    on_server_platform_selected,
+    on_server_search_changed,
+    populate_server_platforms as resolve_populate_server_platforms,
+    render_server_games,
+    resolve_rom_id_for_game as resolve_resolve_rom_id_for_game,
+    resolved_rom_file_name_for_game as resolve_resolved_rom_file_name_for_game,
+    rom_file_name_from_payload as resolve_rom_file_name_from_payload,
+    server_base_url,
     server_platform_ids,
 )
-from rom_mate.server_connection import classify_connection_failure
-from rom_mate.workers import AutoCloudSaveUploadWorker, InstallDownloadWorker, InstallFinalizeWorker
+from rom_mate.background import AutoCloudSaveUploadWorker, InstallDownloadWorker, InstallFinalizeWorker
 
 
 class MainWindow(QMainWindow):
@@ -446,45 +667,10 @@ class MainWindow(QMainWindow):
         return page
 
     def _build_downloads_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setSpacing(10)
-
-        header = QLabel("Downloads")
-        header.setStyleSheet("font-size: 20px; font-weight: 700;")
-        layout.addWidget(header)
-
-        content_frame = QFrame()
-        content_frame.setObjectName("panel")
-        content_layout = QVBoxLayout(content_frame)
-        content_layout.setContentsMargins(12, 10, 12, 10)
-        content_layout.setSpacing(10)
-
-        empty_label = QLabel("No downloads yet.")
-        empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        empty_label.setStyleSheet("color: #6272a4; font-size: 16px; font-weight: 600;")
+        page, empty_label, scroll, list_layout = build_downloads_page()
         self.downloads_empty_label = empty_label
-        content_layout.addWidget(empty_label)
-
-        scroll = QScrollArea()
-        scroll.setObjectName("downloadsScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.viewport().setObjectName("downloadsScrollViewport")
         self.downloads_scroll = scroll
-
-        scroll_content = QWidget()
-        scroll_content.setObjectName("downloadsContent")
-        list_layout = QVBoxLayout(scroll_content)
-        list_layout.setContentsMargins(0, 0, 0, 0)
-        list_layout.setSpacing(10)
         self.downloads_list_layout = list_layout
-
-        scroll.setWidget(scroll_content)
-        content_layout.addWidget(scroll)
-        layout.addWidget(content_frame)
-
         self._refresh_downloads_page()
         return page
 
@@ -883,25 +1069,10 @@ class MainWindow(QMainWindow):
         return label
 
     def _normalized_theme_choice(self, value: Any) -> str:
-        if not isinstance(value, str):
-            return "system"
-        normalized = value.strip().casefold()
-        if normalized in {"system", "dark", "light"}:
-            return normalized
-        return "system"
+        return resolve_normalized_theme_choice(value)
 
     def _resolved_theme_variant(self, theme_choice: str) -> str:
-        if theme_choice != "system":
-            return theme_choice
-        app = QApplication.instance()
-        if app is None:
-            return "dark"
-        palette = app.palette()
-        if isinstance(palette, QPalette):
-            window_color = palette.color(QPalette.ColorRole.Window)
-            if window_color.value() < 128:
-                return "dark"
-        return "light"
+        return resolve_resolved_theme_variant(theme_choice, QApplication.instance())
 
     def _debug_prints_enabled(self) -> bool:
         value = self.config.get("debug_prints", True)
@@ -956,257 +1127,25 @@ class MainWindow(QMainWindow):
         return 3
 
     def _theme_colors(self, theme_variant: str) -> dict[str, str]:
-        if theme_variant == "light":
-            return {
-                "window": "#f6f6fb",
-                "text": "#282a36",
-                "surface": "#e9eaf3",
-                "surface_alt": "#dde0ee",
-                "surface_press": "#cfd4e6",
-                "border": "#aeb7d6",
-                "input_bg": "#ffffff",
-                "input_text": "#282a36",
-                "accent": "#268bd2",
-                "active": "#7f5fd1",
-                "active_text": "#ffffff",
-                "success": "#1f9d55",
-                "muted": "#5f6aa8",
-                "error": "#d13f4b",
-                "warning": "#c37a2c",
-            }
-        return {
-            "window": "#282a36",
-            "text": "#f8f8f2",
-            "surface": "#44475a",
-            "surface_alt": "#535873",
-            "surface_press": "#3b3f51",
-            "border": "#6272a4",
-            "input_bg": "#282a36",
-            "input_text": "#f8f8f2",
-            "accent": "#8be9fd",
-            "active": "#bd93f9",
-            "active_text": "#282a36",
-            "success": "#50fa7b",
-            "muted": "#6272a4",
-            "error": "#ff5555",
-            "warning": "#ffb86c",
-        }
+        return resolve_theme_colors(theme_variant)
 
     def _theme_color(self, key: str, fallback: str) -> str:
-        value = self.active_theme_colors.get(key, "") if isinstance(self.active_theme_colors, dict) else ""
-        if isinstance(value, str) and value.strip():
-            return value
-        return fallback
+        return resolve_theme_color(self.active_theme_colors, key, fallback)
 
     def _theme_stylesheet(self) -> str:
-        colors = self.active_theme_colors
-        return f"""
-            QMainWindow {{
-                background-color: {colors['window']};
-            }}
-            QDialog,
-            QMessageBox,
-            QInputDialog,
-            QFileDialog,
-            QColorDialog,
-            QFontDialog,
-            QDialog QWidget,
-            QMessageBox QWidget,
-            QInputDialog QWidget,
-            QFileDialog QWidget,
-            QColorDialog QWidget,
-            QFontDialog QWidget {{
-                background-color: {colors['surface']};
-                color: {colors['text']};
-            }}
-            QMessageBox QLabel,
-            QDialog QLabel,
-            QInputDialog QLabel,
-            QFileDialog QLabel,
-            QColorDialog QLabel,
-            QFontDialog QLabel {{
-                color: {colors['text']};
-            }}
-            QMenu {{
-                background-color: {colors['surface']};
-                color: {colors['text']};
-                border: 1px solid {colors['border']};
-            }}
-            QMenu::item:selected {{
-                background-color: {colors['surface_alt']};
-                color: {colors['text']};
-            }}
-            QToolTip {{
-                background-color: {colors['surface']};
-                color: {colors['text']};
-                border: 1px solid {colors['border']};
-            }}
-            QLabel {{
-                color: {colors['text']};
-            }}
-            QCheckBox {{
-                color: {colors['text']};
-            }}
-            QPushButton {{
-                background-color: {colors['surface']};
-                color: {colors['text']};
-                border: 1px solid {colors['border']};
-                border-radius: 8px;
-                padding: 8px 14px;
-                font-weight: 600;
-            }}
-            QPushButton:hover {{
-                border-color: {colors['accent']};
-                background-color: {colors['surface_alt']};
-            }}
-            QPushButton:pressed {{
-                background-color: {colors['surface_press']};
-                border-color: {colors['accent']};
-            }}
-            QPushButton:checked {{
-                background-color: {colors['active']};
-                border-color: {colors['active']};
-                color: {colors['active_text']};
-            }}
-            QWidget#downloadStatusWidget {{
-                background-color: {colors['surface']};
-                border: 1px solid {colors['border']};
-                border-radius: 8px;
-            }}
-            QProgressBar {{
-                border: 1px solid {colors['border']};
-                border-radius: 6px;
-                background-color: {colors['window']};
-                color: {colors['text']};
-                text-align: center;
-            }}
-            QProgressBar::chunk {{
-                background-color: {colors['success']};
-                border-radius: 5px;
-            }}
-            QPushButton#gameCard {{
-                text-align: left;
-                background-color: {colors['surface']};
-                border: 1px solid {colors['border']};
-                border-radius: 10px;
-                padding: 0;
-            }}
-            QPushButton#gameCard:hover {{
-                border-color: {colors['accent']};
-            }}
-            QListWidget {{
-                background-color: {colors['surface']};
-                color: {colors['text']};
-                border: 1px solid {colors['border']};
-                border-radius: 8px;
-                padding: 4px;
-            }}
-            QListWidget::item:selected {{
-                background-color: {colors['border']};
-                color: {colors['text']};
-                border-radius: 5px;
-            }}
-            QListWidget#defaultMappingList::item:alternate {{
-                background-color: {colors['surface_alt']};
-            }}
-            QLineEdit, QComboBox {{
-                background-color: {colors['input_bg']};
-                color: {colors['input_text']};
-                border: 1px solid {colors['border']};
-                border-radius: 6px;
-                padding: 6px 8px;
-            }}
-            QLineEdit:focus, QComboBox:focus {{
-                border: 1px solid {colors['accent']};
-            }}
-            QFrame#serverSearchContainer {{
-                background-color: {colors['input_bg']};
-                border: 1px solid {colors['border']};
-                border-radius: 6px;
-            }}
-            QLineEdit#serverSearchInput {{
-                background-color: transparent;
-                border: none;
-                padding: 6px 2px 6px 8px;
-            }}
-            QPushButton#serverSearchClearButton {{
-                background-color: transparent;
-                border: none;
-                color: {colors['text']};
-                font-weight: 700;
-                border-radius: 0;
-                padding: 0;
-            }}
-            QPushButton#serverSearchClearButton:hover {{
-                border: none;
-                color: {colors['text']};
-                background-color: {colors['surface']};
-            }}
-            QPushButton#serverSearchClearButton:pressed {{
-                border: none;
-                color: {colors['text']};
-                background-color: {colors['surface_press']};
-            }}
-            QFrame#panel {{
-                background-color: {colors['surface']};
-                border: 1px solid {colors['border']};
-                border-radius: 10px;
-            }}
-            QComboBox QAbstractItemView {{
-                background-color: {colors['surface']};
-                color: {colors['text']};
-                border: 1px solid {colors['border']};
-                selection-background-color: {colors['border']};
-                selection-color: {colors['text']};
-            }}
-            QScrollArea#libraryScroll,
-            QScrollArea#serverGamesScroll,
-            QScrollArea#downloadsScroll {{
-                background-color: transparent;
-                border: none;
-            }}
-            QWidget#libraryScrollViewport,
-            QWidget#serverGamesScrollViewport,
-            QWidget#downloadsScrollViewport,
-            QWidget#libraryGridContent,
-            QWidget#serverGamesContent,
-            QWidget#downloadsContent {{
-                background-color: transparent;
-            }}
-            QListWidget#serverPlatformsList {{
-                background-color: transparent;
-            }}
-            QListWidget#serverPlatformsList::item:hover {{
-                background-color: {colors['surface_alt']};
-                border-radius: 5px;
-            }}
-        """
+        return resolve_theme_stylesheet(self.active_theme_colors)
 
     def _apply_theme_inline_styles(self) -> None:
-        text = self._theme_color("text", "#f8f8f2")
-        muted = self._theme_color("muted", "#6272a4")
-        accent = self._theme_color("accent", "#8be9fd")
-        window = self._theme_color("window", "#282a36")
-        border = self._theme_color("border", "#6272a4")
-
-        if self.download_count_label is not None:
-            self.download_count_label.setStyleSheet(f"font-weight: 600; color: {text};")
-        if self.download_speed_label is not None:
-            self.download_speed_label.setStyleSheet(f"font-weight: 600; color: {accent};")
-        if self.account_status_label is not None:
-            self.account_status_label.setStyleSheet(f"font-weight: 600; color: {text};")
-        if self.library_empty_label is not None:
-            self.library_empty_label.setStyleSheet(f"color: {muted}; font-size: 16px; font-weight: 600;")
-        if self.downloads_empty_label is not None:
-            self.downloads_empty_label.setStyleSheet(f"color: {muted}; font-size: 16px; font-weight: 600;")
-        if self.details_cover_label is not None:
-            self.details_cover_label.setStyleSheet(
-                f"background-color: {window}; border: 1px dashed {border}; border-radius: 8px; font-size: 20px;"
-            )
-        for screenshot_label in self.details_screenshot_labels:
-            screenshot_label.setStyleSheet(
-                f"background-color: {window}; border: 1px dashed {border}; border-radius: 8px;"
-            )
+        resolve_apply_theme_inline_styles(
+            self.active_theme_colors,
+            download_count_label=self.download_count_label,
+            download_speed_label=self.download_speed_label,
+            account_status_label=self.account_status_label,
+            library_empty_label=self.library_empty_label,
+            downloads_empty_label=self.downloads_empty_label,
+            details_cover_label=self.details_cover_label,
+            screenshot_labels=self.details_screenshot_labels,
+        )
 
     def _apply_theme(self, theme_choice: str) -> None:
         normalized = self._normalized_theme_choice(theme_choice)
@@ -1286,111 +1225,19 @@ class MainWindow(QMainWindow):
         return self._config_dir() / "token.bin"
 
     def _windows_protect_data(self, raw: bytes) -> bytes:
-        class DataBlob(ctypes.Structure):
-            _fields_ = [("cbData", ctypes.c_uint32), ("pbData", ctypes.POINTER(ctypes.c_byte))]
-
-        if not raw:
-            return b""
-
-        in_buffer = ctypes.create_string_buffer(raw, len(raw))
-        in_blob = DataBlob(len(raw), ctypes.cast(in_buffer, ctypes.POINTER(ctypes.c_byte)))
-        out_blob = DataBlob()
-
-        if not ctypes.windll.crypt32.CryptProtectData(
-            ctypes.byref(in_blob),
-            None,
-            None,
-            None,
-            None,
-            0,
-            ctypes.byref(out_blob),
-        ):
-            raise OSError("Could not securely protect token")
-
-        try:
-            return ctypes.string_at(out_blob.pbData, out_blob.cbData)
-        finally:
-            ctypes.windll.kernel32.LocalFree(out_blob.pbData)
+        return resolve_windows_protect_data(raw)
 
     def _windows_unprotect_data(self, protected: bytes) -> bytes:
-        class DataBlob(ctypes.Structure):
-            _fields_ = [("cbData", ctypes.c_uint32), ("pbData", ctypes.POINTER(ctypes.c_byte))]
-
-        if not protected:
-            return b""
-
-        in_buffer = ctypes.create_string_buffer(protected, len(protected))
-        in_blob = DataBlob(len(protected), ctypes.cast(in_buffer, ctypes.POINTER(ctypes.c_byte)))
-        out_blob = DataBlob()
-
-        if not ctypes.windll.crypt32.CryptUnprotectData(
-            ctypes.byref(in_blob),
-            None,
-            None,
-            None,
-            None,
-            0,
-            ctypes.byref(out_blob),
-        ):
-            raise OSError("Could not securely unprotect token")
-
-        try:
-            return ctypes.string_at(out_blob.pbData, out_blob.cbData)
-        finally:
-            ctypes.windll.kernel32.LocalFree(out_blob.pbData)
+        return resolve_windows_unprotect_data(protected)
 
     def _load_api_token(self) -> str:
-        token_file = self._token_file()
-        if not token_file.exists():
-            return ""
-
-        try:
-            payload = token_file.read_bytes()
-        except OSError:
-            return ""
-
-        if not payload:
-            return ""
-
-        try:
-            if sys.platform.startswith("win"):
-                raw = self._windows_unprotect_data(payload)
-            else:
-                raw = base64.b64decode(payload, validate=True)
-            return raw.decode("utf-8")
-        except (OSError, ValueError, UnicodeDecodeError):
-            return ""
+        return resolve_load_api_token(self._token_file())
 
     def _save_api_token(self, token: str) -> bool:
-        normalized = token.strip()
-        token_file = self._token_file()
-
-        if not normalized:
-            try:
-                if token_file.exists():
-                    token_file.unlink()
-                return True
-            except OSError:
-                return False
-
-        try:
-            self._config_dir().mkdir(parents=True, exist_ok=True)
-            raw = normalized.encode("utf-8")
-            if sys.platform.startswith("win"):
-                payload = self._windows_protect_data(raw)
-            else:
-                payload = base64.b64encode(raw)
-            token_file.write_bytes(payload)
-            return True
-        except OSError:
-            return False
+        return resolve_save_api_token(self._config_dir(), self._token_file(), token)
 
     def _set_api_token(self, token: str) -> bool:
-        normalized = token.strip()
-        saved = self._save_api_token(normalized)
-        if saved:
-            self.config["api_token"] = normalized
-        return saved
+        return resolve_set_api_token(self.config, token, save_token=self._save_api_token)
 
     def _load_config(self) -> dict[str, Any]:
         defaults = self._config_defaults()
@@ -1404,28 +1251,15 @@ class MainWindow(QMainWindow):
         except (json.JSONDecodeError, OSError):
             return defaults
 
-        if not isinstance(content, dict):
-            return defaults
-
-        merged = defaults.copy()
-        for key, default_value in defaults.items():
-            value = content.get(key)
-            if isinstance(default_value, str) and isinstance(value, str):
-                merged[key] = value
-            elif isinstance(default_value, bool) and isinstance(value, bool):
-                merged[key] = value
-            elif isinstance(default_value, int) and not isinstance(default_value, bool) and isinstance(value, int):
-                merged[key] = value
-            elif key == "emulators":
-                merged[key] = self._normalize_emulators(value)
-            elif key == "default_emulators":
-                merged[key] = self._normalize_default_emulators(value)
-            elif key == "default_retroarch_cores":
-                merged[key] = self._normalize_default_retroarch_cores(value)
-            elif key == "installed_games":
-                merged[key] = self._normalize_installed_games(value)
-            elif key == "cloud_sync_state":
-                merged[key] = self._normalize_cloud_sync_state(value)
+        merged = resolve_merge_config_with_defaults(
+            defaults,
+            content,
+            normalize_emulators=self._normalize_emulators,
+            normalize_default_emulators=self._normalize_default_emulators,
+            normalize_default_retroarch_cores=self._normalize_default_retroarch_cores,
+            normalize_installed_games=self._normalize_installed_games,
+            normalize_cloud_sync_state=self._normalize_cloud_sync_state,
+        )
 
         stored_token = self._load_api_token()
         if stored_token:
@@ -1438,8 +1272,6 @@ class MainWindow(QMainWindow):
                 migrated["api_token"] = ""
                 self._save_config(migrated)
 
-        if "first_run_completed" not in content:
-            merged["first_run_completed"] = bool(content)
         return merged
 
     def _collect_settings(self) -> dict[str, Any]:
@@ -1596,16 +1428,7 @@ class MainWindow(QMainWindow):
         self._update_top_bar_identity()
 
     def _clear_server_connection_data(self) -> None:
-        self.server_connected = False
-        self.server_platform_ids = {}
-        self.server_games_by_platform = {}
-        self.server_rom_payloads = {}
-        if self.server_platforms_list is not None:
-            self.server_platforms_list.clear()
-            self._resize_server_platform_list()
-        self._refresh_emulator_views()
-        if self.server_games_grid is not None:
-            self._clear_layout(self.server_games_grid)
+        resolve_clear_server_connection_data(self)
 
     def _resize_server_platform_list(self) -> None:
         if self.server_platforms_list is None:
@@ -1625,24 +1448,13 @@ class MainWindow(QMainWindow):
     def _update_top_bar_identity(self) -> None:
         if self.account_status_label is None:
             return
-        username = self.config.get("username", "")
-        if isinstance(username, str) and username.strip() and self._server_connected():
-            self.account_status_label.setText(f"Logged in as: {username.strip()}")
-            return
-        self.account_status_label.setText("Offline")
+        self.account_status_label.setText(account_status_text(self.config, self._server_connected()))
 
     def _credentials_present(self) -> bool:
-        server_url = self.config.get("server_url", "")
-        api_token = self.config.get("api_token", "")
-        if not isinstance(server_url, str) or not isinstance(api_token, str):
-            return False
-        return bool(server_url.strip() and api_token.strip())
+        return credentials_present(self.config)
 
     def _server_base_url(self) -> str:
-        server_url = self.config.get("server_url", "")
-        if not isinstance(server_url, str):
-            return ""
-        return server_url.strip().rstrip("/")
+        return server_base_url(self.config)
 
     def _resolve_cover_url(self, value: Any) -> str:
         return resolve_cover_url(value, self._server_base_url())
@@ -1669,21 +1481,12 @@ class MainWindow(QMainWindow):
         queue_game_cover_load(self, game, label)
 
     def _resolved_cover_url_for_game(self, game: dict[str, str]) -> str:
-        cover_url_value = game.get("cover_url", "")
-        if isinstance(cover_url_value, str):
-            resolved = self._resolve_cover_url(cover_url_value)
-            if resolved:
-                return resolved
-
-        rom_id_value = game.get("rom_id", "")
-        rom_id = rom_id_value.strip() if isinstance(rom_id_value, str) else ""
-        if not rom_id:
-            return ""
-
-        payload = self.server_rom_payloads.get(rom_id)
-        if isinstance(payload, dict):
-            return self._cover_url_from_rom_payload(payload)
-        return ""
+        return resolve_resolved_cover_url_for_game(
+            game,
+            self.server_rom_payloads,
+            resolve_cover_url=self._resolve_cover_url,
+            cover_url_from_rom_payload=self._cover_url_from_rom_payload,
+        )
 
     def _installed_cover_cache_key(self, game: dict[str, str]) -> str:
         return installed_cover_cache_key(game)
@@ -1712,63 +1515,13 @@ class MainWindow(QMainWindow):
         return True
 
     def _update_details_screenshots(self, game: dict[str, str]) -> None:
-        if not self.details_screenshot_labels:
-            return
-        screenshot_urls = self._screenshot_urls_from_game(game)
-        for index, label in enumerate(self.details_screenshot_labels):
-            label.clear()
-            if index < len(screenshot_urls):
-                label.setVisible(True)
-                self._queue_cover_load(screenshot_urls[index], label)
-            else:
-                label.setVisible(False)
+        resolve_update_details_screenshots(self, game)
 
     def _update_details_layout_metrics(self) -> None:
-        if self.details_content_frame is None:
-            return
-
-        content_width = self.details_content_frame.width()
-        if content_width <= 0:
-            content_width = self.width() - 64
-        content_width = max(content_width, 900)
-
-        cover_width = max(300, min(780, int(content_width * 0.36)))
-        cover_height = max(400, min(1040, int(cover_width * 1.35)))
-        if self.details_cover_label is not None:
-            self.details_cover_label.setFixedSize(cover_width, cover_height)
-
-        screenshot_width = max(210, min(520, int(content_width * 0.25)))
-        screenshot_height = max(118, min(320, int(screenshot_width * 0.62)))
-        if self.details_screenshots_scroll is not None:
-            self.details_screenshots_scroll.setFixedWidth(screenshot_width + 28)
-        for label in self.details_screenshot_labels:
-            label.setFixedSize(screenshot_width, screenshot_height)
-
-        if self.details_description_label is not None:
-            description_width = max(420, min(1600, int(content_width * 0.66)))
-            self.details_description_label.setMaximumWidth(description_width)
-
-        self._rescale_details_media_for_current_sizes()
+        resolve_update_details_layout_metrics(self)
 
     def _rescale_details_media_for_current_sizes(self) -> None:
-        game = self.current_details_game
-        if game is None:
-            return
-
-        if self.details_cover_label is not None:
-            self._queue_game_cover_load(game, self.details_cover_label)
-
-        screenshot_urls = self._screenshot_urls_from_game(game)
-        for index, label in enumerate(self.details_screenshot_labels):
-            if index >= len(screenshot_urls):
-                continue
-            screenshot_url = screenshot_urls[index].strip()
-            if not screenshot_url:
-                continue
-            if screenshot_url in self.cover_cache:
-                self._apply_cover_to_label(label, self.cover_cache[screenshot_url])
-            else:
-                self._queue_cover_load(screenshot_url, label)
+        resolve_rescale_details_media_for_current_sizes(self)
 
     def _apply_cover_to_label(self, label: QLabel, pixmap: QPixmap | None) -> None:
         apply_cover_to_label(label, pixmap)
@@ -1817,12 +1570,7 @@ class MainWindow(QMainWindow):
         return api_post_json(base_url, api_token, path, payload, params)
 
     def _set_server_status(self, text: str, color: str | None = None) -> None:
-        if self.server_status_label is None:
-            return
-        self.server_status_label.setText(text)
-        if color is None:
-            color = self._theme_color("muted", "#6272a4")
-        self.server_status_label.setStyleSheet(f"color: {color};")
+        apply_server_status(self.server_status_label, text, color, self._theme_color("muted", "#6272a4"))
 
     def _connect_to_server(self, checked: bool = False, show_errors: bool = True) -> None:
         del checked
@@ -1835,8 +1583,7 @@ class MainWindow(QMainWindow):
         self._set_server_status("Connecting...", self._theme_color("accent", "#8be9fd"))
         last_error: Exception | None = None
         try:
-            me = self._api_get("/api/users/me")
-            platforms = self._api_get("/api/platforms")
+            me, platforms = fetch_connection_payloads(self._api_get)
             self.server_connected = True
             self._apply_connected_user(me)
             self._populate_server_platforms(platforms)
@@ -1867,49 +1614,16 @@ class MainWindow(QMainWindow):
         self.config["username"] = username
 
     def _populate_server_platforms(self, payload: Any) -> None:
-        if self.server_platforms_list is None:
-            return
-        platform_ids = server_platform_ids(payload)
-        if not platform_ids:
-            self.server_platforms_list.clear()
-            self.server_platform_ids = {}
-            self._refresh_emulator_views()
-            return
-
-        self.server_platforms_list.clear()
-        self.server_platform_ids = platform_ids
-        self.server_games_by_platform = {}
-        self.server_rom_payloads = {}
-
-        for display_label in self.server_platform_ids:
-            self.server_platforms_list.addItem(display_label)
-
-        if self.server_platforms_list.count() > 0:
-            self.server_platforms_list.setCurrentRow(0)
-        self._resize_server_platform_list()
-        self._refresh_emulator_views()
+        resolve_populate_server_platforms(self, payload, server_platform_ids)
 
     def _on_server_platform_selected(self, platform_label: str) -> None:
-        if not platform_label:
-            return
-        if platform_label not in self.server_games_by_platform:
-            self._load_server_games(platform_label)
-        self._render_server_games(platform_label)
+        on_server_platform_selected(self, platform_label)
 
     def _on_server_search_changed(self, search_text: str) -> None:
-        if self.server_search_clear_button is not None:
-            self.server_search_clear_button.setVisible(bool(search_text.strip()))
-        if self.server_platforms_list is None:
-            return
-        selected_item = self.server_platforms_list.currentItem()
-        if selected_item is None:
-            return
-        self._render_server_games(selected_item.text())
+        on_server_search_changed(self, search_text)
 
     def _clear_server_search(self) -> None:
-        if self.server_search_input is None:
-            return
-        self.server_search_input.clear()
+        clear_server_search(self)
 
     def _load_server_games(self, platform_label: str) -> None:
         if not self.server_connected:
@@ -1938,15 +1652,9 @@ class MainWindow(QMainWindow):
     def _save_config(self, config: dict[str, Any]) -> bool:
         config_dir = self._config_dir()
         config_file = self._config_file()
-        serialized = config.copy()
-        serialized["api_token"] = ""
 
         try:
-            config_dir.mkdir(parents=True, exist_ok=True)
-            config_file.write_text(
-                json.dumps(serialized, indent=2, sort_keys=True),
-                encoding="utf-8",
-            )
+            resolve_write_config_file(config_dir, config_file, config)
             return True
         except OSError as error:
             if self.settings_status_label is not None:
@@ -1965,36 +1673,7 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(config_dir)))
 
     def _make_game_card(self, game: dict[str, str], source: str) -> QPushButton:
-        frame = QPushButton()
-        frame.setObjectName("gameCard")
-        frame.setFixedSize(180, 250)
-        frame.clicked.connect(lambda: self._open_game_details(game, source))
-
-        layout = QVBoxLayout(frame)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
-
-        cover = QLabel("Cover Art")
-        cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        cover.setFixedHeight(170)
-        cover.setStyleSheet(
-            f"background-color: {self._theme_color('window', '#282a36')}; "
-            f"border: 1px dashed {self._theme_color('border', '#6272a4')}; border-radius: 6px;"
-        )
-
-        self._queue_game_cover_load(game, cover)
-        layout.addWidget(cover)
-
-        title_label = QLabel(game["title"])
-        title_label.setWordWrap(True)
-        title_label.setStyleSheet("font-weight: 600;")
-        layout.addWidget(title_label)
-
-        platform_label = QLabel(game["platform"])
-        platform_label.setStyleSheet(f"color: {self._theme_color('muted', '#6272a4')};")
-        layout.addWidget(platform_label)
-
-        return frame
+        return resolve_make_game_card(self, game, source)
 
     def _refresh_library_grid(self) -> None:
         if not hasattr(self, "library_grid") or self.library_scroll is None:
@@ -2018,42 +1697,13 @@ class MainWindow(QMainWindow):
             self.library_grid.addWidget(card, row, col)
 
     def _visible_library_games(self) -> list[dict[str, str]]:
-        visible_games = [game for game in self.library_games if not self._is_hidden_library_platform(game)]
-        return sorted(
-            visible_games,
-            key=lambda game: (
-                game.get("title", "").strip().casefold(),
-                game.get("platform", "").strip().casefold(),
-            ),
-        )
+        return resolve_visible_library_games(self.library_games)
 
     def _is_hidden_library_platform(self, game: dict[str, str]) -> bool:
-        platform_value = game.get("platform", "")
-        platform = platform_value.strip().casefold() if isinstance(platform_value, str) else ""
-        return platform in {"emulator", "emulators"}
+        return resolve_is_hidden_library_platform(game)
 
     def _render_server_games(self, platform: str) -> None:
-        if self.server_games_grid is None or self.server_games_scroll is None:
-            return
-        games = self.server_games_by_platform.get(platform, [])
-        query = ""
-        if self.server_search_input is not None:
-            query = self.server_search_input.text().strip().casefold()
-        if query:
-            filtered_games: list[dict[str, str]] = []
-            for game in games:
-                title = game.get("title", "").casefold()
-                game_platform = game.get("platform", "").casefold()
-                if query in title or query in game_platform:
-                    filtered_games.append(game)
-            games = filtered_games
-        self._clear_layout(self.server_games_grid)
-        columns = self._grid_columns_for_width(self.server_games_scroll, self.server_games_grid)
-        for i, game in enumerate(games):
-            card = self._make_game_card(game, "server")
-            row = i // columns
-            col = i % columns
-            self.server_games_grid.addWidget(card, row, col)
+        render_server_games(self, platform)
 
     def _grid_columns_for_width(self, scroll: QScrollArea, grid: QGridLayout) -> int:
         viewport_width = scroll.viewport().width()
@@ -2069,29 +1719,19 @@ class MainWindow(QMainWindow):
         return max(1, (usable_width + spacing) // column_span)
 
     def _game_key(self, game: dict[str, str]) -> tuple[str, str]:
-        return (game.get("title", "").strip().lower(), game.get("platform", "").strip().lower())
+        return game_key(game)
 
     def _rom_id_key(self, game: dict[str, str]) -> str:
-        rom_id_value = game.get("rom_id", "")
-        if not isinstance(rom_id_value, str):
-            return ""
-        return rom_id_value.strip().casefold()
+        return rom_id_key(game)
 
     def _games_match_identity(self, left: dict[str, str], right: dict[str, str]) -> bool:
-        left_rom_id = self._rom_id_key(left)
-        right_rom_id = self._rom_id_key(right)
-        if left_rom_id and right_rom_id:
-            return left_rom_id == right_rom_id
-        return self._game_key(left) == self._game_key(right)
+        return games_match_identity(left, right)
 
     def _is_game_installed(self, game: dict[str, str]) -> bool:
-        return any(self._games_match_identity(installed, game) for installed in self.library_games)
+        return is_game_installed(game, self.library_games)
 
     def _installed_game_record(self, game: dict[str, str]) -> dict[str, str] | None:
-        for installed in self.library_games:
-            if self._games_match_identity(installed, game):
-                return installed
-        return None
+        return installed_game_record(game, self.library_games)
 
     def _persist_installed_games(self) -> bool:
         self.library_games = self._normalize_installed_games(self.library_games)
@@ -2112,48 +1752,23 @@ class MainWindow(QMainWindow):
         return True
 
     def _register_installed_game(self, game: dict[str, str], archive_path: Path) -> None:
-        extracted_path = game.get("extracted_path", "").strip()
-        stored_archive_path = "" if extracted_path else str(archive_path)
-        rom_id = game.get("rom_id", "").strip()
-        resolved_cover_url = self._resolved_cover_url_for_game(game)
-        cached_cover_path = self._cache_cover_image_for_game(game)
-        ps3_links_value = game.get("ps3_links", "")
-        ps3_links = ps3_links_value.strip() if isinstance(ps3_links_value, str) else ""
-        ps3_game_id_value = game.get("ps3_game_id", "")
-        ps3_game_id = ps3_game_id_value.strip() if isinstance(ps3_game_id_value, str) else ""
         self.library_games.append(
-            {
-                "title": game.get("title", "").strip(),
-                "platform": game.get("platform", "").strip(),
-                "rating": game.get("rating", "N/A").strip() or "N/A",
-                "description": game.get("description", "No description available.").strip() or "No description available.",
-                "cover_url": resolved_cover_url,
-                "cached_cover_path": cached_cover_path,
-                "screenshot_urls": game.get("screenshot_urls", "").strip(),
-                "rom_id": rom_id,
-                "rom_file_name": game.get("rom_file_name", "").strip(),
-                "extracted_path": extracted_path,
-                "extracted_dir": game.get("extracted_dir", "").strip(),
-                "archive_path": stored_archive_path,
-                "native_launch_parameters": game.get("native_launch_parameters", "").strip(),
-                "ps3_links": ps3_links,
-                "ps3_game_id": ps3_game_id,
-            }
+            resolve_build_installed_game_record(
+                game,
+                archive_path,
+                resolved_cover_url=self._resolved_cover_url_for_game(game),
+                cached_cover_path=self._cache_cover_image_for_game(game),
+            )
         )
         self.library_games = self._normalize_installed_games(self.library_games)
         self._refresh_library_grid()
         self._persist_installed_games()
 
     def _is_arcade_platform(self, game: dict[str, str]) -> bool:
-        platform_value = game.get("platform", "")
-        platform = platform_value.strip().lower() if isinstance(platform_value, str) else ""
-        arcade_tokens = ("arcade", "mame", "fbneo", "final burn")
-        return any(token in platform for token in arcade_tokens)
+        return resolve_is_arcade_platform(game)
 
     def _is_ps3_platform(self, game: dict[str, str]) -> bool:
-        platform_value = game.get("platform", "")
-        platform = platform_value.strip().casefold() if isinstance(platform_value, str) else ""
-        return platform in {"playstation 3", "ps3"}
+        return resolve_is_ps3_platform(game)
 
     def _ps3_emulator_root_for_game(self, game: dict[str, str]) -> Path | None:
         platform_value = game.get("platform", "")
@@ -2180,69 +1795,16 @@ class MainWindow(QMainWindow):
         return None
 
     def _ps3_link_plan_for_extracted_dir(self, extracted_dir: Path, emulator_root: Path) -> list[tuple[Path, Path, bool]]:
-        candidates = [candidate for candidate in extracted_dir.rglob("*") if candidate.is_dir() or candidate.is_file()]
-        candidates.sort(
-            key=lambda path: (
-                len(path.relative_to(extracted_dir).parts),
-                0 if path.is_dir() else 1,
-                str(path).casefold(),
-            )
-        )
-
-        planned_links: list[tuple[Path, Path, bool]] = []
-        seen_targets: set[str] = set()
-        for source_path in candidates:
-            relative_parts = source_path.relative_to(extracted_dir).parts
-            target_cursor = emulator_root
-            for index, part in enumerate(relative_parts):
-                target_candidate = target_cursor / part
-                if target_candidate.exists():
-                    if target_candidate.is_dir() and index < len(relative_parts) - 1:
-                        target_cursor = target_candidate
-                        continue
-                    if target_candidate.is_dir() and source_path.is_dir() and index == len(relative_parts) - 1:
-                        target_cursor = target_candidate
-                        continue
-                    break
-
-                source_candidate = extracted_dir.joinpath(*relative_parts[: index + 1])
-                target_key = self._path_key(target_candidate)
-                if target_key not in seen_targets:
-                    planned_links.append((source_candidate, target_candidate, source_candidate.is_dir()))
-                    seen_targets.add(target_key)
-                break
-        return planned_links
+        return resolve_ps3_link_plan_for_extracted_dir(extracted_dir, emulator_root, self._path_key)
 
     def _ps3_game_id_from_text(self, value: str) -> str:
-        if not isinstance(value, str):
-            return ""
-        match = re.search(r"([A-Z]{4}\d{5})", value.upper())
-        if match is None:
-            return ""
-        return match.group(1)
+        return resolve_ps3_game_id_from_text(value)
 
     def _ps3_game_id_from_paths(self, paths: list[Path]) -> str:
-        for path in paths:
-            for part in path.parts:
-                game_id = self._ps3_game_id_from_text(part)
-                if game_id:
-                    return game_id
-        return ""
+        return resolve_ps3_game_id_from_paths(paths)
 
     def _detected_ps3_game_id(self, extracted_dir: Path, link_targets: list[Path]) -> str:
-        candidate_paths = [extracted_dir, *link_targets]
-        game_id = self._ps3_game_id_from_paths(candidate_paths)
-        if game_id:
-            return game_id
-
-        try:
-            for candidate in extracted_dir.rglob("*"):
-                game_id = self._ps3_game_id_from_text(candidate.name)
-                if game_id:
-                    return game_id
-        except OSError:
-            return ""
-        return ""
+        return resolve_detected_ps3_game_id(extracted_dir, link_targets)
 
     def _ps3_game_id_for_game(self, game: dict[str, str]) -> str:
         existing_value = game.get("ps3_game_id", "")
@@ -2278,37 +1840,10 @@ class MainWindow(QMainWindow):
         return ""
 
     def _is_rpcs3_emulator_name(self, emulator_name: str) -> bool:
-        return "rpcs3" in emulator_name.strip().casefold()
+        return resolve_is_rpcs3_emulator_name(emulator_name)
 
     def _is_ps3_emulator_entry(self, emulator: dict[str, str]) -> bool:
-        name_value = emulator.get("name", "")
-        name = name_value.strip() if isinstance(name_value, str) else ""
-        if name and self._is_rpcs3_emulator_name(name):
-            return True
-
-        path_value = emulator.get("path", "")
-        path_text = path_value.strip() if isinstance(path_value, str) else ""
-        executable_stem = Path(path_text).stem.casefold() if path_text else ""
-        if "rpcs3" in executable_stem:
-            return True
-
-        profile = self._emulator_profile_for_entry(emulator)
-        if profile is None:
-            return False
-
-        keywords = profile.get("platform_keywords", [])
-        if not isinstance(keywords, list):
-            return False
-
-        for keyword in keywords:
-            if not isinstance(keyword, str):
-                continue
-            tokens = set(re.findall(r"[a-z0-9]+", keyword.casefold()))
-            if "ps3" in tokens:
-                return True
-            if {"playstation", "3"}.issubset(tokens):
-                return True
-        return False
+        return resolve_is_ps3_emulator_entry(emulator, self._emulator_profile_for_entry)
 
     def _has_installed_ps3_games(self) -> bool:
         return any(self._is_ps3_platform(game) for game in self.library_games)
@@ -2395,56 +1930,18 @@ class MainWindow(QMainWindow):
         raise OSError(f"Unsupported link path type: {link_path}")
 
     def _ps3_link_paths_from_game(self, game: dict[str, str]) -> list[Path]:
-        raw_value = game.get("ps3_links", "")
-        if not isinstance(raw_value, str) or not raw_value.strip():
-            return []
-
-        try:
-            parsed = json.loads(raw_value)
-        except json.JSONDecodeError:
-            return []
-
-        if not isinstance(parsed, list):
-            return []
-
-        paths: list[Path] = []
-        for item in parsed:
-            if not isinstance(item, str):
-                continue
-            item_text = item.strip()
-            if item_text:
-                paths.append(Path(item_text).expanduser())
-        return paths
+        return resolve_ps3_link_paths_from_game(game)
 
     def _ps3_games_yml_path_for_game(self, game: dict[str, str]) -> Path | None:
-        emulator_root = self._ps3_emulator_root_for_game(game)
-        if emulator_root is None:
-            return None
-        return emulator_root / "config" / "games.yml"
+        return resolve_ps3_games_yml_path_for_game(game, self._ps3_emulator_root_for_game)
 
     def _ps3_games_yml_paths_for_game(self, game: dict[str, str]) -> list[Path]:
-        candidates: list[Path] = []
-        configured_path = self._ps3_games_yml_path_for_game(game)
-        if configured_path is not None:
-            candidates.append(configured_path)
-
-        for link_path in self._ps3_link_paths_from_game(game):
-            current = link_path.parent if link_path.name else link_path
-            for parent in [current, *current.parents]:
-                games_yml_path = parent / "config" / "games.yml"
-                if games_yml_path.exists() and games_yml_path.is_file():
-                    candidates.append(games_yml_path)
-                    break
-
-        unique: list[Path] = []
-        seen: set[str] = set()
-        for candidate in candidates:
-            key = self._path_key(candidate)
-            if key in seen:
-                continue
-            seen.add(key)
-            unique.append(candidate)
-        return unique
+        return resolve_ps3_games_yml_paths_for_game(
+            game,
+            self._ps3_games_yml_path_for_game(game),
+            self._ps3_link_paths_from_game(game),
+            self._path_key,
+        )
 
     def _ps3_games_yml_install_path(
         self,
@@ -2453,120 +1950,21 @@ class MainWindow(QMainWindow):
         extracted_dir: Path,
         emulator_root: Path,
     ) -> str:
-        target_id = game_id.strip().upper()
-        for link_path in link_paths:
-            parts = list(link_path.parts)
-            for index, part in enumerate(parts):
-                if part.strip().upper() != target_id:
-                    continue
-                candidate = Path(*parts[: index + 1])
-                install_path = candidate.as_posix().rstrip("/")
-                return f"{install_path}/" if install_path else ""
-
-        default_candidate = emulator_root / "games" / target_id
-        if default_candidate.exists() or not extracted_dir.exists():
-            install_path = default_candidate.as_posix().rstrip("/")
-            return f"{install_path}/"
-
-        extracted_candidate = extracted_dir / target_id
-        install_path = extracted_candidate.as_posix().rstrip("/")
-        return f"{install_path}/"
+        return resolve_ps3_games_yml_install_path(game_id, link_paths, extracted_dir, emulator_root)
 
     def _upsert_rpcs3_games_yml_entry(self, games_yml_path: Path, game_id: str, install_path: str) -> None:
-        entry = f"{game_id}: {install_path}"
-        lines: list[str] = []
-        if games_yml_path.exists() and games_yml_path.is_file():
-            try:
-                lines = games_yml_path.read_text(encoding="utf-8").splitlines()
-            except OSError as error:
-                raise OSError(f"Could not read RPCS3 games file: {games_yml_path}\n{error}") from error
-
-        updated_lines: list[str] = []
-        replaced = False
-        for line in lines:
-            match = re.match(r"^\s*([A-Za-z]{4}\d{5})\s*:\s*.*$", line)
-            if match and match.group(1).upper() == game_id:
-                if not replaced:
-                    updated_lines.append(entry)
-                    replaced = True
-                continue
-            updated_lines.append(line)
-
-        if not replaced:
-            updated_lines.append(entry)
-
-        games_yml_path.parent.mkdir(parents=True, exist_ok=True)
-        output_text = "\n".join(updated_lines)
-        if output_text:
-            if not output_text.endswith("\n"):
-                output_text = f"{output_text}\n"
-        else:
-            output_text = f"{entry}\n"
-        try:
-            games_yml_path.write_text(output_text, encoding="utf-8")
-        except OSError as error:
-            raise OSError(f"Could not write RPCS3 games file: {games_yml_path}\n{error}") from error
+        resolve_upsert_rpcs3_games_yml_entry(games_yml_path, game_id, install_path)
 
     def _ps3_game_ids_for_game(self, game: dict[str, str]) -> set[str]:
-        game_ids: set[str] = set()
-
-        for key in ("ps3_game_id", "rom_file_name", "title"):
-            value = game.get(key, "")
-            if not isinstance(value, str):
-                continue
-            game_id = self._ps3_game_id_from_text(value)
-            if game_id:
-                game_ids.add(game_id)
-
-        for link_path in self._ps3_link_paths_from_game(game):
-            for part in link_path.parts:
-                game_id = self._ps3_game_id_from_text(part)
-                if game_id:
-                    game_ids.add(game_id)
-
-        fallback = self._ps3_game_id_for_game(game).strip().upper()
-        if self._ps3_game_id_from_text(fallback):
-            game_ids.add(fallback)
-
-        return game_ids
+        return resolve_ps3_game_ids_for_game(
+            game,
+            self._ps3_game_id_from_text,
+            self._ps3_game_id_for_game,
+            self._ps3_link_paths_from_game(game),
+        )
 
     def _remove_rpcs3_games_yml_entries(self, games_yml_path: Path, game_ids: set[str]) -> None:
-        target_ids = {game_id.strip().upper() for game_id in game_ids if self._ps3_game_id_from_text(game_id.strip().upper())}
-        if not target_ids:
-            return
-
-        if not games_yml_path.exists() or not games_yml_path.is_file():
-            return
-
-        try:
-            lines = games_yml_path.read_text(encoding="utf-8").splitlines()
-        except OSError as error:
-            raise OSError(f"Could not read RPCS3 games file: {games_yml_path}\n{error}") from error
-
-        filtered_lines: list[str] = []
-        for line in lines:
-            match = re.match(r"^\s*([A-Za-z]{4}\d{5})\s*:\s*(.*)$", line)
-            if match is None:
-                filtered_lines.append(line)
-                continue
-
-            entry_id = match.group(1).upper()
-            entry_path = match.group(2).upper()
-            path_ids = {path_match.group(1) for path_match in re.finditer(r"\b([A-Z]{4}\d{5})\b", entry_path)}
-            if entry_id in target_ids or path_ids.intersection(target_ids):
-                continue
-            filtered_lines.append(line)
-
-        if filtered_lines == lines:
-            return
-
-        output_text = "\n".join(filtered_lines)
-        if output_text and not output_text.endswith("\n"):
-            output_text = f"{output_text}\n"
-        try:
-            games_yml_path.write_text(output_text, encoding="utf-8")
-        except OSError as error:
-            raise OSError(f"Could not write RPCS3 games file: {games_yml_path}\n{error}") from error
+        resolve_remove_rpcs3_games_yml_entries(games_yml_path, game_ids, self._ps3_game_id_from_text)
 
     def _remove_rpcs3_games_yml_for_game(self, game: dict[str, str]) -> None:
         game_ids = self._ps3_game_ids_for_game(game)
@@ -2577,226 +1975,50 @@ class MainWindow(QMainWindow):
             self._remove_rpcs3_games_yml_entries(games_yml_path, game_ids)
 
     def _update_rpcs3_games_yml_for_install(self, game: dict[str, str], extracted_dir: Path, link_paths: list[Path]) -> str:
-        game_id = self._detected_ps3_game_id(extracted_dir, link_paths).strip().upper()
-        if not self._ps3_game_id_from_text(game_id):
-            raise OSError("No valid PS3 game ID was found for this title.")
-
-        emulator_root = self._ps3_emulator_root_for_game(game)
-        if emulator_root is None:
-            raise OSError("No default PS3 emulator path is configured for PlayStation 3 installs.")
-
-        install_path = self._ps3_games_yml_install_path(game_id, link_paths, extracted_dir, emulator_root)
-        games_yml_path = self._ps3_games_yml_path_for_game(game)
-        if games_yml_path is None:
-            raise OSError("Could not resolve RPCS3 config path for PlayStation 3 installs.")
-        self._upsert_rpcs3_games_yml_entry(games_yml_path, game_id, install_path)
-        return game_id
+        return resolve_update_rpcs3_games_yml_for_install(
+            game,
+            extracted_dir,
+            link_paths,
+            detected_ps3_game_id=self._detected_ps3_game_id,
+            ps3_game_id_from_text=self._ps3_game_id_from_text,
+            ps3_emulator_root_for_game=self._ps3_emulator_root_for_game,
+            ps3_games_yml_install_path=self._ps3_games_yml_install_path,
+            ps3_games_yml_path_for_game=self._ps3_games_yml_path_for_game,
+            upsert_rpcs3_games_yml_entry=self._upsert_rpcs3_games_yml_entry,
+        )
 
     def _configure_ps3_install_links(self, game: dict[str, str], extracted_dir: Path) -> list[Path]:
-        emulator_root = self._ps3_emulator_root_for_game(game)
-        if emulator_root is None:
-            raise OSError("No default PS3 emulator path is configured for PlayStation 3 installs.")
-
-        link_plan = self._ps3_link_plan_for_extracted_dir(extracted_dir, emulator_root)
-        if not link_plan:
-            raise OSError("No PS3 directory branches could be mapped into the emulator directory.")
-
         self.ps3_file_symlink_elevation_consent = None
-        created_links: list[Path] = []
         try:
-            for source_path, link_target, is_directory in link_plan:
-                self._create_link_path(source_path, link_target, is_directory)
-                created_links.append(link_target)
-        except OSError:
-            for link_target in reversed(created_links):
-                try:
-                    self._remove_link_path(link_target)
-                except OSError:
-                    pass
-            raise
+            return resolve_configure_ps3_install_links(
+                extracted_dir,
+                self._ps3_emulator_root_for_game(game),
+                self._ps3_link_plan_for_extracted_dir,
+                self._create_link_path,
+                self._remove_link_path,
+            )
         finally:
             self.ps3_file_symlink_elevation_consent = None
-        return created_links
 
     def _should_extract_archive_for_game(self, game: dict[str, str], archive_path: Path) -> bool:
-        if self._is_native_executable_platform(game):
-            return True
-        if self._is_arcade_platform(game):
-            return False
-        if self._is_ps3_platform(game):
-            return archive_path.suffix.casefold() in {".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz"}
-        return archive_path.suffix.lower() in {".7z", ".zip"}
+        return resolve_should_extract_archive_for_game(
+            game,
+            archive_path,
+            is_native_executable_platform=self._is_native_executable_platform,
+            is_arcade_platform=self._is_arcade_platform,
+            is_ps3_platform=self._is_ps3_platform,
+        )
 
     def _extracted_dir_for_archive_path(self, archive_path: Path) -> Path:
-        extracted_name = archive_path.stem or archive_path.name
-        extracted_dir = archive_path.parent / extracted_name
-        if extracted_dir == archive_path or (extracted_dir.exists() and extracted_dir.is_file()):
-            return archive_path.parent / f"{extracted_name}_extracted"
-        return extracted_dir
+        return resolve_extracted_dir_for_archive_path(archive_path)
 
     def _select_extracted_launch_file(self, game: dict[str, str], extracted_dir: Path, archive_path: Path) -> Path | None:
-        files = [candidate for candidate in extracted_dir.rglob("*") if candidate.is_file()]
-        if not files:
-            return None
-
-        archive_suffixes = {".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz"}
-        non_archive_files = [candidate for candidate in files if candidate.suffix.lower() not in archive_suffixes]
-        pool = non_archive_files if non_archive_files else files
-
-        preferred_extensions = [
-            ".m3u",
-            ".cue",
-            ".chd",
-            ".iso",
-            ".bin",
-            ".pbp",
-            ".cso",
-            ".img",
-            ".ccd",
-            ".nrg",
-            ".mdf",
-            ".gdi",
-            ".rvz",
-            ".gcz",
-            ".wbfs",
-            ".gcm",
-            ".dol",
-            ".elf",
-            ".nes",
-            ".fds",
-            ".sfc",
-            ".smc",
-            ".gba",
-            ".gb",
-            ".gbc",
-            ".n64",
-            ".z64",
-            ".v64",
-            ".nds",
-            ".3ds",
-            ".cia",
-            ".xci",
-            ".nsp",
-            ".gen",
-            ".smd",
-            ".md",
-            ".32x",
-            ".sms",
-            ".gg",
-            ".pce",
-            ".sgx",
-            ".a26",
-            ".a52",
-            ".a78",
-            ".lnx",
-            ".ws",
-            ".wsc",
-            ".ngp",
-            ".ngc",
-            ".jag",
-            ".rom",
-        ]
-        if self._is_ps3_platform(game):
-            preferred_extensions = [".pkg", *preferred_extensions]
-        extension_priority = {extension: index for index, extension in enumerate(preferred_extensions)}
-        support_extensions = {
-            ".txt",
-            ".nfo",
-            ".diz",
-            ".log",
-            ".json",
-            ".xml",
-            ".ini",
-            ".cfg",
-            ".conf",
-            ".url",
-            ".pdf",
-            ".html",
-            ".htm",
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".gif",
-            ".bmp",
-            ".webp",
-            ".svg",
-            ".ico",
-            ".dll",
-            ".so",
-            ".dylib",
-            ".py",
-            ".lua",
-            ".js",
-            ".css",
-            ".db",
-            ".sqlite",
-            ".tmp",
-            ".cache",
-            ".sav",
-            ".srm",
-            ".state",
-            ".states",
-            ".cht",
-            ".slangp",
-            ".slang",
-            ".glsl",
-            ".vert",
-            ".frag",
-        }
-        support_directories = {
-            "__macosx",
-            "glcache",
-            "cache",
-            "caches",
-            "shadercache",
-            "shaders",
-            "docs",
-            "doc",
-            "manual",
-            "manuals",
-            "readme",
-            "licenses",
-            "license",
-            "resources",
-        }
-
-        archive_stem = archive_path.stem.casefold()
-
-        def _candidate_sort_key(candidate: Path) -> tuple[int, int, int, int, str]:
-            try:
-                relative_parts = [part.casefold() for part in candidate.relative_to(extracted_dir).parts]
-            except ValueError:
-                relative_parts = [part.casefold() for part in candidate.parts]
-
-            suffix = candidate.suffix.casefold()
-            support_dir_penalty = 1 if any(part in support_directories for part in relative_parts[:-1]) else 0
-            support_ext_penalty = 1 if suffix in support_extensions else 0
-            extension_rank = extension_priority.get(suffix, len(extension_priority) + 10)
-            stem = candidate.stem.casefold()
-            stem_rank = 0 if stem == archive_stem else 1
-            return (
-                support_dir_penalty + support_ext_penalty,
-                extension_rank,
-                stem_rank,
-                len(relative_parts),
-                str(candidate).casefold(),
-            )
-
-        playable_candidates = [candidate for candidate in pool if candidate.suffix.casefold() in extension_priority]
-        if playable_candidates:
-            playable_candidates.sort(key=_candidate_sort_key)
-            return playable_candidates[0]
-
-        non_support_candidates = [candidate for candidate in pool if _candidate_sort_key(candidate)[0] == 0]
-        selection_pool = non_support_candidates if non_support_candidates else pool
-
-        stem_matches = [candidate for candidate in selection_pool if candidate.stem.casefold() == archive_stem]
-        if stem_matches:
-            stem_matches.sort(key=_candidate_sort_key)
-            return stem_matches[0]
-
-        selection_pool.sort(key=_candidate_sort_key)
-        return selection_pool[0]
+        return resolve_select_extracted_launch_file(
+            game,
+            extracted_dir,
+            archive_path,
+            is_ps3_platform=self._is_ps3_platform,
+        )
 
     def _extract_archive_for_game(
         self,
@@ -2804,118 +2026,22 @@ class MainWindow(QMainWindow):
         archive_path: Path,
         install_progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[Path, Path]:
-        extracted_dir = self._extracted_dir_for_archive_path(archive_path)
-        if extracted_dir.exists():
-            if extracted_dir.is_dir():
-                shutil.rmtree(extracted_dir, ignore_errors=True)
-            else:
-                try:
-                    extracted_dir.unlink()
-                except OSError:
-                    pass
-        extracted_dir.mkdir(parents=True, exist_ok=True)
-
-        try:
-            if zipfile.is_zipfile(archive_path):
-                with zipfile.ZipFile(archive_path) as archive:
-                    members = archive.infolist()
-                    total_install_bytes = sum(max(0, int(member.file_size)) for member in members if not member.is_dir())
-                    installed_bytes = 0
-                    if install_progress_callback is not None:
-                        install_progress_callback(installed_bytes, total_install_bytes)
-                    for member in members:
-                        archive.extract(member, extracted_dir)
-                        if member.is_dir():
-                            continue
-                        installed_bytes += max(0, int(member.file_size))
-                        if install_progress_callback is not None:
-                            install_progress_callback(installed_bytes, total_install_bytes)
-            else:
-                total_install_bytes = self._tar_archive_total_install_bytes(archive_path)
-                if install_progress_callback is not None:
-                    install_progress_callback(0, total_install_bytes)
-                process = subprocess.Popen(
-                    ["tar", "-xf", str(archive_path), "-C", str(extracted_dir)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                )
-                while process.poll() is None:
-                    if install_progress_callback is not None:
-                        installed_bytes = self._directory_total_file_bytes(extracted_dir)
-                        install_progress_callback(min(installed_bytes, total_install_bytes), total_install_bytes)
-                    time.sleep(0.15)
-                stderr_text = ""
-                if process.stderr is not None:
-                    stderr_text = process.stderr.read().strip()
-                    process.stderr.close()
-                if process.returncode != 0:
-                    raise OSError(stderr_text or "Unknown extraction error")
-                if install_progress_callback is not None:
-                    installed_bytes = self._directory_total_file_bytes(extracted_dir)
-                    resolved_total = max(total_install_bytes, installed_bytes)
-                    install_progress_callback(installed_bytes, resolved_total)
-        except (OSError, zipfile.BadZipFile):
-            shutil.rmtree(extracted_dir, ignore_errors=True)
-            raise
-
-        launch_file = self._select_extracted_launch_file(game, extracted_dir, archive_path)
-        if launch_file is None:
-            shutil.rmtree(extracted_dir, ignore_errors=True)
-            raise OSError("Archive extracted but no ROM file was found")
-
-        return launch_file, extracted_dir
+        return resolve_extract_archive_for_game(
+            game,
+            archive_path,
+            extracted_dir_for_archive_path=self._extracted_dir_for_archive_path,
+            select_extracted_launch_file=self._select_extracted_launch_file,
+            install_progress_callback=install_progress_callback,
+        )
 
     def _directory_total_file_bytes(self, directory: Path) -> int:
-        total = 0
-        if not directory.exists() or not directory.is_dir():
-            return 0
-        for root, _, files in os.walk(directory):
-            root_path = Path(root)
-            for name in files:
-                candidate = root_path / name
-                try:
-                    if candidate.exists() and candidate.is_file():
-                        total += max(0, int(candidate.stat().st_size))
-                except OSError:
-                    continue
-        return total
+        return resolve_directory_total_file_bytes(directory)
 
     def _tar_archive_total_install_bytes(self, archive_path: Path) -> int:
-        try:
-            result = subprocess.run(
-                ["tar", "-tvf", str(archive_path)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except OSError:
-            return 0
-        if result.returncode != 0:
-            return 0
-        total = 0
-        for raw_line in result.stdout.splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("tar:"):
-                continue
-            size = self._tar_listing_line_size(line)
-            if size > 0:
-                total += size
-        return total
+        return resolve_tar_archive_total_install_bytes(archive_path)
 
     def _tar_listing_line_size(self, line: str) -> int:
-        parts = line.split()
-        if len(parts) < 4:
-            return 0
-        for index, token in enumerate(parts[:-1]):
-            if not token.isdigit():
-                continue
-            next_token = parts[index + 1] if index + 1 < len(parts) else ""
-            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", next_token):
-                return max(0, int(token))
-            if re.fullmatch(r"[A-Za-z]{3}", next_token):
-                return max(0, int(token))
-        return 0
+        return resolve_tar_listing_line_size(line)
 
     def _prepare_installed_game(self, game: dict[str, str], archive_path: Path) -> dict[str, str] | None:
         prepared, warning_text = self._prepare_installed_game_without_ui(game, archive_path, configure_ps3_links=True)
@@ -2936,223 +2062,67 @@ class MainWindow(QMainWindow):
         configure_ps3_links: bool,
         install_progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[dict[str, str] | None, str]:
-        prepared = dict(game)
-        prepared["extracted_path"] = ""
-        prepared["extracted_dir"] = ""
-        prepared["ps3_links"] = ""
-        prepared["ps3_game_id"] = ""
-        if not self._should_extract_archive_for_game(prepared, archive_path):
-            return prepared, ""
-
-        try:
-            extracted_file, extracted_dir = self._extract_archive_for_game(
-                prepared,
-                archive_path,
-                install_progress_callback=install_progress_callback,
-            )
-        except (OSError, zipfile.BadZipFile) as error:
-            return None, str(error)
-
-        warning_text = ""
-        if archive_path.exists() and archive_path.is_file():
-            try:
-                archive_path.unlink()
-            except OSError as error:
-                warning_text = (
-                    f"Extracted {prepared.get('title', 'Game')}, but could not delete archive:\n{archive_path}\n{error}"
-                )
-
-        prepared["extracted_path"] = str(extracted_file)
-        prepared["extracted_dir"] = str(extracted_dir)
-
-        if self._is_ps3_platform(prepared) and configure_ps3_links:
-            try:
-                ps3_links = self._configure_ps3_install_links(prepared, extracted_dir)
-                prepared["ps3_links"] = json.dumps([str(path) for path in ps3_links])
-                prepared["ps3_game_id"] = self._update_rpcs3_games_yml_for_install(prepared, extracted_dir, ps3_links)
-            except OSError as error:
-                return None, f"Failed to prepare PS3 symlink layout for {prepared.get('title', 'Game')}: {error}"
-
-        return prepared, warning_text
+        return resolve_prepare_installed_game_without_ui(
+            game,
+            archive_path,
+            configure_ps3_links=configure_ps3_links,
+            should_extract_archive_for_game=self._should_extract_archive_for_game,
+            extract_archive_for_game=self._extract_archive_for_game,
+            is_ps3_platform=self._is_ps3_platform,
+            configure_ps3_install_links=self._configure_ps3_install_links,
+            update_rpcs3_games_yml_for_install=self._update_rpcs3_games_yml_for_install,
+            install_progress_callback=install_progress_callback,
+        )
 
     def _is_emulators_platform(self, game: dict[str, str]) -> bool:
-        platform_value = game.get("platform", "")
-        if not isinstance(platform_value, str):
-            return False
-        return platform_value.strip().casefold() == "emulators"
+        return resolve_is_emulators_platform(game)
 
     def _is_native_executable_platform(self, game: dict[str, str]) -> bool:
-        platform_value = game.get("platform", "")
-        if not isinstance(platform_value, str):
-            return False
-        platform = platform_value.strip().casefold()
-        return platform in {"windows", "windows 9x"}
+        return resolve_is_native_executable_platform(game)
 
     def _launchable_native_game_file(self, path: Path) -> bool:
-        launchable_suffixes = {".exe", ".bat", ".cmd", ".ps1", ".sh"}
-        return path.suffix.casefold() in launchable_suffixes
+        return resolve_launchable_native_game_file(path)
 
     def _native_install_dir_for_game(self, game: dict[str, str]) -> Path | None:
-        extracted_dir_value = game.get("extracted_dir", "")
-        if isinstance(extracted_dir_value, str) and extracted_dir_value.strip():
-            extracted_dir = Path(extracted_dir_value).expanduser()
-            if extracted_dir.exists() and extracted_dir.is_dir():
-                return extracted_dir
-
-        extracted_path_value = game.get("extracted_path", "")
-        if isinstance(extracted_path_value, str) and extracted_path_value.strip():
-            extracted_path = Path(extracted_path_value).expanduser()
-            if extracted_path.exists() and extracted_path.is_file():
-                return extracted_path.parent
-
-        for archive_path in self._candidate_archive_paths_for_game(game):
-            if archive_path.exists() and archive_path.is_file():
-                return archive_path.parent
-        return None
+        return resolve_native_install_dir_for_game(
+            game,
+            self._candidate_archive_paths_for_game(game),
+        )
 
     def _native_executable_candidates_for_game(self, game: dict[str, str]) -> list[Path]:
-        install_dir = self._native_install_dir_for_game(game)
-        if install_dir is None:
-            return []
-
-        candidates = [
-            candidate
-            for candidate in install_dir.rglob("*")
-            if candidate.is_file() and self._launchable_native_game_file(candidate)
-        ]
-        candidates.sort(key=lambda candidate: (len(candidate.parts), str(candidate).casefold()))
-        return candidates
+        return resolve_native_executable_candidates_for_game(
+            self._native_install_dir_for_game(game),
+            self._launchable_native_game_file,
+        )
 
     def _resolved_native_executable_path_for_game(self, game: dict[str, str]) -> Path | None:
-        selected_value = game.get("native_executable_path", "")
-        selected_path_text = selected_value.strip() if isinstance(selected_value, str) else ""
-        if selected_path_text:
-            selected_path = Path(selected_path_text).expanduser()
-            if selected_path.exists() and selected_path.is_file() and self._launchable_native_game_file(selected_path):
-                return selected_path
-
-        executable_candidates = self._native_executable_candidates_for_game(game)
-        if executable_candidates:
-            return executable_candidates[0]
-        return None
+        return resolve_resolved_native_executable_path_for_game(
+            game,
+            self._native_executable_candidates_for_game(game),
+            self._launchable_native_game_file,
+        )
 
     def _default_assignable_server_platforms(self) -> list[str]:
-        hidden_platforms = {"windows", "windows 9x", "emulators"}
-        return [
-            platform
-            for platform in self.server_platform_ids.keys()
-            if platform.strip().casefold() not in hidden_platforms
-        ]
+        return resolve_default_assignable_server_platforms(list(self.server_platform_ids.keys()))
 
     def _launchable_emulator_file(self, path: Path) -> bool:
-        launchable_suffixes = {".exe", ".bat", ".cmd", ".ps1", ".sh", ".appimage"}
-        return path.suffix.casefold() in launchable_suffixes
+        return resolve_launchable_emulator_file(path)
 
     def _select_emulator_executable_path(self, game: dict[str, str], archive_path: Path) -> str:
-        extracted_path_value = game.get("extracted_path", "")
-        if isinstance(extracted_path_value, str) and extracted_path_value.strip():
-            extracted_path = Path(extracted_path_value).expanduser()
-            if extracted_path.exists() and extracted_path.is_file() and self._launchable_emulator_file(extracted_path):
-                return str(extracted_path)
-
-        extracted_dir_value = game.get("extracted_dir", "")
-        if isinstance(extracted_dir_value, str) and extracted_dir_value.strip():
-            extracted_dir = Path(extracted_dir_value).expanduser()
-            if extracted_dir.exists() and extracted_dir.is_dir():
-                candidates = [candidate for candidate in extracted_dir.rglob("*") if candidate.is_file() and self._launchable_emulator_file(candidate)]
-                if candidates:
-                    title_text = game.get("title", "")
-                    title = title_text.strip().casefold() if isinstance(title_text, str) else ""
-                    title_tokens = [token for token in re.split(r"[^a-z0-9]+", title) if len(token) > 2]
-                    preferred_executable_names: set[str] = set()
-                    if "nintendo switch" in title or "switch" in title:
-                        preferred_executable_names.add("eden.exe")
-                    if "nintendo 3ds" in title or "3ds" in title:
-                        preferred_executable_names.add("azahar.exe")
-
-                    def score(candidate: Path) -> tuple[int, int, int, str]:
-                        candidate_file_name = candidate.name.casefold()
-                        preferred_name = 0 if candidate_file_name in preferred_executable_names else 1
-                        candidate_name = candidate.stem.casefold()
-                        token_hits = sum(1 for token in title_tokens if token in candidate_name)
-                        preferred_binary = 0 if candidate.suffix.casefold() == ".exe" else 1
-                        return (preferred_name, -token_hits, preferred_binary, len(candidate.parts), str(candidate).casefold())
-
-                    candidates.sort(key=score)
-                    return str(candidates[0])
-
-        if archive_path.exists() and archive_path.is_file() and self._launchable_emulator_file(archive_path):
-            return str(archive_path)
-
-        return ""
+        return resolve_select_emulator_executable_path(
+            game,
+            archive_path,
+            launchable_emulator_file=self._launchable_emulator_file,
+        )
 
     def _matching_platforms_for_emulator_keywords(self, keywords: list[str]) -> list[str]:
-        if not keywords:
-            return []
-
-        def token_set(value: str) -> set[str]:
-            return set(re.findall(r"[a-z0-9]+", value.casefold()))
-
-        matches: list[str] = []
-        for platform in self._default_assignable_server_platforms():
-            platform_tokens = token_set(platform)
-            if not platform_tokens:
-                continue
-
-            for keyword in keywords:
-                if not isinstance(keyword, str):
-                    continue
-                keyword_tokens = token_set(keyword.strip())
-                if not keyword_tokens:
-                    continue
-
-                if not keyword_tokens.issubset(platform_tokens):
-                    continue
-
-                extra_tokens = platform_tokens - keyword_tokens
-                keyword_has_numeric_token = any(token.isdigit() for token in keyword_tokens)
-                extra_has_numeric_token = any(token.isdigit() for token in extra_tokens)
-                if extra_has_numeric_token and not keyword_has_numeric_token:
-                    continue
-
-                if keyword_tokens.issubset(platform_tokens):
-                    if platform not in matches:
-                        matches.append(platform)
-                    break
-        return matches
+        return resolve_matching_platforms_for_emulator_keywords(
+            self._default_assignable_server_platforms(),
+            keywords,
+        )
 
     def _emulator_profile_for_entry(self, emulator: dict[str, str]) -> dict[str, Any] | None:
-        name_value = emulator.get("name", "")
-        path_value = emulator.get("path", "")
-        name = name_value.strip().casefold() if isinstance(name_value, str) else ""
-        executable_name = Path(path_value).name.strip().casefold() if isinstance(path_value, str) else ""
-        executable_stem = Path(executable_name).stem.casefold() if executable_name else ""
-
-        profiles = self._emulator_autoprofiles()
-        for profile in profiles:
-            profile_name = profile.get("name", "")
-            profile_name_folded = profile_name.strip().casefold() if isinstance(profile_name, str) else ""
-            if name and profile_name_folded == name:
-                return profile
-
-            match_tokens = profile.get("match_tokens", [])
-            if not isinstance(match_tokens, list):
-                continue
-            normalized_tokens = {
-                token.strip().casefold()
-                for token in match_tokens
-                if isinstance(token, str) and token.strip()
-            }
-            if not normalized_tokens:
-                continue
-
-            if executable_name and executable_name in normalized_tokens:
-                return profile
-
-            if executable_stem and any(Path(token).stem.casefold() == executable_stem for token in normalized_tokens):
-                return profile
-
-        return None
+        return resolve_emulator_profile_for_entry(emulator, self._emulator_autoprofiles())
 
     def _emulator_supports_platform(self, emulator: dict[str, str], platform: str) -> bool:
         selected_platform = platform.strip()
@@ -3184,105 +2154,30 @@ class MainWindow(QMainWindow):
         return any(isinstance(candidate, str) and candidate.strip().casefold() == selected_folded for candidate in supported_platforms)
 
     def _compatible_emulator_names_for_platform(self, platform: str) -> list[str]:
-        compatible: list[str] = []
-        for emulator in self._normalize_emulators(self._emulators()):
-            name_value = emulator.get("name", "")
-            name = name_value.strip() if isinstance(name_value, str) else ""
-            if not name:
-                continue
-            if self._emulator_supports_platform(emulator, platform):
-                compatible.append(name)
-        return compatible
+        return resolve_compatible_emulator_names_for_platform(
+            self._normalize_emulators(self._emulators()),
+            platform,
+            self._emulator_supports_platform,
+        )
 
     def _emulator_profile_for_game(self, game: dict[str, str], executable_path: str) -> dict[str, Any]:
-        title_value = game.get("title", "")
-        title = title_value.strip() if isinstance(title_value, str) else ""
-        executable_name = Path(executable_path).name.strip().casefold()
-
-        profiles = self._emulator_autoprofiles()
-
-        for profile in profiles:
-            if executable_name and any(token == executable_name for token in profile["match_tokens"]):
-                resolved_name = profile["name"]
-                if profile.get("use_game_title_as_name", False):
-                    resolved_name = title or profile["name"]
-                return {
-                    "name": resolved_name,
-                    "args": profile["args"],
-                    "all_platforms": profile["all_platforms"],
-                    "platform_keywords": profile["platform_keywords"],
-                    "save_strategy": profile.get("save_strategy", "auto"),
-                    "ignore_files": profile.get("ignore_files", []),
-                    "ignore_extensions": profile.get("ignore_extensions", []),
-                    "save_directories": profile.get("save_directories", []),
-                    "state_directories": profile.get("state_directories", []),
-                }
-
-        return {
-            "name": title or "Emulator",
-            "args": "%rom%",
-            "all_platforms": False,
-            "platform_keywords": [],
-            "save_strategy": "auto",
-            "ignore_files": [],
-            "ignore_extensions": [],
-            "save_directories": [],
-            "state_directories": [],
-        }
+        return resolve_emulator_profile_for_game(game, executable_path, self._emulator_autoprofiles())
 
     def _dolphin_variant_label_for_game(self, game: dict[str, str]) -> str:
-        candidates: list[str] = []
-        for field in ("title", "platform", "rom_file_name"):
-            value = game.get(field, "")
-            if isinstance(value, str) and value.strip():
-                candidates.append(value.strip())
-
-        if not candidates:
-            return ""
-
-        combined = " ".join(candidates).casefold()
-        normalized = re.sub(r"[^a-z0-9]+", " ", combined).strip()
-        compact = normalized.replace(" ", "")
-        tokens = set(normalized.split())
-
-        if "gamecube" in compact:
-            return "GameCube"
-        if "wiiu" in compact:
-            return ""
-        if "wii" in tokens:
-            return "Wii"
-        return ""
+        return resolve_dolphin_variant_label_for_game(game)
 
     def _auto_configured_emulator_name(self, base_name: str, game: dict[str, str]) -> str:
-        normalized_name = base_name.strip()
-        if normalized_name.casefold() != "dolphin":
-            return normalized_name
-
-        variant = self._dolphin_variant_label_for_game(game)
-        if not variant:
-            return normalized_name
-        return f"{normalized_name} ({variant})"
+        return resolve_auto_configured_emulator_name(
+            base_name,
+            game,
+            dolphin_variant_label_for_game=self._dolphin_variant_label_for_game,
+        )
 
     def _dolphin_target_platforms_for_variant(self, variant: str) -> list[str]:
-        selected_variant = variant.strip().casefold()
-        if selected_variant not in {"gamecube", "wii"}:
-            return []
-
-        matches: list[str] = []
-        for platform in self._default_assignable_server_platforms():
-            normalized = re.sub(r"[^a-z0-9]+", " ", platform.casefold()).strip()
-            compact = normalized.replace(" ", "")
-            tokens = set(normalized.split())
-
-            if selected_variant == "gamecube":
-                if "gamecube" in compact:
-                    matches.append(platform)
-                continue
-
-            if "wii" in tokens and "wiiu" not in compact:
-                matches.append(platform)
-
-        return matches
+        return resolve_dolphin_target_platforms_for_variant(
+            variant,
+            self._default_assignable_server_platforms(),
+        )
 
     def _auto_configure_installed_emulator(self, game: dict[str, str], archive_path: Path) -> bool:
         if not self._is_emulators_platform(game):
@@ -3291,233 +2186,57 @@ class MainWindow(QMainWindow):
         executable_path = self._select_emulator_executable_path(game, archive_path)
         if not executable_path:
             return False
+
         profile = self._emulator_profile_for_game(game, executable_path)
-        emulator_name = self._auto_configured_emulator_name(profile["name"], game)
-
-        emulators = self._normalize_emulators(self._emulators())
-        args_template = profile["args"].strip() or "%rom%"
-        profile_save_strategy = self._normalize_save_strategy_value(str(profile.get("save_strategy", "auto")))
-        profile_ignore_files = ";\n".join(
-            file_name.strip()
-            for file_name in profile.get("ignore_files", [])
-            if isinstance(file_name, str) and file_name.strip()
+        emulators, defaults, core_defaults = resolve_auto_configure_emulator_settings(
+            game,
+            executable_path,
+            profile,
+            self._normalize_emulators(self._emulators()),
+            self._normalize_default_emulators(self.config.get("default_emulators", {})),
+            self._normalize_default_retroarch_cores(self.config.get("default_retroarch_cores", {})),
+            auto_configured_emulator_name=self._auto_configured_emulator_name,
+            normalize_save_strategy_value=self._normalize_save_strategy_value,
+            is_retroarch_emulator_name=self._is_retroarch_emulator_name,
+            default_assignable_server_platforms=self._default_assignable_server_platforms,
+            installed_retroarch_cores_for_platform=self._installed_retroarch_cores_for_platform,
+            matching_platforms_for_emulator_keywords=self._matching_platforms_for_emulator_keywords,
+            dolphin_variant_label_for_game=self._dolphin_variant_label_for_game,
+            dolphin_target_platforms_for_variant=self._dolphin_target_platforms_for_variant,
         )
-        profile_ignore_extensions = ";\n".join(
-            extension.strip()
-            for extension in profile.get("ignore_extensions", [])
-            if isinstance(extension, str) and extension.strip()
-        )
-        profile_save_paths = ";\n".join(
-            directory.strip()
-            for directory in profile.get("save_directories", [])
-            if isinstance(directory, str) and directory.strip()
-        )
-        profile_state_paths = ";\n".join(
-            directory.strip()
-            for directory in profile.get("state_directories", [])
-            if isinstance(directory, str) and directory.strip()
-        )
-        target_index = -1
-        for index, emulator in enumerate(emulators):
-            existing_name = emulator.get("name", "")
-            if isinstance(existing_name, str) and existing_name.strip().casefold() == emulator_name.casefold():
-                target_index = index
-                break
-
-        if target_index >= 0:
-            existing = emulators[target_index]
-            existing_args = existing.get("args", "%rom%")
-            existing_save_strategy = existing.get("save_strategy", "")
-            existing_ignore_files = existing.get("ignore_files", "")
-            existing_ignore_extensions = existing.get("ignore_extensions", "")
-            existing_save_paths = existing.get("save_paths", "")
-            existing_state_paths = existing.get("state_paths", "")
-            should_update_args = self._is_retroarch_emulator_name(emulator_name) or not isinstance(existing_args, str) or not existing_args.strip() or existing_args.strip() == "%rom%"
-            emulators[target_index] = {
-                "name": emulator_name,
-                "path": executable_path,
-                "args": args_template if should_update_args else existing_args.strip(),
-                "save_strategy": (
-                    self._normalize_save_strategy_value(existing_save_strategy)
-                    if isinstance(existing_save_strategy, str) and existing_save_strategy.strip()
-                    else profile_save_strategy
-                ),
-                "ignore_files": existing_ignore_files.strip() if isinstance(existing_ignore_files, str) and existing_ignore_files.strip() else profile_ignore_files,
-                "ignore_extensions": existing_ignore_extensions.strip() if isinstance(existing_ignore_extensions, str) and existing_ignore_extensions.strip() else profile_ignore_extensions,
-                "save_paths": existing_save_paths.strip() if isinstance(existing_save_paths, str) and existing_save_paths.strip() else profile_save_paths,
-                "state_paths": existing_state_paths.strip() if isinstance(existing_state_paths, str) and existing_state_paths.strip() else profile_state_paths,
-            }
-        else:
-            emulators.append(
-                {
-                    "name": emulator_name,
-                    "path": executable_path,
-                    "args": args_template,
-                    "save_strategy": profile_save_strategy,
-                    "ignore_files": profile_ignore_files,
-                    "ignore_extensions": profile_ignore_extensions,
-                    "save_paths": profile_save_paths,
-                    "state_paths": profile_state_paths,
-                }
-            )
         self.config["emulators"] = self._normalize_emulators(emulators)
-
-        defaults = self._normalize_default_emulators(self.config.get("default_emulators", {}))
-        if profile["all_platforms"]:
-            target_platforms = self._default_assignable_server_platforms()
-            if self._is_retroarch_emulator_name(emulator_name):
-                target_platforms = [
-                    platform
-                    for platform in target_platforms
-                    if self._installed_retroarch_cores_for_platform(platform, emulator_name)
-                ]
-        else:
-            target_platforms = self._matching_platforms_for_emulator_keywords(profile["platform_keywords"])
-            profile_name = profile.get("name", "")
-            if isinstance(profile_name, str) and profile_name.strip().casefold() == "dolphin":
-                variant = self._dolphin_variant_label_for_game(game)
-                variant_platforms = self._dolphin_target_platforms_for_variant(variant)
-                if variant_platforms:
-                    target_platforms = variant_platforms
-
-        for platform in target_platforms:
-            current_value = defaults.get(platform, "")
-            current_default = current_value.strip() if isinstance(current_value, str) else ""
-            if not current_default:
-                defaults[platform] = emulator_name
-                continue
-            if not self._is_retroarch_emulator_name(emulator_name) and self._is_retroarch_emulator_name(current_default):
-                defaults[platform] = emulator_name
         self.config["default_emulators"] = defaults
-
-        core_defaults = self._normalize_default_retroarch_cores(self.config.get("default_retroarch_cores", {}))
-        if self._is_retroarch_emulator_name(emulator_name):
-            for platform in target_platforms:
-                if defaults.get(platform, "").strip().casefold() != emulator_name.casefold():
-                    continue
-                existing_core = core_defaults.get(platform, "")
-                if isinstance(existing_core, str) and existing_core.strip():
-                    continue
-                cores = self._installed_retroarch_cores_for_platform(platform, emulator_name)
-                if cores:
-                    core_defaults[platform] = cores[0]
         self.config["default_retroarch_cores"] = core_defaults
 
         self._refresh_emulator_views()
         self._save_config(self.config)
+        return True
 
     def _archive_name_for_game(self, game: dict[str, str]) -> str:
-        rom_file_name_value = game.get("rom_file_name", "")
-        if isinstance(rom_file_name_value, str):
-            rom_file_name = rom_file_name_value.strip().replace("\\", "/").split("/")[-1]
-            if rom_file_name:
-                return rom_file_name
-
-        title_value = game.get("title", "Game")
-        platform_value = game.get("platform", "Platform")
-        title = title_value if isinstance(title_value, str) else "Game"
-        platform = platform_value if isinstance(platform_value, str) else "Platform"
-        safe_title = self._sanitize_path_component(title, "game")
-        safe_platform = self._sanitize_path_component(platform, "platform")
-        return f"{safe_title}-{safe_platform}.zip"
+        return resolve_archive_name_for_game(game, self._sanitize_path_component)
 
     def _server_content_file_name_for_game(self, game: dict[str, str]) -> str:
-        rom_file_name_value = game.get("rom_file_name", "")
-        if isinstance(rom_file_name_value, str):
-            rom_file_name = rom_file_name_value.strip().replace("\\", "/").lstrip("/")
-            if rom_file_name:
-                return rom_file_name
-        return ""
+        return resolve_server_content_file_name_for_game(game)
 
     def _rom_file_name_from_payload(self, payload: dict[str, Any]) -> str:
-        candidate_fields = (
-            "fs_name",
-            "file_name",
-            "filename",
-            "rom_file_name",
-            "download_path",
-            "file_path",
-            "full_path",
-            "path",
-            "url",
-        )
-        candidates: list[str] = []
-        for field in candidate_fields:
-            value = payload.get(field, "")
-            if not isinstance(value, str):
-                continue
-            candidate = value.strip().replace("\\", "/")
-            if field == "url":
-                candidate = urlsplit(candidate).path
-            candidate = candidate.strip().lstrip("/")
-            if candidate:
-                candidates.append(candidate)
-
-        if not candidates:
-            return ""
-
-        with_suffix = [candidate for candidate in candidates if Path(candidate.split("/")[-1]).suffix]
-        return with_suffix[0] if with_suffix else candidates[0]
+        return resolve_rom_file_name_from_payload(payload)
 
     def _fetch_server_rom_payload(self, rom_id: str, force_refresh: bool = False) -> dict[str, Any] | None:
-        rom_id_key = rom_id.strip()
-        if not rom_id_key:
-            return None
-
-        cached_payload = self.server_rom_payloads.get(rom_id_key)
-        if not force_refresh and isinstance(cached_payload, dict):
-            return cached_payload
-
-        rom_id_path = quote(rom_id_key, safe="")
-        try:
-            payload = self._api_get(f"/api/roms/{rom_id_path}")
-        except (HTTPError, URLError, ValueError, json.JSONDecodeError):
-            return None
-
-        detail_payload: dict[str, Any] | None = None
-        if isinstance(payload, dict):
-            if any(key in payload for key in ("fs_name", "file_name", "filename", "rom_file_name")):
-                detail_payload = payload
-            else:
-                for nested_key in ("item", "rom", "data"):
-                    nested = payload.get(nested_key)
-                    if isinstance(nested, dict):
-                        detail_payload = nested
-                        break
-
-        if detail_payload is None:
-            return None
-
-        self.server_rom_payloads[rom_id_key] = detail_payload
-        return detail_payload
+        return resolve_fetch_server_rom_payload(
+            rom_id,
+            self.server_rom_payloads,
+            api_get=self._api_get,
+            force_refresh=force_refresh,
+        )
 
     def _resolved_rom_file_name_for_game(self, game: dict[str, str], rom_id: str) -> str:
-        current_value = game.get("rom_file_name", "")
-        current_name = current_value.strip().replace("\\", "/").lstrip("/") if isinstance(current_value, str) else ""
-        if current_name and Path(current_name.split("/")[-1]).suffix:
-            return current_name
-
-        fallback_name = current_name if current_name else ""
-
-        payload = self.server_rom_payloads.get(rom_id)
-        if not isinstance(payload, dict):
-            payload = self._fetch_server_rom_payload(rom_id)
-        if isinstance(payload, dict):
-            payload_name = self._rom_file_name_from_payload(payload)
-            if payload_name and Path(payload_name.split("/")[-1]).suffix:
-                return payload_name
-            if payload_name and not fallback_name:
-                fallback_name = payload_name
-
-        payload = self._fetch_server_rom_payload(rom_id, force_refresh=True)
-        if isinstance(payload, dict):
-            payload_name = self._rom_file_name_from_payload(payload)
-            if payload_name and Path(payload_name.split("/")[-1]).suffix:
-                return payload_name
-            if payload_name and not fallback_name:
-                fallback_name = payload_name
-
-        return fallback_name
+        return resolve_resolved_rom_file_name_for_game(
+            game,
+            rom_id,
+            self.server_rom_payloads,
+            fetch_server_rom_payload=self._fetch_server_rom_payload,
+            rom_file_name_from_payload=self._rom_file_name_from_payload,
+        )
 
     def _sanitize_path_component(self, value: str, fallback: str) -> str:
         return sanitize_path_component(value, fallback)
@@ -3579,123 +2298,43 @@ class MainWindow(QMainWindow):
             return None
 
     def _candidate_archive_paths_for_game(self, game: dict[str, str]) -> list[Path]:
-        candidates: list[Path] = []
-        archive_path_value = game.get("archive_path", "")
-        if isinstance(archive_path_value, str) and archive_path_value.strip():
-            candidates.append(Path(archive_path_value).expanduser())
-
-        platform_library_path = self._platform_library_dir(game)
-        if platform_library_path is not None:
-            candidates.append(platform_library_path / self._archive_name_for_game(game))
-
-        library_path = self._library_path_dir()
-        if library_path is not None:
-            candidates.append(library_path / self._archive_name_for_game(game))
-
-        unique: list[Path] = []
-        seen: set[str] = set()
-        for candidate in candidates:
-            key = str(candidate)
-            if key in seen:
-                continue
-            seen.add(key)
-            unique.append(candidate)
-        return unique
+        return resolve_candidate_archive_paths_for_game(
+            game,
+            self._platform_library_dir,
+            self._archive_name_for_game,
+            self._library_path_dir,
+        )
 
     def _candidate_extracted_paths_for_game(self, game: dict[str, str]) -> list[Path]:
-        candidates: list[Path] = []
-        extracted_dir_value = game.get("extracted_dir", "")
-        if isinstance(extracted_dir_value, str) and extracted_dir_value.strip():
-            extracted_dir = Path(extracted_dir_value).expanduser()
-            if extracted_dir.exists() and extracted_dir.is_dir():
-                selected = self._select_extracted_launch_file(game, extracted_dir, Path(game.get("archive_path", "") or "archive"))
-                if selected is not None:
-                    candidates.append(selected)
-
-        extracted_path_value = game.get("extracted_path", "")
-        if isinstance(extracted_path_value, str) and extracted_path_value.strip():
-            extracted_path = Path(extracted_path_value).expanduser()
-            if extracted_path.exists() and extracted_path.is_file():
-                candidates.append(extracted_path)
-
-        unique: list[Path] = []
-        seen: set[str] = set()
-        for candidate in candidates:
-            key = str(candidate)
-            if key in seen:
-                continue
-            seen.add(key)
-            unique.append(candidate)
-        return unique
+        return resolve_candidate_extracted_paths_for_game(
+            game,
+            self._select_extracted_launch_file,
+        )
 
     def _candidate_extracted_dirs_for_game(self, game: dict[str, str]) -> list[Path]:
-        candidates: list[Path] = []
-        extracted_dir_value = game.get("extracted_dir", "")
-        if isinstance(extracted_dir_value, str) and extracted_dir_value.strip():
-            candidates.append(Path(extracted_dir_value).expanduser())
-
-        for archive_path in self._candidate_archive_paths_for_game(game):
-            candidates.append(self._extracted_dir_for_archive_path(archive_path))
-
-        unique: list[Path] = []
-        seen: set[str] = set()
-        for candidate in candidates:
-            key = str(candidate)
-            if key in seen:
-                continue
-            seen.add(key)
-            unique.append(candidate)
-        return unique
+        return resolve_candidate_extracted_dirs_for_game(
+            game,
+            self._candidate_archive_paths_for_game(game),
+            self._extracted_dir_for_archive_path,
+        )
 
     def _remove_game_files(self, game: dict[str, str]) -> bool:
-        if self._is_ps3_platform(game):
-            for link_path in self._ps3_link_paths_from_game(game):
-                if not link_path.exists() and not link_path.is_symlink():
-                    continue
-                try:
-                    self._remove_link_path(link_path)
-                except OSError as error:
-                    QMessageBox.warning(self, "Uninstall Error", f"Could not remove PS3 link: {link_path}\n{error}")
-                    return False
-
-            try:
-                self._remove_rpcs3_games_yml_for_game(game)
-            except OSError as error:
-                QMessageBox.warning(self, "Uninstall Error", f"Could not update RPCS3 games.yml for uninstall:\n{error}")
-                return False
-
-        if self._is_native_executable_platform(game):
-            for extracted_dir in self._candidate_extracted_dirs_for_game(game):
-                if not extracted_dir.exists() or not extracted_dir.is_dir():
-                    continue
-                try:
-                    self._remove_directory_tree(extracted_dir)
-                except OSError as error:
-                    QMessageBox.warning(self, "Uninstall Error", f"Could not remove folder: {extracted_dir}\n{error}")
-                    return False
-            return True
-
-        removed_any = False
-        for candidate in self._candidate_archive_paths_for_game(game):
-            if not candidate.exists() or not candidate.is_file():
-                continue
-            try:
-                candidate.unlink()
-                removed_any = True
-            except OSError as error:
-                QMessageBox.warning(self, "Uninstall Error", f"Could not remove file: {candidate}\n{error}")
-                return False
-
-        for extracted_dir in self._candidate_extracted_dirs_for_game(game):
-            if not extracted_dir.exists() or not extracted_dir.is_dir():
-                continue
-            try:
-                self._remove_directory_tree(extracted_dir)
-                removed_any = True
-            except OSError as error:
-                QMessageBox.warning(self, "Uninstall Error", f"Could not remove folder: {extracted_dir}\n{error}")
-                return False
-        return True if removed_any else True
+        try:
+            resolve_remove_game_files(
+                game,
+                is_ps3_platform=self._is_ps3_platform,
+                ps3_link_paths_from_game=self._ps3_link_paths_from_game,
+                remove_link_path=self._remove_link_path,
+                remove_rpcs3_games_yml_for_game=self._remove_rpcs3_games_yml_for_game,
+                is_native_executable_platform=self._is_native_executable_platform,
+                candidate_extracted_dirs_for_game=self._candidate_extracted_dirs_for_game,
+                remove_directory_tree=self._remove_directory_tree,
+                candidate_archive_paths_for_game=self._candidate_archive_paths_for_game,
+            )
+        except OSError as error:
+            QMessageBox.warning(self, "Uninstall Error", str(error))
+            return False
+        return True
 
     def _remove_directory_tree(self, directory: Path) -> None:
         def onerror(func: Any, path: str, exc_info: tuple[Any, Any, Any]) -> None:
@@ -3715,21 +2354,16 @@ class MainWindow(QMainWindow):
         return path_within_path(path, root)
 
     def _matching_installed_emulator_games(self, emulator_path: Path) -> list[dict[str, str]]:
-        matches: list[dict[str, str]] = []
-        target_key = self._path_key(emulator_path)
-        for game in self.library_games:
-            if not self._is_emulators_platform(game):
-                continue
-
-            file_candidates = self._candidate_archive_paths_for_game(game) + self._candidate_extracted_paths_for_game(game)
-            if any(self._path_key(candidate) == target_key for candidate in file_candidates):
-                matches.append(game)
-                continue
-
-            dir_candidates = self._candidate_extracted_dirs_for_game(game)
-            if any(self._path_within_path(emulator_path, candidate) for candidate in dir_candidates):
-                matches.append(game)
-        return matches
+        return resolve_matching_installed_emulator_games(
+            self.library_games,
+            emulator_path,
+            is_emulators_platform=self._is_emulators_platform,
+            candidate_archive_paths_for_game=self._candidate_archive_paths_for_game,
+            candidate_extracted_paths_for_game=self._candidate_extracted_paths_for_game,
+            candidate_extracted_dirs_for_game=self._candidate_extracted_dirs_for_game,
+            path_key=self._path_key,
+            path_within_path=self._path_within_path,
+        )
 
     def _uninstall_emulator_files(self, emulator: dict[str, str]) -> bool:
         emulator_path_value = emulator.get("path", "")
@@ -3742,37 +2376,30 @@ class MainWindow(QMainWindow):
         if not matches:
             return True
 
-        keys_to_remove = {self._game_key(game) for game in matches}
-        protected_cache_paths = self._cached_cover_path_keys_for_games(
-            [entry for entry in self.library_games if self._game_key(entry) not in keys_to_remove]
+        self.library_games, removed = resolve_uninstall_library_games(
+            self.library_games,
+            {self._game_key(game) for game in matches},
+            game_key=self._game_key,
+            library_games_without_keys=resolve_library_games_without_keys,
+            cached_cover_path_keys_for_games=self._cached_cover_path_keys_for_games,
+            remove_game_files=self._remove_game_files,
+            cleanup_cached_cover_for_game=self._cleanup_cached_cover_for_game,
         )
-        for game in matches:
-            if not self._remove_game_files(game):
-                return False
-            if not self._cleanup_cached_cover_for_game(game, protected_cache_paths):
-                return False
-
-        before = len(self.library_games)
-        self.library_games = [entry for entry in self.library_games if self._game_key(entry) not in keys_to_remove]
-        if len(self.library_games) != before:
+        if removed:
             self._refresh_library_grid()
             self._persist_installed_games()
-        return True
+        return removed
 
     def _uninstall_game(self, game: dict[str, str]) -> bool:
-        target = self._game_key(game)
-        matching_games = [entry for entry in self.library_games if self._game_key(entry) == target]
-        protected_cache_paths = self._cached_cover_path_keys_for_games(
-            [entry for entry in self.library_games if self._game_key(entry) != target]
+        self.library_games, removed = resolve_uninstall_library_games(
+            self.library_games,
+            {self._game_key(game)},
+            game_key=self._game_key,
+            library_games_without_keys=resolve_library_games_without_keys,
+            cached_cover_path_keys_for_games=self._cached_cover_path_keys_for_games,
+            remove_game_files=self._remove_game_files,
+            cleanup_cached_cover_for_game=self._cleanup_cached_cover_for_game,
         )
-        for entry in matching_games:
-            if not self._remove_game_files(entry):
-                return False
-            if not self._cleanup_cached_cover_for_game(entry, protected_cache_paths):
-                return False
-        before = len(self.library_games)
-        self.library_games = [entry for entry in self.library_games if self._game_key(entry) != target]
-        removed = len(self.library_games) != before
         if removed:
             self._refresh_library_grid()
             self._persist_installed_games()
@@ -3785,96 +2412,20 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._update_details_layout_metrics)
 
     def _open_game_details(self, game: dict[str, str], source: str) -> None:
-        self.current_details_game = game
-        self.current_details_source = source
-        if self.details_title_label is not None:
-            self.details_title_label.setText(game["title"])
-        if self.details_cover_label is not None:
-            self.details_cover_label.clear()
-            self.details_cover_label.setText("Cover Art")
-            self._queue_game_cover_load(game, self.details_cover_label)
-        if self.details_platform_label is not None:
-            self.details_platform_label.setText(f"Platform: {game['platform']}")
-        if self.details_rating_label is not None:
-            self.details_rating_label.setText(f"Rating: {game['rating']}")
-        if self.details_description_label is not None:
-            self.details_description_label.setText(game["description"])
-        self._update_details_screenshots(game)
-        self._update_details_action_buttons()
-
-        self.stack.setCurrentIndex(5)
-        self._update_details_layout_metrics()
-        QTimer.singleShot(0, self._update_details_layout_metrics)
-        for button in self.nav_buttons:
-            button.setChecked(False)
+        resolve_open_game_details(self, game, source)
 
     def _update_details_action_buttons(self) -> None:
-        if self.current_details_game is None:
-            return
-        is_emulator_entry = self._is_emulators_platform(self.current_details_game)
-        installed = self._is_game_installed(self.current_details_game)
-        install_block_reason = "" if installed else self._install_block_reason_for_game(self.current_details_game)
-        install_blocked = bool(install_block_reason)
-        queued_current = self._is_game_install_queued(self.current_details_game)
-        installing_current = (
-            self.install_in_progress
-            and self.install_pending_game is not None
-            and self._game_key(self.current_details_game) == self._game_key(self.install_pending_game)
-        )
-        if not installing_current:
-            installing_current = (
-                self.install_finalize_in_progress
-                and self.install_finalize_game is not None
-                and self._game_key(self.current_details_game) == self._game_key(self.install_finalize_game)
-            )
-        if self.details_primary_button is not None:
-            if installing_current:
-                button_text = "Installing..."
-            elif queued_current:
-                button_text = "Queued..."
-            elif installed:
-                button_text = "Play"
-            else:
-                button_text = "Install App" if is_emulator_entry else "Install Game"
-            show_primary = not (is_emulator_entry and installed)
-            self.details_primary_button.setText(button_text)
-            self.details_primary_button.setVisible(show_primary)
-            self.details_primary_button.setEnabled(
-                show_primary and not installing_current and not queued_current and not install_blocked
-            )
-            self.details_primary_button.setToolTip(install_block_reason if install_blocked else "")
-        if self.details_config_button is not None:
-            show_config = installed and self._is_native_executable_platform(self.current_details_game)
-            self.details_config_button.setVisible(show_config)
-            self.details_config_button.setEnabled(show_config and not installing_current)
-        cloud_sync_supported = installed and not is_emulator_entry and not self._is_native_executable_platform(self.current_details_game)
-        cloud_states_supported = cloud_sync_supported
-        if cloud_sync_supported:
-            emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(self.current_details_game)
-            if emulator_entry is not None and self._is_rpcs3_emulator_name(emulator_name):
-                cloud_states_supported = False
-        if self.details_upload_saves_button is not None:
-            self.details_upload_saves_button.setVisible(cloud_sync_supported)
-            self.details_upload_saves_button.setEnabled(cloud_sync_supported and not installing_current)
-        if self.details_restore_saves_button is not None:
-            self.details_restore_saves_button.setVisible(cloud_sync_supported)
-            self.details_restore_saves_button.setEnabled(cloud_sync_supported and not installing_current)
-        if self.details_upload_states_button is not None:
-            self.details_upload_states_button.setVisible(cloud_states_supported)
-            self.details_upload_states_button.setEnabled(cloud_states_supported and not installing_current)
-        if self.details_restore_states_button is not None:
-            self.details_restore_states_button.setVisible(cloud_states_supported)
-            self.details_restore_states_button.setEnabled(cloud_states_supported and not installing_current)
-        if self.details_secondary_button is not None:
-            self.details_secondary_button.setVisible(installed and not is_emulator_entry)
-            self.details_secondary_button.setEnabled(installed and not is_emulator_entry and not installing_current)
+        resolve_update_details_action_buttons(self)
 
     def _is_game_install_queued(self, game: dict[str, str]) -> bool:
-        target = self._game_key(game)
-        return any(self._game_key(queued_game) == target for queued_game in self.install_queue)
+        return is_game_install_queued(game, self.install_queue)
 
     def _start_next_queued_install(self) -> None:
-        if self.install_in_progress or self.install_finalize_in_progress or not self.install_queue:
+        if not can_start_next_queued_install(
+            self.install_in_progress,
+            self.install_finalize_in_progress,
+            self.install_queue,
+        ):
             self._update_details_action_buttons()
             self._update_download_status_ui()
             return
@@ -3882,193 +2433,77 @@ class MainWindow(QMainWindow):
         self._start_async_install(next_game)
 
     def _details_rom_id_cache_key(self, game: dict[str, str] | None) -> str:
-        if game is None:
-            return ""
-        title, platform = self._game_key(game)
-        if not title or not platform:
-            return ""
-        return f"{title}::{platform}"
+        return resolve_details_rom_id_cache_key(game, game_key=self._game_key)
 
     def _details_rom_id_cache(self) -> dict[str, str]:
-        raw = self.config.get("details_rom_id_cache", {})
-        if not isinstance(raw, dict):
-            return {}
-        normalized: dict[str, str] = {}
-        for key, value in raw.items():
-            if not isinstance(key, str) or not isinstance(value, str):
-                continue
-            if not key.strip() or not value.strip():
-                continue
-            normalized[key.strip()] = value.strip()
-        return normalized
+        return resolve_details_rom_id_cache(self.config.get("details_rom_id_cache", {}))
 
     def _normalize_cloud_sync_state(self, value: Any) -> dict[str, dict[str, Any]]:
-        if not isinstance(value, dict):
-            return {}
-
-        normalized: dict[str, dict[str, Any]] = {}
-        for raw_key, raw_state in value.items():
-            if not isinstance(raw_key, str) or not raw_key.strip() or not isinstance(raw_state, dict):
-                continue
-
-            key = raw_key.strip()
-            state: dict[str, Any] = {}
-
-            last_downloaded_save_id = raw_state.get("last_downloaded_save_id", "")
-            if isinstance(last_downloaded_save_id, str) and last_downloaded_save_id.strip():
-                state["last_downloaded_save_id"] = last_downloaded_save_id.strip()
-
-            last_server_timestamp = raw_state.get("last_server_timestamp", 0)
-            if isinstance(last_server_timestamp, (int, float)):
-                state["last_server_timestamp"] = float(last_server_timestamp)
-
-            last_uploaded_local_mtime = raw_state.get("last_uploaded_local_mtime", 0)
-            if isinstance(last_uploaded_local_mtime, (int, float)):
-                state["last_uploaded_local_mtime"] = float(last_uploaded_local_mtime)
-
-            last_uploaded_at = raw_state.get("last_uploaded_at", "")
-            if isinstance(last_uploaded_at, str) and last_uploaded_at.strip():
-                state["last_uploaded_at"] = last_uploaded_at.strip()
-
-            last_downloaded_state_id = raw_state.get("last_downloaded_state_id", "")
-            if isinstance(last_downloaded_state_id, str) and last_downloaded_state_id.strip():
-                state["last_downloaded_state_id"] = last_downloaded_state_id.strip()
-
-            last_uploaded_save_mtime = raw_state.get("last_uploaded_save_mtime", 0)
-            if isinstance(last_uploaded_save_mtime, (int, float)):
-                state["last_uploaded_save_mtime"] = float(last_uploaded_save_mtime)
-
-            last_uploaded_state_mtime = raw_state.get("last_uploaded_state_mtime", 0)
-            if isinstance(last_uploaded_state_mtime, (int, float)):
-                state["last_uploaded_state_mtime"] = float(last_uploaded_state_mtime)
-
-            last_session_started_at = raw_state.get("last_session_started_at", 0)
-            if isinstance(last_session_started_at, (int, float)):
-                state["last_session_started_at"] = float(last_session_started_at)
-
-            last_session_ended_at = raw_state.get("last_session_ended_at", 0)
-            if isinstance(last_session_ended_at, (int, float)):
-                state["last_session_ended_at"] = float(last_session_ended_at)
-
-            if state:
-                normalized[key] = state
-
-        return normalized
+        return normalize_cloud_sync_state(value)
 
     def _cloud_sync_state(self) -> dict[str, dict[str, Any]]:
-        normalized = self._normalize_cloud_sync_state(self.config.get("cloud_sync_state", {}))
+        normalized = cloud_sync_state(self.config.get("cloud_sync_state", {}))
         self.config["cloud_sync_state"] = normalized
         return normalized
 
     def _cloud_sync_state_key(self, game: dict[str, str]) -> str:
-        rom_id = self._rom_id_key(game)
-        if rom_id:
-            return f"rom:{rom_id}"
-        title, platform = self._game_key(game)
-        if not title and not platform:
-            return ""
-        return f"name:{title}::{platform}"
+        return cloud_sync_state_key(game, self._rom_id_key, self._game_key)
 
     def _cloud_sync_state_for_game(self, game: dict[str, str]) -> dict[str, Any]:
-        key = self._cloud_sync_state_key(game)
-        if not key:
-            return {}
-        return dict(self._cloud_sync_state().get(key, {}))
+        return cloud_sync_state_for_game(self._cloud_sync_state(), game, self._rom_id_key, self._game_key)
 
     def _update_cloud_sync_state_for_game(self, game: dict[str, str], updates: dict[str, Any]) -> None:
-        key = self._cloud_sync_state_key(game)
-        if not key or not isinstance(updates, dict) or not updates:
-            return
-
-        state_map = self._cloud_sync_state()
-        existing = state_map.get(key, {})
-        if not isinstance(existing, dict):
-            existing = {}
-        merged = existing.copy()
-        merged.update(updates)
-        state_map[key] = merged
+        state_map = update_cloud_sync_state_for_game(
+            self._cloud_sync_state(),
+            game,
+            updates,
+            self._rom_id_key,
+            self._game_key,
+        )
         self.config["cloud_sync_state"] = state_map
         self._save_config(self.config)
 
     def _cache_rom_id_for_details_game(self, game: dict[str, str], rom_id: str) -> None:
-        cache_key = self._details_rom_id_cache_key(game)
-        if not cache_key or not rom_id.strip():
-            return
-        cache = self._details_rom_id_cache()
-        cache[cache_key] = rom_id.strip()
-        self.config["details_rom_id_cache"] = cache
-        self._save_config(self.config)
+        if resolve_cache_rom_id_for_details_game(
+            self.config,
+            game,
+            rom_id,
+            details_rom_id_cache_key=self._details_rom_id_cache_key,
+            details_rom_id_cache=self._details_rom_id_cache,
+        ):
+            self._save_config(self.config)
 
     def _clear_cached_rom_id_for_details_game(self, game: dict[str, str] | None) -> None:
-        cache_key = self._details_rom_id_cache_key(game)
-        if not cache_key:
-            return
-        cache = self._details_rom_id_cache()
-        if cache_key not in cache:
-            return
-        cache.pop(cache_key, None)
-        if cache:
-            self.config["details_rom_id_cache"] = cache
-        else:
-            self.config.pop("details_rom_id_cache", None)
-        self._save_config(self.config)
+        if resolve_clear_cached_rom_id_for_details_game(
+            self.config,
+            game,
+            details_rom_id_cache_key=self._details_rom_id_cache_key,
+            details_rom_id_cache=self._details_rom_id_cache,
+        ):
+            self._save_config(self.config)
 
     def _resolve_rom_id_for_game(self, game: dict[str, str]) -> str:
-        direct = str(game.get("rom_id", "")).strip()
-        if direct:
-            return direct
-
-        cache_key = self._details_rom_id_cache_key(game)
-        cache = self._details_rom_id_cache()
-        cached = str(cache.get(cache_key, "")).strip()
-        if cached:
-            return cached
-
-        target = self._game_key(game)
-        for games in self.server_games_by_platform.values():
-            for server_game in games:
-                if self._game_key(server_game) != target:
-                    continue
-                server_rom_id = str(server_game.get("rom_id", "")).strip()
-                if server_rom_id:
-                    return server_rom_id
-        return ""
+        return resolve_resolve_rom_id_for_game(
+            game,
+            self.server_games_by_platform,
+            game_key=self._game_key,
+            details_rom_id_cache_key=self._details_rom_id_cache_key,
+            details_rom_id_cache=self._details_rom_id_cache,
+        )
 
     def _hydrate_install_game_metadata(self, game: dict[str, str], rom_id: str) -> None:
-        normalized_rom_id = rom_id.strip()
-        if not normalized_rom_id:
-            return
-
-        target_key = self._game_key(game)
-        for games in self.server_games_by_platform.values():
-            for server_game in games:
-                if self._rom_id_key(server_game) == normalized_rom_id.casefold() or self._game_key(server_game) == target_key:
-                    for field in ("cover_url", "screenshot_urls", "rating", "description", "rom_file_name"):
-                        server_value = server_game.get(field, "")
-                        if not isinstance(server_value, str) or not server_value.strip():
-                            continue
-                        current_value = game.get(field, "")
-                        if not isinstance(current_value, str) or not current_value.strip():
-                            game[field] = server_value.strip()
-                    break
-
-        if self._resolved_cover_url_for_game(game):
-            return
-
-        payload = self.server_rom_payloads.get(normalized_rom_id)
-        if not isinstance(payload, dict):
-            payload = self._fetch_server_rom_payload(normalized_rom_id)
-        if not isinstance(payload, dict):
-            return
-
-        resolved_cover = self._cover_url_from_rom_payload(payload)
-        if resolved_cover:
-            game["cover_url"] = resolved_cover
-
-        if not isinstance(game.get("screenshot_urls", ""), str) or not game.get("screenshot_urls", "").strip():
-            screenshots = self._screenshot_urls_from_rom_payload(payload)
-            if screenshots:
-                game["screenshot_urls"] = "\n".join(screenshots)
+        resolve_hydrate_install_game_metadata(
+            game,
+            rom_id,
+            server_games_by_platform=self.server_games_by_platform,
+            server_rom_payloads=self.server_rom_payloads,
+            game_key=self._game_key,
+            rom_id_key=self._rom_id_key,
+            fetch_server_rom_payload=self._fetch_server_rom_payload,
+            resolved_cover_url_for_game=self._resolved_cover_url_for_game,
+            cover_url_from_rom_payload=self._cover_url_from_rom_payload,
+            screenshot_urls_from_rom_payload=self._screenshot_urls_from_rom_payload,
+        )
 
     def _cleanup_details_view_state(self) -> None:
         self._clear_cached_rom_id_for_details_game(self.current_details_game)
@@ -4097,13 +2532,11 @@ class MainWindow(QMainWindow):
             )
             return False
         install_game["rom_file_name"] = resolved_file_name
-        if self.current_details_game is not None and self._game_key(self.current_details_game) == self._game_key(install_game):
-            self.current_details_game["rom_id"] = rom_id
-            self.current_details_game["rom_file_name"] = resolved_file_name
-            if isinstance(install_game.get("cover_url", ""), str):
-                self.current_details_game["cover_url"] = install_game.get("cover_url", "").strip()
-            if isinstance(install_game.get("screenshot_urls", ""), str):
-                self.current_details_game["screenshot_urls"] = install_game.get("screenshot_urls", "").strip()
+        resolve_sync_install_metadata_to_details_game(
+            self.current_details_game,
+            install_game,
+            game_key=self._game_key,
+        )
 
         install_path = self._platform_library_dir(install_game)
         if install_path is None:
@@ -4128,12 +2561,13 @@ class MainWindow(QMainWindow):
         download_url = f"{base_url}/api/roms/{rom_id_path}/content/{file_name_path}"
 
         install_key = self._game_key(install_game)
-        pending_key: tuple[str, str] | None = None
-        if self.install_in_progress and self.install_pending_game is not None:
-            pending_key = self._game_key(self.install_pending_game)
-        elif self.install_finalize_in_progress and self.install_finalize_game is not None:
-            pending_key = self._game_key(self.install_finalize_game)
-        queued_keys = {self._game_key(queued_game) for queued_game in self.install_queue}
+        pending_key = pending_install_key(
+            self.install_in_progress,
+            self.install_finalize_in_progress,
+            self.install_pending_game,
+            self.install_finalize_game,
+        )
+        queued_keys = queued_install_keys(self.install_queue)
 
         if self.install_in_progress or self.install_finalize_in_progress:
             if install_key == pending_key or install_key in queued_keys:
@@ -4186,15 +2620,15 @@ class MainWindow(QMainWindow):
         self.install_in_progress = False
         self.install_pending_game = None
         self.active_download_entry_id = None
-        self.active_download_count = max(0, self.active_download_count - 1)
-        if self.active_download_count == 0:
+        self.active_download_count = active_download_count_after_finish(self.active_download_count)
+        if should_reset_active_download_metrics(self.active_download_count):
             self.active_download_bytes = 0
             self.active_download_total = 0
             self.active_download_speed_bps = 0.0
 
         if game is None:
             if entry_id:
-                status = "cancelled" if error and "cancel" in error.lower() else ("failed" if error else "completed")
+                status = download_entry_status_from_error(error)
                 self._set_download_entry_status(entry_id, status, error)
             self._update_download_status_ui()
             self._update_details_action_buttons()
@@ -4204,11 +2638,11 @@ class MainWindow(QMainWindow):
         title = game.get("title", "Game")
         if error:
             if entry_id:
-                status = "cancelled" if "cancel" in error.lower() else "failed"
+                status = download_entry_status_from_error(error)
                 self._set_download_entry_status(entry_id, status, error)
             self._update_download_status_ui()
             self._update_details_action_buttons()
-            if "cancel" not in error.lower():
+            if status != "cancelled":
                 QMessageBox.warning(self, "Install Error", f"Failed to download {title} from server.")
             self._start_next_queued_install()
             return
@@ -4327,11 +2761,11 @@ class MainWindow(QMainWindow):
         self.install_finalize_worker = None
 
     def _on_async_install_progress(self, downloaded_bytes: int, total_bytes: int, speed_bps: float) -> None:
-        downloaded = int(downloaded_bytes) if isinstance(downloaded_bytes, (int, float)) else 0
-        total = int(total_bytes) if isinstance(total_bytes, (int, float)) else 0
-        self.active_download_bytes = max(0, downloaded)
-        self.active_download_total = max(0, total)
-        self.active_download_speed_bps = max(0.0, speed_bps)
+        (
+            self.active_download_bytes,
+            self.active_download_total,
+            self.active_download_speed_bps,
+        ) = normalized_download_progress(downloaded_bytes, total_bytes, speed_bps)
         if self.active_download_entry_id:
             self._set_download_entry_progress(
                 self.active_download_entry_id,
@@ -4342,10 +2776,7 @@ class MainWindow(QMainWindow):
         self._update_download_status_ui()
 
     def _on_async_install_finalize_progress(self, installed_bytes: int, total_bytes: int) -> None:
-        installed = int(installed_bytes) if isinstance(installed_bytes, (int, float)) else 0
-        total = int(total_bytes) if isinstance(total_bytes, (int, float)) else 0
-        self.active_install_bytes = max(0, installed)
-        self.active_install_total = max(0, total)
+        self.active_install_bytes, self.active_install_total = normalized_transfer_progress(installed_bytes, total_bytes)
         if self.install_finalize_entry_id:
             self._set_download_entry_install_progress(
                 self.install_finalize_entry_id,
@@ -4355,20 +2786,10 @@ class MainWindow(QMainWindow):
         self._update_download_status_ui()
 
     def _percent_text(self, completed: int, total: int) -> str:
-        if total <= 0:
-            return "0%"
-        percent = max(0, min(100, int((completed * 100) / total)))
-        return f"{percent}%"
+        return percent_text(completed, total)
 
     def _format_size(self, size_bytes: float) -> str:
-        units = ["B", "KB", "MB", "GB", "TB"]
-        size = float(max(0.0, size_bytes))
-        unit_index = 0
-        while size >= 1024.0 and unit_index < len(units) - 1:
-            size /= 1024.0
-            unit_index += 1
-        precision = 0 if unit_index == 0 else 1
-        return f"{size:.{precision}f} {units[unit_index]}"
+        return format_size(size_bytes)
 
     def _update_download_status_ui(self) -> None:
         if self.download_status_widget is None:
@@ -4378,108 +2799,59 @@ class MainWindow(QMainWindow):
         has_install_work = has_active_downloads or queued_count > 0 or self.install_finalize_in_progress
         self.download_status_widget.setVisible(has_install_work)
         if self.download_count_label is not None:
-            active_suffix = "s" if self.active_download_count != 1 else ""
-            if self.install_finalize_in_progress and not has_active_downloads:
-                if queued_count > 0:
-                    queued_suffix = "s" if queued_count != 1 else ""
-                    self.download_count_label.setText(
-                        f"Installing 1 game ({queued_count} queued download{queued_suffix})"
-                    )
-                else:
-                    self.download_count_label.setText("Installing 1 game")
-            elif queued_count > 0:
-                queued_suffix = "s" if queued_count != 1 else ""
-                self.download_count_label.setText(
-                    f"{self.active_download_count} active download{active_suffix} ({queued_count} queued download{queued_suffix})"
+            self.download_count_label.setText(
+                download_count_text(
+                    self.active_download_count,
+                    queued_count,
+                    self.install_finalize_in_progress,
                 )
-            else:
-                self.download_count_label.setText(f"{self.active_download_count} active download{active_suffix}")
+            )
         if self.download_progress_bar is not None:
-            if has_active_downloads and self.active_download_total > 0:
-                percent = int((self.active_download_bytes * 100) / self.active_download_total)
-                percent = max(0, min(100, percent))
-                self.download_progress_bar.setRange(0, 100)
-                self.download_progress_bar.setValue(percent)
-                self.download_progress_bar.setFormat(f"{percent}%")
-            elif has_active_downloads:
-                self.download_progress_bar.setRange(0, 0)
-                self.download_progress_bar.setFormat("Downloading...")
-            elif self.install_finalize_in_progress:
-                if self.active_install_total > 0:
-                    percent_text = self._percent_text(self.active_install_bytes, self.active_install_total)
-                    percent = int(percent_text.rstrip("%"))
-                    self.download_progress_bar.setRange(0, 100)
-                    self.download_progress_bar.setValue(percent)
-                    self.download_progress_bar.setFormat("Installing...")
-                else:
-                    self.download_progress_bar.setRange(0, 0)
-                    self.download_progress_bar.setFormat("Installing...")
-            elif queued_count > 0:
-                self.download_progress_bar.setRange(0, 100)
-                self.download_progress_bar.setValue(0)
-                self.download_progress_bar.setFormat("Queued")
-            else:
-                self.download_progress_bar.setRange(0, 100)
-                self.download_progress_bar.setValue(0)
-                self.download_progress_bar.setFormat("0%")
+            min_value, max_value, progress_value, progress_text = download_progress_display(
+                self.active_download_count,
+                self.active_download_bytes,
+                self.active_download_total,
+                self.install_finalize_in_progress,
+                self.active_install_bytes,
+                self.active_install_total,
+                queued_count,
+            )
+            self.download_progress_bar.setRange(min_value, max_value)
+            if max_value > min_value:
+                self.download_progress_bar.setValue(progress_value)
+            self.download_progress_bar.setFormat(progress_text)
         if self.download_speed_label is not None:
-            if self.install_finalize_in_progress and not has_active_downloads:
-                if self.active_install_total > 0:
-                    percent_text = self._percent_text(self.active_install_bytes, self.active_install_total)
-                    self.download_speed_label.setText(f"Installing {percent_text}")
-                else:
-                    self.download_speed_label.setText("Installing...")
-            else:
-                speed_text = self._format_size(self.active_download_speed_bps)
-                self.download_speed_label.setText(f"{speed_text}/s")
+            self.download_speed_label.setText(
+                download_speed_text(
+                    self.active_download_speed_bps,
+                    self.install_finalize_in_progress,
+                    self.active_download_count,
+                    self.active_install_bytes,
+                    self.active_install_total,
+                )
+            )
 
     def _create_download_entry(self, game: dict[str, Any], status: str, error: str = "") -> str:
-        title_value = game.get("title", "Game")
-        platform_value = game.get("platform", "")
-        title = title_value.strip() if isinstance(title_value, str) and title_value.strip() else "Game"
-        platform = platform_value.strip() if isinstance(platform_value, str) else ""
         entry_id = f"{time.time_ns()}-{len(self.download_entries)}"
-        self.download_entries.append(
-            {
-                "id": entry_id,
-                "game": dict(game),
-                "title": title,
-                "platform": platform,
-                "status": status,
-                "downloaded_bytes": 0,
-                "total_bytes": 0,
-                "speed_bps": 0.0,
-                "install_processed_bytes": 0,
-                "install_total_bytes": 0,
-                "error": error.strip(),
-            }
-        )
+        self.download_entries.append(make_download_entry_data(entry_id, game, status, error))
         self._schedule_downloads_page_refresh()
         return entry_id
 
     def _find_download_entry(self, entry_id: str) -> dict[str, Any] | None:
-        for entry in self.download_entries:
-            if entry.get("id") == entry_id:
-                return entry
-        return None
+        return find_download_entry(self.download_entries, entry_id)
 
     def _set_download_entry_status(self, entry_id: str, status: str, error: str = "") -> None:
         entry = self._find_download_entry(entry_id)
         if entry is None:
             return
-        entry["status"] = status
-        entry["error"] = error.strip()
-        if status in ("completed", "failed", "cancelled"):
-            entry["speed_bps"] = 0.0
+        apply_download_entry_status(entry, status, error)
         self._schedule_downloads_page_refresh()
 
     def _set_download_entry_progress(self, entry_id: str, downloaded_bytes: int, total_bytes: int, speed_bps: float) -> None:
         entry = self._find_download_entry(entry_id)
         if entry is None:
             return
-        entry["downloaded_bytes"] = max(0, downloaded_bytes)
-        entry["total_bytes"] = max(0, total_bytes)
-        entry["speed_bps"] = max(0.0, speed_bps)
+        apply_download_entry_progress(entry, downloaded_bytes, total_bytes, speed_bps)
         detail_label = self.download_entry_detail_labels.get(entry_id)
         if detail_label is not None:
             detail_label.setText(self._download_entry_detail_text(entry))
@@ -4488,14 +2860,13 @@ class MainWindow(QMainWindow):
         entry = self._find_download_entry(entry_id)
         if entry is None:
             return
-        entry["install_processed_bytes"] = max(0, installed_bytes)
-        entry["install_total_bytes"] = max(0, total_bytes)
+        apply_download_entry_install_progress(entry, installed_bytes, total_bytes)
         detail_label = self.download_entry_detail_labels.get(entry_id)
         if detail_label is not None:
             detail_label.setText(self._download_entry_detail_text(entry))
 
     def _dismiss_download_entry(self, entry_id: str) -> None:
-        self.download_entries = [entry for entry in self.download_entries if entry.get("id") != entry_id]
+        self.download_entries = remove_download_entry(self.download_entries, entry_id)
         self._schedule_downloads_page_refresh()
 
     def _schedule_downloads_page_refresh(self) -> None:
@@ -4507,14 +2878,9 @@ class MainWindow(QMainWindow):
         entry = self._find_download_entry(entry_id)
         if entry is None:
             return
-        status = entry.get("status", "")
-        if status not in ("failed", "cancelled"):
+        game_copy = retry_download_game(entry)
+        if game_copy is None:
             return
-        game_value = entry.get("game")
-        if not isinstance(game_value, dict):
-            return
-        game_copy = dict(game_value)
-        game_copy.pop("_download_entry_id", None)
         self._dismiss_download_entry(entry_id)
         self._start_async_install(game_copy)
 
@@ -4525,438 +2891,166 @@ class MainWindow(QMainWindow):
             return
 
         queued_before = len(self.install_queue)
-        self.install_queue = [
-            queued_game
-            for queued_game in self.install_queue
-            if queued_game.get("_download_entry_id") != entry_id
-        ]
+        self.install_queue = filter_queue_by_download_entry_id(self.install_queue, entry_id)
         if len(self.install_queue) != queued_before:
             self._set_download_entry_status(entry_id, "cancelled", "Cancelled while queued")
             self._update_download_status_ui()
             self._update_details_action_buttons()
 
     def _download_entry_detail_text(self, entry: dict[str, Any]) -> str:
-        status = str(entry.get("status", ""))
-        downloaded = int(entry.get("downloaded_bytes", 0))
-        total = int(entry.get("total_bytes", 0))
-        speed_bps = float(entry.get("speed_bps", 0.0))
-        install_processed = int(entry.get("install_processed_bytes", 0))
-        install_total = int(entry.get("install_total_bytes", 0))
-        if status == "queued":
-            return "Queued"
-        if status == "downloading":
-            if total > 0:
-                percent = max(0, min(100, int((downloaded * 100) / total)))
-                return (
-                    f"Downloading {percent}% • {self._format_size(downloaded)} / {self._format_size(total)}"
-                    f" • {self._format_size(speed_bps)}/s"
-                )
-            return f"Downloading • {self._format_size(downloaded)} • {self._format_size(speed_bps)}/s"
-        if status == "installing":
-            if install_total > 0:
-                install_percent = self._percent_text(install_processed, install_total)
-                return (
-                    f"Installing {install_percent} • {self._format_size(install_processed)}"
-                    f" / {self._format_size(install_total)}"
-                )
-            return "Installing..."
-        if status == "cancelling":
-            return "Cancelling..."
-        if status == "completed":
-            size_text = self._format_size(downloaded) if downloaded > 0 else "Unknown size"
-            return f"Completed • {size_text}"
-        if status == "failed":
-            error_text = str(entry.get("error", "")).strip() or "Unknown error"
-            return f"Failed • {error_text}"
-        if status == "cancelled":
-            return "Cancelled"
-        return status.capitalize() or "Unknown"
+        return download_entry_detail_text(entry)
 
     def _make_download_entry_widget(self, entry: dict[str, Any]) -> tuple[QWidget, QLabel]:
-        frame = QFrame()
-        frame.setObjectName("panel")
-        frame_layout = QHBoxLayout(frame)
-        frame_layout.setContentsMargins(12, 10, 12, 10)
-        frame_layout.setSpacing(10)
-
-        text_col = QVBoxLayout()
-        text_col.setSpacing(4)
-
-        title = str(entry.get("title", "Game"))
-        platform = str(entry.get("platform", "")).strip()
-        title_label = QLabel(title if not platform else f"{title} ({platform})")
-        title_label.setStyleSheet("font-size: 16px; font-weight: 700;")
-        text_col.addWidget(title_label)
-
-        detail_label = QLabel(self._download_entry_detail_text(entry))
-        detail_label.setWordWrap(True)
-        detail_label.setStyleSheet(f"color: {self._theme_color('muted', '#6272a4')};")
-        text_col.addWidget(detail_label)
-
-        frame_layout.addLayout(text_col, 1)
-
-        actions = QHBoxLayout()
-        actions.setSpacing(8)
-        entry_id = str(entry.get("id", ""))
-        status = str(entry.get("status", ""))
-
-        if status in ("queued", "downloading", "cancelling"):
-            cancel_button = QPushButton("Cancel")
-            cancel_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-            cancel_button.setEnabled(status != "cancelling")
-            cancel_button.clicked.connect(lambda checked=False, target=entry_id: self._cancel_download_entry(target))
-            actions.addWidget(cancel_button)
-        elif status == "installing":
-            installing_label = QLabel("Installing...")
-            installing_label.setStyleSheet(f"color: {self._theme_color('muted', '#6272a4')};")
-            actions.addWidget(installing_label)
-        elif status in ("failed", "cancelled"):
-            retry_button = QPushButton("Retry")
-            retry_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-            retry_button.clicked.connect(lambda checked=False, target=entry_id: self._retry_download_entry(target))
-            actions.addWidget(retry_button)
-
-            cancel_button = QPushButton("Cancel")
-            cancel_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-            cancel_button.clicked.connect(lambda checked=False, target=entry_id: self._dismiss_download_entry(target))
-            actions.addWidget(cancel_button)
-        else:
-            dismiss_button = QPushButton("Dismiss")
-            dismiss_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-            dismiss_button.clicked.connect(lambda checked=False, target=entry_id: self._dismiss_download_entry(target))
-            actions.addWidget(dismiss_button)
-
-        frame_layout.addLayout(actions)
-        return frame, detail_label
+        return make_download_entry_widget(
+            entry,
+            self._download_entry_detail_text(entry),
+            self._theme_color('muted', '#6272a4'),
+            self._cancel_download_entry,
+            self._retry_download_entry,
+            self._dismiss_download_entry,
+        )
 
     def _refresh_downloads_page(self) -> None:
         if self.downloads_list_layout is None or self.downloads_empty_label is None or self.downloads_scroll is None:
             return
 
-        self.download_entry_detail_labels = {}
-        while self.downloads_list_layout.count() > 0:
-            item = self.downloads_list_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-
-        has_entries = len(self.download_entries) > 0
-        self.downloads_empty_label.setVisible(not has_entries)
-        self.downloads_scroll.setVisible(has_entries)
-        if not has_entries:
-            return
-
-        for entry in reversed(self.download_entries):
-            entry_id = str(entry.get("id", ""))
-            widget, detail_label = self._make_download_entry_widget(entry)
-            if entry_id:
-                self.download_entry_detail_labels[entry_id] = detail_label
-            self.downloads_list_layout.addWidget(widget)
-        self.downloads_list_layout.addStretch()
+        self.download_entry_detail_labels = refresh_downloads_page(
+            self.downloads_list_layout,
+            self.downloads_empty_label,
+            self.downloads_scroll,
+            self.download_entries,
+            self._make_download_entry_widget,
+        )
 
     def _return_from_details(self) -> None:
         self._switch_page(self.current_main_page_index)
 
     def _mapping_value_for_platform(self, mapping: dict[str, str], platform: str) -> str:
-        target = platform.strip()
-        if not target:
-            return ""
-
-        direct = mapping.get(target, "")
-        if isinstance(direct, str) and direct.strip():
-            return direct.strip()
-
-        folded = target.casefold()
-        for key, value in mapping.items():
-            if not isinstance(key, str) or not isinstance(value, str):
-                continue
-            if key.strip().casefold() != folded:
-                continue
-            if value.strip():
-                return value.strip()
-        return ""
+        return resolve_mapping_value_for_platform(mapping, platform)
 
     def _default_emulator_name_for_platform(self, platform: str) -> str:
-        defaults = self._normalize_default_emulators(self.config.get("default_emulators", {}))
-        configured = self._mapping_value_for_platform(defaults, platform)
-        if configured:
-            configured_entry = self._emulator_entry_by_name(configured)
-            if configured_entry is not None and self._emulator_supports_platform(configured_entry, platform):
-                return configured
-
-        compatible = self._compatible_emulator_names_for_platform(platform)
-        if compatible:
-            return compatible[0]
-        return ""
+        emulators = self._normalize_emulators(self._emulators())
+        compatible = resolve_compatible_emulator_names_for_platform(
+            emulators,
+            platform,
+            self._emulator_supports_platform,
+        )
+        return resolve_default_emulator_name_for_platform(
+            platform,
+            self._normalize_default_emulators(self.config.get("default_emulators", {})),
+            emulators,
+            self._emulator_supports_platform,
+            compatible,
+        )
 
     def _emulator_entry_has_usable_path(self, emulator: dict[str, str]) -> bool:
-        path_value = emulator.get("path", "")
-        emulator_path_text = path_value.strip() if isinstance(path_value, str) else ""
-        if not emulator_path_text:
-            return False
-        emulator_path = Path(emulator_path_text).expanduser()
-        return emulator_path.exists() and emulator_path.is_file()
+        return resolve_emulator_entry_has_usable_path(emulator)
 
     def _available_emulator_name_for_platform(self, platform: str) -> str:
-        selected_platform = platform.strip()
-        if not selected_platform:
-            return ""
-
-        candidate_names: list[str] = []
-        default_name = self._default_emulator_name_for_platform(selected_platform)
-        if default_name:
-            candidate_names.append(default_name)
-        for emulator_name in self._compatible_emulator_names_for_platform(selected_platform):
-            if emulator_name not in candidate_names:
-                candidate_names.append(emulator_name)
-
-        for emulator_name in candidate_names:
-            entry = self._emulator_entry_by_name(emulator_name)
-            if entry is None:
-                continue
-            if self._emulator_entry_has_usable_path(entry):
-                return emulator_name
-        return ""
+        emulators = self._normalize_emulators(self._emulators())
+        default_name = self._default_emulator_name_for_platform(platform)
+        return resolve_available_emulator_name_for_platform(
+            platform,
+            emulators,
+            self._emulator_supports_platform,
+            default_name,
+        )
 
     def _install_block_reason_for_game(self, game: dict[str, str]) -> str:
-        if self._is_native_executable_platform(game) or self._is_emulators_platform(game):
-            return ""
-
-        platform_value = game.get("platform", "")
-        platform = platform_value.strip() if isinstance(platform_value, str) else ""
-        if not platform:
-            return "Selected game has no platform value and cannot be installed."
-
-        if self._available_emulator_name_for_platform(platform):
-            return ""
-
-        return (
-            f"No available emulator is configured for platform '{platform}'. "
-            "Add/configure one in Emulators before installing this game."
+        return resolve_install_block_reason_for_game(
+            game,
+            self._is_native_executable_platform,
+            self._is_emulators_platform,
+            self._available_emulator_name_for_platform,
         )
 
     def _emulator_entry_by_name(self, emulator_name: str) -> dict[str, str] | None:
-        target = emulator_name.strip().lower()
-        if not target:
-            return None
-        for emulator in self._normalize_emulators(self._emulators()):
-            name = emulator.get("name", "")
-            if isinstance(name, str) and name.strip().lower() == target:
-                return emulator
-        return None
+        return resolve_emulator_entry_by_name(self._normalize_emulators(self._emulators()), emulator_name)
 
     def _launch_placeholders_for_game(self, game: dict[str, str], emulator_name: str) -> dict[str, str]:
         rom_path = self._resolved_rom_path_for_game(game)
-
-        core_value = ""
-        if self._is_retroarch_emulator_name(emulator_name):
-            core_defaults = self._normalize_default_retroarch_cores(self.config.get("default_retroarch_cores", {}))
-            platform = game.get("platform", "")
-            if isinstance(platform, str) and platform.strip():
-                configured_core = self._mapping_value_for_platform(core_defaults, platform)
-                if configured_core:
-                    core_value = self._retroarch_core_argument_path(configured_core)
-
-        ps3_game_id = ""
-        rpcs3_game_token = ""
-        if self._is_rpcs3_emulator_name(emulator_name):
-            rpcs3_game_token = "%RPCS3_GAMEID%"
-            ps3_game_id = self._ps3_game_id_for_game(game)
-
-        return {
-            "%rom%": rom_path,
-            "%core%": core_value,
-            "%RPCS3_GAMEID%": rpcs3_game_token,
-            "%ps3_gameid%": ps3_game_id,
-        }
+        platform_value = game.get("platform", "")
+        platform = platform_value.strip() if isinstance(platform_value, str) else ""
+        core_defaults = self._normalize_default_retroarch_cores(self.config.get("default_retroarch_cores", {}))
+        core_value = resolve_retroarch_core_value(
+            emulator_name,
+            platform,
+            core_defaults,
+            self._is_retroarch_emulator_name,
+            self._mapping_value_for_platform,
+            self._retroarch_core_argument_path,
+        )
+        return build_launch_placeholders_for_game(
+            rom_path,
+            emulator_name,
+            core_value,
+            self._is_rpcs3_emulator_name,
+            self._ps3_game_id_for_game(game),
+        )
 
     def _retroarch_core_argument_path(self, configured_core: str) -> str:
-        core = configured_core.strip()
-        if not core:
-            return ""
-
-        normalized = core.replace("\\", "/")
-        if "/" in normalized:
-            return normalized
-
-        if normalized.casefold().endswith(".dll"):
-            core_file = normalized
-        elif normalized.casefold().endswith("_libretro"):
-            core_file = f"{normalized}.dll"
-        else:
-            core_file = f"{normalized}_libretro.dll"
-        return f"cores/{core_file}"
+        return resolve_retroarch_core_argument_path(configured_core)
 
     def _strip_wrapping_quotes(self, token: str) -> str:
-        stripped = token.strip()
-        if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in {'"', "'"}:
-            return stripped[1:-1]
-        return stripped
+        return resolve_strip_wrapping_quotes(token)
 
     def _apply_launch_placeholders_to_args(self, args: list[str], placeholders: dict[str, str]) -> list[str]:
-        resolved_args: list[str] = []
-        core_value = placeholders.get("%core%", "")
-        core_missing = not core_value.strip()
-        for arg in args:
-            had_core_placeholder = "%core%" in arg
-            resolved = arg
-            for token, value in placeholders.items():
-                resolved = resolved.replace(token, value)
-            resolved = self._strip_wrapping_quotes(resolved)
-            if had_core_placeholder and core_missing:
-                if resolved_args and resolved_args[-1] in {"-L", "--libretro", "--core"}:
-                    resolved_args.pop()
-                continue
-            if resolved:
-                resolved_args.append(resolved)
-        return resolved_args
+        return resolve_apply_launch_placeholders_to_args(args, placeholders)
 
     def _split_launch_template_args(self, template: str) -> list[str]:
-        if not template.strip():
-            return []
-
-        try:
-            return shlex.split(template, posix=True)
-        except ValueError:
-            return shlex.split(template, posix=False)
+        return resolve_split_launch_template_args(template)
 
     def _resolved_launch_arguments_for_game(self, game: dict[str, str]) -> tuple[str, list[str]]:
-        platform_value = game.get("platform", "")
-        platform = platform_value.strip() if isinstance(platform_value, str) else ""
-        emulator_name = self._default_emulator_name_for_platform(platform)
-        emulator_entry = self._emulator_entry_by_name(emulator_name)
-
-        emulator_args = "%rom%"
-        if emulator_entry is not None:
-            args_value = emulator_entry.get("args", "%rom%")
-            if isinstance(args_value, str) and args_value.strip():
-                emulator_args = args_value.strip()
-
-        global_args_value = self.config.get("launch_args", "")
-        global_args = global_args_value.strip() if isinstance(global_args_value, str) else ""
-        combined_template = " ".join(part for part in (emulator_args, global_args) if part).strip()
-
-        parsed_template_args = self._split_launch_template_args(combined_template)
-        placeholders = self._launch_placeholders_for_game(game, emulator_name)
-        if "%core%" in combined_template and not placeholders.get("%core%", "").strip():
-            raise ValueError("No RetroArch core is configured for this platform. Set one in Emulators > Defaults.")
-        if "%RPCS3_GAMEID%" in combined_template and not placeholders.get("%RPCS3_GAMEID%", "").strip():
-            raise ValueError("No PS3 game ID was found for this title. Reinstall or verify extracted content includes a valid PS3 title ID.")
-        if "%ps3_gameid%" in combined_template and not placeholders.get("%ps3_gameid%", "").strip():
-            raise ValueError("No PS3 game ID was found for this title. Reinstall or verify extracted content includes a valid PS3 title ID.")
-        resolved_args = self._apply_launch_placeholders_to_args(parsed_template_args, placeholders)
-        return emulator_name, resolved_args
+        return resolve_launch_arguments_for_game(
+            game,
+            self.config.get("launch_args", ""),
+            self._default_emulator_name_for_platform,
+            self._emulator_entry_by_name,
+            self._split_launch_template_args,
+            self._launch_placeholders_for_game,
+            resolve_validate_launch_placeholders,
+            self._apply_launch_placeholders_to_args,
+        )
 
     def _resolved_rom_path_for_game(self, game: dict[str, str]) -> str:
-        if not self._is_arcade_platform(game):
-            for candidate in self._candidate_extracted_paths_for_game(game):
-                if candidate.exists() and candidate.is_file():
-                    return str(candidate)
-
-        for candidate in self._candidate_archive_paths_for_game(game):
-            if candidate.exists() and candidate.is_file():
-                return str(candidate)
-        archive_path_value = game.get("archive_path", "")
-        if isinstance(archive_path_value, str):
-            return archive_path_value.strip()
-        return ""
+        return resolve_rom_path_for_game(
+            game,
+            self._is_arcade_platform,
+            self._candidate_extracted_paths_for_game,
+            self._candidate_archive_paths_for_game,
+        )
 
     def _normalized_retroarch_core_args(self, emulator_dir: Path, args: list[str]) -> list[str]:
-        normalized_args = list(args)
-        core_option_tokens = {"-L", "--libretro", "--core"}
-        for index, token in enumerate(normalized_args[:-1]):
-            if token not in core_option_tokens:
-                continue
-
-            core_token = normalized_args[index + 1].strip()
-            if not core_token:
-                continue
-
-            core_path = Path(core_token).expanduser()
-            if core_path.is_absolute():
-                continue
-
-            candidate = (emulator_dir / core_path).resolve(strict=False)
-            if candidate.exists() and candidate.is_file():
-                normalized_args[index + 1] = str(candidate)
-        return normalized_args
+        return resolve_normalized_retroarch_core_args(emulator_dir, args)
 
     def _launch_installed_game(self, game: dict[str, str]) -> bool:
-        if self._is_native_executable_platform(game):
-            native_executable = self._resolved_native_executable_path_for_game(game)
-            if native_executable is None:
-                QMessageBox.warning(
-                    self,
-                    "Launch Error",
-                    "No launchable native executable is configured for this game. Use Game Settings to select one.",
+        try:
+            if self._is_native_executable_platform(game):
+                command, working_directory = resolve_prepare_native_launch_command(
+                    game,
+                    self._resolved_native_executable_path_for_game,
+                    self._split_launch_template_args,
                 )
-                return False
-
-            custom_parameters_value = game.get("native_launch_parameters", "")
-            custom_parameters = custom_parameters_value.strip() if isinstance(custom_parameters_value, str) else ""
-            try:
-                native_args = self._split_launch_template_args(custom_parameters)
-            except ValueError as error:
-                QMessageBox.warning(self, "Launch Error", f"Invalid custom launch parameters: {error}")
-                return False
-
-            command = [str(native_executable), *native_args]
-            try:
-                process = subprocess.Popen(command, cwd=str(native_executable.parent))
+                process = subprocess.Popen(command, cwd=working_directory)
                 QTimer.singleShot(500, lambda p=process, c=command: self._warn_if_process_exited_early(p, c))
                 return True
-            except OSError as error:
-                QMessageBox.warning(self, "Launch Error", f"Failed to launch game:\n{error}")
-                return False
 
-        platform_value = game.get("platform", "")
-        platform = platform_value.strip() if isinstance(platform_value, str) else ""
-        emulator_name = self._default_emulator_name_for_platform(platform)
-        if not emulator_name:
-            QMessageBox.warning(self, "Launch Error", "No emulator is configured. Add one in Emulators settings.")
-            return False
-
-        emulator_entry = self._emulator_entry_by_name(emulator_name)
-        if emulator_entry is None:
-            QMessageBox.warning(self, "Launch Error", f"Default emulator '{emulator_name}' was not found.")
-            return False
-
-        emulator_path_value = emulator_entry.get("path", "")
-        emulator_path_text = emulator_path_value.strip() if isinstance(emulator_path_value, str) else ""
-        if not emulator_path_text:
-            QMessageBox.warning(self, "Launch Error", f"Emulator '{emulator_name}' has no executable path configured.")
-            return False
-
-        emulator_path = Path(emulator_path_text).expanduser()
-        if not emulator_path.exists() or not emulator_path.is_file():
-            QMessageBox.warning(self, "Launch Error", f"Emulator executable not found:\n{emulator_path}")
-            return False
-
-        rom_path = self._resolved_rom_path_for_game(game)
-        if not rom_path:
-            QMessageBox.warning(self, "Launch Error", "No ROM file is available for this game.")
-            return False
-
-        rom_file = Path(rom_path).expanduser()
-        if not rom_file.exists() or not rom_file.is_file():
-            QMessageBox.warning(self, "Launch Error", f"ROM file not found:\n{rom_file}")
-            return False
-
-        try:
-            _, parsed_args = self._resolved_launch_arguments_for_game(game)
-        except ValueError as error:
-            QMessageBox.warning(self, "Launch Error", f"Invalid launch arguments: {error}")
-            return False
-
-        if self._is_retroarch_emulator_name(emulator_name):
-            parsed_args = self._normalized_retroarch_core_args(emulator_path.parent, parsed_args)
-
-        command = [str(emulator_path), *parsed_args]
-        try:
-            process = subprocess.Popen(command, cwd=str(emulator_path.parent))
+            emulator_name, command, working_directory = resolve_prepare_emulator_launch_command(
+                game,
+                self._default_emulator_name_for_platform,
+                self._emulator_entry_by_name,
+                self._resolved_rom_path_for_game,
+                self._resolved_launch_arguments_for_game,
+                self._is_retroarch_emulator_name,
+                self._normalized_retroarch_core_args,
+            )
+            process = subprocess.Popen(command, cwd=working_directory)
             QTimer.singleShot(500, lambda p=process, c=command: self._warn_if_process_exited_early(p, c))
             self._register_game_session_for_auto_upload(game, process, emulator_name)
             return True
+        except ValueError as error:
+            QMessageBox.warning(self, "Launch Error", str(error))
+            return False
         except OSError as error:
             QMessageBox.warning(self, "Launch Error", f"Failed to launch game:\n{error}")
             return False
@@ -4965,11 +3059,10 @@ class MainWindow(QMainWindow):
         exit_code = process.poll()
         if exit_code is None:
             return
-        command_text = " ".join(command)
         QMessageBox.warning(
             self,
             "Launch Error",
-            f"Process exited immediately (code {exit_code}).\nCommand:\n{command_text}",
+            resolve_process_exited_early_message(exit_code, command),
         )
 
     def _perform_game_action(self) -> None:
@@ -5003,73 +3096,30 @@ class MainWindow(QMainWindow):
             )
             return
 
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"Game Settings - {installed_game.get('title', 'Game')}")
-        dialog.setModal(True)
-        dialog.resize(700, 300)
-
-        dialog_layout = QVBoxLayout(dialog)
-        form_layout = QFormLayout()
-
-        install_dir_label = QLabel(str(install_dir))
-        install_dir_label.setWordWrap(True)
-        form_layout.addRow("Install Directory", install_dir_label)
-
-        executable_combo = QComboBox()
-        executable_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        for candidate in executable_candidates:
-            try:
-                display_name = str(candidate.relative_to(install_dir))
-            except ValueError:
-                display_name = str(candidate)
-            executable_combo.addItem(display_name, str(candidate))
-
         selected_path = installed_game.get("native_executable_path", "")
         selected_executable_path = selected_path.strip() if isinstance(selected_path, str) else ""
-        if selected_executable_path:
-            selected_index = executable_combo.findData(selected_executable_path)
-            if selected_index >= 0:
-                executable_combo.setCurrentIndex(selected_index)
-        form_layout.addRow("Executable", executable_combo)
-
-        dialog_layout.addLayout(form_layout)
-
-        launch_panel = QFrame()
-        launch_panel.setObjectName("panel")
-        launch_layout = QVBoxLayout(launch_panel)
-        launch_layout.setContentsMargins(12, 10, 12, 10)
-        launch_layout.addWidget(self._make_section_title("Custom Launch Parameters"))
-
-        custom_launch_form = QFormLayout()
-        native_launch_parameters_input = QLineEdit()
         existing_launch_parameters_value = installed_game.get("native_launch_parameters", "")
         existing_launch_parameters = (
             existing_launch_parameters_value.strip() if isinstance(existing_launch_parameters_value, str) else ""
         )
-        native_launch_parameters_input.setText(existing_launch_parameters)
-        custom_launch_form.addRow("Parameters", native_launch_parameters_input)
-        launch_layout.addLayout(custom_launch_form)
 
-        launch_hint = QLabel("Arguments are optional and appended when launching this game.")
-        launch_hint.setWordWrap(True)
-        launch_layout.addWidget(launch_hint)
-
-        dialog_layout.addWidget(launch_panel)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        dialog_layout.addWidget(buttons)
-
+        dialog = NativeGameSettingsDialog(
+            self,
+            game_title=str(installed_game.get("title", "Game")),
+            install_dir=install_dir,
+            executable_candidates=executable_candidates,
+            selected_executable_path=selected_executable_path,
+            existing_launch_parameters=existing_launch_parameters,
+            section_title_factory=self._make_section_title,
+        )
         if dialog.exec() != int(QDialog.DialogCode.Accepted):
             return
 
-        selected_value = executable_combo.currentData()
-        selected_executable = selected_value.strip() if isinstance(selected_value, str) else ""
+        selected_executable = dialog.selected_executable_path()
         if not selected_executable:
             return
 
-        native_launch_parameters = native_launch_parameters_input.text().strip()
+        native_launch_parameters = dialog.launch_parameters()
         installed_game["native_executable_path"] = selected_executable
         installed_game["native_launch_parameters"] = native_launch_parameters
         if self.current_details_game is not None:
@@ -5106,110 +3156,39 @@ class MainWindow(QMainWindow):
             return
 
     def _resolved_emulator_entry_for_game(self, game: dict[str, str]) -> tuple[str, dict[str, str] | None]:
-        platform_value = game.get("platform", "")
-        platform = platform_value.strip() if isinstance(platform_value, str) else ""
-        if not platform:
-            return "", None
-        emulator_name = self._default_emulator_name_for_platform(platform)
-        if not emulator_name:
-            return "", None
-        return emulator_name, self._emulator_entry_by_name(emulator_name)
+        return resolve_resolved_emulator_entry_for_game(
+            game,
+            default_emulator_name_for_platform_fn=self._default_emulator_name_for_platform,
+            emulator_entry_by_name_fn=self._emulator_entry_by_name,
+        )
 
     def _split_configured_paths(self, value: str) -> list[str]:
-        return [
-            item.strip()
-            for item in re.split(r"[;\r\n]+", value)
-            if isinstance(item, str) and item.strip()
-        ]
+        return resolve_split_configured_paths(value)
 
     def _normalize_save_strategy_value(self, value: str) -> str:
-        strategy = value.strip().casefold() if isinstance(value, str) else ""
-        aliases = {
-            "": "auto",
-            "auto": "auto",
-            "singlefile": "single_file",
-            "single_file": "single_file",
-            "single-file": "single_file",
-            "single file": "single_file",
-            "file": "single_file",
-            "folder": "folder",
-            "directory": "folder",
-            "folder_per_game": "folder",
-            "folder-per-game": "folder",
-        }
-        return aliases.get(strategy, "auto")
+        return resolve_normalize_save_strategy_value(value)
 
     def _resolved_save_strategy_for_emulator(self, emulator: dict[str, str], save_type: str) -> str:
-        configured_value = emulator.get("save_strategy", "")
-        configured_strategy = self._normalize_save_strategy_value(configured_value) if isinstance(configured_value, str) else "auto"
-        if configured_strategy != "auto":
-            return configured_strategy
-
-        profile = self._emulator_profile_for_entry(emulator)
-        profile_value = profile.get("save_strategy", "") if isinstance(profile, dict) else ""
-        profile_strategy = self._normalize_save_strategy_value(profile_value) if isinstance(profile_value, str) else "auto"
-        if profile_strategy != "auto":
-            return profile_strategy
-
-        if save_type == "state":
-            return "single_file"
-        return "auto"
+        return resolve_resolved_save_strategy_for_emulator(
+            emulator,
+            save_type,
+            emulator_profile_for_entry_fn=self._emulator_profile_for_entry,
+        )
 
     def _resolved_ignore_basenames_for_emulator(self, emulator: dict[str, str]) -> set[str]:
-        configured_value = emulator.get("ignore_files", "")
-        configured_values = self._split_configured_paths(configured_value) if isinstance(configured_value, str) else []
-
-        profile = self._emulator_profile_for_entry(emulator)
-        profile_values: list[str] = []
-        if isinstance(profile, dict):
-            raw_profile_values = profile.get("ignore_files", [])
-            if isinstance(raw_profile_values, list):
-                profile_values = [item.strip() for item in raw_profile_values if isinstance(item, str) and item.strip()]
-
-        all_values = configured_values if configured_values else profile_values
-        basenames: set[str] = set()
-        for value in all_values:
-            base_name = Path(value).name.strip().casefold()
-            if base_name and Path(base_name).suffix.casefold() not in {".jpg", ".jpeg"}:
-                basenames.add(base_name)
-        return basenames
+        return resolve_resolved_ignore_basenames_for_emulator(
+            emulator,
+            emulator_profile_for_entry_fn=self._emulator_profile_for_entry,
+        )
 
     def _normalize_ignore_extension_value(self, value: str) -> str:
-        if not isinstance(value, str):
-            return ""
-        normalized = value.strip().casefold()
-        if not normalized:
-            return ""
-        if "/" in normalized or "\\" in normalized:
-            normalized = Path(normalized).suffix.casefold()
-        if normalized.startswith("*."):
-            normalized = normalized[1:]
-        if not normalized.startswith("."):
-            normalized = f".{normalized.lstrip('*')}"
-        if not re.fullmatch(r"\.[a-z0-9]+", normalized):
-            return ""
-        if normalized in {".jpg", ".jpeg"}:
-            return ""
-        return normalized
+        return resolve_normalize_ignore_extension_value(value)
 
     def _resolved_ignore_extensions_for_emulator(self, emulator: dict[str, str]) -> set[str]:
-        configured_value = emulator.get("ignore_extensions", "")
-        configured_values = self._split_configured_paths(configured_value) if isinstance(configured_value, str) else []
-
-        profile = self._emulator_profile_for_entry(emulator)
-        profile_values: list[str] = []
-        if isinstance(profile, dict):
-            raw_profile_values = profile.get("ignore_extensions", [])
-            if isinstance(raw_profile_values, list):
-                profile_values = [item.strip() for item in raw_profile_values if isinstance(item, str) and item.strip()]
-
-        all_values = configured_values if configured_values else profile_values
-        normalized: set[str] = set()
-        for value in all_values:
-            normalized_value = self._normalize_ignore_extension_value(value)
-            if normalized_value:
-                normalized.add(normalized_value)
-        return normalized
+        return resolve_resolved_ignore_extensions_for_emulator(
+            emulator,
+            emulator_profile_for_entry_fn=self._emulator_profile_for_entry,
+        )
 
     def _sync_directory_ignore_basenames_for_emulator(
         self,
@@ -5226,11 +3205,7 @@ class MainWindow(QMainWindow):
         return set(self._resolved_ignore_extensions_for_emulator(emulator))
 
     def _session_filtered_file_candidates(self, game: dict[str, str], files: list[Path]) -> list[Path]:
-        session_window = self._session_window_for_state_upload(game)
-        if session_window is None:
-            return files
-        filtered = self._filter_files_by_mtime_window(files, session_window[0], session_window[1])
-        return filtered if filtered else files
+        return session_filtered_file_candidates(files, self._session_window_for_state_upload(game))
 
     def _session_filtered_directory_candidates(
         self,
@@ -5240,17 +3215,13 @@ class MainWindow(QMainWindow):
         ignore_basenames: set[str] | None = None,
         ignore_extensions: set[str] | None = None,
     ) -> list[Path]:
-        session_window = self._session_window_for_state_upload(game)
-        if session_window is None:
-            return directories
-        filtered = self._filter_directories_by_mtime_window(
+        return session_filtered_directory_candidates(
             directories,
-            session_window[0],
-            session_window[1],
+            self._session_window_for_state_upload(game),
+            self._latest_file_mtime_under_path,
             ignore_basenames=ignore_basenames,
             ignore_extensions=ignore_extensions,
         )
-        return filtered if filtered else directories
 
     def _cloud_sync_directory_candidates_for_game(
         self,
@@ -5260,57 +3231,14 @@ class MainWindow(QMainWindow):
         ignore_basenames: set[str] | None = None,
         ignore_extensions: set[str] | None = None,
     ) -> list[Path]:
-        tokens = self._game_save_match_tokens(game)
-        candidates: list[Path] = []
-        blocked_basenames = {
-            name.casefold()
-            for name in (ignore_basenames or set())
-            if isinstance(name, str) and name.strip()
-        }
-        blocked_extensions = {
-            extension.casefold()
-            for extension in (ignore_extensions or set())
-            if isinstance(extension, str) and extension.strip()
-        }
-
-        for directory in directories:
-            if not directory.exists() or not directory.is_dir():
-                continue
-            for child in directory.iterdir():
-                if not child.is_dir():
-                    continue
-                if not any(
-                    candidate.is_file()
-                    and (not blocked_basenames or candidate.name.casefold() not in blocked_basenames)
-                    and (not blocked_extensions or candidate.suffix.casefold() not in blocked_extensions)
-                    for candidate in child.rglob("*")
-                ):
-                    continue
-
-                normalized_name = re.sub(r"[^a-z0-9]+", "", child.name.casefold())
-                normalized_relative = re.sub(r"[^a-z0-9]+", "", str(child.relative_to(directory)).casefold())
-                if tokens and not any(token in normalized_name or token in normalized_relative for token in tokens):
-                    continue
-                candidates.append(child)
-
-        candidates.sort(
-            key=lambda item: self._latest_file_mtime_under_path(
-                item,
-                ignore_basenames=blocked_basenames,
-                ignore_extensions=blocked_extensions,
-            ),
-            reverse=True,
+        return cloud_sync_directory_candidates_for_game(
+            game,
+            directories,
+            self._game_save_match_tokens,
+            self._latest_file_mtime_under_path,
+            ignore_basenames=ignore_basenames,
+            ignore_extensions=ignore_extensions,
         )
-
-        unique: list[Path] = []
-        seen: set[str] = set()
-        for path in candidates:
-            key_value = str(path).casefold()
-            if key_value in seen:
-                continue
-            seen.add(key_value)
-            unique.append(path)
-        return unique
 
     def _cloud_sync_targets_for_game(
         self,
@@ -5463,52 +3391,16 @@ class MainWindow(QMainWindow):
         return unique
 
     def _session_window_for_state_upload(self, game: dict[str, str]) -> tuple[float, float] | None:
-        for session in reversed(self.active_game_sessions):
-            session_game = session.get("game")
-            if not isinstance(session_game, dict):
-                continue
-            if not self._games_match_identity(session_game, game):
-                continue
-            started_raw = session.get("started_at", 0)
-            try:
-                started_at = float(started_raw)
-            except (TypeError, ValueError):
-                started_at = 0.0
-            if started_at <= 0:
-                continue
-            ended_at = time.time()
-            return max(0.0, started_at - 2.0), ended_at + 30.0
-
-        sync_state = self._cloud_sync_state_for_game(game)
-        started_raw = sync_state.get("last_session_started_at", 0)
-        ended_raw = sync_state.get("last_session_ended_at", 0)
-        try:
-            started_at = float(started_raw)
-        except (TypeError, ValueError):
-            started_at = 0.0
-        try:
-            ended_at = float(ended_raw)
-        except (TypeError, ValueError):
-            ended_at = 0.0
-
-        if started_at <= 0:
-            return None
-        if ended_at <= 0:
-            ended_at = started_at
-        if ended_at < started_at:
-            ended_at = started_at
-        return max(0.0, started_at - 2.0), ended_at + 30.0
+        return session_window_for_state_upload(
+            self.active_game_sessions,
+            game,
+            self._games_match_identity,
+            self._cloud_sync_state_for_game(game),
+            time.time(),
+        )
 
     def _filter_files_by_mtime_window(self, files: list[Path], start_time: float, end_time: float) -> list[Path]:
-        filtered: list[Path] = []
-        for candidate in files:
-            try:
-                candidate_mtime = float(candidate.stat().st_mtime)
-            except (OSError, ValueError):
-                continue
-            if start_time <= candidate_mtime <= end_time:
-                filtered.append(candidate)
-        return filtered
+        return filter_files_by_mtime_window(files, start_time, end_time)
 
     def _filter_directories_by_mtime_window(
         self,
@@ -5519,16 +3411,14 @@ class MainWindow(QMainWindow):
         ignore_basenames: set[str] | None = None,
         ignore_extensions: set[str] | None = None,
     ) -> list[Path]:
-        filtered: list[Path] = []
-        for directory in directories:
-            latest_mtime = self._latest_file_mtime_under_path(
-                directory,
-                ignore_basenames=ignore_basenames,
-                ignore_extensions=ignore_extensions,
-            )
-            if start_time <= latest_mtime <= end_time:
-                filtered.append(directory)
-        return filtered
+        return filter_directories_by_mtime_window(
+            directories,
+            start_time,
+            end_time,
+            self._latest_file_mtime_under_path,
+            ignore_basenames=ignore_basenames,
+            ignore_extensions=ignore_extensions,
+        )
 
     def _rpcs3_save_directories_for_game(self, game: dict[str, str], directories: list[Path]) -> list[Path]:
         game_ids = self._ps3_game_ids_for_game(game)
@@ -5667,39 +3557,12 @@ class MainWindow(QMainWindow):
         title_value = game.get("title", "Game")
         title = title_value if isinstance(title_value, str) else "Game"
         safe_title = self._sanitize_path_component(title, "game")
-        timestamp_iso = datetime.now().astimezone().isoformat(timespec="seconds").replace(":", "-")
-        archive_name = f"{safe_title}-{timestamp_iso}.zip"
-        archive_path = Path(tempfile.gettempdir()) / archive_name
-        if archive_path.exists():
-            suffix = int(time.time() * 1000)
-            archive_path = Path(tempfile.gettempdir()) / f"{safe_title}-{timestamp_iso}-{suffix}.zip"
-
-        blocked_basenames = {
-            name.casefold()
-            for name in (ignore_basenames or set())
-            if isinstance(name, str) and name.strip()
-        }
-
-        try:
-            with zipfile.ZipFile(archive_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
-                for candidate in directory.rglob("*"):
-                    if not candidate.is_file():
-                        continue
-                    if blocked_basenames and candidate.name.casefold() in blocked_basenames:
-                        continue
-                    if blocked_extensions and candidate.suffix.casefold() in blocked_extensions:
-                        continue
-                    relative_path = candidate.relative_to(directory)
-                    archive_member_name = f"{directory.name}/{relative_path.as_posix()}"
-                    archive.write(candidate, archive_member_name)
-            return archive_path
-        except OSError:
-            if archive_path.exists():
-                try:
-                    archive_path.unlink()
-                except OSError:
-                    pass
-            raise
+        return zip_directory_for_upload(
+            directory,
+            safe_title,
+            ignore_basenames=ignore_basenames,
+            ignore_extensions=ignore_extensions,
+        )
 
     def _ppsspp_state_upload_jobs(
         self,
@@ -5710,68 +3573,16 @@ class MainWindow(QMainWindow):
         ignore_basenames: set[str] | None = None,
         ignore_extensions: set[str] | None = None,
     ) -> list[tuple[str, dict[str, Path]]]:
-        id_tokens = self._psp_game_id_tokens(game)
-        blocked_basenames = {
-            name.casefold()
-            for name in (ignore_basenames or set())
-            if isinstance(name, str) and name.strip()
-        }
-        blocked_extensions = {
-            extension.casefold()
-            for extension in (ignore_extensions or set())
-            if isinstance(extension, str) and extension.strip()
-        }
-        candidates: list[tuple[Path, Path | None]] = []
-
-        for directory in directories:
-            if not directory.exists() or not directory.is_dir():
-                continue
-            for state_file in directory.glob("*.ppst"):
-                if not state_file.is_file():
-                    continue
-                if blocked_basenames and state_file.name.casefold() in blocked_basenames:
-                    continue
-                if blocked_extensions and state_file.suffix.casefold() in blocked_extensions:
-                    continue
-                normalized_name = re.sub(r"[^A-Z0-9]+", "", state_file.name.upper())
-                if id_tokens and not any(token in normalized_name for token in id_tokens):
-                    continue
-                screenshot = state_file.with_suffix(".jpg")
-                if not screenshot.exists() or not screenshot.is_file():
-                    screenshot = None
-                candidates.append((state_file, screenshot))
-
-        candidates.sort(key=lambda item: item[0].stat().st_mtime if item[0].exists() else 0, reverse=True)
-
-        jobs: list[tuple[str, dict[str, Path]]] = []
-        seen: set[str] = set()
-        for state_file, screenshot in candidates:
-            key_value = str(state_file).casefold()
-            if key_value in seen:
-                continue
-            seen.add(key_value)
-
-            files: dict[str, Path] = {file_field: state_file}
-            if screenshot is not None:
-                files["screenshotFile"] = screenshot
-            jobs.append((state_file.name, files))
-        return jobs
+        return ppsspp_state_upload_jobs(
+            self._psp_game_id_tokens(game),
+            directories,
+            file_field,
+            ignore_basenames=ignore_basenames,
+            ignore_extensions=ignore_extensions,
+        )
 
     def _save_record_timestamp(self, record: dict[str, Any]) -> float:
-        for key in ("updated_at", "created_at"):
-            value = record.get(key)
-            if not isinstance(value, str):
-                continue
-            text = value.strip()
-            if not text:
-                continue
-            if text.endswith("Z"):
-                text = f"{text[:-1]}+00:00"
-            try:
-                return datetime.fromisoformat(text).timestamp()
-            except ValueError:
-                continue
-        return 0.0
+        return save_record_timestamp(record)
 
     def _latest_file_mtime_under_path(
         self,
@@ -5867,87 +3678,19 @@ class MainWindow(QMainWindow):
 
     def _server_save_records_for_rom(self, rom_id: str) -> list[dict[str, Any]]:
         payload = self._api_get("/api/saves", {"rom_id": rom_id})
-        if not isinstance(payload, list):
-            return []
-
-        records: list[dict[str, Any]] = []
-        seen_ids: set[str] = set()
-        for item in payload:
-            if not isinstance(item, dict):
-                continue
-            save_id = str(item.get("id", "")).strip()
-            if not save_id or save_id in seen_ids:
-                continue
-            seen_ids.add(save_id)
-            records.append(item)
-
-        return records
+        return server_records_from_payload(payload)
 
     def _latest_server_save_record(self, rom_id: str, emulator_name: str) -> dict[str, Any] | None:
         records = self._server_save_records_for_rom(rom_id)
-        if not records:
-            return None
-
-        emulator_key = emulator_name.strip().casefold()
-        emulator_records = [
-            item
-            for item in records
-            if isinstance(item.get("emulator"), str)
-            and item.get("emulator", "").strip().casefold() == emulator_key
-        ]
-        selection = emulator_records if emulator_records else records
-
-        def _id_rank(record: dict[str, Any]) -> int:
-            value = record.get("id", 0)
-            try:
-                return int(value)
-            except (TypeError, ValueError):
-                return 0
-
-        selection.sort(key=lambda item: (self._save_record_timestamp(item), _id_rank(item)), reverse=True)
-        return selection[0]
+        return latest_server_record(records, emulator_name, self._save_record_timestamp)
 
     def _server_state_records_for_rom(self, rom_id: str) -> list[dict[str, Any]]:
         payload = self._api_get("/api/states", {"rom_id": rom_id})
-        if not isinstance(payload, list):
-            return []
-
-        records: list[dict[str, Any]] = []
-        seen_ids: set[str] = set()
-        for item in payload:
-            if not isinstance(item, dict):
-                continue
-            state_id = str(item.get("id", "")).strip()
-            if not state_id or state_id in seen_ids:
-                continue
-            seen_ids.add(state_id)
-            records.append(item)
-
-        return records
+        return server_records_from_payload(payload)
 
     def _latest_server_state_record(self, rom_id: str, emulator_name: str) -> dict[str, Any] | None:
         records = self._server_state_records_for_rom(rom_id)
-        if not records:
-            return None
-
-        emulator_key = emulator_name.strip().casefold()
-        emulator_records = [
-            item
-            for item in records
-            if isinstance(item.get("emulator"), str)
-            and item.get("emulator", "").strip().casefold() == emulator_key
-        ]
-        selection = emulator_records if emulator_records else records
-
-        def _id_rank(record: dict[str, Any]) -> int:
-            value = record.get("id", 0)
-            try:
-                return int(value)
-            except (TypeError, ValueError):
-                return 0
-
-        selection.sort(key=lambda item: (self._save_record_timestamp(item), _id_rank(item)), reverse=True)
-        return selection[0]
+        return latest_server_record(records, emulator_name, self._save_record_timestamp)
 
     def _prune_server_save_records(self, rom_id: str, emulator_name: str, keep_latest: int) -> tuple[int, list[str]]:
         keep = max(1, keep_latest)
@@ -6025,23 +3768,7 @@ class MainWindow(QMainWindow):
         if not isinstance(state_record, dict):
             raise ValueError("State record payload is invalid.")
 
-        def normalize_candidate_url(value: str) -> str:
-            parsed = urlsplit(value)
-            encoded_path = quote(parsed.path, safe="/%")
-            query_items = parse_qsl(parsed.query, keep_blank_values=True)
-            encoded_query = urlencode(query_items, doseq=True, quote_via=quote)
-            return urlunsplit((parsed.scheme, parsed.netloc, encoded_path, encoded_query, parsed.fragment))
-
-        candidate_paths: list[str] = []
-        for key in ("download_path", "file_path", "full_path"):
-            value = state_record.get(key, "")
-            if not isinstance(value, str):
-                continue
-            candidate = value.strip()
-            if candidate:
-                candidate_paths.append(candidate)
-
-        for candidate in candidate_paths:
+        for candidate in state_download_candidate_paths(state_record):
             try:
                 if candidate.startswith(("http://", "https://")):
                     request = Request(normalize_candidate_url(candidate), headers=self._authorized_headers(), method="GET")
@@ -6064,49 +3791,12 @@ class MainWindow(QMainWindow):
         skip_basenames: set[str] | None = None,
         skip_extensions: set[str] | None = None,
     ) -> int:
-        temp_zip_path: Path | None = None
-        blocked_basenames = {name.casefold() for name in (skip_basenames or set()) if isinstance(name, str) and name.strip()}
-        blocked_extensions = {extension.casefold() for extension in (skip_extensions or set()) if isinstance(extension, str) and extension.strip()}
-        try:
-            fd, temp_path = tempfile.mkstemp(prefix="rom-mate-save-", suffix=".zip")
-            os.close(fd)
-            temp_zip_path = Path(temp_path)
-            temp_zip_path.write_bytes(payload)
-            if not zipfile.is_zipfile(temp_zip_path):
-                raise ValueError("Downloaded save is not a zip archive.")
-
-            destination_root = target_root.resolve()
-            extracted_count = 0
-            with zipfile.ZipFile(temp_zip_path) as archive:
-                for member in archive.infolist():
-                    member_name = member.filename.replace("\\", "/")
-                    if not member_name or member_name.endswith("/"):
-                        continue
-                    relative_path = Path(member_name)
-                    if relative_path.is_absolute() or any(part in {"", ".", ".."} for part in relative_path.parts):
-                        continue
-                    if blocked_basenames and relative_path.name.casefold() in blocked_basenames:
-                        continue
-                    if blocked_extensions and relative_path.suffix.casefold() in blocked_extensions:
-                        continue
-
-                    destination = (destination_root / relative_path).resolve()
-                    try:
-                        destination.relative_to(destination_root)
-                    except ValueError:
-                        continue
-
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    with archive.open(member, "r") as source_file, destination.open("wb") as destination_file:
-                        shutil.copyfileobj(source_file, destination_file)
-                    extracted_count += 1
-            return extracted_count
-        finally:
-            if temp_zip_path is not None and temp_zip_path.exists():
-                try:
-                    temp_zip_path.unlink()
-                except OSError:
-                    pass
+        return extract_zip_archive_bytes_to_directory(
+            payload,
+            target_root,
+            skip_basenames=skip_basenames,
+            skip_extensions=skip_extensions,
+        )
 
     def _restore_single_save_file(
         self,
@@ -6118,9 +3808,6 @@ class MainWindow(QMainWindow):
         ignore_basenames: set[str] | None = None,
         ignore_extensions: set[str] | None = None,
     ) -> Path | None:
-        if not payload:
-            return None
-
         candidate_paths = self._cloud_sync_candidates_for_game(
             game,
             directories,
@@ -6128,18 +3815,8 @@ class MainWindow(QMainWindow):
             ignore_basenames=ignore_basenames,
             ignore_extensions=ignore_extensions,
         )
-        if candidate_paths:
-            target_path = candidate_paths[0]
-        else:
-            file_name_value = save_record.get("file_name", "")
-            file_name = Path(file_name_value).name if isinstance(file_name_value, str) else ""
-            if not file_name:
-                file_name = f"{self._sanitize_path_component(game.get('title', 'game'), 'save')}.srm"
-            target_path = directories[0] / file_name
-
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_bytes(payload)
-        return target_path
+        fallback_name = f"{self._sanitize_path_component(game.get('title', 'game'), 'save')}.srm"
+        return restore_single_save_payload(directories, save_record, payload, candidate_paths, fallback_name)
 
     def _restore_single_state_file(
         self,
@@ -6151,34 +3828,15 @@ class MainWindow(QMainWindow):
         ignore_basenames: set[str] | None = None,
         ignore_extensions: set[str] | None = None,
     ) -> Path | None:
-        if not payload:
-            return None
-
-        file_name_value = state_record.get("file_name", "")
-        file_name = Path(file_name_value).name if isinstance(file_name_value, str) else ""
-        if file_name:
-            target_path = directories[0] / file_name
-            for directory in directories:
-                candidate = directory / file_name
-                if candidate.exists() and candidate.is_file():
-                    target_path = candidate
-                    break
-        else:
-            candidate_paths = self._cloud_sync_candidates_for_game(
-                game,
-                directories,
-                "state",
-                ignore_basenames=ignore_basenames,
-                ignore_extensions=ignore_extensions,
-            )
-            if candidate_paths:
-                target_path = candidate_paths[0]
-            else:
-                target_path = directories[0] / f"{self._sanitize_path_component(game.get('title', 'game'), 'state')}.state"
-
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_bytes(payload)
-        return target_path
+        candidate_paths = self._cloud_sync_candidates_for_game(
+            game,
+            directories,
+            "state",
+            ignore_basenames=ignore_basenames,
+            ignore_extensions=ignore_extensions,
+        )
+        fallback_name = f"{self._sanitize_path_component(game.get('title', 'game'), 'state')}.state"
+        return restore_single_state_payload(directories, state_record, payload, candidate_paths, fallback_name)
 
     def _restore_cloud_save_for_game(
         self,
@@ -6237,19 +3895,18 @@ class MainWindow(QMainWindow):
             last_downloaded_save_id = str(sync_state.get("last_downloaded_save_id", "")).strip()
             if last_downloaded_save_id and last_downloaded_save_id == save_id:
                 local_latest_mtime = self._latest_local_save_mtime_for_game(game, emulator_name, directories)
-                if local_latest_mtime <= 0:
-                    if debug_enabled:
-                        print(
-                            f"[DEBUG][CloudSync] Restore continuing local_missing title={game.get('title', '')} "
-                            f"rom_id={rom_id} emulator={emulator_name} save_id={save_id}"
-                        )
-                else:
+                if should_skip_known_latest(last_downloaded_save_id, save_id, local_latest_mtime):
                     if debug_enabled:
                         print(
                             f"[DEBUG][CloudSync] Restore skipped already_latest title={game.get('title', '')} "
                             f"rom_id={rom_id} emulator={emulator_name} save_id={save_id}"
                         )
                     return False
+                if debug_enabled:
+                    print(
+                        f"[DEBUG][CloudSync] Restore continuing local_missing title={game.get('title', '')} "
+                        f"rom_id={rom_id} emulator={emulator_name} save_id={save_id}"
+                    )
 
         if skip_if_local_newer:
             if self._is_pcsx2_emulator_name(emulator_name) and not self._ps2_game_id_tokens(game):
@@ -6261,7 +3918,7 @@ class MainWindow(QMainWindow):
             else:
                 local_latest_mtime = self._latest_local_save_mtime_for_game(game, emulator_name, directories)
                 server_latest_timestamp = self._save_record_timestamp(save_record)
-                if local_latest_mtime > 0 and local_latest_mtime > (server_latest_timestamp + 1.0):
+                if is_local_newer_than_server(local_latest_mtime, server_latest_timestamp):
                     if debug_enabled:
                         print(
                             f"[DEBUG][CloudSync] Restore skipped local_newer title={game.get('title', '')} "
@@ -6394,19 +4051,18 @@ class MainWindow(QMainWindow):
             last_downloaded_state_id = str(sync_state.get("last_downloaded_state_id", "")).strip()
             if last_downloaded_state_id and last_downloaded_state_id == state_id:
                 local_latest_mtime = self._latest_local_state_mtime_for_game(game, emulator_name, directories)
-                if local_latest_mtime <= 0:
-                    if debug_enabled:
-                        print(
-                            f"[DEBUG][CloudSync] Restore continuing local_missing save_type=state title={game.get('title', '')} "
-                            f"rom_id={rom_id} emulator={emulator_name} state_id={state_id}"
-                        )
-                else:
+                if should_skip_known_latest(last_downloaded_state_id, state_id, local_latest_mtime):
                     if debug_enabled:
                         print(
                             f"[DEBUG][CloudSync] Restore skipped already_latest save_type=state title={game.get('title', '')} "
                             f"rom_id={rom_id} emulator={emulator_name} state_id={state_id}"
                         )
                     return False
+                if debug_enabled:
+                    print(
+                        f"[DEBUG][CloudSync] Restore continuing local_missing save_type=state title={game.get('title', '')} "
+                        f"rom_id={rom_id} emulator={emulator_name} state_id={state_id}"
+                    )
 
         try:
             payload = self._download_server_state_content(state_id)
@@ -6461,55 +4117,15 @@ class MainWindow(QMainWindow):
         ignore_basenames: set[str] | None = None,
         ignore_extensions: set[str] | None = None,
     ) -> list[Path]:
-        if save_type not in {"save", "state"}:
-            return []
-        tokens = self._game_save_match_tokens(game)
-        blocked_basenames = {
-            name.casefold()
-            for name in (ignore_basenames or set())
-            if isinstance(name, str) and name.strip()
-        }
-        blocked_extensions = {
-            extension.casefold()
-            for extension in (ignore_extensions or set())
-            if isinstance(extension, str) and extension.strip()
-        }
-        candidates: list[Path] = []
-        state_candidates: list[Path] = []
-
-        for directory in directories:
-            for candidate in directory.rglob("*"):
-                if not candidate.is_file():
-                    continue
-                if blocked_basenames and candidate.name.casefold() in blocked_basenames:
-                    continue
-                if blocked_extensions and candidate.suffix.casefold() in blocked_extensions:
-                    continue
-
-                candidate_name = candidate.name.casefold()
-                candidate_stem_compact = re.sub(r"[^a-z0-9]+", "", candidate.stem.casefold())
-                if save_type == "save" and tokens and not any(
-                    token in candidate_name or (token in candidate_stem_compact and token) for token in tokens
-                ):
-                    continue
-                candidates.append(candidate)
-                if save_type == "state" and self._is_state_file_candidate(candidate):
-                    state_candidates.append(candidate)
-
-        if save_type == "state" and state_candidates:
-            candidates = state_candidates
-
-        candidates.sort(key=lambda item: item.stat().st_mtime if item.exists() else 0, reverse=True)
-
-        unique: list[Path] = []
-        seen: set[str] = set()
-        for path in candidates:
-            key_value = str(path).casefold()
-            if key_value in seen:
-                continue
-            seen.add(key_value)
-            unique.append(path)
-        return unique
+        return cloud_sync_candidates_for_game(
+            game,
+            directories,
+            save_type,
+            self._game_save_match_tokens,
+            self._is_state_file_candidate,
+            ignore_basenames=ignore_basenames,
+            ignore_extensions=ignore_extensions,
+        )
 
     def _upload_cloud_files_for_game(
         self,
@@ -6571,18 +4187,20 @@ class MainWindow(QMainWindow):
             )
             ignore_basenames = self._sync_directory_ignore_basenames_for_emulator(emulator_name, emulator_entry, "save")
             ignore_extensions = self._sync_directory_ignore_extensions_for_emulator(emulator_entry)
-            for save_directory in save_directories:
-                archive_path = self._zip_directory_for_upload(
+            archived_jobs, temporary_archives = directory_archive_upload_jobs(
+                save_directories,
+                file_field,
+                lambda save_directory: self._zip_directory_for_upload(
                     save_directory,
                     game,
                     ignore_basenames=ignore_basenames,
                     ignore_extensions=ignore_extensions,
-                )
-                temporary_archives.append(archive_path)
-                upload_jobs.append((save_directory.name, {file_field: archive_path}))
-            upload_jobs.extend((file_path.name, {file_field: file_path}) for file_path in save_files)
+                ),
+            )
+            upload_jobs.extend(archived_jobs)
+            upload_jobs.extend(file_upload_jobs(save_files, file_field))
             if not upload_jobs:
-                show_info("No matching save files or save folders were found to upload.")
+                show_info(no_matching_upload_message(save_type))
                 return 0, 0, []
         elif is_ppsspp and save_type == "state":
             ignore_basenames = self._resolved_ignore_basenames_for_emulator(emulator_entry)
@@ -6594,20 +4212,12 @@ class MainWindow(QMainWindow):
                 ignore_basenames=ignore_basenames,
                 ignore_extensions=ignore_extensions,
             )
-            session_window = self._session_window_for_state_upload(game)
-            if session_window is not None:
-                upload_jobs = [
-                    (display_name, files_payload)
-                    for display_name, files_payload in upload_jobs
-                    if any(
-                        isinstance(path, Path)
-                        and path.exists()
-                        and session_window[0] <= float(path.stat().st_mtime) <= session_window[1]
-                        for path in files_payload.values()
-                    )
-                ]
+            upload_jobs = filter_upload_jobs_by_session_window(
+                upload_jobs,
+                self._session_window_for_state_upload(game),
+            )
             if not upload_jobs:
-                show_info("No matching PPSSPP .ppst state files were found to upload.")
+                show_info(no_matching_upload_message(save_type, is_ppsspp_state=True))
                 return 0, 0, []
         else:
             files, _ = self._cloud_sync_targets_for_game(
@@ -6618,10 +4228,9 @@ class MainWindow(QMainWindow):
                 save_type,
             )
             if not files:
-                label = "save files" if save_type == "save" else "save states"
-                show_info(f"No matching {label} files were found to upload.")
+                show_info(no_matching_upload_message(save_type))
                 return 0, 0, []
-            upload_jobs = [(file_path.name, {file_field: file_path}) for file_path in files]
+            upload_jobs = file_upload_jobs(files, file_field)
 
         success_count = 0
         failed_files: list[str] = []
@@ -6639,13 +4248,7 @@ class MainWindow(QMainWindow):
             except (HTTPError, URLError, OSError, ValueError, json.JSONDecodeError) as error:
                 failed_files.append(display_name)
 
-        for archive_path in temporary_archives:
-            if not archive_path.exists():
-                continue
-            try:
-                archive_path.unlink()
-            except OSError:
-                continue
+        cleanup_temporary_paths(temporary_archives)
 
         retention_limit = self._cloud_save_retention_limit()
         retention_deleted = 0
@@ -6669,23 +4272,17 @@ class MainWindow(QMainWindow):
                 f"retention_limit={retention_limit} retention_failed={retention_failed_ids[:5]}"
             )
 
-        if failed_files and success_count == 0:
-            show_warning("Cloud upload failed for all matching files.")
-            return success_count, len(upload_jobs), failed_files
-
-        kind_label = "save files" if save_type == "save" else "save states"
-        if failed_files:
-            show_warning(f"Uploaded {success_count} {kind_label}. Failed: {', '.join(failed_files[:5])}")
-            return success_count, len(upload_jobs), failed_files
-
-        if retention_failed_ids:
-            show_warning(
-                f"Uploaded {success_count} {kind_label}. "
-                f"Could not remove {len(retention_failed_ids)} older cloud saves for retention limit {retention_limit}."
-            )
-            return success_count, len(upload_jobs), failed_files
-
-        show_info(f"Uploaded {success_count} {kind_label}.")
+        completion_message, is_warning = upload_completion_message(
+            save_type,
+            success_count,
+            failed_files,
+            retention_failed_ids,
+            retention_limit,
+        )
+        if is_warning:
+            show_warning(completion_message)
+        else:
+            show_info(completion_message)
         return success_count, len(upload_jobs), failed_files
 
     def _perform_upload_saves_action(self) -> None:
@@ -6767,35 +4364,18 @@ class MainWindow(QMainWindow):
         if not self.active_game_sessions:
             return
 
-        remaining: list[dict[str, Any]] = []
-        for session in self.active_game_sessions:
-            process = session.get("process")
-            if not isinstance(process, subprocess.Popen):
-                continue
-            if process.poll() is None:
-                remaining.append(session)
-                continue
+        remaining, finished = partition_active_game_sessions(self.active_game_sessions)
+        for session in finished:
             self._handle_finished_game_session(session)
 
         self.active_game_sessions = remaining
 
     def _handle_finished_game_session(self, session: dict[str, Any]) -> None:
-        game = session.get("game")
-        if isinstance(game, dict):
-            started_raw = session.get("started_at", 0)
-            try:
-                started_at = float(started_raw)
-            except (TypeError, ValueError):
-                started_at = 0.0
-            ended_at = time.time()
-            if started_at > 0:
-                self._update_cloud_sync_state_for_game(
-                    game,
-                    {
-                        "last_session_started_at": started_at,
-                        "last_session_ended_at": ended_at,
-                    },
-                )
+        ended_at = time.time()
+        game, updates = session_cloud_sync_updates(session, ended_at)
+        if game is not None:
+            if updates:
+                self._update_cloud_sync_state_for_game(game, updates)
             session["ended_at"] = ended_at
 
         if not self._auto_cloud_save_upload_enabled():
@@ -6822,36 +4402,25 @@ class MainWindow(QMainWindow):
         if emulator_entry is None:
             return
 
-        upload_types: list[str] = []
-        latest_mtimes: dict[str, float] = {}
         sync_state = self._cloud_sync_state_for_game(game)
 
+        local_latest_save_mtime = 0.0
         save_directories = self._resolved_sync_directory_paths(emulator_entry, "save_paths")
         if save_directories:
             local_latest_save_mtime = self._latest_local_save_mtime_for_game(game, emulator_name, save_directories)
-            if local_latest_save_mtime > 0:
-                previous_save_mtime_raw = sync_state.get("last_uploaded_save_mtime", sync_state.get("last_uploaded_local_mtime", 0))
-                try:
-                    previous_save_mtime = float(previous_save_mtime_raw)
-                except (TypeError, ValueError):
-                    previous_save_mtime = 0.0
-                if local_latest_save_mtime > (previous_save_mtime + 1.0):
-                    upload_types.append("save")
-                    latest_mtimes["save"] = local_latest_save_mtime
 
+        local_latest_state_mtime = 0.0
         state_directories = self._resolved_sync_directory_paths(emulator_entry, "state_paths")
-        if state_directories and not self._is_rpcs3_emulator_name(emulator_name):
+        include_state_upload = bool(state_directories) and not self._is_rpcs3_emulator_name(emulator_name)
+        if include_state_upload:
             local_latest_state_mtime = self._latest_local_state_mtime_for_game(game, emulator_name, state_directories)
-            if local_latest_state_mtime > 0:
-                previous_state_mtime_raw = sync_state.get("last_uploaded_state_mtime", 0)
-                try:
-                    previous_state_mtime = float(previous_state_mtime_raw)
-                except (TypeError, ValueError):
-                    previous_state_mtime = 0.0
-                if local_latest_state_mtime > (previous_state_mtime + 1.0):
-                    upload_types.append("state")
-                    latest_mtimes["state"] = local_latest_state_mtime
 
+        upload_types, latest_mtimes = auto_cloud_upload_plan(
+            sync_state,
+            local_latest_save_mtime,
+            local_latest_state_mtime,
+            include_state_upload,
+        )
         if not upload_types:
             return
 
@@ -6886,57 +4455,10 @@ class MainWindow(QMainWindow):
         if not isinstance(game, dict) or not isinstance(result, dict):
             return
 
-        per_type_raw = result.get("per_type", {})
-        local_latest_mtimes_raw = result.get("local_latest_mtimes", {})
-        per_type = per_type_raw if isinstance(per_type_raw, dict) else {}
-        local_latest_mtimes = local_latest_mtimes_raw if isinstance(local_latest_mtimes_raw, dict) else {}
-
-        updates: dict[str, Any] = {}
-        debug_segments: list[str] = []
-        any_uploaded = False
-        any_failed = False
-
-        for save_type in ("save", "state"):
-            raw_entry = per_type.get(save_type, {})
-            entry = raw_entry if isinstance(raw_entry, dict) else {}
-
-            try:
-                uploaded = int(entry.get("uploaded_count", 0))
-            except (TypeError, ValueError):
-                uploaded = 0
-            try:
-                total = int(entry.get("total_count", 0))
-            except (TypeError, ValueError):
-                total = 0
-
-            failed_raw = entry.get("failed_files", [])
-            failed = [str(item) for item in failed_raw] if isinstance(failed_raw, list) else []
-
-            if total <= 0 and uploaded <= 0 and not failed:
-                continue
-
-            any_uploaded = any_uploaded or uploaded > 0
-            any_failed = any_failed or bool(failed)
-
-            if uploaded > 0:
-                latest_raw = local_latest_mtimes.get(save_type, 0)
-                try:
-                    latest_mtime = float(latest_raw)
-                except (TypeError, ValueError):
-                    latest_mtime = 0.0
-
-                if save_type == "save":
-                    updates["last_uploaded_save_mtime"] = latest_mtime
-                    updates["last_uploaded_local_mtime"] = latest_mtime
-                else:
-                    updates["last_uploaded_state_mtime"] = latest_mtime
-
-            debug_segments.append(
-                f"{save_type}={uploaded}/{max(total, uploaded)} failed={failed[:3]}"
-            )
-
-        if any_uploaded:
-            updates["last_uploaded_at"] = datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+        updates, debug_segments, any_uploaded, any_failed = summarize_auto_cloud_upload_result(
+            result,
+            datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        )
 
         if updates:
             self._update_cloud_sync_state_for_game(game, updates)
@@ -6954,565 +4476,68 @@ class MainWindow(QMainWindow):
             )
 
     def _normalize_emulators(self, value: Any) -> list[dict[str, str]]:
-        if not isinstance(value, list):
-            return []
-        normalized: list[dict[str, str]] = []
-        for item in value:
-            if not isinstance(item, dict):
-                continue
-            name = item.get("name")
-            path = item.get("path")
-            args = item.get("args")
-            save_strategy = item.get("save_strategy", "auto")
-            ignore_files = item.get("ignore_files", "")
-            ignore_extensions = item.get("ignore_extensions", "")
-            save_paths = item.get("save_paths", "")
-            state_paths = item.get("state_paths", "")
-            if not isinstance(name, str) or not name.strip():
-                continue
-            if not isinstance(path, str):
-                path = ""
-            if not isinstance(args, str):
-                args = "%rom%"
-            if not isinstance(save_strategy, str):
-                save_strategy = "auto"
-            if not isinstance(ignore_files, str):
-                ignore_files = ""
-            if not isinstance(ignore_extensions, str):
-                ignore_extensions = ""
-            if not isinstance(save_paths, str):
-                save_paths = ""
-            if not isinstance(state_paths, str):
-                state_paths = ""
-            normalized.append(
-                {
-                    "name": name.strip(),
-                    "path": path.strip(),
-                    "args": args.strip() or "%rom%",
-                    "save_strategy": self._normalize_save_strategy_value(save_strategy),
-                    "ignore_files": ignore_files.strip(),
-                    "ignore_extensions": ignore_extensions.strip(),
-                    "save_paths": save_paths.strip(),
-                    "state_paths": state_paths.strip(),
-                }
-            )
-        normalized.sort(key=lambda emulator: emulator["name"].lower())
-        return normalized
+        return resolve_normalize_emulators(value, self._normalize_save_strategy_value)
 
     def _normalize_default_emulators(self, value: Any) -> dict[str, str]:
-        if not isinstance(value, dict):
-            return {}
-        normalized: dict[str, str] = {}
-        for key, item in value.items():
-            if isinstance(key, str) and key.strip() and isinstance(item, str):
-                normalized[key.strip()] = item
-        return normalized
+        return resolve_normalize_default_emulators(value)
 
     def _normalize_default_retroarch_cores(self, value: Any) -> dict[str, str]:
-        if not isinstance(value, dict):
-            return {}
-        normalized: dict[str, str] = {}
-        for key, item in value.items():
-            if isinstance(key, str) and key.strip() and isinstance(item, str) and item.strip():
-                normalized[key.strip()] = item.strip()
-        return normalized
+        return resolve_normalize_default_retroarch_cores(value)
 
     def _is_retroarch_emulator_name(self, emulator_name: str) -> bool:
         return "retroarch" in emulator_name.strip().lower()
 
     def _emulator_autoprofiles_path(self) -> Path:
-        return Path(__file__).resolve().parent / "emulator-autoprofiles.json"
+        return resolve_emulator_autoprofiles_path(Path(__file__).resolve().parent)
 
     def _default_emulator_autoprofiles(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "match_tokens": ["retroarch.exe"],
-                "name": "RetroArch",
-                "args": '-L "%core%" "%rom%"',
-                "all_platforms": True,
-                "platform_keywords": [],
-                "use_game_title_as_name": False,
-                "save_strategy": "single_file",
-                "save_directories": ["saves"],
-                "state_directories": ["states"],
-            },
-            {
-                "match_tokens": ["duckstation.exe"],
-                "name": "DuckStation",
-                "args": '-fullscreen -batch "%rom%"',
-                "all_platforms": False,
-                "platform_keywords": ["playstation", "ps1"],
-                "use_game_title_as_name": False,
-                "save_strategy": "single_file",
-                "save_directories": [],
-                "state_directories": [],
-            },
-            {
-                "match_tokens": ["pcsx2-qt.exe"],
-                "name": "PCSX2",
-                "args": '-fullscreen -batch "%rom%"',
-                "all_platforms": False,
-                "platform_keywords": ["playstation 2", "ps2"],
-                "use_game_title_as_name": False,
-                "save_strategy": "folder",
-                "save_directories": [],
-                "state_directories": [],
-            },
-            {
-                "match_tokens": ["ppssppqt.exe"],
-                "name": "PPSSPP",
-                "args": '--fullscreen --pause-menu-exit "%rom%"',
-                "all_platforms": False,
-                "platform_keywords": ["playstation portable", "psp"],
-                "use_game_title_as_name": False,
-                "save_strategy": "folder",
-                "ignore_files": ["load_undo.ppst"],
-                "ignore_extensions": [],
-                "save_directories": [],
-                "state_directories": [],
-            },
-            {
-                "match_tokens": ["rpcs3.exe"],
-                "name": "RPCS3",
-                "args": "%rom%",
-                "all_platforms": False,
-                "platform_keywords": ["playstation 3", "ps3"],
-                "use_game_title_as_name": False,
-                "save_strategy": "folder",
-                "save_directories": [
-                    "%EMULATOR_DIR%\\dev_hdd0\\home\\00000001\\savedata",
-                    "%APPDATA%\\rpcs3\\dev_hdd0\\home\\00000001\\savedata",
-                ],
-                "state_directories": [],
-            },
-            {
-                "match_tokens": ["dolphin.exe"],
-                "name": "Dolphin",
-                "args": '-b -e "%rom%"',
-                "all_platforms": False,
-                "platform_keywords": ["gamecube", "wii"],
-                "use_game_title_as_name": False,
-                "save_strategy": "single_file",
-                "save_directories": [],
-                "state_directories": [],
-            },
-            {
-                "match_tokens": ["cemu.exe"],
-                "name": "Cemu",
-                "args": '-f -g "%rom%"',
-                "all_platforms": False,
-                "platform_keywords": ["wii u"],
-                "use_game_title_as_name": False,
-                "save_strategy": "single_file",
-                "save_directories": [],
-                "state_directories": [],
-            },
-            {
-                "match_tokens": ["azahar.exe"],
-                "name": "Azahar",
-                "args": '-f "%rom%"',
-                "all_platforms": False,
-                "platform_keywords": ["nintendo 3ds", "3ds"],
-                "use_game_title_as_name": False,
-                "save_strategy": "single_file",
-                "save_directories": [],
-                "state_directories": [],
-            },
-            {
-                "match_tokens": ["pico8.exe"],
-                "name": "Pico",
-                "args": '-run "%rom%"',
-                "all_platforms": False,
-                "platform_keywords": ["pico-8", "pico 8"],
-                "use_game_title_as_name": False,
-                "save_strategy": "single_file",
-                "save_directories": [],
-                "state_directories": [],
-            },
-            {
-                "match_tokens": ["xemu.exe"],
-                "name": "Xemu",
-                "args": '-full-screen -dvd_path "%rom%"',
-                "all_platforms": False,
-                "platform_keywords": ["xbox"],
-                "use_game_title_as_name": False,
-                "save_strategy": "single_file",
-                "save_directories": [],
-                "state_directories": [],
-            },
-            {
-                "match_tokens": ["eden.exe"],
-                "name": "Eden",
-                "args": '-f -g "%rom%"',
-                "all_platforms": False,
-                "platform_keywords": ["switch", "nintendo switch"],
-                "use_game_title_as_name": False,
-                "save_strategy": "single_file",
-                "save_directories": [],
-                "state_directories": [],
-            },
-            {
-                "match_tokens": ["yuzu.exe"],
-                "name": "Yuzu",
-                "args": "%rom%",
-                "all_platforms": False,
-                "platform_keywords": ["switch", "nintendo switch"],
-                "use_game_title_as_name": False,
-                "save_strategy": "single_file",
-                "save_directories": [],
-                "state_directories": [],
-            },
-            {
-                "match_tokens": ["ryujinx.exe"],
-                "name": "Ryujinx",
-                "args": "%rom%",
-                "all_platforms": False,
-                "platform_keywords": ["switch", "nintendo switch"],
-                "use_game_title_as_name": False,
-                "save_strategy": "single_file",
-                "save_directories": [],
-                "state_directories": [],
-            },
-            {
-                "match_tokens": ["sudachi.exe"],
-                "name": "Sudachi",
-                "args": "%rom%",
-                "all_platforms": False,
-                "platform_keywords": ["switch", "nintendo switch"],
-                "use_game_title_as_name": False,
-                "save_strategy": "single_file",
-                "save_directories": [],
-                "state_directories": [],
-            },
-            {
-                "match_tokens": ["mame.exe"],
-                "name": "MAME",
-                "args": "%rom%",
-                "all_platforms": False,
-                "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
-                "use_game_title_as_name": False,
-                "save_strategy": "single_file",
-                "save_directories": [],
-                "state_directories": [],
-            },
-            {
-                "match_tokens": ["fbneo.exe"],
-                "name": "FBNeo",
-                "args": "%rom%",
-                "all_platforms": False,
-                "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
-                "use_game_title_as_name": False,
-                "save_strategy": "single_file",
-                "save_directories": [],
-                "state_directories": [],
-            },
-            {
-                "match_tokens": ["finalburnneo.exe"],
-                "name": "FinalBurn Neo",
-                "args": "%rom%",
-                "all_platforms": False,
-                "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
-                "use_game_title_as_name": False,
-                "save_strategy": "single_file",
-                "save_directories": [],
-                "state_directories": [],
-            },
-        ]
+        return resolve_default_emulator_autoprofiles()
 
     def _normalize_emulator_autoprofiles(self, value: Any) -> list[dict[str, Any]]:
-        if not isinstance(value, list):
-            return []
-
-        normalized: list[dict[str, Any]] = []
-        for item in value:
-            if not isinstance(item, dict):
-                continue
-
-            match_tokens = item.get("match_tokens", [])
-            if not isinstance(match_tokens, list):
-                continue
-            normalized_tokens = [
-                token.strip().casefold()
-                for token in match_tokens
-                if isinstance(token, str) and token.strip()
-            ]
-            if not normalized_tokens:
-                continue
-            primary_token = normalized_tokens[0]
-
-            name = item.get("name", "")
-            if not isinstance(name, str) or not name.strip():
-                continue
-
-            args = item.get("args", "%rom%")
-            if not isinstance(args, str):
-                args = "%rom%"
-
-            all_platforms = bool(item.get("all_platforms", False))
-
-            platform_keywords = item.get("platform_keywords", [])
-            normalized_keywords: list[str] = []
-            if isinstance(platform_keywords, list):
-                normalized_keywords = [
-                    keyword.strip()
-                    for keyword in platform_keywords
-                    if isinstance(keyword, str) and keyword.strip()
-                ]
-
-            use_game_title_as_name = bool(item.get("use_game_title_as_name", False))
-
-            save_strategy = item.get("save_strategy", "auto")
-            if not isinstance(save_strategy, str):
-                save_strategy = "auto"
-            normalized_save_strategy = self._normalize_save_strategy_value(save_strategy)
-
-            ignore_files = item.get("ignore_files", [])
-            normalized_ignore_files: list[str] = []
-            if isinstance(ignore_files, list):
-                normalized_ignore_files = [
-                    file_name.strip()
-                    for file_name in ignore_files
-                    if isinstance(file_name, str) and file_name.strip()
-                ]
-
-            ignore_extensions = item.get("ignore_extensions", [])
-            normalized_ignore_extensions: list[str] = []
-            if isinstance(ignore_extensions, list):
-                normalized_ignore_extensions = [
-                    normalized
-                    for extension in ignore_extensions
-                    if isinstance(extension, str)
-                    for normalized in [self._normalize_ignore_extension_value(extension)]
-                    if normalized
-                ]
-
-            save_directories = item.get("save_directories", [])
-            normalized_save_directories: list[str] = []
-            if isinstance(save_directories, list):
-                normalized_save_directories = [
-                    directory.strip()
-                    for directory in save_directories
-                    if isinstance(directory, str) and directory.strip()
-                ]
-
-            state_directories = item.get("state_directories", [])
-            normalized_state_directories: list[str] = []
-            if isinstance(state_directories, list):
-                normalized_state_directories = [
-                    directory.strip()
-                    for directory in state_directories
-                    if isinstance(directory, str) and directory.strip()
-                ]
-
-            normalized.append(
-                {
-                    "match_tokens": [primary_token],
-                    "name": name.strip(),
-                    "args": args.strip() or "%rom%",
-                    "all_platforms": all_platforms,
-                    "platform_keywords": normalized_keywords,
-                    "use_game_title_as_name": use_game_title_as_name,
-                    "save_strategy": normalized_save_strategy,
-                    "ignore_files": normalized_ignore_files,
-                    "ignore_extensions": normalized_ignore_extensions,
-                    "save_directories": normalized_save_directories,
-                    "state_directories": normalized_state_directories,
-                }
-            )
-
-        return normalized
+        return resolve_normalize_emulator_autoprofiles(
+            value,
+            self._normalize_save_strategy_value,
+            self._normalize_ignore_extension_value,
+        )
 
     def _emulator_autoprofiles(self) -> list[dict[str, Any]]:
-        if isinstance(self.emulator_autoprofiles, list):
-            return self.emulator_autoprofiles
-
-        defaults = self._normalize_emulator_autoprofiles(self._default_emulator_autoprofiles())
-        autoprofiles_path = self._emulator_autoprofiles_path()
-        if not autoprofiles_path.exists():
-            self.emulator_autoprofiles = defaults
-            return defaults
-
-        try:
-            parsed = json.loads(autoprofiles_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            self.emulator_autoprofiles = defaults
-            return defaults
-
-        normalized = self._normalize_emulator_autoprofiles(parsed)
-        if normalized:
-            self.emulator_autoprofiles = normalized
-            return normalized
-
-        self.emulator_autoprofiles = defaults
-        return defaults
+        profiles = resolve_emulator_autoprofiles(
+            self.emulator_autoprofiles,
+            Path(__file__).resolve().parent,
+            self._normalize_save_strategy_value,
+            self._normalize_ignore_extension_value,
+        )
+        self.emulator_autoprofiles = profiles
+        return profiles
 
     def _retroarch_core_list_path(self) -> Path:
-        return Path(__file__).resolve().parent / "retroarch-core-list.json"
+        return resolve_retroarch_core_list_path(Path(__file__).resolve().parent)
 
     def _retroarch_markdown_label(self, value: str) -> str:
-        text = value.strip()
-        if not text.startswith("["):
-            return text
-        marker = text.find("](")
-        if marker <= 1 or not text.endswith(")"):
-            return text
-        return text[1:marker].strip()
+        return resolve_retroarch_markdown_label(value)
 
     def _retroarch_core_id_from_name(self, core_name: str) -> str:
-        normalized_name = self._retroarch_markdown_label(core_name).strip().casefold()
-        overrides = {
-            "beetle psx": "mednafen_psx",
-            "beetle psx hw": "mednafen_psx_hw",
-            "beetle saturn": "mednafen_saturn",
-            "beetle vb": "mednafen_vb",
-            "fb neo": "fbneo",
-            "fceumm": "fceumm",
-            "flycast gles2": "flycast",
-            "lrps2": "lrps2",
-            "mame 2003-plus": "mame2003_plus",
-            "mesen-s": "mesen_s",
-            "mupen64plus-next": "mupen64plus_next",
-            "mupen64plus-next gles2": "mupen64plus_next",
-            "mupen64plus-next gles3": "mupen64plus_next",
-            "parallel n64": "parallel_n64",
-            "pcsx rearmed": "pcsx_rearmed",
-            "snes9x 2002": "snes9x2002",
-            "snes9x 2005": "snes9x2005",
-            "snes9x 2005 plus": "snes9x2005_plus",
-            "snes9x 2010": "snes9x2010",
-            "same cdi": "same_cdi",
-            "vba-m": "vbam",
-            "vba next": "vba_next",
-        }
-        mapped = overrides.get(normalized_name)
-        if mapped:
-            return mapped
-
-        sanitized: list[str] = []
-        previous_underscore = False
-        for character in normalized_name:
-            if character.isalnum():
-                sanitized.append(character)
-                previous_underscore = False
-                continue
-            if previous_underscore:
-                continue
-            sanitized.append("_")
-            previous_underscore = True
-
-        return "".join(sanitized).strip("_")
+        return resolve_retroarch_core_id_from_name(core_name)
 
     def _retroarch_core_id_from_file_name(self, core_file_name: str) -> str:
-        normalized = core_file_name.strip().replace("\\", "/")
-        if not normalized:
-            return ""
-
-        file_name = normalized.rsplit("/", 1)[-1].casefold()
-        if file_name.endswith(".dll"):
-            file_name = file_name[:-4]
-        if file_name.endswith("_libretro"):
-            file_name = file_name[: -len("_libretro")]
-        return file_name.strip()
+        return resolve_retroarch_core_id_from_file_name(core_file_name)
 
     def _retroarch_compatibility_map_from_markdown(self) -> dict[str, list[str]]:
         if isinstance(self.retroarch_compatibility_map, dict):
             return self.retroarch_compatibility_map
 
-        path = self._retroarch_core_list_path()
-        compatibility: dict[str, list[str]] = {}
-        if not path.exists():
-            self.retroarch_compatibility_map = compatibility
-            return compatibility
-
-        try:
-            raw_content = path.read_text(encoding="utf-8")
-        except OSError:
-            self.retroarch_compatibility_map = compatibility
-            return compatibility
-
-        try:
-            entries = json.loads(raw_content)
-        except json.JSONDecodeError:
-            entries = None
-
-        if isinstance(entries, list):
-            for entry in entries:
-                if not isinstance(entry, dict):
-                    continue
-
-                core_file = entry.get("core_file", "")
-                if not isinstance(core_file, str) or not core_file.strip():
-                    continue
-                core_id = self._retroarch_core_id_from_file_name(core_file)
-                if not core_id:
-                    continue
-
-                platforms = entry.get("platforms", [])
-                if not isinstance(platforms, list):
-                    continue
-                for platform in platforms:
-                    if not isinstance(platform, str):
-                        continue
-                    system_key = self._normalize_retroarch_platform_key(platform)
-                    if not system_key:
-                        continue
-                    known = compatibility.setdefault(system_key, [])
-                    if core_id not in known:
-                        known.append(core_id)
-
-            self.retroarch_compatibility_map = compatibility
-            return compatibility
-
-        lines = raw_content.splitlines()
-
-        for line in lines:
-            if not line.strip().startswith("|"):
-                continue
-            columns = [column.strip() for column in line.split("|")]
-            if len(columns) < 4:
-                continue
-
-            core_cell = columns[1]
-            system_cell = columns[2]
-            if not core_cell or not system_cell:
-                continue
-            if core_cell.casefold() == "core" or system_cell.startswith(":") or system_cell == "-":
-                continue
-
-            core_id = self._retroarch_core_id_from_name(core_cell)
-            system_key = self._normalize_retroarch_platform_key(system_cell)
-            if not core_id or not system_key:
-                continue
-
-            known = compatibility.setdefault(system_key, [])
-            if core_id not in known:
-                known.append(core_id)
-
+        compatibility = resolve_load_retroarch_compatibility_map(self._retroarch_core_list_path())
         self.retroarch_compatibility_map = compatibility
         return compatibility
 
     def _normalize_retroarch_platform_key(self, value: str) -> str:
-        normalized = value.strip().casefold()
-        if not normalized:
-            return ""
-
-        normalized = normalized.replace("\\", "/")
-        normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
-        normalized = re.sub(r"\s+", " ", normalized)
-        return normalized.strip()
+        return resolve_normalize_retroarch_platform_key(value)
 
     def _retroarch_platform_tokens(self, value: str) -> set[str]:
-        normalized = re.sub(r"[^a-z0-9]+", " ", value.strip().casefold())
-        ignored_tokens = {"the", "and", "of", "for", "system"}
-        return {token for token in normalized.split() if token and token not in ignored_tokens}
+        return resolve_retroarch_platform_tokens(value)
 
     def _all_retroarch_cores(self, compatibility: dict[str, list[str]]) -> list[str]:
-        cores: list[str] = []
-        for mapped_cores in compatibility.values():
-            for core in mapped_cores:
-                if core not in cores:
-                    cores.append(core)
-        return cores
+        return resolve_all_retroarch_cores(compatibility)
 
     def _retroarch_installed_core_ids_for_emulator(self, emulator_name: str) -> set[str]:
         if not self._is_retroarch_emulator_name(emulator_name):
@@ -7524,25 +4549,7 @@ class MainWindow(QMainWindow):
 
         emulator_path_value = emulator_entry.get("path", "")
         emulator_path_text = emulator_path_value.strip() if isinstance(emulator_path_value, str) else ""
-        if not emulator_path_text:
-            return set()
-
-        emulator_path = Path(emulator_path_text).expanduser()
-        if not emulator_path.exists() or not emulator_path.is_file():
-            return set()
-
-        cores_dir = emulator_path.parent / "cores"
-        if not cores_dir.exists() or not cores_dir.is_dir():
-            return set()
-
-        installed_core_ids: set[str] = set()
-        for candidate in cores_dir.glob("*.dll"):
-            if not candidate.is_file():
-                continue
-            core_id = self._retroarch_core_id_from_file_name(candidate.name)
-            if core_id:
-                installed_core_ids.add(core_id)
-        return installed_core_ids
+        return resolve_installed_retroarch_core_ids(emulator_path_text)
 
     def _installed_retroarch_cores_for_platform(self, platform: str, emulator_name: str) -> list[str]:
         platform_cores = self._retroarch_cores_for_platform(platform)
@@ -7552,29 +4559,16 @@ class MainWindow(QMainWindow):
         return [core for core in platform_cores if core in installed_core_ids]
 
     def _retroarch_system_keys_for_platform(self, platform: str) -> list[str]:
-        compatibility = self._retroarch_compatibility_map_from_markdown()
-        normalized = self._normalize_retroarch_platform_key(platform)
-        if not normalized or not compatibility:
-            return []
-
-        if normalized in compatibility:
-            return [normalized]
-        return []
+        return resolve_retroarch_system_keys_for_platform(
+            platform,
+            self._retroarch_compatibility_map_from_markdown(),
+        )
 
     def _retroarch_cores_for_platform(self, platform: str) -> list[str]:
-        compatibility = self._retroarch_compatibility_map_from_markdown()
-        if not compatibility:
-            return ["fbneo", "mame2003_plus"]
-
-        resolved_cores: list[str] = []
-        for system_key in self._retroarch_system_keys_for_platform(platform):
-            for core in compatibility.get(system_key, []):
-                if core not in resolved_cores:
-                    resolved_cores.append(core)
-
-        if resolved_cores:
-            return resolved_cores
-        return []
+        return resolve_retroarch_cores_for_platform(
+            platform,
+            self._retroarch_compatibility_map_from_markdown(),
+        )
 
     def _refresh_retroarch_core_options(self) -> None:
         if self.default_core_combo is None or self.default_platform_combo is None or self.default_emulator_combo is None:
@@ -7587,25 +4581,19 @@ class MainWindow(QMainWindow):
         core_defaults = self._normalize_default_retroarch_cores(self.config.get("default_retroarch_cores", {}))
         self.config["default_retroarch_cores"] = core_defaults
         saved_core = core_defaults.get(platform, "") if platform else ""
+        installed_cores = self._installed_retroarch_cores_for_platform(platform, emulator_name)
 
         self.default_core_combo.blockSignals(True)
         self.default_core_combo.clear()
-        for core in self._installed_retroarch_cores_for_platform(platform, emulator_name):
+        for core in installed_cores:
             self.default_core_combo.addItem(core, core)
 
-        if not is_retroarch:
-            self.default_core_combo.setCurrentIndex(-1)
+        selected_core = selected_retroarch_core(saved_core, installed_cores, is_retroarch)
+        if selected_core:
+            saved_index = self.default_core_combo.findData(selected_core)
+            self.default_core_combo.setCurrentIndex(saved_index if saved_index >= 0 else -1)
         else:
-            if saved_core:
-                saved_index = self.default_core_combo.findData(saved_core)
-                if saved_index >= 0:
-                    self.default_core_combo.setCurrentIndex(saved_index)
-                elif self.default_core_combo.count() > 0:
-                    self.default_core_combo.setCurrentIndex(0)
-                else:
-                    self.default_core_combo.setCurrentIndex(-1)
-            else:
-                self.default_core_combo.setCurrentIndex(0 if self.default_core_combo.count() > 0 else -1)
+            self.default_core_combo.setCurrentIndex(-1)
 
         self.default_core_combo.setEnabled(is_retroarch)
         self.default_core_combo.blockSignals(False)
@@ -7623,71 +4611,18 @@ class MainWindow(QMainWindow):
 
         defaults = self._normalize_default_emulators(self.config.get("default_emulators", {}))
         self.config["default_emulators"] = defaults
-        preferred_emulator = self._mapping_value_for_platform(defaults, platform)
-
-        if preferred_emulator and self.default_emulator_combo.findText(preferred_emulator) >= 0:
+        preferred_emulator = preferred_emulator_selection(
+            compatible_emulators,
+            self._mapping_value_for_platform(defaults, platform),
+            selected_before_refresh,
+        )
+        if preferred_emulator:
             self.default_emulator_combo.setCurrentText(preferred_emulator)
-        elif selected_before_refresh and self.default_emulator_combo.findText(selected_before_refresh) >= 0:
-            self.default_emulator_combo.setCurrentText(selected_before_refresh)
-
-        if not self.default_emulator_combo.currentText().strip() and self.default_emulator_combo.count() > 0:
-            self.default_emulator_combo.setCurrentIndex(0)
 
         self._refresh_retroarch_core_options()
 
     def _normalize_installed_games(self, value: Any) -> list[dict[str, str]]:
-        if not isinstance(value, list):
-            return []
-
-        normalized: list[dict[str, str]] = []
-        seen: set[tuple[str, str]] = set()
-        for item in value:
-            if not isinstance(item, dict):
-                continue
-            title = item.get("title")
-            platform = item.get("platform")
-            if not isinstance(title, str) or not title.strip():
-                continue
-            if not isinstance(platform, str) or not platform.strip():
-                continue
-            rating = item.get("rating")
-            description = item.get("description")
-            cover_url = item.get("cover_url")
-            cached_cover_path = item.get("cached_cover_path")
-            screenshot_urls = item.get("screenshot_urls")
-            rom_id = item.get("rom_id")
-            rom_file_name = item.get("rom_file_name")
-            extracted_path = item.get("extracted_path")
-            extracted_dir = item.get("extracted_dir")
-            archive_path = item.get("archive_path")
-            native_executable_path = item.get("native_executable_path")
-            native_launch_parameters = item.get("native_launch_parameters")
-            ps3_links = item.get("ps3_links")
-            ps3_game_id = item.get("ps3_game_id")
-            normalized_game = {
-                "title": title.strip(),
-                "platform": platform.strip(),
-                "rating": rating.strip() if isinstance(rating, str) and rating.strip() else "N/A",
-                "description": description.strip() if isinstance(description, str) and description.strip() else "No description available.",
-                "cover_url": cover_url.strip() if isinstance(cover_url, str) else "",
-                "cached_cover_path": cached_cover_path.strip() if isinstance(cached_cover_path, str) else "",
-                "screenshot_urls": screenshot_urls.strip() if isinstance(screenshot_urls, str) else "",
-                "rom_id": rom_id.strip() if isinstance(rom_id, str) else "",
-                "rom_file_name": rom_file_name.strip() if isinstance(rom_file_name, str) else "",
-                "extracted_path": extracted_path.strip() if isinstance(extracted_path, str) else "",
-                "extracted_dir": extracted_dir.strip() if isinstance(extracted_dir, str) else "",
-                "archive_path": archive_path.strip() if isinstance(archive_path, str) else "",
-                "native_executable_path": native_executable_path.strip() if isinstance(native_executable_path, str) else "",
-                "native_launch_parameters": native_launch_parameters.strip() if isinstance(native_launch_parameters, str) else "",
-                "ps3_links": ps3_links.strip() if isinstance(ps3_links, str) else "",
-                "ps3_game_id": ps3_game_id.strip().upper() if isinstance(ps3_game_id, str) else "",
-            }
-            key = self._game_key(normalized_game)
-            if key in seen:
-                continue
-            seen.add(key)
-            normalized.append(normalized_game)
-        return normalized
+        return resolve_normalize_installed_games(value, self._game_key)
 
     def _emulators(self) -> list[dict[str, str]]:
         emulators = self.config.get("emulators", [])
@@ -7752,15 +4687,13 @@ class MainWindow(QMainWindow):
             core_defaults = self._normalize_default_retroarch_cores(self.config.get("default_retroarch_cores", {}))
             self.config["default_emulators"] = defaults
             self.config["default_retroarch_cores"] = core_defaults
-            sorted_platforms = sorted(server_platforms, key=str.casefold)
-            for platform in sorted_platforms:
-                emulator_name = defaults.get(platform, "(none)")
-                if emulator_name != "(none)" and self._is_retroarch_emulator_name(emulator_name):
-                    core_name = core_defaults.get(platform, "")
-                    suffix = f" ({core_name})" if core_name else ""
-                    self.default_mapping_list.addItem(f"{platform}: {emulator_name}{suffix}")
-                else:
-                    self.default_mapping_list.addItem(f"{platform}: {emulator_name}")
+            for row_text in mapping_list_entries(
+                server_platforms,
+                defaults,
+                core_defaults,
+                self._is_retroarch_emulator_name,
+            ):
+                self.default_mapping_list.addItem(row_text)
 
         selected_platform = self.default_platform_combo.currentText() if self.default_platform_combo is not None else ""
         self._on_default_platform_changed(selected_platform)
@@ -7777,26 +4710,20 @@ class MainWindow(QMainWindow):
             or self.emulator_state_paths_input is None
         ):
             return
-        emulators = self._emulators()
-        if row < 0 or row >= len(emulators):
-            self.emulator_name_input.clear()
-            self.emulator_path_input.clear()
-            self.emulator_args_input.setText("%rom%")
-            self.emulator_save_strategy_input.setCurrentText("auto")
-            self.emulator_ignore_files_input.clear()
-            self.emulator_ignore_extensions_input.clear()
-            self.emulator_save_paths_input.clear()
-            self.emulator_state_paths_input.clear()
-            return
-        emulator = emulators[row]
-        self.emulator_name_input.setText(emulator["name"])
-        self.emulator_path_input.setText(emulator["path"])
-        self.emulator_args_input.setText(emulator["args"])
-        self.emulator_save_strategy_input.setCurrentText(self._normalize_save_strategy_value(emulator.get("save_strategy", "auto")))
-        self.emulator_ignore_files_input.setText(emulator.get("ignore_files", ""))
-        self.emulator_ignore_extensions_input.setText(emulator.get("ignore_extensions", ""))
-        self.emulator_save_paths_input.setText(emulator.get("save_paths", ""))
-        self.emulator_state_paths_input.setText(emulator.get("state_paths", ""))
+
+        form_state = emulator_form_state_for_row(
+            self._emulators(),
+            row,
+            self._normalize_save_strategy_value,
+        )
+        self.emulator_name_input.setText(form_state["name"])
+        self.emulator_path_input.setText(form_state["path"])
+        self.emulator_args_input.setText(form_state["args"])
+        self.emulator_save_strategy_input.setCurrentText(form_state["save_strategy"])
+        self.emulator_ignore_files_input.setText(form_state["ignore_files"])
+        self.emulator_ignore_extensions_input.setText(form_state["ignore_extensions"])
+        self.emulator_save_paths_input.setText(form_state["save_paths"])
+        self.emulator_state_paths_input.setText(form_state["state_paths"])
 
     def _save_emulator(self) -> None:
         if (
@@ -7828,32 +4755,19 @@ class MainWindow(QMainWindow):
         if self.emulator_list is not None:
             target_index = self.emulator_list.currentRow()
 
-        if 0 <= target_index < len(emulators):
-            emulators[target_index] = {
-                "name": name,
-                "path": path,
-                "args": args,
-                "save_strategy": save_strategy,
-                "ignore_files": ignore_files,
-                "ignore_extensions": ignore_extensions,
-                "save_paths": save_paths,
-                "state_paths": state_paths,
-            }
-        else:
-            emulators.append(
-                {
-                    "name": name,
-                    "path": path,
-                    "args": args,
-                    "save_strategy": save_strategy,
-                    "ignore_files": ignore_files,
-                    "ignore_extensions": ignore_extensions,
-                    "save_paths": save_paths,
-                    "state_paths": state_paths,
-                }
-            )
-
-        self.config["emulators"] = self._normalize_emulators(emulators)
+        entry = make_emulator_entry_payload(
+            name,
+            path,
+            args,
+            save_strategy,
+            ignore_files,
+            ignore_extensions,
+            save_paths,
+            state_paths,
+        )
+        self.config["emulators"] = self._normalize_emulators(
+            upsert_emulator_entry(emulators, entry, target_index)
+        )
         self._refresh_emulator_views()
         self._save_config(self.config)
 
@@ -7878,16 +4792,12 @@ class MainWindow(QMainWindow):
         emulators.pop(index)
         self.config["emulators"] = self._normalize_emulators(emulators)
 
-        defaults = self._normalize_default_emulators(self.config.get("default_emulators", {}))
-        for platform in list(defaults.keys()):
-            if defaults[platform] == removed_name:
-                defaults.pop(platform)
+        defaults, core_defaults = remove_emulator_default_mappings(
+            self._normalize_default_emulators(self.config.get("default_emulators", {})),
+            self._normalize_default_retroarch_cores(self.config.get("default_retroarch_cores", {})),
+            removed_name,
+        )
         self.config["default_emulators"] = defaults
-
-        core_defaults = self._normalize_default_retroarch_cores(self.config.get("default_retroarch_cores", {}))
-        for platform in list(core_defaults.keys()):
-            if platform not in defaults:
-                core_defaults.pop(platform)
         self.config["default_retroarch_cores"] = core_defaults
 
         self._refresh_emulator_views()
