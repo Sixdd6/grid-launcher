@@ -38,16 +38,25 @@ On first launch, or when required configuration is missing, the app should promp
 The user must complete this setup before continuing into the main application.
 
 ### Game Details View
-Clicking on a game in the Library or Server sections opens a sub view with more information about the game and a Back button to return to the previous screen.
+Clicking on a game in the Library or Server sections opens a sub view with more information about the game and a button bar with Back, Saves and States buttons.
 The sub view should include a larger cover art image, title/description/platform/rating information, and any available screenshots in a vertical scrollable area.
 
-The action area should update based on the game state and may include:
+The action area should be left-aligned in the center column and should update based on the game state and may include:
 - `Install Game` / `Install App`
 - `Play`
-- `Uninstall`
 - `Config`
-- `Upload Saves` / `Restore Saves`
-- `Upload States` / `Restore States`
+- `Uninstall`
+
+The button bar area should be left-aligned above the cover art in the left column and include:
+- 'Back'
+- 'Details'
+- `Manage Saves`
+- `Manage States`
+
+### Manage Saves/States
+Clicking the Manage Saves or Manage States buttons in the button bar should replace/overlay the middle column of the Game Details view with a panel listing all saves or states for the current game being viewed, based on the button that was clicked. The view should include a button to manually upload the latest save/state for that game.
+
+The Saves/States should be listed in a vertical column with the name of the emulator used, file size, upload time and display relative 'x hours/minutes ago'. Each save in the list should also have right-aligned buttons: one to manually restore the save from the server, overwriting the local save (with confirmation prompt explaining the overwrite) and one to delete the save from the server (with confirmation prompt).
 
 ### Native Game Settings
 For installed native games, the details view should expose a game settings dialog where the player can:
@@ -72,6 +81,9 @@ For emulators which store saves in a subfolder, the archive should include the r
 
 ## Single-file saves
 For emulators which store saves as a single file in a common location, memory cards for example, the archive should include the file or files relevant to the game being saved.
+Configured save/state roots may point to either directories or explicit files from the emulator autoprofiles.
+When multiple companion files belong to one logical save upload, the client should package them into a single archive for upload and unpack that archive back into the proper local location during restore.
+Distinct savestate slots should remain separate logical uploads.
 
 ## Session-aware sync behavior
 The sync flow should track recent game sessions so that auto-upload focuses on files changed during or immediately after play.

@@ -80,6 +80,7 @@ from rom_mate.library import (
     auto_cloud_upload_plan,
     build_installed_game_record as resolve_build_installed_game_record,
     can_start_next_queued_install,
+    cemu_save_directories_for_game,
     candidate_archive_paths_for_game as resolve_candidate_archive_paths_for_game,
     candidate_extracted_dirs_for_game as resolve_candidate_extracted_dirs_for_game,
     candidate_extracted_paths_for_game as resolve_candidate_extracted_paths_for_game,
@@ -98,11 +99,13 @@ from rom_mate.library import (
     extract_archive_for_game as resolve_extract_archive_for_game,
     file_upload_jobs,
     filter_directories_by_mtime_window,
+    grouped_file_upload_jobs,
     filter_files_by_mtime_window,
     filter_upload_jobs_by_session_window,
     is_local_newer_than_server,
     latest_server_record,
     library_games_without_keys as resolve_library_games_without_keys,
+    relative_timestamp_text,
     matching_installed_emulator_games as resolve_matching_installed_emulator_games,
     native_executable_candidates_for_game as resolve_native_executable_candidates_for_game,
     native_install_dir_for_game as resolve_native_install_dir_for_game,
@@ -153,6 +156,7 @@ from rom_mate.library import (
     save_record_timestamp,
     select_extracted_launch_file as resolve_select_extracted_launch_file,
     server_records_from_payload,
+    sort_server_records_by_recency,
     should_extract_archive_for_game as resolve_should_extract_archive_for_game,
     update_rpcs3_games_yml_for_install as resolve_update_rpcs3_games_yml_for_install,
     upsert_rpcs3_games_yml_entry as resolve_upsert_rpcs3_games_yml_entry,
@@ -167,6 +171,7 @@ from rom_mate.library import (
     should_reset_active_download_metrics,
     upload_completion_message,
     zip_directory_for_upload,
+    zip_selected_files_for_upload,
     summarize_auto_cloud_upload_result,
     sync_install_metadata_to_details_game as resolve_sync_install_metadata_to_details_game,
     update_cloud_sync_state_for_game,
@@ -199,14 +204,36 @@ from rom_mate.emulator import (
     auto_configure_emulator_settings as resolve_auto_configure_emulator_settings,
     auto_configured_emulator_name as resolve_auto_configured_emulator_name,
     available_emulator_name_for_platform as resolve_available_emulator_name_for_platform,
+    cloud_save_block_reason_for_game as resolve_cloud_save_block_reason_for_game,
+    azahar_save_path_overrides as resolve_azahar_save_path_overrides,
+    azahar_state_path_overrides as resolve_azahar_state_path_overrides,
+    cemu_save_path_overrides as resolve_cemu_save_path_overrides,
+    dolphin_save_path_overrides as resolve_dolphin_save_path_overrides,
+    dolphin_state_path_overrides as resolve_dolphin_state_path_overrides,
+    eden_save_path_overrides as resolve_eden_save_path_overrides,
+    fbneo_save_path_overrides as resolve_fbneo_save_path_overrides,
+    fbneo_state_path_overrides as resolve_fbneo_state_path_overrides,
+    mame_save_path_overrides as resolve_mame_save_path_overrides,
+    mame_state_path_overrides as resolve_mame_state_path_overrides,
     compatible_emulator_names_for_platform as resolve_compatible_emulator_names_for_platform,
+    pcsx2_save_path_overrides as resolve_pcsx2_save_path_overrides,
+    pcsx2_state_path_overrides as resolve_pcsx2_state_path_overrides,
+    pico8_save_path_overrides as resolve_pico8_save_path_overrides,
+    redream_save_path_overrides as resolve_redream_save_path_overrides,
+    redream_state_path_overrides as resolve_redream_state_path_overrides,
+    xemu_save_path_overrides as resolve_xemu_save_path_overrides,
+    xenia_save_path_overrides as resolve_xenia_save_path_overrides,
+    xenia_state_path_overrides as resolve_xenia_state_path_overrides,
+    rpcs3_save_path_overrides as resolve_rpcs3_save_path_overrides,
     default_assignable_server_platforms as resolve_default_assignable_server_platforms,
     default_emulator_autoprofiles as resolve_default_emulator_autoprofiles,
     default_emulator_name_for_platform as resolve_default_emulator_name_for_platform,
+    ensure_duckstation_memory_card_settings as resolve_ensure_duckstation_memory_card_settings,
     dolphin_target_platforms_for_variant as resolve_dolphin_target_platforms_for_variant,
     dolphin_variant_label_for_game as resolve_dolphin_variant_label_for_game,
     emulator_autoprofiles_path as resolve_emulator_autoprofiles_path,
     emulator_entry_by_name as resolve_emulator_entry_by_name,
+    emulator_entry_matches_tokens as resolve_emulator_entry_matches_tokens,
     emulator_entry_has_usable_path as resolve_emulator_entry_has_usable_path,
     emulator_profile_for_entry as resolve_emulator_profile_for_entry,
     emulator_profile_for_game as resolve_emulator_profile_for_game,
@@ -235,6 +262,8 @@ from rom_mate.emulator import (
     retroarch_core_list_path as resolve_retroarch_core_list_path,
     retroarch_core_value as resolve_retroarch_core_value,
     retroarch_cores_for_platform as resolve_retroarch_cores_for_platform,
+    retroarch_directory_settings as resolve_retroarch_directory_settings,
+    ensure_retroarch_save_location_settings as resolve_ensure_retroarch_save_location_settings,
     retroarch_markdown_label as resolve_retroarch_markdown_label,
     retroarch_platform_tokens as resolve_retroarch_platform_tokens,
     retroarch_system_keys_for_platform as resolve_retroarch_system_keys_for_platform,
@@ -312,7 +341,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Rom Mate Neo")
-        self.resize(1200, 760)
+        self.setMinimumSize(1280, 640)
+        self.resize(1280, 760)
 
         self.config = self._load_config()
         self.active_theme_choice = self._normalized_theme_choice(self.config.get("theme", "system"))
@@ -343,18 +373,24 @@ class MainWindow(QMainWindow):
         self.default_mapping_list: QListWidget | None = None
         self.details_title_label: QLabel | None = None
         self.details_content_frame: QFrame | None = None
+        self.details_center_stack: QStackedWidget | None = None
         self.details_cover_label: QLabel | None = None
         self.details_platform_label: QLabel | None = None
         self.details_rating_label: QLabel | None = None
         self.details_description_label: QLabel | None = None
         self.details_screenshot_labels: list[QLabel] = []
+        self.details_screenshots_panel: QWidget | None = None
         self.details_screenshots_scroll: QScrollArea | None = None
         self.details_primary_button: QPushButton | None = None
         self.details_config_button: QPushButton | None = None
-        self.details_upload_saves_button: QPushButton | None = None
-        self.details_restore_saves_button: QPushButton | None = None
-        self.details_upload_states_button: QPushButton | None = None
-        self.details_restore_states_button: QPushButton | None = None
+        self.details_details_button: QPushButton | None = None
+        self.details_manage_saves_button: QPushButton | None = None
+        self.details_manage_states_button: QPushButton | None = None
+        self.details_cloud_title_label: QLabel | None = None
+        self.details_cloud_status_label: QLabel | None = None
+        self.details_cloud_empty_label: QLabel | None = None
+        self.details_cloud_upload_button: QPushButton | None = None
+        self.details_cloud_list_layout: QVBoxLayout | None = None
         self.details_secondary_button: QPushButton | None = None
         self.server_platforms_list: QListWidget | None = None
         self.server_games_grid: QGridLayout | None = None
@@ -375,6 +411,7 @@ class MainWindow(QMainWindow):
         self.current_main_page_index = 0
         self.current_details_game: dict[str, str] | None = None
         self.current_details_source = "library"
+        self.current_details_cloud_mode = "overview"
         self.install_in_progress = False
         self.install_pending_game: dict[str, str] | None = None
         self.install_queue: list[dict[str, str]] = []
@@ -915,11 +952,6 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setSpacing(12)
 
-        back_button = QPushButton("Back")
-        back_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        back_button.clicked.connect(self._return_from_details)
-        layout.addWidget(back_button)
-
         content = QFrame()
         content.setObjectName("panel")
         self.details_content_frame = content
@@ -928,7 +960,41 @@ class MainWindow(QMainWindow):
         content_layout.setSpacing(20)
 
         cover_col = QVBoxLayout()
+        cover_col.setSpacing(10)
         cover_col.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+
+        button_bar = QHBoxLayout()
+        button_bar.setContentsMargins(0, 0, 0, 0)
+        button_bar.setSpacing(8)
+        button_bar.setAlignment(Qt.AlignmentFlag.AlignLeft)
+
+        back_button = QPushButton("Back")
+        back_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        back_button.clicked.connect(self._return_from_details)
+        button_bar.addWidget(back_button)
+
+        details_button = QPushButton("Details")
+        details_button.setCheckable(True)
+        details_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        details_button.clicked.connect(self._perform_show_details_action)
+        self.details_details_button = details_button
+        button_bar.addWidget(details_button)
+
+        manage_saves_button = QPushButton("Manage Saves")
+        manage_saves_button.setCheckable(True)
+        manage_saves_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        manage_saves_button.clicked.connect(self._perform_manage_saves_action)
+        self.details_manage_saves_button = manage_saves_button
+        button_bar.addWidget(manage_saves_button)
+
+        manage_states_button = QPushButton("Manage States")
+        manage_states_button.setCheckable(True)
+        manage_states_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        manage_states_button.clicked.connect(self._perform_manage_states_action)
+        self.details_manage_states_button = manage_states_button
+        button_bar.addWidget(manage_states_button)
+        button_bar.addStretch()
+        cover_col.addLayout(button_bar)
 
         cover = QLabel("Cover Art")
         cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -942,13 +1008,18 @@ class MainWindow(QMainWindow):
         cover_col.addStretch()
         content_layout.addLayout(cover_col, 2)
 
-        details_col = QVBoxLayout()
+        details_stack = QStackedWidget()
+        self.details_center_stack = details_stack
+
+        overview_page = QWidget()
+        details_col = QVBoxLayout(overview_page)
         details_col.setSpacing(10)
+        details_col.setContentsMargins(0, 0, 0, 0)
         details_col.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
-        action_row.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        action_row.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
         primary = QPushButton("Launch Game")
         primary.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -962,51 +1033,28 @@ class MainWindow(QMainWindow):
         self.details_config_button = config_button
         action_row.addWidget(config_button)
 
-        upload_saves_button = QPushButton("Upload Saves")
-        upload_saves_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        upload_saves_button.clicked.connect(self._perform_upload_saves_action)
-        self.details_upload_saves_button = upload_saves_button
-        action_row.addWidget(upload_saves_button)
-
-        restore_saves_button = QPushButton("Restore Saves")
-        restore_saves_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        restore_saves_button.clicked.connect(self._perform_restore_saves_action)
-        self.details_restore_saves_button = restore_saves_button
-        action_row.addWidget(restore_saves_button)
-
-        upload_states_button = QPushButton("Upload States")
-        upload_states_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        upload_states_button.clicked.connect(self._perform_upload_states_action)
-        self.details_upload_states_button = upload_states_button
-        action_row.addWidget(upload_states_button)
-
-        restore_states_button = QPushButton("Restore States")
-        restore_states_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        restore_states_button.clicked.connect(self._perform_restore_states_action)
-        self.details_restore_states_button = restore_states_button
-        action_row.addWidget(restore_states_button)
-
-        secondary = QPushButton("Uninstall Game")
+        secondary = QPushButton("Uninstall")
         secondary.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         secondary.clicked.connect(self._perform_game_secondary_action)
         self.details_secondary_button = secondary
         action_row.addWidget(secondary)
+        action_row.addStretch()
         details_col.addLayout(action_row)
 
         title = QLabel("Game Title")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         title.setStyleSheet("font-size: 30px; font-weight: 700;")
         self.details_title_label = title
         details_col.addWidget(title)
 
         platform = QLabel("Platform: -")
-        platform.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        platform.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         platform.setStyleSheet("font-size: 18px;")
         self.details_platform_label = platform
         details_col.addWidget(platform)
 
         rating = QLabel("Rating: -")
-        rating.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        rating.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         rating.setStyleSheet("font-size: 18px;")
         self.details_rating_label = rating
         details_col.addWidget(rating)
@@ -1020,9 +1068,70 @@ class MainWindow(QMainWindow):
         self.details_description_label = description
         details_col.addWidget(description)
         details_col.addStretch()
-        content_layout.addLayout(details_col, 4)
+        details_stack.addWidget(overview_page)
 
-        screenshots_col = QVBoxLayout()
+        cloud_page = QFrame()
+        cloud_page.setObjectName("panel")
+        cloud_layout = QVBoxLayout(cloud_page)
+        cloud_layout.setSpacing(10)
+        cloud_layout.setContentsMargins(12, 12, 12, 12)
+
+        cloud_header = QHBoxLayout()
+        cloud_header.setContentsMargins(0, 0, 0, 0)
+        cloud_header.setSpacing(8)
+
+        cloud_title = QLabel("Manage Saves")
+        cloud_title.setStyleSheet("font-size: 22px; font-weight: 700;")
+        self.details_cloud_title_label = cloud_title
+        cloud_header.addWidget(cloud_title)
+        cloud_header.addStretch()
+
+        cloud_upload_button = QPushButton("Upload Latest Save")
+        cloud_upload_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        cloud_upload_button.clicked.connect(self._perform_current_cloud_upload_action)
+        self.details_cloud_upload_button = cloud_upload_button
+        cloud_header.addWidget(cloud_upload_button)
+
+        cloud_layout.addLayout(cloud_header)
+
+        cloud_status = QLabel("View and manage the cloud saves for this game.")
+        cloud_status.setWordWrap(True)
+        cloud_status.setStyleSheet(f"color: {self._theme_color('muted', '#6272a4')};")
+        self.details_cloud_status_label = cloud_status
+        cloud_layout.addWidget(cloud_status)
+
+        cloud_scroll = QScrollArea()
+        cloud_scroll.setObjectName("detailsCloudScroll")
+        cloud_scroll.setWidgetResizable(True)
+        cloud_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        cloud_scroll.viewport().setObjectName("detailsCloudScrollViewport")
+
+        cloud_content = QFrame()
+        cloud_content.setObjectName("detailsCloudListPanel")
+        cloud_content.setFrameShape(QFrame.Shape.StyledPanel)
+        cloud_content.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        cloud_list_layout = QVBoxLayout(cloud_content)
+        cloud_list_layout.setContentsMargins(10, 10, 10, 10)
+        cloud_list_layout.setSpacing(10)
+        self.details_cloud_list_layout = cloud_list_layout
+
+        cloud_empty = QLabel("No cloud saves were found for this game yet.")
+        cloud_empty.setWordWrap(True)
+        cloud_empty.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        cloud_empty.setStyleSheet(f"color: {self._theme_color('muted', '#6272a4')}; font-size: 15px;")
+        self.details_cloud_empty_label = cloud_empty
+        cloud_list_layout.addWidget(cloud_empty)
+        cloud_list_layout.addStretch()
+
+        cloud_scroll.setWidget(cloud_content)
+        cloud_layout.addWidget(cloud_scroll, 1)
+        details_stack.addWidget(cloud_page)
+        content_layout.addWidget(details_stack, 4)
+
+        screenshots_panel = QWidget()
+        self.details_screenshots_panel = screenshots_panel
+        screenshots_col = QVBoxLayout(screenshots_panel)
+        screenshots_col.setContentsMargins(0, 0, 0, 0)
         screenshots_col.setSpacing(8)
 
         screenshots_title = QLabel("Screenshots")
@@ -1057,9 +1166,10 @@ class MainWindow(QMainWindow):
 
         screenshots_scroll.setWidget(screenshots_content)
         screenshots_col.addWidget(screenshots_scroll)
-        content_layout.addLayout(screenshots_col, 2)
+        content_layout.addWidget(screenshots_panel, 2)
 
         layout.addWidget(content)
+        self._show_details_overview()
         self._update_details_layout_metrics()
         return page
 
@@ -1144,6 +1254,8 @@ class MainWindow(QMainWindow):
             library_empty_label=self.library_empty_label,
             downloads_empty_label=self.downloads_empty_label,
             details_cover_label=self.details_cover_label,
+            details_cloud_status_label=self.details_cloud_status_label,
+            details_cloud_empty_label=self.details_cloud_empty_label,
             screenshot_labels=self.details_screenshot_labels,
         )
 
@@ -1154,6 +1266,8 @@ class MainWindow(QMainWindow):
         self.active_theme_colors = self._theme_colors(self.active_theme_variant)
         self.setStyleSheet(self._theme_stylesheet())
         self._apply_theme_inline_styles()
+        if self.current_details_cloud_mode in {"save", "state"}:
+            self._refresh_details_cloud_panel()
 
     def _on_theme_selection_changed(self, selected_theme: str) -> None:
         normalized = self._normalized_theme_choice(selected_theme)
@@ -1839,8 +1953,8 @@ class MainWindow(QMainWindow):
                     return game_id
         return ""
 
-    def _is_rpcs3_emulator_name(self, emulator_name: str) -> bool:
-        return resolve_is_rpcs3_emulator_name(emulator_name)
+    def _is_rpcs3_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        return self._emulator_matches_tokens(emulator_name, "rpcs3", emulator=emulator) or resolve_is_rpcs3_emulator_name(emulator_name)
 
     def _is_ps3_emulator_entry(self, emulator: dict[str, str]) -> bool:
         return resolve_is_ps3_emulator_entry(emulator, self._emulator_profile_for_entry)
@@ -2080,6 +2194,23 @@ class MainWindow(QMainWindow):
     def _is_native_executable_platform(self, game: dict[str, str]) -> bool:
         return resolve_is_native_executable_platform(game)
 
+    def _cloud_save_block_reason_for_game(
+        self,
+        game: dict[str, str],
+        emulator_name: str = "",
+        emulator: dict[str, str] | None = None,
+        *,
+        save_type: str = "save",
+    ) -> str:
+        return resolve_cloud_save_block_reason_for_game(
+            game,
+            is_native_executable_platform=self._is_native_executable_platform,
+            emulator_name=emulator_name,
+            is_xemu_emulator_name=lambda value: self._is_xemu_emulator_name(value, emulator),
+            is_redream_emulator_name=lambda value: self._is_redream_emulator_name(value, emulator),
+            save_type=save_type,
+        )
+
     def _launchable_native_game_file(self, path: Path) -> bool:
         return resolve_launchable_native_game_file(path)
 
@@ -2207,6 +2338,9 @@ class MainWindow(QMainWindow):
         self.config["emulators"] = self._normalize_emulators(emulators)
         self.config["default_emulators"] = defaults
         self.config["default_retroarch_cores"] = core_defaults
+
+        profile_name = str(profile.get("name", "")) if isinstance(profile, dict) else ""
+        self._ensure_emulator_sync_settings(profile_name, executable_path)
 
         self._refresh_emulator_views()
         self._save_config(self.config)
@@ -2416,6 +2550,8 @@ class MainWindow(QMainWindow):
 
     def _update_details_action_buttons(self) -> None:
         resolve_update_details_action_buttons(self)
+        if self.current_details_cloud_mode != "overview":
+            self._refresh_details_cloud_panel()
 
     def _is_game_install_queued(self, game: dict[str, str]) -> bool:
         return is_game_install_queued(game, self.install_queue)
@@ -2507,6 +2643,7 @@ class MainWindow(QMainWindow):
 
     def _cleanup_details_view_state(self) -> None:
         self._clear_cached_rom_id_for_details_game(self.current_details_game)
+        self._show_details_overview()
         self.current_details_game = None
 
     def _start_async_install(self, game: dict[str, str]) -> bool:
@@ -2925,6 +3062,390 @@ class MainWindow(QMainWindow):
     def _return_from_details(self) -> None:
         self._switch_page(self.current_main_page_index)
 
+    def _show_details_overview(self) -> None:
+        self.current_details_cloud_mode = "overview"
+        if self.details_center_stack is not None:
+            self.details_center_stack.setCurrentIndex(0)
+        if self.details_details_button is not None:
+            self.details_details_button.setChecked(True)
+        if self.details_manage_saves_button is not None:
+            self.details_manage_saves_button.setChecked(False)
+        if self.details_manage_states_button is not None:
+            self.details_manage_states_button.setChecked(False)
+
+    def _perform_show_details_action(self) -> None:
+        self._show_details_overview()
+        self._update_details_layout_metrics()
+        QTimer.singleShot(0, self._update_details_layout_metrics)
+
+    def _perform_manage_saves_action(self) -> None:
+        self._toggle_details_cloud_mode("save")
+
+    def _perform_manage_states_action(self) -> None:
+        self._toggle_details_cloud_mode("state")
+
+    def _toggle_details_cloud_mode(self, save_type: str) -> None:
+        if save_type not in {"save", "state"}:
+            return
+        if self.current_details_cloud_mode == save_type:
+            self._show_details_overview()
+            self._update_details_layout_metrics()
+            return
+
+        self.current_details_cloud_mode = save_type
+        if self.details_details_button is not None:
+            self.details_details_button.setChecked(False)
+        if self.details_manage_saves_button is not None:
+            self.details_manage_saves_button.setChecked(save_type == "save")
+        if self.details_manage_states_button is not None:
+            self.details_manage_states_button.setChecked(save_type == "state")
+        if self.details_center_stack is not None:
+            self.details_center_stack.setCurrentIndex(1)
+
+        self._refresh_details_cloud_panel()
+        self._update_details_layout_metrics()
+        QTimer.singleShot(0, self._update_details_layout_metrics)
+
+    def _perform_current_cloud_upload_action(self) -> None:
+        if self.current_details_cloud_mode == "save":
+            self._perform_upload_saves_action()
+        elif self.current_details_cloud_mode == "state":
+            self._perform_upload_states_action()
+
+    def _clear_layout_items(self, layout: Any) -> None:
+        while layout.count():
+            item = layout.takeAt(0)
+            child_layout = item.layout()
+            widget = item.widget()
+            if child_layout is not None:
+                self._clear_layout_items(child_layout)
+            if widget is not None:
+                if widget is self.details_cloud_empty_label:
+                    widget.setParent(None)
+                else:
+                    widget.deleteLater()
+
+    def _details_cloud_record_title(self, record: dict[str, Any], save_type: str) -> str:
+        file_name = str(record.get("file_name", "")).strip()
+        if file_name:
+            return file_name
+        record_id = str(record.get("id", "")).strip() or "?"
+        return f"Cloud {'Save' if save_type == 'save' else 'State'} #{record_id}"
+
+    def _details_cloud_uploaded_text(self, record: dict[str, Any]) -> tuple[str, str]:
+        timestamp = self._save_record_timestamp(record)
+        if timestamp <= 0:
+            return "Unknown upload time", "Unknown"
+        uploaded_at = datetime.fromtimestamp(timestamp).astimezone().strftime("%Y-%m-%d %H:%M")
+        return uploaded_at, relative_timestamp_text(timestamp)
+
+    def _details_cloud_restore_enabled(self, record: dict[str, Any], save_type: str) -> tuple[bool, str]:
+        if self.current_details_game is None:
+            return False, "No game is selected."
+
+        target_game = self._installed_game_record(self.current_details_game)
+        resolved_game = target_game if target_game is not None else self.current_details_game
+        if resolved_game is None:
+            return False, "No game is selected."
+
+        resolved_emulator_name, resolved_emulator_entry = self._resolved_emulator_entry_for_game(resolved_game)
+        record_emulator = str(record.get("emulator", "")).strip()
+        compatibility_emulator_name = record_emulator or resolved_emulator_name
+        compatibility_emulator_entry = resolved_emulator_entry
+        record_emulator_entry = self._emulator_entry_by_name(record_emulator) if record_emulator else None
+        if record_emulator_entry is not None:
+            compatibility_emulator_entry = record_emulator_entry
+        compatibility_reason = self._cloud_save_block_reason_for_game(
+            resolved_game,
+            compatibility_emulator_name,
+            compatibility_emulator_entry,
+        )
+        if compatibility_reason:
+            return False, compatibility_reason
+
+        if save_type == "state" and record_emulator and self._is_rpcs3_emulator_name(record_emulator, record_emulator_entry):
+            return False, "RPCS3 savestate restore is not supported yet."
+
+        emulator_name = record_emulator
+        emulator_entry = record_emulator_entry
+        if record_emulator and emulator_entry is None:
+            return False, f"Configure emulator '{record_emulator}' in Emulators to restore this entry."
+
+        if emulator_entry is None:
+            emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(resolved_game)
+            if emulator_entry is None:
+                return False, "No default emulator is configured for this platform."
+
+        directory_key = "save_paths" if save_type == "save" else "state_paths"
+        directories = self._resolved_sync_directory_paths(emulator_entry, directory_key)
+        if not directories:
+            kind_label = "save" if save_type == "save" else "state"
+            return False, f"No configured {kind_label} directories were found for emulator '{emulator_name}'."
+
+        return True, ""
+
+    def _make_details_cloud_record_widget(self, record: dict[str, Any], save_type: str) -> QWidget:
+        entry = QFrame()
+        entry.setObjectName("detailsCloudRecord")
+        entry.setFrameShape(QFrame.Shape.StyledPanel)
+        entry.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        entry.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        entry_layout = QHBoxLayout(entry)
+        entry_layout.setContentsMargins(12, 10, 12, 10)
+        entry_layout.setSpacing(12)
+
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(4)
+
+        title_label = QLabel(self._details_cloud_record_title(record, save_type))
+        title_label.setStyleSheet("font-size: 16px; font-weight: 600;")
+        info_layout.addWidget(title_label)
+
+        emulator_name = str(record.get("emulator", "")).strip() or "Unknown emulator"
+        slot_value = str(record.get("slot", "")).strip()
+        size_value = record.get("file_size_bytes", 0)
+        try:
+            size_text = format_size(int(size_value))
+        except (TypeError, ValueError):
+            size_text = "Unknown size"
+
+        summary_parts = [emulator_name, size_text]
+        if save_type == "save" and slot_value:
+            summary_parts.append(f"Slot {slot_value}")
+        summary_label = QLabel(" • ".join(summary_parts))
+        summary_label.setStyleSheet(f"color: {self._theme_color('muted', '#6272a4')};")
+        info_layout.addWidget(summary_label)
+
+        uploaded_at, relative_text = self._details_cloud_uploaded_text(record)
+        time_label = QLabel(f"Uploaded {uploaded_at} ({relative_text})")
+        time_label.setStyleSheet(f"color: {self._theme_color('muted', '#6272a4')};")
+        info_layout.addWidget(time_label)
+
+        entry_layout.addLayout(info_layout, 1)
+
+        actions_layout = QHBoxLayout()
+        actions_layout.setSpacing(8)
+
+        restore_button = QPushButton("Restore")
+        restore_button.setObjectName("detailsCloudActionButton")
+        restore_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        restore_enabled, restore_tooltip = self._details_cloud_restore_enabled(record, save_type)
+        restore_button.setEnabled(restore_enabled)
+        restore_button.setToolTip(restore_tooltip)
+        restore_button.clicked.connect(
+            lambda checked=False, payload=dict(record), kind=save_type: self._confirm_restore_details_cloud_record(
+                payload,
+                kind,
+            )
+        )
+        actions_layout.addWidget(restore_button)
+
+        delete_button = QPushButton("Delete")
+        delete_button.setObjectName("detailsCloudActionButton")
+        delete_button.setProperty("role", "danger")
+        delete_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        delete_button.clicked.connect(
+            lambda checked=False, payload=dict(record), kind=save_type: self._confirm_delete_details_cloud_record(
+                payload,
+                kind,
+            )
+        )
+        actions_layout.addWidget(delete_button)
+
+        entry_layout.addLayout(actions_layout)
+
+        for widget in (entry, restore_button, delete_button):
+            style = widget.style()
+            if style is not None:
+                style.unpolish(widget)
+                style.polish(widget)
+            widget.update()
+
+        return entry
+
+    def _refresh_details_cloud_panel(self) -> None:
+        if (
+            self.details_center_stack is None
+            or self.details_cloud_title_label is None
+            or self.details_cloud_status_label is None
+            or self.details_cloud_empty_label is None
+            or self.details_cloud_upload_button is None
+            or self.details_cloud_list_layout is None
+        ):
+            return
+
+        save_type = self.current_details_cloud_mode
+        if save_type not in {"save", "state"}:
+            return
+
+        kind_label = "saves" if save_type == "save" else "states"
+        singular_label = "save" if save_type == "save" else "state"
+        self.details_center_stack.setCurrentIndex(1)
+        self.details_cloud_title_label.setText("Manage Saves" if save_type == "save" else "Manage States")
+        self.details_cloud_upload_button.setText("Upload Latest Save" if save_type == "save" else "Upload Latest State")
+
+        self._clear_layout_items(self.details_cloud_list_layout)
+
+        if self.current_details_game is None:
+            self.details_cloud_status_label.setText("No game is selected.")
+            self.details_cloud_upload_button.setEnabled(False)
+            self.details_cloud_upload_button.setToolTip("")
+            self.details_cloud_empty_label.setText("Choose a game to view its cloud saves or states.")
+            self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
+            self.details_cloud_list_layout.addStretch()
+            return
+
+        installed_game = self._installed_game_record(self.current_details_game)
+        if installed_game is None:
+            self.details_cloud_status_label.setText(f"Install this game to manage cloud {kind_label}.")
+            self.details_cloud_upload_button.setEnabled(False)
+            self.details_cloud_upload_button.setToolTip("")
+            self.details_cloud_empty_label.setText(f"Cloud {kind_label} can be managed after the game is installed.")
+            self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
+            self.details_cloud_list_layout.addStretch()
+            return
+
+        emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(installed_game)
+        compatibility_reason = self._cloud_save_block_reason_for_game(
+            installed_game,
+            emulator_name,
+            emulator_entry,
+            save_type=save_type,
+        )
+        if compatibility_reason:
+            self.details_cloud_status_label.setText(compatibility_reason)
+            self.details_cloud_upload_button.setEnabled(False)
+            self.details_cloud_upload_button.setToolTip(compatibility_reason)
+            self.details_cloud_empty_label.setText(compatibility_reason)
+            self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
+            self.details_cloud_list_layout.addStretch()
+            return
+        upload_reason = ""
+        upload_enabled = True
+        if emulator_entry is None:
+            upload_enabled = False
+            upload_reason = "No default emulator is configured for this platform."
+        else:
+            directory_key = "save_paths" if save_type == "save" else "state_paths"
+            if save_type == "state" and self._is_rpcs3_emulator_name(emulator_name, emulator_entry):
+                upload_enabled = False
+                upload_reason = "RPCS3 savestate uploads are not supported yet."
+            elif not self._resolved_sync_directory_paths(emulator_entry, directory_key):
+                upload_enabled = False
+                upload_reason = (
+                    f"No configured {singular_label} directories were found for emulator '{emulator_name}'."
+                )
+
+        self.details_cloud_upload_button.setEnabled(upload_enabled)
+        self.details_cloud_upload_button.setToolTip(upload_reason)
+
+        rom_id = self._resolve_rom_id_for_game(installed_game)
+        if not rom_id:
+            self.details_cloud_status_label.setText("Missing ROM id for this game.")
+            self.details_cloud_empty_label.setText(f"Cloud {kind_label} could not be loaded for this game.")
+            self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
+            self.details_cloud_list_layout.addStretch()
+            return
+
+        try:
+            records = self._server_save_records_for_rom(rom_id) if save_type == "save" else self._server_state_records_for_rom(rom_id)
+        except (HTTPError, URLError, ValueError, json.JSONDecodeError) as error:
+            self.details_cloud_status_label.setText(f"Could not load cloud {kind_label}: {error}")
+            self.details_cloud_empty_label.setText(f"Cloud {kind_label} could not be loaded right now.")
+            self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
+            self.details_cloud_list_layout.addStretch()
+            return
+
+        ordered_records = sort_server_records_by_recency(records, self._save_record_timestamp)
+        if ordered_records:
+            status_parts = [f"Showing {len(ordered_records)} cloud {kind_label}."]
+            if upload_reason:
+                status_parts.append(upload_reason)
+            elif emulator_name.strip():
+                status_parts.append(f"Local uploads use {emulator_name}.")
+            self.details_cloud_status_label.setText(" ".join(status_parts))
+            for record in ordered_records:
+                self.details_cloud_list_layout.addWidget(self._make_details_cloud_record_widget(record, save_type))
+        else:
+            self.details_cloud_status_label.setText(
+                upload_reason if upload_reason else f"No cloud {kind_label} were found for this game yet."
+            )
+            self.details_cloud_empty_label.setText(f"No cloud {kind_label} were found on the server for this game.")
+            self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
+
+        self.details_cloud_list_layout.addStretch()
+
+    def _confirm_restore_details_cloud_record(self, record: dict[str, Any], save_type: str) -> None:
+        if self.current_details_game is None:
+            return
+
+        installed_game = self._installed_game_record(self.current_details_game)
+        target_game = installed_game if installed_game is not None else self.current_details_game
+        kind_label = "save" if save_type == "save" else "state"
+        game_title = str(target_game.get("title", "this game"))
+        response = QMessageBox.question(
+            self,
+            f"Restore Cloud {kind_label.title()}",
+            f"Restore the selected cloud {kind_label} for '{game_title}' and overwrite the local {kind_label} data?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if response != QMessageBox.StandardButton.Yes:
+            return
+
+        restored = False
+        if save_type == "save":
+            restored = self._restore_cloud_save_for_game(target_game, save_record=dict(record))
+        else:
+            restored = self._restore_cloud_state_for_game(target_game, state_record=dict(record))
+
+        if restored:
+            self._refresh_details_cloud_panel()
+
+    def _confirm_delete_details_cloud_record(self, record: dict[str, Any], save_type: str) -> None:
+        title = self._details_cloud_record_title(record, save_type)
+        kind_label = "save" if save_type == "save" else "state"
+        response = QMessageBox.question(
+            self,
+            f"Delete Cloud {kind_label.title()}",
+            f"Delete '{title}' from the server? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if response != QMessageBox.StandardButton.Yes:
+            return
+
+        if self._delete_cloud_record(record, save_type):
+            self._refresh_details_cloud_panel()
+
+    def _delete_cloud_record(self, record: dict[str, Any], save_type: str) -> bool:
+        record_id = str(record.get("id", "")).strip()
+        if not record_id:
+            QMessageBox.warning(self, "Cloud Sync", "The selected cloud entry is missing an id.")
+            return False
+
+        try:
+            numeric_id = int(record_id)
+        except (TypeError, ValueError):
+            QMessageBox.warning(self, "Cloud Sync", f"The selected cloud entry id is invalid: {record_id}")
+            return False
+
+        endpoint_path = "/api/saves/delete" if save_type == "save" else "/api/states/delete"
+        payload_key = "saves" if save_type == "save" else "states"
+        kind_label = "save" if save_type == "save" else "state"
+        try:
+            self._api_post_json(endpoint_path, {payload_key: [numeric_id]})
+        except HTTPError as error:
+            if error.code not in {404, 410}:
+                QMessageBox.warning(self, "Cloud Sync", f"Failed to delete cloud {kind_label}: {error}")
+                return False
+        except (URLError, OSError, ValueError, json.JSONDecodeError) as error:
+            QMessageBox.warning(self, "Cloud Sync", f"Failed to delete cloud {kind_label}: {error}")
+            return False
+
+        QMessageBox.information(self, "Cloud Sync", f"Cloud {kind_label} deleted successfully.")
+        return True
+
     def _mapping_value_for_platform(self, mapping: dict[str, str], platform: str) -> str:
         return resolve_mapping_value_for_platform(mapping, platform)
 
@@ -3044,6 +3565,11 @@ class MainWindow(QMainWindow):
                 self._is_retroarch_emulator_name,
                 self._normalized_retroarch_core_args,
             )
+            emulator_entry = self._emulator_entry_by_name(emulator_name)
+            if emulator_entry is not None:
+                emulator_path_value = emulator_entry.get("path", "")
+                if isinstance(emulator_path_value, str):
+                    self._ensure_emulator_sync_settings(emulator_name, emulator_path_value)
             process = subprocess.Popen(command, cwd=working_directory)
             QTimer.singleShot(500, lambda p=process, c=command: self._warn_if_process_exited_early(p, c))
             self._register_game_session_for_auto_upload(game, process, emulator_name)
@@ -3197,7 +3723,7 @@ class MainWindow(QMainWindow):
         save_type: str,
     ) -> set[str]:
         ignore_basenames = set(self._resolved_ignore_basenames_for_emulator(emulator))
-        if save_type == "save" and self._is_pcsx2_emulator_name(emulator_name):
+        if save_type == "save" and self._is_pcsx2_emulator_name(emulator_name, emulator):
             ignore_basenames.add("_pcsx2_superblock")
         return ignore_basenames
 
@@ -3254,6 +3780,8 @@ class MainWindow(QMainWindow):
         ignore_basenames = self._sync_directory_ignore_basenames_for_emulator(emulator_name, emulator, save_type)
         ignore_extensions = self._sync_directory_ignore_extensions_for_emulator(emulator)
 
+        explicit_file_roots = [path for path in directories if path.exists() and path.is_file()]
+
         if save_type == "state":
             files = self._cloud_sync_candidates_for_game(
                 game,
@@ -3265,7 +3793,21 @@ class MainWindow(QMainWindow):
             files = self._session_filtered_file_candidates(game, files)
             return files, folder_targets
 
-        if save_strategy == "folder":
+        if self._is_cemu_emulator_name(emulator_name, emulator):
+            folder_targets = self._cemu_save_directories_for_game(
+                game,
+                directories,
+                ignore_basenames=ignore_basenames,
+                ignore_extensions=ignore_extensions,
+            )
+        elif self._is_dolphin_emulator_name(emulator_name, emulator):
+            files, folder_targets = self._dolphin_save_targets_for_game(
+                game,
+                directories,
+                ignore_basenames=ignore_basenames,
+                ignore_extensions=ignore_extensions,
+            )
+        elif save_strategy == "folder":
             folder_targets = self._cloud_sync_directory_candidates_for_game(
                 game,
                 directories,
@@ -3280,16 +3822,25 @@ class MainWindow(QMainWindow):
                 ignore_basenames=ignore_basenames,
                 ignore_extensions=ignore_extensions,
             )
-        elif self._is_ppsspp_emulator_name(emulator_name):
+        elif self._is_ppsspp_emulator_name(emulator_name, emulator):
             folder_targets = self._ppsspp_save_directories_for_game(game, directories)
-        elif self._is_rpcs3_emulator_name(emulator_name):
+        elif self._is_rpcs3_emulator_name(emulator_name, emulator):
             folder_targets = self._rpcs3_save_directories_for_game(game, directories)
-        elif self._is_pcsx2_emulator_name(emulator_name):
+        elif self._is_pcsx2_emulator_name(emulator_name, emulator):
             folder_targets = self._pcsx2_save_directories_for_game(game, directories)
         else:
             files = self._cloud_sync_candidates_for_game(
                 game,
                 directories,
+                "save",
+                ignore_basenames=ignore_basenames,
+                ignore_extensions=ignore_extensions,
+            )
+
+        if not files and not folder_targets and explicit_file_roots:
+            files = self._cloud_sync_candidates_for_game(
+                game,
+                explicit_file_roots,
                 "save",
                 ignore_basenames=ignore_basenames,
                 ignore_extensions=ignore_extensions,
@@ -3319,6 +3870,268 @@ class MainWindow(QMainWindow):
                 profile_paths = [item.strip() for item in raw_profile_paths if isinstance(item, str) and item.strip()]
 
         all_paths = configured_paths if configured_paths else profile_paths
+        emulator_name_value = emulator.get("name", "")
+        emulator_name = emulator_name_value if isinstance(emulator_name_value, str) else ""
+        self._ensure_emulator_sync_settings(emulator_name, emulator.get("path", ""))
+        if not configured_paths and self._is_retroarch_emulator_name(emulator_name, emulator):
+            directory_settings = resolve_retroarch_directory_settings(emulator.get("path", ""))
+            override_key = "savefile_directory" if key == "save_paths" else "savestate_directory"
+            override_path = directory_settings.get(override_key, "")
+            if isinstance(override_path, str) and override_path.strip():
+                all_paths = [override_path.strip(), *all_paths]
+
+            fallback_paths = ["saves", "savefiles"] if key == "save_paths" else ["states", "savestates"]
+            merged_paths: list[str] = []
+            for raw_path in [*all_paths, *fallback_paths]:
+                if not isinstance(raw_path, str) or not raw_path.strip():
+                    continue
+                if raw_path not in merged_paths:
+                    merged_paths.append(raw_path)
+            all_paths = merged_paths
+
+        if not configured_paths and self._is_azahar_emulator_name(emulator_name, emulator):
+            azahar_override_paths: list[str] = []
+            if key == "save_paths":
+                azahar_override_paths = resolve_azahar_save_path_overrides(
+                    emulator.get("path", ""),
+                    emulator.get("args", ""),
+                    self._split_launch_template_args,
+                )
+            elif key == "state_paths":
+                azahar_override_paths = resolve_azahar_state_path_overrides(
+                    emulator.get("path", ""),
+                    emulator.get("args", ""),
+                    self._split_launch_template_args,
+                )
+
+            if azahar_override_paths:
+                merged_paths: list[str] = []
+                for raw_path in [*azahar_override_paths, *all_paths]:
+                    if not isinstance(raw_path, str) or not raw_path.strip():
+                        continue
+                    if raw_path not in merged_paths:
+                        merged_paths.append(raw_path)
+                all_paths = merged_paths
+
+        if not configured_paths and self._is_dolphin_emulator_name(emulator_name, emulator):
+            dolphin_override_paths: list[str] = []
+            if key == "save_paths":
+                dolphin_override_paths = resolve_dolphin_save_path_overrides(
+                    emulator.get("path", ""),
+                    emulator.get("args", ""),
+                    self._split_launch_template_args,
+                )
+            elif key == "state_paths":
+                dolphin_override_paths = resolve_dolphin_state_path_overrides(
+                    emulator.get("path", ""),
+                    emulator.get("args", ""),
+                    self._split_launch_template_args,
+                )
+
+            if dolphin_override_paths:
+                merged_paths: list[str] = []
+                for raw_path in [*dolphin_override_paths, *all_paths]:
+                    if not isinstance(raw_path, str) or not raw_path.strip():
+                        continue
+                    if raw_path not in merged_paths:
+                        merged_paths.append(raw_path)
+                all_paths = merged_paths
+
+        if not configured_paths and self._is_pcsx2_emulator_name(emulator_name, emulator):
+            pcsx2_override_paths: list[str] = []
+            if key == "save_paths":
+                pcsx2_override_paths = resolve_pcsx2_save_path_overrides(
+                    emulator.get("path", ""),
+                    emulator.get("args", ""),
+                    self._split_launch_template_args,
+                )
+            elif key == "state_paths":
+                pcsx2_override_paths = resolve_pcsx2_state_path_overrides(
+                    emulator.get("path", ""),
+                    emulator.get("args", ""),
+                    self._split_launch_template_args,
+                )
+
+            if pcsx2_override_paths:
+                merged_paths: list[str] = []
+                for raw_path in [*pcsx2_override_paths, *all_paths]:
+                    if not isinstance(raw_path, str) or not raw_path.strip():
+                        continue
+                    if raw_path not in merged_paths:
+                        merged_paths.append(raw_path)
+                all_paths = merged_paths
+
+        if not configured_paths and key == "save_paths" and self._is_rpcs3_emulator_name(emulator_name, emulator):
+            rpcs3_override_paths = resolve_rpcs3_save_path_overrides(
+                emulator.get("path", ""),
+                emulator.get("args", ""),
+                self._split_launch_template_args,
+            )
+            if rpcs3_override_paths:
+                merged_paths: list[str] = []
+                for raw_path in [*rpcs3_override_paths, *all_paths]:
+                    if not isinstance(raw_path, str) or not raw_path.strip():
+                        continue
+                    if raw_path not in merged_paths:
+                        merged_paths.append(raw_path)
+                all_paths = merged_paths
+
+        if not configured_paths and key == "save_paths" and self._is_cemu_emulator_name(emulator_name, emulator):
+            cemu_override_paths = resolve_cemu_save_path_overrides(
+                emulator.get("path", ""),
+                emulator.get("args", ""),
+                self._split_launch_template_args,
+            )
+            if cemu_override_paths:
+                merged_paths: list[str] = []
+                for raw_path in [*cemu_override_paths, *all_paths]:
+                    if not isinstance(raw_path, str) or not raw_path.strip():
+                        continue
+                    if raw_path not in merged_paths:
+                        merged_paths.append(raw_path)
+                all_paths = merged_paths
+
+        if not configured_paths and key == "save_paths" and self._is_pico8_emulator_name(emulator_name, emulator):
+            pico8_override_paths = resolve_pico8_save_path_overrides(
+                emulator.get("path", ""),
+                emulator.get("args", ""),
+                self._split_launch_template_args,
+            )
+            if pico8_override_paths:
+                merged_paths: list[str] = []
+                for raw_path in [*pico8_override_paths, *all_paths]:
+                    if not isinstance(raw_path, str) or not raw_path.strip():
+                        continue
+                    if raw_path not in merged_paths:
+                        merged_paths.append(raw_path)
+                all_paths = merged_paths
+
+        if not configured_paths and self._is_fbneo_emulator_name(emulator_name, emulator):
+            fbneo_override_paths: list[str] = []
+            if key == "save_paths":
+                fbneo_override_paths = resolve_fbneo_save_path_overrides(
+                    emulator.get("path", ""),
+                    emulator.get("args", ""),
+                    self._split_launch_template_args,
+                )
+            elif key == "state_paths":
+                fbneo_override_paths = resolve_fbneo_state_path_overrides(
+                    emulator.get("path", ""),
+                    emulator.get("args", ""),
+                    self._split_launch_template_args,
+                )
+
+            if fbneo_override_paths:
+                merged_paths: list[str] = []
+                for raw_path in [*fbneo_override_paths, *all_paths]:
+                    if not isinstance(raw_path, str) or not raw_path.strip():
+                        continue
+                    if raw_path not in merged_paths:
+                        merged_paths.append(raw_path)
+                all_paths = merged_paths
+
+        if not configured_paths and self._is_mame_emulator_name(emulator_name, emulator):
+            mame_override_paths: list[str] = []
+            if key == "save_paths":
+                mame_override_paths = resolve_mame_save_path_overrides(
+                    emulator.get("path", ""),
+                    emulator.get("args", ""),
+                    self._split_launch_template_args,
+                )
+            elif key == "state_paths":
+                mame_override_paths = resolve_mame_state_path_overrides(
+                    emulator.get("path", ""),
+                    emulator.get("args", ""),
+                    self._split_launch_template_args,
+                )
+
+            if mame_override_paths:
+                merged_paths: list[str] = []
+                for raw_path in [*mame_override_paths, *all_paths]:
+                    if not isinstance(raw_path, str) or not raw_path.strip():
+                        continue
+                    if raw_path not in merged_paths:
+                        merged_paths.append(raw_path)
+                all_paths = merged_paths
+
+        if not configured_paths and key == "save_paths" and self._is_eden_emulator_name(emulator_name, emulator):
+            eden_override_paths = resolve_eden_save_path_overrides(
+                emulator.get("path", ""),
+                emulator.get("args", ""),
+                self._split_launch_template_args,
+            )
+            if eden_override_paths:
+                merged_paths: list[str] = []
+                for raw_path in [*eden_override_paths, *all_paths]:
+                    if not isinstance(raw_path, str) or not raw_path.strip():
+                        continue
+                    if raw_path not in merged_paths:
+                        merged_paths.append(raw_path)
+                all_paths = merged_paths
+
+        if not configured_paths and self._is_xenia_emulator_name(emulator_name, emulator):
+            xenia_override_paths: list[str] = []
+            if key == "save_paths":
+                xenia_override_paths = resolve_xenia_save_path_overrides(
+                    emulator.get("path", ""),
+                    emulator.get("args", ""),
+                    self._split_launch_template_args,
+                )
+            elif key == "state_paths":
+                xenia_override_paths = resolve_xenia_state_path_overrides(
+                    emulator.get("path", ""),
+                    emulator.get("args", ""),
+                    self._split_launch_template_args,
+                )
+
+            if xenia_override_paths:
+                merged_paths: list[str] = []
+                for raw_path in [*xenia_override_paths, *all_paths]:
+                    if not isinstance(raw_path, str) or not raw_path.strip():
+                        continue
+                    if raw_path not in merged_paths:
+                        merged_paths.append(raw_path)
+                all_paths = merged_paths
+
+        if not configured_paths and self._is_redream_emulator_name(emulator_name, emulator):
+            redream_override_paths: list[str] = []
+            if key == "save_paths":
+                redream_override_paths = resolve_redream_save_path_overrides(
+                    emulator.get("path", ""),
+                    emulator.get("args", ""),
+                    self._split_launch_template_args,
+                )
+            elif key == "state_paths":
+                redream_override_paths = resolve_redream_state_path_overrides(
+                    emulator.get("path", ""),
+                    emulator.get("args", ""),
+                    self._split_launch_template_args,
+                )
+
+            if redream_override_paths:
+                merged_paths: list[str] = []
+                for raw_path in [*redream_override_paths, *all_paths]:
+                    if not isinstance(raw_path, str) or not raw_path.strip():
+                        continue
+                    if raw_path not in merged_paths:
+                        merged_paths.append(raw_path)
+                all_paths = merged_paths
+
+        if not configured_paths and key == "save_paths" and self._is_xemu_emulator_name(emulator_name, emulator):
+            xemu_override_paths = resolve_xemu_save_path_overrides(
+                emulator.get("path", ""),
+                emulator.get("args", ""),
+                self._split_launch_template_args,
+            )
+            if xemu_override_paths:
+                merged_paths: list[str] = []
+                for raw_path in [*xemu_override_paths, *all_paths]:
+                    if not isinstance(raw_path, str) or not raw_path.strip():
+                        continue
+                    if raw_path not in merged_paths:
+                        merged_paths.append(raw_path)
+                all_paths = merged_paths
+
         if not all_paths:
             return []
 
@@ -3347,7 +4160,7 @@ class MainWindow(QMainWindow):
             elif candidate.is_absolute():
                 candidate = candidate.resolve()
 
-            if candidate.exists() and candidate.is_dir():
+            if candidate.exists() and (candidate.is_dir() or candidate.is_file()):
                 resolved.append(candidate)
 
         unique: list[Path] = []
@@ -3359,6 +4172,46 @@ class MainWindow(QMainWindow):
             seen.add(key_value)
             unique.append(path)
         return unique
+
+    def _cemu_save_directories_for_game(
+        self,
+        game: dict[str, str],
+        directories: list[Path],
+        *,
+        ignore_basenames: set[str] | None = None,
+        ignore_extensions: set[str] | None = None,
+    ) -> list[Path]:
+        return cemu_save_directories_for_game(
+            game,
+            directories,
+            self._cemu_title_id_tokens,
+            self._latest_file_mtime_under_path,
+            ignore_basenames=ignore_basenames,
+            ignore_extensions=ignore_extensions,
+        )
+
+    def _dolphin_save_targets_for_game(
+        self,
+        game: dict[str, str],
+        directories: list[Path],
+        *,
+        ignore_basenames: set[str] | None = None,
+        ignore_extensions: set[str] | None = None,
+    ) -> tuple[list[Path], list[Path]]:
+        files = self._cloud_sync_candidates_for_game(
+            game,
+            directories,
+            "save",
+            ignore_basenames=ignore_basenames,
+            ignore_extensions=ignore_extensions,
+        )
+        folder_targets = self._cloud_sync_directory_candidates_for_game(
+            game,
+            directories,
+            ignore_basenames=ignore_basenames,
+            ignore_extensions=ignore_extensions,
+        )
+        return files, folder_targets
 
     def _pcsx2_save_directories_for_game(self, game: dict[str, str], directories: list[Path]) -> list[Path]:
         id_tokens = self._ps2_game_id_tokens(game)
@@ -3422,9 +4275,9 @@ class MainWindow(QMainWindow):
 
     def _rpcs3_save_directories_for_game(self, game: dict[str, str], directories: list[Path]) -> list[Path]:
         game_ids = self._ps3_game_ids_for_game(game)
-        candidates: list[Path] = []
+        candidates: list[tuple[int, float, Path]] = []
 
-        for directory in directories:
+        for directory_index, directory in enumerate(directories):
             if not directory.exists() or not directory.is_dir():
                 continue
             for child in directory.iterdir():
@@ -3433,13 +4286,13 @@ class MainWindow(QMainWindow):
                 normalized_name = re.sub(r"[^A-Z0-9]+", "", child.name.upper())
                 if game_ids and not any(game_id in normalized_name for game_id in game_ids):
                     continue
-                candidates.append(child)
+                candidates.append((directory_index, self._latest_file_mtime_under_path(child), child))
 
-        candidates.sort(key=lambda item: item.stat().st_mtime if item.exists() else 0, reverse=True)
+        candidates.sort(key=lambda item: (item[0], -item[1]))
 
         unique: list[Path] = []
         seen: set[str] = set()
-        for path in candidates:
+        for _, _, path in candidates:
             key_value = str(path).casefold()
             if key_value in seen:
                 continue
@@ -3464,19 +4317,116 @@ class MainWindow(QMainWindow):
                     tokens.add(compact)
 
         title_value = game.get("title", "")
+        def add_nintendo_id_variants(value: str) -> None:
+            raw_text = value.strip().upper()
+            if not raw_text:
+                return
+            for matched in re.findall(r"\b[A-Z][A-Z0-9]{3,5}\b", raw_text):
+                short_code = matched[:4].casefold()
+                if short_code:
+                    tokens.add(short_code)
+                    ascii_hex = "".join(f"{ord(character):02x}" for character in matched[:4])
+                    if ascii_hex:
+                        tokens.add(ascii_hex)
+            for matched in re.findall(r"[0-9A-F]{16}", raw_text):
+                normalized = matched.casefold()
+                tokens.add(normalized)
+                tokens.add(normalized[:8])
+                tokens.add(normalized[8:])
+            for high, low in re.findall(r"([0-9A-F]{8})[^0-9A-F]+([0-9A-F]{8})", raw_text):
+                normalized_high = high.casefold()
+                normalized_low = low.casefold()
+                tokens.add(normalized_high)
+                tokens.add(normalized_low)
+                tokens.add(f"{normalized_high}{normalized_low}")
+
         if isinstance(title_value, str):
             add_token_variants(title_value)
+
+        for field in ("title_id", "base_title_id"):
+            value = game.get(field, "")
+            if isinstance(value, str) and value.strip():
+                add_token_variants(value)
+                add_nintendo_id_variants(value)
 
         for field in ("rom_file_name", "extracted_path", "archive_path"):
             value = game.get(field, "")
             if not isinstance(value, str) or not value.strip():
                 continue
-            add_token_variants(Path(value).stem)
+            stem_value = Path(value).stem
+            add_token_variants(stem_value)
+            add_nintendo_id_variants(stem_value)
 
         ps3_game_id_value = game.get("ps3_game_id", "")
         ps3_game_id = ps3_game_id_value.strip().casefold() if isinstance(ps3_game_id_value, str) else ""
         if ps3_game_id:
             tokens.add(ps3_game_id)
+
+        return {token for token in tokens if token}
+
+    def _cemu_title_id_tokens(self, game: dict[str, str]) -> set[str]:
+        tokens: set[str] = set()
+
+        def add_title_id_variants(value: str) -> None:
+            text = value.strip().upper()
+            if not text:
+                return
+            for matched in re.findall(r"[0-9A-F]{16}", text):
+                normalized = matched.upper()
+                tokens.add(normalized)
+                tokens.add(normalized[:8])
+                tokens.add(normalized[8:])
+            for high, low in re.findall(r"([0-9A-F]{8})[^0-9A-F]+([0-9A-F]{8})", text):
+                combined = f"{high}{low}"
+                tokens.add(combined)
+                tokens.add(high)
+                tokens.add(low)
+
+        for field in (
+            "title_id",
+            "base_title_id",
+            "rom_id",
+            "rom_file_name",
+            "extracted_path",
+            "archive_path",
+            "extracted_dir",
+            "native_executable_path",
+        ):
+            value = game.get(field, "")
+            if isinstance(value, str) and value.strip():
+                add_title_id_variants(value)
+
+        xml_candidates: list[Path] = []
+        for extracted_path in self._candidate_extracted_paths_for_game(game):
+            parent = extracted_path.parent
+            xml_candidates.extend([
+                parent / "app.xml",
+                parent / "meta.xml",
+                parent / "code" / "app.xml",
+                parent / "meta" / "meta.xml",
+                parent.parent / "code" / "app.xml",
+                parent.parent / "meta" / "meta.xml",
+            ])
+
+        extracted_dir_value = game.get("extracted_dir", "")
+        extracted_dir_text = extracted_dir_value.strip() if isinstance(extracted_dir_value, str) else ""
+        if extracted_dir_text:
+            extracted_dir = Path(extracted_dir_text).expanduser()
+            xml_candidates.extend([
+                extracted_dir / "code" / "app.xml",
+                extracted_dir / "meta" / "meta.xml",
+            ])
+
+        seen_paths: set[str] = set()
+        for xml_path in xml_candidates:
+            key_value = str(xml_path).casefold()
+            if key_value in seen_paths or not xml_path.exists() or not xml_path.is_file():
+                continue
+            seen_paths.add(key_value)
+            try:
+                add_title_id_variants(xml_path.read_text(encoding="utf-8", errors="ignore"))
+            except OSError:
+                continue
 
         return {token for token in tokens if token}
 
@@ -3487,13 +4437,61 @@ class MainWindow(QMainWindow):
             return True
         if ".state" in name:
             return True
+        if re.search(r"\.\d+\.sav$", name):
+            return True
         return False
 
-    def _is_ppsspp_emulator_name(self, emulator_name: str) -> bool:
-        return "ppsspp" in emulator_name.strip().casefold()
+    def _emulator_matches_tokens(
+        self,
+        emulator_name: str,
+        *tokens: str,
+        emulator: dict[str, str] | None = None,
+    ) -> bool:
+        entry = emulator
+        if entry is None and isinstance(emulator_name, str) and emulator_name.strip():
+            entry = self._emulator_entry_by_name(emulator_name)
 
-    def _is_pcsx2_emulator_name(self, emulator_name: str) -> bool:
-        return "pcsx2" in emulator_name.strip().casefold()
+        if resolve_emulator_entry_matches_tokens(entry, tokens, self._emulator_autoprofiles()):
+            return True
+
+        normalized_name = emulator_name.strip().casefold() if isinstance(emulator_name, str) else ""
+        return any(token.strip().casefold() in normalized_name for token in tokens if isinstance(token, str) and token.strip())
+
+    def _is_ppsspp_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        return self._emulator_matches_tokens(emulator_name, "ppsspp", emulator=emulator)
+
+    def _is_azahar_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        return self._emulator_matches_tokens(emulator_name, "azahar", emulator=emulator)
+
+    def _is_dolphin_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        return self._emulator_matches_tokens(emulator_name, "dolphin", emulator=emulator)
+
+    def _is_cemu_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        return self._emulator_matches_tokens(emulator_name, "cemu", emulator=emulator)
+
+    def _is_pico8_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        return self._emulator_matches_tokens(emulator_name, "pico8", "pico-8", emulator=emulator)
+
+    def _is_eden_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        return self._emulator_matches_tokens(emulator_name, "eden", emulator=emulator)
+
+    def _is_fbneo_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        return self._emulator_matches_tokens(emulator_name, "fbneo", "final burn", emulator=emulator)
+
+    def _is_mame_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        return self._emulator_matches_tokens(emulator_name, "mame", emulator=emulator)
+
+    def _is_xemu_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        return self._emulator_matches_tokens(emulator_name, "xemu", emulator=emulator)
+
+    def _is_xenia_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        return self._emulator_matches_tokens(emulator_name, "xenia", emulator=emulator)
+
+    def _is_redream_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        return self._emulator_matches_tokens(emulator_name, "redream", emulator=emulator)
+
+    def _is_pcsx2_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        return self._emulator_matches_tokens(emulator_name, "pcsx2", emulator=emulator)
 
     def _ps2_game_id_tokens(self, game: dict[str, str]) -> set[str]:
         tokens: set[str] = set()
@@ -3591,7 +4589,7 @@ class MainWindow(QMainWindow):
         ignore_basenames: set[str] | None = None,
         ignore_extensions: set[str] | None = None,
     ) -> float:
-        if not root.exists() or not root.is_dir():
+        if not root.exists():
             return 0.0
         blocked_basenames = {
             name.casefold()
@@ -3603,6 +4601,17 @@ class MainWindow(QMainWindow):
             for extension in (ignore_extensions or set())
             if isinstance(extension, str) and extension.strip()
         }
+        if root.is_file():
+            if blocked_basenames and root.name.casefold() in blocked_basenames:
+                return 0.0
+            if blocked_extensions and root.suffix.casefold() in blocked_extensions:
+                return 0.0
+            try:
+                return float(root.stat().st_mtime)
+            except OSError:
+                return 0.0
+        if not root.is_dir():
+            return 0.0
         latest = 0.0
         for candidate in root.rglob("*"):
             if not candidate.is_file():
@@ -3626,10 +4635,9 @@ class MainWindow(QMainWindow):
         if not directories:
             return 0.0
 
-        if self._is_rpcs3_emulator_name(emulator_name):
-            return 0.0
-
         emulator_entry = self._emulator_entry_by_name(emulator_name)
+        if self._is_rpcs3_emulator_name(emulator_name, emulator_entry):
+            return 0.0
         if emulator_entry is None:
             emulator_entry = {"name": emulator_name, "path": "", "args": "%rom%", "save_strategy": "auto"}
 
@@ -3816,7 +4824,15 @@ class MainWindow(QMainWindow):
             ignore_extensions=ignore_extensions,
         )
         fallback_name = f"{self._sanitize_path_component(game.get('title', 'game'), 'save')}.srm"
-        return restore_single_save_payload(directories, save_record, payload, candidate_paths, fallback_name)
+        return restore_single_save_payload(
+            directories,
+            save_record,
+            payload,
+            candidate_paths,
+            fallback_name,
+            skip_basenames=ignore_basenames,
+            skip_extensions=ignore_extensions,
+        )
 
     def _restore_single_state_file(
         self,
@@ -3836,11 +4852,20 @@ class MainWindow(QMainWindow):
             ignore_extensions=ignore_extensions,
         )
         fallback_name = f"{self._sanitize_path_component(game.get('title', 'game'), 'state')}.state"
-        return restore_single_state_payload(directories, state_record, payload, candidate_paths, fallback_name)
+        return restore_single_state_payload(
+            directories,
+            state_record,
+            payload,
+            candidate_paths,
+            fallback_name,
+            skip_basenames=ignore_basenames,
+            skip_extensions=ignore_extensions,
+        )
 
     def _restore_cloud_save_for_game(
         self,
         game: dict[str, str],
+        save_record: dict[str, Any] | None = None,
         *,
         show_dialogs: bool = True,
         skip_if_local_newer: bool = False,
@@ -3856,8 +4881,15 @@ class MainWindow(QMainWindow):
             if show_dialogs:
                 QMessageBox.information(self, "Cloud Sync", message)
 
-        if self._is_native_executable_platform(game):
-            show_warning("Windows native save restore is not supported yet.")
+        emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(game)
+        compatibility_reason = self._cloud_save_block_reason_for_game(
+            game,
+            emulator_name,
+            emulator_entry,
+            save_type="save",
+        )
+        if compatibility_reason:
+            show_info(compatibility_reason)
             return False
 
         rom_id = self._resolve_rom_id_for_game(game)
@@ -3866,6 +4898,21 @@ class MainWindow(QMainWindow):
             return False
 
         emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(game)
+        requested_emulator_name = ""
+        if save_record is not None:
+            emulator_value = save_record.get("emulator", "")
+            if isinstance(emulator_value, str):
+                requested_emulator_name = emulator_value.strip()
+
+        if requested_emulator_name:
+            requested_entry = self._emulator_entry_by_name(requested_emulator_name)
+            if requested_entry is None and requested_emulator_name.casefold() != emulator_name.strip().casefold():
+                show_warning(f"Emulator '{requested_emulator_name}' is not configured on this device.")
+                return False
+            if requested_entry is not None:
+                emulator_name = requested_emulator_name
+                emulator_entry = requested_entry
+
         if emulator_entry is None:
             show_warning("No default emulator is configured for this game's platform.")
             return False
@@ -3875,11 +4922,12 @@ class MainWindow(QMainWindow):
             show_warning(f"No save directories were found for emulator '{emulator_name}'. Configure them in Emulators.")
             return False
 
-        try:
-            save_record = self._latest_server_save_record(rom_id, emulator_name)
-        except (HTTPError, URLError, ValueError, json.JSONDecodeError) as error:
-            show_warning(f"Failed to query server saves: {error}")
-            return False
+        if save_record is None:
+            try:
+                save_record = self._latest_server_save_record(rom_id, emulator_name)
+            except (HTTPError, URLError, ValueError, json.JSONDecodeError) as error:
+                show_warning(f"Failed to query server saves: {error}")
+                return False
 
         if save_record is None:
             show_info("No cloud save was found on the server for this game.")
@@ -3909,7 +4957,7 @@ class MainWindow(QMainWindow):
                     )
 
         if skip_if_local_newer:
-            if self._is_pcsx2_emulator_name(emulator_name) and not self._ps2_game_id_tokens(game):
+            if self._is_pcsx2_emulator_name(emulator_name, emulator_entry) and not self._ps2_game_id_tokens(game):
                 if debug_enabled:
                     print(
                         f"[DEBUG][CloudSync] Restore local_newer_check_skipped title={game.get('title', '')} "
@@ -3938,9 +4986,10 @@ class MainWindow(QMainWindow):
             return False
 
         is_folder_save = (
-            self._is_ppsspp_emulator_name(emulator_name)
-            or self._is_rpcs3_emulator_name(emulator_name)
-            or self._is_pcsx2_emulator_name(emulator_name)
+            self._is_ppsspp_emulator_name(emulator_name, emulator_entry)
+            or self._is_rpcs3_emulator_name(emulator_name, emulator_entry)
+            or self._is_pcsx2_emulator_name(emulator_name, emulator_entry)
+            or self._is_cemu_emulator_name(emulator_name, emulator_entry)
         )
         skip_basenames = self._sync_directory_ignore_basenames_for_emulator(emulator_name, emulator_entry, "save")
         skip_extensions = self._sync_directory_ignore_extensions_for_emulator(emulator_entry)
@@ -3994,6 +5043,7 @@ class MainWindow(QMainWindow):
     def _restore_cloud_state_for_game(
         self,
         game: dict[str, str],
+        state_record: dict[str, Any] | None = None,
         *,
         show_dialogs: bool = True,
         skip_if_known_latest: bool = False,
@@ -4008,8 +5058,15 @@ class MainWindow(QMainWindow):
             if show_dialogs:
                 QMessageBox.information(self, "Cloud Sync", message)
 
-        if self._is_native_executable_platform(game):
-            show_warning("Windows native state restore is not supported yet.")
+        emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(game)
+        compatibility_reason = self._cloud_save_block_reason_for_game(
+            game,
+            emulator_name,
+            emulator_entry,
+            save_type="state",
+        )
+        if compatibility_reason:
+            show_info(compatibility_reason)
             return False
 
         rom_id = self._resolve_rom_id_for_game(game)
@@ -4018,11 +5075,26 @@ class MainWindow(QMainWindow):
             return False
 
         emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(game)
+        requested_emulator_name = ""
+        if state_record is not None:
+            emulator_value = state_record.get("emulator", "")
+            if isinstance(emulator_value, str):
+                requested_emulator_name = emulator_value.strip()
+
+        if requested_emulator_name:
+            requested_entry = self._emulator_entry_by_name(requested_emulator_name)
+            if requested_entry is None and requested_emulator_name.casefold() != emulator_name.strip().casefold():
+                show_warning(f"Emulator '{requested_emulator_name}' is not configured on this device.")
+                return False
+            if requested_entry is not None:
+                emulator_name = requested_emulator_name
+                emulator_entry = requested_entry
+
         if emulator_entry is None:
             show_warning("No default emulator is configured for this game's platform.")
             return False
 
-        if self._is_rpcs3_emulator_name(emulator_name):
+        if self._is_rpcs3_emulator_name(emulator_name, emulator_entry):
             show_info("RPCS3 savestate restore is not supported yet.")
             return False
 
@@ -4031,11 +5103,12 @@ class MainWindow(QMainWindow):
             show_warning(f"No state directories were found for emulator '{emulator_name}'. Configure them in Emulators.")
             return False
 
-        try:
-            state_record = self._latest_server_state_record(rom_id, emulator_name)
-        except (HTTPError, URLError, ValueError, json.JSONDecodeError) as error:
-            show_warning(f"Failed to query server states: {error}")
-            return False
+        if state_record is None:
+            try:
+                state_record = self._latest_server_state_record(rom_id, emulator_name)
+            except (HTTPError, URLError, ValueError, json.JSONDecodeError) as error:
+                show_warning(f"Failed to query server states: {error}")
+                return False
 
         if state_record is None:
             show_info("No cloud save state was found on the server for this game.")
@@ -4144,8 +5217,15 @@ class MainWindow(QMainWindow):
             if show_dialogs:
                 QMessageBox.information(self, "Cloud Sync", message)
 
-        if self._is_native_executable_platform(game):
-            show_warning("Windows native save uploads are not supported yet.")
+        emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(game)
+        compatibility_reason = self._cloud_save_block_reason_for_game(
+            game,
+            emulator_name,
+            emulator_entry,
+            save_type=save_type,
+        )
+        if compatibility_reason:
+            show_info(compatibility_reason)
             return 0, 0, []
 
         rom_id = self._resolve_rom_id_for_game(game)
@@ -4153,7 +5233,6 @@ class MainWindow(QMainWindow):
             show_warning("Missing ROM id for this game.")
             return 0, 0, []
 
-        emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(game)
         if emulator_entry is None:
             show_warning("No default emulator is configured for this game's platform.")
             return 0, 0, []
@@ -4167,8 +5246,8 @@ class MainWindow(QMainWindow):
 
         endpoint = "/api/saves" if save_type == "save" else "/api/states"
         file_field = "saveFile" if save_type == "save" else "stateFile"
-        is_ppsspp = self._is_ppsspp_emulator_name(emulator_name)
-        is_rpcs3 = self._is_rpcs3_emulator_name(emulator_name)
+        is_ppsspp = self._is_ppsspp_emulator_name(emulator_name, emulator_entry)
+        is_rpcs3 = self._is_rpcs3_emulator_name(emulator_name, emulator_entry)
 
         if is_rpcs3 and save_type == "state":
             show_info("RPCS3 savestate uploads are not supported yet.")
@@ -4187,7 +5266,7 @@ class MainWindow(QMainWindow):
             )
             ignore_basenames = self._sync_directory_ignore_basenames_for_emulator(emulator_name, emulator_entry, "save")
             ignore_extensions = self._sync_directory_ignore_extensions_for_emulator(emulator_entry)
-            archived_jobs, temporary_archives = directory_archive_upload_jobs(
+            archived_jobs, directory_archives = directory_archive_upload_jobs(
                 save_directories,
                 file_field,
                 lambda save_directory: self._zip_directory_for_upload(
@@ -4197,8 +5276,20 @@ class MainWindow(QMainWindow):
                     ignore_extensions=ignore_extensions,
                 ),
             )
+            temporary_archives.extend(directory_archives)
+            grouped_jobs, file_archives = grouped_file_upload_jobs(
+                save_files,
+                file_field,
+                lambda files: zip_selected_files_for_upload(
+                    files,
+                    self._sanitize_path_component(game.get("title", "game"), "save"),
+                    ignore_basenames=ignore_basenames,
+                    ignore_extensions=ignore_extensions,
+                ),
+            )
+            temporary_archives.extend(file_archives)
             upload_jobs.extend(archived_jobs)
-            upload_jobs.extend(file_upload_jobs(save_files, file_field))
+            upload_jobs.extend(grouped_jobs)
             if not upload_jobs:
                 show_info(no_matching_upload_message(save_type))
                 return 0, 0, []
@@ -4230,7 +5321,19 @@ class MainWindow(QMainWindow):
             if not files:
                 show_info(no_matching_upload_message(save_type))
                 return 0, 0, []
-            upload_jobs = file_upload_jobs(files, file_field)
+            ignore_basenames = self._sync_directory_ignore_basenames_for_emulator(emulator_name, emulator_entry, save_type)
+            ignore_extensions = self._sync_directory_ignore_extensions_for_emulator(emulator_entry)
+            upload_jobs, grouped_archives = grouped_file_upload_jobs(
+                files,
+                file_field,
+                lambda selected_files: zip_selected_files_for_upload(
+                    selected_files,
+                    self._sanitize_path_component(game.get("title", "game"), save_type),
+                    ignore_basenames=ignore_basenames,
+                    ignore_extensions=ignore_extensions,
+                ),
+            )
+            temporary_archives.extend(grouped_archives)
 
         success_count = 0
         failed_files: list[str] = []
@@ -4292,6 +5395,8 @@ class MainWindow(QMainWindow):
         if installed_game is None:
             return
         self._upload_cloud_files_for_game(installed_game, "save")
+        if self.current_details_cloud_mode != "overview":
+            self._refresh_details_cloud_panel()
 
     def _perform_restore_saves_action(self) -> None:
         if self.current_details_game is None:
@@ -4299,7 +5404,9 @@ class MainWindow(QMainWindow):
         installed_game = self._installed_game_record(self.current_details_game)
         if installed_game is None:
             return
-        self._restore_cloud_save_for_game(installed_game)
+        restored = self._restore_cloud_save_for_game(installed_game)
+        if restored and self.current_details_cloud_mode != "overview":
+            self._refresh_details_cloud_panel()
 
     def _perform_upload_states_action(self) -> None:
         if self.current_details_game is None:
@@ -4308,6 +5415,8 @@ class MainWindow(QMainWindow):
         if installed_game is None:
             return
         self._upload_cloud_files_for_game(installed_game, "state")
+        if self.current_details_cloud_mode != "overview":
+            self._refresh_details_cloud_panel()
 
     def _perform_restore_states_action(self) -> None:
         if self.current_details_game is None:
@@ -4315,26 +5424,28 @@ class MainWindow(QMainWindow):
         installed_game = self._installed_game_record(self.current_details_game)
         if installed_game is None:
             return
-        self._restore_cloud_state_for_game(installed_game)
+        restored = self._restore_cloud_state_for_game(installed_game)
+        if restored and self.current_details_cloud_mode != "overview":
+            self._refresh_details_cloud_panel()
 
     def _auto_sync_before_launch(self, game: dict[str, str]) -> None:
-        if self._is_native_executable_platform(game):
-            return
         if not self._auto_cloud_save_download_enabled():
             return
         if not self._credentials_present() or not self._server_connected():
             return
-        self._restore_cloud_save_for_game(
-            game,
-            show_dialogs=False,
-            skip_if_local_newer=self._auto_cloud_skip_download_if_local_newer(),
-            skip_if_known_latest=True,
-        )
-        self._restore_cloud_state_for_game(
-            game,
-            show_dialogs=False,
-            skip_if_known_latest=True,
-        )
+        if not self._cloud_save_block_reason_for_game(game, save_type="save"):
+            self._restore_cloud_save_for_game(
+                game,
+                show_dialogs=False,
+                skip_if_local_newer=self._auto_cloud_skip_download_if_local_newer(),
+                skip_if_known_latest=True,
+            )
+        if not self._cloud_save_block_reason_for_game(game, save_type="state"):
+            self._restore_cloud_state_for_game(
+                game,
+                show_dialogs=False,
+                skip_if_known_latest=True,
+            )
 
     def _register_game_session_for_auto_upload(
         self,
@@ -4342,7 +5453,11 @@ class MainWindow(QMainWindow):
         process: subprocess.Popen,
         emulator_name: str,
     ) -> None:
-        if self._is_native_executable_platform(game):
+        if self._cloud_save_block_reason_for_game(game, emulator_name, save_type="save") and self._cloud_save_block_reason_for_game(
+            game,
+            emulator_name,
+            save_type="state",
+        ):
             return
         started_at = time.time()
         session = {
@@ -4405,13 +5520,28 @@ class MainWindow(QMainWindow):
         sync_state = self._cloud_sync_state_for_game(game)
 
         local_latest_save_mtime = 0.0
-        save_directories = self._resolved_sync_directory_paths(emulator_entry, "save_paths")
+        include_save_upload = not self._cloud_save_block_reason_for_game(
+            game,
+            emulator_name,
+            emulator_entry,
+            save_type="save",
+        )
+        save_directories = self._resolved_sync_directory_paths(emulator_entry, "save_paths") if include_save_upload else []
         if save_directories:
             local_latest_save_mtime = self._latest_local_save_mtime_for_game(game, emulator_name, save_directories)
 
         local_latest_state_mtime = 0.0
         state_directories = self._resolved_sync_directory_paths(emulator_entry, "state_paths")
-        include_state_upload = bool(state_directories) and not self._is_rpcs3_emulator_name(emulator_name)
+        include_state_upload = (
+            bool(state_directories)
+            and not self._is_rpcs3_emulator_name(emulator_name, emulator_entry)
+            and not self._cloud_save_block_reason_for_game(
+                game,
+                emulator_name,
+                emulator_entry,
+                save_type="state",
+            )
+        )
         if include_state_upload:
             local_latest_state_mtime = self._latest_local_state_mtime_for_game(game, emulator_name, state_directories)
 
@@ -4484,8 +5614,21 @@ class MainWindow(QMainWindow):
     def _normalize_default_retroarch_cores(self, value: Any) -> dict[str, str]:
         return resolve_normalize_default_retroarch_cores(value)
 
-    def _is_retroarch_emulator_name(self, emulator_name: str) -> bool:
-        return "retroarch" in emulator_name.strip().lower()
+    def _is_duckstation_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        return self._emulator_matches_tokens(emulator_name, "duckstation", emulator=emulator)
+
+    def _ensure_emulator_sync_settings(self, emulator_name: str, emulator_path_text: str) -> None:
+        path_text = emulator_path_text.strip() if isinstance(emulator_path_text, str) else ""
+        if not path_text:
+            return
+        emulator_entry = {"name": emulator_name, "path": path_text}
+        if self._is_retroarch_emulator_name(emulator_name, emulator_entry):
+            resolve_ensure_retroarch_save_location_settings(path_text)
+        if self._is_duckstation_emulator_name(emulator_name, emulator_entry):
+            resolve_ensure_duckstation_memory_card_settings(path_text)
+
+    def _is_retroarch_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        return self._emulator_matches_tokens(emulator_name, "retroarch", emulator=emulator)
 
     def _emulator_autoprofiles_path(self) -> Path:
         return resolve_emulator_autoprofiles_path(Path(__file__).resolve().parent)
@@ -4755,6 +5898,8 @@ class MainWindow(QMainWindow):
         if self.emulator_list is not None:
             target_index = self.emulator_list.currentRow()
 
+        self._ensure_emulator_sync_settings(name, path)
+
         entry = make_emulator_entry_payload(
             name,
             path,
@@ -4838,6 +5983,7 @@ class MainWindow(QMainWindow):
 
         command = [str(emulator_path)]
         try:
+            self._ensure_emulator_sync_settings(emulator_name, emulator_path_text)
             process = subprocess.Popen(command, cwd=str(emulator_path.parent))
             QTimer.singleShot(500, lambda p=process, c=command: self._warn_if_process_exited_early(p, c))
         except OSError as error:

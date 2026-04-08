@@ -23,6 +23,7 @@ from .launch import (
 from .profiles import (
     default_emulator_autoprofiles,
     emulator_autoprofiles_path,
+    emulator_entry_matches_tokens,
     emulator_profile_for_entry,
     emulator_profile_for_game,
     load_emulator_autoprofiles,
@@ -35,6 +36,65 @@ from .profiles import (
     resolved_save_strategy_for_emulator,
     split_configured_paths,
 )
+from .azahar import (
+    azahar_directory_settings,
+    azahar_save_path_overrides,
+    azahar_state_path_overrides,
+)
+from .cemu import (
+    cemu_directory_settings,
+    cemu_save_path_overrides,
+)
+from .dolphin import (
+    dolphin_directory_settings,
+    dolphin_save_path_overrides,
+    dolphin_state_path_overrides,
+)
+from .eden import (
+    eden_directory_settings,
+    eden_save_path_overrides,
+)
+from .fbneo import (
+    fbneo_directory_settings,
+    fbneo_save_path_overrides,
+    fbneo_state_path_overrides,
+)
+from .mame import (
+    mame_directory_settings,
+    mame_save_path_overrides,
+    mame_state_path_overrides,
+)
+from .pcsx2 import (
+    pcsx2_directory_settings,
+    pcsx2_save_path_overrides,
+    pcsx2_state_path_overrides,
+)
+from .pico8 import (
+    pico8_directory_settings,
+    pico8_save_path_overrides,
+)
+from .redream import (
+    redream_directory_settings,
+    redream_save_path_overrides,
+    redream_state_path_overrides,
+)
+from .xemu import (
+    xemu_directory_settings,
+    xemu_save_path_overrides,
+)
+from .xenia import (
+    xenia_directory_settings,
+    xenia_save_path_overrides,
+    xenia_state_path_overrides,
+)
+from .rpcs3 import (
+    rpcs3_directory_settings,
+    rpcs3_save_path_overrides,
+)
+from .duckstation import (
+    duckstation_memory_card_settings,
+    ensure_duckstation_memory_card_settings,
+)
 from .retroarch import (
     all_retroarch_cores,
     installed_retroarch_core_ids,
@@ -44,12 +104,15 @@ from .retroarch import (
     retroarch_core_id_from_name,
     retroarch_core_list_path,
     retroarch_cores_for_platform,
+    retroarch_directory_settings,
+    ensure_retroarch_save_location_settings,
     retroarch_markdown_label,
     retroarch_platform_tokens,
     retroarch_system_keys_for_platform,
 )
 from .selection import (
     available_emulator_name_for_platform,
+    cloud_save_block_reason_for_game,
     compatible_emulator_names_for_platform,
     default_assignable_server_platforms,
     default_emulator_name_for_platform,
@@ -74,15 +137,50 @@ __all__ = [
     "auto_configure_emulator_settings",
     "auto_configured_emulator_name",
     "available_emulator_name_for_platform",
+    "cloud_save_block_reason_for_game",
+    "azahar_directory_settings",
+    "azahar_save_path_overrides",
+    "azahar_state_path_overrides",
+    "cemu_directory_settings",
+    "cemu_save_path_overrides",
+    "dolphin_directory_settings",
+    "dolphin_save_path_overrides",
+    "dolphin_state_path_overrides",
     "compatible_emulator_names_for_platform",
     "default_assignable_server_platforms",
     "default_emulator_autoprofiles",
+    "duckstation_memory_card_settings",
+    "eden_directory_settings",
+    "eden_save_path_overrides",
+    "fbneo_directory_settings",
+    "fbneo_save_path_overrides",
+    "fbneo_state_path_overrides",
+    "mame_directory_settings",
+    "mame_save_path_overrides",
+    "mame_state_path_overrides",
+    "pcsx2_directory_settings",
+    "pcsx2_save_path_overrides",
+    "pcsx2_state_path_overrides",
+    "pico8_directory_settings",
+    "pico8_save_path_overrides",
+    "redream_directory_settings",
+    "redream_save_path_overrides",
+    "redream_state_path_overrides",
+    "xemu_directory_settings",
+    "xemu_save_path_overrides",
+    "xenia_directory_settings",
+    "xenia_save_path_overrides",
+    "xenia_state_path_overrides",
+    "rpcs3_directory_settings",
+    "rpcs3_save_path_overrides",
+    "ensure_duckstation_memory_card_settings",
     "default_emulator_name_for_platform",
     "dolphin_target_platforms_for_variant",
     "dolphin_variant_label_for_game",
     "emulator_autoprofiles_path",
     "emulator_entry_by_name",
     "emulator_entry_has_usable_path",
+    "emulator_entry_matches_tokens",
     "emulator_profile_for_entry",
     "emulator_profile_for_game",
     "install_block_reason_for_game",
@@ -121,6 +219,8 @@ __all__ = [
     "retroarch_core_list_path",
     "retroarch_core_value",
     "retroarch_cores_for_platform",
+    "retroarch_directory_settings",
+    "ensure_retroarch_save_location_settings",
     "retroarch_markdown_label",
     "retroarch_platform_tokens",
     "retroarch_system_keys_for_platform",

@@ -21,6 +21,56 @@ def is_ps3_platform(game: dict[str, str]) -> bool:
     return platform in {"playstation 3", "ps3"}
 
 
+def is_original_xbox_platform(game: dict[str, str]) -> bool:
+    platform_value = game.get("platform", "")
+    platform = platform_value.strip().casefold() if isinstance(platform_value, str) else ""
+    normalized = re.sub(r"[^a-z0-9]+", " ", platform).strip()
+    compact = normalized.replace(" ", "")
+    tokens = set(normalized.split())
+
+    if not normalized or "xbox" not in tokens:
+        return False
+    if "xbox360" in compact or "360" in tokens or "one" in tokens or "series" in tokens:
+        return False
+    return True
+
+
+def cloud_save_block_reason_for_game(
+    game: dict[str, str],
+    *,
+    is_native_executable_platform: Callable[[dict[str, str]], bool],
+    emulator_name: str = "",
+    is_xemu_emulator_name: Callable[[str], bool] | None = None,
+    is_redream_emulator_name: Callable[[str], bool] | None = None,
+    save_type: str = "save",
+) -> str:
+    if is_native_executable_platform(game):
+        return "Cloud save management is only available for emulator-based games."
+
+    if is_original_xbox_platform(game):
+        return "This system is not compatible with cloudsaves at this time."
+
+    if (
+        emulator_name.strip()
+        and callable(is_xemu_emulator_name)
+        and is_xemu_emulator_name(emulator_name)
+    ):
+        return "This system is not compatible with cloudsaves at this time."
+
+    if (
+        save_type == "save"
+        and emulator_name.strip()
+        and callable(is_redream_emulator_name)
+        and is_redream_emulator_name(emulator_name)
+    ):
+        return (
+            "This emulator is not compatible with cloud saves at this time, "
+            "as an alternative please use save states instead."
+        )
+
+    return ""
+
+
 def is_emulators_platform(game: dict[str, str]) -> bool:
     platform_value = game.get("platform", "")
     if not isinstance(platform_value, str):

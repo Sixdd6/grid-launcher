@@ -155,6 +155,40 @@ def theme_stylesheet(colors: Mapping[str, str] | None) -> str:
             border-color: {resolved_colors['active']};
             color: {resolved_colors['active_text']};
         }}
+        QPushButton#detailsCloudActionButton {{
+            background-color: {resolved_colors['surface_alt']};
+            color: {resolved_colors['text']};
+            border: 1px solid {resolved_colors['border']};
+            border-radius: 8px;
+            min-width: 90px;
+            padding: 8px 12px;
+        }}
+        QPushButton#detailsCloudActionButton:hover {{
+            background-color: {resolved_colors['surface']};
+            border-color: {resolved_colors['accent']};
+        }}
+        QPushButton#detailsCloudActionButton:pressed {{
+            background-color: {resolved_colors['surface_press']};
+            border-color: {resolved_colors['accent']};
+        }}
+        QPushButton[role="danger"],
+        QPushButton#detailsCloudActionButton[role="danger"] {{
+            background-color: {resolved_colors['surface']};
+            color: {resolved_colors['error']};
+            border: 1px solid {resolved_colors['error']};
+        }}
+        QPushButton[role="danger"]:hover,
+        QPushButton#detailsCloudActionButton[role="danger"]:hover {{
+            background-color: {resolved_colors['error']};
+            border-color: {resolved_colors['error']};
+            color: #ffffff;
+        }}
+        QPushButton[role="danger"]:pressed,
+        QPushButton#detailsCloudActionButton[role="danger"]:pressed {{
+            background-color: {resolved_colors['error']};
+            border-color: {resolved_colors['warning']};
+            color: #ffffff;
+        }}
         QWidget#downloadStatusWidget {{
             background-color: {resolved_colors['surface']};
             border: 1px solid {resolved_colors['border']};
@@ -239,6 +273,16 @@ def theme_stylesheet(colors: Mapping[str, str] | None) -> str:
             border: 1px solid {resolved_colors['border']};
             border-radius: 10px;
         }}
+        QFrame#detailsCloudListPanel {{
+            background-color: transparent;
+            border: none;
+            border-radius: 0;
+        }}
+        QFrame#detailsCloudRecord {{
+            background-color: {resolved_colors['input_bg']};
+            border: 1px solid {resolved_colors['accent']};
+            border-radius: 10px;
+        }}
         QComboBox QAbstractItemView {{
             background-color: {resolved_colors['surface']};
             color: {resolved_colors['text']};
@@ -248,13 +292,15 @@ def theme_stylesheet(colors: Mapping[str, str] | None) -> str:
         }}
         QScrollArea#libraryScroll,
         QScrollArea#serverGamesScroll,
-        QScrollArea#downloadsScroll {{
+        QScrollArea#downloadsScroll,
+        QScrollArea#detailsCloudScroll {{
             background-color: transparent;
             border: none;
         }}
         QWidget#libraryScrollViewport,
         QWidget#serverGamesScrollViewport,
         QWidget#downloadsScrollViewport,
+        QWidget#detailsCloudScrollViewport,
         QWidget#libraryGridContent,
         QWidget#serverGamesContent,
         QWidget#downloadsContent {{
@@ -279,6 +325,8 @@ def apply_theme_inline_styles(
     library_empty_label: QLabel | None = None,
     downloads_empty_label: QLabel | None = None,
     details_cover_label: QLabel | None = None,
+    details_cloud_status_label: QLabel | None = None,
+    details_cloud_empty_label: QLabel | None = None,
     screenshot_labels: Iterable[QLabel] | None = None,
 ) -> None:
     text = theme_color(colors, "text", "#f8f8f2")
@@ -301,6 +349,10 @@ def apply_theme_inline_styles(
         details_cover_label.setStyleSheet(
             f"background-color: {window}; border: 1px dashed {border}; border-radius: 8px; font-size: 20px;"
         )
+    if details_cloud_status_label is not None:
+        details_cloud_status_label.setStyleSheet(f"color: {muted};")
+    if details_cloud_empty_label is not None:
+        details_cloud_empty_label.setStyleSheet(f"color: {muted}; font-size: 15px;")
     for screenshot_label in screenshot_labels or ():
         screenshot_label.setStyleSheet(
             f"background-color: {window}; border: 1px dashed {border}; border-radius: 8px;"

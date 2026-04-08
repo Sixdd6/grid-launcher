@@ -6,6 +6,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 
+DEFAULT_CLOUD_SYNC_IGNORE_BASENAMES = {
+    ".ds_store",
+    "desktop.ini",
+    "ehthumbs.db",
+    "thumbs.db",
+}
+
+
 def matching_platforms_for_emulator_keywords(assignable_platforms: list[str], keywords: list[str]) -> list[str]:
     if not keywords:
         return []
@@ -120,6 +128,58 @@ def emulator_profile_for_entry(
     return None
 
 
+def emulator_entry_matches_tokens(
+    emulator: dict[str, str] | None,
+    tokens: set[str] | list[str] | tuple[str, ...],
+    profiles: list[dict[str, Any]] | None = None,
+) -> bool:
+    if not isinstance(emulator, dict):
+        return False
+
+    normalized_tokens = {
+        token.strip().casefold()
+        for token in tokens
+        if isinstance(token, str) and token.strip()
+    }
+    if not normalized_tokens:
+        return False
+
+    candidate_values: set[str] = set()
+
+    def add_candidate(value: str) -> None:
+        normalized = value.strip().casefold()
+        if not normalized:
+            return
+        candidate_values.add(normalized)
+        stem = Path(normalized).stem.casefold()
+        if stem:
+            candidate_values.add(stem)
+
+    name_value = emulator.get("name", "")
+    if isinstance(name_value, str):
+        add_candidate(name_value)
+
+    path_value = emulator.get("path", "")
+    if isinstance(path_value, str) and path_value.strip():
+        executable_path = Path(path_value.strip())
+        add_candidate(executable_path.name)
+        add_candidate(executable_path.stem)
+
+    if isinstance(profiles, list):
+        profile = emulator_profile_for_entry(emulator, profiles)
+        if isinstance(profile, dict):
+            profile_name = profile.get("name", "")
+            if isinstance(profile_name, str):
+                add_candidate(profile_name)
+            match_tokens = profile.get("match_tokens", [])
+            if isinstance(match_tokens, list):
+                for token in match_tokens:
+                    if isinstance(token, str):
+                        add_candidate(token)
+
+    return any(token == candidate or token in candidate for token in normalized_tokens for candidate in candidate_values)
+
+
 def emulator_profile_for_game(
     game: dict[str, str],
     executable_path: str,
@@ -198,7 +258,7 @@ def resolved_ignore_basenames_for_emulator(
             profile_values = [item.strip() for item in raw_profile_values if isinstance(item, str) and item.strip()]
 
     all_values = configured_values if configured_values else profile_values
-    basenames: set[str] = set()
+    basenames: set[str] = set(DEFAULT_CLOUD_SYNC_IGNORE_BASENAMES)
     for value in all_values:
         base_name = Path(value).name.strip().casefold()
         if base_name and Path(base_name).suffix.casefold() not in {".jpg", ".jpeg"}:
@@ -234,201 +294,18 @@ def emulator_autoprofiles_path(base_path: Path) -> Path:
     return base_path / "emulator-autoprofiles.json"
 
 
-def default_emulator_autoprofiles() -> list[dict[str, Any]]:
-    return [
-        {
-            "match_tokens": ["retroarch.exe"],
-            "name": "RetroArch",
-            "args": '-L "%core%" "%rom%"',
-            "all_platforms": True,
-            "platform_keywords": [],
-            "use_game_title_as_name": False,
-            "save_strategy": "single_file",
-            "save_directories": ["saves"],
-            "state_directories": ["states"],
-        },
-        {
-            "match_tokens": ["duckstation.exe"],
-            "name": "DuckStation",
-            "args": '-fullscreen -batch "%rom%"',
-            "all_platforms": False,
-            "platform_keywords": ["playstation", "ps1"],
-            "use_game_title_as_name": False,
-            "save_strategy": "single_file",
-            "save_directories": [],
-            "state_directories": [],
-        },
-        {
-            "match_tokens": ["pcsx2-qt.exe"],
-            "name": "PCSX2",
-            "args": '-fullscreen -batch "%rom%"',
-            "all_platforms": False,
-            "platform_keywords": ["playstation 2", "ps2"],
-            "use_game_title_as_name": False,
-            "save_strategy": "folder",
-            "save_directories": [],
-            "state_directories": [],
-        },
-        {
-            "match_tokens": ["ppssppqt.exe"],
-            "name": "PPSSPP",
-            "args": '--fullscreen --pause-menu-exit "%rom%"',
-            "all_platforms": False,
-            "platform_keywords": ["playstation portable", "psp"],
-            "use_game_title_as_name": False,
-            "save_strategy": "folder",
-            "ignore_files": ["load_undo.ppst"],
-            "ignore_extensions": [],
-            "save_directories": [],
-            "state_directories": [],
-        },
-        {
-            "match_tokens": ["rpcs3.exe"],
-            "name": "RPCS3",
-            "args": "%rom%",
-            "all_platforms": False,
-            "platform_keywords": ["playstation 3", "ps3"],
-            "use_game_title_as_name": False,
-            "save_strategy": "folder",
-            "save_directories": [
-                "%EMULATOR_DIR%\\dev_hdd0\\home\\00000001\\savedata",
-                "%APPDATA%\\rpcs3\\dev_hdd0\\home\\00000001\\savedata",
-            ],
-            "state_directories": [],
-        },
-        {
-            "match_tokens": ["dolphin.exe"],
-            "name": "Dolphin",
-            "args": '-b -e "%rom%"',
-            "all_platforms": False,
-            "platform_keywords": ["gamecube", "wii"],
-            "use_game_title_as_name": False,
-            "save_strategy": "single_file",
-            "save_directories": [],
-            "state_directories": [],
-        },
-        {
-            "match_tokens": ["cemu.exe"],
-            "name": "Cemu",
-            "args": '-f -g "%rom%"',
-            "all_platforms": False,
-            "platform_keywords": ["wii u"],
-            "use_game_title_as_name": False,
-            "save_strategy": "single_file",
-            "save_directories": [],
-            "state_directories": [],
-        },
-        {
-            "match_tokens": ["azahar.exe"],
-            "name": "Azahar",
-            "args": '-f "%rom%"',
-            "all_platforms": False,
-            "platform_keywords": ["nintendo 3ds", "3ds"],
-            "use_game_title_as_name": False,
-            "save_strategy": "single_file",
-            "save_directories": [],
-            "state_directories": [],
-        },
-        {
-            "match_tokens": ["pico8.exe"],
-            "name": "Pico",
-            "args": '-run "%rom%"',
-            "all_platforms": False,
-            "platform_keywords": ["pico-8", "pico 8"],
-            "use_game_title_as_name": False,
-            "save_strategy": "single_file",
-            "save_directories": [],
-            "state_directories": [],
-        },
-        {
-            "match_tokens": ["xemu.exe"],
-            "name": "Xemu",
-            "args": '-full-screen -dvd_path "%rom%"',
-            "all_platforms": False,
-            "platform_keywords": ["xbox"],
-            "use_game_title_as_name": False,
-            "save_strategy": "single_file",
-            "save_directories": [],
-            "state_directories": [],
-        },
-        {
-            "match_tokens": ["eden.exe"],
-            "name": "Eden",
-            "args": '-f -g "%rom%"',
-            "all_platforms": False,
-            "platform_keywords": ["switch", "nintendo switch"],
-            "use_game_title_as_name": False,
-            "save_strategy": "single_file",
-            "save_directories": [],
-            "state_directories": [],
-        },
-        {
-            "match_tokens": ["yuzu.exe"],
-            "name": "Yuzu",
-            "args": "%rom%",
-            "all_platforms": False,
-            "platform_keywords": ["switch", "nintendo switch"],
-            "use_game_title_as_name": False,
-            "save_strategy": "single_file",
-            "save_directories": [],
-            "state_directories": [],
-        },
-        {
-            "match_tokens": ["ryujinx.exe"],
-            "name": "Ryujinx",
-            "args": "%rom%",
-            "all_platforms": False,
-            "platform_keywords": ["switch", "nintendo switch"],
-            "use_game_title_as_name": False,
-            "save_strategy": "single_file",
-            "save_directories": [],
-            "state_directories": [],
-        },
-        {
-            "match_tokens": ["sudachi.exe"],
-            "name": "Sudachi",
-            "args": "%rom%",
-            "all_platforms": False,
-            "platform_keywords": ["switch", "nintendo switch"],
-            "use_game_title_as_name": False,
-            "save_strategy": "single_file",
-            "save_directories": [],
-            "state_directories": [],
-        },
-        {
-            "match_tokens": ["mame.exe"],
-            "name": "MAME",
-            "args": "%rom%",
-            "all_platforms": False,
-            "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
-            "use_game_title_as_name": False,
-            "save_strategy": "single_file",
-            "save_directories": [],
-            "state_directories": [],
-        },
-        {
-            "match_tokens": ["fbneo.exe"],
-            "name": "FBNeo",
-            "args": "%rom%",
-            "all_platforms": False,
-            "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
-            "use_game_title_as_name": False,
-            "save_strategy": "single_file",
-            "save_directories": [],
-            "state_directories": [],
-        },
-        {
-            "match_tokens": ["finalburnneo.exe"],
-            "name": "FinalBurn Neo",
-            "args": "%rom%",
-            "all_platforms": False,
-            "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
-            "use_game_title_as_name": False,
-            "save_strategy": "single_file",
-            "save_directories": [],
-            "state_directories": [],
-        },
-    ]
+def default_emulator_autoprofiles(base_path: Path | None = None) -> list[dict[str, Any]]:
+    resolved_base_path = base_path if isinstance(base_path, Path) else Path(__file__).resolve().parents[2]
+    autoprofiles_path = emulator_autoprofiles_path(resolved_base_path)
+    if not autoprofiles_path.exists():
+        return []
+
+    try:
+        parsed = json.loads(autoprofiles_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+
+    return parsed if isinstance(parsed, list) else []
 
 
 def normalize_emulator_autoprofiles(
@@ -548,23 +425,10 @@ def load_emulator_autoprofiles(
     if isinstance(cached_profiles, list):
         return cached_profiles
 
-    defaults = normalize_emulator_autoprofiles(
-        default_emulator_autoprofiles(),
-        normalize_save_strategy_value,
-        normalize_ignore_extension_value,
-    )
-    autoprofiles_path = emulator_autoprofiles_path(base_path)
-    if not autoprofiles_path.exists():
-        return defaults
-
-    try:
-        parsed = json.loads(autoprofiles_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return defaults
-
+    parsed = default_emulator_autoprofiles(base_path)
     normalized = normalize_emulator_autoprofiles(
         parsed,
         normalize_save_strategy_value,
         normalize_ignore_extension_value,
     )
-    return normalized if normalized else defaults
+    return normalized if normalized else []

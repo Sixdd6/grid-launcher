@@ -1,14 +1,17 @@
 from .cloud_restore import (
+	relative_timestamp_text,
 	latest_server_record,
 	restore_single_save_payload,
 	restore_single_state_payload,
 	save_record_timestamp,
 	server_records_from_payload,
+	sort_server_records_by_recency,
 )
 from .cloud_transfer import (
 	cleanup_temporary_paths,
 	extract_zip_archive_bytes_to_directory,
 	filter_upload_jobs_by_session_window,
+	grouped_file_upload_jobs,
 	is_local_newer_than_server,
 	normalize_candidate_url,
 	ppsspp_state_upload_jobs,
@@ -16,6 +19,7 @@ from .cloud_transfer import (
 	state_download_candidate_paths,
 	uploaded_kind_label,
 	zip_directory_for_upload,
+	zip_selected_files_for_upload,
 )
 from .archive_preparation import (
 	directory_total_file_bytes,
@@ -35,6 +39,7 @@ from .cloud_upload import (
 )
 from .cloud_sync import (
 	auto_cloud_upload_plan,
+	cemu_save_directories_for_game,
 	cloud_sync_candidates_for_game,
 	cloud_sync_directory_candidates_for_game,
 	cloud_sync_state,
@@ -127,6 +132,7 @@ __all__ = [
 	"remove_game_files",
 	"uninstall_library_games",
 	"candidate_archive_paths_for_game",
+	"cemu_save_directories_for_game",
 	"directory_total_file_bytes",
 	"candidate_extracted_dirs_for_game",
 	"candidate_extracted_paths_for_game",
@@ -141,6 +147,7 @@ __all__ = [
 	"filter_upload_jobs_by_session_window",
 	"is_local_newer_than_server",
 	"latest_server_record",
+	"relative_timestamp_text",
 	"library_games_for_target",
 	"library_games_without_keys",
 	"no_matching_upload_message",
@@ -153,6 +160,7 @@ __all__ = [
 	"filter_queue_by_download_entry_id",
 	"game_key",
 	"games_match_identity",
+	"grouped_file_upload_jobs",
 	"installed_game_record",
 	"is_game_install_queued",
 	"is_game_installed",
@@ -181,6 +189,7 @@ __all__ = [
 	"select_extracted_launch_file",
 	"should_extract_archive_for_game",
 	"server_records_from_payload",
+	"sort_server_records_by_recency",
 	"should_skip_known_latest",
 	"state_download_candidate_paths",
 	"make_download_entry_data",
@@ -213,6 +222,7 @@ __all__ = [
 	"update_rpcs3_games_yml_for_install",
 	"upload_completion_message",
 	"zip_directory_for_upload",
+	"zip_selected_files_for_upload",
 	"should_reset_active_download_metrics",
 	"summarize_auto_cloud_upload_result",
 	"sync_install_metadata_to_details_game",

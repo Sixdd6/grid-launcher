@@ -94,6 +94,174 @@ def retroarch_platform_tokens(value: str) -> set[str]:
     return {token for token in normalized.split() if token and token not in ignored_tokens}
 
 
+def retroarch_config_path_candidates(emulator_path_text: str) -> list[Path]:
+    if not emulator_path_text:
+        return []
+
+    emulator_path = Path(emulator_path_text).expanduser()
+    search_roots: list[Path] = []
+    if emulator_path.is_file() or emulator_path.suffix:
+        search_roots.append(emulator_path.parent)
+    else:
+        search_roots.append(emulator_path)
+
+    candidates: list[Path] = []
+    seen: set[str] = set()
+    for root in search_roots:
+        for candidate in (root / "retroarch.cfg", root / "config" / "retroarch.cfg"):
+            key_value = str(candidate).casefold()
+            if key_value in seen:
+                continue
+            seen.add(key_value)
+            candidates.append(candidate)
+    return candidates
+
+
+def _retroarch_config_bool(value: str) -> bool:
+    normalized = value.strip().casefold()
+    return normalized in {"1", "true", "yes", "on"}
+
+
+def retroarch_directory_settings(emulator_path_text: str) -> dict[str, object]:
+    defaults: dict[str, object] = {
+        "config_path": "",
+        "savefile_directory": "",
+        "savestate_directory": "",
+        "savefiles_in_content_dir": False,
+        "savestates_in_content_dir": False,
+        "sort_savefiles_enable": False,
+        "sort_savestates_enable": False,
+        "sort_savefiles_by_content_enable": False,
+        "sort_savestates_by_content_enable": False,
+    }
+
+    for candidate in retroarch_config_path_candidates(emulator_path_text):
+        if not candidate.exists() or not candidate.is_file():
+            continue
+
+        parsed: dict[str, str] = {}
+        try:
+            raw_content = candidate.read_text(encoding="utf-8")
+        except OSError:
+            continue
+
+        for raw_line in raw_content.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+                value = value[1:-1]
+            parsed[key] = value
+
+        if not parsed:
+            continue
+
+        defaults["config_path"] = str(candidate)
+        for directory_key in ("savefile_directory", "savestate_directory"):
+            raw_value = parsed.get(directory_key, "")
+            if isinstance(raw_value, str) and raw_value.strip() and raw_value.strip().casefold() != "default":
+                defaults[directory_key] = raw_value.strip()
+
+        for bool_key in (
+            "savefiles_in_content_dir",
+            "savestates_in_content_dir",
+            "sort_savefiles_enable",
+            "sort_savestates_enable",
+            "sort_savefiles_by_content_enable",
+            "sort_savestates_by_content_enable",
+        ):
+            raw_value = parsed.get(bool_key, "")
+            if isinstance(raw_value, str) and raw_value.strip():
+                defaults[bool_key] = _retroarch_config_bool(raw_value)
+        break
+
+    return defaults
+
+
+def ensure_retroarch_save_location_settings(emulator_path_text: str) -> dict[str, object]:
+    settings = retroarch_directory_settings(emulator_path_text)
+    config_candidates = retroarch_config_path_candidates(emulator_path_text)
+
+    result = dict(settings)
+    if not config_candidates:
+        result["changed"] = False
+        return result
+
+    configured_path = settings.get("config_path", "")
+    if isinstance(configured_path, str) and configured_path.strip():
+        config_path = Path(configured_path.strip()).expanduser()
+    else:
+        config_path = config_candidates[0]
+
+    desired_values = {
+        "savefile_directory": (
+            str(settings.get("savefile_directory", "")).strip() or "saves"
+        ),
+        "savestate_directory": (
+            str(settings.get("savestate_directory", "")).strip() or "states"
+        ),
+        "sort_savefiles_enable": "false",
+        "sort_savestates_enable": "false",
+        "sort_savefiles_by_content_enable": "false",
+        "sort_savestates_by_content_enable": "false",
+        "savefiles_in_content_dir": "false",
+        "savestates_in_content_dir": "false",
+    }
+
+    created = not config_path.exists()
+    try:
+        raw_content = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    except OSError:
+        raw_content = ""
+
+    output_lines: list[str] = []
+    seen_keys: set[str] = set()
+    changed = created
+
+    for raw_line in raw_content.splitlines():
+        match = re.match(r"^\s*([A-Za-z0-9_]+)\s*=", raw_line)
+        if not match:
+            output_lines.append(raw_line)
+            continue
+
+        key = match.group(1)
+        if key not in desired_values:
+            output_lines.append(raw_line)
+            continue
+        if key in seen_keys:
+            changed = True
+            continue
+
+        replacement = f'{key} = "{desired_values[key]}"'
+        if raw_line.strip() != replacement:
+            changed = True
+        output_lines.append(replacement)
+        seen_keys.add(key)
+
+    for key, value in desired_values.items():
+        if key in seen_keys:
+            continue
+        output_lines.append(f'{key} = "{value}"')
+        seen_keys.add(key)
+        changed = True
+
+    if changed:
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text("\n".join(output_lines).rstrip() + "\n", encoding="utf-8")
+        except OSError:
+            result["changed"] = False
+            return result
+
+    updated = retroarch_directory_settings(emulator_path_text)
+    updated["config_path"] = str(config_path)
+    updated["changed"] = changed
+    return updated
+
+
 def all_retroarch_cores(compatibility: dict[str, list[str]]) -> list[str]:
     cores: list[str] = []
     for mapped_cores in compatibility.values():

@@ -1,1553 +1,931 @@
 [
   {
     "core_file": "2048_libretro.dll",
-    "platforms": [
-      "Game"
-    ]
+    "platforms": ["Game"]
   },
   {
     "core_file": "4do_libretro.dll",
-    "platforms": [
-      "3DO"
-    ]
+    "platforms": ["3DO"]
   },
   {
     "core_file": "a5200_libretro.dll",
-    "platforms": [
-      "Atari 5200"
-    ]
+    "platforms": ["Atari 5200"]
   },
   {
     "core_file": "anarch_libretro.dll",
-    "platforms": [
-      "Game"
-    ]
+    "platforms": ["Game"]
   },
   {
     "core_file": "ardens_libretro.dll",
-    "platforms": [
-      "Arduboy"
-    ]
+    "platforms": ["Arduboy"]
   },
   {
     "core_file": "arduous_libretro.dll",
-    "platforms": [
-      "Arduboy"
-    ]
+    "platforms": ["Arduboy"]
   },
   {
     "core_file": "atari800_libretro.dll",
-    "platforms": [
-      "Atari 5200"
-    ]
+    "platforms": ["Atari 5200"]
   },
   {
     "core_file": "b2_libretro.dll",
-    "platforms": [
-      "Acorn BBC Micro"
-    ]
+    "platforms": ["Acorn BBC Micro"]
   },
   {
     "core_file": "beetle_bsnes_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC"]
   },
   {
     "core_file": "beetle_cygne_libretro.dll",
-    "platforms": [
-      "Bandai WonderSwan",
-      "Bandai WonderSwan Color"
-    ]
+    "platforms": ["Bandai WonderSwan","Bandai WonderSwan Color"]
   },
   {
     "core_file": "beetle_gba_libretro.dll",
-    "platforms": [
-      "Game Boy Advance"
-    ]
+    "platforms": ["Game Boy Advance"]
   },
   {
     "core_file": "beetle_lynx_libretro.dll",
-    "platforms": [
-      "Atari Lynx"
-    ]
+    "platforms": ["Atari Lynx"]
   },
   {
     "core_file": "beetle_neopop_libretro.dll",
-    "platforms": [
-      "Neo Geo Pocket",
-      "Neo Geo Pocket Color"
-    ]
+    "platforms": ["Neo Geo Pocket","Neo Geo Pocket Color"]
   },
   {
     "core_file": "beetle_pc_fx_libretro.dll",
-    "platforms": [
-      "NEC PC-FX"
-    ]
+    "platforms": ["NEC PC-FX"]
   },
   {
     "core_file": "beetle_pce_libretro.dll",
-    "platforms": [
-      "PC Engine",
-      "PC Engine CD",
-      "SuperGrafx",
-      "TurboGrafx-16",
-      "TurboGrafx-16 CD",
-      "TurboGrafx-16/PC Engine",
-      "TurboGrafx-16/PC Engine CD"
-    ]
+    "platforms": ["PC Engine","PC Engine CD","SuperGrafx","TurboGrafx-16","TurboGrafx-16 CD","TurboGrafx-16/PC Engine","TurboGrafx-16/PC Engine CD"]
   },
   {
     "core_file": "mednafen_pce_libretro.dll",
-    "platforms": [
-      "PC Engine",
-      "PC Engine CD",
-      "SuperGrafx",
-      "TurboGrafx-16",
-      "TurboGrafx-16 CD",
-      "TurboGrafx-16/PC Engine",
-      "TurboGrafx-16/PC Engine CD"
-    ]
+    "platforms": ["PC Engine","PC Engine CD","SuperGrafx","TurboGrafx-16","TurboGrafx-16 CD","TurboGrafx-16/PC Engine","TurboGrafx-16/PC Engine CD"]
   },
   {
     "core_file": "mednafen_psx_libretro.dll",
-    "platforms": [
-      "Sony PlayStation"
-    ]
+    "platforms": ["Sony PlayStation"]
   },
   {
     "core_file": "mednafen_psx_hw_libretro.dll",
-    "platforms": [
-      "Sony PlayStation"
-    ]
+    "platforms": ["Sony PlayStation"]
   },
   {
     "core_file": "mednafen_saturn_libretro.dll",
-    "platforms": [
-      "Sega Saturn"
-    ]
+    "platforms": ["Sega Saturn"]
   },
   {
     "core_file": "beetle_supergrafx_libretro.dll",
-    "platforms": [
-      "PC Engine",
-      "SuperGrafx"
-    ]
+    "platforms": ["PC Engine","SuperGrafx"]
   },
   {
     "core_file": "beetle_supafaust_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC"]
   },
   {
     "core_file": "mednafen_vb_libretro.dll",
-    "platforms": [
-      "Nintendo Virtual Boy",
-      "Virtual Boy"
-    ]
+    "platforms": ["Nintendo Virtual Boy","Virtual Boy"]
   },
   {
     "core_file": "bk_libretro.dll",
-    "platforms": [
-      "Elektronika BK-0010",
-      "BK-0011(M)",
-      "Terak 8510-a"
-    ]
+    "platforms": ["Elektronika BK-0010","BK-0011(M)","Terak 8510-a"]
   },
   {
     "core_file": "blastem_libretro.dll",
-    "platforms": [
-      "Sega Genesis (Mega Drive)",
-      "Sega Genesis",
-      "Mega Drive"
-    ]
+    "platforms": ["Sega Genesis (Mega Drive)","Sega Genesis","Mega Drive"]
   },
   {
     "core_file": "bluemsx_libretro.dll",
-    "platforms": [
-      "MSX",
-      "SVI",
-      "ColecoVision",
-      "SG-1000"
-    ]
+    "platforms": ["MSX","SVI","ColecoVision","SG-1000"]
   },
   {
     "core_file": "bnes_libretro.dll",
-    "platforms": [
-      "Nintendo NES",
-      "Famicom"
-    ]
+    "platforms": ["Nintendo NES","Famicom"]
   },
   {
     "core_file": "boom_3_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "boom_3_xp_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "bsnes_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC"]
   },
   {
     "core_file": "bsnes_2014_accuracy_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC"]
   },
   {
     "core_file": "bsnes_2014_balanced_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC"]
   },
   {
     "core_file": "bsnes_2014_performance_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC"]
   },
   {
     "core_file": "bsnes_c_98_v085_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC"]
   },
   {
     "core_file": "bsnes_hd_beta_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC"]
   },
   {
     "core_file": "bsnes_jg_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC"]
   },
   {
     "core_file": "bsnes_mercury_accuracy_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC"]
   },
   {
     "core_file": "bsnes_mercury_balanced_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC"]
   },
   {
     "core_file": "bsnes_mercury_performance_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC"]
   },
   {
     "core_file": "cannonball_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "caprice32_libretro.dll",
-    "platforms": [
-      "Amstrad CPC"
-    ]
+    "platforms": ["Amstrad CPC"]
   },
   {
     "core_file": "cdi_2015_libretro.dll",
-    "platforms": [
-      "Philips CDi"
-    ]
-  },
+    "platforms": ["Philips CDi"]  },
   {
     "core_file": "chailove_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "citra_libretro.dll",
-    "platforms": [
-      "Nintendo 3DS"
-    ]
+    "platforms": ["Nintendo 3DS"]
   },
   {
     "core_file": "citra_2018_libretro.dll",
-    "platforms": [
-      "Nintendo 3DS"
-    ]
+    "platforms": ["Nintendo 3DS"]
   },
   {
     "core_file": "citra_canary_libretro.dll",
-    "platforms": [
-      "Nintendo 3DS"
-    ]
+    "platforms": ["Nintendo 3DS"]
   },
   {
     "core_file": "clownmdemu_libretro.dll",
-    "platforms": [
-      "Sega Mega Drive",
-      "Sega Genesis",
-      "Mega Drive",
-      "Sega CD"
-    ]
+    "platforms": ["Sega Mega Drive","Sega Genesis","Mega Drive","Sega CD"]
   },
   {
     "core_file": "craft_libretro.dll",
-    "platforms": [
-      "Game"
-    ]
+    "platforms": ["Game"]
   },
   {
     "core_file": "crocods_libretro.dll",
-    "platforms": [
-      "Amstrad CPC"
-    ]
+    "platforms": ["Amstrad CPC"]
   },
   {
     "core_file": "cruzes_libretro.dll",
-    "platforms": [
-      "Game"
-    ]
+    "platforms": ["Game"]
   },
   {
     "core_file": "daphne_libretro.dll",
-    "platforms": [
-      "Arcade"
-    ]
+    "platforms": ["Arcade"]
   },
   {
     "core_file": "desmume_libretro.dll",
-    "platforms": [
-      "Nintendo DS"
-    ]
+    "platforms": ["Nintendo DS"]
   },
   {
     "core_file": "desmume_2015_libretro.dll",
-    "platforms": [
-      "Nintendo DS"
-    ]
+    "platforms": ["Nintendo DS"]
   },
   {
     "core_file": "dice_libretro.dll",
-    "platforms": [
-      "Arcade"
-    ]
+    "platforms": ["Arcade"]
   },
   {
     "core_file": "dinothawr_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "directxbox_libretro.dll",
-    "platforms": [
-      "Xbox"
-    ]
+    "platforms": ["Xbox"]
   },
   {
     "core_file": "dolphin_libretro.dll",
-    "platforms": [
-      "Nintendo GameCube",
-      "GameCube",
-      "Nintendo Wii",
-      "Wii"
-    ]
+    "platforms": ["Nintendo GameCube","GameCube","Nintendo Wii","Wii"]
   },
   {
     "core_file": "dosbox_libretro.dll",
-    "platforms": [
-      "DOS"
-    ]
+    "platforms": ["DOS"]
   },
   {
     "core_file": "dosbox_core_libretro.dll",
-    "platforms": [
-      "DOS"
-    ]
+    "platforms": ["DOS"]
   },
   {
     "core_file": "dosbox_pure_libretro.dll",
-    "platforms": [
-      "DOS"
-    ]
+    "platforms": ["DOS"]
   },
   {
     "core_file": "dosbox_svn_libretro.dll",
-    "platforms": [
-      "DOS"
-    ]
+    "platforms": ["DOS"]
   },
   {
     "core_file": "doukutsu_rs_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "duckstation_libretro.dll",
-    "platforms": [
-      "Sony PlayStation"
-    ]
+    "platforms": ["Sony PlayStation"]
   },
   {
     "core_file": "dungeon_crawl_stone_soup_libretro.dll",
-    "platforms": [
-      "Game"
-    ]
+    "platforms": ["Game"]
   },
   {
     "core_file": "easyrpg_libretro.dll",
-    "platforms": [
-      "RPG Maker 2000",
-      "RPG Maker 2003"
-    ]
+    "platforms": ["RPG Maker 2000","RPG Maker 2003"]
   },
   {
     "core_file": "ecwolf_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "eighyone_libretro.dll",
-    "platforms": [
-      "Sinclair ZX 81"
-    ]
+    "platforms": ["Sinclair ZX 81"]
   },
   {
     "core_file": "emux_chip_8_libretro.dll",
-    "platforms": [
-      "CHIP-8"
-    ]
+    "platforms": ["CHIP-8"]
   },
   {
     "core_file": "emux_gb_libretro.dll",
-    "platforms": [
-      "Game Boy",
-      "Game Boy Color"
-    ]
+    "platforms": ["Game Boy","Game Boy Color"]
   },
   {
     "core_file": "emux_nes_libretro.dll",
-    "platforms": [
-      "Nintendo Entertainment System",
-      "Nintendo NES",
-      "Famicom"
-    ]
+    "platforms": ["Nintendo Entertainment System","Nintendo NES","Famicom"]
   },
   {
     "core_file": "emux_sms_libretro.dll",
-    "platforms": [
-      "Sega Master System"
-    ]
+    "platforms": ["Sega Master System"]
   },
   {
     "core_file": "emuscv_libretro.dll",
-    "platforms": [
-      "Super Cassette Vision"
-    ]
+    "platforms": ["Super Cassette Vision"]
   },
   {
     "core_file": "ep128emu_libretro.dll",
-    "platforms": [
-      "Enterprise 64",
-      "Enterprise 128"
-    ]
+    "platforms": ["Enterprise 64","Enterprise 128"]
   },
   {
     "core_file": "fake_08_libretro.dll",
-    "platforms": [
-      "Pico-8",
-      "Pico8"
-    ]
+    "platforms": ["Pico-8","Pico8"]
   },
   {
     "core_file": "fb_alpha_libretro.dll",
-    "platforms": [
-      "Arcade"
-    ]
+    "platforms": ["Arcade"]
   },
   {
     "core_file": "fb_alpha_2012_libretro.dll",
-    "platforms": [
-      "Arcade"
-    ]
+    "platforms": ["Arcade"]
   },
   {
     "core_file": "fb_alpha_2012_cps_1_libretro.dll",
-    "platforms": [
-      "CPS-1",
-      "CPS1"
-    ]
+    "platforms": ["CPS-1","CPS1"]
   },
   {
     "core_file": "fb_alpha_2012_cps_2_libretro.dll",
-    "platforms": [
-      "CPS-2",
-      "CPS2"
-    ]
+    "platforms": ["CPS-2","CPS2"]
   },
   {
     "core_file": "fb_alpha_2012_cps_3_libretro.dll",
-    "platforms": [
-      "CPS-3",
-      "CPS3"
-    ]
+    "platforms": ["CPS-3","CPS3"]
   },
   {
     "core_file": "fb_alpha_2012_neo_geo_libretro.dll",
-    "platforms": [
-      "Neo Geo",
-      "NeoGeo"
-    ]
+    "platforms": ["Neo Geo","NeoGeo"]
   },
   {
     "core_file": "fbneo_libretro.dll",
-    "platforms": [
-      "Arcade"
-    ]
+    "platforms": ["Arcade"]
   },
   {
     "core_file": "fceumm_libretro.dll",
-    "platforms": [
-      "Nintendo Entertainment System",
-      "Nintendo NES",
-      "Famicom"
-    ]
+    "platforms": ["Nintendo Entertainment System","Nintendo NES","Famicom"]
   },
   {
     "core_file": "ffmpeg_libretro.dll",
-    "platforms": [
-      "Media player"
-    ]
+    "platforms": ["Media player"]
   },
   {
     "core_file": "fixgb_libretro.dll",
-    "platforms": [
-      "Game Boy",
-      "Game Boy Color"
-    ]
+    "platforms": ["Game Boy","Game Boy Color"]
   },
   {
     "core_file": "fixnes_libretro.dll",
-    "platforms": [
-      "Nintendo Entertainment System",
-      "Nintendo NES",
-      "Famicom"
-    ]
+    "platforms": ["Nintendo Entertainment System","Nintendo NES","Famicom"]
   },
   {
     "core_file": "flycast_libretro.dll",
-    "platforms": [
-      "Sega Dreamcast",
-      "dreamcast",
-      "NAOMI",
-      "Sega Naomi"
-    ]
+    "platforms": ["Sega Dreamcast","dreamcast","NAOMI","Sega Naomi"]
   },
   {
     "core_file": "fmsx_libretro.dll",
-    "platforms": [
-      "MSX",
-      "MSX2",
-      "MSX2+"
-    ]
+    "platforms": ["MSX","MSX2","MSX2+"]
   },
   {
     "core_file": "freechaf_libretro.dll",
-    "platforms": [
-      "Fairchild ChannelF"
-    ]
+    "platforms": ["Fairchild ChannelF"]
   },
   {
     "core_file": "freeintv_libretro.dll",
-    "platforms": [
-      "Mattel Intellivision"
-    ]
+    "platforms": ["Mattel Intellivision"]
   },
   {
     "core_file": "freej2me_libretro.dll",
-    "platforms": [
-      "J2ME"
-    ]
+    "platforms": ["J2ME"]
   },
   {
     "core_file": "frodo_libretro.dll",
-    "platforms": [
-      "Commodore 64"
-    ]
+    "platforms": ["Commodore 64"]
   },
   {
     "core_file": "fs_uae_libretro.dll",
-    "platforms": [
-      "Commodore Amiga"
-    ]
+    "platforms": ["Commodore Amiga"]
   },
   {
     "core_file": "fuse_libretro.dll",
-    "platforms": [
-      "Sinclair ZX Spectrum"
-    ]
+    "platforms": ["Sinclair ZX Spectrum"]
   },
   {
     "core_file": "gam4980_libretro.dll",
-    "platforms": [
-      "BBK 4980",
-      "4988",
-      "5980 electronic dictionary"
-    ]
+    "platforms": ["BBK 4980","4988","5980 electronic dictionary"]
   },
   {
     "core_file": "gambatte_libretro.dll",
-    "platforms": [
-      "Game Boy",
-      "Game Boy Color"
-    ]
+    "platforms": ["Game Boy","Game Boy Color"]
   },
   {
     "core_file": "game_music_emu_libretro.dll",
-    "platforms": [
-      "Music player"
-    ]
+    "platforms": ["Music player"]
   },
   {
     "core_file": "gearboy_libretro.dll",
-    "platforms": [
-      "Game Boy",
-      "Game Boy Color"
-    ]
+    "platforms": ["Game Boy","Game Boy Color"]
   },
   {
     "core_file": "gearcoleco_libretro.dll",
-    "platforms": [
-      "Coleco ColecoVision"
-    ]
+    "platforms": ["Coleco ColecoVision"]
   },
   {
     "core_file": "geargrafx_libretro.dll",
-    "platforms": [
-      "PC Engine",
-      "SuperGrafx"
-    ]
+    "platforms": ["PC Engine","SuperGrafx"]
   },
   {
     "core_file": "gearlynx_libretro.dll",
-    "platforms": [
-      "Atari Lynx"
-    ]
+    "platforms": ["Atari Lynx"]
   },
   {
     "core_file": "gearsystem_libretro.dll",
-    "platforms": [
-      "Sega Master System",
-      "Sega Game Gear",
-      "Sega SG-1000"
-    ]
+    "platforms": ["Sega Master System","Sega Game Gear","Sega SG-1000"]
   },
   {
     "core_file": "genesis_plus_gx_libretro.dll",
-    "platforms": [
-      "Sega Master System",
-      "Sega Game Gear",
-      "Sega Mega Drive",
-      "Sega Genesis",
-      "Sega CD"
-    ]
+    "platforms": ["Sega Master System","Sega Game Gear","Sega Mega Drive","Sega Genesis","Sega CD"]
   },
   {
     "core_file": "geolith_libretro.dll",
-    "platforms": [
-      "SNK Neo Geo AES",
-      "SNK Neo Geo MVS"
-    ]
+    "platforms": ["SNK Neo Geo AES","SNK Neo Geo MVS"]
   },
   {
     "core_file": "gpsp_libretro.dll",
-    "platforms": [
-      "Game Boy Advance"
-    ]
+    "platforms": ["Game Boy Advance"]
   },
   {
     "core_file": "gong_libretro.dll",
-    "platforms": [
-      "Game"
-    ]
+    "platforms": ["Game"]
   },
   {
     "core_file": "gw_libretro.dll",
-    "platforms": [
-      "Handheld Electronic"
-    ]
+    "platforms": ["Handheld Electronic"]
   },
   {
     "core_file": "handy_libretro.dll",
-    "platforms": [
-      "Atari Lynx"
-    ]
+    "platforms": ["Atari Lynx"]
   },
   {
     "core_file": "hatari_libretro.dll",
-    "platforms": [
-      "Atari ST",
-      "Atari STE",
-      "Atari TT",
-      "Atari Falcon"
-    ]
+    "platforms": ["Atari ST","Atari STE","Atari TT","Atari Falcon"]
   },
   {
     "core_file": "hbmame_libretro.dll",
-    "platforms": [
-      "Arcade"
-    ]
+    "platforms": ["Arcade"]
   },
   {
     "core_file": "higan_accuracy_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC",
-      "Game Boy",
-      "Game Boy Color",
-      "Nintendo Game Boy",
-      "Nintendo Game Boy Color"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC","Game Boy","Game Boy Color","Nintendo Game Boy","Nintendo Game Boy Color"]
   },
   {
     "core_file": "holani_libretro.dll",
-    "platforms": [
-      "Atari Lynx"
-    ]
+    "platforms": ["Atari Lynx"]
   },
   {
     "core_file": "imageviewer_libretro.dll",
-    "platforms": [
-      "Imageviewer"
-    ]
+    "platforms": ["Imageviewer"]
   },
   {
     "core_file": "ishiiruka_libretro.dll",
-    "platforms": [
-      "Nintendo GameCube",
-      "Nintendo Wii",
-      "GameCube",
-      "Wii"
-    ]
+    "platforms": ["Nintendo GameCube","Nintendo Wii","GameCube","Wii"]
   },
   {
     "core_file": "jaxe_libretro.dll",
-    "platforms": [
-      "CHIP-8",
-      "S-CHIP",
-      "XO-CHIP"
-    ]
-  },
+    "platforms": ["CHIP-8","S-CHIP","XO-CHIP"]  },
   {
     "core_file": "jollycv_libretro.dll",
-    "platforms": [
-      "ColecoVision",
-      "CreatiVision",
-      "My Vision"
-    ]
+    "platforms": ["ColecoVision","CreatiVision","My Vision"]
   },
   {
     "core_file": "jump_n_bump_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "kronos_libretro.dll",
-    "platforms": [
-      "Sega Saturn",
-      "Sega ST-V"
-    ]
+    "platforms": ["Sega Saturn","Sega ST-V"]
   },
   {
     "core_file": "lowres_nx_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "lutro_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "m2000_libretro.dll",
-    "platforms": [
-      "Philips P2000T"
-    ]
+    "platforms": ["Philips P2000T"]
   },
   {
     "core_file": "mame_current_libretro.dll",
-    "platforms": [
-      "Arcade"
-    ]
+    "platforms": ["Arcade"]
   },
   {
     "core_file": "mame_2000_libretro.dll",
-    "platforms": [
-      "Arcade"
-    ]
+    "platforms": ["Arcade"]
   },
   {
     "core_file": "mame_2003_libretro.dll",
-    "platforms": [
-      "Arcade"
-    ]
+    "platforms": ["Arcade"]
   },
   {
     "core_file": "mame_2003_midway_libretro.dll",
-    "platforms": [
-      "Arcade"
-    ]
+    "platforms": ["Arcade"]
   },
   {
     "core_file": "mame2003_plus_libretro.dll",
-    "platforms": [
-      "Arcade"
-    ]
+    "platforms": ["Arcade"]
   },
   {
     "core_file": "mame_2009_libretro.dll",
-    "platforms": [
-      "Arcade"
-    ]
+    "platforms": ["Arcade"]
   },
   {
     "core_file": "mame_2010_libretro.dll",
-    "platforms": [
-      "Arcade"
-    ]
+    "platforms": ["Arcade"]
   },
   {
     "core_file": "mame_2015_libretro.dll",
-    "platforms": [
-      "Arcade"
-    ]
+    "platforms": ["Arcade"]
   },
   {
     "core_file": "mame_2016_libretro.dll",
-    "platforms": [
-      "Arcade"
-    ]
+    "platforms": ["Arcade"]
   },
   {
     "core_file": "melonds_2021_libretro.dll",
-    "platforms": [
-      "Nintendo DS"
-    ]
+    "platforms": ["Nintendo DS"]
   },
   {
     "core_file": "melonds_ds_libretro.dll",
-    "platforms": [
-      "Nintendo DS",
-      "Nintendo DSi"
-    ]
+    "platforms": ["Nintendo DS","Nintendo DSi"]
   },
   {
     "core_file": "mesen_libretro.dll",
-    "platforms": [
-      "Nintendo NES",
-      "Nintendo Entertainment System",
-      "Famicom"
-    ]
+    "platforms": ["Nintendo NES","Nintendo Entertainment System","Famicom"]
   },
   {
     "core_file": "mesen_s_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC",
-      "Game Boy",
-      "Game Boy Color",
-      "Nintendo Game Boy",
-      "Nintendo Game Boy Color"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC","Game Boy","Game Boy Color","Nintendo Game Boy","Nintendo Game Boy Color"]
   },
   {
     "core_file": "meteor_libretro.dll",
-    "platforms": [
-      "Game Boy Advance"
-    ]
+    "platforms": ["Game Boy Advance"]
   },
   {
     "core_file": "mgba_libretro.dll",
-    "platforms": [
-      "Game Boy Advance"
-    ]
+    "platforms": ["Game Boy Advance"]
   },
   {
     "core_file": "microw8_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "minivmac_libretro.dll",
-    "platforms": [
-      "Mac II"
-    ]
+    "platforms": ["Mac II"]
   },
   {
     "core_file": "mkxp_z_libretro.dll",
-    "platforms": [
-      "RPG Maker XP",
-      "RPG Maker VX",
-      "RPG Maker VX Ace"
-    ]
+    "platforms": ["RPG Maker XP","RPG Maker VX","RPG Maker VX Ace"]
   },
   {
     "core_file": "mpv_libretro.dll",
-    "platforms": [
-      "Media player"
-    ]
+    "platforms": ["Media player"]
   },
   {
     "core_file": "mr_boom_libretro.dll",
-    "platforms": [
-      "Game"
-    ]
+    "platforms": ["Game"]
   },
   {
     "core_file": "mu_libretro.dll",
-    "platforms": [
-      "Palm OS"
-    ]
+    "platforms": ["Palm OS"]
   },
   {
     "core_file": "mupen64plus_next_libretro.dll",
-    "platforms": [
-      "Nintendo 64"
-    ]
+    "platforms": ["Nintendo 64"]
   },
   {
     "core_file": "neko_project_ii_libretro.dll",
-    "platforms": [
-      "NEC PC-98"
-    ]
+    "platforms": ["NEC PC-98"]
   },
   {
     "core_file": "neko_project_ii_kai_libretro.dll",
-    "platforms": [
-      "NEC PC-98"
-    ]
+    "platforms": ["NEC PC-98"]
   },
   {
     "core_file": "neocd_libretro.dll",
-    "platforms": [
-      "Neo Geo CD"
-    ]
+    "platforms": ["Neo Geo CD"]
   },
   {
     "core_file": "nestopia_libretro.dll",
-    "platforms": [
-      "Nintendo NES",
-      "Nintendo Entertainment System",
-      "Famicom"
-    ]
+    "platforms": ["Nintendo NES","Nintendo Entertainment System","Famicom"]
   },
   {
     "core_file": "nside_balanced_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC",
-      "Game Boy",
-      "Game Boy Color",
-      "Nintendo Game Boy",
-      "Nintendo Game Boy Color"
-    ]
-  },
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC","Game Boy","Game Boy Color","Nintendo Game Boy","Nintendo Game Boy Color"]  },
   {
     "core_file": "numero_libretro.dll",
-    "platforms": [
-      "TI-83"
-    ]
+    "platforms": ["TI-83"]
   },
   {
     "core_file": "nxengine_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "o2em_libretro.dll",
-    "platforms": [
-      "Magnavox Odyssey2",
-      "Philips Videopac+"
-    ]
+    "platforms": ["Magnavox Odyssey2","Philips Videopac+"]
   },
   {
     "core_file": "oberon_libretro.dll",
-    "platforms": [
-      "Oberon RISC machine"
-    ]
+    "platforms": ["Oberon RISC machine"]
   },
   {
     "core_file": "openlara_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "opentyrian_libretro.dll",
-    "platforms": [
-      "Game"
-    ]
+    "platforms": ["Game"]
   },
   {
     "core_file": "opera_libretro.dll",
-    "platforms": [
-      "3DO"
-    ]
+    "platforms": ["3DO"]
   },
   {
     "core_file": "parallel_n64_libretro.dll",
-    "platforms": [
-      "Nintendo 64"
-    ]
+    "platforms": ["Nintendo 64"]
   },
   {
     "core_file": "pascalpong_libretro.dll",
-    "platforms": [
-      "Game"
-    ]
+    "platforms": ["Game"]
   },
   {
     "core_file": "pcem_libretro.dll",
-    "platforms": [
-      "IBM PC"
-    ]
+    "platforms": ["IBM PC"]
   },
   {
     "core_file": "lrps2_libretro.dll",
-    "platforms": [
-      "Sony PlayStation 2"
-    ]
+    "platforms": ["Sony PlayStation 2"]
   },
   {
     "core_file": "pcsx_rearmed_libretro.dll",
-    "platforms": [
-      "Sony PlayStation"
-    ]
+    "platforms": ["Sony PlayStation"]
   },
   {
     "core_file": "pd777_libretro.dll",
-    "platforms": [
-      "Epoch Cassette Vision"
-    ]
+    "platforms": ["Epoch Cassette Vision"]
   },
   {
     "core_file": "picodrive_libretro.dll",
-    "platforms": [
-      "Sega Master System/Mark III",
-      "Sega Master System",
-      "Sega Game Gear",
-      "Sega Mega Drive/Genesis",
-      "Sega Mega Drive",
-      "Sega Genesis",
-      "Sega CD",
-      "Sega 32X"
-    ]
+    "platforms": ["Sega Master System/Mark III","Sega Master System","Sega Game Gear","Sega Mega Drive/Genesis","Sega Mega Drive","Sega Genesis","Sega CD","Sega 32X"]
   },
   {
     "core_file": "play_libretro.dll",
-    "platforms": [
-      "Sony PlayStation 2"
-    ]
+    "platforms": ["Sony PlayStation 2"]
   },
   {
     "core_file": "pocket_cdg_libretro.dll",
-    "platforms": [
-      "Karaoke player"
-    ]
+    "platforms": ["Karaoke player"]
   },
   {
     "core_file": "pokemini_libretro.dll",
-    "platforms": [
-      "Nintendo Pokemon Mini"
-    ]
+    "platforms": ["Nintendo Pokemon Mini"]
   },
   {
     "core_file": "potator_libretro.dll",
-    "platforms": [
-      "Watara Supervision"
-    ]
+    "platforms": ["Watara Supervision"]
   },
   {
     "core_file": "ppsspp_libretro.dll",
-    "platforms": [
-      "PlayStation Portable"
-    ]
+    "platforms": ["PlayStation Portable"]
   },
   {
     "core_file": "prboom_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "prosystem_libretro.dll",
-    "platforms": [
-      "Atari 7800"
-    ]
+    "platforms": ["Atari 7800"]
   },
   {
     "core_file": "puae_libretro.dll",
-    "platforms": [
-      "Commodore Amiga"
-    ]
+    "platforms": ["Commodore Amiga"]
   },
   {
     "core_file": "puae_2021_libretro.dll",
-    "platforms": [
-      "Commodore Amiga"
-    ]
+    "platforms": ["Commodore Amiga"]
   },
   {
     "core_file": "puzzlescript_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "px68k_libretro.dll",
-    "platforms": [
-      "Sharp X68000"
-    ]
+    "platforms": ["Sharp X68000"]
   },
   {
     "core_file": "quasi88_libretro.dll",
-    "platforms": [
-      "NEC PC-8000",
-      "PC-8800 series"
-    ]
+    "platforms": ["NEC PC-8000","PC-8800 series"]
   },
   {
     "core_file": "quicknes_libretro.dll",
-    "platforms": [
-      "Nintendo NES",
-      "Nintendo Entertainment System",
-      "Famicom"
-    ]
+    "platforms": ["Nintendo NES","Nintendo Entertainment System","Famicom"]
   },
   {
     "core_file": "race_libretro.dll",
-    "platforms": [
-      "Neo Geo Pocket",
-      "Neo Geo Pocket Color"
-    ]
+    "platforms": ["Neo Geo Pocket","Neo Geo Pocket Color"]
   },
   {
     "core_file": "redbook_libretro.dll",
-    "platforms": [
-      "Music player"
-    ]
+    "platforms": ["Music player"]
   },
   {
     "core_file": "reminiscence_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "retro8_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["pico-8","pico8"]
   },
   {
     "core_file": "rustation_libretro.dll",
-    "platforms": [
-      "Sony PlayStation"
-    ]
+    "platforms": ["Sony PlayStation"]
   },
   {
     "core_file": "rvvm_libretro.dll",
-    "platforms": [
-      "RISC-V Virtual Machine"
-    ]
+    "platforms": ["RISC-V Virtual Machine"]
   },
   {
     "core_file": "sameboy_libretro.dll",
-    "platforms": [
-      "Game Boy",
-      "Game Boy Color",
-      "Nintendo Game Boy",
-      "Nintendo Game Boy Color"
-    ]
+    "platforms": ["Game Boy","Game Boy Color","Nintendo Game Boy","Nintendo Game Boy Color"]
   },
   {
     "core_file": "sameduck_libretro.dll",
-    "platforms": [
-      "Mega Duck (Cougar Boy)"
-    ]
+    "platforms": ["Mega Duck (Cougar Boy)"]
   },
   {
     "core_file": "same_cdi_libretro.dll",
-    "platforms": [
-      "Philips CDi"
-    ]
+    "platforms": ["Philips CDi"]
   },
   {
     "core_file": "scummvm_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "simcoupe_libretro.dll",
-    "platforms": [
-      "SAM Coupe"
-    ]
+    "platforms": ["SAM Coupe"]
   },
   {
     "core_file": "sms_plus_gx_libretro.dll",
-    "platforms": [
-      "Sega Master System",
-      "Sega Game Gear"
-    ]
+    "platforms": ["Sega Master System","Sega Game Gear"]
   },
   {
     "core_file": "snes9x_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC"]
   },
   {
     "core_file": "snes9x2002_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC"]
   },
   {
     "core_file": "snes9x2005_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC"]
   },
   {
     "core_file": "snes9x2005_plus_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC"]
   },
   {
     "core_file": "snes9x2010_libretro.dll",
-    "platforms": [
-      "Nintendo SNES",
-      "Super Nintendo Entertainment System",
-      "SFC"
-    ]
+    "platforms": ["Nintendo SNES","Super Nintendo Entertainment System","SFC"]
   },
   {
     "core_file": "squirreljme_libretro.dll",
-    "platforms": [
-      "Java ME"
-    ]
+    "platforms": ["Java ME"]
   },
   {
     "core_file": "stella_libretro.dll",
-    "platforms": [
-      "Atari 2600"
-    ]
+    "platforms": ["Atari 2600"]
   },
   {
     "core_file": "stella_2014_libretro.dll",
-    "platforms": [
-      "Atari 2600"
-    ]
+    "platforms": ["Atari 2600"]
   },
   {
     "core_file": "super_bros_war_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "swanstation_libretro.dll",
-    "platforms": [
-      "Sony PlayStation"
-    ]
+    "platforms": ["Sony PlayStation"]
   },
   {
     "core_file": "tempgba_libretro.dll",
-    "platforms": [
-      "Game Boy Advance"
-    ]
+    "platforms": ["Game Boy Advance"]
   },
   {
     "core_file": "tgb_dual_libretro.dll",
-    "platforms": [
-      "Game Boy",
-      "Game Boy Color"
-    ]
+    "platforms": ["Game Boy","Game Boy Color"]
   },
   {
     "core_file": "theodore_libretro.dll",
-    "platforms": [
-      "Thomson MO",
-      "Thomson TO"
-    ]
+    "platforms": ["Thomson MO","Thomson TO"]
   },
   {
     "core_file": "tic_80_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "the_powder_toy_libretro.dll",
-    "platforms": [
-      "Game"
-    ]
+    "platforms": ["Game"]
   },
   {
     "core_file": "tyrquake_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "uae4arm_libretro.dll",
-    "platforms": [
-      "Commodore Amiga"
-    ]
+    "platforms": ["Commodore Amiga"]
   },
   {
     "core_file": "ume_2015_libretro.dll",
-    "platforms": [
-      "Arcade"
-    ]
+    "platforms": ["Arcade"]
   },
   {
     "core_file": "uzem_libretro.dll",
-    "platforms": [
-      "Uzebox"
-    ]
+    "platforms": ["Uzebox"]
   },
   {
     "core_file": "vaporspec_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "vbam_libretro.dll",
-    "platforms": [
-      "Game Boy Advance"
-    ]
+    "platforms": ["Game Boy Advance"]
   },
   {
     "core_file": "vba_next_libretro.dll",
-    "platforms": [
-      "Game Boy Advance"
-    ]
+    "platforms": ["Game Boy Advance"]
   },
   {
     "core_file": "vecx_libretro.dll",
-    "platforms": [
-      "GCE",
-      "MB Vectrex"
-    ]
+    "platforms": ["GCE","MB Vectrex"]
   },
   {
     "core_file": "vemulator_libretro.dll",
-    "platforms": [
-      "SEGA Visual Memory Unit"
-    ]
+    "platforms": ["SEGA Visual Memory Unit"]
   },
   {
     "core_file": "vice_x64_libretro.dll",
-    "platforms": [
-      "Commodore 64"
-    ]
+    "platforms": ["Commodore 64"]
   },
   {
     "core_file": "vice_x64dtv_libretro.dll",
-    "platforms": [
-      "Commodore C64DTV"
-    ]
+    "platforms": ["Commodore C64DTV"]
   },
   {
     "core_file": "vice_x64sc_libretro.dll",
-    "platforms": [
-      "Commodore 64"
-    ]
+    "platforms": ["Commodore 64"]
   },
   {
     "core_file": "vice_x128_libretro.dll",
-    "platforms": [
-      "Commodore 128"
-    ]
+    "platforms": ["Commodore 128"]
   },
   {
     "core_file": "vice_xcbm2_libretro.dll",
-    "platforms": [
-      "Commodore CBM-II 6x0",
-      "Commodore CBM-II 7x0"
-    ]
+    "platforms": ["Commodore CBM-II 6x0","Commodore CBM-II 7x0"]
   },
   {
     "core_file": "vice_xcbm5x0_libretro.dll",
-    "platforms": [
-      "Commodore CBM-II 5x0"
-    ]
+    "platforms": ["Commodore CBM-II 5x0"]
   },
   {
     "core_file": "vice_xpet_libretro.dll",
-    "platforms": [
-      "Commodore PET"
-    ]
+    "platforms": ["Commodore PET"]
   },
   {
     "core_file": "vice_xplus4_libretro.dll",
-    "platforms": [
-      "Commodore Plus",
-      "4"
-    ]
+    "platforms": ["Commodore Plus"]
   },
   {
     "core_file": "vice_xscpu64_libretro.dll",
-    "platforms": [
-      "Commodore 64 SuperCPU"
-    ]
+    "platforms": ["Commodore 64 SuperCPU"]
   },
   {
     "core_file": "vice_xvic_libretro.dll",
-    "platforms": [
-      "Commodore VIC-20"
-    ]
+    "platforms": ["Commodore VIC-20"]
   },
   {
     "core_file": "vircon32_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "virtual_jaguar_libretro.dll",
-    "platforms": [
-      "Atari Jaguar"
-    ]
+    "platforms": ["Atari Jaguar"]
   },
   {
     "core_file": "virtualxt_libretro.dll",
-    "platforms": [
-      "DOS"
-    ]
+    "platforms": ["DOS"]
   },
   {
     "core_file": "vitaquake_2_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "vitaquake_2_rogue_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "vitaquake_2_xatrix_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "vitaquake_2_zaero_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "vitaquake_3_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "vitavoyager_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "wasm_4_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "x_millennium_libretro.dll",
-    "platforms": [
-      "Sharp X1"
-    ]
+    "platforms": ["Sharp X1"]
   },
   {
     "core_file": "xrick_libretro.dll",
-    "platforms": [
-      "Game engine"
-    ]
+    "platforms": ["Game engine"]
   },
   {
     "core_file": "yabasanshiro_libretro.dll",
-    "platforms": [
-      "Sega Saturn"
-    ]
+    "platforms": ["Sega Saturn"]
   },
   {
     "core_file": "yabause_libretro.dll",
-    "platforms": [
-      "Sega Saturn"
-    ]
+    "platforms": ["Sega Saturn"]
   }
 ]

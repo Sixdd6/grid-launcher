@@ -350,6 +350,44 @@ def _unique_casefold_paths(paths: list[Path]) -> list[Path]:
     return unique
 
 
+def _compact_match_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.strip().casefold())
+
+
+def _state_candidate_base_variants(candidate: Path) -> set[str]:
+    variants: set[str] = set()
+    for value in (candidate.name, candidate.stem):
+        normalized = value.strip().casefold()
+        if not normalized:
+            continue
+        variants.add(normalized)
+        stripped = re.sub(r"(?:\.(?:savestate|state|st|ss))(?:\.auto|auto|[0-9]+)?$", "", normalized)
+        if stripped:
+            variants.add(stripped)
+    return {variant for variant in variants if variant}
+
+
+def _state_candidate_matches_game_tokens(candidate: Path, tokens: set[str]) -> bool:
+    if not tokens:
+        return True
+
+    variants = _state_candidate_base_variants(candidate)
+    compact_variants = {_compact_match_text(variant) for variant in variants if variant}
+
+    for token in tokens:
+        if not isinstance(token, str):
+            continue
+        normalized_token = token.strip().casefold()
+        if not normalized_token:
+            continue
+        if normalized_token in variants:
+            return True
+        compact_token = _compact_match_text(normalized_token)
+        if compact_token and compact_token in compact_variants:
+            return True
+    return False
+
+
 def cloud_sync_directory_candidates_for_game(
     game: dict[str, str],
     directories: list[Path],
@@ -403,6 +441,88 @@ def cloud_sync_directory_candidates_for_game(
     return _unique_casefold_paths(candidates)
 
 
+def cemu_save_directories_for_game(
+    game: dict[str, str],
+    directories: list[Path],
+    cemu_title_id_tokens: Callable[[dict[str, str]], set[str]],
+    latest_file_mtime_under_path: Callable[..., float],
+    *,
+    ignore_basenames: set[str] | None = None,
+    ignore_extensions: set[str] | None = None,
+) -> list[Path]:
+    tokens = {
+        re.sub(r"[^A-Z0-9]+", "", token.strip().upper())
+        for token in cemu_title_id_tokens(game)
+        if isinstance(token, str) and token.strip()
+    }
+    full_tokens = {token for token in tokens if len(token) >= 16}
+    low_tokens = {token for token in tokens if len(token) == 8 and not token.startswith("0005")}
+    match_tokens = full_tokens or low_tokens or tokens
+    blocked_basenames = {
+        name.casefold()
+        for name in (ignore_basenames or set())
+        if isinstance(name, str) and name.strip()
+    }
+    blocked_extensions = {
+        extension.casefold()
+        for extension in (ignore_extensions or set())
+        if isinstance(extension, str) and extension.strip()
+    }
+
+    matched_candidates: list[Path] = []
+    fallback_candidates: list[Path] = []
+
+    for directory in directories:
+        if not directory.exists() or not directory.is_dir():
+            continue
+
+        for title_high in directory.iterdir():
+            if not title_high.is_dir():
+                continue
+            high_token = re.sub(r"[^A-Z0-9]+", "", title_high.name.upper())
+
+            for title_low in title_high.iterdir():
+                if not title_low.is_dir():
+                    continue
+                low_token = re.sub(r"[^A-Z0-9]+", "", title_low.name.upper())
+                combined_token = f"{high_token}{low_token}"
+                matches_title_id = not match_tokens or any(
+                    token and (token == high_token or token == low_token or token in combined_token)
+                    for token in match_tokens
+                )
+
+                user_root = title_low / "user"
+                if not user_root.exists() or not user_root.is_dir():
+                    continue
+
+                child_directories = [child for child in user_root.iterdir() if child.is_dir()]
+                candidate_directories = child_directories or [user_root]
+
+                for candidate in candidate_directories:
+                    latest_mtime = latest_file_mtime_under_path(
+                        candidate,
+                        ignore_basenames=blocked_basenames,
+                        ignore_extensions=blocked_extensions,
+                    )
+                    if latest_mtime <= 0:
+                        continue
+
+                    fallback_candidates.append(candidate)
+                    if matches_title_id:
+                        matched_candidates.append(candidate)
+
+    candidates = matched_candidates or fallback_candidates
+    candidates.sort(
+        key=lambda item: latest_file_mtime_under_path(
+            item,
+            ignore_basenames=blocked_basenames,
+            ignore_extensions=blocked_extensions,
+        ),
+        reverse=True,
+    )
+    return _unique_casefold_paths(candidates)
+
+
 def cloud_sync_candidates_for_game(
     game: dict[str, str],
     directories: list[Path],
@@ -431,7 +551,13 @@ def cloud_sync_candidates_for_game(
     state_candidates: list[Path] = []
 
     for directory in directories:
-        for candidate in directory.rglob("*"):
+        if not directory.exists():
+            continue
+
+        explicit_file_root = directory.is_file()
+        iterator = [directory] if explicit_file_root else directory.rglob("*")
+
+        for candidate in iterator:
             if not candidate.is_file():
                 continue
             if blocked_basenames and candidate.name.casefold() in blocked_basenames:
@@ -439,14 +565,21 @@ def cloud_sync_candidates_for_game(
             if blocked_extensions and candidate.suffix.casefold() in blocked_extensions:
                 continue
 
-            candidate_name = candidate.name.casefold()
-            candidate_stem_compact = re.sub(r"[^a-z0-9]+", "", candidate.stem.casefold())
-            if save_type == "save" and tokens and not any(
-                token in candidate_name or (token in candidate_stem_compact and token) for token in tokens
-            ):
-                continue
+            if save_type == "state":
+                if not is_state_file_candidate(candidate):
+                    continue
+                if not explicit_file_root and not _state_candidate_matches_game_tokens(candidate, tokens):
+                    continue
+            else:
+                candidate_name = candidate.name.casefold()
+                candidate_stem_compact = re.sub(r"[^a-z0-9]+", "", candidate.stem.casefold())
+                if not explicit_file_root and tokens and not any(
+                    token in candidate_name or (token in candidate_stem_compact and token) for token in tokens
+                ):
+                    continue
+
             candidates.append(candidate)
-            if save_type == "state" and is_state_file_candidate(candidate):
+            if save_type == "state":
                 state_candidates.append(candidate)
 
     if save_type == "state" and state_candidates:

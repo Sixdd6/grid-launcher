@@ -8,8 +8,57 @@ import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
+
+
+DEFAULT_CLOUD_SYNC_IGNORE_BASENAMES = {
+    ".ds_store",
+    "desktop.ini",
+    "ehthumbs.db",
+    "thumbs.db",
+}
+SUPPORTED_IMAGE_EXTENSIONS = (
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".webp",
+    ".gif",
+    ".bmp",
+)
+
+
+def _normalized_blocked_basenames(values: set[str] | None = None) -> set[str]:
+    blocked = set(DEFAULT_CLOUD_SYNC_IGNORE_BASENAMES)
+    blocked.update(
+        name.casefold()
+        for name in (values or set())
+        if isinstance(name, str) and name.strip()
+    )
+    return blocked
+
+
+def _normalized_blocked_extensions(values: set[str] | None = None) -> set[str]:
+    return {
+        extension.casefold()
+        for extension in (values or set())
+        if isinstance(extension, str) and extension.strip()
+    }
+
+
+def supported_image_sidecar_path(
+    file_path: Path,
+    *,
+    blocked_basenames: set[str] | None = None,
+) -> Path | None:
+    blocked_names = _normalized_blocked_basenames(blocked_basenames)
+    for extension in SUPPORTED_IMAGE_EXTENSIONS:
+        candidate = file_path.with_suffix(extension)
+        if candidate.name.casefold() in blocked_names:
+            continue
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
 
 
 def normalize_candidate_url(value: str) -> str:
@@ -40,8 +89,8 @@ def extract_zip_archive_bytes_to_directory(
     skip_extensions: set[str] | None = None,
 ) -> int:
     temp_zip_path: Path | None = None
-    blocked_basenames = {name.casefold() for name in (skip_basenames or set()) if isinstance(name, str) and name.strip()}
-    blocked_extensions = {extension.casefold() for extension in (skip_extensions or set()) if isinstance(extension, str) and extension.strip()}
+    blocked_basenames = _normalized_blocked_basenames(skip_basenames)
+    blocked_extensions = _normalized_blocked_extensions(skip_extensions)
     try:
         fd, temp_path = tempfile.mkstemp(prefix="rom-mate-save-", suffix=".zip")
         os.close(fd)
@@ -84,13 +133,7 @@ def extract_zip_archive_bytes_to_directory(
                 pass
 
 
-def zip_directory_for_upload(
-    directory: Path,
-    safe_title: str,
-    *,
-    ignore_basenames: set[str] | None = None,
-    ignore_extensions: set[str] | None = None,
-) -> Path:
+def _temporary_archive_path(safe_title: str) -> Path:
     title = safe_title.strip() or "game"
     timestamp_iso = datetime.now().astimezone().isoformat(timespec="seconds").replace(":", "-")
     archive_name = f"{title}-{timestamp_iso}.zip"
@@ -98,17 +141,120 @@ def zip_directory_for_upload(
     if archive_path.exists():
         suffix = int(time.time() * 1000)
         archive_path = Path(tempfile.gettempdir()) / f"{title}-{timestamp_iso}-{suffix}.zip"
+    return archive_path
 
-    blocked_basenames = {
-        name.casefold()
-        for name in (ignore_basenames or set())
-        if isinstance(name, str) and name.strip()
-    }
-    blocked_extensions = {
-        extension.casefold()
-        for extension in (ignore_extensions or set())
-        if isinstance(extension, str) and extension.strip()
-    }
+
+def _unique_existing_files(files: list[Path]) -> list[Path]:
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for file_path in files:
+        if not isinstance(file_path, Path) or not file_path.exists() or not file_path.is_file():
+            continue
+        key_value = str(file_path).casefold()
+        if key_value in seen:
+            continue
+        seen.add(key_value)
+        unique.append(file_path)
+    return unique
+
+
+def zip_selected_files_for_upload(
+    files: list[Path],
+    safe_title: str,
+    *,
+    ignore_basenames: set[str] | None = None,
+    ignore_extensions: set[str] | None = None,
+) -> Path:
+    selected_files = _unique_existing_files(files)
+    if not selected_files:
+        raise ValueError("No files were provided to archive for upload.")
+
+    archive_path = _temporary_archive_path(safe_title)
+    blocked_basenames = _normalized_blocked_basenames(ignore_basenames)
+    blocked_extensions = _normalized_blocked_extensions(ignore_extensions)
+
+    common_root = selected_files[0].parent
+    try:
+        common_root = Path(os.path.commonpath([str(path.parent) for path in selected_files]))
+    except ValueError:
+        common_root = selected_files[0].parent
+
+    try:
+        with zipfile.ZipFile(archive_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for file_path in sorted(selected_files, key=lambda item: str(item).casefold()):
+                if blocked_basenames and file_path.name.casefold() in blocked_basenames:
+                    continue
+                if blocked_extensions and file_path.suffix.casefold() in blocked_extensions:
+                    continue
+                try:
+                    relative_path = file_path.relative_to(common_root)
+                except ValueError:
+                    relative_path = Path(file_path.name)
+                archive.write(file_path, relative_path.as_posix())
+        return archive_path
+    except OSError:
+        if archive_path.exists():
+            try:
+                archive_path.unlink()
+            except OSError:
+                pass
+        raise
+
+
+def _grouped_upload_key(file_path: Path, file_field: str) -> str:
+    if file_field == "stateFile":
+        return file_path.name.strip().casefold()
+    stem = file_path.stem.strip().casefold()
+    return stem or file_path.name.strip().casefold()
+
+
+def grouped_file_upload_jobs(
+    files: list[Path],
+    file_field: str,
+    archive_builder: Callable[[list[Path]], Path],
+) -> tuple[list[tuple[str, dict[str, Path]]], list[Path]]:
+    selected_files = _unique_existing_files(files)
+    if not selected_files:
+        return [], []
+
+    grouped_files: dict[str, list[Path]] = {}
+    ordered_keys: list[str] = []
+    for file_path in selected_files:
+        key_value = _grouped_upload_key(file_path, file_field)
+        if key_value not in grouped_files:
+            grouped_files[key_value] = []
+            ordered_keys.append(key_value)
+        grouped_files[key_value].append(file_path)
+
+    upload_jobs: list[tuple[str, dict[str, Path]]] = []
+    temporary_archives: list[Path] = []
+    for key_value in ordered_keys:
+        group = grouped_files.get(key_value, [])
+        if not group:
+            continue
+        if len(group) == 1:
+            file_path = group[0]
+            upload_jobs.append((file_path.name, {file_field: file_path}))
+            continue
+
+        archive_path = archive_builder(group)
+        temporary_archives.append(archive_path)
+        display_name = group[0].stem or archive_path.stem or group[0].name
+        upload_jobs.append((display_name, {file_field: archive_path}))
+
+    return upload_jobs, temporary_archives
+
+
+def zip_directory_for_upload(
+    directory: Path,
+    safe_title: str,
+    *,
+    ignore_basenames: set[str] | None = None,
+    ignore_extensions: set[str] | None = None,
+) -> Path:
+    archive_path = _temporary_archive_path(safe_title)
+    blocked_basenames = _normalized_blocked_basenames(ignore_basenames)
+    blocked_extensions = _normalized_blocked_extensions(ignore_extensions)
 
     try:
         with zipfile.ZipFile(archive_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -140,16 +286,8 @@ def ppsspp_state_upload_jobs(
     ignore_basenames: set[str] | None = None,
     ignore_extensions: set[str] | None = None,
 ) -> list[tuple[str, dict[str, Path]]]:
-    blocked_basenames = {
-        name.casefold()
-        for name in (ignore_basenames or set())
-        if isinstance(name, str) and name.strip()
-    }
-    blocked_extensions = {
-        extension.casefold()
-        for extension in (ignore_extensions or set())
-        if isinstance(extension, str) and extension.strip()
-    }
+    blocked_basenames = _normalized_blocked_basenames(ignore_basenames)
+    blocked_extensions = _normalized_blocked_extensions(ignore_extensions)
     candidates: list[tuple[Path, Path | None]] = []
 
     for directory in directories:
@@ -165,9 +303,10 @@ def ppsspp_state_upload_jobs(
             normalized_name = re.sub(r"[^A-Z0-9]+", "", state_file.name.upper())
             if id_tokens and not any(token in normalized_name for token in id_tokens):
                 continue
-            screenshot = state_file.with_suffix(".jpg")
-            if not screenshot.exists() or not screenshot.is_file():
-                screenshot = None
+            screenshot = supported_image_sidecar_path(
+                state_file,
+                blocked_basenames=blocked_basenames,
+            )
             candidates.append((state_file, screenshot))
 
     candidates.sort(key=lambda item: item[0].stat().st_mtime if item[0].exists() else 0, reverse=True)

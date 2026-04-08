@@ -7,8 +7,8 @@
     "platform_keywords": [],
     "use_game_title_as_name": false,
     "save_strategy": "single_file",
-    "save_directories": ["saves"],
-    "state_directories": ["states"]
+    "save_directories": ["saves", "savefiles"],
+    "state_directories": ["states", "savestates"]
   },
   {
     "match_tokens": ["duckstation-qt-x64-ReleaseLTCG.exe"],
@@ -28,9 +28,14 @@
     "all_platforms": false,
     "platform_keywords": ["playstation 2", "ps2"],
     "use_game_title_as_name": false,
-    "save_strategy": "folder",
-    "save_directories": ["memcards\\card_a.ps2"],
-    "state_directories": ["sstates"]
+    "save_strategy": "single_file",
+    "save_directories": [
+      "memcards\\Mcd001.ps2",
+      "memcards\\Mcd002.ps2",
+      "memcards",
+      "%USERPROFILE%\\Documents\\PCSX2\\memcards"
+    ],
+    "state_directories": ["sstates", "%USERPROFILE%\\Documents\\PCSX2\\sstates"]
   },
   {
     "match_tokens": ["PPSSPPWindows64.exe"],
@@ -52,7 +57,10 @@
     "platform_keywords": ["playstation 3", "ps3"],
     "use_game_title_as_name": false,
     "save_strategy": "folder",
-    "save_directories": ["dev_hdd0\\home\\00000001\\savedata"],
+    "save_directories": [
+      "portable\\dev_hdd0\\home\\00000001\\savedata",
+      "dev_hdd0\\home\\00000001\\savedata"
+    ],
     "state_directories": []
   },
   {
@@ -62,8 +70,8 @@
     "all_platforms": false,
     "platform_keywords": ["playstation 4", "ps4"],
     "use_game_title_as_name": false,
-    "save_strategy": "single_file",
-    "save_directories": [],
+    "save_strategy": "folder",
+    "save_directories": ["user\\home\\1000\\savedata","%APPDATA%\\shadPS4\\home\\1000\\savedata"],
     "state_directories": []
   },
   {
@@ -74,18 +82,36 @@
     "platform_keywords": ["gamecube", "wii"],
     "use_game_title_as_name": false,
     "save_strategy": "single_file",
-    "save_directories": ["User\\GC\\USA\\Card A","User\\GC\\JAP\\Card A","User\\GC\\EUR\\Card A"],
-    "state_directories": ["User\\StateSaves"]
+    "save_directories": [
+      "User\\GC\\USA\\Card A",
+      "User\\GC\\JPN\\Card A",
+      "User\\GC\\JAP\\Card A",
+      "User\\GC\\EUR\\Card A",
+      "%APPDATA%\\Dolphin Emulator\\GC\\USA\\Card A",
+      "%APPDATA%\\Dolphin Emulator\\GC\\JPN\\Card A",
+      "%APPDATA%\\Dolphin Emulator\\GC\\JAP\\Card A",
+      "%APPDATA%\\Dolphin Emulator\\GC\\EUR\\Card A",
+      "User\\Wii\\title\\00010000",
+      "%APPDATA%\\Dolphin Emulator\\Wii\\title\\00010000"
+    ],
+    "state_directories": [
+      "User\\StateSaves",
+      "%APPDATA%\\Dolphin Emulator\\StateSaves"
+    ]
   },
   {
     "match_tokens": ["cemu.exe"],
     "name": "Cemu (Wii U)",
-    "args": "-f -g \"%rom%\"",
+    "args": "-g \"%rom%\" -f",
     "all_platforms": false,
     "platform_keywords": ["wii u", "wiiu"],
     "use_game_title_as_name": false,
-    "save_strategy": "single_file",
-    "save_directories": [],
+    "save_strategy": "folder",
+    "save_directories": [
+      "portable\\mlc01\\usr\\save",
+      "mlc01\\usr\\save",
+      "%APPDATA%\\Cemu\\mlc01\\usr\\save"
+    ],
     "state_directories": []
   },
   {
@@ -95,9 +121,17 @@
     "all_platforms": false,
     "platform_keywords": ["3ds"],
     "use_game_title_as_name": false,
-    "save_strategy": "single_file",
-    "save_directories": [],
-    "state_directories": []
+    "save_strategy": "folder",
+    "save_directories": [
+      "user\\sdmc\\Nintendo 3DS\\00000000000000000000000000000000\\00000000000000000000000000000000\\title\\00040000",
+      "%APPDATA%\\Azahar\\sdmc\\Nintendo 3DS\\00000000000000000000000000000000\\00000000000000000000000000000000\\title\\00040000",
+      "user\\nand\\00000000000000000000000000000000\\title\\00040010",
+      "%APPDATA%\\Azahar\\nand\\00000000000000000000000000000000\\title\\00040010"
+    ],
+    "state_directories": [
+      "user\\states",
+      "%APPDATA%\\Azahar\\states"
+    ]
   },
   {
     "match_tokens": ["pico8.exe"],
@@ -107,7 +141,12 @@
     "platform_keywords": ["pico 8", "pico8", "pico-8"],
     "use_game_title_as_name": false,
     "save_strategy": "single_file",
-    "save_directories": [],
+    "save_directories": [
+      "cdata",
+      "cstore",
+      "%APPDATA%\\pico-8\\cdata",
+      "%APPDATA%\\pico-8\\cstore"
+    ],
     "state_directories": []
   },
   {
@@ -118,7 +157,12 @@
     "platform_keywords": ["xbox"],
     "use_game_title_as_name": false,
     "save_strategy": "single_file",
-    "save_directories": [],
+    "save_directories": [
+      "xbox_hdd.qcow2",
+      "eeprom.bin",
+      "%APPDATA%\\xemu\\xemu\\xbox_hdd.qcow2",
+      "%APPDATA%\\xemu\\xemu\\eeprom.bin"
+    ],
     "state_directories": []
   },
   {
@@ -128,8 +172,11 @@
     "all_platforms": false,
     "platform_keywords": ["switch", "nintendo switch"],
     "use_game_title_as_name": false,
-    "save_strategy": "single_file",
-    "save_directories": [],
+    "save_strategy": "folder",
+    "save_directories": [
+      "user\\nand\\user\\save\\0000000000000000",
+      "%APPDATA%\\Eden\\nand\\user\\save\\0000000000000000"
+    ],
     "state_directories": []
   },
   {
@@ -140,29 +187,59 @@
     "platform_keywords": ["arcade", "mame"],
     "use_game_title_as_name": false,
     "save_strategy": "single_file",
-    "save_directories": [],
-    "state_directories": []
+    "save_directories": [
+      "nvram",
+      "memcard",
+      "diff"
+    ],
+    "state_directories": [
+      "sta"
+    ]
   },
   {
     "match_tokens": ["fbneo.exe"],
     "name": "FBNeo (Arcade)",
     "args": "\"%rom%\"",
     "all_platforms": false,
-    "platform_keywords": ["arcade", "mame", "final burn", "fbneo"],
+    "platform_keywords": ["final burn", "fbneo"],
     "use_game_title_as_name": false,
     "save_strategy": "single_file",
-    "save_directories": [],
-    "state_directories": []
+    "save_directories": [
+      "config/games",
+      "config/memcards",
+      "support/hiscores",
+      "support/hdd"
+    ],
+    "state_directories": [
+      "savestates"
+    ]
   },
   {
-    "match_tokens": ["xenia_canary.exe"],
+    "match_tokens": ["xenia_canary.exe", "xenia-canary.exe"],
     "name": "Xenia Canary (Xbox 360)",
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["xbox 360", "microsoft xbox 360", "xbox360"],
     "use_game_title_as_name": false,
     "save_strategy": "single_file",
-    "save_directories": [],
+    "save_directories": [
+      "content",
+      "%USERPROFILE%\\Documents\\Xenia\\content"
+    ],
+    "state_directories": []
+  },
+  {
+    "match_tokens": ["xenia.exe"],
+    "name": "Xenia (Xbox 360)",
+    "args": "\"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["xbox 360", "microsoft xbox 360", "xbox360"],
+    "use_game_title_as_name": false,
+    "save_strategy": "single_file",
+    "save_directories": [
+      "content",
+      "%USERPROFILE%\\Documents\\Xenia\\content"
+    ],
     "state_directories": []
   },
   {
@@ -174,6 +251,8 @@
     "use_game_title_as_name": false,
     "save_strategy": "single_file",
     "save_directories": [],
-    "state_directories": []
+    "state_directories": [
+      "."
+    ]
   }
 ]

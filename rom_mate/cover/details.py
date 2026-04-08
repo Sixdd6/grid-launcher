@@ -32,14 +32,19 @@ def resolved_cover_url_for_game(
 
 class CoverDetailsWindowProtocol(Protocol):
     current_details_game: dict[str, str] | None
+    current_details_cloud_mode: str
     details_content_frame: Any | None
     details_cover_label: QLabel | None
     details_description_label: QLabel | None
     details_screenshot_labels: list[QLabel]
+    details_screenshots_panel: Any | None
     details_screenshots_scroll: Any | None
     cover_cache: dict[str, QPixmap | None]
 
     def width(self) -> int:
+        ...
+
+    def height(self) -> int:
         ...
 
     def _screenshot_urls_from_game(self, game: dict[str, str]) -> list[str]:
@@ -79,22 +84,64 @@ def update_details_layout_metrics(window: CoverDetailsWindowProtocol) -> None:
     content_width = window.details_content_frame.width()
     if content_width <= 0:
         content_width = window.width() - 64
-    content_width = max(content_width, 900)
+    content_width = max(content_width, 640)
 
-    cover_width = max(300, min(780, int(content_width * 0.36)))
-    cover_height = max(400, min(1040, int(cover_width * 1.35)))
+    content_height = window.details_content_frame.height()
+    if content_height <= 0:
+        content_height = window.height() - 180
+    content_height = max(content_height, 420)
+
+    cover_aspect_ratio = 1.35
+    cover_max_height = max(320, min(680, int(content_height * 0.78)))
+    cover_width = max(
+        220,
+        min(
+            720,
+            int(content_width * 0.32),
+            int(cover_max_height / cover_aspect_ratio),
+        ),
+    )
+    cover_height = max(300, min(cover_max_height, int(cover_width * cover_aspect_ratio)))
     if window.details_cover_label is not None:
         window.details_cover_label.setFixedSize(cover_width, cover_height)
 
-    screenshot_width = max(210, min(520, int(content_width * 0.25)))
-    screenshot_height = max(118, min(320, int(screenshot_width * 0.62)))
+    screenshot_aspect_ratio = 0.62
+    screenshot_max_height = max(96, min(240, int(content_height * 0.24)))
+    screenshot_width = max(
+        160,
+        min(
+            420,
+            int(content_width * 0.19),
+            int(screenshot_max_height / screenshot_aspect_ratio),
+        ),
+    )
+    screenshot_height = max(90, min(screenshot_max_height, int(screenshot_width * screenshot_aspect_ratio)))
+
+    compact_cloud_layout = window.current_details_cloud_mode != "overview" and (
+        content_width < 1360
+        or content_height < 640
+        or window.width() <= 1280
+        or window.height() <= 720
+    )
+    minimum_center_width = 620 if window.current_details_cloud_mode != "overview" else 420
+    screenshots_reserved_width = screenshot_width + 84
+    show_screenshots = (not compact_cloud_layout) and (
+        content_width >= (cover_width + minimum_center_width + screenshots_reserved_width)
+    )
+
+    screenshots_panel = getattr(window, "details_screenshots_panel", None)
+    if screenshots_panel is not None:
+        screenshots_panel.setVisible(show_screenshots)
+    elif window.details_screenshots_scroll is not None:
+        window.details_screenshots_scroll.setVisible(show_screenshots)
+
     if window.details_screenshots_scroll is not None:
         window.details_screenshots_scroll.setFixedWidth(screenshot_width + 28)
     for label in window.details_screenshot_labels:
         label.setFixedSize(screenshot_width, screenshot_height)
 
     if window.details_description_label is not None:
-        description_width = max(420, min(1600, int(content_width * 0.66)))
+        description_width = max(280, min(1200, int(content_width * 0.42)))
         window.details_description_label.setMaximumWidth(description_width)
 
     window._rescale_details_media_for_current_sizes()

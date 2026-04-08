@@ -20,6 +20,7 @@ class GameCardWindowProtocol(Protocol):
 class GameDetailsWindowProtocol(Protocol):
     current_details_game: dict[str, str] | None
     current_details_source: str
+    current_details_cloud_mode: str
     details_title_label: QLabel | None
     details_cover_label: QLabel | None
     details_platform_label: QLabel | None
@@ -27,10 +28,9 @@ class GameDetailsWindowProtocol(Protocol):
     details_description_label: QLabel | None
     details_primary_button: QPushButton | None
     details_config_button: QPushButton | None
-    details_upload_saves_button: QPushButton | None
-    details_restore_saves_button: QPushButton | None
-    details_upload_states_button: QPushButton | None
-    details_restore_states_button: QPushButton | None
+    details_details_button: QPushButton | None
+    details_manage_saves_button: QPushButton | None
+    details_manage_states_button: QPushButton | None
     details_secondary_button: QPushButton | None
     stack: Any
     nav_buttons: list[QPushButton]
@@ -49,6 +49,9 @@ class GameDetailsWindowProtocol(Protocol):
         ...
 
     def _update_details_layout_metrics(self) -> None:
+        ...
+
+    def _show_details_overview(self) -> None:
         ...
 
     def _is_emulators_platform(self, game: dict[str, str]) -> bool:
@@ -142,6 +145,7 @@ def open_game_details(window: GameDetailsWindowProtocol, game: dict[str, str], s
     if window.details_description_label is not None:
         window.details_description_label.setText(game["description"])
     window._update_details_screenshots(game)
+    window._show_details_overview()
     window._update_details_action_buttons()
 
     window.stack.setCurrentIndex(5)
@@ -196,24 +200,26 @@ def update_details_action_buttons(window: GameDetailsWindowProtocol) -> None:
         window.details_config_button.setEnabled(show_config and not installing_current)
 
     cloud_sync_supported = installed and not is_emulator_entry and not window._is_native_executable_platform(current_game)
-    cloud_states_supported = cloud_sync_supported
-    if cloud_sync_supported:
-        emulator_name, emulator_entry = window._resolved_emulator_entry_for_game(current_game)
-        if emulator_entry is not None and window._is_rpcs3_emulator_name(emulator_name):
-            cloud_states_supported = False
 
-    if window.details_upload_saves_button is not None:
-        window.details_upload_saves_button.setVisible(cloud_sync_supported)
-        window.details_upload_saves_button.setEnabled(cloud_sync_supported and not installing_current)
-    if window.details_restore_saves_button is not None:
-        window.details_restore_saves_button.setVisible(cloud_sync_supported)
-        window.details_restore_saves_button.setEnabled(cloud_sync_supported and not installing_current)
-    if window.details_upload_states_button is not None:
-        window.details_upload_states_button.setVisible(cloud_states_supported)
-        window.details_upload_states_button.setEnabled(cloud_states_supported and not installing_current)
-    if window.details_restore_states_button is not None:
-        window.details_restore_states_button.setVisible(cloud_states_supported)
-        window.details_restore_states_button.setEnabled(cloud_states_supported and not installing_current)
+    if window.details_details_button is not None:
+        window.details_details_button.setVisible(True)
+        window.details_details_button.setEnabled(True)
+        window.details_details_button.setChecked(window.current_details_cloud_mode == "overview")
+    if window.details_manage_saves_button is not None:
+        window.details_manage_saves_button.setVisible(True)
+        window.details_manage_saves_button.setEnabled(cloud_sync_supported and not installing_current)
+        if not cloud_sync_supported:
+            window.details_manage_saves_button.setChecked(False)
+    if window.details_manage_states_button is not None:
+        window.details_manage_states_button.setVisible(True)
+        window.details_manage_states_button.setEnabled(cloud_sync_supported and not installing_current)
+        if not cloud_sync_supported:
+            window.details_manage_states_button.setChecked(False)
+
+    if not cloud_sync_supported and window.current_details_cloud_mode != "overview":
+        window._show_details_overview()
+
     if window.details_secondary_button is not None:
+        window.details_secondary_button.setText("Uninstall")
         window.details_secondary_button.setVisible(installed and not is_emulator_entry)
         window.details_secondary_button.setEnabled(installed and not is_emulator_entry and not installing_current)
