@@ -21,4 +21,4 @@ A simple, nice-looking launcher for RomM.
 - [ ] Cross-platform support (Windows, Linux)
 
 ## Architecture
-- See `ARCHITECTURE.md` for a module map and refactor guidance.
+- See `ARCHITECTURE.md` for the current module map and change guide.
