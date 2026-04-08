@@ -49,232 +49,42 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-
-class InstallDownloadWorker(QObject):
-    finished = Signal(str, str)
-    progress = Signal(object, object, float)
-
-    def __init__(self, download_url: str, headers: dict[str, str], archive_path: Path) -> None:
-        super().__init__()
-        self.download_url = download_url
-        self.headers = headers
-        self.archive_path = archive_path
-        self.cancel_requested = False
-
-    def request_cancel(self) -> None:
-        self.cancel_requested = True
-
-    def run(self) -> None:
-        try:
-            request = Request(self.download_url, headers=self.headers, method="GET")
-            with urlopen(request, timeout=60) as response:
-                content_length = response.headers.get("Content-Length", "").strip()
-                total_bytes = int(content_length) if content_length.isdigit() else 0
-                downloaded_bytes = 0
-                started_at = time.monotonic()
-                with self.archive_path.open("wb") as archive_file:
-                    while True:
-                        if self.cancel_requested:
-                            raise OSError("Download cancelled by user")
-                        chunk = response.read(64 * 1024)
-                        if not chunk:
-                            break
-                        archive_file.write(chunk)
-                        downloaded_bytes += len(chunk)
-                        elapsed = max(time.monotonic() - started_at, 1e-6)
-                        speed_bps = downloaded_bytes / elapsed
-                        self.progress.emit(downloaded_bytes, total_bytes, speed_bps)
-            self.finished.emit(str(self.archive_path), "")
-        except (HTTPError, URLError, OSError, ValueError, OverflowError) as error:
-            if self.archive_path.exists() and self.archive_path.is_file():
-                try:
-                    self.archive_path.unlink()
-                except OSError:
-                    pass
-            self.finished.emit("", str(error))
-
-
-class InstallFinalizeWorker(QObject):
-    finished = Signal(object, str, str, str)
-    progress = Signal(object, object)
-
-    def __init__(self, window: "MainWindow", game: dict[str, str], archive_path: Path) -> None:
-        super().__init__()
-        self.window = window
-        self.game = dict(game)
-        self.archive_path = archive_path
-
-    def run(self) -> None:
-        try:
-            prepared_game, warning_text = self.window._prepare_installed_game_without_ui(
-                self.game,
-                self.archive_path,
-                configure_ps3_links=False,
-                install_progress_callback=self._emit_progress,
-            )
-            if prepared_game is None:
-                self.finished.emit(None, str(self.archive_path), warning_text, "Install preparation failed")
-                return
-            self.finished.emit(prepared_game, str(self.archive_path), warning_text, "")
-        except (OSError, zipfile.BadZipFile) as error:
-            self.finished.emit(None, str(self.archive_path), "", str(error))
-
-    def _emit_progress(self, installed_bytes: int, total_bytes: int) -> None:
-        self.progress.emit(max(0, installed_bytes), max(0, total_bytes))
-
-
-class AutoCloudSaveUploadWorker(QObject):
-    finished = Signal(object, object)
-
-    def __init__(
-        self,
-        window: "MainWindow",
-        game: dict[str, str],
-        upload_types: list[str],
-        local_latest_mtimes: dict[str, float],
-    ) -> None:
-        super().__init__()
-        self.window = window
-        self.game = dict(game)
-        self.upload_types = [item for item in upload_types if item in {"save", "state"}]
-        self.local_latest_mtimes = {
-            key: float(value)
-            for key, value in local_latest_mtimes.items()
-            if key in {"save", "state"} and isinstance(value, (int, float))
-        }
-
-    def run(self) -> None:
-        try:
-            per_type: dict[str, dict[str, Any]] = {}
-            for save_type in self.upload_types:
-                uploaded_count, total_count, failed_files = self.window._upload_cloud_files_for_game(
-                    self.game,
-                    save_type,
-                    show_dialogs=False,
-                )
-                per_type[save_type] = {
-                    "uploaded_count": uploaded_count,
-                    "total_count": total_count,
-                    "failed_files": failed_files,
-                }
-
-            self.finished.emit(
-                self.game,
-                {
-                    "per_type": per_type,
-                    "local_latest_mtimes": self.local_latest_mtimes,
-                },
-            )
-        except (HTTPError, URLError, OSError, ValueError, json.JSONDecodeError) as error:
-            self.finished.emit(
-                self.game,
-                {
-                    "per_type": {
-                        save_type: {
-                            "uploaded_count": 0,
-                            "total_count": 0,
-                            "failed_files": [str(error)],
-                        }
-                        for save_type in self.upload_types
-                    },
-                    "local_latest_mtimes": self.local_latest_mtimes,
-                },
-            )
-
-
-class FirstRunSetupDialog(QDialog):
-    def __init__(self, parent: QWidget | None, config: dict[str, Any], message_text: str = "") -> None:
-        super().__init__(parent)
-        self.setWindowTitle("First Run Setup")
-        self.setModal(True)
-        self.resize(560, 320)
-
-        server_url = config.get("server_url", "")
-        token = config.get("api_token", "")
-        library_path = config.get("library_path", "")
-
-        server_url_text = server_url.strip() if isinstance(server_url, str) else ""
-        token_text = token.strip() if isinstance(token, str) else ""
-        library_path_text = library_path.strip() if isinstance(library_path, str) else ""
-        if not library_path_text:
-            library_path_text = str(Path.home() / "rom-mate-library")
-
-        layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-
-        title = QLabel("Welcome to Rom Mate Neo")
-        title.setStyleSheet("font-size: 22px; font-weight: 700;")
-        layout.addWidget(title)
-
-        description_text = (
-            message_text.strip()
-            if isinstance(message_text, str) and message_text.strip()
-            else "Set up your server connection and game install folder to continue. You can change these later in Settings."
-        )
-        description = QLabel(description_text)
-        description.setWordWrap(True)
-        layout.addWidget(description)
-
-        form = QFormLayout()
-        self.server_url_input = QLineEdit(server_url_text)
-        form.addRow("Server URL", self.server_url_input)
-
-        self.api_token_input = QLineEdit(token_text)
-        self.api_token_input.setEchoMode(QLineEdit.EchoMode.Password)
-        form.addRow("API Token", self.api_token_input)
-
-        self.library_path_input = QLineEdit(library_path_text)
-        library_row = QWidget()
-        library_row_layout = QHBoxLayout(library_row)
-        library_row_layout.setContentsMargins(0, 0, 0, 0)
-        library_row_layout.setSpacing(8)
-        library_row_layout.addWidget(self.library_path_input)
-
-        browse_button = QPushButton("Browse...")
-        browse_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        browse_button.clicked.connect(self._browse_library_path)
-        library_row_layout.addWidget(browse_button)
-        form.addRow("Library Path", library_row)
-
-        layout.addLayout(form)
-
-        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        ok_button = button_box.button(QDialogButtonBox.StandardButton.Ok)
-        if ok_button is not None:
-            ok_button.setText("Save and Continue")
-        cancel_button = button_box.button(QDialogButtonBox.StandardButton.Cancel)
-        if cancel_button is not None:
-            cancel_button.setText("Cancel and Exit")
-        button_box.accepted.connect(self._accept_if_valid)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-
-    def _browse_library_path(self) -> None:
-        current_path = self.library_path_input.text().strip()
-        selected_directory = QFileDialog.getExistingDirectory(self, "Select Library Folder", current_path)
-        if selected_directory:
-            self.library_path_input.setText(selected_directory)
-
-    def _accept_if_valid(self) -> None:
-        if not self.server_url():
-            QMessageBox.warning(self, "Setup Required", "Enter a server URL to continue.")
-            return
-        if not self.api_token():
-            QMessageBox.warning(self, "Setup Required", "Enter an API token to continue.")
-            return
-        if not self.library_path():
-            QMessageBox.warning(self, "Setup Required", "Select a library path to continue.")
-            return
-        self.accept()
-
-    def server_url(self) -> str:
-        return self.server_url_input.text().strip()
-
-    def api_token(self) -> str:
-        return self.api_token_input.text().strip()
-
-    def library_path(self) -> str:
-        return self.library_path_input.text().strip()
+from rom_mate.api_client import (
+    api_get_bytes,
+    api_get_json,
+    api_post_json,
+    api_post_multipart_json,
+    build_auth_headers,
+    multipart_payload,
+)
+from rom_mate.cover_utils import (
+    cached_cover_cache_key,
+    cached_cover_path_from_game,
+    cover_cache_extension_from_payload,
+    cover_url_from_rom_payload,
+    installed_cover_cache_key,
+    resolve_cover_url,
+    screenshot_urls_from_game,
+    screenshot_urls_from_rom_payload,
+)
+from rom_mate.cover_cache import cache_cover_image_for_game
+from rom_mate.cover_loader import apply_cover_to_label, on_cover_reply, queue_cover_load
+from rom_mate.cover_manager import (
+    cached_cover_for_game,
+    cached_cover_path_keys_for_games,
+    cleanup_cached_cover_for_game,
+    queue_game_cover_load,
+)
+from rom_mate.dialogs import FirstRunSetupDialog
+from rom_mate.path_utils import path_key, path_within_path, sanitize_path_component
+from rom_mate.server_catalog import (
+    connected_username,
+    fetch_platform_rom_items,
+    games_from_rom_items,
+    server_platform_ids,
+)
+from rom_mate.server_connection import classify_connection_failure
+from rom_mate.workers import AutoCloudSaveUploadWorker, InstallDownloadWorker, InstallFinalizeWorker
 
 
 class MainWindow(QMainWindow):
@@ -1835,159 +1645,28 @@ class MainWindow(QMainWindow):
         return server_url.strip().rstrip("/")
 
     def _resolve_cover_url(self, value: Any) -> str:
-        if not isinstance(value, str) or not value.strip():
-            return ""
-        candidate = value.strip()
-        if not (candidate.startswith("http://") or candidate.startswith("https://")):
-            base_url = self._server_base_url()
-            if not base_url:
-                return ""
-            if candidate.startswith("/"):
-                candidate = f"{base_url}{candidate}"
-            else:
-                candidate = f"{base_url}/{candidate}"
-
-        split = urlsplit(candidate)
-        safe_path = quote(split.path, safe="/%._-~")
-        query_items = parse_qsl(split.query, keep_blank_values=True)
-        safe_query = urlencode(query_items, doseq=True)
-        return urlunsplit((split.scheme, split.netloc, safe_path, safe_query, split.fragment))
+        return resolve_cover_url(value, self._server_base_url())
 
     def _cover_url_from_rom_payload(self, payload: dict[str, Any]) -> str:
-        def resolve_cover_value(value: Any) -> str:
-            if isinstance(value, str):
-                return self._resolve_cover_url(value)
-            if isinstance(value, dict):
-                for key in ("url", "path", "image", "src", "download_path", "file_path", "full_path"):
-                    candidate = value.get(key)
-                    if isinstance(candidate, str):
-                        resolved = self._resolve_cover_url(candidate)
-                        if resolved:
-                            return resolved
-            return ""
-
-        for key in (
-            "url_cover",
-            "path_cover_large",
-            "path_cover_small",
-            "cover_url",
-            "cover_image",
-            "cover_path",
-            "image_url",
-        ):
-            value = payload.get(key)
-            resolved = resolve_cover_value(value)
-            if resolved:
-                return resolved
-
-        return ""
+        return cover_url_from_rom_payload(payload, self._resolve_cover_url)
 
     def _screenshot_urls_from_rom_payload(self, payload: dict[str, Any]) -> list[str]:
-        urls: list[str] = []
-
-        def append_url(value: Any) -> None:
-            if isinstance(value, str):
-                resolved = self._resolve_cover_url(value)
-                if resolved and resolved not in urls:
-                    urls.append(resolved)
-                return
-            if isinstance(value, dict):
-                for key in ("url", "path", "image", "src"):
-                    candidate = value.get(key)
-                    if isinstance(candidate, str):
-                        resolved = self._resolve_cover_url(candidate)
-                        if resolved and resolved not in urls:
-                            urls.append(resolved)
-                            return
-
-        merged_screenshots = payload.get("merged_screenshots")
-        if isinstance(merged_screenshots, list):
-            for item in merged_screenshots:
-                append_url(item)
-
-        user_screenshots = payload.get("user_screenshots")
-        if isinstance(user_screenshots, list):
-            for item in user_screenshots:
-                if not isinstance(item, dict):
-                    continue
-                for key in ("download_path", "file_path", "full_path"):
-                    append_url(item.get(key))
-
-        gamelist_metadata = payload.get("gamelist_metadata")
-        if isinstance(gamelist_metadata, dict):
-            for key in ("screenshot_url", "title_screen_url", "image_url"):
-                append_url(gamelist_metadata.get(key))
-
-        ss_metadata = payload.get("ss_metadata")
-        if isinstance(ss_metadata, dict):
-            for key in ("screenshot_url", "title_screen_url", "fanart_url"):
-                append_url(ss_metadata.get(key))
-
-        launchbox_metadata = payload.get("launchbox_metadata")
-        if isinstance(launchbox_metadata, dict):
-            images = launchbox_metadata.get("images")
-            if isinstance(images, list):
-                for image in images:
-                    if not isinstance(image, dict):
-                        continue
-                    append_url(image.get("url"))
-
-        for key in ("url_screenshots", "path_screenshots", "screenshots", "images"):
-            value = payload.get(key)
-            if isinstance(value, list):
-                for item in value:
-                    append_url(item)
-            else:
-                append_url(value)
-
-        for key in ("url_screenshot", "path_screenshot"):
-            append_url(payload.get(key))
-
-        return urls
+        return screenshot_urls_from_rom_payload(payload, self._resolve_cover_url)
 
     def _screenshot_urls_from_game(self, game: dict[str, str]) -> list[str]:
-        raw = game.get("screenshot_urls", "")
-        if not isinstance(raw, str) or not raw.strip():
-            return []
-        unique: list[str] = []
-        for item in raw.splitlines():
-            value = item.strip()
-            if value and value not in unique:
-                unique.append(value)
-        return unique
+        return screenshot_urls_from_game(game.get("screenshot_urls", ""))
 
     def _cached_cover_path_from_game(self, game: dict[str, str]) -> Path | None:
-        cached_cover_value = game.get("cached_cover_path", "")
-        if not isinstance(cached_cover_value, str) or not cached_cover_value.strip():
-            return None
-        return Path(cached_cover_value.strip()).expanduser()
+        return cached_cover_path_from_game(game)
 
     def _cached_cover_cache_key(self, cached_cover_path: Path) -> str:
-        return f"file:{self._path_key(cached_cover_path)}"
+        return cached_cover_cache_key(cached_cover_path, self._path_key)
 
     def _cached_cover_for_game(self, game: dict[str, str]) -> QPixmap | None:
-        cached_cover_path = self._cached_cover_path_from_game(game)
-        if cached_cover_path is None or not cached_cover_path.exists() or not cached_cover_path.is_file():
-            return None
-
-        cache_key = self._cached_cover_cache_key(cached_cover_path)
-        if cache_key in self.cover_cache:
-            return self.cover_cache[cache_key]
-
-        pixmap = QPixmap(str(cached_cover_path))
-        loaded = pixmap if not pixmap.isNull() else None
-        self.cover_cache[cache_key] = loaded
-        return loaded
+        return cached_cover_for_game(self, game)
 
     def _queue_game_cover_load(self, game: dict[str, str], label: QLabel) -> None:
-        cached_cover = self._cached_cover_for_game(game)
-        if cached_cover is not None:
-            self._apply_cover_to_label(label, cached_cover)
-            return
-
-        cover_url = self._resolved_cover_url_for_game(game)
-        if cover_url:
-            self._queue_cover_load(cover_url, label)
+        queue_game_cover_load(self, game, label)
 
     def _resolved_cover_url_for_game(self, game: dict[str, str]) -> str:
         cover_url_value = game.get("cover_url", "")
@@ -2007,179 +1686,28 @@ class MainWindow(QMainWindow):
         return ""
 
     def _installed_cover_cache_key(self, game: dict[str, str]) -> str:
-        rom_id_value = game.get("rom_id", "")
-        title_value = game.get("title", "")
-        platform_value = game.get("platform", "")
-
-        rom_id = rom_id_value.strip() if isinstance(rom_id_value, str) else ""
-        title = title_value.strip() if isinstance(title_value, str) else ""
-        platform = platform_value.strip() if isinstance(platform_value, str) else ""
-
-        basis = rom_id or f"{title}|{platform}"
-        digest = hashlib.sha1(basis.encode("utf-8", errors="ignore")).hexdigest()[:12]
-        safe_title = re.sub(r"[^A-Za-z0-9._-]+", "_", title).strip("_.-") or "game"
-        return f"{safe_title[:48]}-{digest}"
+        return installed_cover_cache_key(game)
 
     def _cover_cache_extension_from_payload(self, cover_url: str, payload: bytes, content_type: str = "") -> str:
-        normalized_content_type = content_type.strip().casefold().split(";", 1)[0]
-        mime_extensions = {
-            "image/jpeg": ".jpg",
-            "image/jpg": ".jpg",
-            "image/png": ".png",
-            "image/webp": ".webp",
-            "image/gif": ".gif",
-            "image/bmp": ".bmp",
-            "image/x-ms-bmp": ".bmp",
-            "image/tiff": ".tiff",
-            "image/x-icon": ".ico",
-            "image/vnd.microsoft.icon": ".ico",
-            "image/svg+xml": ".svg",
-        }
-        mapped_extension = mime_extensions.get(normalized_content_type)
-        if mapped_extension:
-            return mapped_extension
-
-        if payload.startswith(b"\x89PNG\r\n\x1a\n"):
-            return ".png"
-        if payload.startswith(b"\xff\xd8\xff"):
-            return ".jpg"
-        if payload.startswith((b"GIF87a", b"GIF89a")):
-            return ".gif"
-        if payload.startswith(b"BM"):
-            return ".bmp"
-        if payload.startswith((b"II*\x00", b"MM\x00*")):
-            return ".tiff"
-        if payload.startswith(b"\x00\x00\x01\x00"):
-            return ".ico"
-        if len(payload) >= 12 and payload.startswith(b"RIFF") and payload[8:12] == b"WEBP":
-            return ".webp"
-
-        preview = payload[:256].lstrip()
-        if preview.startswith(b"<svg") or preview.startswith(b"<?xml") and b"<svg" in preview.casefold():
-            return ".svg"
-
-        parsed = urlsplit(cover_url)
-        suffix = Path(parsed.path).suffix.lower()
-        valid_extensions = {
-            ".jpg",
-            ".jpeg",
-            ".png",
-            ".webp",
-            ".gif",
-            ".bmp",
-            ".tif",
-            ".tiff",
-            ".ico",
-            ".svg",
-            ".avif",
-            ".heic",
-            ".heif",
-        }
-        if suffix in valid_extensions:
-            return suffix
-        return ".img"
+        return cover_cache_extension_from_payload(cover_url, payload, content_type)
 
     def _cache_cover_image_for_game(self, game: dict[str, str]) -> str:
-        existing_cached_path = self._cached_cover_path_from_game(game)
-        if existing_cached_path is not None and existing_cached_path.exists() and existing_cached_path.is_file():
-            return str(existing_cached_path)
-
-        cover_url = self._resolved_cover_url_for_game(game)
-        if not cover_url:
-            return ""
-
-        def write_cover_payload(payload: bytes, content_type: str = "") -> str:
-            if not payload:
-                return ""
-            parsed = QPixmap()
-            if not parsed.loadFromData(payload):
-                return ""
-
-            extension = self._cover_cache_extension_from_payload(cover_url, payload, content_type)
-            cache_file_name = f"{self._installed_cover_cache_key(game)}{extension}"
-            cache_file = self._image_cache_dir() / cache_file_name
-            try:
-                self._image_cache_dir().mkdir(parents=True, exist_ok=True)
-                cache_file.write_bytes(payload)
-            except OSError:
-                return ""
-
-            self.cover_cache[cover_url] = parsed
-            self.cover_cache[self._cached_cover_cache_key(cache_file)] = parsed
-            return str(cache_file)
-
-        request_headers: dict[str, str] = {"Accept": "image/*"}
-        authorization = self._auth_headers().get("Authorization", "").strip()
-        if authorization:
-            request_headers["Authorization"] = authorization
-
-        try:
-            request = Request(cover_url, headers=request_headers, method="GET")
-            with urlopen(request, timeout=30) as response:
-                payload = response.read()
-                response_content_type = response.headers.get("Content-Type", "")
-            cached_path = write_cover_payload(payload, response_content_type)
-            if cached_path:
-                return cached_path
-        except (HTTPError, URLError, OSError, ValueError, OverflowError):
-            pass
-
-        cached_pixmap = self.cover_cache.get(cover_url)
-        if cached_pixmap is None or cached_pixmap.isNull():
-            if (
-                self.current_details_game is not None
-                and self._games_match_identity(self.current_details_game, game)
-                and self.details_cover_label is not None
-            ):
-                label_pixmap = self.details_cover_label.pixmap()
-                if label_pixmap is not None and not label_pixmap.isNull():
-                    cached_pixmap = label_pixmap
-                    self.cover_cache[cover_url] = cached_pixmap
-            if cached_pixmap is None or cached_pixmap.isNull():
-                return ""
-
-        cache_file_name = f"{self._installed_cover_cache_key(game)}.png"
-        cache_file = self._image_cache_dir() / cache_file_name
-        try:
-            self._image_cache_dir().mkdir(parents=True, exist_ok=True)
-            if not cached_pixmap.save(str(cache_file), "PNG"):
-                return ""
-        except OSError:
-            return ""
-
-        self.cover_cache[self._cached_cover_cache_key(cache_file)] = cached_pixmap
-        return str(cache_file)
+        return cache_cover_image_for_game(self, game)
 
     def _cached_cover_path_keys_for_games(self, games: list[dict[str, str]]) -> set[str]:
-        keys: set[str] = set()
-        for game in games:
-            cached_cover_path = self._cached_cover_path_from_game(game)
-            if cached_cover_path is None:
-                continue
-            keys.add(self._path_key(cached_cover_path))
-        return keys
+        return cached_cover_path_keys_for_games(self, games)
 
     def _cleanup_cached_cover_for_game(
         self,
         game: dict[str, str],
         protected_cache_paths: set[str] | None = None,
     ) -> bool:
-        cached_cover_path = self._cached_cover_path_from_game(game)
-        if cached_cover_path is None:
-            return True
-
-        self.cover_cache.pop(self._cached_cover_cache_key(cached_cover_path), None)
-        cached_path_key = self._path_key(cached_cover_path)
-        if protected_cache_paths is not None and cached_path_key in protected_cache_paths:
-            return True
-
-        if not cached_cover_path.exists() or not cached_cover_path.is_file():
-            return True
-
         try:
-            cached_cover_path.unlink()
+            cleanup_cached_cover_for_game(self, game, protected_cache_paths)
         except OSError as error:
-            QMessageBox.warning(self, "Uninstall Error", f"Could not remove cached cover image: {cached_cover_path}\n{error}")
+            cached_cover_path = self._cached_cover_path_from_game(game)
+            cache_path_text = str(cached_cover_path) if cached_cover_path is not None else "(unknown path)"
+            QMessageBox.warning(self, "Uninstall Error", f"Could not remove cached cover image: {cache_path_text}\n{error}")
             return False
         return True
 
@@ -2243,162 +1771,50 @@ class MainWindow(QMainWindow):
                 self._queue_cover_load(screenshot_url, label)
 
     def _apply_cover_to_label(self, label: QLabel, pixmap: QPixmap | None) -> None:
-        if pixmap is None or pixmap.isNull():
-            return
-        try:
-            label.setText("")
-            label.setPixmap(
-                pixmap.scaled(
-                    label.size(),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-            )
-        except RuntimeError:
-            return
+        apply_cover_to_label(label, pixmap)
 
     def _queue_cover_load(self, cover_url: str, label: QLabel) -> None:
-        normalized = cover_url.strip()
-        if not normalized:
-            return
-
-        if normalized in self.cover_cache:
-            self._apply_cover_to_label(label, self.cover_cache[normalized])
-            return
-
-        waiters = self.cover_waiters.setdefault(normalized, [])
-        waiters.append(label)
-        if normalized in self.cover_loading:
-            return
-
-        self.cover_loading.add(normalized)
-        request = QNetworkRequest(QUrl(normalized))
-        request.setRawHeader(b"Accept", b"image/*")
-        reply = self.cover_network.get(request)
-        reply.finished.connect(lambda url=normalized, rep=reply: self._on_cover_reply(url, rep))
+        queue_cover_load(self, cover_url, label)
 
     def _on_cover_reply(self, cover_url: str, reply: QNetworkReply) -> None:
-        pixmap: QPixmap | None = None
-        if reply.error() == QNetworkReply.NetworkError.NoError:
-            payload = bytes(reply.readAll())
-            parsed = QPixmap()
-            if payload and parsed.loadFromData(payload):
-                pixmap = parsed
-
-        self.cover_cache[cover_url] = pixmap
-        self.cover_loading.discard(cover_url)
-        waiters = self.cover_waiters.pop(cover_url, [])
-        for label in waiters:
-            self._apply_cover_to_label(label, pixmap)
-        reply.deleteLater()
+        on_cover_reply(self, cover_url, reply)
 
     def _auth_headers(self) -> dict[str, str]:
         api_token = self.config.get("api_token", "")
         if not isinstance(api_token, str):
             api_token = ""
-        return {"Accept": "application/json", "Authorization": f"Bearer {api_token.strip()}"}
+        return build_auth_headers(api_token)
 
     def _api_get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         base_url = self._server_base_url()
-        if not base_url:
-            raise ValueError("Server URL is required")
-
-        query = ""
-        if params:
-            query = urlencode(params, doseq=True)
-        url = f"{base_url}{path}"
-        if query:
-            url = f"{url}?{query}"
-
-        request = Request(url, headers=self._auth_headers(), method="GET")
-        with urlopen(request, timeout=10) as response:
-            raw = response.read().decode("utf-8")
-        return json.loads(raw)
+        api_token = self.config.get("api_token", "")
+        if not isinstance(api_token, str):
+            api_token = ""
+        return api_get_json(base_url, api_token, path, params)
 
     def _api_get_bytes(self, path: str, params: dict[str, Any] | None = None) -> bytes:
         base_url = self._server_base_url()
-        if not base_url:
-            raise ValueError("Server URL is required")
-
-        query = ""
-        if params:
-            query = urlencode(params, doseq=True)
-        url = f"{base_url}{path}"
-        if query:
-            url = f"{url}?{query}"
-
-        request = Request(url, headers=self._auth_headers(), method="GET")
-        with urlopen(request, timeout=60) as response:
-            return response.read()
+        api_token = self.config.get("api_token", "")
+        if not isinstance(api_token, str):
+            api_token = ""
+        return api_get_bytes(base_url, api_token, path, params)
 
     def _multipart_payload(self, files: dict[str, Path]) -> tuple[str, bytes]:
-        boundary = f"----RomMateBoundary{int(time.time() * 1000)}"
-        body = bytearray()
-
-        for field_name, file_path in files.items():
-            if not file_path.exists() or not file_path.is_file():
-                continue
-            payload = file_path.read_bytes()
-            mime_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
-            body.extend(f"--{boundary}\r\n".encode("utf-8"))
-            body.extend(
-                (
-                    f'Content-Disposition: form-data; name="{field_name}"; filename="{file_path.name}"\r\n'
-                    f"Content-Type: {mime_type}\r\n\r\n"
-                ).encode("utf-8")
-            )
-            body.extend(payload)
-            body.extend(b"\r\n")
-
-        body.extend(f"--{boundary}--\r\n".encode("utf-8"))
-        return f"multipart/form-data; boundary={boundary}", bytes(body)
+        return multipart_payload(files)
 
     def _api_post_multipart(self, path: str, files: dict[str, Path], params: dict[str, Any] | None = None) -> Any:
         base_url = self._server_base_url()
-        if not base_url:
-            raise ValueError("Server URL is required")
-
-        query = ""
-        if params:
-            query = urlencode(params, doseq=True)
-        url = f"{base_url}{path}"
-        if query:
-            url = f"{url}?{query}"
-
-        content_type, payload = self._multipart_payload(files)
-        headers = self._auth_headers()
-        headers["Content-Type"] = content_type
-
-        request = Request(url, headers=headers, method="POST", data=payload)
-        with urlopen(request, timeout=60) as response:
-            raw = response.read().decode("utf-8")
-        return json.loads(raw)
+        api_token = self.config.get("api_token", "")
+        if not isinstance(api_token, str):
+            api_token = ""
+        return api_post_multipart_json(base_url, api_token, path, files, params)
 
     def _api_post_json(self, path: str, payload: dict[str, Any], params: dict[str, Any] | None = None) -> Any:
         base_url = self._server_base_url()
-        if not base_url:
-            raise ValueError("Server URL is required")
-
-        query = ""
-        if params:
-            query = urlencode(params, doseq=True)
-        url = f"{base_url}{path}"
-        if query:
-            url = f"{url}?{query}"
-
-        body = json.dumps(payload).encode("utf-8")
-        headers = self._auth_headers()
-        headers["Content-Type"] = "application/json"
-
-        request = Request(url, headers=headers, method="POST", data=body)
-        with urlopen(request, timeout=60) as response:
-            raw = response.read().decode("utf-8").strip()
-        if not raw:
-            return {}
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            return {}
+        api_token = self.config.get("api_token", "")
+        if not isinstance(api_token, str):
+            api_token = ""
+        return api_post_json(base_url, api_token, path, payload, params)
 
     def _set_server_status(self, text: str, color: str | None = None) -> None:
         if self.server_status_label is None:
@@ -2433,73 +1849,39 @@ class MainWindow(QMainWindow):
         self._clear_server_connection_data()
         self._update_top_bar_identity()
 
-        error_text = "Failed to connect"
-        if isinstance(last_error, HTTPError):
-            if last_error.code == 401:
-                self._set_server_status("Token expired", self._theme_color("error", "#ff5555"))
-                if not self._run_token_expired_setup():
-                    self.close()
-                return
-            if last_error.code == 403:
-                error_text = (
-                    "Access denied (403). Your account or token lacks required permissions. "
-                    "Create or use a token with API access, then update it in Settings."
-                )
-                self._set_server_status("Access denied (403)", self._theme_color("error", "#ff5555"))
-                if show_errors:
-                    QMessageBox.warning(self, "Server Connection", error_text)
-                return
-            error_text = f"Connection failed ({last_error.code})"
-        elif isinstance(last_error, URLError):
-            error_text = "Connection failed (network error)"
-        self._set_server_status(error_text, self._theme_color("error", "#ff5555"))
+        failure = classify_connection_failure(last_error)
+        self._set_server_status(failure.status_text, self._theme_color("error", "#ff5555"))
 
-        if show_errors:
-            QMessageBox.warning(self, "Server Connection", error_text)
+        if failure.token_expired:
+            if not self._run_token_expired_setup():
+                self.close()
+            return
+
+        if show_errors and failure.dialog_text:
+            QMessageBox.warning(self, "Server Connection", failure.dialog_text)
 
     def _apply_connected_user(self, me_payload: Any) -> None:
-        if not isinstance(me_payload, dict):
+        username = connected_username(me_payload)
+        if not username:
             return
-        username = me_payload.get("username")
-        if not isinstance(username, str) or not username.strip():
-            return
-        self.config["username"] = username.strip()
+        self.config["username"] = username
 
     def _populate_server_platforms(self, payload: Any) -> None:
         if self.server_platforms_list is None:
             return
-        if not isinstance(payload, list):
+        platform_ids = server_platform_ids(payload)
+        if not platform_ids:
             self.server_platforms_list.clear()
             self.server_platform_ids = {}
             self._refresh_emulator_views()
             return
 
         self.server_platforms_list.clear()
-        self.server_platform_ids = {}
+        self.server_platform_ids = platform_ids
         self.server_games_by_platform = {}
         self.server_rom_payloads = {}
 
-        for entry in payload:
-            if not isinstance(entry, dict):
-                continue
-            platform_id = entry.get("id")
-            label = entry.get("display_name") or entry.get("name") or entry.get("slug")
-            rom_count = entry.get("rom_count")
-            if (
-                not isinstance(platform_id, int)
-                or not isinstance(label, str)
-                or (isinstance(rom_count, int) and rom_count <= 0)
-            ):
-                continue
-
-            base_label = label.strip() or f"Platform {platform_id}"
-            display_label = base_label
-            counter = 2
-            while display_label in self.server_platform_ids:
-                display_label = f"{base_label} ({counter})"
-                counter += 1
-
-            self.server_platform_ids[display_label] = platform_id
+        for display_label in self.server_platform_ids:
             self.server_platforms_list.addItem(display_label)
 
         if self.server_platforms_list.count() > 0:
@@ -2537,70 +1919,20 @@ class MainWindow(QMainWindow):
         if platform_id is None:
             return
 
-        page_size = 200
-        all_items: list[dict[str, Any]] = []
-        offset = 0
         try:
-            while True:
-                payload = self._api_get(
-                    "/api/roms",
-                    {
-                        "platform_ids": [platform_id],
-                        "limit": page_size,
-                        "offset": offset,
-                        "with_char_index": "false",
-                        "with_filter_values": "false",
-                    },
-                )
-                if not isinstance(payload, dict):
-                    break
-
-                page_items = payload.get("items")
-                if not isinstance(page_items, list) or not page_items:
-                    break
-
-                for item in page_items:
-                    if isinstance(item, dict):
-                        all_items.append(item)
-
-                total = payload.get("total")
-                if isinstance(total, int) and len(all_items) >= total:
-                    break
-
-                if len(page_items) < page_size:
-                    break
-
-                offset += page_size
+            all_items = fetch_platform_rom_items(self._api_get, platform_id)
         except (HTTPError, URLError, ValueError, json.JSONDecodeError):
             self.server_games_by_platform[platform_label] = []
             self._set_server_status("Connected, but failed to load games", self._theme_color("warning", "#ffb86c"))
             return
 
-        games: list[dict[str, str]] = []
-        for item in all_items:
-            title = item.get("name") or item.get("fs_name_no_ext")
-            if not isinstance(title, str) or not title.strip():
-                continue
-            rom_id = str(item.get("id", "")).strip()
-            if rom_id:
-                self.server_rom_payloads[rom_id] = item
-            platform_name = item.get("platform_display_name")
-            summary = item.get("summary")
-            cover_url = self._cover_url_from_rom_payload(item)
-            screenshot_urls = self._screenshot_urls_from_rom_payload(item)
-            games.append(
-                {
-                    "title": title.strip(),
-                    "platform": platform_name.strip() if isinstance(platform_name, str) and platform_name.strip() else platform_label,
-                    "rating": "N/A",
-                    "description": summary.strip() if isinstance(summary, str) and summary.strip() else "No description available.",
-                    "cover_url": cover_url,
-                    "screenshot_urls": "\n".join(screenshot_urls),
-                    "rom_id": rom_id,
-                    "rom_file_name": item.get("fs_name", "").strip() if isinstance(item.get("fs_name", ""), str) else "",
-                }
-            )
-
+        games, rom_payloads = games_from_rom_items(
+            all_items,
+            platform_label,
+            self._cover_url_from_rom_payload,
+            self._screenshot_urls_from_rom_payload,
+        )
+        self.server_rom_payloads.update(rom_payloads)
         self.server_games_by_platform[platform_label] = games
 
     def _save_config(self, config: dict[str, Any]) -> bool:
@@ -4188,11 +3520,7 @@ class MainWindow(QMainWindow):
         return fallback_name
 
     def _sanitize_path_component(self, value: str, fallback: str) -> str:
-        illegal_characters = set('<>:"/\\|?*')
-        sanitized = "".join("_" if ch in illegal_characters or ord(ch) < 32 else ch for ch in value)
-        while sanitized.endswith((" ", ".")):
-            sanitized = f"{sanitized[:-1]}_"
-        return sanitized if sanitized.strip(" _.") else fallback
+        return sanitize_path_component(value, fallback)
 
     def _platform_library_dir(self, game: dict[str, str]) -> Path | None:
         library_path = self._library_path_dir()
@@ -4381,18 +3709,10 @@ class MainWindow(QMainWindow):
         shutil.rmtree(directory, onerror=onerror)
 
     def _path_key(self, path: Path) -> str:
-        expanded = path.expanduser()
-        try:
-            return str(expanded.resolve(strict=False)).casefold()
-        except OSError:
-            return str(expanded).casefold()
+        return path_key(path)
 
     def _path_within_path(self, path: Path, root: Path) -> bool:
-        path_key = self._path_key(path)
-        root_key = self._path_key(root).rstrip("\\/")
-        if not root_key:
-            return False
-        return path_key == root_key or path_key.startswith(f"{root_key}\\") or path_key.startswith(f"{root_key}/")
+        return path_within_path(path, root)
 
     def _matching_installed_emulator_games(self, emulator_path: Path) -> list[dict[str, str]]:
         matches: list[dict[str, str]] = []

@@ -19,3 +19,6 @@ A simple, nice-looking launcher for RomM.
 - [ ] Cloud save support and browsing
 - [ ] RetroAchievements integration and browsing
 - [ ] Cross-platform support (Windows, Linux)
+
+## Architecture
+- See `ARCHITECTURE.md` for a module map and refactor guidance.

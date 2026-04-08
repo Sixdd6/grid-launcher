@@ -36,7 +36,7 @@
 - [ ] Design and Implement a method for detecting when server files have updated and allow updating games and emulators from the server without overwriting user configs or save files. This would mostly be used for updating emulators and native games.
 
 # Medium Priority
-- [x] Implement a first-run wizard to setup the required paths and settings.
+- all done
 
 # Low Priority
 - all done
