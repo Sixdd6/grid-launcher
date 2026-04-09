@@ -361,9 +361,16 @@ def _state_candidate_base_variants(candidate: Path) -> set[str]:
         if not normalized:
             continue
         variants.add(normalized)
-        stripped = re.sub(r"(?:\.(?:savestate|state|st|ss))(?:\.auto|auto|[0-9]+)?$", "", normalized)
-        if stripped:
-            variants.add(stripped)
+
+        stripped_patterns = (
+            r"(?:\.(?:savestate|state|st|ss|ppst))(?:\.auto|auto|[0-9]+)?$",
+            r"(?:\.\d+)?\.sav$",
+            r"\.\d+$",
+        )
+        for pattern in stripped_patterns:
+            stripped = re.sub(pattern, "", normalized)
+            if stripped:
+                variants.add(stripped)
     return {variant for variant in variants if variant}
 
 
@@ -386,6 +393,36 @@ def _state_candidate_matches_game_tokens(candidate: Path, tokens: set[str]) -> b
         if compact_token and compact_token in compact_variants:
             return True
     return False
+
+
+def _state_candidate_hash_group_key(candidate: Path) -> str:
+    matched = re.fullmatch(r"([0-9a-f]{8})(?:\.\d+)?\.sav", candidate.name.strip().casefold())
+    if not matched:
+        return ""
+    return matched.group(1)
+
+
+def _fallback_state_candidates(state_candidates: list[Path]) -> list[Path]:
+    if not state_candidates:
+        return []
+    if len(state_candidates) == 1:
+        return list(state_candidates)
+
+    latest_candidate = max(
+        state_candidates,
+        key=lambda item: item.stat().st_mtime if item.exists() else 0,
+    )
+    latest_group_key = _state_candidate_hash_group_key(latest_candidate)
+    if not latest_group_key:
+        return []
+
+    grouped = [
+        candidate
+        for candidate in state_candidates
+        if _state_candidate_hash_group_key(candidate) == latest_group_key
+    ]
+    grouped.sort(key=lambda item: item.stat().st_mtime if item.exists() else 0, reverse=True)
+    return _unique_casefold_paths(grouped)
 
 
 def cloud_sync_directory_candidates_for_game(
@@ -548,7 +585,8 @@ def cloud_sync_candidates_for_game(
         if isinstance(extension, str) and extension.strip()
     }
     candidates: list[Path] = []
-    state_candidates: list[Path] = []
+    matched_state_candidates: list[Path] = []
+    unmatched_state_candidates: list[Path] = []
 
     for directory in directories:
         if not directory.exists():
@@ -568,22 +606,23 @@ def cloud_sync_candidates_for_game(
             if save_type == "state":
                 if not is_state_file_candidate(candidate):
                     continue
-                if not explicit_file_root and not _state_candidate_matches_game_tokens(candidate, tokens):
-                    continue
-            else:
-                candidate_name = candidate.name.casefold()
-                candidate_stem_compact = re.sub(r"[^a-z0-9]+", "", candidate.stem.casefold())
-                if not explicit_file_root and tokens and not any(
-                    token in candidate_name or (token in candidate_stem_compact and token) for token in tokens
-                ):
-                    continue
+                if explicit_file_root or _state_candidate_matches_game_tokens(candidate, tokens):
+                    matched_state_candidates.append(candidate)
+                else:
+                    unmatched_state_candidates.append(candidate)
+                continue
+
+            candidate_name = candidate.name.casefold()
+            candidate_stem_compact = re.sub(r"[^a-z0-9]+", "", candidate.stem.casefold())
+            if not explicit_file_root and tokens and not any(
+                token in candidate_name or (token in candidate_stem_compact and token) for token in tokens
+            ):
+                continue
 
             candidates.append(candidate)
-            if save_type == "state":
-                state_candidates.append(candidate)
 
-    if save_type == "state" and state_candidates:
-        candidates = state_candidates
+    if save_type == "state":
+        candidates = matched_state_candidates or _fallback_state_candidates(unmatched_state_candidates)
 
     candidates.sort(key=lambda item: item.stat().st_mtime if item.exists() else 0, reverse=True)
     return _unique_casefold_paths(candidates)

@@ -1,4 +1,5 @@
 from .cloud_restore import (
+	latest_server_records_by_slot,
 	relative_timestamp_text,
 	latest_server_record,
 	restore_single_save_payload,
@@ -147,6 +148,7 @@ __all__ = [
 	"filter_upload_jobs_by_session_window",
 	"is_local_newer_than_server",
 	"latest_server_record",
+	"latest_server_records_by_slot",
 	"relative_timestamp_text",
 	"library_games_for_target",
 	"library_games_without_keys",

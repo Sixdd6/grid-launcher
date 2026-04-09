@@ -10,3 +10,9 @@ class MainWindowProtocol(Protocol):
 
     def _upload_cloud_files_for_game(self, game: dict[str, str], save_type: str, show_dialogs: bool = False):
         ...
+
+    def _server_save_records_for_rom(self, rom_id: str):
+        ...
+
+    def _server_state_records_for_rom(self, rom_id: str):
+        ...

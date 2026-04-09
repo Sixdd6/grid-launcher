@@ -16,9 +16,14 @@ A simple, nice-looking launcher for RomM.
     - [x] delete
 - [x] Light/Dark Themes
 - [x] Responsive layout
-- [ ] Cloud save support and browsing
+- [x] Cloud save support and browsing
 - [ ] RetroAchievements integration and browsing
-- [ ] Cross-platform support (Windows, Linux)
+- [ ] Cross-platform support (Windows, Linux, Mac)
 
 ## Architecture
 - See `ARCHITECTURE.md` for the current module map and change guide.
+
+## Cloud Sync Notes
+- Game Details now exposes `Manage Saves`, `Manage States`, or `Emulator Saves` depending on the active emulator and platform capabilities.
+- Shared-save emulators such as Xemu and Redream surface emulator-wide backups with restore/delete warnings because those actions can affect all games using the same shared media.
+- Redream sync now covers global VMU cards plus per-game hash-based `*.0.sav` savestates, and the details panel swaps immediately before loading cloud records asynchronously.

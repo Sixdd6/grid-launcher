@@ -104,6 +104,7 @@ from rom_mate.library import (
     filter_upload_jobs_by_session_window,
     is_local_newer_than_server,
     latest_server_record,
+    latest_server_records_by_slot,
     library_games_without_keys as resolve_library_games_without_keys,
     relative_timestamp_text,
     matching_installed_emulator_games as resolve_matching_installed_emulator_games,
@@ -205,6 +206,7 @@ from rom_mate.emulator import (
     auto_configured_emulator_name as resolve_auto_configured_emulator_name,
     available_emulator_name_for_platform as resolve_available_emulator_name_for_platform,
     cloud_save_block_reason_for_game as resolve_cloud_save_block_reason_for_game,
+    cloud_save_scope_for_game as resolve_cloud_save_scope_for_game,
     azahar_save_path_overrides as resolve_azahar_save_path_overrides,
     azahar_state_path_overrides as resolve_azahar_state_path_overrides,
     cemu_save_path_overrides as resolve_cemu_save_path_overrides,
@@ -334,7 +336,7 @@ from rom_mate.server import (
     server_base_url,
     server_platform_ids,
 )
-from rom_mate.background import AutoCloudSaveUploadWorker, InstallDownloadWorker, InstallFinalizeWorker
+from rom_mate.background import AutoCloudSaveUploadWorker, DetailsCloudRecordsWorker, InstallDownloadWorker, InstallFinalizeWorker
 
 
 class MainWindow(QMainWindow):
@@ -451,6 +453,10 @@ class MainWindow(QMainWindow):
         self.active_game_sessions: list[dict[str, Any]] = []
         self.auto_cloud_upload_threads: list[QThread] = []
         self.auto_cloud_upload_workers: list[AutoCloudSaveUploadWorker] = []
+        self.details_cloud_threads: list[QThread] = []
+        self.details_cloud_workers: list[DetailsCloudRecordsWorker] = []
+        self.details_cloud_request_id = 0
+        self.details_cloud_request_context: dict[str, Any] = {}
         self.session_poll_timer = QTimer(self)
         self.session_poll_timer.setSingleShot(False)
         self.session_poll_timer.setInterval(2500)
@@ -1195,6 +1201,30 @@ class MainWindow(QMainWindow):
             if normalized in {"0", "false", "no", "off"}:
                 return False
         return bool(value)
+
+    def _debug_timing_start(self, label: str, **details: Any) -> float:
+        started_at = time.perf_counter()
+        if self._debug_prints_enabled():
+            detail_parts = [
+                f"{key}={value}"
+                for key, value in details.items()
+                if value is not None and value != ""
+            ]
+            suffix = f" {' '.join(detail_parts)}" if detail_parts else ""
+            print(f"[DEBUG][Timing] enter {label}{suffix}")
+        return started_at
+
+    def _debug_timing_end(self, label: str, started_at: float, **details: Any) -> None:
+        if not self._debug_prints_enabled():
+            return
+        elapsed_ms = max(0.0, (time.perf_counter() - started_at) * 1000.0)
+        detail_parts = [
+            f"{key}={value}"
+            for key, value in details.items()
+            if value is not None and value != ""
+        ]
+        suffix = f" {' '.join(detail_parts)}" if detail_parts else ""
+        print(f"[DEBUG][Timing] exit {label} elapsed_ms={elapsed_ms:.1f}{suffix}")
 
     def _config_bool(self, key: str, default: bool) -> bool:
         value = self.config.get(key, default)
@@ -2211,6 +2241,294 @@ class MainWindow(QMainWindow):
             save_type=save_type,
         )
 
+    def _cloud_save_scope_for_game(
+        self,
+        game: dict[str, str],
+        emulator_name: str = "",
+        emulator: dict[str, str] | None = None,
+        *,
+        save_type: str = "save",
+    ) -> str:
+        return resolve_cloud_save_scope_for_game(
+            game,
+            emulator_name=emulator_name,
+            is_xemu_emulator_name=lambda value: self._is_xemu_emulator_name(value, emulator),
+            is_redream_emulator_name=lambda value: self._is_redream_emulator_name(value, emulator),
+            save_type=save_type,
+        )
+
+    def _resolved_cloud_emulator_entry_for_game(
+        self,
+        game: dict[str, str],
+        *,
+        save_type: str = "save",
+    ) -> tuple[str, dict[str, str] | None]:
+        timing_start = getattr(self, "_debug_timing_start", None)
+        timing_end = getattr(self, "_debug_timing_end", None)
+        started_at = timing_start(
+            "_resolved_cloud_emulator_entry_for_game",
+            save_type=save_type,
+            title=game.get("title", "") if isinstance(game, dict) else "",
+            platform=game.get("platform", "") if isinstance(game, dict) else "",
+        ) if callable(timing_start) else 0.0
+        resolved_game = self._installed_game_record(game) or game
+        emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(resolved_game)
+        if emulator_entry is not None:
+            if callable(timing_end):
+                timing_end("_resolved_cloud_emulator_entry_for_game", started_at, emulator=emulator_name, source="default")
+            return emulator_name, emulator_entry
+        if not self._is_emulators_platform(resolved_game):
+            if callable(timing_end):
+                timing_end("_resolved_cloud_emulator_entry_for_game", started_at, source="none")
+            return emulator_name, emulator_entry
+
+        for candidate in self._normalize_emulators(self._emulators()):
+            candidate_name = str(candidate.get("name", "")).strip()
+            if not candidate_name:
+                continue
+            if not self._emulator_game_matches_shared_sync(resolved_game, candidate_name, candidate):
+                continue
+            if save_type == "save" and self._cloud_save_scope_for_game(
+                resolved_game,
+                candidate_name,
+                candidate,
+                save_type=save_type,
+            ) == "per-game":
+                continue
+            if callable(timing_end):
+                timing_end("_resolved_cloud_emulator_entry_for_game", started_at, emulator=candidate_name, source="shared")
+            return candidate_name, candidate
+
+        if callable(timing_end):
+            timing_end("_resolved_cloud_emulator_entry_for_game", started_at, source="unresolved")
+        return emulator_name, emulator_entry
+
+    def _details_cloud_button_text(self, game: dict[str, str], save_type: str) -> str:
+        if save_type != "save":
+            return "Manage States"
+
+        resolved_game = self._installed_game_record(game) or game
+        emulator_name, emulator_entry = self._resolved_cloud_emulator_entry_for_game(
+            resolved_game,
+            save_type=save_type,
+        )
+        if emulator_entry is not None and self._cloud_save_scope_for_game(
+            resolved_game,
+            emulator_name,
+            emulator_entry,
+            save_type=save_type,
+        ) != "per-game":
+            return "Emulator Saves"
+        return "Manage Saves"
+
+    def _details_cloud_scope_notice(
+        self,
+        game: dict[str, str],
+        emulator_name: str = "",
+        emulator: dict[str, str] | None = None,
+        *,
+        save_type: str = "save",
+    ) -> str:
+        if save_type != "save":
+            return ""
+
+        resolved_game = self._installed_game_record(game) or game
+        resolved_emulator_name = emulator_name
+        resolved_emulator = emulator
+        if not resolved_emulator_name or resolved_emulator is None:
+            resolved_emulator_name, resolved_emulator = self._resolved_cloud_emulator_entry_for_game(
+                resolved_game,
+                save_type=save_type,
+            )
+        if resolved_emulator is None:
+            return ""
+
+        save_scope = self._cloud_save_scope_for_game(
+            resolved_game,
+            resolved_emulator_name,
+            resolved_emulator,
+            save_type=save_type,
+        )
+        emulator_label = resolved_emulator_name.strip() or "this emulator"
+        if save_scope == "shared-single":
+            return (
+                f"These cloud saves are shared {emulator_label} media. Restoring or deleting one affects every game "
+                "using this emulator."
+            )
+        if save_scope == "shared-slotted":
+            return (
+                f"These cloud saves are shared {emulator_label} memory-card backups. Deleting one removes the "
+                "backup for every game using that emulator slot."
+            )
+        return ""
+
+    def _details_cloud_mode_supported(self, game: dict[str, str], save_type: str) -> bool:
+        timing_start = getattr(self, "_debug_timing_start", None)
+        timing_end = getattr(self, "_debug_timing_end", None)
+        started_at = timing_start(
+            "_details_cloud_mode_supported",
+            save_type=save_type,
+            title=game.get("title", "") if isinstance(game, dict) else "",
+            platform=game.get("platform", "") if isinstance(game, dict) else "",
+        ) if callable(timing_start) else 0.0
+        if save_type not in {"save", "state"}:
+            if callable(timing_end):
+                timing_end("_details_cloud_mode_supported", started_at, result=False, reason="invalid-type")
+            return False
+        if self._is_native_executable_platform(game):
+            if callable(timing_end):
+                timing_end("_details_cloud_mode_supported", started_at, result=False, reason="native-platform")
+            return False
+
+        installed_game = self._installed_game_record(game)
+        resolved_game = installed_game or game
+        if installed_game is None and not self._is_emulators_platform(resolved_game):
+            if callable(timing_end):
+                timing_end("_details_cloud_mode_supported", started_at, result=False, reason="not-installed")
+            return False
+
+        emulator_name, emulator_entry = self._resolved_cloud_emulator_entry_for_game(
+            resolved_game,
+            save_type=save_type,
+        )
+        if emulator_entry is None:
+            if callable(timing_end):
+                timing_end("_details_cloud_mode_supported", started_at, result=False, reason="no-emulator")
+            return False
+
+        save_scope = self._cloud_save_scope_for_game(
+            resolved_game,
+            emulator_name,
+            emulator_entry,
+            save_type=save_type,
+        )
+        if save_type == "save" and self._is_emulators_platform(resolved_game) and save_scope == "per-game":
+            if callable(timing_end):
+                timing_end("_details_cloud_mode_supported", started_at, result=False, reason="per-game-emulator-entry")
+            return False
+        if save_type == "state" and (
+            self._is_emulators_platform(resolved_game)
+            or self._is_rpcs3_emulator_name(emulator_name, emulator_entry)
+        ):
+            if callable(timing_end):
+                timing_end("_details_cloud_mode_supported", started_at, result=False, reason="state-blocked")
+            return False
+        if self._cloud_save_block_reason_for_game(
+            resolved_game,
+            emulator_name,
+            emulator_entry,
+            save_type=save_type,
+        ):
+            if callable(timing_end):
+                timing_end("_details_cloud_mode_supported", started_at, result=False, reason="compatibility-blocked")
+            return False
+
+        directory_key = "save_paths" if save_type == "save" else "state_paths"
+        result = bool(self._resolved_sync_directory_paths(emulator_entry, directory_key))
+        if callable(timing_end):
+            timing_end(
+                "_details_cloud_mode_supported",
+                started_at,
+                result=result,
+                emulator=emulator_name,
+                scope=save_scope,
+            )
+        return result
+
+    def _emulator_game_matches_shared_sync(
+        self,
+        game: dict[str, str],
+        emulator_name: str,
+        emulator: dict[str, str] | None = None,
+    ) -> bool:
+        if not self._is_emulators_platform(game):
+            return False
+
+        candidate_text = " ".join(
+            str(game.get(field, "")).strip()
+            for field in ("title", "platform", "description", "rom_file_name")
+        ).casefold()
+        if not candidate_text:
+            return False
+
+        if self._is_xemu_emulator_name(emulator_name, emulator):
+            return "xemu" in candidate_text
+        if self._is_redream_emulator_name(emulator_name, emulator):
+            return "redream" in candidate_text
+        return False
+
+    def _shared_cloud_sync_owner_game(
+        self,
+        emulator_name: str,
+        emulator: dict[str, str] | None = None,
+        *,
+        save_type: str = "save",
+    ) -> dict[str, str] | None:
+        if self._cloud_save_scope_for_game({}, emulator_name, emulator, save_type=save_type) == "per-game":
+            return None
+
+        candidates: list[dict[str, str]] = []
+
+        for game in self.library_games:
+            if self._emulator_game_matches_shared_sync(game, emulator_name, emulator):
+                candidates.append(game)
+
+        for games in self.server_games_by_platform.values():
+            for game in games:
+                if self._emulator_game_matches_shared_sync(game, emulator_name, emulator):
+                    candidates.append(game)
+
+        if not candidates:
+            path_value = emulator.get("path", "") if isinstance(emulator, dict) else ""
+            path_text = path_value.strip() if isinstance(path_value, str) else ""
+            if path_text:
+                try:
+                    candidates.extend(self._matching_installed_emulator_games(Path(path_text).expanduser()))
+                except OSError:
+                    pass
+
+        seen_keys: set[tuple[str, str]] = set()
+        for candidate in candidates:
+            candidate_key = self._game_key(candidate)
+            if candidate_key in seen_keys:
+                continue
+            seen_keys.add(candidate_key)
+
+            owner_rom_id = self._resolve_rom_id_for_game(candidate)
+            if owner_rom_id:
+                return candidate
+        return None
+
+    def _cloud_sync_rom_id_for_game(
+        self,
+        game: dict[str, str],
+        *,
+        save_type: str = "save",
+        emulator_name: str = "",
+        emulator: dict[str, str] | None = None,
+    ) -> str:
+        resolved_game = self._installed_game_record(game) or game
+        resolved_emulator_name = emulator_name
+        resolved_emulator = emulator
+        if not resolved_emulator_name or resolved_emulator is None:
+            resolved_emulator_name, resolved_emulator = self._resolved_cloud_emulator_entry_for_game(
+                resolved_game,
+                save_type=save_type,
+            )
+
+        if save_type == "save":
+            owner_game = self._shared_cloud_sync_owner_game(
+                resolved_emulator_name,
+                resolved_emulator,
+                save_type=save_type,
+            )
+            if owner_game is not None:
+                owner_rom_id = self._resolve_rom_id_for_game(owner_game)
+                if owner_rom_id:
+                    return owner_rom_id
+
+        return self._resolve_rom_id_for_game(resolved_game)
+
     def _launchable_native_game_file(self, path: Path) -> bool:
         return resolve_launchable_native_game_file(path)
 
@@ -3079,17 +3397,111 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._update_details_layout_metrics)
 
     def _perform_manage_saves_action(self) -> None:
+        timing_start = getattr(self, "_debug_timing_start", None)
+        timing_end = getattr(self, "_debug_timing_end", None)
+        started_at = timing_start(
+            "_perform_manage_saves_action",
+            title=(self.current_details_game or {}).get("title", ""),
+            platform=(self.current_details_game or {}).get("platform", ""),
+        ) if callable(timing_start) else 0.0
         self._toggle_details_cloud_mode("save")
+        if callable(timing_end):
+            timing_end("_perform_manage_saves_action", started_at, mode=self.current_details_cloud_mode)
 
     def _perform_manage_states_action(self) -> None:
+        timing_start = getattr(self, "_debug_timing_start", None)
+        timing_end = getattr(self, "_debug_timing_end", None)
+        started_at = timing_start(
+            "_perform_manage_states_action",
+            title=(self.current_details_game or {}).get("title", ""),
+            platform=(self.current_details_game or {}).get("platform", ""),
+        ) if callable(timing_start) else 0.0
         self._toggle_details_cloud_mode("state")
+        if callable(timing_end):
+            timing_end("_perform_manage_states_action", started_at, mode=self.current_details_cloud_mode)
+
+    def _details_cloud_button_visible(self, save_type: str) -> bool:
+        button = self.details_manage_saves_button if save_type == "save" else self.details_manage_states_button
+        if button is None:
+            return False
+        visible_fn = getattr(button, "isVisible", None)
+        if callable(visible_fn):
+            return bool(visible_fn())
+        visible_value = getattr(button, "visible", None)
+        if isinstance(visible_value, bool):
+            return visible_value
+        return True
+
+    def _details_cloud_active_button_text(self, save_type: str) -> str:
+        button = self.details_manage_saves_button if save_type == "save" else self.details_manage_states_button
+        if button is not None:
+            text_value = getattr(button, "text", None)
+            if callable(text_value):
+                resolved_text = str(text_value()).strip()
+                if resolved_text:
+                    return resolved_text
+            elif isinstance(text_value, str) and text_value.strip():
+                return text_value.strip()
+        if save_type == "save":
+            return self._details_cloud_button_text(self.current_details_game or {}, save_type)
+        return "Manage States"
+
+    def _show_details_cloud_loading_state(self, save_type: str) -> None:
+        timing_start = getattr(self, "_debug_timing_start", None)
+        timing_end = getattr(self, "_debug_timing_end", None)
+        started_at = timing_start("_show_details_cloud_loading_state", save_type=save_type) if callable(timing_start) else 0.0
+        if save_type not in {"save", "state"}:
+            if callable(timing_end):
+                timing_end("_show_details_cloud_loading_state", started_at, result="ignored-invalid")
+            return
+
+        kind_label = "saves" if save_type == "save" else "states"
+        title_text = self._details_cloud_active_button_text(save_type)
+
+        if self.details_center_stack is not None:
+            self.details_center_stack.setCurrentIndex(1)
+        if self.details_cloud_title_label is not None:
+            self.details_cloud_title_label.setText(title_text)
+        if self.details_cloud_upload_button is not None:
+            if save_type == "save" and title_text == "Emulator Saves":
+                self.details_cloud_upload_button.setText("Upload Emulator Saves")
+            else:
+                self.details_cloud_upload_button.setText(
+                    "Upload Latest Save" if save_type == "save" else "Upload Latest State"
+                )
+            self.details_cloud_upload_button.setEnabled(False)
+            self.details_cloud_upload_button.setToolTip("")
+        if self.details_cloud_status_label is not None:
+            self.details_cloud_status_label.setText(f"Loading cloud {kind_label}...")
+        if self.details_cloud_empty_label is not None and self.details_cloud_list_layout is not None:
+            self._clear_layout_items(self.details_cloud_list_layout)
+            self.details_cloud_empty_label.setText(f"Loading cloud {kind_label} from the server...")
+            self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
+            self.details_cloud_list_layout.addStretch()
+        if callable(timing_end):
+            timing_end("_show_details_cloud_loading_state", started_at, title=title_text)
 
     def _toggle_details_cloud_mode(self, save_type: str) -> None:
+        timing_start = getattr(self, "_debug_timing_start", None)
+        timing_end = getattr(self, "_debug_timing_end", None)
+        started_at = timing_start(
+            "_toggle_details_cloud_mode",
+            save_type=save_type,
+            current_mode=self.current_details_cloud_mode,
+        ) if callable(timing_start) else 0.0
         if save_type not in {"save", "state"}:
+            if callable(timing_end):
+                timing_end("_toggle_details_cloud_mode", started_at, result="ignored-invalid")
             return
         if self.current_details_cloud_mode == save_type:
             self._show_details_overview()
             self._update_details_layout_metrics()
+            if callable(timing_end):
+                timing_end("_toggle_details_cloud_mode", started_at, result="returned-overview")
+            return
+        if self.current_details_game is None or not self._details_cloud_button_visible(save_type):
+            if callable(timing_end):
+                timing_end("_toggle_details_cloud_mode", started_at, result="unsupported")
             return
 
         self.current_details_cloud_mode = save_type
@@ -3099,12 +3511,13 @@ class MainWindow(QMainWindow):
             self.details_manage_saves_button.setChecked(save_type == "save")
         if self.details_manage_states_button is not None:
             self.details_manage_states_button.setChecked(save_type == "state")
-        if self.details_center_stack is not None:
-            self.details_center_stack.setCurrentIndex(1)
 
-        self._refresh_details_cloud_panel()
+        self._show_details_cloud_loading_state(save_type)
         self._update_details_layout_metrics()
+        QTimer.singleShot(25, self._refresh_details_cloud_panel)
         QTimer.singleShot(0, self._update_details_layout_metrics)
+        if callable(timing_end):
+            timing_end("_toggle_details_cloud_mode", started_at, result="scheduled-refresh")
 
     def _perform_current_cloud_upload_action(self) -> None:
         if self.current_details_cloud_mode == "save":
@@ -3151,6 +3564,17 @@ class MainWindow(QMainWindow):
         resolved_emulator_name, resolved_emulator_entry = self._resolved_emulator_entry_for_game(resolved_game)
         record_emulator = str(record.get("emulator", "")).strip()
         compatibility_emulator_name = record_emulator or resolved_emulator_name
+        cache_key = (
+            save_type,
+            self._game_key(resolved_game),
+            compatibility_emulator_name.casefold(),
+        )
+        request_context = self.details_cloud_request_context if isinstance(self.details_cloud_request_context, dict) else {}
+        restore_cache = request_context.setdefault("restore_enabled_cache", {}) if isinstance(request_context, dict) else {}
+        cached_result = restore_cache.get(cache_key)
+        if isinstance(cached_result, tuple) and len(cached_result) == 2:
+            return bool(cached_result[0]), str(cached_result[1])
+
         compatibility_emulator_entry = resolved_emulator_entry
         record_emulator_entry = self._emulator_entry_by_name(record_emulator) if record_emulator else None
         if record_emulator_entry is not None:
@@ -3161,28 +3585,47 @@ class MainWindow(QMainWindow):
             compatibility_emulator_entry,
         )
         if compatibility_reason:
-            return False, compatibility_reason
+            result = (False, compatibility_reason)
+            restore_cache[cache_key] = result
+            return result
+
+        shared_notice = self._details_cloud_scope_notice(
+            resolved_game,
+            compatibility_emulator_name,
+            compatibility_emulator_entry,
+            save_type=save_type,
+        )
 
         if save_type == "state" and record_emulator and self._is_rpcs3_emulator_name(record_emulator, record_emulator_entry):
-            return False, "RPCS3 savestate restore is not supported yet."
+            result = (False, "RPCS3 savestate restore is not supported yet.")
+            restore_cache[cache_key] = result
+            return result
 
         emulator_name = record_emulator
         emulator_entry = record_emulator_entry
         if record_emulator and emulator_entry is None:
-            return False, f"Configure emulator '{record_emulator}' in Emulators to restore this entry."
+            result = (False, f"Configure emulator '{record_emulator}' in Emulators to restore this entry.")
+            restore_cache[cache_key] = result
+            return result
 
         if emulator_entry is None:
             emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(resolved_game)
             if emulator_entry is None:
-                return False, "No default emulator is configured for this platform."
+                result = (False, "No default emulator is configured for this platform.")
+                restore_cache[cache_key] = result
+                return result
 
         directory_key = "save_paths" if save_type == "save" else "state_paths"
         directories = self._resolved_sync_directory_paths(emulator_entry, directory_key)
         if not directories:
             kind_label = "save" if save_type == "save" else "state"
-            return False, f"No configured {kind_label} directories were found for emulator '{emulator_name}'."
+            result = (False, f"No configured {kind_label} directories were found for emulator '{emulator_name}'.")
+            restore_cache[cache_key] = result
+            return result
 
-        return True, ""
+        result = (True, shared_notice)
+        restore_cache[cache_key] = result
+        return result
 
     def _make_details_cloud_record_widget(self, record: dict[str, Any], save_type: str) -> QWidget:
         entry = QFrame()
@@ -3263,7 +3706,125 @@ class MainWindow(QMainWindow):
 
         return entry
 
+    def _start_details_cloud_records_worker(
+        self,
+        rom_id: str,
+        save_type: str,
+        *,
+        kind_label: str,
+        upload_reason: str,
+        emulator_name: str,
+    ) -> None:
+        timing_start = getattr(self, "_debug_timing_start", None)
+        timing_end = getattr(self, "_debug_timing_end", None)
+        started_at = timing_start("_start_details_cloud_records_worker", save_type=save_type, rom_id=rom_id) if callable(timing_start) else 0.0
+        self.details_cloud_request_id += 1
+        request_id = self.details_cloud_request_id
+        self.details_cloud_request_context = {
+            "request_id": request_id,
+            "save_type": save_type,
+            "kind_label": kind_label,
+            "upload_reason": upload_reason,
+            "emulator_name": emulator_name,
+        }
+
+        thread = QThread(self)
+        worker = DetailsCloudRecordsWorker(self, request_id, rom_id, save_type)
+        worker.moveToThread(thread)
+
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_details_cloud_records_loaded)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(lambda t=thread, w=worker: self._cleanup_details_cloud_worker(t, w))
+
+        self.details_cloud_threads.append(thread)
+        self.details_cloud_workers.append(worker)
+        QTimer.singleShot(0, thread.start)
+        if callable(timing_end):
+            timing_end("_start_details_cloud_records_worker", started_at, request_id=request_id)
+
+    def _cleanup_details_cloud_worker(self, thread: QThread, worker: DetailsCloudRecordsWorker) -> None:
+        self.details_cloud_threads = [item for item in self.details_cloud_threads if item is not thread]
+        self.details_cloud_workers = [item for item in self.details_cloud_workers if item is not worker]
+
+    def _on_details_cloud_records_loaded(
+        self,
+        request_id: int,
+        save_type: str,
+        records: object,
+        error: str,
+    ) -> None:
+        timing_start = getattr(self, "_debug_timing_start", None)
+        timing_end = getattr(self, "_debug_timing_end", None)
+        started_at = timing_start("_on_details_cloud_records_loaded", request_id=request_id, save_type=save_type) if callable(timing_start) else 0.0
+        if (
+            self.details_cloud_status_label is None
+            or self.details_cloud_empty_label is None
+            or self.details_cloud_list_layout is None
+        ):
+            if callable(timing_end):
+                timing_end("_on_details_cloud_records_loaded", started_at, result="missing-ui")
+            return
+        if request_id != self.details_cloud_request_id:
+            if callable(timing_end):
+                timing_end("_on_details_cloud_records_loaded", started_at, result="stale-request")
+            return
+        if self.current_details_cloud_mode != save_type:
+            if callable(timing_end):
+                timing_end("_on_details_cloud_records_loaded", started_at, result="mode-changed")
+            return
+
+        request_context = self.details_cloud_request_context
+        if int(request_context.get("request_id", -1)) != request_id:
+            if callable(timing_end):
+                timing_end("_on_details_cloud_records_loaded", started_at, result="context-mismatch")
+            return
+
+        kind_label = str(request_context.get("kind_label", "saves" if save_type == "save" else "states"))
+        upload_reason = str(request_context.get("upload_reason", "")).strip()
+        emulator_name = str(request_context.get("emulator_name", "")).strip()
+
+        self._clear_layout_items(self.details_cloud_list_layout)
+
+        if error:
+            self.details_cloud_status_label.setText(f"Could not load cloud {kind_label}: {error}")
+            self.details_cloud_empty_label.setText(f"Cloud {kind_label} could not be loaded right now.")
+            self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
+            self.details_cloud_list_layout.addStretch()
+            if callable(timing_end):
+                timing_end("_on_details_cloud_records_loaded", started_at, result="error", message=error)
+            return
+
+        ordered_records = sort_server_records_by_recency(
+            [item for item in records if isinstance(item, dict)] if isinstance(records, list) else [],
+            self._save_record_timestamp,
+        )
+        if ordered_records:
+            status_parts = [f"Showing {len(ordered_records)} cloud {kind_label}."]
+            if upload_reason:
+                status_parts.append(upload_reason)
+            elif emulator_name:
+                status_parts.append(f"Local uploads use {emulator_name}.")
+            self.details_cloud_status_label.setText(" ".join(status_parts))
+            for record in ordered_records:
+                self.details_cloud_list_layout.addWidget(self._make_details_cloud_record_widget(record, save_type))
+        else:
+            self.details_cloud_status_label.setText(
+                upload_reason if upload_reason else f"No cloud {kind_label} were found for this game yet."
+            )
+            self.details_cloud_empty_label.setText(f"No cloud {kind_label} were found on the server for this game.")
+            self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
+
+        self.details_cloud_list_layout.addStretch()
+        if callable(timing_end):
+            timing_end("_on_details_cloud_records_loaded", started_at, result="rendered", count=len(ordered_records))
+
     def _refresh_details_cloud_panel(self) -> None:
+        timing_start = getattr(self, "_debug_timing_start", None)
+        timing_end = getattr(self, "_debug_timing_end", None)
+        started_at = timing_start("_refresh_details_cloud_panel", mode=self.current_details_cloud_mode) if callable(timing_start) else 0.0
         if (
             self.details_center_stack is None
             or self.details_cloud_title_label is None
@@ -3272,21 +3833,33 @@ class MainWindow(QMainWindow):
             or self.details_cloud_upload_button is None
             or self.details_cloud_list_layout is None
         ):
+            if callable(timing_end):
+                timing_end("_refresh_details_cloud_panel", started_at, result="missing-ui")
             return
 
         save_type = self.current_details_cloud_mode
         if save_type not in {"save", "state"}:
+            if callable(timing_end):
+                timing_end("_refresh_details_cloud_panel", started_at, result="overview")
             return
 
         kind_label = "saves" if save_type == "save" else "states"
         singular_label = "save" if save_type == "save" else "state"
         self.details_center_stack.setCurrentIndex(1)
-        self.details_cloud_title_label.setText("Manage Saves" if save_type == "save" else "Manage States")
-        self.details_cloud_upload_button.setText("Upload Latest Save" if save_type == "save" else "Upload Latest State")
+
+        current_game = self.current_details_game
+        title_text = self._details_cloud_active_button_text(save_type) if current_game is not None else (
+            "Manage Saves" if save_type == "save" else "Manage States"
+        )
+        self.details_cloud_title_label.setText(title_text)
+        if save_type == "save" and title_text == "Emulator Saves":
+            self.details_cloud_upload_button.setText("Upload Emulator Saves")
+        else:
+            self.details_cloud_upload_button.setText("Upload Latest Save" if save_type == "save" else "Upload Latest State")
 
         self._clear_layout_items(self.details_cloud_list_layout)
 
-        if self.current_details_game is None:
+        if current_game is None:
             self.details_cloud_status_label.setText("No game is selected.")
             self.details_cloud_upload_button.setEnabled(False)
             self.details_cloud_upload_button.setToolTip("")
@@ -3295,8 +3868,24 @@ class MainWindow(QMainWindow):
             self.details_cloud_list_layout.addStretch()
             return
 
-        installed_game = self._installed_game_record(self.current_details_game)
-        if installed_game is None:
+        installed_game = self._installed_game_record(current_game)
+        target_game = installed_game if installed_game is not None else current_game
+        emulator_name, emulator_entry = self._resolved_cloud_emulator_entry_for_game(
+            target_game,
+            save_type=save_type,
+        )
+        shared_emulator_view = bool(
+            save_type == "save"
+            and self._is_emulators_platform(target_game)
+            and emulator_entry is not None
+            and self._cloud_save_scope_for_game(
+                target_game,
+                emulator_name,
+                emulator_entry,
+                save_type=save_type,
+            ) != "per-game"
+        )
+        if installed_game is None and not shared_emulator_view:
             self.details_cloud_status_label.setText(f"Install this game to manage cloud {kind_label}.")
             self.details_cloud_upload_button.setEnabled(False)
             self.details_cloud_upload_button.setToolTip("")
@@ -3305,9 +3894,8 @@ class MainWindow(QMainWindow):
             self.details_cloud_list_layout.addStretch()
             return
 
-        emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(installed_game)
         compatibility_reason = self._cloud_save_block_reason_for_game(
-            installed_game,
+            target_game,
             emulator_name,
             emulator_entry,
             save_type=save_type,
@@ -3320,7 +3908,12 @@ class MainWindow(QMainWindow):
             self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
             self.details_cloud_list_layout.addStretch()
             return
-        upload_reason = ""
+        upload_reason = self._details_cloud_scope_notice(
+            target_game,
+            emulator_name,
+            emulator_entry,
+            save_type=save_type,
+        )
         upload_enabled = True
         if emulator_entry is None:
             upload_enabled = False
@@ -3339,7 +3932,12 @@ class MainWindow(QMainWindow):
         self.details_cloud_upload_button.setEnabled(upload_enabled)
         self.details_cloud_upload_button.setToolTip(upload_reason)
 
-        rom_id = self._resolve_rom_id_for_game(installed_game)
+        rom_id = self._cloud_sync_rom_id_for_game(
+            target_game,
+            save_type=save_type,
+            emulator_name=emulator_name,
+            emulator=emulator_entry,
+        )
         if not rom_id:
             self.details_cloud_status_label.setText("Missing ROM id for this game.")
             self.details_cloud_empty_label.setText(f"Cloud {kind_label} could not be loaded for this game.")
@@ -3347,33 +3945,20 @@ class MainWindow(QMainWindow):
             self.details_cloud_list_layout.addStretch()
             return
 
-        try:
-            records = self._server_save_records_for_rom(rom_id) if save_type == "save" else self._server_state_records_for_rom(rom_id)
-        except (HTTPError, URLError, ValueError, json.JSONDecodeError) as error:
-            self.details_cloud_status_label.setText(f"Could not load cloud {kind_label}: {error}")
-            self.details_cloud_empty_label.setText(f"Cloud {kind_label} could not be loaded right now.")
-            self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
-            self.details_cloud_list_layout.addStretch()
-            return
-
-        ordered_records = sort_server_records_by_recency(records, self._save_record_timestamp)
-        if ordered_records:
-            status_parts = [f"Showing {len(ordered_records)} cloud {kind_label}."]
-            if upload_reason:
-                status_parts.append(upload_reason)
-            elif emulator_name.strip():
-                status_parts.append(f"Local uploads use {emulator_name}.")
-            self.details_cloud_status_label.setText(" ".join(status_parts))
-            for record in ordered_records:
-                self.details_cloud_list_layout.addWidget(self._make_details_cloud_record_widget(record, save_type))
-        else:
-            self.details_cloud_status_label.setText(
-                upload_reason if upload_reason else f"No cloud {kind_label} were found for this game yet."
-            )
-            self.details_cloud_empty_label.setText(f"No cloud {kind_label} were found on the server for this game.")
-            self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
-
+        self.details_cloud_status_label.setText(f"Loading cloud {kind_label}...")
+        self.details_cloud_empty_label.setText(f"Loading cloud {kind_label} from the server...")
+        self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
         self.details_cloud_list_layout.addStretch()
+
+        self._start_details_cloud_records_worker(
+            rom_id,
+            save_type,
+            kind_label=kind_label,
+            upload_reason=upload_reason,
+            emulator_name=emulator_name,
+        )
+        if callable(timing_end):
+            timing_end("_refresh_details_cloud_panel", started_at, result="worker-started", rom_id=rom_id)
 
     def _confirm_restore_details_cloud_record(self, record: dict[str, Any], save_type: str) -> None:
         if self.current_details_game is None:
@@ -3383,10 +3968,14 @@ class MainWindow(QMainWindow):
         target_game = installed_game if installed_game is not None else self.current_details_game
         kind_label = "save" if save_type == "save" else "state"
         game_title = str(target_game.get("title", "this game"))
+        shared_notice = self._details_cloud_scope_notice(target_game, save_type=save_type)
+        dialog_text = f"Restore the selected cloud {kind_label} for '{game_title}' and overwrite the local {kind_label} data?"
+        if shared_notice:
+            dialog_text = f"{dialog_text}\n\nWarning: {shared_notice}"
         response = QMessageBox.question(
             self,
             f"Restore Cloud {kind_label.title()}",
-            f"Restore the selected cloud {kind_label} for '{game_title}' and overwrite the local {kind_label} data?",
+            dialog_text,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -3405,10 +3994,17 @@ class MainWindow(QMainWindow):
     def _confirm_delete_details_cloud_record(self, record: dict[str, Any], save_type: str) -> None:
         title = self._details_cloud_record_title(record, save_type)
         kind_label = "save" if save_type == "save" else "state"
+        context_game = self._installed_game_record(self.current_details_game) if self.current_details_game is not None else None
+        if context_game is None and self.current_details_game is not None:
+            context_game = self.current_details_game
+        shared_notice = self._details_cloud_scope_notice(context_game or {}, save_type=save_type)
+        dialog_text = f"Delete '{title}' from the server? This cannot be undone."
+        if shared_notice:
+            dialog_text = f"{dialog_text}\n\nWarning: {shared_notice}"
         response = QMessageBox.question(
             self,
             f"Delete Cloud {kind_label.title()}",
-            f"Delete '{title}' from the server? This cannot be undone.",
+            dialog_text,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -3858,8 +4454,14 @@ class MainWindow(QMainWindow):
         return files, folder_targets
 
     def _resolved_sync_directory_paths(self, emulator: dict[str, str], key: str) -> list[Path]:
+        timing_start = getattr(self, "_debug_timing_start", None)
+        timing_end = getattr(self, "_debug_timing_end", None)
+        emulator_name_value = emulator.get("name", "")
+        emulator_name = emulator_name_value if isinstance(emulator_name_value, str) else ""
+        started_at = timing_start("_resolved_sync_directory_paths", emulator=emulator_name, key=key) if callable(timing_start) else 0.0
         configured_value = emulator.get(key, "")
         configured_paths = self._split_configured_paths(configured_value) if isinstance(configured_value, str) else []
+
 
         profile = self._emulator_profile_for_entry(emulator)
         profile_key = "save_directories" if key == "save_paths" else "state_directories"
@@ -3870,8 +4472,6 @@ class MainWindow(QMainWindow):
                 profile_paths = [item.strip() for item in raw_profile_paths if isinstance(item, str) and item.strip()]
 
         all_paths = configured_paths if configured_paths else profile_paths
-        emulator_name_value = emulator.get("name", "")
-        emulator_name = emulator_name_value if isinstance(emulator_name_value, str) else ""
         self._ensure_emulator_sync_settings(emulator_name, emulator.get("path", ""))
         if not configured_paths and self._is_retroarch_emulator_name(emulator_name, emulator):
             directory_settings = resolve_retroarch_directory_settings(emulator.get("path", ""))
@@ -4133,6 +4733,8 @@ class MainWindow(QMainWindow):
                 all_paths = merged_paths
 
         if not all_paths:
+            if callable(timing_end):
+                timing_end("_resolved_sync_directory_paths", started_at, result=0)
             return []
 
         emulator_path_value = emulator.get("path", "")
@@ -4171,6 +4773,8 @@ class MainWindow(QMainWindow):
                 continue
             seen.add(key_value)
             unique.append(path)
+        if callable(timing_end):
+            timing_end("_resolved_sync_directory_paths", started_at, result=len(unique))
         return unique
 
     def _cemu_save_directories_for_game(
@@ -4692,6 +5296,60 @@ class MainWindow(QMainWindow):
         records = self._server_save_records_for_rom(rom_id)
         return latest_server_record(records, emulator_name, self._save_record_timestamp)
 
+    def _latest_server_save_records_for_game(
+        self,
+        game: dict[str, str],
+        rom_id: str,
+        emulator_name: str,
+        emulator_entry: dict[str, str] | None,
+    ) -> list[dict[str, Any]]:
+        records = self._server_save_records_for_rom(rom_id)
+        save_scope = self._cloud_save_scope_for_game(
+            game,
+            emulator_name,
+            emulator_entry,
+            save_type="save",
+        )
+        if save_scope != "per-game":
+            return latest_server_records_by_slot(records, emulator_name, self._save_record_timestamp)
+        latest = latest_server_record(records, emulator_name, self._save_record_timestamp)
+        return [latest] if latest is not None else []
+
+    def _cloud_save_slot_for_upload_job(
+        self,
+        game: dict[str, str],
+        emulator_name: str,
+        emulator_entry: dict[str, str] | None,
+        save_type: str,
+        display_name: str,
+        files_payload: dict[str, Path],
+    ) -> str:
+        if save_type != "save":
+            return ""
+
+        save_scope = self._cloud_save_scope_for_game(
+            game,
+            emulator_name,
+            emulator_entry,
+            save_type=save_type,
+        )
+        if save_scope == "shared-single":
+            return "shared-media"
+        if save_scope != "shared-slotted":
+            return ""
+
+        candidate_names = [display_name.strip().casefold()]
+        for path in files_payload.values():
+            if isinstance(path, Path):
+                candidate_names.append(path.stem.strip().casefold())
+                candidate_names.append(path.name.strip().casefold())
+
+        for candidate in candidate_names:
+            match = re.search(r"vmu([0-3])", candidate)
+            if match is not None:
+                return f"vmu{match.group(1)}"
+        return ""
+
     def _server_state_records_for_rom(self, rom_id: str) -> list[dict[str, Any]]:
         payload = self._api_get("/api/states", {"rom_id": rom_id})
         return server_records_from_payload(payload)
@@ -4703,7 +5361,19 @@ class MainWindow(QMainWindow):
     def _prune_server_save_records(self, rom_id: str, emulator_name: str, keep_latest: int) -> tuple[int, list[str]]:
         keep = max(1, keep_latest)
         records = self._server_save_records_for_rom(rom_id)
-        matching_records = [item for item in records if isinstance(item, dict)]
+        emulator_key = emulator_name.strip().casefold()
+        matching_records = [
+            item
+            for item in records
+            if isinstance(item, dict)
+            and (
+                not emulator_key
+                or (
+                    isinstance(item.get("emulator"), str)
+                    and item.get("emulator", "").strip().casefold() == emulator_key
+                )
+            )
+        ]
         debug_enabled = self._debug_prints_enabled()
 
         def _id_rank(record: dict[str, Any]) -> int:
@@ -4714,7 +5384,26 @@ class MainWindow(QMainWindow):
                 return 0
 
         matching_records.sort(key=lambda item: (self._save_record_timestamp(item), _id_rank(item)), reverse=True)
-        stale_records = matching_records[keep:]
+
+        grouped_records: dict[str, list[dict[str, Any]]] = {}
+        group_order: list[str] = []
+        for item in matching_records:
+            slot_value = item.get("slot", "")
+            slot_key = slot_value.strip().casefold() if isinstance(slot_value, str) else ""
+            if not slot_key:
+                file_name_value = item.get("file_name", "")
+                if isinstance(file_name_value, str) and file_name_value.strip():
+                    slot_key = Path(file_name_value).stem.strip().casefold()
+            if not slot_key:
+                slot_key = "__default__"
+            if slot_key not in grouped_records:
+                grouped_records[slot_key] = []
+                group_order.append(slot_key)
+            grouped_records[slot_key].append(item)
+
+        stale_records: list[dict[str, Any]] = []
+        for group_key in group_order:
+            stale_records.extend(grouped_records.get(group_key, [])[keep:])
 
         if debug_enabled:
             stale_ids_preview = [str(item.get("id", "")).strip() for item in stale_records[:10] if isinstance(item, dict)]
@@ -4881,7 +5570,7 @@ class MainWindow(QMainWindow):
             if show_dialogs:
                 QMessageBox.information(self, "Cloud Sync", message)
 
-        emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(game)
+        emulator_name, emulator_entry = self._resolved_cloud_emulator_entry_for_game(game, save_type="save")
         compatibility_reason = self._cloud_save_block_reason_for_game(
             game,
             emulator_name,
@@ -4892,12 +5581,17 @@ class MainWindow(QMainWindow):
             show_info(compatibility_reason)
             return False
 
-        rom_id = self._resolve_rom_id_for_game(game)
+        rom_id = self._cloud_sync_rom_id_for_game(
+            game,
+            save_type="save",
+            emulator_name=emulator_name,
+            emulator=emulator_entry,
+        )
         if not rom_id:
             show_warning("Missing ROM id for this game.")
             return False
 
-        emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(game)
+        emulator_name, emulator_entry = self._resolved_cloud_emulator_entry_for_game(game, save_type="save")
         requested_emulator_name = ""
         if save_record is not None:
             emulator_value = save_record.get("emulator", "")
@@ -4922,23 +5616,39 @@ class MainWindow(QMainWindow):
             show_warning(f"No save directories were found for emulator '{emulator_name}'. Configure them in Emulators.")
             return False
 
+        save_records_to_restore: list[dict[str, Any]]
         if save_record is None:
             try:
-                save_record = self._latest_server_save_record(rom_id, emulator_name)
+                save_records_to_restore = self._latest_server_save_records_for_game(
+                    game,
+                    rom_id,
+                    emulator_name,
+                    emulator_entry,
+                )
             except (HTTPError, URLError, ValueError, json.JSONDecodeError) as error:
                 show_warning(f"Failed to query server saves: {error}")
                 return False
+        else:
+            save_records_to_restore = [dict(save_record)]
 
-        if save_record is None:
+        if not save_records_to_restore:
             show_info("No cloud save was found on the server for this game.")
             return False
 
-        save_id = str(save_record.get("id", "")).strip()
+        primary_save_record = save_records_to_restore[0]
+        save_id = str(primary_save_record.get("id", "")).strip()
         if not save_id:
             show_warning("Server save record is missing an id.")
             return False
 
-        if skip_if_known_latest:
+        save_scope = self._cloud_save_scope_for_game(
+            game,
+            emulator_name,
+            emulator_entry,
+            save_type="save",
+        )
+
+        if skip_if_known_latest and save_scope == "per-game":
             sync_state = self._cloud_sync_state_for_game(game)
             last_downloaded_save_id = str(sync_state.get("last_downloaded_save_id", "")).strip()
             if last_downloaded_save_id and last_downloaded_save_id == save_id:
@@ -4965,7 +5675,10 @@ class MainWindow(QMainWindow):
                     )
             else:
                 local_latest_mtime = self._latest_local_save_mtime_for_game(game, emulator_name, directories)
-                server_latest_timestamp = self._save_record_timestamp(save_record)
+                server_latest_timestamp = max(
+                    (self._save_record_timestamp(item) for item in save_records_to_restore),
+                    default=0.0,
+                )
                 if is_local_newer_than_server(local_latest_mtime, server_latest_timestamp):
                     if debug_enabled:
                         print(
@@ -4974,16 +5687,6 @@ class MainWindow(QMainWindow):
                             f"server_ts={server_latest_timestamp:.0f} save_id={save_id}"
                         )
                     return False
-
-        try:
-            payload = self._download_server_save_content(save_id)
-        except (HTTPError, URLError, OSError, ValueError) as error:
-            show_warning(f"Failed to download cloud save content: {error}")
-            return False
-
-        if not payload:
-            show_warning("Downloaded cloud save content was empty.")
-            return False
 
         is_folder_save = (
             self._is_ppsspp_emulator_name(emulator_name, emulator_entry)
@@ -4994,47 +5697,65 @@ class MainWindow(QMainWindow):
         skip_basenames = self._sync_directory_ignore_basenames_for_emulator(emulator_name, emulator_entry, "save")
         skip_extensions = self._sync_directory_ignore_extensions_for_emulator(emulator_entry)
         restored_target = ""
+        latest_restored_id = save_id
+        latest_server_timestamp = max(
+            (self._save_record_timestamp(item) for item in save_records_to_restore),
+            default=0.0,
+        )
         try:
-            if is_folder_save:
-                restored_count = self._extract_zip_archive_bytes_to_directory(
-                    payload,
-                    directories[0],
-                    skip_basenames=skip_basenames,
-                    skip_extensions=skip_extensions,
-                )
-                if restored_count <= 0:
-                    show_warning("Save archive downloaded, but no files were restored.")
-                    return False
-                restored_target = str(directories[0])
-            else:
-                restored_file = self._restore_single_save_file(
-                    game,
-                    directories,
-                    save_record,
-                    payload,
-                    ignore_basenames=skip_basenames,
-                    ignore_extensions=skip_extensions,
-                )
-                if restored_file is None:
-                    show_warning("Save content downloaded, but no file was restored.")
-                    return False
-                restored_target = str(restored_file)
-        except (OSError, ValueError, zipfile.BadZipFile) as error:
+            for active_save_record in save_records_to_restore:
+                active_save_id = str(active_save_record.get("id", "")).strip()
+                if not active_save_id:
+                    raise ValueError("Server save record is missing an id.")
+
+                payload = self._download_server_save_content(active_save_id)
+                if not payload:
+                    raise ValueError("Downloaded cloud save content was empty.")
+
+                if is_folder_save:
+                    restored_count = self._extract_zip_archive_bytes_to_directory(
+                        payload,
+                        directories[0],
+                        skip_basenames=skip_basenames,
+                        skip_extensions=skip_extensions,
+                    )
+                    if restored_count <= 0:
+                        raise ValueError("Save archive downloaded, but no files were restored.")
+                    restored_target = str(directories[0])
+                else:
+                    restored_file = self._restore_single_save_file(
+                        game,
+                        directories,
+                        active_save_record,
+                        payload,
+                        ignore_basenames=skip_basenames,
+                        ignore_extensions=skip_extensions,
+                    )
+                    if restored_file is None:
+                        raise ValueError("Save content downloaded, but no file was restored.")
+                    restored_target = str(restored_file)
+
+                active_timestamp = self._save_record_timestamp(active_save_record)
+                if active_timestamp >= latest_server_timestamp:
+                    latest_server_timestamp = active_timestamp
+                    latest_restored_id = active_save_id
+        except (HTTPError, URLError, OSError, ValueError, zipfile.BadZipFile) as error:
             show_warning(f"Failed to restore cloud save: {error}")
             return False
 
         self._update_cloud_sync_state_for_game(
             game,
             {
-                "last_downloaded_save_id": save_id,
-                "last_server_timestamp": self._save_record_timestamp(save_record),
+                "last_downloaded_save_id": latest_restored_id,
+                "last_server_timestamp": latest_server_timestamp,
             },
         )
 
         if debug_enabled:
             print(
                 f"[DEBUG][CloudSync] Restore success save_type=save title={game.get('title', '')} "
-                f"rom_id={rom_id} emulator={emulator_name} save_id={save_id} target={restored_target}"
+                f"rom_id={rom_id} emulator={emulator_name} restored={len(save_records_to_restore)} "
+                f"save_id={latest_restored_id} target={restored_target}"
             )
 
         show_info("Cloud save restored successfully.")
@@ -5058,7 +5779,7 @@ class MainWindow(QMainWindow):
             if show_dialogs:
                 QMessageBox.information(self, "Cloud Sync", message)
 
-        emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(game)
+        emulator_name, emulator_entry = self._resolved_cloud_emulator_entry_for_game(game, save_type="state")
         compatibility_reason = self._cloud_save_block_reason_for_game(
             game,
             emulator_name,
@@ -5074,7 +5795,7 @@ class MainWindow(QMainWindow):
             show_warning("Missing ROM id for this game.")
             return False
 
-        emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(game)
+        emulator_name, emulator_entry = self._resolved_cloud_emulator_entry_for_game(game, save_type="state")
         requested_emulator_name = ""
         if state_record is not None:
             emulator_value = state_record.get("emulator", "")
@@ -5217,7 +5938,7 @@ class MainWindow(QMainWindow):
             if show_dialogs:
                 QMessageBox.information(self, "Cloud Sync", message)
 
-        emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(game)
+        emulator_name, emulator_entry = self._resolved_cloud_emulator_entry_for_game(game, save_type=save_type)
         compatibility_reason = self._cloud_save_block_reason_for_game(
             game,
             emulator_name,
@@ -5228,7 +5949,12 @@ class MainWindow(QMainWindow):
             show_info(compatibility_reason)
             return 0, 0, []
 
-        rom_id = self._resolve_rom_id_for_game(game)
+        rom_id = self._cloud_sync_rom_id_for_game(
+            game,
+            save_type=save_type,
+            emulator_name=emulator_name,
+            emulator=emulator_entry,
+        )
         if not rom_id:
             show_warning("Missing ROM id for this game.")
             return 0, 0, []
@@ -5277,17 +6003,34 @@ class MainWindow(QMainWindow):
                 ),
             )
             temporary_archives.extend(directory_archives)
-            grouped_jobs, file_archives = grouped_file_upload_jobs(
-                save_files,
-                file_field,
-                lambda files: zip_selected_files_for_upload(
-                    files,
-                    self._sanitize_path_component(game.get("title", "game"), "save"),
+            save_scope = self._cloud_save_scope_for_game(
+                game,
+                emulator_name,
+                emulator_entry,
+                save_type="save",
+            )
+            if save_scope == "shared-single" and save_files:
+                shared_archive = zip_selected_files_for_upload(
+                    save_files,
+                    self._sanitize_path_component(emulator_name or game.get("title", "game"), "save"),
                     ignore_basenames=ignore_basenames,
                     ignore_extensions=ignore_extensions,
-                ),
-            )
-            temporary_archives.extend(file_archives)
+                )
+                temporary_archives.append(shared_archive)
+                grouped_jobs = [(f"{emulator_name or 'Shared Save'} Storage", {file_field: shared_archive})]
+                file_archives: list[Path] = []
+            else:
+                grouped_jobs, file_archives = grouped_file_upload_jobs(
+                    save_files,
+                    file_field,
+                    lambda files: zip_selected_files_for_upload(
+                        files,
+                        self._sanitize_path_component(game.get("title", "game"), "save"),
+                        ignore_basenames=ignore_basenames,
+                        ignore_extensions=ignore_extensions,
+                    ),
+                )
+                temporary_archives.extend(file_archives)
             upload_jobs.extend(archived_jobs)
             upload_jobs.extend(grouped_jobs)
             if not upload_jobs:
@@ -5345,6 +6088,16 @@ class MainWindow(QMainWindow):
             }
             if save_type == "save":
                 params["overwrite"] = "true"
+                slot_value = self._cloud_save_slot_for_upload_job(
+                    game,
+                    emulator_name,
+                    emulator_entry,
+                    save_type,
+                    display_name,
+                    files_payload,
+                )
+                if slot_value:
+                    params["slot"] = slot_value
             try:
                 self._api_post_multipart(endpoint, files_payload, params=params)
                 success_count += 1
@@ -5618,14 +6371,21 @@ class MainWindow(QMainWindow):
         return self._emulator_matches_tokens(emulator_name, "duckstation", emulator=emulator)
 
     def _ensure_emulator_sync_settings(self, emulator_name: str, emulator_path_text: str) -> None:
+        timing_start = getattr(self, "_debug_timing_start", None)
+        timing_end = getattr(self, "_debug_timing_end", None)
+        started_at = timing_start("_ensure_emulator_sync_settings", emulator=emulator_name) if callable(timing_start) else 0.0
         path_text = emulator_path_text.strip() if isinstance(emulator_path_text, str) else ""
         if not path_text:
+            if callable(timing_end):
+                timing_end("_ensure_emulator_sync_settings", started_at, result="no-path")
             return
         emulator_entry = {"name": emulator_name, "path": path_text}
         if self._is_retroarch_emulator_name(emulator_name, emulator_entry):
             resolve_ensure_retroarch_save_location_settings(path_text)
         if self._is_duckstation_emulator_name(emulator_name, emulator_entry):
             resolve_ensure_duckstation_memory_card_settings(path_text)
+        if callable(timing_end):
+            timing_end("_ensure_emulator_sync_settings", started_at, result="done")
 
     def _is_retroarch_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
         return self._emulator_matches_tokens(emulator_name, "retroarch", emulator=emulator)

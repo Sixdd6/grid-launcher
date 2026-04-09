@@ -38,7 +38,7 @@ On first launch, or when required configuration is missing, the app should promp
 The user must complete this setup before continuing into the main application.
 
 ### Game Details View
-Clicking on a game in the Library or Server sections opens a sub view with more information about the game and a button bar with Back, Saves and States buttons.
+Clicking on a game in the Library or Server sections opens a sub view with more information about the game and a button bar with Back, Details, and cloud save/state actions when supported.
 The sub view should include a larger cover art image, title/description/platform/rating information, and any available screenshots in a vertical scrollable area.
 
 The action area should be left-aligned in the center column and should update based on the game state and may include:
@@ -50,13 +50,16 @@ The action area should be left-aligned in the center column and should update ba
 The button bar area should be left-aligned above the cover art in the left column and include:
 - 'Back'
 - 'Details'
-- `Manage Saves`
-- `Manage States`
+- `Manage Saves` for normal per-game cloud-save platforms
+- `Emulator Saves` for shared/global save media such as Xemu and Redream VMUs
+- `Manage States` when state sync is supported for that platform
 
 ### Manage Saves/States
-Clicking the Manage Saves or Manage States buttons in the button bar should replace/overlay the middle column of the Game Details view with a panel listing all saves or states for the current game being viewed, based on the button that was clicked. The view should include a button to manually upload the latest save/state for that game.
+Clicking the Manage Saves, Emulator Saves, or Manage States buttons in the button bar should switch the middle column of the Game Details view immediately and then populate the cloud list asynchronously for responsive feedback. The view should include a button to manually upload the latest save/state for that scope.
 
 The Saves/States should be listed in a vertical column with the name of the emulator used, file size, upload time and display relative 'x hours/minutes ago'. Each save in the list should also have right-aligned buttons: one to manually restore the save from the server, overwriting the local save (with confirmation prompt explaining the overwrite) and one to delete the save from the server (with confirmation prompt).
+
+When the panel is showing `Emulator Saves`, the entries represent shared emulator media rather than a single game's private save files, and the UI should warn the player that restoring or deleting those entries can affect every game using that shared emulator storage.
 
 ### Native Game Settings
 For installed native games, the details view should expose a game settings dialog where the player can:
@@ -75,6 +78,8 @@ Core behavior should include:
 - optional skipping of cloud download when the local save appears newer
 - separate handling for save files and emulator state files
 - per-emulator configuration that determines how save discovery and filtering works
+- shared-save emulator scopes that surface emulator-wide backups with explicit warnings instead of pretending they are per-game saves
+- immediate UI view switching with asynchronous cloud-record loading so the details panel remains responsive
 
 ## Folder-based saves
 For emulators which store saves in a subfolder, the archive should include the relevant subfolder and its contents.
@@ -84,6 +89,11 @@ For emulators which store saves as a single file in a common location, memory ca
 Configured save/state roots may point to either directories or explicit files from the emulator autoprofiles.
 When multiple companion files belong to one logical save upload, the client should package them into a single archive for upload and unpack that archive back into the proper local location during restore.
 Distinct savestate slots should remain separate logical uploads.
+
+Special shared-media handling should include:
+- Xemu save uploads should use one shared emulator-media backup scope per user to avoid accidental cross-game rollback confusion.
+- Redream regular saves should retain one latest backup per VMU slot globally per user.
+- Redream savestates should remain per-game safe to sync and must recognize both title-based and hash-based numeric `*.0.sav` naming.
 
 ## Session-aware sync behavior
 The sync flow should track recent game sessions so that auto-upload focuses on files changed during or immediately after play.

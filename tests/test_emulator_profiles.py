@@ -635,7 +635,7 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
         self.assertEqual(settings["config_path"], str(config_path.resolve()))
         self.assertEqual(settings["portable"], "true")
 
-    def test_redream_save_and_state_path_overrides_keep_shared_vmus_disabled(self) -> None:
+    def test_redream_save_and_state_path_overrides_include_global_vmus_and_state_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             emulator_dir = Path(temp_dir) / "redream"
             emulator_dir.mkdir()
@@ -654,10 +654,18 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
                 str.split,
             )
 
-        self.assertEqual(save_overrides, [])
+        self.assertEqual(
+            save_overrides,
+            [
+                str((emulator_dir / "vmu0.bin").resolve()),
+                str((emulator_dir / "vmu1.bin").resolve()),
+                str((emulator_dir / "vmu2.bin").resolve()),
+                str((emulator_dir / "vmu3.bin").resolve()),
+            ],
+        )
         self.assertEqual(state_overrides, [str(emulator_dir.resolve())])
 
-    def test_cloud_save_block_reason_for_original_xbox_uses_incompatible_message(self) -> None:
+    def test_cloud_save_block_reason_for_original_xbox_allows_xemu_shared_media_sync(self) -> None:
         reason = cloud_save_block_reason_for_game(
             {"platform": "Xbox", "title": "Halo"},
             is_native_executable_platform=is_native_executable_platform,
@@ -665,7 +673,7 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
             is_xemu_emulator_name=lambda value: "xemu" in value.casefold(),
         )
 
-        self.assertEqual(reason, "This system is not compatible with cloudsaves at this time.")
+        self.assertEqual(reason, "")
 
     def test_cloud_save_block_reason_does_not_disable_xbox_360_by_name_match(self) -> None:
         reason = cloud_save_block_reason_for_game(
@@ -677,7 +685,7 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
 
         self.assertEqual(reason, "")
 
-    def test_cloud_save_block_reason_for_redream_saves_uses_incompatible_message(self) -> None:
+    def test_cloud_save_block_reason_for_redream_saves_allows_shared_vmu_sync(self) -> None:
         reason = cloud_save_block_reason_for_game(
             {"platform": "Dreamcast", "title": "Sonic Adventure"},
             is_native_executable_platform=is_native_executable_platform,
@@ -687,10 +695,7 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
             save_type="save",
         )
 
-        self.assertEqual(
-            reason,
-            "This emulator is not compatible with cloud saves at this time, as an alternative please use save states instead.",
-        )
+        self.assertEqual(reason, "")
 
     def test_cloud_save_block_reason_does_not_disable_redream_states(self) -> None:
         reason = cloud_save_block_reason_for_game(

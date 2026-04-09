@@ -112,10 +112,21 @@ def redream_save_path_overrides(
     launch_template: str,
     split_launch_template_args: Callable[[str], list[str]],
 ) -> list[str]:
-    del emulator_path_text
-    del launch_template
-    del split_launch_template_args
-    return []
+    settings = redream_directory_settings(emulator_path_text, launch_template, split_launch_template_args)
+    data_root_text = settings.get("data_root", "")
+    if not isinstance(data_root_text, str) or not data_root_text.strip():
+        return []
+
+    data_root = Path(data_root_text).expanduser()
+    if not data_root.exists() or not data_root.is_dir():
+        return []
+
+    vmu_paths = [
+        data_root / f"vmu{index}.bin"
+        for index in range(4)
+        if (data_root / f"vmu{index}.bin").exists() and (data_root / f"vmu{index}.bin").is_file()
+    ]
+    return [str(path) for path in _unique_paths(vmu_paths)]
 
 
 def redream_state_path_overrides(

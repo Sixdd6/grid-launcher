@@ -112,6 +112,41 @@ def latest_server_record(
     return selection[0] if selection else None
 
 
+def latest_server_records_by_slot(
+    records: list[dict[str, Any]],
+    emulator_name: str,
+    timestamp_fn: Callable[[dict[str, Any]], float],
+) -> list[dict[str, Any]]:
+    if not records:
+        return []
+
+    emulator_key = emulator_name.strip().casefold()
+    emulator_records = [
+        item
+        for item in records
+        if isinstance(item.get("emulator"), str)
+        and item.get("emulator", "").strip().casefold() == emulator_key
+    ]
+    selection = sort_server_records_by_recency(list(emulator_records if emulator_records else records), timestamp_fn)
+
+    latest: list[dict[str, Any]] = []
+    seen_slots: set[str] = set()
+    for item in selection:
+        slot_value = item.get("slot", "")
+        slot_key = slot_value.strip().casefold() if isinstance(slot_value, str) else ""
+        if not slot_key:
+            file_name_value = item.get("file_name", "")
+            if isinstance(file_name_value, str) and file_name_value.strip():
+                slot_key = Path(file_name_value).stem.strip().casefold()
+        if not slot_key:
+            slot_key = "__default__"
+        if slot_key in seen_slots:
+            continue
+        seen_slots.add(slot_key)
+        latest.append(item)
+    return latest
+
+
 def preferred_restore_target_path(
     directories: list[Path],
     record_file_name: str,

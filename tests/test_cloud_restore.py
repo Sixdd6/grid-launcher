@@ -7,11 +7,14 @@ import zipfile
 from pathlib import Path
 
 from rom_mate.library.cloud_restore import (
+    latest_server_records_by_slot,
     relative_timestamp_text,
     restore_single_save_payload,
     restore_single_state_payload,
+    save_record_timestamp,
     sort_server_records_by_recency,
 )
+from rom_mate.library.cloud_sync import cloud_sync_candidates_for_game
 
 
 class CloudRestoreTests(unittest.TestCase):
@@ -32,6 +35,18 @@ class CloudRestoreTests(unittest.TestCase):
         ordered = sort_server_records_by_recency(records, timestamp_fn=lambda item: 1 if item["id"] == "2" else 2)
 
         self.assertEqual([item["id"] for item in ordered], ["9", "4", "2"])
+
+    def test_latest_server_records_by_slot_keeps_newest_entry_per_slot(self) -> None:
+        records = [
+            {"id": "1", "emulator": "Redream", "slot": "vmu0", "updated_at": "2026-04-08T09:00:00Z"},
+            {"id": "2", "emulator": "Redream", "slot": "vmu0", "updated_at": "2026-04-08T10:00:00Z"},
+            {"id": "3", "emulator": "Redream", "slot": "vmu1", "updated_at": "2026-04-08T08:30:00Z"},
+            {"id": "4", "emulator": "Other", "slot": "vmu0", "updated_at": "2026-04-08T11:00:00Z"},
+        ]
+
+        grouped = latest_server_records_by_slot(records, "Redream", save_record_timestamp)
+
+        self.assertEqual([item["id"] for item in grouped], ["2", "3"])
 
     def test_restore_single_save_payload_prefers_exact_candidate_filename(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -55,6 +70,55 @@ class CloudRestoreTests(unittest.TestCase):
             self.assertEqual(restored, srm_path)
             self.assertEqual(srm_path.read_bytes(), b"srm-new")
             self.assertEqual(rtc_path.read_bytes(), b"rtc-old")
+
+    def test_cloud_sync_candidates_for_game_matches_redream_numeric_savestate_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_root = Path(temp_dir) / "states"
+            state_root.mkdir(parents=True)
+            state_file = state_root / "Sonic Adventure.0.sav"
+            state_file.write_bytes(b"state")
+
+            candidates = cloud_sync_candidates_for_game(
+                {"title": "Sonic Adventure", "platform": "Dreamcast", "rom_file_name": "Sonic Adventure.chd"},
+                [state_root],
+                "state",
+                lambda game: {"sonicadventure", "sonic", "adventure"},
+                lambda path: path.name.casefold().endswith(".0.sav"),
+            )
+
+            self.assertEqual(candidates, [state_file])
+
+    def test_cloud_sync_candidates_for_game_falls_back_to_latest_redream_hash_group(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_root = Path(temp_dir) / "states"
+            state_root.mkdir(parents=True)
+
+            older_state = state_root / "A1B2C3D4.0.sav"
+            older_state.write_bytes(b"older")
+            latest_state = state_root / "D4A53E48.0.sav"
+            latest_state.write_bytes(b"latest")
+            companion_state = state_root / "D4A53E48.1.sav"
+            companion_state.write_bytes(b"slot-1")
+
+            older_mtime = 1_000_000
+            latest_mtime = older_mtime + 60
+            older_state.touch()
+            latest_state.touch()
+            companion_state.touch()
+            import os
+            os.utime(older_state, (older_mtime, older_mtime))
+            os.utime(latest_state, (latest_mtime, latest_mtime))
+            os.utime(companion_state, (latest_mtime, latest_mtime))
+
+            candidates = cloud_sync_candidates_for_game(
+                {"title": "Jet Grind Radio", "platform": "Dreamcast", "rom_file_name": "Jet Grind Radio (USA).chd"},
+                [state_root],
+                "state",
+                lambda game: {"jetgrindradio", "jet", "grind", "radio"},
+                lambda path: path.name.casefold().endswith(".sav"),
+            )
+
+            self.assertEqual(candidates, [latest_state, companion_state])
 
     def test_restore_single_state_payload_keeps_nested_candidate_folder(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

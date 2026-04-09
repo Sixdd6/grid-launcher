@@ -75,6 +75,12 @@ class GameDetailsWindowProtocol(Protocol):
     def _resolved_emulator_entry_for_game(self, game: dict[str, str]) -> tuple[str, dict[str, str] | None]:
         ...
 
+    def _details_cloud_mode_supported(self, game: dict[str, str], save_type: str) -> bool:
+        ...
+
+    def _details_cloud_button_text(self, game: dict[str, str], save_type: str) -> str:
+        ...
+
     def _is_rpcs3_emulator_name(self, emulator_name: str) -> bool:
         ...
 
@@ -199,24 +205,32 @@ def update_details_action_buttons(window: GameDetailsWindowProtocol) -> None:
         window.details_config_button.setVisible(show_config)
         window.details_config_button.setEnabled(show_config and not installing_current)
 
-    cloud_sync_supported = installed and not is_emulator_entry and not window._is_native_executable_platform(current_game)
+    cloud_sync_supported = not window._is_native_executable_platform(current_game)
+    save_mode_supported = cloud_sync_supported and window._details_cloud_mode_supported(current_game, "save")
+    state_mode_supported = cloud_sync_supported and window._details_cloud_mode_supported(current_game, "state")
 
     if window.details_details_button is not None:
         window.details_details_button.setVisible(True)
         window.details_details_button.setEnabled(True)
         window.details_details_button.setChecked(window.current_details_cloud_mode == "overview")
     if window.details_manage_saves_button is not None:
-        window.details_manage_saves_button.setVisible(True)
-        window.details_manage_saves_button.setEnabled(cloud_sync_supported and not installing_current)
-        if not cloud_sync_supported:
+        window.details_manage_saves_button.setText(window._details_cloud_button_text(current_game, "save"))
+        window.details_manage_saves_button.setVisible(save_mode_supported)
+        window.details_manage_saves_button.setEnabled(save_mode_supported and not installing_current)
+        if not save_mode_supported:
             window.details_manage_saves_button.setChecked(False)
     if window.details_manage_states_button is not None:
-        window.details_manage_states_button.setVisible(True)
-        window.details_manage_states_button.setEnabled(cloud_sync_supported and not installing_current)
-        if not cloud_sync_supported:
+        window.details_manage_states_button.setText(window._details_cloud_button_text(current_game, "state"))
+        window.details_manage_states_button.setVisible(state_mode_supported)
+        window.details_manage_states_button.setEnabled(state_mode_supported and not installing_current)
+        if not state_mode_supported:
             window.details_manage_states_button.setChecked(False)
 
-    if not cloud_sync_supported and window.current_details_cloud_mode != "overview":
+    if (
+        (window.current_details_cloud_mode == "save" and not save_mode_supported)
+        or (window.current_details_cloud_mode == "state" and not state_mode_supported)
+        or ((not save_mode_supported and not state_mode_supported) and window.current_details_cloud_mode != "overview")
+    ):
         window._show_details_overview()
 
     if window.details_secondary_button is not None:

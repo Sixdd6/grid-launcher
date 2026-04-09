@@ -113,6 +113,7 @@ from .retroarch import (
 from .selection import (
     available_emulator_name_for_platform,
     cloud_save_block_reason_for_game,
+    cloud_save_scope_for_game,
     compatible_emulator_names_for_platform,
     default_assignable_server_platforms,
     default_emulator_name_for_platform,
@@ -138,6 +139,7 @@ __all__ = [
     "auto_configured_emulator_name",
     "available_emulator_name_for_platform",
     "cloud_save_block_reason_for_game",
+    "cloud_save_scope_for_game",
     "azahar_directory_settings",
     "azahar_save_path_overrides",
     "azahar_state_path_overrides",

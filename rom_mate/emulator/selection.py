@@ -35,6 +35,35 @@ def is_original_xbox_platform(game: dict[str, str]) -> bool:
     return True
 
 
+def cloud_save_scope_for_game(
+    game: dict[str, str],
+    *,
+    emulator_name: str = "",
+    is_xemu_emulator_name: Callable[[str], bool] | None = None,
+    is_redream_emulator_name: Callable[[str], bool] | None = None,
+    save_type: str = "save",
+) -> str:
+    del game
+    if save_type != "save":
+        return "per-game"
+
+    if (
+        emulator_name.strip()
+        and callable(is_xemu_emulator_name)
+        and is_xemu_emulator_name(emulator_name)
+    ):
+        return "shared-single"
+
+    if (
+        emulator_name.strip()
+        and callable(is_redream_emulator_name)
+        and is_redream_emulator_name(emulator_name)
+    ):
+        return "shared-slotted"
+
+    return "per-game"
+
+
 def cloud_save_block_reason_for_game(
     game: dict[str, str],
     *,
@@ -44,29 +73,13 @@ def cloud_save_block_reason_for_game(
     is_redream_emulator_name: Callable[[str], bool] | None = None,
     save_type: str = "save",
 ) -> str:
+    del emulator_name
+    del is_xemu_emulator_name
+    del is_redream_emulator_name
+    del save_type
+
     if is_native_executable_platform(game):
         return "Cloud save management is only available for emulator-based games."
-
-    if is_original_xbox_platform(game):
-        return "This system is not compatible with cloudsaves at this time."
-
-    if (
-        emulator_name.strip()
-        and callable(is_xemu_emulator_name)
-        and is_xemu_emulator_name(emulator_name)
-    ):
-        return "This system is not compatible with cloudsaves at this time."
-
-    if (
-        save_type == "save"
-        and emulator_name.strip()
-        and callable(is_redream_emulator_name)
-        and is_redream_emulator_name(emulator_name)
-    ):
-        return (
-            "This emulator is not compatible with cloud saves at this time, "
-            "as an alternative please use save states instead."
-        )
 
     return ""
 

@@ -144,3 +144,50 @@ class AutoCloudSaveUploadWorker(QObject):
                     "local_latest_mtimes": self.local_latest_mtimes,
                 },
             )
+
+
+class DetailsCloudRecordsWorker(QObject):
+    finished = Signal(int, str, object, str)
+
+    def __init__(self, window: MainWindowProtocol, request_id: int, rom_id: str, save_type: str) -> None:
+        super().__init__()
+        self.window = window
+        self.request_id = int(request_id)
+        self.rom_id = str(rom_id).strip()
+        self.save_type = save_type if save_type in {"save", "state"} else "save"
+
+    def run(self) -> None:
+        debug_enabled = False
+        debug_enabled_fn = getattr(self.window, "_debug_prints_enabled", None)
+        if callable(debug_enabled_fn):
+            try:
+                debug_enabled = bool(debug_enabled_fn())
+            except (TypeError, ValueError):
+                debug_enabled = False
+
+        started_at = time.perf_counter()
+        if debug_enabled:
+            print(
+                f"[DEBUG][Timing] enter DetailsCloudRecordsWorker.run request_id={self.request_id} "
+                f"save_type={self.save_type} rom_id={self.rom_id}"
+            )
+        try:
+            if self.save_type == "save":
+                records = self.window._server_save_records_for_rom(self.rom_id)
+            else:
+                records = self.window._server_state_records_for_rom(self.rom_id)
+            if debug_enabled:
+                elapsed_ms = max(0.0, (time.perf_counter() - started_at) * 1000.0)
+                print(
+                    f"[DEBUG][Timing] exit DetailsCloudRecordsWorker.run elapsed_ms={elapsed_ms:.1f} "
+                    f"result=success count={len(records) if isinstance(records, list) else 0}"
+                )
+            self.finished.emit(self.request_id, self.save_type, records, "")
+        except (HTTPError, URLError, OSError, ValueError, json.JSONDecodeError) as error:
+            if debug_enabled:
+                elapsed_ms = max(0.0, (time.perf_counter() - started_at) * 1000.0)
+                print(
+                    f"[DEBUG][Timing] exit DetailsCloudRecordsWorker.run elapsed_ms={elapsed_ms:.1f} "
+                    f"result=error message={error}"
+                )
+            self.finished.emit(self.request_id, self.save_type, [], str(error))
