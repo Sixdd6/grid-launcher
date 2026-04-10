@@ -5,7 +5,9 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
+import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Callable
@@ -19,6 +21,10 @@ except ImportError:  # pragma: no cover - dependency is declared in requirements
     class Bad7zFile(Exception):
         pass
 
+
+_APP_TOOLS_DIR = Path.home() / ".rom-mate" / "tools"
+_PORTABLE_7ZR_URL = "https://www.7-zip.org/a/7zr.exe"
+_PORTABLE_7ZR_PATH = _APP_TOOLS_DIR / "7zr.exe"
 
 _PS4_GAME_ID_PATTERN = re.compile(r"^[A-Z]{4}\d{5}$")
 
@@ -191,6 +197,82 @@ def _merge_tree(source_dir: Path, destination_dir: Path) -> None:
         shutil.copy2(source, target)
 
 
+def _ensure_portable_7z() -> Path | None:
+    if sys.platform != "win32":
+        return None
+    if _PORTABLE_7ZR_PATH.exists():
+        return _PORTABLE_7ZR_PATH
+    tmp_path = _PORTABLE_7ZR_PATH.with_suffix(".tmp")
+    try:
+        _APP_TOOLS_DIR.mkdir(parents=True, exist_ok=True)
+        urllib.request.urlretrieve(_PORTABLE_7ZR_URL, tmp_path)
+        tmp_path.replace(_PORTABLE_7ZR_PATH)
+        return _PORTABLE_7ZR_PATH
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except Exception:
+            pass
+        return None
+
+
+def _try_system_7z(archive_path: Path, extracted_dir: Path) -> bool:
+    for cmd in ("7z", "7za", "7zz"):
+        try:
+            result = subprocess.run(
+                [cmd, "x", str(archive_path), f"-o{extracted_dir}", "-y"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            if result.returncode == 0:
+                return True
+            raise OSError(result.stderr.strip() or f"{cmd} failed with exit code {result.returncode}")
+        except FileNotFoundError:
+            continue
+    return False
+
+
+def _try_py7zr(archive_path: Path, extracted_dir: Path) -> bool:
+    if py7zr is None:
+        return False
+    try:
+        with py7zr.SevenZipFile(archive_path, mode="r") as archive:
+            archive.extractall(path=extracted_dir)
+        return True
+    except Exception:
+        return False
+
+
+def _extract_7z_with_fallbacks(archive_path: Path, extracted_dir: Path) -> None:
+    if _try_system_7z(archive_path, extracted_dir):
+        return
+    shutil.rmtree(extracted_dir, ignore_errors=True)
+    extracted_dir.mkdir(parents=True, exist_ok=True)
+    if _try_py7zr(archive_path, extracted_dir):
+        return
+    shutil.rmtree(extracted_dir, ignore_errors=True)
+    extracted_dir.mkdir(parents=True, exist_ok=True)
+    portable = _ensure_portable_7z()
+    if portable is not None:
+        result = subprocess.run(
+            [str(portable), "x", str(archive_path), f"-o{extracted_dir}", "-y"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if result.returncode == 0:
+            return
+        raise OSError(result.stderr.strip() or "Portable 7zr extraction failed")
+    raise OSError(
+        "Cannot extract this .7z archive: no system 7-Zip (7z/7za/7zz) was found, "
+        "py7zr could not handle the compression method, "
+        "and the portable 7-Zip download failed. "
+        "On Windows, check your internet connection and try again. "
+        "On Linux/Mac, install p7zip-full (apt/dnf) or p7zip (brew)."
+    )
+
+
 def extract_archive_into_directory(
     archive_path: Path,
     extracted_dir: Path,
@@ -208,12 +290,9 @@ def extract_archive_into_directory(
 
     try:
         if archive_path.suffix.casefold() == ".7z":
-            if py7zr is None:
-                raise OSError("Cannot extract .7z archives because py7zr is not installed")
             if install_progress_callback is not None:
                 install_progress_callback(0, 0)
-            with py7zr.SevenZipFile(archive_path, mode="r") as archive:
-                archive.extractall(path=extracted_dir)
+            _extract_7z_with_fallbacks(archive_path, extracted_dir)
             if install_progress_callback is not None:
                 installed_bytes = directory_total_file_bytes(extracted_dir)
                 install_progress_callback(installed_bytes, installed_bytes)
@@ -651,7 +730,7 @@ def prepare_installed_game_without_ui(
             archive_path,
             install_progress_callback,
         )
-    except (OSError, zipfile.BadZipFile) as error:
+    except (OSError, zipfile.BadZipFile, Bad7zFile) as error:
         return None, str(error)
 
     warning_text = ""

@@ -42,8 +42,12 @@
 - [ ] Design and Implement a method for detecting when the server has an update available for a native game and allow updating from the server without overwriting user configs or save files.
 
 # Medium Priority
-- [ ] Implement RetroAchievements integration for browsing achievements.
-    - Investigate API to possibly retrieve RA api keys per-user
+- [x] Implement RetroAchievements integration for browsing achievements.
+    - [x] RA API client (`fetch_game_achievements`, `resolve_ra_game_id`)
+    - [x] `RetroAchievementsWorker` background thread
+    - [x] Achievements panel in game details (`build_achievements_panel`)
+    - [x] Achievements button in game details (shown when `ra_id` available)
+    - [x] RA username + API key in Settings
 
 # Low Priority
 - all done

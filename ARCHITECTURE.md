@@ -29,6 +29,7 @@ This document is a stable module map for the current codebase.
   - `state.py`: credential, base URL, and identity helpers.
   - `status.py`: server status presentation.
   - `view.py`: server-page selection, search, and render helpers.
+  - `retroachievements.py`: RetroAchievements Web API client - achievement fetching and RA game ID resolution.
 
 - `rom_mate/library/`
   - Install, uninstall, archive prep, identity, downloads, and cloud-save behavior.

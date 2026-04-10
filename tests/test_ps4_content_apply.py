@@ -5,6 +5,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from rom_mate.core.config import normalize_installed_games
 from rom_mate.library.archive_preparation import (
@@ -156,6 +157,79 @@ class PS4ContentApplyTests(unittest.TestCase):
             self.assertEqual(progress_updates[0], (0, 0))
             self.assertGreater(progress_updates[-1][0], 0)
             self.assertEqual(progress_updates[-1][0], progress_updates[-1][1])
+
+    def test_system_7z_tried_first(self) -> None:
+        from rom_mate.library.archive_preparation import _extract_7z_with_fallbacks
+
+        archive = Path("/fake/test.7z")
+        out_dir = Path("/fake/out")
+        call_order = []
+
+        def fake_run(cmd, **kwargs):
+            call_order.append(cmd[0])
+            return MagicMock(returncode=0, stderr="")
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("rom_mate.library.archive_preparation._ensure_portable_7z", return_value=None):
+            _extract_7z_with_fallbacks(archive, out_dir)
+
+        self.assertTrue(any(c in ("7z", "7za", "7zz") for c in call_order))
+        self.assertEqual(call_order[0], call_order[0])
+
+    def test_py7zr_used_when_system_7z_missing(self) -> None:
+        from rom_mate.library.archive_preparation import _extract_7z_with_fallbacks
+
+        archive = Path("/fake/test.7z")
+        out_dir = Path("/fake/out")
+
+        with patch("subprocess.run", side_effect=FileNotFoundError), \
+             patch("py7zr.SevenZipFile") as mock_7zr, \
+             patch("rom_mate.library.archive_preparation._ensure_portable_7z", return_value=None), \
+             patch("shutil.rmtree"), \
+             patch("pathlib.Path.mkdir"):
+            mock_ctx = MagicMock()
+            mock_7zr.return_value.__enter__ = lambda s: mock_ctx
+            mock_7zr.return_value.__exit__ = MagicMock(return_value=False)
+            _extract_7z_with_fallbacks(archive, out_dir)
+        mock_7zr.assert_called_once()
+
+    def test_portable_7z_downloaded_and_used_as_last_resort(self) -> None:
+        from rom_mate.library.archive_preparation import _extract_7z_with_fallbacks, _PORTABLE_7ZR_PATH
+        import urllib.request
+
+        archive = Path("/fake/test.7z")
+        out_dir = Path("/fake/out")
+        downloaded = []
+
+        def fake_urlretrieve(url, dest):
+            downloaded.append(url)
+            return (str(dest), None)
+
+        def fake_run(cmd, **kwargs):
+            if cmd[0] == str(_PORTABLE_7ZR_PATH):
+                return MagicMock(returncode=0, stderr="")
+            raise FileNotFoundError
+
+        with patch("subprocess.run", side_effect=fake_run), \
+             patch("rom_mate.library.archive_preparation.py7zr", None), \
+             patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve), \
+             patch("pathlib.Path.exists", return_value=False), \
+             patch("pathlib.Path.mkdir"), \
+             patch("pathlib.Path.replace"), \
+             patch("shutil.rmtree"):
+            _extract_7z_with_fallbacks(archive, out_dir)
+
+        self.assertEqual(len(downloaded), 1)
+        self.assertIn("7zr.exe", downloaded[0])
+
+    def test_portable_7z_reused_when_already_downloaded(self) -> None:
+        from rom_mate.library.archive_preparation import _ensure_portable_7z, _PORTABLE_7ZR_PATH
+
+        with patch("pathlib.Path.exists", return_value=True):
+            result = _ensure_portable_7z()
+
+        if result is not None:
+            self.assertEqual(result, _PORTABLE_7ZR_PATH)
 
 
 if __name__ == "__main__":
