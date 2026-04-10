@@ -32,6 +32,7 @@ def build_installed_game_record(
         "cached_cover_path": cached_cover_path,
         "screenshot_urls": _text_value(game, "screenshot_urls"),
         "rom_id": _text_value(game, "rom_id"),
+        "server_updated_at": _text_value(game, "server_updated_at"),
         "rom_file_name": _text_value(game, "rom_file_name"),
         "extracted_path": extracted_path,
         "extracted_dir": _text_value(game, "extracted_dir"),

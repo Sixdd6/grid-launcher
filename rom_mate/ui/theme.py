@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from pathlib import Path
+import re
 from typing import Any
 
-from PySide6.QtGui import QPalette
+from PySide6.QtCore import QByteArray, QSize, Qt
+from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPixmap
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QApplication, QLabel
 
 
@@ -42,6 +46,95 @@ _DARK_THEME_COLORS: dict[str, str] = {
     "error": "#ff5555",
     "warning": "#ffb86c",
 }
+
+_ASSETS_ROOT = Path(__file__).resolve().parents[2] / "assets"
+_SVG_COLOR_ATTR_PATTERN = re.compile(
+    r"(?P<attr>\b(?:fill|stroke)\b)\s*=\s*(?P<quote>[\"\'])(?P<value>.*?)(?P=quote)",
+    flags=re.IGNORECASE,
+)
+
+
+def _resolve_svg_asset_path(asset_name: str) -> Path:
+    candidate = Path(asset_name.strip())
+    if candidate.suffix.casefold() != ".svg":
+        candidate = candidate.with_suffix(".svg")
+    if candidate.is_absolute():
+        return candidate
+    return _ASSETS_ROOT / candidate
+
+
+def _coerce_icon_size(size: QSize | tuple[int, int] | None) -> QSize:
+    if isinstance(size, QSize) and size.isValid() and not size.isEmpty():
+        return QSize(size)
+    if isinstance(size, tuple) and len(size) == 2:
+        width, height = size
+        if width > 0 and height > 0:
+            return QSize(width, height)
+    return QSize(24, 24)
+
+
+def _theme_tinted_svg_bytes(svg_content: str, color: QColor) -> bytes:
+    replacement_color = color.name(QColor.NameFormat.HexRgb)
+
+    def _replace(match: re.Match[str]) -> str:
+        value = match.group("value").strip()
+        lowered = value.casefold()
+        if lowered in {"none", "currentcolor", "inherit", "transparent"}:
+            return match.group(0)
+        if lowered.startswith("url("):
+            return match.group(0)
+        return f"{match.group('attr')}={match.group('quote')}{replacement_color}{match.group('quote')}"
+
+    tinted_svg = _SVG_COLOR_ATTR_PATTERN.sub(_replace, svg_content)
+    return tinted_svg.encode("utf-8")
+
+
+def themed_svg_pixmap(
+    asset_name: str,
+    color: str | QColor,
+    *,
+    size: QSize | tuple[int, int] | None = None,
+) -> QPixmap:
+    resolved_color = color if isinstance(color, QColor) else QColor(str(color))
+    if not resolved_color.isValid():
+        return QPixmap()
+
+    asset_path = _resolve_svg_asset_path(asset_name)
+    if not asset_path.is_file():
+        return QPixmap()
+
+    try:
+        svg_content = asset_path.read_text(encoding="utf-8")
+    except OSError:
+        return QPixmap()
+
+    renderer = QSvgRenderer(QByteArray(_theme_tinted_svg_bytes(svg_content, resolved_color)))
+    if not renderer.isValid():
+        return QPixmap()
+
+    target_size = _coerce_icon_size(size)
+    default_size = renderer.defaultSize()
+    if size is None and default_size.isValid() and not default_size.isEmpty():
+        target_size = default_size
+
+    pixmap = QPixmap(target_size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    renderer.render(painter)
+    painter.end()
+    return pixmap
+
+
+def themed_svg_icon(
+    asset_name: str,
+    color: str | QColor,
+    *,
+    size: QSize | tuple[int, int] | None = None,
+) -> QIcon:
+    pixmap = themed_svg_pixmap(asset_name, color, size=size)
+    if pixmap.isNull():
+        return QIcon()
+    return QIcon(pixmap)
 
 
 def normalized_theme_choice(value: Any) -> str:
@@ -235,6 +328,9 @@ def theme_stylesheet(colors: Mapping[str, str] | None) -> str:
         QListWidget#defaultMappingList::item:alternate {{
             background-color: {resolved_colors['surface_alt']};
         }}
+        QListWidget#installedEmulatorList::item:alternate {{
+            background-color: {resolved_colors['surface_alt']};
+        }}
         QLineEdit, QComboBox {{
             background-color: {resolved_colors['input_bg']};
             color: {resolved_colors['input_text']};
@@ -377,6 +473,8 @@ __all__ = [
     "apply_theme_inline_styles",
     "normalized_theme_choice",
     "resolved_theme_variant",
+    "themed_svg_icon",
+    "themed_svg_pixmap",
     "theme_color",
     "theme_colors",
     "theme_stylesheet",

@@ -20,11 +20,12 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
-from PySide6.QtCore import QObject, QThread, QTimer, Qt, QUrl, Signal
-from PySide6.QtGui import QCloseEvent, QDesktopServices, QPixmap
+from PySide6.QtCore import QObject, QSize, QThread, QTimer, Qt, QUrl, Signal
+from PySide6.QtGui import QCloseEvent, QDesktopServices, QIcon, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -34,6 +35,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -132,6 +134,9 @@ from rom_mate.library import (
     filter_queue_by_download_entry_id,
     find_download_entry,
     format_size,
+    game_has_server_update,
+    has_newer_server_rom_version,
+    rom_file_name_version,
     game_key,
     hydrate_install_game_metadata as resolve_hydrate_install_game_metadata,
     games_match_identity,
@@ -210,6 +215,7 @@ from rom_mate.emulator import (
     assign_profile_platform_defaults as resolve_assign_profile_platform_defaults,
     auto_configure_emulator_settings as resolve_auto_configure_emulator_settings,
     auto_configured_emulator_name as resolve_auto_configured_emulator_name,
+    emulator_install_directory as resolve_emulator_install_directory,
     available_emulator_name_for_platform as resolve_available_emulator_name_for_platform,
     cloud_save_block_reason_for_game as resolve_cloud_save_block_reason_for_game,
     cloud_save_scope_for_game as resolve_cloud_save_scope_for_game,
@@ -292,6 +298,7 @@ from rom_mate.emulator import (
     validate_launch_placeholders as resolve_validate_launch_placeholders,
 )
 from rom_mate.ui import (
+    EmulatorConfigDialog,
     FirstRunSetupDialog,
     NativeGameSettingsDialog,
     apply_theme_inline_styles as resolve_apply_theme_inline_styles,
@@ -309,13 +316,17 @@ from rom_mate.ui import (
     remove_emulator_default_mappings,
     resolved_theme_variant as resolve_resolved_theme_variant,
     selected_retroarch_core,
+    themed_svg_icon as resolve_themed_svg_icon,
     update_details_action_buttons as resolve_update_details_action_buttons,
     theme_color as resolve_theme_color,
     theme_colors as resolve_theme_colors,
     theme_stylesheet as resolve_theme_stylesheet,
     visible_library_games as resolve_visible_library_games,
+    show_toast as resolve_show_toast,
     upsert_emulator_entry,
 )
+from rom_mate.ui.emulators import save_button_label
+from rom_mate.ui.emulators import available_source_download_emulator_entries as resolve_available_source_download_emulator_entries
 from rom_mate.server import (
     account_status_text,
     apply_server_status,
@@ -375,6 +386,7 @@ class MainWindow(QMainWindow):
         self.emulator_ignore_extensions_input: QLineEdit | None = None
         self.emulator_save_paths_input: QLineEdit | None = None
         self.emulator_state_paths_input: QLineEdit | None = None
+        self.save_emulator_button: QPushButton | None = None
         self.default_platform_combo: QComboBox | None = None
         self.default_emulator_combo: QComboBox | None = None
         self.default_core_combo: QComboBox | None = None
@@ -384,6 +396,7 @@ class MainWindow(QMainWindow):
         self.details_center_stack: QStackedWidget | None = None
         self.details_cover_label: QLabel | None = None
         self.details_platform_label: QLabel | None = None
+        self.details_version_label: QLabel | None = None
         self.details_rating_label: QLabel | None = None
         self.details_description_label: QLabel | None = None
         self.details_screenshot_labels: list[QLabel] = []
@@ -401,6 +414,7 @@ class MainWindow(QMainWindow):
         self.details_cloud_upload_button: QPushButton | None = None
         self.details_cloud_list_layout: QVBoxLayout | None = None
         self.details_secondary_button: QPushButton | None = None
+        self.details_update_button: QPushButton | None = None
         self.server_platforms_list: QListWidget | None = None
         self.server_games_grid: QGridLayout | None = None
         self.server_games_content: QWidget | None = None
@@ -453,6 +467,7 @@ class MainWindow(QMainWindow):
         self.download_entries: list[dict[str, Any]] = []
         self.library_games = self._normalize_installed_games(self.config.get("installed_games", []))
         self.server_games_by_platform: dict[str, list[dict[str, str]]] = {}
+        self.installed_game_update_keys: set[tuple[str, str]] = set()
         self.server_rom_payloads: dict[str, dict[str, Any]] = {}
         self.retroarch_compatibility_map: dict[str, list[str]] | None = None
         self.emulator_autoprofiles: list[dict[str, Any]] | None = None
@@ -754,82 +769,44 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(self._make_section_title("Installed Emulators"))
 
         emulator_list = QListWidget()
-        emulator_list.currentRowChanged.connect(self._load_emulator_from_selection)
+        emulator_list.setObjectName("installedEmulatorList")
+        emulator_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        emulator_list.setAlternatingRowColors(True)
         self.emulator_list = emulator_list
         left_layout.addWidget(emulator_list)
 
-        launch_emulator_list_button = QPushButton("Launch Selected")
-        launch_emulator_list_button.clicked.connect(self._launch_selected_emulator)
-        left_layout.addWidget(launch_emulator_list_button)
+        add_emulator_button = QPushButton("Add New Emulator")
+        add_emulator_button.clicked.connect(lambda: MainWindow._open_add_emulator_dialog(self))
+        left_layout.addWidget(add_emulator_button)
+
+        download_source_button = QPushButton("Download Supported Emulator")
+        download_source_button.clicked.connect(lambda: MainWindow._open_source_emulator_download_dialog(self))
+        left_layout.addWidget(download_source_button)
 
         layout.addWidget(left_panel, 1)
 
-        right_column = QWidget()
-        right_column_layout = QVBoxLayout(right_column)
-        right_column_layout.setContentsMargins(0, 0, 0, 0)
-        right_column_layout.setSpacing(12)
+        def _build_hidden_emulator_form_state() -> None:
+            # Keep legacy form widgets available for _save_emulator() and tests.
+            self.emulator_name_input = QLineEdit()
+            _lock_emulator_field_height(self.emulator_name_input)
+            self.emulator_path_input = QLineEdit()
+            _lock_emulator_field_height(self.emulator_path_input)
+            self.emulator_args_input = QLineEdit("%rom%")
+            _lock_emulator_field_height(self.emulator_args_input)
+            self.emulator_save_strategy_input = QComboBox()
+            _lock_emulator_field_height(self.emulator_save_strategy_input)
+            self.emulator_save_strategy_input.addItems(["auto", "single_file", "folder"])
+            self.emulator_ignore_files_input = QLineEdit()
+            _lock_emulator_field_height(self.emulator_ignore_files_input)
+            self.emulator_ignore_extensions_input = QLineEdit()
+            _lock_emulator_field_height(self.emulator_ignore_extensions_input)
+            self.emulator_save_paths_input = QLineEdit()
+            _lock_emulator_field_height(self.emulator_save_paths_input)
+            self.emulator_state_paths_input = QLineEdit()
+            _lock_emulator_field_height(self.emulator_state_paths_input)
+            self.save_emulator_button = QPushButton(save_button_label(self._emulators(), -1))
 
-        emulator_details_panel = QFrame()
-        emulator_details_panel.setObjectName("panel")
-        emulator_details_layout = QVBoxLayout(emulator_details_panel)
-        emulator_details_layout.setContentsMargins(12, 10, 12, 10)
-        emulator_details_layout.addWidget(self._make_section_title("Emulator Details"))
-
-        details_form = QFormLayout()
-        self.emulator_name_input = QLineEdit()
-        _lock_emulator_field_height(self.emulator_name_input)
-        self.emulator_path_input = QLineEdit()
-        _lock_emulator_field_height(self.emulator_path_input)
-        self.emulator_args_input = QLineEdit("%rom%")
-        _lock_emulator_field_height(self.emulator_args_input)
-        self.emulator_save_strategy_input = QComboBox()
-        _lock_emulator_field_height(self.emulator_save_strategy_input)
-        self.emulator_save_strategy_input.addItems(["auto", "single_file", "folder"])
-        self.emulator_ignore_files_input = QLineEdit()
-        _lock_emulator_field_height(self.emulator_ignore_files_input)
-        self.emulator_ignore_extensions_input = QLineEdit()
-        _lock_emulator_field_height(self.emulator_ignore_extensions_input)
-        self.emulator_save_paths_input = QLineEdit()
-        _lock_emulator_field_height(self.emulator_save_paths_input)
-        self.emulator_state_paths_input = QLineEdit()
-        _lock_emulator_field_height(self.emulator_state_paths_input)
-
-        path_row = QWidget()
-        path_row_layout = QHBoxLayout(path_row)
-        path_row_layout.setContentsMargins(0, 0, 0, 0)
-        path_row_layout.setSpacing(8)
-        path_row_layout.addWidget(self.emulator_path_input)
-
-        browse_emulator_path_button = QPushButton("Browse...")
-        browse_emulator_path_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        browse_emulator_path_button.clicked.connect(self._browse_emulator_path)
-        path_row_layout.addWidget(browse_emulator_path_button)
-
-        details_form.addRow("Name", self.emulator_name_input)
-        details_form.addRow("Executable Path", path_row)
-        details_form.addRow("Arguments (%rom%, %core%, %RPCS3_GAMEID%, %ps3_gameid%)", self.emulator_args_input)
-        details_form.addRow("Save Strategy", self.emulator_save_strategy_input)
-        details_form.addRow("Ignore Files (; separated)", self.emulator_ignore_files_input)
-        details_form.addRow("Ignore Extensions (; separated)", self.emulator_ignore_extensions_input)
-        details_form.addRow("Save Dirs (; separated)", self.emulator_save_paths_input)
-        details_form.addRow("State Dirs (; separated)", self.emulator_state_paths_input)
-        emulator_details_layout.addLayout(details_form)
-
-        emulator_actions = QHBoxLayout()
-        save_emulator_button = QPushButton("Add / Update")
-        save_emulator_button.clicked.connect(self._save_emulator)
-        emulator_actions.addWidget(save_emulator_button)
-
-        clear_selection_button = QPushButton("Clear Selection")
-        clear_selection_button.clicked.connect(self._clear_emulator_selection)
-        emulator_actions.addWidget(clear_selection_button)
-
-        remove_emulator_button = QPushButton("Remove")
-        remove_emulator_button.clicked.connect(self._remove_emulator)
-        emulator_actions.addWidget(remove_emulator_button)
-        emulator_actions.addStretch()
-        emulator_details_layout.addLayout(emulator_actions)
-        right_column_layout.addWidget(emulator_details_panel)
+        _build_hidden_emulator_form_state()
 
         defaults_panel = QFrame()
         defaults_panel.setObjectName("panel")
@@ -862,8 +839,7 @@ class MainWindow(QMainWindow):
         self.default_mapping_list.setAlternatingRowColors(True)
         defaults_layout.addWidget(self.default_mapping_list, 1)
 
-        right_column_layout.addWidget(defaults_panel, 1)
-        layout.addWidget(right_column, 2)
+        layout.addWidget(defaults_panel, 2)
 
         scroll.setWidget(content)
         return page
@@ -1111,6 +1087,14 @@ class MainWindow(QMainWindow):
         secondary.clicked.connect(self._perform_game_secondary_action)
         self.details_secondary_button = secondary
         action_row.addWidget(secondary)
+
+        update_button = QPushButton("Update")
+        update_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        update_handler = getattr(self, "_perform_game_update_action", None)
+        if callable(update_handler):
+            update_button.clicked.connect(update_handler)
+        self.details_update_button = update_button
+        action_row.addWidget(update_button)
         action_row.addStretch()
         details_col.addLayout(action_row)
 
@@ -1140,6 +1124,13 @@ class MainWindow(QMainWindow):
         platform.setStyleSheet("font-size: 18px;")
         self.details_platform_label = platform
         overview_content_layout.addWidget(platform)
+
+        version = QLabel("")
+        version.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        version.setStyleSheet(f"font-size: 16px; color: {self._theme_color('muted', '#6272a4')};")
+        version.setVisible(False)
+        self.details_version_label = version
+        overview_content_layout.addWidget(version)
 
         rating = QLabel("Rating: -")
         rating.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -1366,6 +1357,63 @@ class MainWindow(QMainWindow):
     def _theme_stylesheet(self) -> str:
         return resolve_theme_stylesheet(self.active_theme_colors)
 
+    def _themed_svg_icon(self, asset_name: str, color: str, *, size: QSize | tuple[int, int] | None = None) -> QIcon:
+        return resolve_themed_svg_icon(asset_name, color, size=size)
+
+    def _refresh_installed_emulator_action_icons(self) -> None:
+        if self.emulator_list is None:
+            return
+
+        action_icon_size = QSize(16, 16)
+        launch_icon = self._themed_svg_icon(
+            "play-1003-svgrepo-com.svg",
+            self._theme_color("accent", "#8be9fd"),
+            size=action_icon_size,
+        )
+        config_icon = self._themed_svg_icon(
+            "gear-tools-wrench-svgrepo-com.svg",
+            self._theme_color("text", "#f8f8f2"),
+            size=action_icon_size,
+        )
+        uninstall_icon = self._themed_svg_icon(
+            "trashcan-svgrepo-com.svg",
+            self._theme_color("error", "#ff5555"),
+            size=action_icon_size,
+        )
+        source_update_icon = self._themed_svg_icon(
+            "save-floppy-svgrepo-com.svg",
+            self._theme_color("accent", "#8be9fd"),
+            size=action_icon_size,
+        )
+
+        for row_index in range(self.emulator_list.count()):
+            item = self.emulator_list.item(row_index)
+            if item is None:
+                continue
+            row_widget = self.emulator_list.itemWidget(item)
+            if row_widget is None:
+                continue
+
+            launch_button = row_widget.findChild(QPushButton, "installedEmulatorLaunchButton")
+            if launch_button is not None:
+                launch_button.setIcon(launch_icon)
+                launch_button.setIconSize(action_icon_size)
+
+            config_button = row_widget.findChild(QPushButton, "installedEmulatorConfigButton")
+            if config_button is not None:
+                config_button.setIcon(config_icon)
+                config_button.setIconSize(action_icon_size)
+
+            uninstall_button = row_widget.findChild(QPushButton, "installedEmulatorUninstallButton")
+            if uninstall_button is not None:
+                uninstall_button.setIcon(uninstall_icon)
+                uninstall_button.setIconSize(action_icon_size)
+
+            source_update_button = row_widget.findChild(QPushButton, "installedEmulatorSourceUpdateButton")
+            if source_update_button is not None:
+                source_update_button.setIcon(source_update_icon)
+                source_update_button.setIconSize(action_icon_size)
+
     def _apply_theme_inline_styles(self) -> None:
         resolve_apply_theme_inline_styles(
             self.active_theme_colors,
@@ -1387,6 +1435,7 @@ class MainWindow(QMainWindow):
         self.active_theme_colors = self._theme_colors(self.active_theme_variant)
         self.setStyleSheet(self._theme_stylesheet())
         self._apply_theme_inline_styles()
+        self._refresh_installed_emulator_action_icons()
         if self.current_details_cloud_mode in {"save", "state"}:
             self._refresh_details_cloud_panel()
 
@@ -1416,6 +1465,7 @@ class MainWindow(QMainWindow):
             "default_emulators": {},
             "default_retroarch_cores": {},
             "installed_games": [],
+            "emulator_source_installs": {},
             "auto_cloud_save_download_on_launch": True,
             "auto_cloud_save_upload_on_exit": True,
             "auto_cloud_save_skip_download_if_local_newer": True,
@@ -1495,6 +1545,9 @@ class MainWindow(QMainWindow):
             normalize_installed_games=self._normalize_installed_games,
             normalize_cloud_sync_state=self._normalize_cloud_sync_state,
         )
+        merged["emulator_source_installs"] = self._normalize_emulator_source_installs(
+            content.get("emulator_source_installs", {})
+        )
 
         stored_token = self._load_api_token()
         if stored_token:
@@ -1540,6 +1593,9 @@ class MainWindow(QMainWindow):
         values["window_state"] = self.config.get("window_state", "normal")
         values["first_run_completed"] = bool(self.config.get("first_run_completed", False))
         values["installed_games"] = self.library_games
+        values["emulator_source_installs"] = self._normalize_emulator_source_installs(
+            self.config.get("emulator_source_installs", {})
+        )
         values["auto_cloud_save_upload_delay_seconds"] = self._auto_cloud_upload_delay_seconds()
         values["cloud_sync_state"] = self._cloud_sync_state()
         return values
@@ -1664,6 +1720,7 @@ class MainWindow(QMainWindow):
 
     def _clear_server_connection_data(self) -> None:
         resolve_clear_server_connection_data(self)
+        self._refresh_installed_game_update_state()
 
     def _resize_server_platform_list(self) -> None:
         if self.server_platforms_list is None:
@@ -1878,6 +1935,7 @@ class MainWindow(QMainWindow):
             all_items = fetch_platform_rom_items(self._api_get, platform_id)
         except (HTTPError, URLError, ValueError, json.JSONDecodeError):
             self.server_games_by_platform[platform_label] = []
+            self._refresh_installed_game_update_state()
             self._set_server_status("Connected, but failed to load games", self._theme_color("warning", "#ffb86c"))
             return
 
@@ -1889,6 +1947,7 @@ class MainWindow(QMainWindow):
         )
         self.server_rom_payloads.update(rom_payloads)
         self.server_games_by_platform[platform_label] = games
+        self._refresh_installed_game_update_state()
 
     def _save_config(self, config: dict[str, Any]) -> bool:
         config_dir = self._config_dir()
@@ -1993,6 +2052,8 @@ class MainWindow(QMainWindow):
         return True
 
     def _register_installed_game(self, game: dict[str, str], archive_path: Path) -> None:
+        game_key_value = self._game_key(game)
+        self.library_games = [entry for entry in self.library_games if self._game_key(entry) != game_key_value]
         self.library_games.append(
             resolve_build_installed_game_record(
                 game,
@@ -2002,6 +2063,7 @@ class MainWindow(QMainWindow):
             )
         )
         self.library_games = self._normalize_installed_games(self.library_games)
+        self._refresh_installed_game_update_state()
         self._refresh_library_grid()
         self._persist_installed_games()
 
@@ -2015,6 +2077,67 @@ class MainWindow(QMainWindow):
         platform_value = game.get("platform", "")
         platform = platform_value.strip().casefold() if isinstance(platform_value, str) else ""
         return platform in {"ps4", "playstation 4", "playstation4", "sony playstation 4"}
+
+    def _is_windows_pc_platform(self, game: dict[str, str]) -> bool:
+        platform_value = game.get("platform", "")
+        if not isinstance(platform_value, str):
+            return False
+        platform = platform_value.strip().casefold()
+        if not platform:
+            return False
+        return "windows" in platform or platform == "pc"
+
+    def _format_version_tag_for_ui(self, version_tag: object) -> str:
+        if isinstance(version_tag, int):
+            return f"v{version_tag:05d}"
+        if isinstance(version_tag, str):
+            normalized = version_tag.strip()
+            if normalized:
+                return f"v{normalized}"
+        return ""
+
+    def _details_version_label_text_for_game(self, game: dict[str, str]) -> str:
+        if not self._is_windows_pc_platform(game):
+            return ""
+
+        version_tag = rom_file_name_version(game.get("rom_file_name", ""))
+        if version_tag is None:
+            installed_game = self._installed_game_record(game)
+            if installed_game is not None:
+                version_tag = rom_file_name_version(installed_game.get("rom_file_name", ""))
+        if version_tag is None:
+            return ""
+        formatted_version = self._format_version_tag_for_ui(version_tag)
+        if not formatted_version:
+            return ""
+        return f"Version: {formatted_version}"
+
+    def _details_update_button_text_for_game(self, game: dict[str, str]) -> str:
+        default_label = "Update"
+        if self._is_emulators_platform(game):
+            return default_label
+
+        installed_game = self._installed_game_record(game)
+        if installed_game is None:
+            return default_label
+
+        server_game = self._server_game_for_identity(installed_game, installed_game.get("rom_id", ""))
+        if not isinstance(server_game, dict):
+            return default_label
+
+        server_rom_file_name = server_game.get("rom_file_name", "")
+        installed_rom_file_name = installed_game.get("rom_file_name", "")
+        if not has_newer_server_rom_version(installed_rom_file_name, server_rom_file_name):
+            return default_label
+
+        target_version = rom_file_name_version(server_rom_file_name)
+        if target_version is None:
+            return default_label
+
+        formatted_target_version = self._format_version_tag_for_ui(target_version)
+        if not formatted_target_version:
+            return default_label
+        return f"Update to {formatted_target_version}"
 
     def _ps4_file_ids_by_category_from_text(self, value: str) -> dict[str, list[int]]:
         if not isinstance(value, str) or not value.strip():
@@ -2068,6 +2191,57 @@ class MainWindow(QMainWindow):
                 if self._game_key(server_game) == target_key:
                     return server_game
         return None
+
+    def _refresh_installed_game_update_state(self) -> None:
+        update_keys: set[tuple[str, str]] = set()
+        for installed_game in self.library_games:
+            has_update = False
+            if not self._is_emulators_platform(installed_game):
+                server_game = self._server_game_for_identity(installed_game, installed_game.get("rom_id", ""))
+                if isinstance(server_game, dict):
+                    has_update = game_has_server_update(
+                        installed_game,
+                        server_game,
+                        is_emulators_platform=self._is_emulators_platform,
+                    )
+            installed_game["update_available"] = "true" if has_update else "false"
+            if has_update:
+                update_keys.add(self._game_key(installed_game))
+
+        self.installed_game_update_keys = update_keys
+        if self.current_details_game is not None:
+            self.current_details_game["update_available"] = (
+                "true" if self._details_update_available_for_game(self.current_details_game) else "false"
+            )
+        self._update_details_action_buttons()
+
+    def _details_update_available_for_game(self, game: dict[str, str]) -> bool:
+        if self._is_emulators_platform(game):
+            return False
+
+        installed_game = self._installed_game_record(game)
+        if installed_game is None:
+            return False
+
+        game_key_value = self._game_key(installed_game)
+        if game_key_value in self.installed_game_update_keys:
+            return True
+
+        server_game = self._server_game_for_identity(installed_game, installed_game.get("rom_id", ""))
+        if not isinstance(server_game, dict):
+            return False
+
+        has_update = game_has_server_update(
+            installed_game,
+            server_game,
+            is_emulators_platform=self._is_emulators_platform,
+        )
+        installed_game["update_available"] = "true" if has_update else "false"
+        if has_update:
+            self.installed_game_update_keys.add(game_key_value)
+        else:
+            self.installed_game_update_keys.discard(game_key_value)
+        return has_update
 
     def _ps4_file_ids_by_category_for_game(
         self,
@@ -3105,6 +3279,7 @@ class MainWindow(QMainWindow):
             cleanup_cached_cover_for_game=self._cleanup_cached_cover_for_game,
         )
         if removed:
+            self._refresh_installed_game_update_state()
             self._refresh_library_grid()
             self._persist_installed_games()
         return removed
@@ -3219,6 +3394,8 @@ class MainWindow(QMainWindow):
     def _start_async_install(self, game: dict[str, str]) -> bool:
         install_mode_value = game.get("_install_mode", "base")
         install_mode = install_mode_value.strip().lower() if isinstance(install_mode_value, str) else "base"
+        if install_mode in {"source_emulator", "source_emulator_update"}:
+            return self._start_async_source_emulator_install(game)
         is_ps4_content_install = install_mode == "ps4_content"
 
         if is_ps4_content_install:
@@ -3341,6 +3518,106 @@ class MainWindow(QMainWindow):
         thread.start()
         return True
 
+    def _start_async_source_emulator_install(self, game: dict[str, str]) -> bool:
+        install_mode_value = game.get("_install_mode", "source_emulator")
+        install_mode = install_mode_value.strip().lower() if isinstance(install_mode_value, str) else "source_emulator"
+        is_source_update = install_mode == "source_emulator_update"
+
+        if not is_source_update:
+            install_block_reason = self._install_block_reason_for_game(game)
+            if install_block_reason:
+                QMessageBox.warning(self, "Install Blocked", install_block_reason)
+                return False
+
+        source_metadata = game.get("_source_metadata")
+        if not isinstance(source_metadata, dict):
+            QMessageBox.warning(
+                self,
+                "Install Error",
+                "Selected emulator source is missing metadata and cannot be downloaded.",
+            )
+            return False
+
+        install_path = self._platform_library_dir(game)
+        if install_path is None:
+            QMessageBox.warning(self, "Install Error", "Set a Library Path in Settings before downloading emulators.")
+            return False
+
+        try:
+            install_path.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            QMessageBox.warning(self, "Install Error", f"Could not prepare library folder: {error}")
+            return False
+
+        archive_name_value = game.get("_archive_name_override", "")
+        archive_name = (
+            archive_name_value.strip()
+            if isinstance(archive_name_value, str) and archive_name_value.strip()
+            else self._archive_name_for_game(game)
+        )
+        archive_path = install_path / archive_name
+
+        install_key = self._game_key(game)
+        pending_key = pending_install_key(
+            self.install_in_progress,
+            self.install_finalize_in_progress,
+            self.install_pending_game,
+            self.install_finalize_game,
+        )
+        queued_keys = queued_install_keys(self.install_queue)
+
+        if self.install_in_progress or self.install_finalize_in_progress:
+            if install_key == pending_key or install_key in queued_keys:
+                return False
+            queued_game = dict(game)
+            entry_id = self._create_download_entry(queued_game, "queued")
+            queued_game["_download_entry_id"] = entry_id
+            self.install_queue.append(queued_game)
+            self._update_details_action_buttons()
+            self._update_download_status_ui()
+            return True
+
+        pending_entry_id = game.get("_download_entry_id", "") if isinstance(game.get("_download_entry_id", ""), str) else ""
+        entry_id = pending_entry_id.strip()
+        if entry_id:
+            self._set_download_entry_status(entry_id, "downloading")
+        else:
+            entry_id = self._create_download_entry(game, "downloading")
+
+        self.install_in_progress = True
+        install_game = dict(game)
+        install_game["_download_entry_id"] = entry_id
+        self.install_pending_game = install_game
+        self.active_download_entry_id = entry_id
+        self.active_download_count += 1
+        self.active_download_bytes = 0
+        self.active_download_total = 0
+        self.active_download_speed_bps = 0.0
+        self._update_download_status_ui()
+        self._update_details_action_buttons()
+
+        thread = QThread(self)
+        worker = InstallDownloadWorker(
+            "",
+            {},
+            archive_path,
+            source_metadata=source_metadata,
+            debug_enabled=self._debug_prints_enabled(),
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._on_async_install_progress)
+        worker.finished.connect(self._on_async_install_finished)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_install_thread_finished)
+
+        self.install_thread = thread
+        self.install_worker = worker
+        thread.start()
+        return True
+
     def _on_async_install_finished(self, archive_path: str, error: str) -> None:
         game = self.install_pending_game
         entry_id = self.active_download_entry_id
@@ -3365,6 +3642,7 @@ class MainWindow(QMainWindow):
         title = game.get("title", "Game")
         install_mode_value = game.get("_install_mode", "base")
         install_mode = install_mode_value.strip().lower() if isinstance(install_mode_value, str) else "base"
+        is_source_install = install_mode in {"source_emulator", "source_emulator_update"}
         if error:
             status = download_entry_status_from_error(error)
             if entry_id:
@@ -3372,11 +3650,12 @@ class MainWindow(QMainWindow):
             self._update_download_status_ui()
             self._update_details_action_buttons()
             if status != "cancelled":
-                QMessageBox.warning(self, "Install Error", f"Failed to download {title} from server.")
+                failed_source = "source" if is_source_install else "server"
+                QMessageBox.warning(self, "Install Error", f"Failed to download {title} from {failed_source}.")
             self._start_next_queued_install()
             return
 
-        if install_mode != "ps4_content" and self._is_game_installed(game):
+        if install_mode not in {"ps4_content", "update", "source_emulator", "source_emulator_update"} and self._is_game_installed(game):
             if entry_id:
                 self._set_download_entry_status(entry_id, "completed")
             self._update_download_status_ui()
@@ -3440,6 +3719,8 @@ class MainWindow(QMainWindow):
         install_mode_value = game.get("_install_mode", "base") if isinstance(game, dict) else "base"
         install_mode = install_mode_value.strip().lower() if isinstance(install_mode_value, str) else "base"
         is_ps4_content_install = install_mode == "ps4_content"
+        is_source_install = install_mode in {"source_emulator", "source_emulator_update"}
+        is_source_update = install_mode == "source_emulator_update"
         content_kind_value = game.get("_ps4_content_kind", "") if isinstance(game, dict) else ""
         content_kind = content_kind_value.strip().lower() if isinstance(content_kind_value, str) else "content"
         install_label = f"PS4 {content_kind}" if is_ps4_content_install else title
@@ -3498,11 +3779,27 @@ class MainWindow(QMainWindow):
 
         archive_file = Path(archive_path)
         self._register_installed_game(installed_game, archive_file)
-        self._auto_configure_installed_emulator(installed_game, archive_file)
+        auto_configured = self._auto_configure_installed_emulator(installed_game, archive_file)
+        if is_source_install:
+            self._record_source_emulator_install(installed_game)
         if entry_id:
             self._set_download_entry_status(entry_id, "completed")
         if warning_text.strip():
             QMessageBox.warning(self, "Install Warning", warning_text.strip())
+        if is_source_install:
+            if auto_configured:
+                emulator_title = installed_game.get("title", "Emulator")
+                if is_source_update:
+                    self._show_toast(f"Updated emulator '{emulator_title}' from source.", level="success")
+                else:
+                    self._show_toast(f"Installed emulator '{emulator_title}' from source.", level="success")
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Install Warning",
+                    "Emulator install completed, but automatic emulator configuration did not detect a launch path."
+                    " Use Add New Emulator or Config to set the executable path manually.",
+                )
         self._update_download_status_ui()
         self._update_details_action_buttons()
         self._start_next_queued_install()
@@ -4649,14 +4946,58 @@ class MainWindow(QMainWindow):
         if not self._is_game_installed(self.current_details_game):
             return
 
+        if self._uninstall_game(self.current_details_game):
+            self._update_details_action_buttons()
+            return
+
+    def _perform_game_update_action(self) -> None:
+        if self.current_details_game is None:
+            return
+        if not self._is_game_installed(self.current_details_game):
+            return
+        if not self._details_update_available_for_game(self.current_details_game):
+            return
+
         rom_id = self._resolve_rom_id_for_game(self.current_details_game)
         if rom_id:
             self.current_details_game["rom_id"] = rom_id
             self._cache_rom_id_for_details_game(self.current_details_game, rom_id)
 
-        if self._uninstall_game(self.current_details_game):
-            self._update_details_action_buttons()
+        server_game = self._server_game_for_identity(self.current_details_game, rom_id)
+        if server_game is None:
+            QMessageBox.warning(
+                self,
+                "Update Error",
+                "A newer server version is no longer available for this game.",
+            )
+            self._refresh_installed_game_update_state()
             return
+
+        update_game = dict(server_game)
+        resolved_rom_id = self._resolve_rom_id_for_game(update_game)
+        if not resolved_rom_id:
+            QMessageBox.warning(self, "Update Error", "Selected game is missing a ROM id and cannot be updated.")
+            return
+
+        update_game["rom_id"] = resolved_rom_id
+        update_game["_install_mode"] = "update"
+        self._hydrate_install_game_metadata(update_game, resolved_rom_id)
+        resolved_file_name = self._resolved_rom_file_name_for_game(update_game, resolved_rom_id)
+        if not resolved_file_name:
+            QMessageBox.warning(
+                self,
+                "Update Error",
+                "Server did not return a usable ROM filename/path for this title. Refresh server metadata and try again.",
+            )
+            return
+
+        update_game["rom_file_name"] = resolved_file_name
+        resolve_sync_install_metadata_to_details_game(
+            self.current_details_game,
+            update_game,
+            game_key=self._game_key,
+        )
+        self._start_async_install(update_game)
 
     def _resolved_emulator_entry_for_game(self, game: dict[str, str]) -> tuple[str, dict[str, str] | None]:
         return resolve_resolved_emulator_entry_for_game(
@@ -6748,6 +7089,53 @@ class MainWindow(QMainWindow):
     def _normalize_default_retroarch_cores(self, value: Any) -> dict[str, str]:
         return resolve_normalize_default_retroarch_cores(value)
 
+    def _normalize_emulator_source_installs(self, value: Any) -> dict[str, dict[str, str]]:
+        if not isinstance(value, dict):
+            return {}
+
+        normalized: dict[str, dict[str, str]] = {}
+        for raw_key, raw_payload in value.items():
+            key = raw_key.strip().casefold() if isinstance(raw_key, str) else ""
+            if not key or not isinstance(raw_payload, dict):
+                continue
+
+            payload: dict[str, str] = {}
+            for field in ("name", "provider", "owner", "repo", "release_tag", "installed_at"):
+                raw_field_value = raw_payload.get(field, "")
+                payload[field] = raw_field_value.strip() if isinstance(raw_field_value, str) else ""
+            normalized[key] = payload
+        return normalized
+
+    def _emulator_source_installs(self) -> dict[str, dict[str, str]]:
+        installs = self._normalize_emulator_source_installs(self.config.get("emulator_source_installs", {}))
+        self.config["emulator_source_installs"] = installs
+        return installs
+
+    def _record_source_emulator_install(self, game: dict[str, str]) -> None:
+        source_id_value = game.get("_source_id", "")
+        source_id = source_id_value.strip().casefold() if isinstance(source_id_value, str) else ""
+        if not source_id:
+            return
+
+        source_metadata = game.get("_source_metadata")
+        if not isinstance(source_metadata, dict):
+            return
+
+        provider_value = source_metadata.get("provider", "")
+        owner_value = source_metadata.get("owner", "")
+        repo_value = source_metadata.get("repo", source_metadata.get("repository", ""))
+        installs = self._emulator_source_installs()
+        installs[source_id] = {
+            "name": str(game.get("title", "")).strip(),
+            "provider": provider_value.strip() if isinstance(provider_value, str) else "",
+            "owner": owner_value.strip() if isinstance(owner_value, str) else "",
+            "repo": repo_value.strip() if isinstance(repo_value, str) else "",
+            "release_tag": str(game.get("_source_release_tag", "latest")).strip() or "latest",
+            "installed_at": datetime.now(UTC).isoformat(),
+        }
+        self.config["emulator_source_installs"] = installs
+        self._save_config(self.config)
+
     def _is_duckstation_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
         return self._emulator_matches_tokens(emulator_name, "duckstation", emulator=emulator)
 
@@ -6869,13 +7257,17 @@ class MainWindow(QMainWindow):
 
         self.default_core_combo.blockSignals(True)
         self.default_core_combo.clear()
-        for core in installed_cores:
-            self.default_core_combo.addItem(core, core)
+        if is_retroarch:
+            for core in installed_cores:
+                self.default_core_combo.addItem(core, core)
 
         selected_core = selected_retroarch_core(saved_core, installed_cores, is_retroarch)
         if selected_core:
             saved_index = self.default_core_combo.findData(selected_core)
             self.default_core_combo.setCurrentIndex(saved_index if saved_index >= 0 else -1)
+        elif emulator_name and not is_retroarch:
+            self.default_core_combo.addItem("N/A", "")
+            self.default_core_combo.setCurrentIndex(0)
         else:
             self.default_core_combo.setCurrentIndex(-1)
 
@@ -6919,6 +7311,41 @@ class MainWindow(QMainWindow):
             return
         emulators = self._normalize_emulators(self._emulators())
         self.config["emulators"] = emulators
+        action_icon_size = QSize(16, 16)
+        theme_color = getattr(self, "_theme_color", None)
+        if callable(theme_color):
+            accent_color = theme_color("accent", "#8be9fd")
+            text_color = theme_color("text", "#f8f8f2")
+            error_color = theme_color("error", "#ff5555")
+        else:
+            accent_color = "#8be9fd"
+            text_color = "#f8f8f2"
+            error_color = "#ff5555"
+
+        themed_svg_icon = getattr(self, "_themed_svg_icon", None)
+        if not callable(themed_svg_icon):
+            themed_svg_icon = resolve_themed_svg_icon
+
+        launch_icon = themed_svg_icon(
+            "play-1003-svgrepo-com.svg",
+            accent_color,
+            size=action_icon_size,
+        )
+        config_icon = themed_svg_icon(
+            "gear-tools-wrench-svgrepo-com.svg",
+            text_color,
+            size=action_icon_size,
+        )
+        uninstall_icon = themed_svg_icon(
+            "trashcan-svgrepo-com.svg",
+            error_color,
+            size=action_icon_size,
+        )
+        source_update_icon = themed_svg_icon(
+            "save-floppy-svgrepo-com.svg",
+            accent_color,
+            size=action_icon_size,
+        )
 
         selected_name = ""
         selected_index = self.emulator_list.currentRow()
@@ -6935,16 +7362,52 @@ class MainWindow(QMainWindow):
             row_layout.setContentsMargins(6, 2, 6, 2)
             row_layout.setSpacing(8)
 
-            name_button = QPushButton(entry["name"])
-            name_button.setFlat(True)
-            name_button.setStyleSheet("text-align: left; padding: 4px 0;")
-            name_button.clicked.connect(lambda checked=False, current_row=row: self.emulator_list.setCurrentRow(current_row))
-            row_layout.addWidget(name_button, 1)
+            name_label = QLabel(entry["name"])
+            name_label.setStyleSheet("padding: 4px 0;")
+            row_layout.addWidget(name_label, 1)
 
-            uninstall_button = QPushButton("Uninstall")
+            launch_button = QPushButton()
+            launch_button.setObjectName("installedEmulatorLaunchButton")
+            launch_button.setToolTip("Launch")
+            launch_button.setIcon(launch_icon)
+            launch_button.setIconSize(action_icon_size)
+            launch_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            launch_button.clicked.connect(lambda checked=False, current_row=row: self._launch_emulator_at_index(current_row))
+            row_layout.addWidget(launch_button)
+
+            config_button = QPushButton()
+            config_button.setObjectName("installedEmulatorConfigButton")
+            config_button.setToolTip("Config")
+            config_button.setIcon(config_icon)
+            config_button.setIconSize(action_icon_size)
+            config_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            config_button.setMinimumHeight(config_button.sizeHint().height() + 2)
+            config_button.clicked.connect(
+                lambda checked=False, current_row=row: MainWindow._open_emulator_config_dialog_for_row(self, current_row)
+            )
+            row_layout.addWidget(config_button)
+
+            uninstall_button = QPushButton()
+            uninstall_button.setObjectName("installedEmulatorUninstallButton")
+            uninstall_button.setToolTip("Uninstall")
+            uninstall_button.setIcon(uninstall_icon)
+            uninstall_button.setIconSize(action_icon_size)
             uninstall_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             uninstall_button.clicked.connect(lambda checked=False, current_row=row: self._remove_emulator_at_index(current_row))
             row_layout.addWidget(uninstall_button)
+
+            source_entry = self._source_download_entry_for_emulator_name(entry.get("name", ""))
+            if source_entry is not None:
+                source_update_button = QPushButton()
+                source_update_button.setObjectName("installedEmulatorSourceUpdateButton")
+                source_update_button.setToolTip("Update from Source")
+                source_update_button.setIcon(source_update_icon)
+                source_update_button.setIconSize(action_icon_size)
+                source_update_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+                source_update_button.clicked.connect(
+                    lambda checked=False, current_row=row: self._start_source_emulator_update_at_index(current_row)
+                )
+                row_layout.addWidget(source_update_button)
 
             item.setSizeHint(row_widget.sizeHint())
             self.emulator_list.addItem(item)
@@ -6995,6 +7458,9 @@ class MainWindow(QMainWindow):
         ):
             return
 
+        if self.save_emulator_button is not None:
+            self.save_emulator_button.setText(save_button_label(self._emulators(), row))
+
         form_state = emulator_form_state_for_row(
             self._emulators(),
             row,
@@ -7008,6 +7474,259 @@ class MainWindow(QMainWindow):
         self.emulator_ignore_extensions_input.setText(form_state["ignore_extensions"])
         self.emulator_save_paths_input.setText(form_state["save_paths"])
         self.emulator_state_paths_input.setText(form_state["state_paths"])
+
+    def _open_add_emulator_dialog(self) -> None:
+        self._open_emulator_config_dialog_for_row(-1)
+
+    def _available_source_download_emulator_entries(
+        self,
+        query: str = "",
+        installed_emulator_names: list[str] | None = None,
+    ) -> list[dict[str, str]]:
+        return resolve_available_source_download_emulator_entries(
+            self._emulator_autoprofiles(),
+            query=query,
+            installed_emulator_names=installed_emulator_names,
+        )
+
+    def _source_download_entry_for_emulator_name(self, emulator_name: str) -> dict[str, Any] | None:
+        name = emulator_name.strip() if isinstance(emulator_name, str) else ""
+        if not name:
+            return None
+
+        source_rows = self._available_source_download_emulator_entries(query=name)
+        for row in source_rows:
+            row_name_value = row.get("name", "")
+            row_name = row_name_value.strip() if isinstance(row_name_value, str) else ""
+            if row_name and row_name.casefold() == name.casefold():
+                return dict(row)
+
+        installs = self._emulator_source_installs()
+        for source_id, install_entry in installs.items():
+            install_name_value = install_entry.get("name", "")
+            install_name = install_name_value.strip() if isinstance(install_name_value, str) else ""
+            if not install_name or install_name.casefold() != name.casefold():
+                continue
+
+            provider_value = install_entry.get("provider", "")
+            owner_value = install_entry.get("owner", "")
+            repo_value = install_entry.get("repo", "")
+            release_tag_value = install_entry.get("release_tag", "")
+            provider = provider_value.strip() if isinstance(provider_value, str) else ""
+            owner = owner_value.strip() if isinstance(owner_value, str) else ""
+            repo = repo_value.strip() if isinstance(repo_value, str) else ""
+            release_tag = release_tag_value.strip() if isinstance(release_tag_value, str) and release_tag_value.strip() else "latest"
+
+            if (not owner or not repo) and isinstance(source_id, str) and "/" in source_id:
+                source_owner, _, source_repo = source_id.partition("/")
+                if not owner:
+                    owner = source_owner.strip()
+                if not repo:
+                    repo = source_repo.strip()
+            if not owner or not repo:
+                continue
+
+            source_metadata = {
+                "provider": provider or "github",
+                "owner": owner,
+                "repo": repo,
+                "release_tag": release_tag,
+            }
+            return {
+                "name": install_name,
+                "provider": source_metadata["provider"],
+                "owner": owner,
+                "repo": repo,
+                "release_tag": release_tag,
+                "source_id": f"{owner}/{repo}",
+                "source_metadata": source_metadata,
+            }
+
+        return None
+
+    def _build_source_emulator_install_game(self, selected: dict[str, Any], install_mode: str) -> dict[str, Any]:
+        selected_source_metadata = selected.get("source_metadata")
+        if isinstance(selected_source_metadata, dict):
+            source_metadata = dict(selected_source_metadata)
+        else:
+            source_metadata = {
+                "provider": selected.get("provider", ""),
+                "owner": selected.get("owner", ""),
+                "repo": selected.get("repo", ""),
+                "release_tag": selected.get("release_tag", "latest"),
+            }
+
+        source_release_tag = ""
+        for key in ("release_tag", "tag", "version"):
+            value = source_metadata.get(key, "")
+            if isinstance(value, str) and value.strip():
+                source_release_tag = value.strip()
+                break
+        if not source_release_tag:
+            source_release_tag = str(selected.get("release_tag", "latest")).strip() or "latest"
+
+        return {
+            "title": selected.get("name", "Emulator").strip() or "Emulator",
+            "platform": "Emulators",
+            "rating": "N/A",
+            "description": "Installed from configured source metadata.",
+            "rom_file_name": f"{selected.get('repo', 'source-download')}.zip",
+            "_install_mode": install_mode,
+            "_source_id": selected.get("source_id", "").strip(),
+            "_source_release_tag": source_release_tag,
+            "_source_metadata": source_metadata,
+            "_archive_name_override": (
+                f"{self._sanitize_path_component(selected.get('name', 'emulator'), 'emulator')}"
+                f"-{self._sanitize_path_component(source_release_tag, 'latest')}.zip"
+            ),
+        }
+
+    def _open_source_emulator_download_dialog(self) -> None:
+        installed_names = [
+            entry.get("name", "")
+            for entry in self._normalize_emulators(self._emulators())
+            if isinstance(entry, dict)
+        ]
+        source_rows = self._available_source_download_emulator_entries(
+            installed_emulator_names=installed_names,
+        )
+        if not source_rows:
+            QMessageBox.information(
+                self,
+                "Source Downloads",
+                "No supported source emulator downloads are currently available.",
+            )
+            return
+
+        labels = [
+            f"{row['name']} - {row['source_id']} ({row['release_tag']})"
+            for row in source_rows
+        ]
+        selected_label, ok = QInputDialog.getItem(
+            self,
+            "Download Supported Emulator",
+            "Select emulator source:",
+            labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+
+        selected_index = labels.index(selected_label) if selected_label in labels else -1
+        if selected_index < 0:
+            return
+
+        selected = source_rows[selected_index]
+        install_game = self._build_source_emulator_install_game(selected, "source_emulator")
+        self._start_async_install(install_game)
+
+    def _start_source_emulator_update_at_index(self, index: int) -> None:
+        emulators = self._normalize_emulators(self._emulators())
+        if index < 0 or index >= len(emulators):
+            return
+
+        emulator = emulators[index]
+        source_entry = self._source_download_entry_for_emulator_name(emulator.get("name", ""))
+        if source_entry is None:
+            emulator_name = str(emulator.get("name", "Emulator")).strip() or "Emulator"
+            QMessageBox.information(
+                self,
+                "Source Update",
+                f"No source metadata is available for '{emulator_name}'.",
+            )
+            return
+
+        install_game = self._build_source_emulator_install_game(source_entry, "source_emulator_update")
+        self._start_async_install(install_game)
+
+    def _extract_emulator_archive(self, emulator_name: str, archive_path: Path) -> tuple[str, str]:
+        library_path = self._library_path_dir()
+        if library_path is None:
+            QMessageBox.warning(self, "Validation", "Set a Library Path in Settings before adding an emulator archive.")
+            return "", ""
+
+        extract_target_dir = resolve_emulator_install_directory(library_path, emulator_name)
+        try:
+            resolve_extract_archive_into_directory(archive_path, extract_target_dir)
+        except OSError as error:
+            QMessageBox.warning(self, "Archive Error", f"Failed to extract emulator archive: {error}")
+            return "", ""
+
+        resolved_path = self._select_emulator_executable_path(
+            {
+                "title": emulator_name,
+                "extracted_dir": str(extract_target_dir),
+            },
+            archive_path,
+        )
+        if not resolved_path:
+            QMessageBox.warning(
+                self,
+                "Archive Extracted",
+                "Archive extraction finished, but no launchable executable was detected. Open Config to set the executable path manually.",
+            )
+        return str(extract_target_dir), resolved_path
+
+    def _open_emulator_config_dialog_for_row(self, row: int) -> None:
+        emulators = self._normalize_emulators(self._emulators())
+        self.config["emulators"] = emulators
+        selected_row = row if 0 <= row < len(emulators) else -1
+        existing_entry = emulators[selected_row] if selected_row >= 0 else None
+
+        dialog = EmulatorConfigDialog(
+            self,
+            emulator=existing_entry,
+            is_new_entry=selected_row < 0,
+            save_strategy_values=["auto", "single_file", "folder"],
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        entry = dialog.entry_payload()
+        entry_name = entry.get("name", "").strip()
+        executable_path = entry.get("path", "").strip()
+        archive_path_text = entry.get("archive_path", "").strip()
+        if archive_path_text:
+            archive_path = Path(archive_path_text).expanduser()
+            if not archive_path.exists() or not archive_path.is_file():
+                QMessageBox.warning(self, "Validation", f"Archive file was not found:\n{archive_path}")
+                return
+            extracted_dir, detected_path = self._extract_emulator_archive(entry_name, archive_path)
+            if extracted_dir:
+                entry["archive_path"] = str(archive_path)
+            if not executable_path and detected_path:
+                entry["path"] = detected_path
+
+        if self.emulator_name_input is None:
+            return
+        if self.emulator_path_input is None:
+            return
+        if self.emulator_args_input is None:
+            return
+        if self.emulator_save_strategy_input is None:
+            return
+        if self.emulator_ignore_files_input is None:
+            return
+        if self.emulator_ignore_extensions_input is None:
+            return
+        if self.emulator_save_paths_input is None:
+            return
+        if self.emulator_state_paths_input is None:
+            return
+
+        if self.emulator_list is not None:
+            self.emulator_list.setCurrentRow(selected_row)
+
+        self.emulator_name_input.setText(entry.get("name", ""))
+        self.emulator_path_input.setText(entry.get("path", ""))
+        self.emulator_args_input.setText(entry.get("args", "%rom%"))
+        self.emulator_save_strategy_input.setCurrentText(entry.get("save_strategy", "auto"))
+        self.emulator_ignore_files_input.setText(entry.get("ignore_files", ""))
+        self.emulator_ignore_extensions_input.setText(entry.get("ignore_extensions", ""))
+        self.emulator_save_paths_input.setText(entry.get("save_paths", ""))
+        self.emulator_state_paths_input.setText(entry.get("state_paths", ""))
+        self._save_emulator()
 
     def _save_emulator(self) -> None:
         if (
@@ -7086,7 +7805,14 @@ class MainWindow(QMainWindow):
                 self.config["default_retroarch_cores"] = core_defaults
 
         self._refresh_emulator_views()
+        self._clear_emulator_selection()
         self._save_config(self.config)
+        if is_new_manual_entry:
+            self._show_toast(f"Added emulator '{name}'.", level="success")
+
+    def _show_toast(self, message: str, level: str = "info") -> None:
+        del level
+        resolve_show_toast(self, message)
 
     def _remove_emulator_at_index(self, index: int) -> None:
         emulators = self._emulators()
@@ -7136,6 +7862,9 @@ class MainWindow(QMainWindow):
             return
 
         index = self.emulator_list.currentRow()
+        self._launch_emulator_at_index(index)
+
+    def _launch_emulator_at_index(self, index: int) -> None:
         emulators = self._emulators()
         if index < 0 or index >= len(emulators):
             return

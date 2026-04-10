@@ -4,8 +4,16 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
+from ..core.path import sanitize_path_component
+
 
 EmulatorEntry = dict[str, str]
+
+
+def emulator_install_directory(library_path: Path | str, emulator_name: str) -> Path:
+    library_root = library_path.expanduser() if isinstance(library_path, Path) else Path(str(library_path)).expanduser()
+    safe_emulator_name = sanitize_path_component(str(emulator_name), "emulator")
+    return library_root / "Emulators" / safe_emulator_name
 
 
 def select_emulator_executable_path(
@@ -14,31 +22,45 @@ def select_emulator_executable_path(
     *,
     launchable_emulator_file: Callable[[Path], bool],
 ) -> str:
+    title_text = game.get("title", "")
+    title = title_text.strip().casefold() if isinstance(title_text, str) else ""
+    title_tokens = [token for token in re.split(r"[^a-z0-9]+", title) if len(token) > 2]
+    preferred_executable_names: set[str] = set()
+    if "nintendo switch" in title or "switch" in title:
+        preferred_executable_names.add("eden.exe")
+    if "nintendo 3ds" in title or "3ds" in title:
+        preferred_executable_names.add("azahar.exe")
+
+    extracted_path_fallback = ""
+
+    extracted_dir_value = game.get("extracted_dir", "")
+    extracted_dir = None
+    if isinstance(extracted_dir_value, str) and extracted_dir_value.strip():
+        candidate_dir = Path(extracted_dir_value).expanduser()
+        if candidate_dir.exists() and candidate_dir.is_dir():
+            extracted_dir = candidate_dir
+
     extracted_path_value = game.get("extracted_path", "")
     if isinstance(extracted_path_value, str) and extracted_path_value.strip():
         extracted_path = Path(extracted_path_value).expanduser()
         if extracted_path.exists() and extracted_path.is_file() and launchable_emulator_file(extracted_path):
-            return str(extracted_path)
+            extracted_path_candidate = str(extracted_path)
+            extracted_path_name = extracted_path.name.casefold()
+            if (
+                not preferred_executable_names
+                or extracted_path_name in preferred_executable_names
+                or extracted_dir is None
+            ):
+                return extracted_path_candidate
+            extracted_path_fallback = extracted_path_candidate
 
-    extracted_dir_value = game.get("extracted_dir", "")
-    if isinstance(extracted_dir_value, str) and extracted_dir_value.strip():
-        extracted_dir = Path(extracted_dir_value).expanduser()
-        if extracted_dir.exists() and extracted_dir.is_dir():
+    if extracted_dir is not None:
             candidates = [
                 candidate
                 for candidate in extracted_dir.rglob("*")
                 if candidate.is_file() and launchable_emulator_file(candidate)
             ]
             if candidates:
-                title_text = game.get("title", "")
-                title = title_text.strip().casefold() if isinstance(title_text, str) else ""
-                title_tokens = [token for token in re.split(r"[^a-z0-9]+", title) if len(token) > 2]
-                preferred_executable_names: set[str] = set()
-                if "nintendo switch" in title or "switch" in title:
-                    preferred_executable_names.add("eden.exe")
-                if "nintendo 3ds" in title or "3ds" in title:
-                    preferred_executable_names.add("azahar.exe")
-
                 def score(candidate: Path) -> tuple[int, int, int, int, str]:
                     candidate_file_name = candidate.name.casefold()
                     preferred_name = 0 if candidate_file_name in preferred_executable_names else 1
@@ -55,6 +77,9 @@ def select_emulator_executable_path(
 
                 candidates.sort(key=score)
                 return str(candidates[0])
+
+    if extracted_path_fallback:
+        return extracted_path_fallback
 
     if archive_path.exists() and archive_path.is_file() and launchable_emulator_file(archive_path):
         return str(archive_path)
@@ -83,6 +108,159 @@ def _multiline_profile_value(profile: dict[str, Any], key: str) -> str:
         item.strip()
         for item in profile.get(key, [])
         if isinstance(item, str) and item.strip()
+    )
+
+
+def _resolved_autoprofiles(
+    autoprofiles: list[dict[str, Any]] | None = None,
+    profiles: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    resolved_profiles = autoprofiles if isinstance(autoprofiles, list) else profiles
+    return resolved_profiles if isinstance(resolved_profiles, list) else []
+
+
+def emulator_source_registry_for_profile(
+    profile: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(profile, dict):
+        return None
+    source_value = profile.get("source")
+    if not isinstance(source_value, dict):
+        return None
+    provider_value = source_value.get("provider", "")
+    provider = provider_value.strip() if isinstance(provider_value, str) else ""
+    if not provider:
+        return None
+    return dict(source_value)
+
+
+def emulator_source_registry_for_name(
+    emulator_name: str,
+    autoprofiles: list[dict[str, Any]] | None = None,
+    profiles: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    selected_profile = _selected_manual_autoprofile(
+        emulator_name,
+        None,
+        None,
+        _resolved_autoprofiles(autoprofiles, profiles),
+    )
+    return emulator_source_registry_for_profile(selected_profile)
+
+
+def emulator_source_registry_for_entry(
+    emulator: EmulatorEntry,
+    autoprofiles: list[dict[str, Any]],
+    *,
+    emulator_profile_for_entry: Callable[[dict[str, str], list[dict[str, Any]]], dict[str, Any] | None],
+) -> dict[str, Any] | None:
+    profile = emulator_profile_for_entry(emulator, autoprofiles)
+    return emulator_source_registry_for_profile(profile)
+
+
+def _selected_manual_autoprofile(
+    selected_name: str,
+    selected_profile: dict[str, Any] | None,
+    profile: dict[str, Any] | None,
+    all_profiles: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if isinstance(selected_profile, dict):
+        return selected_profile
+    if isinstance(profile, dict):
+        return profile
+    if not selected_name:
+        return None
+
+    normalized_selected_name = selected_name.casefold()
+    for candidate in all_profiles:
+        if not isinstance(candidate, dict):
+            continue
+        candidate_name = candidate.get("name", "")
+        if isinstance(candidate_name, str) and candidate_name.strip().casefold() == normalized_selected_name:
+            return candidate
+    return None
+
+
+def manual_emulator_autofill_suggestions(
+    prefix: str = "",
+    typed_prefix: str = "",
+    query: str = "",
+    text: str = "",
+    profiles: list[dict[str, Any]] | None = None,
+    autoprofiles: list[dict[str, Any]] | None = None,
+) -> list[str]:
+    resolved_prefix = ""
+    for value in (prefix, typed_prefix, query, text):
+        if isinstance(value, str) and value.strip():
+            resolved_prefix = value.strip()
+            break
+    if not resolved_prefix:
+        return []
+
+    normalized_prefix = resolved_prefix.casefold()
+    suggestions: list[str] = []
+    seen_names: set[str] = set()
+    for profile in _resolved_autoprofiles(autoprofiles, profiles):
+        if not isinstance(profile, dict):
+            continue
+        profile_name = profile.get("name", "")
+        if not isinstance(profile_name, str):
+            continue
+        normalized_name = profile_name.strip()
+        if not normalized_name:
+            continue
+        normalized_key = normalized_name.casefold()
+        if normalized_key in seen_names:
+            continue
+        if normalized_name.casefold().startswith(normalized_prefix):
+            seen_names.add(normalized_key)
+            suggestions.append(normalized_name)
+    return suggestions
+
+
+def manual_entry_from_autofill_suggestion(
+    selected_suggestion: str = "",
+    suggestion_name: str = "",
+    profile_name: str = "",
+    selected_profile: dict[str, Any] | None = None,
+    profile: dict[str, Any] | None = None,
+    entry: EmulatorEntry | None = None,
+    manual_entry: EmulatorEntry | None = None,
+    emulator_entry: EmulatorEntry | None = None,
+    profiles: list[dict[str, Any]] | None = None,
+    autoprofiles: list[dict[str, Any]] | None = None,
+    *,
+    normalize_save_strategy_value: Callable[[str], str],
+) -> EmulatorEntry:
+    resolved_entry = dict(manual_entry or entry or emulator_entry or {})
+    resolved_profiles = _resolved_autoprofiles(autoprofiles, profiles)
+
+    resolved_selected_name = ""
+    for value in (selected_suggestion, suggestion_name, profile_name):
+        if isinstance(value, str) and value.strip():
+            resolved_selected_name = value.strip()
+            break
+
+    selected = _selected_manual_autoprofile(
+        resolved_selected_name,
+        selected_profile,
+        profile,
+        resolved_profiles,
+    )
+    if not isinstance(selected, dict):
+        return resolved_entry
+
+    selected_name = selected.get("name", "")
+    if isinstance(selected_name, str) and selected_name.strip():
+        resolved_entry["name"] = selected_name.strip()
+    elif resolved_selected_name:
+        resolved_entry["name"] = resolved_selected_name
+
+    return apply_manual_emulator_profile_defaults(
+        resolved_entry,
+        resolved_profiles,
+        emulator_profile_for_entry=lambda _entry, _profiles: selected,
+        normalize_save_strategy_value=normalize_save_strategy_value,
     )
 
 

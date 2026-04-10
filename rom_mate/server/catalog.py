@@ -126,6 +126,13 @@ def _ps4_file_ids_by_category(item: dict[str, Any]) -> dict[str, list[int]]:
     return file_ids_by_category
 
 
+def _rom_updated_at_text(item: dict[str, Any]) -> str:
+    updated_at = item.get("updated_at")
+    if not isinstance(updated_at, str):
+        return ""
+    return updated_at.strip()
+
+
 def games_from_rom_items(
     all_items: list[dict[str, Any]],
     platform_label: str,
@@ -162,6 +169,7 @@ def games_from_rom_items(
                 "cover_url": cover_url,
                 "screenshot_urls": "\n".join(screenshot_urls),
                 "rom_id": rom_id,
+                "server_updated_at": _rom_updated_at_text(item),
                 "rom_file_name": item.get("fs_name", "").strip() if isinstance(item.get("fs_name", ""), str) else "",
                 "ps4_has_update": "true" if "update" in ps4_file_ids_by_category else "false",
                 "ps4_has_dlc": "true" if "dlc" in ps4_file_ids_by_category else "false",

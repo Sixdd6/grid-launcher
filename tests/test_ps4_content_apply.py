@@ -126,6 +126,37 @@ class PS4ContentApplyTests(unittest.TestCase):
         self.assertEqual(normalized[0]["ps4_game_id"], "CUSA12345")
         self.assertEqual(normalized[0]["ps4_content"], "[{\"kind\":\"update\"}]")
 
+    def test_extract_archive_into_directory_supports_7z(self) -> None:
+        try:
+            import py7zr
+        except ImportError:
+            self.skipTest("py7zr is required for .7z extraction tests")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_file = root / "pcsx2-qt.exe"
+            source_file.write_bytes(b"pcsx2-binary")
+            archive_path = root / "pcsx2.7z"
+
+            with py7zr.SevenZipFile(archive_path, mode="w") as archive:
+                archive.write(source_file, arcname="PCSX2/pcsx2-qt.exe")
+
+            extracted_dir = root / "extract"
+            progress_updates: list[tuple[int, int]] = []
+            extract_archive_into_directory(
+                archive_path,
+                extracted_dir,
+                install_progress_callback=lambda installed, total: progress_updates.append((installed, total)),
+            )
+
+            extracted_file = extracted_dir / "PCSX2" / "pcsx2-qt.exe"
+            self.assertTrue(extracted_file.exists())
+            self.assertEqual(extracted_file.read_bytes(), b"pcsx2-binary")
+            self.assertGreaterEqual(len(progress_updates), 2)
+            self.assertEqual(progress_updates[0], (0, 0))
+            self.assertGreater(progress_updates[-1][0], 0)
+            self.assertEqual(progress_updates[-1][0], progress_updates[-1][1])
+
 
 if __name__ == "__main__":
     unittest.main()

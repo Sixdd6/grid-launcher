@@ -61,6 +61,7 @@ from rom_mate.emulator.xenia import (
 )
 from rom_mate.emulator.profiles import (
     emulator_entry_matches_tokens,
+    emulator_profile_for_game,
     load_emulator_autoprofiles,
     matching_platforms_for_emulator_keywords,
     normalize_ignore_extension_value,
@@ -102,7 +103,50 @@ def _coerce_manual_entry_result(result):
     raise AssertionError(f"Unable to extract manual emulator entry from helper result: {result!r}")
 
 
+def _coerce_suggestion_names(result):
+    if isinstance(result, tuple):
+        for item in result:
+            if isinstance(item, list):
+                result = item
+                break
+
+    if not isinstance(result, list):
+        raise AssertionError(f"Unable to extract suggestion list from helper result: {result!r}")
+
+    names = []
+    for item in result:
+        if isinstance(item, str) and item.strip():
+            names.append(item.strip())
+            continue
+        if isinstance(item, dict):
+            name_value = item.get("name", "")
+            if isinstance(name_value, str) and name_value.strip():
+                names.append(name_value.strip())
+    return names
+
+
 class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
+    def test_select_emulator_executable_path_prefers_azahar_over_azahar_room(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            extracted_dir = Path(temp_dir) / "azahar"
+            extracted_dir.mkdir()
+            azahar_room_path = extracted_dir / "azahar-room.exe"
+            azahar_path = extracted_dir / "azahar.exe"
+            azahar_room_path.write_text("", encoding="utf-8")
+            azahar_path.write_text("", encoding="utf-8")
+
+            selected_path = emulator_autoconfig.select_emulator_executable_path(
+                {
+                    "title": "Nintendo 3DS",
+                    "extracted_path": str(azahar_room_path),
+                    "extracted_dir": str(extracted_dir),
+                },
+                Path(temp_dir) / "archive.zip",
+                launchable_emulator_file=lambda path: path.suffix.casefold() == ".exe",
+            )
+
+        self.assertEqual(selected_path, str(azahar_path))
+
     def test_cemu_save_path_overrides_reads_custom_mlc_from_settings_xml(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             emulator_dir = Path(temp_dir) / "cemu"
@@ -816,6 +860,31 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
 
         self.assertEqual(profiles, [])
 
+    def test_emulator_profile_for_game_prefers_exact_title_when_match_tokens_duplicate(self) -> None:
+        profiles = [
+            {
+                "match_tokens": ["shadps4.exe"],
+                "name": "ShadPS4 Core (Playstation 4)",
+                "args": "--core \"%rom%\"",
+                "platform_keywords": ["playstation 4", "ps4"],
+            },
+            {
+                "match_tokens": ["shadps4.exe"],
+                "name": "ShadPS4 Qt Launcher (Playstation 4)",
+                "args": "\"%rom%\"",
+                "platform_keywords": ["playstation 4", "ps4"],
+            },
+        ]
+
+        selected_profile = emulator_profile_for_game(
+            {"title": "ShadPS4 Qt Launcher (Playstation 4)"},
+            r"C:\Emulators\ShadPS4\shadPS4.exe",
+            profiles,
+        )
+
+        self.assertEqual(selected_profile["name"], "ShadPS4 Qt Launcher (Playstation 4)")
+        self.assertEqual(selected_profile["args"], '"%rom%"')
+
 
 class ManualEmulatorAutopopulateTests(unittest.TestCase):
     def test_defaults_manual_entry_from_matched_profile(self) -> None:
@@ -995,6 +1064,112 @@ class ManualEmulatorAutopopulateTests(unittest.TestCase):
         self.assertEqual(resolved_defaults.get("Sony PlayStation"), "RetroArch (Multi-System)")
         self.assertEqual(resolved_defaults.get("Nintendo Wii U"), "")
         self.assertEqual(resolved_core_defaults.get("Sony PlayStation"), "pcsx_rearmed_libretro.dll")
+
+
+class ManualEmulatorAutofillSuggestionTests(unittest.TestCase):
+    def test_autofill_suggestions_match_typed_prefix(self) -> None:
+        helper = _resolve_autoconfig_helper(
+            "manual_emulator_autofill_suggestions",
+            "manual_emulator_autoprofile_suggestions",
+            "autoprofile_suggestions_for_prefix",
+            "suggest_autoprofile_names",
+        )
+        profiles = [
+            {"name": "RetroArch (Multi-System)", "match_tokens": ["retroarch.exe"]},
+            {"name": "RetroDeck", "match_tokens": ["retrodeck.exe"]},
+            {"name": "Dolphin", "match_tokens": ["dolphin.exe"]},
+        ]
+
+        result = _call_with_supported_kwargs(
+            helper,
+            prefix="retro",
+            typed_prefix="retro",
+            query="retro",
+            text="retro",
+            profiles=profiles,
+            autoprofiles=profiles,
+        )
+        suggestions = _coerce_suggestion_names(result)
+
+        self.assertEqual(suggestions, ["RetroArch (Multi-System)", "RetroDeck"])
+
+    def test_autofill_suggestions_return_empty_for_no_match(self) -> None:
+        helper = _resolve_autoconfig_helper(
+            "manual_emulator_autofill_suggestions",
+            "manual_emulator_autoprofile_suggestions",
+            "autoprofile_suggestions_for_prefix",
+            "suggest_autoprofile_names",
+        )
+        profiles = [
+            {"name": "RetroArch (Multi-System)", "match_tokens": ["retroarch.exe"]},
+            {"name": "Dolphin", "match_tokens": ["dolphin.exe"]},
+        ]
+
+        result = _call_with_supported_kwargs(
+            helper,
+            prefix="xyz-no-match",
+            typed_prefix="xyz-no-match",
+            query="xyz-no-match",
+            text="xyz-no-match",
+            profiles=profiles,
+            autoprofiles=profiles,
+        )
+        suggestions = _coerce_suggestion_names(result)
+
+        self.assertEqual(suggestions, [])
+
+    def test_builds_manual_entry_from_selected_autofill_suggestion(self) -> None:
+        helper = _resolve_autoconfig_helper(
+            "manual_entry_from_autofill_suggestion",
+            "manual_emulator_entry_from_suggestion",
+            "build_manual_emulator_entry_from_suggestion",
+            "populated_manual_emulator_entry_from_suggestion",
+        )
+        profile = {
+            "name": "RetroArch (Multi-System)",
+            "match_tokens": ["retroarch.exe"],
+            "args": '-L "%core%" "%rom%"',
+            "save_strategy": "folder",
+            "ignore_files": ["retroarch.log"],
+            "ignore_extensions": ["tmp"],
+            "save_directories": ["saves"],
+            "state_directories": ["states"],
+        }
+        entry = {
+            "name": "retro",
+            "path": r"C:\Emulators\RetroArch\retroarch_custom.exe",
+            "args": "%rom%",
+            "save_strategy": "",
+            "ignore_files": "",
+            "ignore_extensions": "",
+            "save_paths": "",
+            "state_paths": "",
+        }
+
+        result = _call_with_supported_kwargs(
+            helper,
+            selected_suggestion="RetroArch (Multi-System)",
+            suggestion_name="RetroArch (Multi-System)",
+            profile_name="RetroArch (Multi-System)",
+            selected_profile=profile,
+            profile=profile,
+            entry=entry,
+            manual_entry=entry,
+            emulator_entry=entry,
+            profiles=[profile],
+            autoprofiles=[profile],
+            normalize_save_strategy_value=normalize_save_strategy_value,
+        )
+        defaulted_entry = _coerce_manual_entry_result(result)
+
+        self.assertEqual(defaulted_entry.get("name"), "RetroArch (Multi-System)")
+        self.assertEqual(defaulted_entry.get("path"), r"C:\Emulators\RetroArch\retroarch_custom.exe")
+        self.assertEqual(defaulted_entry.get("args"), '-L "%core%" "%rom%"')
+        self.assertEqual(defaulted_entry.get("save_strategy"), "folder")
+        self.assertEqual(defaulted_entry.get("ignore_files"), "retroarch.log")
+        self.assertEqual(defaulted_entry.get("ignore_extensions"), "tmp")
+        self.assertEqual(defaulted_entry.get("save_paths"), "saves")
+        self.assertEqual(defaulted_entry.get("state_paths"), "states")
 
 
 if __name__ == "__main__":

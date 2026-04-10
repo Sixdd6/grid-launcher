@@ -5,6 +5,8 @@ from typing import Any, Protocol
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout
 
+from rom_mate.library import rom_file_name_version
+
 
 class GameCardWindowProtocol(Protocol):
     def _open_game_details(self, game: dict[str, str], source: str) -> None:
@@ -24,6 +26,7 @@ class GameDetailsWindowProtocol(Protocol):
     details_title_label: QLabel | None
     details_cover_label: QLabel | None
     details_platform_label: QLabel | None
+    details_version_label: QLabel | None
     details_rating_label: QLabel | None
     details_description_label: QLabel | None
     details_primary_button: QPushButton | None
@@ -33,6 +36,7 @@ class GameDetailsWindowProtocol(Protocol):
     details_manage_states_button: QPushButton | None
     details_ps4_content_button: QPushButton | None
     details_secondary_button: QPushButton | None
+    details_update_button: QPushButton | None
     stack: Any
     nav_buttons: list[QPushButton]
     install_in_progress: bool
@@ -91,6 +95,57 @@ class GameDetailsWindowProtocol(Protocol):
     def _is_rpcs3_emulator_name(self, emulator_name: str) -> bool:
         ...
 
+    def _details_version_label_text_for_game(self, game: dict[str, str]) -> str:
+        ...
+
+    def _details_update_button_text_for_game(self, game: dict[str, str]) -> str:
+        ...
+
+
+def _is_windows_pc_platform(platform_value: object) -> bool:
+    if not isinstance(platform_value, str):
+        return False
+    platform = platform_value.strip().casefold()
+    if not platform:
+        return False
+    return "windows" in platform or platform == "pc"
+
+
+def _default_details_version_label_text(game: dict[str, str]) -> str:
+    if not _is_windows_pc_platform(game.get("platform", "")):
+        return ""
+    rom_file_name = game.get("rom_file_name", "")
+    version_tag = rom_file_name_version(rom_file_name)
+    if version_tag is None:
+        return ""
+    return f"Version: v{version_tag:05d}"
+
+
+def _is_truthy_flag(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        return normalized in {"1", "true", "yes", "on", "y", "t"}
+    return False
+
+
+def _has_update_available(window: GameDetailsWindowProtocol, game: dict[str, str], installed: bool) -> bool:
+    if not installed:
+        return False
+
+    details_update_available_fn = getattr(window, "_details_update_available_for_game", None)
+    if callable(details_update_available_fn):
+        return bool(details_update_available_fn(game))
+
+    for field in ("update_available", "has_update", "ps4_has_update"):
+        if _is_truthy_flag(game.get(field)):
+            return True
+
+    return False
+
 
 def is_hidden_library_platform(game: dict[str, str]) -> bool:
     platform_value = game.get("platform", "")
@@ -137,6 +192,12 @@ def make_game_card(window: GameCardWindowProtocol, game: dict[str, str], source:
     platform_label.setStyleSheet(f"color: {window._theme_color('muted', '#6272a4')};")
     layout.addWidget(platform_label)
 
+    update_indicator = QLabel("Update Available")
+    update_indicator.setObjectName("gameCardUpdateIndicator")
+    update_indicator.setStyleSheet(f"color: {window._theme_color('warning', '#ffb86c')}; font-size: 12px; font-weight: 600;")
+    update_indicator.setVisible(_is_truthy_flag(game.get("update_available")))
+    layout.addWidget(update_indicator)
+
     return frame
 
 
@@ -151,6 +212,15 @@ def open_game_details(window: GameDetailsWindowProtocol, game: dict[str, str], s
         window._queue_game_cover_load(game, window.details_cover_label)
     if window.details_platform_label is not None:
         window.details_platform_label.setText(f"Platform: {game['platform']}")
+    version_label_text_fn = getattr(window, "_details_version_label_text_for_game", None)
+    version_label_text = (
+        version_label_text_fn(game)
+        if callable(version_label_text_fn)
+        else _default_details_version_label_text(game)
+    )
+    if window.details_version_label is not None:
+        window.details_version_label.setText(version_label_text)
+        window.details_version_label.setVisible(bool(version_label_text))
     if window.details_rating_label is not None:
         window.details_rating_label.setText(f"Rating: {game['rating']}")
     if window.details_description_label is not None:
@@ -173,6 +243,7 @@ def update_details_action_buttons(window: GameDetailsWindowProtocol) -> None:
     current_game = window.current_details_game
     is_emulator_entry = window._is_emulators_platform(current_game)
     installed = window._is_game_installed(current_game)
+    update_available = _has_update_available(window, current_game, installed)
     install_block_reason = "" if installed else window._install_block_reason_for_game(current_game)
     install_blocked = bool(install_block_reason)
     queued_current = window._is_game_install_queued(current_game)
@@ -250,7 +321,21 @@ def update_details_action_buttons(window: GameDetailsWindowProtocol) -> None:
     ):
         window._show_details_overview()
 
+    show_secondary = installed and not is_emulator_entry
     if window.details_secondary_button is not None:
         window.details_secondary_button.setText("Uninstall")
-        window.details_secondary_button.setVisible(installed and not is_emulator_entry)
-        window.details_secondary_button.setEnabled(installed and not is_emulator_entry and not installing_current)
+        window.details_secondary_button.setVisible(show_secondary)
+        window.details_secondary_button.setEnabled(show_secondary and not installing_current)
+
+    details_update_button = getattr(window, "details_update_button", None)
+    if details_update_button is not None:
+        show_update = show_secondary and update_available
+        update_button_text_fn = getattr(window, "_details_update_button_text_for_game", None)
+        update_button_text = (
+            update_button_text_fn(current_game)
+            if callable(update_button_text_fn)
+            else "Update"
+        )
+        details_update_button.setText(update_button_text)
+        details_update_button.setVisible(show_update)
+        details_update_button.setEnabled(show_update and not installing_current)

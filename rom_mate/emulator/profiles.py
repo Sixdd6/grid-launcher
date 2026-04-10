@@ -206,24 +206,40 @@ def emulator_profile_for_game(
     title_value = game.get("title", "")
     title = title_value.strip() if isinstance(title_value, str) else ""
     executable_name = Path(executable_path).name.strip().casefold()
+    token_matches: list[dict[str, Any]] = []
 
     for profile in profiles:
         match_tokens = profile.get("match_tokens", [])
         if executable_name and isinstance(match_tokens, list) and any(token == executable_name for token in match_tokens):
-            resolved_name = profile.get("name", "Emulator")
-            if profile.get("use_game_title_as_name", False):
-                resolved_name = title or resolved_name
-            return {
-                "name": resolved_name,
-                "args": profile.get("args", "%rom%"),
-                "all_platforms": bool(profile.get("all_platforms", False)),
-                "platform_keywords": profile.get("platform_keywords", []),
-                "save_strategy": profile.get("save_strategy", "auto"),
-                "ignore_files": profile.get("ignore_files", []),
-                "ignore_extensions": profile.get("ignore_extensions", []),
-                "save_directories": profile.get("save_directories", []),
-                "state_directories": profile.get("state_directories", []),
-            }
+            token_matches.append(profile)
+
+    selected_profile: dict[str, Any] | None = None
+    if len(token_matches) == 1:
+        selected_profile = token_matches[0]
+    elif len(token_matches) > 1:
+        for profile in token_matches:
+            profile_name = profile.get("name", "")
+            if isinstance(profile_name, str) and profile_name.strip() == title:
+                selected_profile = profile
+                break
+        if selected_profile is None:
+            selected_profile = token_matches[0]
+
+    if isinstance(selected_profile, dict):
+        resolved_name = selected_profile.get("name", "Emulator")
+        if selected_profile.get("use_game_title_as_name", False):
+            resolved_name = title or resolved_name
+        return {
+            "name": resolved_name,
+            "args": selected_profile.get("args", "%rom%"),
+            "all_platforms": bool(selected_profile.get("all_platforms", False)),
+            "platform_keywords": selected_profile.get("platform_keywords", []),
+            "save_strategy": selected_profile.get("save_strategy", "auto"),
+            "ignore_files": selected_profile.get("ignore_files", []),
+            "ignore_extensions": selected_profile.get("ignore_extensions", []),
+            "save_directories": selected_profile.get("save_directories", []),
+            "state_directories": selected_profile.get("state_directories", []),
+        }
 
     return {
         "name": title or "Emulator",
@@ -415,21 +431,25 @@ def normalize_emulator_autoprofiles(
                 if isinstance(directory, str) and directory.strip()
             ]
 
-        normalized.append(
-            {
-                "match_tokens": [primary_token],
-                "name": name.strip(),
-                "args": args.strip() or "%rom%",
-                "all_platforms": all_platforms,
-                "platform_keywords": normalized_keywords,
-                "use_game_title_as_name": use_game_title_as_name,
-                "save_strategy": normalized_save_strategy,
-                "ignore_files": normalized_ignore_files,
-                "ignore_extensions": normalized_ignore_extensions,
-                "save_directories": normalized_save_directories,
-                "state_directories": normalized_state_directories,
-            }
-        )
+        source = item.get("source")
+        normalized_source = source.copy() if isinstance(source, dict) else None
+
+        normalized_profile = {
+            "match_tokens": [primary_token],
+            "name": name.strip(),
+            "args": args.strip() or "%rom%",
+            "all_platforms": all_platforms,
+            "platform_keywords": normalized_keywords,
+            "use_game_title_as_name": use_game_title_as_name,
+            "save_strategy": normalized_save_strategy,
+            "ignore_files": normalized_ignore_files,
+            "ignore_extensions": normalized_ignore_extensions,
+            "save_directories": normalized_save_directories,
+            "state_directories": normalized_state_directories,
+        }
+        if normalized_source is not None:
+            normalized_profile["source"] = normalized_source
+        normalized.append(normalized_profile)
 
     return normalized
 

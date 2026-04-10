@@ -12,6 +12,24 @@
   },
   {
     "match_tokens": ["duckstation-qt-x64-ReleaseLTCG.exe"],
+    "source": {
+      "provider": "github-release",
+      "owner": "stenzek",
+      "repo": "duckstation",
+      "release_tag": "latest",
+      "windows_assets": [
+        {
+          "arch": "x64",
+          "asset_name": "duckstation-windows-x64-release.zip",
+          "launch_executable": "duckstation-qt-x64-ReleaseLTCG.exe"
+        },
+        {
+          "arch": "arm64",
+          "asset_name": "duckstation-windows-arm64-release.zip",
+          "launch_executable": "duckstation-qt-arm64-ReleaseLTCG.exe"
+        }
+      ]
+    },
     "name": "DuckStation (Playstation 1)",
     "args": "-fullscreen -batch \"%rom%\"",
     "all_platforms": false,
@@ -23,6 +41,19 @@
   },
   {
     "match_tokens": ["pcsx2-qt.exe"],
+    "source": {
+      "provider": "github-release",
+      "owner": "PCSX2",
+      "repo": "pcsx2",
+      "release_tag": "latest",
+      "windows_assets": [
+        {
+          "arch": "x64",
+          "asset_name_regex": "^pcsx2-v[0-9.]+-windows-x64-Qt\\.7z$",
+          "launch_executable": "pcsx2-qt.exe"
+        }
+      ]
+    },
     "name": "PCSX2 (Playstation 2)",
     "args": "-fullscreen -batch \"%rom%\"",
     "all_platforms": false,
@@ -39,6 +70,24 @@
   },
   {
     "match_tokens": ["PPSSPPWindows64.exe"],
+    "source": {
+      "provider": "github-release",
+      "owner": "hrydgard",
+      "repo": "ppsspp",
+      "release_tag": "latest",
+      "windows_assets": [
+        {
+          "arch": "x64",
+          "asset_name_regex": "^PPSSPP-v[0-9.]+-Windows-x64\\.zip$",
+          "launch_executable": "PPSSPPWindows64.exe"
+        },
+        {
+          "arch": "arm64",
+          "asset_name_regex": "^PPSSPP-v[0-9.]+-Windows-ARM64\\.zip$",
+          "launch_executable": "PPSSPPWindowsARM64.exe"
+        }
+      ]
+    },
     "name": "PPSSPP (Playstation Portable)",
     "args": "--fullscreen --pause-menu-exit \"%rom%\"",
     "all_platforms": false,
@@ -65,10 +114,47 @@
   },
   {
     "match_tokens": ["shadPS4.exe"],
+    "source": {
+      "provider": "github-release",
+      "owner": "shadps4-emu",
+      "repo": "shadPS4",
+      "release_tag": "latest",
+      "windows_assets": [
+        {
+          "arch": "x64",
+          "asset_name_regex": "^shadps4-win64-sdl-[0-9.]+\\.zip$",
+          "launch_executable": "shadPS4.exe"
+        }
+      ]
+    },
     "name": "ShadPS4 (Playstation 4)",
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation 4", "ps4"],
+    "use_game_title_as_name": false,
+    "save_strategy": "folder",
+    "save_directories": ["user\\home\\1000\\savedata","%APPDATA%\\shadPS4\\home\\1000\\savedata"],
+    "state_directories": []
+  },
+  {
+    "match_tokens": ["shadPS4QtLauncher.exe"],
+    "source": {
+      "provider": "github-release",
+      "owner": "shadps4-emu",
+      "repo": "shadps4-qtlauncher",
+      "release_tag": "latest",
+      "windows_assets": [
+        {
+          "arch": "x64",
+          "asset_name_regex": "^shadPS4QtLauncher-win64-qt-v[0-9]+\\.zip$",
+          "launch_executable": "shadPS4QtLauncher.exe"
+        }
+      ]
+    },
+    "name": "ShadPS4 Qt Launcher",
+    "args": "",
+    "all_platforms": false,
+    "platform_keywords": [],
     "use_game_title_as_name": false,
     "save_strategy": "folder",
     "save_directories": ["user\\home\\1000\\savedata","%APPDATA%\\shadPS4\\home\\1000\\savedata"],
@@ -101,6 +187,19 @@
   },
   {
     "match_tokens": ["cemu.exe"],
+    "source": {
+      "provider": "github-release",
+      "owner": "cemu-project",
+      "repo": "Cemu",
+      "release_tag": "latest",
+      "windows_assets": [
+        {
+          "arch": "x64",
+          "asset_name_regex": "^cemu-[0-9.]+-windows-x64\\.zip$",
+          "launch_executable": "cemu.exe"
+        }
+      ]
+    },
     "name": "Cemu (Wii U)",
     "args": "-g \"%rom%\" -f",
     "all_platforms": false,
@@ -116,6 +215,19 @@
   },
   {
     "match_tokens": ["azahar.exe"],
+    "source": {
+      "provider": "github-release",
+      "owner": "azahar-emu",
+      "repo": "azahar",
+      "release_tag": "latest",
+      "windows_assets": [
+        {
+          "arch": "x64",
+          "asset_name_regex": "^azahar-windows-msvc-[0-9.]+\\.zip$",
+          "launch_executable": "azahar.exe"
+        }
+      ]
+    },
     "name": "Azahar (Nintendo 3DS)",
     "args": "-f \"%rom%\"",
     "all_platforms": false,
@@ -151,7 +263,25 @@
   },
   {
     "match_tokens": ["xemu.exe"],
-    "name": "Xemu",
+    "source": {
+      "provider": "github-release",
+      "owner": "xemu-project",
+      "repo": "xemu",
+      "release_tag": "latest",
+      "windows_assets": [
+        {
+          "arch": "x64",
+          "asset_name": "xemu-win-x86_64-release.zip",
+          "launch_executable": "xemu.exe"
+        },
+        {
+          "arch": "arm64",
+          "asset_name": "xemu-win-aarch64-release.zip",
+          "launch_executable": "xemu.exe"
+        }
+      ]
+    },
+    "name": "Xemu (Xbox)",
     "args": "-full-screen -dvd_path \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["xbox"],
@@ -216,6 +346,19 @@
   },
   {
     "match_tokens": ["xenia_canary.exe", "xenia-canary.exe"],
+    "source": {
+      "provider": "github-release",
+      "owner": "xenia-canary",
+      "repo": "xenia-canary",
+      "release_tag": "latest",
+      "windows_assets": [
+        {
+          "arch": "x64",
+          "asset_name": "xenia_canary_windows.zip",
+          "launch_executable": "xenia_canary.exe"
+        }
+      ]
+    },
     "name": "Xenia Canary (Xbox 360)",
     "args": "\"%rom%\"",
     "all_platforms": false,

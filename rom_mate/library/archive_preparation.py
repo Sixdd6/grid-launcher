@@ -10,6 +10,15 @@ import zipfile
 from pathlib import Path
 from typing import Callable
 
+try:
+    import py7zr
+    from py7zr.exceptions import Bad7zFile
+except ImportError:  # pragma: no cover - dependency is declared in requirements.
+    py7zr = None
+
+    class Bad7zFile(Exception):
+        pass
+
 
 _PS4_GAME_ID_PATTERN = re.compile(r"^[A-Z]{4}\d{5}$")
 
@@ -198,7 +207,17 @@ def extract_archive_into_directory(
     extracted_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        if zipfile.is_zipfile(archive_path):
+        if archive_path.suffix.casefold() == ".7z":
+            if py7zr is None:
+                raise OSError("Cannot extract .7z archives because py7zr is not installed")
+            if install_progress_callback is not None:
+                install_progress_callback(0, 0)
+            with py7zr.SevenZipFile(archive_path, mode="r") as archive:
+                archive.extractall(path=extracted_dir)
+            if install_progress_callback is not None:
+                installed_bytes = directory_total_file_bytes(extracted_dir)
+                install_progress_callback(installed_bytes, installed_bytes)
+        elif zipfile.is_zipfile(archive_path):
             with zipfile.ZipFile(archive_path) as archive:
                 members = archive.infolist()
                 total_install_bytes = sum(max(0, int(member.file_size)) for member in members if not member.is_dir())
@@ -237,7 +256,7 @@ def extract_archive_into_directory(
                 installed_bytes = directory_total_file_bytes(extracted_dir)
                 resolved_total = max(total_install_bytes, installed_bytes)
                 install_progress_callback(installed_bytes, resolved_total)
-    except (OSError, zipfile.BadZipFile):
+    except (OSError, zipfile.BadZipFile, Bad7zFile):
         shutil.rmtree(extracted_dir, ignore_errors=True)
         raise
 

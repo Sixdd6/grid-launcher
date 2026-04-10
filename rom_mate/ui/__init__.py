@@ -1,4 +1,4 @@
-from .dialogs import FirstRunSetupDialog, NativeGameSettingsDialog
+from .dialogs import EmulatorConfigDialog, FirstRunSetupDialog, NativeGameSettingsDialog
 from .downloads import build_downloads_page, make_download_entry_widget, refresh_downloads_page
 from .emulators import (
     emulator_form_state_for_row,
@@ -20,12 +20,15 @@ from .theme import (
     apply_theme_inline_styles,
     normalized_theme_choice,
     resolved_theme_variant,
+    themed_svg_icon,
     theme_color,
     theme_colors,
     theme_stylesheet,
 )
+from .toast import ToastWidget, show_toast
 
 __all__ = [
+    "EmulatorConfigDialog",
     "FirstRunSetupDialog",
     "NativeGameSettingsDialog",
     "build_downloads_page",
@@ -43,10 +46,13 @@ __all__ = [
     "apply_theme_inline_styles",
     "normalized_theme_choice",
     "resolved_theme_variant",
+    "themed_svg_icon",
     "theme_color",
     "theme_colors",
     "theme_stylesheet",
+    "ToastWidget",
     "update_details_action_buttons",
+    "show_toast",
     "upsert_emulator_entry",
     "visible_library_games",
 ]

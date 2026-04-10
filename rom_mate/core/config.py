@@ -104,6 +104,7 @@ def normalize_installed_games(
         cached_cover_path = item.get("cached_cover_path")
         screenshot_urls = item.get("screenshot_urls")
         rom_id = item.get("rom_id")
+        server_updated_at = item.get("server_updated_at")
         rom_file_name = item.get("rom_file_name")
         extracted_path = item.get("extracted_path")
         extracted_dir = item.get("extracted_dir")
@@ -123,6 +124,7 @@ def normalize_installed_games(
             "cached_cover_path": cached_cover_path.strip() if isinstance(cached_cover_path, str) else "",
             "screenshot_urls": screenshot_urls.strip() if isinstance(screenshot_urls, str) else "",
             "rom_id": rom_id.strip() if isinstance(rom_id, str) else "",
+            "server_updated_at": server_updated_at.strip() if isinstance(server_updated_at, str) else "",
             "rom_file_name": rom_file_name.strip() if isinstance(rom_file_name, str) else "",
             "extracted_path": extracted_path.strip() if isinstance(extracted_path, str) else "",
             "extracted_dir": extracted_dir.strip() if isinstance(extracted_dir, str) else "",

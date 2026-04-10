@@ -99,6 +99,12 @@ from .install_registry import (
 	library_games_without_keys,
 	matching_installed_emulator_games,
 )
+from .update_detection import (
+	game_has_server_update,
+	game_server_updated_at,
+	has_newer_server_rom_version,
+	rom_file_name_version,
+)
 from .ps3_links import (
 	configure_ps3_install_links,
 	detected_ps3_game_id,
@@ -183,8 +189,12 @@ __all__ = [
 	"download_entry_title",
 	"download_progress_display",
 	"download_speed_text",
+	"game_has_server_update",
+	"has_newer_server_rom_version",
 	"find_download_entry",
 	"format_size",
+	"game_server_updated_at",
+	"rom_file_name_version",
 	"native_executable_candidates_for_game",
 	"native_install_dir_for_game",
 	"normalize_candidate_url",

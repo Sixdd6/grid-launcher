@@ -7,12 +7,12 @@ A simple, responsive launcher for RomM.
 - [x] Library view with cover art grid for installed games
 - [x] Server view with platform list and game grid for games on your server
 - [x] Emulator auto-install from RomM server with autopopulated launch arguments
-    - [ ] Emulator auto-download from source "coming soon"
+    - [x] Emulator auto-download from supported source metadata (MVP)
 - [x] Settings view with necessary configuration options
 - [x] Game launching functionality
 - Game management
     - [x] install
-    - [ ] update
+    - [x] update
     - [x] delete
 - [x] Light/Dark Themes
 - [x] Responsive layout
