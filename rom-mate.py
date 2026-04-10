@@ -206,6 +206,8 @@ from rom_mate.cover import (
 from rom_mate.emulator import (
     all_retroarch_cores as resolve_all_retroarch_cores,
     apply_launch_placeholders_to_args as resolve_apply_launch_placeholders_to_args,
+    apply_manual_emulator_profile_defaults as resolve_apply_manual_emulator_profile_defaults,
+    assign_profile_platform_defaults as resolve_assign_profile_platform_defaults,
     auto_configure_emulator_settings as resolve_auto_configure_emulator_settings,
     auto_configured_emulator_name as resolve_auto_configured_emulator_name,
     available_emulator_name_for_platform as resolve_available_emulator_name_for_platform,
@@ -7037,6 +7039,8 @@ class MainWindow(QMainWindow):
         if self.emulator_list is not None:
             target_index = self.emulator_list.currentRow()
 
+        is_new_manual_entry = target_index < 0 or target_index >= len(emulators)
+
         self._ensure_emulator_sync_settings(name, path)
 
         entry = make_emulator_entry_payload(
@@ -7049,9 +7053,38 @@ class MainWindow(QMainWindow):
             save_paths,
             state_paths,
         )
+
+        if is_new_manual_entry:
+            entry = resolve_apply_manual_emulator_profile_defaults(
+                entry,
+                self._emulator_autoprofiles(),
+                emulator_profile_for_entry=resolve_emulator_profile_for_entry,
+                normalize_save_strategy_value=self._normalize_save_strategy_value,
+            )
+
         self.config["emulators"] = self._normalize_emulators(
             upsert_emulator_entry(emulators, entry, target_index)
         )
+
+        if is_new_manual_entry:
+            profile = self._emulator_profile_for_entry(entry)
+            if isinstance(profile, dict):
+                defaults, core_defaults = resolve_assign_profile_platform_defaults(
+                    None,
+                    entry.get("name", "").strip(),
+                    profile,
+                    self._normalize_default_emulators(self.config.get("default_emulators", {})),
+                    self._normalize_default_retroarch_cores(self.config.get("default_retroarch_cores", {})),
+                    is_retroarch_emulator_name=self._is_retroarch_emulator_name,
+                    default_assignable_server_platforms=self._default_assignable_server_platforms,
+                    installed_retroarch_cores_for_platform=self._installed_retroarch_cores_for_platform,
+                    matching_platforms_for_emulator_keywords=self._matching_platforms_for_emulator_keywords,
+                    dolphin_variant_label_for_game=self._dolphin_variant_label_for_game,
+                    dolphin_target_platforms_for_variant=self._dolphin_target_platforms_for_variant,
+                )
+                self.config["default_emulators"] = defaults
+                self.config["default_retroarch_cores"] = core_defaults
+
         self._refresh_emulator_views()
         self._save_config(self.config)
 

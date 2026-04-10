@@ -1,6 +1,12 @@
 from .autoconfig import (
+    assign_default_platforms_for_emulator,
+    assign_default_platforms_for_manual_emulator,
+    apply_manual_emulator_profile_defaults,
     auto_configure_emulator_settings,
     auto_configured_emulator_name,
+    defaulted_manual_emulator_entry,
+    defaults_for_manual_emulator_entry,
+    assign_profile_platform_defaults,
     select_emulator_executable_path,
 )
 from .launch import (
@@ -136,6 +142,10 @@ from .selection import (
 __all__ = [
     "all_retroarch_cores",
     "apply_launch_placeholders_to_args",
+    "apply_manual_emulator_profile_defaults",
+    "assign_default_platforms_for_emulator",
+    "assign_default_platforms_for_manual_emulator",
+    "assign_profile_platform_defaults",
     "auto_configure_emulator_settings",
     "auto_configured_emulator_name",
     "available_emulator_name_for_platform",
@@ -153,6 +163,8 @@ __all__ = [
     "default_assignable_server_platforms",
     "default_emulator_autoprofiles",
     "duckstation_memory_card_settings",
+    "defaulted_manual_emulator_entry",
+    "defaults_for_manual_emulator_entry",
     "eden_directory_settings",
     "eden_save_path_overrides",
     "fbneo_directory_settings",

@@ -86,6 +86,250 @@ def _multiline_profile_value(profile: dict[str, Any], key: str) -> str:
     )
 
 
+def apply_manual_emulator_profile_defaults(
+    emulator: EmulatorEntry,
+    autoprofiles: list[dict[str, Any]],
+    *,
+    emulator_profile_for_entry: Callable[[dict[str, str], list[dict[str, Any]]], dict[str, Any] | None],
+    normalize_save_strategy_value: Callable[[str], str],
+) -> EmulatorEntry:
+    resolved_emulator = dict(emulator)
+    profile = emulator_profile_for_entry(resolved_emulator, autoprofiles)
+    if not isinstance(profile, dict):
+        return resolved_emulator
+
+    current_name = resolved_emulator.get("name", "")
+    if not isinstance(current_name, str) or not current_name.strip():
+        profile_name = profile.get("name", "")
+        if isinstance(profile_name, str) and profile_name.strip():
+            resolved_emulator["name"] = profile_name.strip()
+
+    current_args = resolved_emulator.get("args", "%rom%")
+    if not isinstance(current_args, str) or not current_args.strip() or current_args.strip() == "%rom%":
+        profile_args = profile.get("args", "%rom%")
+        if isinstance(profile_args, str) and profile_args.strip():
+            resolved_emulator["args"] = profile_args.strip()
+
+    current_save_strategy = resolved_emulator.get("save_strategy", "")
+    current_save_strategy_value = normalize_save_strategy_value(current_save_strategy) if isinstance(current_save_strategy, str) else "auto"
+    if current_save_strategy_value == "auto":
+        profile_save_strategy = normalize_save_strategy_value(str(profile.get("save_strategy", "auto")))
+        resolved_emulator["save_strategy"] = profile_save_strategy
+
+    field_key_map = {
+        "ignore_files": "ignore_files",
+        "ignore_extensions": "ignore_extensions",
+        "save_paths": "save_directories",
+        "state_paths": "state_directories",
+    }
+    for emulator_key, profile_key in field_key_map.items():
+        current_value = resolved_emulator.get(emulator_key, "")
+        if isinstance(current_value, str) and current_value.strip():
+            continue
+        resolved_emulator[emulator_key] = _multiline_profile_value(profile, profile_key)
+
+    return resolved_emulator
+
+
+def defaults_for_manual_emulator_entry(
+    manual_entry: EmulatorEntry | None = None,
+    autoprofiles: list[dict[str, Any]] | None = None,
+    entry: EmulatorEntry | None = None,
+    emulator_entry: EmulatorEntry | None = None,
+    profiles: list[dict[str, Any]] | None = None,
+    *,
+    emulator_profile_for_entry: Callable[[dict[str, str], list[dict[str, Any]]], dict[str, Any] | None] | None = None,
+    emulator_entry_matches_tokens: Callable[[dict[str, str], set[str]], bool] | None = None,
+    normalize_save_strategy_value: Callable[[str], str],
+) -> EmulatorEntry:
+    resolved_entry = manual_entry or entry or emulator_entry or {}
+    resolved_profiles = autoprofiles if isinstance(autoprofiles, list) else profiles
+    if not isinstance(resolved_profiles, list):
+        resolved_profiles = []
+
+    if callable(emulator_profile_for_entry):
+        return apply_manual_emulator_profile_defaults(
+            resolved_entry,
+            resolved_profiles,
+            emulator_profile_for_entry=emulator_profile_for_entry,
+            normalize_save_strategy_value=normalize_save_strategy_value,
+        )
+
+    def _profile_for_entry(candidate: dict[str, str], all_profiles: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if not callable(emulator_entry_matches_tokens):
+            return None
+        for profile in all_profiles:
+            if not isinstance(profile, dict):
+                continue
+            tokens = profile.get("match_tokens", [])
+            if not isinstance(tokens, list):
+                continue
+            normalized_tokens = {
+                token.strip().casefold()
+                for token in tokens
+                if isinstance(token, str) and token.strip()
+            }
+            if normalized_tokens and emulator_entry_matches_tokens(candidate, normalized_tokens):
+                return profile
+        return None
+
+    return apply_manual_emulator_profile_defaults(
+        resolved_entry,
+        resolved_profiles,
+        emulator_profile_for_entry=_profile_for_entry,
+        normalize_save_strategy_value=normalize_save_strategy_value,
+    )
+
+
+def defaulted_manual_emulator_entry(
+    manual_entry: EmulatorEntry | None = None,
+    autoprofiles: list[dict[str, Any]] | None = None,
+    entry: EmulatorEntry | None = None,
+    emulator_entry: EmulatorEntry | None = None,
+    profiles: list[dict[str, Any]] | None = None,
+    *,
+    emulator_profile_for_entry: Callable[[dict[str, str], list[dict[str, Any]]], dict[str, Any] | None] | None = None,
+    emulator_entry_matches_tokens: Callable[[dict[str, str], set[str]], bool] | None = None,
+    normalize_save_strategy_value: Callable[[str], str],
+) -> EmulatorEntry:
+    return defaults_for_manual_emulator_entry(
+        manual_entry,
+        autoprofiles,
+        entry=entry,
+        emulator_entry=emulator_entry,
+        profiles=profiles,
+        emulator_profile_for_entry=emulator_profile_for_entry,
+        emulator_entry_matches_tokens=emulator_entry_matches_tokens,
+        normalize_save_strategy_value=normalize_save_strategy_value,
+    )
+
+
+def assign_profile_platform_defaults(
+    game: dict[str, str] | None,
+    emulator_name: str,
+    profile: dict[str, Any],
+    defaults: dict[str, str],
+    core_defaults: dict[str, str],
+    *,
+    is_retroarch_emulator_name: Callable[[str], bool],
+    default_assignable_server_platforms: Callable[[], list[str]],
+    installed_retroarch_cores_for_platform: Callable[[str, str], list[str]],
+    matching_platforms_for_emulator_keywords: Callable[[list[str]], list[str]],
+    dolphin_variant_label_for_game: Callable[[dict[str, str]], str],
+    dolphin_target_platforms_for_variant: Callable[[str], list[str]],
+) -> tuple[dict[str, str], dict[str, str]]:
+    resolved_defaults = dict(defaults)
+    resolved_core_defaults = dict(core_defaults)
+
+    profile_all_platforms = bool(profile.get("all_platforms", False))
+    if profile_all_platforms:
+        target_platforms = default_assignable_server_platforms()
+        if is_retroarch_emulator_name(emulator_name):
+            target_platforms = [
+                platform
+                for platform in target_platforms
+                if installed_retroarch_cores_for_platform(platform, emulator_name)
+            ]
+    else:
+        platform_keywords = profile.get("platform_keywords", [])
+        target_platforms = matching_platforms_for_emulator_keywords(platform_keywords if isinstance(platform_keywords, list) else [])
+        profile_name = profile.get("name", "")
+        if game and isinstance(profile_name, str) and profile_name.strip().casefold() == "dolphin":
+            variant = dolphin_variant_label_for_game(game)
+            variant_platforms = dolphin_target_platforms_for_variant(variant)
+            if variant_platforms:
+                target_platforms = variant_platforms
+
+    for platform in target_platforms:
+        current_value = resolved_defaults.get(platform, "")
+        current_default = current_value.strip() if isinstance(current_value, str) else ""
+        if not current_default:
+            resolved_defaults[platform] = emulator_name
+            continue
+        if not is_retroarch_emulator_name(emulator_name) and is_retroarch_emulator_name(current_default):
+            resolved_defaults[platform] = emulator_name
+
+    if is_retroarch_emulator_name(emulator_name):
+        for platform in target_platforms:
+            if resolved_defaults.get(platform, "").strip().casefold() != emulator_name.casefold():
+                continue
+            existing_core = resolved_core_defaults.get(platform, "")
+            if isinstance(existing_core, str) and existing_core.strip():
+                continue
+            cores = installed_retroarch_cores_for_platform(platform, emulator_name)
+            if cores:
+                resolved_core_defaults[platform] = cores[0]
+
+    return resolved_defaults, resolved_core_defaults
+
+
+def assign_default_platforms_for_manual_emulator(
+    emulator_name: str,
+    profile: dict[str, Any],
+    defaults: dict[str, str] | None = None,
+    platform_defaults: dict[str, str] | None = None,
+    core_defaults: dict[str, str] | None = None,
+    assignable_platforms: list[str] | None = None,
+    *,
+    is_retroarch_emulator_name: Callable[[str], bool],
+    default_assignable_server_platforms: Callable[[], list[str]],
+    installed_retroarch_cores_for_platform: Callable[[str, str], list[str]],
+    matching_platforms_for_emulator_keywords: Callable[..., list[str]],
+) -> tuple[dict[str, str], dict[str, str]]:
+    resolved_defaults = defaults if isinstance(defaults, dict) else platform_defaults
+    if not isinstance(resolved_defaults, dict):
+        resolved_defaults = {}
+    resolved_core_defaults = dict(core_defaults) if isinstance(core_defaults, dict) else {}
+
+    if isinstance(assignable_platforms, list):
+        default_platform_resolver = lambda: list(assignable_platforms)
+        matching_platform_resolver = lambda keywords: matching_platforms_for_emulator_keywords(assignable_platforms, keywords)
+    else:
+        default_platform_resolver = default_assignable_server_platforms
+        matching_platform_resolver = matching_platforms_for_emulator_keywords
+
+    return assign_profile_platform_defaults(
+        None,
+        emulator_name,
+        profile,
+        resolved_defaults,
+        resolved_core_defaults,
+        is_retroarch_emulator_name=is_retroarch_emulator_name,
+        default_assignable_server_platforms=default_platform_resolver,
+        installed_retroarch_cores_for_platform=installed_retroarch_cores_for_platform,
+        matching_platforms_for_emulator_keywords=matching_platform_resolver,
+        dolphin_variant_label_for_game=lambda _game: "",
+        dolphin_target_platforms_for_variant=lambda _variant: [],
+    )
+
+
+def assign_default_platforms_for_emulator(
+    emulator_name: str,
+    profile: dict[str, Any],
+    defaults: dict[str, str] | None = None,
+    platform_defaults: dict[str, str] | None = None,
+    core_defaults: dict[str, str] | None = None,
+    assignable_platforms: list[str] | None = None,
+    *,
+    is_retroarch_emulator_name: Callable[[str], bool],
+    default_assignable_server_platforms: Callable[[], list[str]],
+    installed_retroarch_cores_for_platform: Callable[[str, str], list[str]],
+    matching_platforms_for_emulator_keywords: Callable[..., list[str]],
+) -> tuple[dict[str, str], dict[str, str]]:
+    return assign_default_platforms_for_manual_emulator(
+        emulator_name,
+        profile,
+        defaults,
+        platform_defaults=platform_defaults,
+        core_defaults=core_defaults,
+        assignable_platforms=assignable_platforms,
+        is_retroarch_emulator_name=is_retroarch_emulator_name,
+        default_assignable_server_platforms=default_assignable_server_platforms,
+        installed_retroarch_cores_for_platform=installed_retroarch_cores_for_platform,
+        matching_platforms_for_emulator_keywords=matching_platforms_for_emulator_keywords,
+    )
+
+
 def auto_configure_emulator_settings(
     game: dict[str, str],
     executable_path: str,
@@ -182,43 +426,18 @@ def auto_configure_emulator_settings(
             }
         )
 
-    profile_all_platforms = bool(profile.get("all_platforms", False))
-    if profile_all_platforms:
-        target_platforms = default_assignable_server_platforms()
-        if is_retroarch_emulator_name(emulator_name):
-            target_platforms = [
-                platform
-                for platform in target_platforms
-                if installed_retroarch_cores_for_platform(platform, emulator_name)
-            ]
-    else:
-        platform_keywords = profile.get("platform_keywords", [])
-        target_platforms = matching_platforms_for_emulator_keywords(platform_keywords if isinstance(platform_keywords, list) else [])
-        profile_name = profile.get("name", "")
-        if isinstance(profile_name, str) and profile_name.strip().casefold() == "dolphin":
-            variant = dolphin_variant_label_for_game(game)
-            variant_platforms = dolphin_target_platforms_for_variant(variant)
-            if variant_platforms:
-                target_platforms = variant_platforms
-
-    for platform in target_platforms:
-        current_value = resolved_defaults.get(platform, "")
-        current_default = current_value.strip() if isinstance(current_value, str) else ""
-        if not current_default:
-            resolved_defaults[platform] = emulator_name
-            continue
-        if not is_retroarch_emulator_name(emulator_name) and is_retroarch_emulator_name(current_default):
-            resolved_defaults[platform] = emulator_name
-
-    if is_retroarch_emulator_name(emulator_name):
-        for platform in target_platforms:
-            if resolved_defaults.get(platform, "").strip().casefold() != emulator_name.casefold():
-                continue
-            existing_core = resolved_core_defaults.get(platform, "")
-            if isinstance(existing_core, str) and existing_core.strip():
-                continue
-            cores = installed_retroarch_cores_for_platform(platform, emulator_name)
-            if cores:
-                resolved_core_defaults[platform] = cores[0]
+    resolved_defaults, resolved_core_defaults = assign_profile_platform_defaults(
+        game,
+        emulator_name,
+        profile,
+        resolved_defaults,
+        resolved_core_defaults,
+        is_retroarch_emulator_name=is_retroarch_emulator_name,
+        default_assignable_server_platforms=default_assignable_server_platforms,
+        installed_retroarch_cores_for_platform=installed_retroarch_cores_for_platform,
+        matching_platforms_for_emulator_keywords=matching_platforms_for_emulator_keywords,
+        dolphin_variant_label_for_game=dolphin_variant_label_for_game,
+        dolphin_target_platforms_for_variant=dolphin_target_platforms_for_variant,
+    )
 
     return resolved_emulators, resolved_defaults, resolved_core_defaults

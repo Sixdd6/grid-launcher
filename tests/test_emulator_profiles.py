@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from inspect import signature
 from pathlib import Path
 from unittest.mock import patch
 
+from rom_mate.emulator import autoconfig as emulator_autoconfig
 from rom_mate.emulator.azahar import (
     azahar_directory_settings,
     azahar_save_path_overrides,
@@ -69,6 +71,35 @@ from rom_mate.emulator.selection import (
     install_block_reason_for_game,
     is_native_executable_platform,
 )
+
+
+def _resolve_autoconfig_helper(*candidate_names: str):
+    for name in candidate_names:
+        helper = getattr(emulator_autoconfig, name, None)
+        if callable(helper):
+            return helper
+    raise AssertionError(
+        "Expected one of the manual auto-populate helpers to exist in rom_mate.emulator.autoconfig: "
+        + ", ".join(candidate_names)
+    )
+
+
+def _call_with_supported_kwargs(helper, **kwargs):
+    helper_params = signature(helper).parameters
+    supported_kwargs = {name: value for name, value in kwargs.items() if name in helper_params}
+    return helper(**supported_kwargs)
+
+
+def _coerce_manual_entry_result(result):
+    if isinstance(result, dict):
+        return result
+    if isinstance(result, tuple):
+        for item in result:
+            if isinstance(item, dict) and "path" in item:
+                return item
+            if isinstance(item, list) and item and isinstance(item[0], dict) and "path" in item[0]:
+                return item[0]
+    raise AssertionError(f"Unable to extract manual emulator entry from helper result: {result!r}")
 
 
 class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
@@ -784,6 +815,186 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
             )
 
         self.assertEqual(profiles, [])
+
+
+class ManualEmulatorAutopopulateTests(unittest.TestCase):
+    def test_defaults_manual_entry_from_matched_profile(self) -> None:
+        helper = _resolve_autoconfig_helper(
+            "defaults_for_manual_emulator_entry",
+            "defaulted_manual_emulator_entry",
+        )
+        entry = {
+            "name": "My Cemu",
+            "path": r"C:\Emulators\Cemu\cemu.exe",
+            "args": "",
+            "save_strategy": "",
+            "ignore_files": "",
+            "ignore_extensions": "",
+            "save_paths": "",
+            "state_paths": "",
+        }
+        profile = {
+            "name": "Cemu (Wii U)",
+            "match_tokens": ["cemu.exe"],
+            "args": '-g "%rom%" -f',
+            "save_strategy": "folder",
+            "ignore_files": ["debug.log"],
+            "ignore_extensions": ["tmp"],
+            "save_directories": ["mlc01\\usr\\save"],
+            "state_directories": ["states"],
+        }
+
+        result = _call_with_supported_kwargs(
+            helper,
+            entry=entry,
+            manual_entry=entry,
+            emulator_entry=entry,
+            profiles=[profile],
+            autoprofiles=[profile],
+            normalize_save_strategy_value=normalize_save_strategy_value,
+            emulator_entry_matches_tokens=emulator_entry_matches_tokens,
+        )
+        defaulted_entry = _coerce_manual_entry_result(result)
+
+        self.assertEqual(defaulted_entry.get("name"), "My Cemu")
+        self.assertEqual(defaulted_entry.get("path"), r"C:\Emulators\Cemu\cemu.exe")
+        self.assertEqual(defaulted_entry.get("args"), '-g "%rom%" -f')
+        self.assertEqual(defaulted_entry.get("save_strategy"), "folder")
+        self.assertEqual(defaulted_entry.get("ignore_files"), "debug.log")
+        self.assertEqual(defaulted_entry.get("ignore_extensions"), "tmp")
+        self.assertEqual(defaulted_entry.get("save_paths"), r"mlc01\usr\save")
+        self.assertEqual(defaulted_entry.get("state_paths"), "states")
+
+    def test_manual_entry_defaults_do_not_overwrite_user_values(self) -> None:
+        helper = _resolve_autoconfig_helper(
+            "defaults_for_manual_emulator_entry",
+            "defaulted_manual_emulator_entry",
+        )
+        entry = {
+            "name": "My Cemu",
+            "path": r"C:\Emulators\Cemu\cemu.exe",
+            "args": '"%rom%" --my-custom-flag',
+            "save_strategy": "single_file",
+            "ignore_files": "my-ignore.txt",
+            "ignore_extensions": "bak",
+            "save_paths": r"portable\my-saves",
+            "state_paths": r"portable\my-states",
+        }
+        profile = {
+            "name": "Cemu (Wii U)",
+            "match_tokens": ["cemu.exe"],
+            "args": '-g "%rom%" -f',
+            "save_strategy": "folder",
+            "ignore_files": ["debug.log"],
+            "ignore_extensions": ["tmp"],
+            "save_directories": ["mlc01\\usr\\save"],
+            "state_directories": ["states"],
+        }
+
+        result = _call_with_supported_kwargs(
+            helper,
+            entry=entry,
+            manual_entry=entry,
+            emulator_entry=entry,
+            profiles=[profile],
+            autoprofiles=[profile],
+            normalize_save_strategy_value=normalize_save_strategy_value,
+            emulator_entry_matches_tokens=emulator_entry_matches_tokens,
+        )
+        defaulted_entry = _coerce_manual_entry_result(result)
+
+        self.assertEqual(defaulted_entry.get("args"), '"%rom%" --my-custom-flag')
+        self.assertEqual(defaulted_entry.get("save_strategy"), "single_file")
+        self.assertEqual(defaulted_entry.get("ignore_files"), "my-ignore.txt")
+        self.assertEqual(defaulted_entry.get("ignore_extensions"), "bak")
+        self.assertEqual(defaulted_entry.get("save_paths"), r"portable\my-saves")
+        self.assertEqual(defaulted_entry.get("state_paths"), r"portable\my-states")
+
+    def test_manual_entry_defaults_noop_when_profile_does_not_match(self) -> None:
+        helper = _resolve_autoconfig_helper(
+            "defaults_for_manual_emulator_entry",
+            "defaulted_manual_emulator_entry",
+        )
+        entry = {
+            "name": "My Cemu",
+            "path": r"C:\Emulators\Cemu\cemu.exe",
+            "args": "",
+            "save_strategy": "",
+            "ignore_files": "",
+            "ignore_extensions": "",
+            "save_paths": "",
+            "state_paths": "",
+        }
+        non_matching_profile = {
+            "name": "RPCS3 (Playstation 3)",
+            "match_tokens": ["rpcs3.exe"],
+            "args": '--no-gui "%RPCS3_GAMEID%:%ps3_gameid%"',
+            "save_strategy": "folder",
+            "save_directories": ["dev_hdd0\\home\\00000001\\savedata"],
+            "state_directories": [],
+        }
+
+        result = _call_with_supported_kwargs(
+            helper,
+            entry=entry,
+            manual_entry=entry,
+            emulator_entry=entry,
+            profiles=[non_matching_profile],
+            autoprofiles=[non_matching_profile],
+            normalize_save_strategy_value=normalize_save_strategy_value,
+            emulator_entry_matches_tokens=emulator_entry_matches_tokens,
+        )
+        defaulted_entry = _coerce_manual_entry_result(result)
+
+        self.assertEqual(defaulted_entry, entry)
+
+    def test_assign_default_platforms_and_retroarch_cores_from_profile_keywords(self) -> None:
+        helper = _resolve_autoconfig_helper(
+            "assign_default_platforms_for_emulator",
+            "assign_default_platforms_for_manual_emulator",
+        )
+        defaults = {
+            "Sony PlayStation": "",
+            "Nintendo Wii U": "",
+        }
+        core_defaults = {}
+        profile = {
+            "platform_keywords": ["playstation", "ps1"],
+            "all_platforms": False,
+        }
+        assignable_platforms = ["Sony PlayStation", "Nintendo Wii U"]
+
+        result = _call_with_supported_kwargs(
+            helper,
+            emulator_name="RetroArch (Multi-System)",
+            profile=profile,
+            defaults=defaults,
+            platform_defaults=defaults,
+            core_defaults=core_defaults,
+            assignable_platforms=assignable_platforms,
+            matching_platforms_for_emulator_keywords=matching_platforms_for_emulator_keywords,
+            is_retroarch_emulator_name=lambda value: "retroarch" in value.casefold(),
+            installed_retroarch_cores_for_platform=(
+                lambda platform, _emulator_name: ["pcsx_rearmed_libretro.dll"]
+                if platform.casefold() == "sony playstation"
+                else []
+            ),
+            default_assignable_server_platforms=lambda: assignable_platforms,
+        )
+
+        resolved_defaults = defaults
+        resolved_core_defaults = core_defaults
+        if isinstance(result, tuple):
+            for item in result:
+                if isinstance(item, dict) and "Sony PlayStation" in item:
+                    if item.get("Sony PlayStation") == "RetroArch (Multi-System)":
+                        resolved_defaults = item
+                    if item.get("Sony PlayStation") == "pcsx_rearmed_libretro.dll":
+                        resolved_core_defaults = item
+
+        self.assertEqual(resolved_defaults.get("Sony PlayStation"), "RetroArch (Multi-System)")
+        self.assertEqual(resolved_defaults.get("Nintendo Wii U"), "")
+        self.assertEqual(resolved_core_defaults.get("Sony PlayStation"), "pcsx_rearmed_libretro.dll")
 
 
 if __name__ == "__main__":
