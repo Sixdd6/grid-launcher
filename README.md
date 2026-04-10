@@ -17,7 +17,7 @@ A simple, responsive launcher for RomM.
 - [x] Light/Dark Themes
 - [x] Responsive layout
 - [x] Cloud save support and in-app management
-- [ ] RetroAchievements integration and browsing
+- [x] RetroAchievements integration and browsing
 - [ ] Cross-platform support (Windows, Linux, Mac)
 
 ## Cloud Sync Notes

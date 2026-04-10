@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from rom_mate.background.workers import DetailsCloudRecordsWorker, InstallDownloadWorker
+from rom_mate.background.workers import DetailsCloudRecordsWorker, InstallDownloadWorker, RetroAchievementsWorker
 from rom_mate.emulator.source import EmulatorSourceResolutionError
 
 
@@ -600,6 +600,38 @@ class InstallDownloadWorkerTests(unittest.TestCase):
             self.assertFalse(initial_archive_path.exists())
             self.assertTrue(expected_archive_path.exists())
             self.assertEqual(expected_archive_path.read_bytes(), archive_payload)
+
+
+class TestRetroAchievementsWorker(unittest.TestCase):
+    def _run_worker(self, worker):
+        results = []
+        worker.finished.connect(lambda rid, achs, err: results.append((rid, achs, err)))
+        worker.run()
+        return results
+
+    def test_worker_emits_achievements_on_success(self):
+        with patch("rom_mate.server.retroachievements.fetch_game_achievements") as mock_fetch:
+            mock_fetch.return_value = [{"id": 1, "title": "Test"}]
+            worker = RetroAchievementsWorker(42, 100, "user", "key")
+            results = self._run_worker(worker)
+        self.assertEqual(len(results), 1)
+        rid, achs, err = results[0]
+        self.assertEqual(rid, 42)
+        self.assertEqual(achs, [{"id": 1, "title": "Test"}])
+        self.assertEqual(err, "")
+
+    def test_worker_emits_error_on_failure(self):
+        from rom_mate.server.retroachievements import RetroAchievementsError
+
+        with patch("rom_mate.server.retroachievements.fetch_game_achievements") as mock_fetch:
+            mock_fetch.side_effect = RetroAchievementsError("network error")
+            worker = RetroAchievementsWorker(7, 50, "user", "key")
+            results = self._run_worker(worker)
+        self.assertEqual(len(results), 1)
+        rid, achs, err = results[0]
+        self.assertEqual(rid, 7)
+        self.assertEqual(achs, [])
+        self.assertIn("network error", err)
 
 
 if __name__ == "__main__":

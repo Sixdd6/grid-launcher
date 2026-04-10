@@ -369,6 +369,8 @@ class MainWindow(QMainWindow):
         self.active_theme_colors = self._theme_colors(self.active_theme_variant)
         self.server_url_input: QLineEdit | None = None
         self.api_token_input: QLineEdit | None = None
+        self.ra_username_input: QLineEdit | None = None
+        self.ra_api_key_input: QLineEdit | None = None
         self.library_path_input: QLineEdit | None = None
         self.debug_prints_checkbox: QCheckBox | None = None
         self.auto_cloud_download_checkbox: QCheckBox | None = None
@@ -415,6 +417,7 @@ class MainWindow(QMainWindow):
         self.details_cloud_list_layout: QVBoxLayout | None = None
         self.details_secondary_button: QPushButton | None = None
         self.details_update_button: QPushButton | None = None
+        self.details_achievements_button: QPushButton | None = None
         self.server_platforms_list: QListWidget | None = None
         self.server_games_grid: QGridLayout | None = None
         self.server_games_content: QWidget | None = None
@@ -433,8 +436,13 @@ class MainWindow(QMainWindow):
         self.cover_network = QNetworkAccessManager(self)
         self.current_main_page_index = 0
         self.current_details_game: dict[str, str] | None = None
+        self._current_details_game: dict[str, str] | None = None
         self.current_details_source = "library"
         self.current_details_cloud_mode = "overview"
+        self._pending_achievements_request_id: int | None = None
+        self._ra_thread: QThread | None = None
+        self._ra_worker: QObject | None = None
+        self.details_achievements_panel: QWidget | None = None
         self.install_in_progress = False
         self.install_pending_game: dict[str, str] | None = None
         self.install_queue: list[dict[str, str]] = []
@@ -902,6 +910,23 @@ class MainWindow(QMainWindow):
         server_layout.addLayout(connection_actions)
         layout.addWidget(server_panel)
 
+        ra_panel = QFrame()
+        ra_panel.setObjectName("panel")
+        ra_panel_layout = QVBoxLayout(ra_panel)
+        ra_panel_layout.setContentsMargins(12, 10, 12, 10)
+        ra_panel_layout.addWidget(self._make_section_title("RetroAchievements"))
+
+        ra_form = QFormLayout()
+        self.ra_username_input = QLineEdit(self.config.get("retroachievements_username", ""))
+        _lock_settings_field_height(self.ra_username_input)
+        self.ra_api_key_input = QLineEdit(self.config.get("retroachievements_api_key", ""))
+        _lock_settings_field_height(self.ra_api_key_input)
+        self.ra_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        ra_form.addRow("Username", self.ra_username_input)
+        ra_form.addRow("API Key", self.ra_api_key_input)
+        ra_panel_layout.addLayout(ra_form)
+        layout.addWidget(ra_panel)
+
         paths_panel = QFrame()
         paths_panel.setObjectName("panel")
         paths_layout = QVBoxLayout(paths_panel)
@@ -1022,6 +1047,13 @@ class MainWindow(QMainWindow):
         details_button.clicked.connect(self._perform_show_details_action)
         self.details_details_button = details_button
         button_bar.addWidget(details_button)
+
+        self.details_achievements_button = QPushButton("Achievements")
+        self.details_achievements_button.setCheckable(True)
+        self.details_achievements_button.setObjectName("detailsAchievementsButton")
+        self.details_achievements_button.clicked.connect(self._open_achievements_panel)
+        self.details_achievements_button.setVisible(False)
+        button_bar.addWidget(self.details_achievements_button)
 
         manage_saves_button = QPushButton("Manage Saves")
         manage_saves_button.setCheckable(True)
@@ -1471,6 +1503,8 @@ class MainWindow(QMainWindow):
             "auto_cloud_save_skip_download_if_local_newer": True,
             "auto_cloud_save_upload_delay_seconds": 3,
             "cloud_sync_state": {},
+            "retroachievements_username": "",
+            "retroachievements_api_key": "",
         }
 
     def _persist_window_geometry(self) -> None:
@@ -1568,6 +1602,10 @@ class MainWindow(QMainWindow):
             values["server_url"] = self.server_url_input.text().strip()
         if self.api_token_input is not None:
             values["api_token"] = self.api_token_input.text().strip()
+        if self.ra_username_input is not None:
+            values["retroachievements_username"] = self.ra_username_input.text().strip()
+        if self.ra_api_key_input is not None:
+            values["retroachievements_api_key"] = self.ra_api_key_input.text().strip()
         existing_username = self.config.get("username", "")
         if isinstance(existing_username, str):
             values["username"] = existing_username.strip()
@@ -3291,7 +3329,19 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._update_details_layout_metrics)
 
     def _open_game_details(self, game: dict[str, str], source: str) -> None:
+        self._current_details_game = game
         resolve_open_game_details(self, game, source)
+        details_achievements_button = self.details_achievements_button
+        if details_achievements_button is None:
+            return
+        from rom_mate.server.retroachievements import resolve_ra_game_id
+
+        ra_game_id = resolve_ra_game_id(
+            game,
+            self.config.get("retroachievements_username", ""),
+            self.config.get("retroachievements_api_key", ""),
+        )
+        details_achievements_button.setVisible(ra_game_id is not None)
 
     def _update_details_action_buttons(self) -> None:
         resolve_update_details_action_buttons(self)
@@ -3390,6 +3440,7 @@ class MainWindow(QMainWindow):
         self._clear_cached_rom_id_for_details_game(self.current_details_game)
         self._show_details_overview()
         self.current_details_game = None
+        self._current_details_game = None
 
     def _start_async_install(self, game: dict[str, str]) -> bool:
         install_mode_value = game.get("_install_mode", "base")
@@ -3987,6 +4038,9 @@ class MainWindow(QMainWindow):
             self.details_manage_saves_button.setChecked(False)
         if self.details_manage_states_button is not None:
             self.details_manage_states_button.setChecked(False)
+        details_achievements_button = getattr(self, "details_achievements_button", None)
+        if details_achievements_button is not None:
+            details_achievements_button.setChecked(False)
 
     def _perform_show_details_action(self) -> None:
         self._show_details_overview()
@@ -4108,6 +4162,9 @@ class MainWindow(QMainWindow):
             self.details_manage_saves_button.setChecked(save_type == "save")
         if self.details_manage_states_button is not None:
             self.details_manage_states_button.setChecked(save_type == "state")
+        details_achievements_button = getattr(self, "details_achievements_button", None)
+        if details_achievements_button is not None:
+            details_achievements_button.setChecked(False)
 
         self._show_details_cloud_loading_state(save_type)
         self._update_details_layout_metrics()
@@ -4998,6 +5055,105 @@ class MainWindow(QMainWindow):
             game_key=self._game_key,
         )
         self._start_async_install(update_game)
+
+    def _open_achievements_panel(self) -> None:
+        game = self._current_details_game
+        if game is None:
+            return
+
+        from rom_mate.server.retroachievements import resolve_ra_game_id
+
+        ra_username = (
+            self.ra_username_input.text().strip()
+            if self.ra_username_input is not None
+            else self.config.get("retroachievements_username", "")
+        )
+        ra_api_key = (
+            self.ra_api_key_input.text().strip()
+            if self.ra_api_key_input is not None
+            else self.config.get("retroachievements_api_key", "")
+        )
+
+        ra_game_id = resolve_ra_game_id(
+            game,
+            ra_username,
+            ra_api_key,
+        )
+        if ra_game_id is None:
+            self._show_toast("No RetroAchievements ID found for this game.")
+            return
+        self._load_achievements_for_ra_id(ra_game_id)
+
+    def _load_achievements_for_ra_id(self, ra_game_id: int) -> None:
+        from rom_mate.background.workers import RetroAchievementsWorker
+
+        request_id = int(time.time() * 1000) % 1000000
+        self._pending_achievements_request_id = request_id
+
+        ra_username = (
+            self.ra_username_input.text().strip()
+            if self.ra_username_input is not None
+            else self.config.get("retroachievements_username", "")
+        )
+        ra_api_key = (
+            self.ra_api_key_input.text().strip()
+            if self.ra_api_key_input is not None
+            else self.config.get("retroachievements_api_key", "")
+        )
+
+        worker = RetroAchievementsWorker(
+            request_id,
+            ra_game_id,
+            ra_username,
+            ra_api_key,
+        )
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_achievements_loaded)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+
+        self._ra_thread = thread
+        self._ra_worker = worker
+
+    def _on_achievements_loaded(self, request_id: int, achievements: list, error: str) -> None:
+        if request_id != self._pending_achievements_request_id:
+            return
+        if error:
+            self._show_toast(f"Could not load achievements: {error}")
+            return
+
+        from rom_mate.ui.game_views import build_achievements_panel
+
+        panel = build_achievements_panel(achievements, load_image_fn=self._queue_cover_load)
+        self._show_achievements_panel(panel)
+
+    def _show_achievements_panel(self, panel: QWidget) -> None:
+        if self.details_center_stack is None:
+            return
+
+        current_panel = self.details_achievements_panel
+        if current_panel is not None:
+            self.details_center_stack.removeWidget(current_panel)
+            current_panel.deleteLater()
+
+        self.details_achievements_panel = panel
+        self.details_center_stack.addWidget(panel)
+        self.details_center_stack.setCurrentWidget(panel)
+        if self.details_details_button is not None:
+            self.details_details_button.setChecked(False)
+        if self.details_manage_saves_button is not None:
+            self.details_manage_saves_button.setChecked(False)
+        if self.details_manage_states_button is not None:
+            self.details_manage_states_button.setChecked(False)
+        details_achievements_button = getattr(self, "details_achievements_button", None)
+        if details_achievements_button is not None:
+            details_achievements_button.setChecked(True)
+        self._update_details_layout_metrics()
+        QTimer.singleShot(0, self._update_details_layout_metrics)
 
     def _resolved_emulator_entry_for_game(self, game: dict[str, str]) -> tuple[str, dict[str, str] | None]:
         return resolve_resolved_emulator_entry_for_game(

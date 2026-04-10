@@ -9,7 +9,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QAbstractItemView, QComboBox, QLabel, QLineEdit, QPushButton, QScrollArea
+from PySide6.QtWidgets import QApplication, QAbstractItemView, QComboBox, QFrame, QLabel, QLineEdit, QPushButton, QScrollArea
 
 from rom_mate.ui.game_views import make_game_card, open_game_details, update_details_action_buttons
 from rom_mate.ui.theme import apply_theme_inline_styles
@@ -675,6 +675,9 @@ class _DetailsPageStubWindow:
         return None
 
     def _perform_current_cloud_upload_action(self) -> None:
+        return None
+
+    def _open_achievements_panel(self) -> None:
         return None
 
     def _theme_color(self, role: str, fallback: str) -> str:
@@ -1433,6 +1436,104 @@ class MainWindowVersionFormattingTests(unittest.TestCase):
         button_text = module.MainWindow._details_update_button_text_for_game(window, installed_game)
 
         self.assertEqual(button_text, "Update to v01235")
+
+
+class TestBuildAchievementsPanel(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_empty_achievements_shows_empty_label(self):
+        from rom_mate.ui.game_views import build_achievements_panel
+
+        panel = build_achievements_panel([])
+        labels = panel.findChildren(QLabel)
+        object_names = [label.objectName() for label in labels]
+        self.assertIn("achievementsEmptyLabel", object_names)
+
+    def test_single_achievement_renders_row(self):
+        from rom_mate.ui.game_views import build_achievements_panel
+
+        achievement = {
+            "id": 1,
+            "title": "First Blood",
+            "description": "Kill an enemy",
+            "points": 5,
+            "badge_name": "12345",
+            "date_earned": "",
+        }
+        panel = build_achievements_panel([achievement], load_image_fn=lambda url, lbl: None)
+        rows = panel.findChildren(QFrame, "achievementRow")
+        self.assertGreaterEqual(len(rows), 1)
+
+    def test_earned_achievement_shows_checkmark(self):
+        from rom_mate.ui.game_views import build_achievements_panel
+
+        achievement = {
+            "id": 2,
+            "title": "Done",
+            "description": "Complete",
+            "points": 10,
+            "badge_name": "99999",
+            "date_earned": "2024-01-01",
+        }
+        panel = build_achievements_panel([achievement], load_image_fn=lambda url, lbl: None)
+        earned_labels = panel.findChildren(QLabel, "achievementEarned")
+        self.assertGreaterEqual(len(earned_labels), 1)
+        self.assertEqual(earned_labels[0].text(), "✓")
+
+    def test_earned_achievement_shows_date(self):
+        from rom_mate.ui.game_views import build_achievements_panel
+
+        ach = {
+            "id": 2,
+            "title": "Done",
+            "description": "Complete",
+            "points": 10,
+            "badge_name": "b",
+            "date_earned": "2024-01-01 12:00:00",
+        }
+        panel = build_achievements_panel([ach], load_image_fn=lambda u, l: None)
+        date_labels = panel.findChildren(QLabel, "achievementDate")
+        self.assertGreaterEqual(len(date_labels), 1)
+        self.assertTrue(date_labels[0].text().startswith("Unlocked:"))
+        self.assertGreater(len(date_labels[0].text()), len("Unlocked: "))
+
+    def test_locked_achievement_no_date(self):
+        from rom_mate.ui.game_views import build_achievements_panel
+
+        ach = {
+            "id": 3,
+            "title": "Locked",
+            "description": "Not done",
+            "points": 5,
+            "badge_name": "c",
+            "date_earned": "",
+        }
+        panel = build_achievements_panel([ach], load_image_fn=lambda u, l: None)
+        date_labels = panel.findChildren(QLabel, "achievementDate")
+        self.assertEqual(len(date_labels), 0)
+
+    def test_badge_image_label_created_per_achievement(self):
+        from rom_mate.ui.game_views import build_achievements_panel
+
+        calls = []
+
+        def fake_loader(url, lbl):
+            calls.append((url, lbl))
+
+        ach = {
+            "id": 1,
+            "title": "T",
+            "description": "D",
+            "points": 5,
+            "badge_name": "54321",
+            "date_earned": "",
+        }
+
+        build_achievements_panel([ach], load_image_fn=fake_loader)
+        self.assertEqual(len(calls), 1)
+        self.assertIn("54321_lock", calls[0][0])
 
 
 class SettingsPageLayoutTests(unittest.TestCase):

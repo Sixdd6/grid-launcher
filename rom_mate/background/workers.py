@@ -338,10 +338,11 @@ class InstallFinalizeWorker(QObject):
                     install_progress_callback=self._emit_progress,
                 )
             if prepared_game is None:
-                self.finished.emit(None, str(self.archive_path), warning_text, "Install preparation failed")
+                error_detail = warning_text.strip() if isinstance(warning_text, str) and warning_text.strip() else "Install preparation failed"
+                self.finished.emit(None, str(self.archive_path), "", error_detail)
                 return
             self.finished.emit(prepared_game, str(self.archive_path), warning_text, "")
-        except (OSError, zipfile.BadZipFile) as error:
+        except Exception as error:
             self.finished.emit(None, str(self.archive_path), "", str(error))
 
     def _emit_progress(self, installed_bytes: int, total_bytes: int) -> None:
@@ -452,3 +453,23 @@ class DetailsCloudRecordsWorker(QObject):
                     f"result=error message={error}"
                 )
             self.finished.emit(self.request_id, self.save_type, [], str(error))
+
+
+class RetroAchievementsWorker(QObject):
+    finished = Signal(int, list, str)
+
+    def __init__(self, request_id: int, ra_game_id: int, username: str, api_key: str) -> None:
+        super().__init__()
+        self.request_id = int(request_id)
+        self.ra_game_id = int(ra_game_id)
+        self.username = str(username)
+        self.api_key = str(api_key)
+
+    def run(self) -> None:
+        from rom_mate.server.retroachievements import fetch_game_achievements, RetroAchievementsError
+
+        try:
+            achievements = fetch_game_achievements(self.ra_game_id, self.username, self.api_key)
+            self.finished.emit(self.request_id, achievements, "")
+        except (RetroAchievementsError, ValueError, OSError) as error:
+            self.finished.emit(self.request_id, [], str(error))

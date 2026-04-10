@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from rom_mate.library import rom_file_name_version
 
@@ -100,6 +100,10 @@ class GameDetailsWindowProtocol(Protocol):
 
     def _details_update_button_text_for_game(self, game: dict[str, str]) -> str:
         ...
+
+
+class GameAchievementsWindowProtocol(Protocol):
+    details_achievements_button: QPushButton
 
 
 def _is_windows_pc_platform(platform_value: object) -> bool:
@@ -339,3 +343,95 @@ def update_details_action_buttons(window: GameDetailsWindowProtocol) -> None:
         details_update_button.setText(update_button_text)
         details_update_button.setVisible(show_update)
         details_update_button.setEnabled(show_update and not installing_current)
+
+
+def _format_achievement_date(raw: str) -> str:
+    from PySide6.QtCore import QDateTime, QLocale
+
+    dt = QDateTime.fromString(raw.strip(), "yyyy-MM-dd HH:mm:ss")
+    if not dt.isValid():
+        return raw.strip()
+    locale = QLocale.system()
+    return locale.toString(dt, QLocale.FormatType.ShortFormat)
+
+
+def build_achievements_panel(
+    achievements: list[dict],
+    load_image_fn: Callable[[str, QLabel], None] | None = None,
+) -> QWidget:
+    container = QFrame()
+    container.setObjectName("panel")
+    layout = QVBoxLayout(container)
+    layout.setContentsMargins(12, 12, 12, 12)
+    layout.setSpacing(4)
+
+    if not achievements:
+        empty_label = QLabel("No achievements found.")
+        empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_label.setObjectName("achievementsEmptyLabel")
+        layout.addWidget(empty_label)
+        layout.addStretch()
+        return container
+
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+    scroll.setStyleSheet("QScrollArea { background: transparent; border: none; } QScrollArea > QWidget > QWidget { background: transparent; }")
+    inner = QWidget()
+    inner.setAutoFillBackground(False)
+    inner_layout = QVBoxLayout(inner)
+    inner_layout.setContentsMargins(0, 0, 0, 0)
+    inner_layout.setSpacing(6)
+
+    achievements = sorted(achievements, key=lambda a: (not bool(a.get("date_earned", "")), str(a.get("title", ""))))
+    for ach in achievements:
+        row = QFrame()
+        row.setObjectName("achievementRow")
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(8, 6, 8, 6)
+        row_layout.setSpacing(10)
+
+        earned = bool(ach.get("date_earned", ""))
+        badge_label = QLabel()
+        badge_label.setFixedSize(48, 48)
+        badge_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge_label.setObjectName("achievementBadge")
+        badge_name = str(ach.get("badge_name", "")).strip()
+        if badge_name and load_image_fn is not None:
+            badge_url = f"https://media.retroachievements.org/Badge/{badge_name}{'_lock' if not earned else ''}.png"
+            load_image_fn(badge_url, badge_label)
+        row_layout.addWidget(badge_label)
+
+        indicator = QLabel("✓" if earned else "○")
+        indicator.setFixedWidth(18)
+        indicator.setObjectName("achievementEarned" if earned else "achievementLocked")
+        row_layout.addWidget(indicator)
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
+        name_label = QLabel(str(ach.get("title", "")))
+        name_label.setObjectName("achievementTitle")
+        name_label.setWordWrap(True)
+        desc_label = QLabel(str(ach.get("description", "")))
+        desc_label.setObjectName("achievementDesc")
+        desc_label.setWordWrap(True)
+        text_col.addWidget(name_label)
+        text_col.addWidget(desc_label)
+        date_earned = str(ach.get("date_earned", "")).strip()
+        if date_earned:
+            date_label = QLabel(f"Unlocked: {_format_achievement_date(date_earned)}")
+            date_label.setObjectName("achievementDate")
+            text_col.addWidget(date_label)
+        row_layout.addLayout(text_col, 1)
+
+        pts_label = QLabel(f"{ach.get('points', 0)} pts")
+        pts_label.setObjectName("achievementPoints")
+        pts_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        row_layout.addWidget(pts_label)
+
+        inner_layout.addWidget(row)
+
+    inner_layout.addStretch()
+    scroll.setWidget(inner)
+    layout.addWidget(scroll)
+    return container

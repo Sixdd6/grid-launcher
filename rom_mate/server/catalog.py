@@ -160,6 +160,7 @@ def games_from_rom_items(
         summary = item.get("summary")
         cover_url = cover_url_from_payload(item)
         screenshot_urls = screenshot_urls_from_payload(item)
+        ra_id = item.get("ra_id")
         games.append(
             {
                 "title": title.strip(),
@@ -171,6 +172,7 @@ def games_from_rom_items(
                 "rom_id": rom_id,
                 "server_updated_at": _rom_updated_at_text(item),
                 "rom_file_name": item.get("fs_name", "").strip() if isinstance(item.get("fs_name", ""), str) else "",
+                "ra_id": str(ra_id) if ra_id is not None else "",
                 "ps4_has_update": "true" if "update" in ps4_file_ids_by_category else "false",
                 "ps4_has_dlc": "true" if "dlc" in ps4_file_ids_by_category else "false",
                 "ps4_file_ids_by_category": json.dumps(ps4_file_ids_by_category, separators=(",", ":"), sort_keys=True),
