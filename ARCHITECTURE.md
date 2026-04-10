@@ -9,7 +9,7 @@ This document is a stable module map for the current codebase.
 - `rom-mate.py`
   - Application entry point and `MainWindow` orchestration shell.
   - Wires together UI interactions, background jobs, and domain helpers.
-  - Owns the Game Details cloud panel orchestration, shared-save scope handling, and the responsive handoff from `Details` to `Manage Saves` / `Emulator Saves` / `Manage States`.
+  - Owns the Game Details cloud panel orchestration, shared-save scope handling, the responsive handoff from `Details` to `Manage Saves` / `Emulator Saves` / `Manage States`, and screenshot directory resolution for cloud upload jobs.
 
 ## Package Map
 - `rom_mate/core/`
@@ -36,7 +36,7 @@ This document is a stable module map for the current codebase.
   - `archive_preparation.py`: extraction and install-prep flow.
   - `cloud_restore.py`: restore record and target selection, including slot-aware restore grouping.
   - `cloud_sync.py`: sync state normalization, shared-save discovery, Redream hash-based savestate matching, and session filtering.
-  - `cloud_transfer.py`: upload/restore archive transfer utilities.
+  - `cloud_transfer.py`: upload/restore archive transfer utilities, including session-window screenshot attachment for emulators that save screenshots to a dedicated directory.
   - `cloud_upload.py`: upload planning and result messaging.
   - `downloads.py`: download status and detail formatting.
   - `identity.py`: game key and installed-record lookup helpers.
@@ -91,3 +91,5 @@ This document is a stable module map for the current codebase.
 - Shared emulator save media (for example Xemu HDD images and Redream VMUs) should be represented in the UI as emulator-wide backup scopes rather than per-game saves.
 - Any future details-panel cloud queries should stay async so the view can switch immediately before remote/local lookup work begins.
 - Update this file when module ownership changes.
+- Emulator autoprofiles (`emulator-autoprofiles.json`) define `screenshot_directories` alongside `save_directories` and `state_directories`. The `_resolved_screenshot_directories()` method in `rom-mate.py` resolves these paths; `session_screenshot_path()` in `cloud_transfer.py` finds the most recent session-window screenshot to attach to cloud uploads. These are intentionally absent for PPSSPP and RetroArch which use file sidecars instead.
+- The `InstallFinalizeWorker` in `workers.py` only deletes the downloaded archive after installation when extraction actually occurred (`extracted_path` is non-empty). Direct game file formats (.chd, .iso, .bin, etc.) must never be deleted post-install.

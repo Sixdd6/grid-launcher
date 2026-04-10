@@ -438,26 +438,22 @@ class InstallFinalizeWorker(QObject):
                     cleanup_archive_on_success=False,
                     install_progress_callback=self._emit_progress,
                 )
-            print(f"[ROM-MATE DEBUG] InstallFinalizeWorker: content_kind={self.content_kind!r} archive_path={self.archive_path!r} exists={self.archive_path.exists()}")
             if prepared_game is None:
                 error_detail = warning_text.strip() if isinstance(warning_text, str) and warning_text.strip() else "Install preparation failed"
                 self.finished.emit(None, str(self.archive_path), "", error_detail)
                 return
-            print(f"[ROM-MATE DEBUG] InstallFinalizeWorker: prepared_game is not None, proceeding to cleanup")
-            print(f"[ROM-MATE DEBUG] InstallFinalizeWorker: archive_path before main cleanup={self.archive_path!r} exists={self.archive_path.exists()}")
             cleanup_install_archives = getattr(self.window, "_cleanup_install_archives_without_ui", None)
-            print(f"[ROM-MATE DEBUG] InstallFinalizeWorker: cleanup_install_archives callable={callable(cleanup_install_archives)} value={cleanup_install_archives!r}")
             if callable(cleanup_install_archives):
-                cleanup_warning = cleanup_install_archives(
-                    self.game,
-                    self.archive_path,
-                    include_main=True,
-                    include_supplementals=False,
-                    install_progress_callback=self._emit_progress,
-                )
-                print(f"[ROM-MATE DEBUG] InstallFinalizeWorker: main cleanup result={cleanup_warning!r} archive exists after={self.archive_path.exists()}")
-                if isinstance(cleanup_warning, str) and cleanup_warning.strip():
-                    warning_text = "\n\n".join(part for part in (warning_text.strip(), cleanup_warning.strip()) if part)
+                if bool(prepared_game.get("extracted_path", "")):
+                    cleanup_warning = cleanup_install_archives(
+                        self.game,
+                        self.archive_path,
+                        include_main=True,
+                        include_supplementals=False,
+                        install_progress_callback=self._emit_progress,
+                    )
+                    if isinstance(cleanup_warning, str) and cleanup_warning.strip():
+                        warning_text = "\n\n".join(part for part in (warning_text.strip(), cleanup_warning.strip()) if part)
             apply_source_supplemental_archives = getattr(self.window, "_apply_source_supplemental_archives_without_ui", None)
             if callable(apply_source_supplemental_archives):
                 apply_source_supplemental_archives(

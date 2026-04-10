@@ -191,7 +191,7 @@ from rom_mate.library import (
     sync_install_metadata_to_details_game as resolve_sync_install_metadata_to_details_game,
     update_cloud_sync_state_for_game,
 )
-from rom_mate.library.cloud_transfer import SUPPORTED_IMAGE_EXTENSIONS
+from rom_mate.library.cloud_transfer import SUPPORTED_IMAGE_EXTENSIONS, session_screenshot_path
 from rom_mate.cover import (
     apply_cover_to_label,
     cache_cover_image_for_game,
@@ -2714,14 +2714,11 @@ class MainWindow(QMainWindow):
         install_progress_callback: Callable[[int, int], None] | None = None,
     ) -> str:
         del install_progress_callback
-        print(f"[ROM-MATE DEBUG] _cleanup_install_archives_without_ui: archive_path={archive_path!r} exists={archive_path.exists()} include_main={include_main} include_supplementals={include_supplementals}")
         warnings: list[str] = []
         title = str(game.get("title", "Game")).strip() or "Game"
 
         if include_main:
-            print(f"[ROM-MATE DEBUG] _cleanup_install_archives_without_ui: attempting main archive delete: {archive_path!r} is_file={archive_path.is_file()}")
             cleanup_error = resolve_cleanup_install_archive(archive_path)
-            print(f"[ROM-MATE DEBUG] _cleanup_install_archives_without_ui: main cleanup_error={cleanup_error!r} exists_after={archive_path.exists()}")
             if cleanup_error:
                 warnings.append(f"Extracted {title}, but could not delete archive:\n{cleanup_error}")
 
@@ -6130,6 +6127,55 @@ class MainWindow(QMainWindow):
             timing_end("_resolved_sync_directory_paths", started_at, result=len(unique))
         return unique
 
+    def _resolved_screenshot_directories(self, emulator: dict[str, str]) -> list[Path]:
+        profile = self._emulator_profile_for_entry(emulator)
+        profile_paths: list[str] = []
+        if isinstance(profile, dict):
+            raw_profile_paths = profile.get("screenshot_directories", [])
+            if isinstance(raw_profile_paths, list):
+                profile_paths = [item.strip() for item in raw_profile_paths if isinstance(item, str) and item.strip()]
+
+        if not profile_paths:
+            return []
+
+        emulator_path_value = emulator.get("path", "")
+        emulator_path = Path(emulator_path_value).expanduser() if isinstance(emulator_path_value, str) else Path()
+        emulator_dir = emulator_path.parent if emulator_path_value else Path()
+
+        library_value = self.config.get("library_path", "")
+        library_path = Path(library_value).expanduser() if isinstance(library_value, str) and library_value.strip() else Path()
+        config_dir = self._config_dir()
+
+        resolved: list[Path] = []
+        for raw_path in profile_paths:
+            expanded = os.path.expandvars(raw_path)
+            replacements = {
+                "%EMULATOR_DIR%": str(emulator_dir),
+                "%LIBRARY_DIR%": str(library_path),
+                "%CONFIG_DIR%": str(config_dir),
+            }
+            for token, token_value in replacements.items():
+                expanded = expanded.replace(token, token_value)
+
+            candidate = Path(expanded).expanduser()
+            if not candidate.is_absolute() and emulator_dir:
+                candidate = (emulator_dir / candidate).resolve()
+            elif candidate.is_absolute():
+                candidate = candidate.resolve()
+
+            if candidate.exists() and candidate.is_dir():
+                resolved.append(candidate)
+
+        unique: list[Path] = []
+        seen: set[str] = set()
+        for path in resolved:
+            key_value = str(path).casefold()
+            if key_value in seen:
+                continue
+            seen.add(key_value)
+            unique.append(path)
+        return unique
+
     def _cemu_save_directories_for_game(
         self,
         game: dict[str, str],
@@ -7646,6 +7692,15 @@ class MainWindow(QMainWindow):
                     ),
                 )
                 temporary_archives.extend(grouped_archives)
+
+        screenshot_dirs = self._resolved_screenshot_directories(emulator_entry)
+        if screenshot_dirs:
+            session_win = self._session_window_for_state_upload(game)
+            sidecar_screenshot = session_screenshot_path(screenshot_dirs, session_win)
+            if sidecar_screenshot is not None:
+                for _, files_payload in upload_jobs:
+                    if "screenshotFile" not in files_payload:
+                        files_payload["screenshotFile"] = sidecar_screenshot
 
         for display_name, files_payload in upload_jobs:
             params: dict[str, Any] = {

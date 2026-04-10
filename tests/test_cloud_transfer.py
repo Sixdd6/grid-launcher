@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 import zipfile
@@ -11,6 +12,7 @@ from rom_mate.library.cloud_transfer import (
     grouped_file_upload_jobs,
     ppsspp_state_upload_jobs,
     retroarch_state_upload_jobs,
+    session_screenshot_path,
     screenshot_download_candidate_paths,
     zip_directory_for_upload,
     zip_selected_files_for_upload,
@@ -353,6 +355,108 @@ class CloudTransferTests(unittest.TestCase):
                 "Sonic-The-Hedgehog.state2",
             ],
         )
+
+
+class TestSessionScreenshotPath(unittest.TestCase):
+    def test_returns_none_when_no_directories(self) -> None:
+        result = session_screenshot_path([], (0.0, 9999999999.0))
+        self.assertIsNone(result)
+
+    def test_returns_none_when_session_window_is_none(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            img = Path(temp_dir) / "shot.png"
+            img.write_bytes(b"\x89PNG\r\n\x1a\n")
+            result = session_screenshot_path([Path(temp_dir)], None)
+        self.assertIsNone(result)
+
+    def test_returns_none_when_no_images_in_window(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            img = Path(temp_dir) / "shot.png"
+            img.write_bytes(b"\x89PNG\r\n\x1a\n")
+            past_time = 1000.0
+            os.utime(img, (past_time, past_time))
+            result = session_screenshot_path([Path(temp_dir)], (2000.0, 3000.0))
+        self.assertIsNone(result)
+
+    def test_returns_image_within_session_window(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            img = Path(temp_dir) / "shot.png"
+            img.write_bytes(b"\x89PNG\r\n\x1a\n")
+            window_start = 1000.0
+            window_end = 9000.0
+            os.utime(img, (5000.0, 5000.0))
+            result = session_screenshot_path([Path(temp_dir)], (window_start, window_end))
+        self.assertEqual(result, img)
+
+    def test_returns_most_recent_image_when_multiple_within_window(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            earlier = Path(temp_dir) / "earlier.png"
+            later = Path(temp_dir) / "later.png"
+            earlier.write_bytes(b"\x89PNG\r\n\x1a\n")
+            later.write_bytes(b"\x89PNG\r\n\x1a\n")
+            os.utime(earlier, (2000.0, 2000.0))
+            os.utime(later, (4000.0, 4000.0))
+            result = session_screenshot_path([Path(temp_dir)], (1000.0, 9000.0))
+        self.assertEqual(result, later)
+
+    def test_ignores_non_image_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            txt = Path(temp_dir) / "notes.txt"
+            txt.write_text("not an image", encoding="utf-8")
+            os.utime(txt, (5000.0, 5000.0))
+            result = session_screenshot_path([Path(temp_dir)], (1000.0, 9000.0))
+        self.assertIsNone(result)
+
+    def test_scans_subdirectories_recursively(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            subdir = Path(temp_dir) / "GameID"
+            subdir.mkdir()
+            img = subdir / "shot.png"
+            img.write_bytes(b"\x89PNG\r\n\x1a\n")
+            os.utime(img, (5000.0, 5000.0))
+            result = session_screenshot_path([Path(temp_dir)], (1000.0, 9000.0))
+        self.assertEqual(result, img)
+
+    def test_skips_blocked_basenames(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            img = Path(temp_dir) / "blocked.png"
+            img.write_bytes(b"\x89PNG\r\n\x1a\n")
+            os.utime(img, (5000.0, 5000.0))
+            result = session_screenshot_path(
+                [Path(temp_dir)],
+                (1000.0, 9000.0),
+                blocked_basenames={"blocked.png"},
+            )
+        self.assertIsNone(result)
+
+    def test_skips_missing_directories_gracefully(self) -> None:
+        missing = Path("/nonexistent/screenshot/dir/that/does/not/exist")
+        result = session_screenshot_path([missing], (1000.0, 9000.0))
+        self.assertIsNone(result)
+
+    def test_supports_jpg_extension(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            img = Path(temp_dir) / "shot.jpg"
+            img.write_bytes(b"\xff\xd8\xff")
+            os.utime(img, (5000.0, 5000.0))
+            result = session_screenshot_path([Path(temp_dir)], (1000.0, 9000.0))
+        self.assertEqual(result, img)
+
+    def test_supports_webp_extension(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            img = Path(temp_dir) / "shot.webp"
+            img.write_bytes(b"RIFF")
+            os.utime(img, (5000.0, 5000.0))
+            result = session_screenshot_path([Path(temp_dir)], (1000.0, 9000.0))
+        self.assertEqual(result, img)
+
+    def test_supports_bmp_extension(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            img = Path(temp_dir) / "shot.bmp"
+            img.write_bytes(b"BM")
+            os.utime(img, (5000.0, 5000.0))
+            result = session_screenshot_path([Path(temp_dir)], (1000.0, 9000.0))
+        self.assertEqual(result, img)
 
 
 if __name__ == "__main__":

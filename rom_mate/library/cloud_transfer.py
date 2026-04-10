@@ -80,6 +80,50 @@ def appended_image_sidecar_path(
     return None
 
 
+def session_screenshot_path(
+    screenshot_directories: list[Path],
+    session_window: tuple[float, float] | None,
+    *,
+    blocked_basenames: set[str] | None = None,
+) -> Path | None:
+    """Return the most recently captured screenshot from *screenshot_directories*
+    whose modification time falls within *session_window*.
+
+    Returns ``None`` if *session_window* is ``None``, if no directories are
+    provided, or if no qualifying image is found.
+    """
+    if not screenshot_directories or session_window is None:
+        return None
+
+    window_start, window_end = session_window
+    blocked_names = _normalized_blocked_basenames(blocked_basenames)
+
+    best: Path | None = None
+    best_mtime: float = -1.0
+
+    for directory in screenshot_directories:
+        try:
+            candidates = list(directory.rglob("*"))
+        except OSError:
+            continue
+        for candidate in candidates:
+            try:
+                if not candidate.is_file():
+                    continue
+                if candidate.suffix.casefold() not in SUPPORTED_IMAGE_EXTENSIONS:
+                    continue
+                if candidate.name.casefold() in blocked_names:
+                    continue
+                mtime = candidate.stat().st_mtime
+            except OSError:
+                continue
+            if window_start <= mtime <= window_end and mtime > best_mtime:
+                best = candidate
+                best_mtime = mtime
+
+    return best
+
+
 def normalize_candidate_url(value: str) -> str:
     parsed = urlsplit(value)
     encoded_path = quote(parsed.path, safe="/%")

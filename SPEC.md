@@ -99,6 +99,12 @@ Special shared-media handling should include:
 The sync flow should track recent game sessions so that auto-upload focuses on files changed during or immediately after play.
 Some emulator/platform combinations may limit state-sync actions when that behavior is not reliable.
 
+## Screenshot upload
+When uploading saves or states, the app should attempt to attach the most recently captured screenshot as a companion `screenshotFile`.
+- PPSSPP and RetroArch attach screenshots via file sidecars: PPSSPP replaces the state file extension with an image extension; RetroArch appends an image extension to the full state filename.
+- All other supported emulators (DuckStation, PCSX2, Dolphin, RPCS3, Cemu, Azahar, Xemu, Eden, MAME, FBNeo, Xenia) attach screenshots by scanning a known emulator screenshot directory for the most recently captured image within the current game session window. No screenshot is attached if no image was captured during the session.
+- Emulator profiles define the screenshot directories to scan via the `screenshot_directories` key in `emulator-autoprofiles.json`.
+
 # Additional Platform-Specific Behavior
 - RetroArch support should include installed core detection and per-platform core assignment.
 - RPCS3 / PS3 handling should support the game-launch requirements needed by that emulator setup.

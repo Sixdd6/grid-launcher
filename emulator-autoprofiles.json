@@ -57,7 +57,8 @@
     "use_game_title_as_name": false,
     "save_strategy": "single_file",
     "save_directories": ["memcards"],
-    "state_directories": ["savestates"]
+    "state_directories": ["savestates"],
+    "screenshot_directories": ["screenshots", "%LOCALAPPDATA%\\DuckStation\\screenshots"]
   },
   {
     "match_tokens": ["pcsx2-qt.exe"],
@@ -86,7 +87,8 @@
       "memcards",
       "%USERPROFILE%\\Documents\\PCSX2\\memcards"
     ],
-    "state_directories": ["sstates", "%USERPROFILE%\\Documents\\PCSX2\\sstates"]
+    "state_directories": ["sstates", "%USERPROFILE%\\Documents\\PCSX2\\sstates"],
+    "screenshot_directories": ["snaps", "%APPDATA%\\PCSX2\\snaps"]
   },
   {
     "match_tokens": ["PPSSPPWindows64.exe"],
@@ -143,7 +145,8 @@
       "portable\\dev_hdd0\\home\\00000001\\savedata",
       "dev_hdd0\\home\\00000001\\savedata"
     ],
-    "state_directories": []
+    "state_directories": [],
+    "screenshot_directories": ["%APPDATA%\\rpcs3\\screenshots"]
   },
   {
     "match_tokens": ["shadPS4.exe"],
@@ -224,7 +227,8 @@
     "state_directories": [
       "User\\StateSaves",
       "%APPDATA%\\Dolphin Emulator\\StateSaves"
-    ]
+    ],
+    "screenshot_directories": ["User\\ScreenShots", "%LOCALAPPDATA%\\Dolphin Emulator\\ScreenShots"]
   },
   {
     "match_tokens": ["cemu.exe"],
@@ -252,7 +256,8 @@
       "mlc01\\usr\\save",
       "%APPDATA%\\Cemu\\mlc01\\usr\\save"
     ],
-    "state_directories": []
+    "state_directories": [],
+    "screenshot_directories": ["mlc01\\screenshots", "portable\\mlc01\\screenshots", "%APPDATA%\\Cemu\\mlc01\\screenshots"]
   },
   {
     "match_tokens": ["azahar.exe"],
@@ -284,7 +289,8 @@
     "state_directories": [
       "user\\states",
       "%APPDATA%\\Azahar\\states"
-    ]
+    ],
+    "screenshot_directories": ["user\\screenshots", "%APPDATA%\\Azahar\\screenshots"]
   },
   {
     "match_tokens": ["pico8.exe"],
@@ -334,7 +340,8 @@
       "%APPDATA%\\xemu\\xemu\\xbox_hdd.qcow2",
       "%APPDATA%\\xemu\\xemu\\eeprom.bin"
     ],
-    "state_directories": []
+    "state_directories": [],
+    "screenshot_directories": [".", "%APPDATA%\\xemu\\xemu"]
   },
   {
     "match_tokens": ["eden.exe"],
@@ -357,7 +364,8 @@
       "user\\nand\\user\\save\\0000000000000000",
       "%APPDATA%\\Eden\\nand\\user\\save\\0000000000000000"
     ],
-    "state_directories": []
+    "state_directories": [],
+    "screenshot_directories": ["user\\screenshots", "%APPDATA%\\Eden\\screenshots"]
   },
   {
     "match_tokens": ["mame.exe"],
@@ -374,7 +382,8 @@
     ],
     "state_directories": [
       "sta"
-    ]
+    ],
+    "screenshot_directories": ["snap"]
   },
   {
     "match_tokens": ["fbneo.exe"],
@@ -392,7 +401,8 @@
     ],
     "state_directories": [
       "savestates"
-    ]
+    ],
+    "screenshot_directories": ["screenshots"]
   },
   {
     "match_tokens": ["xenia_canary.exe", "xenia-canary.exe"],
@@ -419,7 +429,8 @@
       "content",
       "%USERPROFILE%\\Documents\\Xenia\\content"
     ],
-    "state_directories": []
+    "state_directories": [],
+    "screenshot_directories": ["screenshots", "%USERPROFILE%\\Documents\\Xenia\\screenshots"]
   },
   {
     "match_tokens": ["xenia.exe"],
@@ -433,7 +444,8 @@
       "content",
       "%USERPROFILE%\\Documents\\Xenia\\content"
     ],
-    "state_directories": []
+    "state_directories": [],
+    "screenshot_directories": ["screenshots", "%USERPROFILE%\\Documents\\Xenia\\screenshots"]
   },
   {
     "match_tokens": ["redream.exe"],

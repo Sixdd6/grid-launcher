@@ -123,47 +123,36 @@ def _ps4_title_id_roots(directory: Path) -> list[Path]:
 
 
 def _schedule_delete_on_reboot(path: Path) -> bool:
-    print(f"[ROM-MATE DEBUG] _schedule_delete_on_reboot: start path={path!r}")
     if os.name != "nt":
-        print("[ROM-MATE DEBUG] _schedule_delete_on_reboot: returning False (os.name is not 'nt')")
         return False
     try:
         import ctypes
 
         MOVEFILE_DELAY_UNTIL_REBOOT = 0x4
         result = bool(ctypes.windll.kernel32.MoveFileExW(str(path), None, MOVEFILE_DELAY_UNTIL_REBOOT))
-        print(f"[ROM-MATE DEBUG] _schedule_delete_on_reboot: returning {result} (MoveFileExW result)")
         return result
     except Exception:
-        print("[ROM-MATE DEBUG] _schedule_delete_on_reboot: returning False (exception while scheduling delete on reboot)")
         return False
 
 
 def _unlink_file_with_retries(path: Path, *, attempts: int = 20, delay_seconds: float = 0.25) -> None:
     last_error: OSError | None = None
     total_attempts = max(1, int(attempts))
-    print(f"[ROM-MATE DEBUG] _unlink_file_with_retries: starting {total_attempts} attempts for {path!r}")
     for attempt_index in range(total_attempts):
         try:
             path.unlink()
-            print(f"[ROM-MATE DEBUG] _unlink_file_with_retries: deleted on attempt {attempt_index + 1}")
             return
         except FileNotFoundError:
-            print(f"[ROM-MATE DEBUG] _unlink_file_with_retries: FileNotFoundError on attempt {attempt_index + 1}, treating as success")
             return
         except OSError as error:
-            print(f"[ROM-MATE DEBUG] _unlink_file_with_retries: OSError on attempt {attempt_index + 1}/{total_attempts}: {error}")
             last_error = error
             if attempt_index + 1 >= total_attempts:
                 break
             _wait_for_extractor_processes(timeout_seconds=max(0.0, float(delay_seconds)), poll_interval=0.05)
             time.sleep(max(0.0, float(delay_seconds)))
 
-    print(f"[ROM-MATE DEBUG] _unlink_file_with_retries: all {total_attempts} attempts failed, trying _schedule_delete_on_reboot")
     if last_error is not None and _schedule_delete_on_reboot(path):
-        print(f"[ROM-MATE DEBUG] _unlink_file_with_retries: _schedule_delete_on_reboot succeeded")
         return
-    print(f"[ROM-MATE DEBUG] _unlink_file_with_retries: _schedule_delete_on_reboot failed or last_error is None, raising")
     if last_error is not None:
         raise last_error
 
@@ -173,35 +162,26 @@ def _delete_with_background_retry(path: Path, *, initial_wait_seconds: float = 5
     import threading
 
     def _try() -> None:
-        print(f"[ROM-MATE DEBUG] _delete_with_background_retry: thread started, waiting {initial_wait_seconds}s before first attempt for {path!r}")
         time.sleep(initial_wait_seconds)
         for attempt_index in range(max(1, attempts)):
             try:
                 path.unlink()
-                print(f"[ROM-MATE DEBUG] _delete_with_background_retry: deleted on background attempt {attempt_index + 1}")
                 return
             except FileNotFoundError:
-                print(f"[ROM-MATE DEBUG] _delete_with_background_retry: FileNotFoundError on background attempt {attempt_index + 1}, treating as success")
                 return
             except OSError as error:
-                print(f"[ROM-MATE DEBUG] _delete_with_background_retry: OSError on background attempt {attempt_index + 1}/{attempts}: {error}")
                 time.sleep(max(0.0, delay_seconds))
-        print(f"[ROM-MATE DEBUG] _delete_with_background_retry: all {attempts} background attempts failed, giving up")
 
     thread = threading.Thread(target=_try, daemon=True)
     thread.start()
 
 
 def cleanup_install_archive(archive_path: Path) -> str:
-    print(f"[ROM-MATE DEBUG] cleanup_install_archive: path={archive_path!r} exists={archive_path.exists()} is_file={archive_path.is_file() if archive_path.exists() else 'N/A'}")
     if not archive_path.exists() or not archive_path.is_file():
-        print(f"[ROM-MATE DEBUG] cleanup_install_archive: skipping (not found or not a file)")
         return ""
     try:
         _unlink_file_with_retries(archive_path)
-        print(f"[ROM-MATE DEBUG] cleanup_install_archive: deleted successfully")
     except OSError:
-        print(f"[ROM-MATE DEBUG] cleanup_install_archive: scheduling background retry")
         _delete_with_background_retry(archive_path)
     return ""
 

@@ -795,6 +795,21 @@ class _FinalizeWindowStub:
         return ""
 
 
+class _FinalizeWindowDirectFileStub(_FinalizeWindowStub):
+    def _prepare_installed_game_without_ui(
+        self,
+        game: dict[str, str],
+        archive_path: Path,
+        *,
+        configure_ps3_links: bool,
+        cleanup_archive_on_success: bool = True,
+        install_progress_callback=None,
+    ):
+        del game, archive_path, configure_ps3_links, install_progress_callback
+        self.calls.append(("prepare", cleanup_archive_on_success))
+        return ({"title": "Gran Turismo 4", "extracted_dir": "", "extracted_path": ""}, "")
+
+
 class InstallFinalizeWorkerTests(unittest.TestCase):
     def test_worker_defers_archive_cleanup_until_after_supplementals(self) -> None:
         window = _FinalizeWindowStub()
@@ -813,6 +828,30 @@ class InstallFinalizeWorkerTests(unittest.TestCase):
             [
                 ("prepare", False),
                 ("cleanup", (True, False)),
+                ("supplementals", None),
+                ("cleanup", (False, True)),
+            ],
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0][3], "")
+        self.assertEqual(results[0][2], "")
+
+    def test_worker_skips_main_cleanup_for_direct_file_installs(self) -> None:
+        window = _FinalizeWindowDirectFileStub()
+        worker = InstallFinalizeWorker(
+            window,
+            {"title": "Gran Turismo 4", "_install_mode": "native_game"},
+            Path("gran_turismo_4.chd"),
+        )
+        results: list[tuple[object, str, str, str]] = []
+        worker.finished.connect(lambda prepared, archive_path, warning_text, error: results.append((prepared, archive_path, warning_text, error)))
+
+        worker.run()
+
+        self.assertEqual(
+            window.calls,
+            [
+                ("prepare", False),
                 ("supplementals", None),
                 ("cleanup", (False, True)),
             ],
