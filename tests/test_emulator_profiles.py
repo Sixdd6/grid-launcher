@@ -818,6 +818,20 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
         self.assertEqual(wii_matches, ["WiiU"])
         self.assertEqual(xbox_matches, ["Xbox360"])
 
+    def test_matching_platforms_for_emulator_keywords_blocks_psp_for_playstation_keyword(self) -> None:
+        matches = matching_platforms_for_emulator_keywords(
+            ["Playstation Portable"],
+            ["playstation"],
+        )
+        self.assertEqual(matches, [])
+
+    def test_matching_platforms_for_emulator_keywords_allows_manufacturer_prefix_for_playstation(self) -> None:
+        matches = matching_platforms_for_emulator_keywords(
+            ["Sony PlayStation", "Playstation Portable"],
+            ["playstation"],
+        )
+        self.assertEqual(matches, ["Sony PlayStation"])
+
     def test_install_block_reason_for_ps4_clears_when_shadps4_is_available(self) -> None:
         assignable = ["Sony PlayStation4"]
         keywords = ["playstation 4", "ps4"]

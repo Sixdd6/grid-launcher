@@ -1,6 +1,26 @@
 [
   {
     "match_tokens": ["retroarch.exe"],
+    "source": {
+      "provider": "direct",
+      "owner": "libretro",
+      "repo": "retroarch-nightly",
+      "release_tag": "nightly",
+      "page_url": "https://buildbot.libretro.com/nightly/windows/x86_64/",
+      "download_url_regex": "https://buildbot\\.libretro\\.com/nightly/windows/x86_64/RetroArch\\.7z",
+      "asset_name": "RetroArch.7z",
+      "supplemental_downloads": [
+        {
+          "provider": "direct",
+          "owner": "libretro",
+          "repo": "retroarch-cores-nightly",
+          "release_tag": "nightly-cores",
+          "page_url": "https://buildbot.libretro.com/nightly/windows/x86_64/",
+          "download_url_regex": "https://buildbot\\.libretro\\.com/nightly/windows/x86_64/RetroArch_cores\\.7z",
+          "asset_name": "RetroArch_cores.7z"
+        }
+      ]
+    },
     "name": "RetroArch (Multi-System)",
     "args": "-L \"%core%\" \"%rom%\"",
     "all_platforms": true,
@@ -100,6 +120,19 @@
   },
   {
     "match_tokens": ["rpcs3.exe"],
+    "source": {
+      "provider": "github-release",
+      "owner": "RPCS3",
+      "repo": "rpcs3-binaries-win",
+      "release_tag": "latest",
+      "windows_assets": [
+        {
+          "arch": "x64",
+          "asset_name_regex": "^rpcs3-v.*_win64_msvc\\.7z$",
+          "launch_executable": "rpcs3.exe"
+        }
+      ]
+    },
     "name": "RPCS3 (Playstation 3)",
     "args": "--no-gui \"%RPCS3_GAMEID%:%ps3_gameid%\"",
     "all_platforms": false,
@@ -162,6 +195,14 @@
   },
   {
     "match_tokens": ["dolphin.exe"],
+    "source": {
+      "provider": "direct",
+      "owner": "dolphin-emu",
+      "repo": "dolphin-master",
+      "release_tag": "latest",
+      "page_url": "https://dolphin-emu.org/download/list/master/1/",
+      "download_url_regex": "https://dl\\.dolphin-emu\\.org/builds/[^\\\"\\s]+/dolphin-master-[0-9-]+-x64\\.7z"
+    },
     "name": "Dolphin",
     "args": "-b -e \"%rom%\"",
     "all_platforms": false,
@@ -297,6 +338,15 @@
   },
   {
     "match_tokens": ["eden.exe"],
+    "source": {
+      "provider": "gitea",
+      "base_url": "https://git.eden-emu.dev",
+      "owner": "eden-emu",
+      "repo": "eden",
+      "release_tag": "latest",
+      "asset_patterns": ["Eden-Windows-*-amd64-msvc-standard.zip"],
+      "launch_executable": "eden.exe"
+    },
     "name": "Eden (Nintendo Switch)",
     "args": "-f -g \"%rom%\"",
     "all_platforms": false,
@@ -387,6 +437,14 @@
   },
   {
     "match_tokens": ["redream.exe"],
+    "source": {
+      "provider": "direct",
+      "owner": "inolen",
+      "repo": "redream",
+      "release_tag": "nightly",
+      "page_url": "https://redream.io/download",
+      "download_url_regex": "https://redream\\.io/download/redream\\.x86_64-windows-v[0-9.]+-[0-9]+-g[0-9a-f]+\\.zip"
+    },
     "name": "Redream (Sega Dreamcast)",
     "args": "\"%rom%\"",
     "all_platforms": false,

@@ -181,7 +181,13 @@ def retroarch_directory_settings(emulator_path_text: str) -> dict[str, object]:
     return defaults
 
 
-def ensure_retroarch_save_location_settings(emulator_path_text: str) -> dict[str, object]:
+def ensure_retroarch_save_location_settings(
+    emulator_path_text: str,
+    *,
+    enable_fullscreen: bool = False,
+    retroachievements_username: str = "",
+    retroachievements_token: str = "",
+) -> dict[str, object]:
     settings = retroarch_directory_settings(emulator_path_text)
     config_candidates = retroarch_config_path_candidates(emulator_path_text)
 
@@ -210,6 +216,16 @@ def ensure_retroarch_save_location_settings(emulator_path_text: str) -> dict[str
         "savefiles_in_content_dir": "false",
         "savestates_in_content_dir": "false",
     }
+
+    if enable_fullscreen:
+        desired_values["video_fullscreen"] = "true"
+
+    username = retroachievements_username.strip() if isinstance(retroachievements_username, str) else ""
+    token = retroachievements_token.strip() if isinstance(retroachievements_token, str) else ""
+    if username and token:
+        desired_values["cheevos_enable"] = "true"
+        desired_values["cheevos_username"] = username
+        desired_values["cheevos_token"] = token
 
     created = not config_path.exists()
     try:

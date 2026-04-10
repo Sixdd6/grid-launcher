@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -479,7 +481,12 @@ class _EmulatorRowsStubWindow:
     def _remove_emulator_at_index(self, index: int) -> None:
         return None
 
-    def _source_download_entry_for_emulator_name(self, emulator_name: str) -> dict[str, str] | None:
+    def _source_download_entry_for_emulator_name(
+        self,
+        emulator_name: str,
+        emulator: dict[str, str] | None = None,
+    ) -> dict[str, str] | None:
+        del emulator
         if not self.source_available:
             return None
         return {
@@ -591,7 +598,12 @@ class _SourceUpdateActionStubWindow:
             return [item for item in value if isinstance(item, dict)]
         return []
 
-    def _source_download_entry_for_emulator_name(self, emulator_name: str) -> dict[str, str] | None:
+    def _source_download_entry_for_emulator_name(
+        self,
+        emulator_name: str,
+        emulator: dict[str, str] | None = None,
+    ) -> dict[str, str] | None:
+        del emulator
         return {
             "name": emulator_name,
             "provider": "github",
@@ -620,6 +632,64 @@ class _SourceUpdateActionStubWindow:
     def _start_async_install(self, game: dict[str, str]) -> None:
         self.install_game = game
 
+
+class _RenamedSourceLookupStubWindow:
+    def __init__(self) -> None:
+        self.config = {
+            "emulator_source_installs": {
+                "dolphin-emu/dolphin": {
+                    "name": "Dolphin",
+                    "provider": "direct",
+                    "owner": "dolphin-emu",
+                    "repo": "dolphin",
+                    "release_tag": "latest",
+                    "installed_at": "2026-04-10T00:00:00Z",
+                }
+            }
+        }
+
+    def _available_source_download_emulator_entries(
+        self,
+        query: str = "",
+        installed_emulator_names: list[str] | None = None,
+    ) -> list[dict[str, str]]:
+        del query, installed_emulator_names
+        return [
+            {
+                "name": "Dolphin",
+                "provider": "direct",
+                "owner": "dolphin-emu",
+                "repo": "dolphin",
+                "release_tag": "latest",
+                "source_id": "dolphin-emu/dolphin",
+                "source_metadata": {
+                    "provider": "direct",
+                    "owner": "dolphin-emu",
+                    "repo": "dolphin",
+                    "release_tag": "latest",
+                    "download_url": "https://example.test/dolphin.7z",
+                },
+            }
+        ]
+
+    def _emulator_source_installs(self) -> dict[str, dict[str, str]]:
+        value = self.config.get("emulator_source_installs", {})
+        return value if isinstance(value, dict) else {}
+
+    def _emulator_profile_for_entry(self, emulator: dict[str, str]) -> dict[str, object] | None:
+        path = str(emulator.get("path", "")).casefold()
+        if path.endswith("dolphin.exe"):
+            return {
+                "name": "Dolphin",
+                "source": {
+                    "provider": "direct",
+                    "owner": "dolphin-emu",
+                    "repo": "dolphin",
+                    "release_tag": "latest",
+                    "download_url": "https://example.test/dolphin.7z",
+                },
+            }
+        return None
 
 class _DetailsPageStubWindow:
     def __init__(self) -> None:
@@ -885,6 +955,27 @@ class EmulatorSourceDownloadHelperTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["source_id"], "stenzek/duckstation")
 
+    def test_available_source_download_emulator_entries_excludes_renamed_installed_source_by_source_id(self) -> None:
+        module = self._load_emulators_module()
+        autoprofiles = [
+            {
+                "name": "Dolphin",
+                "source": {
+                    "provider": "direct",
+                    "owner": "dolphin-emu",
+                    "repo": "dolphin",
+                },
+            }
+        ]
+
+        rows = module.available_source_download_emulator_entries(
+            autoprofiles,
+            query="dolphin",
+            installed_emulator_names=["Dolphin (GameCube + Wii)"],
+            installed_source_ids=["dolphin-emu/dolphin"],
+        )
+
+        self.assertEqual(rows, [])
 
 class EmulatorsPageLayoutTests(unittest.TestCase):
     @classmethod
@@ -1029,19 +1120,10 @@ class EmulatorsPageLayoutTests(unittest.TestCase):
         row_widget = window.emulator_list.itemWidget(item)
         self.assertIsNotNone(row_widget)
         assert row_widget is not None
-        row_layout = row_widget.layout()
-        self.assertIsNotNone(row_layout)
-        assert row_layout is not None
+        self.assertIsNotNone(row_widget.layout())
 
-        name_labels = []
-        action_buttons: list[QPushButton] = []
-        for index in range(row_layout.count()):
-            row_item = row_layout.itemAt(index)
-            widget = row_item.widget() if row_item is not None else None
-            if isinstance(widget, QLabel):
-                name_labels.append(widget.text().strip())
-            if isinstance(widget, QPushButton):
-                action_buttons.append(widget)
+        name_labels = [label.text().strip() for label in row_widget.findChildren(QLabel)]
+        action_buttons: list[QPushButton] = list(row_widget.findChildren(QPushButton))
 
         self.assertEqual(name_labels, ["DuckStation"])
         self.assertEqual(len(action_buttons), 3)
@@ -1101,6 +1183,65 @@ class EmulatorsPageLayoutTests(unittest.TestCase):
         assert window.install_game is not None
         self.assertEqual(window.install_game.get("_install_mode"), "source_emulator_update")
         self.assertEqual(window.install_game.get("_source_id"), "stenzek/duckstation")
+
+    def test_source_download_entry_lookup_for_renamed_emulator_uses_stable_source_identity(self) -> None:
+        module = self._load_main_module()
+        window = _RenamedSourceLookupStubWindow()
+        emulator = {
+            "name": "Dolphin (GameCube + Wii)",
+            "path": "C:/Emulators/Dolphin/dolphin.exe",
+        }
+
+        source_entry = module.MainWindow._source_download_entry_for_emulator_name(
+            window,
+            emulator["name"],
+            emulator,
+        )
+
+        self.assertIsNotNone(source_entry)
+        assert source_entry is not None
+        self.assertEqual(source_entry.get("source_id"), "dolphin-emu/dolphin")
+        self.assertEqual(source_entry.get("name"), "Dolphin (GameCube + Wii)")
+
+    def test_apply_source_supplemental_archives_preserves_main_emulator_files(self) -> None:
+        module = self._load_main_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            install_dir = root / "RetroArch"
+            install_dir.mkdir()
+            (install_dir / "retroarch.exe").write_text("main-exe", encoding="utf-8")
+            (install_dir / "retroarch.cfg").write_text("config", encoding="utf-8")
+
+            archive_path = root / "retroarch.7z"
+            archive_path.write_text("placeholder", encoding="utf-8")
+            supplemental_path = root / "retroarch-supplemental-1.zip"
+            with zipfile.ZipFile(supplemental_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("cores/flycast_libretro.dll", "core-data")
+
+            game = {
+                "_source_metadata": {
+                    "supplemental_downloads": [
+                        {
+                            "asset_name": "RetroArch_cores.zip",
+                        }
+                    ]
+                }
+            }
+            installed_game = {
+                "extracted_dir": str(install_dir),
+                "extracted_path": str(install_dir / "retroarch.exe"),
+            }
+
+            module.MainWindow._apply_source_supplemental_archives_without_ui(
+                object(),
+                game,
+                archive_path,
+                installed_game,
+            )
+
+            self.assertTrue((install_dir / "retroarch.exe").exists())
+            self.assertTrue((install_dir / "retroarch.cfg").exists())
+            self.assertTrue((install_dir / "cores" / "flycast_libretro.dll").exists())
 
     def test_build_emulators_page_locks_text_inputs_to_readable_height(self) -> None:
         module = self._load_main_module()

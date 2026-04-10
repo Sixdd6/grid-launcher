@@ -83,6 +83,28 @@ class RetroArchConfigTests(unittest.TestCase):
         self.assertIn('savefile_directory = "D:/Custom Saves"', text)
         self.assertIn('savestate_directory = "E:/Custom States"', text)
 
+    def test_ensure_retroarch_save_location_settings_enables_fullscreen_and_retroachievements(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            retroarch_dir = Path(temp_dir) / "RetroArch"
+            retroarch_dir.mkdir()
+            emulator_path = retroarch_dir / "retroarch.exe"
+            emulator_path.write_bytes(b"")
+            config_path = retroarch_dir / "retroarch.cfg"
+            config_path.write_text('video_fullscreen = "false"\ncheevos_enable = "false"\n', encoding="utf-8")
+
+            result = ensure_retroarch_save_location_settings(
+                str(emulator_path),
+                enable_fullscreen=True,
+                retroachievements_username="retro_user",
+                retroachievements_token="retro_token",
+            )
+            text = config_path.read_text(encoding="utf-8")
+
+        self.assertTrue(result["changed"])
+        self.assertIn('video_fullscreen = "true"', text)
+        self.assertIn('cheevos_enable = "true"', text)
+        self.assertIn('cheevos_username = "retro_user"', text)
+        self.assertIn('cheevos_token = "retro_token"', text)
 
 if __name__ == "__main__":
     unittest.main()

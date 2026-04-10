@@ -60,6 +60,20 @@ def matching_platforms_for_emulator_keywords(assignable_platforms: list[str], ke
             if extra_has_numeric_token and not keyword_has_numeric_token:
                 continue
 
+            extra_alpha_tokens = {t for t in extra_tokens if t.isalpha()}
+            if extra_alpha_tokens:
+                normalized_platform = platform.casefold()
+                keyword_end = max(
+                    (m.end() for kw_tok in keyword_tokens if kw_tok.isalpha()
+                     for m in re.finditer(re.escape(kw_tok), normalized_platform)),
+                    default=0,
+                )
+                if any(
+                    any(m.start() >= keyword_end for m in re.finditer(re.escape(et), normalized_platform))
+                    for et in extra_alpha_tokens
+                ):
+                    continue
+
             if platform not in matches:
                 matches.append(platform)
             break

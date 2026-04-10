@@ -18,6 +18,7 @@ A simple, responsive launcher for RomM.
 - [x] Responsive layout
 - [x] Cloud save support and in-app management
 - [x] RetroAchievements integration and browsing
+- [x] Supports screen resolutions from 720p and up, good for small handhelds AND large screens
 
 ## Cloud Sync Notes
 - Game Details now displays `Manage Saves` or `Emulator Saves`, `Manage States` depending on the active emulator capabilities.

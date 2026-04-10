@@ -128,31 +128,29 @@ class PS4ContentApplyTests(unittest.TestCase):
         self.assertEqual(normalized[0]["ps4_content"], "[{\"kind\":\"update\"}]")
 
     def test_extract_archive_into_directory_supports_7z(self) -> None:
-        try:
-            import py7zr
-        except ImportError:
-            self.skipTest("py7zr is required for .7z extraction tests")
-
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            source_file = root / "pcsx2-qt.exe"
-            source_file.write_bytes(b"pcsx2-binary")
             archive_path = root / "pcsx2.7z"
-
-            with py7zr.SevenZipFile(archive_path, mode="w") as archive:
-                archive.write(source_file, arcname="PCSX2/pcsx2-qt.exe")
+            archive_path.write_bytes(b"7z-test")
 
             extracted_dir = root / "extract"
             progress_updates: list[tuple[int, int]] = []
-            extract_archive_into_directory(
-                archive_path,
-                extracted_dir,
-                install_progress_callback=lambda installed, total: progress_updates.append((installed, total)),
-            )
+            expected_extracted = extracted_dir / "PCSX2" / "pcsx2-qt.exe"
 
-            extracted_file = extracted_dir / "PCSX2" / "pcsx2-qt.exe"
-            self.assertTrue(extracted_file.exists())
-            self.assertEqual(extracted_file.read_bytes(), b"pcsx2-binary")
+            def fake_extract(_archive_path: Path, out_dir: Path) -> None:
+                target = out_dir / "PCSX2"
+                target.mkdir(parents=True, exist_ok=True)
+                (target / "pcsx2-qt.exe").write_bytes(b"pcsx2-binary")
+
+            with patch("rom_mate.library.archive_preparation._extract_7z_with_fallbacks", side_effect=fake_extract):
+                extract_archive_into_directory(
+                    archive_path,
+                    extracted_dir,
+                    install_progress_callback=lambda installed, total: progress_updates.append((installed, total)),
+                )
+
+            self.assertTrue(expected_extracted.exists())
+            self.assertEqual(expected_extracted.read_bytes(), b"pcsx2-binary")
             self.assertGreaterEqual(len(progress_updates), 2)
             self.assertEqual(progress_updates[0], (0, 0))
             self.assertGreater(progress_updates[-1][0], 0)
@@ -176,23 +174,6 @@ class PS4ContentApplyTests(unittest.TestCase):
         self.assertTrue(any(c in ("7z", "7za", "7zz") for c in call_order))
         self.assertEqual(call_order[0], call_order[0])
 
-    def test_py7zr_used_when_system_7z_missing(self) -> None:
-        from rom_mate.library.archive_preparation import _extract_7z_with_fallbacks
-
-        archive = Path("/fake/test.7z")
-        out_dir = Path("/fake/out")
-
-        with patch("subprocess.run", side_effect=FileNotFoundError), \
-             patch("py7zr.SevenZipFile") as mock_7zr, \
-             patch("rom_mate.library.archive_preparation._ensure_portable_7z", return_value=None), \
-             patch("shutil.rmtree"), \
-             patch("pathlib.Path.mkdir"):
-            mock_ctx = MagicMock()
-            mock_7zr.return_value.__enter__ = lambda s: mock_ctx
-            mock_7zr.return_value.__exit__ = MagicMock(return_value=False)
-            _extract_7z_with_fallbacks(archive, out_dir)
-        mock_7zr.assert_called_once()
-
     def test_portable_7z_downloaded_and_used_as_last_resort(self) -> None:
         from rom_mate.library.archive_preparation import _extract_7z_with_fallbacks, _PORTABLE_7ZR_PATH
         import urllib.request
@@ -211,7 +192,6 @@ class PS4ContentApplyTests(unittest.TestCase):
             raise FileNotFoundError
 
         with patch("subprocess.run", side_effect=fake_run), \
-             patch("rom_mate.library.archive_preparation.py7zr", None), \
              patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve), \
              patch("pathlib.Path.exists", return_value=False), \
              patch("pathlib.Path.mkdir"), \

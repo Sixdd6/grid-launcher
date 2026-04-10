@@ -44,8 +44,14 @@ def make_emulator_entry_payload(
     ignore_extensions: str,
     save_paths: str,
     state_paths: str,
+    *,
+    source_id: str = "",
+    source_provider: str = "",
+    source_owner: str = "",
+    source_repo: str = "",
+    source_release_tag: str = "",
 ) -> dict[str, str]:
-    return {
+    payload = {
         "name": name.strip(),
         "path": path.strip(),
         "args": args.strip() or "%rom%",
@@ -55,6 +61,17 @@ def make_emulator_entry_payload(
         "save_paths": save_paths.strip(),
         "state_paths": state_paths.strip(),
     }
+    if source_id.strip():
+        payload["source_id"] = source_id.strip()
+    if source_provider.strip():
+        payload["source_provider"] = source_provider.strip()
+    if source_owner.strip():
+        payload["source_owner"] = source_owner.strip()
+    if source_repo.strip():
+        payload["source_repo"] = source_repo.strip()
+    if source_release_tag.strip():
+        payload["source_release_tag"] = source_release_tag.strip()
+    return payload
 
 
 def upsert_emulator_entry(
@@ -212,6 +229,7 @@ def filter_source_download_emulator_entries(
     source_entries: list[dict[str, Any]],
     query: str = "",
     installed_emulator_names: list[str] | None = None,
+    installed_source_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     normalized_query_tokens = [
         token
@@ -223,6 +241,11 @@ def filter_source_download_emulator_entries(
         for name in (installed_emulator_names or [])
         if isinstance(name, str) and name.strip()
     }
+    installed_ids = {
+        source_id.strip().casefold()
+        for source_id in (installed_source_ids or [])
+        if isinstance(source_id, str) and source_id.strip()
+    }
 
     filtered_rows: list[dict[str, Any]] = []
     for row in source_entries:
@@ -233,7 +256,11 @@ def filter_source_download_emulator_entries(
         name = name_value.strip() if isinstance(name_value, str) else ""
         if not name:
             continue
+        row_source_id_value = row.get("source_id", "")
+        row_source_id = row_source_id_value.strip() if isinstance(row_source_id_value, str) else ""
         if name.casefold() in installed_names:
+            continue
+        if row_source_id and row_source_id.casefold() in installed_ids:
             continue
 
         if normalized_query_tokens:
@@ -262,9 +289,11 @@ def available_source_download_emulator_entries(
     autoprofiles: list[dict[str, Any]] | None,
     query: str = "",
     installed_emulator_names: list[str] | None = None,
+    installed_source_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     return filter_source_download_emulator_entries(
         source_download_emulator_entries(autoprofiles),
         query=query,
         installed_emulator_names=installed_emulator_names,
+        installed_source_ids=installed_source_ids,
     )

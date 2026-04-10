@@ -119,6 +119,16 @@ class EmulatorConfigDialogAddNewTests(unittest.TestCase):
                 self.assertEqual(payload.get("path", ""), expected["path"])
                 self.assertEqual(payload.get("archive_path", ""), expected["archive_path"])
 
+    def test_selecting_archive_populates_visible_path_field(self) -> None:
+        dialog = self._new_dialog()
+
+        archive_path = "/some/emulator.zip"
+        dialog._route_selected_path(archive_path)
+
+        self.assertEqual(dialog.emulator_path_input.text(), archive_path)
+        self.assertEqual(dialog.emulator_archive_path_input.text(), archive_path)
+        self.assertEqual(dialog.entry_payload()["path"], "")
+
 
 if __name__ == "__main__":
     unittest.main()

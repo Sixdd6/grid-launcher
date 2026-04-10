@@ -11,6 +11,7 @@ from urllib.error import HTTPError
 from rom_mate.background.workers import (
     DetailsCloudRecordsWorker,
     InstallDownloadWorker,
+    InstallFinalizeWorker,
     PCGamingWikiWorker,
     RetroAchievementsWorker,
 )
@@ -555,6 +556,159 @@ class InstallDownloadWorkerTests(unittest.TestCase):
         self.assertEqual(resolved["asset_name"], "pcsx2-v2.6.3-windows-x64-Qt.7z")
         self.assertEqual(resolved["download_url"], "https://example.test/pcsx2.7z")
 
+    def test_source_metadata_direct_download_resolution(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("redream.zip"))
+        source_metadata = {
+            "provider": "direct",
+            "owner": "redream.io",
+            "repo": "redream",
+            "download_url": "https://redream.io/download/redream.x86_64-windows-v1.5.0.zip",
+            "asset_name": "redream.x86_64-windows-v1.5.0.zip",
+        }
+
+        resolved = worker._resolve_source_download(source_metadata)
+
+        self.assertEqual(resolved["provider"], "direct")
+        self.assertEqual(resolved["asset_name"], "redream.x86_64-windows-v1.5.0.zip")
+        self.assertEqual(
+            resolved["download_url"],
+            "https://redream.io/download/redream.x86_64-windows-v1.5.0.zip",
+        )
+
+    def test_source_metadata_direct_page_url_regex_resolution(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("retroarch.zip"))
+        source_metadata = {
+            "provider": "direct",
+            "owner": "buildbot.libretro.com",
+            "repo": "retroarch-nightly",
+            "page_url": "https://buildbot.libretro.com/nightly/windows/x86_64/",
+            "download_url_regex": r'https://buildbot\.libretro\.com/nightly/windows/x86_64/RetroArch\.7z',
+            "asset_name": "RetroArch.7z",
+        }
+        page_payload = self._ResponseStub(
+            b'<a href="https://buildbot.libretro.com/nightly/windows/x86_64/RetroArch.7z">RetroArch.7z</a>'
+        )
+
+        with patch("rom_mate.background.workers.urlopen", return_value=page_payload):
+            resolved = worker._resolve_source_download(source_metadata)
+
+        self.assertEqual(resolved["provider"], "direct")
+        self.assertEqual(resolved["asset_name"], "RetroArch.7z")
+        self.assertEqual(
+            resolved["download_url"],
+            "https://buildbot.libretro.com/nightly/windows/x86_64/RetroArch.7z",
+        )
+
+    def test_source_metadata_direct_page_url_regex_resolution_prefers_redream_nightly_build(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("redream.zip"))
+        source_metadata = {
+            "provider": "direct",
+            "owner": "inolen",
+            "repo": "redream",
+            "page_url": "https://redream.io/download",
+            "download_url_regex": r'https://redream\.io/download/redream\.x86_64-windows-v[0-9.]+-[0-9]+-g[0-9a-f]+\.zip',
+        }
+        page_payload = self._ResponseStub(
+            b'\n'.join(
+                [
+                    b'<a href="/download/redream.x86_64-windows-v1.5.0.zip">stable</a>',
+                    b'<a href="/download/redream.x86_64-windows-v1.5.0-1133-g03c2ae9.zip">nightly</a>',
+                ]
+            )
+        )
+
+        with patch("rom_mate.background.workers.urlopen", return_value=page_payload):
+            resolved = worker._resolve_source_download(source_metadata)
+
+        self.assertEqual(
+            resolved["download_url"],
+            "https://redream.io/download/redream.x86_64-windows-v1.5.0-1133-g03c2ae9.zip",
+        )
+        self.assertEqual(resolved["asset_name"], "redream.x86_64-windows-v1.5.0-1133-g03c2ae9.zip")
+
+    def test_source_metadata_gitea_builds_correct_api_url(self):
+        """Worker uses Gitea API URL for gitea provider."""
+        captured_urls = []
+        worker = InstallDownloadWorker("", {}, Path("eden.zip"))
+        source_metadata = {
+            "provider": "gitea",
+            "base_url": "https://git.example.com",
+            "owner": "my-org",
+            "repo": "my-repo",
+            "release_tag": "latest",
+            "asset_patterns": ["MyEmulator-Windows-*-amd64.zip"],
+        }
+        release_payload = {
+            "tag_name": "v1.2.3",
+            "assets": [
+                {
+                    "name": "MyEmulator-Windows-v1.2.3-amd64.zip",
+                    "browser_download_url": "https://git.example.com/my-org/my-repo/releases/download/v1.2.3/MyEmulator-Windows-v1.2.3-amd64.zip",
+                }
+            ],
+        }
+
+        def _capture_load_json(url: str, headers: dict[str, str]):
+            captured_urls.append(url)
+            self.assertEqual(headers, {})
+            return release_payload
+
+        with patch.object(worker, "_load_json", side_effect=_capture_load_json):
+            resolved = worker._resolve_source_download(source_metadata)
+
+        self.assertEqual(resolved["provider"], "gitea")
+        self.assertTrue(captured_urls)
+        self.assertTrue(
+            captured_urls[0].startswith("https://git.example.com/api/v1/repos/my-org/my-repo/releases")
+        )
+
+    def test_source_metadata_downloads_supplemental_archives_for_direct_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            initial_archive_path = Path(temp_dir) / "retroarch.zip"
+            expected_archive_path = Path(temp_dir) / "retroarch.7z"
+            expected_supplemental_path = Path(temp_dir) / "retroarch-supplemental-1.7z"
+            worker = InstallDownloadWorker(
+                "",
+                {},
+                initial_archive_path,
+                source_metadata={
+                    "provider": "direct",
+                    "owner": "libretro",
+                    "repo": "retroarch-nightly",
+                    "download_url": "https://example.test/RetroArch.7z",
+                    "asset_name": "RetroArch.7z",
+                    "supplemental_downloads": [
+                        {
+                            "provider": "direct",
+                            "owner": "libretro",
+                            "repo": "retroarch-cores-nightly",
+                            "download_url": "https://example.test/RetroArch_cores.7z",
+                            "asset_name": "RetroArch_cores.7z",
+                        }
+                    ],
+                },
+            )
+            results: list[tuple[str, str]] = []
+            worker.finished.connect(lambda path, error: results.append((path, error)))
+
+            main_payload = b"retroarch-main"
+            supplemental_payload = b"retroarch-cores"
+
+            with patch(
+                "rom_mate.background.workers.urlopen",
+                side_effect=[
+                    self._ResponseStub(main_payload, content_length=len(main_payload)),
+                    self._ResponseStub(supplemental_payload, content_length=len(supplemental_payload)),
+                ],
+            ):
+                worker.run()
+
+            self.assertEqual(results, [(str(expected_archive_path), "")])
+            self.assertTrue(expected_archive_path.exists())
+            self.assertEqual(expected_archive_path.read_bytes(), main_payload)
+            self.assertTrue(expected_supplemental_path.exists())
+            self.assertEqual(expected_supplemental_path.read_bytes(), supplemental_payload)
+
     def test_source_metadata_download_rewrites_archive_suffix_from_resolved_asset_name(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             initial_archive_path = Path(temp_dir) / "pcsx2.zip"
@@ -605,6 +759,67 @@ class InstallDownloadWorkerTests(unittest.TestCase):
             self.assertFalse(initial_archive_path.exists())
             self.assertTrue(expected_archive_path.exists())
             self.assertEqual(expected_archive_path.read_bytes(), archive_payload)
+
+class _FinalizeWindowStub:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object]] = []
+
+    def _prepare_installed_game_without_ui(
+        self,
+        game: dict[str, str],
+        archive_path: Path,
+        *,
+        configure_ps3_links: bool,
+        cleanup_archive_on_success: bool = True,
+        install_progress_callback=None,
+    ):
+        del game, archive_path, configure_ps3_links, install_progress_callback
+        self.calls.append(("prepare", cleanup_archive_on_success))
+        return ({"title": "RetroArch", "extracted_dir": "C:/Emulators/RetroArch", "extracted_path": "C:/Emulators/RetroArch/retroarch.exe"}, "")
+
+    def _apply_source_supplemental_archives_without_ui(self, game, archive_path, prepared_game, *, install_progress_callback=None) -> None:
+        del game, archive_path, prepared_game, install_progress_callback
+        self.calls.append(("supplementals", None))
+
+    def _cleanup_install_archives_without_ui(
+        self,
+        game,
+        archive_path,
+        *,
+        include_main: bool = True,
+        include_supplementals: bool = True,
+        install_progress_callback=None,
+    ) -> str:
+        del game, archive_path, install_progress_callback
+        self.calls.append(("cleanup", (include_main, include_supplementals)))
+        return ""
+
+
+class InstallFinalizeWorkerTests(unittest.TestCase):
+    def test_worker_defers_archive_cleanup_until_after_supplementals(self) -> None:
+        window = _FinalizeWindowStub()
+        worker = InstallFinalizeWorker(
+            window,
+            {"title": "RetroArch", "_install_mode": "source_emulator"},
+            Path("retroarch.7z"),
+        )
+        results: list[tuple[object, str, str, str]] = []
+        worker.finished.connect(lambda prepared, archive_path, warning_text, error: results.append((prepared, archive_path, warning_text, error)))
+
+        worker.run()
+
+        self.assertEqual(
+            window.calls,
+            [
+                ("prepare", False),
+                ("cleanup", (True, False)),
+                ("supplementals", None),
+                ("cleanup", (False, True)),
+            ],
+        )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0][3], "")
+        self.assertEqual(results[0][2], "")
 
 
 class TestRetroAchievementsWorker(unittest.TestCase):

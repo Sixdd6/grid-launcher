@@ -309,7 +309,7 @@ class EmulatorConfigDialog(QDialog):
             browse_text="Browse...",
             browse_handler=self._browse_emulator_path,
         )
-        form.addRow("Executable Path", path_row)
+        form.addRow("Executable / Archive Path" if self._is_new_entry else "Executable Path", path_row)
 
         self.emulator_archive_path_input = QLineEdit()
         self._lock_field_height(self.emulator_archive_path_input)
@@ -427,7 +427,7 @@ class EmulatorConfigDialog(QDialog):
         selected_suffix = Path(selected_file).suffix.strip().casefold()
         if selected_suffix in self._archive_extensions:
             self.emulator_archive_path_input.setText(selected_file)
-            self.emulator_path_input.clear()
+            self.emulator_path_input.setText(selected_file)
             return
 
         self.emulator_path_input.setText(selected_file)
@@ -445,7 +445,10 @@ class EmulatorConfigDialog(QDialog):
         state_paths = emulator.get("state_paths", "")
 
         self.emulator_name_input.setText(name.strip() if isinstance(name, str) else "")
-        self.emulator_path_input.setText(path.strip() if isinstance(path, str) else "")
+        display_path = (path.strip() if isinstance(path, str) and path.strip() else "") or (
+            archive_path.strip() if isinstance(archive_path, str) else ""
+        )
+        self.emulator_path_input.setText(display_path)
         self.emulator_archive_path_input.setText(archive_path.strip() if isinstance(archive_path, str) else "")
         self.emulator_args_input.setText(args.strip() if isinstance(args, str) and args.strip() else "%rom%")
 
@@ -470,10 +473,12 @@ class EmulatorConfigDialog(QDialog):
         self.accept()
 
     def entry_payload(self) -> dict[str, str]:
+        archive_path = self.emulator_archive_path_input.text().strip()
+        path = "" if archive_path else self.emulator_path_input.text().strip()
         return {
             "name": self.emulator_name_input.text().strip(),
-            "path": self.emulator_path_input.text().strip(),
-            "archive_path": self.emulator_archive_path_input.text().strip(),
+            "path": path,
+            "archive_path": archive_path,
             "args": self.emulator_args_input.text().strip() or "%rom%",
             "save_strategy": self.emulator_save_strategy_input.currentText().strip() or "auto",
             "ignore_files": self.emulator_ignore_files_input.text().strip(),

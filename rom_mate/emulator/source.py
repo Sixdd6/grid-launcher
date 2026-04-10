@@ -14,9 +14,30 @@ def resolve_emulator_source_release_asset(
 ) -> dict[str, Any]:
     source = normalize_emulator_source_metadata(source_metadata)
     provider = source["provider"]
-    if provider != "github":
+    if provider == "direct":
+        download_url = str(source.get("download_url", "")).strip()
+        asset_name = str(source.get("asset_name", "")).strip()
+        if not download_url:
+            raise EmulatorSourceResolutionError(
+                "Direct source metadata is missing 'download_url'."
+            )
+        if not asset_name:
+            asset_name = download_url.rsplit("/", 1)[-1].strip()
+        release_tag = str(source.get("release_tag", "")).strip() or "latest"
+        return {
+            "provider": provider,
+            "owner": source["owner"],
+            "repo": source["repo"],
+            "release_tag": release_tag,
+            "release_name": release_tag,
+            "asset_name": asset_name,
+            "download_url": download_url,
+            "size": 0,
+            "content_type": "",
+        }
+    if provider not in ("github", "gitea"):
         raise EmulatorSourceResolutionError(
-            f"Unsupported source provider '{provider}'. Supported providers: github."
+            f"Unsupported source provider '{provider}'. Supported providers: github, gitea, direct."
         )
 
     release = _select_github_release(source, release_metadata)
@@ -46,6 +67,14 @@ def normalize_emulator_source_metadata(source_metadata: dict[str, Any]) -> dict[
         "github-release": "github",
         "github_release": "github",
         "githubrelease": "github",
+        "gitea": "gitea",
+        "gitea-release": "gitea",
+        "gitea_release": "gitea",
+        "direct": "direct",
+        "direct-download": "direct",
+        "direct_download": "direct",
+        "download": "direct",
+        "url": "direct",
     }
     normalized_provider = provider_aliases.get(provider, provider)
     if not normalized_provider:
@@ -75,8 +104,7 @@ def normalize_emulator_source_metadata(source_metadata: dict[str, Any]) -> dict[
             break
 
     allow_prerelease = bool(source_metadata.get("allow_prerelease", False))
-
-    return {
+    normalized = {
         "provider": normalized_provider,
         "owner": owner,
         "repo": repo,
@@ -86,6 +114,67 @@ def normalize_emulator_source_metadata(source_metadata: dict[str, Any]) -> dict[
         "asset_exclude_patterns": exclude_patterns,
         "asset_preferred_patterns": preferred_patterns,
     }
+
+    if normalized_provider == "gitea":
+        base_url = _normalized_required_string(source_metadata, "base_url")
+        normalized["base_url"] = base_url.rstrip("/")
+
+    if normalized_provider == "direct":
+        download_url = _normalized_optional_string(
+            source_metadata,
+            "download_url",
+            fallback_keys=("url", "browser_download_url"),
+        )
+        page_url = _normalized_optional_string(
+            source_metadata,
+            "page_url",
+            fallback_keys=("index_url", "listing_url"),
+        )
+        download_url_regex = _normalized_optional_string(
+            source_metadata,
+            "download_url_regex",
+            fallback_keys=("url_regex", "asset_url_regex"),
+        )
+        asset_name = _normalized_optional_string(source_metadata, "asset_name")
+        if not download_url and not page_url:
+            raise EmulatorSourceResolutionError(
+                "Direct source metadata must include either 'download_url' or 'page_url'."
+            )
+        normalized.update(
+            {
+                "download_url": download_url,
+                "page_url": page_url,
+                "download_url_regex": download_url_regex,
+                "asset_name": asset_name,
+            }
+        )
+        supplemental_value = source_metadata.get("supplemental_downloads", [])
+        if isinstance(supplemental_value, list):
+            normalized["supplemental_downloads"] = [
+                dict(item)
+                for item in supplemental_value
+                if isinstance(item, dict)
+            ]
+
+    return normalized
+
+
+def _normalized_optional_string(
+    metadata: dict[str, Any],
+    key: str,
+    *,
+    fallback_keys: tuple[str, ...] = (),
+) -> str:
+    value = metadata.get(key, "")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+
+    for fallback_key in fallback_keys:
+        fallback_value = metadata.get(fallback_key, "")
+        if isinstance(fallback_value, str) and fallback_value.strip():
+            return fallback_value.strip()
+
+    return ""
 
 
 def _normalized_required_string(
@@ -153,6 +242,8 @@ def _select_github_release(
         )
 
     release_tag = source.get("release_tag", "")
+    if isinstance(release_tag, str) and release_tag.strip().casefold() == "latest":
+        release_tag = ""
     allow_prerelease = bool(source.get("allow_prerelease", False))
 
     selected: dict[str, Any] | None = None

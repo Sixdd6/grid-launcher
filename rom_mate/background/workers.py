@@ -7,7 +7,7 @@ import time
 import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote
+from urllib.parse import quote, urljoin, urlparse
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -54,24 +54,8 @@ class InstallDownloadWorker(QObject):
             self.archive_path = resolved_archive_path
             if self.debug_enabled:
                 print(f"[DEBUG][InstallDownload] url={resolved_download_url}")
-            request = Request(resolved_download_url, headers=self.headers, method="GET")
-            with urlopen(request, timeout=60) as response:
-                content_length = response.headers.get("Content-Length", "").strip()
-                total_bytes = int(content_length) if content_length.isdigit() else 0
-                downloaded_bytes = 0
-                started_at = time.monotonic()
-                with self.archive_path.open("wb") as archive_file:
-                    while True:
-                        if self.cancel_requested:
-                            raise OSError("Download cancelled by user")
-                        chunk = response.read(64 * 1024)
-                        if not chunk:
-                            break
-                        archive_file.write(chunk)
-                        downloaded_bytes += len(chunk)
-                        elapsed = max(time.monotonic() - started_at, 1e-6)
-                        speed_bps = downloaded_bytes / elapsed
-                        self.progress.emit(downloaded_bytes, total_bytes, speed_bps)
+            self._download_to_path(resolved_download_url, self.archive_path)
+            self._download_supplemental_archives(self.archive_path)
             self.finished.emit(str(self.archive_path), "")
         except HTTPError as error:
             detail = format_http_error_details(error)
@@ -106,6 +90,47 @@ class InstallDownloadWorker(QObject):
         asset_name = str(resolved.get("asset_name", "")).strip()
         return download_url, self._archive_path_with_asset_suffix(asset_name)
 
+    def _download_to_path(self, download_url: str, target_path: Path) -> None:
+        request_headers = self._github_release_headers()
+        request = Request(download_url, headers=request_headers, method="GET")
+        with urlopen(request, timeout=60) as response:
+            content_length = response.headers.get("Content-Length", "").strip()
+            total_bytes = int(content_length) if content_length.isdigit() else 0
+            downloaded_bytes = 0
+            started_at = time.monotonic()
+            with target_path.open("wb") as archive_file:
+                while True:
+                    if self.cancel_requested:
+                        raise OSError("Download cancelled by user")
+                    chunk = response.read(64 * 1024)
+                    if not chunk:
+                        break
+                    archive_file.write(chunk)
+                    downloaded_bytes += len(chunk)
+                    elapsed = max(time.monotonic() - started_at, 1e-6)
+                    speed_bps = downloaded_bytes / elapsed
+                    self.progress.emit(downloaded_bytes, total_bytes, speed_bps)
+
+    def _download_supplemental_archives(self, primary_archive_path: Path) -> None:
+        supplemental_value = self.source_metadata.get("supplemental_downloads", []) if isinstance(self.source_metadata, dict) else []
+        if not isinstance(supplemental_value, list):
+            return
+
+        for index, raw_spec in enumerate(supplemental_value, start=1):
+            if not isinstance(raw_spec, dict):
+                continue
+            resolved = self._resolve_source_download(raw_spec)
+            download_url = str(resolved.get("download_url", "")).strip()
+            if not download_url:
+                continue
+            asset_name = str(resolved.get("asset_name", "")).strip()
+            supplemental_path = self._supplemental_archive_path(primary_archive_path, index, asset_name)
+            self._download_to_path(download_url, supplemental_path)
+
+    def _supplemental_archive_path(self, primary_archive_path: Path, index: int, asset_name: str) -> Path:
+        suffix = Path(asset_name).suffix or primary_archive_path.suffix or ".zip"
+        return primary_archive_path.with_name(f"{primary_archive_path.stem}-supplemental-{index}{suffix}")
+
     def _archive_path_with_asset_suffix(self, asset_name: str) -> Path:
         if not asset_name:
             return self.archive_path
@@ -119,37 +144,49 @@ class InstallDownloadWorker(QObject):
     def _resolve_source_download(self, source_metadata: dict[str, Any]) -> dict[str, Any]:
         source = normalize_emulator_source_metadata(source_metadata)
         provider = source.get("provider", "")
-        if provider != "github":
+        if provider == "direct":
+            request_headers = self._github_release_headers()
+            return self._resolve_direct_source_download(source, request_headers)
+
+        request_headers: dict[str, str]
+        if provider == "github":
+            owner = source["owner"]
+            repo = source["repo"]
+            api_base = f"https://api.github.com/repos/{owner}/{repo}"
+            request_headers = self._github_release_headers()
+        elif provider == "gitea":
+            owner = source["owner"]
+            repo = source["repo"]
+            api_base = f"{source.get('base_url', '').rstrip('/')}/api/v1/repos/{owner}/{repo}"
+            request_headers = {}
+        else:
             raise EmulatorSourceResolutionError(
-                f"Unsupported source provider '{provider}'. Supported providers: github."
+                f"Unsupported source provider '{provider}'. Supported providers: github, gitea, direct."
             )
 
-        github_headers = self._github_release_headers()
         release_tag = str(source.get("release_tag", "")).strip()
-        owner = source["owner"]
-        repo = source["repo"]
 
         if release_tag and release_tag.casefold() != "latest":
             tag_path = quote(release_tag, safe="")
             release_metadata = self._load_json(
-                f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag_path}",
-                github_headers,
+                f"{api_base}/releases/tags/{tag_path}",
+                request_headers,
             )
         elif release_tag.casefold() == "latest":
             release_metadata = self._load_json(
-                f"https://api.github.com/repos/{owner}/{repo}/releases/latest",
-                github_headers,
+                f"{api_base}/releases/latest",
+                request_headers,
             )
         else:
             release_metadata = self._load_json(
-                f"https://api.github.com/repos/{owner}/{repo}/releases",
-                github_headers,
+                f"{api_base}/releases",
+                request_headers,
             )
 
         windows_asset = self._resolve_windows_asset_download(source_metadata, release_metadata)
         if windows_asset is not None:
             return {
-                "provider": "github",
+                "provider": provider,
                 "owner": owner,
                 "repo": repo,
                 "release_tag": windows_asset.get("release_tag", ""),
@@ -159,12 +196,63 @@ class InstallDownloadWorker(QObject):
 
         resolved = resolve_emulator_source_release_asset(source, release_metadata)
         return {
-            "provider": "github",
+            "provider": provider,
             "owner": owner,
             "repo": repo,
             "release_tag": resolved.get("release_tag", ""),
             "asset_name": resolved.get("asset_name", ""),
             "download_url": resolved.get("download_url", ""),
+        }
+
+    def _resolve_direct_source_download(self, source: dict[str, Any], headers: dict[str, str]) -> dict[str, str]:
+        download_url = str(source.get("download_url", "")).strip()
+        page_url = str(source.get("page_url", "")).strip()
+        download_url_regex = str(source.get("download_url_regex", "")).strip()
+        asset_name = str(source.get("asset_name", "")).strip()
+
+        if not download_url and page_url:
+            page_text = self._load_text(page_url, headers)
+            if download_url_regex:
+                pattern = re.compile(download_url_regex, flags=re.IGNORECASE)
+                href_matches = re.findall(r'href\s*=\s*["\']([^"\']+)["\']', page_text, flags=re.IGNORECASE)
+                for href in href_matches:
+                    candidate = href.strip()
+                    if not candidate:
+                        continue
+                    resolved_candidate = urljoin(page_url, candidate)
+                    if pattern.search(candidate) or pattern.search(resolved_candidate):
+                        download_url = resolved_candidate
+                        break
+
+                if not download_url:
+                    match = pattern.search(page_text)
+                    if match is not None:
+                        if match.groups():
+                            for group in match.groups():
+                                if isinstance(group, str) and group.strip():
+                                    download_url = urljoin(page_url, group.strip())
+                                    break
+                        if not download_url:
+                            download_url = urljoin(page_url, match.group(0).strip())
+            if not download_url:
+                raise EmulatorSourceResolutionError(
+                    "Direct source metadata did not resolve a download URL from the configured page. "
+                    f"page_url='{page_url}'"
+                )
+
+        if not download_url:
+            raise EmulatorSourceResolutionError("Direct source metadata did not include a download URL.")
+
+        if not asset_name:
+            asset_name = Path(urlparse(download_url).path).name
+
+        return {
+            "provider": "direct",
+            "owner": str(source.get("owner", "")).strip(),
+            "repo": str(source.get("repo", "")).strip(),
+            "release_tag": str(source.get("release_tag", "")).strip() or "latest",
+            "asset_name": asset_name,
+            "download_url": download_url,
         }
 
     def _github_release_headers(self) -> dict[str, str]:
@@ -187,6 +275,12 @@ class InstallDownloadWorker(QObject):
         if isinstance(payload, list):
             return [item for item in payload if isinstance(item, dict)]
         raise ValueError("Source release API returned an unsupported payload shape.")
+
+    def _load_text(self, url: str, headers: dict[str, str]) -> str:
+        request = Request(url, headers=headers, method="GET")
+        with urlopen(request, timeout=60) as response:
+            raw = response.read()
+        return raw.decode("utf-8", errors="ignore")
 
     def _resolve_windows_asset_download(
         self,
@@ -341,12 +435,47 @@ class InstallFinalizeWorker(QObject):
                     self.game,
                     self.archive_path,
                     configure_ps3_links=False,
+                    cleanup_archive_on_success=False,
                     install_progress_callback=self._emit_progress,
                 )
+            print(f"[ROM-MATE DEBUG] InstallFinalizeWorker: content_kind={self.content_kind!r} archive_path={self.archive_path!r} exists={self.archive_path.exists()}")
             if prepared_game is None:
                 error_detail = warning_text.strip() if isinstance(warning_text, str) and warning_text.strip() else "Install preparation failed"
                 self.finished.emit(None, str(self.archive_path), "", error_detail)
                 return
+            print(f"[ROM-MATE DEBUG] InstallFinalizeWorker: prepared_game is not None, proceeding to cleanup")
+            print(f"[ROM-MATE DEBUG] InstallFinalizeWorker: archive_path before main cleanup={self.archive_path!r} exists={self.archive_path.exists()}")
+            cleanup_install_archives = getattr(self.window, "_cleanup_install_archives_without_ui", None)
+            print(f"[ROM-MATE DEBUG] InstallFinalizeWorker: cleanup_install_archives callable={callable(cleanup_install_archives)} value={cleanup_install_archives!r}")
+            if callable(cleanup_install_archives):
+                cleanup_warning = cleanup_install_archives(
+                    self.game,
+                    self.archive_path,
+                    include_main=True,
+                    include_supplementals=False,
+                    install_progress_callback=self._emit_progress,
+                )
+                print(f"[ROM-MATE DEBUG] InstallFinalizeWorker: main cleanup result={cleanup_warning!r} archive exists after={self.archive_path.exists()}")
+                if isinstance(cleanup_warning, str) and cleanup_warning.strip():
+                    warning_text = "\n\n".join(part for part in (warning_text.strip(), cleanup_warning.strip()) if part)
+            apply_source_supplemental_archives = getattr(self.window, "_apply_source_supplemental_archives_without_ui", None)
+            if callable(apply_source_supplemental_archives):
+                apply_source_supplemental_archives(
+                    self.game,
+                    self.archive_path,
+                    prepared_game,
+                    install_progress_callback=self._emit_progress,
+                )
+            if callable(cleanup_install_archives):
+                cleanup_warning = cleanup_install_archives(
+                    self.game,
+                    self.archive_path,
+                    include_main=False,
+                    include_supplementals=True,
+                    install_progress_callback=self._emit_progress,
+                )
+                if isinstance(cleanup_warning, str) and cleanup_warning.strip():
+                    warning_text = "\n\n".join(part for part in (warning_text.strip(), cleanup_warning.strip()) if part)
             self.finished.emit(prepared_game, str(self.archive_path), warning_text, "")
         except Exception as error:
             self.finished.emit(None, str(self.archive_path), "", str(error))

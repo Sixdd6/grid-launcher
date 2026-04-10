@@ -189,6 +189,78 @@ class EmulatorSourceResolveFailureTests(unittest.TestCase):
         self.assertIn("must be a release object", str(raised.exception))
 
 
+class GiteaProviderTests(unittest.TestCase):
+    def test_normalize_gitea_provider_canonical_name(self):
+        metadata = {
+            "provider": "gitea",
+            "base_url": "https://git.example.com",
+            "owner": "my-org",
+            "repo": "my-repo",
+        }
+        normalized = normalize_emulator_source_metadata(metadata)
+        self.assertEqual(normalized["provider"], "gitea")
+        self.assertEqual(normalized["base_url"], "https://git.example.com")
+
+    def test_normalize_gitea_release_alias(self):
+        metadata = {
+            "provider": "gitea-release",
+            "base_url": "https://git.example.com",
+            "owner": "my-org",
+            "repo": "my-repo",
+        }
+        normalized = normalize_emulator_source_metadata(metadata)
+        self.assertEqual(normalized["provider"], "gitea")
+
+    def test_normalize_gitea_missing_base_url_raises(self):
+        metadata = {
+            "provider": "gitea",
+            "owner": "my-org",
+            "repo": "my-repo",
+        }
+        with self.assertRaises(EmulatorSourceResolutionError) as ctx:
+            normalize_emulator_source_metadata(metadata)
+        self.assertIn("base_url", str(ctx.exception))
+
+    def test_normalize_gitea_strips_trailing_slash_from_base_url(self):
+        metadata = {
+            "provider": "gitea",
+            "base_url": "https://git.example.com/",
+            "owner": "my-org",
+            "repo": "my-repo",
+        }
+        normalized = normalize_emulator_source_metadata(metadata)
+        self.assertFalse(normalized["base_url"].endswith("/"))
+
+    def test_resolve_gitea_latest_release_asset(self):
+        source_metadata = {
+            "provider": "gitea",
+            "base_url": "https://git.example.com",
+            "owner": "my-org",
+            "repo": "my-repo",
+            "release_tag": "latest",
+            "asset_patterns": ["MyEmulator-Windows-*-amd64.zip"],
+        }
+        release_metadata = {
+            "tag_name": "v1.2.3",
+            "name": "Release v1.2.3",
+            "draft": False,
+            "prerelease": False,
+            "assets": [
+                {
+                    "name": "MyEmulator-Windows-v1.2.3-amd64.zip",
+                    "browser_download_url": "https://git.example.com/my-org/my-repo/releases/download/v1.2.3/MyEmulator-Windows-v1.2.3-amd64.zip",
+                    "size": 1024,
+                    "content_type": "application/zip",
+                }
+            ],
+        }
+        resolved = resolve_emulator_source_release_asset(source_metadata, release_metadata)
+        self.assertEqual(resolved["provider"], "gitea")
+        self.assertEqual(resolved["asset_name"], "MyEmulator-Windows-v1.2.3-amd64.zip")
+        self.assertEqual(resolved["release_tag"], "v1.2.3")
+        self.assertIn("amd64.zip", resolved["download_url"])
+
+
 class EmulatorAutoprofileNormalizationTests(unittest.TestCase):
     def test_normalize_emulator_autoprofiles_preserves_source_metadata(self) -> None:
         profiles = [

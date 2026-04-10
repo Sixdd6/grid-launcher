@@ -54,6 +54,75 @@ def _duckstation_config_bool(value: str) -> bool:
     return value.strip().casefold() in {"1", "true", "yes", "on"}
 
 
+def _ensure_duckstation_section_values(
+    raw_content: str,
+    section_name: str,
+    desired_values: dict[str, str],
+) -> tuple[str, bool]:
+    if not desired_values:
+        return raw_content, False
+
+    lines = raw_content.splitlines()
+    output_lines: list[str] = []
+    changed = False
+    target_key = section_name.casefold()
+    in_target = False
+    section_found = False
+    seen_keys: set[str] = set()
+
+    def flush_missing_keys() -> None:
+        nonlocal changed
+        for key, value in desired_values.items():
+            if key in seen_keys:
+                continue
+            output_lines.append(f"{key} = {value}")
+            seen_keys.add(key)
+            changed = True
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        section_match = re.match(r"^\[(.+?)\]\s*$", stripped)
+        if section_match:
+            if in_target:
+                flush_missing_keys()
+            current_section = section_match.group(1).strip()
+            in_target = current_section.casefold() == target_key
+            if in_target:
+                section_found = True
+            output_lines.append(raw_line)
+            continue
+
+        if in_target:
+            key_match = re.match(r"^\s*([A-Za-z0-9_]+)\s*=", raw_line)
+            if key_match:
+                key = key_match.group(1)
+                if key in desired_values:
+                    if key in seen_keys:
+                        changed = True
+                        continue
+                    replacement = f"{key} = {desired_values[key]}"
+                    if raw_line.strip() != replacement:
+                        changed = True
+                    output_lines.append(replacement)
+                    seen_keys.add(key)
+                    continue
+
+        output_lines.append(raw_line)
+
+    if in_target:
+        flush_missing_keys()
+
+    if not section_found:
+        if output_lines and output_lines[-1].strip():
+            output_lines.append("")
+        output_lines.append(f"[{section_name}]")
+        for key, value in desired_values.items():
+            output_lines.append(f"{key} = {value}")
+        changed = True
+
+    return "\n".join(output_lines).rstrip() + "\n", changed
+
+
 def duckstation_memory_card_settings(emulator_path_text: str) -> dict[str, object]:
     defaults: dict[str, object] = {
         "config_path": "",
@@ -108,7 +177,13 @@ def duckstation_memory_card_settings(emulator_path_text: str) -> dict[str, objec
     return defaults
 
 
-def ensure_duckstation_memory_card_settings(emulator_path_text: str) -> dict[str, object]:
+def ensure_duckstation_memory_card_settings(
+    emulator_path_text: str,
+    *,
+    enable_fullscreen: bool = False,
+    retroachievements_username: str = "",
+    retroachievements_token: str = "",
+) -> dict[str, object]:
     settings = duckstation_memory_card_settings(emulator_path_text)
     config_candidates = duckstation_config_path_candidates(emulator_path_text)
 
@@ -140,67 +215,36 @@ def ensure_duckstation_memory_card_settings(emulator_path_text: str) -> dict[str
     except OSError:
         raw_content = ""
 
-    lines = raw_content.splitlines()
-    output_lines: list[str] = []
     changed = created
-    in_memory_cards = False
-    memory_cards_found = False
-    seen_keys: set[str] = set()
+    updated_content, section_changed = _ensure_duckstation_section_values(raw_content, "MemoryCards", desired_values)
+    changed = changed or section_changed
 
-    def flush_missing_keys() -> None:
-        nonlocal changed
-        for key, value in desired_values.items():
-            if key in seen_keys:
-                continue
-            output_lines.append(f"{key} = {value}")
-            seen_keys.add(key)
-            changed = True
+    if enable_fullscreen:
+        updated_content, section_changed = _ensure_duckstation_section_values(
+            updated_content,
+            "Main",
+            {"StartFullscreen": "true"},
+        )
+        changed = changed or section_changed
 
-    for raw_line in lines:
-        stripped = raw_line.strip()
-        section_match = re.match(r"^\[(.+?)\]\s*$", stripped)
-        if section_match:
-            if in_memory_cards:
-                flush_missing_keys()
-            section_name = section_match.group(1).strip()
-            in_memory_cards = section_name.casefold() == "memorycards"
-            if in_memory_cards:
-                memory_cards_found = True
-            output_lines.append(raw_line)
-            continue
-
-        if in_memory_cards:
-            key_match = re.match(r"^\s*([A-Za-z0-9_]+)\s*=", raw_line)
-            if key_match:
-                key = key_match.group(1)
-                if key in desired_values:
-                    if key in seen_keys:
-                        changed = True
-                        continue
-                    replacement = f"{key} = {desired_values[key]}"
-                    if raw_line.strip() != replacement:
-                        changed = True
-                    output_lines.append(replacement)
-                    seen_keys.add(key)
-                    continue
-
-        output_lines.append(raw_line)
-
-    if in_memory_cards:
-        flush_missing_keys()
-
-    if not memory_cards_found:
-        if output_lines and output_lines[-1].strip():
-            output_lines.append("")
-        output_lines.append("[MemoryCards]")
-        for key, value in desired_values.items():
-            output_lines.append(f"{key} = {value}")
-        changed = True
+    username = retroachievements_username.strip() if isinstance(retroachievements_username, str) else ""
+    token = retroachievements_token.strip() if isinstance(retroachievements_token, str) else ""
+    if username and token:
+        updated_content, section_changed = _ensure_duckstation_section_values(
+            updated_content,
+            "Achievements",
+            {
+                "Enabled": "true",
+                "Username": username,
+                "Token": token,
+            },
+        )
+        changed = changed or section_changed
 
     if changed:
         try:
             config_path.parent.mkdir(parents=True, exist_ok=True)
-            config_path.write_text("\n".join(output_lines).rstrip() + "\n", encoding="utf-8")
+            config_path.write_text(updated_content, encoding="utf-8")
         except OSError:
             result["changed"] = False
             return result

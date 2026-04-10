@@ -86,6 +86,7 @@ from rom_mate.library import (
     build_installed_game_record as resolve_build_installed_game_record,
     can_start_next_queued_install,
     cemu_save_directories_for_game,
+    cleanup_install_archive as resolve_cleanup_install_archive,
     candidate_archive_paths_for_game as resolve_candidate_archive_paths_for_game,
     candidate_extracted_dirs_for_game as resolve_candidate_extracted_dirs_for_game,
     candidate_extracted_paths_for_game as resolve_candidate_extracted_paths_for_game,
@@ -114,6 +115,7 @@ from rom_mate.library import (
     library_games_without_keys as resolve_library_games_without_keys,
     relative_timestamp_text,
     matching_installed_emulator_games as resolve_matching_installed_emulator_games,
+    merge_archive_into_directory as resolve_merge_archive_into_directory,
     native_executable_candidates_for_game as resolve_native_executable_candidates_for_game,
     native_install_dir_for_game as resolve_native_install_dir_for_game,
     no_matching_upload_message,
@@ -2644,6 +2646,14 @@ class MainWindow(QMainWindow):
     def _tar_listing_line_size(self, line: str) -> int:
         return resolve_tar_listing_line_size(line)
 
+    def _show_install_warning_if_actionable(self, warning_text: str) -> None:
+        text = warning_text.strip() if isinstance(warning_text, str) else ""
+        if not text:
+            return
+        if "could not delete archive" in text.casefold():
+            return
+        QMessageBox.warning(self, "Install Warning", text)
+
     def _prepare_installed_game(self, game: dict[str, str], archive_path: Path) -> dict[str, str] | None:
         prepared, warning_text = self._prepare_installed_game_without_ui(game, archive_path, configure_ps3_links=True)
         if prepared is None:
@@ -2651,8 +2661,7 @@ class MainWindow(QMainWindow):
             error_text = warning_text or f"Failed to extract archive for {title}"
             QMessageBox.warning(self, "Install Error", f"Failed to install {title}: {error_text}")
             return None
-        if warning_text:
-            QMessageBox.warning(self, "Install Warning", warning_text)
+        self._show_install_warning_if_actionable(warning_text)
         return prepared
 
     def _prepare_installed_game_without_ui(
@@ -2661,6 +2670,7 @@ class MainWindow(QMainWindow):
         archive_path: Path,
         *,
         configure_ps3_links: bool,
+        cleanup_archive_on_success: bool = True,
         install_progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[dict[str, str] | None, str]:
         return resolve_prepare_installed_game_without_ui(
@@ -2672,8 +2682,95 @@ class MainWindow(QMainWindow):
             is_ps3_platform=self._is_ps3_platform,
             configure_ps3_install_links=self._configure_ps3_install_links,
             update_rpcs3_games_yml_for_install=self._update_rpcs3_games_yml_for_install,
+            cleanup_archive_on_success=cleanup_archive_on_success,
             install_progress_callback=install_progress_callback,
         )
+
+    def _cleanup_install_archives_without_ui(
+        self,
+        game: dict[str, str],
+        archive_path: Path,
+        *,
+        include_main: bool = True,
+        include_supplementals: bool = True,
+        install_progress_callback: Callable[[int, int], None] | None = None,
+    ) -> str:
+        del install_progress_callback
+        print(f"[ROM-MATE DEBUG] _cleanup_install_archives_without_ui: archive_path={archive_path!r} exists={archive_path.exists()} include_main={include_main} include_supplementals={include_supplementals}")
+        warnings: list[str] = []
+        title = str(game.get("title", "Game")).strip() or "Game"
+
+        if include_main:
+            print(f"[ROM-MATE DEBUG] _cleanup_install_archives_without_ui: attempting main archive delete: {archive_path!r} is_file={archive_path.is_file()}")
+            cleanup_error = resolve_cleanup_install_archive(archive_path)
+            print(f"[ROM-MATE DEBUG] _cleanup_install_archives_without_ui: main cleanup_error={cleanup_error!r} exists_after={archive_path.exists()}")
+            if cleanup_error:
+                warnings.append(f"Extracted {title}, but could not delete archive:\n{cleanup_error}")
+
+        if include_supplementals:
+            source_metadata = game.get("_source_metadata") if isinstance(game, dict) else None
+            supplemental_value = source_metadata.get("supplemental_downloads", []) if isinstance(source_metadata, dict) else []
+            if isinstance(supplemental_value, list):
+                for index, raw_spec in enumerate(supplemental_value, start=1):
+                    if not isinstance(raw_spec, dict):
+                        continue
+                    asset_name_value = raw_spec.get("asset_name", "")
+                    asset_name = asset_name_value.strip() if isinstance(asset_name_value, str) else ""
+                    suffix = Path(asset_name).suffix or archive_path.suffix or ".zip"
+                    supplemental_path = archive_path.with_name(f"{archive_path.stem}-supplemental-{index}{suffix}")
+                    cleanup_error = resolve_cleanup_install_archive(supplemental_path)
+                    if cleanup_error:
+                        warnings.append(
+                            "Applied supplemental emulator files, but could not delete archive:\n"
+                            f"{cleanup_error}"
+                        )
+
+        return "\n\n".join(part for part in warnings if part.strip())
+
+    def _apply_source_supplemental_archives_without_ui(
+        self,
+        game: dict[str, str],
+        archive_path: Path,
+        installed_game: dict[str, str],
+        *,
+        install_progress_callback: Callable[[int, int], None] | None = None,
+    ) -> None:
+        source_metadata = game.get("_source_metadata") if isinstance(game, dict) else None
+        if not isinstance(source_metadata, dict):
+            return
+
+        supplemental_value = source_metadata.get("supplemental_downloads", [])
+        if not isinstance(supplemental_value, list) or not supplemental_value:
+            return
+
+        extracted_dir_text = installed_game.get("extracted_dir", "") if isinstance(installed_game, dict) else ""
+        extracted_path_text = installed_game.get("extracted_path", "") if isinstance(installed_game, dict) else ""
+        if isinstance(extracted_dir_text, str) and extracted_dir_text.strip():
+            target_dir = Path(extracted_dir_text.strip())
+        elif isinstance(extracted_path_text, str) and extracted_path_text.strip():
+            target_dir = Path(extracted_path_text.strip()).expanduser().parent
+        else:
+            return
+
+        if not target_dir.exists() or not target_dir.is_dir():
+            return
+
+        for index, raw_spec in enumerate(supplemental_value, start=1):
+            if not isinstance(raw_spec, dict):
+                continue
+            asset_name_value = raw_spec.get("asset_name", "")
+            asset_name = asset_name_value.strip() if isinstance(asset_name_value, str) else ""
+            suffix = Path(asset_name).suffix or archive_path.suffix or ".zip"
+            supplemental_path = archive_path.with_name(f"{archive_path.stem}-supplemental-{index}{suffix}")
+            if not supplemental_path.exists() or not supplemental_path.is_file():
+                continue
+            temp_dir = target_dir.parent / f".{target_dir.name}-supplemental-{index}-merge"
+            resolve_merge_archive_into_directory(
+                supplemental_path,
+                target_dir,
+                temp_dir,
+                install_progress_callback=install_progress_callback,
+            )
 
     def _apply_native_game_update_without_ui(
         self,
@@ -3137,6 +3234,16 @@ class MainWindow(QMainWindow):
             return False
 
         profile = self._emulator_profile_for_game(game, executable_path)
+
+        def _installed_cores_for_platform_with_fallback(platform: str, emulator_name: str) -> list[str]:
+            platform_cores = self._retroarch_cores_for_platform(platform)
+            installed_ids = self._retroarch_installed_core_ids_for_emulator(emulator_name)
+            if not installed_ids and self._is_retroarch_emulator_name(emulator_name, None):
+                installed_ids = resolve_installed_retroarch_core_ids(executable_path)
+            if not installed_ids:
+                return []
+            return [core for core in platform_cores if core in installed_ids]
+
         emulators, defaults, core_defaults = resolve_auto_configure_emulator_settings(
             game,
             executable_path,
@@ -3148,11 +3255,12 @@ class MainWindow(QMainWindow):
             normalize_save_strategy_value=self._normalize_save_strategy_value,
             is_retroarch_emulator_name=self._is_retroarch_emulator_name,
             default_assignable_server_platforms=self._default_assignable_server_platforms,
-            installed_retroarch_cores_for_platform=self._installed_retroarch_cores_for_platform,
+            installed_retroarch_cores_for_platform=_installed_cores_for_platform_with_fallback,
             matching_platforms_for_emulator_keywords=self._matching_platforms_for_emulator_keywords,
             dolphin_variant_label_for_game=self._dolphin_variant_label_for_game,
             dolphin_target_platforms_for_variant=self._dolphin_target_platforms_for_variant,
         )
+        emulators = [MainWindow._emulator_entry_with_source_identity(self, emulator) for emulator in emulators]
         self.config["emulators"] = self._normalize_emulators(emulators)
         self.config["default_emulators"] = defaults
         self.config["default_retroarch_cores"] = core_defaults
@@ -3936,8 +4044,7 @@ class MainWindow(QMainWindow):
                 self.current_details_game["ps4_content"] = installed_game.get("ps4_content", "")
             if entry_id:
                 self._set_download_entry_status(entry_id, "completed")
-            if warning_text.strip():
-                QMessageBox.warning(self, "Install Warning", warning_text.strip())
+            self._show_install_warning_if_actionable(warning_text)
             self._update_download_status_ui()
             self._update_details_action_buttons()
             self._start_next_queued_install()
@@ -3947,8 +4054,7 @@ class MainWindow(QMainWindow):
             self._register_installed_game(installed_game, Path(archive_path))
             if entry_id:
                 self._set_download_entry_status(entry_id, "completed")
-            if warning_text.strip():
-                QMessageBox.warning(self, "Install Warning", warning_text.strip())
+            self._show_install_warning_if_actionable(warning_text)
             self._show_toast(f"Updated '{title}' successfully.", level="success")
             self._update_download_status_ui()
             self._update_details_action_buttons()
@@ -3982,8 +4088,7 @@ class MainWindow(QMainWindow):
             self._record_source_emulator_install(installed_game)
         if entry_id:
             self._set_download_entry_status(entry_id, "completed")
-        if warning_text.strip():
-            QMessageBox.warning(self, "Install Warning", warning_text.strip())
+        self._show_install_warning_if_actionable(warning_text)
         if is_source_install:
             if auto_configured:
                 emulator_title = installed_game.get("title", "Emulator")
@@ -7870,10 +7975,22 @@ class MainWindow(QMainWindow):
                 timing_end("_ensure_emulator_sync_settings", started_at, result="no-path")
             return
         emulator_entry = {"name": emulator_name, "path": path_text}
+        ra_username = str(self.config.get("retroachievements_username", "")).strip()
+        ra_token = str(self.config.get("retroachievements_api_key", "")).strip()
         if self._is_retroarch_emulator_name(emulator_name, emulator_entry):
-            resolve_ensure_retroarch_save_location_settings(path_text)
+            resolve_ensure_retroarch_save_location_settings(
+                path_text,
+                enable_fullscreen=True,
+                retroachievements_username=ra_username,
+                retroachievements_token=ra_token,
+            )
         if self._is_duckstation_emulator_name(emulator_name, emulator_entry):
-            resolve_ensure_duckstation_memory_card_settings(path_text)
+            resolve_ensure_duckstation_memory_card_settings(
+                path_text,
+                enable_fullscreen=True,
+                retroachievements_username=ra_username,
+                retroachievements_token=ra_token,
+            )
         if callable(timing_end):
             timing_end("_ensure_emulator_sync_settings", started_at, result="done")
 
@@ -8079,13 +8196,23 @@ class MainWindow(QMainWindow):
         for row, entry in enumerate(emulators):
             item = QListWidgetItem()
             row_widget = QWidget()
-            row_layout = QHBoxLayout(row_widget)
-            row_layout.setContentsMargins(6, 2, 6, 2)
-            row_layout.setSpacing(8)
+            outer_layout = QVBoxLayout(row_widget)
+            outer_layout.setContentsMargins(6, 4, 6, 4)
+            outer_layout.setSpacing(2)
+
+            top_row = QHBoxLayout()
+            top_row.setContentsMargins(0, 0, 0, 0)
+            top_row.setSpacing(8)
 
             name_label = QLabel(entry["name"])
             name_label.setStyleSheet("padding: 4px 0;")
-            row_layout.addWidget(name_label, 1)
+            top_row.addWidget(name_label, 1)
+            outer_layout.addLayout(top_row)
+
+            bottom_row = QHBoxLayout()
+            bottom_row.setContentsMargins(0, 0, 0, 0)
+            bottom_row.setSpacing(4)
+            bottom_row.addStretch(1)
 
             launch_button = QPushButton()
             launch_button.setObjectName("installedEmulatorLaunchButton")
@@ -8094,7 +8221,7 @@ class MainWindow(QMainWindow):
             launch_button.setIconSize(action_icon_size)
             launch_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             launch_button.clicked.connect(lambda checked=False, current_row=row: self._launch_emulator_at_index(current_row))
-            row_layout.addWidget(launch_button)
+            bottom_row.addWidget(launch_button)
 
             config_button = QPushButton()
             config_button.setObjectName("installedEmulatorConfigButton")
@@ -8106,7 +8233,7 @@ class MainWindow(QMainWindow):
             config_button.clicked.connect(
                 lambda checked=False, current_row=row: MainWindow._open_emulator_config_dialog_for_row(self, current_row)
             )
-            row_layout.addWidget(config_button)
+            bottom_row.addWidget(config_button)
 
             uninstall_button = QPushButton()
             uninstall_button.setObjectName("installedEmulatorUninstallButton")
@@ -8115,9 +8242,12 @@ class MainWindow(QMainWindow):
             uninstall_button.setIconSize(action_icon_size)
             uninstall_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             uninstall_button.clicked.connect(lambda checked=False, current_row=row: self._remove_emulator_at_index(current_row))
-            row_layout.addWidget(uninstall_button)
+            bottom_row.addWidget(uninstall_button)
 
-            source_entry = self._source_download_entry_for_emulator_name(entry.get("name", ""))
+            source_entry = self._source_download_entry_for_emulator_name(
+                entry.get("name", ""),
+                entry,
+            )
             if source_entry is not None:
                 source_update_button = QPushButton()
                 source_update_button.setObjectName("installedEmulatorSourceUpdateButton")
@@ -8128,7 +8258,9 @@ class MainWindow(QMainWindow):
                 source_update_button.clicked.connect(
                     lambda checked=False, current_row=row: self._start_source_emulator_update_at_index(current_row)
                 )
-                row_layout.addWidget(source_update_button)
+                bottom_row.addWidget(source_update_button)
+
+            outer_layout.addLayout(bottom_row)
 
             item.setSizeHint(row_widget.sizeHint())
             self.emulator_list.addItem(item)
@@ -8204,14 +8336,139 @@ class MainWindow(QMainWindow):
         query: str = "",
         installed_emulator_names: list[str] | None = None,
     ) -> list[dict[str, str]]:
+        installed_source_ids: list[str] | None = None
+        if installed_emulator_names is not None:
+            installed_source_ids = []
+            for emulator in self._normalize_emulators(self._emulators()):
+                if not isinstance(emulator, dict):
+                    continue
+                source_id_value = emulator.get("source_id", "")
+                source_id = source_id_value.strip() if isinstance(source_id_value, str) else ""
+                if not source_id:
+                    source_owner_value = emulator.get("source_owner", "")
+                    source_repo_value = emulator.get("source_repo", "")
+                    source_owner = source_owner_value.strip() if isinstance(source_owner_value, str) else ""
+                    source_repo = source_repo_value.strip() if isinstance(source_repo_value, str) else ""
+                    if source_owner and source_repo:
+                        source_id = f"{source_owner}/{source_repo}"
+                if not source_id:
+                    profile = self._emulator_profile_for_entry(emulator)
+                    profile_source = profile.get("source") if isinstance(profile, dict) else None
+                    if isinstance(profile_source, dict):
+                        owner_value = profile_source.get("owner", "")
+                        repo_value = profile_source.get("repo", profile_source.get("repository", ""))
+                        owner = owner_value.strip() if isinstance(owner_value, str) else ""
+                        repo = repo_value.strip() if isinstance(repo_value, str) else ""
+                        if owner and repo:
+                            source_id = f"{owner}/{repo}"
+                if source_id:
+                    installed_source_ids.append(source_id)
+
         return resolve_available_source_download_emulator_entries(
             self._emulator_autoprofiles(),
             query=query,
             installed_emulator_names=installed_emulator_names,
+            installed_source_ids=installed_source_ids,
         )
 
-    def _source_download_entry_for_emulator_name(self, emulator_name: str) -> dict[str, Any] | None:
+    def _source_download_entry_from_metadata(
+        self,
+        source_metadata: dict[str, Any],
+        *,
+        display_name: str = "",
+    ) -> dict[str, Any] | None:
+        if not isinstance(source_metadata, dict):
+            return None
+
+        provider_value = source_metadata.get("provider", "")
+        owner_value = source_metadata.get("owner", "")
+        repo_value = source_metadata.get("repo", source_metadata.get("repository", ""))
+        provider = provider_value.strip() if isinstance(provider_value, str) else ""
+        owner = owner_value.strip() if isinstance(owner_value, str) else ""
+        repo = repo_value.strip() if isinstance(repo_value, str) else ""
+        if not owner or not repo:
+            return None
+
+        release_tag = ""
+        for key in ("release_tag", "tag", "version"):
+            value = source_metadata.get(key, "")
+            if isinstance(value, str) and value.strip():
+                release_tag = value.strip()
+                break
+        if not release_tag:
+            release_tag = "latest"
+
+        source_id = f"{owner}/{repo}"
+        source_rows = self._available_source_download_emulator_entries(query=repo)
+        for row in source_rows:
+            row_source_id_value = row.get("source_id", "")
+            row_source_id = row_source_id_value.strip() if isinstance(row_source_id_value, str) else ""
+            if not row_source_id or row_source_id.casefold() != source_id.casefold():
+                continue
+            resolved = dict(row)
+            if display_name:
+                resolved["name"] = display_name
+            merged_source = row.get("source_metadata")
+            merged_source_metadata = dict(merged_source) if isinstance(merged_source, dict) else {}
+            merged_source_metadata.update(dict(source_metadata))
+            resolved["source_metadata"] = merged_source_metadata
+            resolved["release_tag"] = release_tag
+            return resolved
+
+        return {
+            "name": display_name or repo or "Emulator",
+            "provider": provider or "github",
+            "owner": owner,
+            "repo": repo,
+            "release_tag": release_tag,
+            "source_id": source_id,
+            "source_metadata": dict(source_metadata),
+        }
+
+    def _source_download_entry_for_emulator_name(
+        self,
+        emulator_name: str,
+        emulator: dict[str, str] | None = None,
+    ) -> dict[str, Any] | None:
         name = emulator_name.strip() if isinstance(emulator_name, str) else ""
+
+        if isinstance(emulator, dict):
+            source_id_value = emulator.get("source_id", "")
+            source_id = source_id_value.strip() if isinstance(source_id_value, str) else ""
+            source_metadata: dict[str, Any] = {}
+            for source_field, metadata_key in (
+                ("source_provider", "provider"),
+                ("source_owner", "owner"),
+                ("source_repo", "repo"),
+                ("source_release_tag", "release_tag"),
+            ):
+                raw_value = emulator.get(source_field, "")
+                if isinstance(raw_value, str) and raw_value.strip():
+                    source_metadata[metadata_key] = raw_value.strip()
+            if source_id and "/" in source_id:
+                source_owner, _, source_repo = source_id.partition("/")
+                source_metadata.setdefault("owner", source_owner.strip())
+                source_metadata.setdefault("repo", source_repo.strip())
+            if source_metadata:
+                resolved = MainWindow._source_download_entry_from_metadata(self, source_metadata, display_name=name)
+                if resolved is not None:
+                    return resolved
+
+            profile = self._emulator_profile_for_entry(emulator)
+            profile_source = profile.get("source") if isinstance(profile, dict) else None
+            if isinstance(profile_source, dict):
+                resolved = MainWindow._source_download_entry_from_metadata(self, profile_source, display_name=name)
+                if resolved is not None:
+                    return resolved
+
+            if source_id:
+                installs = self._emulator_source_installs()
+                install_entry = installs.get(source_id.casefold())
+                if isinstance(install_entry, dict):
+                    resolved = MainWindow._source_download_entry_from_metadata(self, install_entry, display_name=name)
+                    if resolved is not None:
+                        return resolved
+
         if not name:
             return None
 
@@ -8223,47 +8480,52 @@ class MainWindow(QMainWindow):
                 return dict(row)
 
         installs = self._emulator_source_installs()
-        for source_id, install_entry in installs.items():
+        for _source_id, install_entry in installs.items():
             install_name_value = install_entry.get("name", "")
             install_name = install_name_value.strip() if isinstance(install_name_value, str) else ""
             if not install_name or install_name.casefold() != name.casefold():
                 continue
-
-            provider_value = install_entry.get("provider", "")
-            owner_value = install_entry.get("owner", "")
-            repo_value = install_entry.get("repo", "")
-            release_tag_value = install_entry.get("release_tag", "")
-            provider = provider_value.strip() if isinstance(provider_value, str) else ""
-            owner = owner_value.strip() if isinstance(owner_value, str) else ""
-            repo = repo_value.strip() if isinstance(repo_value, str) else ""
-            release_tag = release_tag_value.strip() if isinstance(release_tag_value, str) and release_tag_value.strip() else "latest"
-
-            if (not owner or not repo) and isinstance(source_id, str) and "/" in source_id:
-                source_owner, _, source_repo = source_id.partition("/")
-                if not owner:
-                    owner = source_owner.strip()
-                if not repo:
-                    repo = source_repo.strip()
-            if not owner or not repo:
-                continue
-
-            source_metadata = {
-                "provider": provider or "github",
-                "owner": owner,
-                "repo": repo,
-                "release_tag": release_tag,
-            }
-            return {
-                "name": install_name,
-                "provider": source_metadata["provider"],
-                "owner": owner,
-                "repo": repo,
-                "release_tag": release_tag,
-                "source_id": f"{owner}/{repo}",
-                "source_metadata": source_metadata,
-            }
+            resolved = MainWindow._source_download_entry_from_metadata(self, install_entry, display_name=name)
+            if resolved is not None:
+                return resolved
 
         return None
+
+    def _emulator_entry_with_source_identity(self, emulator: dict[str, str]) -> dict[str, str]:
+        if not isinstance(emulator, dict):
+            return {}
+
+        resolved_entry = dict(emulator)
+        source_lookup = getattr(self, "_source_download_entry_for_emulator_name", None)
+        if not callable(source_lookup):
+            return resolved_entry
+
+        source_entry = source_lookup(
+            str(resolved_entry.get("name", "")),
+            resolved_entry,
+        )
+        if source_entry is None:
+            return resolved_entry
+
+        source_metadata = source_entry.get("source_metadata")
+        if not isinstance(source_metadata, dict):
+            return resolved_entry
+
+        provider_value = source_metadata.get("provider", source_entry.get("provider", ""))
+        owner_value = source_metadata.get("owner", source_entry.get("owner", ""))
+        repo_value = source_metadata.get("repo", source_entry.get("repo", ""))
+        release_tag_value = source_entry.get("release_tag", source_metadata.get("release_tag", "latest"))
+        provider = provider_value.strip() if isinstance(provider_value, str) else ""
+        owner = owner_value.strip() if isinstance(owner_value, str) else ""
+        repo = repo_value.strip() if isinstance(repo_value, str) else ""
+        release_tag = release_tag_value.strip() if isinstance(release_tag_value, str) else ""
+        if owner and repo:
+            resolved_entry["source_id"] = f"{owner}/{repo}"
+            resolved_entry["source_provider"] = provider or "github"
+            resolved_entry["source_owner"] = owner
+            resolved_entry["source_repo"] = repo
+            resolved_entry["source_release_tag"] = release_tag or "latest"
+        return resolved_entry
 
     def _build_source_emulator_install_game(self, selected: dict[str, Any], install_mode: str) -> dict[str, Any]:
         selected_source_metadata = selected.get("source_metadata")
@@ -8348,7 +8610,10 @@ class MainWindow(QMainWindow):
             return
 
         emulator = emulators[index]
-        source_entry = self._source_download_entry_for_emulator_name(emulator.get("name", ""))
+        source_entry = self._source_download_entry_for_emulator_name(
+            emulator.get("name", ""),
+            emulator,
+        )
         if source_entry is None:
             emulator_name = str(emulator.get("name", "Emulator")).strip() or "Emulator"
             QMessageBox.information(
@@ -8480,6 +8745,9 @@ class MainWindow(QMainWindow):
             target_index = self.emulator_list.currentRow()
 
         is_new_manual_entry = target_index < 0 or target_index >= len(emulators)
+        existing_entry = emulators[target_index] if not is_new_manual_entry else {}
+        if not isinstance(existing_entry, dict):
+            existing_entry = {}
 
         self._ensure_emulator_sync_settings(name, path)
 
@@ -8492,7 +8760,13 @@ class MainWindow(QMainWindow):
             ignore_extensions,
             save_paths,
             state_paths,
+            source_id=str(existing_entry.get("source_id", "")),
+            source_provider=str(existing_entry.get("source_provider", "")),
+            source_owner=str(existing_entry.get("source_owner", "")),
+            source_repo=str(existing_entry.get("source_repo", "")),
+            source_release_tag=str(existing_entry.get("source_release_tag", "")),
         )
+        entry = MainWindow._emulator_entry_with_source_identity(self, entry)
 
         if is_new_manual_entry:
             entry = resolve_apply_manual_emulator_profile_defaults(

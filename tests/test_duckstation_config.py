@@ -73,6 +73,39 @@ class DuckStationConfigTests(unittest.TestCase):
         self.assertEqual(settings["card1_type"], "PerGameTitle")
         self.assertEqual(settings["card2_type"], "None")
 
+    def test_ensure_duckstation_memory_card_settings_enables_fullscreen_and_retroachievements(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            duckstation_dir = Path(temp_dir) / "DuckStation"
+            duckstation_dir.mkdir()
+            emulator_path = duckstation_dir / "duckstation-qt-x64-ReleaseLTCG.exe"
+            emulator_path.write_bytes(b"")
+            config_path = duckstation_dir / "settings.ini"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "[Main]",
+                        "StartFullscreen = false",
+                        "[Achievements]",
+                        "Enabled = false",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = ensure_duckstation_memory_card_settings(
+                str(emulator_path),
+                enable_fullscreen=True,
+                retroachievements_username="duck_user",
+                retroachievements_token="duck_token",
+            )
+            text = config_path.read_text(encoding="utf-8")
+
+        self.assertTrue(result["changed"])
+        self.assertIn("StartFullscreen = true", text)
+        self.assertIn("Enabled = true", text)
+        self.assertIn("Username = duck_user", text)
+        self.assertIn("Token = duck_token", text)
 
 if __name__ == "__main__":
     unittest.main()

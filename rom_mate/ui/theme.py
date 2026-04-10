@@ -331,6 +331,14 @@ def theme_stylesheet(colors: Mapping[str, str] | None) -> str:
         QListWidget#installedEmulatorList::item:alternate {{
             background-color: {resolved_colors['surface_alt']};
         }}
+        QListWidget#installedEmulatorList::item:hover,
+        QListWidget#defaultMappingList::item:hover {{
+            background-color: transparent;
+        }}
+        QListWidget#installedEmulatorList::item:alternate:hover,
+        QListWidget#defaultMappingList::item:alternate:hover {{
+            background-color: {resolved_colors['surface_alt']};
+        }}
         QLineEdit, QComboBox {{
             background-color: {resolved_colors['input_bg']};
             color: {resolved_colors['input_text']};
@@ -422,6 +430,67 @@ def theme_stylesheet(colors: Mapping[str, str] | None) -> str:
         QListWidget#serverPlatformsList::item:hover {{
             background-color: {resolved_colors['surface_alt']};
             border-radius: 5px;
+        }}
+        QPushButton#installedEmulatorLaunchButton,
+        QPushButton#installedEmulatorConfigButton,
+        QPushButton#installedEmulatorUninstallButton,
+        QPushButton#installedEmulatorSourceUpdateButton {{
+            background-color: {resolved_colors['surface']};
+            border: 1px solid {resolved_colors['border']};
+            border-radius: 8px;
+            padding: 4px 8px;
+        }}
+        QPushButton#installedEmulatorLaunchButton:hover,
+        QPushButton#installedEmulatorConfigButton:hover,
+        QPushButton#installedEmulatorUninstallButton:hover,
+        QPushButton#installedEmulatorSourceUpdateButton:hover {{
+            background-color: {resolved_colors['surface_alt']};
+            border-color: {resolved_colors['accent']};
+        }}
+        QPushButton#installedEmulatorLaunchButton:pressed,
+        QPushButton#installedEmulatorConfigButton:pressed,
+        QPushButton#installedEmulatorUninstallButton:pressed,
+        QPushButton#installedEmulatorSourceUpdateButton:pressed {{
+            background-color: {resolved_colors['surface_press']};
+            border-color: {resolved_colors['accent']};
+        }}
+        QScrollBar:vertical {{
+            background-color: {resolved_colors['surface_alt']};
+            width: 10px;
+            border-radius: 5px;
+            margin: 0;
+        }}
+        QScrollBar::handle:vertical {{
+            background-color: {resolved_colors['border']};
+            border-radius: 5px;
+            min-height: 20px;
+        }}
+        QScrollBar::handle:vertical:hover {{
+            background-color: {resolved_colors['accent']};
+        }}
+        QScrollBar::add-line:vertical,
+        QScrollBar::sub-line:vertical {{
+            height: 0;
+            background: none;
+        }}
+        QScrollBar:horizontal {{
+            background-color: {resolved_colors['surface_alt']};
+            height: 10px;
+            border-radius: 5px;
+            margin: 0;
+        }}
+        QScrollBar::handle:horizontal {{
+            background-color: {resolved_colors['border']};
+            border-radius: 5px;
+            min-width: 20px;
+        }}
+        QScrollBar::handle:horizontal:hover {{
+            background-color: {resolved_colors['accent']};
+        }}
+        QScrollBar::add-line:horizontal,
+        QScrollBar::sub-line:horizontal {{
+            width: 0;
+            background: none;
         }}
     """
 

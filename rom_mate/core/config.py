@@ -24,6 +24,11 @@ def normalize_emulators(
         ignore_extensions = item.get("ignore_extensions", "")
         save_paths = item.get("save_paths", "")
         state_paths = item.get("state_paths", "")
+        source_id = item.get("source_id", "")
+        source_provider = item.get("source_provider", "")
+        source_owner = item.get("source_owner", "")
+        source_repo = item.get("source_repo", "")
+        source_release_tag = item.get("source_release_tag", "")
         if not isinstance(name, str) or not name.strip():
             continue
         if not isinstance(path, str):
@@ -40,18 +45,37 @@ def normalize_emulators(
             save_paths = ""
         if not isinstance(state_paths, str):
             state_paths = ""
-        normalized.append(
-            {
-                "name": name.strip(),
-                "path": path.strip(),
-                "args": args.strip() or "%rom%",
-                "save_strategy": normalize_save_strategy_value(save_strategy),
-                "ignore_files": ignore_files.strip(),
-                "ignore_extensions": ignore_extensions.strip(),
-                "save_paths": save_paths.strip(),
-                "state_paths": state_paths.strip(),
-            }
-        )
+        if not isinstance(source_id, str):
+            source_id = ""
+        if not isinstance(source_provider, str):
+            source_provider = ""
+        if not isinstance(source_owner, str):
+            source_owner = ""
+        if not isinstance(source_repo, str):
+            source_repo = ""
+        if not isinstance(source_release_tag, str):
+            source_release_tag = ""
+        normalized_entry = {
+            "name": name.strip(),
+            "path": path.strip(),
+            "args": args.strip() or "%rom%",
+            "save_strategy": normalize_save_strategy_value(save_strategy),
+            "ignore_files": ignore_files.strip(),
+            "ignore_extensions": ignore_extensions.strip(),
+            "save_paths": save_paths.strip(),
+            "state_paths": state_paths.strip(),
+        }
+        if source_id.strip():
+            normalized_entry["source_id"] = source_id.strip()
+        if source_provider.strip():
+            normalized_entry["source_provider"] = source_provider.strip()
+        if source_owner.strip():
+            normalized_entry["source_owner"] = source_owner.strip()
+        if source_repo.strip():
+            normalized_entry["source_repo"] = source_repo.strip()
+        if source_release_tag.strip():
+            normalized_entry["source_release_tag"] = source_release_tag.strip()
+        normalized.append(normalized_entry)
 
     normalized.sort(key=lambda emulator: emulator["name"].lower())
     return normalized

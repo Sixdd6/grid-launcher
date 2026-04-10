@@ -12,15 +12,6 @@ import zipfile
 from pathlib import Path
 from typing import Callable
 
-try:
-    import py7zr
-    from py7zr.exceptions import Bad7zFile
-except ImportError:  # pragma: no cover - dependency is declared in requirements.
-    py7zr = None
-
-    class Bad7zFile(Exception):
-        pass
-
 
 _APP_TOOLS_DIR = Path.home() / ".rom-mate" / "tools"
 _PORTABLE_7ZR_URL = "https://www.7-zip.org/a/7zr.exe"
@@ -131,6 +122,90 @@ def _ps4_title_id_roots(directory: Path) -> list[Path]:
     return roots
 
 
+def _schedule_delete_on_reboot(path: Path) -> bool:
+    print(f"[ROM-MATE DEBUG] _schedule_delete_on_reboot: start path={path!r}")
+    if os.name != "nt":
+        print("[ROM-MATE DEBUG] _schedule_delete_on_reboot: returning False (os.name is not 'nt')")
+        return False
+    try:
+        import ctypes
+
+        MOVEFILE_DELAY_UNTIL_REBOOT = 0x4
+        result = bool(ctypes.windll.kernel32.MoveFileExW(str(path), None, MOVEFILE_DELAY_UNTIL_REBOOT))
+        print(f"[ROM-MATE DEBUG] _schedule_delete_on_reboot: returning {result} (MoveFileExW result)")
+        return result
+    except Exception:
+        print("[ROM-MATE DEBUG] _schedule_delete_on_reboot: returning False (exception while scheduling delete on reboot)")
+        return False
+
+
+def _unlink_file_with_retries(path: Path, *, attempts: int = 20, delay_seconds: float = 0.25) -> None:
+    last_error: OSError | None = None
+    total_attempts = max(1, int(attempts))
+    print(f"[ROM-MATE DEBUG] _unlink_file_with_retries: starting {total_attempts} attempts for {path!r}")
+    for attempt_index in range(total_attempts):
+        try:
+            path.unlink()
+            print(f"[ROM-MATE DEBUG] _unlink_file_with_retries: deleted on attempt {attempt_index + 1}")
+            return
+        except FileNotFoundError:
+            print(f"[ROM-MATE DEBUG] _unlink_file_with_retries: FileNotFoundError on attempt {attempt_index + 1}, treating as success")
+            return
+        except OSError as error:
+            print(f"[ROM-MATE DEBUG] _unlink_file_with_retries: OSError on attempt {attempt_index + 1}/{total_attempts}: {error}")
+            last_error = error
+            if attempt_index + 1 >= total_attempts:
+                break
+            _wait_for_extractor_processes(timeout_seconds=max(0.0, float(delay_seconds)), poll_interval=0.05)
+            time.sleep(max(0.0, float(delay_seconds)))
+
+    print(f"[ROM-MATE DEBUG] _unlink_file_with_retries: all {total_attempts} attempts failed, trying _schedule_delete_on_reboot")
+    if last_error is not None and _schedule_delete_on_reboot(path):
+        print(f"[ROM-MATE DEBUG] _unlink_file_with_retries: _schedule_delete_on_reboot succeeded")
+        return
+    print(f"[ROM-MATE DEBUG] _unlink_file_with_retries: _schedule_delete_on_reboot failed or last_error is None, raising")
+    if last_error is not None:
+        raise last_error
+
+
+def _delete_with_background_retry(path: Path, *, initial_wait_seconds: float = 5.0, attempts: int = 60, delay_seconds: float = 1.0) -> None:
+    """Spawns a daemon thread to retry deletion silently after AV scanning completes."""
+    import threading
+
+    def _try() -> None:
+        print(f"[ROM-MATE DEBUG] _delete_with_background_retry: thread started, waiting {initial_wait_seconds}s before first attempt for {path!r}")
+        time.sleep(initial_wait_seconds)
+        for attempt_index in range(max(1, attempts)):
+            try:
+                path.unlink()
+                print(f"[ROM-MATE DEBUG] _delete_with_background_retry: deleted on background attempt {attempt_index + 1}")
+                return
+            except FileNotFoundError:
+                print(f"[ROM-MATE DEBUG] _delete_with_background_retry: FileNotFoundError on background attempt {attempt_index + 1}, treating as success")
+                return
+            except OSError as error:
+                print(f"[ROM-MATE DEBUG] _delete_with_background_retry: OSError on background attempt {attempt_index + 1}/{attempts}: {error}")
+                time.sleep(max(0.0, delay_seconds))
+        print(f"[ROM-MATE DEBUG] _delete_with_background_retry: all {attempts} background attempts failed, giving up")
+
+    thread = threading.Thread(target=_try, daemon=True)
+    thread.start()
+
+
+def cleanup_install_archive(archive_path: Path) -> str:
+    print(f"[ROM-MATE DEBUG] cleanup_install_archive: path={archive_path!r} exists={archive_path.exists()} is_file={archive_path.is_file() if archive_path.exists() else 'N/A'}")
+    if not archive_path.exists() or not archive_path.is_file():
+        print(f"[ROM-MATE DEBUG] cleanup_install_archive: skipping (not found or not a file)")
+        return ""
+    try:
+        _unlink_file_with_retries(archive_path)
+        print(f"[ROM-MATE DEBUG] cleanup_install_archive: deleted successfully")
+    except OSError:
+        print(f"[ROM-MATE DEBUG] cleanup_install_archive: scheduling background retry")
+        _delete_with_background_retry(archive_path)
+    return ""
+
+
 def _detected_ps4_game_id_from_installed_game(game: dict[str, str]) -> str:
     explicit = _ps4_game_id_from_text(game.get("ps4_game_id", ""))
     if explicit:
@@ -216,32 +291,65 @@ def _ensure_portable_7z() -> Path | None:
         return None
 
 
+def _subprocess_creationflags() -> int:
+    if os.name != "nt":
+        return 0
+    return int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
+def _windows_extractor_processes_running() -> bool:
+    if os.name != "nt":
+        return False
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FO", "CSV", "/NH"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=5,
+            creationflags=_subprocess_creationflags(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+    output = result.stdout.casefold()
+    return any(name in output for name in ("7z.exe", "7za.exe", "7zz.exe", "7zr.exe", "tar.exe"))
+
+
+def _wait_for_extractor_processes(*, timeout_seconds: float = 3.0, poll_interval: float = 0.15) -> None:
+    if os.name != "nt":
+        return
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+    while _windows_extractor_processes_running():
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(max(0.01, float(poll_interval)))
+
+
+def _run_extractor_process(command: list[str], *, failure_message: str) -> None:
+    result = subprocess.run(
+        command,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        creationflags=_subprocess_creationflags(),
+    )
+    _wait_for_extractor_processes(timeout_seconds=1.0, poll_interval=0.1)
+    if result.returncode != 0:
+        raise OSError(str(result.stderr).strip() or failure_message)
+
+
 def _try_system_7z(archive_path: Path, extracted_dir: Path) -> bool:
     for cmd in ("7z", "7za", "7zz"):
         try:
-            result = subprocess.run(
+            _run_extractor_process(
                 [cmd, "x", str(archive_path), f"-o{extracted_dir}", "-y"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                text=True,
+                failure_message=f"{cmd} extraction failed",
             )
-            if result.returncode == 0:
-                return True
-            raise OSError(result.stderr.strip() or f"{cmd} failed with exit code {result.returncode}")
+            return True
         except FileNotFoundError:
             continue
     return False
-
-
-def _try_py7zr(archive_path: Path, extracted_dir: Path) -> bool:
-    if py7zr is None:
-        return False
-    try:
-        with py7zr.SevenZipFile(archive_path, mode="r") as archive:
-            archive.extractall(path=extracted_dir)
-        return True
-    except Exception:
-        return False
 
 
 def _extract_7z_with_fallbacks(archive_path: Path, extracted_dir: Path) -> None:
@@ -249,24 +357,15 @@ def _extract_7z_with_fallbacks(archive_path: Path, extracted_dir: Path) -> None:
         return
     shutil.rmtree(extracted_dir, ignore_errors=True)
     extracted_dir.mkdir(parents=True, exist_ok=True)
-    if _try_py7zr(archive_path, extracted_dir):
-        return
-    shutil.rmtree(extracted_dir, ignore_errors=True)
-    extracted_dir.mkdir(parents=True, exist_ok=True)
     portable = _ensure_portable_7z()
     if portable is not None:
-        result = subprocess.run(
+        _run_extractor_process(
             [str(portable), "x", str(archive_path), f"-o{extracted_dir}", "-y"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
+            failure_message="Portable 7zr extraction failed",
         )
-        if result.returncode == 0:
-            return
-        raise OSError(result.stderr.strip() or "Portable 7zr extraction failed")
+        return
     raise OSError(
-        "Cannot extract this .7z archive: no system 7-Zip (7z/7za/7zz) was found, "
-        "py7zr could not handle the compression method, "
+        "Cannot extract this .7z archive: no system 7-Zip (7z/7za/7zz) was found "
         "and the portable 7-Zip download failed. "
         "On Windows, check your internet connection and try again. "
         "On Linux/Mac, install p7zip-full (apt/dnf) or p7zip (brew)."
@@ -335,7 +434,7 @@ def extract_archive_into_directory(
                 installed_bytes = directory_total_file_bytes(extracted_dir)
                 resolved_total = max(total_install_bytes, installed_bytes)
                 install_progress_callback(installed_bytes, resolved_total)
-    except (OSError, zipfile.BadZipFile, Bad7zFile):
+    except (OSError, zipfile.BadZipFile):
         shutil.rmtree(extracted_dir, ignore_errors=True)
         raise
 
@@ -414,7 +513,7 @@ def apply_ps4_content_archive_without_ui(
         warning_text = ""
         if archive_path.exists() and archive_path.is_file():
             try:
-                archive_path.unlink()
+                _unlink_file_with_retries(archive_path)
             except OSError as error:
                 warning_text = (
                     "Applied PS4 content, but could not delete archive:\n"
@@ -713,6 +812,7 @@ def prepare_installed_game_without_ui(
     is_ps3_platform: Callable[[dict[str, str]], bool],
     configure_ps3_install_links: Callable[[dict[str, str], Path], list[Path]],
     update_rpcs3_games_yml_for_install: Callable[[dict[str, str], Path, list[Path]], str],
+    cleanup_archive_on_success: bool = True,
     install_progress_callback: Callable[[int, int], None] | None = None,
 ) -> tuple[dict[str, str] | None, str]:
     prepared = dict(game)
@@ -730,16 +830,15 @@ def prepare_installed_game_without_ui(
             archive_path,
             install_progress_callback,
         )
-    except (OSError, zipfile.BadZipFile, Bad7zFile) as error:
+    except (OSError, zipfile.BadZipFile) as error:
         return None, str(error)
 
     warning_text = ""
-    if archive_path.exists() and archive_path.is_file():
-        try:
-            archive_path.unlink()
-        except OSError as error:
+    if cleanup_archive_on_success:
+        cleanup_error = cleanup_install_archive(archive_path)
+        if cleanup_error:
             warning_text = (
-                f"Extracted {prepared.get('title', 'Game')}, but could not delete archive:\n{archive_path}\n{error}"
+                f"Extracted {prepared.get('title', 'Game')}, but could not delete archive:\n{cleanup_error}"
             )
 
     prepared["extracted_path"] = str(extracted_file)
@@ -838,7 +937,7 @@ def prepare_native_game_update_without_ui(
             temp_dir,
             install_progress_callback,
         )
-    except (OSError, zipfile.BadZipFile, Bad7zFile) as error:
+    except (OSError, zipfile.BadZipFile) as error:
         return None, str(error)
 
     # Re-detect the launch file in case the executable name changed.
@@ -852,7 +951,7 @@ def prepare_native_game_update_without_ui(
     warning_text = ""
     if archive_path.exists() and archive_path.is_file():
         try:
-            archive_path.unlink()
+            _unlink_file_with_retries(archive_path)
         except OSError as error:
             warning_text = (
                 f"Updated {prepared.get('title', 'Game')}, but could not delete archive:\n"
