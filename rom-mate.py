@@ -55,6 +55,8 @@ from rom_mate.core import (
     api_post_json,
     api_post_multipart_json,
     build_auth_headers,
+    build_binary_auth_headers,
+    format_http_error_details,
     merge_config_with_defaults as resolve_merge_config_with_defaults,
     normalize_default_emulators as resolve_normalize_default_emulators,
     normalize_default_retroarch_cores as resolve_normalize_default_retroarch_cores,
@@ -73,6 +75,7 @@ from rom_mate.core import (
 )
 from rom_mate.library import (
     active_download_count_after_finish,
+    apply_ps4_content_archive_without_ui as resolve_apply_ps4_content_archive_without_ui,
     apply_download_entry_install_progress,
     apply_download_entry_progress,
     apply_download_entry_status,
@@ -97,6 +100,7 @@ from rom_mate.library import (
     extract_zip_archive_bytes_to_directory,
     extracted_dir_for_archive_path as resolve_extracted_dir_for_archive_path,
     extract_archive_for_game as resolve_extract_archive_for_game,
+    extract_archive_into_directory as resolve_extract_archive_into_directory,
     file_upload_jobs,
     filter_directories_by_mtime_window,
     grouped_file_upload_jobs,
@@ -388,6 +392,7 @@ class MainWindow(QMainWindow):
         self.details_details_button: QPushButton | None = None
         self.details_manage_saves_button: QPushButton | None = None
         self.details_manage_states_button: QPushButton | None = None
+        self.details_ps4_content_button: QPushButton | None = None
         self.details_cloud_title_label: QLabel | None = None
         self.details_cloud_status_label: QLabel | None = None
         self.details_cloud_empty_label: QLabel | None = None
@@ -719,8 +724,26 @@ class MainWindow(QMainWindow):
 
     def _build_emulators_page(self) -> QWidget:
         page = QWidget()
-        layout = QHBoxLayout(page)
+        outer_layout = QVBoxLayout(page)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("emulatorsScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.viewport().setObjectName("emulatorsScrollViewport")
+        outer_layout.addWidget(scroll)
+
+        content = QWidget()
+        content.setObjectName("emulatorsContent")
+        layout = QHBoxLayout(content)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
+
+        def _lock_emulator_field_height(widget: QLineEdit | QComboBox, height: int = 34) -> None:
+            widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            widget.setMinimumHeight(height)
+            widget.setMaximumHeight(height)
 
         left_panel = QFrame()
         left_panel.setObjectName("panel")
@@ -752,14 +775,22 @@ class MainWindow(QMainWindow):
 
         details_form = QFormLayout()
         self.emulator_name_input = QLineEdit()
+        _lock_emulator_field_height(self.emulator_name_input)
         self.emulator_path_input = QLineEdit()
+        _lock_emulator_field_height(self.emulator_path_input)
         self.emulator_args_input = QLineEdit("%rom%")
+        _lock_emulator_field_height(self.emulator_args_input)
         self.emulator_save_strategy_input = QComboBox()
+        _lock_emulator_field_height(self.emulator_save_strategy_input)
         self.emulator_save_strategy_input.addItems(["auto", "single_file", "folder"])
         self.emulator_ignore_files_input = QLineEdit()
+        _lock_emulator_field_height(self.emulator_ignore_files_input)
         self.emulator_ignore_extensions_input = QLineEdit()
+        _lock_emulator_field_height(self.emulator_ignore_extensions_input)
         self.emulator_save_paths_input = QLineEdit()
+        _lock_emulator_field_height(self.emulator_save_paths_input)
         self.emulator_state_paths_input = QLineEdit()
+        _lock_emulator_field_height(self.emulator_state_paths_input)
 
         path_row = QWidget()
         path_row_layout = QHBoxLayout(path_row)
@@ -806,8 +837,11 @@ class MainWindow(QMainWindow):
 
         default_form = QFormLayout()
         self.default_platform_combo = QComboBox()
+        _lock_emulator_field_height(self.default_platform_combo)
         self.default_emulator_combo = QComboBox()
+        _lock_emulator_field_height(self.default_emulator_combo)
         self.default_core_combo = QComboBox()
+        _lock_emulator_field_height(self.default_core_combo)
         self.default_emulator_combo.setMaximumWidth(220)
         self.default_core_combo.setMaximumWidth(220)
         self.default_platform_combo.currentTextChanged.connect(self._on_default_platform_changed)
@@ -828,12 +862,32 @@ class MainWindow(QMainWindow):
 
         right_column_layout.addWidget(defaults_panel, 1)
         layout.addWidget(right_column, 2)
+
+        scroll.setWidget(content)
         return page
 
     def _build_settings_page(self) -> QWidget:
         page = QWidget()
-        layout = QVBoxLayout(page)
+        outer_layout = QVBoxLayout(page)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("settingsScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.viewport().setObjectName("settingsScrollViewport")
+        outer_layout.addWidget(scroll)
+
+        content = QWidget()
+        content.setObjectName("settingsContent")
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
+
+        def _lock_settings_field_height(widget: QLineEdit | QComboBox, height: int = 34) -> None:
+            widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            widget.setMinimumHeight(height)
+            widget.setMaximumHeight(height)
 
         header = QLabel("Settings")
         header.setStyleSheet("font-size: 20px; font-weight: 700;")
@@ -847,7 +901,9 @@ class MainWindow(QMainWindow):
 
         server_form = QFormLayout()
         self.server_url_input = QLineEdit(self.config["server_url"])
+        _lock_settings_field_height(self.server_url_input)
         self.api_token_input = QLineEdit(self.config["api_token"])
+        _lock_settings_field_height(self.api_token_input)
         self.api_token_input.setEchoMode(QLineEdit.EchoMode.Password)
         server_form.addRow("Server URL", self.server_url_input)
         server_form.addRow("API Token", self.api_token_input)
@@ -876,6 +932,7 @@ class MainWindow(QMainWindow):
 
         paths_form = QFormLayout()
         self.library_path_input = QLineEdit(self.config["library_path"])
+        _lock_settings_field_height(self.library_path_input)
 
         library_path_row = QWidget()
         library_path_row_layout = QHBoxLayout(library_path_row)
@@ -900,6 +957,7 @@ class MainWindow(QMainWindow):
 
         appearance_form = QFormLayout()
         self.theme_input = QComboBox()
+        _lock_settings_field_height(self.theme_input)
         self.theme_input.addItems(["system", "dark", "light"])
         self.theme_input.setCurrentText(self._normalized_theme_choice(self.config.get("theme", "system")))
         self.theme_input.currentTextChanged.connect(self._on_theme_selection_changed)
@@ -951,6 +1009,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(controls_row)
 
         layout.addStretch()
+        scroll.setWidget(content)
         return page
 
     def _build_game_details_page(self) -> QWidget:
@@ -1007,10 +1066,10 @@ class MainWindow(QMainWindow):
         cover.setMinimumSize(260, 340)
         cover.setMaximumSize(860, 1120)
         cover.setStyleSheet(
-            "background-color: #282a36; border: 1px dashed #6272a4; border-radius: 8px; font-size: 20px;"
+            "background-color: transparent; border: none; border-radius: 8px; font-size: 20px;"
         )
         self.details_cover_label = cover
-        cover_col.addWidget(cover)
+        cover_col.addWidget(cover, alignment=Qt.AlignmentFlag.AlignHCenter)
         cover_col.addStretch()
         content_layout.addLayout(cover_col, 2)
 
@@ -1039,6 +1098,12 @@ class MainWindow(QMainWindow):
         self.details_config_button = config_button
         action_row.addWidget(config_button)
 
+        ps4_content_button = QPushButton("Install Update/DLC")
+        ps4_content_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        ps4_content_button.clicked.connect(self._perform_ps4_content_action)
+        self.details_ps4_content_button = ps4_content_button
+        action_row.addWidget(ps4_content_button)
+
         secondary = QPushButton("Uninstall")
         secondary.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         secondary.clicked.connect(self._perform_game_secondary_action)
@@ -1047,23 +1112,38 @@ class MainWindow(QMainWindow):
         action_row.addStretch()
         details_col.addLayout(action_row)
 
+        overview_scroll = QScrollArea()
+        overview_scroll.setObjectName("detailsOverviewScroll")
+        overview_scroll.setWidgetResizable(True)
+        overview_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        overview_scroll.viewport().setObjectName("detailsOverviewScrollViewport")
+        overview_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        overview_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        overview_content = QWidget()
+        overview_content.setObjectName("detailsOverviewContent")
+        overview_content_layout = QVBoxLayout(overview_content)
+        overview_content_layout.setContentsMargins(0, 0, 0, 0)
+        overview_content_layout.setSpacing(10)
+        overview_content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
         title = QLabel("Game Title")
         title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         title.setStyleSheet("font-size: 30px; font-weight: 700;")
         self.details_title_label = title
-        details_col.addWidget(title)
+        overview_content_layout.addWidget(title)
 
         platform = QLabel("Platform: -")
         platform.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         platform.setStyleSheet("font-size: 18px;")
         self.details_platform_label = platform
-        details_col.addWidget(platform)
+        overview_content_layout.addWidget(platform)
 
         rating = QLabel("Rating: -")
         rating.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         rating.setStyleSheet("font-size: 18px;")
         self.details_rating_label = rating
-        details_col.addWidget(rating)
+        overview_content_layout.addWidget(rating)
 
         description = QLabel("Description")
         description.setWordWrap(True)
@@ -1072,8 +1152,11 @@ class MainWindow(QMainWindow):
         description.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         description.setStyleSheet("font-size: 17px;")
         self.details_description_label = description
-        details_col.addWidget(description)
-        details_col.addStretch()
+        overview_content_layout.addWidget(description)
+        overview_content_layout.addStretch()
+
+        overview_scroll.setWidget(overview_content)
+        details_col.addWidget(overview_scroll, 1)
         details_stack.addWidget(overview_page)
 
         cloud_page = QFrame()
@@ -1164,14 +1247,20 @@ class MainWindow(QMainWindow):
             screenshot_label.setMinimumSize(210, 118)
             screenshot_label.setMaximumSize(520, 320)
             screenshot_label.setStyleSheet(
-                "background-color: #282a36; border: 1px dashed #6272a4; border-radius: 8px;"
+                f"background-color: {self._theme_color('window', '#282a36')}; border: none; border-radius: 8px;"
             )
             self.details_screenshot_labels.append(screenshot_label)
-            screenshots_content_layout.addWidget(screenshot_label)
+            screenshots_content_layout.addWidget(
+                screenshot_label,
+                alignment=Qt.AlignmentFlag.AlignHCenter,
+            )
         screenshots_content_layout.addStretch()
 
         screenshots_scroll.setWidget(screenshots_content)
-        screenshots_col.addWidget(screenshots_scroll)
+        screenshots_col.addWidget(
+            screenshots_scroll,
+            alignment=Qt.AlignmentFlag.AlignHCenter,
+        )
         content_layout.addWidget(screenshots_panel, 2)
 
         layout.addWidget(content)
@@ -1682,6 +1771,12 @@ class MainWindow(QMainWindow):
             api_token = ""
         return build_auth_headers(api_token)
 
+    def _download_headers(self) -> dict[str, str]:
+        api_token = self.config.get("api_token", "")
+        if not isinstance(api_token, str):
+            api_token = ""
+        return build_binary_auth_headers(api_token)
+
     def _api_get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         base_url = self._server_base_url()
         api_token = self.config.get("api_token", "")
@@ -1913,6 +2008,150 @@ class MainWindow(QMainWindow):
 
     def _is_ps3_platform(self, game: dict[str, str]) -> bool:
         return resolve_is_ps3_platform(game)
+
+    def _is_ps4_platform(self, game: dict[str, str]) -> bool:
+        platform_value = game.get("platform", "")
+        platform = platform_value.strip().casefold() if isinstance(platform_value, str) else ""
+        return platform in {"ps4", "playstation 4", "playstation4", "sony playstation 4"}
+
+    def _ps4_file_ids_by_category_from_text(self, value: str) -> dict[str, list[int]]:
+        if not isinstance(value, str) or not value.strip():
+            return {}
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        if not isinstance(parsed, dict):
+            return {}
+
+        file_ids_by_category: dict[str, list[int]] = {}
+        for raw_category, raw_ids in parsed.items():
+            if not isinstance(raw_category, str):
+                continue
+            category = raw_category.strip().lower()
+            if not category:
+                continue
+            if not isinstance(raw_ids, list):
+                continue
+            normalized_ids = [file_id for file_id in raw_ids if isinstance(file_id, int)]
+            if normalized_ids:
+                file_ids_by_category[category] = normalized_ids
+        return file_ids_by_category
+
+    def _ps4_file_ids_by_category_from_payload(self, payload: dict[str, Any]) -> dict[str, list[int]]:
+        files = payload.get("files")
+        if not isinstance(files, list):
+            return {}
+
+        file_ids_by_category: dict[str, list[int]] = {}
+        for entry in files:
+            if not isinstance(entry, dict):
+                continue
+            file_id = entry.get("id")
+            if not isinstance(file_id, int):
+                continue
+            raw_category = entry.get("category")
+            category = raw_category.strip().lower() if isinstance(raw_category, str) and raw_category.strip() else "game"
+            file_ids_by_category.setdefault(category, []).append(file_id)
+        return file_ids_by_category
+
+    def _server_game_for_identity(self, game: dict[str, str], rom_id: str = "") -> dict[str, str] | None:
+        normalized_rom_id = rom_id.strip()
+        target_key = self._game_key(game)
+        target_rom_key = normalized_rom_id.casefold()
+        for games in self.server_games_by_platform.values():
+            for server_game in games:
+                if target_rom_key and self._rom_id_key(server_game) == target_rom_key:
+                    return server_game
+                if self._game_key(server_game) == target_key:
+                    return server_game
+        return None
+
+    def _ps4_file_ids_by_category_for_game(
+        self,
+        game: dict[str, str],
+        rom_id: str = "",
+        *,
+        allow_payload_lookup: bool,
+    ) -> dict[str, list[int]]:
+        for candidate in (
+            game,
+            self._installed_game_record(game),
+            self._server_game_for_identity(game, rom_id),
+        ):
+            if not isinstance(candidate, dict):
+                continue
+            parsed = self._ps4_file_ids_by_category_from_text(candidate.get("ps4_file_ids_by_category", ""))
+            if parsed:
+                return parsed
+
+        if allow_payload_lookup:
+            normalized_rom_id = rom_id.strip()
+            if normalized_rom_id:
+                payload = self._fetch_server_rom_payload(normalized_rom_id, force_refresh=True)
+                if isinstance(payload, dict):
+                    parsed = self._ps4_file_ids_by_category_from_payload(payload)
+                    if parsed:
+                        return parsed
+        return {}
+
+    def _available_ps4_content_kinds_for_game(self, game: dict[str, str]) -> list[str]:
+        if not self._is_ps4_platform(game):
+            return []
+        file_ids_by_category = self._ps4_file_ids_by_category_for_game(game, allow_payload_lookup=False)
+        kinds = [kind for kind in ("update", "dlc") if file_ids_by_category.get(kind)]
+        return kinds
+
+    def _details_ps4_content_button_text(self, game: dict[str, str]) -> str:
+        kinds = self._available_ps4_content_kinds_for_game(game)
+        if kinds == ["update"]:
+            return "Install Update"
+        if kinds == ["dlc"]:
+            return "Install DLC"
+        if len(kinds) == 2:
+            return "Install Update/DLC"
+        return ""
+
+    def _ps4_content_install_block_reason(self, game: dict[str, str]) -> str:
+        if not self._is_ps4_platform(game):
+            return ""
+        if not self._is_game_installed(game):
+            return "Install the base PS4 game before applying update or DLC content."
+        if not self._resolve_rom_id_for_game(game):
+            return "This game is missing a ROM id, so update/DLC content cannot be downloaded."
+        if not self._available_ps4_content_kinds_for_game(game):
+            return "No update or DLC content is available for this PS4 game on the server."
+        return ""
+
+    def _ps4_content_archive_name(self, game: dict[str, str], content_kind: str) -> str:
+        safe_title = self._sanitize_path_component(game.get("title", "ps4-content"), "ps4-content")
+        kind = content_kind.strip().lower() or "content"
+        return f"{safe_title}-{kind}.zip"
+
+    def _apply_ps4_content_archive_without_ui(
+        self,
+        installed_game: dict[str, str],
+        archive_path: Path,
+        *,
+        content_kind: str,
+        install_progress_callback: Callable[[int, int], None] | None = None,
+    ) -> tuple[dict[str, str] | None, str]:
+        return resolve_apply_ps4_content_archive_without_ui(
+            installed_game,
+            archive_path,
+            content_kind=content_kind,
+            extracted_dir_for_archive_path=self._extracted_dir_for_archive_path,
+            extract_archive_into_directory=resolve_extract_archive_into_directory,
+            install_progress_callback=install_progress_callback,
+        )
+
+    def _sync_ps4_content_metadata_to_installed_game(self, source_game: dict[str, str], updated_game: dict[str, str]) -> None:
+        installed_game = self._installed_game_record(source_game)
+        if installed_game is None:
+            return
+        installed_game["ps4_game_id"] = updated_game.get("ps4_game_id", "")
+        installed_game["ps4_content"] = updated_game.get("ps4_content", "")
+        self._persist_installed_games()
 
     def _ps3_emulator_root_for_game(self, game: dict[str, str]) -> Path | None:
         platform_value = game.get("platform", "")
@@ -2741,11 +2980,22 @@ class MainWindow(QMainWindow):
         rom_id_path = quote(rom_id, safe="")
         file_name_path = quote(self._server_content_file_name_for_game(game), safe="")
 
+        download_path = f"/api/roms/{rom_id_path}/content/{file_name_path}"
         try:
-            payload = self._api_get_bytes(f"/api/roms/{rom_id_path}/content/{file_name_path}")
+            payload = self._api_get_bytes(download_path)
             archive_path.write_bytes(payload)
             return archive_path
-        except (HTTPError, URLError, OSError, ValueError):
+        except HTTPError as error:
+            detail = format_http_error_details(error)
+            if self._debug_prints_enabled():
+                print(f"[DEBUG][InstallDownload] url={self._server_base_url()}{download_path}")
+                print(f"[DEBUG][InstallDownload] error={detail}")
+            QMessageBox.warning(self, "Install Error", f"Failed to download {title} from server.")
+            return None
+        except (URLError, OSError, ValueError) as error:
+            if self._debug_prints_enabled():
+                print(f"[DEBUG][InstallDownload] url={self._server_base_url()}{download_path}")
+                print(f"[DEBUG][InstallDownload] error={error}")
             QMessageBox.warning(self, "Install Error", f"Failed to download {title} from server.")
             return None
 
@@ -2965,10 +3215,20 @@ class MainWindow(QMainWindow):
         self.current_details_game = None
 
     def _start_async_install(self, game: dict[str, str]) -> bool:
-        install_block_reason = self._install_block_reason_for_game(game)
-        if install_block_reason:
-            QMessageBox.warning(self, "Install Blocked", install_block_reason)
-            return False
+        install_mode_value = game.get("_install_mode", "base")
+        install_mode = install_mode_value.strip().lower() if isinstance(install_mode_value, str) else "base"
+        is_ps4_content_install = install_mode == "ps4_content"
+
+        if is_ps4_content_install:
+            ps4_block_reason = self._ps4_content_install_block_reason(game)
+            if ps4_block_reason:
+                QMessageBox.warning(self, "Install Blocked", ps4_block_reason)
+                return False
+        else:
+            install_block_reason = self._install_block_reason_for_game(game)
+            if install_block_reason:
+                QMessageBox.warning(self, "Install Blocked", install_block_reason)
+                return False
 
         rom_id = self._resolve_rom_id_for_game(game)
         if not rom_id:
@@ -3009,11 +3269,16 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Install Error", "Set a Server URL in Settings before installing games.")
             return False
 
-        archive_name = self._archive_name_for_game(install_game)
+        archive_name_value = install_game.get("_archive_name_override", "")
+        archive_name = archive_name_value.strip() if isinstance(archive_name_value, str) and archive_name_value.strip() else self._archive_name_for_game(install_game)
         archive_path = install_path / archive_name
         rom_id_path = quote(rom_id, safe="")
         file_name_path = quote(self._server_content_file_name_for_game(install_game), safe="")
         download_url = f"{base_url}/api/roms/{rom_id_path}/content/{file_name_path}"
+        file_ids_csv_value = install_game.get("_ps4_file_ids_csv", "")
+        file_ids_csv = file_ids_csv_value.strip() if isinstance(file_ids_csv_value, str) else ""
+        if file_ids_csv:
+            download_url = f"{download_url}?{urlencode({'file_ids': file_ids_csv})}"
 
         install_key = self._game_key(install_game)
         pending_key = pending_install_key(
@@ -3054,7 +3319,12 @@ class MainWindow(QMainWindow):
         self._update_details_action_buttons()
 
         thread = QThread(self)
-        worker = InstallDownloadWorker(download_url, self._auth_headers(), archive_path)
+        worker = InstallDownloadWorker(
+            download_url,
+            self._download_headers(),
+            archive_path,
+            debug_enabled=self._debug_prints_enabled(),
+        )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.progress.connect(self._on_async_install_progress)
@@ -3091,9 +3361,11 @@ class MainWindow(QMainWindow):
             return
 
         title = game.get("title", "Game")
+        install_mode_value = game.get("_install_mode", "base")
+        install_mode = install_mode_value.strip().lower() if isinstance(install_mode_value, str) else "base"
         if error:
+            status = download_entry_status_from_error(error)
             if entry_id:
-                status = download_entry_status_from_error(error)
                 self._set_download_entry_status(entry_id, status, error)
             self._update_download_status_ui()
             self._update_details_action_buttons()
@@ -3102,7 +3374,7 @@ class MainWindow(QMainWindow):
             self._start_next_queued_install()
             return
 
-        if self._is_game_installed(game):
+        if install_mode != "ps4_content" and self._is_game_installed(game):
             if entry_id:
                 self._set_download_entry_status(entry_id, "completed")
             self._update_download_status_ui()
@@ -3126,8 +3398,14 @@ class MainWindow(QMainWindow):
         self._update_download_status_ui()
         self._update_details_action_buttons()
 
+        install_mode_value = game.get("_install_mode", "base")
+        install_mode = install_mode_value.strip().lower() if isinstance(install_mode_value, str) else "base"
+        content_kind_value = game.get("_ps4_content_kind", "")
+        content_kind = content_kind_value.strip().lower() if isinstance(content_kind_value, str) else ""
+        finalize_content_kind = content_kind if install_mode == "ps4_content" else ""
+
         thread = QThread(self)
-        worker = InstallFinalizeWorker(self, game, archive_file)
+        worker = InstallFinalizeWorker(self, game, archive_file, content_kind=finalize_content_kind)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.progress.connect(self._on_async_install_finalize_progress)
@@ -3157,6 +3435,12 @@ class MainWindow(QMainWindow):
         self.active_install_total = 0
 
         title = game.get("title", "Game") if isinstance(game, dict) else "Game"
+        install_mode_value = game.get("_install_mode", "base") if isinstance(game, dict) else "base"
+        install_mode = install_mode_value.strip().lower() if isinstance(install_mode_value, str) else "base"
+        is_ps4_content_install = install_mode == "ps4_content"
+        content_kind_value = game.get("_ps4_content_kind", "") if isinstance(game, dict) else ""
+        content_kind = content_kind_value.strip().lower() if isinstance(content_kind_value, str) else "content"
+        install_label = f"PS4 {content_kind}" if is_ps4_content_install else title
 
         if error or not isinstance(prepared_game, dict):
             if entry_id:
@@ -3171,11 +3455,25 @@ class MainWindow(QMainWindow):
             self._update_download_status_ui()
             self._update_details_action_buttons()
             if error:
-                QMessageBox.warning(self, "Install Error", f"Failed to install {title}: {error}")
+                QMessageBox.warning(self, "Install Error", f"Failed to install {install_label}: {error}")
             self._start_next_queued_install()
             return
 
         installed_game = dict(prepared_game)
+        if is_ps4_content_install:
+            self._sync_ps4_content_metadata_to_installed_game(game, installed_game)
+            if self.current_details_game is not None:
+                self.current_details_game["ps4_game_id"] = installed_game.get("ps4_game_id", "")
+                self.current_details_game["ps4_content"] = installed_game.get("ps4_content", "")
+            if entry_id:
+                self._set_download_entry_status(entry_id, "completed")
+            if warning_text.strip():
+                QMessageBox.warning(self, "Install Warning", warning_text.strip())
+            self._update_download_status_ui()
+            self._update_details_action_buttons()
+            self._start_next_queued_install()
+            return
+
         extracted_dir_text = installed_game.get("extracted_dir", "")
         if self._is_ps3_platform(installed_game) and isinstance(extracted_dir_text, str) and extracted_dir_text.strip():
             try:
@@ -4198,6 +4496,87 @@ class MainWindow(QMainWindow):
             return
 
         self._start_async_install(self.current_details_game)
+
+    def _perform_ps4_content_action(self) -> None:
+        if self.current_details_game is None:
+            return
+
+        block_reason = self._ps4_content_install_block_reason(self.current_details_game)
+        if block_reason:
+            QMessageBox.warning(self, "Install Blocked", block_reason)
+            return
+
+        available_kinds = self._available_ps4_content_kinds_for_game(self.current_details_game)
+        if not available_kinds:
+            QMessageBox.warning(
+                self,
+                "Install Error",
+                "No PS4 update or DLC content is available for this game from the current server metadata.",
+            )
+            return
+
+        selected_kind = ""
+        if len(available_kinds) == 1:
+            selected_kind = available_kinds[0]
+        else:
+            chooser = QMessageBox(self)
+            chooser.setWindowTitle("Install PS4 Content")
+            chooser.setText("Choose the PS4 content type to install:")
+            update_button = chooser.addButton("Install Update", QMessageBox.ButtonRole.AcceptRole)
+            dlc_button = chooser.addButton("Install DLC", QMessageBox.ButtonRole.ActionRole)
+            chooser.addButton(QMessageBox.StandardButton.Cancel)
+            chooser.exec()
+            clicked_button = chooser.clickedButton()
+            if clicked_button is update_button:
+                selected_kind = "update"
+            elif clicked_button is dlc_button:
+                selected_kind = "dlc"
+            else:
+                return
+
+        rom_id = self._resolve_rom_id_for_game(self.current_details_game)
+        if not rom_id:
+            QMessageBox.warning(self, "Install Error", "Selected game is missing a ROM id and cannot be downloaded.")
+            return
+
+        file_ids_by_category = self._ps4_file_ids_by_category_for_game(
+            self.current_details_game,
+            rom_id,
+            allow_payload_lookup=True,
+        )
+        selected_file_ids = file_ids_by_category.get(selected_kind, [])
+        if not selected_file_ids:
+            QMessageBox.warning(
+                self,
+                "Install Error",
+                f"No PS4 {selected_kind} files were found for this title in server metadata.",
+            )
+            return
+
+        install_game = dict(self.current_details_game)
+        install_game["rom_id"] = rom_id
+        install_game["_install_mode"] = "ps4_content"
+        install_game["_ps4_content_kind"] = selected_kind
+        install_game["_ps4_file_ids_csv"] = ",".join(str(file_id) for file_id in selected_file_ids)
+        install_game["_archive_name_override"] = self._ps4_content_archive_name(install_game, selected_kind)
+        self._hydrate_install_game_metadata(install_game, rom_id)
+
+        resolved_file_name = self._resolved_rom_file_name_for_game(install_game, rom_id)
+        if not resolved_file_name:
+            QMessageBox.warning(
+                self,
+                "Install Error",
+                "Server did not return a usable ROM filename/path for this title. Refresh server metadata and try again.",
+            )
+            return
+        install_game["rom_file_name"] = resolved_file_name
+        install_game["ps4_file_ids_by_category"] = json.dumps(
+            file_ids_by_category,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+        self._start_async_install(install_game)
 
     def _perform_game_config_action(self) -> None:
         if self.current_details_game is None:

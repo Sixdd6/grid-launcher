@@ -21,6 +21,22 @@ def is_ps3_platform(game: dict[str, str]) -> bool:
     return platform in {"playstation 3", "ps3"}
 
 
+def is_ps4_platform(game: dict[str, str]) -> bool:
+    platform_value = game.get("platform", "")
+    platform = platform_value.strip().casefold() if isinstance(platform_value, str) else ""
+    normalized = re.sub(r"[^a-z0-9]+", " ", platform).strip()
+    compact = normalized.replace(" ", "")
+    tokens = set(normalized.split())
+
+    if not normalized:
+        return False
+    if normalized in {"playstation 4", "ps4"}:
+        return True
+    if "ps4" in tokens:
+        return True
+    return "playstation4" in compact
+
+
 def is_original_xbox_platform(game: dict[str, str]) -> bool:
     platform_value = game.get("platform", "")
     platform = platform_value.strip().casefold() if isinstance(platform_value, str) else ""

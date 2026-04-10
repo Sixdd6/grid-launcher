@@ -53,7 +53,16 @@ def hydrate_install_game_metadata(
     for games in server_games_by_platform.values():
         for server_game in games:
             if rom_id_key(server_game) == normalized_rom_id.casefold() or game_key(server_game) == target_key:
-                for field in ("cover_url", "screenshot_urls", "rating", "description", "rom_file_name"):
+                for field in (
+                    "cover_url",
+                    "screenshot_urls",
+                    "rating",
+                    "description",
+                    "rom_file_name",
+                    "ps4_has_update",
+                    "ps4_has_dlc",
+                    "ps4_file_ids_by_category",
+                ):
                     server_value = server_game.get(field, "")
                     if not isinstance(server_value, str) or not server_value.strip():
                         continue
@@ -65,24 +74,20 @@ def hydrate_install_game_metadata(
         if matched:
             break
 
-    if resolved_cover_url_for_game(game):
-        return
-
     payload = server_rom_payloads.get(normalized_rom_id)
     if not isinstance(payload, dict):
         payload = fetch_server_rom_payload(normalized_rom_id)
     if not isinstance(payload, dict):
         return
 
-    resolved_cover = cover_url_from_rom_payload(payload)
-    if resolved_cover:
-        game["cover_url"] = resolved_cover
+    if not resolved_cover_url_for_game(game):
+        resolved_cover = cover_url_from_rom_payload(payload)
+        if resolved_cover:
+            game["cover_url"] = resolved_cover
 
-    screenshot_value = game.get("screenshot_urls", "")
-    if not isinstance(screenshot_value, str) or not screenshot_value.strip():
-        screenshots = screenshot_urls_from_rom_payload(payload)
-        if screenshots:
-            game["screenshot_urls"] = "\n".join(screenshots)
+    screenshots = screenshot_urls_from_rom_payload(payload)
+    if screenshots:
+        game["screenshot_urls"] = "\n".join(screenshots)
 
 
 def sync_install_metadata_to_details_game(
@@ -104,3 +109,8 @@ def sync_install_metadata_to_details_game(
     screenshot_value = install_game.get("screenshot_urls", "")
     if isinstance(screenshot_value, str):
         current_details_game["screenshot_urls"] = screenshot_value.strip()
+
+    for field in ("ps4_has_update", "ps4_has_dlc", "ps4_file_ids_by_category"):
+        field_value = install_game.get(field, "")
+        if isinstance(field_value, str):
+            current_details_game[field] = field_value.strip()

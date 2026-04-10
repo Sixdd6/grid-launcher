@@ -215,6 +215,11 @@ def theme_stylesheet(colors: Mapping[str, str] | None) -> str:
         QPushButton#gameCard:hover {{
             border-color: {resolved_colors['accent']};
         }}
+        QLabel#gameCardCover {{
+            background-color: transparent;
+            border: none;
+            border-radius: 6px;
+        }}
         QListWidget {{
             background-color: {resolved_colors['surface']};
             color: {resolved_colors['text']};
@@ -293,7 +298,10 @@ def theme_stylesheet(colors: Mapping[str, str] | None) -> str:
         QScrollArea#libraryScroll,
         QScrollArea#serverGamesScroll,
         QScrollArea#downloadsScroll,
-        QScrollArea#detailsCloudScroll {{
+        QScrollArea#detailsCloudScroll,
+        QScrollArea#detailsOverviewScroll,
+        QScrollArea#settingsScroll,
+        QScrollArea#emulatorsScroll {{
             background-color: transparent;
             border: none;
         }}
@@ -301,9 +309,15 @@ def theme_stylesheet(colors: Mapping[str, str] | None) -> str:
         QWidget#serverGamesScrollViewport,
         QWidget#downloadsScrollViewport,
         QWidget#detailsCloudScrollViewport,
+        QWidget#detailsOverviewScrollViewport,
+        QWidget#settingsScrollViewport,
+        QWidget#emulatorsScrollViewport,
         QWidget#libraryGridContent,
         QWidget#serverGamesContent,
-        QWidget#downloadsContent {{
+        QWidget#downloadsContent,
+        QWidget#detailsOverviewContent,
+        QWidget#settingsContent,
+        QWidget#emulatorsContent {{
             background-color: transparent;
         }}
         QListWidget#serverPlatformsList {{
@@ -347,7 +361,7 @@ def apply_theme_inline_styles(
         downloads_empty_label.setStyleSheet(f"color: {muted}; font-size: 16px; font-weight: 600;")
     if details_cover_label is not None:
         details_cover_label.setStyleSheet(
-            f"background-color: {window}; border: 1px dashed {border}; border-radius: 8px; font-size: 20px;"
+            "background-color: transparent; border: none; border-radius: 8px; font-size: 20px;"
         )
     if details_cloud_status_label is not None:
         details_cloud_status_label.setStyleSheet(f"color: {muted};")
@@ -355,7 +369,7 @@ def apply_theme_inline_styles(
         details_cloud_empty_label.setStyleSheet(f"color: {muted}; font-size: 15px;")
     for screenshot_label in screenshot_labels or ():
         screenshot_label.setStyleSheet(
-            f"background-color: {window}; border: 1px dashed {border}; border-radius: 8px;"
+            f"background-color: {window}; border: none; border-radius: 8px;"
         )
 
 

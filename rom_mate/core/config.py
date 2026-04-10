@@ -112,6 +112,8 @@ def normalize_installed_games(
         native_launch_parameters = item.get("native_launch_parameters")
         ps3_links = item.get("ps3_links")
         ps3_game_id = item.get("ps3_game_id")
+        ps4_game_id = item.get("ps4_game_id")
+        ps4_content = item.get("ps4_content")
         normalized_game = {
             "title": title.strip(),
             "platform": platform.strip(),
@@ -129,6 +131,8 @@ def normalize_installed_games(
             "native_launch_parameters": native_launch_parameters.strip() if isinstance(native_launch_parameters, str) else "",
             "ps3_links": ps3_links.strip() if isinstance(ps3_links, str) else "",
             "ps3_game_id": ps3_game_id.strip().upper() if isinstance(ps3_game_id, str) else "",
+            "ps4_game_id": ps4_game_id.strip().upper() if isinstance(ps4_game_id, str) else "",
+            "ps4_content": ps4_content.strip() if isinstance(ps4_content, str) else "",
         }
         key = game_key_fn(normalized_game)
         if key in seen:

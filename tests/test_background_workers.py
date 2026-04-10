@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from io import BytesIO
+from pathlib import Path
+from unittest.mock import patch
+from urllib.error import HTTPError
 
-from rom_mate.background.workers import DetailsCloudRecordsWorker
+from rom_mate.background.workers import DetailsCloudRecordsWorker, InstallDownloadWorker
 
 
 class _StubWindow:
@@ -44,6 +49,63 @@ class DetailsCloudRecordsWorkerTests(unittest.TestCase):
         worker.run()
 
         self.assertEqual(results, [(9, "save", [], "boom")])
+
+
+class InstallDownloadWorkerTests(unittest.TestCase):
+    def test_http_error_includes_status_reason_url_and_body(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            archive_path = Path(temp_dir) / "game.zip"
+            worker = InstallDownloadWorker(
+                "https://server.example/api/roms/1/content/game.zip",
+                {"Accept": "*/*"},
+                archive_path,
+            )
+            results: list[tuple[str, str]] = []
+            worker.finished.connect(lambda path, error: results.append((path, error)))
+
+            http_error = HTTPError(
+                "https://server.example/api/roms/1/content/game.zip",
+                403,
+                "Forbidden",
+                None,
+                BytesIO(b'{"detail":"Token invalid for this ROM"}'),
+            )
+            with patch("rom_mate.background.workers.urlopen", side_effect=http_error):
+                worker.run()
+
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0][0], "")
+            self.assertIn("HTTP 403 Forbidden", results[0][1])
+            self.assertIn("url=https://server.example/api/roms/1/content/game.zip", results[0][1])
+            self.assertIn("Token invalid for this ROM", results[0][1])
+
+    def test_debug_logging_prints_url_and_error_details(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            archive_path = Path(temp_dir) / "game.zip"
+            worker = InstallDownloadWorker(
+                "https://server.example/api/roms/1/content/game.zip",
+                {"Accept": "*/*"},
+                archive_path,
+                debug_enabled=True,
+            )
+            results: list[tuple[str, str]] = []
+            worker.finished.connect(lambda path, error: results.append((path, error)))
+
+            http_error = HTTPError(
+                "https://server.example/api/roms/1/content/game.zip",
+                401,
+                "Unauthorized",
+                None,
+                BytesIO(b"access denied"),
+            )
+            with patch("rom_mate.background.workers.urlopen", side_effect=http_error):
+                with patch("builtins.print") as mock_print:
+                    worker.run()
+
+            self.assertEqual(len(results), 1)
+            printed_text = "\n".join(" ".join(str(item) for item in call.args) for call in mock_print.call_args_list)
+            self.assertIn("[DEBUG][InstallDownload] url=https://server.example/api/roms/1/content/game.zip", printed_text)
+            self.assertIn("[DEBUG][InstallDownload] error=HTTP 401 Unauthorized", printed_text)
 
 
 if __name__ == "__main__":

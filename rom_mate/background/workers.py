@@ -10,6 +10,8 @@ from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QObject, Signal
 
+from ..core.api import format_http_error_details
+
 if TYPE_CHECKING:
     from ..core.types import MainWindowProtocol
 
@@ -18,18 +20,28 @@ class InstallDownloadWorker(QObject):
     finished = Signal(str, str)
     progress = Signal(object, object, float)
 
-    def __init__(self, download_url: str, headers: dict[str, str], archive_path: Path) -> None:
+    def __init__(
+        self,
+        download_url: str,
+        headers: dict[str, str],
+        archive_path: Path,
+        *,
+        debug_enabled: bool = False,
+    ) -> None:
         super().__init__()
         self.download_url = download_url
         self.headers = headers
         self.archive_path = archive_path
         self.cancel_requested = False
+        self.debug_enabled = bool(debug_enabled)
 
     def request_cancel(self) -> None:
         self.cancel_requested = True
 
     def run(self) -> None:
         try:
+            if self.debug_enabled:
+                print(f"[DEBUG][InstallDownload] url={self.download_url}")
             request = Request(self.download_url, headers=self.headers, method="GET")
             with urlopen(request, timeout=60) as response:
                 content_length = response.headers.get("Content-Length", "").strip()
@@ -49,7 +61,19 @@ class InstallDownloadWorker(QObject):
                         speed_bps = downloaded_bytes / elapsed
                         self.progress.emit(downloaded_bytes, total_bytes, speed_bps)
             self.finished.emit(str(self.archive_path), "")
-        except (HTTPError, URLError, OSError, ValueError, OverflowError) as error:
+        except HTTPError as error:
+            detail = format_http_error_details(error)
+            if self.debug_enabled:
+                print(f"[DEBUG][InstallDownload] error={detail}")
+            if self.archive_path.exists() and self.archive_path.is_file():
+                try:
+                    self.archive_path.unlink()
+                except OSError:
+                    pass
+            self.finished.emit("", detail)
+        except (URLError, OSError, ValueError, OverflowError) as error:
+            if self.debug_enabled:
+                print(f"[DEBUG][InstallDownload] error={error}")
             if self.archive_path.exists() and self.archive_path.is_file():
                 try:
                     self.archive_path.unlink()
@@ -62,20 +86,36 @@ class InstallFinalizeWorker(QObject):
     finished = Signal(object, str, str, str)
     progress = Signal(object, object)
 
-    def __init__(self, window: MainWindowProtocol, game: dict[str, str], archive_path: Path) -> None:
+    def __init__(
+        self,
+        window: MainWindowProtocol,
+        game: dict[str, str],
+        archive_path: Path,
+        *,
+        content_kind: str = "",
+    ) -> None:
         super().__init__()
         self.window = window
         self.game = dict(game)
         self.archive_path = archive_path
+        self.content_kind = content_kind.strip().lower()
 
     def run(self) -> None:
         try:
-            prepared_game, warning_text = self.window._prepare_installed_game_without_ui(
-                self.game,
-                self.archive_path,
-                configure_ps3_links=False,
-                install_progress_callback=self._emit_progress,
-            )
+            if self.content_kind in {"update", "dlc"}:
+                prepared_game, warning_text = self.window._apply_ps4_content_archive_without_ui(
+                    self.game,
+                    self.archive_path,
+                    content_kind=self.content_kind,
+                    install_progress_callback=self._emit_progress,
+                )
+            else:
+                prepared_game, warning_text = self.window._prepare_installed_game_without_ui(
+                    self.game,
+                    self.archive_path,
+                    configure_ps3_links=False,
+                    install_progress_callback=self._emit_progress,
+                )
             if prepared_game is None:
                 self.finished.emit(None, str(self.archive_path), warning_text, "Install preparation failed")
                 return

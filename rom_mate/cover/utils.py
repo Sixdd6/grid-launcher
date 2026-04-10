@@ -7,6 +7,24 @@ from typing import Any, Callable
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 
+_SCREENSHOT_HINT_RE = re.compile(
+    r"(?:^|[^a-z0-9])(?:screenshot|screen[_-]?shot|gameplay|in[_-]?game|title[_-]?screen|titlescreen)(?:[^a-z0-9]|$)",
+    re.IGNORECASE,
+)
+_NON_SCREENSHOT_ART_RE = re.compile(
+    r"(?:^|[^a-z0-9])(?:box(?:[_-]?art)?|cover(?:[_-]?art)?|fan(?:[_-]?art)?|logo|clear[_-]?logo|clear[_-]?art|banner|poster|marquee|cartridge|disc)(?:[^a-z0-9]|$)",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_screenshot_url(value: str) -> bool:
+    parsed = urlsplit(value)
+    haystack = f"{parsed.path}?{parsed.query}" if (parsed.path or parsed.query) else value
+    if _SCREENSHOT_HINT_RE.search(haystack):
+        return True
+    return _NON_SCREENSHOT_ART_RE.search(haystack) is None
+
+
 def resolve_cover_url(value: Any, base_url: str) -> str:
     if not isinstance(value, str) or not value.strip():
         return ""
@@ -58,6 +76,14 @@ def cover_url_from_rom_payload(payload: dict[str, Any], resolver: Callable[[Any]
 
 def screenshot_urls_from_rom_payload(payload: dict[str, Any], resolver: Callable[[Any], str]) -> list[str]:
     urls: list[str] = []
+    launchbox_screenshot_type_tokens = (
+        "screenshot",
+        "title screen",
+        "titlescreen",
+        "gameplay",
+        "in-game",
+        "ingame",
+    )
 
     def append_url(value: Any) -> None:
         if isinstance(value, str):
@@ -89,12 +115,12 @@ def screenshot_urls_from_rom_payload(payload: dict[str, Any], resolver: Callable
 
     gamelist_metadata = payload.get("gamelist_metadata")
     if isinstance(gamelist_metadata, dict):
-        for key in ("screenshot_url", "title_screen_url", "image_url"):
+        for key in ("screenshot_url", "title_screen_url"):
             append_url(gamelist_metadata.get(key))
 
     ss_metadata = payload.get("ss_metadata")
     if isinstance(ss_metadata, dict):
-        for key in ("screenshot_url", "title_screen_url", "fanart_url"):
+        for key in ("screenshot_url", "title_screen_url"):
             append_url(ss_metadata.get(key))
 
     launchbox_metadata = payload.get("launchbox_metadata")
@@ -104,20 +130,38 @@ def screenshot_urls_from_rom_payload(payload: dict[str, Any], resolver: Callable
             for image in images:
                 if not isinstance(image, dict):
                     continue
-                append_url(image.get("url"))
+                image_type = image.get("type")
+                if not isinstance(image_type, str):
+                    continue
+                normalized_type = image_type.strip().casefold()
+                if any(token in normalized_type for token in launchbox_screenshot_type_tokens):
+                    append_url(image.get("url"))
 
     for key in ("url_screenshots", "path_screenshots", "screenshots", "images"):
         value = payload.get(key)
         if isinstance(value, list):
-            for item in value:
-                append_url(item)
+            if key == "images":
+                for item in value:
+                    if not isinstance(item, dict):
+                        append_url(item)
+                        continue
+                    image_type = item.get("type")
+                    if isinstance(image_type, str):
+                        normalized_type = image_type.strip().casefold()
+                        if any(token in normalized_type for token in launchbox_screenshot_type_tokens):
+                            append_url(item)
+                        continue
+                    append_url(item)
+            else:
+                for item in value:
+                    append_url(item)
         else:
             append_url(value)
 
     for key in ("url_screenshot", "path_screenshot"):
         append_url(payload.get(key))
 
-    return urls
+    return [url for url in urls if _looks_like_screenshot_url(url)]
 
 
 def screenshot_urls_from_game(raw: Any) -> list[str]:
@@ -126,7 +170,7 @@ def screenshot_urls_from_game(raw: Any) -> list[str]:
     unique: list[str] = []
     for item in raw.splitlines():
         value = item.strip()
-        if value and value not in unique:
+        if value and _looks_like_screenshot_url(value) and value not in unique:
             unique.append(value)
     return unique
 

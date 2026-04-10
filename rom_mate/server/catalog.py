@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Callable
 
 
@@ -85,6 +86,46 @@ def fetch_platform_rom_items(
     return all_items
 
 
+def _is_ps4_platform_label(label: Any) -> bool:
+    if not isinstance(label, str):
+        return False
+    normalized = "".join(ch for ch in label.lower() if ch.isalnum())
+    if not normalized:
+        return False
+    return normalized in {"ps4", "playstation4", "sonyplaystation4"}
+
+
+def _is_ps4_rom_item(item: dict[str, Any], fallback_platform_label: str) -> bool:
+    candidates = (
+        item.get("platform_fs_slug"),
+        item.get("platform_slug"),
+        item.get("platform_display_name"),
+        fallback_platform_label,
+    )
+    return any(_is_ps4_platform_label(candidate) for candidate in candidates)
+
+
+def _ps4_file_ids_by_category(item: dict[str, Any]) -> dict[str, list[int]]:
+    files = item.get("files")
+    if not isinstance(files, list):
+        return {}
+
+    file_ids_by_category: dict[str, list[int]] = {}
+    for file_entry in files:
+        if not isinstance(file_entry, dict):
+            continue
+
+        file_id = file_entry.get("id")
+        if not isinstance(file_id, int):
+            continue
+
+        raw_category = file_entry.get("category")
+        category = raw_category.strip().lower() if isinstance(raw_category, str) and raw_category.strip() else "game"
+        file_ids_by_category.setdefault(category, []).append(file_id)
+
+    return file_ids_by_category
+
+
 def games_from_rom_items(
     all_items: list[dict[str, Any]],
     platform_label: str,
@@ -104,19 +145,27 @@ def games_from_rom_items(
             rom_payloads[rom_id] = item
 
         platform_name = item.get("platform_display_name")
+        resolved_platform = platform_name.strip() if isinstance(platform_name, str) and platform_name.strip() else platform_label
+        ps4_file_ids_by_category = {}
+        if _is_ps4_rom_item(item, resolved_platform):
+            ps4_file_ids_by_category = _ps4_file_ids_by_category(item)
+
         summary = item.get("summary")
         cover_url = cover_url_from_payload(item)
         screenshot_urls = screenshot_urls_from_payload(item)
         games.append(
             {
                 "title": title.strip(),
-                "platform": platform_name.strip() if isinstance(platform_name, str) and platform_name.strip() else platform_label,
+                "platform": resolved_platform,
                 "rating": "N/A",
                 "description": summary.strip() if isinstance(summary, str) and summary.strip() else "No description available.",
                 "cover_url": cover_url,
                 "screenshot_urls": "\n".join(screenshot_urls),
                 "rom_id": rom_id,
                 "rom_file_name": item.get("fs_name", "").strip() if isinstance(item.get("fs_name", ""), str) else "",
+                "ps4_has_update": "true" if "update" in ps4_file_ids_by_category else "false",
+                "ps4_has_dlc": "true" if "dlc" in ps4_file_ids_by_category else "false",
+                "ps4_file_ids_by_category": json.dumps(ps4_file_ids_by_category, separators=(",", ":"), sort_keys=True),
             }
         )
 

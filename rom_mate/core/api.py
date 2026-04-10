@@ -3,14 +3,56 @@ from __future__ import annotations
 import json
 import mimetypes
 import time
+from io import UnsupportedOperation
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
 def build_auth_headers(api_token: str) -> dict[str, str]:
     return {"Accept": "application/json", "Authorization": f"Bearer {api_token.strip()}"}
+
+
+def build_binary_auth_headers(api_token: str) -> dict[str, str]:
+    headers = build_auth_headers(api_token)
+    headers["Accept"] = "application/octet-stream, */*;q=0.9"
+    return headers
+
+
+def format_http_error_details(error: HTTPError, *, body_limit: int = 240) -> str:
+    status = int(getattr(error, "code", 0) or 0)
+    reason = str(getattr(error, "reason", "") or "").strip()
+    url = str(getattr(error, "url", "") or "").strip()
+
+    title = f"HTTP {status}" if status > 0 else "HTTP error"
+    if reason:
+        title = f"{title} {reason}"
+
+    parts = [title]
+    if url:
+        parts.append(f"url={url}")
+
+    body_snippet = ""
+    try:
+        raw = error.read(body_limit + 1)
+    except (OSError, ValueError, TypeError, UnsupportedOperation):
+        raw = b""
+
+    if isinstance(raw, bytes) and raw:
+        decoded = raw.decode("utf-8", errors="replace")
+        normalized = " ".join(decoded.split())
+        truncated = normalized[:body_limit]
+        if len(normalized) > body_limit:
+            truncated = f"{truncated}..."
+        if truncated:
+            body_snippet = truncated
+
+    if body_snippet:
+        parts.append(f'body="{body_snippet}"')
+
+    return " | ".join(parts)
 
 
 def _build_url(base_url: str, path: str, params: dict[str, Any] | None = None) -> str:
@@ -37,7 +79,7 @@ def api_get_bytes(base_url: str, api_token: str, path: str, params: dict[str, An
     if not base_url:
         raise ValueError("Server URL is required")
 
-    request = Request(_build_url(base_url, path, params), headers=build_auth_headers(api_token), method="GET")
+    request = Request(_build_url(base_url, path, params), headers=build_binary_auth_headers(api_token), method="GET")
     with urlopen(request, timeout=60) as response:
         return response.read()
 

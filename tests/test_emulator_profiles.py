@@ -60,11 +60,13 @@ from rom_mate.emulator.xenia import (
 from rom_mate.emulator.profiles import (
     emulator_entry_matches_tokens,
     load_emulator_autoprofiles,
+    matching_platforms_for_emulator_keywords,
     normalize_ignore_extension_value,
     normalize_save_strategy_value,
 )
 from rom_mate.emulator.selection import (
     cloud_save_block_reason_for_game,
+    install_block_reason_for_game,
     is_native_executable_platform,
 )
 
@@ -717,6 +719,46 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
 
         self.assertTrue(emulator_entry_matches_tokens(emulator, {"cemu"}))
         self.assertFalse(emulator_entry_matches_tokens(emulator, {"rpcs3"}))
+
+    def test_matching_platforms_for_emulator_keywords_handles_compact_platform_labels(self) -> None:
+        matches = matching_platforms_for_emulator_keywords(
+            ["Sony PlayStation4", "PlayStation4", "Xbox360"],
+            ["playstation 4"],
+        )
+
+        self.assertEqual(matches, ["Sony PlayStation4", "PlayStation4"])
+
+    def test_matching_platforms_for_emulator_keywords_keeps_numeric_guard(self) -> None:
+        matches = matching_platforms_for_emulator_keywords(
+            ["Xbox360"],
+            ["xbox"],
+        )
+
+        self.assertEqual(matches, [])
+
+    def test_matching_platforms_for_emulator_keywords_handles_wiiu_and_xbox360_tokens(self) -> None:
+        wii_matches = matching_platforms_for_emulator_keywords(["WiiU"], ["wii u"])
+        xbox_matches = matching_platforms_for_emulator_keywords(["Xbox360"], ["xbox 360"])
+
+        self.assertEqual(wii_matches, ["WiiU"])
+        self.assertEqual(xbox_matches, ["Xbox360"])
+
+    def test_install_block_reason_for_ps4_clears_when_shadps4_is_available(self) -> None:
+        assignable = ["Sony PlayStation4"]
+        keywords = ["playstation 4", "ps4"]
+        supported = matching_platforms_for_emulator_keywords(assignable, keywords)
+
+        def available_emulator_name(platform: str) -> str:
+            return "ShadPS4" if any(candidate.casefold() == platform.casefold() for candidate in supported) else ""
+
+        reason = install_block_reason_for_game(
+            {"platform": "Sony PlayStation4"},
+            lambda _game: False,
+            lambda _game: False,
+            available_emulator_name,
+        )
+
+        self.assertEqual(reason, "")
 
     def test_load_emulator_autoprofiles_returns_empty_list_when_json_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

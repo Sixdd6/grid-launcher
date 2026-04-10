@@ -39,6 +39,8 @@ def build_installed_game_record(
         "native_launch_parameters": _text_value(game, "native_launch_parameters"),
         "ps3_links": _text_value(game, "ps3_links"),
         "ps3_game_id": _text_value(game, "ps3_game_id"),
+        "ps4_game_id": _text_value(game, "ps4_game_id"),
+        "ps4_content": _text_value(game, "ps4_content"),
     }
 
 

@@ -19,7 +19,25 @@ def matching_platforms_for_emulator_keywords(assignable_platforms: list[str], ke
         return []
 
     def token_set(value: str) -> set[str]:
-        return set(re.findall(r"[a-z0-9]+", value.casefold()))
+        tokens: set[str] = set()
+        for chunk in re.findall(r"[A-Za-z0-9]+", value):
+            folded_chunk = chunk.casefold()
+            if folded_chunk:
+                tokens.add(folded_chunk)
+
+            split_chunks = re.sub(
+                r"(?<=[A-Za-z])(?=[0-9])|(?<=[0-9])(?=[A-Za-z])|(?<=[a-z])(?=[A-Z])",
+                " ",
+                chunk,
+            ).split()
+            folded_parts = [part.casefold() for part in split_chunks if part]
+            tokens.update(folded_parts)
+
+            compact_alpha = "".join(part for part in folded_parts if part.isalpha())
+            if compact_alpha:
+                tokens.add(compact_alpha)
+
+        return tokens
 
     matches: list[str] = []
     for platform in assignable_platforms:

@@ -23,9 +23,11 @@ from .cloud_transfer import (
 	zip_selected_files_for_upload,
 )
 from .archive_preparation import (
+	apply_ps4_content_archive_without_ui,
 	directory_total_file_bytes,
 	extracted_dir_for_archive_path,
 	extract_archive_for_game,
+	extract_archive_into_directory,
 	prepare_installed_game_without_ui,
 	select_extracted_launch_file,
 	should_extract_archive_for_game,
@@ -128,6 +130,7 @@ from .install_state import (
 __all__ = [
 	"auto_cloud_upload_plan",
 	"archive_name_for_game",
+	"apply_ps4_content_archive_without_ui",
 	"build_installed_game_record",
 	"cleanup_temporary_paths",
 	"remove_game_files",
@@ -139,6 +142,7 @@ __all__ = [
 	"candidate_extracted_paths_for_game",
 	"extracted_dir_for_archive_path",
 	"extract_archive_for_game",
+	"extract_archive_into_directory",
 	"cloud_sync_candidates_for_game",
 	"configure_ps3_install_links",
 	"detected_ps3_game_id",

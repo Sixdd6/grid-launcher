@@ -4,6 +4,8 @@ from .api import (
     api_post_json,
     api_post_multipart_json,
     build_auth_headers,
+    build_binary_auth_headers,
+    format_http_error_details,
     multipart_payload,
 )
 from .config import (
@@ -25,6 +27,8 @@ __all__ = [
     "api_post_json",
     "api_post_multipart_json",
     "build_auth_headers",
+    "build_binary_auth_headers",
+    "format_http_error_details",
     "multipart_payload",
     "merge_config_with_defaults",
     "normalize_default_emulators",
