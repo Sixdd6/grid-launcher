@@ -60,7 +60,7 @@ class FirstRunSetupDialog(QDialog):
 
         self.api_token_input = QLineEdit(token_text)
         self.api_token_input.setEchoMode(QLineEdit.EchoMode.Password)
-        form.addRow("API Token", self.api_token_input)
+        form.addRow("Client Token", self.api_token_input)
 
         self.library_path_input = QLineEdit(library_path_text)
         library_row = QWidget()
@@ -99,7 +99,7 @@ class FirstRunSetupDialog(QDialog):
             QMessageBox.warning(self, "Setup Required", "Enter a server URL to continue.")
             return
         if not self.api_token():
-            QMessageBox.warning(self, "Setup Required", "Enter an API token to continue.")
+            QMessageBox.warning(self, "Setup Required", "Enter a Client Token to continue.")
             return
         if not self.library_path():
             QMessageBox.warning(self, "Setup Required", "Select a library path to continue.")

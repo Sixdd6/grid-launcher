@@ -1563,7 +1563,7 @@ class MainWindow(QMainWindow):
         self.config["server_url"] = dialog.server_url()
         self.config["library_path"] = dialog.library_path()
         if not self._set_api_token(dialog.api_token()):
-            QMessageBox.warning(self, "Setup Error", "Could not securely save API token.")
+            QMessageBox.warning(self, "Setup Error", "Could not securely save Client Token.")
             return False
 
         self.config["first_run_completed"] = True
@@ -1590,7 +1590,7 @@ class MainWindow(QMainWindow):
 
     def _run_token_expired_setup(self) -> bool:
         return self._run_setup_dialog(
-            "Your API token has expired. Enter a new token to continue. You can change these settings later in Settings."
+            "Your Client Token has expired. Enter a new Client Token to continue. You can change these settings later in Settings."
         )
 
     def _save_settings(self) -> None:
