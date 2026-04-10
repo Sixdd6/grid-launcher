@@ -127,6 +127,26 @@ def api_post_multipart_json(
     return json.loads(raw)
 
 
+def api_put_multipart_json(
+    base_url: str,
+    api_token: str,
+    path: str,
+    files: dict[str, Path],
+    params: dict[str, Any] | None = None,
+) -> Any:
+    if not base_url:
+        raise ValueError("Server URL is required")
+
+    content_type, payload = multipart_payload(files)
+    headers = build_auth_headers(api_token)
+    headers["Content-Type"] = content_type
+
+    request = Request(_build_url(base_url, path, params), headers=headers, method="PUT", data=payload)
+    with urlopen(request, timeout=60) as response:
+        raw = response.read().decode("utf-8")
+    return json.loads(raw)
+
+
 def api_post_json(
     base_url: str,
     api_token: str,

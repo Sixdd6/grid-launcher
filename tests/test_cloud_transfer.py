@@ -7,8 +7,11 @@ from pathlib import Path
 
 from rom_mate.library.cloud_sync import cemu_save_directories_for_game, cloud_sync_candidates_for_game
 from rom_mate.library.cloud_transfer import (
+    appended_image_sidecar_path,
     grouped_file_upload_jobs,
     ppsspp_state_upload_jobs,
+    retroarch_state_upload_jobs,
+    screenshot_download_candidate_paths,
     zip_directory_for_upload,
     zip_selected_files_for_upload,
 )
@@ -53,6 +56,136 @@ class CloudTransferTests(unittest.TestCase):
         self.assertEqual(display_name, "ULUS12345_1.ppst")
         self.assertEqual(files["stateFile"].name, "ULUS12345_1.ppst")
         self.assertEqual(files["screenshotFile"].name, screenshot_file.name)
+
+    def test_appended_image_sidecar_path_finds_png_appended_to_full_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "game.state1"
+            screenshot_path = Path(temp_dir) / "game.state1.png"
+            state_path.write_text("", encoding="utf-8")
+            screenshot_path.write_bytes(b"")
+
+            found = appended_image_sidecar_path(state_path)
+
+        self.assertEqual(found, screenshot_path)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "game.state1"
+            replaced_extension_screenshot = Path(temp_dir) / "game.png"
+            state_path.write_text("", encoding="utf-8")
+            replaced_extension_screenshot.write_bytes(b"")
+
+            found = appended_image_sidecar_path(state_path)
+
+        self.assertIsNone(found)
+
+    def test_screenshot_download_candidate_paths_returns_ordered_candidates(self) -> None:
+        candidates = screenshot_download_candidate_paths({
+            "download_path": "a/b.png",
+            "file_path": "c/d.png",
+            "full_path": "e/f.png",
+        })
+
+        self.assertEqual(candidates, ["a/b.png", "c/d.png", "e/f.png"])
+
+    def test_screenshot_download_candidate_paths_skips_blank_and_missing_keys(self) -> None:
+        candidates = screenshot_download_candidate_paths({
+            "download_path": "",
+            "full_path": "x/y.png",
+        })
+
+        self.assertEqual(candidates, ["x/y.png"])
+
+    def test_screenshot_download_candidate_paths_returns_empty_for_empty_record(self) -> None:
+        candidates = screenshot_download_candidate_paths({})
+
+        self.assertEqual(candidates, [])
+
+    def test_retroarch_state_upload_jobs_attaches_appended_png_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_file = Path(temp_dir) / "Chrono Trigger.state1"
+            screenshot_file = Path(temp_dir) / "Chrono Trigger.state1.png"
+            state_file.write_text("state", encoding="utf-8")
+            screenshot_file.write_bytes(b"")
+
+            jobs, temporary_archives = retroarch_state_upload_jobs([state_file], "stateFile")
+
+        self.assertEqual(temporary_archives, [])
+        self.assertEqual(len(jobs), 1)
+        _, files = jobs[0]
+        self.assertEqual(files["stateFile"], state_file)
+        self.assertEqual(files["screenshotFile"], screenshot_file)
+
+    def test_retroarch_state_upload_jobs_omits_screenshotfile_when_no_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_file = Path(temp_dir) / "game.state"
+            state_file.write_text("state", encoding="utf-8")
+
+            jobs, temporary_archives = retroarch_state_upload_jobs([state_file], "stateFile")
+
+        self.assertEqual(temporary_archives, [])
+        self.assertEqual(len(jobs), 1)
+        _, files = jobs[0]
+        self.assertIn("stateFile", files)
+        self.assertNotIn("screenshotFile", files)
+
+    def test_retroarch_state_upload_jobs_separate_jobs_per_slot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state1_file = Path(temp_dir) / "game.state1"
+            state1_screenshot = Path(temp_dir) / "game.state1.png"
+            state2_file = Path(temp_dir) / "game.state2"
+            state2_screenshot = Path(temp_dir) / "game.state2.png"
+            state1_file.write_text("state1", encoding="utf-8")
+            state1_screenshot.write_bytes(b"")
+            state2_file.write_text("state2", encoding="utf-8")
+            state2_screenshot.write_bytes(b"")
+
+            jobs, temporary_archives = retroarch_state_upload_jobs([state1_file, state2_file], "stateFile")
+
+        self.assertEqual(temporary_archives, [])
+        self.assertEqual(len(jobs), 2)
+        self.assertEqual(jobs[0][1]["stateFile"], state1_file)
+        self.assertEqual(jobs[0][1]["screenshotFile"], state1_screenshot)
+        self.assertEqual(jobs[1][1]["stateFile"], state2_file)
+        self.assertEqual(jobs[1][1]["screenshotFile"], state2_screenshot)
+
+    def test_retroarch_state_upload_jobs_ignores_non_image_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_file = Path(temp_dir) / "game.state"
+            non_image_sidecar = Path(temp_dir) / "game.state.txt"
+            state_file.write_text("state", encoding="utf-8")
+            non_image_sidecar.write_text("metadata", encoding="utf-8")
+
+            jobs, temporary_archives = retroarch_state_upload_jobs([state_file], "stateFile")
+
+        self.assertEqual(temporary_archives, [])
+        self.assertEqual(len(jobs), 1)
+        _, files = jobs[0]
+        self.assertNotIn("screenshotFile", files)
+
+    def test_retroarch_state_upload_jobs_screenshot_in_files_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_file = Path(temp_dir) / "game.state1"
+            screenshot_file = Path(temp_dir) / "game.state1.png"
+            state_file.write_text("state", encoding="utf-8")
+            screenshot_file.write_bytes(b"")
+
+            jobs, temporary_archives = retroarch_state_upload_jobs([state_file], "stateFile")
+
+        self.assertEqual(temporary_archives, [])
+        self.assertEqual(len(jobs), 1)
+        _, files = jobs[0]
+        self.assertEqual(files["screenshotFile"], screenshot_file)
+
+    def test_retroarch_state_upload_jobs_returns_two_tuple_per_job(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_file = Path(temp_dir) / "game.state1"
+            state_file.write_text("state", encoding="utf-8")
+
+            jobs, temporary_archives = retroarch_state_upload_jobs([state_file], "stateFile")
+
+        self.assertEqual(temporary_archives, [])
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(len(jobs[0]), 2)
 
     def test_grouped_file_upload_jobs_archives_multiple_files_into_one_upload(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

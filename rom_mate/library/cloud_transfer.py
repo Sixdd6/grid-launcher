@@ -61,6 +61,25 @@ def supported_image_sidecar_path(
     return None
 
 
+def appended_image_sidecar_path(
+    file_path: Path,
+    *,
+    blocked_basenames: set[str] | None = None,
+) -> Path | None:
+    """Return the first supported image sidecar formed by appending an extension
+    to the complete filename (e.g. ``game.state1`` -> ``game.state1.png``).
+    Returns ``None`` if no such file exists.
+    """
+    blocked_names = _normalized_blocked_basenames(blocked_basenames)
+    for extension in SUPPORTED_IMAGE_EXTENSIONS:
+        candidate = Path(str(file_path) + extension)
+        if blocked_names and candidate.name.casefold() in blocked_names:
+            continue
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
 def normalize_candidate_url(value: str) -> str:
     parsed = urlsplit(value)
     encoded_path = quote(parsed.path, safe="/%")
@@ -73,6 +92,18 @@ def state_download_candidate_paths(state_record: dict[str, Any]) -> list[str]:
     candidate_paths: list[str] = []
     for key in ("download_path", "file_path", "full_path"):
         value = state_record.get(key, "")
+        if not isinstance(value, str):
+            continue
+        candidate = value.strip()
+        if candidate:
+            candidate_paths.append(candidate)
+    return candidate_paths
+
+
+def screenshot_download_candidate_paths(screenshot_record: dict[str, Any]) -> list[str]:
+    candidate_paths: list[str] = []
+    for key in ("download_path", "file_path", "full_path"):
+        value = screenshot_record.get(key, "")
         if not isinstance(value, str):
             continue
         candidate = value.strip()
@@ -324,6 +355,36 @@ def ppsspp_state_upload_jobs(
             files["screenshotFile"] = screenshot
         jobs.append((state_file.name, files))
     return jobs
+
+
+def retroarch_state_upload_jobs(
+    files: list[Path],
+    file_field: str,
+    *,
+    ignore_basenames: set[str] | None = None,
+    ignore_extensions: set[str] | None = None,
+) -> tuple[list[tuple[str, dict[str, Path]]], list[Path]]:
+    selected_files = _unique_existing_files(files)
+    blocked_basenames = _normalized_blocked_basenames(ignore_basenames)
+    blocked_extensions = _normalized_blocked_extensions(ignore_extensions)
+
+    jobs: list[tuple[str, dict[str, Path]]] = []
+    for state_file in selected_files:
+        if blocked_basenames and state_file.name.casefold() in blocked_basenames:
+            continue
+        if blocked_extensions and state_file.suffix.casefold() in blocked_extensions:
+            continue
+
+        screenshot = appended_image_sidecar_path(
+            state_file,
+            blocked_basenames=ignore_basenames,
+        )
+        payload: dict[str, Path] = {file_field: state_file}
+        if screenshot is not None:
+            payload["screenshotFile"] = screenshot
+        jobs.append((state_file.name, payload))
+
+    return jobs, []
 
 
 def filter_upload_jobs_by_session_window(

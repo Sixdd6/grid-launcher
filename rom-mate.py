@@ -56,6 +56,7 @@ from rom_mate.core import (
     api_get_json,
     api_post_json,
     api_post_multipart_json,
+    api_put_multipart_json,
     build_auth_headers,
     build_binary_auth_headers,
     format_http_error_details,
@@ -157,6 +158,7 @@ from rom_mate.library import (
     remove_game_files as resolve_remove_game_files,
     uninstall_library_games as resolve_uninstall_library_games,
     ppsspp_state_upload_jobs,
+    retroarch_state_upload_jobs,
     prepare_installed_game_without_ui as resolve_prepare_installed_game_without_ui,
     restore_single_save_payload,
     restore_single_state_payload,
@@ -173,6 +175,7 @@ from rom_mate.library import (
     update_rpcs3_games_yml_for_install as resolve_update_rpcs3_games_yml_for_install,
     upsert_rpcs3_games_yml_entry as resolve_upsert_rpcs3_games_yml_entry,
     session_cloud_sync_updates,
+    screenshot_download_candidate_paths,
     should_skip_known_latest,
     state_download_candidate_paths,
     tar_archive_total_install_bytes as resolve_tar_archive_total_install_bytes,
@@ -188,6 +191,7 @@ from rom_mate.library import (
     sync_install_metadata_to_details_game as resolve_sync_install_metadata_to_details_game,
     update_cloud_sync_state_for_game,
 )
+from rom_mate.library.cloud_transfer import SUPPORTED_IMAGE_EXTENSIONS
 from rom_mate.cover import (
     apply_cover_to_label,
     cache_cover_image_for_game,
@@ -449,6 +453,13 @@ class MainWindow(QMainWindow):
         self._pcgw_thread: QThread | None = None
         self._pcgw_worker: QObject | None = None
         self._pcgw_paths_cache: dict[str, list[str]] = {}
+        saved_manual = self.config.get("native_manual_save_paths", {})
+        if isinstance(saved_manual, dict):
+            for title_key, paths in saved_manual.items():
+                if isinstance(title_key, str) and isinstance(paths, list):
+                    clean_paths = [p for p in paths if isinstance(p, str) and p]
+                    if clean_paths:
+                        self._pcgw_paths_cache[title_key + "__manual"] = clean_paths
         self.install_in_progress = False
         self.install_pending_game: dict[str, str] | None = None
         self.install_queue: list[dict[str, str]] = []
@@ -1903,6 +1914,13 @@ class MainWindow(QMainWindow):
         if not isinstance(api_token, str):
             api_token = ""
         return api_post_multipart_json(base_url, api_token, path, files, params)
+
+    def _api_put_multipart(self, path: str, files: dict[str, Path], params: dict[str, Any] | None = None) -> Any:
+        base_url = self._server_base_url()
+        api_token = self.config.get("api_token", "")
+        if not isinstance(api_token, str):
+            api_token = ""
+        return api_put_multipart_json(base_url, api_token, path, files, params)
 
     def _api_post_json(self, path: str, payload: dict[str, Any], params: dict[str, Any] | None = None) -> Any:
         base_url = self._server_base_url()
@@ -4462,13 +4480,16 @@ class MainWindow(QMainWindow):
         if self.current_details_game is None:
             return False, "No game is selected."
 
+        record_emulator = str(record.get("emulator", "")).strip()
+        if record_emulator == "native_multi_dir":
+            return True, ""
+
         target_game = self._installed_game_record(self.current_details_game)
         resolved_game = target_game if target_game is not None else self.current_details_game
         if resolved_game is None:
             return False, "No game is selected."
 
         resolved_emulator_name, resolved_emulator_entry = self._resolved_emulator_entry_for_game(resolved_game)
-        record_emulator = str(record.get("emulator", "")).strip()
         compatibility_emulator_name = record_emulator or resolved_emulator_name
         cache_key = (
             save_type,
@@ -4691,8 +4712,18 @@ class MainWindow(QMainWindow):
         kind_label = str(request_context.get("kind_label", "saves" if save_type == "save" else "states"))
         upload_reason = str(request_context.get("upload_reason", "")).strip()
         emulator_name = str(request_context.get("emulator_name", "")).strip()
+        native_game = self.current_details_game if (
+            save_type == "save"
+            and self.current_details_game is not None
+            and self._is_native_executable_platform(self.current_details_game)
+        ) else None
 
         self._clear_layout_items(self.details_cloud_list_layout)
+
+        if isinstance(native_game, dict):
+            native_paths = self._native_save_paths_for_game(native_game)
+            self._render_native_save_path_section(native_game, native_paths)
+            self.details_cloud_list_layout.addWidget(self._native_cloud_saves_section_label())
 
         if error:
             self.details_cloud_status_label.setText(f"Could not load cloud {kind_label}: {error}")
@@ -4869,6 +4900,78 @@ class MainWindow(QMainWindow):
         if callable(timing_end):
             timing_end("_refresh_details_cloud_panel", started_at, result="worker-started", rom_id=rom_id)
 
+    def _native_save_paths_for_game(self, game: dict) -> list[str]:
+        cached = self._pcgw_paths_for_game(game) or []
+        key = self._pcgw_cache_key(game)
+        manual_key = key + "__manual"
+        manual_paths: list[str] = self._pcgw_paths_cache.get(manual_key, [])
+        return list(cached) + [path for path in manual_paths if path not in cached]
+
+    def _native_cloud_saves_section_label(self) -> QLabel:
+        label = QLabel("Cloud Saves")
+        label.setStyleSheet("font-size: 16px; font-weight: 700;")
+        return label
+
+    def _render_native_save_path_section(self, game: dict, all_raw_paths: list[str]) -> None:
+        if self.details_cloud_list_layout is None:
+            return
+
+        import os
+
+        container = QFrame()
+        container.setObjectName("detailsNativePathSection")
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(8)
+
+        heading = QLabel("Save Locations")
+        heading.setStyleSheet("font-size: 16px; font-weight: 700;")
+        container_layout.addWidget(heading)
+
+        if all_raw_paths:
+            for raw_path in all_raw_paths:
+                expanded = os.path.expandvars(raw_path)
+                row = QWidget()
+                row_layout = QHBoxLayout(row)
+                row_layout.setContentsMargins(0, 4, 0, 4)
+                label = QLabel(raw_path)
+                label.setWordWrap(True)
+                label.setToolTip(expanded)
+                row_layout.addWidget(label, 1)
+                remove_btn = QPushButton("X")
+                remove_btn.setFixedWidth(28)
+                remove_btn.setToolTip("Remove this path")
+                raw_path_capture = raw_path
+
+                def _remove(checked=False, rp=raw_path_capture):
+                    self._pcgw_remove_path_for_game(game, rp)
+                    self._refresh_details_cloud_panel()
+
+                remove_btn.clicked.connect(_remove)
+                row_layout.addWidget(remove_btn)
+                container_layout.addWidget(row)
+        else:
+            empty_paths = QLabel("No save locations were found automatically. Use Browse to add one.")
+            empty_paths.setWordWrap(True)
+            empty_paths.setStyleSheet(f"color: {self._theme_color('muted', '#6272a4')};")
+            container_layout.addWidget(empty_paths)
+
+        browse_btn = QPushButton("Browse...")
+        browse_btn.setToolTip("Add a custom save folder for this game")
+
+        def _browse(checked=False):
+            from PySide6.QtWidgets import QFileDialog
+
+            folder = QFileDialog.getExistingDirectory(self, "Select Save Folder")
+            if folder:
+                self._pcgw_add_manual_path_for_game(game, folder)
+                self._refresh_details_cloud_panel()
+
+        browse_btn.clicked.connect(_browse)
+        container_layout.addWidget(browse_btn)
+
+        self.details_cloud_list_layout.addWidget(container)
+
     def _refresh_native_save_panel(self, game: dict, save_type: str) -> None:
         """Populate the cloud panel for a native Windows game using PCGamingWiki paths."""
         if save_type != "save":
@@ -4893,11 +4996,8 @@ class MainWindow(QMainWindow):
             self._start_pcgw_lookup_for_game(game)
             return
 
-        # Build a combined list: PCGW paths + any manually added paths
-        key = self._pcgw_cache_key(game)
-        manual_key = key + "__manual"
-        manual_paths: list[str] = self._pcgw_paths_cache.get(manual_key, [])
-        all_raw_paths = list(cached) + [p for p in manual_paths if p not in cached]
+        all_raw_paths = self._native_save_paths_for_game(game)
+        rom_id = self._cloud_sync_rom_id_for_game(game)
 
         # Show the path list (or empty state)
         if not all_raw_paths:
@@ -4906,67 +5006,41 @@ class MainWindow(QMainWindow):
             self.details_cloud_upload_button.setToolTip("Add a save location to enable uploads.")
         else:
             self.details_cloud_status_label.setText(f"{len(all_raw_paths)} save location(s) configured.")
-            rom_id = self._cloud_sync_rom_id_for_game(game)
             self.details_cloud_upload_button.setEnabled(bool(rom_id))
             self.details_cloud_upload_button.setToolTip(
                 "Upload save files from the listed locations." if rom_id else "Missing ROM id for this game."
             )
 
-        # Render path rows
-        import os
-        from pathlib import Path
+        self._render_native_save_path_section(game, all_raw_paths)
+        self.details_cloud_list_layout.addWidget(self._native_cloud_saves_section_label())
 
-        for raw_path in all_raw_paths:
-            expanded = os.path.expandvars(raw_path)
-            p = Path(expanded)
-            row = QWidget()
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(0, 4, 0, 4)
-            label = QLabel(raw_path)
-            label.setWordWrap(True)
-            label.setToolTip(expanded)
-            row_layout.addWidget(label, 1)
-            remove_btn = QPushButton("✕")
-            remove_btn.setFixedWidth(28)
-            remove_btn.setToolTip("Remove this path")
-            raw_path_capture = raw_path
-
-            def _remove(checked=False, rp=raw_path_capture):
-                self._pcgw_remove_path_for_game(game, rp)
-                self._refresh_details_cloud_panel()
-
-            remove_btn.clicked.connect(_remove)
-            row_layout.addWidget(remove_btn)
-            self.details_cloud_list_layout.addWidget(row)
-
-        # Browse button (always shown so users can add paths)
-        browse_btn = QPushButton("Browse…")
-        browse_btn.setToolTip("Add a custom save folder for this game")
-
-        def _browse(checked=False):
-            from PySide6.QtWidgets import QFileDialog
-
-            folder = QFileDialog.getExistingDirectory(self, "Select Save Folder")
-            if folder:
-                self._pcgw_add_manual_path_for_game(game, folder)
-                self._refresh_details_cloud_panel()
-
-        browse_btn.clicked.connect(_browse)
-        self.details_cloud_list_layout.addWidget(browse_btn)
-
-        if not all_raw_paths:
-            self.details_cloud_empty_label.setText(
-                "No save locations were found automatically. Use Browse to add one."
-            )
+        if not rom_id:
+            self.details_cloud_empty_label.setText("Missing ROM id for this game.")
             self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
+            self.details_cloud_list_layout.addStretch()
+            return
 
+        self.details_cloud_empty_label.setText("Loading cloud saves from the server...")
+        self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
         self.details_cloud_list_layout.addStretch()
 
+        self._start_details_cloud_records_worker(
+            rom_id,
+            "save",
+            kind_label="saves",
+            upload_reason="Uploads include all configured native save locations.",
+            emulator_name="native_multi_dir",
+        )
+
     def _pcgw_add_manual_path_for_game(self, game: dict, folder: str) -> None:
-        key = self._pcgw_cache_key(game) + "__manual"
-        existing = self._pcgw_paths_cache.get(key, [])
+        key = self._pcgw_cache_key(game)
+        manual_key = key + "__manual"
+        existing = self._pcgw_paths_cache.get(manual_key, [])
         if folder not in existing:
-            self._pcgw_paths_cache[key] = existing + [folder]
+            self._pcgw_paths_cache[manual_key] = existing + [folder]
+        saved = self.config.setdefault("native_manual_save_paths", {})
+        saved[key] = list(self._pcgw_paths_cache.get(key + "__manual", []))
+        self._save_config(self.config)
 
     def _pcgw_remove_path_for_game(self, game: dict, raw_path: str) -> None:
         key = self._pcgw_cache_key(game)
@@ -4977,6 +5051,9 @@ class MainWindow(QMainWindow):
         # Remove from manual list
         manual = self._pcgw_paths_cache.get(manual_key, [])
         self._pcgw_paths_cache[manual_key] = [p for p in manual if p != raw_path]
+        saved = self.config.setdefault("native_manual_save_paths", {})
+        saved[key] = list(self._pcgw_paths_cache.get(key + "__manual", []))
+        self._save_config(self.config)
 
     def _confirm_restore_details_cloud_record(self, record: dict[str, Any], save_type: str) -> None:
         if self.current_details_game is None:
@@ -6313,6 +6390,8 @@ class MainWindow(QMainWindow):
     def _is_state_file_candidate(self, file_path: Path) -> bool:
         name = file_path.name.casefold()
         suffix = file_path.suffix.casefold()
+        if suffix in SUPPORTED_IMAGE_EXTENSIONS:
+            return False
         if suffix in {".state", ".savestate", ".st", ".ss", ".ppst"}:
             return True
         if ".state" in name:
@@ -6628,7 +6707,25 @@ class MainWindow(QMainWindow):
 
     def _server_state_records_for_rom(self, rom_id: str) -> list[dict[str, Any]]:
         payload = self._api_get("/api/states", {"rom_id": rom_id})
-        return server_records_from_payload(payload)
+        records = server_records_from_payload(payload)
+        blocked_extensions = tuple(
+            extension.casefold()
+            for extension in SUPPORTED_IMAGE_EXTENSIONS
+            if isinstance(extension, str) and extension.strip()
+        )
+        if not blocked_extensions:
+            return records
+
+        filtered_records: list[dict[str, Any]] = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            file_name_value = record.get("file_name", "")
+            file_name = file_name_value.strip().casefold() if isinstance(file_name_value, str) else ""
+            if file_name and file_name.endswith(blocked_extensions):
+                continue
+            filtered_records.append(record)
+        return filtered_records
 
     def _latest_server_state_record(self, rom_id: str, emulator_name: str) -> dict[str, Any] | None:
         records = self._server_state_records_for_rom(rom_id)
@@ -6756,6 +6853,34 @@ class MainWindow(QMainWindow):
 
         raise ValueError("State content path could not be resolved from server record.")
 
+    def _download_screenshot_from_state_record(self, state_record: dict) -> tuple[bytes, str] | None:
+        screenshot_record = state_record.get("screenshot")
+        if not isinstance(screenshot_record, dict):
+            return None
+
+        if screenshot_record.get("missing_from_fs") is True:
+            return None
+
+        candidates = screenshot_download_candidate_paths(screenshot_record)
+        if not candidates:
+            return None
+
+        screenshot_extension = screenshot_record.get("file_extension", "").strip() or ".png"
+        for candidate in candidates:
+            try:
+                if candidate.startswith(("http://", "https://")):
+                    request = Request(normalize_candidate_url(candidate), headers=self._authorized_headers(), method="GET")
+                    with urlopen(request, timeout=60) as response:
+                        return response.read(), screenshot_extension
+
+                relative_path = candidate if candidate.startswith("/") else f"/{candidate}"
+                relative_path = normalize_candidate_url(relative_path)
+                return self._api_get_bytes(relative_path), screenshot_extension
+            except (HTTPError, URLError, OSError, ValueError):
+                continue
+
+        return None
+
     def _extract_zip_archive_bytes_to_directory(
         self,
         payload: bytes,
@@ -6805,6 +6930,8 @@ class MainWindow(QMainWindow):
         directories: list[Path],
         state_record: dict[str, Any],
         payload: bytes,
+        screenshot_bytes: bytes | None = None,
+        screenshot_extension: str = ".png",
         *,
         ignore_basenames: set[str] | None = None,
         ignore_extensions: set[str] | None = None,
@@ -6823,6 +6950,8 @@ class MainWindow(QMainWindow):
             payload,
             candidate_paths,
             fallback_name,
+            screenshot_bytes=screenshot_bytes,
+            screenshot_extension=screenshot_extension,
             skip_basenames=ignore_basenames,
             skip_extensions=ignore_extensions,
         )
@@ -7282,6 +7411,17 @@ class MainWindow(QMainWindow):
             show_warning("Downloaded cloud state content was empty.")
             return False
 
+        screenshot_result = None
+        try:
+            screenshot_result = self._download_screenshot_from_state_record(state_record)
+        except (HTTPError, URLError, OSError, ValueError) as error:
+            if debug_enabled:
+                print(
+                    f"[DEBUG][CloudSync] Restore screenshot download failed save_type=state title={game.get('title', '')} "
+                    f"rom_id={rom_id} emulator={emulator_name} state_id={state_id} error={error}"
+                )
+        screenshot_bytes, screenshot_ext = screenshot_result if screenshot_result else (None, ".png")
+
         try:
             ignore_basenames = self._resolved_ignore_basenames_for_emulator(emulator_entry)
             ignore_extensions = self._resolved_ignore_extensions_for_emulator(emulator_entry)
@@ -7290,6 +7430,8 @@ class MainWindow(QMainWindow):
                 directories,
                 state_record,
                 payload,
+                screenshot_bytes,
+                screenshot_ext,
                 ignore_basenames=ignore_basenames,
                 ignore_extensions=ignore_extensions,
             )
@@ -7397,6 +7539,8 @@ class MainWindow(QMainWindow):
 
         upload_jobs: list[tuple[str, dict[str, Path]]] = []
         temporary_archives: list[Path] = []
+        success_count = 0
+        failed_files: list[str] = []
 
         if save_type == "save":
             save_files, save_directories = self._cloud_sync_targets_for_game(
@@ -7482,20 +7626,26 @@ class MainWindow(QMainWindow):
                 return 0, 0, []
             ignore_basenames = self._sync_directory_ignore_basenames_for_emulator(emulator_name, emulator_entry, save_type)
             ignore_extensions = self._sync_directory_ignore_extensions_for_emulator(emulator_entry)
-            upload_jobs, grouped_archives = grouped_file_upload_jobs(
-                files,
-                file_field,
-                lambda selected_files: zip_selected_files_for_upload(
-                    selected_files,
-                    self._sanitize_path_component(game.get("title", "game"), save_type),
+            if save_type == "state" and self._is_retroarch_emulator_name(emulator_name, emulator_entry):
+                upload_jobs, ra_archives = retroarch_state_upload_jobs(
+                    files,
+                    file_field,
                     ignore_basenames=ignore_basenames,
                     ignore_extensions=ignore_extensions,
-                ),
-            )
-            temporary_archives.extend(grouped_archives)
-
-        success_count = 0
-        failed_files: list[str] = []
+                )
+                temporary_archives.extend(ra_archives)
+            else:
+                upload_jobs, grouped_archives = grouped_file_upload_jobs(
+                    files,
+                    file_field,
+                    lambda selected_files: zip_selected_files_for_upload(
+                        selected_files,
+                        self._sanitize_path_component(game.get("title", "game"), save_type),
+                        ignore_basenames=ignore_basenames,
+                        ignore_extensions=ignore_extensions,
+                    ),
+                )
+                temporary_archives.extend(grouped_archives)
 
         for display_name, files_payload in upload_jobs:
             params: dict[str, Any] = {
@@ -7537,9 +7687,10 @@ class MainWindow(QMainWindow):
 
         if debug_enabled:
             status = "success" if not failed_files else ("partial" if success_count > 0 else "failure")
+            total_upload_jobs = len(upload_jobs)
             print(
                 f"[DEBUG][CloudSync] Upload {status} save_type={save_type} title={game.get('title', '')} "
-                f"rom_id={rom_id} emulator={emulator_name} uploaded={success_count}/{len(upload_jobs)} "
+                f"rom_id={rom_id} emulator={emulator_name} uploaded={success_count}/{total_upload_jobs} "
                 f"failed={failed_files[:5]} retention_deleted={retention_deleted} "
                 f"retention_limit={retention_limit} retention_failed={retention_failed_ids[:5]}"
             )
@@ -7555,7 +7706,8 @@ class MainWindow(QMainWindow):
             show_warning(completion_message)
         else:
             show_info(completion_message)
-        return success_count, len(upload_jobs), failed_files
+        total_upload_jobs = len(upload_jobs)
+        return success_count, total_upload_jobs, failed_files
 
     def _upload_native_saves_for_game(
         self,

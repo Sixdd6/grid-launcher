@@ -3,7 +3,7 @@
 This document is a stable module map for the current codebase.
 
 - Use `SPEC.md` for product behavior and UX intent.
-- Use `openapi.json` when changing server connectivity or API contracts.
+- Use `openapi.json` as a single source of truth for all api calls to the server.
 
 ## Runtime Entry
 - `rom-mate.py`

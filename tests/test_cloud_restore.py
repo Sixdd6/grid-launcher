@@ -141,6 +141,106 @@ class CloudRestoreTests(unittest.TestCase):
             self.assertEqual(restored, expected_path)
             self.assertEqual(expected_path.read_bytes(), b"auto-state")
 
+    def test_restore_single_state_payload_writes_screenshot_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_root = Path(temp_dir) / "states"
+            core_dir = state_root / "Snes9x"
+            core_dir.mkdir(parents=True)
+            existing_state = core_dir / "Chrono Trigger.state1"
+            existing_state.write_bytes(b"slot-1")
+
+            restored = restore_single_state_payload(
+                [state_root],
+                {"file_name": "Chrono Trigger.state.auto"},
+                b"auto-state",
+                [existing_state],
+                "Chrono Trigger.state",
+                screenshot_bytes=b"\x89PNG\r\n\x1a\n",
+                screenshot_extension=".png",
+            )
+
+            expected_path = core_dir / "Chrono Trigger.state.auto"
+            sidecar_path = Path(str(expected_path) + ".png")
+            self.assertEqual(restored, expected_path)
+            self.assertTrue(expected_path.exists())
+            self.assertTrue(sidecar_path.exists())
+            self.assertEqual(sidecar_path.read_bytes(), b"\x89PNG\r\n\x1a\n")
+
+    def test_restore_single_state_payload_omits_sidecar_when_no_screenshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_root = Path(temp_dir) / "states"
+            core_dir = state_root / "Snes9x"
+            core_dir.mkdir(parents=True)
+            existing_state = core_dir / "Chrono Trigger.state1"
+            existing_state.write_bytes(b"slot-1")
+
+            restored = restore_single_state_payload(
+                [state_root],
+                {"file_name": "Chrono Trigger.state.auto"},
+                b"auto-state",
+                [existing_state],
+                "Chrono Trigger.state",
+                screenshot_bytes=None,
+            )
+
+            expected_path = core_dir / "Chrono Trigger.state.auto"
+            sidecar_path = Path(str(expected_path) + ".png")
+            self.assertEqual(restored, expected_path)
+            self.assertTrue(expected_path.exists())
+            self.assertFalse(sidecar_path.exists())
+
+    def test_restore_single_state_payload_uses_custom_screenshot_extension(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_root = Path(temp_dir) / "states"
+            core_dir = state_root / "Snes9x"
+            core_dir.mkdir(parents=True)
+            existing_state = core_dir / "Chrono Trigger.state1"
+            existing_state.write_bytes(b"slot-1")
+
+            restored = restore_single_state_payload(
+                [state_root],
+                {"file_name": "Chrono Trigger.state.auto"},
+                b"auto-state",
+                [existing_state],
+                "Chrono Trigger.state",
+                screenshot_bytes=b"fake",
+                screenshot_extension=".jpg",
+            )
+
+            expected_path = core_dir / "Chrono Trigger.state.auto"
+            jpg_sidecar_path = Path(str(expected_path) + ".jpg")
+            png_sidecar_path = Path(str(expected_path) + ".png")
+            self.assertEqual(restored, expected_path)
+            self.assertTrue(jpg_sidecar_path.exists())
+            self.assertFalse(png_sidecar_path.exists())
+
+    def test_restore_single_state_payload_no_sidecar_for_zip_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_root = Path(temp_dir) / "states"
+            core_dir = state_root / "Snes9x"
+            core_dir.mkdir(parents=True)
+            existing_state = core_dir / "Chrono Trigger.state1"
+            existing_state.write_bytes(b"slot-1")
+
+            payload_stream = io.BytesIO()
+            with zipfile.ZipFile(payload_stream, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("Chrono Trigger.state2", b"new-slot")
+
+            restored = restore_single_state_payload(
+                [state_root],
+                {"file_name": "Chrono Trigger.state.zip"},
+                payload_stream.getvalue(),
+                [existing_state],
+                "Chrono Trigger.state",
+                screenshot_bytes=b"\x89PNG\r\n\x1a\n",
+            )
+
+            expected_extracted_path = core_dir / "Chrono Trigger.state2"
+            sidecar_path = Path(str(core_dir / "Chrono Trigger.state.zip") + ".png")
+            self.assertEqual(restored, core_dir)
+            self.assertTrue(expected_extracted_path.exists())
+            self.assertFalse(sidecar_path.exists())
+
     def test_restore_single_state_payload_unpacks_zip_archive_into_matching_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             state_root = Path(temp_dir) / "states"

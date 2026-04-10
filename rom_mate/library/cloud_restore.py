@@ -225,6 +225,8 @@ def restore_single_state_payload(
     *,
     skip_basenames: set[str] | None = None,
     skip_extensions: set[str] | None = None,
+    screenshot_bytes: bytes | None = None,
+    screenshot_extension: str = ".png",
 ) -> Path | None:
     if not payload or not directories:
         return None
@@ -246,4 +248,6 @@ def restore_single_state_payload(
         return target_path.parent if extracted_count > 0 else None
 
     target_path.write_bytes(payload)
+    if screenshot_bytes:
+        Path(str(target_path) + screenshot_extension).write_bytes(screenshot_bytes)
     return target_path
