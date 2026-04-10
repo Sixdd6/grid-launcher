@@ -8,7 +8,12 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from rom_mate.background.workers import DetailsCloudRecordsWorker, InstallDownloadWorker, RetroAchievementsWorker
+from rom_mate.background.workers import (
+    DetailsCloudRecordsWorker,
+    InstallDownloadWorker,
+    PCGamingWikiWorker,
+    RetroAchievementsWorker,
+)
 from rom_mate.emulator.source import EmulatorSourceResolutionError
 
 
@@ -632,6 +637,28 @@ class TestRetroAchievementsWorker(unittest.TestCase):
         self.assertEqual(rid, 7)
         self.assertEqual(achs, [])
         self.assertIn("network error", err)
+
+
+class TestPCGamingWikiWorker(unittest.TestCase):
+    def _run_worker(self, worker):
+        results = []
+        worker.finished.connect(lambda rid, paths, err: results.append((rid, paths, err)))
+        worker.run()
+        return results
+
+    def test_pcgamingwiki_worker_emits_paths_on_success(self):
+        with patch("rom_mate.server.pcgamingwiki.fetch_windows_save_paths") as mock_fetch:
+            mock_fetch.return_value = ["%APPDATA%\\Game"]
+            worker = PCGamingWikiWorker(42, "Game")
+            results = self._run_worker(worker)
+        self.assertEqual(results, [(42, ["%APPDATA%\\Game"], "")])
+
+    def test_pcgamingwiki_worker_emits_error_on_failure(self):
+        with patch("rom_mate.server.pcgamingwiki.fetch_windows_save_paths") as mock_fetch:
+            mock_fetch.side_effect = Exception("timeout")
+            worker = PCGamingWikiWorker(9, "Game")
+            results = self._run_worker(worker)
+        self.assertEqual(results, [(9, [], "timeout")])
 
 
 if __name__ == "__main__":

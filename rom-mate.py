@@ -443,6 +443,10 @@ class MainWindow(QMainWindow):
         self._ra_thread: QThread | None = None
         self._ra_worker: QObject | None = None
         self.details_achievements_panel: QWidget | None = None
+        self._pending_pcgw_request_id: int | None = None
+        self._pcgw_thread: QThread | None = None
+        self._pcgw_worker: QObject | None = None
+        self._pcgw_paths_cache: dict[str, list[str]] = {}
         self.install_in_progress = False
         self.install_pending_game: dict[str, str] | None = None
         self.install_queue: list[dict[str, str]] = []
@@ -2671,6 +2675,42 @@ class MainWindow(QMainWindow):
             install_progress_callback=install_progress_callback,
         )
 
+    def _apply_native_game_update_without_ui(
+        self,
+        update_game: dict[str, str],
+        archive_path: Path,
+        *,
+        install_progress_callback: Callable[[int, int], None] | None = None,
+    ) -> tuple[dict[str, str] | None, str]:
+        from rom_mate.library.archive_preparation import prepare_native_game_update_without_ui
+
+        installed_game = self._installed_game_record(update_game) or update_game
+
+        return prepare_native_game_update_without_ui(
+            installed_game,
+            update_game,
+            archive_path,
+            temp_dir_for_game=self._native_update_temp_dir_for_game,
+            select_extracted_launch_file=self._select_extracted_launch_file,
+            install_progress_callback=install_progress_callback,
+        )
+
+    def _native_update_temp_dir_for_game(self, game: dict[str, str]) -> Path:
+        """Return a temp dir on the same filesystem as the game's install directory.
+
+        Using the same parent folder as extracted_dir ensures the extraction and
+        merge happen on the same filesystem, avoiding cross-drive file copies.
+        """
+        extracted_dir_text = game.get("extracted_dir", "").strip()
+        if extracted_dir_text:
+            extracted_dir = Path(extracted_dir_text)
+            safe_name = self._sanitize_path_component(game.get("title", "game"), "game")
+            return extracted_dir.parent / f"{safe_name}-temp"
+        # Fallback: system temp (should not normally be reached)
+        import tempfile
+        safe_name = self._sanitize_path_component(game.get("title", "game"), "game")
+        return Path(tempfile.gettempdir()) / f"rom-mate-{safe_name}-temp"
+
     def _is_emulators_platform(self, game: dict[str, str]) -> bool:
         return resolve_is_emulators_platform(game)
 
@@ -2829,9 +2869,16 @@ class MainWindow(QMainWindow):
                 timing_end("_details_cloud_mode_supported", started_at, result=False, reason="invalid-type")
             return False
         if self._is_native_executable_platform(game):
+            if save_type == "state":
+                if callable(timing_end):
+                    timing_end("_details_cloud_mode_supported", started_at, result=False, reason="native-no-states")
+                return False
+            # Allow save mode for installed native games
+            installed_game = self._installed_game_record(game)
+            result = installed_game is not None
             if callable(timing_end):
-                timing_end("_details_cloud_mode_supported", started_at, result=False, reason="native-platform")
-            return False
+                timing_end("_details_cloud_mode_supported", started_at, result=result, reason="native-save")
+            return result
 
         installed_game = self._installed_game_record(game)
         resolved_game = installed_game or game
@@ -3328,7 +3375,89 @@ class MainWindow(QMainWindow):
         self._update_details_layout_metrics()
         QTimer.singleShot(0, self._update_details_layout_metrics)
 
+    def _enrich_game_for_details(self, game: dict) -> None:
+        """Merge missing server-side fields into a game dict before opening details.
+
+        This ensures library games (which may lack ra_id or update metadata) get
+        enriched from the live server game list, so the details page behaviour is
+        identical regardless of which page the user navigated from.
+        """
+        rom_id = game.get("rom_id", "")
+        if not rom_id:
+            return
+        server_game = next(
+            (
+                g
+                for games in self.server_games_by_platform.values()
+                for g in games
+                if g.get("rom_id") == rom_id
+            ),
+            None,
+        )
+        if server_game is None:
+            return
+        for field in ("ra_id", "ps4_has_update", "ps4_has_dlc", "ps4_file_ids_by_category"):
+            if not game.get(field):
+                value = server_game.get(field)
+                if value:
+                    game[field] = value
+
+    def _pcgw_cache_key(self, game: dict) -> str:
+        return game.get("title", "").strip()
+
+    def _pcgw_paths_for_game(self, game: dict) -> list[str] | None:
+        """Return cached path list, or None if not yet fetched."""
+        key = self._pcgw_cache_key(game)
+        if key not in self._pcgw_paths_cache:
+            return None
+        return self._pcgw_paths_cache[key]
+
+    def _start_pcgw_lookup_for_game(self, game: dict) -> None:
+        from rom_mate.background.workers import PCGamingWikiWorker
+
+        request_id = int(time.time() * 1000) % 1_000_000
+        self._pending_pcgw_request_id = request_id
+
+        title = game.get("title", "").strip()
+        worker = PCGamingWikiWorker(request_id, title)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_pcgw_paths_loaded)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+
+        self._pcgw_thread = thread
+        self._pcgw_worker = worker
+
+    def _on_pcgw_paths_loaded(self, request_id: int, raw_paths: list, error: str) -> None:
+        if request_id != self._pending_pcgw_request_id:
+            return
+        game = self._current_details_game
+        if game is None:
+            return
+        key = self._pcgw_cache_key(game)
+        self._pcgw_paths_cache[key] = raw_paths
+        # Refresh the native save panel if still showing it
+        if self.current_details_cloud_mode == "save":
+            self._refresh_details_cloud_panel()
+
+    def _expanded_pcgw_paths_for_game(self, game: dict) -> list:
+        """Return PCGamingWiki paths expanded via os.path.expandvars as Path objects."""
+        import os
+        from pathlib import Path
+
+        raw_paths = self._pcgw_paths_for_game(game) or []
+        result = []
+        for raw in raw_paths:
+            expanded = os.path.expandvars(raw)
+            result.append(Path(expanded))
+        return result
+
     def _open_game_details(self, game: dict[str, str], source: str) -> None:
+        self._enrich_game_for_details(game)
         self._current_details_game = game
         resolve_open_game_details(self, game, source)
         details_achievements_button = self.details_achievements_button
@@ -3734,7 +3863,12 @@ class MainWindow(QMainWindow):
         install_mode = install_mode_value.strip().lower() if isinstance(install_mode_value, str) else "base"
         content_kind_value = game.get("_ps4_content_kind", "")
         content_kind = content_kind_value.strip().lower() if isinstance(content_kind_value, str) else ""
-        finalize_content_kind = content_kind if install_mode == "ps4_content" else ""
+        if install_mode == "ps4_content":
+            finalize_content_kind = content_kind
+        elif install_mode == "native_update":
+            finalize_content_kind = "native_update"
+        else:
+            finalize_content_kind = ""
 
         thread = QThread(self)
         worker = InstallFinalizeWorker(self, game, archive_file, content_kind=finalize_content_kind)
@@ -3772,6 +3906,7 @@ class MainWindow(QMainWindow):
         is_ps4_content_install = install_mode == "ps4_content"
         is_source_install = install_mode in {"source_emulator", "source_emulator_update"}
         is_source_update = install_mode == "source_emulator_update"
+        is_native_update = install_mode == "native_update"
         content_kind_value = game.get("_ps4_content_kind", "") if isinstance(game, dict) else ""
         content_kind = content_kind_value.strip().lower() if isinstance(content_kind_value, str) else "content"
         install_label = f"PS4 {content_kind}" if is_ps4_content_install else title
@@ -3803,6 +3938,18 @@ class MainWindow(QMainWindow):
                 self._set_download_entry_status(entry_id, "completed")
             if warning_text.strip():
                 QMessageBox.warning(self, "Install Warning", warning_text.strip())
+            self._update_download_status_ui()
+            self._update_details_action_buttons()
+            self._start_next_queued_install()
+            return
+
+        if is_native_update:
+            self._register_installed_game(installed_game, Path(archive_path))
+            if entry_id:
+                self._set_download_entry_status(entry_id, "completed")
+            if warning_text.strip():
+                QMessageBox.warning(self, "Install Warning", warning_text.strip())
+            self._show_toast(f"Updated '{title}' successfully.", level="success")
             self._update_download_status_ui()
             self._update_details_action_buttons()
             self._start_next_queued_install()
@@ -4523,6 +4670,9 @@ class MainWindow(QMainWindow):
             return
 
         installed_game = self._installed_game_record(current_game)
+        if self._is_native_executable_platform(current_game):
+            self._refresh_native_save_panel(current_game, save_type)
+            return
         target_game = installed_game if installed_game is not None else current_game
         emulator_name, emulator_entry = self._resolved_cloud_emulator_entry_for_game(
             target_game,
@@ -4613,6 +4763,115 @@ class MainWindow(QMainWindow):
         )
         if callable(timing_end):
             timing_end("_refresh_details_cloud_panel", started_at, result="worker-started", rom_id=rom_id)
+
+    def _refresh_native_save_panel(self, game: dict, save_type: str) -> None:
+        """Populate the cloud panel for a native Windows game using PCGamingWiki paths."""
+        if save_type != "save":
+            self.details_cloud_status_label.setText("Save states are not supported for native games.")
+            self.details_cloud_upload_button.setEnabled(False)
+            self.details_cloud_upload_button.setToolTip("")
+            self.details_cloud_empty_label.setText("Only save file backups are supported for native games.")
+            self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
+            self.details_cloud_list_layout.addStretch()
+            return
+
+        cached = self._pcgw_paths_for_game(game)
+
+        if cached is None:
+            # Not yet fetched - show loading state and kick off background lookup
+            self.details_cloud_status_label.setText("Looking up save locations on PCGamingWiki…")
+            self.details_cloud_upload_button.setEnabled(False)
+            self.details_cloud_upload_button.setToolTip("Waiting for save location lookup…")
+            self.details_cloud_empty_label.setText("Fetching save locations from PCGamingWiki…")
+            self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
+            self.details_cloud_list_layout.addStretch()
+            self._start_pcgw_lookup_for_game(game)
+            return
+
+        # Build a combined list: PCGW paths + any manually added paths
+        key = self._pcgw_cache_key(game)
+        manual_key = key + "__manual"
+        manual_paths: list[str] = self._pcgw_paths_cache.get(manual_key, [])
+        all_raw_paths = list(cached) + [p for p in manual_paths if p not in cached]
+
+        # Show the path list (or empty state)
+        if not all_raw_paths:
+            self.details_cloud_status_label.setText("No save locations found on PCGamingWiki.")
+            self.details_cloud_upload_button.setEnabled(False)
+            self.details_cloud_upload_button.setToolTip("Add a save location to enable uploads.")
+        else:
+            self.details_cloud_status_label.setText(f"{len(all_raw_paths)} save location(s) configured.")
+            rom_id = self._cloud_sync_rom_id_for_game(game)
+            self.details_cloud_upload_button.setEnabled(bool(rom_id))
+            self.details_cloud_upload_button.setToolTip(
+                "Upload save files from the listed locations." if rom_id else "Missing ROM id for this game."
+            )
+
+        # Render path rows
+        import os
+        from pathlib import Path
+
+        for raw_path in all_raw_paths:
+            expanded = os.path.expandvars(raw_path)
+            p = Path(expanded)
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 4, 0, 4)
+            label = QLabel(raw_path)
+            label.setWordWrap(True)
+            label.setToolTip(expanded)
+            row_layout.addWidget(label, 1)
+            remove_btn = QPushButton("✕")
+            remove_btn.setFixedWidth(28)
+            remove_btn.setToolTip("Remove this path")
+            raw_path_capture = raw_path
+
+            def _remove(checked=False, rp=raw_path_capture):
+                self._pcgw_remove_path_for_game(game, rp)
+                self._refresh_details_cloud_panel()
+
+            remove_btn.clicked.connect(_remove)
+            row_layout.addWidget(remove_btn)
+            self.details_cloud_list_layout.addWidget(row)
+
+        # Browse button (always shown so users can add paths)
+        browse_btn = QPushButton("Browse…")
+        browse_btn.setToolTip("Add a custom save folder for this game")
+
+        def _browse(checked=False):
+            from PySide6.QtWidgets import QFileDialog
+
+            folder = QFileDialog.getExistingDirectory(self, "Select Save Folder")
+            if folder:
+                self._pcgw_add_manual_path_for_game(game, folder)
+                self._refresh_details_cloud_panel()
+
+        browse_btn.clicked.connect(_browse)
+        self.details_cloud_list_layout.addWidget(browse_btn)
+
+        if not all_raw_paths:
+            self.details_cloud_empty_label.setText(
+                "No save locations were found automatically. Use Browse to add one."
+            )
+            self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
+
+        self.details_cloud_list_layout.addStretch()
+
+    def _pcgw_add_manual_path_for_game(self, game: dict, folder: str) -> None:
+        key = self._pcgw_cache_key(game) + "__manual"
+        existing = self._pcgw_paths_cache.get(key, [])
+        if folder not in existing:
+            self._pcgw_paths_cache[key] = existing + [folder]
+
+    def _pcgw_remove_path_for_game(self, game: dict, raw_path: str) -> None:
+        key = self._pcgw_cache_key(game)
+        manual_key = key + "__manual"
+        # Remove from PCGW list
+        current = self._pcgw_paths_cache.get(key, [])
+        self._pcgw_paths_cache[key] = [p for p in current if p != raw_path]
+        # Remove from manual list
+        manual = self._pcgw_paths_cache.get(manual_key, [])
+        self._pcgw_paths_cache[manual_key] = [p for p in manual if p != raw_path]
 
     def _confirm_restore_details_cloud_record(self, record: dict[str, Any], save_type: str) -> None:
         if self.current_details_game is None:
@@ -5037,7 +5296,41 @@ class MainWindow(QMainWindow):
             return
 
         update_game["rom_id"] = resolved_rom_id
-        update_game["_install_mode"] = "update"
+        native_platform_check = getattr(self, "_is_native_executable_platform", None)
+        is_native_platform = (
+            native_platform_check(self.current_details_game)
+            if callable(native_platform_check)
+            else resolve_is_native_executable_platform(self.current_details_game)
+        )
+        if is_native_platform:
+            installed_rec = self._installed_game_record(self.current_details_game)
+            if installed_rec is None:
+                QMessageBox.warning(self, "Update Error", "Installed game record not found.")
+                return
+            extracted_dir_text = installed_rec.get("extracted_dir", "").strip()
+            if not extracted_dir_text or not Path(extracted_dir_text).is_dir():
+                QMessageBox.warning(
+                    self,
+                    "Update Error",
+                    "Game install directory could not be found. Reinstall the game and try again.",
+                )
+                return
+            confirm = QMessageBox.question(
+                self,
+                "Confirm Update",
+                f"This will download the new version of '{update_game.get('title', 'this game')}' "
+                "and merge updated files into your install directory.\n\n"
+                "Your save files and configuration will be preserved.\n\n"
+                "Continue?",
+            )
+            if confirm != QMessageBox.StandardButton.Yes:
+                return
+            update_game["_install_mode"] = "native_update"
+            update_game["extracted_dir"] = extracted_dir_text
+            update_game["native_executable_path"] = installed_rec.get("native_executable_path", "")
+            update_game["native_launch_parameters"] = installed_rec.get("native_launch_parameters", "")
+        else:
+            update_game["_install_mode"] = "update"
         self._hydrate_install_game_metadata(update_game, resolved_rom_id)
         resolved_file_name = self._resolved_rom_file_name_for_game(update_game, resolved_rom_id)
         if not resolved_file_name:
@@ -6448,6 +6741,9 @@ class MainWindow(QMainWindow):
             if show_dialogs:
                 QMessageBox.information(self, "Cloud Sync", message)
 
+        if self._is_native_executable_platform(game):
+            return self._restore_native_cloud_save_for_game(game, save_record=save_record, show_dialogs=show_dialogs)
+
         emulator_name, emulator_entry = self._resolved_cloud_emulator_entry_for_game(game, save_type="save")
         compatibility_reason = self._cloud_save_block_reason_for_game(
             game,
@@ -6639,6 +6935,141 @@ class MainWindow(QMainWindow):
         show_info("Cloud save restored successfully.")
         return True
 
+    def _restore_native_cloud_save_for_game(
+        self,
+        game: dict,
+        *,
+        save_record=None,
+        show_dialogs: bool = True,
+    ) -> bool:
+        import io
+        import json as _json
+        import os
+        import tempfile
+        import zipfile as _zipfile
+        from pathlib import Path
+        from urllib.error import HTTPError, URLError
+
+        def show_warning(msg: str) -> None:
+            if show_dialogs:
+                QMessageBox.warning(self, "Cloud Sync", msg)
+
+        # Build fallback directory list in case manifest is missing (legacy records)
+        key = self._pcgw_cache_key(game)
+        manual_key = key + "__manual"
+        cached = self._pcgw_paths_for_game(game) or []
+        manual = self._pcgw_paths_cache.get(manual_key, [])
+        all_raw = list(cached) + [p for p in manual if p not in cached]
+        fallback_dirs = [Path(os.path.expandvars(r)) for r in all_raw]
+
+        rom_id = self._cloud_sync_rom_id_for_game(game)
+        if not rom_id:
+            show_warning("Missing ROM id for this game.")
+            return False
+
+        try:
+            if save_record is None:
+                try:
+                    records = self._latest_server_save_records_for_game(game, rom_id, "", {})
+                except (HTTPError, URLError, ValueError) as error:
+                    show_warning(f"Failed to query server saves: {error}")
+                    return False
+            else:
+                records = [dict(save_record)]
+
+            if not records:
+                if show_dialogs:
+                    QMessageBox.information(self, "Cloud Sync", "No cloud save found on the server for this game.")
+                return False
+
+            for record in records:
+                save_id = str(record.get("id", "")).strip()
+                if not save_id:
+                    continue
+                payload = self._download_server_save_content(save_id)
+                if not payload:
+                    raise ValueError("Downloaded cloud save content was empty.")
+
+                emulator_field = str(record.get("emulator", "") or "")
+
+                if emulator_field == "native_multi_dir":
+                    # New format: combined archive with manifest
+                    fd, tmp_path = tempfile.mkstemp(prefix="rom-mate-restore-", suffix=".zip")
+                    os.close(fd)
+                    tmp_zip = Path(tmp_path)
+                    try:
+                        tmp_zip.write_bytes(payload)
+                        if not _zipfile.is_zipfile(tmp_zip):
+                            raise ValueError("Downloaded save is not a valid zip archive.")
+
+                        with _zipfile.ZipFile(tmp_zip, "r") as archive:
+                            # Read manifest
+                            try:
+                                manifest_bytes = archive.read("_rom_mate_dirs.json")
+                                manifest: dict[str, str] = _json.loads(manifest_bytes)
+                            except (KeyError, _json.JSONDecodeError):
+                                manifest = {}
+
+                            for member in archive.infolist():
+                                member_name = member.filename
+                                if member_name == "_rom_mate_dirs.json" or member_name.endswith("/"):
+                                    continue
+
+                                # Parse index prefix: "0/path/to/file.sav"
+                                parts = member_name.split("/", 1)
+                                if len(parts) != 2:
+                                    continue
+                                dir_idx, relative_str = parts[0], parts[1]
+                                if not relative_str:
+                                    continue
+
+                                # Resolve target directory
+                                if dir_idx in manifest:
+                                    raw_path = manifest[dir_idx]
+                                    target_root = Path(os.path.expandvars(raw_path))
+                                elif fallback_dirs:
+                                    target_root = fallback_dirs[0]
+                                else:
+                                    continue
+
+                                # Security: prevent path traversal
+                                resolved_root = target_root.resolve()
+                                destination = (resolved_root / relative_str).resolve()
+                                try:
+                                    destination.relative_to(resolved_root)
+                                except ValueError:
+                                    continue
+
+                                destination.parent.mkdir(parents=True, exist_ok=True)
+                                with archive.open(member, "r") as src, destination.open("wb") as dst:
+                                    import shutil
+                                    shutil.copyfileobj(src, dst)
+                    finally:
+                        tmp_zip.unlink(missing_ok=True)
+
+                elif emulator_field.startswith("native_dir:"):
+                    # Previous per-directory format (legacy)
+                    raw_path = emulator_field[len("native_dir:"):]
+                    restore_dir = Path(os.path.expandvars(raw_path))
+                    restore_dir.mkdir(parents=True, exist_ok=True)
+                    self._extract_zip_archive_bytes_to_directory(payload, restore_dir)
+
+                else:
+                    # Unknown/old format — restore to first fallback dir
+                    if not fallback_dirs:
+                        raise ValueError("No restore directories configured.")
+                    restore_dir = fallback_dirs[0]
+                    restore_dir.mkdir(parents=True, exist_ok=True)
+                    self._extract_zip_archive_bytes_to_directory(payload, restore_dir)
+
+        except Exception as error:
+            show_warning(f"Failed to restore cloud save: {error}")
+            return False
+
+        if show_dialogs:
+            QMessageBox.information(self, "Cloud Sync", "Cloud save restored successfully.")
+        return True
+
     def _restore_cloud_state_for_game(
         self,
         game: dict[str, str],
@@ -6817,6 +7248,8 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "Cloud Sync", message)
 
         emulator_name, emulator_entry = self._resolved_cloud_emulator_entry_for_game(game, save_type=save_type)
+        if self._is_native_executable_platform(game):
+            return self._upload_native_saves_for_game(game, show_dialogs=show_dialogs)
         compatibility_reason = self._cloud_save_block_reason_for_game(
             game,
             emulator_name,
@@ -7018,6 +7451,138 @@ class MainWindow(QMainWindow):
         else:
             show_info(completion_message)
         return success_count, len(upload_jobs), failed_files
+
+    def _upload_native_saves_for_game(
+        self,
+        game: dict,
+        *,
+        show_dialogs: bool = True,
+    ) -> tuple[int, int, list[str]]:
+        import io
+        import json as _json
+        import os
+        import tempfile
+        import zipfile as _zipfile
+        from pathlib import Path
+
+        def show_warning(msg: str) -> None:
+            if show_dialogs:
+                QMessageBox.warning(self, "Cloud Sync", msg)
+
+        def show_info(msg: str) -> None:
+            if show_dialogs:
+                QMessageBox.information(self, "Cloud Sync", msg)
+
+        # Build combined path list (PCGW + manual)
+        key = self._pcgw_cache_key(game)
+        manual_key = key + "__manual"
+        cached = self._pcgw_paths_for_game(game) or []
+        manual = self._pcgw_paths_cache.get(manual_key, [])
+        all_raw = list(cached) + [p for p in manual if p not in cached]
+
+        if not all_raw:
+            show_warning(
+                "No save locations are configured for this game. "
+                "Use 'Manage Saves' → 'Browse' to add one."
+            )
+            return 0, 0, []
+
+        rom_id = self._cloud_sync_rom_id_for_game(game)
+        if not rom_id:
+            show_warning("Missing ROM id for this game.")
+            return 0, 0, []
+
+        # Build dir_map: only include directories that currently exist
+        dir_map: list[tuple[str, Path]] = []
+        for raw in all_raw:
+            expanded = Path(os.path.expandvars(raw))
+            if expanded.exists():
+                dir_map.append((raw, expanded))
+
+        if not dir_map:
+            show_warning("None of the configured save locations exist on this device yet.")
+            return 0, 0, []
+
+        # Build a single combined zip archive
+        safe_title = self._sanitize_path_component(game.get("title", "game"), "save")
+        fd, tmp_path = tempfile.mkstemp(prefix=f"rom-mate-{safe_title}-", suffix=".zip")
+        os.close(fd)
+        archive_path = Path(tmp_path)
+
+        total_files = 0
+        manifest: dict[str, str] = {}
+        try:
+            with _zipfile.ZipFile(archive_path, mode="w", compression=_zipfile.ZIP_DEFLATED) as archive:
+                for idx, (raw_path, directory) in enumerate(dir_map):
+                    manifest[str(idx)] = raw_path
+                    prefix = f"{idx}/"
+                    for candidate in sorted(directory.rglob("*"), key=lambda p: str(p).casefold()):
+                        if not candidate.is_file():
+                            continue
+                        try:
+                            relative = candidate.relative_to(directory)
+                        except ValueError:
+                            relative = Path(candidate.name)
+                        archive_member = prefix + relative.as_posix()
+                        archive.write(candidate, archive_member)
+                        total_files += 1
+                # Write manifest last so it's easy to find
+                manifest_bytes = _json.dumps(manifest, indent=2).encode("utf-8")
+                archive.writestr("_rom_mate_dirs.json", manifest_bytes)
+        except OSError as exc:
+            archive_path.unlink(missing_ok=True)
+            show_warning(f"Failed to create save archive: {exc}")
+            return 0, 0, []
+
+        if total_files == 0:
+            archive_path.unlink(missing_ok=True)
+            show_info(no_matching_upload_message("save"))
+            return 0, 0, []
+
+        endpoint = "/api/saves"
+        file_field = "saveFile"
+        files_payload: dict[str, Path] = {file_field: archive_path}
+        params: dict[str, Any] = {
+            "rom_id": rom_id,
+            "emulator": "native_multi_dir",
+            "overwrite": "true",
+        }
+        try:
+            self._api_post_multipart(endpoint, files_payload, params=params)
+            success_count = 1
+            failed_files: list[str] = []
+        except (HTTPError, URLError, OSError, ValueError, json.JSONDecodeError) as exc:
+            success_count = 0
+            failed_files = [safe_title]
+        finally:
+            archive_path.unlink(missing_ok=True)
+
+        # Retention pruning — single upload job counts as 1
+        retention_limit = self._cloud_save_retention_limit()
+        retention_failed_ids: list[str] = []
+        if success_count > 0:
+            try:
+                _, retention_failed_ids = self._prune_server_save_records(
+                    rom_id,
+                    "native_multi_dir",
+                    retention_limit,
+                )
+            except (HTTPError, URLError, OSError, ValueError, json.JSONDecodeError) as error:
+                retention_failed_ids = [str(error)]
+
+        completion_message, is_warning = upload_completion_message(
+            "save",
+            success_count,
+            failed_files,
+            retention_failed_ids,
+            retention_limit,
+        )
+        if is_warning:
+            show_warning(completion_message)
+        else:
+            show_info(completion_message)
+
+        return success_count, 1, failed_files
 
     def _perform_upload_saves_action(self) -> None:
         if self.current_details_game is None:

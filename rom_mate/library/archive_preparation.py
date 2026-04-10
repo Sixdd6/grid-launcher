@@ -756,3 +756,107 @@ def prepare_installed_game_without_ui(
             return None, f"Failed to prepare PS3 symlink layout for {prepared.get('title', 'Game')}: {error}"
 
     return prepared, warning_text
+
+
+def merge_archive_into_directory(
+    archive_path: Path,
+    target_dir: Path,
+    temp_dir: Path,
+    install_progress_callback: Callable[[int, int], None] | None = None,
+) -> None:
+    """Extract archive into temp_dir (same filesystem as target_dir), then merge into target_dir.
+
+    Files already present in target_dir that are NOT in the archive are left untouched.
+    The temp_dir is always removed on completion, success or failure.
+
+    Args:
+        archive_path: Path to the archive file (.zip, .7z, .tar, etc.)
+        target_dir: Existing game install directory to merge updates into.
+        temp_dir: Temporary extraction directory. Must be on the same filesystem as target_dir
+                  so that file moves are atomic and fast. Caller is responsible for choosing
+                  a suitable location (e.g. target_dir.parent / (target_dir.name + "-temp")).
+                  Must not already exist; will be created and deleted by this function.
+    """
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir, ignore_errors=True)
+    try:
+        extract_archive_into_directory(archive_path, temp_dir, install_progress_callback)
+        _merge_tree(temp_dir, target_dir)
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def prepare_native_game_update_without_ui(
+    installed_game: dict[str, str],
+    update_game: dict[str, str],
+    archive_path: Path,
+    *,
+    temp_dir_for_game: Callable[[dict[str, str]], Path],
+    select_extracted_launch_file: Callable[[dict[str, str], Path, Path], Path | None],
+    install_progress_callback: Callable[[int, int], None] | None = None,
+) -> tuple[dict[str, str] | None, str]:
+    """Merge a new archive into an existing native game install directory.
+
+    Preserves all files in the install directory that are not present in the new archive
+    (saves, configs, keybindings, etc.). Only files delivered by the new archive are
+    updated or added.
+
+    Args:
+        installed_game: The currently installed game record (has extracted_dir, extracted_path, etc.)
+        update_game: The server game dict for the new version (has rom_file_name, server_updated_at, etc.)
+        archive_path: Path to the downloaded update archive.
+        temp_dir_for_game: Callable that returns the temp extraction directory for the game.
+                           Should return a path on the same filesystem as extracted_dir.
+        select_extracted_launch_file: Callable to detect the primary executable from extracted files.
+        install_progress_callback: Optional progress callback (bytes_done, bytes_total).
+
+    Returns:
+        (prepared_game_dict, warning_text) on success, or (None, error_string) on failure.
+    """
+    prepared = dict(installed_game)
+
+    # Merge server-side metadata from the update into the prepared record.
+    for field in ("rom_id", "rom_file_name", "server_updated_at", "description", "rating", "screenshot_urls", "ra_id"):
+        value = update_game.get(field, "")
+        if value:
+            prepared[field] = value
+
+    extracted_dir_text = prepared.get("extracted_dir", "")
+    if not isinstance(extracted_dir_text, str) or not extracted_dir_text.strip():
+        return None, "Installed game directory not found - reinstall the game and try again."
+
+    extracted_dir = Path(extracted_dir_text.strip())
+    if not extracted_dir.exists() or not extracted_dir.is_dir():
+        return None, f"Installed game directory does not exist: {extracted_dir}"
+
+    temp_dir = temp_dir_for_game(prepared)
+
+    try:
+        merge_archive_into_directory(
+            archive_path,
+            extracted_dir,
+            temp_dir,
+            install_progress_callback,
+        )
+    except (OSError, zipfile.BadZipFile, Bad7zFile) as error:
+        return None, str(error)
+
+    # Re-detect the launch file in case the executable name changed.
+    new_launch_file = select_extracted_launch_file(prepared, extracted_dir, archive_path)
+    if new_launch_file is not None:
+        # Respect manual executable overrides when present.
+        manual_exe = prepared.get("native_executable_path", "").strip()
+        if not manual_exe:
+            prepared["extracted_path"] = str(new_launch_file)
+
+    warning_text = ""
+    if archive_path.exists() and archive_path.is_file():
+        try:
+            archive_path.unlink()
+        except OSError as error:
+            warning_text = (
+                f"Updated {prepared.get('title', 'Game')}, but could not delete archive:\n"
+                f"{archive_path}\n{error}"
+            )
+
+    return prepared, warning_text

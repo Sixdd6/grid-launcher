@@ -56,6 +56,20 @@ class UpdateDetectionTests(unittest.TestCase):
 
         self.assertEqual(installed["server_updated_at"], "2026-04-10T14:30:00Z")
 
+    def test_build_installed_game_record_persists_ra_id(self) -> None:
+        installed = build_installed_game_record(
+            {
+                "title": "Installed Game",
+                "platform": "PS2",
+                "ra_id": "12345",
+            },
+            Path("Y:/downloads/installed-game.zip"),
+            resolved_cover_url="",
+            cached_cover_path="",
+        )
+
+        self.assertEqual(installed["ra_id"], "12345")
+
     def test_normalize_installed_games_preserves_server_updated_at(self) -> None:
         normalized = normalize_installed_games(
             [
@@ -69,6 +83,20 @@ class UpdateDetectionTests(unittest.TestCase):
         )
 
         self.assertEqual(normalized[0]["server_updated_at"], "2026-04-10T14:30:00Z")
+
+    def test_normalize_installed_games_preserves_ra_id(self) -> None:
+        normalized = normalize_installed_games(
+            [
+                {
+                    "title": "Installed Game",
+                    "platform": "PS2",
+                    "ra_id": "42",
+                }
+            ],
+            self._game_key,
+        )
+
+        self.assertEqual(normalized[0]["ra_id"], "42")
 
     def test_game_has_server_update_true_when_server_timestamp_is_newer(self) -> None:
         installed = {

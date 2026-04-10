@@ -330,6 +330,12 @@ class InstallFinalizeWorker(QObject):
                     content_kind=self.content_kind,
                     install_progress_callback=self._emit_progress,
                 )
+            elif self.content_kind == "native_update":
+                prepared_game, warning_text = self.window._apply_native_game_update_without_ui(
+                    self.game,
+                    self.archive_path,
+                    install_progress_callback=self._emit_progress,
+                )
             else:
                 prepared_game, warning_text = self.window._prepare_installed_game_without_ui(
                     self.game,
@@ -473,3 +479,20 @@ class RetroAchievementsWorker(QObject):
             self.finished.emit(self.request_id, achievements, "")
         except (RetroAchievementsError, ValueError, OSError) as error:
             self.finished.emit(self.request_id, [], str(error))
+
+
+class PCGamingWikiWorker(QObject):
+    finished = Signal(int, list, str)  # (request_id, paths: list[str], error: str)
+
+    def __init__(self, request_id: int, title: str) -> None:
+        super().__init__()
+        self._request_id = request_id
+        self._title = title
+
+    def run(self) -> None:
+        try:
+            from rom_mate.server.pcgamingwiki import fetch_windows_save_paths, PCGamingWikiError
+            paths = fetch_windows_save_paths(self._title)
+            self.finished.emit(self._request_id, paths, "")
+        except Exception as exc:
+            self.finished.emit(self._request_id, [], str(exc))

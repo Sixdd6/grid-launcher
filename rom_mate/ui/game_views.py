@@ -297,9 +297,15 @@ def update_details_action_buttons(window: GameDetailsWindowProtocol) -> None:
         details_ps4_content_button.setEnabled(show_ps4_content and not installing_current and not ps4_block_reason)
         details_ps4_content_button.setToolTip(ps4_block_reason)
 
-    cloud_sync_supported = not window._is_native_executable_platform(current_game)
-    save_mode_supported = cloud_sync_supported and window._details_cloud_mode_supported(current_game, "save")
-    state_mode_supported = cloud_sync_supported and window._details_cloud_mode_supported(current_game, "state")
+    is_native = window._is_native_executable_platform(current_game)
+    cloud_sync_supported = not is_native
+    # Native games get their own save panel (PCGamingWiki-backed) - show button if installed
+    if is_native:
+        save_mode_supported = installed and window._details_cloud_mode_supported(current_game, "save")
+        state_mode_supported = False
+    else:
+        save_mode_supported = cloud_sync_supported and window._details_cloud_mode_supported(current_game, "save")
+        state_mode_supported = cloud_sync_supported and window._details_cloud_mode_supported(current_game, "state")
 
     if window.details_details_button is not None:
         window.details_details_button.setVisible(True)
