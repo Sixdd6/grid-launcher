@@ -445,6 +445,24 @@ def normalize_emulator_autoprofiles(
                 if isinstance(directory, str) and directory.strip()
             ]
 
+        screenshot_directories = item.get("screenshot_directories", [])
+        normalized_screenshot_directories: list[str] = []
+        if isinstance(screenshot_directories, list):
+            normalized_screenshot_directories = [
+                directory.strip()
+                for directory in screenshot_directories
+                if isinstance(directory, str) and directory.strip()
+            ]
+
+        firmware_directories = item.get("firmware_directories", [])
+        normalized_firmware_directories: list = []
+        if isinstance(firmware_directories, list):
+            for entry in firmware_directories:
+                if isinstance(entry, str) and entry.strip():
+                    normalized_firmware_directories.append(entry.strip())
+                elif isinstance(entry, dict):
+                    normalized_firmware_directories.append(entry.copy())
+
         source = item.get("source")
         normalized_source = source.copy() if isinstance(source, dict) else None
 
@@ -460,6 +478,8 @@ def normalize_emulator_autoprofiles(
             "ignore_extensions": normalized_ignore_extensions,
             "save_directories": normalized_save_directories,
             "state_directories": normalized_state_directories,
+            "screenshot_directories": normalized_screenshot_directories,
+            "firmware_directories": normalized_firmware_directories,
         }
         if normalized_source is not None:
             normalized_profile["source"] = normalized_source

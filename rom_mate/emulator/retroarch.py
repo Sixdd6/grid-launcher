@@ -185,6 +185,7 @@ def ensure_retroarch_save_location_settings(
     emulator_path_text: str,
     *,
     enable_fullscreen: bool = False,
+    username: str = "",
     retroachievements_username: str = "",
     retroachievements_token: str = "",
 ) -> dict[str, object]:
@@ -209,13 +210,31 @@ def ensure_retroarch_save_location_settings(
         "savestate_directory": (
             str(settings.get("savestate_directory", "")).strip() or "states"
         ),
+        "video_windowed_fullscreen": "true",
+        "audio_volume": "-18.000000",
+        "discord_enable": "false",
+        "pause_nonactive": "true",
+        "video_vsync": "true",
+        "input_menu_toggle_gamepad_combo": "2",
+        "savestate_auto_save": "false",
+        "savestate_auto_load": "false",
+        "rgui_show_start_screen": "false",
+        "menu_show_core_updater": "false",
         "sort_savefiles_enable": "false",
         "sort_savestates_enable": "false",
         "sort_savefiles_by_content_enable": "false",
         "sort_savestates_by_content_enable": "false",
         "savefiles_in_content_dir": "false",
         "savestates_in_content_dir": "false",
+        "cheevos_hardcore_mode_enable": "false",
+        "cheevos_visibility_lboard_start": "false",
+        "cheevos_visibility_lboard_submit": "false",
+        "cheevos_visibility_lboard_trackers": "false",
     }
+
+    nick = username.strip() if isinstance(username, str) else ""
+    if nick:
+        desired_values["netplay_nickname"] = nick
 
     if enable_fullscreen:
         desired_values["video_fullscreen"] = "true"
@@ -249,6 +268,12 @@ def ensure_retroarch_save_location_settings(
             continue
         if key in seen_keys:
             changed = True
+            continue
+
+        # Preserve explicit user volume preferences when already configured.
+        if key == "audio_volume":
+            output_lines.append(raw_line)
+            seen_keys.add(key)
             continue
 
         replacement = f'{key} = "{desired_values[key]}"'
@@ -400,3 +425,21 @@ def installed_retroarch_core_ids(emulator_path_text: str) -> set[str]:
         if core_id:
             installed_core_ids.add(core_id)
     return installed_core_ids
+
+
+def retroarch_core_firmware_metadata(core_id: str, entries: list) -> dict | None:
+    """Return the firmware metadata dict for the given core_id, or None."""
+    if not core_id or not entries:
+        return None
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        core_file = entry.get("core_file", "")
+        if not isinstance(core_file, str) or not core_file.strip():
+            continue
+        if retroarch_core_id_from_file_name(core_file) == core_id:
+            firmware = entry.get("firmware")
+            if isinstance(firmware, dict):
+                return firmware
+            return None
+    return None

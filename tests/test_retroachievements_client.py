@@ -6,7 +6,7 @@ from io import BytesIO
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from rom_mate.server.retroachievements import RetroAchievementsError, fetch_game_achievements, resolve_ra_game_id
+from rom_mate.server.retroachievements import RetroAchievementsError, fetch_game_achievements, ra_login, resolve_ra_game_id
 
 
 class _ResponseStub:
@@ -24,6 +24,33 @@ class _ResponseStub:
 
 
 class RetroAchievementsClientTests(unittest.TestCase):
+    @patch("rom_mate.server.retroachievements.urlopen")
+    def test_ra_login_success(self, mock_urlopen) -> None:
+        mock_urlopen.return_value = _ResponseStub(
+            json.dumps({"Success": True, "User": "testuser", "Token": "abc123"}).encode("utf-8")
+        )
+
+        result = ra_login("testuser", "password123")
+
+        self.assertEqual(result, {"username": "testuser", "token": "abc123"})
+
+    @patch("rom_mate.server.retroachievements.urlopen")
+    def test_ra_login_failure(self, mock_urlopen) -> None:
+        mock_urlopen.return_value = _ResponseStub(
+            json.dumps({"Success": False, "Error": "Invalid credentials"}).encode("utf-8")
+        )
+
+        with self.assertRaises(RetroAchievementsError):
+            ra_login("bad", "wrong")
+
+    def test_ra_login_empty_username(self) -> None:
+        with self.assertRaises(ValueError):
+            ra_login("", "password")
+
+    def test_ra_login_empty_password(self) -> None:
+        with self.assertRaises(ValueError):
+            ra_login("user", "")
+
     @patch("rom_mate.server.retroachievements.urlopen")
     def test_fetch_game_achievements_with_user_credentials(self, mock_urlopen) -> None:
         payload = {

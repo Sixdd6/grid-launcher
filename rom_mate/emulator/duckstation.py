@@ -123,6 +123,27 @@ def _ensure_duckstation_section_values(
     return "\n".join(output_lines).rstrip() + "\n", changed
 
 
+def _duckstation_section_has_key(raw_content: str, section_name: str, key_name: str) -> bool:
+    target_section = section_name.casefold()
+    target_key = key_name.casefold()
+    in_target = False
+
+    for raw_line in raw_content.splitlines():
+        stripped = raw_line.strip()
+        section_match = re.match(r"^\[(.+?)\]\s*$", stripped)
+        if section_match:
+            in_target = section_match.group(1).strip().casefold() == target_section
+            continue
+        if not in_target:
+            continue
+
+        key_match = re.match(r"^\s*([A-Za-z0-9_]+)\s*=", raw_line)
+        if key_match and key_match.group(1).casefold() == target_key:
+            return True
+
+    return False
+
+
 def duckstation_memory_card_settings(emulator_path_text: str) -> dict[str, object]:
     defaults: dict[str, object] = {
         "config_path": "",
@@ -181,9 +202,18 @@ def ensure_duckstation_memory_card_settings(
     emulator_path_text: str,
     *,
     enable_fullscreen: bool = False,
-    retroachievements_username: str = "",
-    retroachievements_token: str = "",
 ) -> dict[str, object]:
+    _emulator_dir: Path | None = None
+    if isinstance(emulator_path_text, str) and emulator_path_text.strip():
+        _emulator_path = Path(emulator_path_text.strip()).expanduser()
+        _emulator_dir = _emulator_path if _emulator_path.is_dir() else _emulator_path.parent
+        _portable_txt = _emulator_dir / "portable.txt"
+        if not _portable_txt.exists():
+            try:
+                _portable_txt.write_text("", encoding="utf-8")
+            except OSError:
+                pass
+
     settings = duckstation_memory_card_settings(emulator_path_text)
     config_candidates = duckstation_config_path_candidates(emulator_path_text)
 
@@ -192,11 +222,14 @@ def ensure_duckstation_memory_card_settings(
         result["changed"] = False
         return result
 
-    configured_path = settings.get("config_path", "")
-    if isinstance(configured_path, str) and configured_path.strip():
-        config_path = Path(configured_path.strip()).expanduser()
+    if _emulator_dir is not None:
+        config_path = _emulator_dir / "settings.ini"
     else:
-        config_path = config_candidates[0]
+        configured_path = settings.get("config_path", "")
+        if isinstance(configured_path, str) and configured_path.strip():
+            config_path = Path(configured_path.strip()).expanduser()
+        else:
+            config_path = config_candidates[0]
 
     current_card1_type = str(settings.get("card1_type", "")).strip()
     current_card2_type = str(settings.get("card2_type", "")).strip()
@@ -219,6 +252,109 @@ def ensure_duckstation_memory_card_settings(
     updated_content, section_changed = _ensure_duckstation_section_values(raw_content, "MemoryCards", desired_values)
     changed = changed or section_changed
 
+    updated_content, section_changed = _ensure_duckstation_section_values(
+        updated_content,
+        "Main",
+        {
+            "InhibitScreensaver": "true",
+            "SetupWizardIncomplete": "false",
+            **({} if _duckstation_section_has_key(raw_content, "Main", "ConfirmPowerOff") else {"ConfirmPowerOff": "false"}),
+        },
+    )
+    changed = changed or section_changed
+
+    updated_content, section_changed = _ensure_duckstation_section_values(
+        updated_content,
+        "Display",
+        {
+            "FullscreenMode": "Borderless Windowed",
+            **({} if _duckstation_section_has_key(raw_content, "Display", "Scaling") else {"Scaling": "Lanczos"}),
+            **({} if _duckstation_section_has_key(raw_content, "Display", "Scaling24Bit") else {"Scaling24Bit": "Lanczos"}),
+        },
+    )
+    changed = changed or section_changed
+
+    # Auto-update disabled (always force)
+    updated_content, section_changed = _ensure_duckstation_section_values(
+        updated_content,
+        "AutoUpdater",
+        {"CheckAtStartup": "false"},
+    )
+    changed = changed or section_changed
+
+    # GPU settings (only if not already set by user)
+    gpu_defaults = {}
+    for key, value in (
+        ("ResolutionScale", "4"),
+        ("PGXPEnable", "true"),
+        ("PGXPColorCorrection", "true"),
+        ("TextureFilter", "Scale2x"),
+        ("SpriteTextureFilter", "Scale2x"),
+        ("DitheringMode", "TrueColorFull"),
+        ("LineDetectMode", "BasicTriangles"),
+        ("DownsampleMode", "Box"),
+        ("DownsampleScale", "2"),
+    ):
+        if not _duckstation_section_has_key(raw_content, "GPU", key):
+            gpu_defaults[key] = value
+    if gpu_defaults:
+        updated_content, section_changed = _ensure_duckstation_section_values(
+            updated_content, "GPU", gpu_defaults,
+        )
+        changed = changed or section_changed
+
+    # Audio volume 60% (only if not already set by user)
+    updated_content, section_changed = _ensure_duckstation_section_values(
+        updated_content,
+        "Audio",
+        {**({} if _duckstation_section_has_key(raw_content, "Audio", "OutputVolume") else {"OutputVolume": "60"})},
+    )
+    changed = changed or section_changed
+
+    # Pause menu hotkey on guide button (only if not already set by user)
+    updated_content, section_changed = _ensure_duckstation_section_values(
+        updated_content,
+        "Hotkeys",
+        {**({} if _duckstation_section_has_key(raw_content, "Hotkeys", "OpenPauseMenu") else {"OpenPauseMenu": "SDL-0/Guide"})},
+    )
+    changed = changed or section_changed
+
+    # Default SDL controller mapping for Pad1 (only if not already configured)
+    if not _duckstation_section_has_key(raw_content, "Pad1", "Type"):
+        pad1_values = {
+            "Type": "AnalogController",
+            "Up": "SDL-0/DPadUp",
+            "Down": "SDL-0/DPadDown",
+            "Left": "SDL-0/DPadLeft",
+            "Right": "SDL-0/DPadRight",
+            "Triangle": "SDL-0/Y",
+            "Circle": "SDL-0/B",
+            "Cross": "SDL-0/A",
+            "Square": "SDL-0/X",
+            "L1": "SDL-0/LeftShoulder",
+            "R1": "SDL-0/RightShoulder",
+            "L2": "SDL-0/+LeftTrigger",
+            "R2": "SDL-0/+RightTrigger",
+            "L3": "SDL-0/LeftStick",
+            "R3": "SDL-0/RightStick",
+            "Select": "SDL-0/Back",
+            "Start": "SDL-0/Start",
+            "LLeft": "SDL-0/-LeftX",
+            "LRight": "SDL-0/+LeftX",
+            "LUp": "SDL-0/-LeftY",
+            "LDown": "SDL-0/+LeftY",
+            "RLeft": "SDL-0/-RightX",
+            "RRight": "SDL-0/+RightX",
+            "RUp": "SDL-0/-RightY",
+            "RDown": "SDL-0/+RightY",
+            "LargeMotor": "SDL-0/LargeMotor",
+            "SmallMotor": "SDL-0/SmallMotor",
+        }
+        updated_content, section_changed = _ensure_duckstation_section_values(
+            updated_content, "Pad1", pad1_values,
+        )
+        changed = changed or section_changed
+
     if enable_fullscreen:
         updated_content, section_changed = _ensure_duckstation_section_values(
             updated_content,
@@ -227,19 +363,17 @@ def ensure_duckstation_memory_card_settings(
         )
         changed = changed or section_changed
 
-    username = retroachievements_username.strip() if isinstance(retroachievements_username, str) else ""
-    token = retroachievements_token.strip() if isinstance(retroachievements_token, str) else ""
-    if username and token:
-        updated_content, section_changed = _ensure_duckstation_section_values(
-            updated_content,
-            "Achievements",
-            {
-                "Enabled": "true",
-                "Username": username,
-                "Token": token,
-            },
-        )
-        changed = changed or section_changed
+    updated_content, section_changed = _ensure_duckstation_section_values(
+        updated_content,
+        "Cheevos",
+        {
+            "Enabled": "true",
+            "ChallengeMode": "false",
+            "LeaderboardNotifications": "false",
+            "LeaderboardTrackers": "false",
+        },
+    )
+    changed = changed or section_changed
 
     if changed:
         try:

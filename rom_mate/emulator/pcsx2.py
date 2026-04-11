@@ -2,8 +2,382 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Callable
+
+
+def _windows_documents_folder() -> Path | None:
+    """Return the user's Documents folder using the Windows Shell API.
+
+    Uses SHGetKnownFolderPath(FOLDERID_Documents) which correctly resolves
+    folder redirection (e.g. network shares, non-default locations).
+    Returns None on non-Windows or if the API call fails.
+    """
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        import ctypes.wintypes
+
+        class GUID(ctypes.Structure):
+            _fields_ = [
+                ("Data1", ctypes.c_ulong),
+                ("Data2", ctypes.c_ushort),
+                ("Data3", ctypes.c_ushort),
+                ("Data4", ctypes.c_ubyte * 8),
+            ]
+
+        FOLDERID_Documents = GUID(
+            0xFDD39AD0, 0x238F, 0x46AF,
+            (ctypes.c_ubyte * 8)(0xAD, 0xB4, 0x6C, 0x85, 0x48, 0x03, 0x69, 0xC7),
+        )
+
+        path_ptr = ctypes.c_wchar_p()
+        hr = ctypes.windll.shell32.SHGetKnownFolderPath(
+            ctypes.byref(FOLDERID_Documents),
+            ctypes.wintypes.DWORD(0),
+            ctypes.wintypes.HANDLE(0),
+            ctypes.byref(path_ptr),
+        )
+        if hr != 0 or not path_ptr.value:
+            return None
+        result = Path(path_ptr.value)
+        ctypes.windll.ole32.CoTaskMemFree(path_ptr)
+        return result
+    except (OSError, AttributeError, ValueError):
+        return None
+
+
+def pcsx2_windows_documents_folder() -> Path | None:
+    return _windows_documents_folder()
+
+
+def _ensure_section_values(
+    raw_content: str,
+    section_name: str,
+    desired_values: dict[str, str],
+) -> tuple[str, bool]:
+    if not desired_values:
+        return raw_content, False
+
+    lines = raw_content.splitlines()
+    output_lines: list[str] = []
+    changed = False
+    target_key = section_name.casefold()
+    in_target = False
+    section_found = False
+    seen_keys: set[str] = set()
+
+    def flush_missing_keys() -> None:
+        nonlocal changed
+        for key, value in desired_values.items():
+            if key in seen_keys:
+                continue
+            output_lines.append(f"{key} = {value}")
+            seen_keys.add(key)
+            changed = True
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        section_match = re.match(r"^\[(.+?)\]\s*$", stripped)
+        if section_match:
+            if in_target:
+                flush_missing_keys()
+            current_section = section_match.group(1).strip()
+            in_target = current_section.casefold() == target_key
+            if in_target:
+                section_found = True
+            output_lines.append(raw_line)
+            continue
+
+        if in_target:
+            key_match = re.match(r"^\s*([A-Za-z0-9_]+)\s*=", raw_line)
+            if key_match:
+                key = key_match.group(1)
+                if key in desired_values:
+                    if key in seen_keys:
+                        changed = True
+                        continue
+                    replacement = f"{key} = {desired_values[key]}"
+                    if raw_line.strip() != replacement:
+                        changed = True
+                    output_lines.append(replacement)
+                    seen_keys.add(key)
+                    continue
+
+        output_lines.append(raw_line)
+
+    if in_target:
+        flush_missing_keys()
+
+    if not section_found:
+        if output_lines and output_lines[-1].strip():
+            output_lines.append("")
+        output_lines.append(f"[{section_name}]")
+        for key, value in desired_values.items():
+            output_lines.append(f"{key} = {value}")
+        changed = True
+
+    return "\n".join(output_lines).rstrip() + "\n", changed
+
+
+def _section_has_key(raw_content: str, section_name: str, key_name: str) -> bool:
+    target_section = section_name.casefold()
+    target_key = key_name.casefold()
+    in_target = False
+
+    for raw_line in raw_content.splitlines():
+        stripped = raw_line.strip()
+        section_match = re.match(r"^\[(.+?)\]\s*$", stripped)
+        if section_match:
+            in_target = section_match.group(1).strip().casefold() == target_section
+            continue
+        if not in_target:
+            continue
+
+        key_match = re.match(r"^\s*([A-Za-z0-9_]+)\s*=", raw_line)
+        if key_match and key_match.group(1).casefold() == target_key:
+            return True
+
+    return False
+
+
+def pcsx2_config_path_candidates(emulator_path_text: str) -> list[Path]:
+    path_text = emulator_path_text.strip() if isinstance(emulator_path_text, str) else ""
+    emulator_path = Path(path_text).expanduser() if path_text else Path()
+    emulator_dir = emulator_path.parent
+
+    candidates: list[Path] = []
+
+    # Check portable mode first (portable.ini or portable.txt next to exe)
+    portable_ini = emulator_dir / "portable.ini"
+    portable_txt = emulator_dir / "portable.txt"
+    if portable_ini.exists() or portable_txt.exists():
+        candidates.append(emulator_dir / "inis" / "PCSX2.ini")
+
+    # Default system locations
+    documents = _windows_documents_folder()
+    if documents is None:
+        documents = Path.home() / "Documents"
+    candidates.append(documents / "PCSX2" / "inis" / "PCSX2.ini")
+    candidates.append(Path.home() / ".config" / "PCSX2" / "inis" / "PCSX2.ini")
+    candidates.append(Path.home() / "Library" / "Application Support" / "PCSX2" / "inis" / "PCSX2.ini")
+
+    return candidates
+
+
+def ensure_pcsx2_settings(
+    emulator_path_text: str,
+    *,
+    enable_fullscreen: bool = False,
+    retroachievements_username: str = "",
+    retroachievements_token: str = "",
+    bios_directory: str = "",
+) -> dict:
+    path_text = emulator_path_text.strip() if isinstance(emulator_path_text, str) else ""
+    if not path_text:
+        return {"config_path": None, "changed": False}
+
+    emulator_path = Path(path_text).expanduser()
+    if not emulator_path.exists() or not emulator_path.is_file():
+        return {"config_path": None, "changed": False}
+
+    emulator_dir = Path(emulator_path_text).parent
+    portable_ini_path = emulator_dir / "portable.ini"
+    if not portable_ini_path.exists():
+        try:
+            portable_ini_path.write_text("", encoding="utf-8")
+        except OSError:
+            pass
+
+    config_path = emulator_dir / "inis" / "PCSX2.ini"
+
+    try:
+        content = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+        changed = False
+
+        content, section_changed = _ensure_section_values(
+            content, "UI", {"SetupWizardIncomplete": "false", "SettingsVersion": "1"},
+        )
+        changed = changed or section_changed
+
+        content, section_changed = _ensure_section_values(
+            content, "AutoUpdater", {"CheckAtStartup": "false"},
+        )
+        changed = changed or section_changed
+
+        content, section_changed = _ensure_section_values(
+            content,
+            "UI",
+            {
+                "InhibitScreensaver": "true",
+                **({} if _section_has_key(content, "UI", "ConfirmShutdown") else {"ConfirmShutdown": "false"}),
+                **({} if _section_has_key(content, "UI", "PauseOnFocusLoss") else {"PauseOnFocusLoss": "true"}),
+                **({} if _section_has_key(content, "UI", "HideMouseCursor") else {"HideMouseCursor": "true"}),
+            },
+        )
+        changed = changed or section_changed
+
+        content, section_changed = _ensure_section_values(
+            content,
+            "EmuCore",
+            {
+                "EnableDiscordPresence": "false",
+            },
+        )
+        changed = changed or section_changed
+
+        emu_defaults = {}
+        for key, value in (
+            ("EnableWideScreenPatches", "true"),
+            ("EnableNoInterlacingPatches", "true"),
+        ):
+            if not _section_has_key(content, "EmuCore", key):
+                emu_defaults[key] = value
+        if emu_defaults:
+            content, section_changed = _ensure_section_values(
+                content, "EmuCore", emu_defaults,
+            )
+            changed = changed or section_changed
+
+        ra_user = retroachievements_username.strip() if isinstance(retroachievements_username, str) else ""
+        ra_tok = retroachievements_token.strip() if isinstance(retroachievements_token, str) else ""
+        if ra_user and ra_tok:
+            content, section_changed = _ensure_section_values(
+                content,
+                "Achievements",
+                {"Enabled": "true", "Username": ra_user, "Token": ra_tok},
+            )
+            changed = changed or section_changed
+
+        content, section_changed = _ensure_section_values(
+            content,
+            "EmuCore/GS",
+            {
+                "pcrtc_antiblur": "true",
+                "pcrtc_offsets": "false",
+            },
+        )
+        changed = changed or section_changed
+
+        gs_defaults = {}
+        for key, value in (
+            ("VsyncEnable", "true"),
+            ("Renderer", "14"),
+            ("filter", "2"),
+            ("accurate_blending_unit", "3"),
+            ("MaxAnisotropy", "4"),
+            ("dithering_ps2", "2"),
+            ("CASMode", "2"),
+            ("CASSharpness", "50"),
+            ("hw_mipmap", "true"),
+            ("texture_preloading", "2"),
+        ):
+            if not _section_has_key(content, "EmuCore/GS", key):
+                gs_defaults[key] = value
+        if gs_defaults:
+            content, section_changed = _ensure_section_values(
+                content, "EmuCore/GS", gs_defaults,
+            )
+            changed = changed or section_changed
+
+        speedhack_defaults = {}
+        for key, value in (
+            ("fastCDVD", "false"),
+            ("vuThread", "true"),
+            ("vu1Instant", "true"),
+        ):
+            if not _section_has_key(content, "EmuCore/Speedhacks", key):
+                speedhack_defaults[key] = value
+        if speedhack_defaults:
+            content, section_changed = _ensure_section_values(
+                content, "EmuCore/Speedhacks", speedhack_defaults,
+            )
+            changed = changed or section_changed
+
+        if not _section_has_key(content, "Pad1", "Type"):
+            content, section_changed = _ensure_section_values(
+                content,
+                "Pad1",
+                {
+                    "Type": "DualShock2",
+                    "InvertL": "0",
+                    "InvertR": "0",
+                    "Deadzone": "0",
+                    "AxisScale": "1.33",
+                    "LargeMotorScale": "1",
+                    "SmallMotorScale": "1",
+                    "ButtonDeadzone": "0",
+                    "PressureModifier": "0.5",
+                    "Up": "SDL-0/DPadUp",
+                    "Right": "SDL-0/DPadRight",
+                    "Down": "SDL-0/DPadDown",
+                    "Left": "SDL-0/DPadLeft",
+                    "Triangle": "SDL-0/FaceNorth",
+                    "Circle": "SDL-0/FaceEast",
+                    "Cross": "SDL-0/FaceSouth",
+                    "Square": "SDL-0/FaceWest",
+                    "Select": "SDL-0/Back",
+                    "Start": "SDL-0/Start",
+                    "L1": "SDL-0/LeftShoulder",
+                    "L2": "SDL-0/+LeftTrigger",
+                    "R1": "SDL-0/RightShoulder",
+                    "R2": "SDL-0/+RightTrigger",
+                    "L3": "SDL-0/LeftStick",
+                    "R3": "SDL-0/RightStick",
+                    "LUp": "SDL-0/-LeftY",
+                    "LRight": "SDL-0/+LeftX",
+                    "LDown": "SDL-0/+LeftY",
+                    "LLeft": "SDL-0/-LeftX",
+                    "RUp": "SDL-0/-RightY",
+                    "RRight": "SDL-0/+RightX",
+                    "RDown": "SDL-0/+RightY",
+                    "RLeft": "SDL-0/-RightX",
+                    "LargeMotor": "SDL-0/LargeMotor",
+                    "SmallMotor": "SDL-0/SmallMotor",
+                },
+            )
+            changed = changed or section_changed
+
+        if not _section_has_key(content, "Hotkeys", "OpenPauseMenu"):
+            content, section_changed = _ensure_section_values(
+                content, "Hotkeys", {"OpenPauseMenu": "SDL-0/Guide"},
+            )
+            changed = changed or section_changed
+
+        if not _section_has_key(content, "SPU2/Output", "StandardVolume"):
+            content, section_changed = _ensure_section_values(
+                content, "SPU2/Output", {"StandardVolume": "40"},
+            )
+            changed = changed or section_changed
+
+        if not _section_has_key(content, "EmuCore/GS", "upscale_multiplier"):
+            content, section_changed = _ensure_section_values(
+                content, "EmuCore/GS", {"upscale_multiplier": "3"},
+            )
+            changed = changed or section_changed
+
+        if enable_fullscreen:
+            content, section_changed = _ensure_section_values(
+                content, "UI", {"StartFullscreen": "true"},
+            )
+            changed = changed or section_changed
+
+        bios_dir = bios_directory.strip() if isinstance(bios_directory, str) else ""
+        if bios_dir and not _section_has_key(content, "Folders", "Bios"):
+            content, section_changed = _ensure_section_values(
+                content, "Folders", {"Bios": bios_dir},
+            )
+            changed = changed or section_changed
+
+        if changed:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(content, encoding="utf-8")
+    except OSError:
+        return {"config_path": None, "changed": False}
+
+    return {"config_path": config_path, "changed": changed}
 
 
 def _unique_paths(paths: list[Path]) -> list[Path]:
@@ -72,12 +446,16 @@ def pcsx2_data_root_candidates(
         emulator_path = Path(path_text).expanduser()
         emulator_dir = emulator_path if emulator_path.is_dir() else emulator_path.parent
         if str(emulator_dir):
+            # App-managed installs now always create portable.ini in ensure_pcsx2_settings().
             portable_root = _portable_data_root(emulator_dir, launch_template, split_launch_template_args)
             if portable_root is not None:
                 portable_roots.append(portable_root)
             fallback_roots.append(emulator_dir.resolve())
 
     user_roots: list[Path] = []
+    win_docs = _windows_documents_folder()
+    if win_docs is not None:
+        user_roots.append(win_docs / "PCSX2")
     for raw_base in (
         os.environ.get("OneDrive", ""),
         os.environ.get("USERPROFILE", ""),

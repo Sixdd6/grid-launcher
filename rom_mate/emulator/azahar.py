@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import configparser
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Callable
@@ -49,6 +50,166 @@ def _resolve_setting_path(root: Path, raw_value: str, default_value: str) -> str
     if not candidate.is_absolute():
         candidate = root / candidate
     return str(candidate.resolve())
+
+
+def _ensure_section_values(
+    raw_content: str,
+    section_name: str,
+    desired_values: dict[str, str],
+) -> tuple[str, bool]:
+    if not desired_values:
+        return raw_content, False
+
+    lines = raw_content.splitlines()
+    output_lines: list[str] = []
+    changed = False
+    target_key = section_name.casefold()
+    in_target = False
+    section_found = False
+    seen_keys: set[str] = set()
+
+    def flush_missing_keys() -> None:
+        nonlocal changed
+        for key, value in desired_values.items():
+            if key in seen_keys:
+                continue
+            output_lines.append(f"{key} = {value}")
+            seen_keys.add(key)
+            changed = True
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        section_match = re.match(r"^\[(.+?)\]\s*$", stripped)
+        if section_match:
+            if in_target:
+                flush_missing_keys()
+            current_section = section_match.group(1).strip()
+            in_target = current_section.casefold() == target_key
+            if in_target:
+                section_found = True
+            output_lines.append(raw_line)
+            continue
+
+        if in_target:
+            key_match = re.match(r"^\s*([A-Za-z0-9_%\\]+)\s*=", raw_line)
+            if key_match:
+                key = key_match.group(1)
+                if key in desired_values:
+                    if key in seen_keys:
+                        changed = True
+                        continue
+                    replacement = f"{key} = {desired_values[key]}"
+                    if raw_line.strip() != replacement:
+                        changed = True
+                    output_lines.append(replacement)
+                    seen_keys.add(key)
+                    continue
+
+        output_lines.append(raw_line)
+
+    if in_target:
+        flush_missing_keys()
+
+    if not section_found:
+        if output_lines and output_lines[-1].strip():
+            output_lines.append("")
+        output_lines.append(f"[{section_name}]")
+        for key, value in desired_values.items():
+            output_lines.append(f"{key} = {value}")
+        changed = True
+
+    return "\n".join(output_lines).rstrip() + "\n", changed
+
+
+def azahar_config_path_candidates(emulator_path_text: str) -> list[Path]:
+    if not isinstance(emulator_path_text, str) or not emulator_path_text.strip():
+        return []
+
+    emulator_path = Path(emulator_path_text).expanduser()
+    return [
+        emulator_path.parent / "user" / "config" / "qt-config.ini",
+        emulator_path.parent / "qt-config.ini",
+        Path(os.path.expandvars("%APPDATA%")) / "Azahar" / "qt-config.ini",
+        Path.home() / ".config" / "Azahar" / "qt-config.ini",
+    ]
+
+
+def ensure_azahar_settings(emulator_path_text: str) -> dict:
+    if isinstance(emulator_path_text, str) and emulator_path_text.strip():
+        _emulator_path = Path(emulator_path_text.strip()).expanduser()
+        _emulator_dir = _emulator_path if _emulator_path.is_dir() else _emulator_path.parent
+        _user_dir = _emulator_dir / "user"
+        if not _user_dir.exists():
+            try:
+                _user_dir.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                pass
+
+    config_candidates = azahar_config_path_candidates(emulator_path_text)
+    if not config_candidates:
+        return {"config_path": None, "changed": False}
+
+    config_path = next((candidate for candidate in config_candidates if candidate.exists()), config_candidates[0])
+
+    try:
+        content = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    except OSError:
+        return {"config_path": None, "changed": False}
+
+    changed = False
+
+    content, section_changed = _ensure_section_values(
+        content,
+        "Renderer",
+        {
+            "resolution_factor\\default": "false",
+            "resolution_factor": "4",
+            "use_vsync\\default": "false",
+            "use_vsync": "true",
+        },
+    )
+    changed = changed or section_changed
+
+    content, section_changed = _ensure_section_values(
+        content,
+        "Audio",
+        {
+            "volume\\default": "false",
+            "volume": "0.4",
+        },
+    )
+    changed = changed or section_changed
+
+    content, section_changed = _ensure_section_values(
+        content,
+        "UI",
+        {
+            "enable_discord_presence\\default": "false",
+            "enable_discord_presence": "false",
+            "confirmClose\\default": "false",
+            "confirmClose": "false",
+            "fullscreen\\default": "false",
+            "fullscreen": "true",
+            "pauseWhenInBackground\\default": "false",
+            "pauseWhenInBackground": "true",
+            "hideInactiveMouse\\default": "false",
+            "hideInactiveMouse": "true",
+            "Shortcuts\\Main%20Window\\Fullscreen\\KeySeq\\default": "false",
+            "Shortcuts\\Main%20Window\\Fullscreen\\KeySeq": "F1",
+            "Shortcuts\\Main%20Window\\Stop%20Emulation\\KeySeq\\default": "false",
+            "Shortcuts\\Main%20Window\\Stop%20Emulation\\KeySeq": "Escape",
+        },
+    )
+    changed = changed or section_changed
+
+    if changed:
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(content, encoding="utf-8")
+        except OSError:
+            return {"config_path": None, "changed": False}
+
+    return {"config_path": str(config_path), "changed": changed}
 
 
 def azahar_user_root_candidates(

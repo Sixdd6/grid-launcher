@@ -66,11 +66,13 @@ from rom_mate.core import (
     normalize_emulators as resolve_normalize_emulators,
     normalize_installed_games as resolve_normalize_installed_games,
     load_api_token as resolve_load_api_token,
+    load_ra_token as resolve_load_ra_token,
     path_key,
     path_within_path,
     sanitize_path_component,
     multipart_payload,
     save_api_token as resolve_save_api_token,
+    save_ra_token as resolve_save_ra_token,
     set_api_token as resolve_set_api_token,
     windows_protect_data as resolve_windows_protect_data,
     windows_unprotect_data as resolve_windows_unprotect_data,
@@ -192,6 +194,7 @@ from rom_mate.library import (
     update_cloud_sync_state_for_game,
 )
 from rom_mate.library.cloud_transfer import SUPPORTED_IMAGE_EXTENSIONS, session_screenshot_path
+from rom_mate.library.firmware_install import install_platform_firmware
 from rom_mate.cover import (
     apply_cover_to_label,
     cache_cover_image_for_game,
@@ -238,6 +241,7 @@ from rom_mate.emulator import (
     compatible_emulator_names_for_platform as resolve_compatible_emulator_names_for_platform,
     pcsx2_save_path_overrides as resolve_pcsx2_save_path_overrides,
     pcsx2_state_path_overrides as resolve_pcsx2_state_path_overrides,
+    pcsx2_windows_documents_folder as resolve_pcsx2_windows_documents_folder,
     pico8_save_path_overrides as resolve_pico8_save_path_overrides,
     redream_save_path_overrides as resolve_redream_save_path_overrides,
     redream_state_path_overrides as resolve_redream_state_path_overrides,
@@ -248,7 +252,17 @@ from rom_mate.emulator import (
     default_assignable_server_platforms as resolve_default_assignable_server_platforms,
     default_emulator_autoprofiles as resolve_default_emulator_autoprofiles,
     default_emulator_name_for_platform as resolve_default_emulator_name_for_platform,
+    ensure_azahar_settings as resolve_ensure_azahar_settings,
+    ensure_cemu_settings as resolve_ensure_cemu_settings,
+    ensure_dolphin_settings as resolve_ensure_dolphin_settings,
+    ensure_dolphin_skip_ipl as resolve_ensure_dolphin_skip_ipl,
+    ensure_dolphin_gcpad_config as resolve_ensure_dolphin_gcpad_config,
     ensure_duckstation_memory_card_settings as resolve_ensure_duckstation_memory_card_settings,
+    ensure_eden_settings as resolve_ensure_eden_settings,
+    ensure_pcsx2_settings as resolve_ensure_pcsx2_settings,
+    ensure_ppsspp_settings as resolve_ensure_ppsspp_settings,
+    ensure_redream_settings as resolve_ensure_redream_settings,
+    ensure_xemu_settings as resolve_ensure_xemu_settings,
     dolphin_target_platforms_for_variant as resolve_dolphin_target_platforms_for_variant,
     dolphin_variant_label_for_game as resolve_dolphin_variant_label_for_game,
     emulator_autoprofiles_path as resolve_emulator_autoprofiles_path,
@@ -277,6 +291,7 @@ from rom_mate.emulator import (
     normalize_retroarch_platform_key as resolve_normalize_retroarch_platform_key,
     normalize_save_strategy_value as resolve_normalize_save_strategy_value,
     retroarch_core_id_from_file_name as resolve_retroarch_core_id_from_file_name,
+    retroarch_core_firmware_metadata as resolve_retroarch_core_firmware_metadata,
     retroarch_core_argument_path as resolve_retroarch_core_argument_path,
     retroarch_core_id_from_name as resolve_retroarch_core_id_from_name,
     retroarch_core_list_path as resolve_retroarch_core_list_path,
@@ -377,6 +392,10 @@ class MainWindow(QMainWindow):
         self.api_token_input: QLineEdit | None = None
         self.ra_username_input: QLineEdit | None = None
         self.ra_api_key_input: QLineEdit | None = None
+        self.ra_password_input: QLineEdit | None = None
+        self.ra_login_status_label: QLabel | None = None
+        self.ra_login_button: QPushButton | None = None
+        self.ra_clear_button: QPushButton | None = None
         self.library_path_input: QLineEdit | None = None
         self.debug_prints_checkbox: QCheckBox | None = None
         self.auto_cloud_download_checkbox: QCheckBox | None = None
@@ -448,6 +467,8 @@ class MainWindow(QMainWindow):
         self._pending_achievements_request_id: int | None = None
         self._ra_thread: QThread | None = None
         self._ra_worker: QObject | None = None
+        self._ra_login_thread: QThread | None = None
+        self._ra_login_worker: QObject | None = None
         self.details_achievements_panel: QWidget | None = None
         self._pending_pcgw_request_id: int | None = None
         self._pcgw_thread: QThread | None = None
@@ -936,12 +957,43 @@ class MainWindow(QMainWindow):
         ra_form = QFormLayout()
         self.ra_username_input = QLineEdit(self.config.get("retroachievements_username", ""))
         _lock_settings_field_height(self.ra_username_input)
+        ra_form.addRow("Username", self.ra_username_input)
+
         self.ra_api_key_input = QLineEdit(self.config.get("retroachievements_api_key", ""))
         _lock_settings_field_height(self.ra_api_key_input)
         self.ra_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        ra_form.addRow("Username", self.ra_username_input)
-        ra_form.addRow("API Key", self.ra_api_key_input)
+        ra_form.addRow("Web API Key", self.ra_api_key_input)
+
+        self.ra_password_input = QLineEdit()
+        _lock_settings_field_height(self.ra_password_input)
+        self.ra_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        ra_form.addRow("Password", self.ra_password_input)
+
         ra_panel_layout.addLayout(ra_form)
+
+        ra_button_row = QHBoxLayout()
+        self.ra_login_button = QPushButton("Log In")
+        self.ra_login_button.setFixedWidth(100)
+        self.ra_login_button.clicked.connect(self._ra_login_clicked)
+        ra_button_row.addWidget(self.ra_login_button)
+
+        self.ra_clear_button = QPushButton("Clear Login")
+        self.ra_clear_button.setFixedWidth(100)
+        self.ra_clear_button.clicked.connect(self._ra_clear_credentials)
+        ra_button_row.addWidget(self.ra_clear_button)
+
+        ra_button_row.addStretch()
+        ra_panel_layout.addLayout(ra_button_row)
+
+        self.ra_login_status_label = QLabel()
+        ra_token = self.config.get("retroachievements_token", "")
+        ra_user = self.config.get("retroachievements_username", "")
+        if ra_token and ra_user:
+            self.ra_login_status_label.setText(f"Logged in as {ra_user}")
+        else:
+            self.ra_login_status_label.setText("Not logged in")
+        ra_panel_layout.addWidget(self.ra_login_status_label)
+
         layout.addWidget(ra_panel)
 
         paths_panel = QFrame()
@@ -1522,6 +1574,7 @@ class MainWindow(QMainWindow):
             "cloud_sync_state": {},
             "retroachievements_username": "",
             "retroachievements_api_key": "",
+            "retroachievements_token": "",
         }
 
     def _persist_window_geometry(self) -> None:
@@ -1560,6 +1613,9 @@ class MainWindow(QMainWindow):
     def _token_file(self) -> Path:
         return self._config_dir() / "token.bin"
 
+    def _ra_token_file(self) -> Path:
+        return self._config_dir() / "ra_token.bin"
+
     def _windows_protect_data(self, raw: bytes) -> bytes:
         return resolve_windows_protect_data(raw)
 
@@ -1569,8 +1625,14 @@ class MainWindow(QMainWindow):
     def _load_api_token(self) -> str:
         return resolve_load_api_token(self._token_file())
 
+    def _load_ra_token(self) -> str:
+        return resolve_load_ra_token(self._ra_token_file())
+
     def _save_api_token(self, token: str) -> bool:
         return resolve_save_api_token(self._config_dir(), self._token_file(), token)
+
+    def _save_ra_token(self, token: str) -> bool:
+        return resolve_save_ra_token(self._config_dir(), self._ra_token_file(), token)
 
     def _set_api_token(self, token: str) -> bool:
         return resolve_set_api_token(self.config, token, save_token=self._save_api_token)
@@ -1611,6 +1673,10 @@ class MainWindow(QMainWindow):
                 migrated["api_token"] = ""
                 self._save_config(migrated)
 
+        ra_token = self._load_ra_token()
+        if ra_token:
+            merged["retroachievements_token"] = ra_token
+
         return merged
 
     def _collect_settings(self) -> dict[str, Any]:
@@ -1623,6 +1689,9 @@ class MainWindow(QMainWindow):
             values["retroachievements_username"] = self.ra_username_input.text().strip()
         if self.ra_api_key_input is not None:
             values["retroachievements_api_key"] = self.ra_api_key_input.text().strip()
+        ra_token = self.config.get("retroachievements_token", "")
+        if isinstance(ra_token, str) and ra_token.strip():
+            values["retroachievements_token"] = ra_token.strip()
         existing_username = self.config.get("username", "")
         if isinstance(existing_username, str):
             values["username"] = existing_username.strip()
@@ -1725,6 +1794,62 @@ class MainWindow(QMainWindow):
 
         if self._credentials_present() and self.server_auto_reconnect:
             self._connect_to_server(show_errors=False)
+
+    def _ra_login_clicked(self) -> None:
+        if self.ra_username_input is None or self.ra_password_input is None:
+            return
+        username = self.ra_username_input.text().strip()
+        password = self.ra_password_input.text()
+        if not username or not password:
+            self._show_toast("Enter both username and password.")
+            return
+        if self.ra_login_button is not None:
+            self.ra_login_button.setEnabled(False)
+
+        from rom_mate.background.workers import RALoginWorker
+
+        worker = RALoginWorker(username, password)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_ra_login_finished)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+        self._ra_login_thread = thread
+        self._ra_login_worker = worker
+
+    def _on_ra_login_finished(self, username: str, token: str, error: str) -> None:
+        if self.ra_login_button is not None:
+            self.ra_login_button.setEnabled(True)
+        if error:
+            self._show_toast(f"RA login failed: {error}")
+            if self.ra_login_status_label is not None:
+                self.ra_login_status_label.setText("Login failed")
+            return
+        self._save_ra_token(token)
+        self.config["retroachievements_username"] = username
+        self.config["retroachievements_token"] = token
+        if self.ra_username_input is not None:
+            self.ra_username_input.setText(username)
+        if self.ra_password_input is not None:
+            self.ra_password_input.clear()
+        if self.ra_login_status_label is not None:
+            self.ra_login_status_label.setText(f"Logged in as {username}")
+        self._show_toast(f"Logged in as {username}")
+
+    def _ra_clear_credentials(self) -> None:
+        self._save_ra_token("")
+        self.config["retroachievements_username"] = ""
+        self.config["retroachievements_token"] = ""
+        if self.ra_username_input is not None:
+            self.ra_username_input.clear()
+        if self.ra_password_input is not None:
+            self.ra_password_input.clear()
+        if self.ra_login_status_label is not None:
+            self.ra_login_status_label.setText("Not logged in")
+        self._show_toast("RetroAchievements credentials cleared.")
 
     def _ensure_library_path_exists(self) -> bool:
         value = self.config.get("library_path", "")
@@ -2703,6 +2828,71 @@ class MainWindow(QMainWindow):
             cleanup_archive_on_success=cleanup_archive_on_success,
             install_progress_callback=install_progress_callback,
         )
+
+    def _install_firmware_for_game_without_ui(self, game: dict, prepared_game: dict) -> str:
+        del prepared_game
+        platform = game.get("platform", "")
+        game_name = game.get("title", "")
+        if not platform:
+            return ""
+
+        platform_id = getattr(self, "server_platform_ids", {}).get(platform)
+        if platform_id is None or not isinstance(platform_id, int):
+            return ""
+
+        emulator_name = self._default_emulator_name_for_platform(platform)
+        if not emulator_name:
+            return ""
+
+        emulator_entry = self._emulator_entry_by_name(emulator_name)
+        if emulator_entry is None:
+            return ""
+
+        firmware_dirs = self._resolved_firmware_directories(emulator_entry)
+        if not firmware_dirs:
+            return ""
+
+        if self._is_retroarch_emulator_name(emulator_name, emulator=emulator_entry):
+            core_defaults = self._normalize_default_retroarch_cores(
+                self.config.get("default_retroarch_cores", {})
+            )
+            configured_core = self._mapping_value_for_platform(core_defaults, platform)
+            if not configured_core:
+                return ""
+            metadata = resolve_retroarch_core_firmware_metadata(
+                configured_core, self._retroarch_core_list_entries()
+            )
+            if metadata is None:
+                return ""
+            subdirectory = metadata.get("subdirectory")
+            if isinstance(subdirectory, str) and subdirectory.strip():
+                firmware_dirs = [
+                    ((d[0] / subdirectory, d[1]) if isinstance(d, tuple) else d / subdirectory)
+                    for d in firmware_dirs
+                ]
+
+        try:
+            warnings = install_platform_firmware(
+                self._api_get,
+                self._api_get_bytes,
+                platform_id,
+                firmware_dirs,
+                skip_existing=True,
+            )
+        except Exception as e:
+            warnings = [f"Firmware install error: {e}"]
+
+        if self._is_dolphin_emulator_name(emulator_name, emulator=emulator_entry):
+            try:
+                resolve_ensure_dolphin_skip_ipl(emulator_entry.get("path", ""))
+            except Exception:
+                pass
+            try:
+                resolve_ensure_dolphin_gcpad_config(emulator_entry.get("path", ""))
+            except Exception:
+                pass
+
+        return "\n".join(warnings)
 
     def _cleanup_install_archives_without_ui(
         self,
@@ -5286,9 +5476,12 @@ class MainWindow(QMainWindow):
             installed_game = self._installed_game_record(self.current_details_game)
             launch_game = installed_game if installed_game is not None else self.current_details_game
             self._auto_sync_before_launch(launch_game)
+            try:
+                firmware_warnings = self._install_firmware_for_game_without_ui(launch_game, {})
+            except Exception as e:
+                pass
             self._launch_installed_game(launch_game)
             return
-
         self._start_async_install(self.current_details_game)
 
     def _perform_ps4_content_action(self) -> None:
@@ -6094,6 +6287,8 @@ class MainWindow(QMainWindow):
         library_value = self.config.get("library_path", "")
         library_path = Path(library_value).expanduser() if isinstance(library_value, str) and library_value.strip() else Path()
         config_dir = self._config_dir()
+        win_docs = resolve_pcsx2_windows_documents_folder()
+        documents_str = str(win_docs) if win_docs is not None else os.path.join(os.path.expandvars("%USERPROFILE%"), "Documents")
 
         resolved: list[Path] = []
         for raw_path in all_paths:
@@ -6102,6 +6297,7 @@ class MainWindow(QMainWindow):
                 "%EMULATOR_DIR%": str(emulator_dir),
                 "%LIBRARY_DIR%": str(library_path),
                 "%CONFIG_DIR%": str(config_dir),
+                "%DOCUMENTS%": documents_str,
             }
             for token, token_value in replacements.items():
                 expanded = expanded.replace(token, token_value)
@@ -6174,6 +6370,81 @@ class MainWindow(QMainWindow):
                 continue
             seen.add(key_value)
             unique.append(path)
+        return unique
+
+    def _resolved_firmware_directories(self, emulator: dict[str, str]) -> list:
+        profile = self._emulator_profile_for_entry(emulator)
+        profile_paths: list = []
+        if isinstance(profile, dict):
+            raw_profile_paths = profile.get("firmware_directories", [])
+            if isinstance(raw_profile_paths, list):
+                profile_paths = raw_profile_paths
+
+        if not profile_paths:
+            return []
+
+        emulator_path_value = emulator.get("path", "")
+        emulator_path = Path(emulator_path_value).expanduser() if isinstance(emulator_path_value, str) else Path()
+        emulator_dir = emulator_path.parent if emulator_path_value else Path()
+
+        library_value = self.config.get("library_path", "")
+        library_path = Path(library_value).expanduser() if isinstance(library_value, str) and library_value.strip() else Path()
+        config_dir = self._config_dir()
+
+        resolved: list = []
+        for raw_path in profile_paths:
+            route_keywords: list[str] | None = None
+            path_value = ""
+            if isinstance(raw_path, str) and raw_path.strip():
+                path_value = raw_path.strip()
+            elif isinstance(raw_path, dict):
+                candidate_path = raw_path.get("path", "")
+                candidate_match = raw_path.get("match", [])
+                if not isinstance(candidate_path, str) or not candidate_path.strip():
+                    continue
+                if not isinstance(candidate_match, list):
+                    continue
+                normalized_keywords = [
+                    item.strip().lower()
+                    for item in candidate_match
+                    if isinstance(item, str) and item.strip()
+                ]
+                if not normalized_keywords:
+                    continue
+                path_value = candidate_path.strip()
+                route_keywords = normalized_keywords
+            else:
+                continue
+
+            expanded = os.path.expandvars(path_value)
+            replacements = {
+                "%EMULATOR_DIR%": str(emulator_dir),
+                "%LIBRARY_DIR%": str(library_path),
+                "%CONFIG_DIR%": str(config_dir),
+            }
+            for token, token_value in replacements.items():
+                expanded = expanded.replace(token, token_value)
+
+            candidate = Path(expanded).expanduser()
+            if not candidate.is_absolute() and emulator_dir:
+                candidate = (emulator_dir / candidate).resolve()
+            elif candidate.is_absolute():
+                candidate = candidate.resolve()
+
+            if route_keywords is None:
+                resolved.append(candidate)
+            else:
+                resolved.append((candidate, route_keywords))
+
+        unique: list = []
+        seen: set[str] = set()
+        for entry in resolved:
+            path = entry[0] if isinstance(entry, tuple) else entry
+            key_value = str(path).casefold()
+            if key_value in seen:
+                continue
+            seen.add(key_value)
+            unique.append(entry)
         return unique
 
     def _cemu_save_directories_for_game(
@@ -6438,11 +6709,13 @@ class MainWindow(QMainWindow):
         suffix = file_path.suffix.casefold()
         if suffix in SUPPORTED_IMAGE_EXTENSIONS:
             return False
-        if suffix in {".state", ".savestate", ".st", ".ss", ".ppst"}:
+        if suffix in {".state", ".savestate", ".st", ".ss", ".ppst", ".p2s"}:
             return True
         if ".state" in name:
             return True
-        if re.search(r"\.\d+\.sav$", name):
+        if re.search(r"[._]\d+\.sav$", name):
+            return True
+        if re.search(r"_resume\.sav$", name):
             return True
         return False
 
@@ -8001,6 +8274,10 @@ class MainWindow(QMainWindow):
                 self._update_cloud_sync_state_for_game(game, updates)
             session["ended_at"] = ended_at
 
+        game_title = game.get("title", "") if isinstance(game, dict) else ""
+        emulator_name_value = session.get("emulator_name", "")
+        emulator_name = emulator_name_value.strip() if isinstance(emulator_name_value, str) else ""
+
         if not self._auto_cloud_save_upload_enabled():
             return
         if not self._credentials_present() or not self._server_connected():
@@ -8021,6 +8298,7 @@ class MainWindow(QMainWindow):
         emulator_name = emulator_name_value.strip() if isinstance(emulator_name_value, str) else ""
         if not emulator_name:
             emulator_name, _ = self._resolved_emulator_entry_for_game(game)
+        game_title = game.get("title", "")
         emulator_entry = self._emulator_entry_by_name(emulator_name)
         if emulator_entry is None:
             return
@@ -8176,6 +8454,7 @@ class MainWindow(QMainWindow):
         timing_start = getattr(self, "_debug_timing_start", None)
         timing_end = getattr(self, "_debug_timing_end", None)
         started_at = timing_start("_ensure_emulator_sync_settings", emulator=emulator_name) if callable(timing_start) else 0.0
+        romm_username = str(self.config.get("username", "")).strip() if hasattr(self, "config") and self.config else ""
         path_text = emulator_path_text.strip() if isinstance(emulator_path_text, str) else ""
         if not path_text:
             if callable(timing_end):
@@ -8183,21 +8462,48 @@ class MainWindow(QMainWindow):
             return
         emulator_entry = {"name": emulator_name, "path": path_text}
         ra_username = str(self.config.get("retroachievements_username", "")).strip()
-        ra_token = str(self.config.get("retroachievements_api_key", "")).strip()
+        ra_token = str(self.config.get("retroachievements_token", "")).strip()
         if self._is_retroarch_emulator_name(emulator_name, emulator_entry):
             resolve_ensure_retroarch_save_location_settings(
                 path_text,
                 enable_fullscreen=True,
                 retroachievements_username=ra_username,
                 retroachievements_token=ra_token,
+                username=romm_username,
             )
         if self._is_duckstation_emulator_name(emulator_name, emulator_entry):
             resolve_ensure_duckstation_memory_card_settings(
                 path_text,
                 enable_fullscreen=True,
+            )
+        if self._is_xemu_emulator_name(emulator_name, emulator_entry):
+            resolve_ensure_xemu_settings(path_text)
+        if self._is_pcsx2_emulator_name(emulator_name, emulator_entry):
+            bios_dir = ""
+            firmware_dirs = self._resolved_firmware_directories(emulator_entry)
+            for fw_entry in firmware_dirs:
+                fw_path = fw_entry[0] if isinstance(fw_entry, tuple) else fw_entry
+                bios_dir = str(fw_path)
+                break
+            resolve_ensure_pcsx2_settings(
+                path_text,
+                enable_fullscreen=True,
                 retroachievements_username=ra_username,
                 retroachievements_token=ra_token,
+                bios_directory=bios_dir,
             )
+        if self._is_dolphin_emulator_name(emulator_name, emulator_entry):
+            resolve_ensure_dolphin_settings(path_text)
+        if self._is_azahar_emulator_name(emulator_name, emulator_entry):
+            resolve_ensure_azahar_settings(path_text)
+        if self._is_eden_emulator_name(emulator_name, emulator_entry):
+            resolve_ensure_eden_settings(path_text)
+        if self._is_ppsspp_emulator_name(emulator_name, emulator_entry):
+            resolve_ensure_ppsspp_settings(path_text)
+        if self._is_cemu_emulator_name(emulator_name, emulator_entry):
+            resolve_ensure_cemu_settings(path_text)
+        if self._is_redream_emulator_name(emulator_name, emulator_entry):
+            resolve_ensure_redream_settings(path_text)
         if callable(timing_end):
             timing_end("_ensure_emulator_sync_settings", started_at, result="done")
 
@@ -8238,6 +8544,24 @@ class MainWindow(QMainWindow):
 
     def _retroarch_core_id_from_file_name(self, core_file_name: str) -> str:
         return resolve_retroarch_core_id_from_file_name(core_file_name)
+
+    def _retroarch_core_list_entries(self) -> list:
+        cache = getattr(self, "_retroarch_core_list_entries_cache", None)
+        if isinstance(cache, list):
+            return cache
+        path = self._retroarch_core_list_path()
+        if not path.exists():
+            self._retroarch_core_list_entries_cache = []
+            return []
+        try:
+            raw = path.read_text(encoding="utf-8")
+            entries = json.loads(raw)
+        except (OSError, json.JSONDecodeError):
+            entries = []
+        if not isinstance(entries, list):
+            entries = []
+        self._retroarch_core_list_entries_cache = entries
+        return entries
 
     def _retroarch_compatibility_map_from_markdown(self) -> dict[str, list[str]]:
         if isinstance(self.retroarch_compatibility_map, dict):
@@ -8399,6 +8723,7 @@ class MainWindow(QMainWindow):
             if isinstance(existing_name, str):
                 selected_name = existing_name.strip()
 
+        scroll_pos = self.emulator_list.verticalScrollBar().value()
         self.emulator_list.clear()
         for row, entry in enumerate(emulators):
             item = QListWidgetItem()
@@ -8415,6 +8740,15 @@ class MainWindow(QMainWindow):
             name_label.setStyleSheet("padding: 4px 0;")
             top_row.addWidget(name_label, 1)
             outer_layout.addLayout(top_row)
+
+            if self._is_azahar_emulator_name(entry.get("name", ""), entry):
+                azahar_note = QLabel(
+                    "Controller setup: Settings \u2192 Controls \u2192 Auto Map  \u00b7  Press Esc to close emulator"
+                )
+                azahar_note.setObjectName("azaharControllerNote")
+                azahar_note.setWordWrap(True)
+                azahar_note.setStyleSheet("color: palette(mid); font-size: 10px; padding: 1px 0;")
+                outer_layout.addWidget(azahar_note)
 
             bottom_row = QHBoxLayout()
             bottom_row.setContentsMargins(0, 0, 0, 0)
@@ -8479,6 +8813,7 @@ class MainWindow(QMainWindow):
                 if isinstance(emulator_name, str) and emulator_name.strip().casefold() == selected_name.casefold():
                     self.emulator_list.setCurrentRow(row)
                     break
+        self.emulator_list.verticalScrollBar().setValue(scroll_pos)
 
         server_platforms = self._default_assignable_server_platforms()
         if self.default_platform_combo is not None:

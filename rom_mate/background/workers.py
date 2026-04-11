@@ -472,6 +472,15 @@ class InstallFinalizeWorker(QObject):
                 )
                 if isinstance(cleanup_warning, str) and cleanup_warning.strip():
                     warning_text = "\n\n".join(part for part in (warning_text.strip(), cleanup_warning.strip()) if part)
+            install_firmware = getattr(self.window, "_install_firmware_for_game_without_ui", None)
+            if callable(install_firmware):
+                try:
+                    firmware_warning = install_firmware(self.game, prepared_game)
+                    if isinstance(firmware_warning, str) and firmware_warning.strip():
+                        warning_text = "\n\n".join(part for part in (warning_text.strip(), firmware_warning.strip()) if part)
+                except Exception as firmware_error:
+                    firmware_warning = f"Firmware install error: {firmware_error}"
+                    warning_text = "\n\n".join(part for part in (warning_text.strip(), firmware_warning.strip()) if part)
             self.finished.emit(prepared_game, str(self.archive_path), warning_text, "")
         except Exception as error:
             self.finished.emit(None, str(self.archive_path), "", str(error))
@@ -604,6 +613,26 @@ class RetroAchievementsWorker(QObject):
             self.finished.emit(self.request_id, achievements, "")
         except (RetroAchievementsError, ValueError, OSError) as error:
             self.finished.emit(self.request_id, [], str(error))
+
+
+class RALoginWorker(QObject):
+    """Worker that authenticates with RetroAchievements and returns a login token."""
+
+    finished = Signal(str, str, str)  # (username, token, error)
+
+    def __init__(self, username: str, password: str) -> None:
+        super().__init__()
+        self._username = username
+        self._password = password
+
+    def run(self) -> None:
+        from rom_mate.server.retroachievements import ra_login, RetroAchievementsError
+
+        try:
+            result = ra_login(self._username, self._password)
+            self.finished.emit(result["username"], result["token"], "")
+        except (RetroAchievementsError, ValueError, OSError) as error:
+            self.finished.emit("", "", str(error))
 
 
 class PCGamingWikiWorker(QObject):

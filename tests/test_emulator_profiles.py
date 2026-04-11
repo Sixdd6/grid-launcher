@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from inspect import signature
@@ -171,12 +172,18 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch("rom_mate.emulator.pcsx2.Path.home", return_value=fake_home):
-                settings = pcsx2_directory_settings(
-                    r"C:\Emulators\PCSX2\pcsx2-qt.exe",
-                    "",
-                    lambda value: [value],
-                )
+            with patch.dict(
+                os.environ,
+                {"USERPROFILE": str(fake_home), "HOME": str(fake_home), "OneDrive": ""},
+                clear=False,
+            ):
+                with patch("rom_mate.emulator.pcsx2.Path.home", return_value=fake_home):
+                    with patch("rom_mate.emulator.pcsx2._windows_documents_folder", return_value=None):
+                        settings = pcsx2_directory_settings(
+                            r"C:\Emulators\PCSX2\pcsx2-qt.exe",
+                            "",
+                            lambda value: [value],
+                        )
 
         self.assertEqual(settings["memory_cards"], str(fake_home / "Documents" / "PCSX2" / "custom-memcards"))
         self.assertEqual(settings["savestates"], str(fake_home / "Documents" / "PCSX2" / "custom-sstates"))
@@ -214,6 +221,14 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
             ],
         )
         self.assertEqual(state_overrides, [str(emulator_dir / "states-custom")])
+
+    def test_pcsx2_windows_documents_folder_is_public_wrapper(self) -> None:
+        sentinel = Path("/fake/documents")
+        with patch("rom_mate.emulator.pcsx2._windows_documents_folder", return_value=sentinel):
+            from rom_mate.emulator.pcsx2 import pcsx2_windows_documents_folder
+
+            result = pcsx2_windows_documents_folder()
+        self.assertEqual(result, sentinel)
 
     def test_rpcs3_directory_settings_reads_vfs_and_persistent_active_user(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -6,6 +6,7 @@ from urllib.parse import urlencode
 from urllib.request import urlopen, Request
 
 _RA_API_BASE = "https://retroachievements.org/API"
+_RA_DOREQUEST_URL = "https://retroachievements.org/dorequest.php"
 
 
 class RetroAchievementsError(Exception):
@@ -63,6 +64,31 @@ def _normalize_achievement(achievement_id: str, achievement: dict, include_progr
         "badge_name": str(achievement.get("BadgeName") or ""),
         "date_earned": date_earned,
     }
+
+
+def ra_login(username: str, password: str) -> dict:
+    if not isinstance(username, str) or not username.strip():
+        raise ValueError("username must be a non-empty string")
+    if not isinstance(password, str) or not password.strip():
+        raise ValueError("password must be a non-empty string")
+
+    url = f"{_RA_DOREQUEST_URL}?{urlencode({'r': 'login', 'u': username, 'p': password})}"
+    data = _fetch_json(url)
+
+    if data.get("Success") is True:
+        user = data.get("User")
+        token = data.get("Token")
+        if not isinstance(user, str) or not user:
+            raise RetroAchievementsError("RetroAchievements login response missing User")
+        if not isinstance(token, str) or not token:
+            raise RetroAchievementsError("RetroAchievements login response missing Token")
+        return {
+            "username": user,
+            "token": token,
+        }
+
+    message = str(data.get("Error") or data.get("Message") or "Invalid credentials")
+    raise RetroAchievementsError(message)
 
 
 def fetch_game_achievements(ra_game_id: int, username: str, api_key: str) -> list[dict]:

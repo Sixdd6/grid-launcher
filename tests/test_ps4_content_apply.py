@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 import unittest
 import zipfile
@@ -9,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from rom_mate.core.config import normalize_installed_games
 from rom_mate.library.archive_preparation import (
+    _BUNDLED_7Z_PATH,
     apply_ps4_content_archive_without_ui,
     extract_archive_into_directory,
     extracted_dir_for_archive_path,
@@ -156,6 +158,18 @@ class PS4ContentApplyTests(unittest.TestCase):
             self.assertGreater(progress_updates[-1][0], 0)
             self.assertEqual(progress_updates[-1][0], progress_updates[-1][1])
 
+    def test_rar_routes_through_7z_fallbacks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            archive_path = root / "duckstation.rar"
+            archive_path.write_bytes(b"rar-test")
+            extracted_dir = root / "extract"
+
+            with patch("rom_mate.library.archive_preparation._extract_7z_with_fallbacks") as mock_extract:
+                extract_archive_into_directory(archive_path, extracted_dir)
+
+            mock_extract.assert_called_once_with(archive_path, extracted_dir)
+
     def test_system_7z_tried_first(self) -> None:
         from rom_mate.library.archive_preparation import _extract_7z_with_fallbacks
 
@@ -167,40 +181,61 @@ class PS4ContentApplyTests(unittest.TestCase):
             call_order.append(cmd[0])
             return MagicMock(returncode=0, stderr="")
 
-        with patch("subprocess.run", side_effect=fake_run), \
-             patch("rom_mate.library.archive_preparation._ensure_portable_7z", return_value=None):
+        bundled_path = MagicMock()
+        bundled_path.exists.return_value = False
+        bundled_path.__str__.return_value = "C:/bundled/7z.exe"
+
+        with patch("rom_mate.library.archive_preparation._BUNDLED_7Z_PATH", bundled_path), \
+             patch("subprocess.run", side_effect=fake_run), \
+             patch("rom_mate.library.archive_preparation._ensure_full_7z", return_value=None):
             _extract_7z_with_fallbacks(archive, out_dir)
 
         self.assertTrue(any(c in ("7z", "7za", "7zz") for c in call_order))
         self.assertEqual(call_order[0], call_order[0])
 
     def test_portable_7z_downloaded_and_used_as_last_resort(self) -> None:
-        from rom_mate.library.archive_preparation import _extract_7z_with_fallbacks, _PORTABLE_7ZR_PATH
-        import urllib.request
+        from rom_mate.library.archive_preparation import _extract_7z_with_fallbacks
 
         archive = Path("/fake/test.7z")
         out_dir = Path("/fake/out")
-        downloaded = []
-
-        def fake_urlretrieve(url, dest):
-            downloaded.append(url)
-            return (str(dest), None)
+        full_7z_path = Path("C:/tools/7zz.exe")
 
         def fake_run(cmd, **kwargs):
-            if cmd[0] == str(_PORTABLE_7ZR_PATH):
+            if cmd[0] == str(full_7z_path):
                 return MagicMock(returncode=0, stderr="")
             raise FileNotFoundError
 
-        with patch("subprocess.run", side_effect=fake_run), \
-             patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve), \
-             patch("pathlib.Path.exists", return_value=False), \
-             patch("pathlib.Path.mkdir"), \
-             patch("pathlib.Path.replace"), \
+        bundled_path = MagicMock()
+        bundled_path.exists.return_value = False
+        bundled_path.__str__.return_value = "C:/bundled/7z.exe"
+
+        with patch("rom_mate.library.archive_preparation._BUNDLED_7Z_PATH", bundled_path), \
+             patch("subprocess.run", side_effect=fake_run), \
+             patch("rom_mate.library.archive_preparation._ensure_full_7z", return_value=full_7z_path), \
              patch("shutil.rmtree"):
             _extract_7z_with_fallbacks(archive, out_dir)
 
-        self.assertEqual(len(downloaded), 1)
-        self.assertIn("7zr.exe", downloaded[0])
+    def test_bundled_7z_used_when_available(self) -> None:
+        from rom_mate.library.archive_preparation import _BUNDLED_7Z_PATH, _extract_7z_with_fallbacks
+
+        archive = Path("/fake/test.7z")
+        out_dir = Path("/fake/out")
+        seen_commands: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            seen_commands.append(cmd)
+            return MagicMock(returncode=0, stderr="")
+
+        bundled_path = MagicMock()
+        bundled_path.exists.return_value = True
+        bundled_path.__str__.return_value = str(_BUNDLED_7Z_PATH)
+
+        with patch("rom_mate.library.archive_preparation._BUNDLED_7Z_PATH", bundled_path), \
+             patch("subprocess.run", side_effect=fake_run):
+            _extract_7z_with_fallbacks(archive, out_dir)
+
+        self.assertGreaterEqual(len(seen_commands), 1)
+        self.assertEqual(seen_commands[0][0], str(_BUNDLED_7Z_PATH))
 
     def test_portable_7z_reused_when_already_downloaded(self) -> None:
         from rom_mate.library.archive_preparation import _ensure_portable_7z, _PORTABLE_7ZR_PATH
@@ -210,6 +245,158 @@ class PS4ContentApplyTests(unittest.TestCase):
 
         if result is not None:
             self.assertEqual(result, _PORTABLE_7ZR_PATH)
+
+
+class TestExtractArchiveIntoDirectory(unittest.TestCase):
+    @unittest.skipUnless(_BUNDLED_7Z_PATH.exists(), "Bundled 7z.exe not available")
+    def test_bundled_7z_extracts_real_7z_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            test_file = Path("hello.txt")
+            (root / test_file).write_bytes(b"Hello from 7z")
+
+            archive_path = root / "smoke.7z"
+            subprocess.run(
+                [str(_BUNDLED_7Z_PATH), "a", str(archive_path), str(test_file), "-y"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            extract_dir = root / "extract"
+            extract_dir.mkdir(parents=True, exist_ok=True)
+
+            extract_archive_into_directory(archive_path, extract_dir)
+
+            extracted_file = extract_dir / "hello.txt"
+            self.assertTrue(extracted_file.exists())
+            self.assertEqual(extracted_file.read_bytes(), b"Hello from 7z")
+
+
+class TestEnsureFullSevenZip(unittest.TestCase):
+    def test_returns_path_when_7zz_already_exists(self) -> None:
+        from rom_mate.library.archive_preparation import _ensure_full_7z, _PORTABLE_7ZZ_PATH
+
+        with patch("sys.platform", "win32"), \
+             patch("pathlib.Path.exists", return_value=True), \
+             patch("rom_mate.library.archive_preparation._ensure_portable_7z") as mock_bootstrap:
+            result = _ensure_full_7z()
+
+        self.assertEqual(result, _PORTABLE_7ZZ_PATH)
+        mock_bootstrap.assert_not_called()
+
+    def test_returns_none_on_non_windows(self) -> None:
+        from rom_mate.library.archive_preparation import _ensure_full_7z
+
+        with patch("sys.platform", "linux"):
+            result = _ensure_full_7z()
+
+        self.assertIsNone(result)
+
+    def test_returns_none_when_7zr_unavailable(self) -> None:
+        from rom_mate.library.archive_preparation import _ensure_full_7z
+
+        with patch("sys.platform", "win32"), \
+             patch("pathlib.Path.exists", return_value=False), \
+             patch("rom_mate.library.archive_preparation._ensure_portable_7z", return_value=None):
+            result = _ensure_full_7z()
+
+        self.assertIsNone(result)
+
+    def test_downloads_extra_archive_and_extracts_7zz(self) -> None:
+        from rom_mate.library.archive_preparation import _ensure_full_7z, _PORTABLE_7ZZ_PATH
+
+        with patch("sys.platform", "win32"), \
+                         patch("pathlib.Path.exists", side_effect=[False, True, True]), \
+             patch("rom_mate.library.archive_preparation._ensure_portable_7z", return_value=Path("C:/tools/7zr.exe")), \
+             patch("rom_mate.library.archive_preparation.urllib.request.urlretrieve"), \
+               patch("pathlib.Path.mkdir"), \
+             patch("rom_mate.library.archive_preparation.subprocess.run", return_value=MagicMock(returncode=0, stderr="")):
+            result = _ensure_full_7z()
+
+        self.assertEqual(result, _PORTABLE_7ZZ_PATH)
+
+    def test_moves_x64_7zz_to_root_and_cleans_up_extra_files(self) -> None:
+        import rom_mate.library.archive_preparation as archive_preparation
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tools_dir = Path(temp_dir) / "tools"
+            portable_7zz_path = tools_dir / "7zz.exe"
+            extra_names = (
+                "7za.exe",
+                "7zS.sfx",
+                "7zSD.sfx",
+                "readme.txt",
+                "History.txt",
+                "License.txt",
+                "7-ZipFar.dll",
+                "7zS2.sfx",
+                "7zS2con.sfx",
+            )
+
+            def fake_extract(*_args, **_kwargs):
+                x64_dir = tools_dir / "x64"
+                x64_dir.mkdir(parents=True, exist_ok=True)
+                (x64_dir / "7zz.exe").write_bytes(b"portable-7zz")
+                for name in extra_names:
+                    (tools_dir / name).write_bytes(b"extra")
+                return MagicMock(returncode=0, stderr="")
+
+            with patch("sys.platform", "win32"), \
+                 patch.object(archive_preparation, "_APP_TOOLS_DIR", tools_dir), \
+                 patch.object(archive_preparation, "_PORTABLE_7ZZ_PATH", portable_7zz_path), \
+                 patch("rom_mate.library.archive_preparation._ensure_portable_7z", return_value=Path("C:/tools/7zr.exe")), \
+                 patch("rom_mate.library.archive_preparation.urllib.request.urlretrieve"), \
+                 patch("rom_mate.library.archive_preparation.subprocess.run", side_effect=fake_extract):
+                result = archive_preparation._ensure_full_7z()
+
+            self.assertEqual(result, portable_7zz_path)
+            self.assertTrue(portable_7zz_path.exists())
+            self.assertFalse((tools_dir / "x64").exists())
+            for name in extra_names:
+                self.assertFalse((tools_dir / name).exists())
+
+    def test_returns_none_when_extraction_fails(self) -> None:
+        from rom_mate.library.archive_preparation import _ensure_full_7z
+
+        with patch("sys.platform", "win32"), \
+             patch("pathlib.Path.exists", return_value=False), \
+             patch("rom_mate.library.archive_preparation._ensure_portable_7z", return_value=Path("C:/tools/7zr.exe")), \
+             patch("rom_mate.library.archive_preparation.urllib.request.urlretrieve"), \
+               patch("pathlib.Path.mkdir"), \
+             patch("rom_mate.library.archive_preparation.subprocess.run", return_value=MagicMock(returncode=1, stderr="boom")):
+            result = _ensure_full_7z()
+
+        self.assertIsNone(result)
+
+    def test_returns_none_when_subprocess_raises(self) -> None:
+        from rom_mate.library.archive_preparation import _ensure_full_7z
+
+        with patch("sys.platform", "win32"), \
+             patch("pathlib.Path.exists", return_value=False), \
+             patch("rom_mate.library.archive_preparation._ensure_portable_7z", return_value=Path("C:/tools/7zr.exe")), \
+             patch("rom_mate.library.archive_preparation.urllib.request.urlretrieve"), \
+               patch("pathlib.Path.mkdir"), \
+             patch("rom_mate.library.archive_preparation.subprocess.run", side_effect=OSError("extract failed")):
+            result = _ensure_full_7z()
+
+        self.assertIsNone(result)
+
+    def test_cleans_up_temp_file_on_failure(self) -> None:
+        from rom_mate.library.archive_preparation import _ensure_full_7z
+
+        with patch("sys.platform", "win32"), \
+             patch("pathlib.Path.exists", return_value=False), \
+             patch("rom_mate.library.archive_preparation._ensure_portable_7z", return_value=Path("C:/tools/7zr.exe")), \
+             patch("rom_mate.library.archive_preparation.urllib.request.urlretrieve"), \
+               patch("pathlib.Path.mkdir"), \
+             patch("rom_mate.library.archive_preparation.subprocess.run", side_effect=OSError("extract failed")), \
+             patch("pathlib.Path.unlink") as mock_unlink:
+            result = _ensure_full_7z()
+
+        self.assertIsNone(result)
+        self.assertTrue(mock_unlink.called)
 
 
 if __name__ == "__main__":

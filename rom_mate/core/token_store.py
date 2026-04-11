@@ -85,7 +85,53 @@ def load_api_token(token_file: Path) -> str:
         return ""
 
 
+def load_ra_token(token_file: Path) -> str:
+    if not token_file.exists():
+        return ""
+
+    try:
+        payload = token_file.read_bytes()
+    except OSError:
+        return ""
+
+    if not payload:
+        return ""
+
+    try:
+        if sys.platform.startswith("win"):
+            raw = windows_unprotect_data(payload)
+        else:
+            raw = base64.b64decode(payload, validate=True)
+        return raw.decode("utf-8")
+    except (OSError, ValueError, UnicodeDecodeError):
+        return ""
+
+
 def save_api_token(config_dir: Path, token_file: Path, token: str) -> bool:
+    normalized = token.strip()
+
+    if not normalized:
+        try:
+            if token_file.exists():
+                token_file.unlink()
+            return True
+        except OSError:
+            return False
+
+    try:
+        config_dir.mkdir(parents=True, exist_ok=True)
+        raw = normalized.encode("utf-8")
+        if sys.platform.startswith("win"):
+            payload = windows_protect_data(raw)
+        else:
+            payload = base64.b64encode(raw)
+        token_file.write_bytes(payload)
+        return True
+    except OSError:
+        return False
+
+
+def save_ra_token(config_dir: Path, token_file: Path, token: str) -> bool:
     normalized = token.strip()
 
     if not normalized:

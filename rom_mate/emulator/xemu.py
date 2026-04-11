@@ -177,6 +177,100 @@ def xemu_config_path_candidates(
     )
 
 
+def _ensure_toml_section_values(
+    raw_content: str,
+    section_name: str,
+    desired_values: dict[str, str],
+) -> tuple[str, bool]:
+    if not desired_values:
+        return raw_content, False
+
+    lines = raw_content.splitlines()
+    output_lines: list[str] = []
+    changed = False
+    target_key = section_name.casefold()
+    in_target = False
+    section_found = False
+    seen_keys: set[str] = set()
+
+    def flush_missing_keys() -> None:
+        nonlocal changed
+        for key, value in desired_values.items():
+            if key in seen_keys:
+                continue
+            output_lines.append(f"{key} = {value}")
+            seen_keys.add(key)
+            changed = True
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        section_match = re.match(r"^\[(.+?)\]\s*$", stripped)
+        if section_match:
+            if in_target:
+                flush_missing_keys()
+            current_section = section_match.group(1).strip()
+            in_target = current_section.casefold() == target_key
+            if in_target:
+                section_found = True
+            output_lines.append(raw_line)
+            continue
+
+        if in_target:
+            key_match = re.match(r"^\s*([A-Za-z0-9_\-]+)\s*=", raw_line)
+            if key_match:
+                seen_keys.add(key_match.group(1))
+
+        output_lines.append(raw_line)
+
+    if in_target:
+        flush_missing_keys()
+
+    if not section_found:
+        if output_lines and output_lines[-1].strip():
+            output_lines.append("")
+        output_lines.append(f"[{section_name}]")
+        for key, value in desired_values.items():
+            output_lines.append(f"{key} = {value}")
+        changed = True
+
+    return "\n".join(output_lines).rstrip() + "\n", changed
+
+
+def ensure_xemu_settings(emulator_path_text: str) -> dict[str, object]:
+    emulator_dir: Path | None = None
+    if isinstance(emulator_path_text, str) and emulator_path_text.strip():
+        emulator_path = Path(emulator_path_text.strip()).expanduser()
+        emulator_dir = emulator_path if emulator_path.is_dir() else emulator_path.parent
+
+    if emulator_dir is not None:
+        config_path = emulator_dir / "xemu.toml"
+    else:
+        config_path = _default_base_root() / "xemu.toml"
+
+    try:
+        content = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+
+        updated_content, changed = _ensure_toml_section_values(
+            content,
+            "misc",
+            {"check_for_updates": "false"},
+        )
+        updated_content, display_changed = _ensure_toml_section_values(
+            updated_content,
+            "display",
+            {"vsync": "true"},
+        )
+        changed = changed or display_changed
+
+        if changed:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(updated_content, encoding="utf-8")
+    except OSError:
+        return {"config_path": None, "changed": False}
+
+    return {"config_path": str(config_path), "changed": changed}
+
+
 def _parse_inline_table(raw_value: str) -> dict[str, str]:
     stripped = raw_value.strip()
     if not stripped.startswith("{") or not stripped.endswith("}"):

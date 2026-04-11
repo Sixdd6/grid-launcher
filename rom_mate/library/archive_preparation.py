@@ -16,6 +16,9 @@ from typing import Callable
 _APP_TOOLS_DIR = Path.home() / ".rom-mate" / "tools"
 _PORTABLE_7ZR_URL = "https://www.7-zip.org/a/7zr.exe"
 _PORTABLE_7ZR_PATH = _APP_TOOLS_DIR / "7zr.exe"
+_PORTABLE_7ZZ_URL = "https://www.7-zip.org/a/7z2600-extra.7z"
+_PORTABLE_7ZZ_PATH = _APP_TOOLS_DIR / "7zz.exe"
+_BUNDLED_7Z_PATH = Path(__file__).resolve().parent.parent.parent / "assets" / "tools" / "7z" / "7z.exe"
 
 _PS4_GAME_ID_PATTERN = re.compile(r"^[A-Z]{4}\d{5}$")
 
@@ -271,6 +274,66 @@ def _ensure_portable_7z() -> Path | None:
         return None
 
 
+def _ensure_full_7z() -> Path | None:
+    if sys.platform != "win32":
+        return None
+    if _PORTABLE_7ZZ_PATH.exists():
+        return _PORTABLE_7ZZ_PATH
+    try:
+        portable_7zr = _ensure_portable_7z()
+        if portable_7zr is None:
+            return None
+        _APP_TOOLS_DIR.mkdir(parents=True, exist_ok=True)
+        tmp_path = _APP_TOOLS_DIR / "7z-extra.tmp"
+        try:
+            urllib.request.urlretrieve(_PORTABLE_7ZZ_URL, tmp_path)
+            result = subprocess.run(
+                [str(portable_7zr), "x", str(tmp_path), f"-o{_APP_TOOLS_DIR}", "-y"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                creationflags=_subprocess_creationflags(),
+            )
+            if result.returncode != 0:
+                return None
+
+            if not _PORTABLE_7ZZ_PATH.exists():
+                x64_7zz_path = _APP_TOOLS_DIR / "x64" / "7zz.exe"
+                if x64_7zz_path.exists():
+                    try:
+                        shutil.move(str(x64_7zz_path), str(_PORTABLE_7ZZ_PATH))
+                    except OSError:
+                        pass
+
+            shutil.rmtree(_APP_TOOLS_DIR / "x64", ignore_errors=True)
+            for root_filename in (
+                "7za.exe",
+                "7zS.sfx",
+                "7zSD.sfx",
+                "readme.txt",
+                "History.txt",
+                "License.txt",
+                "7-ZipFar.dll",
+                "7zS2.sfx",
+                "7zS2con.sfx",
+            ):
+                try:
+                    (_APP_TOOLS_DIR / root_filename).unlink()
+                except OSError:
+                    pass
+
+            if not _PORTABLE_7ZZ_PATH.exists():
+                return None
+            return _PORTABLE_7ZZ_PATH
+        finally:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+    except Exception:
+        return None
+
+
 def _subprocess_creationflags() -> int:
     if os.name != "nt":
         return 0
@@ -333,20 +396,28 @@ def _try_system_7z(archive_path: Path, extracted_dir: Path) -> bool:
 
 
 def _extract_7z_with_fallbacks(archive_path: Path, extracted_dir: Path) -> None:
+    if _BUNDLED_7Z_PATH.exists():
+        try:
+            _run_extractor_process(
+                [str(_BUNDLED_7Z_PATH), "x", str(archive_path), f"-o{extracted_dir}", "-y"],
+                failure_message="Bundled 7z extraction failed",
+            )
+            return
+        except (FileNotFoundError, OSError):
+            pass
     if _try_system_7z(archive_path, extracted_dir):
         return
     shutil.rmtree(extracted_dir, ignore_errors=True)
     extracted_dir.mkdir(parents=True, exist_ok=True)
-    portable = _ensure_portable_7z()
-    if portable is not None:
+    full_7z = _ensure_full_7z()
+    if full_7z is not None:
         _run_extractor_process(
-            [str(portable), "x", str(archive_path), f"-o{extracted_dir}", "-y"],
-            failure_message="Portable 7zr extraction failed",
+            [str(full_7z), "x", str(archive_path), f"-o{extracted_dir}", "-y"],
+            failure_message="Portable 7zz extraction failed",
         )
         return
     raise OSError(
-        "Cannot extract this .7z archive: no system 7-Zip (7z/7za/7zz) was found "
-        "and the portable 7-Zip download failed. "
+        "Cannot extract this archive: no bundled, system, or portable 7-Zip was found. "
         "On Windows, check your internet connection and try again. "
         "On Linux/Mac, install p7zip-full (apt/dnf) or p7zip (brew)."
     )
@@ -368,7 +439,7 @@ def extract_archive_into_directory(
     extracted_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        if archive_path.suffix.casefold() == ".7z":
+        if archive_path.suffix.casefold() in (".7z", ".rar"):
             if install_progress_callback is not None:
                 install_progress_callback(0, 0)
             _extract_7z_with_fallbacks(archive_path, extracted_dir)

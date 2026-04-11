@@ -49,19 +49,25 @@ from .azahar import (
     azahar_directory_settings,
     azahar_save_path_overrides,
     azahar_state_path_overrides,
+    ensure_azahar_settings,
 )
 from .cemu import (
     cemu_directory_settings,
     cemu_save_path_overrides,
+    ensure_cemu_settings,
 )
 from .dolphin import (
     dolphin_directory_settings,
     dolphin_save_path_overrides,
     dolphin_state_path_overrides,
+    ensure_dolphin_gcpad_config,
+    ensure_dolphin_settings,
+    ensure_dolphin_skip_ipl,
 )
 from .eden import (
     eden_directory_settings,
     eden_save_path_overrides,
+    ensure_eden_settings,
 )
 from .fbneo import (
     fbneo_directory_settings,
@@ -77,12 +83,16 @@ from .pcsx2 import (
     pcsx2_directory_settings,
     pcsx2_save_path_overrides,
     pcsx2_state_path_overrides,
+    pcsx2_windows_documents_folder,
+    ensure_pcsx2_settings,
 )
+from .ppsspp import ensure_ppsspp_settings
 from .pico8 import (
     pico8_directory_settings,
     pico8_save_path_overrides,
 )
 from .redream import (
+    ensure_redream_settings,
     redream_directory_settings,
     redream_save_path_overrides,
     redream_state_path_overrides,
@@ -90,6 +100,7 @@ from .redream import (
 from .xemu import (
     xemu_directory_settings,
     xemu_save_path_overrides,
+    ensure_xemu_settings,
 )
 from .xenia import (
     xenia_directory_settings,
@@ -109,6 +120,7 @@ from .retroarch import (
     installed_retroarch_core_ids,
     load_retroarch_compatibility_map,
     normalize_retroarch_platform_key,
+    retroarch_core_firmware_metadata,
     retroarch_core_id_from_file_name,
     retroarch_core_id_from_name,
     retroarch_core_list_path,
@@ -160,11 +172,16 @@ __all__ = [
     "azahar_directory_settings",
     "azahar_save_path_overrides",
     "azahar_state_path_overrides",
+    "ensure_azahar_settings",
     "cemu_directory_settings",
     "cemu_save_path_overrides",
+    "ensure_cemu_settings",
     "dolphin_directory_settings",
     "dolphin_save_path_overrides",
     "dolphin_state_path_overrides",
+    "ensure_dolphin_gcpad_config",
+    "ensure_dolphin_settings",
+    "ensure_dolphin_skip_ipl",
     "compatible_emulator_names_for_platform",
     "default_assignable_server_platforms",
     "default_emulator_autoprofiles",
@@ -173,6 +190,7 @@ __all__ = [
     "defaults_for_manual_emulator_entry",
     "eden_directory_settings",
     "eden_save_path_overrides",
+    "ensure_eden_settings",
     "fbneo_directory_settings",
     "fbneo_save_path_overrides",
     "fbneo_state_path_overrides",
@@ -182,13 +200,18 @@ __all__ = [
     "pcsx2_directory_settings",
     "pcsx2_save_path_overrides",
     "pcsx2_state_path_overrides",
+    "pcsx2_windows_documents_folder",
+    "ensure_pcsx2_settings",
+    "ensure_ppsspp_settings",
     "pico8_directory_settings",
     "pico8_save_path_overrides",
+    "ensure_redream_settings",
     "redream_directory_settings",
     "redream_save_path_overrides",
     "redream_state_path_overrides",
     "xemu_directory_settings",
     "xemu_save_path_overrides",
+    "ensure_xemu_settings",
     "xenia_directory_settings",
     "xenia_save_path_overrides",
     "xenia_state_path_overrides",

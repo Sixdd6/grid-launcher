@@ -106,5 +106,23 @@ class RetroArchConfigTests(unittest.TestCase):
         self.assertIn('cheevos_username = "retro_user"', text)
         self.assertIn('cheevos_token = "retro_token"', text)
 
+    def test_ensure_retroarch_save_location_settings_writes_cheevos_leaderboard_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            retroarch_dir = Path(temp_dir) / "RetroArch"
+            retroarch_dir.mkdir()
+            emulator_path = retroarch_dir / "retroarch.exe"
+            emulator_path.write_bytes(b"")
+            config_path = retroarch_dir / "retroarch.cfg"
+            config_path.write_text("", encoding="utf-8")
+
+            result = ensure_retroarch_save_location_settings(str(emulator_path))
+            text = config_path.read_text(encoding="utf-8")
+
+        self.assertTrue(result["changed"])
+        self.assertIn('cheevos_hardcore_mode_enable = "false"', text)
+        self.assertIn('cheevos_visibility_lboard_start = "false"', text)
+        self.assertIn('cheevos_visibility_lboard_submit = "false"', text)
+        self.assertIn('cheevos_visibility_lboard_trackers = "false"', text)
+
 if __name__ == "__main__":
     unittest.main()

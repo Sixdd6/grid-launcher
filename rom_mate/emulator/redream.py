@@ -149,3 +149,56 @@ def redream_state_path_overrides(
         candidates.append(states_root.resolve())
     candidates.append(data_root.resolve())
     return [str(path) for path in _unique_paths(candidates)]
+
+
+def ensure_redream_settings(emulator_path_text: str) -> dict:
+    settings = redream_directory_settings(emulator_path_text, "", lambda s: [])
+    config_path_text = settings.get("config_path", "")
+    if not isinstance(config_path_text, str) or not config_path_text.strip():
+        return {"config_path": None, "changed": False}
+
+    config_path = Path(config_path_text)
+    desired = {"mode": "fullscreen", "volume": "40"}
+
+    try:
+        existing_lines = config_path.read_text(encoding="utf-8").splitlines() if config_path.exists() else []
+    except OSError:
+        return {"config_path": None, "changed": False}
+
+    parsed: dict[str, str] = {}
+    for line in existing_lines:
+        if "=" in line:
+            key, _, value = line.partition("=")
+            parsed[key.strip()] = value.strip()
+
+    changed = False
+    for key, value in desired.items():
+        if parsed.get(key) != value:
+            parsed[key] = value
+            changed = True
+
+    if not changed:
+        return {"config_path": str(config_path), "changed": False}
+
+    output_lines: list[str] = []
+    written_keys: set[str] = set()
+    for line in existing_lines:
+        if "=" in line:
+            key, _, _ = line.partition("=")
+            key = key.strip()
+            if key in desired:
+                output_lines.append(f"{key}={desired[key]}")
+                written_keys.add(key)
+                continue
+        output_lines.append(line)
+    for key, value in desired.items():
+        if key not in written_keys:
+            output_lines.append(f"{key}={value}")
+
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text("\n".join(output_lines) + "\n", encoding="utf-8")
+    except OSError:
+        return {"config_path": None, "changed": False}
+
+    return {"config_path": str(config_path), "changed": True}

@@ -28,7 +28,8 @@
     "use_game_title_as_name": false,
     "save_strategy": "single_file",
     "save_directories": ["saves", "savefiles"],
-    "state_directories": ["states", "savestates"]
+    "state_directories": ["states", "savestates"],
+    "firmware_directories": ["system"]
   },
   {
     "match_tokens": ["duckstation-qt-x64-ReleaseLTCG.exe"],
@@ -58,7 +59,8 @@
     "save_strategy": "single_file",
     "save_directories": ["memcards"],
     "state_directories": ["savestates"],
-    "screenshot_directories": ["screenshots", "%LOCALAPPDATA%\\DuckStation\\screenshots"]
+    "screenshot_directories": ["screenshots"],
+    "firmware_directories": ["bios"]
   },
   {
     "match_tokens": ["pcsx2-qt.exe"],
@@ -84,11 +86,11 @@
     "save_directories": [
       "memcards\\Mcd001.ps2",
       "memcards\\Mcd002.ps2",
-      "memcards",
-      "%USERPROFILE%\\Documents\\PCSX2\\memcards"
+      "memcards"
     ],
-    "state_directories": ["sstates", "%USERPROFILE%\\Documents\\PCSX2\\sstates"],
-    "screenshot_directories": ["snaps", "%APPDATA%\\PCSX2\\snaps"]
+    "state_directories": ["sstates"],
+    "screenshot_directories": ["snaps"],
+    "firmware_directories": ["bios"]
   },
   {
     "match_tokens": ["PPSSPPWindows64.exe"],
@@ -146,7 +148,7 @@
       "dev_hdd0\\home\\00000001\\savedata"
     ],
     "state_directories": [],
-    "screenshot_directories": ["%APPDATA%\\rpcs3\\screenshots"]
+    "screenshot_directories": []
   },
   {
     "match_tokens": ["shadPS4.exe"],
@@ -169,7 +171,7 @@
     "platform_keywords": ["playstation 4", "ps4"],
     "use_game_title_as_name": false,
     "save_strategy": "folder",
-    "save_directories": ["user\\home\\1000\\savedata","%APPDATA%\\shadPS4\\home\\1000\\savedata"],
+    "save_directories": ["user\\home\\1000\\savedata"],
     "state_directories": []
   },
   {
@@ -193,7 +195,7 @@
     "platform_keywords": [],
     "use_game_title_as_name": false,
     "save_strategy": "folder",
-    "save_directories": ["user\\home\\1000\\savedata","%APPDATA%\\shadPS4\\home\\1000\\savedata"],
+    "save_directories": ["user\\home\\1000\\savedata"],
     "state_directories": []
   },
   {
@@ -217,18 +219,17 @@
       "User\\GC\\JPN\\Card A",
       "User\\GC\\JAP\\Card A",
       "User\\GC\\EUR\\Card A",
-      "%APPDATA%\\Dolphin Emulator\\GC\\USA\\Card A",
-      "%APPDATA%\\Dolphin Emulator\\GC\\JPN\\Card A",
-      "%APPDATA%\\Dolphin Emulator\\GC\\JAP\\Card A",
-      "%APPDATA%\\Dolphin Emulator\\GC\\EUR\\Card A",
-      "User\\Wii\\title\\00010000",
-      "%APPDATA%\\Dolphin Emulator\\Wii\\title\\00010000"
+      "User\\Wii\\title\\00010000"
     ],
     "state_directories": [
-      "User\\StateSaves",
-      "%APPDATA%\\Dolphin Emulator\\StateSaves"
+      "User\\StateSaves"
     ],
-    "screenshot_directories": ["User\\ScreenShots", "%LOCALAPPDATA%\\Dolphin Emulator\\ScreenShots"]
+    "screenshot_directories": ["User\\ScreenShots"],
+    "firmware_directories": [
+      {"path": "Sys/GC/JAP", "match": ["ntsc_j", "ntsc-j", "jap", "jpn"]},
+      {"path": "Sys/GC/USA", "match": ["ntsc", "usa"]},
+      {"path": "Sys/GC/EUR", "match": ["pal", "eur"]}
+    ]
   },
   {
     "match_tokens": ["cemu.exe"],
@@ -253,11 +254,10 @@
     "save_strategy": "folder",
     "save_directories": [
       "portable\\mlc01\\usr\\save",
-      "mlc01\\usr\\save",
-      "%APPDATA%\\Cemu\\mlc01\\usr\\save"
+      "mlc01\\usr\\save"
     ],
     "state_directories": [],
-    "screenshot_directories": ["mlc01\\screenshots", "portable\\mlc01\\screenshots", "%APPDATA%\\Cemu\\mlc01\\screenshots"]
+    "screenshot_directories": ["mlc01\\screenshots", "portable\\mlc01\\screenshots"]
   },
   {
     "match_tokens": ["azahar.exe"],
@@ -282,15 +282,12 @@
     "save_strategy": "folder",
     "save_directories": [
       "user\\sdmc\\Nintendo 3DS\\00000000000000000000000000000000\\00000000000000000000000000000000\\title\\00040000",
-      "%APPDATA%\\Azahar\\sdmc\\Nintendo 3DS\\00000000000000000000000000000000\\00000000000000000000000000000000\\title\\00040000",
-      "user\\nand\\00000000000000000000000000000000\\title\\00040010",
-      "%APPDATA%\\Azahar\\nand\\00000000000000000000000000000000\\title\\00040010"
+      "user\\nand\\00000000000000000000000000000000\\title\\00040010"
     ],
     "state_directories": [
-      "user\\states",
-      "%APPDATA%\\Azahar\\states"
+      "user\\states"
     ],
-    "screenshot_directories": ["user\\screenshots", "%APPDATA%\\Azahar\\screenshots"]
+    "screenshot_directories": ["user\\screenshots"]
   },
   {
     "match_tokens": ["pico8.exe"],
@@ -302,9 +299,7 @@
     "save_strategy": "single_file",
     "save_directories": [
       "cdata",
-      "cstore",
-      "%APPDATA%\\pico-8\\cdata",
-      "%APPDATA%\\pico-8\\cstore"
+      "cstore"
     ],
     "state_directories": []
   },
@@ -336,12 +331,10 @@
     "save_strategy": "single_file",
     "save_directories": [
       "xbox_hdd.qcow2",
-      "eeprom.bin",
-      "%APPDATA%\\xemu\\xemu\\xbox_hdd.qcow2",
-      "%APPDATA%\\xemu\\xemu\\eeprom.bin"
+      "eeprom.bin"
     ],
     "state_directories": [],
-    "screenshot_directories": [".", "%APPDATA%\\xemu\\xemu"]
+    "screenshot_directories": ["."]
   },
   {
     "match_tokens": ["eden.exe"],
@@ -361,11 +354,10 @@
     "use_game_title_as_name": false,
     "save_strategy": "folder",
     "save_directories": [
-      "user\\nand\\user\\save\\0000000000000000",
-      "%APPDATA%\\Eden\\nand\\user\\save\\0000000000000000"
+      "user\\nand\\user\\save\\0000000000000000"
     ],
     "state_directories": [],
-    "screenshot_directories": ["user\\screenshots", "%APPDATA%\\Eden\\screenshots"]
+    "screenshot_directories": ["user\\screenshots"]
   },
   {
     "match_tokens": ["mame.exe"],
@@ -426,11 +418,10 @@
     "use_game_title_as_name": false,
     "save_strategy": "single_file",
     "save_directories": [
-      "content",
-      "%USERPROFILE%\\Documents\\Xenia\\content"
+      "content"
     ],
     "state_directories": [],
-    "screenshot_directories": ["screenshots", "%USERPROFILE%\\Documents\\Xenia\\screenshots"]
+    "screenshot_directories": ["screenshots"]
   },
   {
     "match_tokens": ["xenia.exe"],
@@ -441,11 +432,10 @@
     "use_game_title_as_name": false,
     "save_strategy": "single_file",
     "save_directories": [
-      "content",
-      "%USERPROFILE%\\Documents\\Xenia\\content"
+      "content"
     ],
     "state_directories": [],
-    "screenshot_directories": ["screenshots", "%USERPROFILE%\\Documents\\Xenia\\screenshots"]
+    "screenshot_directories": ["screenshots"]
   },
   {
     "match_tokens": ["redream.exe"],

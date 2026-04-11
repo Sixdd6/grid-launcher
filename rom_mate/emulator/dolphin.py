@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import configparser
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Callable
@@ -152,6 +153,251 @@ def dolphin_settings_path_candidates(
     return _unique_paths(
         [root / "Config" / "Dolphin.ini" for root in dolphin_user_root_candidates(emulator_path_text, launch_template, split_launch_template_args)]
     )
+
+
+def _ensure_section_values(
+    raw_content: str,
+    section_name: str,
+    desired_values: dict[str, str],
+) -> tuple[str, bool]:
+    if not desired_values:
+        return raw_content, False
+
+    lines = raw_content.splitlines()
+    output_lines: list[str] = []
+    changed = False
+    target_key = section_name.casefold()
+    in_target = False
+    section_found = False
+    seen_keys: set[str] = set()
+
+    def flush_missing_keys() -> None:
+        nonlocal changed
+        for key, value in desired_values.items():
+            if key in seen_keys:
+                continue
+            output_lines.append(f"{key} = {value}")
+            seen_keys.add(key)
+            changed = True
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        section_match = re.match(r"^\[(.+?)\]\s*$", stripped)
+        if section_match:
+            if in_target:
+                flush_missing_keys()
+            current_section = section_match.group(1).strip()
+            in_target = current_section.casefold() == target_key
+            if in_target:
+                section_found = True
+            output_lines.append(raw_line)
+            continue
+
+        if in_target:
+            key_match = re.match(r"^\s*([A-Za-z0-9_]+)\s*=", raw_line)
+            if key_match:
+                key = key_match.group(1)
+                if key in desired_values:
+                    if key in seen_keys:
+                        changed = True
+                        continue
+                    replacement = f"{key} = {desired_values[key]}"
+                    if raw_line.strip() != replacement:
+                        changed = True
+                    output_lines.append(replacement)
+                    seen_keys.add(key)
+                    continue
+
+        output_lines.append(raw_line)
+
+    if in_target:
+        flush_missing_keys()
+
+    if not section_found:
+        if output_lines and output_lines[-1].strip():
+            output_lines.append("")
+        output_lines.append(f"[{section_name}]")
+        for key, value in desired_values.items():
+            output_lines.append(f"{key} = {value}")
+        changed = True
+
+    return "\n".join(output_lines).rstrip() + "\n", changed
+
+
+def dolphin_ini_path_candidates(emulator_path_text: str, ini_name: str) -> list[Path]:
+    portable_path = Path(emulator_path_text).expanduser().parent / "User" / "Config" / ini_name
+    candidates = [
+        portable_path,
+        Path(os.path.expandvars("%APPDATA%")) / "Dolphin Emulator" / "Config" / ini_name,
+        Path.home() / ".local" / "share" / "dolphin-emu" / ini_name,
+        Path.home() / "Library" / "Application Support" / "Dolphin" / ini_name,
+    ]
+
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate).casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
+
+
+def ensure_dolphin_settings(emulator_path_text: str) -> dict:
+    if isinstance(emulator_path_text, str) and emulator_path_text.strip():
+        _emulator_path = Path(emulator_path_text.strip()).expanduser()
+        _emulator_dir = _emulator_path if _emulator_path.is_dir() else _emulator_path.parent
+        _portable_txt = _emulator_dir / "portable.txt"
+        if not _portable_txt.exists():
+            try:
+                _portable_txt.write_text("", encoding="utf-8")
+            except OSError:
+                pass
+
+    changed = False
+    dolphin_ini_path: str | None = None
+    gfx_ini_path: str | None = None
+
+    dolphin_candidates = dolphin_ini_path_candidates(emulator_path_text, "Dolphin.ini")
+    if dolphin_candidates:
+        if isinstance(emulator_path_text, str) and emulator_path_text.strip():
+            selected_dolphin = dolphin_candidates[0]
+        else:
+            selected_dolphin = next((candidate for candidate in dolphin_candidates if candidate.exists()), dolphin_candidates[0])
+        try:
+            content = selected_dolphin.read_text(encoding="utf-8") if selected_dolphin.exists() else ""
+            file_changed = False
+            for section_name, values in (
+                ("Analytics", {"Enabled": "False", "PermissionAsked": "True"}),
+                ("Display", {"Fullscreen": "True", "RenderToMain": "True"}),
+                ("General", {"ShowLaunchWarning": "False"}),
+                ("DSP", {"Volume": "70"}),
+            ):
+                content, section_changed = _ensure_section_values(content, section_name, values)
+                file_changed = file_changed or section_changed
+
+            if file_changed:
+                selected_dolphin.parent.mkdir(parents=True, exist_ok=True)
+                selected_dolphin.write_text(content, encoding="utf-8")
+                changed = True
+            dolphin_ini_path = str(selected_dolphin)
+        except OSError:
+            dolphin_ini_path = None
+
+    gfx_candidates = dolphin_ini_path_candidates(emulator_path_text, "GFX.ini")
+    if gfx_candidates:
+        if isinstance(emulator_path_text, str) and emulator_path_text.strip():
+            selected_gfx = gfx_candidates[0]
+        else:
+            selected_gfx = next((candidate for candidate in gfx_candidates if candidate.exists()), gfx_candidates[0])
+        try:
+            content = selected_gfx.read_text(encoding="utf-8") if selected_gfx.exists() else ""
+            content, file_changed = _ensure_section_values(content, "Settings", {"UseVerticalSync": "True"})
+            if file_changed:
+                selected_gfx.parent.mkdir(parents=True, exist_ok=True)
+                selected_gfx.write_text(content, encoding="utf-8")
+                changed = True
+            gfx_ini_path = str(selected_gfx)
+        except OSError:
+            gfx_ini_path = None
+
+    return {
+        "dolphin_ini_path": dolphin_ini_path,
+        "gfx_ini_path": gfx_ini_path,
+        "changed": changed,
+    }
+
+
+def ensure_dolphin_skip_ipl(emulator_path_text: str) -> dict:
+    """Enable GameCube boot animation by setting SkipIPL = False."""
+    changed = False
+    dolphin_ini_path: str | None = None
+
+    dolphin_candidates = dolphin_ini_path_candidates(emulator_path_text, "Dolphin.ini")
+    if dolphin_candidates:
+        selected = next((c for c in dolphin_candidates if c.exists()), dolphin_candidates[0])
+        try:
+            content = selected.read_text(encoding="utf-8") if selected.exists() else ""
+            content, file_changed = _ensure_section_values(content, "Core", {"SkipIPL": "False"})
+            if file_changed:
+                selected.parent.mkdir(parents=True, exist_ok=True)
+                selected.write_text(content, encoding="utf-8")
+                changed = True
+            dolphin_ini_path = str(selected)
+        except OSError:
+            dolphin_ini_path = None
+
+    return {"dolphin_ini_path": dolphin_ini_path, "changed": changed}
+
+
+_DEFAULT_GCPAD_CONFIG = """\
+[GCPad1]
+Device = XInput/0/Gamepad
+Buttons/A = `Button A`
+Buttons/B = `Button B`
+Buttons/X = `Button X`
+Buttons/Y = `Button Y`
+Buttons/Z = `Shoulder R`
+Buttons/Start = `Start`
+Main Stick/Up = `Left Y+`
+Main Stick/Down = `Left Y-`
+Main Stick/Left = `Left X-`
+Main Stick/Right = `Left X+`
+Main Stick/Calibration = 100.00
+C-Stick/Up = `Right Y+`
+C-Stick/Down = `Right Y-`
+C-Stick/Left = `Right X-`
+C-Stick/Right = `Right X+`
+C-Stick/Calibration = 100.00
+Triggers/L = `Trigger L`
+Triggers/R = `Trigger R`
+Triggers/L-Analog = `Trigger L`
+Triggers/R-Analog = `Trigger R`
+D-Pad/Up = `Pad N`
+D-Pad/Down = `Pad S`
+D-Pad/Left = `Pad W`
+D-Pad/Right = `Pad E`
+Rumble/Motor = `Motor L` | `Motor R`
+"""
+
+
+def ensure_dolphin_gcpad_config(emulator_path_text: str) -> dict:
+    """Write default XInput GCPad config if no [GCPad1] section exists."""
+    changed = False
+    gcpad_ini_path: str | None = None
+
+    candidates = dolphin_ini_path_candidates(emulator_path_text, "GCPadNew.ini")
+    if candidates:
+        existing = next((c for c in candidates if c.exists()), None)
+        if existing is not None:
+            selected = existing
+        else:
+            dolphin_ini_candidates = dolphin_ini_path_candidates(emulator_path_text, "Dolphin.ini")
+            dolphin_ini_dir = next((c.parent for c in dolphin_ini_candidates if c.exists()), None)
+            if dolphin_ini_dir is not None:
+                selected = dolphin_ini_dir / "GCPadNew.ini"
+            else:
+                selected = candidates[0]
+        try:
+            content = selected.read_text(encoding="utf-8") if selected.exists() else ""
+            has_gcpad1 = bool(re.search(r"^\[GCPad1\]", content, re.MULTILINE | re.IGNORECASE))
+            if has_gcpad1:
+                gcpad_ini_path = str(selected)
+                return {"gcpad_ini_path": gcpad_ini_path, "changed": False}
+
+            if content and not content.endswith("\n"):
+                content += "\n"
+            content += _DEFAULT_GCPAD_CONFIG
+
+            selected.parent.mkdir(parents=True, exist_ok=True)
+            selected.write_text(content, encoding="utf-8")
+            changed = True
+            gcpad_ini_path = str(selected)
+        except OSError as exc:
+            gcpad_ini_path = None
+
+    return {"gcpad_ini_path": gcpad_ini_path, "changed": changed}
 
 
 def _clean_path_value(value: str) -> str:

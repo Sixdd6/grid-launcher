@@ -37,6 +37,57 @@ def cemu_settings_path_candidates(emulator_path_text: str) -> list[Path]:
     return _unique_paths(candidates)
 
 
+def _ensure_xml_element_value(root, tag: str, value: str) -> bool:
+    elem = root.find(tag)
+    if elem is None:
+        elem = ET.SubElement(root, tag)
+        elem.text = value
+        return True
+    if elem.text == value:
+        return False
+    elem.text = value
+    return True
+
+
+def ensure_cemu_settings(emulator_path_text: str) -> dict:
+    try:
+        candidates = cemu_settings_path_candidates(emulator_path_text)
+        if not candidates:
+            return {"config_path": None, "changed": False}
+
+        target = next((path for path in candidates if path.exists() and path.is_file()), candidates[0])
+        changed = False
+
+        if target.exists() and target.is_file():
+            try:
+                content = target.read_text(encoding="utf-8")
+                if not content.strip():
+                    raise ET.ParseError("empty settings.xml")
+                root = ET.fromstring(content)
+            except ET.ParseError:
+                root = ET.fromstring(
+                    "<content><check_update>false</check_update><discord_presence>false</discord_presence></content>"
+                )
+                changed = True
+        else:
+            root = ET.fromstring(
+                "<content><check_update>false</check_update><discord_presence>false</discord_presence></content>"
+            )
+            changed = True
+
+        changed = _ensure_xml_element_value(root, "check_update", "false") or changed
+        changed = _ensure_xml_element_value(root, "discord_presence", "false") or changed
+
+        if changed:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            xml_body = ET.tostring(root, encoding="unicode", xml_declaration=False)
+            target.write_text(f'<?xml version="1.0" encoding="utf-8"?>\n{xml_body}', encoding="utf-8")
+
+        return {"config_path": str(target), "changed": changed}
+    except Exception:
+        return {"config_path": None, "changed": False}
+
+
 def cemu_directory_settings(emulator_path_text: str) -> dict[str, str]:
     defaults = {
         "config_path": "",

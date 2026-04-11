@@ -57,3 +57,9 @@ _rom_mate_dirs.json       ← directory manifest
 Paths use `%ENVVAR%` tokens rather than absolute paths so archives are portable across user accounts and machines.
 
 On restore, each `N/` prefix is decoded via the manifest, env vars are expanded, and files are written back to the correct directory. The `emulator` field on the server record is set to `native_multi_dir` to identify this format. Legacy per-directory records (emulator field `native_dir:<path>`) from an earlier format are still supported.
+
+## Third-Party Software
+
+This project bundles the following third-party software:
+
+- **7-Zip** — Copyright © 1999-2026 Igor Pavlov. Licensed under GNU LGPL. The unRAR code is licensed under a mixed license (GNU LGPL + unRAR restriction). See [assets/tools/7z/License.txt](assets/tools/7z/License.txt) for full license details. Source code: https://github.com/ip7z/7zip

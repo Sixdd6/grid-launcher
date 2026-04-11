@@ -403,6 +403,120 @@ class EmulatorAutoprofileNormalizationTests(unittest.TestCase):
         for index, profile in enumerate(profiles):
             self.assertEqual(normalized[index].get("source"), profile["source"])
 
+    def test_normalize_emulator_autoprofiles_preserves_screenshot_directories(self) -> None:
+        profiles = [
+            {
+                "name": "TestEmu",
+                "match_tokens": ["test.exe"],
+                "screenshot_directories": [
+                    "screenshots",
+                    "%LOCALAPPDATA%\\DuckStation\\screenshots",
+                ],
+            }
+        ]
+
+        normalized = normalize_emulator_autoprofiles(
+            profiles,
+            lambda value: value,
+            lambda value: value,
+        )
+
+        self.assertEqual(len(normalized), 1)
+        self.assertEqual(
+            normalized[0]["screenshot_directories"],
+            ["screenshots", "%LOCALAPPDATA%\\DuckStation\\screenshots"],
+        )
+
+    def test_normalize_emulator_autoprofiles_preserves_firmware_directories_strings(self) -> None:
+        profiles = [
+            {
+                "name": "TestEmu",
+                "match_tokens": ["test.exe"],
+                "firmware_directories": ["system", "bios"],
+            }
+        ]
+
+        normalized = normalize_emulator_autoprofiles(
+            profiles,
+            lambda value: value,
+            lambda value: value,
+        )
+
+        self.assertEqual(len(normalized), 1)
+        self.assertEqual(normalized[0]["firmware_directories"], ["system", "bios"])
+
+    def test_normalize_emulator_autoprofiles_preserves_firmware_directories_dicts(self) -> None:
+        directories = [
+            {"path": "Sys/GC/JAP", "match": ["ntsc_j", "jap"]},
+            {"path": "Sys/GC/USA", "match": ["ntsc", "usa"]},
+        ]
+        profiles = [
+            {
+                "name": "TestEmu",
+                "match_tokens": ["test.exe"],
+                "firmware_directories": directories,
+            }
+        ]
+
+        normalized = normalize_emulator_autoprofiles(
+            profiles,
+            lambda value: value,
+            lambda value: value,
+        )
+
+        self.assertEqual(len(normalized), 1)
+        self.assertEqual(normalized[0]["firmware_directories"], directories)
+        self.assertIsNot(normalized[0]["firmware_directories"][0], directories[0])
+        self.assertIsNot(normalized[0]["firmware_directories"][1], directories[1])
+
+    def test_normalize_emulator_autoprofiles_defaults_missing_directory_keys(self) -> None:
+        profiles = [
+            {
+                "name": "TestEmu",
+                "match_tokens": ["test.exe"],
+            }
+        ]
+
+        normalized = normalize_emulator_autoprofiles(
+            profiles,
+            lambda value: value,
+            lambda value: value,
+        )
+
+        self.assertEqual(len(normalized), 1)
+        self.assertIn("screenshot_directories", normalized[0])
+        self.assertIn("firmware_directories", normalized[0])
+        self.assertEqual(normalized[0]["screenshot_directories"], [])
+        self.assertEqual(normalized[0]["firmware_directories"], [])
+
+    def test_normalize_emulator_autoprofiles_strips_invalid_firmware_directory_entries(self) -> None:
+        profiles = [
+            {
+                "name": "TestEmu",
+                "match_tokens": ["test.exe"],
+                "firmware_directories": [
+                    42,
+                    "",
+                    "  ",
+                    None,
+                    "bios",
+                    {"path": "system", "match": ["all"]},
+                ],
+            }
+        ]
+
+        normalized = normalize_emulator_autoprofiles(
+            profiles,
+            lambda value: value,
+            lambda value: value,
+        )
+
+        self.assertEqual(len(normalized), 1)
+        self.assertEqual(
+            normalized[0]["firmware_directories"],
+            ["bios", {"path": "system", "match": ["all"]}],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

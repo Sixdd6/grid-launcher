@@ -321,6 +321,7 @@ class _SettingsPageStubWindow:
             "api_token": "secret-token",
             "library_path": "C:/Games",
             "theme": "system",
+            "retroachievements_token": "",
         }
         self.server_url_input = None
         self.api_token_input = None
@@ -367,6 +368,15 @@ class _SettingsPageStubWindow:
 
     def _save_settings(self) -> None:
         return None
+
+    def _ra_login_clicked(self):
+        pass
+
+    def _ra_clear_credentials(self):
+        pass
+
+    def _on_ra_login_finished(self, username, token, error):
+        pass
 
     def _open_config_folder(self) -> None:
         return None
@@ -474,6 +484,14 @@ class _EmulatorRowsStubWindow:
 
     def _is_retroarch_emulator_name(self, emulator_name: str) -> bool:
         return emulator_name.strip().casefold() == "retroarch"
+
+    def _is_azahar_emulator_name(
+        self,
+        emulator_name: str,
+        emulator: dict[str, str] | None = None,
+    ) -> bool:
+        del emulator
+        return emulator_name.strip().casefold() == "azahar"
 
     def _on_default_platform_changed(self, platform: str) -> None:
         return None

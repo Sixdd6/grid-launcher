@@ -363,8 +363,10 @@ def _state_candidate_base_variants(candidate: Path) -> set[str]:
         variants.add(normalized)
 
         stripped_patterns = (
+            r"(?:\s*\([0-9a-f]+\))?(?:\.\d+)?\.p2s$",
             r"(?:\.(?:savestate|state|st|ss|ppst))(?:\.auto|auto|[0-9]+)?$",
             r"(?:\.\d+)?\.sav$",
+            r"[_](?:\d+|resume)\.sav$",
             r"\.\d+$",
         )
         for pattern in stripped_patterns:
@@ -396,10 +398,14 @@ def _state_candidate_matches_game_tokens(candidate: Path, tokens: set[str]) -> b
 
 
 def _state_candidate_hash_group_key(candidate: Path) -> str:
-    matched = re.fullmatch(r"([0-9a-f]{8})(?:\.\d+)?\.sav", candidate.name.strip().casefold())
-    if not matched:
-        return ""
-    return matched.group(1)
+    name = candidate.name.strip().casefold()
+    matched = re.fullmatch(r"([0-9a-f]{8})(?:\.\d+)?\.sav", name)
+    if matched:
+        return matched.group(1)
+    matched = re.fullmatch(r"([a-z0-9][\w-]+?)(?:[_](?:\d+|resume))\.sav", name)
+    if matched:
+        return matched.group(1)
+    return ""
 
 
 def _fallback_state_candidates(state_candidates: list[Path]) -> list[Path]:

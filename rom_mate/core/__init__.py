@@ -18,7 +18,15 @@ from .config import (
     write_config_file,
 )
 from .path import path_key, path_within_path, sanitize_path_component
-from .token_store import load_api_token, save_api_token, set_api_token, windows_protect_data, windows_unprotect_data
+from .token_store import (
+    load_api_token,
+    load_ra_token,
+    save_api_token,
+    save_ra_token,
+    set_api_token,
+    windows_protect_data,
+    windows_unprotect_data,
+)
 from .types import MainWindowProtocol
 
 __all__ = [
@@ -41,7 +49,9 @@ __all__ = [
     "path_within_path",
     "sanitize_path_component",
     "load_api_token",
+    "load_ra_token",
     "save_api_token",
+    "save_ra_token",
     "set_api_token",
     "windows_protect_data",
     "windows_unprotect_data",
