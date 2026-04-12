@@ -575,6 +575,46 @@ def apply_ps4_content_archive_without_ui(
         shutil.rmtree(content_extract_dir, ignore_errors=True)
 
 
+def apply_xenia_content_archive_without_ui(
+    archive_path: Path,
+    content_root: Path,
+    *,
+    extracted_dir_for_archive_path: Callable[[Path], Path],
+    extract_archive_into_directory: Callable[[Path, Path, Callable[[int, int], None] | None], None],
+    install_progress_callback: Callable[[int, int], None] | None = None,
+) -> tuple[list[dict[str, object]], str]:
+    """Extract archive and install all STFS packages found inside to the xenia content directory.
+
+    Returns (results_list, warning_text). Each result is the dict from apply_xenia_content_without_ui.
+    """
+    from rom_mate.emulator.xenia import apply_xenia_content_without_ui as _apply_stfs
+
+    extract_dir = extracted_dir_for_archive_path(archive_path)
+    try:
+        extract_archive_into_directory(archive_path, extract_dir, install_progress_callback)
+    except Exception as exc:
+        return [], str(exc)
+
+    try:
+        results: list[dict[str, object]] = []
+        errors: list[str] = []
+        for file_path in sorted(extract_dir.rglob("*")):
+            if not file_path.is_file():
+                continue
+            result = _apply_stfs(file_path, content_root)
+            if result["error"]:
+                errors.append(str(result["error"]))
+            else:
+                results.append(result)
+
+        if errors and not results:
+            return [], "\n".join(errors)
+        warning_text = "\n".join(errors) if errors else ""
+        return results, warning_text
+    finally:
+        shutil.rmtree(str(extract_dir), ignore_errors=True)
+
+
 def should_extract_archive_for_game(
     game: dict[str, str],
     archive_path: Path,
@@ -620,6 +660,7 @@ def select_extracted_launch_file(
         ".cue",
         ".chd",
         ".iso",
+        ".xex",
         ".bin",
         ".pbp",
         ".cso",
@@ -876,11 +917,24 @@ def prepare_installed_game_without_ui(
         return prepared, ""
 
     try:
-        extracted_file, extracted_dir = extract_archive_for_game(
-            prepared,
-            archive_path,
-            install_progress_callback,
-        )
+        if is_ps3_platform(prepared):
+            extracted_dir = extracted_dir_for_archive_path(archive_path)
+            extract_archive_into_directory(
+                archive_path,
+                extracted_dir,
+                install_progress_callback=install_progress_callback,
+            )
+            has_extracted_files = any(candidate.is_file() for candidate in extracted_dir.rglob("*"))
+            if not has_extracted_files:
+                shutil.rmtree(extracted_dir, ignore_errors=True)
+                raise OSError("Archive extracted but no ROM file was found")
+            extracted_file = extracted_dir
+        else:
+            extracted_file, extracted_dir = extract_archive_for_game(
+                prepared,
+                archive_path,
+                install_progress_callback,
+            )
     except (OSError, zipfile.BadZipFile) as error:
         return None, str(error)
 

@@ -13,6 +13,7 @@ import subprocess
 import zipfile
 import mimetypes
 import tempfile
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -81,6 +82,7 @@ from rom_mate.core import (
 from rom_mate.library import (
     active_download_count_after_finish,
     apply_ps4_content_archive_without_ui as resolve_apply_ps4_content_archive_without_ui,
+    apply_xenia_content_archive_without_ui as resolve_apply_xenia_content_archive_without_ui,
     apply_download_entry_install_progress,
     apply_download_entry_progress,
     apply_download_entry_status,
@@ -246,13 +248,18 @@ from rom_mate.emulator import (
     redream_save_path_overrides as resolve_redream_save_path_overrides,
     redream_state_path_overrides as resolve_redream_state_path_overrides,
     xemu_save_path_overrides as resolve_xemu_save_path_overrides,
+    xenia_directory_settings as resolve_xenia_directory_settings,
     xenia_save_path_overrides as resolve_xenia_save_path_overrides,
     xenia_state_path_overrides as resolve_xenia_state_path_overrides,
+    rpcs3_data_root as resolve_rpcs3_data_root,
+    rpcs3_pup_path as resolve_rpcs3_pup_path,
     rpcs3_save_path_overrides as resolve_rpcs3_save_path_overrides,
+    trigger_rpcs3_firmware_install as resolve_trigger_rpcs3_firmware_install,
     default_assignable_server_platforms as resolve_default_assignable_server_platforms,
     default_emulator_autoprofiles as resolve_default_emulator_autoprofiles,
     default_emulator_name_for_platform as resolve_default_emulator_name_for_platform,
     ensure_azahar_settings as resolve_ensure_azahar_settings,
+    ensure_cemu_controller_config as resolve_ensure_cemu_controller_config,
     ensure_cemu_settings as resolve_ensure_cemu_settings,
     ensure_dolphin_settings as resolve_ensure_dolphin_settings,
     ensure_dolphin_skip_ipl as resolve_ensure_dolphin_skip_ipl,
@@ -261,6 +268,7 @@ from rom_mate.emulator import (
     ensure_eden_settings as resolve_ensure_eden_settings,
     ensure_pcsx2_settings as resolve_ensure_pcsx2_settings,
     ensure_ppsspp_settings as resolve_ensure_ppsspp_settings,
+    ensure_rpcs3_settings as resolve_ensure_rpcs3_settings,
     ensure_redream_settings as resolve_ensure_redream_settings,
     ensure_xemu_settings as resolve_ensure_xemu_settings,
     dolphin_target_platforms_for_variant as resolve_dolphin_target_platforms_for_variant,
@@ -291,6 +299,8 @@ from rom_mate.emulator import (
     normalize_retroarch_platform_key as resolve_normalize_retroarch_platform_key,
     normalize_save_strategy_value as resolve_normalize_save_strategy_value,
     retroarch_core_id_from_file_name as resolve_retroarch_core_id_from_file_name,
+    retroarch_core_config_files_metadata as resolve_retroarch_core_config_files_metadata,
+    retroarch_core_saves_files_metadata as resolve_retroarch_core_saves_files_metadata,
     retroarch_core_firmware_metadata as resolve_retroarch_core_firmware_metadata,
     retroarch_core_argument_path as resolve_retroarch_core_argument_path,
     retroarch_core_id_from_name as resolve_retroarch_core_id_from_name,
@@ -318,6 +328,9 @@ from rom_mate.emulator import (
     strip_wrapping_quotes as resolve_strip_wrapping_quotes,
     validate_launch_placeholders as resolve_validate_launch_placeholders,
 )
+from rom_mate.emulator.retroarch import retroarch_core_flags as resolve_retroarch_core_flags
+from rom_mate.emulator.retroarch import retroarch_core_flags_for_platform as resolve_retroarch_core_flags_for_platform
+from rom_mate.emulator.retroarch import flycast_vmu_file_candidates as resolve_flycast_vmu_file_candidates
 from rom_mate.ui import (
     EmulatorConfigDialog,
     FirstRunSetupDialog,
@@ -378,6 +391,8 @@ from rom_mate.background import AutoCloudSaveUploadWorker, DetailsCloudRecordsWo
 
 
 class MainWindow(QMainWindow):
+    _emulator_refresh_requested = Signal()
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Rom Mate Neo")
@@ -385,6 +400,15 @@ class MainWindow(QMainWindow):
         self.resize(1280, 760)
 
         self.config = self._load_config()
+        import logging as _logging
+        _fw_logger = _logging.getLogger("rom_mate.library.firmware_install")
+        if not _fw_logger.handlers:
+            _fw_handler = _logging.StreamHandler()
+            _fw_handler.setFormatter(_logging.Formatter("[DEBUG][Firmware] %(message)s"))
+            _fw_logger.addHandler(_fw_handler)
+        _fw_logger.setLevel(
+            _logging.DEBUG if self._debug_prints_enabled() else _logging.WARNING
+        )
         self.active_theme_choice = self._normalized_theme_choice(self.config.get("theme", "system"))
         self.active_theme_variant = self._resolved_theme_variant(self.active_theme_choice)
         self.active_theme_colors = self._theme_colors(self.active_theme_variant)
@@ -435,6 +459,7 @@ class MainWindow(QMainWindow):
         self.details_manage_saves_button: QPushButton | None = None
         self.details_manage_states_button: QPushButton | None = None
         self.details_ps4_content_button: QPushButton | None = None
+        self.details_xbox360_content_button: QPushButton | None = None
         self.details_cloud_title_label: QLabel | None = None
         self.details_cloud_status_label: QLabel | None = None
         self.details_cloud_empty_label: QLabel | None = None
@@ -502,6 +527,7 @@ class MainWindow(QMainWindow):
         self.downloads_refresh_timer.setSingleShot(True)
         self.downloads_refresh_timer.setInterval(120)
         self.downloads_refresh_timer.timeout.connect(self._refresh_downloads_page)
+        self._emulator_refresh_requested.connect(self._refresh_emulator_views)
         self.download_entry_detail_labels: dict[str, QLabel] = {}
         self.active_download_count = 0
         self.active_download_bytes = 0
@@ -1182,6 +1208,12 @@ class MainWindow(QMainWindow):
         ps4_content_button.clicked.connect(self._perform_ps4_content_action)
         self.details_ps4_content_button = ps4_content_button
         action_row.addWidget(ps4_content_button)
+
+        xbox360_content_button = QPushButton("Install Update/DLC")
+        xbox360_content_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        xbox360_content_button.clicked.connect(self._perform_xbox360_content_action)
+        self.details_xbox360_content_button = xbox360_content_button
+        action_row.addWidget(xbox360_content_button)
 
         secondary = QPushButton("Uninstall")
         secondary.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -2265,6 +2297,10 @@ class MainWindow(QMainWindow):
         platform = platform_value.strip().casefold() if isinstance(platform_value, str) else ""
         return platform in {"ps4", "playstation 4", "playstation4", "sony playstation 4"}
 
+    def _is_xbox360_platform(self, game: dict[str, str]) -> bool:
+        from rom_mate.emulator import is_xbox360_platform
+        return is_xbox360_platform(game)
+
     def _is_windows_pc_platform(self, game: dict[str, str]) -> bool:
         platform_value = game.get("platform", "")
         if not isinstance(platform_value, str):
@@ -2336,6 +2372,29 @@ class MainWindow(QMainWindow):
         if not isinstance(parsed, dict):
             return {}
 
+        file_ids_by_category: dict[str, list[int]] = {}
+        for raw_category, raw_ids in parsed.items():
+            if not isinstance(raw_category, str):
+                continue
+            category = raw_category.strip().lower()
+            if not category:
+                continue
+            if not isinstance(raw_ids, list):
+                continue
+            normalized_ids = [file_id for file_id in raw_ids if isinstance(file_id, int)]
+            if normalized_ids:
+                file_ids_by_category[category] = normalized_ids
+        return file_ids_by_category
+
+    def _xbox360_file_ids_by_category_from_text(self, value: str) -> dict[str, list[int]]:
+        if not isinstance(value, str) or not value.strip():
+            return {}
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            return {}
+        if not isinstance(parsed, dict):
+            return {}
         file_ids_by_category: dict[str, list[int]] = {}
         for raw_category, raw_ids in parsed.items():
             if not isinstance(raw_category, str):
@@ -2458,6 +2517,34 @@ class MainWindow(QMainWindow):
                         return parsed
         return {}
 
+    def _xbox360_file_ids_by_category_for_game(
+        self,
+        game: dict[str, str],
+        rom_id: str = "",
+        *,
+        allow_payload_lookup: bool,
+    ) -> dict[str, list[int]]:
+        for candidate in (
+            game,
+            self._installed_game_record(game),
+            self._server_game_for_identity(game, rom_id),
+        ):
+            if not isinstance(candidate, dict):
+                continue
+            parsed = self._xbox360_file_ids_by_category_from_text(candidate.get("xbox360_file_ids_by_category", ""))
+            if parsed:
+                return parsed
+
+        if allow_payload_lookup:
+            normalized_rom_id = rom_id.strip()
+            if normalized_rom_id:
+                payload = self._fetch_server_rom_payload(normalized_rom_id, force_refresh=True)
+                if isinstance(payload, dict):
+                    parsed = self._ps4_file_ids_by_category_from_payload(payload)
+                    if parsed:
+                        return parsed
+        return {}
+
     def _available_ps4_content_kinds_for_game(self, game: dict[str, str]) -> list[str]:
         if not self._is_ps4_platform(game):
             return []
@@ -2467,6 +2554,22 @@ class MainWindow(QMainWindow):
 
     def _details_ps4_content_button_text(self, game: dict[str, str]) -> str:
         kinds = self._available_ps4_content_kinds_for_game(game)
+        if kinds == ["update"]:
+            return "Install Update"
+        if kinds == ["dlc"]:
+            return "Install DLC"
+        if len(kinds) == 2:
+            return "Install Update/DLC"
+        return ""
+
+    def _available_xbox360_content_kinds_for_game(self, game: dict[str, str]) -> list[str]:
+        if not self._is_xbox360_platform(game):
+            return []
+        file_ids_by_category = self._xbox360_file_ids_by_category_for_game(game, allow_payload_lookup=False)
+        return [kind for kind in ("update", "dlc") if file_ids_by_category.get(kind)]
+
+    def _details_xbox360_content_button_text(self, game: dict[str, str]) -> str:
+        kinds = self._available_xbox360_content_kinds_for_game(game)
         if kinds == ["update"]:
             return "Install Update"
         if kinds == ["dlc"]:
@@ -2486,8 +2589,21 @@ class MainWindow(QMainWindow):
             return "No update or DLC content is available for this PS4 game on the server."
         return ""
 
+    def _xbox360_content_install_block_reason(self, game: dict[str, str]) -> str:
+        if not self._is_game_installed(game):
+            return "Game must be installed before content can be applied."
+        rom_id = self._resolve_rom_id_for_game(game)
+        if not rom_id:
+            return "Game is missing a ROM ID."
+        return ""
+
     def _ps4_content_archive_name(self, game: dict[str, str], content_kind: str) -> str:
         safe_title = self._sanitize_path_component(game.get("title", "ps4-content"), "ps4-content")
+        kind = content_kind.strip().lower() or "content"
+        return f"{safe_title}-{kind}.zip"
+
+    def _xbox360_content_archive_name(self, game: dict[str, str], content_kind: str) -> str:
+        safe_title = self._sanitize_path_component(game.get("title", "xbox360-content"), "xbox360-content")
         kind = content_kind.strip().lower() or "content"
         return f"{safe_title}-{kind}.zip"
 
@@ -2507,6 +2623,42 @@ class MainWindow(QMainWindow):
             extract_archive_into_directory=resolve_extract_archive_into_directory,
             install_progress_callback=install_progress_callback,
         )
+
+    def _apply_xenia_content_archive_without_ui(
+        self,
+        installed_game: dict[str, str],
+        archive_path: Path,
+        *,
+        install_progress_callback: Callable[[int, int], None] | None = None,
+    ) -> tuple[dict[str, str] | None, str]:
+        platform = installed_game.get("platform", "Xbox 360")
+        emulator_name = self._default_emulator_name_for_platform(platform)
+        emulator = self._emulator_entry_by_name(emulator_name) if emulator_name else None
+        emulator_path = emulator.get("path", "") if isinstance(emulator, dict) else ""
+        emulator_args = emulator.get("args", "") if isinstance(emulator, dict) else ""
+
+        settings = resolve_xenia_directory_settings(
+            emulator_path,
+            emulator_args,
+            self._split_launch_template_args,
+        )
+        content_root_text = settings.get("content_root", "")
+        if not content_root_text:
+            return None, "Could not determine Xenia content directory. Is Xenia configured?"
+
+        results, warning_text = resolve_apply_xenia_content_archive_without_ui(
+            archive_path,
+            Path(content_root_text),
+            extracted_dir_for_archive_path=self._extracted_dir_for_archive_path,
+            extract_archive_into_directory=resolve_extract_archive_into_directory,
+            install_progress_callback=install_progress_callback,
+        )
+
+        if not results and warning_text:
+            return None, warning_text
+
+        game = dict(installed_game)
+        return game, warning_text
 
     def _sync_ps4_content_metadata_to_installed_game(self, source_game: dict[str, str], updated_game: dict[str, str]) -> None:
         installed_game = self._installed_game_record(source_game)
@@ -2531,16 +2683,9 @@ class MainWindow(QMainWindow):
         emulator_path_text = emulator_path_value.strip() if isinstance(emulator_path_value, str) else ""
         if not emulator_path_text:
             return None
+        return resolve_rpcs3_data_root(emulator_path_text)
 
-        emulator_path = Path(emulator_path_text).expanduser()
-        if emulator_path.exists() and emulator_path.is_dir():
-            return emulator_path
-        emulator_root = emulator_path.parent
-        if emulator_root.exists() and emulator_root.is_dir():
-            return emulator_root
-        return None
-
-    def _ps3_link_plan_for_extracted_dir(self, extracted_dir: Path, emulator_root: Path) -> list[tuple[Path, Path, bool]]:
+    def _ps3_link_plan_for_extracted_dir(self, extracted_dir: Path, emulator_root: Path) -> list[tuple[Path, Path, bool, str]]:
         return resolve_ps3_link_plan_for_extracted_dir(extracted_dir, emulator_root, self._path_key)
 
     def _ps3_game_id_from_text(self, value: str) -> str:
@@ -2849,8 +2994,9 @@ class MainWindow(QMainWindow):
             return ""
 
         firmware_dirs = self._resolved_firmware_directories(emulator_entry)
-        if not firmware_dirs:
-            return ""
+        config_file_dirs: list = []
+        saves_file_dirs: list = []
+        extract_zip_with_paths = False
 
         if self._is_retroarch_emulator_name(emulator_name, emulator=emulator_entry):
             core_defaults = self._normalize_default_retroarch_cores(
@@ -2859,28 +3005,133 @@ class MainWindow(QMainWindow):
             configured_core = self._mapping_value_for_platform(core_defaults, platform)
             if not configured_core:
                 return ""
-            metadata = resolve_retroarch_core_firmware_metadata(
-                configured_core, self._retroarch_core_list_entries()
-            )
+            core_entries = self._retroarch_core_list_entries()
+            metadata = resolve_retroarch_core_firmware_metadata(configured_core, core_entries)
             if metadata is None:
-                return ""
-            subdirectory = metadata.get("subdirectory")
-            if isinstance(subdirectory, str) and subdirectory.strip():
-                firmware_dirs = [
-                    ((d[0] / subdirectory, d[1]) if isinstance(d, tuple) else d / subdirectory)
-                    for d in firmware_dirs
-                ]
+                firmware_dirs = []
+            else:
+                subdirectory = metadata.get("subdirectory")
+                if isinstance(subdirectory, str) and subdirectory.strip():
+                    firmware_dirs = [
+                        ((d[0] / subdirectory, d[1]) if isinstance(d, tuple) else d / subdirectory)
+                        for d in firmware_dirs
+                    ]
+                file_names = metadata.get("files", [])
+                if isinstance(file_names, list) and file_names:
+                    firmware_dirs = [
+                        (d if isinstance(d, tuple) else (d, list(file_names)))
+                        for d in firmware_dirs
+                    ]
+                extract_zip_with_paths = bool(metadata.get("extract_with_paths", False))
 
-        try:
-            warnings = install_platform_firmware(
-                self._api_get,
-                self._api_get_bytes,
-                platform_id,
-                firmware_dirs,
-                skip_existing=True,
+            config_metadata = resolve_retroarch_core_config_files_metadata(
+                configured_core, core_entries
             )
-        except Exception as e:
-            warnings = [f"Firmware install error: {e}"]
+            if isinstance(config_metadata, dict):
+                base_dir = config_metadata.get("base_dir")
+                if isinstance(base_dir, str) and base_dir.strip():
+                    emulator_path_value = emulator_entry.get("path", "")
+                    emulator_path = (
+                        Path(emulator_path_value).expanduser()
+                        if isinstance(emulator_path_value, str)
+                        else Path()
+                    )
+                    emulator_dir = emulator_path.parent if emulator_path_value else Path()
+                    file_names = config_metadata.get("files", [])
+                    if isinstance(file_names, list) and file_names:
+                        config_file_dirs = [(emulator_dir / base_dir, list(file_names))]
+                    else:
+                        config_file_dirs = [emulator_dir / base_dir]
+
+            saves_metadata = resolve_retroarch_core_saves_files_metadata(
+                configured_core, core_entries
+            )
+            if isinstance(saves_metadata, dict):
+                saves_file_name = saves_metadata.get("file")
+                if isinstance(saves_file_name, str) and saves_file_name.strip():
+                    directory_settings = resolve_retroarch_directory_settings(
+                        emulator_entry.get("path", "")
+                    )
+                    savefile_dir_str = directory_settings.get("savefile_directory", "")
+                    emulator_path_value = emulator_entry.get("path", "")
+                    emulator_path = (
+                        Path(emulator_path_value).expanduser()
+                        if isinstance(emulator_path_value, str) and emulator_path_value
+                        else None
+                    )
+                    emulator_dir = emulator_path.parent if emulator_path else None
+                    if emulator_dir:
+                        if isinstance(savefile_dir_str, str) and savefile_dir_str.strip():
+                            stripped = savefile_dir_str.strip()
+                            if stripped.lower() == "default":
+                                saves_dir = emulator_dir / "saves"
+                            elif stripped.startswith(":\\") or stripped.startswith(":/"):
+                                # RetroArch root-relative notation - strip the :\ or :/ prefix.
+                                relative_part = stripped[2:]
+                                saves_dir = (emulator_dir / relative_part).resolve()
+                            else:
+                                saves_dir = Path(stripped).expanduser()
+                                if not saves_dir.is_absolute():
+                                    saves_dir = (emulator_dir / saves_dir).resolve()
+                        else:
+                            saves_dir = emulator_dir / "saves"
+                        saves_file_dirs = [(saves_dir, [saves_file_name])]
+                        if self._debug_prints_enabled():
+                            print(f"[DEBUG][Firmware] saves_dir resolved to: {saves_dir}")
+        elif self._is_cemu_emulator_name(emulator_name, emulator=emulator_entry):
+            firmware_dirs = [
+                d if isinstance(d, tuple) else (d, ["keys.txt"])
+                for d in firmware_dirs
+            ]
+
+        if not firmware_dirs and not config_file_dirs and not saves_file_dirs:
+            return ""
+
+        warnings: list[str] = []
+
+        if firmware_dirs:
+            try:
+                warnings.extend(
+                    install_platform_firmware(
+                        self._api_get,
+                        self._api_get_bytes,
+                        platform_id,
+                        firmware_dirs,
+                        skip_existing=True,
+                        extract_zip_with_paths=extract_zip_with_paths,
+                    )
+                )
+            except Exception as e:
+                warnings.append(f"Firmware install error: {e}")
+
+        if config_file_dirs:
+            try:
+                warnings.extend(
+                    install_platform_firmware(
+                        self._api_get,
+                        self._api_get_bytes,
+                        platform_id,
+                        config_file_dirs,
+                        skip_existing=True,
+                    )
+                )
+            except Exception as e:
+                warnings.append(f"Firmware install error: {e}")
+
+        if saves_file_dirs:
+            try:
+                warnings.extend(
+                    install_platform_firmware(
+                        self._api_get,
+                        self._api_get_bytes,
+                        platform_id,
+                        saves_file_dirs,
+                        skip_existing=True,
+                        extract_zip_with_paths=True,
+                    )
+                )
+            except Exception as e:
+                warnings.append(f"Firmware install error: {e}")
 
         if self._is_dolphin_emulator_name(emulator_name, emulator=emulator_entry):
             try:
@@ -3027,12 +3278,34 @@ class MainWindow(QMainWindow):
         *,
         save_type: str = "save",
     ) -> str:
+        resolved_emulator_name = emulator_name.strip()
+        if not resolved_emulator_name and isinstance(emulator, dict):
+            emulator_value = emulator.get("name", "")
+            if isinstance(emulator_value, str):
+                resolved_emulator_name = emulator_value.strip()
+
+        platform_value = game.get("platform", "")
+        platform = platform_value.strip() if isinstance(platform_value, str) else ""
+        if not resolved_emulator_name and platform:
+            resolved_emulator_name = self._default_emulator_name_for_platform(platform)
+
+        flags: dict[str, bool] | None = None
+        if resolved_emulator_name and self._is_retroarch_emulator_name(resolved_emulator_name, emulator):
+            core_defaults = self._normalize_default_retroarch_cores(
+                self.config.get("default_retroarch_cores", {})
+            )
+            core_id = self._mapping_value_for_platform(core_defaults, platform)
+            if core_id:
+                flags = resolve_retroarch_core_flags(core_id, self._retroarch_core_list_entries())
+
         return resolve_cloud_save_block_reason_for_game(
             game,
             is_native_executable_platform=self._is_native_executable_platform,
-            emulator_name=emulator_name,
+            emulator_name=resolved_emulator_name,
             is_xemu_emulator_name=lambda value: self._is_xemu_emulator_name(value, emulator),
             is_redream_emulator_name=lambda value: self._is_redream_emulator_name(value, emulator),
+            is_retroarch_emulator_name=self._is_retroarch_emulator_name,
+            retroarch_core_flags=flags,
             save_type=save_type,
         )
 
@@ -3044,11 +3317,35 @@ class MainWindow(QMainWindow):
         *,
         save_type: str = "save",
     ) -> str:
+        resolved_emulator_name = emulator_name.strip()
+        if not resolved_emulator_name and isinstance(emulator, dict):
+            emulator_value = emulator.get("name", "")
+            if isinstance(emulator_value, str):
+                resolved_emulator_name = emulator_value.strip()
+
+        platform_value = game.get("platform", "")
+        platform = platform_value.strip() if isinstance(platform_value, str) else ""
+        if not resolved_emulator_name and platform:
+            resolved_emulator_name = self._default_emulator_name_for_platform(platform)
+
+        flags: dict[str, bool] | None = None
+        if resolved_emulator_name and self._is_retroarch_emulator_name(resolved_emulator_name, emulator):
+            core_defaults = self._normalize_default_retroarch_cores(
+                self.config.get("default_retroarch_cores", {})
+            )
+            core_id = self._mapping_value_for_platform(core_defaults, platform)
+            if core_id:
+                flags = resolve_retroarch_core_flags(core_id, self._retroarch_core_list_entries())
+            elif platform:
+                flags = resolve_retroarch_core_flags_for_platform(platform, self._retroarch_core_list_entries())
+
         return resolve_cloud_save_scope_for_game(
             game,
-            emulator_name=emulator_name,
+            emulator_name=resolved_emulator_name,
             is_xemu_emulator_name=lambda value: self._is_xemu_emulator_name(value, emulator),
             is_redream_emulator_name=lambda value: self._is_redream_emulator_name(value, emulator),
+            is_retroarch_emulator_name=self._is_retroarch_emulator_name,
+            retroarch_core_flags=flags,
             save_type=save_type,
         )
 
@@ -3709,7 +4006,15 @@ class MainWindow(QMainWindow):
         )
         if server_game is None:
             return
-        for field in ("ra_id", "ps4_has_update", "ps4_has_dlc", "ps4_file_ids_by_category"):
+        for field in (
+            "ra_id",
+            "ps4_has_update",
+            "ps4_has_dlc",
+            "ps4_file_ids_by_category",
+            "xbox360_has_update",
+            "xbox360_has_dlc",
+            "xbox360_file_ids_by_category",
+        ):
             if not game.get(field):
                 value = server_game.get(field)
                 if value:
@@ -3890,11 +4195,17 @@ class MainWindow(QMainWindow):
         if install_mode in {"source_emulator", "source_emulator_update"}:
             return self._start_async_source_emulator_install(game)
         is_ps4_content_install = install_mode == "ps4_content"
+        is_xbox360_content_install = install_mode == "xbox360_content"
 
         if is_ps4_content_install:
             ps4_block_reason = self._ps4_content_install_block_reason(game)
             if ps4_block_reason:
                 QMessageBox.warning(self, "Install Blocked", ps4_block_reason)
+                return False
+        elif is_xbox360_content_install:
+            xbox360_block_reason = self._xbox360_content_install_block_reason(game)
+            if xbox360_block_reason:
+                QMessageBox.warning(self, "Install Blocked", xbox360_block_reason)
                 return False
         else:
             install_block_reason = self._install_block_reason_for_game(game)
@@ -3941,8 +4252,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Install Error", "Set a Server URL in Settings before installing games.")
             return False
 
+        nested_file_name_value = install_game.get("rom_nested_file_name", "")
+        nested_file_name = nested_file_name_value.strip() if isinstance(nested_file_name_value, str) else ""
         archive_name_value = install_game.get("_archive_name_override", "")
-        archive_name = archive_name_value.strip() if isinstance(archive_name_value, str) and archive_name_value.strip() else self._archive_name_for_game(install_game)
+        archive_name_override = archive_name_value.strip() if isinstance(archive_name_value, str) else ""
+        archive_name = nested_file_name or archive_name_override or self._archive_name_for_game(install_game)
         archive_path = install_path / archive_name
         rom_id_path = quote(rom_id, safe="")
         file_name_path = quote(self._server_content_file_name_for_game(install_game), safe="")
@@ -3951,6 +4265,11 @@ class MainWindow(QMainWindow):
         file_ids_csv = file_ids_csv_value.strip() if isinstance(file_ids_csv_value, str) else ""
         if file_ids_csv:
             download_url = f"{download_url}?{urlencode({'file_ids': file_ids_csv})}"
+        elif not is_ps4_content_install and not is_xbox360_content_install:
+            base_file_id_value = install_game.get("rom_base_file_id", "")
+            base_file_id = base_file_id_value.strip() if isinstance(base_file_id_value, str) else ""
+            if base_file_id:
+                download_url = f"{download_url}?{urlencode({'file_ids': base_file_id})}"
 
         install_key = self._game_key(install_game)
         pending_key = pending_install_key(
@@ -4148,7 +4467,7 @@ class MainWindow(QMainWindow):
             self._start_next_queued_install()
             return
 
-        if install_mode not in {"ps4_content", "update", "source_emulator", "source_emulator_update"} and self._is_game_installed(game):
+        if install_mode not in {"ps4_content", "xbox360_content", "update", "source_emulator", "source_emulator_update"} and self._is_game_installed(game):
             if entry_id:
                 self._set_download_entry_status(entry_id, "completed")
             self._update_download_status_ui()
@@ -4178,6 +4497,8 @@ class MainWindow(QMainWindow):
         content_kind = content_kind_value.strip().lower() if isinstance(content_kind_value, str) else ""
         if install_mode == "ps4_content":
             finalize_content_kind = content_kind
+        elif install_mode == "xbox360_content":
+            finalize_content_kind = "xenia_content"
         elif install_mode == "native_update":
             finalize_content_kind = "native_update"
         else:
@@ -4217,12 +4538,19 @@ class MainWindow(QMainWindow):
         install_mode_value = game.get("_install_mode", "base") if isinstance(game, dict) else "base"
         install_mode = install_mode_value.strip().lower() if isinstance(install_mode_value, str) else "base"
         is_ps4_content_install = install_mode == "ps4_content"
+        is_xbox360_content_install = install_mode == "xbox360_content"
         is_source_install = install_mode in {"source_emulator", "source_emulator_update"}
         is_source_update = install_mode == "source_emulator_update"
         is_native_update = install_mode == "native_update"
         content_kind_value = game.get("_ps4_content_kind", "") if isinstance(game, dict) else ""
         content_kind = content_kind_value.strip().lower() if isinstance(content_kind_value, str) else "content"
-        install_label = f"PS4 {content_kind}" if is_ps4_content_install else title
+        if is_ps4_content_install:
+            install_label = f"PS4 {content_kind}"
+        elif is_xbox360_content_install:
+            xenia_kind_value = game.get("_xenia_content_kind", "content") if isinstance(game, dict) else "content"
+            install_label = f"Xbox 360 {xenia_kind_value.strip().lower() or 'content'}"
+        else:
+            install_label = title
 
         if error or not isinstance(prepared_game, dict):
             if entry_id:
@@ -4247,6 +4575,15 @@ class MainWindow(QMainWindow):
             if self.current_details_game is not None:
                 self.current_details_game["ps4_game_id"] = installed_game.get("ps4_game_id", "")
                 self.current_details_game["ps4_content"] = installed_game.get("ps4_content", "")
+            if entry_id:
+                self._set_download_entry_status(entry_id, "completed")
+            self._show_install_warning_if_actionable(warning_text)
+            self._update_download_status_ui()
+            self._update_details_action_buttons()
+            self._start_next_queued_install()
+            return
+
+        if is_xbox360_content_install:
             if entry_id:
                 self._set_download_entry_status(entry_id, "completed")
             self._show_install_warning_if_actionable(warning_text)
@@ -4288,6 +4625,7 @@ class MainWindow(QMainWindow):
 
         archive_file = Path(archive_path)
         self._register_installed_game(installed_game, archive_file)
+        self._queue_xbox360_content_for_game(installed_game)
         auto_configured = self._auto_configure_installed_emulator(installed_game, archive_file)
         if is_source_install:
             self._record_source_emulator_install(installed_game)
@@ -5480,6 +5818,7 @@ class MainWindow(QMainWindow):
                 firmware_warnings = self._install_firmware_for_game_without_ui(launch_game, {})
             except Exception as e:
                 pass
+
             self._launch_installed_game(launch_game)
             return
         self._start_async_install(self.current_details_game)
@@ -5564,6 +5903,127 @@ class MainWindow(QMainWindow):
         )
 
         self._start_async_install(install_game)
+
+    def _perform_xbox360_content_action(self) -> None:
+        if self.current_details_game is None:
+            return
+
+        block_reason = self._xbox360_content_install_block_reason(self.current_details_game)
+        if block_reason:
+            QMessageBox.warning(self, "Install Blocked", block_reason)
+            return
+
+        available_kinds = self._available_xbox360_content_kinds_for_game(self.current_details_game)
+        if not available_kinds:
+            QMessageBox.warning(
+                self,
+                "Install Error",
+                "No Xbox 360 update or DLC content is available for this game from the current server metadata.",
+            )
+            return
+
+        selected_kind = ""
+        if len(available_kinds) == 1:
+            selected_kind = available_kinds[0]
+        else:
+            chooser = QMessageBox(self)
+            chooser.setWindowTitle("Install Xbox 360 Content")
+            chooser.setText("Choose the content type to install:")
+            update_button = chooser.addButton("Install Update", QMessageBox.ButtonRole.AcceptRole)
+            dlc_button = chooser.addButton("Install DLC", QMessageBox.ButtonRole.ActionRole)
+            chooser.addButton(QMessageBox.StandardButton.Cancel)
+            chooser.exec()
+            clicked_button = chooser.clickedButton()
+            if clicked_button is update_button:
+                selected_kind = "update"
+            elif clicked_button is dlc_button:
+                selected_kind = "dlc"
+            else:
+                return
+
+        rom_id = self._resolve_rom_id_for_game(self.current_details_game)
+        if not rom_id:
+            QMessageBox.warning(self, "Install Error", "Selected game is missing a ROM id and cannot be downloaded.")
+            return
+
+        file_ids_by_category = self._xbox360_file_ids_by_category_for_game(
+            self.current_details_game,
+            rom_id,
+            allow_payload_lookup=True,
+        )
+        selected_file_ids = file_ids_by_category.get(selected_kind, [])
+        if not selected_file_ids:
+            QMessageBox.warning(
+                self,
+                "Install Error",
+                f"No Xbox 360 {selected_kind} files were found for this title in server metadata.",
+            )
+            return
+
+        install_game = dict(self.current_details_game)
+        install_game["rom_id"] = rom_id
+        install_game["_install_mode"] = "xbox360_content"
+        install_game["_xenia_content_kind"] = selected_kind
+        install_game["_ps4_file_ids_csv"] = ",".join(str(file_id) for file_id in selected_file_ids)
+        install_game["_archive_name_override"] = self._xbox360_content_archive_name(install_game, selected_kind)
+        self._hydrate_install_game_metadata(install_game, rom_id)
+
+        resolved_file_name = self._resolved_rom_file_name_for_game(install_game, rom_id)
+        if not resolved_file_name:
+            QMessageBox.warning(
+                self,
+                "Install Error",
+                "Server did not return a usable ROM filename/path for this title. Refresh server metadata and try again.",
+            )
+            return
+        install_game["rom_file_name"] = resolved_file_name
+        install_game["xbox360_file_ids_by_category"] = json.dumps(
+            file_ids_by_category,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+        self._start_async_install(install_game)
+
+    def _queue_xbox360_content_for_game(self, installed_game: dict[str, str]) -> None:
+        """Silently queue Xbox 360 title update and DLC downloads after base game install."""
+        if not self._is_xbox360_platform(installed_game):
+            return
+
+        rom_id = self._resolve_rom_id_for_game(installed_game)
+        if not rom_id:
+            return
+
+        file_ids_by_category = self._xbox360_file_ids_by_category_for_game(
+            installed_game,
+            rom_id,
+            allow_payload_lookup=False,
+        )
+        if not file_ids_by_category:
+            return
+
+        resolved_file_name = self._resolved_rom_file_name_for_game(installed_game, rom_id)
+
+        for kind in ("update", "dlc"):
+            selected_file_ids = file_ids_by_category.get(kind, [])
+            if not selected_file_ids:
+                continue
+
+            install_game = dict(installed_game)
+            install_game["rom_id"] = rom_id
+            install_game["_install_mode"] = "xbox360_content"
+            install_game["_xenia_content_kind"] = kind
+            install_game["_ps4_file_ids_csv"] = ",".join(str(file_id) for file_id in selected_file_ids)
+            install_game["_archive_name_override"] = self._xbox360_content_archive_name(install_game, kind)
+            if resolved_file_name:
+                install_game["rom_file_name"] = resolved_file_name
+            install_game["xbox360_file_ids_by_category"] = json.dumps(
+                file_ids_by_category,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            self._hydrate_install_game_metadata(install_game, rom_id)
+            self._start_async_install(install_game)
 
     def _perform_game_config_action(self) -> None:
         if self.current_details_game is None:
@@ -5953,6 +6413,27 @@ class MainWindow(QMainWindow):
                 ignore_basenames=ignore_basenames,
                 ignore_extensions=ignore_extensions,
             )
+        elif (
+            self._is_retroarch_emulator_name(emulator_name, emulator)
+            and self._cloud_save_scope_for_game(game, emulator_name, emulator, save_type="save") == "shared-slotted"
+        ):
+            vmu_files = resolve_flycast_vmu_file_candidates(directories)
+            if vmu_files:
+                files = self._cloud_sync_candidates_for_game(
+                    game,
+                    vmu_files,
+                    "save",
+                    ignore_basenames=ignore_basenames,
+                    ignore_extensions=ignore_extensions,
+                )
+            else:
+                files = self._cloud_sync_candidates_for_game(
+                    game,
+                    directories,
+                    "save",
+                    ignore_basenames=ignore_basenames,
+                    ignore_extensions=ignore_extensions,
+                )
         elif save_strategy == "single_file":
             files = self._cloud_sync_candidates_for_game(
                 game,
@@ -6302,11 +6783,21 @@ class MainWindow(QMainWindow):
             for token, token_value in replacements.items():
                 expanded = expanded.replace(token, token_value)
 
-            candidate = Path(expanded).expanduser()
-            if not candidate.is_absolute() and emulator_dir:
-                candidate = (emulator_dir / candidate).resolve()
-            elif candidate.is_absolute():
-                candidate = candidate.resolve()
+            stripped = expanded.strip()
+            if self._is_retroarch_emulator_name(emulator_name, emulator) and stripped.lower() == "default":
+                default_dir = "saves" if key == "save_paths" else "states"
+                candidate = (emulator_dir / default_dir).resolve()
+            elif self._is_retroarch_emulator_name(emulator_name, emulator) and (
+                stripped.startswith(":\\") or stripped.startswith(":/")
+            ):
+                # RetroArch root-relative notation - strip the :\ or :/ prefix.
+                candidate = (emulator_dir / stripped[2:]).resolve()
+            else:
+                candidate = Path(expanded).expanduser()
+                if not candidate.is_absolute() and emulator_dir:
+                    candidate = (emulator_dir / candidate).resolve()
+                elif candidate.is_absolute():
+                    candidate = candidate.resolve()
 
             if candidate.exists() and (candidate.is_dir() or candidate.is_file()):
                 resolved.append(candidate)
@@ -6760,7 +7251,7 @@ class MainWindow(QMainWindow):
         return self._emulator_matches_tokens(emulator_name, "mame", emulator=emulator)
 
     def _is_xemu_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-        return self._emulator_matches_tokens(emulator_name, "xemu", emulator=emulator)
+        return self._emulator_matches_tokens(emulator_name, "xemu", "xemu.exe", emulator=emulator)
 
     def _is_xenia_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
         return self._emulator_matches_tokens(emulator_name, "xenia", emulator=emulator)
@@ -8450,6 +8941,45 @@ class MainWindow(QMainWindow):
     def _is_duckstation_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
         return self._emulator_matches_tokens(emulator_name, "duckstation", emulator=emulator)
 
+    def _trigger_rpcs3_firmware_download_background(
+        self, emulator_entry: dict, path_text: str
+    ) -> None:
+        if resolve_rpcs3_pup_path(path_text) is not None:
+            return
+
+        platform_id: int | None = None
+        platform_ids = getattr(self, "server_platform_ids", {})
+        for key, val in platform_ids.items():
+            if isinstance(key, str) and ("playstation 3" in key.lower() or key.lower() == "ps3"):
+                if isinstance(val, int):
+                    platform_id = val
+                    break
+        if platform_id is None:
+            return
+
+        firmware_dirs = self._resolved_firmware_directories(emulator_entry)
+        if not firmware_dirs:
+            return
+
+        api_get = self._api_get
+        api_get_bytes = self._api_get_bytes
+
+        def _worker() -> None:
+            try:
+                install_platform_firmware(
+                    api_get,
+                    api_get_bytes,
+                    platform_id,
+                    firmware_dirs,
+                    skip_existing=True,
+                )
+            except Exception:
+                pass
+            self._emulator_refresh_requested.emit()
+
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+
     def _ensure_emulator_sync_settings(self, emulator_name: str, emulator_path_text: str) -> None:
         timing_start = getattr(self, "_debug_timing_start", None)
         timing_end = getattr(self, "_debug_timing_end", None)
@@ -8498,10 +9028,18 @@ class MainWindow(QMainWindow):
             resolve_ensure_azahar_settings(path_text)
         if self._is_eden_emulator_name(emulator_name, emulator_entry):
             resolve_ensure_eden_settings(path_text)
+        if self._is_rpcs3_emulator_name(emulator_name, emulator_entry):
+            resolve_ensure_rpcs3_settings(path_text)
+            self._trigger_rpcs3_firmware_download_background(emulator_entry, path_text)
         if self._is_ppsspp_emulator_name(emulator_name, emulator_entry):
-            resolve_ensure_ppsspp_settings(path_text)
+            resolve_ensure_ppsspp_settings(
+                path_text,
+                retroachievements_username=ra_username,
+                retroachievements_token=ra_token,
+            )
         if self._is_cemu_emulator_name(emulator_name, emulator_entry):
             resolve_ensure_cemu_settings(path_text)
+            resolve_ensure_cemu_controller_config(path_text)
         if self._is_redream_emulator_name(emulator_name, emulator_entry):
             resolve_ensure_redream_settings(path_text)
         if callable(timing_end):
@@ -8749,6 +9287,46 @@ class MainWindow(QMainWindow):
                 azahar_note.setWordWrap(True)
                 azahar_note.setStyleSheet("color: palette(mid); font-size: 10px; padding: 1px 0;")
                 outer_layout.addWidget(azahar_note)
+
+            if self._is_eden_emulator_name(entry.get("name", ""), entry):
+                eden_note = QLabel(
+                    "Controller setup: Controls \u2192 Configure \u2192 Map Controller"
+                )
+                eden_note.setObjectName("edenControllerNote")
+                eden_note.setWordWrap(True)
+                eden_note.setStyleSheet("color: palette(mid); font-size: 10px; padding: 1px 0;")
+                outer_layout.addWidget(eden_note)
+
+            if self._is_xemu_emulator_name(entry.get("name", ""), entry):
+                xemu_note = QLabel(
+                    "Controller setup: required to connect a controller first \u2014 layout is auto-detected"
+                )
+                xemu_note.setObjectName("xemuControllerNote")
+                xemu_note.setWordWrap(True)
+                xemu_note.setStyleSheet("color: palette(mid); font-size: 10px; padding: 1px 0;")
+                outer_layout.addWidget(xemu_note)
+
+            if self._is_rpcs3_emulator_name(entry.get("name", "")):
+                path_value = entry.get("path", "")
+                path_text = path_value.strip() if isinstance(path_value, str) else ""
+                pup_path = resolve_rpcs3_pup_path(path_text)
+                if pup_path is not None:
+                    fw_note = QLabel("PS3 firmware downloaded \u2014 click Install to activate it.")
+                    fw_note.setWordWrap(True)
+                    fw_note.setStyleSheet("color: palette(mid); font-size: 10px; padding: 1px 0;")
+                    outer_layout.addWidget(fw_note)
+
+                    fw_row = QHBoxLayout()
+                    fw_row.setContentsMargins(0, 0, 0, 0)
+                    fw_row.setSpacing(4)
+                    fw_btn = QPushButton("Install PS3 Firmware")
+                    fw_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+                    fw_btn.clicked.connect(
+                        lambda checked=False, ep=path_text, pp=str(pup_path): resolve_trigger_rpcs3_firmware_install(ep, pp)
+                    )
+                    fw_row.addWidget(fw_btn)
+                    fw_row.addStretch(1)
+                    outer_layout.addLayout(fw_row)
 
             bottom_row = QHBoxLayout()
             bottom_row.setContentsMargins(0, 0, 0, 0)

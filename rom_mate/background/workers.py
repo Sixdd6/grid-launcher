@@ -417,7 +417,13 @@ class InstallFinalizeWorker(QObject):
 
     def run(self) -> None:
         try:
-            if self.content_kind in {"update", "dlc"}:
+            if self.content_kind == "xenia_content":
+                prepared_game, warning_text = self.window._apply_xenia_content_archive_without_ui(
+                    self.game,
+                    self.archive_path,
+                    install_progress_callback=self._emit_progress,
+                )
+            elif self.content_kind in {"update", "dlc"}:
                 prepared_game, warning_text = self.window._apply_ps4_content_archive_without_ui(
                     self.game,
                     self.archive_path,

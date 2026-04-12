@@ -9,6 +9,83 @@ from typing import Callable
 
 _HEX8_RE = re.compile(r"^[0-9a-fA-F]{8}$")
 _HEX16_RE = re.compile(r"^[0-9a-fA-F]{16}$")
+_STFS_MAGIC = {b"CON ", b"LIVE", b"PIRS"}
+_STFS_CONTENT_TYPE_OFFSET = 0x344
+_STFS_TITLE_ID_OFFSET = 0x360
+_XUID_ANONYMOUS = "0000000000000000"
+
+
+def _read_stfs_header(content_path: Path) -> tuple[str, str]:
+    """Return (title_id_hex8, content_type_hex8) or ("", "") if not an STFS file."""
+    try:
+        with content_path.open("rb") as f:
+            header = f.read(0x368)
+    except OSError:
+        return "", ""
+
+    if len(header) < 0x368:
+        return "", ""
+    if header[:4] not in _STFS_MAGIC:
+        return "", ""
+
+    content_type = int.from_bytes(header[_STFS_CONTENT_TYPE_OFFSET:_STFS_CONTENT_TYPE_OFFSET + 4], "big")
+    title_id = int.from_bytes(header[_STFS_TITLE_ID_OFFSET:_STFS_TITLE_ID_OFFSET + 4], "big")
+    return f"{title_id:08X}", f"{content_type:08X}"
+
+
+def apply_xenia_content_without_ui(
+    content_path: Path,
+    content_root: Path,
+    *,
+    expected_title_id: str = "",
+) -> dict[str, object]:
+    """Copy an STFS content package to the correct xenia content directory.
+
+    Returns a dict with keys:
+      - "title_id": detected TitleID (8-char hex string)
+      - "content_type": detected ContentType (8-char hex string)
+      - "destination": absolute path string where the file was placed
+      - "error": non-empty string if something went wrong
+    """
+    if not isinstance(content_path, Path):
+        content_path = Path(content_path)
+    if not isinstance(content_root, Path):
+        content_root = Path(content_root)
+
+    if not content_path.exists() or not content_path.is_file():
+        return {"title_id": "", "content_type": "", "destination": "", "error": f"Content file not found: {content_path}"}
+
+    title_id, content_type = _read_stfs_header(content_path)
+    if not title_id:
+        return {"title_id": "", "content_type": "", "destination": "", "error": "File does not appear to be an STFS package (bad magic)"}
+
+    if expected_title_id and expected_title_id.upper() != title_id.upper():
+        return {
+            "title_id": title_id,
+            "content_type": content_type,
+            "destination": "",
+            "error": f"Title ID mismatch: expected {expected_title_id.upper()}, archive contains {title_id}",
+        }
+
+    dest_dir = content_root / _XUID_ANONYMOUS / title_id / content_type
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return {"title_id": title_id, "content_type": content_type, "destination": "", "error": str(exc)}
+
+    dest_path = dest_dir / content_path.name
+    try:
+        import shutil
+        shutil.copy2(str(content_path), str(dest_path))
+    except OSError as exc:
+        return {"title_id": title_id, "content_type": content_type, "destination": "", "error": str(exc)}
+
+    return {
+        "title_id": title_id,
+        "content_type": content_type,
+        "destination": str(dest_path),
+        "error": "",
+    }
 
 
 def _unique_paths(paths: list[Path]) -> list[Path]:

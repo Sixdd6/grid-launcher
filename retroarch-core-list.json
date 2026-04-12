@@ -3,7 +3,10 @@
     "core_file": "2048_libretro.dll",
     "platforms": [
       "Game"
-    ]
+    ],
+    "supports_save_states": false,
+    "supports_saves": false,
+    "cloud_sync_safe": false
   },
   {
     "core_file": "4do_libretro.dll",
@@ -24,6 +27,12 @@
         "panafz1j-norsa.bin",
         "goldstar.bin",
         "sanyotry.bin"
+      ]
+    },
+    "config_files": {
+      "base_dir": "config/4DO",
+      "files": [
+        "4DO.opt"
       ]
     }
   },
@@ -66,6 +75,12 @@
         "ATARIOSA.ROM",
         "ATARIXL.ROM"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/Atari800",
+      "files": [
+        "Atari800.opt"
+      ]
     }
   },
   {
@@ -106,6 +121,12 @@
       "files": [
         "lynxboot.img"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/Beetle Lynx",
+      "files": [
+        "Beetle Lynx.opt"
+      ]
     }
   },
   {
@@ -113,7 +134,13 @@
     "platforms": [
       "Neo Geo Pocket",
       "Neo Geo Pocket Color"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/Beetle NeoPop",
+      "files": [
+        "Beetle NeoPop.opt"
+      ]
+    }
   },
   {
     "core_file": "beetle_pc_fx_libretro.dll",
@@ -148,6 +175,12 @@
         "syscard1.pce",
         "gexpress.pce"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/Beetle PCE",
+      "files": [
+        "Beetle PCE.opt"
+      ]
     }
   },
   {
@@ -170,12 +203,21 @@
         "syscard1.pce",
         "gexpress.pce"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/Beetle PCE",
+      "files": [
+        "Beetle PCE.opt"
+      ]
     }
   },
   {
     "core_file": "mednafen_psx_libretro.dll",
     "platforms": [
-      "Sony PlayStation"
+      "Sony PlayStation",
+      "PlayStation",
+      "psx",
+      "ps1"
     ],
     "firmware": {
       "needs_bios": true,
@@ -184,6 +226,12 @@
         "scph5500.bin",
         "scph5501.bin",
         "scph5502.bin"
+      ]
+    },
+    "config_files": {
+      "base_dir": "config/Beetle PSX",
+      "files": [
+        "Beetle PSX.opt"
       ]
     }
   },
@@ -200,6 +248,12 @@
         "scph5501.bin",
         "scph5502.bin"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/Beetle PSX HW",
+      "files": [
+        "Beetle PSX HW.opt"
+      ]
     }
   },
   {
@@ -215,6 +269,12 @@
         "mpr-17933.bin",
         "mpr-18811-mx.ic1",
         "mpr-19367-mx.ic1"
+      ]
+    },
+    "config_files": {
+      "base_dir": "config/Beetle Saturn",
+      "files": [
+        "Beetle Saturn.opt"
       ]
     }
   },
@@ -233,6 +293,12 @@
         "syscard1.pce",
         "gexpress.pce"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/Beetle SuperGrafx",
+      "files": [
+        "Beetle SuperGrafx.opt"
+      ]
     }
   },
   {
@@ -248,7 +314,13 @@
     "platforms": [
       "Nintendo Virtual Boy",
       "Virtual Boy"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/Beetle VB",
+      "files": [
+        "Beetle VB.opt"
+      ]
+    }
   },
   {
     "core_file": "bk_libretro.dll",
@@ -278,7 +350,13 @@
       "Sega Genesis (Mega Drive)",
       "Sega Genesis",
       "Mega Drive"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/BlastEm",
+      "files": [
+        "BlastEm.opt"
+      ]
+    }
   },
   {
     "core_file": "bluemsx_libretro.dll",
@@ -287,7 +365,13 @@
       "SVI",
       "ColecoVision",
       "SG-1000"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/blueMSX",
+      "files": [
+        "blueMSX.opt"
+      ]
+    }
   },
   {
     "core_file": "bnes_libretro.dll",
@@ -314,7 +398,13 @@
       "Nintendo SNES",
       "Super Nintendo Entertainment System",
       "SFC"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/bsnes",
+      "files": [
+        "bsnes.opt"
+      ]
+    }
   },
   {
     "core_file": "bsnes_2014_accuracy_libretro.dll",
@@ -426,7 +516,13 @@
       "Nintendo SNES",
       "Super Nintendo Entertainment System",
       "SFC"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/bsnes-hd beta",
+      "files": [
+        "bsnes-hd beta.opt"
+      ]
+    }
   },
   {
     "core_file": "bsnes_jg_libretro.dll",
@@ -542,7 +638,13 @@
     "core_file": "caprice32_libretro.dll",
     "platforms": [
       "Amstrad CPC"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/Caprice32",
+      "files": [
+        "Caprice32.opt"
+      ]
+    }
   },
   {
     "core_file": "cdi_2015_libretro.dll",
@@ -560,7 +662,16 @@
     "core_file": "citra_libretro.dll",
     "platforms": [
       "Nintendo 3DS"
-    ]
+    ],
+    "saves_files": {
+      "file": "citra-sysdata.zip"
+    },
+    "config_files": {
+      "base_dir": "config/Citra",
+      "files": [
+        "Citra.opt"
+      ]
+    }
   },
   {
     "core_file": "citra_2018_libretro.dll",
@@ -620,6 +731,12 @@
         "bios9.bin",
         "firmware.bin"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/DeSmuME",
+      "files": [
+        "DeSmuME.opt"
+      ]
     }
   },
   {
@@ -634,6 +751,12 @@
         "bios7.bin",
         "bios9.bin",
         "firmware.bin"
+      ]
+    },
+    "config_files": {
+      "base_dir": "config/DeSmuME 2015",
+      "files": [
+        "DeSmuME 2015.opt"
       ]
     }
   },
@@ -662,7 +785,21 @@
       "GameCube",
       "Nintendo Wii",
       "Wii"
-    ]
+    ],
+    "firmware": {
+      "needs_bios": false,
+      "subdirectory": "dolphin-emu/Sys",
+      "files": [
+        "dolphin-gc-bios.zip"
+      ],
+      "extract_with_paths": true
+    },
+    "config_files": {
+      "base_dir": "config/dolphin-emu",
+      "files": [
+        "dolphin-emu.opt"
+      ]
+    }
   },
   {
     "core_file": "dosbox_libretro.dll",
@@ -674,13 +811,25 @@
     "core_file": "dosbox_core_libretro.dll",
     "platforms": [
       "DOS"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/DOSBox-Core",
+      "files": [
+        "DOSBox-Core.opt"
+      ]
+    }
   },
   {
     "core_file": "dosbox_pure_libretro.dll",
     "platforms": [
       "DOS"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/DOSBox-pure",
+      "files": [
+        "DOSBox-pure.opt"
+      ]
+    }
   },
   {
     "core_file": "dosbox_svn_libretro.dll",
@@ -698,7 +847,22 @@
     "core_file": "duckstation_libretro.dll",
     "platforms": [
       "Sony PlayStation"
-    ]
+    ],
+    "firmware": {
+      "needs_bios": true,
+      "subdirectory": null,
+      "files": [
+        "scph5500.bin",
+        "scph5501.bin",
+        "scph5502.bin"
+      ]
+    },
+    "config_files": {
+      "base_dir": "config/DuckStation",
+      "files": [
+        "DuckStation.opt"
+      ]
+    }
   },
   {
     "core_file": "dungeon_crawl_stone_soup_libretro.dll",
@@ -825,7 +989,13 @@
     "core_file": "fb_alpha_libretro.dll",
     "platforms": [
       "Arcade"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/FB Alpha",
+      "files": [
+        "FB Alpha.opt"
+      ]
+    }
   },
   {
     "core_file": "fb_alpha_2012_libretro.dll",
@@ -865,7 +1035,22 @@
     "core_file": "fbneo_libretro.dll",
     "platforms": [
       "Arcade"
-    ]
+    ],
+    "cloud_sync_safe": false,
+    "firmware": {
+      "needs_bios": true,
+      "subdirectory": "fbneo",
+      "files": [
+        "neogeo.zip"
+      ],
+      "extract_with_paths": false
+    },
+    "config_files": {
+      "base_dir": "config/FinalBurn Neo",
+      "files": [
+        "FinalBurn Neo.opt"
+      ]
+    }
   },
   {
     "core_file": "fceumm_libretro.dll",
@@ -881,13 +1066,22 @@
         "disksys.rom",
         "gamegenie.nes"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/FCEUmm",
+      "files": [
+        "FCEUmm.opt"
+      ]
     }
   },
   {
     "core_file": "ffmpeg_libretro.dll",
     "platforms": [
       "Media player"
-    ]
+    ],
+    "supports_save_states": false,
+    "supports_saves": false,
+    "cloud_sync_safe": false
   },
   {
     "core_file": "fixgb_libretro.dll",
@@ -906,19 +1100,26 @@
   },
   {
     "core_file": "flycast_libretro.dll",
+    "vmu_shared_saves": true,
     "platforms": [
       "Sega Dreamcast",
       "dreamcast",
       "NAOMI",
       "Sega Naomi"
     ],
+    "config_files": {
+      "base_dir": "config/flycast",
+      "files": [
+        "flycast.opt"
+      ]
+    },
     "firmware": {
       "needs_bios": false,
       "subdirectory": "dc",
       "files": [
         "dc_boot.bin",
         "dc_flash.bin",
-        "naomi_boot.bin",
+        "naomi.zip",
         "hod2bios.zip",
         "f355dlx.zip",
         "f355bios.zip",
@@ -949,6 +1150,12 @@
         "MSXDOS2.ROM",
         "PAINTER.ROM",
         "KANJI.ROM"
+      ]
+    },
+    "config_files": {
+      "base_dir": "config/fMSX",
+      "files": [
+        "fMSX.opt"
       ]
     }
   },
@@ -988,7 +1195,13 @@
     "core_file": "fs_uae_libretro.dll",
     "platforms": [
       "Commodore Amiga"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/FS-UAE",
+      "files": [
+        "FS-UAE.opt"
+      ]
+    }
   },
   {
     "core_file": "fuse_libretro.dll",
@@ -1031,6 +1244,12 @@
         "gb_bios.bin",
         "gbc_bios.bin"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/Gambatte",
+      "files": [
+        "Gambatte.opt"
+      ]
     }
   },
   {
@@ -1052,6 +1271,12 @@
         "dmg_boot.bin",
         "cgb_boot.bin"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/Gearboy",
+      "files": [
+        "Gearboy.opt"
+      ]
     }
   },
   {
@@ -1064,6 +1289,12 @@
       "subdirectory": null,
       "files": [
         "colecovision.rom"
+      ]
+    },
+    "config_files": {
+      "base_dir": "config/GearColeco",
+      "files": [
+        "GearColeco.opt"
       ]
     }
   },
@@ -1078,7 +1309,20 @@
     "core_file": "gearlynx_libretro.dll",
     "platforms": [
       "Atari Lynx"
-    ]
+    ],
+    "firmware": {
+      "needs_bios": true,
+      "subdirectory": null,
+      "files": [
+        "lynxboot.img"
+      ]
+    },
+    "config_files": {
+      "base_dir": "config/GearLynx",
+      "files": [
+        "GearLynx.opt"
+      ]
+    }
   },
   {
     "core_file": "gearsystem_libretro.dll",
@@ -1094,6 +1338,12 @@
         "bios.sms",
         "bios.gg"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/Gearsystem",
+      "files": [
+        "Gearsystem.opt"
+      ]
     }
   },
   {
@@ -1105,6 +1355,12 @@
       "Sega Genesis",
       "Sega CD"
     ],
+    "config_files": {
+      "base_dir": "config/Genesis Plus GX",
+      "files": [
+        "Genesis Plus GX.opt"
+      ]
+    },
     "firmware": {
       "needs_bios": true,
       "subdirectory": null,
@@ -1142,6 +1398,12 @@
       "files": [
         "gba_bios.bin"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/gpSP",
+      "files": [
+        "gpSP.opt"
+      ]
     }
   },
   {
@@ -1167,6 +1429,12 @@
       "files": [
         "lynxboot.img"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/Handy",
+      "files": [
+        "Handy.opt"
+      ]
     }
   },
   {
@@ -1183,13 +1451,22 @@
       "files": [
         "tos.img"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/Hatari",
+      "files": [
+        "Hatari.opt"
+      ]
     }
   },
   {
     "core_file": "hbmame_libretro.dll",
     "platforms": [
       "Arcade"
-    ]
+    ],
+    "supports_save_states": false,
+    "supports_saves": false,
+    "cloud_sync_safe": false
   },
   {
     "core_file": "higan_accuracy_libretro.dll",
@@ -1258,7 +1535,13 @@
     "platforms": [
       "Sega Saturn",
       "Sega ST-V"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/Kronos",
+      "files": [
+        "Kronos.opt"
+      ]
+    }
   },
   {
     "core_file": "lowres_nx_libretro.dll",
@@ -1282,55 +1565,118 @@
     "core_file": "mame_current_libretro.dll",
     "platforms": [
       "Arcade"
-    ]
+    ],
+    "supports_save_states": false,
+    "supports_saves": false,
+    "cloud_sync_safe": false,
+    "config_files": {
+      "base_dir": "config/MAME",
+      "files": [
+        "MAME.opt"
+      ]
+    }
   },
   {
     "core_file": "mame_2000_libretro.dll",
     "platforms": [
       "Arcade"
-    ]
+    ],
+    "supports_save_states": false,
+    "supports_saves": false,
+    "cloud_sync_safe": false
   },
   {
     "core_file": "mame_2003_libretro.dll",
     "platforms": [
       "Arcade"
-    ]
+    ],
+    "supports_save_states": false,
+    "supports_saves": false,
+    "cloud_sync_safe": false,
+    "config_files": {
+      "base_dir": "config/MAME 2003 (0.78)",
+      "files": [
+        "MAME 2003 (0.78).opt"
+      ]
+    }
   },
   {
     "core_file": "mame_2003_midway_libretro.dll",
     "platforms": [
       "Arcade"
-    ]
+    ],
+    "supports_save_states": false,
+    "supports_saves": false,
+    "cloud_sync_safe": false
   },
   {
     "core_file": "mame2003_plus_libretro.dll",
     "platforms": [
       "Arcade"
-    ]
+    ],
+    "supports_save_states": false,
+    "supports_saves": false,
+    "cloud_sync_safe": false,
+    "config_files": {
+      "base_dir": "config/MAME 2003-Plus",
+      "files": [
+        "MAME 2003-Plus.opt"
+      ]
+    }
   },
   {
     "core_file": "mame_2009_libretro.dll",
     "platforms": [
       "Arcade"
-    ]
+    ],
+    "supports_save_states": false,
+    "supports_saves": false,
+    "cloud_sync_safe": false
   },
   {
     "core_file": "mame_2010_libretro.dll",
     "platforms": [
       "Arcade"
-    ]
+    ],
+    "supports_save_states": false,
+    "supports_saves": false,
+    "cloud_sync_safe": false,
+    "config_files": {
+      "base_dir": "config/MAME 2010",
+      "files": [
+        "MAME 2010.opt"
+      ]
+    }
   },
   {
     "core_file": "mame_2015_libretro.dll",
     "platforms": [
       "Arcade"
-    ]
+    ],
+    "supports_save_states": false,
+    "supports_saves": false,
+    "cloud_sync_safe": false,
+    "config_files": {
+      "base_dir": "config/MAME 2015",
+      "files": [
+        "MAME 2015.opt"
+      ]
+    }
   },
   {
     "core_file": "mame_2016_libretro.dll",
     "platforms": [
       "Arcade"
-    ]
+    ],
+    "supports_save_states": false,
+    "supports_saves": false,
+    "cloud_sync_safe": false,
+    "config_files": {
+      "base_dir": "config/MAME 2016",
+      "files": [
+        "MAME 2016.opt"
+      ]
+    }
   },
   {
     "core_file": "melonds_2021_libretro.dll",
@@ -1344,6 +1690,12 @@
       "Nintendo DS",
       "Nintendo DSi"
     ],
+    "config_files": {
+      "base_dir": "config/melonDS DS",
+      "files": [
+        "melonDS DS.opt"
+      ]
+    },
     "firmware": {
       "needs_bios": true,
       "subdirectory": null,
@@ -1370,6 +1722,12 @@
       "subdirectory": null,
       "files": [
         "disksys.rom"
+      ]
+    },
+    "config_files": {
+      "base_dir": "config/Mesen",
+      "files": [
+        "Mesen.opt"
       ]
     }
   },
@@ -1410,6 +1768,12 @@
         "SGB2.sfc",
         "BS-X.bin"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/Mesen-S",
+      "files": [
+        "Mesen-S.opt"
+      ]
     }
   },
   {
@@ -1423,6 +1787,12 @@
     "platforms": [
       "Game Boy Advance"
     ],
+    "config_files": {
+      "base_dir": "config/mGBA",
+      "files": [
+        "mGBA.opt"
+      ]
+    },
     "firmware": {
       "needs_bios": false,
       "subdirectory": null,
@@ -1483,7 +1853,13 @@
     "core_file": "mupen64plus_next_libretro.dll",
     "platforms": [
       "Nintendo 64"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/Mupen64Plus-Next",
+      "files": [
+        "Mupen64Plus-Next.opt"
+      ]
+    }
   },
   {
     "core_file": "neko_project_ii_libretro.dll",
@@ -1520,7 +1896,31 @@
     "core_file": "neocd_libretro.dll",
     "platforms": [
       "Neo Geo CD"
-    ]
+    ],
+    "firmware": {
+      "needs_bios": true,
+      "subdirectory": "neocd",
+      "files": [
+        "neocd_f.rom",
+        "neocd_sf.rom",
+        "front-sp1.bin",
+        "neocd_t.rom",
+        "neocd_st.rom",
+        "top-sp1.bin",
+        "neocd_z.rom",
+        "neocd_st.rom",
+        "neocd.bin",
+        "ng-lo.rom",
+        "000-lo.lo",
+        "uni-bioscd.rom"
+      ]
+    },
+    "config_files": {
+      "base_dir": "config/NeoCD",
+      "files": [
+        "NeoCD.opt"
+      ]
+    }
   },
   {
     "core_file": "nestopia_libretro.dll",
@@ -1534,6 +1934,12 @@
       "subdirectory": null,
       "files": [
         "disksys.rom"
+      ]
+    },
+    "config_files": {
+      "base_dir": "config/Nestopia",
+      "files": [
+        "Nestopia.opt"
       ]
     }
   },
@@ -1625,13 +2031,32 @@
         "goldstar.bin",
         "sanyotry.bin"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/Opera",
+      "files": [
+        "Opera.opt"
+      ]
     }
   },
   {
     "core_file": "parallel_n64_libretro.dll",
     "platforms": [
       "Nintendo 64"
-    ]
+    ],
+    "firmware": {
+      "needs_bios": false,
+      "subdirectory": null,
+      "files": [
+        "64DD_IPL.bin"
+      ]
+    },
+    "config_files": {
+      "base_dir": "config/ParaLLEl N64",
+      "files": [
+        "ParaLLEl N64.opt"
+      ]
+    }
   },
   {
     "core_file": "pascalpong_libretro.dll",
@@ -1649,13 +2074,30 @@
     "core_file": "lrps2_libretro.dll",
     "platforms": [
       "Sony PlayStation 2"
-    ]
+    ],
+    "firmware": {
+      "needs_bios": true,
+      "subdirectory": "pcsx2/bios",
+      "files": []
+    },
+    "config_files": {
+      "base_dir": "config/LRPS2",
+      "files": [
+        "LRPS2.opt"
+      ]
+    }
   },
   {
     "core_file": "pcsx_rearmed_libretro.dll",
     "platforms": [
       "Sony PlayStation"
     ],
+    "config_files": {
+      "base_dir": "config/PCSX-ReARMed",
+      "files": [
+        "PCSX-ReARMed.opt"
+      ]
+    },
     "firmware": {
       "needs_bios": false,
       "subdirectory": null,
@@ -1692,7 +2134,16 @@
       "files": [
         "bios_CD_E.bin",
         "bios_CD_U.bin",
-        "bios_CD_J.bin"
+        "bios_CD_J.bin",
+        "32X_G_BIOS.BIN",
+        "32X_M_BIOS.BIN",
+        "32X_S_BIOS.BIN"
+      ]
+    },
+    "config_files": {
+      "base_dir": "config/PicoDrive",
+      "files": [
+        "PicoDrive.opt"
       ]
     }
   },
@@ -1700,7 +2151,13 @@
     "core_file": "play_libretro.dll",
     "platforms": [
       "Sony PlayStation 2"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/Play!",
+      "files": [
+        "Play!.opt"
+      ]
+    }
   },
   {
     "core_file": "pocket_cdg_libretro.dll",
@@ -1719,6 +2176,12 @@
       "files": [
         "bios.min"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/PokeMini",
+      "files": [
+        "PokeMini.opt"
+      ]
     }
   },
   {
@@ -1731,13 +2194,25 @@
     "core_file": "ppsspp_libretro.dll",
     "platforms": [
       "PlayStation Portable"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/PPSSPP",
+      "files": [
+        "PPSSPP.opt"
+      ]
+    }
   },
   {
     "core_file": "prboom_libretro.dll",
     "platforms": [
       "Game engine"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/PrBoom",
+      "files": [
+        "PrBoom.opt"
+      ]
+    }
   },
   {
     "core_file": "prosystem_libretro.dll",
@@ -1756,13 +2231,25 @@
     "core_file": "puae_libretro.dll",
     "platforms": [
       "Commodore Amiga"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/PUAE",
+      "files": [
+        "PUAE.opt"
+      ]
+    }
   },
   {
     "core_file": "puae_2021_libretro.dll",
     "platforms": [
       "Commodore Amiga"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/PUAE 2021",
+      "files": [
+        "PUAE 2021.opt"
+      ]
+    }
   },
   {
     "core_file": "puzzlescript_libretro.dll",
@@ -1800,7 +2287,13 @@
       "Nintendo NES",
       "Nintendo Entertainment System",
       "Famicom"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/QuickNES",
+      "files": [
+        "QuickNES.opt"
+      ]
+    }
   },
   {
     "core_file": "race_libretro.dll",
@@ -1855,6 +2348,12 @@
         "dmg_boot.bin",
         "cgb_boot.bin"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/SameBoy",
+      "files": [
+        "SameBoy.opt"
+      ]
     }
   },
   {
@@ -1873,7 +2372,13 @@
     "core_file": "scummvm_libretro.dll",
     "platforms": [
       "Game engine"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/ScummVM",
+      "files": [
+        "ScummVM.opt"
+      ]
+    }
   },
   {
     "core_file": "simcoupe_libretro.dll",
@@ -1902,7 +2407,13 @@
       "Nintendo SNES",
       "Super Nintendo Entertainment System",
       "SFC"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/Snes9x",
+      "files": [
+        "Snes9x.opt"
+      ]
+    }
   },
   {
     "core_file": "snes9x2002_libretro.dll",
@@ -1918,7 +2429,13 @@
       "Nintendo SNES",
       "Super Nintendo Entertainment System",
       "SFC"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/Snes9x 2005",
+      "files": [
+        "Snes9x 2005.opt"
+      ]
+    }
   },
   {
     "core_file": "snes9x2005_plus_libretro.dll",
@@ -1926,7 +2443,13 @@
       "Nintendo SNES",
       "Super Nintendo Entertainment System",
       "SFC"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/Snes9x 2005+",
+      "files": [
+        "Snes9x 2005+.opt"
+      ]
+    }
   },
   {
     "core_file": "snes9x2010_libretro.dll",
@@ -1934,7 +2457,13 @@
       "Nintendo SNES",
       "Super Nintendo Entertainment System",
       "SFC"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/Snes9x 2010",
+      "files": [
+        "Snes9x 2010.opt"
+      ]
+    }
   },
   {
     "core_file": "squirreljme_libretro.dll",
@@ -1964,7 +2493,24 @@
     "core_file": "swanstation_libretro.dll",
     "platforms": [
       "Sony PlayStation"
-    ]
+    ],
+    "firmware": {
+      "needs_bios": true,
+      "subdirectory": null,
+      "files": [
+        "scph5500.bin",
+        "scph5501.bin",
+        "scph5502.bin",
+        "psxonpsp660.bin",
+        "ps1_rom.bin"
+      ]
+    },
+    "config_files": {
+      "base_dir": "config/SwanStation",
+      "files": [
+        "SwanStation.opt"
+      ]
+    }
   },
   {
     "core_file": "tempgba_libretro.dll",
@@ -1977,7 +2523,13 @@
     "platforms": [
       "Game Boy",
       "Game Boy Color"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/TGB Dual",
+      "files": [
+        "TGB Dual.opt"
+      ]
+    }
   },
   {
     "core_file": "theodore_libretro.dll",
@@ -2002,7 +2554,13 @@
     "core_file": "tyrquake_libretro.dll",
     "platforms": [
       "Game engine"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/TyrQuake",
+      "files": [
+        "TyrQuake.opt"
+      ]
+    }
   },
   {
     "core_file": "uae4arm_libretro.dll",
@@ -2032,7 +2590,13 @@
     "core_file": "vbam_libretro.dll",
     "platforms": [
       "Game Boy Advance"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/VBA-M",
+      "files": [
+        "VBA-M.opt"
+      ]
+    }
   },
   {
     "core_file": "vba_next_libretro.dll",
@@ -2044,6 +2608,12 @@
       "subdirectory": null,
       "files": [
         "gba_bios.bin"
+      ]
+    },
+    "config_files": {
+      "base_dir": "config/VBA Next",
+      "files": [
+        "VBA Next.opt"
       ]
     }
   },
@@ -2064,7 +2634,13 @@
     "core_file": "vice_x64_libretro.dll",
     "platforms": [
       "Commodore 64"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/VICE x64",
+      "files": [
+        "VICE x64.opt"
+      ]
+    }
   },
   {
     "core_file": "vice_x64dtv_libretro.dll",
@@ -2076,13 +2652,25 @@
     "core_file": "vice_x64sc_libretro.dll",
     "platforms": [
       "Commodore 64"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/VICE x64sc",
+      "files": [
+        "VICE x64sc.opt"
+      ]
+    }
   },
   {
     "core_file": "vice_x128_libretro.dll",
     "platforms": [
       "Commodore 128"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/VICE x128",
+      "files": [
+        "VICE x128.opt"
+      ]
+    }
   },
   {
     "core_file": "vice_xcbm2_libretro.dll",
@@ -2101,13 +2689,25 @@
     "core_file": "vice_xpet_libretro.dll",
     "platforms": [
       "Commodore PET"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/VICE xpet",
+      "files": [
+        "VICE xpet.opt"
+      ]
+    }
   },
   {
     "core_file": "vice_xplus4_libretro.dll",
     "platforms": [
       "Commodore Plus"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/VICE xplus4",
+      "files": [
+        "VICE xplus4.opt"
+      ]
+    }
   },
   {
     "core_file": "vice_xscpu64_libretro.dll",
@@ -2119,7 +2719,13 @@
     "core_file": "vice_xvic_libretro.dll",
     "platforms": [
       "Commodore VIC-20"
-    ]
+    ],
+    "config_files": {
+      "base_dir": "config/VICE xvic",
+      "files": [
+        "VICE xvic.opt"
+      ]
+    }
   },
   {
     "core_file": "vircon32_libretro.dll",
@@ -2211,6 +2817,12 @@
       "files": [
         "saturn_bios.bin"
       ]
+    },
+    "config_files": {
+      "base_dir": "config/YabaSanshiro",
+      "files": [
+        "YabaSanshiro.opt"
+      ]
     }
   },
   {
@@ -2223,6 +2835,12 @@
       "subdirectory": null,
       "files": [
         "saturn_bios.bin"
+      ]
+    },
+    "config_files": {
+      "base_dir": "config/Yabause",
+      "files": [
+        "Yabause.opt"
       ]
     }
   }

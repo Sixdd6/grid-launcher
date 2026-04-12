@@ -147,6 +147,7 @@
       "portable\\dev_hdd0\\home\\00000001\\savedata",
       "dev_hdd0\\home\\00000001\\savedata"
     ],
+    "firmware_directories": ["."],
     "state_directories": [],
     "screenshot_directories": []
   },
@@ -226,7 +227,7 @@
     ],
     "screenshot_directories": ["User\\ScreenShots"],
     "firmware_directories": [
-      {"path": "Sys/GC/JAP", "match": ["ntsc_j", "ntsc-j", "jap", "jpn"]},
+      {"path": "Sys/GC/JAP", "match": ["ntsc_j", "ntsc-j", "jap", "jpn", "ntsc"]},
       {"path": "Sys/GC/USA", "match": ["ntsc", "usa"]},
       {"path": "Sys/GC/EUR", "match": ["pal", "eur"]}
     ]
@@ -257,7 +258,8 @@
       "mlc01\\usr\\save"
     ],
     "state_directories": [],
-    "screenshot_directories": ["mlc01\\screenshots", "portable\\mlc01\\screenshots"]
+    "screenshot_directories": ["mlc01\\screenshots", "portable\\mlc01\\screenshots"],
+    "firmware_directories": ["portable"]
   },
   {
     "match_tokens": ["azahar.exe"],
@@ -334,6 +336,7 @@
       "eeprom.bin"
     ],
     "state_directories": [],
+    "firmware_directories": ["."],
     "screenshot_directories": ["."]
   },
   {
@@ -357,7 +360,11 @@
       "user\\nand\\user\\save\\0000000000000000"
     ],
     "state_directories": [],
-    "screenshot_directories": ["user\\screenshots"]
+    "screenshot_directories": ["user\\screenshots"],
+    "firmware_directories": [
+      {"path": "user\\keys", "match": ["keys"]},
+      {"path": "user\\nand\\system\\Contents\\registered", "match": ["firmware"]}
+    ]
   },
   {
     "match_tokens": ["mame.exe"],

@@ -1,48 +1,106 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Callable
+
+
+_PS3_GAME_ID_RE = re.compile(r"^[A-Z]{4}\d{5}$")
+_NPWR_TROPHY_RE = re.compile(r"^NPWR\d{5}$")
+
+
+def _has_ps3_game_content(directory: Path) -> bool:
+    """Return True if directory contains PS3_GAME subdirectory (marks real game content)."""
+    try:
+        return (directory / "PS3_GAME").is_dir()
+    except OSError:
+        return False
+
+
+def _has_game_id_descendant(directory: Path) -> bool:
+    """Return True if any subdirectory of directory has a PS3 game-ID name."""
+    try:
+        for child in directory.rglob("*"):
+            if child.is_dir() and _PS3_GAME_ID_RE.match(child.name.upper()):
+                return True
+    except OSError:
+        pass
+    return False
 
 
 def ps3_link_plan_for_extracted_dir(
     extracted_dir: Path,
     emulator_root: Path,
     path_key: Callable[[Path], str],
-) -> list[tuple[Path, Path, bool]]:
-    candidates = [candidate for candidate in extracted_dir.rglob("*") if candidate.is_dir() or candidate.is_file()]
-    candidates.sort(
-        key=lambda path: (
-            len(path.relative_to(extracted_dir).parts),
-            0 if path.is_dir() else 1,
-            str(path).casefold(),
-        )
-    )
-
-    planned_links: list[tuple[Path, Path, bool]] = []
+) -> list[tuple[Path, Path, bool, str]]:
+    planned: list[tuple[Path, Path, bool, str]] = []
     seen_targets: set[str] = set()
-    for source_path in candidates:
-        relative_parts = source_path.relative_to(extracted_dir).parts
-        target_cursor = emulator_root
-        for index, part in enumerate(relative_parts):
-            target_candidate = target_cursor / part
-            if target_candidate.exists():
-                if target_candidate.is_dir() and index < len(relative_parts) - 1:
-                    target_cursor = target_candidate
-                    continue
-                if target_candidate.is_dir() and source_path.is_dir() and index == len(relative_parts) - 1:
-                    target_cursor = target_candidate
-                    continue
-                break
 
-            source_candidate = extracted_dir.joinpath(*relative_parts[: index + 1])
-            target_key = path_key(target_candidate)
-            if target_key not in seen_targets:
-                planned_links.append((source_candidate, target_candidate, source_candidate.is_dir()))
-                seen_targets.add(target_key)
-            break
-    return planned_links
+    try:
+        top_entries = sorted(
+            extracted_dir.iterdir(),
+            key=lambda p: (
+                0 if p.is_dir() else 1,
+                0 if (_PS3_GAME_ID_RE.match(p.name.upper()) and _has_ps3_game_content(p)) else 1,
+                p.name.casefold(),
+            ),
+        )
+    except OSError:
+        return planned
+
+    for top_entry in top_entries:
+        if not top_entry.is_dir():
+            continue
+        if _NPWR_TROPHY_RE.match(top_entry.name.upper()):
+            target = emulator_root / "dev_hdd0" / "home" / "00000001" / "trophy" / top_entry.name
+        else:
+            target = emulator_root / top_entry.name
+        _plan_ps3_entry(top_entry, target, planned, seen_targets, path_key)
+
+    return planned
+
+
+def _plan_ps3_entry(
+    source: Path,
+    target: Path,
+    planned: list[tuple[Path, Path, bool, str]],
+    seen_targets: set[str],
+    path_key: Callable[[Path], str],
+) -> None:
+    target_key = path_key(target)
+    if target_key in seen_targets:
+        return
+
+    name_upper = source.name.upper()
+
+    # Game-ID directory -> create a junction here.
+    if _PS3_GAME_ID_RE.match(name_upper):
+        seen_targets.add(target_key)
+        planned.append((source, target, True, "junction"))
+        return
+
+    # Existing real directory target should remain real; recurse into children.
+    if target.exists() and target.is_dir() and not os.path.islink(str(target)):
+        if source.is_dir():
+            for child in sorted(source.iterdir(), key=lambda p: (0 if p.is_dir() else 1, p.name.casefold())):
+                if child.is_dir():
+                    _plan_ps3_entry(child, target / child.name, planned, seen_targets, path_key)
+        return
+
+    # If descendants contain a game-ID dir, create target as a real directory and recurse.
+    if _has_game_id_descendant(source):
+        seen_targets.add(target_key)
+        planned.append((source, target, True, "mkdir"))
+        if source.is_dir():
+            for child in sorted(source.iterdir(), key=lambda p: (0 if p.is_dir() else 1, p.name.casefold())):
+                if child.is_dir():
+                    _plan_ps3_entry(child, target / child.name, planned, seen_targets, path_key)
+    else:
+        # No game-ID found below, link whole subtree at this target.
+        seen_targets.add(target_key)
+        planned.append((source, target, True, "junction"))
 
 
 def ps3_game_id_from_text(value: str) -> str:
@@ -58,7 +116,7 @@ def ps3_game_id_from_paths(paths: list[Path]) -> str:
     for path in paths:
         for part in path.parts:
             game_id = ps3_game_id_from_text(part)
-            if game_id:
+            if game_id and not _NPWR_TROPHY_RE.match(game_id):
                 return game_id
     return ""
 
@@ -71,11 +129,13 @@ def detected_ps3_game_id(extracted_dir: Path, link_targets: list[Path]) -> str:
 
     try:
         for candidate in extracted_dir.rglob("*"):
+            if not candidate.is_dir():
+                continue
             game_id = ps3_game_id_from_text(candidate.name)
-            if game_id:
+            if game_id and _has_ps3_game_content(candidate):
                 return game_id
     except OSError:
-        return ""
+        pass
     return ""
 
 
@@ -307,7 +367,7 @@ def update_rpcs3_games_yml_for_install(
 def configure_ps3_install_links(
     extracted_dir: Path,
     emulator_root: Path | None,
-    ps3_link_plan_for_extracted_dir: Callable[[Path, Path], list[tuple[Path, Path, bool]]],
+    ps3_link_plan_for_extracted_dir: Callable[[Path, Path], list[tuple[Path, Path, bool, str]]],
     create_link_path: Callable[[Path, Path, bool], None],
     remove_link_path: Callable[[Path], None],
 ) -> list[Path]:
@@ -320,7 +380,12 @@ def configure_ps3_install_links(
 
     created_links: list[Path] = []
     try:
-        for source_path, link_target, is_directory in link_plan:
+        for source_path, link_target, is_directory, link_type in link_plan:
+            if link_type == "mkdir":
+                link_target.mkdir(parents=True, exist_ok=True)
+                created_links.append(link_target)
+                continue
+
             create_link_path(source_path, link_target, is_directory)
             created_links.append(link_target)
     except OSError:

@@ -1,4 +1,4 @@
-# TV Mode Idea - non ready to implement!
+# TV Mode Idea - not ready to implement!
 Fullscreen experience that works like a "emulation station" "ES-DE" or "bigbox".
 
 

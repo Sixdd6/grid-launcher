@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Callable
 
 
@@ -105,6 +106,25 @@ def _is_ps4_rom_item(item: dict[str, Any], fallback_platform_label: str) -> bool
     return any(_is_ps4_platform_label(candidate) for candidate in candidates)
 
 
+def _is_xbox360_platform_label(label: Any) -> bool:
+    if not isinstance(label, str):
+        return False
+    normalized = "".join(ch for ch in label.lower() if ch.isalnum())
+    if not normalized:
+        return False
+    return normalized in {"xbox360", "microsoftxbox360", "xb360"}
+
+
+def _is_xbox360_rom_item(item: dict[str, Any], fallback_platform_label: str) -> bool:
+    candidates = (
+        item.get("platform_fs_slug"),
+        item.get("platform_slug"),
+        item.get("platform_display_name"),
+        fallback_platform_label,
+    )
+    return any(_is_xbox360_platform_label(candidate) for candidate in candidates)
+
+
 def _ps4_file_ids_by_category(item: dict[str, Any]) -> dict[str, list[int]]:
     files = item.get("files")
     if not isinstance(files, list):
@@ -156,11 +176,44 @@ def games_from_rom_items(
         ps4_file_ids_by_category = {}
         if _is_ps4_rom_item(item, resolved_platform):
             ps4_file_ids_by_category = _ps4_file_ids_by_category(item)
+        xbox360_file_ids_by_category = {}
+        if _is_xbox360_rom_item(item, resolved_platform):
+            xbox360_file_ids_by_category = _ps4_file_ids_by_category(item)
 
         summary = item.get("summary")
         cover_url = cover_url_from_payload(item)
         screenshot_urls = screenshot_urls_from_payload(item)
         ra_id = item.get("ra_id")
+        fs_name_val = item.get("fs_name", "")
+        fs_ext_val = item.get("fs_extension", "")
+        fs_name_str = fs_name_val.strip() if isinstance(fs_name_val, str) else ""
+        fs_ext_str = fs_ext_val.strip().lstrip(".") if isinstance(fs_ext_val, str) else ""
+        if fs_name_str and fs_ext_str and not Path(fs_name_str).suffix:
+            rom_file_name = f"{fs_name_str}.{fs_ext_str}"
+        else:
+            rom_file_name = fs_name_str
+        rom_nested_file_name = ""
+        # Folder-backed ROMs can expose the actual archive filename under files[0].file_name.
+        if not fs_ext_str:
+            files_val = item.get("files")
+            if isinstance(files_val, list) and files_val:
+                first_file_name = files_val[0].get("file_name", "") if isinstance(files_val[0], dict) else ""
+                first_file_name = first_file_name.strip() if isinstance(first_file_name, str) else ""
+                if first_file_name and Path(first_file_name).suffix:
+                    rom_nested_file_name = first_file_name
+        rom_base_file_id = ""
+        files_val = item.get("files")
+        if isinstance(files_val, list) and len(files_val) > 1:
+            for file_entry in files_val:
+                if not isinstance(file_entry, dict):
+                    continue
+                raw_cat = file_entry.get("category")
+                cat = raw_cat.strip().lower() if isinstance(raw_cat, str) else ""
+                if cat in ("", "game"):
+                    file_id = file_entry.get("id")
+                    if isinstance(file_id, int):
+                        rom_base_file_id = str(file_id)
+                        break
         games.append(
             {
                 "title": title.strip(),
@@ -171,11 +224,16 @@ def games_from_rom_items(
                 "screenshot_urls": "\n".join(screenshot_urls),
                 "rom_id": rom_id,
                 "server_updated_at": _rom_updated_at_text(item),
-                "rom_file_name": item.get("fs_name", "").strip() if isinstance(item.get("fs_name", ""), str) else "",
+                "rom_file_name": rom_file_name,
+                "rom_nested_file_name": rom_nested_file_name,
+                "rom_base_file_id": rom_base_file_id,
                 "ra_id": str(ra_id) if ra_id is not None else "",
                 "ps4_has_update": "true" if "update" in ps4_file_ids_by_category else "false",
                 "ps4_has_dlc": "true" if "dlc" in ps4_file_ids_by_category else "false",
                 "ps4_file_ids_by_category": json.dumps(ps4_file_ids_by_category, separators=(",", ":"), sort_keys=True),
+                "xbox360_has_update": "true" if "update" in xbox360_file_ids_by_category else "false",
+                "xbox360_has_dlc": "true" if "dlc" in xbox360_file_ids_by_category else "false",
+                "xbox360_file_ids_by_category": json.dumps(xbox360_file_ids_by_category, separators=(",", ":"), sort_keys=True),
             }
         )
 

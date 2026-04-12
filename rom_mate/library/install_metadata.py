@@ -59,6 +59,8 @@ def hydrate_install_game_metadata(
                     "rating",
                     "description",
                     "rom_file_name",
+                    "rom_nested_file_name",
+                    "rom_base_file_id",
                     "ps4_has_update",
                     "ps4_has_dlc",
                     "ps4_file_ids_by_category",
@@ -101,6 +103,7 @@ def sync_install_metadata_to_details_game(
 
     current_details_game["rom_id"] = install_game.get("rom_id", "")
     current_details_game["rom_file_name"] = install_game.get("rom_file_name", "")
+    current_details_game["rom_base_file_id"] = install_game.get("rom_base_file_id", "")
 
     cover_value = install_game.get("cover_url", "")
     if isinstance(cover_value, str):

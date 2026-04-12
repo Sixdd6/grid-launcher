@@ -6,6 +6,7 @@ from pathlib import Path
 
 from rom_mate.emulator.retroarch import (
     ensure_retroarch_save_location_settings,
+    retroarch_core_flags,
     retroarch_directory_settings,
 )
 
@@ -123,6 +124,70 @@ class RetroArchConfigTests(unittest.TestCase):
         self.assertIn('cheevos_visibility_lboard_start = "false"', text)
         self.assertIn('cheevos_visibility_lboard_submit = "false"', text)
         self.assertIn('cheevos_visibility_lboard_trackers = "false"', text)
+
+
+class TestRetroarchCoreFlags(unittest.TestCase):
+    """Tests for retroarch_core_flags()."""
+
+    _SNES_ENTRY = {
+        "core_file": "snes9x_libretro.dll",
+        "platforms": ["Nintendo SNES"],
+    }
+    _MAME_ENTRY = {
+        "core_file": "mame_current_libretro.dll",
+        "platforms": ["Arcade"],
+        "supports_save_states": False,
+        "supports_saves": False,
+        "cloud_sync_safe": False,
+    }
+    _FBNEO_ENTRY = {
+        "core_file": "fbneo_libretro.dll",
+        "platforms": ["Arcade"],
+        "cloud_sync_safe": False,
+    }
+
+    def test_all_true_defaults_when_no_flags_set(self):
+        result = retroarch_core_flags("snes9x", [self._SNES_ENTRY])
+        self.assertTrue(result["supports_save_states"])
+        self.assertTrue(result["supports_saves"])
+        self.assertTrue(result["cloud_sync_safe"])
+
+    def test_explicit_false_values_returned(self):
+        result = retroarch_core_flags("mame_current", [self._MAME_ENTRY])
+        self.assertFalse(result["supports_save_states"])
+        self.assertFalse(result["supports_saves"])
+        self.assertFalse(result["cloud_sync_safe"])
+
+    def test_partial_flags_merged_with_defaults(self):
+        # fbneo only has cloud_sync_safe: False; other flags default to True
+        result = retroarch_core_flags("fbneo", [self._FBNEO_ENTRY])
+        self.assertTrue(result["supports_save_states"])
+        self.assertTrue(result["supports_saves"])
+        self.assertFalse(result["cloud_sync_safe"])
+
+    def test_all_true_when_core_not_found(self):
+        result = retroarch_core_flags("unknown_core", [self._SNES_ENTRY])
+        self.assertTrue(result["supports_save_states"])
+        self.assertTrue(result["supports_saves"])
+        self.assertTrue(result["cloud_sync_safe"])
+
+    def test_all_true_for_empty_entries(self):
+        result = retroarch_core_flags("snes9x", [])
+        self.assertTrue(result["supports_save_states"])
+        self.assertTrue(result["supports_saves"])
+        self.assertTrue(result["cloud_sync_safe"])
+
+    def test_skips_non_dict_entries(self):
+        entries = ["not_a_dict", None, self._MAME_ENTRY]
+        result = retroarch_core_flags("mame_current", entries)
+        self.assertFalse(result["cloud_sync_safe"])
+
+    def test_returns_dict_with_exactly_four_keys(self):
+        result = retroarch_core_flags("snes9x", [self._SNES_ENTRY])
+        self.assertEqual(
+            set(result.keys()),
+            {"supports_save_states", "supports_saves", "cloud_sync_safe", "vmu_shared_saves"},
+        )
 
 if __name__ == "__main__":
     unittest.main()

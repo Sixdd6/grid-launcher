@@ -51,12 +51,30 @@ def is_original_xbox_platform(game: dict[str, str]) -> bool:
     return True
 
 
+def is_xbox360_platform(game: dict[str, str]) -> bool:
+    platform_value = game.get("platform", "")
+    platform = platform_value.strip().casefold() if isinstance(platform_value, str) else ""
+    normalized = re.sub(r"[^a-z0-9]+", " ", platform).strip()
+    compact = normalized.replace(" ", "")
+    tokens = set(normalized.split())
+
+    if not normalized:
+        return False
+    if "xbox" not in tokens and "xbox360" not in compact:
+        return False
+    if "xbox360" in compact or "360" in tokens:
+        return True
+    return False
+
+
 def cloud_save_scope_for_game(
     game: dict[str, str],
     *,
     emulator_name: str = "",
     is_xemu_emulator_name: Callable[[str], bool] | None = None,
     is_redream_emulator_name: Callable[[str], bool] | None = None,
+    is_retroarch_emulator_name: Callable[[str], bool] | None = None,
+    retroarch_core_flags: dict[str, bool] | None = None,
     save_type: str = "save",
 ) -> str:
     del game
@@ -77,6 +95,15 @@ def cloud_save_scope_for_game(
     ):
         return "shared-slotted"
 
+    if (
+        emulator_name.strip()
+        and callable(is_retroarch_emulator_name)
+        and is_retroarch_emulator_name(emulator_name)
+        and isinstance(retroarch_core_flags, dict)
+        and retroarch_core_flags.get("vmu_shared_saves", False)
+    ):
+        return "shared-slotted"
+
     return "per-game"
 
 
@@ -87,15 +114,37 @@ def cloud_save_block_reason_for_game(
     emulator_name: str = "",
     is_xemu_emulator_name: Callable[[str], bool] | None = None,
     is_redream_emulator_name: Callable[[str], bool] | None = None,
+    is_retroarch_emulator_name: Callable[[str], bool] | None = None,
+    retroarch_core_flags: dict[str, bool] | None = None,
     save_type: str = "save",
 ) -> str:
-    del emulator_name
     del is_xemu_emulator_name
     del is_redream_emulator_name
-    del save_type
 
     if is_native_executable_platform(game):
         return "Cloud save management is only available for emulator-based games."
+
+    if (
+        save_type == "state"
+        and callable(is_retroarch_emulator_name)
+        and emulator_name
+        and is_retroarch_emulator_name(emulator_name)
+        and isinstance(retroarch_core_flags, dict)
+    ):
+        if not retroarch_core_flags.get("supports_save_states", True):
+            return "This core does not support save states."
+        if not retroarch_core_flags.get("cloud_sync_safe", True):
+            return "Save state format for this core may not be stable across devices."
+
+    if (
+        save_type == "save"
+        and callable(is_retroarch_emulator_name)
+        and emulator_name
+        and is_retroarch_emulator_name(emulator_name)
+        and isinstance(retroarch_core_flags, dict)
+    ):
+        if not retroarch_core_flags.get("supports_saves", True):
+            return "This core does not support battery saves."
 
     return ""
 

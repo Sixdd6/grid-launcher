@@ -443,3 +443,109 @@ def retroarch_core_firmware_metadata(core_id: str, entries: list) -> dict | None
                 return firmware
             return None
     return None
+
+
+def retroarch_core_config_files_metadata(core_id: str, entries: list) -> dict | None:
+    if not core_id or not entries:
+        return None
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        core_file = entry.get("core_file", "")
+        if not isinstance(core_file, str) or not core_file.strip():
+            continue
+        if retroarch_core_id_from_file_name(core_file) == core_id:
+            config_files = entry.get("config_files")
+            if isinstance(config_files, dict):
+                return config_files
+            return None
+    return None
+
+
+def retroarch_core_saves_files_metadata(core_id: str, entries: list) -> dict | None:
+    if not core_id or not entries:
+        return None
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        core_file = entry.get("core_file", "")
+        if not isinstance(core_file, str) or not core_file.strip():
+            continue
+        if retroarch_core_id_from_file_name(core_file) == core_id:
+            saves_files = entry.get("saves_files")
+            if isinstance(saves_files, dict):
+                return saves_files
+            return None
+    return None
+
+
+def retroarch_core_flags(core_id: str, entries: list) -> dict[str, bool]:
+    """Return capability flags for *core_id* from the core-list entries.
+
+    All flags default to True when the core is not found or when a specific flag
+    is absent from the entry, so callers that pre-date these fields are unaffected.
+    """
+    _DEFAULTS: dict[str, bool] = {
+        "supports_save_states": True,
+        "supports_saves": True,
+        "cloud_sync_safe": True,
+        "vmu_shared_saves": False,
+    }
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        core_file = entry.get("core_file", "")
+        if not core_file:
+            continue
+        if retroarch_core_id_from_file_name(core_file) == core_id:
+            return {
+                key: bool(entry.get(key, default))
+                for key, default in _DEFAULTS.items()
+            }
+    return dict(_DEFAULTS)
+
+
+def retroarch_core_flags_for_platform(platform: str, entries: list) -> dict[str, bool] | None:
+    target = platform.strip().casefold()
+    if not target:
+        return None
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        platforms = entry.get("platforms", [])
+        if not isinstance(platforms, list):
+            continue
+        for candidate in platforms:
+            if isinstance(candidate, str) and candidate.strip().casefold() == target:
+                core_id = retroarch_core_id_from_file_name(entry.get("core_file", ""))
+                if core_id:
+                    return retroarch_core_flags(core_id, entries)
+    return None
+
+
+def flycast_vmu_file_candidates(directories: list[Path]) -> list[Path]:
+    latest_by_slot: dict[str, tuple[float, Path]] = {}
+    for directory in directories:
+        if not isinstance(directory, Path) or not directory.exists() or not directory.is_dir():
+            continue
+
+        for candidate in directory.glob("*.bin"):
+            if not candidate.exists() or not candidate.is_file():
+                continue
+
+            match = re.match(r"^vmu([0-3]).*\.bin$", candidate.name, flags=re.IGNORECASE)
+            if match is None:
+                continue
+
+            try:
+                mtime = candidate.stat().st_mtime
+            except OSError:
+                continue
+
+            slot = match.group(1)
+            existing = latest_by_slot.get(slot)
+            if existing is None or mtime > existing[0]:
+                latest_by_slot[slot] = (mtime, candidate)
+
+    ordered_slots = ("0", "1", "2", "3")
+    return [latest_by_slot[slot][1] for slot in ordered_slots if slot in latest_by_slot]

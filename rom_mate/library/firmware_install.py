@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import io
+import logging
 import shutil
 import tempfile
 import zipfile
 from pathlib import Path
+
+
+_logger = logging.getLogger(__name__)
 
 
 def fetch_platform_firmware(api_get_json_fn, platform_id: int) -> list[dict]:
@@ -27,26 +31,42 @@ def resolve_firmware_targets(file_name: str, target_dirs: list) -> list[Path]:
     - A plain Path (accepts all firmware files)
     - A tuple (Path, list[str]) where the file is accepted only if any keyword
       appears as a substring of the lowercase filename
-
-    For routed (tuple) entries, first-match-wins: once a tuple entry matches,
-    remaining tuple entries are skipped. Plain Path entries always pass through.
     """
     lower_name = file_name.lower()
     result: list[Path] = []
-    routed_match_found = False
 
     for entry in target_dirs:
         if isinstance(entry, tuple):
-            if routed_match_found:
-                continue
             path, keywords = entry
             if any(kw in lower_name for kw in keywords):
                 result.append(path)
-                routed_match_found = True
         else:
             result.append(entry)
 
     return result
+
+
+def should_keep_zip_archive(file_name: str, target_dirs: list, applicable_dirs: list[Path]) -> bool:
+    """Return whether this .zip should be written as-is instead of extracted.
+
+    A .zip is preserved only when it was routed through at least one tuple entry
+    whose keyword list contains the exact filename (case-insensitive).
+    """
+    lower_name = file_name.lower()
+    applicable_set = set(applicable_dirs)
+
+    for entry in target_dirs:
+        if not isinstance(entry, tuple):
+            continue
+        path, keywords = entry
+        if path not in applicable_set:
+            continue
+
+        lowered_keywords = [kw.lower() for kw in keywords]
+        if any(kw in lower_name for kw in lowered_keywords) and lower_name in lowered_keywords:
+            return True
+
+    return False
 
 
 def install_platform_firmware(
@@ -56,6 +76,7 @@ def install_platform_firmware(
     target_dirs: list,
     *,
     skip_existing: bool = True,
+    extract_zip_with_paths: bool = False,
 ) -> list[str]:
     if not target_dirs:
         return []
@@ -78,10 +99,18 @@ def install_platform_firmware(
 
         applicable_dirs = resolve_firmware_targets(file_name, target_dirs)
         if not applicable_dirs:
+            _logger.debug("No target directory matched for firmware file: %s (skipped)", file_name)
             continue
 
+        keep_archive = False
+        lower_name = file_name.lower()
+        if not extract_zip_with_paths and lower_name.endswith(".zip"):
+            keep_archive = should_keep_zip_archive(file_name, target_dirs, applicable_dirs)
+
         try:
+            _logger.debug("Fetching firmware file: %s", file_name)
             data = download_firmware_bytes(api_get_bytes_fn, firmware_id, file_name)
+            _logger.debug("Downloaded %d bytes for: %s", len(data), file_name)
         except Exception as error:
             warnings.append(f"Failed to download firmware {file_name}: {error}")
             continue
@@ -94,8 +123,6 @@ def install_platform_firmware(
                 continue
 
             dest_path = target_dir / file_name
-
-            lower_name = file_name.lower()
 
             if lower_name.endswith(".7z") or lower_name.endswith(".rar"):
                 try:
@@ -117,6 +144,7 @@ def install_platform_firmware(
                                     continue
                                 member_dest = target_dir / extracted_file.name
                                 if skip_existing and member_dest.exists():
+                                    _logger.debug("Firmware file already exists, skipping: %s", member_dest)
                                     continue
                                 shutil.copy2(extracted_file, member_dest)
                     finally:
@@ -129,26 +157,51 @@ def install_platform_firmware(
                     continue
 
             elif lower_name.endswith(".zip") or zipfile.is_zipfile(io.BytesIO(data)):
+                if keep_archive and lower_name.endswith(".zip"):
+                    if skip_existing and dest_path.exists():
+                        continue
+                    try:
+                        dest_path.write_bytes(data)
+                        _logger.debug("Installed firmware: %s -> %s", file_name, dest_path)
+                    except OSError as error:
+                        warnings.append(f"Failed to write firmware {file_name} to {dest_path}: {error}")
+                    continue
                 try:
                     with zipfile.ZipFile(io.BytesIO(data)) as zf:
                         for member in zf.namelist():
                             if member.endswith("/") or member.startswith("__MACOSX"):
                                 continue
-                            extracted_name = Path(member).name
-                            if not extracted_name:
-                                continue
-                            member_dest = target_dir / extracted_name
-                            if skip_existing and member_dest.exists():
-                                continue
-                            member_dest.write_bytes(zf.read(member))
+                            if extract_zip_with_paths:
+                                normalized = Path(member)
+                                parts = normalized.parts
+                                if not parts or any(part == ".." for part in parts) or normalized.is_absolute():
+                                    continue
+                                member_dest = target_dir / normalized
+                                if skip_existing and member_dest.exists():
+                                    _logger.debug("Firmware file already exists, skipping: %s", member_dest)
+                                    continue
+                                member_dest.parent.mkdir(parents=True, exist_ok=True)
+                                member_dest.write_bytes(zf.read(member))
+                                _logger.debug("Extracted firmware member: %s -> %s", member, member_dest)
+                            else:
+                                extracted_name = Path(member).name
+                                if not extracted_name:
+                                    continue
+                                member_dest = target_dir / extracted_name
+                                if skip_existing and member_dest.exists():
+                                    _logger.debug("Firmware file already exists, skipping: %s", member_dest)
+                                    continue
+                                member_dest.write_bytes(zf.read(member))
                 except (zipfile.BadZipFile, OSError, KeyError) as error:
                     warnings.append(f"Failed to extract firmware archive {file_name}: {error}")
+                    _logger.debug("Zip extraction error for %s: %s", file_name, error)
                     continue
             else:
                 if skip_existing and dest_path.exists():
                     continue
                 try:
                     dest_path.write_bytes(data)
+                    _logger.debug("Installed firmware: %s -> %s", file_name, dest_path)
                 except OSError as error:
                     warnings.append(f"Failed to write firmware {file_name} to {dest_path}: {error}")
                     continue

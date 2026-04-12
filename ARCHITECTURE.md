@@ -41,6 +41,7 @@ This document is a stable module map for the current codebase.
   - `downloads.py`: download status and detail formatting.
   - `identity.py`: game key and installed-record lookup helpers.
   - `install_cleanup.py`: uninstall orchestration and file cleanup.
+  - `firmware_install.py`: RetroArch and emulator firmware download, routing, and extraction. Supports keyword-filtered routing, MAME-format zip preservation, flat and path-preserving zip extraction, and debug logging via `rom_mate.library.firmware_install` logger.
   - `install_metadata.py`: install-time metadata hydration.
   - `install_paths.py`: archive, extracted, and native path resolution.
   - `install_registry.py`: installed-game record construction and matching.
@@ -93,3 +94,4 @@ This document is a stable module map for the current codebase.
 - Update this file when module ownership changes.
 - Emulator autoprofiles (`emulator-autoprofiles.json`) define `screenshot_directories` alongside `save_directories` and `state_directories`. The `_resolved_screenshot_directories()` method in `rom-mate.py` resolves these paths; `session_screenshot_path()` in `cloud_transfer.py` finds the most recent session-window screenshot to attach to cloud uploads. These are intentionally absent for PPSSPP and RetroArch which use file sidecars instead.
 - The `InstallFinalizeWorker` in `workers.py` only deletes the downloaded archive after installation when extraction actually occurred (`extracted_path` is non-empty). Direct game file formats (.chd, .iso, .bin, etc.) must never be deleted post-install.
+- RetroArch firmware installation is driven by per-core metadata in `retroarch-core-list.json`. Each entry may have `firmware` (system-dir BIOS files, with optional `subdirectory`, `files` keyword filter, and `extract_with_paths` flag), `config_files` (`.opt` core option files routed to `config/<corename>/`), and `saves_files` (archives extracted into the RetroArch saves directory). The `firmware_install.py` module handles all three routing modes. Debug output is available via the `rom_mate.library.firmware_install` Python logger, enabled when `debug_prints` is true in the app config.

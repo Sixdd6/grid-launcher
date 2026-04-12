@@ -35,6 +35,7 @@ class GameDetailsWindowProtocol(Protocol):
     details_manage_saves_button: QPushButton | None
     details_manage_states_button: QPushButton | None
     details_ps4_content_button: QPushButton | None
+    details_xbox360_content_button: QPushButton | None
     details_secondary_button: QPushButton | None
     details_update_button: QPushButton | None
     stack: Any
@@ -81,6 +82,12 @@ class GameDetailsWindowProtocol(Protocol):
         ...
 
     def _ps4_content_install_block_reason(self, game: dict[str, str]) -> str:
+        ...
+
+    def _details_xbox360_content_button_text(self, game: dict[str, str]) -> str:
+        ...
+
+    def _xbox360_content_install_block_reason(self, game: dict[str, str]) -> str:
         ...
 
     def _resolved_emulator_entry_for_game(self, game: dict[str, str]) -> tuple[str, dict[str, str] | None]:
@@ -296,6 +303,18 @@ def update_details_action_buttons(window: GameDetailsWindowProtocol) -> None:
         details_ps4_content_button.setVisible(show_ps4_content)
         details_ps4_content_button.setEnabled(show_ps4_content and not installing_current and not ps4_block_reason)
         details_ps4_content_button.setToolTip(ps4_block_reason)
+
+    details_xbox360_content_button = getattr(window, "details_xbox360_content_button", None)
+    if details_xbox360_content_button is not None:
+        xbox360_button_text_fn = getattr(window, "_details_xbox360_content_button_text", None)
+        xbox360_block_reason_fn = getattr(window, "_xbox360_content_install_block_reason", None)
+        xbox360_button_text = xbox360_button_text_fn(current_game) if callable(xbox360_button_text_fn) else ""
+        xbox360_block_reason = xbox360_block_reason_fn(current_game) if callable(xbox360_block_reason_fn) else ""
+        show_xbox360_content = installed and bool(xbox360_button_text)
+        details_xbox360_content_button.setText(xbox360_button_text)
+        details_xbox360_content_button.setVisible(show_xbox360_content)
+        details_xbox360_content_button.setEnabled(show_xbox360_content and not installing_current and not xbox360_block_reason)
+        details_xbox360_content_button.setToolTip(xbox360_block_reason)
 
     is_native = window._is_native_executable_platform(current_game)
     cloud_sync_supported = not is_native

@@ -26,6 +26,7 @@ from .cloud_transfer import (
 )
 from .archive_preparation import (
 	apply_ps4_content_archive_without_ui,
+	apply_xenia_content_archive_without_ui,
 	cleanup_install_archive,
 	directory_total_file_bytes,
 	extracted_dir_for_archive_path,
@@ -141,6 +142,7 @@ __all__ = [
 	"auto_cloud_upload_plan",
 	"archive_name_for_game",
 	"apply_ps4_content_archive_without_ui",
+	"apply_xenia_content_archive_without_ui",
 	"cleanup_install_archive",
 	"build_installed_game_record",
 	"cleanup_temporary_paths",

@@ -56,6 +56,12 @@ class _StubWindow:
         self.call_order.append("start_async_install")
         self.install_started = True
 
+    def _resolved_emulator_entry_for_game(
+        self,
+        game: dict[str, str],
+    ) -> tuple[str, dict[str, str] | None]:
+        return "", None
+
 
 class PerformGameActionFirmwareTests(unittest.TestCase):
     @classmethod

@@ -54,6 +54,7 @@ from .azahar import (
 from .cemu import (
     cemu_directory_settings,
     cemu_save_path_overrides,
+    ensure_cemu_controller_config,
     ensure_cemu_settings,
 )
 from .dolphin import (
@@ -101,15 +102,21 @@ from .xemu import (
     xemu_directory_settings,
     xemu_save_path_overrides,
     ensure_xemu_settings,
+    xemu_missing_bios_files,
 )
 from .xenia import (
+    apply_xenia_content_without_ui,
     xenia_directory_settings,
     xenia_save_path_overrides,
     xenia_state_path_overrides,
 )
 from .rpcs3 import (
+    rpcs3_data_root,
+    ensure_rpcs3_settings,
+    rpcs3_pup_path,
     rpcs3_directory_settings,
     rpcs3_save_path_overrides,
+    trigger_rpcs3_firmware_install,
 )
 from .duckstation import (
     duckstation_memory_card_settings,
@@ -119,6 +126,8 @@ from .retroarch import (
     all_retroarch_cores,
     installed_retroarch_core_ids,
     load_retroarch_compatibility_map,
+    retroarch_core_config_files_metadata,
+    retroarch_core_saves_files_metadata,
     normalize_retroarch_platform_key,
     retroarch_core_firmware_metadata,
     retroarch_core_id_from_file_name,
@@ -149,6 +158,7 @@ from .selection import (
     is_ps3_emulator_entry,
     is_ps3_platform,
     is_ps4_platform,
+    is_xbox360_platform,
     is_rpcs3_emulator_name,
     mapping_value_for_platform,
     resolved_emulator_entry_for_game,
@@ -157,6 +167,7 @@ from .selection import (
 __all__ = [
     "all_retroarch_cores",
     "apply_launch_placeholders_to_args",
+    "apply_xenia_content_without_ui",
     "apply_manual_emulator_profile_defaults",
     "assign_default_platforms_for_emulator",
     "assign_default_platforms_for_manual_emulator",
@@ -175,6 +186,7 @@ __all__ = [
     "ensure_azahar_settings",
     "cemu_directory_settings",
     "cemu_save_path_overrides",
+    "ensure_cemu_controller_config",
     "ensure_cemu_settings",
     "dolphin_directory_settings",
     "dolphin_save_path_overrides",
@@ -212,11 +224,16 @@ __all__ = [
     "xemu_directory_settings",
     "xemu_save_path_overrides",
     "ensure_xemu_settings",
+    "xemu_missing_bios_files",
     "xenia_directory_settings",
     "xenia_save_path_overrides",
     "xenia_state_path_overrides",
+    "rpcs3_data_root",
+    "ensure_rpcs3_settings",
+    "rpcs3_pup_path",
     "rpcs3_directory_settings",
     "rpcs3_save_path_overrides",
+    "trigger_rpcs3_firmware_install",
     "ensure_duckstation_memory_card_settings",
     "default_emulator_name_for_platform",
     "dolphin_target_platforms_for_variant",
@@ -234,6 +251,7 @@ __all__ = [
     "is_ps3_emulator_entry",
     "is_ps3_platform",
     "is_ps4_platform",
+    "is_xbox360_platform",
     "is_rpcs3_emulator_name",
     "installed_retroarch_core_ids",
     "launch_placeholders_for_game",
@@ -260,6 +278,8 @@ __all__ = [
     "resolve_rom_path_for_game",
     "select_emulator_executable_path",
     "retroarch_core_argument_path",
+    "retroarch_core_config_files_metadata",
+    "retroarch_core_saves_files_metadata",
     "retroarch_core_id_from_name",
     "retroarch_core_list_path",
     "retroarch_core_value",

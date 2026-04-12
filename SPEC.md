@@ -107,6 +107,7 @@ When uploading saves or states, the app should attempt to attach the most recent
 
 # Additional Platform-Specific Behavior
 - RetroArch support should include installed core detection and per-platform core assignment.
+- RetroArch firmware auto-install supports: BIOS files routed to `system/` with optional subdirectory, `.opt` core option files routed to `config/<corename>/`, MAME-format zip archives preserved intact, path-preserving zip extraction for archives with internal directory structure, and saves-directory placement for cores that require it. All routing is driven by per-core metadata in `retroarch-core-list.json`.
 - RPCS3 / PS3 handling should support the game-launch requirements needed by that emulator setup.
 - Theme selection should support `system`, `dark`, and `light` modes and apply consistently across the app UI.
 - Settings should include an option to enable debug prints and a shortcut to open the config folder.

@@ -20,6 +20,14 @@ def rom_file_name_from_payload(payload: dict[str, Any]) -> str:
         "url",
     )
     candidates: list[str] = []
+    # Highest priority: fs_name + fs_extension combined (RomM stores these separately)
+    fs_name_raw = payload.get("fs_name", "")
+    fs_ext_raw = payload.get("fs_extension", "")
+    fs_name = fs_name_raw.strip() if isinstance(fs_name_raw, str) else ""
+    fs_ext = fs_ext_raw.strip().lstrip(".") if isinstance(fs_ext_raw, str) else ""
+    if fs_name and fs_ext:
+        candidates.append(f"{fs_name}.{fs_ext}")
+
     for field in candidate_fields:
         value = payload.get(field, "")
         if not isinstance(value, str):

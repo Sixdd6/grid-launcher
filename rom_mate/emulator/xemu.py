@@ -74,6 +74,10 @@ def _resolve_setting_path(base_root: Path, raw_value: str, default_name: str) ->
     return str(candidate.resolve())
 
 
+def _toml_path(p: Path) -> str:
+    return "'" + str(p) + "'"
+
+
 def _launch_config_path(
     launch_template: str,
     split_launch_template_args: Callable[[str], list[str]] | None,
@@ -250,17 +254,67 @@ def ensure_xemu_settings(emulator_path_text: str) -> dict[str, object]:
     try:
         content = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
 
-        updated_content, changed = _ensure_toml_section_values(
+        updated_content, gen_changed = _ensure_toml_section_values(
             content,
+            "general",
+            {"show_welcome": "false"},
+        )
+        changed = gen_changed
+
+        updated_content, changed = _ensure_toml_section_values(
+            updated_content,
             "misc",
             {"check_for_updates": "false"},
         )
+        changed = changed or gen_changed
         updated_content, display_changed = _ensure_toml_section_values(
             updated_content,
             "display",
             {"vsync": "true"},
         )
         changed = changed or display_changed
+
+        updated_content, win_changed = _ensure_toml_section_values(
+            updated_content,
+            "display.window",
+            {"fullscreen_on_startup": "true"},
+        )
+        changed = changed or win_changed
+
+        updated_content, qual_changed = _ensure_toml_section_values(
+            updated_content,
+            "display.quality",
+            {"surface_scale": "2"},
+        )
+        changed = changed or qual_changed
+
+        updated_content, audio_changed = _ensure_toml_section_values(
+            updated_content,
+            "audio",
+            {"volume_limit": "0.4"},
+        )
+        changed = changed or audio_changed
+
+        updated_content, input_changed = _ensure_toml_section_values(
+            updated_content,
+            "input.bindings",
+            {"port1_driver": '"usb-xbox-gamepad"'},
+        )
+        changed = changed or input_changed
+
+        base_dir = emulator_dir if emulator_dir is not None else _default_base_root()
+        sys_files_values = {
+            "bootrom_path": _toml_path(base_dir / "mcpx_1.0.bin"),
+            "flashrom_path": _toml_path(base_dir / "complex_4627.bin"),
+            "hdd_path": _toml_path(base_dir / "xbox_hdd.qcow2"),
+            "eeprom_path": _toml_path(base_dir / "eeprom.bin"),
+        }
+        updated_content, sys_changed = _ensure_toml_section_values(
+            updated_content,
+            "sys.files",
+            sys_files_values,
+        )
+        changed = changed or sys_changed
 
         if changed:
             config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -269,6 +323,16 @@ def ensure_xemu_settings(emulator_path_text: str) -> dict[str, object]:
         return {"config_path": None, "changed": False}
 
     return {"config_path": str(config_path), "changed": changed}
+
+
+def xemu_missing_bios_files(emulator_path_text: str) -> list[str]:
+    required = ["mcpx_1.0.bin", "complex_4627.bin", "xbox_hdd.qcow2"]
+    emulator_dir: Path | None = None
+    if isinstance(emulator_path_text, str) and emulator_path_text.strip():
+        emulator_path = Path(emulator_path_text.strip()).expanduser()
+        emulator_dir = emulator_path if emulator_path.is_dir() else emulator_path.parent
+    base_dir = emulator_dir if emulator_dir is not None else _default_base_root()
+    return [name for name in required if not (base_dir / name).exists()]
 
 
 def _parse_inline_table(raw_value: str) -> dict[str, str]:

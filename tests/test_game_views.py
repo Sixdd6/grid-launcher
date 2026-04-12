@@ -493,6 +493,27 @@ class _EmulatorRowsStubWindow:
         del emulator
         return emulator_name.strip().casefold() == "azahar"
 
+    def _is_eden_emulator_name(
+        self,
+        emulator_name: str,
+        emulator: dict[str, str] | None = None,
+    ) -> bool:
+        del emulator
+        return emulator_name.strip().casefold() == "eden"
+
+    def _is_xemu_emulator_name(
+        self,
+        emulator_name: str,
+        emulator: dict[str, str] | None = None,
+    ) -> bool:
+        del emulator
+        normalized_name = emulator_name.strip().casefold()
+        return any(token in normalized_name for token in ("xemu", "xemu.exe"))
+
+    def _is_rpcs3_emulator_name(self, emulator_name: str) -> bool:
+        normalized_name = emulator_name.strip().casefold()
+        return any(token in normalized_name for token in ("rpcs3", "rpcs3.exe"))
+
     def _on_default_platform_changed(self, platform: str) -> None:
         return None
 
@@ -730,6 +751,7 @@ class _DetailsPageStubWindow:
         self.details_primary_button = None
         self.details_config_button = None
         self.details_ps4_content_button = None
+        self.details_xbox360_content_button = None
         self.details_secondary_button = None
         self.details_update_button = None
         self.details_screenshot_labels = []
@@ -757,6 +779,9 @@ class _DetailsPageStubWindow:
         return None
 
     def _perform_ps4_content_action(self) -> None:
+        return None
+
+    def _perform_xbox360_content_action(self) -> None:
         return None
 
     def _perform_game_secondary_action(self) -> None:

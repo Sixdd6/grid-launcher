@@ -106,9 +106,104 @@ def _ensure_section_values(
     return "\n".join(output_lines).rstrip() + "\n", changed
 
 
+def _ensure_eden_section_values(
+    raw_content: str,
+    section_name: str,
+    desired_values: dict[str, str],
+) -> tuple[str, bool]:
+    """Like _ensure_section_values but also manages key\default=false annotations for Eden's QSettings format."""
+    if not desired_values:
+        return raw_content, False
+
+    lines = raw_content.splitlines()
+    output_lines: list[str] = []
+    changed = False
+    target_key = section_name.casefold()
+    in_target = False
+    section_found = False
+    seen_keys: set[str] = set()
+    seen_annotations: set[str] = set()
+
+    def flush_missing_keys() -> None:
+        nonlocal changed
+        for key, value in desired_values.items():
+            if key in seen_keys:
+                continue
+            if key not in seen_annotations:
+                output_lines.append(f"{key}\\default=false")
+                seen_annotations.add(key)
+            output_lines.append(f"{key} = {value}")
+            seen_keys.add(key)
+            changed = True
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        section_match = re.match(r"^\[(.+?)\]\s*$", stripped)
+        if section_match:
+            if in_target:
+                flush_missing_keys()
+            current_section = section_match.group(1).strip()
+            in_target = current_section.casefold() == target_key
+            if in_target:
+                section_found = True
+            output_lines.append(raw_line)
+            continue
+
+        if in_target:
+            annotation_match = re.match(r"^\s*([A-Za-z0-9_]+)\\default\s*=", raw_line)
+            if annotation_match:
+                key = annotation_match.group(1)
+                if key in desired_values:
+                    if key in seen_annotations:
+                        changed = True
+                        continue
+                    replacement = f"{key}\\default=false"
+                    if raw_line.strip() != replacement:
+                        changed = True
+                    output_lines.append(replacement)
+                    seen_annotations.add(key)
+                    continue
+                output_lines.append(raw_line)
+                continue
+
+            key_match = re.match(r"^\s*([A-Za-z0-9_]+)\s*=", raw_line)
+            if key_match:
+                key = key_match.group(1)
+                if key in desired_values:
+                    if key in seen_keys:
+                        changed = True
+                        continue
+                    if key not in seen_annotations:
+                        output_lines.append(f"{key}\\default=false")
+                        seen_annotations.add(key)
+                        changed = True
+                    replacement = f"{key} = {desired_values[key]}"
+                    if raw_line.strip() != replacement:
+                        changed = True
+                    output_lines.append(replacement)
+                    seen_keys.add(key)
+                    continue
+
+        output_lines.append(raw_line)
+
+    if in_target:
+        flush_missing_keys()
+
+    if not section_found:
+        if output_lines and output_lines[-1].strip():
+            output_lines.append("")
+        output_lines.append(f"[{section_name}]")
+        for key, value in desired_values.items():
+            output_lines.append(f"{key}\\default=false")
+            output_lines.append(f"{key} = {value}")
+        changed = True
+
+    return "\n".join(output_lines).rstrip() + "\n", changed
+
+
 def eden_config_path_candidates(emulator_path_text: str) -> list[Path]:
-    portable_candidate = Path(emulator_path_text).parent / "qt-config.ini"
-    windows_candidate = Path(os.path.expandvars("%APPDATA%")) / "eden" / "qt-config.ini"
+    portable_candidate = Path(emulator_path_text).parent / "user" / "config" / "qt-config.ini"
+    windows_candidate = Path(os.path.expandvars("%APPDATA%")) / "eden" / "config" / "qt-config.ini"
     linux_candidate = Path.home() / ".config" / "eden" / "qt-config.ini"
     return [portable_candidate, windows_candidate, linux_candidate]
 
@@ -134,20 +229,40 @@ def ensure_eden_settings(emulator_path_text: str) -> dict:
         content = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
 
         changed = False
-        updated_content, section_changed = _ensure_section_values(
+        updated_content, section_changed = _ensure_eden_section_values(
             content,
             "UI",
             {
                 "enable_discord_presence": "false",
-                "confirm_before_closing": "false",
+                "confirmStop": "2",
+                "fullscreen": "true",
+                "firstStart": "false",
+                "pauseWhenInBackground": "true",
+                "enable_gamemode": "true",
+                "theme": "colorful_dark",
+                "check_for_updates": "false",
             },
         )
         changed = changed or section_changed
 
-        updated_content, section_changed = _ensure_section_values(
+        updated_content, section_changed = _ensure_eden_section_values(
             updated_content,
             "WebService",
             {"enable_telemetry": "false"},
+        )
+        changed = changed or section_changed
+
+        updated_content, section_changed = _ensure_eden_section_values(
+            updated_content,
+            "Audio",
+            {"volume": "40", "muteWhenInBackground": "true"},
+        )
+        changed = changed or section_changed
+
+        updated_content, section_changed = _ensure_eden_section_values(
+            updated_content,
+            "Renderer",
+            {"scaling_filter": "6"},
         )
         changed = changed or section_changed
 

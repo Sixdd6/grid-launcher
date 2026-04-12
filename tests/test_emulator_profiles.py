@@ -71,6 +71,7 @@ from rom_mate.emulator.profiles import (
 from rom_mate.emulator.selection import (
     cloud_save_block_reason_for_game,
     install_block_reason_for_game,
+    is_xbox360_platform,
     is_native_executable_platform,
 )
 
@@ -127,6 +128,18 @@ def _coerce_suggestion_names(result):
 
 
 class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
+    def test_is_xbox360_platform_detects_standard_label(self) -> None:
+        self.assertTrue(is_xbox360_platform({"platform": "Xbox 360"}))
+
+    def test_is_xbox360_platform_detects_compact_label(self) -> None:
+        self.assertTrue(is_xbox360_platform({"platform": "Xbox360"}))
+
+    def test_is_xbox360_platform_rejects_original_xbox(self) -> None:
+        self.assertFalse(is_xbox360_platform({"platform": "Xbox"}))
+
+    def test_is_xbox360_platform_rejects_xbox_one(self) -> None:
+        self.assertFalse(is_xbox360_platform({"platform": "Xbox One"}))
+
     def test_select_emulator_executable_path_prefers_azahar_over_azahar_room(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             extracted_dir = Path(temp_dir) / "azahar"
