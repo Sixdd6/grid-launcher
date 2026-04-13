@@ -101,9 +101,7 @@ Some emulator/platform combinations may limit state-sync actions when that behav
 
 ## Screenshot upload
 When uploading saves or states, the app should attempt to attach the most recently captured screenshot as a companion `screenshotFile`.
-- PPSSPP and RetroArch attach screenshots via file sidecars: PPSSPP replaces the state file extension with an image extension; RetroArch appends an image extension to the full state filename.
-- All other supported emulators (DuckStation, PCSX2, Dolphin, RPCS3, Cemu, Azahar, Xemu, Eden, MAME, FBNeo, Xenia) attach screenshots by scanning a known emulator screenshot directory for the most recently captured image within the current game session window. No screenshot is attached if no image was captured during the session.
-- Emulator profiles define the screenshot directories to scan via the `screenshot_directories` key in `emulator-autoprofiles.json`.
+- PPSSPP and RetroArch use file sidecars; all other supported emulators scan the emulator's screenshot directory for the most recent image within the session window. See ARCHITECTURE.md maintenance notes for routing details.
 
 # Additional Platform-Specific Behavior
 - RetroArch support should include installed core detection and per-platform core assignment.

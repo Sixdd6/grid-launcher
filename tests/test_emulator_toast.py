@@ -9,9 +9,10 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QComboBox, QLineEdit, QListWidget
+from rom_mate.ui.mixins.emulator_ui_mixin import EmulatorUIMixin
 
 
-class _SaveEmulatorToastStubWindow:
+class _SaveEmulatorToastStubWindow(EmulatorUIMixin):
     def __init__(self) -> None:
         self.config = {
             "emulators": [],

@@ -22,6 +22,8 @@ pytest-cache-files-*/
 .coverage
 .coverage.*
 htmlcov/
+User/
+unittest_*
 
 # Logs
 *.log
@@ -38,3 +40,4 @@ Thumbs.db
 
 # Ignore the agents and related files
 agents/
+skills/

@@ -65,12 +65,20 @@ This document is a stable module map for the current codebase.
   - `utils.py`: URL normalization and cache-key helpers.
 
 - `rom_mate/ui/`
-  - UI-specific dialogs, views, theming, and widget helpers.
+  - UI-specific dialogs, views, theming, widget helpers, and `MainWindow` mixin behavior.
   - `dialogs.py`: first-run and native game settings dialogs.
   - `downloads.py`: downloads page/widget construction.
   - `emulators.py`: emulator settings form helpers.
   - `game_views.py`: library cards and details-view UI helpers, including cloud button visibility/label updates like `Emulator Saves`.
   - `theme.py`: theme selection and stylesheet generation.
+  - `toast.py`: `ToastWidget` and `show_toast` helper for transient in-window notifications.
+
+- `rom_mate/ui/mixins/`
+  - `MainWindow` behavior extracted into composable mixins. `MainWindow` inherits all four in MRO order: `CloudSaveMixin`, `EmulatorUIMixin`, `InstallMixin`, `DetailsViewMixin`.
+  - `cloud_mixin.py` (`CloudSaveMixin`): cloud save orchestration — save-scope classification, block-reason resolution, sync candidate discovery (per-game and shared-emulator paths for all emulators), emulator-specific save-directory overrides (Cemu, Dolphin, PCSX2, RPCS3, etc.), session-window filtering, screenshot and firmware directory resolution, and upload/restore coordinator helpers.
+  - `emulator_ui_mixin.py` (`EmulatorUIMixin`): emulator settings page behavior — emulator config normalization, autoprofile loading, RetroArch core list and compatibility map access, emulator view refresh, emulator add/edit/remove/save form actions, source-download emulator install flow, RPCS3 firmware background download trigger, and emulator path/library browsing.
+  - `install_mixin.py` (`InstallMixin`): game install/uninstall lifecycle — async download and finalize workers, archive extraction, PS4/Xbox 360 content install flows, firmware routing post-install, native game update application, installed-game registration, update-state refresh, and library path resolution.
+  - `details_view_mixin.py` (`DetailsViewMixin`): game details panel — opening/closing the details view, cloud panel rendering (records, upload, restore, delete), details-view responsive layout (responsive resize), PCGamingWiki save-path lookup, native save-path section rendering, cloud sync state accessors, ROM ID caching, install-queue integration, and the async `DetailsCloudRecordsWorker` lifecycle.
 
 - `rom_mate/background/`
   - Threaded background workers for downloads, installs, cloud uploads, and async details-panel cloud record loading.
@@ -83,6 +91,10 @@ This document is a stable module map for the current codebase.
 - Emulator detection, defaults, save-scope rules, and launching: `rom_mate/emulator/`
 - Cover caching and details loading: `rom_mate/cover/`
 - Dialog, widget, theme behavior, and details-button visibility/labels: `rom_mate/ui/`
+- Cloud save orchestration (scopes, candidates, emulator path overrides, upload/restore): `rom_mate/ui/mixins/cloud_mixin.py`
+- Emulator settings page, autoprofiles, RetroArch core UI, source-download emulator installs: `rom_mate/ui/mixins/emulator_ui_mixin.py`
+- Game install/uninstall lifecycle, async workers, archive extraction, PS4/Xbox 360 content: `rom_mate/ui/mixins/install_mixin.py`
+- Details panel rendering, cloud record display, PCGamingWiki paths, native save paths: `rom_mate/ui/mixins/details_view_mixin.py`
 - Background worker behavior and async details cloud loading: `rom_mate/background/workers.py`
 - Top-level orchestration, shared-save warnings, and signal wiring: `rom-mate.py`
 
@@ -94,4 +106,5 @@ This document is a stable module map for the current codebase.
 - Update this file when module ownership changes.
 - Emulator autoprofiles (`emulator-autoprofiles.json`) define `screenshot_directories` alongside `save_directories` and `state_directories`. The `_resolved_screenshot_directories()` method in `rom-mate.py` resolves these paths; `session_screenshot_path()` in `cloud_transfer.py` finds the most recent session-window screenshot to attach to cloud uploads. These are intentionally absent for PPSSPP and RetroArch which use file sidecars instead.
 - The `InstallFinalizeWorker` in `workers.py` only deletes the downloaded archive after installation when extraction actually occurred (`extracted_path` is non-empty). Direct game file formats (.chd, .iso, .bin, etc.) must never be deleted post-install.
-- RetroArch firmware installation is driven by per-core metadata in `retroarch-core-list.json`. Each entry may have `firmware` (system-dir BIOS files, with optional `subdirectory`, `files` keyword filter, and `extract_with_paths` flag), `config_files` (`.opt` core option files routed to `config/<corename>/`), and `saves_files` (archives extracted into the RetroArch saves directory). The `firmware_install.py` module handles all three routing modes. Debug output is available via the `rom_mate.library.firmware_install` Python logger, enabled when `debug_prints` is true in the app config.
+- RetroArch firmware routing details are in `retroarch-core-list.json` and `firmware_install.py`. Debug output available via the `rom_mate.library.firmware_install` logger.
+- `MainWindow` is composed via four mixins (`CloudSaveMixin`, `EmulatorUIMixin`, `InstallMixin`, `DetailsViewMixin`) in `rom_mate/ui/mixins/`. When behavior spans mixins (e.g., install triggering a cloud refresh), the call crosses from `InstallMixin` into a method resolved on `self` that lives in another mixin — check the mixin that owns the behavior you're tracing before searching `rom-mate.py`.

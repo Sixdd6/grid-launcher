@@ -14,6 +14,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QAbstractItemView, QComboBox, QFrame, QLabel, QLineEdit, QPushButton, QScrollArea
 
 from rom_mate.ui.game_views import make_game_card, open_game_details, update_details_action_buttons
+from rom_mate.ui.mixins.emulator_ui_mixin import EmulatorUIMixin
 from rom_mate.ui.theme import apply_theme_inline_styles
 
 
@@ -680,7 +681,7 @@ class _SourceUpdateActionStubWindow:
         self.install_game = game
 
 
-class _RenamedSourceLookupStubWindow:
+class _RenamedSourceLookupStubWindow(EmulatorUIMixin):
     def __init__(self) -> None:
         self.config = {
             "emulator_source_installs": {

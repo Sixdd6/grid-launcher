@@ -1852,7 +1852,7 @@ class EmulatorEnsureDispatchTests(unittest.TestCase):
 
         window = _WindowStub()
 
-        with patch.object(module, "resolve_ensure_ppsspp_settings") as ensure_ppsspp:
+        with patch("rom_mate.ui.mixins.emulator_ui_mixin.ensure_ppsspp_settings") as ensure_ppsspp:
             module.MainWindow._ensure_emulator_sync_settings(window, "PPSSPP", "C:/Emulators/PPSSPPWindows64.exe")
 
         ensure_ppsspp.assert_called_once_with(
@@ -2114,8 +2114,8 @@ class TestRpcs3FirmwareBackgroundDownload(unittest.TestCase):
                 return _ThreadStub()
 
             with (
-                patch.object(module, "download_ps3_firmware_direct", return_value=[]) as download_direct,
-                patch.object(module, "install_platform_firmware") as install_firmware,
+                patch("rom_mate.ui.mixins.emulator_ui_mixin.download_ps3_firmware_direct", return_value=[]) as download_direct,
+                patch("rom_mate.ui.mixins.emulator_ui_mixin.install_platform_firmware") as install_firmware,
                 patch.object(window._emulator_refresh_requested, "emit") as emit_signal,
                 patch("threading.Thread", side_effect=_thread_side_effect),
             ):
@@ -2179,10 +2179,10 @@ class TestRpcs3FirmwareBackgroundDownload(unittest.TestCase):
                 return _ThreadStub()
 
             with (
-                patch.object(
-                    module, "download_ps3_firmware_direct", return_value=["network error"]
+                patch(
+                    "rom_mate.ui.mixins.emulator_ui_mixin.download_ps3_firmware_direct", return_value=["network error"]
                 ) as download_direct,
-                patch.object(module, "install_platform_firmware") as install_firmware,
+                patch("rom_mate.ui.mixins.emulator_ui_mixin.install_platform_firmware") as install_firmware,
                 patch.object(window._emulator_refresh_requested, "emit") as emit_signal,
                 patch("threading.Thread", side_effect=_thread_side_effect),
             ):
@@ -2250,7 +2250,7 @@ class TestRpcs3FirmwareBackgroundDownload(unittest.TestCase):
                 patch.object(
                     module, "download_ps3_firmware_direct", return_value=["network error"]
                 ),
-                patch.object(module, "install_platform_firmware") as install_firmware,
+                patch("rom_mate.ui.mixins.emulator_ui_mixin.install_platform_firmware") as install_firmware,
                 patch("threading.Thread", side_effect=_thread_side_effect),
             ):
                 module.MainWindow._trigger_rpcs3_firmware_download_background(
