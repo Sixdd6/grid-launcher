@@ -1252,7 +1252,7 @@ class DetailsViewMixin:
             self._emulator_entry_by_name,
             self._split_launch_template_args,
             self._launch_placeholders_for_game,
-            resolve_validate_launch_placeholders,
+            validate_launch_placeholders,
             self._apply_launch_placeholders_to_args,
         )
 

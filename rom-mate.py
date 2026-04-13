@@ -2262,6 +2262,8 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         if self.library_empty_label is not None:
             self.library_empty_label.setVisible(not has_games)
 
+        for i in range(self.library_grid.rowCount()):
+            self.library_grid.setRowStretch(i, 0)
         self._clear_layout(self.library_grid)
         if not has_games:
             return
@@ -2272,6 +2274,8 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             row = i // columns
             col = i % columns
             self.library_grid.addWidget(card, row, col)
+        last_row = (len(visible_games) - 1) // columns
+        self.library_grid.setRowStretch(last_row + 1, 1)
 
     def _visible_library_games(self) -> list[dict[str, str]]:
         return resolve_visible_library_games(self.library_games)

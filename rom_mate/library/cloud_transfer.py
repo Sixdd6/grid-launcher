@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import subprocess
+import sys
 import tempfile
 import time
 import zipfile
@@ -26,6 +28,8 @@ SUPPORTED_IMAGE_EXTENSIONS = (
     ".gif",
     ".bmp",
 )
+
+_BUNDLED_7Z_PATH = Path(__file__).resolve().parent.parent.parent / "assets" / "tools" / "7z" / "7z.exe"
 
 
 def _normalized_blocked_basenames(values: set[str] | None = None) -> set[str]:
@@ -144,6 +148,66 @@ def state_download_candidate_paths(state_record: dict[str, Any]) -> list[str]:
     return candidate_paths
 
 
+def _extract_zip_with_7z(
+    zip_path: Path,
+    destination_root: Path,
+    blocked_basenames: set[str],
+    blocked_extensions: set[str],
+) -> int:
+    temp_dir = Path(tempfile.mkdtemp(prefix="rom-mate-save-7z-"))
+    creationflags = subprocess.CREATE_NO_WINDOW if sys.platform.startswith("win") else 0
+    try:
+        commands: list[str] = []
+        if _BUNDLED_7Z_PATH.exists():
+            commands.append(str(_BUNDLED_7Z_PATH))
+        commands.extend(["7z", "7za", "7zz"])
+
+        extracted = False
+        for command in commands:
+            try:
+                subprocess.run(
+                    [command, "x", str(zip_path), f"-o{temp_dir}", "-y"],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    creationflags=creationflags,
+                )
+                extracted = True
+                break
+            except FileNotFoundError:
+                continue
+            except subprocess.CalledProcessError:
+                continue
+
+        if not extracted:
+            raise OSError("No 7-Zip found to extract this archive.")
+
+        extracted_count = 0
+        for candidate in temp_dir.rglob("*"):
+            if not candidate.is_file():
+                continue
+            if blocked_basenames and candidate.name.casefold() in blocked_basenames:
+                continue
+            if blocked_extensions and candidate.suffix.casefold() in blocked_extensions:
+                continue
+
+            relative_path = candidate.relative_to(temp_dir)
+            destination = (destination_root / relative_path).resolve()
+            try:
+                destination.relative_to(destination_root)
+            except ValueError:
+                continue
+
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(candidate, destination)
+            extracted_count += 1
+
+        return extracted_count
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 def screenshot_download_candidate_paths(screenshot_record: dict[str, Any]) -> list[str]:
     candidate_paths: list[str] = []
     for key in ("download_path", "file_path", "full_path"):
@@ -176,30 +240,38 @@ def extract_zip_archive_bytes_to_directory(
 
         destination_root = target_root.resolve()
         extracted_count = 0
-        with zipfile.ZipFile(temp_zip_path) as archive:
-            for member in archive.infolist():
-                member_name = member.filename.replace("\\", "/")
-                if not member_name or member_name.endswith("/"):
-                    continue
-                relative_path = Path(member_name)
-                if relative_path.is_absolute() or any(part in {"", ".", ".."} for part in relative_path.parts):
-                    continue
-                if blocked_basenames and relative_path.name.casefold() in blocked_basenames:
-                    continue
-                if blocked_extensions and relative_path.suffix.casefold() in blocked_extensions:
-                    continue
+        try:
+            with zipfile.ZipFile(temp_zip_path) as archive:
+                for member in archive.infolist():
+                    member_name = member.filename.replace("\\", "/")
+                    if not member_name or member_name.endswith("/"):
+                        continue
+                    relative_path = Path(member_name)
+                    if relative_path.is_absolute() or any(part in {"", ".", ".."} for part in relative_path.parts):
+                        continue
+                    if blocked_basenames and relative_path.name.casefold() in blocked_basenames:
+                        continue
+                    if blocked_extensions and relative_path.suffix.casefold() in blocked_extensions:
+                        continue
 
-                destination = (destination_root / relative_path).resolve()
-                try:
-                    destination.relative_to(destination_root)
-                except ValueError:
-                    continue
+                    destination = (destination_root / relative_path).resolve()
+                    try:
+                        destination.relative_to(destination_root)
+                    except ValueError:
+                        continue
 
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                with archive.open(member, "r") as source_file, destination.open("wb") as destination_file:
-                    shutil.copyfileobj(source_file, destination_file)
-                extracted_count += 1
-        return extracted_count
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with archive.open(member, "r") as source_file, destination.open("wb") as destination_file:
+                        shutil.copyfileobj(source_file, destination_file)
+                    extracted_count += 1
+            return extracted_count
+        except NotImplementedError:
+            return _extract_zip_with_7z(
+                temp_zip_path,
+                destination_root,
+                blocked_basenames,
+                blocked_extensions,
+            )
     finally:
         if temp_zip_path is not None and temp_zip_path.exists():
             try:

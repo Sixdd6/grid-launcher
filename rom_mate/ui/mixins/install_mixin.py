@@ -332,7 +332,7 @@ class InstallMixin:
             archive_path,
             content_kind=content_kind,
             extracted_dir_for_archive_path=self._extracted_dir_for_archive_path,
-            extract_archive_into_directory=resolve_extract_archive_into_directory,
+            extract_archive_into_directory=extract_archive_into_directory,
             install_progress_callback=install_progress_callback,
         )
 
@@ -363,7 +363,7 @@ class InstallMixin:
             archive_path,
             Path(content_root_text),
             extracted_dir_for_archive_path=self._extracted_dir_for_archive_path,
-            extract_archive_into_directory=resolve_extract_archive_into_directory,
+            extract_archive_into_directory=extract_archive_into_directory,
             install_progress_callback=install_progress_callback,
         )
 
@@ -969,7 +969,7 @@ class InstallMixin:
             self.library_games,
             {self._game_key(game) for game in matches},
             game_key=self._game_key,
-            library_games_without_keys=resolve_library_games_without_keys,
+            library_games_without_keys=library_games_without_keys,
             cached_cover_path_keys_for_games=self._cached_cover_path_keys_for_games,
             remove_game_files=self._remove_game_files,
             cleanup_cached_cover_for_game=self._cleanup_cached_cover_for_game,
@@ -985,7 +985,7 @@ class InstallMixin:
             self.library_games,
             {self._game_key(game)},
             game_key=self._game_key,
-            library_games_without_keys=resolve_library_games_without_keys,
+            library_games_without_keys=library_games_without_keys,
             cached_cover_path_keys_for_games=self._cached_cover_path_keys_for_games,
             remove_game_files=self._remove_game_files,
             cleanup_cached_cover_for_game=self._cleanup_cached_cover_for_game,

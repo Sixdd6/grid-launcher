@@ -125,12 +125,15 @@ def render_server_games(window: ServerViewWindowProtocol, platform: str) -> None
     if window.server_games_grid is None or window.server_games_scroll is None:
         return
 
+    for i in range(window.server_games_grid.rowCount()):
+        window.server_games_grid.setRowStretch(i, 0)
     window._clear_layout(window.server_games_grid)
 
     if platform in window._server_platforms_loading:
         loading_label = QLabel("Loading games...")
         loading_label.setObjectName("serverLoadingLabel")
         window.server_games_grid.addWidget(loading_label, 0, 0)
+        window.server_games_grid.setRowStretch(1, 1)
         return
 
     games = window.server_games_by_platform.get(platform, [])
@@ -145,3 +148,6 @@ def render_server_games(window: ServerViewWindowProtocol, platform: str) -> None
         row = i // columns
         col = i % columns
         window.server_games_grid.addWidget(card, row, col)
+    if games:
+        last_row = (len(games) - 1) // columns
+        window.server_games_grid.setRowStretch(last_row + 1, 1)
