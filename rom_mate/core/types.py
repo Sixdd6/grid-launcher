@@ -5,7 +5,7 @@ from typing import Protocol
 
 
 class MainWindowProtocol(Protocol):
-    def _prepare_installed_game_without_ui(self, game: dict[str, str], archive_path: Path, configure_ps3_links: bool = False, install_progress_callback=None):
+    def _prepare_installed_game_without_ui(self, game: dict[str, str], archive_path: Path, *, cleanup_archive_on_success: bool = True, install_progress_callback=None):
         ...
 
     def _apply_ps4_content_archive_without_ui(

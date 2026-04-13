@@ -1,7 +1,6 @@
 import sys
 import json
 import base64
-import ctypes
 import hashlib
 import os
 import re
@@ -96,13 +95,11 @@ from rom_mate.library import (
     candidate_extracted_dirs_for_game as resolve_candidate_extracted_dirs_for_game,
     candidate_extracted_paths_for_game as resolve_candidate_extracted_paths_for_game,
     cleanup_temporary_paths,
-    configure_ps3_install_links as resolve_configure_ps3_install_links,
     cloud_sync_candidates_for_game,
     cloud_sync_directory_candidates_for_game,
     cloud_sync_state,
     cloud_sync_state_for_game,
     cloud_sync_state_key,
-    detected_ps3_game_id as resolve_detected_ps3_game_id,
     directory_archive_upload_jobs,
     directory_total_file_bytes as resolve_directory_total_file_bytes,
     extract_zip_archive_bytes_to_directory,
@@ -126,12 +123,6 @@ from rom_mate.library import (
     no_matching_upload_message,
     ps3_game_id_from_paths as resolve_ps3_game_id_from_paths,
     ps3_game_id_from_text as resolve_ps3_game_id_from_text,
-    ps3_game_ids_for_game as resolve_ps3_game_ids_for_game,
-    ps3_games_yml_install_path as resolve_ps3_games_yml_install_path,
-    ps3_games_yml_path_for_game as resolve_ps3_games_yml_path_for_game,
-    ps3_games_yml_paths_for_game as resolve_ps3_games_yml_paths_for_game,
-    ps3_link_paths_from_game as resolve_ps3_link_paths_from_game,
-    ps3_link_plan_for_extracted_dir as resolve_ps3_link_plan_for_extracted_dir,
     normalize_candidate_url,
     download_count_text,
     download_entry_detail_text,
@@ -167,7 +158,6 @@ from rom_mate.library import (
     restore_single_save_payload,
     restore_single_state_payload,
     retry_download_game,
-    remove_rpcs3_games_yml_entries as resolve_remove_rpcs3_games_yml_entries,
     resolved_native_executable_path_for_game as resolve_resolved_native_executable_path_for_game,
     rom_id_key,
     server_content_file_name_for_game as resolve_server_content_file_name_for_game,
@@ -176,8 +166,6 @@ from rom_mate.library import (
     server_records_from_payload,
     sort_server_records_by_recency,
     should_extract_archive_for_game as resolve_should_extract_archive_for_game,
-    update_rpcs3_games_yml_for_install as resolve_update_rpcs3_games_yml_for_install,
-    upsert_rpcs3_games_yml_entry as resolve_upsert_rpcs3_games_yml_entry,
     session_cloud_sync_updates,
     screenshot_download_candidate_paths,
     should_skip_known_latest,
@@ -196,7 +184,7 @@ from rom_mate.library import (
     update_cloud_sync_state_for_game,
 )
 from rom_mate.library.cloud_transfer import SUPPORTED_IMAGE_EXTENSIONS, session_screenshot_path
-from rom_mate.library.firmware_install import install_platform_firmware
+from rom_mate.library.firmware_install import download_ps3_firmware_direct, install_platform_firmware
 from rom_mate.cover import (
     apply_cover_to_label,
     cache_cover_image_for_game,
@@ -251,7 +239,6 @@ from rom_mate.emulator import (
     xenia_directory_settings as resolve_xenia_directory_settings,
     xenia_save_path_overrides as resolve_xenia_save_path_overrides,
     xenia_state_path_overrides as resolve_xenia_state_path_overrides,
-    rpcs3_data_root as resolve_rpcs3_data_root,
     rpcs3_pup_path as resolve_rpcs3_pup_path,
     rpcs3_save_path_overrides as resolve_rpcs3_save_path_overrides,
     trigger_rpcs3_firmware_install as resolve_trigger_rpcs3_firmware_install,
@@ -269,6 +256,7 @@ from rom_mate.emulator import (
     ensure_pcsx2_settings as resolve_ensure_pcsx2_settings,
     ensure_ppsspp_settings as resolve_ensure_ppsspp_settings,
     ensure_rpcs3_settings as resolve_ensure_rpcs3_settings,
+    ps3_vfs_dev_hdd0_path as resolve_ps3_vfs_dev_hdd0_path,
     ensure_redream_settings as resolve_ensure_redream_settings,
     ensure_xemu_settings as resolve_ensure_xemu_settings,
     dolphin_target_platforms_for_variant as resolve_dolphin_target_platforms_for_variant,
@@ -374,9 +362,7 @@ from rom_mate.server import (
     details_rom_id_cache as resolve_details_rom_id_cache,
     details_rom_id_cache_key as resolve_details_rom_id_cache_key,
     fetch_connection_payloads,
-    fetch_platform_rom_items,
     fetch_server_rom_payload as resolve_fetch_server_rom_payload,
-    games_from_rom_items,
     on_server_platform_selected,
     on_server_search_changed,
     populate_server_platforms as resolve_populate_server_platforms,
@@ -392,6 +378,10 @@ from rom_mate.background import AutoCloudSaveUploadWorker, DetailsCloudRecordsWo
 
 class MainWindow(QMainWindow):
     _emulator_refresh_requested = Signal()
+    _toast_requested = Signal(str, str)  # message, level
+    _firmware_download_progress = Signal(int, int, float)  # downloaded_bytes, total_bytes, speed_bps
+    _firmware_download_done = Signal(str)  # error string (empty on success)
+    _platform_games_ready = Signal(str)  # platform_label — results staged in _platform_games_results
 
     def __init__(self) -> None:
         super().__init__()
@@ -499,6 +489,14 @@ class MainWindow(QMainWindow):
         self._pcgw_thread: QThread | None = None
         self._pcgw_worker: QObject | None = None
         self._pcgw_paths_cache: dict[str, list[str]] = {}
+        self._retroarch_core_ids_cache: dict[str, set[str]] = {}
+        self._platform_default_emulator_cache: dict[str, str] = {}
+        self._platform_available_emulator_cache: dict[str, str] = {}
+        self._server_platforms_loading: set[str] = set()
+        self._platform_games_results: dict[str, tuple] = {}  # platform_label -> (games, rom_payloads, error)
+        self._emulator_sync_settings_done: set[str] = set()
+        self._cloud_emulator_entry_cache: dict[str, tuple] = {}  # (title::platform::save_type) -> (emulator_name, entry)
+        self._sync_directory_paths_cache: dict[tuple[str, str, str], list] = {}  # (name, path, key) -> list[Path]
         saved_manual = self.config.get("native_manual_save_paths", {})
         if isinstance(saved_manual, dict):
             for title_key, paths in saved_manual.items():
@@ -528,12 +526,17 @@ class MainWindow(QMainWindow):
         self.downloads_refresh_timer.setInterval(120)
         self.downloads_refresh_timer.timeout.connect(self._refresh_downloads_page)
         self._emulator_refresh_requested.connect(self._refresh_emulator_views)
+        self._platform_games_ready.connect(self._on_platform_games_ready)
+        self._toast_requested.connect(self._show_toast)
+        self._firmware_download_progress.connect(self._on_firmware_download_progress)
+        self._firmware_download_done.connect(self._on_firmware_download_done)
         self.download_entry_detail_labels: dict[str, QLabel] = {}
         self.active_download_count = 0
         self.active_download_bytes = 0
         self.active_download_total = 0
         self.active_download_speed_bps = 0.0
         self.active_download_entry_id: str | None = None
+        self._firmware_download_entry_id: str | None = None
         self.active_install_bytes = 0
         self.active_install_total = 0
         self.download_entries: list[dict[str, Any]] = []
@@ -543,7 +546,6 @@ class MainWindow(QMainWindow):
         self.server_rom_payloads: dict[str, dict[str, Any]] = {}
         self.retroarch_compatibility_map: dict[str, list[str]] | None = None
         self.emulator_autoprofiles: list[dict[str, Any]] | None = None
-        self.ps3_file_symlink_elevation_consent: bool | None = None
         self.active_game_sessions: list[dict[str, Any]] = []
         self.auto_cloud_upload_threads: list[QThread] = []
         self.auto_cloud_upload_workers: list[AutoCloudSaveUploadWorker] = []
@@ -1870,6 +1872,11 @@ class MainWindow(QMainWindow):
         if self.ra_login_status_label is not None:
             self.ra_login_status_label.setText(f"Logged in as {username}")
         self._show_toast(f"Logged in as {username}")
+        for emulator in self._emulators():
+            emulator_name = str(emulator.get("name", "")).strip()
+            emulator_path = str(emulator.get("path", "")).strip()
+            if emulator_name and emulator_path:
+                self._ensure_emulator_sync_settings(emulator_name, emulator_path)
 
     def _ra_clear_credentials(self) -> None:
         self._save_ra_token("")
@@ -2150,27 +2157,74 @@ class MainWindow(QMainWindow):
         if platform_id is None:
             return
 
-        try:
-            all_items = fetch_platform_rom_items(self._api_get, platform_id)
-        except (HTTPError, URLError, ValueError, json.JSONDecodeError):
+        if platform_label in self._server_platforms_loading:
+            return
+
+        import threading
+        from rom_mate.core.api import api_get_json
+        from rom_mate.server.catalog import fetch_platform_rom_items, games_from_rom_items
+        from rom_mate.cover.utils import cover_url_from_rom_payload, screenshot_urls_from_rom_payload, resolve_cover_url
+
+        # Capture all config values on the main thread before spawning the background thread.
+        captured_base_url = self._server_base_url()
+        captured_api_token = self.config.get("api_token", "")
+        if not isinstance(captured_api_token, str):
+            captured_api_token = ""
+
+        self._server_platforms_loading.add(platform_label)
+
+        def _fetch() -> None:
+            def _api_get(path: str, params: dict | None = None) -> Any:
+                return api_get_json(captured_base_url, captured_api_token, path, params)
+
+            def _cover_url(payload: Any) -> str:
+                return cover_url_from_rom_payload(payload, lambda v: resolve_cover_url(v, captured_base_url))
+
+            def _screenshot_urls(payload: Any) -> list:
+                return screenshot_urls_from_rom_payload(payload, lambda v: resolve_cover_url(v, captured_base_url))
+
+            try:
+                all_items = fetch_platform_rom_items(_api_get, platform_id)
+                fetched_games, fetched_payloads = games_from_rom_items(
+                    all_items, platform_label, _cover_url, _screenshot_urls
+                )
+                # Store results then signal main thread — GIL makes the dict write safe.
+                self._platform_games_results[platform_label] = (fetched_games, fetched_payloads, "")
+            except Exception as exc:
+                self._platform_games_results[platform_label] = ([], {}, str(exc))
+            self._platform_games_ready.emit(platform_label)
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _on_platform_games_ready(self, platform_label: str) -> None:
+        result = self._platform_games_results.pop(platform_label, None)
+        self._server_platforms_loading.discard(platform_label)
+
+        if result is None:
+            return
+
+        games, rom_payloads, error = result
+        if error:
             self.server_games_by_platform[platform_label] = []
             self._refresh_installed_game_update_state()
             self._set_server_status("Connected, but failed to load games", self._theme_color("warning", "#ffb86c"))
-            return
+        else:
+            self.server_rom_payloads.update(rom_payloads)
+            self.server_games_by_platform[platform_label] = games
+            self._refresh_installed_game_update_state()
 
-        games, rom_payloads = games_from_rom_items(
-            all_items,
-            platform_label,
-            self._cover_url_from_rom_payload,
-            self._screenshot_urls_from_rom_payload,
-        )
-        self.server_rom_payloads.update(rom_payloads)
-        self.server_games_by_platform[platform_label] = games
-        self._refresh_installed_game_update_state()
-
+        # Re-render if this is still the selected platform.
+        if self.server_platforms_list is not None:
+            selected_item = self.server_platforms_list.currentItem()
+            if selected_item is not None and selected_item.text() == platform_label:
+                self._render_server_games(platform_label)
     def _save_config(self, config: dict[str, Any]) -> bool:
         config_dir = self._config_dir()
         config_file = self._config_file()
+        # Emulator paths or library path may have changed — clear session caches.
+        self._emulator_sync_settings_done.clear()
+        self._sync_directory_paths_cache.clear()
+        self._cloud_emulator_entry_cache.clear()
 
         try:
             resolve_write_config_file(config_dir, config_file, config)
@@ -2459,7 +2513,18 @@ class MainWindow(QMainWindow):
             self.current_details_game["update_available"] = (
                 "true" if self._details_update_available_for_game(self.current_details_game) else "false"
             )
-        self._update_details_action_buttons()
+            # Only refresh the update button, not the full (expensive) action button set.
+            details_update_button = getattr(self, "details_update_button", None)
+            if details_update_button is not None:
+                has_update = self.current_details_game.get("update_available") == "true"
+                installed = self._is_game_installed(self.current_details_game)
+                is_emulator_entry = self._is_emulators_platform(self.current_details_game)
+                show_update = installed and not is_emulator_entry and has_update
+                update_button_text_fn = getattr(self, "_details_update_button_text_for_game", None)
+                update_button_text = update_button_text_fn(self.current_details_game) if callable(update_button_text_fn) else "Update"
+                details_update_button.setText(update_button_text)
+                details_update_button.setVisible(show_update)
+                details_update_button.setEnabled(show_update and not self.install_in_progress)
 
     def _details_update_available_for_game(self, game: dict[str, str]) -> bool:
         if self._is_emulators_platform(game):
@@ -2668,34 +2733,11 @@ class MainWindow(QMainWindow):
         installed_game["ps4_content"] = updated_game.get("ps4_content", "")
         self._persist_installed_games()
 
-    def _ps3_emulator_root_for_game(self, game: dict[str, str]) -> Path | None:
-        platform_value = game.get("platform", "")
-        platform = platform_value.strip() if isinstance(platform_value, str) else ""
-        emulator_name = self._default_emulator_name_for_platform(platform)
-        if not emulator_name:
-            return None
-
-        emulator_entry = self._emulator_entry_by_name(emulator_name)
-        if emulator_entry is None:
-            return None
-
-        emulator_path_value = emulator_entry.get("path", "")
-        emulator_path_text = emulator_path_value.strip() if isinstance(emulator_path_value, str) else ""
-        if not emulator_path_text:
-            return None
-        return resolve_rpcs3_data_root(emulator_path_text)
-
-    def _ps3_link_plan_for_extracted_dir(self, extracted_dir: Path, emulator_root: Path) -> list[tuple[Path, Path, bool, str]]:
-        return resolve_ps3_link_plan_for_extracted_dir(extracted_dir, emulator_root, self._path_key)
-
     def _ps3_game_id_from_text(self, value: str) -> str:
         return resolve_ps3_game_id_from_text(value)
 
     def _ps3_game_id_from_paths(self, paths: list[Path]) -> str:
         return resolve_ps3_game_id_from_paths(paths)
-
-    def _detected_ps3_game_id(self, extracted_dir: Path, link_targets: list[Path]) -> str:
-        return resolve_detected_ps3_game_id(extracted_dir, link_targets)
 
     def _ps3_game_id_for_game(self, game: dict[str, str]) -> str:
         existing_value = game.get("ps3_game_id", "")
@@ -2715,181 +2757,37 @@ class MainWindow(QMainWindow):
         if game_id:
             return game_id
 
-        link_paths = self._ps3_link_paths_from_game(game)
-        game_id = self._ps3_game_id_from_paths(link_paths)
-        if game_id:
-            return game_id
-
+        # Under VFS layout, extracted_dir points to dev_hdd0/game/<GAMEID>/
         extracted_dir_value = game.get("extracted_dir", "")
         extracted_dir_text = extracted_dir_value.strip() if isinstance(extracted_dir_value, str) else ""
         if extracted_dir_text:
             extracted_dir = Path(extracted_dir_text).expanduser()
-            if extracted_dir.exists() and extracted_dir.is_dir():
-                game_id = self._detected_ps3_game_id(extracted_dir, link_paths)
-                if game_id:
-                    return game_id
+            game_id = self._ps3_game_id_from_text(extracted_dir.name)
+            if game_id:
+                return game_id
         return ""
+
+    def _ps3_dev_hdd0_for_game(self, game: dict[str, str]) -> Path | None:
+        platform_value = game.get("platform", "")
+        platform = platform_value.strip() if isinstance(platform_value, str) else ""
+        emulator_name = self._default_emulator_name_for_platform(platform)
+        if not emulator_name:
+            return None
+        emulator_entry = self._emulator_entry_by_name(emulator_name)
+        if emulator_entry is None:
+            return None
+        emulator_path_value = emulator_entry.get("path", "")
+        emulator_path_text = emulator_path_value.strip() if isinstance(emulator_path_value, str) else ""
+        library_path_value = self.config.get("library_path", "")
+        library_path_text = library_path_value.strip() if isinstance(library_path_value, str) else ""
+        ps3_library_path = str(Path(library_path_text).expanduser() / "PlayStation 3") if library_path_text else ""
+        return resolve_ps3_vfs_dev_hdd0_path(emulator_path_text, ps3_library_path)
 
     def _is_rpcs3_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
         return self._emulator_matches_tokens(emulator_name, "rpcs3", emulator=emulator) or resolve_is_rpcs3_emulator_name(emulator_name)
 
     def _is_ps3_emulator_entry(self, emulator: dict[str, str]) -> bool:
         return resolve_is_ps3_emulator_entry(emulator, self._emulator_profile_for_entry)
-
-    def _has_installed_ps3_games(self) -> bool:
-        return any(self._is_ps3_platform(game) for game in self.library_games)
-
-    def _create_link_path(self, source_path: Path, link_path: Path, is_directory: bool) -> None:
-        link_path.parent.mkdir(parents=True, exist_ok=True)
-        if link_path.exists():
-            return
-
-        if is_directory:
-            result = subprocess.run(
-                ["cmd", "/c", "mklink", "/J", str(link_path), str(source_path)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if result.returncode == 0:
-                return
-
-            try:
-                os.symlink(str(source_path), str(link_path), target_is_directory=True)
-                return
-            except (AttributeError, NotImplementedError, OSError):
-                pass
-
-            error_text = result.stderr.strip() or result.stdout.strip() or "Unknown link creation error"
-            raise OSError(error_text)
-
-        try:
-            os.symlink(str(source_path), str(link_path), target_is_directory=False)
-            return
-        except (AttributeError, NotImplementedError, OSError) as error:
-            if self._create_elevated_file_symlink(source_path, link_path):
-                return
-            raise OSError(str(error)) from error
-
-    def _create_elevated_file_symlink(self, source_path: Path, link_path: Path) -> bool:
-        if os.name != "nt":
-            return False
-
-        if self.ps3_file_symlink_elevation_consent is None:
-            answer = QMessageBox.question(
-                self,
-                "Administrator Permission Required",
-                "Creating file symlinks for this PS3 install requires administrator permission on Windows.\n\n"
-                "Do you want to allow a one-time elevation prompt for this operation?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes,
-            )
-            self.ps3_file_symlink_elevation_consent = answer == QMessageBox.StandardButton.Yes
-
-        if not self.ps3_file_symlink_elevation_consent:
-            return False
-
-        source_text = str(source_path)
-        link_text = str(link_path)
-        command_params = f'/c mklink "{link_text}" "{source_text}"'
-        result = ctypes.windll.shell32.ShellExecuteW(None, "runas", "cmd.exe", command_params, None, 0)
-        if result <= 32:
-            return False
-
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline:
-            if link_path.exists():
-                return True
-            time.sleep(0.1)
-        return link_path.exists()
-
-    def _remove_link_path(self, link_path: Path) -> None:
-        if not link_path.exists() and not link_path.is_symlink():
-            return
-        if link_path.is_symlink():
-            link_path.unlink()
-            return
-        if link_path.is_file():
-            link_path.unlink()
-            return
-        if link_path.is_dir():
-            try:
-                os.rmdir(link_path)
-            except OSError:
-                self._remove_directory_tree(link_path)
-            return
-        raise OSError(f"Unsupported link path type: {link_path}")
-
-    def _ps3_link_paths_from_game(self, game: dict[str, str]) -> list[Path]:
-        return resolve_ps3_link_paths_from_game(game)
-
-    def _ps3_games_yml_path_for_game(self, game: dict[str, str]) -> Path | None:
-        return resolve_ps3_games_yml_path_for_game(game, self._ps3_emulator_root_for_game)
-
-    def _ps3_games_yml_paths_for_game(self, game: dict[str, str]) -> list[Path]:
-        return resolve_ps3_games_yml_paths_for_game(
-            game,
-            self._ps3_games_yml_path_for_game(game),
-            self._ps3_link_paths_from_game(game),
-            self._path_key,
-        )
-
-    def _ps3_games_yml_install_path(
-        self,
-        game_id: str,
-        link_paths: list[Path],
-        extracted_dir: Path,
-        emulator_root: Path,
-    ) -> str:
-        return resolve_ps3_games_yml_install_path(game_id, link_paths, extracted_dir, emulator_root)
-
-    def _upsert_rpcs3_games_yml_entry(self, games_yml_path: Path, game_id: str, install_path: str) -> None:
-        resolve_upsert_rpcs3_games_yml_entry(games_yml_path, game_id, install_path)
-
-    def _ps3_game_ids_for_game(self, game: dict[str, str]) -> set[str]:
-        return resolve_ps3_game_ids_for_game(
-            game,
-            self._ps3_game_id_from_text,
-            self._ps3_game_id_for_game,
-            self._ps3_link_paths_from_game(game),
-        )
-
-    def _remove_rpcs3_games_yml_entries(self, games_yml_path: Path, game_ids: set[str]) -> None:
-        resolve_remove_rpcs3_games_yml_entries(games_yml_path, game_ids, self._ps3_game_id_from_text)
-
-    def _remove_rpcs3_games_yml_for_game(self, game: dict[str, str]) -> None:
-        game_ids = self._ps3_game_ids_for_game(game)
-        if not game_ids:
-            return
-
-        for games_yml_path in self._ps3_games_yml_paths_for_game(game):
-            self._remove_rpcs3_games_yml_entries(games_yml_path, game_ids)
-
-    def _update_rpcs3_games_yml_for_install(self, game: dict[str, str], extracted_dir: Path, link_paths: list[Path]) -> str:
-        return resolve_update_rpcs3_games_yml_for_install(
-            game,
-            extracted_dir,
-            link_paths,
-            detected_ps3_game_id=self._detected_ps3_game_id,
-            ps3_game_id_from_text=self._ps3_game_id_from_text,
-            ps3_emulator_root_for_game=self._ps3_emulator_root_for_game,
-            ps3_games_yml_install_path=self._ps3_games_yml_install_path,
-            ps3_games_yml_path_for_game=self._ps3_games_yml_path_for_game,
-            upsert_rpcs3_games_yml_entry=self._upsert_rpcs3_games_yml_entry,
-        )
-
-    def _configure_ps3_install_links(self, game: dict[str, str], extracted_dir: Path) -> list[Path]:
-        self.ps3_file_symlink_elevation_consent = None
-        try:
-            return resolve_configure_ps3_install_links(
-                extracted_dir,
-                self._ps3_emulator_root_for_game(game),
-                self._ps3_link_plan_for_extracted_dir,
-                self._create_link_path,
-                self._remove_link_path,
-            )
-        finally:
-            self.ps3_file_symlink_elevation_consent = None
 
     def _should_extract_archive_for_game(self, game: dict[str, str], archive_path: Path) -> bool:
         return resolve_should_extract_archive_for_game(
@@ -2943,7 +2841,7 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, "Install Warning", text)
 
     def _prepare_installed_game(self, game: dict[str, str], archive_path: Path) -> dict[str, str] | None:
-        prepared, warning_text = self._prepare_installed_game_without_ui(game, archive_path, configure_ps3_links=True)
+        prepared, warning_text = self._prepare_installed_game_without_ui(game, archive_path)
         if prepared is None:
             title = game.get("title", "Game")
             error_text = warning_text or f"Failed to extract archive for {title}"
@@ -2957,19 +2855,16 @@ class MainWindow(QMainWindow):
         game: dict[str, str],
         archive_path: Path,
         *,
-        configure_ps3_links: bool,
         cleanup_archive_on_success: bool = True,
         install_progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[dict[str, str] | None, str]:
         return resolve_prepare_installed_game_without_ui(
             game,
             archive_path,
-            configure_ps3_links=configure_ps3_links,
             should_extract_archive_for_game=self._should_extract_archive_for_game,
             extract_archive_for_game=self._extract_archive_for_game,
             is_ps3_platform=self._is_ps3_platform,
-            configure_ps3_install_links=self._configure_ps3_install_links,
-            update_rpcs3_games_yml_for_install=self._update_rpcs3_games_yml_for_install,
+            ps3_dev_hdd0_root=self._ps3_dev_hdd0_for_game,
             cleanup_archive_on_success=cleanup_archive_on_success,
             install_progress_callback=install_progress_callback,
         )
@@ -3363,16 +3258,28 @@ class MainWindow(QMainWindow):
             title=game.get("title", "") if isinstance(game, dict) else "",
             platform=game.get("platform", "") if isinstance(game, dict) else "",
         ) if callable(timing_start) else 0.0
+        _title = game.get("title", "") if isinstance(game, dict) else ""
+        _platform = game.get("platform", "") if isinstance(game, dict) else ""
+        _cache_key = f"{_title}::{_platform}::{save_type}"
+        if _cache_key in self._cloud_emulator_entry_cache:
+            _cached = self._cloud_emulator_entry_cache[_cache_key]
+            if callable(timing_end):
+                timing_end("_resolved_cloud_emulator_entry_for_game", started_at, emulator=_cached[0], source="cached")
+            return _cached
         resolved_game = self._installed_game_record(game) or game
         emulator_name, emulator_entry = self._resolved_emulator_entry_for_game(resolved_game)
         if emulator_entry is not None:
             if callable(timing_end):
                 timing_end("_resolved_cloud_emulator_entry_for_game", started_at, emulator=emulator_name, source="default")
-            return emulator_name, emulator_entry
+            _result: tuple[str, dict[str, str] | None] = (emulator_name, emulator_entry)
+            self._cloud_emulator_entry_cache[_cache_key] = _result
+            return _result
         if not self._is_emulators_platform(resolved_game):
             if callable(timing_end):
                 timing_end("_resolved_cloud_emulator_entry_for_game", started_at, source="none")
-            return emulator_name, emulator_entry
+            _result = (emulator_name, emulator_entry)
+            self._cloud_emulator_entry_cache[_cache_key] = _result
+            return _result
 
         for candidate in self._normalize_emulators(self._emulators()):
             candidate_name = str(candidate.get("name", "")).strip()
@@ -3389,11 +3296,15 @@ class MainWindow(QMainWindow):
                 continue
             if callable(timing_end):
                 timing_end("_resolved_cloud_emulator_entry_for_game", started_at, emulator=candidate_name, source="shared")
-            return candidate_name, candidate
+            _shared_result: tuple[str, dict[str, str] | None] = (candidate_name, candidate)
+            self._cloud_emulator_entry_cache[_cache_key] = _shared_result
+            return _shared_result
 
         if callable(timing_end):
             timing_end("_resolved_cloud_emulator_entry_for_game", started_at, source="unresolved")
-        return emulator_name, emulator_entry
+        _unresolved_result: tuple[str, dict[str, str] | None] = (emulator_name, emulator_entry)
+        self._cloud_emulator_entry_cache[_cache_key] = _unresolved_result
+        return _unresolved_result
 
     def _details_cloud_button_text(self, game: dict[str, str], save_type: str) -> str:
         if save_type != "save":
@@ -3896,9 +3807,6 @@ class MainWindow(QMainWindow):
             resolve_remove_game_files(
                 game,
                 is_ps3_platform=self._is_ps3_platform,
-                ps3_link_paths_from_game=self._ps3_link_paths_from_game,
-                remove_link_path=self._remove_link_path,
-                remove_rpcs3_games_yml_for_game=self._remove_rpcs3_games_yml_for_game,
                 is_native_executable_platform=self._is_native_executable_platform,
                 candidate_extracted_dirs_for_game=self._candidate_extracted_dirs_for_game,
                 remove_directory_tree=self._remove_directory_tree,
@@ -4075,6 +3983,7 @@ class MainWindow(QMainWindow):
         return result
 
     def _open_game_details(self, game: dict[str, str], source: str) -> None:
+        self._cloud_emulator_entry_cache.clear()
         self._enrich_game_for_details(game)
         self._current_details_game = game
         resolve_open_game_details(self, game, source)
@@ -4603,26 +4512,6 @@ class MainWindow(QMainWindow):
             self._start_next_queued_install()
             return
 
-        extracted_dir_text = installed_game.get("extracted_dir", "")
-        if self._is_ps3_platform(installed_game) and isinstance(extracted_dir_text, str) and extracted_dir_text.strip():
-            try:
-                extracted_dir = Path(extracted_dir_text)
-                ps3_links = self._configure_ps3_install_links(installed_game, extracted_dir)
-                installed_game["ps3_links"] = json.dumps([str(path) for path in ps3_links])
-                installed_game["ps3_game_id"] = self._update_rpcs3_games_yml_for_install(installed_game, extracted_dir, ps3_links)
-            except OSError as ps3_error:
-                if entry_id:
-                    self._set_download_entry_status(entry_id, "failed", str(ps3_error))
-                self._update_download_status_ui()
-                self._update_details_action_buttons()
-                QMessageBox.warning(
-                    self,
-                    "Install Error",
-                    f"Failed to prepare PS3 symlink layout for {title}: {ps3_error}",
-                )
-                self._start_next_queued_install()
-                return
-
         archive_file = Path(archive_path)
         self._register_installed_game(installed_game, archive_file)
         self._queue_xbox360_content_for_game(installed_game)
@@ -4681,6 +4570,32 @@ class MainWindow(QMainWindow):
                 self.active_install_bytes,
                 self.active_install_total,
             )
+        self._update_download_status_ui()
+
+    def _on_firmware_download_progress(self, downloaded_bytes: int, total_bytes: int, speed_bps: float) -> None:
+        self.active_download_bytes = downloaded_bytes
+        self.active_download_total = total_bytes
+        self.active_download_speed_bps = speed_bps
+        if self._firmware_download_entry_id:
+            self._set_download_entry_progress(
+                self._firmware_download_entry_id,
+                downloaded_bytes,
+                total_bytes,
+                speed_bps,
+            )
+        self._update_download_status_ui()
+
+    def _on_firmware_download_done(self, error: str) -> None:
+        self.active_download_count = active_download_count_after_finish(self.active_download_count)
+        if should_reset_active_download_metrics(self.active_download_count):
+            self.active_download_bytes = 0
+            self.active_download_total = 0
+            self.active_download_speed_bps = 0.0
+        entry_id = self._firmware_download_entry_id
+        self._firmware_download_entry_id = None
+        if entry_id:
+            status = "failed" if error else "completed"
+            self._set_download_entry_status(entry_id, status, error)
         self._update_download_status_ui()
 
     def _percent_text(self, completed: int, total: int) -> str:
@@ -5666,32 +5581,40 @@ class MainWindow(QMainWindow):
         return resolve_mapping_value_for_platform(mapping, platform)
 
     def _default_emulator_name_for_platform(self, platform: str) -> str:
+        if platform in self._platform_default_emulator_cache:
+            return self._platform_default_emulator_cache[platform]
         emulators = self._normalize_emulators(self._emulators())
         compatible = resolve_compatible_emulator_names_for_platform(
             emulators,
             platform,
             self._emulator_supports_platform,
         )
-        return resolve_default_emulator_name_for_platform(
+        result = resolve_default_emulator_name_for_platform(
             platform,
             self._normalize_default_emulators(self.config.get("default_emulators", {})),
             emulators,
             self._emulator_supports_platform,
             compatible,
         )
+        self._platform_default_emulator_cache[platform] = result
+        return result
 
     def _emulator_entry_has_usable_path(self, emulator: dict[str, str]) -> bool:
         return resolve_emulator_entry_has_usable_path(emulator)
 
     def _available_emulator_name_for_platform(self, platform: str) -> str:
+        if platform in self._platform_available_emulator_cache:
+            return self._platform_available_emulator_cache[platform]
         emulators = self._normalize_emulators(self._emulators())
         default_name = self._default_emulator_name_for_platform(platform)
-        return resolve_available_emulator_name_for_platform(
+        result = resolve_available_emulator_name_for_platform(
             platform,
             emulators,
             self._emulator_supports_platform,
             default_name,
         )
+        self._platform_available_emulator_cache[platform] = result
+        return result
 
     def _install_block_reason_for_game(self, game: dict[str, str]) -> str:
         return resolve_install_block_reason_for_game(
@@ -6483,6 +6406,15 @@ class MainWindow(QMainWindow):
         emulator_name_value = emulator.get("name", "")
         emulator_name = emulator_name_value if isinstance(emulator_name_value, str) else ""
         started_at = timing_start("_resolved_sync_directory_paths", emulator=emulator_name, key=key) if callable(timing_start) else 0.0
+        emulator_path_raw = emulator.get("path", "")
+        emulator_path_raw = emulator_path_raw if isinstance(emulator_path_raw, str) else ""
+        _sync_cache_key = (emulator_name, emulator_path_raw, key)
+        _sync_cache = getattr(self, "_sync_directory_paths_cache", None)
+        if _sync_cache is not None and _sync_cache_key in _sync_cache:
+            _cached_result = _sync_cache[_sync_cache_key]
+            if callable(timing_end):
+                timing_end("_resolved_sync_directory_paths", started_at, result=len(_cached_result))
+            return list(_cached_result)
         configured_value = emulator.get(key, "")
         configured_paths = self._split_configured_paths(configured_value) if isinstance(configured_value, str) else []
 
@@ -6759,6 +6691,8 @@ class MainWindow(QMainWindow):
         if not all_paths:
             if callable(timing_end):
                 timing_end("_resolved_sync_directory_paths", started_at, result=0)
+            if _sync_cache is not None:
+                _sync_cache[_sync_cache_key] = []
             return []
 
         emulator_path_value = emulator.get("path", "")
@@ -6812,6 +6746,8 @@ class MainWindow(QMainWindow):
             unique.append(path)
         if callable(timing_end):
             timing_end("_resolved_sync_directory_paths", started_at, result=len(unique))
+        if _sync_cache is not None:
+            _sync_cache[_sync_cache_key] = list(unique)
         return unique
 
     def _resolved_screenshot_directories(self, emulator: dict[str, str]) -> list[Path]:
@@ -8947,6 +8883,10 @@ class MainWindow(QMainWindow):
         if resolve_rpcs3_pup_path(path_text) is not None:
             return
 
+        firmware_dirs = self._resolved_firmware_directories(emulator_entry)
+        if not firmware_dirs:
+            return
+
         platform_id: int | None = None
         platform_ids = getattr(self, "server_platform_ids", {})
         for key, val in platform_ids.items():
@@ -8954,27 +8894,37 @@ class MainWindow(QMainWindow):
                 if isinstance(val, int):
                     platform_id = val
                     break
-        if platform_id is None:
-            return
 
-        firmware_dirs = self._resolved_firmware_directories(emulator_entry)
-        if not firmware_dirs:
-            return
+        api_get = getattr(self, "_api_get", None) if platform_id is not None else None
+        api_get_bytes = getattr(self, "_api_get_bytes", None) if platform_id is not None else None
 
-        api_get = self._api_get
-        api_get_bytes = self._api_get_bytes
+        firmware_game: dict[str, str] = {"title": "PS3 Firmware", "platform": "PlayStation 3"}
+        entry_id = self._create_download_entry(firmware_game, "downloading")
+        self._firmware_download_entry_id = entry_id
+        self.active_download_count += 1
+        self.active_download_bytes = 0
+        self.active_download_total = 0
+        self.active_download_speed_bps = 0.0
+        self._update_download_status_ui()
 
         def _worker() -> None:
-            try:
-                install_platform_firmware(
-                    api_get,
-                    api_get_bytes,
-                    platform_id,
-                    firmware_dirs,
-                    skip_existing=True,
-                )
-            except Exception:
-                pass
+            def _progress(downloaded: int, total: int, speed: float) -> None:
+                self._firmware_download_progress.emit(downloaded, total, speed)
+
+            warnings = download_ps3_firmware_direct(firmware_dirs, skip_existing=True, progress_callback=_progress)
+            if warnings and platform_id is not None:
+                try:
+                    install_platform_firmware(
+                        api_get,
+                        api_get_bytes,
+                        platform_id,
+                        firmware_dirs,
+                        skip_existing=True,
+                    )
+                except Exception:
+                    pass
+            error = warnings[0] if warnings else ""
+            self._firmware_download_done.emit(error)
             self._emulator_refresh_requested.emit()
 
         t = threading.Thread(target=_worker, daemon=True)
@@ -8989,6 +8939,12 @@ class MainWindow(QMainWindow):
         if not path_text:
             if callable(timing_end):
                 timing_end("_ensure_emulator_sync_settings", started_at, result="no-path")
+            return
+        sync_cache_key = f"{emulator_name}::{path_text}"
+        sync_done = getattr(self, "_emulator_sync_settings_done", None)
+        if sync_done is not None and sync_cache_key in sync_done:
+            if callable(timing_end):
+                timing_end("_ensure_emulator_sync_settings", started_at, result="done")
             return
         emulator_entry = {"name": emulator_name, "path": path_text}
         ra_username = str(self.config.get("retroachievements_username", "")).strip()
@@ -9029,7 +8985,10 @@ class MainWindow(QMainWindow):
         if self._is_eden_emulator_name(emulator_name, emulator_entry):
             resolve_ensure_eden_settings(path_text)
         if self._is_rpcs3_emulator_name(emulator_name, emulator_entry):
-            resolve_ensure_rpcs3_settings(path_text)
+            library_path_value = self.config.get("library_path", "")
+            library_path_text = library_path_value.strip() if isinstance(library_path_value, str) else ""
+            ps3_library_path = str(Path(library_path_text).expanduser() / "PlayStation 3") if library_path_text else ""
+            resolve_ensure_rpcs3_settings(path_text, ps3_library_path=ps3_library_path)
             self._trigger_rpcs3_firmware_download_background(emulator_entry, path_text)
         if self._is_ppsspp_emulator_name(emulator_name, emulator_entry):
             resolve_ensure_ppsspp_settings(
@@ -9042,6 +9001,8 @@ class MainWindow(QMainWindow):
             resolve_ensure_cemu_controller_config(path_text)
         if self._is_redream_emulator_name(emulator_name, emulator_entry):
             resolve_ensure_redream_settings(path_text)
+        if sync_done is not None:
+            sync_done.add(sync_cache_key)
         if callable(timing_end):
             timing_end("_ensure_emulator_sync_settings", started_at, result="done")
 
@@ -9128,7 +9089,11 @@ class MainWindow(QMainWindow):
 
         emulator_path_value = emulator_entry.get("path", "")
         emulator_path_text = emulator_path_value.strip() if isinstance(emulator_path_value, str) else ""
-        return resolve_installed_retroarch_core_ids(emulator_path_text)
+        if emulator_path_text in self._retroarch_core_ids_cache:
+            return self._retroarch_core_ids_cache[emulator_path_text]
+        result = resolve_installed_retroarch_core_ids(emulator_path_text)
+        self._retroarch_core_ids_cache[emulator_path_text] = result
+        return result
 
     def _installed_retroarch_cores_for_platform(self, platform: str, emulator_name: str) -> list[str]:
         platform_cores = self._retroarch_cores_for_platform(platform)
@@ -9214,6 +9179,9 @@ class MainWindow(QMainWindow):
         return emulators
 
     def _refresh_emulator_views(self) -> None:
+        self._retroarch_core_ids_cache.clear()
+        self._platform_default_emulator_cache.clear()
+        self._platform_available_emulator_cache.clear()
         if self.emulator_list is None:
             return
         emulators = self._normalize_emulators(self._emulators())
@@ -9307,6 +9275,12 @@ class MainWindow(QMainWindow):
                 outer_layout.addWidget(xemu_note)
 
             if self._is_rpcs3_emulator_name(entry.get("name", "")):
+                rpcs3_controller_note = QLabel("Must setup controller after install")
+                rpcs3_controller_note.setObjectName("rpcs3ControllerNote")
+                rpcs3_controller_note.setWordWrap(True)
+                rpcs3_controller_note.setStyleSheet("color: palette(mid); font-size: 10px; padding: 1px 0;")
+                outer_layout.addWidget(rpcs3_controller_note)
+
                 path_value = entry.get("path", "")
                 path_text = path_value.strip() if isinstance(path_value, str) else ""
                 pup_path = resolve_rpcs3_pup_path(path_text)
@@ -9322,7 +9296,16 @@ class MainWindow(QMainWindow):
                     fw_btn = QPushButton("Install PS3 Firmware")
                     fw_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
                     fw_btn.clicked.connect(
-                        lambda checked=False, ep=path_text, pp=str(pup_path): resolve_trigger_rpcs3_firmware_install(ep, pp)
+                        lambda checked=False, ep=path_text, pp=str(pup_path): (
+                            self._show_toast(
+                                "PS3 firmware installation started — follow the RPCS3 dialog to complete.",
+                                level="success",
+                            )
+                            if resolve_trigger_rpcs3_firmware_install(ep, pp)
+                            else self._show_toast(
+                                "Could not launch RPCS3 to install firmware. Check the emulator path.",
+                            )
+                        )
                     )
                     fw_row.addWidget(fw_btn)
                     fw_row.addStretch(1)
@@ -9417,6 +9400,28 @@ class MainWindow(QMainWindow):
 
         selected_platform = self.default_platform_combo.currentText() if self.default_platform_combo is not None else ""
         self._on_default_platform_changed(selected_platform)
+
+        QTimer.singleShot(0, self._warm_emulator_platform_caches)
+
+    def _warm_emulator_platform_caches(self) -> None:
+        import threading
+
+        platforms: set[str] = set(self.server_platform_ids.keys())
+        for game in self.library_games:
+            platform_value = game.get("platform", "")
+            if isinstance(platform_value, str):
+                platform = platform_value.strip()
+                if platform:
+                    platforms.add(platform)
+        threading.Thread(
+            target=self._do_warm_emulator_platform_caches,
+            args=(platforms,),
+            daemon=True,
+        ).start()
+
+    def _do_warm_emulator_platform_caches(self, platforms: set[str]) -> None:
+        for platform in platforms:
+            self._available_emulator_name_for_platform(platform)
 
     def _load_emulator_from_selection(self, row: int) -> None:
         if (
@@ -9935,14 +9940,6 @@ class MainWindow(QMainWindow):
             return
 
         emulator_to_remove = emulators[index]
-        if self._is_ps3_emulator_entry(emulator_to_remove) and self._has_installed_ps3_games():
-            QMessageBox.warning(
-                self,
-                "Uninstall Blocked",
-                "Cannot uninstall RPCS3 while PlayStation 3 games are still installed. Uninstall those games first to avoid orphaned launch links.",
-            )
-            return
-
         if not self._uninstall_emulator_files(emulator_to_remove):
             return
 

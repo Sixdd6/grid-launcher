@@ -51,9 +51,9 @@ class CoverManagerTests(unittest.TestCase):
             self.assertTrue(window.queued[0][0].startswith("file:"))
             self.assertEqual(window.queued[1], ("https://example.com/cover.png", label))
 
-    def test_queue_game_cover_load_discards_oversized_cached_file_and_falls_back_to_remote(self) -> None:
+    def test_queue_game_cover_load_queues_cached_file_url_and_remote_without_sync_disk_check(self) -> None:
         with TemporaryDirectory() as tmpdir:
-            cached_cover_path = Path(tmpdir) / "oversized-cover.png"
+            cached_cover_path = Path(tmpdir) / "cached-cover.png"
             cached_cover_path.write_bytes(b"0" * (MAX_CACHED_COVER_BYTES + 1))
             window = _StubWindow(cached_cover_path)
             label = object()
@@ -61,9 +61,9 @@ class CoverManagerTests(unittest.TestCase):
             queue_game_cover_load(window, {"title": "Test Game", "platform": "Test Platform"}, label)
 
             self.assertEqual(window.applied, [])
-            self.assertEqual(window.queued, [("https://example.com/cover.png", label)])
-            self.assertIsNone(window.cover_cache[f"file:{cached_cover_path}"])
-            self.assertFalse(cached_cover_path.exists())
+            self.assertEqual(len(window.queued), 2)
+            self.assertTrue(window.queued[0][0].startswith("file:"))
+            self.assertEqual(window.queued[1], ("https://example.com/cover.png", label))
 
 
 if __name__ == "__main__":

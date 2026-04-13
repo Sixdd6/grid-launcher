@@ -46,7 +46,7 @@ This document is a stable module map for the current codebase.
   - `install_paths.py`: archive, extracted, and native path resolution.
   - `install_registry.py`: installed-game record construction and matching.
   - `install_state.py`: queue, pending, and progress state helpers.
-  - `ps3_links.py`: RPCS3 / PS3 link planning and metadata helpers.
+  - `ps3_install.py`: PS3 content classification, VFS routing, and game-ID helpers.
 
 - `rom_mate/emulator/`
   - Emulator selection, profiles, auto-configuration, RetroArch integration, and launching.

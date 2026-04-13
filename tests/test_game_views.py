@@ -459,6 +459,11 @@ class _EmulatorRowsStubWindow:
         self.default_platform_combo = None
         self.default_mapping_list = None
         self.source_available = source_available
+        self._retroarch_core_ids_cache: dict[str, set[str]] = {}
+        self._platform_default_emulator_cache: dict[str, str] = {}
+        self._platform_available_emulator_cache: dict[str, str] = {}
+        self.server_platform_ids: dict[str, int] = {}
+        self.library_games: list[dict[str, str]] = []
 
     def _emulators(self) -> list[dict[str, str]]:
         value = self.config.get("emulators", [])
@@ -515,6 +520,9 @@ class _EmulatorRowsStubWindow:
         return any(token in normalized_name for token in ("rpcs3", "rpcs3.exe"))
 
     def _on_default_platform_changed(self, platform: str) -> None:
+        return None
+
+    def _warm_emulator_platform_caches(self) -> None:
         return None
 
     def _remove_emulator_at_index(self, index: int) -> None:

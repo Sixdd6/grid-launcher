@@ -12,8 +12,11 @@ from unittest.mock import Mock, patch
 from rom_mate.library.firmware_install import (
     download_firmware_bytes,
     fetch_platform_firmware,
+    fetch_ps3_firmware_url,
+    download_ps3_firmware_direct,
     install_platform_firmware,
     resolve_firmware_targets,
+    PS3_FIRMWARE_MANIFEST_URL,
 )
 from rom_mate.emulator.retroarch import (
     retroarch_core_config_files_metadata,
@@ -923,6 +926,95 @@ class FirmwareExtractZipWithPathsTests(unittest.TestCase):
             self.assertTrue((target_dir / "IPL.bin").exists())
             self.assertFalse((target_dir / "._IPL.bin").exists())
             self.assertFalse((target_dir / ".DS_Store").exists())
+
+
+class Ps3FirmwareDirectDownloadTests(unittest.TestCase):
+    _MANIFEST_CONTENT = (
+        "# US\n"
+        "Dest=84;CompatibleSystemSoftwareVersion=4.9300-;\n"
+        "Dest=84;IncrementalUpdateVersion=00010b72-00010b72;ImageVersion=00010b94;"
+        "SystemSoftwareVersion=4.9300;"
+        "CDN=http://dus01.ps3.update.playstation.net/update/ps3/image/us/hash/PS3PATCH.PUP;"
+        "CDN_Timeout=30;\n"
+        "Dest=84;ImageVersion=00010b94;SystemSoftwareVersion=4.9300;"
+        "CDN=http://dus01.ps3.update.playstation.net/update/ps3/image/us/hash/PS3UPDAT.PUP;"
+        "CDN_Timeout=30;\n"
+    )
+
+    def _make_manifest_response(self, content: str):
+        encoded = content.encode("utf-8")
+        mock_resp = Mock()
+        mock_resp.read.return_value = encoded
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = Mock(return_value=False)
+        return mock_resp
+
+    def test_manifest_constant_points_to_sony(self) -> None:
+        self.assertIn("ps3.update.playstation.net", PS3_FIRMWARE_MANIFEST_URL)
+
+    def test_fetch_ps3_firmware_url_parses_update_line(self) -> None:
+        mock_resp = self._make_manifest_response(self._MANIFEST_CONTENT)
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            url = fetch_ps3_firmware_url()
+        self.assertIn("PS3UPDAT.PUP", url)
+        self.assertNotIn("PS3PATCH.PUP", url)
+
+    def test_fetch_ps3_firmware_url_raises_when_not_found(self) -> None:
+        mock_resp = self._make_manifest_response("# no firmware here\n")
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            with self.assertRaises(ValueError):
+                fetch_ps3_firmware_url()
+
+    def test_download_ps3_firmware_direct_writes_file(self) -> None:
+        manifest_resp = self._make_manifest_response(self._MANIFEST_CONTENT)
+        firmware_data = b"fake_pup_data"
+        firmware_resp = Mock()
+        firmware_resp.read.side_effect = [firmware_data, b""]
+        firmware_resp.headers = {"Content-Length": str(len(firmware_data))}
+        firmware_resp.__enter__ = lambda s: s
+        firmware_resp.__exit__ = Mock(return_value=False)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            with patch("urllib.request.urlopen", side_effect=[manifest_resp, firmware_resp]):
+                warnings = download_ps3_firmware_direct([target], skip_existing=False)
+            self.assertEqual(warnings, [])
+            self.assertEqual((target / "PS3UPDAT.PUP").read_bytes(), firmware_data)
+
+    def test_download_ps3_firmware_direct_skip_existing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            pup_path = target / "PS3UPDAT.PUP"
+            pup_path.write_bytes(b"existing")
+
+            with patch("urllib.request.urlopen") as mock_open:
+                warnings = download_ps3_firmware_direct([target], skip_existing=True)
+
+            mock_open.assert_not_called()
+            self.assertEqual(warnings, [])
+            self.assertEqual(pup_path.read_bytes(), b"existing")
+
+    def test_download_ps3_firmware_direct_manifest_error_returns_warning(self) -> None:
+        with patch("urllib.request.urlopen", side_effect=OSError("network error")):
+            warnings = download_ps3_firmware_direct([Path("/tmp/rpcs3")], skip_existing=False)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("Sony", warnings[0])
+
+    def test_download_ps3_firmware_direct_download_error_returns_warning(self) -> None:
+        manifest_resp = self._make_manifest_response(self._MANIFEST_CONTENT)
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=[manifest_resp, OSError("connection reset")],
+        ):
+            warnings = download_ps3_firmware_direct([Path("/tmp/rpcs3")], skip_existing=False)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("PS3UPDAT.PUP", warnings[0])
+
+    def test_download_ps3_firmware_direct_empty_target_dirs_returns_no_warnings(self) -> None:
+        with patch("urllib.request.urlopen") as mock_open:
+            warnings = download_ps3_firmware_direct([], skip_existing=False)
+        mock_open.assert_not_called()
+        self.assertEqual(warnings, [])
 
 
 if __name__ == "__main__":

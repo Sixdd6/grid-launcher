@@ -628,7 +628,7 @@ def should_extract_archive_for_game(
     if is_arcade_platform(game):
         return False
     if is_ps3_platform(game):
-        return archive_path.suffix.casefold() in {".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz"}
+        return archive_path.suffix.casefold() in {".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".iso"}
     return archive_path.suffix.casefold() in {".7z", ".zip"}
 
 
@@ -898,20 +898,18 @@ def prepare_installed_game_without_ui(
     game: dict[str, str],
     archive_path: Path,
     *,
-    configure_ps3_links: bool,
     should_extract_archive_for_game: Callable[[dict[str, str], Path], bool],
     extract_archive_for_game: Callable[[dict[str, str], Path, Callable[[int, int], None] | None], tuple[Path, Path]],
     is_ps3_platform: Callable[[dict[str, str]], bool],
-    configure_ps3_install_links: Callable[[dict[str, str], Path], list[Path]],
-    update_rpcs3_games_yml_for_install: Callable[[dict[str, str], Path, list[Path]], str],
+    ps3_dev_hdd0_root: Callable[[dict[str, str]], Path | None] | None = None,
     cleanup_archive_on_success: bool = True,
     install_progress_callback: Callable[[int, int], None] | None = None,
 ) -> tuple[dict[str, str] | None, str]:
     prepared = dict(game)
     prepared["extracted_path"] = ""
     prepared["extracted_dir"] = ""
-    prepared["ps3_links"] = ""
     prepared["ps3_game_id"] = ""
+    prepared["ps3_trophy_paths"] = ""
     prepared["ps4_game_id"] = ""
     if not should_extract_archive_for_game(prepared, archive_path):
         return prepared, ""
@@ -951,13 +949,32 @@ def prepare_installed_game_without_ui(
     if _is_ps4_platform(prepared):
         prepared["ps4_game_id"] = _detected_ps4_game_id_for_layout(extracted_dir, extracted_file, archive_path)
 
-    if is_ps3_platform(prepared) and configure_ps3_links:
+    if is_ps3_platform(prepared):
+        from rom_mate.library.ps3_install import (
+            extract_iso_to_ps3_layout,
+            ps3_route_extracted_contents,
+        )
+        dev_hdd0_root = ps3_dev_hdd0_root(prepared) if callable(ps3_dev_hdd0_root) else None
+        if dev_hdd0_root is None:
+            return None, f"No PS3 VFS dev_hdd0 path configured for {prepared.get('title', 'Game')}"
         try:
-            ps3_links = configure_ps3_install_links(prepared, extracted_dir)
-            prepared["ps3_links"] = json.dumps([str(path) for path in ps3_links])
-            prepared["ps3_game_id"] = update_rpcs3_games_yml_for_install(prepared, extracted_dir, ps3_links)
+            game_id, installed_paths = ps3_route_extracted_contents(
+                extracted_dir, dev_hdd0_root, extract_iso_to_ps3_layout
+            )
+            if not game_id:
+                return None, f"No PS3 game ID found in archive for {prepared.get('title', 'Game')}"
+            prepared["ps3_game_id"] = game_id
+            game_install_dir = dev_hdd0_root / "game" / game_id
+            prepared["extracted_path"] = str(game_install_dir)
+            prepared["extracted_dir"] = str(game_install_dir)
+            trophy_paths = [
+                p for p in installed_paths
+                if "trophy" in str(p).casefold()
+            ]
+            prepared["ps3_trophy_paths"] = json.dumps([str(p) for p in trophy_paths])
+            shutil.rmtree(extracted_dir, ignore_errors=True)
         except OSError as error:
-            return None, f"Failed to prepare PS3 symlink layout for {prepared.get('title', 'Game')}: {error}"
+            return None, f"Failed to install PS3 game {prepared.get('title', 'Game')}: {error}"
 
     return prepared, warning_text
 

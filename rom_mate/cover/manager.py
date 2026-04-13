@@ -63,12 +63,6 @@ def cached_cover_for_game(window: CoverManagerWindowProtocol, game: dict[str, st
     if cached_cover_path is None:
         return None
 
-    try:
-        if not cached_cover_path.exists() or not cached_cover_path.is_file():
-            return None
-    except (OSError, ValueError):
-        return None
-
     cache_key = window._cached_cover_cache_key(cached_cover_path)
     if cache_key in window.cover_cache:
         return window.cover_cache[cache_key]
@@ -90,16 +84,7 @@ def queue_game_cover_load(window: CoverManagerWindowProtocol, game: dict[str, st
 
     cached_cover_path = window._cached_cover_path_from_game(game)
     if cached_cover_path is not None:
-        try:
-            cached_exists = cached_cover_path.exists() and cached_cover_path.is_file()
-        except (OSError, ValueError):
-            cached_exists = False
-        if cached_exists:
-            cache_key = window._cached_cover_cache_key(cached_cover_path)
-            if _cached_cover_file_looks_safe(cached_cover_path):
-                window._queue_cover_load(_cached_cover_url(cached_cover_path), label)
-            else:
-                _discard_unreadable_cached_cover(window, cached_cover_path, cache_key)
+        window._queue_cover_load(_cached_cover_url(cached_cover_path), label)
 
     cover_url = window._resolved_cover_url_for_game(game)
     if cover_url:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Protocol
 
-from PySide6.QtWidgets import QGridLayout, QListWidget, QLineEdit, QPushButton, QScrollArea
+from PySide6.QtWidgets import QGridLayout, QLabel, QListWidget, QLineEdit, QPushButton, QScrollArea
 
 
 class ServerViewWindowProtocol(Protocol):
@@ -15,6 +15,7 @@ class ServerViewWindowProtocol(Protocol):
     server_search_input: QLineEdit | None
     server_search_clear_button: QPushButton | None
     server_platforms_list: QListWidget | None
+    _server_platforms_loading: set[str]
 
     def _load_server_games(self, platform_label: str) -> None:
         ...
@@ -43,6 +44,7 @@ def clear_server_connection_data(window: ServerViewWindowProtocol) -> None:
     window.server_platform_ids = {}
     window.server_games_by_platform = {}
     window.server_rom_payloads = {}
+    window._server_platforms_loading.clear()
     if window.server_platforms_list is not None:
         window.server_platforms_list.clear()
         window._resize_server_platform_list()
@@ -123,13 +125,20 @@ def render_server_games(window: ServerViewWindowProtocol, platform: str) -> None
     if window.server_games_grid is None or window.server_games_scroll is None:
         return
 
+    window._clear_layout(window.server_games_grid)
+
+    if platform in window._server_platforms_loading:
+        loading_label = QLabel("Loading games...")
+        loading_label.setObjectName("serverLoadingLabel")
+        window.server_games_grid.addWidget(loading_label, 0, 0)
+        return
+
     games = window.server_games_by_platform.get(platform, [])
     query = ""
     if window.server_search_input is not None:
         query = window.server_search_input.text().strip().casefold()
     games = filter_server_games(games, query)
 
-    window._clear_layout(window.server_games_grid)
     columns = window._grid_columns_for_width(window.server_games_scroll, window.server_games_grid)
     for i, game in enumerate(games):
         card = window._make_game_card(game, "server")

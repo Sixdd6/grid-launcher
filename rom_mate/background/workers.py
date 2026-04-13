@@ -98,6 +98,8 @@ class InstallDownloadWorker(QObject):
             total_bytes = int(content_length) if content_length.isdigit() else 0
             downloaded_bytes = 0
             started_at = time.monotonic()
+            last_emit_at = started_at
+            _PROGRESS_EMIT_INTERVAL = 0.1
             with target_path.open("wb") as archive_file:
                 while True:
                     if self.cancel_requested:
@@ -107,9 +109,12 @@ class InstallDownloadWorker(QObject):
                         break
                     archive_file.write(chunk)
                     downloaded_bytes += len(chunk)
-                    elapsed = max(time.monotonic() - started_at, 1e-6)
-                    speed_bps = downloaded_bytes / elapsed
-                    self.progress.emit(downloaded_bytes, total_bytes, speed_bps)
+                    now = time.monotonic()
+                    if now - last_emit_at >= _PROGRESS_EMIT_INTERVAL:
+                        elapsed = max(now - started_at, 1e-6)
+                        speed_bps = downloaded_bytes / elapsed
+                        self.progress.emit(downloaded_bytes, total_bytes, speed_bps)
+                        last_emit_at = now
 
     def _download_supplemental_archives(self, primary_archive_path: Path) -> None:
         supplemental_value = self.source_metadata.get("supplemental_downloads", []) if isinstance(self.source_metadata, dict) else []
@@ -440,7 +445,6 @@ class InstallFinalizeWorker(QObject):
                 prepared_game, warning_text = self.window._prepare_installed_game_without_ui(
                     self.game,
                     self.archive_path,
-                    configure_ps3_links=False,
                     cleanup_archive_on_success=False,
                     install_progress_callback=self._emit_progress,
                 )

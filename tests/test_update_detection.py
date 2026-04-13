@@ -353,7 +353,9 @@ class MainWindowUpdateFlowTests(unittest.TestCase):
         self.assertEqual(window.library_games[0].get("update_available"), "true")
         self.assertEqual(window.library_games[1].get("update_available"), "false")
         self.assertEqual(window.library_games[2].get("update_available"), "false")
-        self.assertEqual(window.update_details_action_calls, 1)
+        # _update_details_action_buttons is no longer called unconditionally; it only
+        # fires a targeted update-button refresh when current_details_game is set.
+        self.assertEqual(window.update_details_action_calls, 0)
 
     class _SecondaryActionStub:
         def __init__(self, module: Any, *, update_available: bool) -> None:

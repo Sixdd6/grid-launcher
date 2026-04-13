@@ -169,6 +169,7 @@ def _ensure_rpcs3_gui_section_values(
     raw_content: str,
     section_name: str,
     desired_values: dict[str, str],
+    annotate: bool = True,
 ) -> tuple[str, bool]:
     if not desired_values:
         return raw_content, False
@@ -182,15 +183,18 @@ def _ensure_rpcs3_gui_section_values(
     seen_keys: set[str] = set()
     seen_annotations: set[str] = set()
 
+    def _fmt(key: str, value: str) -> str:
+        return f"{key} = {value}" if annotate else f"{key}={value}"
+
     def flush_missing_keys() -> None:
         nonlocal changed
         for key, value in desired_values.items():
             if key in seen_keys:
                 continue
-            if key not in seen_annotations:
+            if annotate and key not in seen_annotations:
                 output_lines.append(f"{key}\\default=false")
                 seen_annotations.add(key)
-            output_lines.append(f"{key} = {value}")
+            output_lines.append(_fmt(key, value))
             seen_keys.add(key)
             changed = True
 
@@ -212,6 +216,9 @@ def _ensure_rpcs3_gui_section_values(
             if annotation_match:
                 key = annotation_match.group(1)
                 if key in desired_values:
+                    if not annotate:
+                        changed = True
+                        continue
                     if key in seen_annotations:
                         changed = True
                         continue
@@ -231,11 +238,11 @@ def _ensure_rpcs3_gui_section_values(
                     if key in seen_keys:
                         changed = True
                         continue
-                    if key not in seen_annotations:
+                    if annotate and key not in seen_annotations:
                         output_lines.append(f"{key}\\default=false")
                         seen_annotations.add(key)
                         changed = True
-                    replacement = f"{key} = {desired_values[key]}"
+                    replacement = _fmt(key, desired_values[key])
                     if raw_line.strip() != replacement:
                         changed = True
                     output_lines.append(replacement)
@@ -252,8 +259,9 @@ def _ensure_rpcs3_gui_section_values(
             output_lines.append("")
         output_lines.append(f"[{section_name}]")
         for key, value in desired_values.items():
-            output_lines.append(f"{key}\\default=false")
-            output_lines.append(f"{key} = {value}")
+            if annotate:
+                output_lines.append(f"{key}\\default=false")
+            output_lines.append(_fmt(key, value))
         changed = True
 
     return "\n".join(output_lines).rstrip() + "\n", changed
@@ -292,23 +300,135 @@ def rpcs3_data_root(emulator_path_text: str) -> Path | None:
     return emulator_dir.resolve()
 
 
-def trigger_rpcs3_firmware_install(exe_path: str, pup_path: str) -> None:
-    """Launch RPCS3 with --installfw to install PS3 firmware. Shows a GUI dialog."""
+def trigger_rpcs3_firmware_install(exe_path: str, pup_path: str) -> bool:
+    """Launch RPCS3 with --installfw to install PS3 firmware. Shows a GUI dialog.
+
+    Returns True if the process was launched successfully, False otherwise.
+    """
     import subprocess
 
     exe = Path(exe_path).expanduser().resolve()
     pup = Path(pup_path).expanduser().resolve()
     if not exe.exists() or not exe.is_file():
-        return
+        return False
     if not pup.exists() or not pup.is_file():
-        return
+        return False
     try:
         subprocess.Popen([str(exe), "--installfw", str(pup)], cwd=str(exe.parent))
+        return True
     except OSError:
-        pass
+        return False
 
 
-def ensure_rpcs3_settings(emulator_path_text: str) -> dict[str, object]:
+def ensure_rpcs3_vfs_settings(emulator_path_text: str, ps3_library_path: str) -> dict[str, object]:
+    """Write/update portable/config/vfs.yml to redirect /dev_hdd0/ into the PS3 library folder.
+
+    Only writes keys that are not already present, preserving any user-set VFS paths.
+    Returns {"vfs_path": path_or_None, "dev_hdd0": path_str, "changed": bool}.
+    """
+    path_text = emulator_path_text.strip() if isinstance(emulator_path_text, str) else ""
+    library_text = ps3_library_path.strip() if isinstance(ps3_library_path, str) else ""
+    if not path_text or not library_text:
+        return {"vfs_path": None, "dev_hdd0": "", "changed": False}
+
+    emulator_path = Path(path_text).expanduser()
+    if not emulator_path.exists() or not emulator_path.is_file():
+        return {"vfs_path": None, "dev_hdd0": "", "changed": False}
+
+    emulator_dir = emulator_path.parent
+    portable_dir = emulator_dir / "portable"
+    config_dir = portable_dir / "config"
+    vfs_path = config_dir / "vfs.yml"
+
+    library_path = Path(library_text).expanduser().resolve()
+    dev_hdd0_path = library_path / ".vfs" / "dev_hdd0"
+    dev_hdd0_str = dev_hdd0_path.as_posix()
+    if not dev_hdd0_str.endswith("/"):
+        dev_hdd0_str += "/"
+
+    desired: dict[str, str] = {
+        "$(EmulatorDir)": "",
+        "/dev_hdd0/": dev_hdd0_str,
+    }
+
+    try:
+        config_dir.mkdir(parents=True, exist_ok=True)
+        existing_content = vfs_path.read_text(encoding="utf-8") if vfs_path.exists() else ""
+
+        output_lines = existing_content.splitlines() if existing_content else []
+        changed = False
+
+        # Collect keys already present so we never overwrite them
+        existing_keys: set[str] = set()
+        for line in output_lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            colon_pos = stripped.find(":")
+            if colon_pos == -1:
+                continue
+            key = stripped[:colon_pos].strip().strip('"').strip("'")
+            if key:
+                existing_keys.add(key)
+
+        for key, value in desired.items():
+            if key in existing_keys:
+                continue
+            if value:
+                output_lines.append(f'"{key}": "{value}"')
+            else:
+                output_lines.append(f'"{key}": ""')
+            changed = True
+
+        if changed:
+            output_text = "\n".join(output_lines)
+            if output_text and not output_text.endswith("\n"):
+                output_text += "\n"
+            vfs_path.write_text(output_text, encoding="utf-8")
+
+    except OSError:
+        return {"vfs_path": None, "dev_hdd0": "", "changed": False}
+
+    return {
+        "vfs_path": str(vfs_path),
+        "dev_hdd0": str(dev_hdd0_path),
+        "changed": changed,
+    }
+
+
+def ps3_vfs_dev_hdd0_path(emulator_path_text: str, ps3_library_path: str) -> Path | None:
+    """Return the resolved dev_hdd0 root for PS3 game installs.
+
+    Reads from vfs.yml if present; falls back to <ps3_library>/.vfs/dev_hdd0/.
+    Returns None if neither emulator path nor library path is usable.
+    """
+    path_text = emulator_path_text.strip() if isinstance(emulator_path_text, str) else ""
+    library_text = ps3_library_path.strip() if isinstance(ps3_library_path, str) else ""
+
+    # Try reading from existing vfs.yml first
+    for data_root in rpcs3_data_root_candidates(path_text):
+        for vfs_candidate in _vfs_path_candidates_for_root(data_root):
+            if not vfs_candidate.exists() or not vfs_candidate.is_file():
+                continue
+            try:
+                raw_content = vfs_candidate.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            raw_emulator_root = _yaml_scalar_value(raw_content, "$(EmulatorDir)")
+            emulator_root = _resolve_rpcs3_path(data_root, raw_emulator_root)
+            raw_dev_hdd0 = _yaml_scalar_value(raw_content, "/dev_hdd0/")
+            if raw_dev_hdd0:
+                return _resolve_rpcs3_path(emulator_root, raw_dev_hdd0)
+            break
+
+    # Fall back to library-derived default
+    if not library_text:
+        return None
+    library_path = Path(library_text).expanduser().resolve()
+    return library_path / ".vfs" / "dev_hdd0"
+
+
+def ensure_rpcs3_settings(emulator_path_text: str, ps3_library_path: str = "") -> dict[str, object]:
     path_text = emulator_path_text.strip() if isinstance(emulator_path_text, str) else ""
     if not path_text:
         return {"config_path": None, "gui_config_path": None, "changed": False}
@@ -323,6 +443,7 @@ def ensure_rpcs3_settings(emulator_path_text: str) -> dict[str, object]:
     gui_dir = portable_dir / "GuiConfigs"
     config_path = config_dir / "config.yml"
     gui_path = gui_dir / "GuiSettings.ini"
+    current_settings_path = gui_dir / "CurrentSettings.ini"
 
     try:
         portable_dir.mkdir(parents=True, exist_ok=True)
@@ -345,13 +466,29 @@ def ensure_rpcs3_settings(emulator_path_text: str) -> dict[str, object]:
             "confirmationBoxBootGame": "false",
             "infoBoxEnabledInstallPUP": "false",
         })
-        gui_content, g2 = _ensure_rpcs3_gui_section_values(gui_content, "Meta", {
-            "useRichPresence": "false",
-            "checkUpdateStart": "false",
-        })
-        if g1 or g2:
+        if g1:
             gui_path.write_text(gui_content, encoding="utf-8")
             changed = True
+
+        current_content = current_settings_path.read_text(encoding="utf-8") if current_settings_path.exists() else ""
+        current_content, cs1 = _ensure_rpcs3_gui_section_values(current_content, "Meta", {
+            "checkUpdateStart": "false",
+            "useRichPresence": "false",
+        }, annotate=False)
+        current_content, cs2 = _ensure_rpcs3_gui_section_values(current_content, "main_window", {
+            "infoBoxEnabledWelcome": "false",
+            "confirmationBoxExitGame": "false",
+            "confirmationBoxBootGame": "false",
+            "infoBoxEnabledInstallPUP": "false",
+        }, annotate=False)
+        if cs1 or cs2:
+            current_settings_path.write_text(current_content, encoding="utf-8")
+            changed = True
+
+        if ps3_library_path.strip():
+            vfs_result = ensure_rpcs3_vfs_settings(emulator_path_text, ps3_library_path)
+            if vfs_result.get("changed"):
+                changed = True
 
     except OSError:
         return {"config_path": None, "gui_config_path": None, "changed": False}

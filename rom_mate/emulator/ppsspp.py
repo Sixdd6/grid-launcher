@@ -94,25 +94,71 @@ def ensure_ppsspp_settings(
         except OSError:
             pass
 
+    ini_path = emulator_dir / "memstick" / "PSP" / "SYSTEM" / "PPSSPP.INI"
+    content = ini_path.read_text(encoding="utf-8") if ini_path.exists() else ""
+
+    sections: list[tuple[str, dict[str, str]]] = [
+        ("General", {
+            "CheckForNewVersion": "False",
+            "SaveStateSlotCount": "3",
+        }),
+        ("Graphics", {
+            "InternalResolution": "4",
+            "MultiSampleLevel": "2",
+            "Smart2DTexFiltering": "True",
+            "TexScalingLevel": "4",
+            "TexScalingType": "0",
+            "TexDeposterize": "True",
+            "TexHardwareScaling": "False",
+            "TextureShader": "Off",
+            "HardwareTessellation": "False",
+        }),
+        ("Sound", {
+            "GameVolume": "25",
+            "AchievementVolume": "40",
+        }),
+        ("Theme", {
+            "ThemeName": "Slate Forest",
+        }),
+    ]
+
     ra_user = retroachievements_username.strip() if isinstance(retroachievements_username, str) else ""
     ra_tok = retroachievements_token.strip() if isinstance(retroachievements_token, str) else ""
     if ra_user and ra_tok:
-        ini_path = emulator_dir / "memstick" / "PSP" / "SYSTEM" / "PPSSPP.INI"
-        content = ini_path.read_text(encoding="utf-8") if ini_path.exists() else ""
-        content, ini_changed = _ensure_section_values(
-            content,
-            "Achievements",
-            {
-                "AchievementsEnable": "True",
-                "AchievementsUserName": ra_user,
-                "AchievementsToken": ra_tok,
-                "AchievementsChallengeMode": "False",
-            },
-        )
-        if ini_changed:
+        sections.append(("Achievements", {
+            "AchievementsEnable": "True",
+            "AchievementsUserName": ra_user,
+            "AchievementsToken": ra_tok,
+            "AchievementsChallengeMode": "False",
+            "AchievementsLeaderboardTrackerPos": "3",
+            "AchievementsLeaderboardStartedOrFailedPos": "3",
+            "AchievementsLeaderboardSubmittedPos": "3",
+            "AchievementsProgressPos": "3",
+            "AchievementsChallengePos": "3",
+            "AchievementsUnlockedPos": "4",
+        }))
+
+    any_ini_changed = False
+    for section_name, values in sections:
+        content, section_changed = _ensure_section_values(content, section_name, values)
+        if section_changed:
+            any_ini_changed = True
+
+    if any_ini_changed:
+        try:
+            ini_path.parent.mkdir(parents=True, exist_ok=True)
+            ini_path.write_text(content, encoding="utf-8")
+            changed = True
+        except OSError:
+            pass
+
+    if ra_user and ra_tok:
+        dat_path = ini_path.parent / "ppsspp_retroachievements.dat"
+        existing_dat = dat_path.read_text(encoding="utf-8").strip() if dat_path.exists() else ""
+        if existing_dat != ra_tok:
             try:
-                ini_path.parent.mkdir(parents=True, exist_ok=True)
-                ini_path.write_text(content, encoding="utf-8")
+                dat_path.parent.mkdir(parents=True, exist_ok=True)
+                dat_path.write_text(ra_tok, encoding="utf-8")
                 changed = True
             except OSError:
                 pass

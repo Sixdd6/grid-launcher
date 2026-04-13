@@ -6,7 +6,7 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, ANY
 import json
 
 from rom_mate.emulator.azahar import ensure_azahar_settings
@@ -1227,7 +1227,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
         self.assertTrue(result["changed"])
         self.assertFalse(installed_exists)
 
-    def test_ppsspp_no_change_when_installed_txt_absent(self) -> None:
+    def test_ppsspp_writes_default_settings_without_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             emulator_dir = Path(temp_dir) / "PPSSPP"
             emulator_dir.mkdir()
@@ -1235,8 +1235,19 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
             exe_path.write_bytes(b"")
 
             result = ensure_ppsspp_settings(str(exe_path))
+            ini_path = emulator_dir / "memstick" / "PSP" / "SYSTEM" / "PPSSPP.INI"
+            text = ini_path.read_text(encoding="utf-8")
 
-        self.assertFalse(result["changed"])
+        self.assertTrue(result["changed"])
+        self.assertIn("CheckForNewVersion = False", text)
+        self.assertIn("SaveStateSlotCount = 3", text)
+        self.assertIn("InternalResolution = 4", text)
+        self.assertIn("TexScalingLevel = 4", text)
+        self.assertIn("Smart2DTexFiltering = True", text)
+        self.assertIn("HardwareTessellation = False", text)
+        self.assertIn("GameVolume = 25", text)
+        self.assertIn("ThemeName = Slate Forest", text)
+        self.assertNotIn("[Achievements]", text)
 
     def test_ppsspp_no_change_for_empty_path(self) -> None:
         result = ensure_ppsspp_settings("")
@@ -1256,14 +1267,24 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
                 retroachievements_token="psp_tok",
             )
             ini_path = emulator_dir / "memstick" / "PSP" / "SYSTEM" / "PPSSPP.INI"
+            dat_path = emulator_dir / "memstick" / "PSP" / "SYSTEM" / "ppsspp_retroachievements.dat"
             text = ini_path.read_text(encoding="utf-8")
+            dat_text = dat_path.read_text(encoding="utf-8")
 
         self.assertTrue(result["changed"])
         self.assertIn("[Achievements]", text)
         self.assertIn("AchievementsEnable = True", text)
+        self.assertNotIn("AchievementsEnableRAIntegration", text)
         self.assertIn("AchievementsUserName = psp_user", text)
         self.assertIn("AchievementsToken = psp_tok", text)
         self.assertIn("AchievementsChallengeMode = False", text)
+        self.assertIn("AchievementsLeaderboardTrackerPos = 3", text)
+        self.assertIn("AchievementsLeaderboardStartedOrFailedPos = 3", text)
+        self.assertIn("AchievementsLeaderboardSubmittedPos = 3", text)
+        self.assertIn("AchievementsProgressPos = 3", text)
+        self.assertIn("AchievementsChallengePos = 3", text)
+        self.assertIn("AchievementsUnlockedPos = 4", text)
+        self.assertEqual(dat_text, "psp_tok")
 
     def test_ppsspp_skips_retroachievements_when_no_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1274,8 +1295,15 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
 
             ensure_ppsspp_settings(str(exe_path))
             ini_path = emulator_dir / "memstick" / "PSP" / "SYSTEM" / "PPSSPP.INI"
+            dat_path = emulator_dir / "memstick" / "PSP" / "SYSTEM" / "ppsspp_retroachievements.dat"
+            ini_exists = ini_path.exists()
+            dat_exists = dat_path.exists()
+            text = ini_path.read_text(encoding="utf-8") if ini_exists else ""
 
-        self.assertFalse(ini_path.exists())
+        self.assertTrue(ini_exists)
+        self.assertFalse(dat_exists)
+        self.assertNotIn("[Achievements]", text)
+        self.assertNotIn("AchievementsUserName", text)
 
     def test_redream_ensure_writes_fullscreen_and_volume(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1685,15 +1713,35 @@ class Rpcs3AutoConfigTests(unittest.TestCase):
         self.assertIn("[main_window]", text)
         self.assertIn("infoBoxEnabledWelcome = false", text)
 
-    def test_rpcs3_writes_gui_settings_meta_section(self) -> None:
+    def test_rpcs3_gui_settings_contains_only_main_window_section(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             exe = Path(tmp) / "rpcs3.exe"
             exe.write_bytes(b"")
             ensure_rpcs3_settings(str(exe))
             text = (Path(tmp) / "portable" / "GuiConfigs" / "GuiSettings.ini").read_text(encoding="utf-8")
+        self.assertIn("[main_window]", text)
+        self.assertIn("infoBoxEnabledWelcome = false", text)
+        self.assertIn("confirmationBoxExitGame = false", text)
+        self.assertIn("confirmationBoxBootGame = false", text)
+        self.assertIn("infoBoxEnabledInstallPUP = false", text)
+        self.assertNotIn("[Meta]", text)
+        self.assertNotIn("useRichPresence", text)
+        self.assertNotIn("checkUpdateStart", text)
+
+    def test_rpcs3_writes_current_settings_check_update_and_rich_presence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp) / "rpcs3.exe"
+            exe.write_bytes(b"")
+            ensure_rpcs3_settings(str(exe))
+            text = (Path(tmp) / "portable" / "GuiConfigs" / "CurrentSettings.ini").read_text(encoding="utf-8")
         self.assertIn("[Meta]", text)
-        self.assertIn("useRichPresence = false", text)
-        self.assertIn("checkUpdateStart = false", text)
+        self.assertIn("checkUpdateStart=false", text)
+        self.assertIn("useRichPresence=false", text)
+        self.assertIn("[main_window]", text)
+        self.assertIn("infoBoxEnabledWelcome=false", text)
+        self.assertIn("confirmationBoxExitGame=false", text)
+        self.assertIn("confirmationBoxBootGame=false", text)
+        self.assertIn("infoBoxEnabledInstallPUP=false", text)
 
     def test_rpcs3_always_overwrites_gui_ini_keys(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1702,13 +1750,32 @@ class Rpcs3AutoConfigTests(unittest.TestCase):
             gui_dir = Path(tmp) / "portable" / "GuiConfigs"
             gui_dir.mkdir(parents=True)
             (gui_dir / "GuiSettings.ini").write_text(
-                "[Meta]\nuseRichPresence=true\n",
+                "[main_window]\ninfoBoxEnabledWelcome=true\n",
                 encoding="utf-8",
             )
             ensure_rpcs3_settings(str(exe))
             text = (gui_dir / "GuiSettings.ini").read_text(encoding="utf-8")
-        self.assertIn("useRichPresence = false", text)
+        self.assertIn("infoBoxEnabledWelcome = false", text)
+        self.assertNotIn("infoBoxEnabledWelcome=true", text)
+
+    def test_rpcs3_always_overwrites_current_settings_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp) / "rpcs3.exe"
+            exe.write_bytes(b"")
+            gui_dir = Path(tmp) / "portable" / "GuiConfigs"
+            gui_dir.mkdir(parents=True)
+            (gui_dir / "CurrentSettings.ini").write_text(
+                "[Meta]\ncheckUpdateStart=true\nuseRichPresence=true\n[main_window]\ninfoBoxEnabledWelcome=true\n",
+                encoding="utf-8",
+            )
+            ensure_rpcs3_settings(str(exe))
+            text = (gui_dir / "CurrentSettings.ini").read_text(encoding="utf-8")
+        self.assertIn("checkUpdateStart=false", text)
+        self.assertIn("useRichPresence=false", text)
+        self.assertIn("infoBoxEnabledWelcome=false", text)
+        self.assertNotIn("checkUpdateStart=true", text)
         self.assertNotIn("useRichPresence=true", text)
+        self.assertNotIn("infoBoxEnabledWelcome=true", text)
 
     def test_rpcs3_returns_changed_true_on_first_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1794,6 +1861,70 @@ class EmulatorEnsureDispatchTests(unittest.TestCase):
             retroachievements_token="psp_token",
         )
 
+    def test_on_ra_login_finished_syncs_all_emulator_settings(self) -> None:
+        module = type(self).module
+
+        calls: list[tuple[str, str]] = []
+
+        class _WindowStub:
+            def __init__(self) -> None:
+                self.config = {
+                    "emulators": [
+                        {"name": "PPSSPP", "path": "C:/Emulators/PPSSPPWindows64.exe"},
+                        {"name": "RetroArch", "path": "C:/Emulators/retroarch.exe"},
+                    ]
+                }
+                self.ra_login_button = None
+                self.ra_username_input = None
+                self.ra_password_input = None
+                self.ra_login_status_label = None
+
+            def _save_ra_token(self, token: str) -> None:
+                pass
+
+            def _emulators(self) -> list[dict]:
+                return self.config.get("emulators", [])
+
+            def _ensure_emulator_sync_settings(self, emulator_name: str, emulator_path: str) -> None:
+                calls.append((emulator_name, emulator_path))
+
+            def _show_toast(self, message: str) -> None:
+                pass
+
+        window = _WindowStub()
+        module.MainWindow._on_ra_login_finished(window, "psp_user", "new_token", "")
+
+        self.assertEqual(window.config.get("retroachievements_username"), "psp_user")
+        self.assertEqual(window.config.get("retroachievements_token"), "new_token")
+        self.assertIn(("PPSSPP", "C:/Emulators/PPSSPPWindows64.exe"), calls)
+        self.assertIn(("RetroArch", "C:/Emulators/retroarch.exe"), calls)
+
+    def test_on_ra_login_finished_does_not_sync_on_error(self) -> None:
+        module = type(self).module
+
+        sync_called = []
+
+        class _WindowStub:
+            def __init__(self) -> None:
+                self.config = {
+                    "emulators": [
+                        {"name": "PPSSPP", "path": "C:/Emulators/PPSSPPWindows64.exe"},
+                    ]
+                }
+                self.ra_login_button = None
+                self.ra_login_status_label = None
+
+            def _ensure_emulator_sync_settings(self, emulator_name: str, emulator_path: str) -> None:
+                sync_called.append(emulator_name)
+
+            def _show_toast(self, message: str) -> None:
+                pass
+
+        window = _WindowStub()
+        module.MainWindow._on_ra_login_finished(window, "", "", "Invalid credentials")
+
+        self.assertEqual(sync_called, [])
+
 
 class TestRpcs3FirmwareBackgroundDownload(unittest.TestCase):
     @classmethod
@@ -1811,10 +1942,21 @@ class TestRpcs3FirmwareBackgroundDownload(unittest.TestCase):
 
         class _WindowStub:
             def __init__(self) -> None:
-                self.server_platform_ids = {"PlayStation 3": 5}
-                self._api_get = object()
-                self._api_get_bytes = object()
                 self._emulator_refresh_requested = type("_SignalStub", (), {"emit": lambda _self: None})()
+                self._toast_requested = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_progress = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_done = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_entry_id: str | None = None
+                self.active_download_count = 0
+                self.active_download_bytes = 0
+                self.active_download_total = 0
+                self.active_download_speed_bps = 0.0
+
+            def _create_download_entry(self, game: dict, status: str) -> str:
+                return "stub-entry-id"
+
+            def _update_download_status_ui(self) -> None:
+                pass
 
             def _resolved_firmware_directories(self, emulator_entry: dict[str, str]) -> list[Path]:
                 del emulator_entry
@@ -1826,23 +1968,36 @@ class TestRpcs3FirmwareBackgroundDownload(unittest.TestCase):
             (Path(temp_dir) / "PS3UPDAT.PUP").write_bytes(b"fake")
             window = _WindowStub()
 
-            with patch.object(module, "install_platform_firmware") as install_firmware:
+            with patch.object(module, "download_ps3_firmware_direct") as download_direct:
                 module.MainWindow._trigger_rpcs3_firmware_download_background(
                     window,
                     {"name": "RPCS3", "path": str(emulator_path)},
                     str(emulator_path),
                 )
 
-        install_firmware.assert_not_called()
+        download_direct.assert_not_called()
 
-    def test_trigger_background_download_skipped_if_no_platform_id(self) -> None:
+    def test_trigger_background_download_starts_thread_without_server_platform_id(self) -> None:
+        # Platform ID is no longer required; firmware is fetched directly from Sony.
         module = type(self).module
 
         class _WindowStub:
             def __init__(self) -> None:
-                self.server_platform_ids = {}
-                self._api_get = object()
-                self._api_get_bytes = object()
+                self._emulator_refresh_requested = type("_SignalStub", (), {"emit": lambda _self: None})()
+                self._toast_requested = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_progress = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_done = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_entry_id: str | None = None
+                self.active_download_count = 0
+                self.active_download_bytes = 0
+                self.active_download_total = 0
+                self.active_download_speed_bps = 0.0
+
+            def _create_download_entry(self, game: dict, status: str) -> str:
+                return "stub-entry-id"
+
+            def _update_download_status_ui(self) -> None:
+                pass
 
             def _resolved_firmware_directories(self, emulator_entry: dict[str, str]) -> list[Path]:
                 del emulator_entry
@@ -1853,14 +2008,23 @@ class TestRpcs3FirmwareBackgroundDownload(unittest.TestCase):
             emulator_path.write_bytes(b"")
             window = _WindowStub()
 
-            with patch("threading.Thread") as thread_ctor:
+            thread_started = []
+
+            class _ThreadStub:
+                def __init__(self, *args, **kwargs):
+                    pass
+
+                def start(self):
+                    thread_started.append(True)
+
+            with patch("threading.Thread", _ThreadStub):
                 module.MainWindow._trigger_rpcs3_firmware_download_background(
                     window,
                     {"name": "RPCS3", "path": str(emulator_path)},
                     str(emulator_path),
                 )
 
-        thread_ctor.assert_not_called()
+        self.assertEqual(len(thread_started), 1)
 
     def test_trigger_background_download_skipped_if_no_firmware_dirs(self) -> None:
         module = type(self).module
@@ -1871,6 +2035,20 @@ class TestRpcs3FirmwareBackgroundDownload(unittest.TestCase):
                 self._api_get = object()
                 self._api_get_bytes = object()
                 self._emulator_refresh_requested = type("_SignalStub", (), {"emit": lambda _self: None})()
+                self._toast_requested = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_progress = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_done = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_entry_id: str | None = None
+                self.active_download_count = 0
+                self.active_download_bytes = 0
+                self.active_download_total = 0
+                self.active_download_speed_bps = 0.0
+
+            def _create_download_entry(self, game: dict, status: str) -> str:
+                return "stub-entry-id"
+
+            def _update_download_status_ui(self) -> None:
+                pass
 
             def _resolved_firmware_directories(self, emulator_entry: dict[str, str]) -> list[Path]:
                 del emulator_entry
@@ -1895,10 +2073,21 @@ class TestRpcs3FirmwareBackgroundDownload(unittest.TestCase):
 
         class _WindowStub:
             def __init__(self) -> None:
-                self.server_platform_ids = {"PlayStation 3": 5}
-                self._api_get = object()
-                self._api_get_bytes = object()
                 self._emulator_refresh_requested = type("_SignalStub", (), {"emit": lambda _self: None})()
+                self._toast_requested = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_progress = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_done = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_entry_id: str | None = None
+                self.active_download_count = 0
+                self.active_download_bytes = 0
+                self.active_download_total = 0
+                self.active_download_speed_bps = 0.0
+
+            def _create_download_entry(self, game: dict, status: str) -> str:
+                return "stub-entry-id"
+
+            def _update_download_status_ui(self) -> None:
+                pass
 
             def _resolved_firmware_directories(self, emulator_entry: dict[str, str]) -> list[Path]:
                 del emulator_entry
@@ -1925,6 +2114,7 @@ class TestRpcs3FirmwareBackgroundDownload(unittest.TestCase):
                 return _ThreadStub()
 
             with (
+                patch.object(module, "download_ps3_firmware_direct", return_value=[]) as download_direct,
                 patch.object(module, "install_platform_firmware") as install_firmware,
                 patch.object(window._emulator_refresh_requested, "emit") as emit_signal,
                 patch("threading.Thread", side_effect=_thread_side_effect),
@@ -1935,6 +2125,74 @@ class TestRpcs3FirmwareBackgroundDownload(unittest.TestCase):
                     str(emulator_path),
                 )
 
+        download_direct.assert_called_once_with(
+            expected_firmware_dirs,
+            skip_existing=True,
+            progress_callback=ANY,
+        )
+        install_firmware.assert_not_called()
+        emit_signal.assert_called_once_with()
+
+    def test_trigger_background_download_falls_back_to_romm_on_sony_failure(self) -> None:
+        module = type(self).module
+
+        class _WindowStub:
+            def __init__(self) -> None:
+                self.server_platform_ids = {"PlayStation 3": 5}
+                self._api_get = object()
+                self._api_get_bytes = object()
+                self._emulator_refresh_requested = type("_SignalStub", (), {"emit": lambda _self: None})()
+                self._toast_requested = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_progress = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_done = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_entry_id: str | None = None
+                self.active_download_count = 0
+                self.active_download_bytes = 0
+                self.active_download_total = 0
+                self.active_download_speed_bps = 0.0
+
+            def _create_download_entry(self, game: dict, status: str) -> str:
+                return "stub-entry-id"
+
+            def _update_download_status_ui(self) -> None:
+                pass
+
+            def _resolved_firmware_directories(self, emulator_entry: dict[str, str]) -> list[Path]:
+                del emulator_entry
+                return [Path("C:/firmware")]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            emulator_path = Path(temp_dir) / "rpcs3.exe"
+            emulator_path.write_bytes(b"")
+            window = _WindowStub()
+            expected_firmware_dirs = [Path("C:/firmware")]
+
+            def _thread_side_effect(*args, **kwargs):
+                target = kwargs.get("target")
+                self.assertTrue(callable(target))
+                target()
+
+                class _ThreadStub:
+                    def start(self) -> None:
+                        return None
+
+                return _ThreadStub()
+
+            with (
+                patch.object(
+                    module, "download_ps3_firmware_direct", return_value=["network error"]
+                ) as download_direct,
+                patch.object(module, "install_platform_firmware") as install_firmware,
+                patch.object(window._emulator_refresh_requested, "emit") as emit_signal,
+                patch("threading.Thread", side_effect=_thread_side_effect),
+            ):
+                module.MainWindow._trigger_rpcs3_firmware_download_background(
+                    window,
+                    {"name": "RPCS3", "path": str(emulator_path)},
+                    str(emulator_path),
+                )
+
+        download_direct.assert_called_once_with(expected_firmware_dirs, skip_existing=True, progress_callback=ANY)
         install_firmware.assert_called_once_with(
             window._api_get,
             window._api_get_bytes,
@@ -1943,6 +2201,65 @@ class TestRpcs3FirmwareBackgroundDownload(unittest.TestCase):
             skip_existing=True,
         )
         emit_signal.assert_called_once_with()
+
+    def test_trigger_background_download_no_romm_fallback_without_platform_id(self) -> None:
+        module = type(self).module
+
+        class _WindowStub:
+            def __init__(self) -> None:
+                self.server_platform_ids = {}
+                self._api_get = object()
+                self._api_get_bytes = object()
+                self._emulator_refresh_requested = type("_SignalStub", (), {"emit": lambda _self: None})()
+                self._toast_requested = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_progress = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_done = type("_SignalStub", (), {"emit": lambda _self, *a: None})()
+                self._firmware_download_entry_id: str | None = None
+                self.active_download_count = 0
+                self.active_download_bytes = 0
+                self.active_download_total = 0
+                self.active_download_speed_bps = 0.0
+
+            def _create_download_entry(self, game: dict, status: str) -> str:
+                return "stub-entry-id"
+
+            def _update_download_status_ui(self) -> None:
+                pass
+
+            def _resolved_firmware_directories(self, emulator_entry: dict[str, str]) -> list[Path]:
+                del emulator_entry
+                return [Path("C:/firmware")]
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            emulator_path = Path(temp_dir) / "rpcs3.exe"
+            emulator_path.write_bytes(b"")
+            window = _WindowStub()
+
+            def _thread_side_effect(*args, **kwargs):
+                target = kwargs.get("target")
+                self.assertTrue(callable(target))
+                target()
+
+                class _ThreadStub:
+                    def start(self) -> None:
+                        return None
+
+                return _ThreadStub()
+
+            with (
+                patch.object(
+                    module, "download_ps3_firmware_direct", return_value=["network error"]
+                ),
+                patch.object(module, "install_platform_firmware") as install_firmware,
+                patch("threading.Thread", side_effect=_thread_side_effect),
+            ):
+                module.MainWindow._trigger_rpcs3_firmware_download_background(
+                    window,
+                    {"name": "RPCS3", "path": str(emulator_path)},
+                    str(emulator_path),
+                )
+
+        install_firmware.assert_not_called()
 
 
 class XemuMissingBiosFilesTests(unittest.TestCase):
@@ -1978,6 +2295,106 @@ class XemuMissingBiosFilesTests(unittest.TestCase):
             # eeprom.bin absent but it should not appear in missing list
             result = xemu_missing_bios_files(str(tmp_dir / "xemu.exe"))
             self.assertNotIn("eeprom.bin", result)
+
+
+class Rpcs3VfsSettingsTests(unittest.TestCase):
+    def _make_exe(self, tmp: str) -> Path:
+        exe = Path(tmp) / "rpcs3.exe"
+        exe.write_bytes(b"")
+        return exe
+
+    def test_ensure_rpcs3_vfs_settings_writes_vfs_yml(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = self._make_exe(tmp)
+            library = Path(tmp) / "PS3 Library"
+            from rom_mate.emulator.rpcs3 import ensure_rpcs3_vfs_settings
+            result = ensure_rpcs3_vfs_settings(str(exe), str(library))
+
+            self.assertTrue(result["changed"])
+            vfs_path = Path(str(result["vfs_path"]))
+            self.assertTrue(vfs_path.exists())
+            content = vfs_path.read_text(encoding="utf-8")
+            self.assertIn("/dev_hdd0/", content)
+            self.assertIn(".vfs", content)
+
+    def test_ensure_rpcs3_vfs_settings_is_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = self._make_exe(tmp)
+            library = Path(tmp) / "PS3 Library"
+            from rom_mate.emulator.rpcs3 import ensure_rpcs3_vfs_settings
+            result1 = ensure_rpcs3_vfs_settings(str(exe), str(library))
+            result2 = ensure_rpcs3_vfs_settings(str(exe), str(library))
+
+            self.assertTrue(result1["changed"])
+            self.assertFalse(result2["changed"])
+            # Key should appear exactly once (not duplicated by second call)
+            content = Path(str(result1["vfs_path"])).read_text(encoding="utf-8")
+            self.assertEqual(content.count('"/dev_hdd0/":'), 1)
+
+    def test_ensure_rpcs3_vfs_settings_does_not_overwrite_existing_dev_hdd0(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = self._make_exe(tmp)
+            library = Path(tmp) / "PS3 Library"
+            # Write a pre-existing vfs.yml with a custom /dev_hdd0/ path
+            config_dir = Path(tmp) / "portable" / "config"
+            config_dir.mkdir(parents=True)
+            vfs_path = config_dir / "vfs.yml"
+            vfs_path.write_text(
+                '"$(EmulatorDir)": ""\n"/dev_hdd0/": "D:/MyCustomPath/"\n',
+                encoding="utf-8",
+            )
+
+            from rom_mate.emulator.rpcs3 import ensure_rpcs3_vfs_settings
+            result = ensure_rpcs3_vfs_settings(str(exe), str(library))
+
+            self.assertFalse(result["changed"])
+            content = vfs_path.read_text(encoding="utf-8")
+            self.assertIn("D:/MyCustomPath/", content)
+            self.assertNotIn(".vfs", content)
+
+    def test_ensure_rpcs3_vfs_settings_returns_no_change_for_missing_exe(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            library = Path(tmp) / "PS3 Library"
+            from rom_mate.emulator.rpcs3 import ensure_rpcs3_vfs_settings
+            result = ensure_rpcs3_vfs_settings(str(Path(tmp) / "nonexistent.exe"), str(library))
+
+        self.assertFalse(result["changed"])
+        self.assertIsNone(result["vfs_path"])
+
+    def test_ps3_vfs_dev_hdd0_path_reads_from_existing_vfs_yml(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = self._make_exe(tmp)
+            custom_path = Path(tmp) / "custom_hdd0"
+            config_dir = Path(tmp) / "portable" / "config"
+            config_dir.mkdir(parents=True)
+            vfs_path = config_dir / "vfs.yml"
+            vfs_path.write_text(f'"/dev_hdd0/": "{custom_path.as_posix()}/"\n', encoding="utf-8")
+
+            from rom_mate.emulator.rpcs3 import ps3_vfs_dev_hdd0_path
+            result = ps3_vfs_dev_hdd0_path(str(exe), "")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result, custom_path)
+
+    def test_ps3_vfs_dev_hdd0_path_falls_back_to_library_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = self._make_exe(tmp)
+            library = Path(tmp) / "PS3 Library"
+
+            from rom_mate.emulator.rpcs3 import ps3_vfs_dev_hdd0_path
+            result = ps3_vfs_dev_hdd0_path(str(exe), str(library))
+
+        self.assertIsNotNone(result)
+        expected = library.resolve() / ".vfs" / "dev_hdd0"
+        self.assertEqual(result, expected)
+
+    def test_ps3_vfs_dev_hdd0_path_returns_none_with_no_vfs_and_no_library(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = self._make_exe(tmp)
+            from rom_mate.emulator.rpcs3 import ps3_vfs_dev_hdd0_path
+            result = ps3_vfs_dev_hdd0_path(str(exe), "")
+
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

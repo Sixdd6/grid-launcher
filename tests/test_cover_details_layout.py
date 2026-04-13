@@ -98,7 +98,6 @@ class CoverDetailsLayoutMetricsTests(unittest.TestCase):
 
         assert window.details_cover_label.fixed_size is not None
         self.assertLessEqual(window.details_cover_label.fixed_size[1], 440)
-        self.assertEqual(window.rescale_calls, 1)
 
     def test_update_details_layout_metrics_shrinks_below_old_min_width_floor(self) -> None:
         window = _StubWindow(content_width=760, content_height=580, window_width=900, window_height=720)

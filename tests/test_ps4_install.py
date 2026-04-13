@@ -55,12 +55,9 @@ class PS4InstallTests(unittest.TestCase):
             prepared, warning_text = prepare_installed_game_without_ui(
                 {"title": "Test PS4 Game", "platform": "PlayStation 4"},
                 archive_path,
-                configure_ps3_links=False,
                 should_extract_archive_for_game=lambda game, path: True,
                 extract_archive_for_game=lambda game, path, install_progress_callback: (launch_file, extracted_dir),
                 is_ps3_platform=lambda game: False,
-                configure_ps3_install_links=lambda game, path: [],
-                update_rpcs3_games_yml_for_install=lambda game, path, links: "",
             )
 
         self.assertIsNotNone(prepared)
@@ -93,12 +90,9 @@ class PS4InstallTests(unittest.TestCase):
                         prepared, warning_text = prepare_installed_game_without_ui(
                             {"title": "Test PS4 Game", "platform": "PlayStation 4"},
                             archive_path,
-                            configure_ps3_links=False,
                             should_extract_archive_for_game=lambda game, path: True,
                             extract_archive_for_game=lambda game, path, install_progress_callback: (launch_file, extracted_dir),
                             is_ps3_platform=lambda game: False,
-                            configure_ps3_install_links=lambda game, path: [],
-                            update_rpcs3_games_yml_for_install=lambda game, path, links: "",
                         )
 
         mock_wait.assert_called()

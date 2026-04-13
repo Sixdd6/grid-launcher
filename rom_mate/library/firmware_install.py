@@ -5,12 +5,23 @@ from __future__ import annotations
 import io
 import logging
 import shutil
+import ssl
 import tempfile
+import time
+import urllib.request
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 
 
 _logger = logging.getLogger(__name__)
+
+# Sony's PS3 firmware update manifest.  The manifest contains the CDN URL for
+# the latest PS3UPDAT.PUP file and is fetched to resolve the current firmware
+# download URL without hard-coding a version-specific path.
+PS3_FIRMWARE_MANIFEST_URL = (
+    "https://fus01.ps3.update.playstation.net/update/ps3/list/us/ps3-updatelist.txt"
+)
 
 
 def fetch_platform_firmware(api_get_json_fn, platform_id: int) -> list[dict]:
@@ -205,5 +216,118 @@ def install_platform_firmware(
                 except OSError as error:
                     warnings.append(f"Failed to write firmware {file_name} to {dest_path}: {error}")
                     continue
+
+    return warnings
+
+
+def _make_sony_ssl_context() -> ssl.SSLContext:
+    """Return an SSL context suitable for Sony's PS3 update servers.
+
+    Sony's PS3 update CDN (fus01.ps3.update.playstation.net) presents a
+    certificate whose hostname does not match, so hostname verification is
+    disabled.  The connection is still encrypted; only the identity check is
+    skipped for this well-known endpoint.
+    """
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+def fetch_ps3_firmware_url() -> str:
+    """Return the CDN URL for the latest PS3UPDAT.PUP from Sony's manifest.
+
+    Fetches ``PS3_FIRMWARE_MANIFEST_URL`` and parses the line that contains
+    ``PS3UPDAT.PUP`` (excluding patch files) to extract the ``CDN=`` value.
+
+    Raises ``ValueError`` if the URL cannot be found in the manifest.
+    """
+    ctx = _make_sony_ssl_context()
+    with urllib.request.urlopen(PS3_FIRMWARE_MANIFEST_URL, context=ctx, timeout=15) as resp:
+        text = resp.read().decode("utf-8", errors="replace")
+
+    for line in text.splitlines():
+        if "PS3UPDAT.PUP" not in line:
+            continue
+        if "PS3PATCH.PUP" in line:
+            continue
+        for part in line.split(";"):
+            if part.startswith("CDN="):
+                url = part[4:].strip()
+                if url:
+                    _logger.debug("Resolved PS3UPDAT.PUP URL from Sony manifest: %s", url)
+                    return url
+
+    raise ValueError("PS3UPDAT.PUP URL not found in Sony firmware manifest")
+
+
+def download_ps3_firmware_direct(
+    target_dirs: list,
+    *,
+    skip_existing: bool = True,
+    progress_callback: Callable[[int, int, float], None] | None = None,
+) -> list[str]:
+    """Download PS3UPDAT.PUP directly from Sony's update servers.
+
+    Resolves the current firmware URL from Sony's manifest, downloads the file,
+    and writes it to each entry in *target_dirs* that accepts it (same format
+    as :func:`install_platform_firmware`'s *target_dirs*).
+
+    Returns a list of warning strings; an empty list means success.
+    """
+    if not target_dirs:
+        return []
+
+    file_name = "PS3UPDAT.PUP"
+    applicable_dirs = resolve_firmware_targets(file_name, target_dirs)
+    if not applicable_dirs:
+        return []
+
+    if skip_existing and all((d / file_name).exists() for d in applicable_dirs):
+        _logger.debug("PS3UPDAT.PUP already present in all target directories, skipping download")
+        return []
+
+    try:
+        firmware_url = fetch_ps3_firmware_url()
+    except Exception as error:
+        return [f"Failed to resolve PS3 firmware URL from Sony: {error}"]
+
+    try:
+        _logger.debug("Downloading PS3UPDAT.PUP from Sony: %s", firmware_url)
+        ctx = _make_sony_ssl_context()
+        with urllib.request.urlopen(firmware_url, context=ctx, timeout=300) as resp:
+            content_length = resp.headers.get("Content-Length")
+            total_bytes = int(content_length) if isinstance(content_length, str) and content_length.isdigit() else 0
+            chunk_size = 65536
+            downloaded = 0
+            start_time = time.monotonic()
+            chunks: list[bytes] = []
+            while True:
+                chunk = resp.read(chunk_size)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                downloaded += len(chunk)
+                if progress_callback is not None:
+                    elapsed = time.monotonic() - start_time
+                    speed = downloaded / elapsed if elapsed > 0 else 0.0
+                    progress_callback(downloaded, total_bytes, speed)
+            data = b"".join(chunks)
+        _logger.debug("Downloaded %d bytes for PS3UPDAT.PUP", len(data))
+    except Exception as error:
+        return [f"Failed to download PS3UPDAT.PUP from Sony: {error}"]
+
+    warnings: list[str] = []
+    for target_dir in applicable_dirs:
+        dest_path = target_dir / file_name
+        if skip_existing and dest_path.exists():
+            _logger.debug("PS3UPDAT.PUP already exists, skipping: %s", dest_path)
+            continue
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            dest_path.write_bytes(data)
+            _logger.debug("Installed PS3UPDAT.PUP -> %s", dest_path)
+        except OSError as error:
+            warnings.append(f"Failed to write PS3UPDAT.PUP to {dest_path}: {error}")
 
     return warnings

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Protocol
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QLabel
 
@@ -144,7 +145,7 @@ def update_details_layout_metrics(window: CoverDetailsWindowProtocol) -> None:
         description_width = max(280, min(1200, int(content_width * 0.42)))
         window.details_description_label.setMaximumWidth(description_width)
 
-    window._rescale_details_media_for_current_sizes()
+    QTimer.singleShot(0, window._rescale_details_media_for_current_sizes)
 
 
 def rescale_details_media_for_current_sizes(window: CoverDetailsWindowProtocol) -> None:

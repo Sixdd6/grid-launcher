@@ -769,11 +769,10 @@ class _FinalizeWindowStub:
         game: dict[str, str],
         archive_path: Path,
         *,
-        configure_ps3_links: bool,
         cleanup_archive_on_success: bool = True,
         install_progress_callback=None,
     ):
-        del game, archive_path, configure_ps3_links, install_progress_callback
+        del game, archive_path, install_progress_callback
         self.calls.append(("prepare", cleanup_archive_on_success))
         return ({"title": "RetroArch", "extracted_dir": "C:/Emulators/RetroArch", "extracted_path": "C:/Emulators/RetroArch/retroarch.exe"}, "")
 
@@ -801,11 +800,10 @@ class _FinalizeWindowDirectFileStub(_FinalizeWindowStub):
         game: dict[str, str],
         archive_path: Path,
         *,
-        configure_ps3_links: bool,
         cleanup_archive_on_success: bool = True,
         install_progress_callback=None,
     ):
-        del game, archive_path, configure_ps3_links, install_progress_callback
+        del game, archive_path, install_progress_callback
         self.calls.append(("prepare", cleanup_archive_on_success))
         return ({"title": "Gran Turismo 4", "extracted_dir": "", "extracted_path": ""}, "")
 

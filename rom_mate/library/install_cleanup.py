@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Callable
 
@@ -8,27 +9,34 @@ def remove_game_files(
     game: dict[str, str],
     *,
     is_ps3_platform: Callable[[dict[str, str]], bool],
-    ps3_link_paths_from_game: Callable[[dict[str, str]], list[Path]],
-    remove_link_path: Callable[[Path], None],
-    remove_rpcs3_games_yml_for_game: Callable[[dict[str, str]], None],
     is_native_executable_platform: Callable[[dict[str, str]], bool],
     candidate_extracted_dirs_for_game: Callable[[dict[str, str]], list[Path]],
     remove_directory_tree: Callable[[Path], None],
     candidate_archive_paths_for_game: Callable[[dict[str, str]], list[Path]],
 ) -> None:
     if is_ps3_platform(game):
-        for link_path in ps3_link_paths_from_game(game):
-            if not link_path.exists() and not link_path.is_symlink():
+        trophy_paths_value = game.get("ps3_trophy_paths", "")
+        if isinstance(trophy_paths_value, str) and trophy_paths_value.strip():
+            try:
+                trophy_paths = [Path(p) for p in json.loads(trophy_paths_value)]
+            except (ValueError, TypeError):
+                trophy_paths = []
+            for trophy_path in trophy_paths:
+                if not trophy_path.exists() or not trophy_path.is_dir():
+                    continue
+                try:
+                    remove_directory_tree(trophy_path)
+                except OSError as error:
+                    raise OSError(f"Could not remove PS3 trophy directory: {trophy_path}\n{error}") from error
+
+        for extracted_dir in candidate_extracted_dirs_for_game(game):
+            if not extracted_dir.exists() or not extracted_dir.is_dir():
                 continue
             try:
-                remove_link_path(link_path)
+                remove_directory_tree(extracted_dir)
             except OSError as error:
-                raise OSError(f"Could not remove PS3 link: {link_path}\n{error}") from error
-
-        try:
-            remove_rpcs3_games_yml_for_game(game)
-        except OSError as error:
-            raise OSError(f"Could not update RPCS3 games.yml for uninstall:\n{error}") from error
+                raise OSError(f"Could not remove folder: {extracted_dir}\n{error}") from error
+        return
 
     if is_native_executable_platform(game):
         for extracted_dir in candidate_extracted_dirs_for_game(game):

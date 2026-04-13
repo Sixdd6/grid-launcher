@@ -113,6 +113,7 @@ from .xenia import (
 from .rpcs3 import (
     rpcs3_data_root,
     ensure_rpcs3_settings,
+    ps3_vfs_dev_hdd0_path,
     rpcs3_pup_path,
     rpcs3_directory_settings,
     rpcs3_save_path_overrides,
@@ -230,6 +231,7 @@ __all__ = [
     "xenia_state_path_overrides",
     "rpcs3_data_root",
     "ensure_rpcs3_settings",
+    "ps3_vfs_dev_hdd0_path",
     "rpcs3_pup_path",
     "rpcs3_directory_settings",
     "rpcs3_save_path_overrides",
