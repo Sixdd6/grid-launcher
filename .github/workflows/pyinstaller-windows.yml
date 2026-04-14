@@ -29,7 +29,7 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --noconfirm --clean --windowed --onefile --name rom-mate-neo --add-data "assets;assets" --add-data "retroarch-core-list.json;." rom-mate.py
+          pyinstaller --noconfirm --clean --windowed --onefile --name rom-mate-neo --add-data "assets;assets" --add-data "retroarch-core-list.json;." --add-data "emulator-autoprofiles.json;." rom-mate.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
