@@ -6,7 +6,7 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from unittest.mock import patch, ANY
+from unittest.mock import patch, ANY, MagicMock
 import json
 
 from rom_mate.emulator.azahar import ensure_azahar_settings
@@ -16,11 +16,18 @@ from rom_mate.emulator.duckstation import ensure_duckstation_memory_card_setting
 from rom_mate.emulator.eden import _ensure_eden_section_values, ensure_eden_settings
 from rom_mate.emulator.pcsx2 import ensure_pcsx2_settings, pcsx2_data_root_candidates
 from rom_mate.emulator.ppsspp import ensure_ppsspp_settings
-from rom_mate.emulator.rpcs3 import ensure_rpcs3_settings, rpcs3_data_root
+from rom_mate.emulator.rpcs3 import (
+    copy_ps3_custom_config_to_emulator,
+    ensure_rpcs3_settings,
+    rpcs3_data_root,
+    update_rpcs3_games_yml,
+    ps3_vfs_games_path,
+)
 from rom_mate.emulator.redream import ensure_redream_settings
 from rom_mate.emulator.retroarch import ensure_retroarch_save_location_settings
 from rom_mate.emulator.xemu import ensure_xemu_settings
 from rom_mate.emulator import xemu_missing_bios_files
+from rom_mate.ui.mixins.emulator_ui_mixin import EmulatorUIMixin
 
 
 class EmulatorAutoConfigSettingsTests(unittest.TestCase):
@@ -2315,6 +2322,7 @@ class Rpcs3VfsSettingsTests(unittest.TestCase):
             self.assertTrue(vfs_path.exists())
             content = vfs_path.read_text(encoding="utf-8")
             self.assertIn("/dev_hdd0/", content)
+            self.assertIn("/games/", content)
             self.assertIn(".vfs", content)
 
     def test_ensure_rpcs3_vfs_settings_is_idempotent(self) -> None:
@@ -2330,6 +2338,7 @@ class Rpcs3VfsSettingsTests(unittest.TestCase):
             # Key should appear exactly once (not duplicated by second call)
             content = Path(str(result1["vfs_path"])).read_text(encoding="utf-8")
             self.assertEqual(content.count('"/dev_hdd0/":'), 1)
+            self.assertEqual(content.count('"/games/":'), 1)
 
     def test_ensure_rpcs3_vfs_settings_does_not_overwrite_existing_dev_hdd0(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2347,10 +2356,29 @@ class Rpcs3VfsSettingsTests(unittest.TestCase):
             from rom_mate.emulator.rpcs3 import ensure_rpcs3_vfs_settings
             result = ensure_rpcs3_vfs_settings(str(exe), str(library))
 
-            self.assertFalse(result["changed"])
+            self.assertTrue(result["changed"])
             content = vfs_path.read_text(encoding="utf-8")
             self.assertIn("D:/MyCustomPath/", content)
-            self.assertNotIn(".vfs", content)
+            self.assertIn('"/games/":', content)
+
+    def test_ensure_rpcs3_vfs_settings_does_not_overwrite_existing_games(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = self._make_exe(tmp)
+            library = Path(tmp) / "PS3 Library"
+            config_dir = Path(tmp) / "portable" / "config"
+            config_dir.mkdir(parents=True)
+            vfs_path = config_dir / "vfs.yml"
+            vfs_path.write_text(
+                '"$(EmulatorDir)": ""\n"/dev_hdd0/": "D:/MyCustomPath/"\n"/games/": "E:/DiscGames/"\n',
+                encoding="utf-8",
+            )
+
+            from rom_mate.emulator.rpcs3 import ensure_rpcs3_vfs_settings
+            result = ensure_rpcs3_vfs_settings(str(exe), str(library))
+
+            self.assertFalse(result["changed"])
+            content = vfs_path.read_text(encoding="utf-8")
+            self.assertIn('"/games/": "E:/DiscGames/"', content)
 
     def test_ensure_rpcs3_vfs_settings_returns_no_change_for_missing_exe(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2395,6 +2423,322 @@ class Rpcs3VfsSettingsTests(unittest.TestCase):
             result = ps3_vfs_dev_hdd0_path(str(exe), "")
 
         self.assertIsNone(result)
+
+    def test_ps3_vfs_games_path_reads_from_existing_vfs_yml(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = self._make_exe(tmp)
+            custom_path = Path(tmp) / "custom_games"
+            config_dir = Path(tmp) / "portable" / "config"
+            config_dir.mkdir(parents=True)
+            vfs_path = config_dir / "vfs.yml"
+            vfs_path.write_text(f'"/games/": "{custom_path.as_posix()}/"\n', encoding="utf-8")
+
+            result = ps3_vfs_games_path(str(exe), "")
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result, custom_path)
+
+    def test_ps3_vfs_games_path_falls_back_to_library_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = self._make_exe(tmp)
+            library = Path(tmp) / "PS3 Library"
+
+            result = ps3_vfs_games_path(str(exe), str(library))
+
+        self.assertIsNotNone(result)
+        expected = library.resolve() / ".vfs" / "games"
+        self.assertEqual(result, expected)
+
+    def test_ps3_vfs_games_path_returns_none_with_no_vfs_and_no_library(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = self._make_exe(tmp)
+            result = ps3_vfs_games_path(str(exe), "")
+
+        self.assertIsNone(result)
+
+
+class SourceVersionCheckHandlerTests(unittest.TestCase):
+    class _StubWindow(EmulatorUIMixin):
+        def __init__(self) -> None:
+            self._do_start_source_emulator_update_at_index = MagicMock()
+            self._source_check_emulator_name = "TestEmulator"
+
+    @patch("rom_mate.ui.mixins.emulator_ui_mixin.QMessageBox")
+    def test_error_shows_warning(self, mock_message_box) -> None:
+        stub = self._StubWindow()
+
+        stub._on_source_version_check_finished("", "", "timeout", 0)
+
+        mock_message_box.warning.assert_called_once()
+
+    @patch("rom_mate.ui.mixins.emulator_ui_mixin.QMessageBox")
+    def test_version_match_shows_info_no_install(self, mock_message_box) -> None:
+        stub = self._StubWindow()
+
+        stub._on_source_version_check_finished("v1.2.3", "v1.2.3", "", 0)
+
+        mock_message_box.information.assert_called_once()
+        self.assertEqual(mock_message_box.information.call_args[0][1], "No Updates Available")
+        stub._do_start_source_emulator_update_at_index.assert_not_called()
+
+    @patch("rom_mate.ui.mixins.emulator_ui_mixin.QMessageBox")
+    def test_version_mismatch_yes_calls_install(self, mock_message_box) -> None:
+        stub = self._StubWindow()
+        mock_message_box.StandardButton.Yes = 1
+        mock_message_box.StandardButton.No = 2
+        mock_message_box.question.return_value = 1
+
+        stub._on_source_version_check_finished("v1.2.2", "v1.2.3", "", 0)
+
+        mock_message_box.question.assert_called_once()
+        stub._do_start_source_emulator_update_at_index.assert_called_once_with(0)
+
+    @patch("rom_mate.ui.mixins.emulator_ui_mixin.QMessageBox")
+    def test_version_mismatch_no_skips_install(self, mock_message_box) -> None:
+        stub = self._StubWindow()
+        mock_message_box.StandardButton.Yes = 1
+        mock_message_box.StandardButton.No = 2
+        mock_message_box.question.return_value = 2
+
+        stub._on_source_version_check_finished("v1.2.2", "v1.2.3", "", 0)
+
+        mock_message_box.question.assert_called_once()
+        stub._do_start_source_emulator_update_at_index.assert_not_called()
+
+    @patch("rom_mate.ui.mixins.emulator_ui_mixin.QMessageBox")
+    def test_latest_installed_shows_update_dialog(self, mock_message_box) -> None:
+        stub = self._StubWindow()
+        mock_message_box.StandardButton.Yes = 1
+        mock_message_box.StandardButton.No = 2
+        mock_message_box.question.return_value = 2
+
+        stub._on_source_version_check_finished("latest", "v1.2.3", "", 0)
+
+        mock_message_box.question.assert_called_once()
+        mock_message_box.information.assert_not_called()
+
+    @patch("rom_mate.ui.mixins.emulator_ui_mixin.QMessageBox")
+    def test_direct_provider_shows_update_dialog(self, mock_message_box) -> None:
+        stub = self._StubWindow()
+        mock_message_box.StandardButton.Yes = 1
+        mock_message_box.StandardButton.No = 2
+        mock_message_box.question.return_value = 2
+
+        stub._on_source_version_check_finished("v1.0.0", "direct", "", 0)
+
+        mock_message_box.question.assert_called_once()
+        mock_message_box.information.assert_not_called()
+
+
+class RPCS3GamesYmlTests(unittest.TestCase):
+    def test_prefers_games_dir_for_disc_layout_when_provided(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            data_root = tmp_path / "portable"
+            dev_hdd0 = tmp_path / "dev_hdd0"
+            games_dir = tmp_path / "games"
+            (games_dir / "BLUS30336").mkdir(parents=True)
+
+            result = update_rpcs3_games_yml(data_root, "BLUS30336", dev_hdd0, games_dir)
+
+            games_yml = data_root / "config" / "games.yml"
+            self.assertTrue(result)
+            content = games_yml.read_text(encoding="utf-8")
+            self.assertIn((games_dir / "BLUS30336").as_posix(), content)
+
+    def test_writes_new_games_yml_disc_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            data_root = tmp_path / "portable"
+            dev_hdd0 = tmp_path / "dev_hdd0"
+            (dev_hdd0 / "game" / "BLUS30336").mkdir(parents=True)
+
+            result = update_rpcs3_games_yml(data_root, "BLUS30336", dev_hdd0)
+
+            games_yml = data_root / "config" / "games.yml"
+            self.assertTrue(result)
+            self.assertTrue(games_yml.exists())
+            content = games_yml.read_text(encoding="utf-8")
+            self.assertIn("BLUS30336:", content)
+            self.assertIn((dev_hdd0 / "game" / "BLUS30336").resolve().as_posix(), content)
+
+    def test_writes_new_games_yml_hdd_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            data_root = tmp_path / "portable"
+            dev_hdd0 = tmp_path / "dev_hdd0"
+            (dev_hdd0 / "game" / "BCUS12345").mkdir(parents=True)
+
+            result = update_rpcs3_games_yml(data_root, "BCUS12345", dev_hdd0)
+
+            self.assertTrue(result)
+            content = (data_root / "config" / "games.yml").read_text(encoding="utf-8")
+            self.assertIn("BCUS12345:", content)
+            self.assertIn((dev_hdd0 / "game" / "BCUS12345").resolve().as_posix(), content)
+
+    def test_writes_game_dir_when_game_dir_exists_without_eboot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            data_root = tmp_path / "portable"
+            dev_hdd0 = tmp_path / "dev_hdd0"
+            game_dir = dev_hdd0 / "game" / "BLES01234"
+            game_dir.mkdir(parents=True)
+
+            result = update_rpcs3_games_yml(data_root, "BLES01234", dev_hdd0)
+
+            self.assertTrue(result)
+            content = (data_root / "config" / "games.yml").read_text(encoding="utf-8")
+            self.assertIn("BLES01234:", content)
+            self.assertIn(game_dir.resolve().as_posix(), content)
+
+    def test_updates_existing_entry_same_game_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            data_root = tmp_path / "portable"
+            dev_hdd0 = tmp_path / "dev_hdd0"
+            config_dir = data_root / "config"
+            config_dir.mkdir(parents=True)
+            games_yml = config_dir / "games.yml"
+            games_yml.write_text('BLUS30336: "/old/path/EBOOT.BIN"\n', encoding="utf-8")
+
+            (dev_hdd0 / "game" / "BLUS30336").mkdir(parents=True)
+
+            result = update_rpcs3_games_yml(data_root, "BLUS30336", dev_hdd0)
+
+            self.assertTrue(result)
+            content = games_yml.read_text(encoding="utf-8")
+            self.assertIn("BLUS30336:", content)
+            self.assertNotIn('/old/path', content)
+            self.assertEqual(content.count("BLUS30336:"), 1)
+    def test_preserves_other_games_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            data_root = tmp_path / "portable"
+            dev_hdd0 = tmp_path / "dev_hdd0"
+            config_dir = data_root / "config"
+            config_dir.mkdir(parents=True)
+            games_yml = config_dir / "games.yml"
+            games_yml.write_text('BCUS12345: "/some/path/EBOOT.BIN"\n', encoding="utf-8")
+
+            (dev_hdd0 / "game" / "BLUS30336").mkdir(parents=True)
+
+            result = update_rpcs3_games_yml(data_root, "BLUS30336", dev_hdd0)
+
+            self.assertTrue(result)
+            content = games_yml.read_text(encoding="utf-8")
+            self.assertIn('BCUS12345: "/some/path/EBOOT.BIN"', content)
+            self.assertIn("BLUS30336:", content)
+
+    def test_writes_game_dir_when_no_eboot_found(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            data_root = tmp_path / "portable"
+            dev_hdd0 = tmp_path / "dev_hdd0"
+            game_dir = dev_hdd0 / "game" / "BLUS30336"
+            game_dir.mkdir(parents=True)
+
+            result = update_rpcs3_games_yml(data_root, "BLUS30336", dev_hdd0)
+
+            self.assertTrue(result)
+            games_yml = data_root / "config" / "games.yml"
+            self.assertTrue(games_yml.exists())
+            content = games_yml.read_text(encoding="utf-8")
+            self.assertIn("BLUS30336:", content)
+            self.assertIn(game_dir.resolve().as_posix(), content)
+            self.assertNotIn("EBOOT.BIN", content)
+
+    def test_returns_false_for_empty_game_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            data_root = tmp_path / "portable"
+            dev_hdd0 = tmp_path / "dev_hdd0"
+
+            result = update_rpcs3_games_yml(data_root, "", dev_hdd0)
+
+            self.assertFalse(result)
+
+    def test_creates_config_dir_if_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            data_root = tmp_path / "portable"
+            dev_hdd0 = tmp_path / "dev_hdd0"
+            (dev_hdd0 / "game" / "BLUS30336").mkdir(parents=True)
+
+            result = update_rpcs3_games_yml(data_root, "BLUS30336", dev_hdd0)
+
+            self.assertTrue(result)
+            self.assertTrue((data_root / "config").exists())
+            self.assertTrue((data_root / "config" / "games.yml").exists())
+
+    def test_idempotent_on_repeat_call(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            data_root = tmp_path / "portable"
+            dev_hdd0 = tmp_path / "dev_hdd0"
+            (dev_hdd0 / "game" / "BLUS30336").mkdir(parents=True)
+
+            result_first = update_rpcs3_games_yml(data_root, "BLUS30336", dev_hdd0)
+            result_second = update_rpcs3_games_yml(data_root, "BLUS30336", dev_hdd0)
+
+            content = (data_root / "config" / "games.yml").read_text(encoding="utf-8")
+            self.assertTrue(result_first)
+            self.assertTrue(result_second)
+            self.assertEqual(content.count("BLUS30336:"), 1)
+
+
+class RPCS3CustomConfigCopyTests(unittest.TestCase):
+    def test_copies_files_when_source_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            vfs_config = tmp_path / "vfs" / "config"
+            (vfs_config / "custom_configs").mkdir(parents=True)
+            (vfs_config / "custom_configs" / "config_BLUS30443.yml").write_bytes(b"config data")
+            rpcs3_root = tmp_path / "rpcs3"
+
+            copy_ps3_custom_config_to_emulator(vfs_config, rpcs3_root)
+
+            dest = rpcs3_root / "config" / "custom_configs" / "config_BLUS30443.yml"
+            self.assertTrue(dest.exists())
+            self.assertEqual(dest.read_bytes(), b"config data")
+
+    def test_skips_silently_when_source_dir_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            vfs_config = tmp_path / "vfs" / "config"  # custom_configs subdir doesn't exist
+            rpcs3_root = tmp_path / "rpcs3"
+
+            # Should not raise
+            copy_ps3_custom_config_to_emulator(vfs_config, rpcs3_root)
+
+            self.assertFalse((rpcs3_root / "config" / "custom_configs").exists())
+
+    def test_creates_dest_dir_when_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            vfs_config = tmp_path / "vfs" / "config"
+            (vfs_config / "custom_configs").mkdir(parents=True)
+            (vfs_config / "custom_configs" / "config_BLUS30443.yml").write_bytes(b"x")
+            rpcs3_root = tmp_path / "rpcs3"
+            # rpcs3_root/config/custom_configs does not pre-exist
+
+            copy_ps3_custom_config_to_emulator(vfs_config, rpcs3_root)
+
+            self.assertTrue((rpcs3_root / "config" / "custom_configs").is_dir())
+
+    def test_copies_multiple_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            vfs_config = tmp_path / "vfs" / "config"
+            (vfs_config / "custom_configs").mkdir(parents=True)
+            (vfs_config / "custom_configs" / "config_BLUS30443.yml").write_bytes(b"a")
+            (vfs_config / "custom_configs" / "config_BCUS98174.yml").write_bytes(b"b")
+            rpcs3_root = tmp_path / "rpcs3"
+
+            copy_ps3_custom_config_to_emulator(vfs_config, rpcs3_root)
+
+            dest_dir = rpcs3_root / "config" / "custom_configs"
+            self.assertTrue((dest_dir / "config_BLUS30443.yml").exists())
+            self.assertTrue((dest_dir / "config_BCUS98174.yml").exists())
 
 
 if __name__ == "__main__":

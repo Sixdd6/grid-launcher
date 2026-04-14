@@ -27,6 +27,15 @@ def rom_file_name_from_payload(payload: dict[str, Any]) -> str:
     fs_ext = fs_ext_raw.strip().lstrip(".") if isinstance(fs_ext_raw, str) else ""
     if fs_name and fs_ext:
         candidates.append(f"{fs_name}.{fs_ext}")
+    elif fs_name and not fs_ext:
+        # Folder-backed ROM: use the first nested file when it has a real archive suffix.
+        files_val = payload.get("files")
+        if isinstance(files_val, list) and files_val:
+            first_file = files_val[0]
+            if isinstance(first_file, dict):
+                first_file_name = str(first_file.get("file_name", "")).strip()
+                if first_file_name and Path(first_file_name).suffix:
+                    candidates.append(first_file_name)
 
     for field in candidate_fields:
         value = payload.get(field, "")

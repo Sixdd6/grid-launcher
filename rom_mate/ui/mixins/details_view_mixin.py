@@ -11,10 +11,13 @@ from urllib.error import HTTPError, URLError
 
 from PySide6.QtCore import QThread, QTimer, Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -27,6 +30,7 @@ from rom_mate.background import DetailsCloudRecordsWorker
 from rom_mate.emulator import (
     apply_launch_placeholders_to_args,
     available_emulator_name_for_platform,
+    copy_ps3_custom_config_to_emulator,
     compatible_emulator_names_for_platform,
     default_emulator_name_for_platform,
     emulator_entry_by_name,
@@ -69,6 +73,7 @@ from rom_mate.server import (
     details_rom_id_cache_key,
     resolve_rom_id_for_game,
 )
+from rom_mate.server.metadata import details_metadata_from_item
 from rom_mate.ui import (
     NativeGameSettingsDialog,
     open_game_details,
@@ -108,6 +113,11 @@ class DetailsViewMixin:
             return
         for field in (
             "ra_id",
+            "rating",
+            "description",
+            "genres",
+            "regions",
+            "filesize_bytes",
             "ps4_has_update",
             "ps4_has_dlc",
             "ps4_file_ids_by_category",
@@ -115,7 +125,16 @@ class DetailsViewMixin:
             "xbox360_has_dlc",
             "xbox360_file_ids_by_category",
         ):
-            if not game.get(field):
+            current_value = game.get(field)
+            if field == "rating" and isinstance(current_value, str) and current_value.strip().casefold() == "n/a":
+                current_value = ""
+            if (
+                field == "description"
+                and isinstance(current_value, str)
+                and current_value.strip().casefold() == "no description available."
+            ):
+                current_value = ""
+            if not current_value:
                 value = server_game.get(field)
                 if value:
                     game[field] = value
@@ -154,6 +173,82 @@ class DetailsViewMixin:
         self._pcgw_worker = worker
 
 
+    def _details_missing_server_metadata(self, game: dict[str, str]) -> bool:
+        for field in ("genres", "regions", "filesize_bytes", "rating"):
+            current_value = game.get(field)
+            if field == "rating" and isinstance(current_value, str) and current_value.strip().casefold() == "n/a":
+                current_value = ""
+            if isinstance(current_value, str):
+                if current_value.strip():
+                    continue
+            elif current_value:
+                continue
+            return True
+        return False
+
+
+    def _start_rom_detail_lookup(self, rom_id: str, base_url: str, api_token: str) -> None:
+        from rom_mate.background.workers import RomDetailWorker
+
+        existing_thread = self._rom_detail_thread
+        if existing_thread is not None and existing_thread.isRunning():
+            existing_thread.quit()
+
+        worker = RomDetailWorker(base_url, api_token, rom_id)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_rom_detail_loaded)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(lambda t=thread, w=worker: self._cleanup_rom_detail_worker(t, w))
+        thread.start()
+
+        self._rom_detail_thread = thread
+        self._rom_detail_worker = worker
+
+
+    def _cleanup_rom_detail_worker(self, thread: QThread, worker: object) -> None:
+        if self._rom_detail_thread is thread:
+            self._rom_detail_thread = None
+        if self._rom_detail_worker is worker:
+            self._rom_detail_worker = None
+
+
+    def _on_rom_detail_loaded(self, rom_id: str, payload: dict, error: str) -> None:
+        if error:
+            return
+        current_game = self.current_details_game
+        if current_game is None:
+            return
+        current_rom_id = current_game.get("rom_id", "")
+        current_rom_id_text = current_rom_id.strip() if isinstance(current_rom_id, str) else str(current_rom_id).strip()
+        if current_rom_id_text != str(rom_id).strip():
+            return
+        metadata = details_metadata_from_item(payload)
+        for field in ("description", "genres", "regions", "rating", "filesize_bytes"):
+            current_value = current_game.get(field)
+            if field == "rating" and isinstance(current_value, str) and current_value.strip().casefold() == "n/a":
+                current_value = ""
+            if (
+                field == "description"
+                and isinstance(current_value, str)
+                and current_value.strip().casefold() == "no description available."
+            ):
+                current_value = ""
+            if isinstance(current_value, str):
+                has_current_value = bool(current_value.strip())
+            else:
+                has_current_value = bool(current_value)
+            if has_current_value:
+                continue
+            incoming_value = metadata.get(field)
+            if isinstance(incoming_value, str) and incoming_value.strip():
+                current_game[field] = incoming_value
+        open_game_details(self, current_game, self.current_details_source)
+
+
     def _on_pcgw_paths_loaded(self, request_id: int, raw_paths: list, error: str) -> None:
         if request_id != self._pending_pcgw_request_id:
             return
@@ -185,6 +280,19 @@ class DetailsViewMixin:
         self._enrich_game_for_details(game)
         self._current_details_game = game
         open_game_details(self, game, source)
+
+        rom_id_value = game.get("rom_id", "")
+        rom_id = rom_id_value.strip() if isinstance(rom_id_value, str) else str(rom_id_value).strip()
+        base_url = self._server_base_url()
+        api_token = str(self.config.get("api_token", "")).strip()
+        if (
+            self._details_missing_server_metadata(game)
+            and rom_id
+            and base_url
+            and api_token
+        ):
+            self._start_rom_detail_lookup(rom_id, base_url, api_token)
+
         details_achievements_button = self.details_achievements_button
         if details_achievements_button is None:
             return
@@ -744,9 +852,9 @@ class DetailsViewMixin:
 
         self._clear_layout_items(self.details_cloud_list_layout)
 
+        native_paths: list[str] = []
         if isinstance(native_game, dict):
             native_paths = self._native_save_paths_for_game(native_game)
-            self._render_native_save_path_section(native_game, native_paths)
             self.details_cloud_list_layout.addWidget(self._native_cloud_saves_section_label())
 
         if error:
@@ -778,7 +886,17 @@ class DetailsViewMixin:
             self.details_cloud_empty_label.setText(f"No cloud {kind_label} were found on the server for this game.")
             self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
 
-        self.details_cloud_list_layout.addStretch()
+        if isinstance(native_game, dict):
+            self.details_cloud_list_layout.addStretch()
+            separator = QFrame()
+            separator.setFrameShape(QFrame.Shape.HLine)
+            separator.setFrameShadow(QFrame.Shadow.Sunken)
+            self.details_cloud_list_layout.addSpacing(8)
+            self.details_cloud_list_layout.addWidget(separator)
+            self.details_cloud_list_layout.addSpacing(8)
+            self._render_native_save_path_section(native_game, native_paths)
+        else:
+            self.details_cloud_list_layout.addStretch()
         if callable(timing_end):
             timing_end("_on_details_cloud_records_loaded", started_at, result="rendered", count=len(ordered_records))
 
@@ -952,33 +1070,42 @@ class DetailsViewMixin:
         heading.setStyleSheet("font-size: 16px; font-weight: 700;")
         container_layout.addWidget(heading)
 
-        if all_raw_paths:
-            for raw_path in all_raw_paths:
-                expanded = os.path.expandvars(raw_path)
-                row = QWidget()
-                row_layout = QHBoxLayout(row)
-                row_layout.setContentsMargins(0, 4, 0, 4)
-                label = QLabel(raw_path)
-                label.setWordWrap(True)
-                label.setToolTip(expanded)
-                row_layout.addWidget(label, 1)
-                remove_btn = QPushButton("X")
-                remove_btn.setFixedWidth(28)
-                remove_btn.setToolTip("Remove this path")
-                raw_path_capture = raw_path
+        path_list = QListWidget()
+        path_list.setObjectName("nativeSaveDirList")
+        path_list.setAlternatingRowColors(True)
+        path_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        path_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        path_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        path_list.setSizeAdjustPolicy(QListWidget.SizeAdjustPolicy.AdjustToContents)
 
-                def _remove(checked=False, rp=raw_path_capture):
-                    self._pcgw_remove_path_for_game(game, rp)
-                    self._refresh_details_cloud_panel()
+        for raw_path in all_raw_paths:
+            expanded = os.path.expandvars(raw_path)
+            item = QListWidgetItem()
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(6, 4, 6, 4)
+            row_layout.setSpacing(8)
+            label = QLabel(raw_path)
+            label.setStyleSheet("padding: 4px 0;")
+            label.setToolTip(expanded)
+            label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            row_layout.addWidget(label, 1)
+            remove_btn = QPushButton("✕")
+            remove_btn.setFixedWidth(28)
+            remove_btn.setToolTip("Remove this path")
+            raw_path_capture = raw_path
 
-                remove_btn.clicked.connect(_remove)
-                row_layout.addWidget(remove_btn)
-                container_layout.addWidget(row)
-        else:
-            empty_paths = QLabel("No save locations were found automatically. Use Browse to add one.")
-            empty_paths.setWordWrap(True)
-            empty_paths.setStyleSheet(f"color: {self._theme_color('muted', '#6272a4')};")
-            container_layout.addWidget(empty_paths)
+            def _remove(checked=False, rp=raw_path_capture):
+                self._pcgw_remove_path_for_game(game, rp)
+                self._refresh_details_cloud_panel()
+
+            remove_btn.clicked.connect(_remove)
+            row_layout.addWidget(remove_btn)
+            item.setSizeHint(row.sizeHint())
+            path_list.addItem(item)
+            path_list.setItemWidget(item, row)
+
+        container_layout.addWidget(path_list)
 
         browse_btn = QPushButton("Browse...")
         browse_btn.setToolTip("Add a custom save folder for this game")
@@ -1035,26 +1162,32 @@ class DetailsViewMixin:
                 "Upload save files from the listed locations." if rom_id else "Missing ROM id for this game."
             )
 
-        self._render_native_save_path_section(game, all_raw_paths)
         self.details_cloud_list_layout.addWidget(self._native_cloud_saves_section_label())
 
         if not rom_id:
             self.details_cloud_empty_label.setText("Missing ROM id for this game.")
             self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
-            self.details_cloud_list_layout.addStretch()
-            return
+        else:
+            self.details_cloud_empty_label.setText("Loading cloud saves from the server...")
+            self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
 
-        self.details_cloud_empty_label.setText("Loading cloud saves from the server...")
-        self.details_cloud_list_layout.addWidget(self.details_cloud_empty_label)
         self.details_cloud_list_layout.addStretch()
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        self.details_cloud_list_layout.addSpacing(8)
+        self.details_cloud_list_layout.addWidget(separator)
+        self.details_cloud_list_layout.addSpacing(8)
+        self._render_native_save_path_section(game, all_raw_paths)
 
-        self._start_details_cloud_records_worker(
-            rom_id,
-            "save",
-            kind_label="saves",
-            upload_reason="Uploads include all configured native save locations.",
-            emulator_name="native_multi_dir",
-        )
+        if rom_id:
+            self._start_details_cloud_records_worker(
+                rom_id,
+                "save",
+                kind_label="saves",
+                upload_reason="Uploads include all configured native save locations.",
+                emulator_name="native_multi_dir",
+            )
 
     def _pcgw_add_manual_path_for_game(self, game: dict, folder: str) -> None:
         key = self._pcgw_cache_key(game)
@@ -1293,6 +1426,13 @@ class DetailsViewMixin:
                 emulator_path_value = emulator_entry.get("path", "")
                 if isinstance(emulator_path_value, str):
                     self._ensure_emulator_sync_settings(emulator_name, emulator_path_value)
+                if self._is_rpcs3_emulator_name(emulator_name):
+                    _ps3_game_id = game.get("ps3_game_id", "").strip()
+                    if _ps3_game_id:
+                        _ps3_dev_hdd0 = self._ps3_dev_hdd0_for_game(game)
+                        _rpcs3_root = self._rpcs3_data_root_for_game(game)
+                        if _ps3_dev_hdd0 is not None and _rpcs3_root is not None:
+                            copy_ps3_custom_config_to_emulator(_ps3_dev_hdd0.parent / "config", _rpcs3_root)
             process = subprocess.Popen(command, cwd=working_directory)
             QTimer.singleShot(500, lambda p=process, c=command: self._warn_if_process_exited_early(p, c))
             self._register_game_session_for_auto_upload(game, process, emulator_name)

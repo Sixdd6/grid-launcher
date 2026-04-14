@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+from rom_mate.emulator.launch import prepare_emulator_launch_command
+from rom_mate.ui.mixins.details_view_mixin import DetailsViewMixin
 
 
 class _StubWindow:
@@ -129,6 +134,132 @@ class PerformGameActionFirmwareTests(unittest.TestCase):
         type(self).module.MainWindow._perform_game_action(window)
 
         self.assertTrue(window.launch_called)
+
+
+class _StubPS3LaunchWindow(DetailsViewMixin):
+    def __init__(self, *, ps3_dev_hdd0: Path | None, rpcs3_data_root: Path | None) -> None:
+        self._ps3_dev_hdd0 = ps3_dev_hdd0
+        self._rpcs3_data_root = rpcs3_data_root
+
+    def _is_native_executable_platform(self, game: dict[str, str]) -> bool:
+        del game
+        return False
+
+    def _default_emulator_name_for_platform(self, platform: str) -> str:
+        del platform
+        return "RPCS3"
+
+    def _emulator_entry_by_name(self, name: str) -> dict[str, str] | None:
+        del name
+        return {"path": "/fake/rpcs3"}
+
+    def _resolved_rom_path_for_game(self, game: dict[str, str]) -> str:
+        del game
+        return "/fake/rom"
+
+    def _resolved_launch_arguments_for_game(self, game: dict[str, str]) -> list[str]:
+        del game
+        return []
+
+    def _is_retroarch_emulator_name(self, name: str) -> bool:
+        del name
+        return False
+
+    def _normalized_retroarch_core_args(self, game: dict[str, str], core_id: str) -> list[str]:
+        del game, core_id
+        return []
+
+    def _is_rpcs3_emulator_name(self, name: str) -> bool:
+        del name
+        return True
+
+    def _ps3_dev_hdd0_for_game(self, game: dict[str, str]) -> Path | None:
+        del game
+        return self._ps3_dev_hdd0
+
+    def _rpcs3_data_root_for_game(self, game: dict[str, str]) -> Path | None:
+        del game
+        return self._rpcs3_data_root
+
+    def _ensure_emulator_sync_settings(self, name: str, path: str) -> None:
+        del name, path
+
+    def _register_game_session_for_auto_upload(self, game: dict[str, str], process, emulator_name: str) -> None:
+        del game, process, emulator_name
+
+    def _warn_if_process_exited_early(self, process, command: list[str]) -> None:
+        del process, command
+
+
+class PS3CustomConfigCopyOnLaunchTests(unittest.TestCase):
+    def test_copy_called_for_ps3_game_at_launch(self) -> None:
+        self.assertTrue(callable(prepare_emulator_launch_command))
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            dev_hdd0 = tmp_path / "vfs" / "dev_hdd0"
+            rpcs3_root = tmp_path / "rpcs3"
+            window = _StubPS3LaunchWindow(ps3_dev_hdd0=dev_hdd0, rpcs3_data_root=rpcs3_root)
+            game = {"platform": "PlayStation 3", "ps3_game_id": "BLUS30443", "title": "Test Game"}
+            process = MagicMock()
+
+            with (
+                patch(
+                    "rom_mate.ui.mixins.details_view_mixin.prepare_emulator_launch_command",
+                    return_value=("RPCS3", ["/fake/rpcs3", "/fake/rom"], None),
+                ),
+                patch("rom_mate.ui.mixins.details_view_mixin.subprocess.Popen", return_value=process),
+                patch("rom_mate.ui.mixins.details_view_mixin.QTimer.singleShot"),
+                patch("rom_mate.ui.mixins.details_view_mixin.copy_ps3_custom_config_to_emulator") as copy_cfg,
+            ):
+                launched = window._launch_installed_game(game)
+
+            self.assertTrue(launched)
+            copy_cfg.assert_called_once_with(dev_hdd0.parent / "config", rpcs3_root)
+
+    def test_copy_skipped_when_ps3_game_id_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            dev_hdd0 = tmp_path / "vfs" / "dev_hdd0"
+            rpcs3_root = tmp_path / "rpcs3"
+            window = _StubPS3LaunchWindow(ps3_dev_hdd0=dev_hdd0, rpcs3_data_root=rpcs3_root)
+            game = {"platform": "PlayStation 3", "ps3_game_id": "", "title": "Test Game"}
+            process = MagicMock()
+
+            with (
+                patch(
+                    "rom_mate.ui.mixins.details_view_mixin.prepare_emulator_launch_command",
+                    return_value=("RPCS3", ["/fake/rpcs3", "/fake/rom"], None),
+                ),
+                patch("rom_mate.ui.mixins.details_view_mixin.subprocess.Popen", return_value=process),
+                patch("rom_mate.ui.mixins.details_view_mixin.QTimer.singleShot"),
+                patch("rom_mate.ui.mixins.details_view_mixin.copy_ps3_custom_config_to_emulator") as copy_cfg,
+            ):
+                launched = window._launch_installed_game(game)
+
+            self.assertTrue(launched)
+            copy_cfg.assert_not_called()
+
+    def test_copy_skipped_when_rpcs3_data_root_is_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            dev_hdd0 = tmp_path / "vfs" / "dev_hdd0"
+            window = _StubPS3LaunchWindow(ps3_dev_hdd0=dev_hdd0, rpcs3_data_root=None)
+            game = {"platform": "PlayStation 3", "ps3_game_id": "BLUS30443", "title": "Test Game"}
+            process = MagicMock()
+
+            with (
+                patch(
+                    "rom_mate.ui.mixins.details_view_mixin.prepare_emulator_launch_command",
+                    return_value=("RPCS3", ["/fake/rpcs3", "/fake/rom"], None),
+                ),
+                patch("rom_mate.ui.mixins.details_view_mixin.subprocess.Popen", return_value=process),
+                patch("rom_mate.ui.mixins.details_view_mixin.QTimer.singleShot"),
+                patch("rom_mate.ui.mixins.details_view_mixin.copy_ps3_custom_config_to_emulator") as copy_cfg,
+            ):
+                launched = window._launch_installed_game(game)
+
+            self.assertTrue(launched)
+            copy_cfg.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -26,6 +26,7 @@ from rom_mate.emulator import (
     retroarch_core_firmware_metadata,
     retroarch_core_saves_files_metadata,
     retroarch_directory_settings,
+    update_rpcs3_games_yml,
     xenia_directory_settings,
 )
 from rom_mate.library import (
@@ -107,6 +108,7 @@ class InstallMixin:
             return False
         self._auto_configure_installed_emulator(installed_game, archive_path)
         self._register_installed_game(installed_game, archive_path)
+        self._write_rpcs3_games_yml_for_game(installed_game)
         return True
 
 
@@ -476,9 +478,26 @@ class InstallMixin:
             extract_archive_for_game=self._extract_archive_for_game,
             is_ps3_platform=self._is_ps3_platform,
             ps3_dev_hdd0_root=self._ps3_dev_hdd0_for_game,
+            ps3_games_root=self._ps3_games_dir_for_game,
             cleanup_archive_on_success=cleanup_archive_on_success,
             install_progress_callback=install_progress_callback,
         )
+
+
+    def _write_rpcs3_games_yml_for_game(self, installed_game: dict[str, str]) -> None:
+        if not self._is_ps3_platform(installed_game):
+            return
+        game_id = installed_game.get("ps3_game_id", "").strip()
+        if not game_id:
+            return
+        data_root = self._rpcs3_data_root_for_game(installed_game)
+        if data_root is None:
+            return
+        dev_hdd0 = self._ps3_dev_hdd0_for_game(installed_game)
+        if dev_hdd0 is None:
+            return
+        games_dir = self._ps3_games_dir_for_game(installed_game)
+        update_rpcs3_games_yml(data_root, game_id, dev_hdd0, games_dir)
 
 
     def _install_firmware_for_game_without_ui(self, game: dict, prepared_game: dict) -> str:
@@ -1417,6 +1436,7 @@ class InstallMixin:
 
         archive_file = Path(archive_path)
         self._register_installed_game(installed_game, archive_file)
+        self._write_rpcs3_games_yml_for_game(installed_game)
         self._queue_xbox360_content_for_game(installed_game)
         auto_configured = self._auto_configure_installed_emulator(installed_game, archive_file)
         if is_source_install:

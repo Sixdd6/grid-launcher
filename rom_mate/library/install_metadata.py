@@ -58,6 +58,9 @@ def hydrate_install_game_metadata(
                     "screenshot_urls",
                     "rating",
                     "description",
+                    "genres",
+                    "regions",
+                    "filesize_bytes",
                     "rom_file_name",
                     "rom_nested_file_name",
                     "rom_base_file_id",
@@ -69,6 +72,14 @@ def hydrate_install_game_metadata(
                     if not isinstance(server_value, str) or not server_value.strip():
                         continue
                     current_value = game.get(field, "")
+                    if field == "rating" and isinstance(current_value, str) and current_value.strip().casefold() == "n/a":
+                        current_value = ""
+                    if (
+                        field == "description"
+                        and isinstance(current_value, str)
+                        and current_value.strip().casefold() == "no description available."
+                    ):
+                        current_value = ""
                     if not isinstance(current_value, str) or not current_value.strip():
                         game[field] = server_value.strip()
                 matched = True
@@ -112,6 +123,11 @@ def sync_install_metadata_to_details_game(
     screenshot_value = install_game.get("screenshot_urls", "")
     if isinstance(screenshot_value, str):
         current_details_game["screenshot_urls"] = screenshot_value.strip()
+
+    for field in ("rating", "description", "genres", "regions", "filesize_bytes"):
+        field_value = install_game.get(field, "")
+        if isinstance(field_value, str):
+            current_details_game[field] = field_value.strip()
 
     for field in ("ps4_has_update", "ps4_has_dlc", "ps4_file_ids_by_category"):
         field_value = install_game.get(field, "")

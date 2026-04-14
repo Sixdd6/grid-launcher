@@ -13,9 +13,50 @@ from rom_mate.library.ps3_install import (
     detected_ps3_game_id,
     ps3_route_extracted_contents,
 )
+from rom_mate.ui.mixins.install_mixin import InstallMixin
 
 
 class PS3InstallTests(unittest.TestCase):
+    def test_prepare_installed_game_without_ui_routes_ps3_disc_game_id_dir_to_vfs_games(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            archive_path = temp_path / "BLUS30336.7z"
+            archive_path.write_bytes(b"placeholder")
+            dev_hdd0_root = temp_path / "dev_hdd0"
+            games_root = temp_path / "games"
+
+            def fake_extract(archive: Path, destination: Path, install_progress_callback=None) -> None:
+                del archive, install_progress_callback
+                destination.mkdir(parents=True, exist_ok=True)
+                game_dir = destination / "BLUS30336"
+                (game_dir / "PS3_GAME").mkdir(parents=True)
+                (game_dir / "PS3_DISC.SFB").write_bytes(b"disc")
+
+            with patch(
+                "rom_mate.library.archive_preparation.extract_archive_into_directory",
+                side_effect=fake_extract,
+            ):
+                prepared, warning_text = prepare_installed_game_without_ui(
+                    {"title": "Test PS3 Disc Game", "platform": "PlayStation 3"},
+                    archive_path,
+                    cleanup_archive_on_success=False,
+                    should_extract_archive_for_game=lambda game, path: True,
+                    extract_archive_for_game=lambda game, path, cb: (_ for _ in ()).throw(
+                        AssertionError("extract_archive_for_game should not be called for PS3")
+                    ),
+                    is_ps3_platform=lambda game: True,
+                    ps3_dev_hdd0_root=lambda game: dev_hdd0_root,
+                    ps3_games_root=lambda game: games_root,
+                )
+
+        self.assertIsNotNone(prepared)
+        self.assertEqual(warning_text, "")
+        assert prepared is not None
+        expected_game_dir = str(games_root / "BLUS30336")
+        self.assertEqual(prepared.get("extracted_dir"), expected_game_dir)
+        self.assertEqual(prepared.get("extracted_path"), expected_game_dir)
+        self.assertEqual(prepared.get("ps3_game_id"), "BLUS30336")
+
     def test_prepare_installed_game_without_ui_routes_ps3_game_id_dir_to_vfs_dev_hdd0(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -141,6 +182,17 @@ class PS3GameIdHelperTests(unittest.TestCase):
 
 
 class PS3ClassifyTests(unittest.TestCase):
+    def test_classifies_disc_game_id_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            game_dir = Path(tmp) / "BLUS30336"
+            (game_dir / "PS3_GAME").mkdir(parents=True)
+            (game_dir / "PS3_DISC.SFB").write_bytes(b"disc")
+
+            results = ps3_classify_extracted_contents(Path(tmp))
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0][1], "disc_game_id_dir")
+
     def test_classifies_game_id_dir(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             game_dir = Path(tmp) / "BLUS30336"
@@ -235,6 +287,29 @@ class PS3ClassifyTests(unittest.TestCase):
 
 
 class PS3RouteTests(unittest.TestCase):
+    def test_routes_disc_game_id_dir_to_games_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            extracted = tmp_path / "extracted"
+            game_dir = extracted / "BLUS30336"
+            (game_dir / "PS3_GAME" / "USRDIR").mkdir(parents=True)
+            (game_dir / "PS3_DISC.SFB").write_bytes(b"disc")
+            (game_dir / "PS3_GAME" / "USRDIR" / "EBOOT.BIN").write_bytes(b"boot")
+            dev_hdd0 = tmp_path / "dev_hdd0"
+            games_root = tmp_path / "games"
+
+            game_id, installed_paths = ps3_route_extracted_contents(
+                extracted,
+                dev_hdd0,
+                lambda iso, tmp_dir: tmp_dir,
+                games_root=games_root,
+            )
+
+            self.assertEqual(game_id, "BLUS30336")
+            self.assertEqual(installed_paths[0], games_root / "BLUS30336")
+            self.assertTrue((games_root / "BLUS30336" / "PS3_DISC.SFB").exists())
+            self.assertFalse((dev_hdd0 / "game" / "BLUS30336").exists())
+
     def test_routes_game_id_dir_to_dev_hdd0_game(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -378,18 +453,46 @@ class PS3RouteTests(unittest.TestCase):
             config_dir = extracted / "config"
             (config_dir / "custom_configs").mkdir(parents=True)
             (config_dir / "custom_configs" / "BLUS30336.yml").write_bytes(b"settings")
-            # dev_hdd0 sits one level below data_root
-            data_root = tmp_path / "rpcs3_data"
-            dev_hdd0 = data_root / "dev_hdd0"
+            # VFS and emulator root are completely separate paths
+            vfs_root = tmp_path / "vfs"
+            dev_hdd0 = vfs_root / "dev_hdd0"
+            rpcs3_data_root = tmp_path / "rpcs3_emulator"
 
             game_id, installed_paths = ps3_route_extracted_contents(
-                extracted, dev_hdd0, lambda iso, tmp_dir: tmp_dir
+                extracted, dev_hdd0, lambda iso, tmp_dir: tmp_dir,
+                rpcs3_data_root=rpcs3_data_root,
             )
 
             self.assertEqual(game_id, "BLUS30336")
-            expected_config = data_root / "config"
+            # Config should be in emulator root, NOT in vfs
+            expected_config = rpcs3_data_root / "config"
             self.assertIn(expected_config, installed_paths)
             self.assertTrue((expected_config / "custom_configs" / "BLUS30336.yml").exists())
+            # Must NOT be in VFS config
+            self.assertFalse((vfs_root / "config").exists())
+
+    def test_routes_config_dir_to_vfs_config_when_no_data_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            extracted = tmp_path / "extracted"
+            game_dir = extracted / "BLUS30336"
+            (game_dir / "PS3_GAME").mkdir(parents=True)
+            (game_dir / "PS3_GAME" / "PARAM.SFO").write_bytes(b"sfo")
+            config_dir = extracted / "config"
+            (config_dir / "custom_configs").mkdir(parents=True)
+            (config_dir / "custom_configs" / "config_BLUS30336.yml").write_bytes(b"settings")
+            vfs_root = tmp_path / "vfs"
+            dev_hdd0 = vfs_root / "dev_hdd0"
+
+            # No rpcs3_data_root — should fall back to dev_hdd0.parent (vfs_root)
+            game_id, installed_paths = ps3_route_extracted_contents(
+                extracted, dev_hdd0, lambda iso, tmp_dir: tmp_dir,
+            )
+
+            self.assertEqual(game_id, "BLUS30336")
+            expected_config = vfs_root / "config"
+            self.assertIn(expected_config, installed_paths)
+            self.assertTrue((expected_config / "custom_configs" / "config_BLUS30336.yml").exists())
 
     def test_returns_empty_game_id_for_only_unknown_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -405,6 +508,99 @@ class PS3RouteTests(unittest.TestCase):
 
         self.assertEqual(game_id, "")
         self.assertEqual(installed_paths, [])
+
+
+class _StubInstallWindow(InstallMixin):
+    def __init__(
+        self,
+        *,
+        is_ps3: bool = True,
+        data_root: Path | None = None,
+        dev_hdd0: Path | None = None,
+        games_dir: Path | None = None,
+    ) -> None:
+        self._is_ps3 = is_ps3
+        self._data_root = data_root
+        self._dev_hdd0 = dev_hdd0
+        self._games_dir = games_dir
+
+    def _is_ps3_platform(self, game: dict[str, str]) -> bool:
+        del game
+        return self._is_ps3
+
+    def _rpcs3_data_root_for_game(self, game: dict[str, str]) -> Path | None:
+        del game
+        return self._data_root
+
+    def _ps3_dev_hdd0_for_game(self, game: dict[str, str]) -> Path | None:
+        del game
+        return self._dev_hdd0
+
+    def _ps3_games_dir_for_game(self, game: dict[str, str]) -> Path | None:
+        del game
+        return self._games_dir
+
+
+class PS3GamesYmlCallSiteTests(unittest.TestCase):
+    def test_games_yml_written_for_ps3_game(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            data_root = tmp_path / "portable"
+            dev_hdd0 = tmp_path / "dev_hdd0"
+            games_dir = tmp_path / "games"
+            window = _StubInstallWindow(
+                is_ps3=True,
+                data_root=data_root,
+                dev_hdd0=dev_hdd0,
+                games_dir=games_dir,
+            )
+            game = {"platform": "PlayStation 3", "ps3_game_id": "BLUS30336"}
+
+            with patch("rom_mate.ui.mixins.install_mixin.update_rpcs3_games_yml") as update_games:
+                window._write_rpcs3_games_yml_for_game(game)
+
+        update_games.assert_called_once_with(data_root, "BLUS30336", dev_hdd0, games_dir)
+
+    def test_games_yml_skipped_for_non_ps3_game(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            window = _StubInstallWindow(
+                is_ps3=False,
+                data_root=tmp_path / "portable",
+                dev_hdd0=tmp_path / "dev_hdd0",
+            )
+            game = {"platform": "PC", "ps3_game_id": "BLUS30336"}
+
+            with patch("rom_mate.ui.mixins.install_mixin.update_rpcs3_games_yml") as update_games:
+                window._write_rpcs3_games_yml_for_game(game)
+
+        update_games.assert_not_called()
+
+    def test_games_yml_skipped_when_data_root_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            window = _StubInstallWindow(is_ps3=True, data_root=None, dev_hdd0=tmp_path / "dev_hdd0")
+            game = {"platform": "PlayStation 3", "ps3_game_id": "BLUS30336"}
+
+            with patch("rom_mate.ui.mixins.install_mixin.update_rpcs3_games_yml") as update_games:
+                window._write_rpcs3_games_yml_for_game(game)
+
+        update_games.assert_not_called()
+
+    def test_games_yml_skipped_when_no_game_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            window = _StubInstallWindow(
+                is_ps3=True,
+                data_root=tmp_path / "portable",
+                dev_hdd0=tmp_path / "dev_hdd0",
+            )
+            game = {"platform": "PlayStation 3"}
+
+            with patch("rom_mate.ui.mixins.install_mixin.update_rpcs3_games_yml") as update_games:
+                window._write_rpcs3_games_yml_for_game(game)
+
+        update_games.assert_not_called()
 
 
 if __name__ == "__main__":

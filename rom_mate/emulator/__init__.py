@@ -111,13 +111,16 @@ from .xenia import (
     xenia_state_path_overrides,
 )
 from .rpcs3 import (
+    copy_ps3_custom_config_to_emulator,
     rpcs3_data_root,
     ensure_rpcs3_settings,
     ps3_vfs_dev_hdd0_path,
+    ps3_vfs_games_path,
     rpcs3_pup_path,
     rpcs3_directory_settings,
     rpcs3_save_path_overrides,
     trigger_rpcs3_firmware_install,
+    update_rpcs3_games_yml,
 )
 from .duckstation import (
     duckstation_memory_card_settings,
@@ -229,13 +232,16 @@ __all__ = [
     "xenia_directory_settings",
     "xenia_save_path_overrides",
     "xenia_state_path_overrides",
+    "copy_ps3_custom_config_to_emulator",
     "rpcs3_data_root",
     "ensure_rpcs3_settings",
     "ps3_vfs_dev_hdd0_path",
+    "ps3_vfs_games_path",
     "rpcs3_pup_path",
     "rpcs3_directory_settings",
     "rpcs3_save_path_overrides",
     "trigger_rpcs3_firmware_install",
+    "update_rpcs3_games_yml",
     "ensure_duckstation_memory_card_settings",
     "default_emulator_name_for_platform",
     "dolphin_target_platforms_for_variant",

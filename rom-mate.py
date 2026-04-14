@@ -239,6 +239,7 @@ from rom_mate.emulator import (
     xenia_directory_settings as resolve_xenia_directory_settings,
     xenia_save_path_overrides as resolve_xenia_save_path_overrides,
     xenia_state_path_overrides as resolve_xenia_state_path_overrides,
+    rpcs3_data_root as resolve_rpcs3_data_root,
     rpcs3_pup_path as resolve_rpcs3_pup_path,
     rpcs3_save_path_overrides as resolve_rpcs3_save_path_overrides,
     trigger_rpcs3_firmware_install as resolve_trigger_rpcs3_firmware_install,
@@ -257,6 +258,7 @@ from rom_mate.emulator import (
     ensure_ppsspp_settings as resolve_ensure_ppsspp_settings,
     ensure_rpcs3_settings as resolve_ensure_rpcs3_settings,
     ps3_vfs_dev_hdd0_path as resolve_ps3_vfs_dev_hdd0_path,
+    ps3_vfs_games_path as resolve_ps3_vfs_games_path,
     ensure_redream_settings as resolve_ensure_redream_settings,
     ensure_xemu_settings as resolve_ensure_xemu_settings,
     dolphin_target_platforms_for_variant as resolve_dolphin_target_platforms_for_variant,
@@ -440,7 +442,17 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self.details_content_frame: QFrame | None = None
         self.details_center_stack: QStackedWidget | None = None
         self.details_cover_label: QLabel | None = None
+        self.details_platform_group: QWidget | None = None
+        self.details_rating_group: QWidget | None = None
+        self.details_regions_group: QWidget | None = None
+        self.details_filesize_group: QWidget | None = None
+        self.details_version_group: QWidget | None = None
+        self.details_genres_group: QWidget | None = None
+        self.details_genres_layout: QHBoxLayout | None = None
         self.details_platform_label: QLabel | None = None
+        self.details_genres_label: QLabel | None = None
+        self.details_regions_label: QLabel | None = None
+        self.details_filesize_label: QLabel | None = None
         self.details_version_label: QLabel | None = None
         self.details_rating_label: QLabel | None = None
         self.details_description_label: QLabel | None = None
@@ -492,6 +504,8 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self._pending_pcgw_request_id: int | None = None
         self._pcgw_thread: QThread | None = None
         self._pcgw_worker: QObject | None = None
+        self._rom_detail_thread: QThread | None = None
+        self._rom_detail_worker = None
         self._pcgw_paths_cache: dict[str, list[str]] = {}
         self._retroarch_core_ids_cache: dict[str, set[str]] = {}
         self._platform_default_emulator_cache: dict[str, str] = {}
@@ -731,7 +745,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         platforms.setObjectName("serverPlatformsList")
         platforms.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         platforms.setMinimumWidth(120)
-        platforms.setMaximumWidth(220)
+        platforms.setMaximumWidth(300)
         platforms.currentTextChanged.connect(self._on_server_platform_selected)
         self.server_platforms_list = platforms
         platforms_layout.addWidget(platforms)
@@ -1254,37 +1268,120 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
         title = QLabel("Game Title")
         title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        title.setStyleSheet("font-size: 30px; font-weight: 700;")
+        title.setStyleSheet(f"font-size: 30px; font-weight: 700; color: {self._theme_color('text', '#f8f8f2')};")
         self.details_title_label = title
         overview_content_layout.addWidget(title)
-
-        platform = QLabel("Platform: -")
-        platform.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        platform.setStyleSheet("font-size: 18px;")
-        self.details_platform_label = platform
-        overview_content_layout.addWidget(platform)
-
-        version = QLabel("")
-        version.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        version.setStyleSheet(f"font-size: 16px; color: {self._theme_color('muted', '#6272a4')};")
-        version.setVisible(False)
-        self.details_version_label = version
-        overview_content_layout.addWidget(version)
-
-        rating = QLabel("Rating: -")
-        rating.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        rating.setStyleSheet("font-size: 18px;")
-        self.details_rating_label = rating
-        overview_content_layout.addWidget(rating)
 
         description = QLabel("Description")
         description.setWordWrap(True)
         description.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         description.setMinimumWidth(0)
         description.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        description.setStyleSheet("font-size: 17px;")
+        description.setStyleSheet(f"font-size: 17px; color: {self._theme_color('text', '#f8f8f2')};")
         self.details_description_label = description
         overview_content_layout.addWidget(description)
+
+        overview_content_layout.addSpacing(4)
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Plain)
+        separator.setStyleSheet(
+            f"border: none; background-color: {self._theme_color('surface_alt', '#dde0ee')}; max-height: 1px;"
+        )
+        overview_content_layout.addWidget(separator)
+        overview_content_layout.addSpacing(4)
+
+        metadata_container = QWidget()
+        metadata_layout = QVBoxLayout(metadata_container)
+        metadata_layout.setContentsMargins(0, 0, 0, 0)
+        metadata_layout.setSpacing(16)
+
+        muted = self._theme_color("muted", "#6272a4")
+        text = self._theme_color("text", "#f8f8f2")
+
+        def _make_metadata_group(header_text: str, value_style: str | None = None) -> tuple[QWidget, QLabel]:
+            group = QWidget()
+            group_layout = QVBoxLayout(group)
+            group_layout.setContentsMargins(0, 0, 0, 0)
+            group_layout.setSpacing(3)
+
+            header_label = QLabel(header_text)
+            header_label.setStyleSheet(f"font-size: 10px; color: {muted}; font-weight: 700;")
+            group_layout.addWidget(header_label)
+
+            value_label = QLabel("")
+            value_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            if value_style is None:
+                value_label.setStyleSheet(f"font-size: 14px; color: {text};")
+            else:
+                value_label.setStyleSheet(value_style)
+            group_layout.addWidget(value_label)
+
+            return group, value_label
+
+        grid_widget = QWidget()
+        grid_layout = QGridLayout(grid_widget)
+        grid_layout.setContentsMargins(0, 0, 0, 0)
+        grid_layout.setHorizontalSpacing(16)
+        grid_layout.setVerticalSpacing(14)
+
+        platform_group, platform = _make_metadata_group("PLATFORM")
+        self.details_platform_group = platform_group
+        self.details_platform_label = platform
+        grid_layout.addWidget(platform_group, 0, 0)
+
+        rating_group, rating = _make_metadata_group("RATING")
+        rating.setTextFormat(Qt.TextFormat.RichText)
+        rating_group.setVisible(False)
+        self.details_rating_group = rating_group
+        self.details_rating_label = rating
+        grid_layout.addWidget(rating_group, 0, 1)
+
+        regions_group, regions = _make_metadata_group("REGIONS")
+        regions_group.setVisible(False)
+        self.details_regions_group = regions_group
+        self.details_regions_label = regions
+        grid_layout.addWidget(regions_group, 1, 0)
+
+        filesize_group, filesize = _make_metadata_group("FILE SIZE")
+        filesize_group.setVisible(False)
+        self.details_filesize_group = filesize_group
+        self.details_filesize_label = filesize
+        grid_layout.addWidget(filesize_group, 1, 1)
+
+        metadata_layout.addWidget(grid_widget)
+
+        version_group, version = _make_metadata_group(
+            "VERSION",
+            f"font-size: 16px; color: {self._theme_color('muted', '#6272a4')};",
+        )
+        version_group.setVisible(False)
+        self.details_version_group = version_group
+        self.details_version_label = version
+        metadata_layout.addWidget(version_group)
+
+        genres_group = QWidget()
+        genres_layout_outer = QVBoxLayout(genres_group)
+        genres_layout_outer.setContentsMargins(0, 0, 0, 0)
+        genres_layout_outer.setSpacing(3)
+        genres_header = QLabel("GENRES")
+        genres_header.setStyleSheet(f"font-size: 10px; color: {muted}; font-weight: 700;")
+        genres_layout_outer.addWidget(genres_header)
+
+        genres_chip_container = QWidget()
+        genres_chip_layout = QHBoxLayout(genres_chip_container)
+        genres_chip_layout.setContentsMargins(0, 0, 0, 0)
+        genres_chip_layout.setSpacing(8)
+        genres_layout_outer.addWidget(genres_chip_container)
+
+        genres_group.setVisible(False)
+        self.details_genres_group = genres_group
+        self.details_genres_layout = genres_chip_layout
+
+        self.details_genres_label = None
+
+        metadata_layout.addWidget(genres_group)
+        overview_content_layout.addWidget(metadata_container)
         overview_content_layout.addStretch()
 
         overview_scroll.setWidget(overview_content)
@@ -1954,7 +2051,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         scroll_width = self.server_platforms_list.verticalScrollBar().sizeHint().width()
         frame_width = self.server_platforms_list.frameWidth() * 2
         target_width = content_width + scroll_width + frame_width + 20
-        target_width = max(120, min(220, target_width))
+        target_width = max(120, min(300, target_width))
         self.server_platforms_list.setFixedWidth(target_width)
 
     def _server_connected(self) -> bool:
@@ -2536,6 +2633,39 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         library_path_text = library_path_value.strip() if isinstance(library_path_value, str) else ""
         ps3_library_path = str(Path(library_path_text).expanduser() / "PlayStation 3") if library_path_text else ""
         return resolve_ps3_vfs_dev_hdd0_path(emulator_path_text, ps3_library_path)
+
+
+    def _ps3_games_dir_for_game(self, game: dict[str, str]) -> Path | None:
+        platform_value = game.get("platform", "")
+        platform = platform_value.strip() if isinstance(platform_value, str) else ""
+        emulator_name = self._default_emulator_name_for_platform(platform)
+        if not emulator_name:
+            return None
+        emulator_entry = self._emulator_entry_by_name(emulator_name)
+        if emulator_entry is None:
+            return None
+        emulator_path_value = emulator_entry.get("path", "")
+        emulator_path_text = emulator_path_value.strip() if isinstance(emulator_path_value, str) else ""
+        library_path_value = self.config.get("library_path", "")
+        library_path_text = library_path_value.strip() if isinstance(library_path_value, str) else ""
+        ps3_library_path = str(Path(library_path_text).expanduser() / "PlayStation 3") if library_path_text else ""
+        return resolve_ps3_vfs_games_path(emulator_path_text, ps3_library_path)
+
+
+    def _rpcs3_data_root_for_game(self, game: dict[str, str]) -> Path | None:
+        platform_value = game.get("platform", "")
+        platform = platform_value.strip() if isinstance(platform_value, str) else ""
+        emulator_name = self._default_emulator_name_for_platform(platform)
+        if not emulator_name:
+            return None
+        emulator_entry = self._emulator_entry_by_name(emulator_name)
+        if emulator_entry is None:
+            return None
+        emulator_path_value = emulator_entry.get("path", "")
+        emulator_path_text = emulator_path_value.strip() if isinstance(emulator_path_value, str) else ""
+        if not emulator_path_text:
+            return None
+        return resolve_rpcs3_data_root(emulator_path_text)
 
 
     def _is_emulators_platform(self, game: dict[str, str]) -> bool:

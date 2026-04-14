@@ -25,7 +25,17 @@ class GameDetailsWindowProtocol(Protocol):
     current_details_cloud_mode: str
     details_title_label: QLabel | None
     details_cover_label: QLabel | None
+    details_platform_group: QWidget | None
+    details_rating_group: QWidget | None
+    details_regions_group: QWidget | None
+    details_filesize_group: QWidget | None
+    details_version_group: QWidget | None
+    details_genres_group: QWidget | None
+    details_genres_layout: QHBoxLayout | None
     details_platform_label: QLabel | None
+    details_genres_label: QLabel | None
+    details_regions_label: QLabel | None
+    details_filesize_label: QLabel | None
     details_version_label: QLabel | None
     details_rating_label: QLabel | None
     details_description_label: QLabel | None
@@ -106,6 +116,9 @@ class GameDetailsWindowProtocol(Protocol):
         ...
 
     def _details_update_button_text_for_game(self, game: dict[str, str]) -> str:
+        ...
+
+    def _format_size(self, size_bytes: float) -> str:
         ...
 
 
@@ -222,7 +235,75 @@ def open_game_details(window: GameDetailsWindowProtocol, game: dict[str, str], s
         window.details_cover_label.setText("Cover Art")
         window._queue_game_cover_load(game, window.details_cover_label)
     if window.details_platform_label is not None:
-        window.details_platform_label.setText(f"Platform: {game['platform']}")
+        platform_value = game.get("platform", "")
+        platform_text = platform_value.strip() if isinstance(platform_value, str) else ""
+        platform_group = getattr(window, "details_platform_group", None)
+        if platform_group is not None:
+            window.details_platform_label.setText(platform_text)
+            platform_group.setVisible(True)
+        else:
+            window.details_platform_label.setText(f"Platform: {platform_text}")
+            window.details_platform_label.setVisible(bool(platform_text))
+
+    genres_value = game.get("genres", "")
+    genres_text = genres_value.strip() if isinstance(genres_value, str) else ""
+    genres_layout = getattr(window, "details_genres_layout", None)
+    genres_group = getattr(window, "details_genres_group", None)
+    if genres_layout is not None:
+        while genres_layout.count() > 0:
+            item = genres_layout.takeAt(0)
+            chip_widget = item.widget()
+            if chip_widget is not None:
+                chip_widget.deleteLater()
+        genre_parts = [part.strip() for part in genres_text.split(",")]
+        surface = window._theme_color("surface", "#44475a")
+        text_color = window._theme_color("text", "#f8f8f2")
+        for genre in genre_parts:
+            if not genre:
+                continue
+            chip = QLabel(genre)
+            chip.setStyleSheet(
+                f"background-color: {surface}; color: {text_color}; border-radius: 10px; padding: 3px 10px; font-size: 12px;"
+            )
+            genres_layout.addWidget(chip)
+        genres_layout.addStretch()
+        if genres_group is not None:
+            genres_group.setVisible(bool(genres_text))
+    elif window.details_genres_label is not None:
+        # Legacy fallback for test stubs that don't have the chip layout
+        window.details_genres_label.setText(f"Genres: {genres_text}")
+        window.details_genres_label.setVisible(bool(genres_text))
+        if genres_group is not None:
+            genres_group.setVisible(bool(genres_text))
+
+    if window.details_regions_label is not None:
+        regions_value = game.get("regions", "")
+        regions_text = regions_value.strip() if isinstance(regions_value, str) else ""
+        regions_group = getattr(window, "details_regions_group", None)
+        if regions_group is not None:
+            window.details_regions_label.setText(regions_text)
+            regions_group.setVisible(bool(regions_text))
+        else:
+            window.details_regions_label.setText(f"Regions: {regions_text}")
+            window.details_regions_label.setVisible(bool(regions_text))
+
+    if window.details_filesize_label is not None:
+        filesize_text = ""
+        filesize_value = game.get("filesize_bytes", "")
+        raw_filesize = filesize_value.strip() if isinstance(filesize_value, str) else ""
+        if raw_filesize.isdigit():
+            format_size_fn = getattr(window, "_format_size", None)
+            if callable(format_size_fn):
+                filesize_text = format_size_fn(float(raw_filesize))
+            else:
+                filesize_text = raw_filesize
+        filesize_group = getattr(window, "details_filesize_group", None)
+        if filesize_group is not None:
+            window.details_filesize_label.setText(filesize_text)
+            filesize_group.setVisible(bool(filesize_text))
+        else:
+            window.details_filesize_label.setText(f"Filesize: {filesize_text}")
+            window.details_filesize_label.setVisible(bool(filesize_text))
     version_label_text_fn = getattr(window, "_details_version_label_text_for_game", None)
     version_label_text = (
         version_label_text_fn(game)
@@ -230,12 +311,41 @@ def open_game_details(window: GameDetailsWindowProtocol, game: dict[str, str], s
         else _default_details_version_label_text(game)
     )
     if window.details_version_label is not None:
-        window.details_version_label.setText(version_label_text)
-        window.details_version_label.setVisible(bool(version_label_text))
+        version_group = getattr(window, "details_version_group", None)
+        if version_group is not None:
+            normalized_version_text = version_label_text.strip() if isinstance(version_label_text, str) else ""
+            if normalized_version_text.casefold().startswith("version:"):
+                normalized_version_text = normalized_version_text.split(":", 1)[1].strip()
+            window.details_version_label.setText(normalized_version_text)
+            version_group.setVisible(bool(normalized_version_text))
+        else:
+            fallback_version_text = version_label_text if isinstance(version_label_text, str) else ""
+            window.details_version_label.setText(fallback_version_text)
+            window.details_version_label.setVisible(bool(fallback_version_text))
     if window.details_rating_label is not None:
-        window.details_rating_label.setText(f"Rating: {game['rating']}")
+        rating_value = game.get("rating", "")
+        rating_text = rating_value.strip() if isinstance(rating_value, str) else ""
+        if rating_text.casefold() == "n/a":
+            rating_text = ""
+        rating_group = getattr(window, "details_rating_group", None)
+        if rating_group is not None:
+            theme_color_fn = getattr(window, "_theme_color", None)
+            accent = theme_color_fn("accent", "#8be9fd") if callable(theme_color_fn) else "#8be9fd"
+            if rating_text:
+                window.details_rating_label.setText(f'<span style="color:{accent}">★</span> {rating_text}')
+            else:
+                window.details_rating_label.setText("")
+            rating_group.setVisible(bool(rating_text))
+        else:
+            window.details_rating_label.setText(f"Rating: {rating_text}")
+            window.details_rating_label.setVisible(bool(rating_text))
     if window.details_description_label is not None:
-        window.details_description_label.setText(game["description"])
+        description_value = game.get("description", "")
+        description_text = description_value.strip() if isinstance(description_value, str) else ""
+        if description_text.casefold() == "no description available.":
+            description_text = ""
+        window.details_description_label.setText(description_text)
+        window.details_description_label.setVisible(bool(description_text))
     window._update_details_screenshots(game)
     window._show_details_overview()
     window._update_details_action_buttons()

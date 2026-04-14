@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QObject, Signal
 
-from ..core.api import format_http_error_details
+from ..core.api import api_get_json, format_http_error_details
 from ..emulator.source import (
     EmulatorSourceResolutionError,
     normalize_emulator_source_metadata,
@@ -402,6 +402,95 @@ class InstallDownloadWorker(QObject):
         return None
 
 
+class SourceVersionCheckWorker(QObject):
+    finished = Signal(str, str, str)  # (installed_tag, available_tag, error_msg)
+
+    def __init__(self, source_metadata: dict, installed_tag: str) -> None:
+        super().__init__()
+        self.source_metadata = source_metadata
+        self.installed_tag = installed_tag
+
+    def run(self) -> None:
+        try:
+            source = normalize_emulator_source_metadata(self.source_metadata)
+            provider = str(source.get("provider", "")).strip().casefold()
+            print(
+                f"[DEBUG] SourceVersionCheckWorker.run() started, provider={provider}, "
+                f"installed_tag={self.installed_tag}"
+            )
+
+            if provider == "direct":
+                print(
+                    f"[DEBUG] SourceVersionCheckWorker emitting: installed={self.installed_tag} "
+                    f"available=direct error="
+                )
+                self.finished.emit(self.installed_tag, "direct", "")
+                return
+
+            owner = source["owner"]
+            repo = source["repo"]
+            release_tag = str(source.get("release_tag", "")).strip()
+
+            if provider == "github":
+                api_base = f"https://api.github.com/repos/{owner}/{repo}"
+                request_headers = self._github_release_headers()
+                if release_tag and release_tag.casefold() != "latest":
+                    tag_path = quote(release_tag, safe="")
+                    payload = self._load_json(f"{api_base}/releases/tags/{tag_path}", request_headers)
+                else:
+                    payload = self._load_json(f"{api_base}/releases/latest", request_headers)
+            elif provider == "gitea":
+                base_url = str(source.get("base_url", "")).strip().rstrip("/")
+                payload = self._load_json(
+                    f"{base_url}/api/v1/repos/{owner}/{repo}/releases/latest",
+                    {},
+                )
+            else:
+                print(
+                    f"[DEBUG] SourceVersionCheckWorker emitting: installed= available= "
+                    f"error=Unsupported provider: {provider}"
+                )
+                self.finished.emit("", "", f"Unsupported provider: {provider}")
+                return
+
+            if not isinstance(payload, dict):
+                raise ValueError("Source release API returned an unsupported payload shape.")
+            resolved_tag = str(payload.get("tag_name", "")).strip()
+            if not resolved_tag:
+                raise ValueError("Source release API response did not include tag_name.")
+            print(
+                f"[DEBUG] SourceVersionCheckWorker emitting: installed={self.installed_tag} "
+                f"available={resolved_tag} error="
+            )
+            self.finished.emit(self.installed_tag, resolved_tag, "")
+        except Exception as error:
+            print(
+                f"[DEBUG] SourceVersionCheckWorker emitting: installed= available= error={error}"
+            )
+            self.finished.emit("", "", str(error))
+
+    def _github_release_headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        if not str(headers.get("Accept", "")).strip():
+            headers["Accept"] = "application/vnd.github+json"
+        if not str(headers.get("X-GitHub-Api-Version", "")).strip():
+            headers["X-GitHub-Api-Version"] = "2022-11-28"
+        if not str(headers.get("User-Agent", "")).strip():
+            headers["User-Agent"] = "rom-mate-neo"
+        return headers
+
+    def _load_json(self, url: str, headers: dict[str, str]) -> dict[str, Any] | list[dict[str, Any]]:
+        request = Request(url, headers=headers, method="GET")
+        with urlopen(request, timeout=60) as response:
+            raw = response.read()
+        payload = json.loads(raw.decode("utf-8"))
+        if isinstance(payload, dict):
+            return payload
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)]
+        raise ValueError("Source release API returned an unsupported payload shape.")
+
+
 class InstallFinalizeWorker(QObject):
     finished = Signal(object, str, str, str)
     progress = Signal(object, object)
@@ -603,6 +692,25 @@ class DetailsCloudRecordsWorker(QObject):
                     f"result=error message={error}"
                 )
             self.finished.emit(self.request_id, self.save_type, [], str(error))
+
+
+class RomDetailWorker(QObject):
+    finished = Signal(str, dict, str)
+
+    def __init__(self, base_url: str, api_token: str, rom_id: str) -> None:
+        super().__init__()
+        self.base_url = str(base_url).strip()
+        self.api_token = str(api_token).strip()
+        self.rom_id = str(rom_id).strip()
+
+    def run(self) -> None:
+        try:
+            payload = api_get_json(self.base_url, self.api_token, f"/api/roms/{self.rom_id}")
+            if not isinstance(payload, dict):
+                raise ValueError("ROM detail API returned an unsupported payload shape.")
+            self.finished.emit(self.rom_id, payload, "")
+        except Exception as error:
+            self.finished.emit(self.rom_id, {}, str(error))
 
 
 class RetroAchievementsWorker(QObject):

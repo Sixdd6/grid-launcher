@@ -91,6 +91,33 @@ class InstallMetadataTests(unittest.TestCase):
             ),
         )
 
+    def test_sync_install_metadata_to_details_game_copies_new_details_fields(self) -> None:
+        details_game = {
+            "title": "Demo Game",
+            "platform": "PS2",
+        }
+        install_game = {
+            "title": "Demo Game",
+            "platform": "PS2",
+            "rating": "4.0/5",
+            "description": "Updated description",
+            "genres": "Action, Adventure",
+            "regions": "USA",
+            "filesize_bytes": "1024",
+        }
+
+        sync_install_metadata_to_details_game(
+            details_game,
+            install_game,
+            game_key=self._game_key,
+        )
+
+        self.assertEqual(details_game.get("rating"), "4.0/5")
+        self.assertEqual(details_game.get("description"), "Updated description")
+        self.assertEqual(details_game.get("genres"), "Action, Adventure")
+        self.assertEqual(details_game.get("regions"), "USA")
+        self.assertEqual(details_game.get("filesize_bytes"), "1024")
+
 
 if __name__ == "__main__":
     unittest.main()

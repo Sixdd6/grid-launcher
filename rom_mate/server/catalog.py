@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
+from .metadata import details_metadata_from_item
+
 
 def connected_username(me_payload: Any) -> str:
     if not isinstance(me_payload, dict):
@@ -167,6 +169,8 @@ def games_from_rom_items(
         if not isinstance(title, str) or not title.strip():
             continue
 
+        details_metadata = details_metadata_from_item(item)
+
         rom_id = str(item.get("id", "")).strip()
         if rom_id:
             rom_payloads[rom_id] = item
@@ -180,7 +184,6 @@ def games_from_rom_items(
         if _is_xbox360_rom_item(item, resolved_platform):
             xbox360_file_ids_by_category = _ps4_file_ids_by_category(item)
 
-        summary = item.get("summary")
         cover_url = cover_url_from_payload(item)
         screenshot_urls = screenshot_urls_from_payload(item)
         ra_id = item.get("ra_id")
@@ -218,8 +221,11 @@ def games_from_rom_items(
             {
                 "title": title.strip(),
                 "platform": resolved_platform,
-                "rating": "N/A",
-                "description": summary.strip() if isinstance(summary, str) and summary.strip() else "No description available.",
+                "rating": details_metadata.get("rating", ""),
+                "description": details_metadata.get("description", ""),
+                "genres": details_metadata.get("genres", ""),
+                "regions": details_metadata.get("regions", ""),
+                "filesize_bytes": details_metadata.get("filesize_bytes", ""),
                 "cover_url": cover_url,
                 "screenshot_urls": "\n".join(screenshot_urls),
                 "rom_id": rom_id,

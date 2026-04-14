@@ -59,6 +59,12 @@ class _StubWindow:
         self.details_title_label = None
         self.details_cover_label = None
         self.details_platform_label = None
+        self.details_genres_label = None
+        self.details_regions_label = None
+        self.details_filesize_label = None
+        self.details_genres_label = None
+        self.details_regions_label = None
+        self.details_filesize_label = None
         self.details_version_label = None
         self.details_rating_label = None
         self.details_description_label = None
@@ -646,6 +652,10 @@ class _SourceUpdateActionStubWindow:
             return [item for item in value if isinstance(item, dict)]
         return []
 
+    def _emulator_source_installs(self) -> dict[str, dict[str, str]]:
+        value = self.config.get("emulator_source_installs", {})
+        return value if isinstance(value, dict) else {}
+
     def _source_download_entry_for_emulator_name(
         self,
         emulator_name: str,
@@ -1229,7 +1239,7 @@ class EmulatorsPageLayoutTests(unittest.TestCase):
         module = self._load_main_module()
         window = _SourceUpdateActionStubWindow()
 
-        module.MainWindow._start_source_emulator_update_at_index(window, 0)
+        module.MainWindow._do_start_source_emulator_update_at_index(window, 0)
 
         self.assertIsNotNone(window.install_game)
         assert window.install_game is not None
@@ -1429,6 +1439,9 @@ class _OpenDetailsWindowStub:
         self.details_title_label = QLabel()
         self.details_cover_label = QLabel()
         self.details_platform_label = QLabel()
+        self.details_genres_label = QLabel()
+        self.details_regions_label = QLabel()
+        self.details_filesize_label = QLabel()
         self.details_version_label = QLabel()
         self.details_rating_label = QLabel()
         self.details_description_label = QLabel()
@@ -1465,6 +1478,11 @@ class _OpenDetailsWindowStub:
 
     def _show_details_overview(self) -> None:
         self.current_details_cloud_mode = "overview"
+
+    def _format_size(self, size_bytes: float) -> str:
+        if size_bytes >= 1024.0:
+            return f"{size_bytes / 1024.0:.1f} KB"
+        return f"{int(size_bytes)} B"
 
     def _is_emulators_platform(self, game: dict[str, str]) -> bool:
         return False
@@ -1537,6 +1555,53 @@ class GameDetailsVersionLabelTests(unittest.TestCase):
 
         self.assertEqual(window.details_version_label.text(), "")
         self.assertFalse(window.details_version_label.isVisible())
+
+    def test_open_game_details_shows_new_metadata_rows_when_values_present(self) -> None:
+        game = {
+            "title": "Console Game",
+            "platform": "PlayStation 2",
+            "rating": "4.2/5",
+            "description": "Console title.",
+            "genres": "Action, Adventure",
+            "regions": "USA, Europe",
+            "filesize_bytes": "2048",
+            "rom_file_name": "console-game (v01234).zip",
+        }
+        window = _OpenDetailsWindowStub(game)
+
+        open_game_details(window, game, "library")
+
+        self.assertTrue(window.details_platform_label.isVisible())
+        self.assertEqual(window.details_genres_label.text(), "Genres: Action, Adventure")
+        self.assertTrue(window.details_genres_label.isVisible())
+        self.assertEqual(window.details_regions_label.text(), "Regions: USA, Europe")
+        self.assertTrue(window.details_regions_label.isVisible())
+        self.assertEqual(window.details_filesize_label.text(), "Filesize: 2.0 KB")
+        self.assertTrue(window.details_filesize_label.isVisible())
+        self.assertEqual(window.details_rating_label.text(), "Rating: 4.2/5")
+        self.assertTrue(window.details_rating_label.isVisible())
+
+    def test_open_game_details_hides_new_metadata_rows_when_values_missing(self) -> None:
+        game = {
+            "title": "Console Game",
+            "platform": "",
+            "rating": "",
+            "description": "",
+            "genres": "",
+            "regions": "",
+            "filesize_bytes": "",
+            "rom_file_name": "console-game (v01234).zip",
+        }
+        window = _OpenDetailsWindowStub(game)
+
+        open_game_details(window, game, "library")
+
+        self.assertFalse(window.details_platform_label.isVisible())
+        self.assertFalse(window.details_genres_label.isVisible())
+        self.assertFalse(window.details_regions_label.isVisible())
+        self.assertFalse(window.details_filesize_label.isVisible())
+        self.assertFalse(window.details_rating_label.isVisible())
+        self.assertFalse(window.details_description_label.isVisible())
 
 
 class _MainWindowVersionTextStub:

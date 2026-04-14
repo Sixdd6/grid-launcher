@@ -3,6 +3,7 @@ from __future__ import annotations
 import configparser
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Callable
 
@@ -300,6 +301,64 @@ def rpcs3_data_root(emulator_path_text: str) -> Path | None:
     return emulator_dir.resolve()
 
 
+def update_rpcs3_games_yml(
+    data_root: Path,
+    game_id: str,
+    dev_hdd0_root: Path,
+    games_root: Path | None = None,
+) -> bool:
+    normalized_game_id = game_id.strip() if isinstance(game_id, str) else ""
+    if not normalized_game_id:
+        return False
+    if not isinstance(data_root, Path) or not isinstance(dev_hdd0_root, Path):
+        return False
+
+    try:
+        if isinstance(games_root, Path):
+            game_dir = games_root / normalized_game_id
+        else:
+            game_dir = dev_hdd0_root / "game" / normalized_game_id
+
+        game_dir_posix = game_dir.resolve().as_posix()
+        if not game_dir_posix.endswith("/"):
+            game_dir_posix += "/"
+
+        games_yml_path = data_root / "config" / "games.yml"
+        config_dir = data_root / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+
+        existing_lines: list[str] = []
+        if games_yml_path.exists() and games_yml_path.is_file():
+            existing_lines = games_yml_path.read_text(encoding="utf-8").splitlines()
+
+        updated_line = f'{normalized_game_id}: "{game_dir_posix}"'
+        found = False
+        next_lines: list[str] = []
+        for line in existing_lines:
+            stripped = line.strip()
+            if ":" not in stripped:
+                next_lines.append(line)
+                continue
+            raw_key = stripped.split(":", 1)[0].strip().strip('"').strip("'")
+            if raw_key == normalized_game_id:
+                next_lines.append(updated_line)
+                found = True
+                continue
+            next_lines.append(line)
+
+        if not found:
+            next_lines.append(updated_line)
+
+        output_text = "\n".join(next_lines)
+        if next_lines:
+            output_text += "\n"
+        games_yml_path.write_text(output_text, encoding="utf-8")
+    except OSError:
+        return False
+
+    return True
+
+
 def trigger_rpcs3_firmware_install(exe_path: str, pup_path: str) -> bool:
     """Launch RPCS3 with --installfw to install PS3 firmware. Shows a GUI dialog.
 
@@ -324,16 +383,16 @@ def ensure_rpcs3_vfs_settings(emulator_path_text: str, ps3_library_path: str) ->
     """Write/update portable/config/vfs.yml to redirect /dev_hdd0/ into the PS3 library folder.
 
     Only writes keys that are not already present, preserving any user-set VFS paths.
-    Returns {"vfs_path": path_or_None, "dev_hdd0": path_str, "changed": bool}.
+    Returns {"vfs_path": path_or_None, "dev_hdd0": path_str, "games": path_str, "changed": bool}.
     """
     path_text = emulator_path_text.strip() if isinstance(emulator_path_text, str) else ""
     library_text = ps3_library_path.strip() if isinstance(ps3_library_path, str) else ""
     if not path_text or not library_text:
-        return {"vfs_path": None, "dev_hdd0": "", "changed": False}
+        return {"vfs_path": None, "dev_hdd0": "", "games": "", "changed": False}
 
     emulator_path = Path(path_text).expanduser()
     if not emulator_path.exists() or not emulator_path.is_file():
-        return {"vfs_path": None, "dev_hdd0": "", "changed": False}
+        return {"vfs_path": None, "dev_hdd0": "", "games": "", "changed": False}
 
     emulator_dir = emulator_path.parent
     portable_dir = emulator_dir / "portable"
@@ -342,13 +401,18 @@ def ensure_rpcs3_vfs_settings(emulator_path_text: str, ps3_library_path: str) ->
 
     library_path = Path(library_text).expanduser().resolve()
     dev_hdd0_path = library_path / ".vfs" / "dev_hdd0"
+    games_path = library_path / ".vfs" / "games"
     dev_hdd0_str = dev_hdd0_path.as_posix()
     if not dev_hdd0_str.endswith("/"):
         dev_hdd0_str += "/"
+    games_str = games_path.as_posix()
+    if not games_str.endswith("/"):
+        games_str += "/"
 
     desired: dict[str, str] = {
         "$(EmulatorDir)": "",
         "/dev_hdd0/": dev_hdd0_str,
+        "/games/": games_str,
     }
 
     try:
@@ -387,11 +451,12 @@ def ensure_rpcs3_vfs_settings(emulator_path_text: str, ps3_library_path: str) ->
             vfs_path.write_text(output_text, encoding="utf-8")
 
     except OSError:
-        return {"vfs_path": None, "dev_hdd0": "", "changed": False}
+        return {"vfs_path": None, "dev_hdd0": "", "games": "", "changed": False}
 
     return {
         "vfs_path": str(vfs_path),
         "dev_hdd0": str(dev_hdd0_path),
+        "games": str(games_path),
         "changed": changed,
     }
 
@@ -426,6 +491,36 @@ def ps3_vfs_dev_hdd0_path(emulator_path_text: str, ps3_library_path: str) -> Pat
         return None
     library_path = Path(library_text).expanduser().resolve()
     return library_path / ".vfs" / "dev_hdd0"
+
+
+def ps3_vfs_games_path(emulator_path_text: str, ps3_library_path: str) -> Path | None:
+    """Return the resolved games root for PS3 disc installs.
+
+    Reads from vfs.yml if present; falls back to <ps3_library>/.vfs/games/.
+    Returns None if neither emulator path nor library path is usable.
+    """
+    path_text = emulator_path_text.strip() if isinstance(emulator_path_text, str) else ""
+    library_text = ps3_library_path.strip() if isinstance(ps3_library_path, str) else ""
+
+    for data_root in rpcs3_data_root_candidates(path_text):
+        for vfs_candidate in _vfs_path_candidates_for_root(data_root):
+            if not vfs_candidate.exists() or not vfs_candidate.is_file():
+                continue
+            try:
+                raw_content = vfs_candidate.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            raw_emulator_root = _yaml_scalar_value(raw_content, "$(EmulatorDir)")
+            emulator_root = _resolve_rpcs3_path(data_root, raw_emulator_root)
+            raw_games = _yaml_scalar_value(raw_content, "/games/")
+            if raw_games:
+                return _resolve_rpcs3_path(emulator_root, raw_games)
+            break
+
+    if not library_text:
+        return None
+    library_path = Path(library_text).expanduser().resolve()
+    return library_path / ".vfs" / "games"
 
 
 def ensure_rpcs3_settings(emulator_path_text: str, ps3_library_path: str = "") -> dict[str, object]:
@@ -639,3 +734,24 @@ def rpcs3_save_path_overrides(
         seen.add(key)
         unique.append(str(resolved))
     return unique
+
+
+def copy_ps3_custom_config_to_emulator(vfs_config_dir: Path, rpcs3_data_root: Path) -> None:
+    """Copy all PS3 custom config files from the platform VFS into the RPCS3 emulator config dir.
+
+    vfs_config_dir should be <platform_vfs_root>/config.
+    Files in vfs_config_dir/custom_configs/ are merged into rpcs3_data_root/config/custom_configs/.
+    Silently skips if the source directory doesn't exist. Wraps OSError silently so a config
+    copy failure never prevents game launch.
+    """
+    src_dir = vfs_config_dir / "custom_configs"
+    if not src_dir.is_dir():
+        return
+    dest_dir = rpcs3_data_root / "config" / "custom_configs"
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for src_file in src_dir.iterdir():
+            if src_file.is_file():
+                shutil.copy2(src_file, dest_dir / src_file.name)
+    except OSError:
+        pass

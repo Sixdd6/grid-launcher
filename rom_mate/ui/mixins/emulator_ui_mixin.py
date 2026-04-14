@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QSize, QTimer
+from PySide6.QtCore import QSize, QThread, QTimer
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -29,6 +29,7 @@ from rom_mate.core import (
     normalize_emulators,
     normalize_installed_games,
 )
+from rom_mate.background.workers import SourceVersionCheckWorker
 from rom_mate.emulator import (
     all_retroarch_cores,
     apply_manual_emulator_profile_defaults,
@@ -425,7 +426,7 @@ class EmulatorUIMixin:
             size=action_icon_size,
         )
         source_update_icon = themed_svg_icon_fn(
-            "save-floppy-svgrepo-com.svg",
+            "cloud-download-svgrepo-com.svg",
             accent_color,
             size=action_icon_size,
         )
@@ -938,6 +939,65 @@ class EmulatorUIMixin:
         self._start_async_install(install_game)
 
     def _start_source_emulator_update_at_index(self, index: int) -> None:
+        emulator_rows = self._normalize_emulators(self._emulators())
+        if index < 0 or index >= len(emulator_rows):
+            return
+
+        emulator = emulator_rows[index]
+        emulator_name = str(emulator.get("name", "")).strip()
+        print(f"[DEBUG] Update from source clicked for: {emulator_name}")
+        source_entry = self._source_download_entry_for_emulator_name(emulator_name)
+        if source_entry is None:
+            print("[DEBUG] No source entry found")
+        else:
+            print(f"[DEBUG] source_entry: {source_entry}")
+        if source_entry is None:
+            QMessageBox.information(
+                self,
+                "No Source",
+                "No source download configured for this emulator.",
+            )
+            return
+
+        source_id_value = source_entry.get("source_id", "")
+        source_id = source_id_value.strip() if isinstance(source_id_value, str) else ""
+        installed_info = self._emulator_source_installs().get(source_id, {})
+        installed_tag_value = installed_info.get("release_tag", "latest") if isinstance(installed_info, dict) else "latest"
+        installed_tag = installed_tag_value.strip() if isinstance(installed_tag_value, str) else "latest"
+        if not installed_tag:
+            installed_tag = "latest"
+        print(f"[DEBUG] installed_tag: {installed_tag}")
+
+        source_check_thread = getattr(self, "_source_check_thread", None)
+        source_check_running = False
+        if source_check_thread is not None:
+            try:
+                source_check_running = bool(source_check_thread.isRunning())
+            except Exception:
+                source_check_running = False
+        print(f"[DEBUG] Concurrent check guard: thread={source_check_thread}, running={source_check_running}")
+        if source_check_thread is not None and source_check_running:
+            return
+
+        self._source_check_emulator_name = emulator_name
+        self._source_check_index = index
+        source_metadata = source_entry.get("source_metadata", {})
+        worker = SourceVersionCheckWorker(source_metadata, installed_tag)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_source_version_check_finished_slot)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(lambda: setattr(self, "_source_check_thread", None))
+        thread.finished.connect(lambda: setattr(self, "_source_check_worker", None))
+        print("[DEBUG] Starting SourceVersionCheckWorker thread")
+        thread.start()
+        self._source_check_thread = thread
+        self._source_check_worker = worker
+
+    def _do_start_source_emulator_update_at_index(self, index: int) -> None:
         emulators = self._normalize_emulators(self._emulators())
         if index < 0 or index >= len(emulators):
             return
@@ -958,6 +1018,60 @@ class EmulatorUIMixin:
 
         install_game = self._build_source_emulator_install_game(source_entry, "source_emulator_update")
         self._start_async_install(install_game)
+
+    def _on_source_version_check_finished_slot(
+        self, installed_tag: str, available_tag: str, error_msg: str
+    ) -> None:
+        index = getattr(self, "_source_check_index", 0)
+        self._on_source_version_check_finished(installed_tag, available_tag, error_msg, index)
+
+    def _on_source_version_check_finished(
+        self, installed_tag: str, available_tag: str, error_msg: str, index: int
+    ) -> None:
+        print(
+            f"[DEBUG] _on_source_version_check_finished called: installed={installed_tag} "
+            f"available={available_tag} error={error_msg} index={index}"
+        )
+        if error_msg:
+            print("[DEBUG] Branch: error")
+            QMessageBox.warning(self, "Version Check Failed", f"Could not check for updates:\n{error_msg}")
+            return
+
+        installed_display = installed_tag if installed_tag and installed_tag.casefold() != "latest" else "unknown"
+        if available_tag == "direct":
+            available_display = "Unknown (direct source)"
+        else:
+            available_display = available_tag
+
+        if (
+            installed_tag
+            and available_tag
+            and installed_tag != "latest"
+            and available_tag != "direct"
+            and installed_tag.casefold() == available_tag.casefold()
+        ):
+            print("[DEBUG] Branch: no updates")
+            QMessageBox.information(self, "No Updates Available", f"Already up to date ({available_display}).")
+            return
+
+        emulator_name = getattr(self, "_source_check_emulator_name", "emulator")
+        print("[DEBUG] Branch: show update dialog")
+        print("[DEBUG] _show_update_dialog() fired")
+        try:
+            reply = QMessageBox.question(
+                self,
+                "Update Available",
+                f"Update {emulator_name}?\n\nInstalled: {installed_display}\nAvailable: {available_display}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            print(f"[DEBUG] QMessageBox.question returned: {reply}")
+            if reply == QMessageBox.StandardButton.Yes:
+                self._do_start_source_emulator_update_at_index(index)
+        except Exception as e:
+            import traceback
+            print(f"[DEBUG] Exception in update dialog: {e}")
+            traceback.print_exc()
 
     def _extract_emulator_archive(self, emulator_name: str, archive_path: Path) -> tuple[str, str]:
         library_path = self._library_path_dir()

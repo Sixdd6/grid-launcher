@@ -39,6 +39,13 @@ def _has_ps3_game_content(directory: Path) -> bool:
         return False
 
 
+def _is_disc_game_id_directory(directory: Path) -> bool:
+    try:
+        return (directory / "PS3_GAME").is_dir() and (directory / "PS3_DISC.SFB").is_file()
+    except OSError:
+        return False
+
+
 def detected_ps3_game_id(extracted_dir: Path, installed_paths: list[Path]) -> str:
     candidate_paths = [extracted_dir, *installed_paths]
     game_id = ps3_game_id_from_paths(candidate_paths)
@@ -67,6 +74,7 @@ def ps3_classify_extracted_contents(
     """Scan extracted_dir and classify each top-level entry.
 
     Returns a list of (path, classification) tuples. Classifications:
+            "disc_game_id_dir" — BLUS30336/ with PS3_GAME/ and PS3_DISC.SFB (disc-style extracted layout)
       "game_id_dir"      — BLUS30336/ with PS3_GAME/ inside
       "trophy_dir"       — NPWR##### directory
       "bare_disc_dir"    — PS3_GAME/ at top level (disc dump, no ID wrapper)
@@ -101,6 +109,10 @@ def ps3_classify_extracted_contents(
             continue
 
         # BLUS30336/ with PS3_GAME inside -> game_id_dir
+        if _PS3_GAME_ID_RE.match(name_upper) and _is_disc_game_id_directory(entry):
+            results.append((entry, "disc_game_id_dir"))
+            continue
+
         if _PS3_GAME_ID_RE.match(name_upper) and _has_ps3_game_content(entry):
             results.append((entry, "game_id_dir"))
             continue
@@ -139,19 +151,31 @@ def ps3_route_extracted_contents(
     extracted_dir: Path,
     dev_hdd0_root: Path,
     iso_extract_fn: Callable[[Path, Path], Path],
+    games_root: Path | None = None,
+    rpcs3_data_root: Path | None = None,
 ) -> tuple[str, list[Path]]:
     """Route classified PS3 archive contents into the correct VFS destinations.
 
     Returns (game_id, installed_paths) where installed_paths are directories
     written under dev_hdd0_root. A config/ entry at the archive root is merged
-    into <data_root>/config/ where data_root is dev_hdd0_root.parent.
+    into <rpcs3_data_root>/config/ when provided, otherwise
+    <dev_hdd0_root.parent>/config/.
     """
     classified = ps3_classify_extracted_contents(extracted_dir)
     installed_paths: list[Path] = []
     game_id = ""
 
     for item_path, classification in classified:
-        if classification == "game_id_dir":
+        if classification == "disc_game_id_dir":
+            _id = item_path.name.upper()
+            destination_root = games_root if isinstance(games_root, Path) else (dev_hdd0_root / "game")
+            dest = destination_root / _id
+            _copytree_merge(item_path, dest)
+            installed_paths.append(dest)
+            if not game_id:
+                game_id = _id
+
+        elif classification == "game_id_dir":
             _id = item_path.name.upper()
             dest = dev_hdd0_root / "game" / _id
             _copytree_merge(item_path, dest)
@@ -182,7 +206,11 @@ def ps3_route_extracted_contents(
             with tempfile.TemporaryDirectory() as tmp_dir:
                 iso_extracted = iso_extract_fn(item_path, Path(tmp_dir))
                 iso_game_id, iso_paths = ps3_route_extracted_contents(
-                    iso_extracted, dev_hdd0_root, iso_extract_fn
+                    iso_extracted,
+                    dev_hdd0_root,
+                    iso_extract_fn,
+                    games_root=games_root,
+                    rpcs3_data_root=rpcs3_data_root,
                 )
                 installed_paths.extend(iso_paths)
                 if not game_id and iso_game_id:
@@ -221,8 +249,9 @@ def ps3_route_extracted_contents(
                         pass
 
         elif classification == "config_dir":
-            # Merge config/ into data_root/config/ (data_root is parent of dev_hdd0)
-            dest = dev_hdd0_root.parent / "config"
+            # Merge config/ into rpcs3_data_root/config/ (the emulator config dir)
+            effective_data_root = rpcs3_data_root if rpcs3_data_root is not None else dev_hdd0_root.parent
+            dest = effective_data_root / "config"
             _copytree_merge(item_path, dest)
             installed_paths.append(dest)
 

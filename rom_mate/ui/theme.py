@@ -331,12 +331,17 @@ def theme_stylesheet(colors: Mapping[str, str] | None) -> str:
         QListWidget#installedEmulatorList::item:alternate {{
             background-color: {resolved_colors['surface_alt']};
         }}
+        QListWidget#nativeSaveDirList::item:alternate {{
+            background-color: {resolved_colors['surface_alt']};
+        }}
         QListWidget#installedEmulatorList::item:hover,
-        QListWidget#defaultMappingList::item:hover {{
+        QListWidget#defaultMappingList::item:hover,
+        QListWidget#nativeSaveDirList::item:hover {{
             background-color: transparent;
         }}
         QListWidget#installedEmulatorList::item:alternate:hover,
-        QListWidget#defaultMappingList::item:alternate:hover {{
+        QListWidget#defaultMappingList::item:alternate:hover,
+        QListWidget#nativeSaveDirList::item:alternate:hover {{
             background-color: {resolved_colors['surface_alt']};
         }}
         QLineEdit, QComboBox {{

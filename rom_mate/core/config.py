@@ -127,6 +127,9 @@ def normalize_installed_games(
         cover_url = item.get("cover_url")
         cached_cover_path = item.get("cached_cover_path")
         screenshot_urls = item.get("screenshot_urls")
+        genres = item.get("genres")
+        regions = item.get("regions")
+        filesize_bytes = item.get("filesize_bytes")
         rom_id = item.get("rom_id")
         ra_id = item.get("ra_id", "")
         server_updated_at = item.get("server_updated_at")
@@ -148,6 +151,9 @@ def normalize_installed_games(
             "cover_url": cover_url.strip() if isinstance(cover_url, str) else "",
             "cached_cover_path": cached_cover_path.strip() if isinstance(cached_cover_path, str) else "",
             "screenshot_urls": screenshot_urls.strip() if isinstance(screenshot_urls, str) else "",
+            "genres": genres.strip() if isinstance(genres, str) else "",
+            "regions": regions.strip() if isinstance(regions, str) else "",
+            "filesize_bytes": filesize_bytes.strip() if isinstance(filesize_bytes, str) else "",
             "rom_id": rom_id.strip() if isinstance(rom_id, str) else "",
             "ra_id": ra_id.strip() if isinstance(ra_id, str) else "",
             "server_updated_at": server_updated_at.strip() if isinstance(server_updated_at, str) else "",

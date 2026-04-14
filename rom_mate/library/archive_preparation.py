@@ -902,6 +902,8 @@ def prepare_installed_game_without_ui(
     extract_archive_for_game: Callable[[dict[str, str], Path, Callable[[int, int], None] | None], tuple[Path, Path]],
     is_ps3_platform: Callable[[dict[str, str]], bool],
     ps3_dev_hdd0_root: Callable[[dict[str, str]], Path | None] | None = None,
+    ps3_games_root: Callable[[dict[str, str]], Path | None] | None = None,
+    ps3_rpcs3_data_root: Callable[[dict[str, str]], Path | None] | None = None,
     cleanup_archive_on_success: bool = True,
     install_progress_callback: Callable[[int, int], None] | None = None,
 ) -> tuple[dict[str, str] | None, str]:
@@ -957,14 +959,26 @@ def prepare_installed_game_without_ui(
         dev_hdd0_root = ps3_dev_hdd0_root(prepared) if callable(ps3_dev_hdd0_root) else None
         if dev_hdd0_root is None:
             return None, f"No PS3 VFS dev_hdd0 path configured for {prepared.get('title', 'Game')}"
+        games_root = ps3_games_root(prepared) if callable(ps3_games_root) else None
+        rpcs3_data_root = ps3_rpcs3_data_root(prepared) if callable(ps3_rpcs3_data_root) else None
         try:
             game_id, installed_paths = ps3_route_extracted_contents(
-                extracted_dir, dev_hdd0_root, extract_iso_to_ps3_layout
+                extracted_dir,
+                dev_hdd0_root,
+                extract_iso_to_ps3_layout,
+                games_root=games_root,
+                rpcs3_data_root=rpcs3_data_root,
             )
             if not game_id:
                 return None, f"No PS3 game ID found in archive for {prepared.get('title', 'Game')}"
             prepared["ps3_game_id"] = game_id
-            game_install_dir = dev_hdd0_root / "game" / game_id
+            game_install_dir = next(
+                (
+                    path for path in installed_paths
+                    if path.name.upper() == game_id.upper()
+                ),
+                dev_hdd0_root / "game" / game_id,
+            )
             prepared["extracted_path"] = str(game_install_dir)
             prepared["extracted_dir"] = str(game_install_dir)
             trophy_paths = [
@@ -1037,7 +1051,18 @@ def prepare_native_game_update_without_ui(
     prepared = dict(installed_game)
 
     # Merge server-side metadata from the update into the prepared record.
-    for field in ("rom_id", "rom_file_name", "server_updated_at", "description", "rating", "screenshot_urls", "ra_id"):
+    for field in (
+        "rom_id",
+        "rom_file_name",
+        "server_updated_at",
+        "description",
+        "rating",
+        "genres",
+        "regions",
+        "filesize_bytes",
+        "screenshot_urls",
+        "ra_id",
+    ):
         value = update_game.get(field, "")
         if value:
             prepared[field] = value
