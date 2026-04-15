@@ -60,6 +60,7 @@ ApplicationWindow {
 
             width: parent ? parent.width : 0
             height: parent ? parent.height : 0
+            property int _prevTabIndex: 0
 
             ViewTabBar {
                 id: tabBar
@@ -75,6 +76,29 @@ ApplicationWindow {
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 initialItem: homeViewComponent
+
+                // slideDir: 1 = new view enters from right (navigating to higher index)
+                //           -1 = new view enters from left (navigating to lower index)
+                property int slideDir: 1
+
+                replaceEnter: Transition {
+                    NumberAnimation {
+                        property: "x"
+                        from: innerStack.slideDir * innerStack.width
+                        to: 0
+                        duration: 220
+                        easing.type: Easing.OutCubic
+                    }
+                }
+                replaceExit: Transition {
+                    NumberAnimation {
+                        property: "x"
+                        from: 0
+                        to: -innerStack.slideDir * innerStack.width
+                        duration: 220
+                        easing.type: Easing.OutCubic
+                    }
+                }
             }
 
             Component { id: homeViewComponent;    HomeView    { stackView: innerStack; outerStackRef: outerStack } }
@@ -84,6 +108,8 @@ ApplicationWindow {
             Connections {
                 target: tabBar
                 function onTabSelected(index) {
+                    innerStack.slideDir = index > tabRoot._prevTabIndex ? 1 : -1
+                    tabRoot._prevTabIndex = index
                     if (index === 0) innerStack.replace(homeViewComponent)
                     else if (index === 1) innerStack.replace(libraryViewComponent)
                     else if (index === 2) innerStack.replace(serverViewComponent)

@@ -72,7 +72,7 @@ class AppBackend(QObject):
         games = self._config.get("installed_games", [])
         if not isinstance(games, list):
             return []
-        return games
+        return [g for g in games if g.get("platform", "").strip().casefold() != "emulators"]
 
     @Property(list, notify=favoritesGamesChanged)
     def favoritesGames(self) -> list:

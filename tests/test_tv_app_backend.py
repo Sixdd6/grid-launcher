@@ -49,6 +49,17 @@ class TestAppBackendConfigDefaults(unittest.TestCase):
         backend = self._make_backend({"installed_games": games})
         self.assertEqual(backend.libraryGames, games)
 
+    def test_library_games_excludes_emulator_platform_entries(self):
+        games = [
+            {"title": "Doom", "platform": "PC"},
+            {"title": "RetroArch", "platform": "emulators"},
+            {"title": "Dolphin", "platform": "Emulators"},
+        ]
+        backend = self._make_backend({"installed_games": games})
+        result = backend.libraryGames
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["title"], "Doom")
+
     def test_library_games_invalid_type_returns_empty(self):
         backend = self._make_backend({"installed_games": "bad"})
         self.assertEqual(backend.libraryGames, [])

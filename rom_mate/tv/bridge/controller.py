@@ -222,11 +222,11 @@ class _PygameGuidePollThread(QThread):
         pygame.init()
         pygame.joystick.init()
 
-        joysticks: list[Any] = []
+        joysticks: dict[int, Any] = {}
         for i in range(pygame.joystick.get_count()):
             js = pygame.joystick.Joystick(i)
             js.init()
-            joysticks.append(js)
+            joysticks[i] = js
 
         print(f"[TV Controller] pygame guide-thread: {len(joysticks)} joystick(s)", file=sys.stderr)
 
@@ -234,7 +234,27 @@ class _PygameGuidePollThread(QThread):
             try:
                 pygame.event.pump()
                 for event in pygame.event.get():
-                    if event.type == pygame.JOYBUTTONDOWN and event.button == 10:
+                    if event.type == pygame.JOYDEVICEADDED:
+                        js = pygame.joystick.Joystick(event.device_index)
+                        js.init()
+                        joysticks[event.device_index] = js
+                        print(
+                            f"[TV Controller] pygame guide-thread added joystick idx={event.device_index}",
+                            file=sys.stderr,
+                        )
+                    elif event.type == pygame.JOYDEVICEREMOVED:
+                        removed_key = None
+                        for key, js in joysticks.items():
+                            if js.get_instance_id() == event.instance_id:
+                                removed_key = key
+                                break
+                        if removed_key is not None:
+                            joysticks.pop(removed_key, None)
+                        print(
+                            f"[TV Controller] pygame guide-thread removed joystick instance={event.instance_id}",
+                            file=sys.stderr,
+                        )
+                    elif event.type == pygame.JOYBUTTONDOWN and event.button == 10:
                         self.event_received.emit("BTN_MODE", 1.0)
                     elif event.type == pygame.JOYBUTTONUP and event.button == 10:
                         self.event_received.emit("BTN_MODE", 0.0)

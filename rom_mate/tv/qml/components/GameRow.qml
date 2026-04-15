@@ -38,13 +38,14 @@ Item {
 
         ListView {
             id: listView
-            width: parent.width - (root.homeStyle ? 48 : 0)
+            x: root.homeStyle ? 48 : 0
+            width: parent.width - (root.homeStyle ? 48 + 48 : 0)
             height: root._cardHeight + (root.homeStyle ? 38 : 18)
             orientation: ListView.Horizontal
             spacing: root.homeStyle ? 20 : 12
             clip: !root.homeStyle
             cacheBuffer: 0
-            leftMargin: root.homeStyle ? 28 : 16
+            leftMargin: root.homeStyle ? 0 : 16
             rightMargin: root.homeStyle ? 48 : 16
             keyNavigationEnabled: true
             focus: root.activeFocus

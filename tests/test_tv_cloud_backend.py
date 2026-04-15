@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from PySide6.QtCore import QCoreApplication
 
-from rom_mate.tv.bridge.cloud_backend import CloudBackend, _SlotFetchWorker
+from rom_mate.tv.bridge.cloud_backend import CloudBackend, _CloudUploadWorker, _SlotFetchWorker
 
 BASE_CONFIG = {
     "server_url": "http://romm.local",
@@ -190,6 +190,141 @@ class TestCloudBackend(unittest.TestCase):
         backend = CloudBackend(dict(BASE_CONFIG))
         backend.syncConfig({"api_token": "new"})
         self.assertEqual(backend._config["api_token"], "new")
+
+    def test_upload_save_emits_upload_complete_false_when_no_credentials(self):
+        backend = CloudBackend(dict(BASE_CONFIG))
+        received: list[tuple[bool, str]] = []
+        backend.uploadComplete.connect(lambda ok, msg: received.append((ok, msg)))
+
+        with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=False):
+            backend.uploadSave({"id": "5", "name": "Game"}, "save")
+
+        self.assertEqual(received, [(False, "Not signed in to cloud saves.")])
+
+    def test_upload_save_starts_thread_when_credentials_present(self):
+        backend = CloudBackend(dict(BASE_CONFIG))
+
+        with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
+            "rom_mate.tv.bridge.cloud_backend.QThread.start"
+        ) as mock_thread_start:
+            backend.uploadSave({"id": "5", "name": "Game", "install_dir": "/tmp/fake"}, "save")
+
+        mock_thread_start.assert_called_once_with()
+        self.assertIsNotNone(backend._upload_thread)
+
+    def test_on_upload_done_emits_upload_complete(self):
+        backend = CloudBackend(dict(BASE_CONFIG))
+        received: list[tuple[bool, str]] = []
+        backend.uploadComplete.connect(lambda ok, msg: received.append((ok, msg)))
+
+        backend._on_upload_done(True, "Save uploaded successfully.")
+
+        self.assertEqual(received, [(True, "Save uploaded successfully.")])
+
+
+class TestCloudUploadWorker(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QCoreApplication.instance() or QCoreApplication(sys.argv)
+
+    def test_upload_worker_run_emits_success_when_emulator_found(self):
+        worker = _CloudUploadWorker(
+            config=dict(BASE_CONFIG),
+            game_dict={"id": "1", "platform": "SNES", "name": "Game"},
+            save_type="save",
+        )
+        received: list[tuple[bool, str]] = []
+        worker.finished.connect(lambda ok, msg: received.append((ok, msg)))
+
+        with patch(
+            "rom_mate.tv.bridge.cloud_backend.resolve_emulator_entry_for_game",
+            return_value=("RetroArch", {"name": "RetroArch"}),
+        ), patch(
+            "rom_mate.tv.bridge.cloud_backend.perform_tv_save_upload",
+            return_value=(1, 1, []),
+        ):
+            worker.run()
+
+        self.assertEqual(len(received), 1)
+        self.assertTrue(received[0][0])
+        self.assertTrue(received[0][1])
+        self.assertIn("Uploaded", received[0][1])
+
+    def test_upload_worker_run_emits_failure_when_no_emulator(self):
+        worker = _CloudUploadWorker(
+            config=dict(BASE_CONFIG),
+            game_dict={"id": "1", "platform": "SNES", "name": "Game"},
+            save_type="save",
+        )
+        received: list[tuple[bool, str]] = []
+        worker.finished.connect(lambda ok, msg: received.append((ok, msg)))
+
+        with patch(
+            "rom_mate.tv.bridge.cloud_backend.resolve_emulator_entry_for_game",
+            return_value=("", None),
+        ):
+            worker.run()
+
+        self.assertEqual(len(received), 1)
+        self.assertFalse(received[0][0])
+        self.assertIn("No emulator configured", received[0][1])
+
+    def test_upload_worker_run_emits_failure_when_no_files_found(self):
+        worker = _CloudUploadWorker(
+            config=dict(BASE_CONFIG),
+            game_dict={"id": "1", "platform": "SNES", "name": "Game"},
+            save_type="save",
+        )
+        received: list[tuple[bool, str]] = []
+        worker.finished.connect(lambda ok, msg: received.append((ok, msg)))
+
+        with patch(
+            "rom_mate.tv.bridge.cloud_backend.resolve_emulator_entry_for_game",
+            return_value=("RetroArch", {"name": "RetroArch"}),
+        ), patch(
+            "rom_mate.tv.bridge.cloud_backend.perform_tv_save_upload",
+            return_value=(0, 0, ["No save directories found for this emulator"]),
+        ):
+            worker.run()
+
+        self.assertEqual(len(received), 1)
+        self.assertFalse(received[0][0])
+        self.assertIn("No save files", received[0][1])
+
+    def test_upload_worker_run_partial_upload(self):
+        worker = _CloudUploadWorker(
+            config=dict(BASE_CONFIG),
+            game_dict={"id": "1", "platform": "SNES", "name": "Game"},
+            save_type="save",
+        )
+        received: list[tuple[bool, str]] = []
+        worker.finished.connect(lambda ok, msg: received.append((ok, msg)))
+
+        with patch(
+            "rom_mate.tv.bridge.cloud_backend.resolve_emulator_entry_for_game",
+            return_value=("RetroArch", {"name": "RetroArch"}),
+        ), patch(
+            "rom_mate.tv.bridge.cloud_backend.perform_tv_save_upload",
+            return_value=(1, 2, ["file2.srm"]),
+        ):
+            worker.run()
+
+        self.assertEqual(len(received), 1)
+        self.assertTrue(received[0][0])
+        self.assertIn("1/2", received[0][1])
+
+    def test_upload_save_skips_when_no_credentials(self):
+        backend = CloudBackend(dict(BASE_CONFIG))
+        received: list[tuple[bool, str]] = []
+        backend.uploadComplete.connect(lambda ok, msg: received.append((ok, msg)))
+
+        with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=False), patch(
+            "rom_mate.tv.bridge.cloud_backend.QThread.start"
+        ) as mock_thread_start:
+            backend.uploadSave({"id": "5", "name": "Game"}, "save")
+
+        self.assertEqual(received, [(False, "Not signed in to cloud saves.")])
+        mock_thread_start.assert_not_called()
 
 
 class TestCloudBackendState(unittest.TestCase):

@@ -722,6 +722,12 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             app_backend = AppBackend(self.config, image_cache_dir, parent=None)
             cloud_backend = CloudBackend(self.config, parent=None)
             game_backend = GameBackend(self.config, parent=None)
+            game_backend.installComplete.connect(
+                lambda ok, _msg, _game: app_backend.syncConfig(self.config) if ok else None
+            )
+            game_backend.uninstallComplete.connect(
+                lambda ok, _msg, _game: app_backend.syncConfig(self.config) if ok else None
+            )
             app_backend.switchToDesktopModeRequested.connect(self._switch_to_desktop_mode)
             controller_backend = ControllerBackend(
                 app_backend=app_backend,

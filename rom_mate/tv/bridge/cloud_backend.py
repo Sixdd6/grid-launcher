@@ -5,7 +5,7 @@ from typing import Any
 
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
-from rom_mate.core.api import api_get_bytes, api_get_json, api_post_json
+from rom_mate.core.api import api_get_bytes, api_get_json, api_post_json, api_post_multipart_json
 from rom_mate.library.cloud_restore import (
     latest_server_records_by_slot,
     relative_timestamp_text,
@@ -14,11 +14,13 @@ from rom_mate.library.cloud_restore import (
     server_records_from_payload,
 )
 from rom_mate.server.state import credentials_present, server_base_url
+from rom_mate.tv.bridge.cloud_helpers import perform_tv_save_upload, resolve_emulator_entry_for_game
 
 # Module-level aliases for test patchability.
 _api_get_json = api_get_json
 _api_get_bytes = api_get_bytes
 _api_post_json = api_post_json
+_api_post_multipart_json = api_post_multipart_json
 _server_records_from_payload = server_records_from_payload
 _latest_server_records_by_slot = latest_server_records_by_slot
 _save_record_timestamp = save_record_timestamp
@@ -65,6 +67,42 @@ class _SlotFetchWorker(QObject):
             self.error.emit(self._save_type, str(error))
 
 
+class _CloudUploadWorker(QObject):
+    finished = Signal(bool, str)  # success, message
+
+    def __init__(self, *, config: dict[str, Any], game_dict: dict[str, Any], save_type: str, parent: QObject | None = None) -> None:
+        super().__init__(parent)
+        self._config = config
+        self._game_dict = game_dict
+        self._save_type = save_type
+
+    @Slot()
+    def run(self) -> None:
+        emulator_name, emulator_entry = resolve_emulator_entry_for_game(self._game_dict, self._config)
+        if emulator_entry is None:
+            self.finished.emit(False, "No emulator configured for this game's platform.")
+            return
+        try:
+            uploaded, total, failed = perform_tv_save_upload(
+                self._config,
+                self._game_dict,
+                emulator_name,
+                emulator_entry,
+                self._save_type,
+            )
+            del failed
+        except Exception as exc:
+            self.finished.emit(False, str(exc))
+            return
+
+        if total == 0:
+            self.finished.emit(False, "No save files found for this game.")
+        elif uploaded == total:
+            self.finished.emit(True, f"Uploaded {uploaded} file(s).")
+        else:
+            self.finished.emit(uploaded > 0, f"Uploaded {uploaded}/{total} file(s).")
+
+
 class CloudBackend(QObject):
     slotsLoaded = Signal(str, list)       # save_type ("save"|"state"), list of slot dicts
     slotsError = Signal(str, str)         # save_type, error message
@@ -77,6 +115,8 @@ class CloudBackend(QObject):
         self._config = config
         self._fetch_thread: QThread | None = None
         self._fetch_worker: _SlotFetchWorker | None = None
+        self._upload_thread: QThread | None = None
+        self._upload_worker: _CloudUploadWorker | None = None
 
     @Slot(object)
     def syncConfig(self, config: dict[str, Any]) -> None:
@@ -181,6 +221,27 @@ class CloudBackend(QObject):
         except Exception as error:
             self.restoreComplete.emit(False, str(error))
 
+    @Slot("QVariant", str)
+    def uploadSave(self, game: Any, save_type: str) -> None:
+        if not credentials_present(self._config):
+            self.uploadComplete.emit(False, "Not signed in to cloud saves.")
+            return
+
+        game_dict = self._normalize_game(game)
+
+        worker = _CloudUploadWorker(config=self._config, game_dict=game_dict, save_type=save_type)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_upload_done)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+
+        self._upload_thread = thread
+        self._upload_worker = worker
+        thread.start()
+
     def _cancel_fetch_thread(self) -> None:
         if self._fetch_thread and self._fetch_thread.isRunning():
             self._fetch_thread.quit()
@@ -199,6 +260,12 @@ class CloudBackend(QObject):
         self.slotsError.emit(save_type, error)
         self._fetch_thread = None
         self._fetch_worker = None
+
+    @Slot(bool, str)
+    def _on_upload_done(self, success: bool, message: str) -> None:
+        self._upload_thread = None
+        self._upload_worker = None
+        self.uploadComplete.emit(success, message)
 
     def _normalize_game(self, game: Any) -> dict[str, Any]:
         payload = game

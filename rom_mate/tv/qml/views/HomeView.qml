@@ -212,7 +212,12 @@ Item {
                               : highlyRatedRow
                 root._setActiveIndex(root._visuallyClosestIndex(fromRowDown, fromIdxDown, toRowDown))
             } else if (direction === "left") {
-                root._setActiveIndex(Math.max(0, root._getActiveIndex() - 1))
+                var activeRowLeft = root._activeRowIndex === 0 ? continueRow
+                                  : root._activeRowIndex === 1 ? favoritesRow
+                                  : root._activeRowIndex === 2 ? newAdditionsRow
+                                  : highlyRatedRow
+                var maxIdxLeft = Math.max(0, activeRowLeft.games.length - 1)
+                root._setActiveIndex(Math.min(maxIdxLeft, Math.max(0, root._getActiveIndex() - 1)))
             } else if (direction === "right") {
                 var activeRow = root._activeRowIndex === 0 ? continueRow
                               : root._activeRowIndex === 1 ? favoritesRow

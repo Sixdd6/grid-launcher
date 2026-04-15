@@ -4,8 +4,9 @@ import subprocess
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
-from PySide6.QtCore import Property, QObject, QThread, Signal, Slot
+from PySide6.QtCore import Property, QObject, Qt, QThread, Signal, Slot
 
 from rom_mate.emulator.launch import (
     apply_launch_placeholders_to_args,
@@ -24,11 +25,30 @@ def is_retroarch_emulator_name(emulator_name: str) -> bool:
 
 
 from rom_mate.emulator.selection import is_rpcs3_emulator_name
-from rom_mate.emulator.selection import is_arcade_platform, mapping_value_for_platform
+from rom_mate.emulator.selection import (
+    is_arcade_platform,
+    is_native_executable_platform,
+    is_ps3_platform,
+    mapping_value_for_platform,
+)
+from rom_mate.library.archive_preparation import (
+    extract_archive_for_game,
+    extracted_dir_for_archive_path,
+    prepare_installed_game_without_ui,
+    select_extracted_launch_file,
+    should_extract_archive_for_game,
+)
+from rom_mate.server.state import credentials_present as _credentials_present_fn
+from rom_mate.tv.bridge.cloud_helpers import (
+    _TvAutoRestoreWorker,
+    perform_tv_save_upload,
+    resolve_emulator_entry_for_game,
+)
 
 # Module-level aliases for test patchability.
 _subprocess_popen = subprocess.Popen
 _time_sleep = time.sleep
+_credentials_present = _credentials_present_fn
 
 try:
     import psutil as _psutil
@@ -55,6 +75,134 @@ class _ProcessWatchThread(QThread):
         self._backend._on_process_exited(emulator_name)
 
 
+class _TvInstallDownloadWorker(QObject):
+    progress = Signal(int, int, float)
+    finished = Signal(str, str)
+
+    def __init__(self, url: str, headers: dict[str, str], dest_path: str) -> None:
+        super().__init__()
+        self._url = str(url).strip()
+        self._headers = dict(headers)
+        self._dest_path = str(dest_path)
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            import requests
+
+            destination = Path(self._dest_path)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+
+            downloaded_bytes = 0
+            started_at = time.monotonic()
+            with requests.get(self._url, headers=self._headers, stream=True, timeout=60) as response:
+                response.raise_for_status()
+                content_length = str(response.headers.get("Content-Length", "")).strip()
+                total_bytes = int(content_length) if content_length.isdigit() else 0
+                with destination.open("wb") as output_file:
+                    for chunk in response.iter_content(chunk_size=65536):
+                        if not chunk:
+                            continue
+                        output_file.write(chunk)
+                        downloaded_bytes += len(chunk)
+                        elapsed = max(time.monotonic() - started_at, 1e-6)
+                        speed_bps = downloaded_bytes / elapsed
+                        self.progress.emit(downloaded_bytes, total_bytes, speed_bps)
+            self.finished.emit(str(destination), "")
+        except Exception as error:
+            self.finished.emit("", str(error))
+
+
+class _TvInstallFinalizeWorker(QObject):
+    finished = Signal(bool, str, str)
+
+    def __init__(self, archive_path: str, dest_dir: str, game_dict: dict[str, str]) -> None:
+        super().__init__()
+        self._archive_path = str(archive_path)
+        self._dest_dir = str(dest_dir)
+        self._game_dict = dict(game_dict)
+
+    @Slot()
+    def run(self) -> None:
+        platform = str(self._game_dict.get("platform", "")).strip().casefold()
+        if "ps4" in platform or "xbox 360" in platform:
+            self.finished.emit(False, "Use Desktop Mode to install this content type.", "")
+            return
+
+        try:
+            archive_path = Path(self._archive_path)
+            if not archive_path.exists() or not archive_path.is_file():
+                self.finished.emit(False, f"Archive was not found: {archive_path}", "")
+                return
+
+            destination_dir = Path(self._dest_dir).expanduser()
+            destination_dir.mkdir(parents=True, exist_ok=True)
+
+            prepared_game, error_text = prepare_installed_game_without_ui(
+                self._game_dict,
+                archive_path,
+                should_extract_archive_for_game=lambda game, current_archive_path: should_extract_archive_for_game(
+                    game,
+                    current_archive_path,
+                    is_native_executable_platform=is_native_executable_platform,
+                    is_arcade_platform=is_arcade_platform,
+                    is_ps3_platform=is_ps3_platform,
+                ),
+                extract_archive_for_game=lambda game, current_archive_path, install_progress_callback=None: extract_archive_for_game(
+                    game,
+                    current_archive_path,
+                    extracted_dir_for_archive_path=extracted_dir_for_archive_path,
+                    select_extracted_launch_file=lambda game_payload, extracted_dir, archive: select_extracted_launch_file(
+                        game_payload,
+                        extracted_dir,
+                        archive,
+                        is_ps3_platform=is_ps3_platform,
+                    ),
+                    install_progress_callback=install_progress_callback,
+                ),
+                is_ps3_platform=is_ps3_platform,
+            )
+            if prepared_game is None:
+                self.finished.emit(False, error_text or "Install preparation failed.", "")
+                return
+
+            local_path = str(prepared_game.get("extracted_path", "")).strip() or str(archive_path)
+            self.finished.emit(True, "", local_path)
+        except Exception as error:
+            self.finished.emit(False, str(error), "")
+
+
+class _TvAutoUploadWorker(QObject):
+    finished = Signal(bool, str)
+
+    def __init__(self, config: dict[str, Any], game: dict[str, str], emulator_name: str, emulator_entry: dict[str, str]) -> None:
+        super().__init__()
+        self._config = config
+        self._game = game
+        self._emulator_name = emulator_name
+        self._emulator_entry = emulator_entry
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            uploaded, total, failed = perform_tv_save_upload(
+                self._config,
+                self._game,
+                self._emulator_name,
+                self._emulator_entry,
+                "save",
+            )
+            del failed
+            if total == 0:
+                self.finished.emit(False, "No save files found.")
+            elif uploaded == total:
+                self.finished.emit(True, f"Auto-uploaded {uploaded} save file(s).")
+            else:
+                self.finished.emit(uploaded > 0, f"Auto-uploaded {uploaded}/{total} save file(s).")
+        except Exception as exc:
+            self.finished.emit(False, str(exc))
+
+
 class GameBackend(QObject):
     sessionStarted = Signal(str)
     sessionEnded = Signal(str)
@@ -62,6 +210,11 @@ class GameBackend(QObject):
     sessionPaused = Signal()
     sessionResumed = Signal()
     pauseRequested = Signal()
+    installProgress = Signal(int, int, float)
+    installComplete = Signal(bool, str, object)
+    uninstallComplete = Signal(bool, str, object)
+    cloudSyncStatus = Signal(str)
+    _installStateChanged = Signal()
     _sessionStateChanged = Signal()
 
     def __init__(self, config: dict[str, Any], *, parent: QObject | None = None) -> None:
@@ -70,6 +223,17 @@ class GameBackend(QObject):
         self._active_emulator_name: str = ""
         self._process: subprocess.Popen | None = None
         self._watch_thread: QThread | None = None
+        self._install_thread: QThread | None = None
+        self._install_worker = None
+        self._install_target_game: dict[str, str] | None = None
+        self._finalize_thread: QThread | None = None
+        self._finalize_worker = None
+        self._session_started_at = 0.0
+        self._session_game: dict[str, str] | None = None
+        self._restore_thread: QThread | None = None
+        self._restore_worker = None
+        self._auto_upload_thread: QThread | None = None
+        self._auto_upload_worker = None
 
     @Property(str, notify=_sessionStateChanged)
     def activeEmulatorName(self) -> str:
@@ -84,6 +248,10 @@ class GameBackend(QObject):
     def canPause(self) -> bool:
         process = self._process
         return bool(_psutil is not None and process is not None and process.poll() is None)
+
+    @Property(bool, notify=_installStateChanged)
+    def isInstallActive(self) -> bool:
+        return self._install_thread is not None and self._install_thread.isRunning()
 
     @Slot(object)
     def syncConfig(self, config: dict[str, Any]) -> None:
@@ -188,6 +356,37 @@ class GameBackend(QObject):
             self.launchError.emit(str(error))
             return
 
+        self._session_game = game_dict
+        self._session_started_at = time.time()
+
+        if self._restore_thread is not None and self._restore_thread.isRunning():
+            self._restore_thread.quit()
+            self._restore_thread.wait(500)
+
+        config = dict(self._config)
+        if config.get("auto_cloud_sync") and _credentials_present(config):
+            em_name, em_entry = resolve_emulator_entry_for_game(game_dict, config)
+            if em_entry is not None:
+                self.cloudSyncStatus.emit("Restoring save…")
+                worker = _TvAutoRestoreWorker(config, game_dict, em_name, em_entry)
+                thread = QThread(self)
+                worker.moveToThread(thread)
+                thread.started.connect(worker.run)
+                worker.finished.connect(
+                    lambda ok, msg, en=emulator_name, cmd=command, d=cwd: self._on_restore_done(ok, msg, en, cmd, d),
+                    Qt.ConnectionType.QueuedConnection,
+                )
+                worker.finished.connect(thread.quit)
+                worker.finished.connect(worker.deleteLater)
+                thread.finished.connect(thread.deleteLater)
+                self._restore_thread = thread
+                self._restore_worker = worker
+                thread.start()
+                return
+
+        self._do_launch(emulator_name, command, cwd)
+
+    def _do_launch(self, emulator_name: str, command: list[str], cwd: str | None) -> None:
         try:
             process = _subprocess_popen(command, cwd=cwd, close_fds=True)
         except (OSError, ValueError) as error:
@@ -204,6 +403,13 @@ class GameBackend(QObject):
         self._watch_thread = watch_thread
         watch_thread.finished.connect(watch_thread.deleteLater)
         watch_thread.start()
+
+    def _on_restore_done(self, success: bool, message: str, emulator_name: str, command: list[str], cwd: str | None) -> None:
+        del success, message
+        self._restore_thread = None
+        self._restore_worker = None
+        self.cloudSyncStatus.emit("")
+        self._do_launch(emulator_name, command, cwd)
 
     @Slot()
     def stopGame(self) -> None:
@@ -251,6 +457,153 @@ class GameBackend(QObject):
         if self.isSessionActive:
             self.pauseRequested.emit()
 
+    @Slot("QVariant")
+    def installGame(self, game: Any) -> None:
+        game_dict = self._normalize_game(game)
+        if not game_dict:
+            self.launchError.emit("Invalid game payload.")
+            return
+
+        rom_id = str(game_dict.get("id") or game_dict.get("rom_id") or "").strip()
+        if not rom_id:
+            self.launchError.emit("Game is missing a ROM id.")
+            return
+
+        server_url_value = self._config.get("server_url") or self._config.get("base_url") or ""
+        server_url = str(server_url_value).strip()
+        if not server_url:
+            self.launchError.emit("No server URL configured.")
+            return
+
+        if self.isInstallActive:
+            self.launchError.emit("An install is already in progress.")
+            return
+
+        library_path_value = self._config.get("library_path", "")
+        library_path = str(library_path_value).strip()
+        if not library_path:
+            self.launchError.emit("No library path configured.")
+            return
+
+        api_token = str(self._config.get("api_token", "")).strip()
+        headers = {"Authorization": f"Bearer {api_token}"} if api_token else {}
+        rom_file_name = str(game_dict.get("rom_file_name", "")).strip()
+        if rom_file_name:
+            download_url = f"{server_url.rstrip('/')}/api/roms/{rom_id}/content/{quote(rom_file_name)}"
+        else:
+            download_url = f"{server_url.rstrip('/')}/api/roms/{rom_id}/content"
+        dest_path = str(Path(library_path).expanduser() / f"_tv_download_{rom_id}.tmp")
+
+        worker = _TvInstallDownloadWorker(download_url, headers, dest_path)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._on_install_progress)
+        worker.finished.connect(self._on_install_download_done)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        self._install_thread = thread
+        self._install_worker = worker
+        self._install_target_game = dict(game_dict)
+        thread.start()
+        self._installStateChanged.emit()
+
+    @Slot(int, int, float)
+    def _on_install_progress(self, downloaded: int, total: int, speed: float) -> None:
+        self.installProgress.emit(downloaded, total, speed)
+
+    @Slot(str, str)
+    def _on_install_download_done(self, archive_path: str, error: str) -> None:
+        game_dict = self._install_target_game or {}
+        self._install_thread = None
+        self._install_worker = None
+        self._installStateChanged.emit()
+        if error:
+            self.installComplete.emit(False, error, game_dict)
+            self._install_target_game = None
+            return
+
+        library_path = str(self._config.get("library_path", "")).strip()
+        if not library_path:
+            self.installComplete.emit(False, "No library path configured.", game_dict)
+            self._install_target_game = None
+            return
+
+        worker = _TvInstallFinalizeWorker(
+            archive_path=archive_path,
+            dest_dir=library_path,
+            game_dict=game_dict,
+        )
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_install_finalize_done)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        self._finalize_thread = thread
+        self._finalize_worker = worker
+        thread.start()
+
+    @Slot(bool, str, str)
+    def _on_install_finalize_done(self, success: bool, error: str, local_path: str) -> None:
+        game_dict = self._install_target_game or {}
+        self._finalize_thread = None
+        self._finalize_worker = None
+        self._install_target_game = None
+        if success:
+            installed_game = dict(game_dict)
+            installed_game["local_path"] = local_path
+            installed = self._config.setdefault("installed_games", [])
+            if not isinstance(installed, list):
+                installed = []
+                self._config["installed_games"] = installed
+            rom_id = str(installed_game.get("id") or installed_game.get("rom_id") or "")
+            installed[:] = [
+                entry
+                for entry in installed
+                if isinstance(entry, dict)
+                and str(entry.get("id") or entry.get("rom_id") or "") != rom_id
+            ]
+            installed.append(installed_game)
+            self.installComplete.emit(True, "Game installed.", installed_game)
+        else:
+            self.installComplete.emit(False, error, game_dict)
+        self._installStateChanged.emit()
+
+    @Slot("QVariant")
+    def uninstallGame(self, game: Any) -> None:
+        game_dict = self._normalize_game(game)
+        if not game_dict and isinstance(game, dict):
+            game_dict = {str(key): str(value) for key, value in game.items() if isinstance(key, str)}
+
+        rom_id = str(game_dict.get("id") or game_dict.get("rom_id") or "")
+        local_path = str(game_dict.get("local_path", "")).strip()
+        if local_path:
+            try:
+                import shutil
+
+                path = Path(local_path)
+                if path.is_dir():
+                    shutil.rmtree(str(path))
+                elif path.is_file():
+                    path.unlink()
+            except Exception as error:
+                self.uninstallComplete.emit(False, f"Could not remove files: {error}", game_dict)
+                return
+
+        installed = self._config.get("installed_games", [])
+        if not isinstance(installed, list):
+            installed = []
+        self._config["installed_games"] = [
+            entry
+            for entry in installed
+            if isinstance(entry, dict)
+            and str(entry.get("id") or entry.get("rom_id") or "") != rom_id
+        ]
+        self.uninstallComplete.emit(True, "Game uninstalled.", game_dict)
+
     def _on_process_exited(self, emulator_name: str) -> None:
         if self._process is None:
             self._watch_thread = None
@@ -262,6 +615,30 @@ class GameBackend(QObject):
         self._sessionStateChanged.emit()
         self._watch_thread = None
         self.sessionEnded.emit(emulator_name)
+
+        if self._session_game is not None:
+            config = dict(self._config)
+            if config.get("auto_cloud_sync") and _credentials_present(config):
+                em_name, em_entry = resolve_emulator_entry_for_game(self._session_game, config)
+                if em_entry is not None:
+                    worker = _TvAutoUploadWorker(config, self._session_game, em_name, em_entry)
+                    thread = QThread(self)
+                    worker.moveToThread(thread)
+                    thread.started.connect(worker.run)
+                    worker.finished.connect(self._on_auto_upload_done, Qt.ConnectionType.QueuedConnection)
+                    worker.finished.connect(thread.quit)
+                    worker.finished.connect(worker.deleteLater)
+                    thread.finished.connect(thread.deleteLater)
+                    self._auto_upload_thread = thread
+                    self._auto_upload_worker = worker
+                    thread.start()
+
+    def _on_auto_upload_done(self, success: bool, message: str) -> None:
+        del success
+        self._auto_upload_thread = None
+        self._auto_upload_worker = None
+        if message:
+            self.cloudSyncStatus.emit(message)
 
     def _normalize_game(self, game: Any) -> dict[str, str]:
         payload = game
