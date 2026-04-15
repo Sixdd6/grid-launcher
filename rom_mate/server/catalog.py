@@ -89,6 +89,19 @@ def fetch_platform_rom_items(
     return all_items
 
 
+def fetch_rom_items_by_params(
+    api_get: Callable[[str, dict | None], Any],
+    params: dict,
+) -> list[dict[str, Any]]:
+    response = api_get("/api/roms", params)
+    if not isinstance(response, dict):
+        return []
+    items = response.get("items", [])
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
 def _is_ps4_platform_label(label: Any) -> bool:
     if not isinstance(label, str):
         return False
@@ -225,6 +238,7 @@ def games_from_rom_items(
                 "description": details_metadata.get("description", ""),
                 "genres": details_metadata.get("genres", ""),
                 "regions": details_metadata.get("regions", ""),
+                "release_year": details_metadata.get("release_year", ""),
                 "filesize_bytes": details_metadata.get("filesize_bytes", ""),
                 "cover_url": cover_url,
                 "screenshot_urls": "\n".join(screenshot_urls),

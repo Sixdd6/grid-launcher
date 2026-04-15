@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from rom_mate.server.catalog import games_from_rom_items
+from rom_mate.server.catalog import games_from_rom_items, fetch_rom_items_by_params
 from rom_mate.server.details_cache import rom_file_name_from_payload
 from rom_mate.server.metadata import normalize_rating_to_five
 
@@ -237,6 +237,43 @@ class ServerCatalogFileNameTests(unittest.TestCase):
         self.assertEqual(game["genres"], "RPG")
         self.assertEqual(game["regions"], "USA")
 
+    def test_catalog_includes_release_year_from_igdb_timestamp(self) -> None:
+        games, _ = games_from_rom_items(
+            [
+                {
+                    "id": 202,
+                    "name": "Year Test",
+                    "platform_display_name": "PS1",
+                    "igdb_metadata": {
+                        "first_release_date": 788918400,
+                    },
+                }
+            ],
+            "PS1",
+            cover_url_from_payload=lambda payload: "",
+            screenshot_urls_from_payload=lambda payload: [],
+        )
+
+        self.assertEqual(len(games), 1)
+        self.assertEqual(games[0].get("release_year"), "1995")
+
+    def test_catalog_sets_release_year_empty_when_no_date_metadata_exists(self) -> None:
+        games, _ = games_from_rom_items(
+            [
+                {
+                    "id": 203,
+                    "name": "No Year Test",
+                    "platform_display_name": "PS1",
+                }
+            ],
+            "PS1",
+            cover_url_from_payload=lambda payload: "",
+            screenshot_urls_from_payload=lambda payload: [],
+        )
+
+        self.assertEqual(len(games), 1)
+        self.assertEqual(games[0].get("release_year"), "")
+
 
 class RatingNormalizationTests(unittest.TestCase):
     def test_normalize_rating_to_five_handles_common_scales(self) -> None:
@@ -249,6 +286,39 @@ class RatingNormalizationTests(unittest.TestCase):
         self.assertIsNone(normalize_rating_to_five(""))
         self.assertIsNone(normalize_rating_to_five("not a rating"))
         self.assertIsNone(normalize_rating_to_five(-1))
+
+
+class TestFetchRomItemsByParams(unittest.TestCase):
+    def test_returns_empty_when_api_returns_non_dict(self) -> None:
+        api_get = lambda path, params: [{"id": 1}]
+        result = fetch_rom_items_by_params(api_get, {"foo": "bar"})
+        self.assertEqual(result, [])
+
+    def test_returns_empty_when_no_items_key(self) -> None:
+        api_get = lambda path, params: {}
+        result = fetch_rom_items_by_params(api_get, {})
+        self.assertEqual(result, [])
+
+    def test_returns_empty_list_when_items_is_empty(self) -> None:
+        api_get = lambda path, params: {"items": []}
+        result = fetch_rom_items_by_params(api_get, {})
+        self.assertEqual(result, [])
+
+    def test_returns_items_when_valid(self) -> None:
+        api_get = lambda path, params: {"items": [{"id": 1, "name": "Tetris"}]}
+        result = fetch_rom_items_by_params(api_get, {})
+        self.assertEqual(result, [{"id": 1, "name": "Tetris"}])
+
+    def test_passes_params_to_api_get(self) -> None:
+        from unittest.mock import MagicMock
+        api_get = MagicMock(return_value={"items": []})
+        fetch_rom_items_by_params(api_get, {"foo": "bar"})
+        api_get.assert_called_once_with("/api/roms", {"foo": "bar"})
+
+    def test_skips_non_dict_items(self) -> None:
+        api_get = lambda path, params: {"items": [{"id": 1}, "bad", None]}
+        result = fetch_rom_items_by_params(api_get, {})
+        self.assertEqual(result, [{"id": 1}])
 
 
 if __name__ == "__main__":

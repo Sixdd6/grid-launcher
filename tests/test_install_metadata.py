@@ -118,6 +118,57 @@ class InstallMetadataTests(unittest.TestCase):
         self.assertEqual(details_game.get("regions"), "USA")
         self.assertEqual(details_game.get("filesize_bytes"), "1024")
 
+    def test_hydrate_install_game_metadata_copies_release_year_from_server_game(self) -> None:
+        game = {
+            "title": "Demo Game",
+            "platform": "PS2",
+            "release_year": "",
+        }
+
+        hydrate_install_game_metadata(
+            game,
+            "rom-2",
+            server_games_by_platform={
+                "PS2": [
+                    {
+                        "title": "Demo Game",
+                        "platform": "PS2",
+                        "rom_id": "rom-2",
+                        "release_year": "1999",
+                    }
+                ]
+            },
+            server_rom_payloads={},
+            game_key=self._game_key,
+            rom_id_key=self._rom_id_key,
+            fetch_server_rom_payload=lambda rom_id: None,
+            resolved_cover_url_for_game=lambda value: "",
+            cover_url_from_rom_payload=lambda payload: "",
+            screenshot_urls_from_rom_payload=lambda payload: [],
+        )
+
+        self.assertEqual(game.get("release_year"), "1999")
+
+    def test_sync_install_metadata_to_details_game_copies_release_year(self) -> None:
+        details_game = {
+            "title": "Demo Game",
+            "platform": "PS2",
+            "release_year": "",
+        }
+        install_game = {
+            "title": "Demo Game",
+            "platform": "PS2",
+            "release_year": "2001",
+        }
+
+        sync_install_metadata_to_details_game(
+            details_game,
+            install_game,
+            game_key=self._game_key,
+        )
+
+        self.assertEqual(details_game.get("release_year"), "2001")
+
 
 if __name__ == "__main__":
     unittest.main()

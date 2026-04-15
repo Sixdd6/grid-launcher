@@ -571,6 +571,12 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self.details_cloud_workers: list[DetailsCloudRecordsWorker] = []
         self.details_cloud_request_id = 0
         self.details_cloud_request_context: dict[str, Any] = {}
+        self._tv_engine: Any = None
+        self._tv_app_backend: Any = None
+        self._tv_game_backend: "GameBackend | None" = None
+        self._tv_cloud_backend: "CloudBackend | None" = None
+        self._tv_controller_backend: Any = None
+        self._tv_window: Any = None
         self.session_poll_timer = QTimer(self)
         self.session_poll_timer.setSingleShot(False)
         self.session_poll_timer.setInterval(2500)
@@ -655,6 +661,11 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
         nav_row.addWidget(nav_buttons_by_label["Emulators"])
         nav_row.addWidget(nav_buttons_by_label["Settings"])
+        tv_mode_button = QPushButton("TV Mode")
+        tv_mode_button.setCheckable(False)
+        tv_mode_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        tv_mode_button.clicked.connect(self._switch_to_tv_mode)
+        nav_row.addWidget(tv_mode_button)
         self._update_top_bar_identity()
         self._switch_page(0)
         self._apply_theme(self.active_theme_choice)
@@ -666,7 +677,118 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self._persist_window_geometry()
+        if self._tv_window is not None:
+            self._tv_window.hide()
+        if self._tv_game_backend is not None and self._tv_game_backend.isSessionActive:
+            self._tv_game_backend.stopGame()
+        if self._tv_controller_backend is not None:
+            self._tv_controller_backend.stop()
+            self._tv_controller_backend = None
+        if self._tv_engine is not None:
+            self._tv_engine.deleteLater()
+            self._tv_engine = None
         super().closeEvent(event)
+
+    def _switch_to_tv_mode(self) -> None:
+        from PySide6.QtQml import QQmlApplicationEngine
+        from PySide6.QtCore import QUrl
+
+        if getattr(self, "install_in_progress", False):
+            from PySide6.QtWidgets import QMessageBox
+            result = QMessageBox.question(
+                self,
+                "Download in Progress",
+                "A download is in progress. Switch to TV Mode anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if result != QMessageBox.StandardButton.Yes:
+                return
+
+        self._save_config(self.config)
+
+        if self._tv_engine is None:
+            from rom_mate.tv.bridge.app_backend import AppBackend
+            from rom_mate.tv.bridge.cloud_backend import CloudBackend
+            from rom_mate.tv.bridge.controller import ControllerBackend
+            from rom_mate.tv.bridge.game_backend import GameBackend
+            from rom_mate.tv.bridge.image_provider import CoverImageProvider
+
+            image_cache_dir = self._image_cache_dir()
+            cover_url_map: dict[str, str] = {
+                g["cover_url"]: g["cached_cover_path"]
+                for g in self.config.get("installed_games", [])
+                if isinstance(g, dict) and g.get("cover_url") and g.get("cached_cover_path")
+            }
+            app_backend = AppBackend(self.config, image_cache_dir, parent=None)
+            cloud_backend = CloudBackend(self.config, parent=None)
+            game_backend = GameBackend(self.config, parent=None)
+            app_backend.switchToDesktopModeRequested.connect(self._switch_to_desktop_mode)
+            controller_backend = ControllerBackend(
+                app_backend=app_backend,
+                game_backend=game_backend,
+                parent=None,
+            )
+            cover_provider = CoverImageProvider(
+                image_cache_dir,
+                self.config.get("api_token", ""),
+                self.config.get("server_url", ""),
+                cover_url_map,
+            )
+
+            engine = QQmlApplicationEngine()
+            import PySide6 as _pyside6_pkg
+            _pyside6_qml_dir = Path(_pyside6_pkg.__file__).parent / "Qt" / "qml"
+            if _pyside6_qml_dir.exists():
+                engine.addImportPath(str(_pyside6_qml_dir))
+            qml_root = Path(__file__).parent / "rom_mate" / "tv" / "qml"
+            engine.addImportPath(str(qml_root))
+            engine.addImportPath(str(qml_root / "views"))
+            engine.addImportPath(str(qml_root / "components"))
+            engine.addImportPath(str(qml_root / "theme"))
+            engine.addImageProvider("covers", cover_provider)
+            engine.rootContext().setContextProperty("appBackend", app_backend)
+            engine.rootContext().setContextProperty("cloudBackend", cloud_backend)
+            engine.rootContext().setContextProperty("gameBackend", game_backend)
+            engine.rootContext().setContextProperty("controllerBackend", controller_backend)
+            qml_path = Path(__file__).parent / "rom_mate" / "tv" / "qml" / "Main.qml"
+            engine.load(QUrl.fromLocalFile(str(qml_path)))
+            if not engine.rootObjects():
+                self._show_toast("TV Mode failed to load. Check that PySide6 QtQuick is available.", "error")
+                engine.deleteLater()
+                return
+            self._tv_engine = engine
+            self._tv_window = engine.rootObjects()[0]
+            controller_backend.start()
+            self._tv_controller_backend = controller_backend
+            self._tv_app_backend = app_backend
+            self._tv_cloud_backend = cloud_backend
+            self._tv_game_backend = game_backend
+
+        if self._tv_app_backend is not None:
+            self._tv_app_backend.syncConfig(self.config)
+            self._tv_app_backend.connectToServer()
+        if self._tv_game_backend is not None:
+            self._tv_game_backend.syncConfig(self.config)
+        if self._tv_cloud_backend is not None:
+            self._tv_cloud_backend.syncConfig(self.config)
+
+        self.hide()
+        self._tv_window.showFullScreen()
+        self._tv_window.requestActivate()
+
+    def _switch_to_desktop_mode(self) -> None:
+        if self._tv_game_backend is not None and self._tv_game_backend.isSessionActive:
+            self._tv_game_backend.stopGame()
+        if self._tv_window is not None:
+            self._tv_window.hide()
+        self.config = self._load_config()
+        self.show()
+        self.activateWindow()
+        self._refresh_library_grid()
+
+    def _on_tv_window_closing(self, close: Any) -> None:
+        close.accepted = False
+        self._switch_to_desktop_mode()
 
     def _switch_page(self, index: int) -> None:
         previous_index = self.stack.currentIndex()
@@ -1710,6 +1832,9 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             "retroachievements_username": "",
             "retroachievements_api_key": "",
             "retroachievements_token": "",
+            "tv_mode_home_view": "home",
+            "tv_guide_button_exclusion_list": ["RPCS3", "Cemu", "Dolphin", "Xemu", "Xenia"],
+            "tv_mode_last_active": False,
         }
 
     def _persist_window_geometry(self) -> None:
@@ -2923,7 +3048,25 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
 def main() -> None:
     app = QApplication(sys.argv)
+
+    from PySide6.QtNetwork import QLocalServer, QLocalSocket
+
+    _singleton_name = "rom-mate-neo-singleton"
+    _probe = QLocalSocket()
+    _probe.connectToServer(_singleton_name)
+    if _probe.waitForConnected(300):
+        _probe.disconnectFromServer()
+        print("Another instance is already running.")
+        sys.exit(0)
+    _probe.deleteLater()
+
+    QLocalServer.removeServer(_singleton_name)
+    _singleton_server = QLocalServer()
+    _singleton_server.listen(_singleton_name)
+
     window = MainWindow()
+    app.aboutToQuit.connect(_singleton_server.close)
+
     if not window._run_first_run_setup_if_needed():
         window.close()
         return

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import re
 from typing import Any
 
@@ -174,6 +175,31 @@ def format_rating_to_five(raw: Any) -> str:
     return f"{normalized:.1f}/5"
 
 
+def _extract_year(value: Any) -> str:
+    if isinstance(value, bool):
+        return ""
+
+    if isinstance(value, int):
+        if value > 10000:
+            try:
+                year = datetime.datetime.fromtimestamp(value, tz=datetime.timezone.utc).year
+            except (OverflowError, OSError, ValueError):
+                return ""
+            return str(year) if 1900 <= year <= 2100 else ""
+        if 1900 <= value <= 2100:
+            return str(value)
+        return ""
+
+    if isinstance(value, str):
+        match = re.search(r"\d{4}", value)
+        if not match:
+            return ""
+        year = int(match.group(0))
+        return str(year) if 1900 <= year <= 2100 else ""
+
+    return ""
+
+
 def details_metadata_from_item(item: dict[str, Any]) -> dict[str, str]:
     source_blocks: dict[str, dict[str, Any]] = {}
     for key in SOURCE_PRIORITY:
@@ -186,6 +212,7 @@ def details_metadata_from_item(item: dict[str, Any]) -> dict[str, str]:
     regions: list[str] = []
     rating = ""
     rating_source = ""
+    release_year = ""
 
     for source_key in SOURCE_PRIORITY:
         source_data = source_blocks[source_key]
@@ -219,6 +246,21 @@ def details_metadata_from_item(item: dict[str, Any]) -> dict[str, str]:
                     rating_source = source_key
                     break
 
+    for raw_value in (
+        source_blocks["launchbox_metadata"].get("first_release_date"),
+        source_blocks["ss_metadata"].get("first_release_date"),
+        source_blocks["igdb_metadata"].get("first_release_date"),
+        item.get("flashpoint_metadata", {}).get("first_release_date") if isinstance(item.get("flashpoint_metadata"), dict) else None,
+    ):
+        release_year = _extract_year(raw_value)
+        if release_year:
+            break
+
+    if not release_year:
+        metadatum = item.get("metadatum")
+        if isinstance(metadatum, dict):
+            release_year = _extract_year(metadatum.get("first_release_date"))
+
     if not description:
         description = _clean_text(item.get("summary"))
         if description:
@@ -250,5 +292,6 @@ def details_metadata_from_item(item: dict[str, Any]) -> dict[str, str]:
         "regions": ", ".join(regions),
         "rating": rating,
         "rating_source": rating_source,
+        "release_year": release_year,
         "filesize_bytes": size_text,
     }
