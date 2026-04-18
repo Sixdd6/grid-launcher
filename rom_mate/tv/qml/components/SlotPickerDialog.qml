@@ -18,13 +18,15 @@ Item {
 
     onVisibleChanged: {
         if (visible) {
+            appBackend.setUiOverlayActive(true)
             _loading = true
             _slots = []
             _errorText = ""
             cloudBackend.loadSlotsForGame(root.game, root.saveType)
             forceActiveFocus()
+        } else {
+            Qt.callLater(function() { appBackend.setUiOverlayActive(false) })
         }
-        appBackend.setUiOverlayActive(visible)
     }
 
     Connections {

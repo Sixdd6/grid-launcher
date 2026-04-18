@@ -11,8 +11,6 @@ Item {
     property int _focusedColumn: 0
     property int _leftButtonIndex: 0
     property real _installProgress: 0.0
-    property int _cloudSlotCount: 0
-    property string _cloudMostRecent: ""
     property string _bannerText: ""
     property bool _bannerSuccess: true
     property var _screenshotList: {
@@ -33,6 +31,7 @@ Item {
     function _visibleButtonCount() {
         var count = 1
         if (root.game.local_path) count++
+        if (root.game.local_path && _isNativePcGame()) count++
         if (appBackend.isConnected) count++
         return count
     }
@@ -41,8 +40,17 @@ Item {
         return appBackend.uiOverlayActive
     }
 
+    function _isNativePcGame() {
+        if (!root.game) return false
+        var p = root.game.platform || ""
+        return p === "Windows" || p === "Windows 9x"
+    }
+
     function _triggerLeftButton() {
-        if (_leftButtonIndex === 0) {
+        var idx = 0
+
+        // Index 0: Play / Install
+        if (_leftButtonIndex === idx) {
             if (!gameBackend.isInstallActive) {
                 if (root.game.local_path) {
                     gameBackend.launchGame(root.game)
@@ -52,21 +60,32 @@ Item {
             }
             return
         }
-        var idx = 1
-        if (root.game.local_path && _leftButtonIndex === idx) {
-            gameBackend.uninstallGame(root.game)
-            return
+        idx++
+
+        // Index 1 (if installed): Uninstall
+        if (root.game.local_path) {
+            if (_leftButtonIndex === idx) {
+                gameBackend.uninstallGame(root.game)
+                return
+            }
+            idx++
         }
-        if (root.game.local_path) idx++
-        
+
+        // Next index (if installed native game): Change Executable
+        if (root.game.local_path && _isNativePcGame()) {
+            if (_leftButtonIndex === idx) {
+                nativeExecPicker.candidates = gameBackend.getNativeExecutableCandidates(root.game.rom_id || "")
+                nativeExecPicker.romId = root.game.rom_id || ""
+                nativeExecPicker.currentPath = root.game.native_executable_path || ""
+                nativeExecPicker.visible = true
+                return
+            }
+            idx++
+        }
+
+        // Next index (if server connected): Cloud Saves
         if (appBackend.isConnected && _leftButtonIndex === idx) {
             cloudSavesOverlay.visible = true
-        }
-    }
-
-    onVisibleChanged: {
-        if (visible && appBackend.isConnected && root.game) {
-            cloudBackend.loadSlotsForGame(root.game, "save")
         }
     }
 
@@ -148,17 +167,11 @@ Item {
             root._bannerSuccess = false
             bannerTimer.restart()
         }
-    }
-
-    Connections {
-        target: cloudBackend
-        function onSlotsLoaded(slots) {
-            root._cloudSlotCount = slots.length
-            if (slots.length > 0 && slots[0].timestamp_text) {
-                root._cloudMostRecent = slots[0].timestamp_text
-            } else {
-                root._cloudMostRecent = ""
-            }
+        function onNativeExecPickerNeeded(candidates) {
+            nativeExecPicker.candidates = candidates
+            nativeExecPicker.romId = root.game ? (root.game.rom_id || "") : ""
+            nativeExecPicker.currentPath = root.game ? (root.game.native_executable_path || "") : ""
+            nativeExecPicker.visible = true
         }
     }
 
@@ -363,9 +376,28 @@ Item {
                         }
                     }
 
+                    // Change Executable Button (native PC games only)
+                    Rectangle {
+                        property int myIndex: root.game.local_path ? 2 : -1
+                        width: parent.width
+                        height: 44
+                        radius: 8
+                        color: "#1e1f29"
+                        border.color: (root._focusedColumn === 0 && root._leftButtonIndex === myIndex) ? "#ff79c6" : "#bd93f9"
+                        border.width: (root._focusedColumn === 0 && root._leftButtonIndex === myIndex) ? 2 : 1
+                        visible: !!root.game.local_path && _isNativePcGame()
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "⚙  Change Executable"
+                            color: (root._focusedColumn === 0 && root._leftButtonIndex === parent.myIndex) ? "#f8f8f2" : "#bd93f9"
+                            font.pixelSize: 14
+                        }
+                    }
+
                     // Cloud Saves Button
                     Rectangle {
-                        property int myIndex: (root.game.local_path ? 2 : 1)
+                        property int myIndex: root.game.local_path ? (_isNativePcGame() ? 3 : 2) : 1
                         width: parent.width
                         height: 44
                         radius: 8
@@ -538,70 +570,6 @@ Item {
                             }
                         }
 
-                        // Cloud Saves Summary
-                        Item { width: parent.width - 32; height: 8 }
-
-                        Rectangle {
-                            width: parent.width - 32
-                            height: 1
-                            color: "#44475a"
-                        }
-
-                        Text {
-                            text: "☁  Cloud Saves"
-                            color: "#bd93f9"
-                            font.pixelSize: 15
-                            font.bold: true
-                            topPadding: 4
-                        }
-
-                        Text {
-                            visible: !appBackend.isConnected
-                            text: "Connect to a RomM server to manage cloud saves."
-                            color: "#6272a4"
-                            font.pixelSize: 13
-                            wrapMode: Text.Wrap
-                            width: parent.width - 32
-                        }
-
-                        Column {
-                            visible: appBackend.isConnected
-                            spacing: 6
-                            width: parent.width - 32
-
-                            Text {
-                                text: root._cloudSlotCount + " save(s) found"
-                                color: "#f8f8f2"
-                                font.pixelSize: 13
-                            }
-
-                            Text {
-                                text: root._cloudMostRecent !== "" ? "Latest: " + root._cloudMostRecent : "No recent saves"
-                                color: "#6272a4"
-                                font.pixelSize: 12
-                            }
-
-                            Rectangle {
-                                width: parent.width
-                                height: 40
-                                color: "#1e1f29"
-                                border.color: "#bd93f9"
-                                border.width: 1
-                                radius: 8
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "☁  Open Cloud Saves"
-                                    color: "#bd93f9"
-                                    font.pixelSize: 13
-                                }
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: cloudSavesOverlay.visible = true
-                                }
-                            }
-                        }
                     }
                 }
                 
@@ -694,5 +662,15 @@ Item {
         onClosed: {
             visible = false
         }
+    }
+
+    NativeExecPickerDialog {
+        id: nativeExecPicker
+        visible: false
+        anchors.fill: parent
+        romId: root.game ? (root.game.rom_id || "") : ""
+        candidates: []
+        currentPath: ""
+        onClosed: visible = false
     }
 }

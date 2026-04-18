@@ -8,10 +8,13 @@ from urllib.parse import quote
 
 from PySide6.QtCore import Property, QObject, Qt, QThread, Signal, Slot
 
+from rom_mate.core.config import write_config_file as _write_config_file
 from rom_mate.emulator.launch import (
     apply_launch_placeholders_to_args,
+    launchable_native_game_file,
     launch_placeholders_for_game,
     normalized_retroarch_core_args,
+    prepare_native_launch_command,
     prepare_emulator_launch_command,
     resolve_launch_arguments_for_game,
     resolve_rom_path_for_game,
@@ -37,6 +40,11 @@ from rom_mate.library.archive_preparation import (
     prepare_installed_game_without_ui,
     select_extracted_launch_file,
     should_extract_archive_for_game,
+)
+from rom_mate.library.install_paths import (
+    native_executable_candidates_for_game,
+    native_install_dir_for_game,
+    resolved_native_executable_path_for_game,
 )
 from rom_mate.server.state import credentials_present as _credentials_present_fn
 from rom_mate.tv.bridge.cloud_helpers import (
@@ -214,6 +222,7 @@ class GameBackend(QObject):
     installComplete = Signal(bool, str, object)
     uninstallComplete = Signal(bool, str, object)
     cloudSyncStatus = Signal(str)
+    nativeExecPickerNeeded = Signal(list)
     _installStateChanged = Signal()
     _sessionStateChanged = Signal()
 
@@ -230,6 +239,7 @@ class GameBackend(QObject):
         self._finalize_worker = None
         self._session_started_at = 0.0
         self._session_game: dict[str, str] | None = None
+        self._pending_native_game: dict[str, str] | None = None
         self._restore_thread: QThread | None = None
         self._restore_worker = None
         self._auto_upload_thread: QThread | None = None
@@ -266,6 +276,10 @@ class GameBackend(QObject):
 
         if self.isSessionActive:
             self.launchError.emit("A game session is already active.")
+            return
+
+        if is_native_executable_platform(game_dict):
+            self._handle_native_launch(game_dict)
             return
 
         emulators = self._config.get("emulators") or []
@@ -364,7 +378,7 @@ class GameBackend(QObject):
             self._restore_thread.wait(500)
 
         config = dict(self._config)
-        if config.get("auto_cloud_sync") and _credentials_present(config):
+        if config.get("auto_cloud_save_download_on_launch", True) and _credentials_present(config):
             em_name, em_entry = resolve_emulator_entry_for_game(game_dict, config)
             if em_entry is not None:
                 self.cloudSyncStatus.emit("Restoring save…")
@@ -385,6 +399,53 @@ class GameBackend(QObject):
                 return
 
         self._do_launch(emulator_name, command, cwd)
+
+    def _native_install_dir(self, game_dict: dict[str, str]) -> "Path | None":
+        candidate_paths: list[Path] = []
+        for key in ("archive_path", "local_path", "extracted_path"):
+            val = game_dict.get(key, "")
+            if isinstance(val, str) and val.strip():
+                candidate_paths.append(Path(val).expanduser())
+        return native_install_dir_for_game(game_dict, candidate_paths)
+
+    def _handle_native_launch(self, game_dict: dict[str, str]) -> None:
+        install_dir = self._native_install_dir(game_dict)
+        if install_dir is None:
+            self.launchError.emit("No install directory found for this game.")
+            return
+
+        candidates = native_executable_candidates_for_game(install_dir, launchable_native_game_file)
+        exe_path = resolved_native_executable_path_for_game(game_dict, candidates, launchable_native_game_file)
+
+        if exe_path is None and not candidates:
+            self.launchError.emit("No executable found in the install directory.")
+            return
+
+        if exe_path is None:
+            candidate_dicts: list[dict[str, str]] = []
+            for c in candidates:
+                try:
+                    label = str(c.relative_to(install_dir))
+                except ValueError:
+                    label = str(c)
+                candidate_dicts.append({"label": label, "path": str(c)})
+            self._pending_native_game = game_dict
+            self.nativeExecPickerNeeded.emit(candidate_dicts)
+            return
+
+        try:
+            command, cwd = prepare_native_launch_command(
+                game_dict,
+                lambda g: exe_path,
+                split_launch_template_args,
+            )
+        except ValueError as err:
+            self.launchError.emit(str(err))
+            return
+
+        self._session_game = game_dict
+        self._session_started_at = time.time()
+        self._do_launch("", command, cwd)
 
     def _do_launch(self, emulator_name: str, command: list[str], cwd: str | None) -> None:
         try:
@@ -604,6 +665,66 @@ class GameBackend(QObject):
         ]
         self.uninstallComplete.emit(True, "Game uninstalled.", game_dict)
 
+    @Slot(str, result=list)
+    def getNativeExecutableCandidates(self, rom_id: str) -> list:
+        if not rom_id:
+            return []
+        installed_games = self._config.get("installed_games", [])
+        if not isinstance(installed_games, list):
+            return []
+        game_dict: dict[str, str] | None = None
+        for g in installed_games:
+            if isinstance(g, dict) and str(g.get("rom_id", "")) == rom_id:
+                game_dict = g
+                break
+        if game_dict is None:
+            return []
+        install_dir = self._native_install_dir(game_dict)
+        if install_dir is None:
+            return []
+        candidates = native_executable_candidates_for_game(install_dir, launchable_native_game_file)
+        result: list[dict[str, str]] = []
+        for c in candidates:
+            try:
+                label = str(c.relative_to(install_dir))
+            except ValueError:
+                label = str(c)
+            result.append({"label": label, "path": str(c)})
+        return result
+
+    @Slot(str, str)
+    def saveNativeExecutable(self, rom_id: str, exe_path: str) -> None:
+        if not rom_id:
+            return
+        installed_games = self._config.get("installed_games", [])
+        if not isinstance(installed_games, list):
+            return
+        for g in installed_games:
+            if isinstance(g, dict) and str(g.get("rom_id", "")) == rom_id:
+                g["native_executable_path"] = exe_path
+                break
+        config_dir = Path.home() / ".rom-mate"
+        config_file = config_dir / "config.json"
+        try:
+            _write_config_file(config_dir, config_file, self._config)
+        except OSError:
+            pass
+
+    @Slot(str, str)
+    def launchWithNativeExecutable(self, rom_id: str, exe_path: str) -> None:
+        self.saveNativeExecutable(rom_id, exe_path)
+        installed_games = self._config.get("installed_games", [])
+        game_dict: dict[str, str] | None = None
+        if isinstance(installed_games, list):
+            for g in installed_games:
+                if isinstance(g, dict) and str(g.get("rom_id", "")) == rom_id:
+                    game_dict = g
+                    break
+        if game_dict is None:
+            self.launchError.emit("Game not found.")
+            return
+        self._handle_native_launch(game_dict)
+
     def _on_process_exited(self, emulator_name: str) -> None:
         if self._process is None:
             self._watch_thread = None
@@ -618,7 +739,7 @@ class GameBackend(QObject):
 
         if self._session_game is not None:
             config = dict(self._config)
-            if config.get("auto_cloud_sync") and _credentials_present(config):
+            if config.get("auto_cloud_save_upload_on_exit", True) and _credentials_present(config):
                 em_name, em_entry = resolve_emulator_entry_for_game(self._session_game, config)
                 if em_entry is not None:
                     worker = _TvAutoUploadWorker(config, self._session_game, em_name, em_entry)

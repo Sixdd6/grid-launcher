@@ -62,6 +62,10 @@ class AppBackend(QObject):
         self._config = config
         self.libraryGamesChanged.emit()
         self.platformsChanged.emit()
+        view = self._config.get("tv_mode_home_view", "home")
+        if not isinstance(view, str):
+            view = "home"
+        self.homeViewTabChanged.emit(view)
 
     # ------------------------------------------------------------------
     # Properties
@@ -72,19 +76,30 @@ class AppBackend(QObject):
         games = self._config.get("installed_games", [])
         if not isinstance(games, list):
             return []
-        return [g for g in games if g.get("platform", "").strip().casefold() != "emulators"]
+        result = []
+        for g in games:
+            if not isinstance(g, dict):
+                continue
+            if g.get("platform", "").strip().casefold() == "emulators":
+                continue
+            if not g.get("local_path"):
+                path = self._resolve_game_path(g)
+                if path:
+                    g = {**g, "local_path": path}
+            result.append(g)
+        return result
 
     @Property(list, notify=favoritesGamesChanged)
     def favoritesGames(self) -> list:
-        return self._favorites_games
+        return self._enrich_with_local_paths(self._favorites_games)
 
     @Property(list, notify=newAdditionsGamesChanged)
     def newAdditionsGames(self) -> list:
-        return self._new_additions_games
+        return self._enrich_with_local_paths(self._new_additions_games)
 
     @Property(list, notify=highlyRatedGamesChanged)
     def highlyRatedGames(self) -> list:
-        return self._highly_rated_games
+        return self._enrich_with_local_paths(self._highly_rated_games)
 
     @Property(list, notify=platformsChanged)
     def platforms(self) -> list[str]:
@@ -101,8 +116,25 @@ class AppBackend(QObject):
             return self._DEFAULT_EXCLUSION_LIST
         return value
 
-    @Property(str, notify=libraryGamesChanged)
-    def homeView(self) -> str:
+    @Property(list, notify=libraryGamesChanged)
+    def availableEmulatorNames(self) -> list[str]:
+        emulators = self._config.get("emulators", [])
+        if not isinstance(emulators, list):
+            return []
+        exclusion_set = {e.lower() for e in self.tvGuideExclusionList}
+        names: list[str] = []
+        for e in emulators:
+            if not isinstance(e, dict):
+                continue
+            name = e.get("name")
+            if not isinstance(name, str) or not name.strip():
+                continue
+            if name.strip().lower() not in exclusion_set:
+                names.append(name.strip())
+        return sorted(names)
+
+    @Property(str, notify=homeViewTabChanged)
+    def homeViewTab(self) -> str:
         value = self._config.get("tv_mode_home_view", "home")
         if not isinstance(value, str):
             return "home"
@@ -117,7 +149,7 @@ class AppBackend(QObject):
 
     @Property(bool, notify=libraryGamesChanged)
     def isAutoSync(self) -> bool:
-        return bool(self._config.get("auto_cloud_sync", False))
+        return bool(self._config.get("auto_cloud_save_download_on_launch", True))
 
     @Property(bool, notify=overlayStateChanged)
     def uiOverlayActive(self) -> bool:
@@ -183,7 +215,9 @@ class AppBackend(QObject):
 
     @Slot(bool)
     def setAutoSync(self, enabled: bool) -> None:
-        self._config["auto_cloud_sync"] = bool(enabled)
+        self._config["auto_cloud_save_download_on_launch"] = bool(enabled)
+        self._config["auto_cloud_save_upload_on_exit"] = bool(enabled)
+        self._config.pop("auto_cloud_sync", None)
         self._saveConfigToDisk()
         self.autoSyncChanged.emit(bool(enabled))
         self.libraryGamesChanged.emit()
@@ -204,7 +238,7 @@ class AppBackend(QObject):
 
     @Slot(str, result=list)
     def serverGamesForPlatform(self, platform_label: str) -> list[dict[str, str]]:
-        return self._server_games.get(platform_label, [])
+        return self._enrich_with_local_paths(self._server_games.get(platform_label, []))
 
     @Slot(str)
     def loadPlatformGames(self, platform_label: str) -> None:
@@ -216,9 +250,63 @@ class AppBackend(QObject):
             return
         self._start_rom_fetch(platform_label, platform_id)
 
+    @Slot(str, result=str)
+    def getInstalledLocalPath(self, rom_id: str) -> str:
+        if not rom_id:
+            return ""
+        installed_games = self._config.get("installed_games", [])
+        if not isinstance(installed_games, list):
+            return ""
+        for installed in installed_games:
+            if not isinstance(installed, dict):
+                continue
+            if str(installed.get("rom_id", "") or installed.get("id", "")) == rom_id:
+                return self._resolve_game_path(installed)
+        return ""
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _resolve_game_path(game: dict) -> str:
+        """Return the first non-empty file path from any known path key."""
+        for key in ("local_path", "extracted_path", "extracted_dir", "archive_path"):
+            val = game.get(key, "")
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        return ""
+
+    def _installed_local_paths(self) -> dict[str, str]:
+        result: dict[str, str] = {}
+        installed_games = self._config.get("installed_games", [])
+        if not isinstance(installed_games, list):
+            return result
+        for g in installed_games:
+            if not isinstance(g, dict):
+                continue
+            rom_id = str(g.get("rom_id", "") or g.get("id", "")).strip()
+            path = self._resolve_game_path(g)
+            if rom_id and path:
+                result[rom_id] = path
+        return result
+
+    def _enrich_with_local_paths(self, games: list) -> list:
+        local_paths = self._installed_local_paths()
+        if not local_paths:
+            return games
+        result = []
+        for game in games:
+            if not isinstance(game, dict):
+                result.append(game)
+                continue
+            rom_id = str(game.get("rom_id", "") or game.get("id", "")).strip()
+            lp = local_paths.get(rom_id, "")
+            if lp and not game.get("local_path"):
+                result.append({**game, "local_path": lp})
+            else:
+                result.append(game)
+        return result
 
     def _api_get(self, path: str, params: dict | None) -> Any:
         from rom_mate.core.api import api_get_json

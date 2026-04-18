@@ -30,15 +30,15 @@ class TestAppBackendConfigDefaults(unittest.TestCase):
 
     def test_home_view_default(self):
         backend = self._make_backend({})
-        self.assertEqual(backend.homeView, "home")
+        self.assertEqual(backend.homeViewTab, "home")
 
     def test_home_view_from_config(self):
         backend = self._make_backend({"tv_mode_home_view": "library"})
-        self.assertEqual(backend.homeView, "library")
+        self.assertEqual(backend.homeViewTab, "library")
 
     def test_home_view_invalid_type_returns_default(self):
         backend = self._make_backend({"tv_mode_home_view": 42})
-        self.assertEqual(backend.homeView, "home")
+        self.assertEqual(backend.homeViewTab, "home")
 
     def test_library_games_empty_when_no_installed_games(self):
         backend = self._make_backend({})
@@ -161,15 +161,16 @@ class TestAppBackendSettings(unittest.TestCase):
 
         self.backend.setAutoSync(True)
 
-        self.assertTrue(self.backend._config["auto_cloud_sync"])
+        self.assertTrue(self.backend._config["auto_cloud_save_download_on_launch"])
+        self.assertTrue(self.backend._config["auto_cloud_save_upload_on_exit"])
         self.assertEqual(emitted[-1], True)
 
     def test_server_url_property(self):
         self.backend.syncConfig({"server_url": "http://myserver"})
         self.assertEqual(self.backend.serverUrl, "http://myserver")
 
-    def test_is_auto_sync_defaults_false(self):
-        self.assertFalse(self.backend.isAutoSync)
+    def test_is_auto_sync_defaults_true(self):
+        self.assertTrue(self.backend.isAutoSync)
 
     def test_set_auto_sync_false(self):
         emitted = []
@@ -177,7 +178,8 @@ class TestAppBackendSettings(unittest.TestCase):
 
         self.backend.setAutoSync(False)
 
-        self.assertFalse(self.backend._config["auto_cloud_sync"])
+        self.assertFalse(self.backend._config["auto_cloud_save_download_on_launch"])
+        self.assertFalse(self.backend._config["auto_cloud_save_upload_on_exit"])
         self.assertEqual(emitted[-1], False)
 
     def test_set_home_view_tab_valid(self):
@@ -283,6 +285,211 @@ class TestAppBackendCuratedRows(unittest.TestCase):
              patch.object(backend, "_start_curated_rows_fetch") as mock_curated:
             backend._on_catalog_finished({}, {})
             mock_curated.assert_called_once()
+
+
+class TestAppBackendAvailableEmulatorNames(unittest.TestCase):
+    def _make_backend(self, config):
+        from rom_mate.tv.bridge.app_backend import AppBackend
+        return AppBackend(config, Path("/tmp/covers"))
+
+    def test_returns_sorted_names_excluding_already_excluded(self):
+        config = {
+            "emulators": [
+                {"name": "Dolphin"},
+                {"name": "RPCS3"},
+                {"name": "Cemu"},
+            ],
+            "tv_guide_button_exclusion_list": ["RPCS3"],
+        }
+        backend = self._make_backend(config)
+        self.assertEqual(backend.availableEmulatorNames, ["Cemu", "Dolphin"])
+
+    def test_empty_when_emulators_key_missing(self):
+        backend = self._make_backend({})
+        self.assertEqual(backend.availableEmulatorNames, [])
+
+    def test_empty_when_emulators_is_empty_list(self):
+        backend = self._make_backend({"emulators": []})
+        self.assertEqual(backend.availableEmulatorNames, [])
+
+    def test_case_insensitive_exclusion_filter(self):
+        config = {
+            "emulators": [{"name": "RPCS3"}],
+            "tv_guide_button_exclusion_list": ["rpcs3"],
+        }
+        backend = self._make_backend(config)
+        self.assertEqual(backend.availableEmulatorNames, [])
+
+    def test_filters_against_default_exclusion_list_when_no_config_key(self):
+        # When tv_guide_button_exclusion_list is absent, tvGuideExclusionList
+        # returns the default list (RPCS3, Cemu, Dolphin, Xemu, Xenia).
+        # Emulators with names not in the default list should appear.
+        config = {
+            "emulators": [
+                {"name": "RetroArch"},
+                {"name": "PCSX2"},
+                {"name": "RPCS3"},   # in default list, should be filtered
+            ],
+        }
+        backend = self._make_backend(config)
+        result = backend.availableEmulatorNames
+        self.assertIn("RetroArch", result)
+        self.assertIn("PCSX2", result)
+        self.assertNotIn("RPCS3", result)
+
+    def test_skips_invalid_emulator_entries(self):
+        config = {
+            "emulators": [
+                {"name": "RetroArch"},
+                "not_a_dict",
+                {"no_name_key": True},
+                {"name": "   "},   # blank name
+            ],
+            "tv_guide_button_exclusion_list": [],
+        }
+        backend = self._make_backend(config)
+        self.assertEqual(backend.availableEmulatorNames, ["RetroArch"])
+
+
+class TestAppBackendGetInstalledLocalPath(unittest.TestCase):
+    def _make_backend(self, config: dict) -> "AppBackend":
+        from rom_mate.tv.bridge.app_backend import AppBackend
+        return AppBackend(config, Path("/tmp/covers"))
+
+    def test_returns_local_path_when_game_is_installed(self):
+        backend = self._make_backend({
+            "installed_games": [
+                {"rom_id": "42", "local_path": "/games/mygame.zip"}
+            ]
+        })
+        result = backend.getInstalledLocalPath("42")
+        self.assertEqual(result, "/games/mygame.zip")
+
+    def test_returns_empty_string_when_not_installed(self):
+        backend = self._make_backend({
+            "installed_games": [
+                {"rom_id": "7", "local_path": "/games/other.zip"}
+            ]
+        })
+        result = backend.getInstalledLocalPath("42")
+        self.assertEqual(result, "")
+
+    def test_returns_empty_string_when_rom_id_is_empty(self):
+        backend = self._make_backend({
+            "installed_games": [
+                {"rom_id": "42", "local_path": "/games/mygame.zip"}
+            ]
+        })
+        result = backend.getInstalledLocalPath("")
+        self.assertEqual(result, "")
+
+    def test_returns_empty_string_when_installed_games_empty(self):
+        backend = self._make_backend({"installed_games": []})
+        result = backend.getInstalledLocalPath("42")
+        self.assertEqual(result, "")
+
+    def test_returns_empty_string_when_local_path_missing(self):
+        backend = self._make_backend({
+            "installed_games": [
+                {"rom_id": "42"}
+            ]
+        })
+        result = backend.getInstalledLocalPath("42")
+        self.assertEqual(result, "")
+
+    def test_returns_archive_path_when_no_local_path(self):
+        backend = self._make_backend({
+            "installed_games": [
+                {"rom_id": "42", "archive_path": "/games/mygame.zip"}
+            ]
+        })
+        result = backend.getInstalledLocalPath("42")
+        self.assertEqual(result, "/games/mygame.zip")
+
+    def test_returns_extracted_path_when_no_local_path(self):
+        backend = self._make_backend({
+            "installed_games": [
+                {"rom_id": "42", "extracted_path": "/games/mygame/"}
+            ]
+        })
+        result = backend.getInstalledLocalPath("42")
+        self.assertEqual(result, "/games/mygame/")
+
+
+class TestAppBackendEnrichWithLocalPaths(unittest.TestCase):
+    def _make_backend(self, config: dict) -> "AppBackend":
+        from rom_mate.tv.bridge.app_backend import AppBackend
+        return AppBackend(config, Path("/tmp/covers"))
+
+    def test_server_games_for_platform_enriches_installed_game(self):
+        backend = self._make_backend({
+            "installed_games": [
+                {"rom_id": "42", "local_path": "/games/mygame.zip"}
+            ]
+        })
+        backend._server_games["PS2"] = [{"rom_id": "42", "title": "My Game"}]
+        result = backend.serverGamesForPlatform("PS2")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].get("local_path"), "/games/mygame.zip")
+
+    def test_server_games_for_platform_leaves_uninstalled_game_unchanged(self):
+        backend = self._make_backend({"installed_games": []})
+        backend._server_games["PS2"] = [{"rom_id": "99", "title": "Other Game"}]
+        result = backend.serverGamesForPlatform("PS2")
+        self.assertEqual(len(result), 1)
+        self.assertNotIn("local_path", result[0])
+
+    def test_favorites_games_enriches_installed_game(self):
+        backend = self._make_backend({
+            "installed_games": [
+                {"rom_id": "7", "local_path": "/games/fav.zip"}
+            ]
+        })
+        backend._favorites_games = [{"rom_id": "7", "title": "Fav Game"}]
+        result = backend.favoritesGames
+        self.assertEqual(result[0].get("local_path"), "/games/fav.zip")
+
+    def test_new_additions_games_enriches_installed_game(self):
+        backend = self._make_backend({
+            "installed_games": [
+                {"rom_id": "5", "local_path": "/games/new.zip"}
+            ]
+        })
+        backend._new_additions_games = [{"rom_id": "5", "title": "New Game"}]
+        result = backend.newAdditionsGames
+        self.assertEqual(result[0].get("local_path"), "/games/new.zip")
+
+    def test_highly_rated_games_enriches_installed_game(self):
+        backend = self._make_backend({
+            "installed_games": [
+                {"rom_id": "3", "local_path": "/games/rated.zip"}
+            ]
+        })
+        backend._highly_rated_games = [{"rom_id": "3", "title": "Rated Game"}]
+        result = backend.highlyRatedGames
+        self.assertEqual(result[0].get("local_path"), "/games/rated.zip")
+
+    def test_enrichment_does_not_overwrite_existing_local_path(self):
+        backend = self._make_backend({
+            "installed_games": [
+                {"rom_id": "42", "local_path": "/games/new_path.zip"}
+            ]
+        })
+        backend._server_games["PS2"] = [
+            {"rom_id": "42", "title": "My Game", "local_path": "/games/original.zip"}
+        ]
+        result = backend.serverGamesForPlatform("PS2")
+        self.assertEqual(result[0].get("local_path"), "/games/original.zip")
+
+    def test_server_games_enriched_with_archive_path_for_desktop_install(self):
+        backend = self._make_backend({
+            "installed_games": [
+                {"rom_id": "42", "archive_path": "/games/mygame.zip"}
+            ]
+        })
+        backend._server_games["PS2"] = [{"rom_id": "42", "title": "My Game"}]
+        result = backend.serverGamesForPlatform("PS2")
+        self.assertEqual(result[0].get("local_path"), "/games/mygame.zip")
 
 
 if __name__ == "__main__":

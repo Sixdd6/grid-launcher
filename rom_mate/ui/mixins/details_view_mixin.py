@@ -86,7 +86,6 @@ class DetailsViewMixin:
     def resizeEvent(self, event) -> None:
         QMainWindow.resizeEvent(self, event)
         self._reflow_current_page_grid()
-        self._update_details_layout_metrics()
         QTimer.singleShot(0, self._update_details_layout_metrics)
 
 

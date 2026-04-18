@@ -22,8 +22,8 @@ Item {
     z: 10
 
     onVisibleChanged: {
-        appBackend.setUiOverlayActive(visible)
         if (visible) {
+            appBackend.setUiOverlayActive(true)
             _currentIndex = 0
             _actionMode = 0
             _loading = true
@@ -32,6 +32,8 @@ Item {
             _statusText = ""
             _uploading = false
             cloudBackend.loadSlotsForGame(root.game, root.saveType)
+        } else {
+            Qt.callLater(function() { appBackend.setUiOverlayActive(false) })
         }
     }
 

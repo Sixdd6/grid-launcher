@@ -6,10 +6,18 @@
     "configurations": [
 
         {
-            "name": "Python Debugger: rom-mate-neo",
+            "name": "Desktop Mode",
             "type": "debugpy",
             "request": "launch",
             "program": "rom-mate.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "TV Mode",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "rom-mate.py",
+            "args": ["-tv"],
             "console": "integratedTerminal"
         }
     ]

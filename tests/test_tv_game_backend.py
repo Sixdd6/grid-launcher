@@ -5,6 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import sys
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from PySide6.QtCore import QCoreApplication
@@ -301,7 +302,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
     def test_launch_game_starts_restore_worker_when_auto_sync_enabled(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
-        backend = GameBackend({**self.base_config, "auto_cloud_sync": True})
+        backend = GameBackend({**self.base_config, "auto_cloud_save_download_on_launch": True})
         statuses: list[str] = []
         backend.cloudSyncStatus.connect(statuses.append)
 
@@ -344,7 +345,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
     def test_launch_game_skips_restore_when_no_emulator_entry(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
-        backend = GameBackend({**self.base_config, "auto_cloud_sync": True})
+        backend = GameBackend({**self.base_config, "auto_cloud_save_download_on_launch": True})
         started: list[str] = []
         backend.sessionStarted.connect(started.append)
 
@@ -369,7 +370,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
     def test_on_process_exited_triggers_auto_upload_when_enabled(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
-        backend = GameBackend({**self.base_config, "auto_cloud_sync": True})
+        backend = GameBackend({**self.base_config, "auto_cloud_save_upload_on_exit": True})
         backend._session_game = dict(self.game)
         backend._process = MagicMock()
 
@@ -386,7 +387,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
     def test_on_process_exited_skips_upload_when_no_session_game(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
-        backend = GameBackend({**self.base_config, "auto_cloud_sync": True})
+        backend = GameBackend({**self.base_config, "auto_cloud_save_upload_on_exit": True})
         backend._session_game = None
         backend._process = MagicMock()
 
@@ -615,6 +616,80 @@ class TestGameBackendInstall(unittest.TestCase):
         self.assertEqual(received, [(True, "Game uninstalled.", {"id": "77", "name": "Test", "local_path": ""})])
         installed_games = backend._config.get("installed_games", [])
         self.assertFalse(any(entry.get("id") == "77" for entry in installed_games))
+
+
+class TestGameBackendNativeLaunch(unittest.TestCase):
+    def _make_backend(self, config=None):
+        from rom_mate.tv.bridge.game_backend import GameBackend
+
+        return GameBackend(config or {})
+
+    @patch("rom_mate.tv.bridge.game_backend.is_native_executable_platform", return_value=True)
+    @patch("rom_mate.tv.bridge.game_backend.native_install_dir_for_game", return_value=Path("/fake/dir"))
+    @patch("rom_mate.tv.bridge.game_backend.native_executable_candidates_for_game", return_value=[Path("/fake/dir/sub/game.exe")])
+    @patch("rom_mate.tv.bridge.game_backend.resolved_native_executable_path_for_game", return_value=None)
+    def test_launch_game_native_no_exe_emits_picker_needed(self, *_):
+        backend = self._make_backend()
+        captured = []
+        backend.nativeExecPickerNeeded.connect(lambda c: captured.append(c))
+        backend.launchGame({"rom_id": "1", "platform": "Windows", "local_path": "/fake/dir"})
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(len(captured[0]), 1)
+        self.assertIn("label", captured[0][0])
+        self.assertIn("path", captured[0][0])
+        self.assertEqual(captured[0][0]["path"], str(Path("/fake/dir/sub/game.exe")))
+
+    @patch("rom_mate.tv.bridge.game_backend._ProcessWatchThread.start")
+    @patch("rom_mate.tv.bridge.game_backend._subprocess_popen")
+    @patch("rom_mate.tv.bridge.game_backend.prepare_native_launch_command", return_value=(["game.exe"], "/fake/dir"))
+    @patch("rom_mate.tv.bridge.game_backend.resolved_native_executable_path_for_game", return_value=Path("/fake/dir/game.exe"))
+    @patch("rom_mate.tv.bridge.game_backend.native_executable_candidates_for_game", return_value=[Path("/fake/dir/game.exe")])
+    @patch("rom_mate.tv.bridge.game_backend.native_install_dir_for_game", return_value=Path("/fake/dir"))
+    @patch("rom_mate.tv.bridge.game_backend.is_native_executable_platform", return_value=True)
+    def test_launch_game_native_with_exe_calls_do_launch(self, _isnative, _installdir, _candidates, _resolved, _prepare, mock_popen, _watchstart):
+        mock_popen.return_value = MagicMock()
+        backend = self._make_backend()
+        backend.launchGame({"rom_id": "1", "platform": "Windows", "local_path": "/fake/dir"})
+        mock_popen.assert_called_once()
+        self.assertIsNotNone(backend._session_game)
+
+    @patch("rom_mate.tv.bridge.game_backend.resolved_native_executable_path_for_game", return_value=None)
+    @patch("rom_mate.tv.bridge.game_backend.native_executable_candidates_for_game", return_value=[])
+    @patch("rom_mate.tv.bridge.game_backend.native_install_dir_for_game", return_value=Path("/fake/dir"))
+    @patch("rom_mate.tv.bridge.game_backend.is_native_executable_platform", return_value=True)
+    def test_launch_game_native_no_candidates_emits_error(self, *_):
+        backend = self._make_backend()
+        captured = []
+        backend.launchError.connect(lambda m: captured.append(m))
+        backend.launchGame({"rom_id": "1", "platform": "Windows", "local_path": "/fake/dir"})
+        self.assertEqual(len(captured), 1)
+        self.assertIn("No executable", captured[0])
+
+    @patch("rom_mate.tv.bridge.game_backend._write_config_file")
+    def test_save_native_executable_updates_config(self, mock_write):
+        config = {
+            "installed_games": [
+                {"rom_id": "42", "title": "My Game", "local_path": "/games/mygame"}
+            ]
+        }
+        backend = self._make_backend(config)
+        backend.saveNativeExecutable("42", "/games/mygame/launcher.exe")
+        self.assertEqual(config["installed_games"][0]["native_executable_path"], "/games/mygame/launcher.exe")
+        mock_write.assert_called_once()
+
+    @patch("rom_mate.tv.bridge.game_backend.native_executable_candidates_for_game", return_value=[Path("/fake/dir/sub/game.exe")])
+    @patch("rom_mate.tv.bridge.game_backend.native_install_dir_for_game", return_value=Path("/fake/dir"))
+    def test_get_native_executable_candidates_returns_list(self, *_):
+        config = {
+            "installed_games": [
+                {"rom_id": "7", "extracted_dir": "/fake/dir"}
+            ]
+        }
+        backend = self._make_backend(config)
+        result = backend.getNativeExecutableCandidates("7")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["label"], str(Path("sub/game.exe")))
+        self.assertEqual(result[0]["path"], str(Path("/fake/dir/sub/game.exe")))
 
 
 if __name__ == "__main__":

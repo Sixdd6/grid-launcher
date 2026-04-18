@@ -15,6 +15,12 @@ ApplicationWindow {
         root.hide()
     }
 
+    onVisibleChanged: {
+        if (visible && outerStack.depth > 1) {
+            outerStack.pop(null)
+        }
+    }
+
     // Outer stack: full-screen pushes (Details, Settings overlay the tab bar)
     StackView {
         id: outerStack
@@ -61,6 +67,17 @@ ApplicationWindow {
             width: parent ? parent.width : 0
             height: parent ? parent.height : 0
             property int _prevTabIndex: 0
+
+            Component.onCompleted: {
+                var tab = appBackend.homeViewTab
+                var idx = tab === "library" ? 1 : tab === "server" ? 2 : 0
+                if (idx !== 0) {
+                    tabBar.currentIndex = idx
+                    tabRoot._prevTabIndex = idx
+                    if (idx === 1) innerStack.replace(libraryViewComponent)
+                    else if (idx === 2) innerStack.replace(serverViewComponent)
+                }
+            }
 
             ViewTabBar {
                 id: tabBar
@@ -125,7 +142,7 @@ ApplicationWindow {
                     } else if (direction === "tab_next") {
                         tabBar.selectNext()
                     } else if (direction === "back") {
-                        if (outerStack.depth > 1) {
+                        if (outerStack.depth > 1 && !appBackend.uiOverlayActive) {
                             outerStack.pop()
                         }
                     } else if (direction === "guide_button") {

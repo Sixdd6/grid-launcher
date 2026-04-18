@@ -11,9 +11,9 @@ Item {
     // --- Focus tracking ---
     property int currentFocusIndex: 0
     property int _tabSubIndex: 0
+    property int _pickerSubIndex: 0
     property int _exclusionStartIndex: exclusionHeaderRow.addMode ? 6 : 5
-    property int _totalFocusCount: _exclusionStartIndex + (exclusionRepeater._exclusions ? exclusionRepeater._exclusions.length : 0)
-    property bool inputActive: exclusionHeaderRow.addMode && newExclusionInput.activeFocus
+    property int _totalFocusCount: _exclusionStartIndex + (exclusionRepeater.exclusions ? exclusionRepeater.exclusions.length : 0)
     readonly property int idxBack: 0
     readonly property int idxTabs: 1
     readonly property int idxCloudSync: 2
@@ -38,19 +38,20 @@ Item {
             appBackend.requestDesktopMode()
         } else if (currentFocusIndex === idxAddButton) {
             exclusionHeaderRow.addMode = !exclusionHeaderRow.addMode
-            if (exclusionHeaderRow.addMode) currentFocusIndex = idxAddRow
+            if (exclusionHeaderRow.addMode) {
+                _pickerSubIndex = 0
+                currentFocusIndex = idxAddRow
+            }
         } else if (exclusionHeaderRow.addMode && currentFocusIndex === idxAddRow) {
-            if (newExclusionInput.text.trim().length > 0) {
-                appBackend.addExclusionEntry(newExclusionInput.text.trim())
-                newExclusionInput.text = ""
+            var names = appBackend.availableEmulatorNames || []
+            if (names.length > 0) {
+                appBackend.addExclusionEntry(names[_pickerSubIndex])
                 exclusionHeaderRow.addMode = false
                 currentFocusIndex = idxAddButton
-            } else {
-                newExclusionInput.forceActiveFocus()
             }
         } else {
             var exclusionIdx = currentFocusIndex - _exclusionStartIndex
-            var list = exclusionRepeater._exclusions || []
+            var list = exclusionRepeater.exclusions || []
             if (exclusionIdx >= 0 && exclusionIdx < list.length) {
                 appBackend.removeExclusionEntry(list[exclusionIdx])
                 currentFocusIndex = Math.min(currentFocusIndex, _totalFocusCount - 2)
@@ -66,10 +67,11 @@ Item {
         else if (currentFocusIndex === idxDesktop)   { y = 36 + 168 }
         else if (currentFocusIndex === idxAddButton) { y = 36 + 168 + 56 + 36 }
         else if (exclusionHeaderRow.addMode && currentFocusIndex === idxAddRow) {
-            y = 36 + 168 + 56 + 36 + 56
+            y = 36 + 168 + 56 + 36 + 56 + _pickerSubIndex * 44
         } else {
             var exIdx = currentFocusIndex - _exclusionStartIndex
-            var baseY = 36 + 168 + 56 + 36 + 56 + (exclusionHeaderRow.addMode ? 56 : 0)
+            var pickerH = exclusionHeaderRow.addMode ? Math.max(1, (appBackend.availableEmulatorNames || []).length) * 44 : 0
+            var baseY = 36 + 168 + 56 + 36 + 56 + pickerH
             y = baseY + exIdx * 48
         }
         var fl = settingsScroll.contentItem
@@ -145,6 +147,8 @@ Item {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         clip: true
+        ScrollBar.vertical.policy: ScrollBar.AlwaysOff
+        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
         Column {
             width: parent.width
@@ -156,7 +160,7 @@ Item {
                 color: "#1e1f29"
                 Text {
                     text: "GENERAL"
-                    color: "#6272a4"; font.pixelSize: 11
+                    color: "#bd93f9"; font.pixelSize: 11
                     font.letterSpacing: 1.5
                     anchors { left: parent.left; leftMargin: 20; verticalCenter: parent.verticalCenter }
                 }
@@ -300,26 +304,6 @@ Item {
                     Behavior on opacity { NumberAnimation { duration: 100 } }
                 }
 
-                // Outer glow
-                Rectangle {
-                    x: 20 - 16; y: (parent.height - 44) / 2 - 16
-                    width: parent.width - 40 + 32; height: 44 + 32
-                    radius: 24
-                    color: "#ff79c6"
-                    opacity: desktopModeRow.isFocused ? 0.15 : 0.0
-                    Behavior on opacity { NumberAnimation { duration: 100 } }
-                }
-
-                // Inner glow
-                Rectangle {
-                    x: 20 - 8; y: (parent.height - 44) / 2 - 8
-                    width: parent.width - 40 + 16; height: 44 + 16
-                    radius: 16
-                    color: "#ff79c6"
-                    opacity: desktopModeRow.isFocused ? 0.20 : 0.0
-                    Behavior on opacity { NumberAnimation { duration: 100 } }
-                }
-
                 Rectangle {
                     anchors { left: parent.left; right: parent.right; leftMargin: 20; rightMargin: 20; verticalCenter: parent.verticalCenter }
                     height: 44; radius: 8
@@ -348,7 +332,7 @@ Item {
                 color: "#1e1f29"
                 Text {
                     text: "CONTROLLER"
-                    color: "#6272a4"; font.pixelSize: 11
+                    color: "#bd93f9"; font.pixelSize: 11
                     font.letterSpacing: 1.5
                     anchors { left: parent.left; leftMargin: 20; verticalCenter: parent.verticalCenter }
                 }
@@ -358,18 +342,8 @@ Item {
             Rectangle {
                 id: exclusionHeaderRow
                 width: parent.width; height: 56
-                color: currentFocusIndex === idxAddButton ? "#383a59" : "transparent"
-                Behavior on color { ColorAnimation { duration: 100 } }
+                color: "transparent"
                 property bool addMode: false
-
-                Rectangle {
-                    width: 3; height: parent.height * 0.6
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left
-                    color: "#ff79c6"
-                    opacity: currentFocusIndex === idxAddButton ? 1.0 : 0.0
-                    Behavior on opacity { NumberAnimation { duration: 100 } }
-                }
 
                 Text {
                     text: "Guide button exclusions"
@@ -402,61 +376,97 @@ Item {
                     }
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: exclusionHeaderRow.addMode = !exclusionHeaderRow.addMode
+                        onClicked: {
+                            exclusionHeaderRow.addMode = !exclusionHeaderRow.addMode
+                            if (exclusionHeaderRow.addMode) {
+                                root._pickerSubIndex = 0
+                                root.currentFocusIndex = idxAddRow
+                            }
+                        }
                     }
                 }
             }
 
-            // Add new exclusion input row
+            // Guide Button Exclusion List hint
             Rectangle {
                 width: parent.width
-                height: exclusionHeaderRow.addMode ? 56 : 0
-                color: (exclusionHeaderRow.addMode && currentFocusIndex === idxAddRow) ? "#383a59" : "transparent"
-                Behavior on color { ColorAnimation { duration: 100 } }
+                height: hintText.implicitHeight + 16
+                color: "transparent"
+
+                Text {
+                    id: hintText
+                    text: "Emulators in this list will use their own guide button behaviour instead of the TV menu shortcut."
+                    color: "#6272a4"
+                    font.pixelSize: 13
+                    wrapMode: Text.WordWrap
+                    anchors { left: parent.left; right: parent.right; leftMargin: 20; rightMargin: 20; top: parent.top; topMargin: 8 }
+                }
+            }
+
+            // Emulator picker — shown when addMode is true
+            Rectangle {
+                id: pickerContainer
+                width: parent.width
+                property var _names: appBackend.availableEmulatorNames || []
+                height: exclusionHeaderRow.addMode ? Math.max(1, _names.length) * 44 : 0
                 visible: exclusionHeaderRow.addMode
                 clip: true
+                color: "#1e1f29"
+                border.color: "#44475a"
+                border.width: 1
                 Behavior on height { NumberAnimation { duration: 150 } }
 
+                // Empty state
                 Rectangle {
-                    width: 3; height: parent.height * 0.6
-                    anchors.verticalCenter: parent.verticalCenter
-                    anchors.left: parent.left
-                    color: "#ff79c6"
-                    opacity: (exclusionHeaderRow.addMode && currentFocusIndex === idxAddRow) ? 1.0 : 0.0
-                    Behavior on opacity { NumberAnimation { duration: 100 } }
+                    width: parent.width; height: 44
+                    color: "transparent"
+                    visible: pickerContainer._names.length === 0
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "No emulators to add"
+                        color: "#6272a4"
+                        font.pixelSize: 15
+                    }
                 }
 
-                Row {
-                    anchors { left: parent.left; right: parent.right; leftMargin: 20; rightMargin: 20; verticalCenter: parent.verticalCenter }
-                    spacing: 12
-                    Rectangle {
-                        width: parent.width - 80; height: 36
-                        color: "#1e1f29"
-                        border.color: currentFocusIndex === idxAddRow ? "#ff79c6" : "#44475a"
-                        border.width: 1
-                        radius: 4
-                        Behavior on border.color { ColorAnimation { duration: 80 } }
-                        TextInput {
-                            id: newExclusionInput
-                            anchors.fill: parent
-                            anchors.leftMargin: 10; anchors.rightMargin: 10
-                            color: "#f8f8f2"
-                            verticalAlignment: TextInput.AlignVCenter
-                            font.pixelSize: 16
-                            clip: true
-                        }
-                    }
-                    Rectangle {
-                        width: 68; height: 36; radius: 4
-                        color: "#ff79c6"
-                        Text { text: "Add"; color: "#1e1f29"; anchors.centerIn: parent; font.bold: true }
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: {
-                                if (newExclusionInput.text.trim().length > 0) {
-                                    appBackend.addExclusionEntry(newExclusionInput.text.trim())
-                                    newExclusionInput.text = ""
+                // Picker items
+                Column {
+                    width: parent.width
+                    visible: pickerContainer._names.length > 0
+
+                    Repeater {
+                        model: pickerContainer._names
+                        Rectangle {
+                            width: pickerContainer.width; height: 44
+                            property bool isPickerFocused: exclusionHeaderRow.addMode && currentFocusIndex === idxAddRow && root._pickerSubIndex === index
+                            color: isPickerFocused ? "#383a59" : "transparent"
+                            Behavior on color { ColorAnimation { duration: 100 } }
+
+                            // Left accent bar
+                            Rectangle {
+                                width: 3; height: parent.height * 0.6
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.left: parent.left
+                                color: "#ff79c6"
+                                opacity: isPickerFocused ? 1.0 : 0.0
+                                Behavior on opacity { NumberAnimation { duration: 100 } }
+                            }
+
+                            Text {
+                                text: modelData
+                                color: "#f8f8f2"
+                                anchors { left: parent.left; leftMargin: 20; verticalCenter: parent.verticalCenter }
+                                font.pixelSize: 16
+                                z: 1
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: {
+                                    appBackend.addExclusionEntry(modelData)
                                     exclusionHeaderRow.addMode = false
+                                    root.currentFocusIndex = idxAddButton
                                 }
                             }
                         }
@@ -467,8 +477,13 @@ Item {
             // Exclusion List Repeater
             Repeater {
                 id: exclusionRepeater
-                property var _exclusions: appBackend.tvGuideExclusionList || []
-                model: _exclusions
+                property var exclusions: appBackend.tvGuideExclusionList || []
+                onExclusionsChanged: {
+                    var maxIdx = root._totalFocusCount - 1
+                    if (root.currentFocusIndex > maxIdx)
+                        root.currentFocusIndex = Math.max(root.idxAddButton, maxIdx)
+                }
+                model: exclusions
                 Rectangle {
                     width: parent.width; height: 48
                     property bool isFocused: currentFocusIndex === (root._exclusionStartIndex + index)
@@ -522,7 +537,7 @@ Item {
                 color: "#1e1f29"
                 Text {
                     text: "KEYBINDS"
-                    color: "#6272a4"; font.pixelSize: 11
+                    color: "#bd93f9"; font.pixelSize: 11
                     font.letterSpacing: 1.5
                     anchors { left: parent.left; leftMargin: 20; verticalCenter: parent.verticalCenter }
                 }
@@ -561,7 +576,7 @@ Item {
                 color: "#1e1f29"
                 Text {
                     text: "THEME"
-                    color: "#6272a4"; font.pixelSize: 11
+                    color: "#bd93f9"; font.pixelSize: 11
                     font.letterSpacing: 1.5
                     anchors { left: parent.left; leftMargin: 20; verticalCenter: parent.verticalCenter }
                 }
@@ -589,7 +604,7 @@ Item {
                 color: "#1e1f29"
                 Text {
                     text: "SOUND"
-                    color: "#6272a4"; font.pixelSize: 11
+                    color: "#bd93f9"; font.pixelSize: 11
                     font.letterSpacing: 1.5
                     anchors { left: parent.left; leftMargin: 20; verticalCenter: parent.verticalCenter }
                 }
@@ -616,17 +631,34 @@ Item {
     Connections {
         target: controllerBackend
         function onNavigationEvent(direction) {
-            if (appBackend.uiOverlayActive) return
-            if (inputActive) {
-                if (direction === "back") { newExclusionInput.focus = false; root.forceActiveFocus() }
-                return
-            }
-            if (direction === "back") {
-                if (exclusionHeaderRow.addMode && currentFocusIndex === idxAddRow) {
+            // Picker navigation — intercepts all input while picker is open
+            if (exclusionHeaderRow.addMode && currentFocusIndex === idxAddRow) {
+                var names = appBackend.availableEmulatorNames || []
+                if (direction === "up") {
+                    if (_pickerSubIndex > 0) {
+                        _pickerSubIndex--
+                        _ensureFocusVisible()
+                    } else {
+                        exclusionHeaderRow.addMode = false
+                        currentFocusIndex = idxAddButton
+                    }
+                } else if (direction === "down") {
+                    if (_pickerSubIndex < names.length - 1) {
+                        _pickerSubIndex++
+                        _ensureFocusVisible()
+                    }
+                } else if (direction === "confirm") {
+                    _activateCurrentControl()
+                } else if (direction === "back") {
                     exclusionHeaderRow.addMode = false
                     currentFocusIndex = idxAddButton
-                    return
                 }
+                return
+            }
+
+            if (appBackend.uiOverlayActive) return
+
+            if (direction === "back") {
                 if (root.StackView.view) root.StackView.view.pop()
                 return
             }
@@ -655,19 +687,11 @@ Item {
     Connections {
         target: exclusionHeaderRow
         function onAddModeChanged() {
+            _pickerSubIndex = 0
+            appBackend.setUiOverlayActive(exclusionHeaderRow.addMode)
             if (!exclusionHeaderRow.addMode && currentFocusIndex === idxAddRow)
                 currentFocusIndex = idxAddButton
         }
     }
 
-    Connections {
-        target: appBackend
-        function onExclusionListChanged(list) {
-            exclusionRepeater._exclusions = list
-            var maxIdx = root._totalFocusCount - 1
-            if (currentFocusIndex > maxIdx) currentFocusIndex = Math.max(idxAddButton, maxIdx)
-        }
-    }
 }
-
-

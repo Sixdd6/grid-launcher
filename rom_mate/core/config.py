@@ -208,6 +208,8 @@ def merge_config_with_defaults(
             merged[key] = normalize_installed_games(value)
         elif key == "cloud_sync_state":
             merged[key] = normalize_cloud_sync_state(value)
+        elif isinstance(default_value, list) and isinstance(value, list):
+            merged[key] = value
 
     if "first_run_completed" not in content:
         merged["first_run_completed"] = bool(content)

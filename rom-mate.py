@@ -418,8 +418,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self.ra_clear_button: QPushButton | None = None
         self.library_path_input: QLineEdit | None = None
         self.debug_prints_checkbox: QCheckBox | None = None
-        self.auto_cloud_download_checkbox: QCheckBox | None = None
-        self.auto_cloud_upload_checkbox: QCheckBox | None = None
+        self.auto_cloud_checkbox: QCheckBox | None = None
         self.auto_cloud_skip_local_newer_checkbox: QCheckBox | None = None
         self.theme_input: QComboBox | None = None
         self.settings_status_label: QLabel | None = None
@@ -778,6 +777,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         if self._tv_cloud_backend is not None:
             self._tv_cloud_backend.syncConfig(self.config)
 
+        self.session_poll_timer.stop()
         self.hide()
         self._tv_window.showFullScreen()
         self._tv_window.requestActivate()
@@ -788,7 +788,10 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         if self._tv_window is not None:
             self._tv_window.hide()
         self.config = self._load_config()
+        if self.auto_cloud_checkbox is not None:
+            self.auto_cloud_checkbox.setChecked(self._auto_cloud_save_download_enabled())
         self.show()
+        self.session_poll_timer.start()
         self.activateWindow()
         self._refresh_library_grid()
 
@@ -1222,13 +1225,9 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         cloud_sync_layout.setContentsMargins(12, 10, 12, 10)
         cloud_sync_layout.addWidget(self._make_section_title("Cloud Save Sync"))
 
-        self.auto_cloud_download_checkbox = QCheckBox("Download latest cloud save before launch")
-        self.auto_cloud_download_checkbox.setChecked(self._auto_cloud_save_download_enabled())
-        cloud_sync_layout.addWidget(self.auto_cloud_download_checkbox)
-
-        self.auto_cloud_upload_checkbox = QCheckBox("Upload saves automatically when game closes")
-        self.auto_cloud_upload_checkbox.setChecked(self._auto_cloud_save_upload_enabled())
-        cloud_sync_layout.addWidget(self.auto_cloud_upload_checkbox)
+        self.auto_cloud_checkbox = QCheckBox("Auto cloud saves (download before launch, upload after close)")
+        self.auto_cloud_checkbox.setChecked(self._auto_cloud_save_download_enabled())
+        cloud_sync_layout.addWidget(self.auto_cloud_checkbox)
 
         self.auto_cloud_skip_local_newer_checkbox = QCheckBox("Skip download if local save appears newer")
         self.auto_cloud_skip_local_newer_checkbox.setChecked(self._auto_cloud_skip_download_if_local_newer())
@@ -1839,7 +1838,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             "retroachievements_api_key": "",
             "retroachievements_token": "",
             "tv_mode_home_view": "home",
-            "tv_guide_button_exclusion_list": ["RPCS3", "Cemu", "Dolphin", "Xemu", "Xenia"],
+            "tv_guide_button_exclusion_list": [],
             "tv_mode_last_active": False,
         }
 
@@ -1968,10 +1967,9 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             values["launch_args"] = existing_launch_args.strip()
         if self.debug_prints_checkbox is not None:
             values["debug_prints"] = self.debug_prints_checkbox.isChecked()
-        if self.auto_cloud_download_checkbox is not None:
-            values["auto_cloud_save_download_on_launch"] = self.auto_cloud_download_checkbox.isChecked()
-        if self.auto_cloud_upload_checkbox is not None:
-            values["auto_cloud_save_upload_on_exit"] = self.auto_cloud_upload_checkbox.isChecked()
+        if self.auto_cloud_checkbox is not None:
+            values["auto_cloud_save_download_on_launch"] = self.auto_cloud_checkbox.isChecked()
+            values["auto_cloud_save_upload_on_exit"] = self.auto_cloud_checkbox.isChecked()
         if self.auto_cloud_skip_local_newer_checkbox is not None:
             values["auto_cloud_save_skip_download_if_local_newer"] = self.auto_cloud_skip_local_newer_checkbox.isChecked()
         if self.theme_input is not None:
@@ -1983,6 +1981,9 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         values["window_state"] = self.config.get("window_state", "normal")
         values["first_run_completed"] = bool(self.config.get("first_run_completed", False))
         values["installed_games"] = self.library_games
+        values["tv_mode_home_view"] = self.config.get("tv_mode_home_view", "home")
+        values["tv_guide_button_exclusion_list"] = self.config.get("tv_guide_button_exclusion_list", values["tv_guide_button_exclusion_list"])
+        values["tv_mode_last_active"] = self.config.get("tv_mode_last_active", False)
         values["emulator_source_installs"] = self._normalize_emulator_source_installs(
             self.config.get("emulator_source_installs", {})
         )
@@ -3076,7 +3077,10 @@ def main() -> None:
     if not window._run_first_run_setup_if_needed():
         window.close()
         return
-    window.show()
+    if "-tv" in sys.argv:
+        window._switch_to_tv_mode()
+    else:
+        window.show()
     sys.exit(app.exec())
 
 

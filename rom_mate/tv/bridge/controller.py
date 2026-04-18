@@ -26,6 +26,7 @@ _XINPUT_GAMEPAD_LEFT_THUMB = 0x0040
 _XINPUT_GAMEPAD_RIGHT_THUMB = 0x0080
 _XINPUT_GAMEPAD_LEFT_SHOULDER = 0x0100
 _XINPUT_GAMEPAD_RIGHT_SHOULDER = 0x0200
+_XINPUT_GAMEPAD_GUIDE = 0x0400
 _XINPUT_GAMEPAD_A = 0x1000
 _XINPUT_GAMEPAD_B = 0x2000
 _XINPUT_GAMEPAD_X = 0x4000
@@ -49,6 +50,7 @@ _XINPUT_BUTTON_BITS: list[tuple[int, str]] = [
     (_XINPUT_GAMEPAD_B, "BTN_EAST"),
     (_XINPUT_GAMEPAD_X, "BTN_WEST"),
     (_XINPUT_GAMEPAD_Y, "BTN_NORTH"),
+    (_XINPUT_GAMEPAD_GUIDE, "BTN_MODE"),
 ]
 
 
@@ -111,7 +113,12 @@ class _XInputPollThread(QThread):
                 ("Gamepad", _Gamepad),
             ]
 
-        XInputGetState = xinput.XInputGetState
+        # Prefer XInputGetStateEx (ordinal 100) - same signature as XInputGetState
+        # but also exposes the guide button via bit 0x0400 in wButtons.
+        try:
+            XInputGetState = xinput[100]  # ordinal 100 = XInputGetStateEx
+        except (AttributeError, OSError):
+            XInputGetState = xinput.XInputGetState
         XInputGetState.argtypes = [wt.DWORD, ctypes.POINTER(_State)]
         XInputGetState.restype = wt.DWORD
         ERROR_SUCCESS = 0
@@ -230,6 +237,8 @@ class _PygameGuidePollThread(QThread):
 
         print(f"[TV Controller] pygame guide-thread: {len(joysticks)} joystick(s)", file=sys.stderr)
 
+        last_scan = time.monotonic()
+
         while self._running:
             try:
                 pygame.event.pump()
@@ -260,6 +269,24 @@ class _PygameGuidePollThread(QThread):
                         self.event_received.emit("BTN_MODE", 0.0)
             except Exception:
                 pass
+
+            # Periodic fallback: initialise joysticks missed by JOYDEVICEADDED
+            now_t = time.monotonic()
+            if now_t - last_scan >= 1.0:
+                last_scan = now_t
+                try:
+                    tracked_ids = {js.get_instance_id() for js in joysticks.values()}
+                    for i in range(pygame.joystick.get_count()):
+                        js = pygame.joystick.Joystick(i)
+                        js.init()
+                        if js.get_instance_id() not in tracked_ids:
+                            joysticks[i] = js
+                            print(
+                                f"[TV Controller] pygame guide-thread periodic-scan added joystick idx={i}",
+                                file=sys.stderr,
+                            )
+                except Exception:
+                    pass
             time.sleep(0.016)
 
         try:
