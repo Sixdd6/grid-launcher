@@ -37,18 +37,29 @@ class RomListFetchWorker(QObject):
         platform_label: str,
         platform_id: int,
         library_games: list[dict[str, str]],
+        base_url: str = "",
     ) -> None:
         super().__init__()
         self._api_get = api_get
         self._platform_label = platform_label
         self._platform_id = platform_id
         self._library_games = library_games
+        self._base_url = base_url
 
     def run(self) -> None:
+        from rom_mate.cover.utils import cover_url_from_rom_payload, screenshot_urls_from_rom_payload, resolve_cover_url
         from rom_mate.server.catalog import fetch_platform_rom_items, games_from_rom_items
         try:
             items = fetch_platform_rom_items(self._api_get, self._platform_id)
-            games = games_from_rom_items(items, self._library_games, default_platform_label=self._platform_label)
+            captured_base_url = self._base_url
+
+            def _cover_url(payload):
+                return cover_url_from_rom_payload(payload, lambda v: resolve_cover_url(v, captured_base_url))
+
+            def _screenshot_urls(payload):
+                return screenshot_urls_from_rom_payload(payload, lambda v: resolve_cover_url(v, captured_base_url))
+
+            games, _ = games_from_rom_items(items, self._platform_label, _cover_url, _screenshot_urls)
             self.finished.emit(self._platform_label, games)
         except Exception as exc:
             self.error.emit(self._platform_label, str(exc))

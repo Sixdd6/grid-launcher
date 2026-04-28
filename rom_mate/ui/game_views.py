@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable, Protocol
 
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLayout, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from rom_mate.library import rom_file_name_version
 
@@ -32,6 +32,12 @@ class GameDetailsWindowProtocol(Protocol):
     details_version_group: QWidget | None
     details_genres_group: QWidget | None
     details_genres_layout: QHBoxLayout | None
+    details_companies_group: QWidget | None
+    details_companies_label: QLabel | None
+    details_release_date_group: QWidget | None
+    details_release_date_label: QLabel | None
+    details_languages_group: QWidget | None
+    details_languages_label: QLabel | None
     details_platform_label: QLabel | None
     details_genres_label: QLabel | None
     details_regions_label: QLabel | None
@@ -136,13 +142,15 @@ def _is_windows_pc_platform(platform_value: object) -> bool:
 
 
 def _default_details_version_label_text(game: dict[str, str]) -> str:
-    if not _is_windows_pc_platform(game.get("platform", "")):
-        return ""
-    rom_file_name = game.get("rom_file_name", "")
-    version_tag = rom_file_name_version(rom_file_name)
-    if version_tag is None:
-        return ""
-    return f"Version: v{version_tag:05d}"
+    if _is_windows_pc_platform(game.get("platform", "")):
+        rom_file_name = game.get("rom_file_name", "")
+        version_tag = rom_file_name_version(rom_file_name)
+        if version_tag is not None:
+            return f"Version: v{version_tag:05d}"
+    revision = game.get("revision", "")
+    if isinstance(revision, str) and revision.strip():
+        return revision.strip()
+    return ""
 
 
 def _is_truthy_flag(value: object) -> bool:
@@ -346,6 +354,31 @@ def open_game_details(window: GameDetailsWindowProtocol, game: dict[str, str], s
             description_text = ""
         window.details_description_label.setText(description_text)
         window.details_description_label.setVisible(bool(description_text))
+
+    companies_value = game.get("companies", "")
+    companies_text = companies_value.strip() if isinstance(companies_value, str) else ""
+    companies_group = getattr(window, "details_companies_group", None)
+    companies_label = getattr(window, "details_companies_label", None)
+    if companies_group is not None and companies_label is not None:
+        companies_label.setText(companies_text)
+        companies_group.setVisible(bool(companies_text))
+
+    release_date_value = game.get("first_release_date", "")
+    release_date_text = release_date_value.strip() if isinstance(release_date_value, str) else ""
+    release_date_group = getattr(window, "details_release_date_group", None)
+    release_date_label = getattr(window, "details_release_date_label", None)
+    if release_date_group is not None and release_date_label is not None:
+        release_date_label.setText(release_date_text)
+        release_date_group.setVisible(bool(release_date_text))
+
+    languages_value = game.get("languages", "")
+    languages_text = languages_value.strip() if isinstance(languages_value, str) else ""
+    languages_group = getattr(window, "details_languages_group", None)
+    languages_label = getattr(window, "details_languages_label", None)
+    if languages_group is not None and languages_label is not None:
+        languages_label.setText(languages_text)
+        languages_group.setVisible(bool(languages_text))
+
     window._update_details_screenshots(game)
     window._show_details_overview()
     window._update_details_action_buttons()

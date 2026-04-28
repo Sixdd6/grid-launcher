@@ -22,6 +22,15 @@ Item {
         }
     }
 
+    onGamesChanged: {
+        Qt.callLater(function() {
+            var target = root.sharedIndex >= 0 ? root.sharedIndex : 0
+            if (listView.currentIndex !== target) {
+                listView.currentIndex = target
+            }
+        })
+    }
+
     signal gameSelected(var game)
 
     Column {
@@ -49,8 +58,13 @@ Item {
             rightMargin: root.homeStyle ? 48 : 16
             keyNavigationEnabled: true
             focus: root.activeFocus
-            currentIndex: root.sharedIndex >= 0 ? root.sharedIndex : 0
             highlightMoveDuration: 0
+
+            Binding {
+                target: listView
+                property: "currentIndex"
+                value: root.sharedIndex >= 0 ? root.sharedIndex : 0
+            }
             highlightFollowsCurrentItem: false
 
             onCurrentIndexChanged: {

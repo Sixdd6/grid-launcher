@@ -68,6 +68,12 @@ def hydrate_install_game_metadata(
                     "ps4_has_update",
                     "ps4_has_dlc",
                     "ps4_file_ids_by_category",
+                    "revision",
+                    "languages",
+                    "tags",
+                    "fanart_url",
+                    "companies",
+                    "first_release_date",
                 ):
                     server_value = server_game.get(field, "")
                     if not isinstance(server_value, str) or not server_value.strip():
@@ -125,7 +131,7 @@ def sync_install_metadata_to_details_game(
     if isinstance(screenshot_value, str):
         current_details_game["screenshot_urls"] = screenshot_value.strip()
 
-    for field in ("rating", "description", "genres", "regions", "release_year", "filesize_bytes"):
+    for field in ("rating", "description", "genres", "regions", "release_year", "filesize_bytes", "revision", "languages", "tags", "fanart_url", "companies", "first_release_date"):
         field_value = install_game.get(field, "")
         if isinstance(field_value, str):
             current_details_game[field] = field_value.strip()

@@ -77,6 +77,37 @@ class RomDetailWorkerTests(unittest.TestCase):
 
         self.assertEqual(window.started_lookup_args, ("123", "https://romm.example", "token"))
 
+    def test_on_rom_detail_loaded_applies_new_fields(self) -> None:
+        window = _StubDetailsWindow()
+        window.current_details_game = {
+            "rom_id": "123",
+            "title": "Test",
+        }
+        window.current_details_source = "library"
+        payload = {
+            "revision": "v2.0",
+            "languages": ["English", "French"],
+            "tags": [{"name": "RPG"}, {"name": "Action"}],
+            "igdb_metadata": {
+                "companies": ["Capcom"],
+                "first_release_date": 788918400,
+            },
+            "ss_metadata": {
+                "fanart_url": "https://example.com/fanart.jpg",
+            },
+        }
+
+        with patch("rom_mate.ui.mixins.details_view_mixin.open_game_details"):
+            window._on_rom_detail_loaded("123", payload, "")
+
+        game = window.current_details_game
+        self.assertEqual(game.get("revision"), "v2.0")
+        self.assertEqual(game.get("languages"), "English, French")
+        self.assertEqual(game.get("tags"), "RPG, Action")
+        self.assertEqual(game.get("companies"), "Capcom")
+        self.assertEqual(game.get("fanart_url"), "https://example.com/fanart.jpg")
+        self.assertTrue(game.get("first_release_date"))
+
 
 if __name__ == "__main__":
     unittest.main()

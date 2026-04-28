@@ -4,6 +4,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import sys
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -42,7 +43,7 @@ class TestGameBackend(unittest.TestCase):
             "platform": "SNES",
             "local_path": "/games/super_game.sfc",
         }
-        self.backend = GameBackend(self.config)
+        self.backend = GameBackend(self.config, MagicMock())
 
     def test_active_emulator_name_is_empty_on_init(self):
         self.assertEqual(self.backend.activeEmulatorName, "")
@@ -178,7 +179,8 @@ class TestGameBackendPause(unittest.TestCase):
                 "emulators": [],
                 "default_emulators": {},
                 "launch_args": "",
-            }
+            },
+            MagicMock(),
         )
 
     def test_pause_emulator_calls_suspend(self):
@@ -261,7 +263,7 @@ class TestGameBackendSync(unittest.TestCase):
     def test_process_watch_thread_clears_state_on_exit(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
-        backend = GameBackend({"emulators": [], "default_emulators": {}, "launch_args": ""})
+        backend = GameBackend({"emulators": [], "default_emulators": {}, "launch_args": ""}, MagicMock())
         backend._active_emulator_name = "RetroArch"
         backend._process = MagicMock()
         backend._process.wait.return_value = 0
@@ -302,7 +304,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
     def test_launch_game_starts_restore_worker_when_auto_sync_enabled(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
-        backend = GameBackend({**self.base_config, "auto_cloud_save_download_on_launch": True})
+        backend = GameBackend({**self.base_config, "auto_cloud_save_download_on_launch": True}, MagicMock())
         statuses: list[str] = []
         backend.cloudSyncStatus.connect(statuses.append)
 
@@ -323,7 +325,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
     def test_launch_game_calls_do_launch_directly_when_auto_sync_disabled(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
-        backend = GameBackend(dict(self.base_config))
+        backend = GameBackend(dict(self.base_config), MagicMock())
         started: list[str] = []
         backend.sessionStarted.connect(started.append)
 
@@ -345,7 +347,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
     def test_launch_game_skips_restore_when_no_emulator_entry(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
-        backend = GameBackend({**self.base_config, "auto_cloud_save_download_on_launch": True})
+        backend = GameBackend({**self.base_config, "auto_cloud_save_download_on_launch": True}, MagicMock())
         started: list[str] = []
         backend.sessionStarted.connect(started.append)
 
@@ -370,7 +372,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
     def test_on_process_exited_triggers_auto_upload_when_enabled(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
-        backend = GameBackend({**self.base_config, "auto_cloud_save_upload_on_exit": True})
+        backend = GameBackend({**self.base_config, "auto_cloud_save_upload_on_exit": True}, MagicMock())
         backend._session_game = dict(self.game)
         backend._process = MagicMock()
 
@@ -387,7 +389,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
     def test_on_process_exited_skips_upload_when_no_session_game(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
-        backend = GameBackend({**self.base_config, "auto_cloud_save_upload_on_exit": True})
+        backend = GameBackend({**self.base_config, "auto_cloud_save_upload_on_exit": True}, MagicMock())
         backend._session_game = None
         backend._process = MagicMock()
 
@@ -401,7 +403,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
     def test_on_process_exited_skips_upload_when_auto_sync_disabled(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
-        backend = GameBackend(dict(self.base_config))
+        backend = GameBackend(dict(self.base_config), MagicMock())
         backend._session_game = dict(self.game)
         backend._process = MagicMock()
 
@@ -413,7 +415,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
     def test_on_restore_done_calls_do_launch_on_success(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
-        backend = GameBackend(dict(self.base_config))
+        backend = GameBackend(dict(self.base_config), MagicMock())
         statuses: list[str] = []
         backend.cloudSyncStatus.connect(statuses.append)
 
@@ -426,7 +428,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
     def test_on_restore_done_calls_do_launch_even_on_failure(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
-        backend = GameBackend(dict(self.base_config))
+        backend = GameBackend(dict(self.base_config), MagicMock())
 
         with patch.object(backend, "_do_launch") as mock_do_launch:
             backend._on_restore_done(False, "Restore failed.", "RetroArch", ["retroarch"], None)
@@ -436,7 +438,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
     def test_on_auto_upload_done_emits_cloud_sync_status(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
-        backend = GameBackend(dict(self.base_config))
+        backend = GameBackend(dict(self.base_config), MagicMock())
         statuses: list[str] = []
         backend.cloudSyncStatus.connect(statuses.append)
 
@@ -447,7 +449,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
     def test_on_auto_upload_done_skips_signal_when_empty_message(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
-        backend = GameBackend(dict(self.base_config))
+        backend = GameBackend(dict(self.base_config), MagicMock())
         statuses: list[str] = []
         backend.cloudSyncStatus.connect(statuses.append)
 
@@ -472,7 +474,8 @@ class TestGameBackendInstall(unittest.TestCase):
                 "server_url": "http://romm.local",
                 "library_path": "/games",
                 "installed_games": [],
-            }
+            },
+            MagicMock(),
         )
 
         self.assertFalse(backend.isInstallActive)
@@ -487,7 +490,8 @@ class TestGameBackendInstall(unittest.TestCase):
                 "launch_args": "",
                 "library_path": "/games",
                 "installed_games": [],
-            }
+            },
+            MagicMock(),
         )
 
         received: list[str] = []
@@ -509,7 +513,8 @@ class TestGameBackendInstall(unittest.TestCase):
                 "server_url": "http://romm.local",
                 "library_path": "",
                 "installed_games": [],
-            }
+            },
+            MagicMock(),
         )
 
         received: list[str] = []
@@ -531,7 +536,8 @@ class TestGameBackendInstall(unittest.TestCase):
                 "server_url": "http://romm.local",
                 "library_path": "/games",
                 "installed_games": [],
-            }
+            },
+            MagicMock(),
         )
         backend._install_thread = MagicMock()
         backend._install_thread.isRunning.return_value = True
@@ -556,7 +562,8 @@ class TestGameBackendInstall(unittest.TestCase):
                 "server_url": "http://romm.local",
                 "library_path": "/games",
                 "installed_games": [],
-            }
+            },
+            MagicMock(),
         )
         backend._install_target_game = {"id": "1", "name": "Test"}
 
@@ -570,6 +577,7 @@ class TestGameBackendInstall(unittest.TestCase):
     def test_on_install_finalize_done_success_adds_to_installed_games(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
+        mock_main_window = MagicMock()
         backend = GameBackend(
             {
                 "emulators": [],
@@ -578,25 +586,57 @@ class TestGameBackendInstall(unittest.TestCase):
                 "server_url": "http://romm.local",
                 "library_path": "/games",
                 "installed_games": [],
-            }
+            },
+            mock_main_window,
         )
         backend._install_target_game = {"id": "99", "name": "Test"}
 
         received: list[tuple[bool, str, object]] = []
         backend.installComplete.connect(lambda ok, msg, payload: received.append((ok, msg, payload)))
 
-        backend._on_install_finalize_done(True, "", "/games/Test/Test.iso")
+        prepared_game = {"id": "99", "name": "Test", "extracted_path": "/games/Test/Test.iso"}
+        backend._on_install_finalize_done(prepared_game, "/tmp/archive.zip", "", "")
 
-        self.assertEqual(
-            received,
-            [(True, "Game installed.", {"id": "99", "name": "Test", "local_path": "/games/Test/Test.iso"})],
-        )
+        self.assertEqual(len(received), 1)
+        ok, msg, payload = received[0]
+        self.assertTrue(ok)
+        self.assertEqual(msg, "Game installed.")
+        self.assertEqual(payload.get("id"), "99")
+        self.assertEqual(payload.get("local_path"), "/games/Test/Test.iso")
         installed_games = backend._config.get("installed_games", [])
         self.assertTrue(any(entry.get("id") == "99" and entry.get("local_path") == "/games/Test/Test.iso" for entry in installed_games))
+
+    def test_on_install_download_done_success_starts_finalize_thread(self):
+        from rom_mate.tv.bridge.game_backend import GameBackend
+
+        mock_main_window = MagicMock()
+        backend = GameBackend(
+            {
+                "emulators": [],
+                "default_emulators": {},
+                "launch_args": "",
+                "server_url": "http://romm.local",
+                "library_path": "/games",
+                "installed_games": [],
+            },
+            mock_main_window,
+        )
+        backend._install_target_game = {"id": "42", "name": "Test"}
+
+        with patch("rom_mate.tv.bridge.game_backend.threading.Thread") as mock_thread_cls:
+            mock_thread_instance = MagicMock()
+            mock_thread_cls.return_value = mock_thread_instance
+            backend._on_install_download_done("/tmp/archive.zip", "")
+
+        mock_thread_cls.assert_called_once()
+        mock_thread_instance.start.assert_called_once()
+        self.assertIs(backend._finalize_thread, mock_thread_instance)
 
     def test_uninstall_game_emits_complete_and_removes_from_installed_games(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
+        mock_main_window = MagicMock()
+        mock_main_window._uninstall_game.return_value = True
         backend = GameBackend(
             {
                 "emulators": [],
@@ -605,7 +645,8 @@ class TestGameBackendInstall(unittest.TestCase):
                 "server_url": "http://romm.local",
                 "library_path": "/games",
                 "installed_games": [{"id": "77", "name": "Test", "local_path": ""}],
-            }
+            },
+            mock_main_window,
         )
 
         received: list[tuple[bool, str, object]] = []
@@ -613,16 +654,143 @@ class TestGameBackendInstall(unittest.TestCase):
 
         backend.uninstallGame({"id": "77", "name": "Test", "local_path": ""})
 
+        mock_main_window._uninstall_game.assert_called_once()
         self.assertEqual(received, [(True, "Game uninstalled.", {"id": "77", "name": "Test", "local_path": ""})])
+
+    def test_on_install_finalize_done_non_extracted_sets_archive_path(self):
+        from rom_mate.tv.bridge.game_backend import GameBackend
+
+        mock_main_window = MagicMock()
+        backend = GameBackend(
+            {
+                "emulators": [],
+                "default_emulators": {},
+                "launch_args": "",
+                "server_url": "http://romm.local",
+                "library_path": "/games",
+                "installed_games": [],
+            },
+            mock_main_window,
+        )
+        backend._install_target_game = {"id": "55", "name": "Test"}
+
+        received: list[tuple[bool, str, object]] = []
+        backend.installComplete.connect(lambda ok, msg, payload: received.append((ok, msg, payload)))
+
+        prepared_game = {"id": "55", "name": "Test", "extracted_path": ""}
+        backend._on_install_finalize_done(prepared_game, "/tmp/archive.zip", "", "")
+
+        self.assertEqual(len(received), 1)
+        ok, _msg, payload = received[0]
+        self.assertTrue(ok)
+        self.assertEqual(payload.get("archive_path"), "/tmp/archive.zip")
+        self.assertEqual(payload.get("local_path"), "/tmp/archive.zip")
         installed_games = backend._config.get("installed_games", [])
-        self.assertFalse(any(entry.get("id") == "77" for entry in installed_games))
+        self.assertTrue(
+            any(
+                entry.get("id") == "55"
+                and entry.get("archive_path") == "/tmp/archive.zip"
+                and entry.get("local_path") == "/tmp/archive.zip"
+                for entry in installed_games
+            )
+        )
+
+    def test_on_install_finalize_done_persists_config(self):
+        from rom_mate.tv.bridge.game_backend import GameBackend
+
+        mock_main_window = MagicMock()
+        backend = GameBackend(
+            {
+                "emulators": [],
+                "default_emulators": {},
+                "launch_args": "",
+                "server_url": "http://romm.local",
+                "library_path": "/games",
+                "installed_games": [],
+            },
+            mock_main_window,
+        )
+        backend._install_target_game = {"id": "99", "name": "Test"}
+
+        prepared_game = {"id": "99", "name": "Test", "extracted_path": "/games/Test/Test.iso"}
+        backend._on_install_finalize_done(prepared_game, "/tmp/archive.zip", "", "")
+
+        mock_main_window._save_config.assert_called_once()
+
+    def test_on_install_finalize_done_failure_does_not_persist_config(self):
+        from rom_mate.tv.bridge.game_backend import GameBackend
+
+        mock_main_window = MagicMock()
+        backend = GameBackend(
+            {
+                "emulators": [],
+                "default_emulators": {},
+                "launch_args": "",
+                "server_url": "http://romm.local",
+                "library_path": "/games",
+                "installed_games": [],
+            },
+            mock_main_window,
+        )
+        backend._install_target_game = {"id": "99", "name": "Test"}
+
+        backend._on_install_finalize_done(None, "/tmp/archive.zip", "", "Archive error")
+
+        mock_main_window._save_config.assert_not_called()
+
+    def test_uninstall_game_delegates_to_main_window(self):
+        from rom_mate.tv.bridge.game_backend import GameBackend
+
+        mock_main_window = MagicMock()
+        mock_main_window._uninstall_game.return_value = True
+        backend = GameBackend(
+            {
+                "emulators": [],
+                "default_emulators": {},
+                "launch_args": "",
+                "server_url": "http://romm.local",
+                "library_path": "/games",
+                "installed_games": [{"id": "55", "name": "Test", "local_path": "/games/Test/Test.iso"}],
+            },
+            mock_main_window,
+        )
+
+        backend.uninstallGame({"id": "55", "name": "Test", "local_path": "/games/Test/Test.iso"})
+
+        mock_main_window._uninstall_game.assert_called_once()
+        call_arg = mock_main_window._uninstall_game.call_args[0][0]
+        self.assertEqual(call_arg.get("id"), "55")
+
+    def test_uninstall_game_emits_failure_when_not_found(self):
+        from rom_mate.tv.bridge.game_backend import GameBackend
+
+        mock_main_window = MagicMock()
+        mock_main_window._uninstall_game.return_value = False
+        backend = GameBackend(
+            {
+                "emulators": [],
+                "default_emulators": {},
+                "launch_args": "",
+                "server_url": "http://romm.local",
+                "library_path": "/games",
+                "installed_games": [],
+            },
+            mock_main_window,
+        )
+
+        received: list[tuple[bool, str, object]] = []
+        backend.uninstallComplete.connect(lambda ok, msg, payload: received.append((ok, msg, payload)))
+
+        backend.uninstallGame({"id": "nonexistent", "name": "Test"})
+
+        self.assertEqual(received, [(False, "Game not found in library.", {"id": "nonexistent", "name": "Test"})])
 
 
 class TestGameBackendNativeLaunch(unittest.TestCase):
     def _make_backend(self, config=None):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
-        return GameBackend(config or {})
+        return GameBackend(config or {}, MagicMock())
 
     @patch("rom_mate.tv.bridge.game_backend.is_native_executable_platform", return_value=True)
     @patch("rom_mate.tv.bridge.game_backend.native_install_dir_for_game", return_value=Path("/fake/dir"))
@@ -690,6 +858,243 @@ class TestGameBackendNativeLaunch(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["label"], str(Path("sub/game.exe")))
         self.assertEqual(result[0]["path"], str(Path("/fake/dir/sub/game.exe")))
+
+
+class TestGameBackendInstallActiveFinalize(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QCoreApplication.instance() or QCoreApplication(sys.argv)
+
+    def _make_backend(self):
+        from rom_mate.tv.bridge.game_backend import GameBackend
+
+        return GameBackend(
+            {
+                "emulators": [],
+                "default_emulators": {},
+                "launch_args": "",
+                "server_url": "http://romm.local",
+                "library_path": "/games",
+                "installed_games": [],
+            },
+            MagicMock(),
+        )
+
+    def test_install_active_during_finalize_phase(self):
+        backend = self._make_backend()
+
+        mock_thread = MagicMock()
+        mock_thread.is_alive.return_value = True
+        backend._finalize_thread = mock_thread
+        backend._install_thread = None
+
+        self.assertTrue(backend.isInstallActive)
+
+    def test_install_game_rejected_when_finalize_thread_running(self):
+        backend = self._make_backend()
+
+        mock_thread = MagicMock()
+        mock_thread.is_alive.return_value = True
+        backend._finalize_thread = mock_thread
+        backend._install_thread = None
+
+        received: list[str] = []
+        backend.launchError.connect(lambda message: received.append(message))
+
+        with patch("rom_mate.tv.bridge.game_backend.QThread.start") as mock_thread_start:
+            backend.installGame({"id": "42", "name": "Test Game"})
+
+        self.assertEqual(received, ["An install is already in progress."])
+        mock_thread_start.assert_not_called()
+
+    def test_install_game_rejected_when_install_target_game_set(self):
+        backend = self._make_backend()
+
+        # Simulate state where threads have cleared but _install_target_game is still set
+        backend._install_thread = None
+        backend._finalize_thread = None
+        backend._install_target_game = {"rom_id": "123", "name": "In Progress Game"}
+
+        received: list[tuple[bool, str, object]] = []
+        backend.installComplete.connect(lambda ok, msg, payload: received.append((ok, msg, payload)))
+
+        with patch("rom_mate.tv.bridge.game_backend.QThread.start") as mock_thread_start:
+            backend.installGame({"id": "99", "name": "New Game"})
+
+        self.assertEqual(len(received), 1)
+        ok, msg, _ = received[0]
+        self.assertFalse(ok)
+        self.assertEqual(msg, "An install is already in progress.")
+        mock_thread_start.assert_not_called()
+        # Ensure original target game was not overwritten
+        self.assertEqual(backend._install_target_game.get("rom_id"), "123")
+
+    def test_is_install_active_false_when_finalize_thread_not_running(self):
+        backend = self._make_backend()
+
+        mock_thread = MagicMock()
+        mock_thread.is_alive.return_value = False
+        backend._finalize_thread = mock_thread
+        backend._install_thread = None
+
+        self.assertFalse(backend.isInstallActive)
+
+    def test_install_state_active_during_finalize_phase_via_signal(self):
+        # Verifies that _installStateChanged is emitted AFTER _finalize_thread is
+        # assigned, so isInstallActive reads True at the moment of the signal.
+        backend = self._make_backend()
+
+        observed: list[bool] = []
+        backend._installStateChanged.connect(lambda: observed.append(backend.isInstallActive))
+
+        mock_finalize = MagicMock()
+        mock_finalize.is_alive.return_value = True
+
+        backend._install_thread = None
+        backend._install_worker = None
+        backend._finalize_thread = mock_finalize
+        backend._installStateChanged.emit()
+
+        self.assertEqual(len(observed), 1)
+        self.assertTrue(observed[0])
+
+
+class TestGameBackendInstallPlatformSubfolder(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QCoreApplication.instance() or QCoreApplication(sys.argv)
+
+    def _make_backend(self, extra_config=None):
+        from rom_mate.tv.bridge.game_backend import GameBackend
+
+        config = {
+            "emulators": [],
+            "default_emulators": {},
+            "launch_args": "",
+            "server_url": "http://romm.local",
+            "library_path": "/games",
+            "installed_games": [],
+        }
+        if extra_config:
+            config.update(extra_config)
+        return GameBackend(config, MagicMock())
+
+    def test_install_game_uses_platform_subfolder(self):
+        backend = self._make_backend()
+        captured_archive_paths: list[Path] = []
+
+        def fake_worker(download_url, headers, archive_path):
+            captured_archive_paths.append(archive_path)
+            worker = MagicMock()
+            worker.progress = MagicMock()
+            worker.finished = MagicMock()
+            worker.progress.connect = MagicMock()
+            worker.finished.connect = MagicMock()
+            return worker
+
+        game = {"id": "42", "name": "Breath of the Wild", "platform": "Nintendo Switch"}
+
+        with patch("rom_mate.tv.bridge.game_backend._InstallDownloadWorker", side_effect=fake_worker), \
+             patch("rom_mate.tv.bridge.game_backend.QThread") as mock_qthread_cls, \
+             patch("rom_mate.tv.bridge.game_backend.Path.mkdir"):
+            mock_thread = MagicMock()
+            mock_thread.isRunning.return_value = False
+            mock_qthread_cls.return_value = mock_thread
+            backend.installGame(game)
+
+        self.assertEqual(len(captured_archive_paths), 1)
+        archive_path = captured_archive_paths[0]
+        self.assertIn("Nintendo Switch", str(archive_path))
+        self.assertEqual(Path(archive_path).parent, Path("/games/Nintendo Switch"))
+
+    def test_install_game_uses_library_root_when_no_platform(self):
+        backend = self._make_backend()
+        captured_archive_paths: list[Path] = []
+
+        def fake_worker(download_url, headers, archive_path):
+            captured_archive_paths.append(archive_path)
+            worker = MagicMock()
+            worker.progress = MagicMock()
+            worker.finished = MagicMock()
+            worker.progress.connect = MagicMock()
+            worker.finished.connect = MagicMock()
+            return worker
+
+        game = {"id": "99", "name": "Mystery Game"}
+
+        with patch("rom_mate.tv.bridge.game_backend._InstallDownloadWorker", side_effect=fake_worker), \
+             patch("rom_mate.tv.bridge.game_backend.QThread") as mock_qthread_cls, \
+             patch("rom_mate.tv.bridge.game_backend.Path.mkdir"):
+            mock_thread = MagicMock()
+            mock_thread.isRunning.return_value = False
+            mock_qthread_cls.return_value = mock_thread
+            backend.installGame(game)
+
+        self.assertEqual(len(captured_archive_paths), 1)
+        archive_path = captured_archive_paths[0]
+        parts = Path(archive_path).parts
+        # Should be directly in /games/, not in a platform subfolder
+        self.assertEqual(parts[-2], "games")
+        self.assertEqual(Path(archive_path).parent, Path("/games"))
+
+    def test_install_game_archive_named_after_rom_file(self):
+        backend = self._make_backend()
+        captured_archive_paths: list[Path] = []
+
+        def fake_worker(download_url, headers, archive_path):
+            captured_archive_paths.append(archive_path)
+            worker = MagicMock()
+            worker.progress = MagicMock()
+            worker.finished = MagicMock()
+            worker.progress.connect = MagicMock()
+            worker.finished.connect = MagicMock()
+            return worker
+
+        game = {
+            "id": "1470",
+            "name": "Sonic the Hedgehog",
+            "platform": "Sega Genesis",
+            "rom_file_name": "Sonic the Hedgehog (USA).zip",
+        }
+
+        with patch("rom_mate.tv.bridge.game_backend._InstallDownloadWorker", side_effect=fake_worker), \
+             patch("rom_mate.tv.bridge.game_backend.QThread") as mock_qthread_cls, \
+             patch("rom_mate.tv.bridge.game_backend.Path.mkdir"):
+            mock_thread = MagicMock()
+            mock_thread.isRunning.return_value = False
+            mock_qthread_cls.return_value = mock_thread
+            backend.installGame(game)
+
+        self.assertEqual(len(captured_archive_paths), 1)
+        archive_path = captured_archive_paths[0]
+        self.assertTrue(str(archive_path).endswith("Sonic the Hedgehog (USA).zip"))
+
+    def test_install_game_archive_fallback_name_when_no_rom_file(self):
+        backend = self._make_backend()
+        captured_archive_paths: list[Path] = []
+
+        def fake_worker(download_url, headers, archive_path):
+            captured_archive_paths.append(archive_path)
+            worker = MagicMock()
+            worker.progress = MagicMock()
+            worker.finished = MagicMock()
+            worker.progress.connect = MagicMock()
+            worker.finished.connect = MagicMock()
+            return worker
+
+        game = {"id": "1470", "name": "Mystery Game", "platform": "Sega Genesis"}
+
+        with patch("rom_mate.tv.bridge.game_backend._InstallDownloadWorker", side_effect=fake_worker), \
+             patch("rom_mate.tv.bridge.game_backend.QThread") as mock_qthread_cls, \
+             patch("rom_mate.tv.bridge.game_backend.Path.mkdir"):
+            mock_thread = MagicMock()
+            mock_thread.isRunning.return_value = False
+            mock_qthread_cls.return_value = mock_thread
+            backend.installGame(game)
+
+        self.assertEqual(len(captured_archive_paths), 1)
+        archive_path = captured_archive_paths[0]
+        self.assertEqual(Path(archive_path).name, "_tv_download_1470.tmp")
 
 
 if __name__ == "__main__":

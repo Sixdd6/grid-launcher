@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -117,6 +118,27 @@ class TestAppBackendConnectToServer(unittest.TestCase):
         backend.connectToServer()
         self.assertEqual(len(emitted), 1)
         self.assertIn("No credentials", emitted[0])
+
+    def test_connect_to_server_skips_fetch_when_already_fetched(self):
+        backend = self._make_backend({"server_url": "http://server", "api_token": "tok"})
+        backend._catalog_fetched = True
+        with patch.object(backend, "_start_catalog_fetch") as mock_fetch:
+            backend.connectToServer()
+        mock_fetch.assert_not_called()
+
+    def test_sync_config_resets_catalog_fetched_when_url_differs(self):
+        backend = self._make_backend({})
+        backend._catalog_fetched = True
+        backend._catalog_server_url = "http://old"
+        backend.syncConfig({"server_url": "http://new"})
+        self.assertFalse(backend._catalog_fetched)
+
+    def test_sync_config_preserves_catalog_fetched_when_url_same(self):
+        backend = self._make_backend({})
+        backend._catalog_fetched = True
+        backend._catalog_server_url = "http://same"
+        backend.syncConfig({"server_url": "http://same"})
+        self.assertTrue(backend._catalog_fetched)
 
 
 class TestAppBackendSettings(unittest.TestCase):
@@ -274,6 +296,27 @@ class TestAppBackendCuratedRows(unittest.TestCase):
         backend = self._make_backend()
         backend._on_highly_rated_finished([{"title": "Half-Life"}])
         self.assertEqual(backend.highlyRatedGames, [{"title": "Half-Life"}])
+
+    def test_favorites_finished_emits_library_games_changed(self):
+        backend = self._make_backend()
+        count = [0]
+        backend.libraryGamesChanged.connect(lambda: count.__setitem__(0, count[0] + 1))
+        backend._on_favorites_finished([{"title": "Tetris"}])
+        self.assertEqual(count[0], 1)
+
+    def test_new_additions_finished_emits_library_games_changed(self):
+        backend = self._make_backend()
+        count = [0]
+        backend.libraryGamesChanged.connect(lambda: count.__setitem__(0, count[0] + 1))
+        backend._on_new_additions_finished([{"title": "Doom"}])
+        self.assertEqual(count[0], 1)
+
+    def test_highly_rated_finished_emits_library_games_changed(self):
+        backend = self._make_backend()
+        count = [0]
+        backend.libraryGamesChanged.connect(lambda: count.__setitem__(0, count[0] + 1))
+        backend._on_highly_rated_finished([{"title": "Half-Life"}])
+        self.assertEqual(count[0], 1)
 
     def test_catalog_finish_triggers_curated_fetch(self):
         from unittest.mock import patch, MagicMock
@@ -490,6 +533,396 @@ class TestAppBackendEnrichWithLocalPaths(unittest.TestCase):
         backend._server_games["PS2"] = [{"rom_id": "42", "title": "My Game"}]
         result = backend.serverGamesForPlatform("PS2")
         self.assertEqual(result[0].get("local_path"), "/games/mygame.zip")
+
+
+class TestAppBackendFetchRomMetadata(unittest.TestCase):
+    def _make_backend(self, config: dict) -> "AppBackend":
+        from rom_mate.tv.bridge.app_backend import AppBackend
+        return AppBackend(config, Path("/tmp/covers"))
+
+    def test_fetch_rom_metadata_skips_when_no_rom_id(self):
+        backend = self._make_backend({"server_url": "http://server", "api_token": "tok"})
+        backend.fetchRomMetadata(json.dumps({"title": "Game"}))
+        self.assertFalse(backend._rom_meta_threads)
+
+    def test_fetch_rom_metadata_skips_when_no_credentials(self):
+        backend = self._make_backend({"server_url": ""})
+        backend.fetchRomMetadata(json.dumps({"rom_id": "42", "title": "Game"}))
+        self.assertFalse(backend._rom_meta_threads)
+
+    def test_fetch_rom_metadata_skips_when_metadata_complete(self):
+        backend = self._make_backend({"server_url": "http://server", "api_token": "tok"})
+        game = {
+            "rom_id": "42",
+            "genres": "RPG",
+            "description": "A great game.",
+            "rating": "4.5",
+            "filesize_bytes": "1024",
+            "companies": "Nintendo",
+            "first_release_date": "1996-02-21",
+        }
+        backend.fetchRomMetadata(json.dumps(game))
+        self.assertFalse(backend._rom_meta_threads)
+
+    def test_fetch_rom_metadata_runs_when_first_release_date_missing(self):
+        import threading
+        from unittest.mock import patch
+        from rom_mate.tv.bridge.app_backend import AppBackend
+
+        backend = AppBackend(
+            {"server_url": "http://server", "api_token": "tok"},
+            Path("/tmp/covers"),
+        )
+        # All original 5 fields are complete but first_release_date is absent
+        game = {
+            "rom_id": "55",
+            "genres": "RPG",
+            "description": "A great game.",
+            "rating": "4.5",
+            "filesize_bytes": "1024",
+            "companies": "Nintendo",
+        }
+        with patch("rom_mate.core.api.api_get_json", return_value={}), \
+             patch("rom_mate.server.metadata.details_metadata_from_item", return_value={}):
+            backend.fetchRomMetadata(json.dumps(game))
+
+        t = backend._rom_meta_threads.get("55")
+        self.assertIsNotNone(t)
+        self.assertIsInstance(t, threading.Thread)
+        if t is not None:
+            t.join(timeout=2.0)
+
+    def test_fetch_rom_metadata_emits_romMetadataReady(self):
+        from unittest.mock import patch
+        from rom_mate.tv.bridge.app_backend import AppBackend, _RomMetaFetchWorker
+
+        backend = AppBackend(
+            {"server_url": "http://server", "api_token": "tok"},
+            Path("/tmp/covers"),
+        )
+
+        fake_api_payload = {"igdb_metadata": {"genres": ["RPG"]}}
+        with patch("rom_mate.core.api.api_get_json", return_value=fake_api_payload), \
+             patch("rom_mate.server.metadata.details_metadata_from_item", return_value={"genres": "RPG", "description": ""}):
+            worker = _RomMetaFetchWorker("http://server", "tok", "42")
+            worker_results = []
+            worker.finished.connect(lambda rid, meta: worker_results.append((rid, meta)))
+            worker.run()
+
+        self.assertEqual(len(worker_results), 1)
+        self.assertEqual(worker_results[0][0], "42")
+        self.assertIn("genres", worker_results[0][1])
+        self.assertEqual(worker_results[0][1]["genres"], "RPG")
+        self.assertNotIn("description", worker_results[0][1])
+
+        emitted = []
+        backend.romMetadataReady.connect(lambda rid, meta: emitted.append((rid, meta)))
+        backend._on_rom_meta_finished("42", {"genres": "RPG"})
+        self.assertEqual(len(emitted), 1)
+        self.assertEqual(emitted[0][0], "42")
+        self.assertEqual(json.loads(emitted[0][1])["genres"], "RPG")
+
+    def test_fetch_rom_metadata_stores_threading_thread(self):
+        import threading
+        from unittest.mock import patch
+        from rom_mate.tv.bridge.app_backend import AppBackend
+
+        backend = AppBackend(
+            {"server_url": "http://server", "api_token": "tok"},
+            Path("/tmp/covers"),
+        )
+        game = {"rom_id": "99", "genres": "", "description": "", "rating": "", "filesize_bytes": "", "companies": ""}
+        with patch("rom_mate.core.api.api_get_json", return_value={}), \
+             patch("rom_mate.server.metadata.details_metadata_from_item", return_value={}):
+            backend.fetchRomMetadata(json.dumps(game))
+
+        t = backend._rom_meta_threads.get("99")
+        self.assertIsNotNone(t)
+        self.assertIsInstance(t, threading.Thread)
+        if t is not None:
+            t.join(timeout=2.0)
+
+    def test_fetch_rom_metadata_dedup_skips_when_alive(self):
+        import threading
+        from unittest.mock import MagicMock
+        from rom_mate.tv.bridge.app_backend import AppBackend
+
+        backend = AppBackend(
+            {"server_url": "http://server", "api_token": "tok"},
+            Path("/tmp/covers"),
+        )
+        game = {"rom_id": "77", "genres": "", "description": "", "rating": "", "filesize_bytes": "", "companies": ""}
+
+        # Simulate an already-alive thread for this rom_id
+        fake_thread = MagicMock(spec=threading.Thread)
+        fake_thread.is_alive.return_value = True
+        backend._rom_meta_threads["77"] = fake_thread
+
+        with patch("rom_mate.tv.bridge.app_backend.threading") as mock_threading:
+            backend.fetchRomMetadata(json.dumps(game))
+            mock_threading.Thread.assert_not_called()
+
+    def test_rom_metadata_fetch_started_signal_emitted(self):
+        import threading
+        from unittest.mock import patch
+        from rom_mate.tv.bridge.app_backend import AppBackend
+
+        backend = AppBackend(
+            {"server_url": "http://server", "api_token": "tok"},
+            Path("/tmp/covers"),
+        )
+        # first_release_date is missing so the fetch should proceed
+        game = {
+            "rom_id": "88",
+            "genres": "RPG",
+            "description": "A great game.",
+            "rating": "4.5",
+            "filesize_bytes": "1024",
+            "companies": "Nintendo",
+        }
+        emitted_ids: list[str] = []
+        backend.romMetadataFetchStarted.connect(lambda rid: emitted_ids.append(rid))
+
+        with patch("rom_mate.core.api.api_get_json", return_value={}), \
+             patch("rom_mate.server.metadata.details_metadata_from_item", return_value={}):
+            backend.fetchRomMetadata(json.dumps(game))
+
+        t = backend._rom_meta_threads.get("88")
+        if t is not None:
+            t.join(timeout=2.0)
+
+        self.assertEqual(emitted_ids, ["88"])
+
+    def test_on_rom_meta_finished_removes_worker_and_calls_delete_later(self):
+        from rom_mate.tv.bridge.app_backend import AppBackend
+
+        backend = AppBackend(
+            {"server_url": "http://server", "api_token": "tok"},
+            Path("/tmp/covers"),
+        )
+        mock_worker = MagicMock()
+        backend._rom_meta_workers["42"] = mock_worker
+        backend._on_rom_meta_finished("42", {})
+        self.assertNotIn("42", backend._rom_meta_workers)
+        mock_worker.deleteLater.assert_called_once()
+
+
+class TestAppBackendStartRomFetch(unittest.TestCase):
+    def _make_backend(self, config: dict = None) -> "AppBackend":
+        from rom_mate.tv.bridge.app_backend import AppBackend
+        return AppBackend(config or {}, Path("/tmp/covers"))
+
+    def test_start_rom_fetch_stores_threading_thread(self):
+        import threading
+        from unittest.mock import MagicMock, patch
+        from rom_mate.tv.bridge.app_backend import AppBackend
+
+        backend = AppBackend(
+            {"server_url": "http://server", "installed_games": []},
+            Path("/tmp/covers"),
+        )
+        backend._platforms = {"PS2": 2}
+
+        fake_thread = MagicMock(spec=threading.Thread)
+        fake_thread.is_alive.return_value = False
+
+        with patch("rom_mate.tv.bridge.app_backend.threading") as mock_threading, \
+             patch("rom_mate.tv.bridge.workers.RomListFetchWorker") as _mock_worker_cls:
+            mock_threading.Thread.return_value = fake_thread
+            backend._start_rom_fetch("PS2", 2)
+
+        self.assertIn("PS2", backend._rom_threads)
+        self.assertIs(backend._rom_threads["PS2"], fake_thread)
+        fake_thread.start.assert_called_once()
+
+    def test_start_rom_fetch_skips_when_thread_alive(self):
+        import threading
+        from unittest.mock import MagicMock, patch
+        from rom_mate.tv.bridge.app_backend import AppBackend
+
+        backend = AppBackend(
+            {"server_url": "http://server", "installed_games": []},
+            Path("/tmp/covers"),
+        )
+        fake_thread = MagicMock(spec=threading.Thread)
+        fake_thread.is_alive.return_value = True
+        backend._rom_threads["PS2"] = fake_thread
+
+        with patch("rom_mate.tv.bridge.app_backend.threading") as mock_threading:
+            backend._start_rom_fetch("PS2", 2)
+            mock_threading.Thread.assert_not_called()
+
+    def test_on_rom_fetch_thread_done_removes_finished_entries(self):
+        import threading
+        from unittest.mock import MagicMock
+        from rom_mate.tv.bridge.app_backend import AppBackend
+
+        backend = AppBackend({}, Path("/tmp/covers"))
+
+        alive_thread = MagicMock(spec=threading.Thread)
+        alive_thread.is_alive.return_value = True
+        dead_thread = MagicMock(spec=threading.Thread)
+        dead_thread.is_alive.return_value = False
+
+        backend._rom_threads["SNES"] = alive_thread
+        backend._rom_threads["GBA"] = dead_thread
+        backend._rom_workers["SNES"] = object()
+        backend._rom_workers["GBA"] = object()
+
+        backend._on_rom_fetch_thread_done()
+
+        self.assertIn("SNES", backend._rom_threads)
+        self.assertNotIn("GBA", backend._rom_threads)
+        self.assertNotIn("GBA", backend._rom_workers)
+
+
+class TestAppBackendLibraryGamesServerMetadataMerge(unittest.TestCase):
+    def _make_backend(self, config: dict) -> "AppBackend":
+        from rom_mate.tv.bridge.app_backend import AppBackend
+        return AppBackend(config, Path("/tmp/covers"))
+
+    def test_library_games_merges_genres_and_rating_from_server(self):
+        backend = self._make_backend({
+            "installed_games": [
+                {"rom_id": "10", "title": "Sonic", "platform": "Genesis", "local_path": "/games/sonic.zip"}
+            ]
+        })
+        backend._server_games["Genesis"] = [
+            {"rom_id": "10", "title": "Sonic", "genres": "Platformer", "rating": "4.8"}
+        ]
+        result = backend.libraryGames
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["genres"], "Platformer")
+        self.assertEqual(result[0]["rating"], "4.8")
+
+    def test_library_games_does_not_overwrite_existing_genres(self):
+        backend = self._make_backend({
+            "installed_games": [
+                {"rom_id": "10", "title": "Sonic", "platform": "Genesis",
+                 "local_path": "/games/sonic.zip", "genres": "Action"}
+            ]
+        })
+        backend._server_games["Genesis"] = [
+            {"rom_id": "10", "title": "Sonic", "genres": "Platformer", "rating": "4.8"}
+        ]
+        result = backend.libraryGames
+        self.assertEqual(result[0]["genres"], "Action")
+        self.assertEqual(result[0]["rating"], "4.8")
+
+    def test_library_games_merges_all_meta_fields_from_server(self):
+        backend = self._make_backend({
+            "installed_games": [
+                {"rom_id": "20", "title": "Mario", "platform": "SNES", "local_path": "/games/mario.zip"}
+            ]
+        })
+        backend._server_games["SNES"] = [
+            {
+                "rom_id": "20",
+                "first_release_date": "1990-11-21",
+                "release_year": "1990",
+                "companies": "Nintendo",
+                "languages": "English",
+                "revision": "1.0",
+                "fanart_url": "http://example.com/fanart.jpg",
+                "genres": "Platformer",
+                "rating": "5.0",
+            }
+        ]
+        result = backend.libraryGames
+        game = result[0]
+        self.assertEqual(game["first_release_date"], "1990-11-21")
+        self.assertEqual(game["release_year"], "1990")
+        self.assertEqual(game["companies"], "Nintendo")
+        self.assertEqual(game["languages"], "English")
+        self.assertEqual(game["revision"], "1.0")
+        self.assertEqual(game["fanart_url"], "http://example.com/fanart.jpg")
+        self.assertEqual(game["genres"], "Platformer")
+        self.assertEqual(game["rating"], "5.0")
+
+    def test_library_games_no_merge_when_no_server_data(self):
+        backend = self._make_backend({
+            "installed_games": [
+                {"rom_id": "30", "title": "Zelda", "platform": "NES", "local_path": "/games/zelda.zip"}
+            ]
+        })
+        result = backend.libraryGames
+        self.assertNotIn("genres", result[0])
+        self.assertNotIn("rating", result[0])
+
+
+class TestAppBackendRomMetaFinishedUpdatesLibrary(unittest.TestCase):
+    def _make_backend(self, config: dict) -> "AppBackend":
+        from rom_mate.tv.bridge.app_backend import AppBackend
+        return AppBackend(config, Path("/tmp/covers"))
+
+    def test_rom_meta_finished_updates_installed_game(self):
+        game = {"rom_id": "42", "title": "Bomb Rush Cyberfunk", "platform": "PC"}
+        backend = self._make_backend({"installed_games": [game]})
+
+        backend._on_rom_meta_finished("42", {"companies": "Team Reptile", "first_release_date": "2023-08-18"})
+
+        self.assertEqual(game["companies"], "Team Reptile")
+        self.assertEqual(game["first_release_date"], "2023-08-18")
+
+    def test_rom_meta_finished_emits_library_games_changed(self):
+        game = {"rom_id": "42", "title": "Bomb Rush Cyberfunk", "platform": "PC"}
+        backend = self._make_backend({"installed_games": [game]})
+
+        emitted = []
+        backend.libraryGamesChanged.connect(lambda: emitted.append(True))
+        backend._on_rom_meta_finished("42", {"companies": "Team Reptile"})
+
+        self.assertEqual(len(emitted), 1)
+
+    def test_rom_meta_finished_does_not_overwrite_existing_value(self):
+        game = {"rom_id": "42", "title": "Bomb Rush Cyberfunk", "platform": "PC", "genres": "Action"}
+        backend = self._make_backend({"installed_games": [game]})
+
+        backend._on_rom_meta_finished("42", {"genres": "RPG"})
+
+        self.assertEqual(game["genres"], "Action")
+
+    def test_rom_meta_finished_no_emit_when_no_match(self):
+        game = {"rom_id": "99", "title": "Some Other Game", "platform": "PC"}
+        backend = self._make_backend({"installed_games": [game]})
+
+        emitted = []
+        backend.libraryGamesChanged.connect(lambda: emitted.append(True))
+        backend._on_rom_meta_finished("42", {"companies": "Team Reptile"})
+
+        self.assertEqual(len(emitted), 0)
+
+    def test_rom_meta_finished_saves_config_when_changed(self):
+        game = {"rom_id": "42", "title": "Bomb Rush Cyberfunk", "platform": "PC"}
+        backend = self._make_backend({"installed_games": [game]})
+
+        emitted = []
+        backend.saveConfigRequested.connect(lambda: emitted.append(True))
+        backend._on_rom_meta_finished("42", {"companies": "Team Reptile"})
+        self.assertEqual(len(emitted), 1)
+
+    def test_rom_meta_finished_does_not_save_config_when_nothing_changed(self):
+        game = {
+            "rom_id": "42",
+            "title": "Bomb Rush Cyberfunk",
+            "platform": "PC",
+            "genres": "Action",
+            "companies": "Team Reptile",
+            "first_release_date": "2023-08-18",
+            "description": "A game",
+            "rating": "9",
+            "filesize_bytes": "1234",
+        }
+        backend = self._make_backend({"installed_games": [game]})
+
+        emitted = []
+        backend.saveConfigRequested.connect(lambda: emitted.append(True))
+        backend._on_rom_meta_finished("42", {
+            "genres": "Action",
+            "companies": "Team Reptile",
+            "first_release_date": "2023-08-18",
+        })
+        self.assertEqual(len(emitted), 0)
 
 
 if __name__ == "__main__":

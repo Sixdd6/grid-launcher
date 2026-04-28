@@ -117,6 +117,12 @@ class DetailsViewMixin:
             "genres",
             "regions",
             "filesize_bytes",
+            "revision",
+            "languages",
+            "tags",
+            "fanart_url",
+            "companies",
+            "first_release_date",
             "ps4_has_update",
             "ps4_has_dlc",
             "ps4_file_ids_by_category",
@@ -173,7 +179,7 @@ class DetailsViewMixin:
 
 
     def _details_missing_server_metadata(self, game: dict[str, str]) -> bool:
-        for field in ("genres", "regions", "filesize_bytes", "rating"):
+        for field in ("genres", "regions", "filesize_bytes", "rating", "companies"):
             current_value = game.get(field)
             if field == "rating" and isinstance(current_value, str) and current_value.strip().casefold() == "n/a":
                 current_value = ""
@@ -226,7 +232,7 @@ class DetailsViewMixin:
         if current_rom_id_text != str(rom_id).strip():
             return
         metadata = details_metadata_from_item(payload)
-        for field in ("description", "genres", "regions", "rating", "filesize_bytes"):
+        for field in ("description", "genres", "regions", "rating", "filesize_bytes", "revision", "languages", "tags", "fanart_url", "companies", "first_release_date"):
             current_value = current_game.get(field)
             if field == "rating" and isinstance(current_value, str) and current_value.strip().casefold() == "n/a":
                 current_value = ""

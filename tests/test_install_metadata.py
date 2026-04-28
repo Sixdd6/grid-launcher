@@ -169,6 +169,35 @@ class InstallMetadataTests(unittest.TestCase):
 
         self.assertEqual(details_game.get("release_year"), "2001")
 
+    def test_sync_propagates_new_metadata_fields(self) -> None:
+        details_game = {
+            "title": "Demo Game",
+            "platform": "PS2",
+        }
+        install_game = {
+            "title": "Demo Game",
+            "platform": "PS2",
+            "revision": "v1.2",
+            "languages": "English, French",
+            "tags": "RPG, Action",
+            "companies": "Capcom, Inafune",
+            "fanart_url": "https://example.com/fanart.jpg",
+            "first_release_date": "1995-01-01",
+        }
+
+        sync_install_metadata_to_details_game(
+            details_game,
+            install_game,
+            game_key=self._game_key,
+        )
+
+        self.assertEqual(details_game.get("revision"), "v1.2")
+        self.assertEqual(details_game.get("languages"), "English, French")
+        self.assertEqual(details_game.get("tags"), "RPG, Action")
+        self.assertEqual(details_game.get("companies"), "Capcom, Inafune")
+        self.assertEqual(details_game.get("fanart_url"), "https://example.com/fanart.jpg")
+        self.assertEqual(details_game.get("first_release_date"), "1995-01-01")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,19 @@ Item {
     height: parent ? parent.height : 0
 
     property var game: ({})
+    property string _pendingMetadataRomId: ""
+    property bool _metadataLoading: false
+    onGameChanged: {
+        root._metadataLoading = false
+        if (root.game && root.game.rom_id) {
+            var rid = String(root.game.rom_id)
+            if (rid === root._pendingMetadataRomId) {
+                root._pendingMetadataRomId = ""
+                return
+            }
+            appBackend.fetchRomMetadata(JSON.stringify(root.game))
+        }
+    }
     property int _focusedColumn: 0
     property int _leftButtonIndex: 0
     property real _installProgress: 0.0
@@ -17,6 +30,19 @@ Item {
         var raw = root.game.screenshot_urls || ""
         if (!raw) return []
         return raw.split("\n").filter(function(s) { return s.trim() !== "" })
+    }
+    property string _installedLocalPath: {
+        var rid = root.game ? (root.game.rom_id || root.game.id || "") : ""
+        if (rid !== "") {
+            var lib = appBackend.libraryGames
+            for (var i = 0; i < lib.length; i++) {
+                var entry = lib[i]
+                if ((entry.rom_id || entry.id || "") === rid) {
+                    return entry.local_path || ""
+                }
+            }
+        }
+        return root.game ? (root.game.local_path || "") : ""
     }
 
     function formatFilesize(bytes) {
@@ -30,8 +56,8 @@ Item {
 
     function _visibleButtonCount() {
         var count = 1
-        if (root.game.local_path) count++
-        if (root.game.local_path && _isNativePcGame()) count++
+        if (root._installedLocalPath) count++
+        if (root._installedLocalPath && _isNativePcGame()) count++
         if (appBackend.isConnected) count++
         return count
     }
@@ -51,8 +77,8 @@ Item {
 
         // Index 0: Play / Install
         if (_leftButtonIndex === idx) {
-            if (!gameBackend.isInstallActive) {
-                if (root.game.local_path) {
+            if (!gameBackend.isInstallActive && !gameBackend.isSessionActive) {
+                if (root._installedLocalPath) {
                     gameBackend.launchGame(root.game)
                 } else if (appBackend.isConnected) {
                     gameBackend.installGame(root.game)
@@ -63,7 +89,7 @@ Item {
         idx++
 
         // Index 1 (if installed): Uninstall
-        if (root.game.local_path) {
+        if (root._installedLocalPath) {
             if (_leftButtonIndex === idx) {
                 gameBackend.uninstallGame(root.game)
                 return
@@ -72,7 +98,7 @@ Item {
         }
 
         // Next index (if installed native game): Change Executable
-        if (root.game.local_path && _isNativePcGame()) {
+        if (root._installedLocalPath && _isNativePcGame()) {
             if (_leftButtonIndex === idx) {
                 nativeExecPicker.candidates = gameBackend.getNativeExecutableCandidates(root.game.rom_id || "")
                 nativeExecPicker.romId = root.game.rom_id || ""
@@ -140,6 +166,28 @@ Item {
     }
 
     Connections {
+        target: appBackend
+        function onRomMetadataFetchStarted(romId) {
+            if (root.game && String(root.game.rom_id) === String(romId)) {
+                root._metadataLoading = true
+            }
+        }
+        function onRomMetadataReady(romId, metadataJson) {
+            if (!root.game || String(root.game.rom_id) !== String(romId)) return
+            var metadata = {}
+            try { metadata = JSON.parse(metadataJson) } catch(e) {}
+            root._pendingMetadataRomId = String(romId)
+            root.game = Object.assign({}, root.game, metadata)
+            root._metadataLoading = false
+        }
+        function onConnectionStatusChanged() {
+            if (root.game && root.game.rom_id && appBackend.isConnected) {
+                appBackend.fetchRomMetadata(JSON.stringify(root.game))
+            }
+        }
+    }
+
+    Connections {
         target: gameBackend
         function onInstallProgress(downloaded, total, speed) {
             if (total > 0) root._installProgress = downloaded / total
@@ -151,6 +199,7 @@ Item {
             if (success && returnedGame && returnedGame.local_path) {
                 root.game = Object.assign({}, root.game, { local_path: returnedGame.local_path })
             }
+            root._leftButtonIndex = 0
         }
         function onUninstallComplete(success, message, returnedGame) {
             root._bannerText = message
@@ -161,10 +210,21 @@ Item {
                 delete updated.local_path
                 root.game = updated
             }
+            root._leftButtonIndex = 0
         }
         function onLaunchError(msg) {
             root._bannerText = msg
             root._bannerSuccess = false
+            bannerTimer.restart()
+        }
+        function onSessionStarted(emulatorName) {
+            root._bannerText = emulatorName ? "Launched with " + emulatorName : "Game launched"
+            root._bannerSuccess = true
+            bannerTimer.restart()
+        }
+        function onSessionEnded(emulatorName) {
+            root._bannerText = "Session ended"
+            root._bannerSuccess = true
             bannerTimer.restart()
         }
         function onNativeExecPickerNeeded(candidates) {
@@ -217,7 +277,7 @@ Item {
                 }
                 
                 Text {
-                    text: root.game.name || root.game.fs_name || "Details"
+                    text: root.game.title || root.game.name || "Details"
                     color: "#f8f8f2"
                     font.pixelSize: 16
                     font.bold: true
@@ -276,7 +336,7 @@ Item {
                             id: coverImage
                             width: parent.width
                             height: implicitHeight > 0 ? implicitWidth > 0 ? Math.round(width * implicitHeight / implicitWidth) : width * 1.33 : width * 1.33
-                            source: typeof(root.game.cover_url) === "string" && root.game.cover_url.length > 0 ? "image://covers/" + root.game.cover_url : ("image://covers/" + (root.game.path_cover_l || root.game.path_cover_s || ""))
+                            source: root.game.cover_url ? "image://covers/" + root.game.cover_url : ""
                             fillMode: Image.PreserveAspectFit
                             onStatusChanged: fallbackText.visible = (status === Image.Error || status === Image.Null)
                         }
@@ -296,15 +356,15 @@ Item {
                         width: parent.width
                         height: 48
                         radius: 8
-                        color: (root._focusedColumn === 0 && root._leftButtonIndex === 0) ? "#ff79c6" : "#1e1f29"
-                        border.color: (root._focusedColumn === 0 && root._leftButtonIndex === 0) ? "#ff79c6" : "transparent"
+                        color: "#ff79c6"
+                        border.color: (root._focusedColumn === 0 && root._leftButtonIndex === 0) ? "#f8f8f2" : "transparent"
                         border.width: 2
-                        visible: !!root.game.local_path && !gameBackend.isInstallActive
+                        visible: !!root._installedLocalPath && !gameBackend.isInstallActive
 
                         Text {
                             anchors.centerIn: parent
                             text: gameBackend.isSessionActive ? "▐▐  Playing..." : "▶  Play"
-                            color: (root._focusedColumn === 0 && root._leftButtonIndex === 0) ? "#282a36" : "#f8f8f2"
+                            color: "#282a36"
                             font.pixelSize: 16
                             font.bold: true
                         }
@@ -315,10 +375,10 @@ Item {
                         width: parent.width
                         height: 48
                         radius: 8
-                        color: (root._focusedColumn === 0 && root._leftButtonIndex === 0) ? "#ff79c6" : "#50fa7b"
-                        border.color: (root._focusedColumn === 0 && root._leftButtonIndex === 0) ? "#ff79c6" : "transparent"
+                        color: "#50fa7b"
+                        border.color: (root._focusedColumn === 0 && root._leftButtonIndex === 0) ? "#f8f8f2" : "transparent"
                         border.width: 2
-                        visible: !root.game.local_path && appBackend.isConnected && !gameBackend.isInstallActive
+                        visible: !root._installedLocalPath && appBackend.isConnected && !gameBackend.isInstallActive
 
                         Text {
                             anchors.centerIn: parent
@@ -361,45 +421,47 @@ Item {
                     Rectangle {
                         property int myIndex: 1
                         width: parent.width
-                        height: 44
+                        height: 48
                         radius: 8
                         color: "#383a59"
                         border.color: (root._focusedColumn === 0 && root._leftButtonIndex === myIndex) ? "#ff79c6" : "#ff5555"
                         border.width: (root._focusedColumn === 0 && root._leftButtonIndex === myIndex) ? 2 : 1
-                        visible: !!root.game.local_path
+                        visible: !!root._installedLocalPath
 
                         Text {
                             anchors.centerIn: parent
                             text: "✕  Uninstall"
                             color: (root._focusedColumn === 0 && root._leftButtonIndex === parent.myIndex) ? "#f8f8f2" : "#ff5555"
-                            font.pixelSize: 14
+                            font.pixelSize: 16
+                            font.bold: true
                         }
                     }
 
                     // Change Executable Button (native PC games only)
                     Rectangle {
-                        property int myIndex: root.game.local_path ? 2 : -1
+                        property int myIndex: root._installedLocalPath ? 2 : -1
                         width: parent.width
-                        height: 44
+                        height: 48
                         radius: 8
                         color: "#1e1f29"
                         border.color: (root._focusedColumn === 0 && root._leftButtonIndex === myIndex) ? "#ff79c6" : "#bd93f9"
                         border.width: (root._focusedColumn === 0 && root._leftButtonIndex === myIndex) ? 2 : 1
-                        visible: !!root.game.local_path && _isNativePcGame()
+                        visible: !!root._installedLocalPath && _isNativePcGame()
 
                         Text {
                             anchors.centerIn: parent
                             text: "⚙  Change Executable"
                             color: (root._focusedColumn === 0 && root._leftButtonIndex === parent.myIndex) ? "#f8f8f2" : "#bd93f9"
-                            font.pixelSize: 14
+                            font.pixelSize: 16
+                            font.bold: true
                         }
                     }
 
                     // Cloud Saves Button
                     Rectangle {
-                        property int myIndex: root.game.local_path ? (_isNativePcGame() ? 3 : 2) : 1
+                        property int myIndex: root._installedLocalPath ? (_isNativePcGame() ? 3 : 2) : 1
                         width: parent.width
-                        height: 44
+                        height: 48
                         radius: 8
                         color: "#1e1f29"
                         border.color: (root._focusedColumn === 0 && root._leftButtonIndex === myIndex) ? "#ff79c6" : "#bd93f9"
@@ -410,7 +472,8 @@ Item {
                             anchors.centerIn: parent
                             text: "☁  Cloud Saves"
                             color: (root._focusedColumn === 0 && root._leftButtonIndex === parent.myIndex) ? "#f8f8f2" : "#bd93f9"
-                            font.pixelSize: 14
+                            font.pixelSize: 16
+                            font.bold: true
                         }
                     }
                 }
@@ -427,161 +490,210 @@ Item {
                 
                 Behavior on border.color { ColorAnimation { duration: 150 } }
 
-                Flickable {
-                    id: centerFlickable
-                    anchors.fill: parent
-                    anchors.margins: 1
-                    clip: true
-                    contentHeight: metaColumn.implicitHeight
-                    
+                Text {
+                    id: detailsTitleText
+                    anchors.top: parent.top
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.topMargin: 16
+                    anchors.leftMargin: 16
+                    anchors.rightMargin: 16
+                    text: root.game.title || root.game.name || ""
+                    font.pixelSize: 32
+                    font.bold: true
+                    color: "#50fa7b"
+                    wrapMode: Text.WordWrap
+                    elide: Text.ElideRight
+                    maximumLineCount: 2
+                }
+
+                // Zone B — Metadata Panel (fixed, always visible at bottom)
+                Rectangle {
+                    id: metadataPanel
+                    anchors.bottom: parent.bottom
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottomMargin: 1
+                    anchors.leftMargin: 1
+                    anchors.rightMargin: 1
+                    color: "#1e1f29"
+                    height: metadataPanelColumn.implicitHeight + 24
+
                     Column {
-                        id: metaColumn
-                        width: centerFlickable.width
-                        padding: 16
+                        id: metadataPanelColumn
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: 12
                         spacing: 8
-                        
-                        Text {
-                            text: root.game.name || root.game.fs_name || ""
-                            font.pixelSize: 22
-                            font.bold: true
-                            color: "#f8f8f2"
-                            wrapMode: Text.Wrap
-                            width: parent.width - 32
-                        }
-                        
-                        Text {
-                            text: root.game.platform_name || root.game.platform || ""
-                            font.pixelSize: 13
-                            color: "#6272a4"
-                            visible: text !== ""
-                        }
-                        
+
                         Row {
                             spacing: 4
-                            visible: !!root.game.average_rating && root.game.average_rating !== ""
-                            Text { text: "★"; color: "#ff79c6"; font.pixelSize: 14 }
-                            Text { text: root.game.average_rating || ""; color: "#f8f8f2"; font.pixelSize: 14 }
+                            visible: !!root.game.platform
+                            Text { text: "Platform:"; color: "#6272a4"; font.pixelSize: 14 }
+                            Text { text: root.game.platform || ""; color: "#f8f8f2"; font.pixelSize: 14 }
                         }
-                        
+
                         Row {
                             spacing: 4
-                            visible: !!root.game.first_release_date && root.game.first_release_date !== ""
+                            property string _releaseText: root.game.first_release_date || root.game.release_year || ""
+                            visible: _releaseText !== ""
                             Text { text: "Released:"; color: "#6272a4"; font.pixelSize: 14 }
-                            Text { text: root.game.first_release_date || ""; color: "#f8f8f2"; font.pixelSize: 14 }
+                            Text { text: parent._releaseText; color: "#f8f8f2"; font.pixelSize: 14 }
                         }
-                        
+
                         Row {
                             spacing: 4
-                            visible: !!root.game.companies || !!root.game.developer
+                            visible: !!root.game.companies
                             Text { text: "By:"; color: "#6272a4"; font.pixelSize: 14 }
-                            Text { 
-                                text: root.game.companies || root.game.developer || ""
+                            Text {
+                                text: root.game.companies || ""
                                 color: "#f8f8f2"
                                 font.pixelSize: 14
                                 wrapMode: Text.Wrap
-                                width: metaColumn.width - 64
+                                width: metadataPanel.width - 80
                             }
                         }
-                        
-                        Flow {
-                            width: parent.width - 32
-                            spacing: 6
-                            visible: !!root.game.genres && typeof(root.game.genres) === "string" && root.game.genres.length > 0
-                            
+
+                        Row {
+                            spacing: 4
+                            visible: !!root.game.revision && root.game.revision !== ""
+                            Text { text: "Version:"; color: "#6272a4"; font.pixelSize: 14 }
+                            Text { text: root.game.revision || ""; color: "#f8f8f2"; font.pixelSize: 14 }
+                        }
+
+                        Row {
+                            spacing: 4
+                            visible: !!root.game.filesize_bytes
+                            Text { text: "Size:"; color: "#6272a4"; font.pixelSize: 14 }
+                            Text { text: root.formatFilesize(root.game.filesize_bytes); color: "#f8f8f2"; font.pixelSize: 14 }
+                        }
+
+                        Row {
+                            spacing: 4
+                            property string _ratingRaw: root.game.average_rating || root.game.rating || ""
+                            property real _ratingNum: {
+                                var s = _ratingRaw
+                                var slashIdx = s.indexOf("/")
+                                if (slashIdx !== -1) s = s.substring(0, slashIdx)
+                                return parseFloat(s) || 0
+                            }
+                            visible: _ratingRaw !== "" && _ratingRaw !== "N/A"
+                            Text { text: "Rating:"; color: "#6272a4"; font.pixelSize: 14 }
                             Repeater {
-                                model: (root.game.genres || "").split(",").filter(function(s) { return s.trim() !== ""; })
-                                delegate: Rectangle {
-                                    color: "#383a59"
-                                    radius: 10
-                                    width: genreText.width + 16
-                                    height: genreText.height + 8
-                                    Text {
-                                        id: genreText
-                                        anchors.centerIn: parent
-                                        text: modelData.trim()
-                                        color: "#6272a4"
-                                        font.pixelSize: 12
-                                    }
+                                model: 5
+                                delegate: Text {
+                                    text: "★"
+                                    color: (index + 1) <= Math.round(parent.parent._ratingNum) ? "#ff79c6" : "#44475a"
+                                    font.pixelSize: 16
                                 }
                             }
+                            Text { text: parent._ratingNum.toFixed(1) + "/5"; color: "#6272a4"; font.pixelSize: 13 }
                         }
-                        
-                        Text {
-                            text: root.game.summary || root.game.description || "No description available."
-                            color: "#f8f8f2"
-                            wrapMode: Text.Wrap
-                            font.pixelSize: 14
-                            topPadding: 8
-                            width: parent.width - 32
-                        }
-                        
-                        Text {
-                            visible: !!root.game.filesize_bytes || !!root.game.file_size_bytes
-                            color: "#6272a4"
-                            text: "Size: " + root.formatFilesize(root.game.filesize_bytes || root.game.file_size_bytes)
-                            font.pixelSize: 14
-                        }
-                        
+
                         Row {
                             spacing: 4
                             visible: !!root.game.regions && root.game.regions.length > 0
-                            Text { text: "Regions:"; color: "#6272a4"; font.pixelSize: 14 }
-                            Text { 
+                            Text { text: "Region:"; color: "#6272a4"; font.pixelSize: 14 }
+                            Text {
                                 text: (Array.isArray(root.game.regions) ? root.game.regions.join(", ") : root.game.regions) || ""
                                 color: "#f8f8f2"
                                 font.pixelSize: 14
                             }
                         }
-                        
+
                         Row {
                             spacing: 4
                             visible: !!root.game.languages && root.game.languages.length > 0
                             Text { text: "Languages:"; color: "#6272a4"; font.pixelSize: 14 }
-                            Text { 
+                            Text {
                                 text: (Array.isArray(root.game.languages) ? root.game.languages.join(", ") : root.game.languages) || ""
                                 color: "#f8f8f2"
                                 font.pixelSize: 14
                             }
                         }
-                        
-                        Flow {
-                            width: parent.width - 32
+
+                        Row {
                             spacing: 6
-                            topPadding: 4
-                            visible: !!root.game.tags && root.game.tags.length > 0
-                            
-                            Repeater {
-                                model: Array.isArray(root.game.tags) ? root.game.tags : []
-                                delegate: Rectangle {
-                                    color: "#1e1f29"
-                                    border.color: "#44475a"
-                                    border.width: 1
-                                    radius: 10
-                                    width: tagText.width + 16
-                                    height: tagText.height + 8
-                                    Text {
-                                        id: tagText
-                                        anchors.centerIn: parent
-                                        text: modelData.name || modelData
-                                        color: "#6272a4"
-                                        font.pixelSize: 12
+                            visible: !!root.game.genres && typeof(root.game.genres) === "string" && root.game.genres.length > 0
+                            Text { text: "Genres:"; color: "#6272a4"; font.pixelSize: 14; anchors.verticalCenter: parent.verticalCenter }
+                            Flow {
+                                width: metadataPanel.width - 80
+                                spacing: 6
+                                Repeater {
+                                    model: (root.game.genres || "").split(",").filter(function(s) { return s.trim() !== ""; })
+                                    delegate: Rectangle {
+                                        color: "#383a59"
+                                        radius: 10
+                                        width: genreChipText.width + 16
+                                        height: genreChipText.height + 8
+                                        Text {
+                                            id: genreChipText
+                                            anchors.centerIn: parent
+                                            text: modelData.trim()
+                                            color: "#bd93f9"
+                                            font.pixelSize: 12
+                                        }
                                     }
                                 }
                             }
                         }
 
+                        Text {
+                            id: metadataLoadingText
+                            opacity: root._metadataLoading ? 1.0 : 0.0
+                            visible: opacity > 0
+                            text: "Loading metadata\u2026"
+                            color: "#6272a4"
+                            font.pixelSize: 12
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            topPadding: 4
+
+                            Behavior on opacity { NumberAnimation { duration: 200 } }
+                        }
                     }
                 }
-                
+
+                // Zone A — Description Flickable (scrollable, fills between title and metadata panel)
+                Flickable {
+                    id: descFlickable
+                    anchors.top: detailsTitleText.bottom
+                    anchors.topMargin: 8
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: metadataPanel.top
+                    anchors.bottomMargin: 0
+                    anchors.leftMargin: 1
+                    anchors.rightMargin: 1
+                    clip: true
+                    contentHeight: descColumn.implicitHeight
+
+                    Column {
+                        id: descColumn
+                        width: descFlickable.width
+                        padding: 16
+                        spacing: 8
+
+                        Text {
+                            text: root.game.summary || root.game.description || "No description available."
+                            color: "#f8f8f2"
+                            wrapMode: Text.Wrap
+                            font.pixelSize: 14
+                            width: parent.width - 32
+                        }
+
+                    }
+                }
+
                 // Scroll indicator
                 Rectangle {
                     anchors.right: parent.right
                     width: 3
                     color: "#44475a"
                     opacity: 0.6
-                    y: centerFlickable.visibleArea.yPosition * centerFlickable.height
-                    height: centerFlickable.visibleArea.heightRatio * centerFlickable.height
-                    visible: centerFlickable.contentHeight > centerFlickable.height
+                    y: descFlickable.visibleArea.yPosition * descFlickable.height
+                    height: descFlickable.visibleArea.heightRatio * descFlickable.height
+                    visible: descFlickable.contentHeight > descFlickable.height
                 }
             }
 

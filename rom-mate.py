@@ -448,6 +448,12 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self.details_version_group: QWidget | None = None
         self.details_genres_group: QWidget | None = None
         self.details_genres_layout: QHBoxLayout | None = None
+        self.details_companies_group: QWidget | None = None
+        self.details_companies_label: QLabel | None = None
+        self.details_release_date_group: QWidget | None = None
+        self.details_release_date_label: QLabel | None = None
+        self.details_languages_group: QWidget | None = None
+        self.details_languages_label: QLabel | None = None
         self.details_platform_label: QLabel | None = None
         self.details_genres_label: QLabel | None = None
         self.details_regions_label: QLabel | None = None
@@ -720,14 +726,30 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             }
             app_backend = AppBackend(self.config, image_cache_dir, parent=None)
             cloud_backend = CloudBackend(self.config, parent=None)
-            game_backend = GameBackend(self.config, parent=None)
+            game_backend = GameBackend(self.config, self, parent=None)
             game_backend.installComplete.connect(
                 lambda ok, _msg, _game: app_backend.syncConfig(self.config) if ok else None
             )
             game_backend.uninstallComplete.connect(
                 lambda ok, _msg, _game: app_backend.syncConfig(self.config) if ok else None
             )
+
+            def _on_tv_install(ok: bool, _msg: str, _game: object) -> None:
+                if ok:
+                    self.library_games = self.config.get("installed_games", [])
+                    self._refresh_library_grid()
+                    app_backend.libraryGamesChanged.emit()
+
+            def _on_tv_uninstall(ok: bool, _msg: str, _game: object) -> None:
+                if ok:
+                    self.library_games = self.config.get("installed_games", [])
+                    self._refresh_library_grid()
+                    app_backend.libraryGamesChanged.emit()
+
+            game_backend.installComplete.connect(_on_tv_install)
+            game_backend.uninstallComplete.connect(_on_tv_uninstall)
             app_backend.switchToDesktopModeRequested.connect(self._switch_to_desktop_mode)
+            app_backend.saveConfigRequested.connect(lambda: self._save_config(self.config))
             controller_backend = ControllerBackend(
                 app_backend=app_backend,
                 game_backend=game_backend,
@@ -763,12 +785,13 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
                 return
             self._tv_engine = engine
             self._tv_window = engine.rootObjects()[0]
-            controller_backend.start()
             self._tv_controller_backend = controller_backend
             self._tv_app_backend = app_backend
             self._tv_cloud_backend = cloud_backend
             self._tv_game_backend = game_backend
 
+        if self._tv_controller_backend is not None:
+            self._tv_controller_backend.start()
         if self._tv_app_backend is not None:
             self._tv_app_backend.syncConfig(self.config)
             self._tv_app_backend.connectToServer()
@@ -787,6 +810,8 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             self._tv_game_backend.stopGame()
         if self._tv_window is not None:
             self._tv_window.hide()
+        if self._tv_controller_backend is not None:
+            self._tv_controller_backend.stop()
         self.config = self._load_config()
         if self.auto_cloud_checkbox is not None:
             self.auto_cloud_checkbox.setChecked(self._auto_cloud_save_download_enabled())
@@ -1508,6 +1533,25 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self.details_genres_label = None
 
         metadata_layout.addWidget(genres_group)
+
+        companies_group, companies = _make_metadata_group("DEVELOPER / PUBLISHER")
+        companies_group.setVisible(False)
+        self.details_companies_group = companies_group
+        self.details_companies_label = companies
+        metadata_layout.addWidget(companies_group)
+
+        release_date_group, release_date = _make_metadata_group("RELEASED")
+        release_date_group.setVisible(False)
+        self.details_release_date_group = release_date_group
+        self.details_release_date_label = release_date
+        metadata_layout.addWidget(release_date_group)
+
+        languages_group, languages = _make_metadata_group("LANGUAGES")
+        languages_group.setVisible(False)
+        self.details_languages_group = languages_group
+        self.details_languages_label = languages
+        metadata_layout.addWidget(languages_group)
+
         overview_content_layout.addWidget(metadata_container)
         overview_content_layout.addStretch()
 
@@ -2589,20 +2633,20 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
 
     def _details_version_label_text_for_game(self, game: dict[str, str]) -> str:
-        if not self._is_windows_pc_platform(game):
-            return ""
-
-        version_tag = rom_file_name_version(game.get("rom_file_name", ""))
-        if version_tag is None:
-            installed_game = self._installed_game_record(game)
-            if installed_game is not None:
-                version_tag = rom_file_name_version(installed_game.get("rom_file_name", ""))
-        if version_tag is None:
-            return ""
-        formatted_version = self._format_version_tag_for_ui(version_tag)
-        if not formatted_version:
-            return ""
-        return f"Version: {formatted_version}"
+        if self._is_windows_pc_platform(game):
+            version_tag = rom_file_name_version(game.get("rom_file_name", ""))
+            if version_tag is None:
+                installed_game = self._installed_game_record(game)
+                if installed_game is not None:
+                    version_tag = rom_file_name_version(installed_game.get("rom_file_name", ""))
+            if version_tag is not None:
+                formatted_version = self._format_version_tag_for_ui(version_tag)
+                if formatted_version:
+                    return f"Version: {formatted_version}"
+        revision = game.get("revision", "")
+        if isinstance(revision, str) and revision.strip():
+            return revision.strip()
+        return ""
 
 
     def _details_update_button_text_for_game(self, game: dict[str, str]) -> str:

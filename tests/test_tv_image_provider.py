@@ -21,7 +21,7 @@ class TestCoverImageProviderCacheHit(unittest.TestCase):
 
     def _make_provider(self, cover_url_map=None):
         from rom_mate.tv.bridge.image_provider import CoverImageProvider
-        return CoverImageProvider(self.cache_dir, "test-token", cover_url_map or {})
+        return CoverImageProvider(self.cache_dir, "test-token", "", cover_url_map or {})
 
     def test_requestImage_returns_image_from_cached_path(self):
         # Generate a valid 1x1 red PNG using QImage.

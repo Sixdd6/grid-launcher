@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import re
+from datetime import timezone
 from typing import Any
 
 SOURCE_PRIORITY: tuple[str, ...] = (
@@ -200,6 +201,33 @@ def _extract_year(value: Any) -> str:
     return ""
 
 
+def _format_release_date(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return ""
+    if isinstance(value, int):
+        if value > 10000 or (0 <= value < 1900):
+            try:
+                return datetime.datetime.fromtimestamp(value, tz=timezone.utc).strftime("%Y-%m-%d")
+            except (OverflowError, OSError, ValueError):
+                return ""
+        if 1900 <= value <= 2200:
+            return str(value)
+        return ""
+    if isinstance(value, str):
+        try:
+            parsed = datetime.datetime.fromisoformat(value)
+            return parsed.strftime("%Y-%m-%d")
+        except (ValueError, TypeError):
+            pass
+        match = re.search(r"\d{4}", value)
+        if match:
+            return match.group(0)
+        return ""
+    return ""
+
+
 def details_metadata_from_item(item: dict[str, Any]) -> dict[str, str]:
     source_blocks: dict[str, dict[str, Any]] = {}
     for key in SOURCE_PRIORITY:
@@ -285,6 +313,52 @@ def details_metadata_from_item(item: dict[str, Any]) -> dict[str, str]:
     size_bytes = item.get("fs_size_bytes")
     size_text = str(size_bytes) if isinstance(size_bytes, int) and size_bytes > 0 else ""
 
+    _gamelist_meta = item.get("gamelist_metadata")
+    _gamelist_meta_block = _gamelist_meta if isinstance(_gamelist_meta, dict) else {}
+    fanart_url = source_blocks.get("ss_metadata", {}).get("fanart_url") or _gamelist_meta_block.get("fanart_url") or ""
+    if not isinstance(fanart_url, str):
+        fanart_url = ""
+
+    companies = ""
+    for _src_key in ("launchbox_metadata", "igdb_metadata", "ss_metadata"):
+        _companies = source_blocks.get(_src_key, {}).get("companies")
+        if isinstance(_companies, list) and _companies:
+            companies = ", ".join(str(c) for c in _companies)
+            break
+    if not companies:
+        _meta_companies = item.get("metadatum", {}).get("companies") if isinstance(item.get("metadatum"), dict) else None
+        if isinstance(_meta_companies, list) and _meta_companies:
+            companies = ", ".join(str(c) for c in _meta_companies if c)
+        elif isinstance(_meta_companies, str):
+            companies = _meta_companies.strip()
+
+    first_release_date = ""
+    for _raw_date in (
+        source_blocks["launchbox_metadata"].get("first_release_date"),
+        source_blocks["ss_metadata"].get("first_release_date"),
+        source_blocks["igdb_metadata"].get("first_release_date"),
+        item.get("flashpoint_metadata", {}).get("first_release_date") if isinstance(item.get("flashpoint_metadata"), dict) else None,
+    ):
+        first_release_date = _format_release_date(_raw_date)
+        if first_release_date:
+            break
+    if not first_release_date:
+        metadatum = item.get("metadatum")
+        if isinstance(metadatum, dict):
+            first_release_date = _format_release_date(metadatum.get("first_release_date"))
+
+    _raw_tags = item.get("tags")
+    if isinstance(_raw_tags, list) and _raw_tags:
+        _tag_names = []
+        for _t in _raw_tags:
+            if isinstance(_t, dict):
+                _tag_names.append(str(_t.get("name", "") or ""))
+            else:
+                _tag_names.append(str(_t))
+        tags = ", ".join(t for t in _tag_names if t)
+    else:
+        tags = ""
+
     return {
         "description": description,
         "description_source": description_source,
@@ -294,4 +368,10 @@ def details_metadata_from_item(item: dict[str, Any]) -> dict[str, str]:
         "rating_source": rating_source,
         "release_year": release_year,
         "filesize_bytes": size_text,
+        "revision": str(item.get("revision") or ""),
+        "languages": ", ".join(item.get("languages", [])) if isinstance(item.get("languages"), list) else "",
+        "tags": tags,
+        "fanart_url": fanart_url,
+        "companies": companies,
+        "first_release_date": first_release_date,
     }

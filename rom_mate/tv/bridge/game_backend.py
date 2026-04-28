@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,7 @@ from urllib.parse import quote
 
 from PySide6.QtCore import Property, QObject, Qt, QThread, Signal, Slot
 
+from rom_mate.core import sanitize_path_component
 from rom_mate.core.config import write_config_file as _write_config_file
 from rom_mate.emulator.launch import (
     apply_launch_placeholders_to_args,
@@ -35,6 +37,7 @@ from rom_mate.emulator.selection import (
     mapping_value_for_platform,
 )
 from rom_mate.library.archive_preparation import (
+    cleanup_install_archive,
     extract_archive_for_game,
     extracted_dir_for_archive_path,
     prepare_installed_game_without_ui,
@@ -46,6 +49,7 @@ from rom_mate.library.install_paths import (
     native_install_dir_for_game,
     resolved_native_executable_path_for_game,
 )
+from rom_mate.background.workers import InstallDownloadWorker
 from rom_mate.server.state import credentials_present as _credentials_present_fn
 from rom_mate.tv.bridge.cloud_helpers import (
     _TvAutoRestoreWorker,
@@ -57,6 +61,7 @@ from rom_mate.tv.bridge.cloud_helpers import (
 _subprocess_popen = subprocess.Popen
 _time_sleep = time.sleep
 _credentials_present = _credentials_present_fn
+_InstallDownloadWorker = InstallDownloadWorker
 
 try:
     import psutil as _psutil
@@ -81,103 +86,6 @@ class _ProcessWatchThread(QThread):
             return
 
         self._backend._on_process_exited(emulator_name)
-
-
-class _TvInstallDownloadWorker(QObject):
-    progress = Signal(int, int, float)
-    finished = Signal(str, str)
-
-    def __init__(self, url: str, headers: dict[str, str], dest_path: str) -> None:
-        super().__init__()
-        self._url = str(url).strip()
-        self._headers = dict(headers)
-        self._dest_path = str(dest_path)
-
-    @Slot()
-    def run(self) -> None:
-        try:
-            import requests
-
-            destination = Path(self._dest_path)
-            destination.parent.mkdir(parents=True, exist_ok=True)
-
-            downloaded_bytes = 0
-            started_at = time.monotonic()
-            with requests.get(self._url, headers=self._headers, stream=True, timeout=60) as response:
-                response.raise_for_status()
-                content_length = str(response.headers.get("Content-Length", "")).strip()
-                total_bytes = int(content_length) if content_length.isdigit() else 0
-                with destination.open("wb") as output_file:
-                    for chunk in response.iter_content(chunk_size=65536):
-                        if not chunk:
-                            continue
-                        output_file.write(chunk)
-                        downloaded_bytes += len(chunk)
-                        elapsed = max(time.monotonic() - started_at, 1e-6)
-                        speed_bps = downloaded_bytes / elapsed
-                        self.progress.emit(downloaded_bytes, total_bytes, speed_bps)
-            self.finished.emit(str(destination), "")
-        except Exception as error:
-            self.finished.emit("", str(error))
-
-
-class _TvInstallFinalizeWorker(QObject):
-    finished = Signal(bool, str, str)
-
-    def __init__(self, archive_path: str, dest_dir: str, game_dict: dict[str, str]) -> None:
-        super().__init__()
-        self._archive_path = str(archive_path)
-        self._dest_dir = str(dest_dir)
-        self._game_dict = dict(game_dict)
-
-    @Slot()
-    def run(self) -> None:
-        platform = str(self._game_dict.get("platform", "")).strip().casefold()
-        if "ps4" in platform or "xbox 360" in platform:
-            self.finished.emit(False, "Use Desktop Mode to install this content type.", "")
-            return
-
-        try:
-            archive_path = Path(self._archive_path)
-            if not archive_path.exists() or not archive_path.is_file():
-                self.finished.emit(False, f"Archive was not found: {archive_path}", "")
-                return
-
-            destination_dir = Path(self._dest_dir).expanduser()
-            destination_dir.mkdir(parents=True, exist_ok=True)
-
-            prepared_game, error_text = prepare_installed_game_without_ui(
-                self._game_dict,
-                archive_path,
-                should_extract_archive_for_game=lambda game, current_archive_path: should_extract_archive_for_game(
-                    game,
-                    current_archive_path,
-                    is_native_executable_platform=is_native_executable_platform,
-                    is_arcade_platform=is_arcade_platform,
-                    is_ps3_platform=is_ps3_platform,
-                ),
-                extract_archive_for_game=lambda game, current_archive_path, install_progress_callback=None: extract_archive_for_game(
-                    game,
-                    current_archive_path,
-                    extracted_dir_for_archive_path=extracted_dir_for_archive_path,
-                    select_extracted_launch_file=lambda game_payload, extracted_dir, archive: select_extracted_launch_file(
-                        game_payload,
-                        extracted_dir,
-                        archive,
-                        is_ps3_platform=is_ps3_platform,
-                    ),
-                    install_progress_callback=install_progress_callback,
-                ),
-                is_ps3_platform=is_ps3_platform,
-            )
-            if prepared_game is None:
-                self.finished.emit(False, error_text or "Install preparation failed.", "")
-                return
-
-            local_path = str(prepared_game.get("extracted_path", "")).strip() or str(archive_path)
-            self.finished.emit(True, "", local_path)
-        except Exception as error:
-            self.finished.emit(False, str(error), "")
 
 
 class _TvAutoUploadWorker(QObject):
@@ -225,18 +133,19 @@ class GameBackend(QObject):
     nativeExecPickerNeeded = Signal(list)
     _installStateChanged = Signal()
     _sessionStateChanged = Signal()
+    _finalizeResult = Signal(object, str, str, str)
 
-    def __init__(self, config: dict[str, Any], *, parent: QObject | None = None) -> None:
+    def __init__(self, config: dict[str, Any], main_window: Any, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._config = config
+        self._main_window = main_window
         self._active_emulator_name: str = ""
         self._process: subprocess.Popen | None = None
         self._watch_thread: QThread | None = None
         self._install_thread: QThread | None = None
         self._install_worker = None
         self._install_target_game: dict[str, str] | None = None
-        self._finalize_thread: QThread | None = None
-        self._finalize_worker = None
+        self._finalize_thread: threading.Thread | None = None
         self._session_started_at = 0.0
         self._session_game: dict[str, str] | None = None
         self._pending_native_game: dict[str, str] | None = None
@@ -244,6 +153,10 @@ class GameBackend(QObject):
         self._restore_worker = None
         self._auto_upload_thread: QThread | None = None
         self._auto_upload_worker = None
+        self._finalizeResult.connect(
+            self._on_install_finalize_done,
+            Qt.ConnectionType.QueuedConnection,
+        )
 
     @Property(str, notify=_sessionStateChanged)
     def activeEmulatorName(self) -> str:
@@ -261,7 +174,9 @@ class GameBackend(QObject):
 
     @Property(bool, notify=_installStateChanged)
     def isInstallActive(self) -> bool:
-        return self._install_thread is not None and self._install_thread.isRunning()
+        download_active = self._install_thread is not None and self._install_thread.isRunning()
+        finalize_active = self._finalize_thread is not None and self._finalize_thread.is_alive()
+        return download_active or finalize_active
 
     @Slot(object)
     def syncConfig(self, config: dict[str, Any]) -> None:
@@ -312,8 +227,7 @@ class GameBackend(QObject):
             )
             ps3_game_id_value = current_game.get("ps3_game_id", "")
             ps3_game_id = ps3_game_id_value.strip() if isinstance(ps3_game_id_value, str) else ""
-            rom_path = current_game.get("rom_path", "")
-            rom_path_text = rom_path.strip() if isinstance(rom_path, str) else ""
+            rom_path_text = resolved_rom_path_for_game(current_game)
             return launch_placeholders_for_game(
                 rom_path_text,
                 emulator_name,
@@ -540,6 +454,10 @@ class GameBackend(QObject):
             self.launchError.emit("An install is already in progress.")
             return
 
+        if self._install_target_game is not None:
+            self.installComplete.emit(False, "An install is already in progress.", {})
+            return
+
         library_path_value = self._config.get("library_path", "")
         library_path = str(library_path_value).strip()
         if not library_path:
@@ -553,9 +471,20 @@ class GameBackend(QObject):
             download_url = f"{server_url.rstrip('/')}/api/roms/{rom_id}/content/{quote(rom_file_name)}"
         else:
             download_url = f"{server_url.rstrip('/')}/api/roms/{rom_id}/content"
-        dest_path = str(Path(library_path).expanduser() / f"_tv_download_{rom_id}.tmp")
+        platform_name = str(game_dict.get("platform", "")).strip()
+        if platform_name:
+            platform_dir = Path(library_path).expanduser() / sanitize_path_component(platform_name, "platform")
+        else:
+            platform_dir = Path(library_path).expanduser()
+        try:
+            platform_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            self.installComplete.emit(False, str(e), game_dict)
+            return
+        archive_name = rom_file_name if rom_file_name else f"_tv_download_{rom_id}.tmp"
+        archive_path = platform_dir / archive_name
 
-        worker = _TvInstallDownloadWorker(download_url, headers, dest_path)
+        worker = _InstallDownloadWorker(download_url, headers, archive_path)
         thread = QThread(self)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -570,7 +499,7 @@ class GameBackend(QObject):
         thread.start()
         self._installStateChanged.emit()
 
-    @Slot(int, int, float)
+    @Slot(object, object, float)
     def _on_install_progress(self, downloaded: int, total: int, speed: float) -> None:
         self.installProgress.emit(downloaded, total, speed)
 
@@ -579,43 +508,95 @@ class GameBackend(QObject):
         game_dict = self._install_target_game or {}
         self._install_thread = None
         self._install_worker = None
-        self._installStateChanged.emit()
         if error:
             self.installComplete.emit(False, error, game_dict)
             self._install_target_game = None
+            self._installStateChanged.emit()
             return
 
         library_path = str(self._config.get("library_path", "")).strip()
         if not library_path:
             self.installComplete.emit(False, "No library path configured.", game_dict)
             self._install_target_game = None
+            self._installStateChanged.emit()
             return
 
-        worker = _TvInstallFinalizeWorker(
-            archive_path=archive_path,
-            dest_dir=library_path,
-            game_dict=game_dict,
-        )
-        thread = QThread(self)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.finished.connect(self._on_install_finalize_done)
-        worker.finished.connect(thread.quit)
-        worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        self._finalize_thread = thread
-        self._finalize_worker = worker
-        thread.start()
+        archive_path_obj = Path(archive_path)
+        _game = dict(game_dict)
 
-    @Slot(bool, str, str)
-    def _on_install_finalize_done(self, success: bool, error: str, local_path: str) -> None:
+        # Resolve all required callables on the main thread NOW, before the thread starts.
+        # These are all pure-Python functions / method references that do NOT touch Qt objects.
+        main_window = self._main_window
+        _is_ps3 = main_window._is_ps3_platform
+        _ps3_dev_hdd0 = main_window._ps3_dev_hdd0_for_game
+        _ps3_games_root = main_window._ps3_games_dir_for_game
+
+        def _select_launch_file(game, exdir, apath):
+            return select_extracted_launch_file(game, exdir, apath, is_ps3_platform=_is_ps3)
+
+        def _should_extract(game, apath):
+            return should_extract_archive_for_game(
+                game, apath,
+                is_native_executable_platform=is_native_executable_platform,
+                is_arcade_platform=is_arcade_platform,
+                is_ps3_platform=_is_ps3,
+            )
+
+        def _extract(game, apath, progress_cb=None):
+            return extract_archive_for_game(
+                game, apath,
+                extracted_dir_for_archive_path=extracted_dir_for_archive_path,
+                select_extracted_launch_file=_select_launch_file,
+                install_progress_callback=progress_cb,
+            )
+
+        def _run_finalize() -> None:
+            try:
+                prepared_game, warning_text = prepare_installed_game_without_ui(
+                    _game, archive_path_obj,
+                    should_extract_archive_for_game=_should_extract,
+                    extract_archive_for_game=_extract,
+                    is_ps3_platform=_is_ps3,
+                    ps3_dev_hdd0_root=_ps3_dev_hdd0,
+                    ps3_games_root=_ps3_games_root,
+                    cleanup_archive_on_success=False,
+                )
+                if prepared_game is None:
+                    _error = (warning_text or "").strip() or "Install preparation failed"
+                    self._finalizeResult.emit(None, str(archive_path_obj), "", _error)
+                    return
+
+                # Cleanup main archive (pure filesystem, no MainWindow)
+                if prepared_game.get("extracted_path", ""):
+                    _cleanup_err = cleanup_install_archive(archive_path_obj)
+                    if _cleanup_err:
+                        title = _game.get("title", "Game") or "Game"
+                        warning_text = f"Extracted {title}, but could not delete archive:\n{_cleanup_err}"
+
+                # Skip supplemental archives and firmware in TV mode — they are desktop-only features
+                # that require MainWindow context and are not needed for basic ROM installs
+
+                self._finalizeResult.emit(prepared_game, str(archive_path_obj), warning_text, "")
+
+            except Exception as _e:
+                self._finalizeResult.emit(None, str(archive_path_obj), "", str(_e))
+
+        finalize_thread = threading.Thread(target=_run_finalize, daemon=True)
+        self._finalize_thread = finalize_thread
+        finalize_thread.start()
+        self._installStateChanged.emit()
+
+    @Slot(object, str, str, str)
+    def _on_install_finalize_done(self, prepared_game: Any, archive_path: str, warning_text: str, error: str) -> None:
         game_dict = self._install_target_game or {}
         self._finalize_thread = None
-        self._finalize_worker = None
         self._install_target_game = None
-        if success:
-            installed_game = dict(game_dict)
+        if prepared_game is not None and not error:
+            installed_game = dict(prepared_game)
+            local_path = str(installed_game.get("extracted_path", "")).strip() or archive_path
             installed_game["local_path"] = local_path
+            if not installed_game.get("extracted_path", "").strip():
+                installed_game["archive_path"] = archive_path
             installed = self._config.setdefault("installed_games", [])
             if not isinstance(installed, list):
                 installed = []
@@ -629,8 +610,9 @@ class GameBackend(QObject):
             ]
             installed.append(installed_game)
             self.installComplete.emit(True, "Game installed.", installed_game)
+            self._main_window._save_config(self._main_window.config)
         else:
-            self.installComplete.emit(False, error, game_dict)
+            self.installComplete.emit(False, error or "Install preparation failed.", game_dict)
         self._installStateChanged.emit()
 
     @Slot("QVariant")
@@ -639,31 +621,16 @@ class GameBackend(QObject):
         if not game_dict and isinstance(game, dict):
             game_dict = {str(key): str(value) for key, value in game.items() if isinstance(key, str)}
 
-        rom_id = str(game_dict.get("id") or game_dict.get("rom_id") or "")
-        local_path = str(game_dict.get("local_path", "")).strip()
-        if local_path:
-            try:
-                import shutil
+        try:
+            removed = self._main_window._uninstall_game(game_dict)
+        except Exception as error:
+            self.uninstallComplete.emit(False, str(error), game_dict)
+            return
 
-                path = Path(local_path)
-                if path.is_dir():
-                    shutil.rmtree(str(path))
-                elif path.is_file():
-                    path.unlink()
-            except Exception as error:
-                self.uninstallComplete.emit(False, f"Could not remove files: {error}", game_dict)
-                return
-
-        installed = self._config.get("installed_games", [])
-        if not isinstance(installed, list):
-            installed = []
-        self._config["installed_games"] = [
-            entry
-            for entry in installed
-            if isinstance(entry, dict)
-            and str(entry.get("id") or entry.get("rom_id") or "") != rom_id
-        ]
-        self.uninstallComplete.emit(True, "Game uninstalled.", game_dict)
+        if removed:
+            self.uninstallComplete.emit(True, "Game uninstalled.", game_dict)
+        else:
+            self.uninstallComplete.emit(False, "Game not found in library.", game_dict)
 
     @Slot(str, result=list)
     def getNativeExecutableCandidates(self, rom_id: str) -> list:

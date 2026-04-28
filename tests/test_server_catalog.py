@@ -274,6 +274,39 @@ class ServerCatalogFileNameTests(unittest.TestCase):
         self.assertEqual(len(games), 1)
         self.assertEqual(games[0].get("release_year"), "")
 
+    def test_new_metadata_fields_in_game_dict(self) -> None:
+        games, _ = games_from_rom_items(
+            [
+                {
+                    "id": 300,
+                    "name": "New Fields Test",
+                    "platform_display_name": "PS1",
+                    "revision": "v1.2",
+                    "languages": ["English", "French"],
+                    "tags": [{"name": "RPG"}, {"name": "Action"}],
+                    "igdb_metadata": {
+                        "companies": ["Capcom", "Inafune"],
+                        "first_release_date": 788918400,
+                    },
+                    "ss_metadata": {
+                        "fanart_url": "https://example.com/fanart.jpg",
+                    },
+                }
+            ],
+            "PS1",
+            cover_url_from_payload=lambda payload: "",
+            screenshot_urls_from_payload=lambda payload: [],
+        )
+
+        self.assertEqual(len(games), 1)
+        game = games[0]
+        self.assertEqual(game["revision"], "v1.2")
+        self.assertEqual(game["languages"], "English, French")
+        self.assertEqual(game["tags"], "RPG, Action")
+        self.assertEqual(game["companies"], "Capcom, Inafune")
+        self.assertEqual(game["fanart_url"], "https://example.com/fanart.jpg")
+        self.assertTrue(game["first_release_date"])
+
 
 class RatingNormalizationTests(unittest.TestCase):
     def test_normalize_rating_to_five_handles_common_scales(self) -> None:

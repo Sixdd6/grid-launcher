@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import os
 import unittest
+from unittest.mock import MagicMock
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6.QtWidgets import QApplication
 
 from rom_mate.cover.details import update_details_layout_metrics
+from rom_mate.ui.game_views import open_game_details
 
 
 class _StubFrame:
@@ -148,6 +155,120 @@ class CoverDetailsLayoutMetricsTests(unittest.TestCase):
 
         self.assertTrue(window.details_screenshots_panel.visible)
 
+
+class _StubDetailsOpenWindow:
+    def __init__(self) -> None:
+        self.current_details_game = None
+        self.current_details_source = ""
+        self.details_title_label = None
+        self.details_cover_label = None
+        self.details_platform_label = None
+        self.details_genres_label = None
+        self.details_genres_layout = None
+        self.details_genres_group = None
+        self.details_regions_label = None
+        self.details_filesize_label = None
+        self.details_version_label = None
+        self.details_rating_label = None
+        self.details_description_label = None
+        self.details_companies_group = MagicMock()
+        self.details_companies_label = MagicMock()
+        self.details_release_date_group = MagicMock()
+        self.details_release_date_label = MagicMock()
+        self.details_languages_group = MagicMock()
+        self.details_languages_label = MagicMock()
+        self.stack = MagicMock()
+        self.nav_buttons: list = []
+        self.install_in_progress = False
+        self.install_finalize_in_progress = False
+        self.install_pending_game = None
+        self.install_finalize_game = None
+
+    def _queue_game_cover_load(self, game: dict, label: object) -> None:
+        pass
+
+    def _update_details_screenshots(self, game: dict) -> None:
+        pass
+
+    def _update_details_action_buttons(self) -> None:
+        pass
+
+    def _update_details_layout_metrics(self) -> None:
+        pass
+
+    def _show_details_overview(self) -> None:
+        pass
+
+    def _is_emulators_platform(self, game: dict) -> bool:
+        return False
+
+    def _is_game_installed(self, game: dict) -> bool:
+        return True
+
+    def _install_block_reason_for_game(self, game: dict) -> str:
+        return ""
+
+    def _is_game_install_queued(self, game: dict) -> bool:
+        return False
+
+    def _game_key(self, game: dict) -> tuple:
+        return (game.get("title", ""), game.get("platform", ""))
+
+    def _is_native_executable_platform(self, game: dict) -> bool:
+        return False
+
+    def _resolved_emulator_entry_for_game(self, game: dict) -> tuple:
+        return ("", None)
+
+    def _is_rpcs3_emulator_name(self, name: str) -> bool:
+        return False
+
+    def _details_cloud_mode_supported(self, game: dict, save_type: str) -> bool:
+        return False
+
+    def _details_cloud_button_text(self, game: dict, save_type: str) -> str:
+        return ""
+
+
+class DetailsNewFieldsVisibilityTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def _make_window(self) -> _StubDetailsOpenWindow:
+        return _StubDetailsOpenWindow()
+
+    def test_companies_group_shown_when_present(self) -> None:
+        window = self._make_window()
+        game = {"title": "Test", "platform": "PS1", "companies": "Capcom"}
+
+        open_game_details(window, game, "library")
+
+        window.details_companies_group.setVisible.assert_called_with(True)
+
+    def test_companies_group_hidden_when_absent(self) -> None:
+        window = self._make_window()
+        game = {"title": "Test", "platform": "PS1"}
+
+        open_game_details(window, game, "library")
+
+        window.details_companies_group.setVisible.assert_called_with(False)
+
+    def test_release_date_group_shown_when_present(self) -> None:
+        window = self._make_window()
+        game = {"title": "Test", "platform": "PS1", "first_release_date": "1995-01-01"}
+
+        open_game_details(window, game, "library")
+
+        window.details_release_date_group.setVisible.assert_called_with(True)
+
+    def test_languages_group_shown_when_present(self) -> None:
+        window = self._make_window()
+        game = {"title": "Test", "platform": "PS1", "languages": "English, French"}
+
+        open_game_details(window, game, "library")
+
+        window.details_languages_group.setVisible.assert_called_with(True)
 
 if __name__ == "__main__":
     unittest.main()

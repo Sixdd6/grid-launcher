@@ -182,9 +182,82 @@ class MetadataTests(unittest.TestCase):
                 "regions": "",
                 "rating": "",
                 "rating_source": "",
+                "release_year": "",
                 "filesize_bytes": "",
+                "revision": "",
+                "languages": "",
+                "tags": "",
+                "fanart_url": "",
+                "companies": "",
+                "first_release_date": "",
             },
         )
+
+    def test_revision_extracted(self):
+        item = {"revision": "v1.1"}
+
+        result = details_metadata_from_item(item)
+
+        self.assertEqual(result["revision"], "v1.1")
+
+    def test_languages_joined_from_list(self):
+        item = {"languages": ["English", "French"]}
+
+        result = details_metadata_from_item(item)
+
+        self.assertEqual(result["languages"], "English, French")
+
+    def test_languages_empty_when_not_list(self):
+        item = {"languages": "English"}
+
+        result = details_metadata_from_item(item)
+
+        self.assertEqual(result["languages"], "")
+
+    def test_tags_joined_from_string_dicts(self):
+        item = {"tags": [{"name": "RPG"}, {"name": "Action"}]}
+
+        result = details_metadata_from_item(item)
+
+        self.assertEqual(result["tags"], "RPG, Action")
+
+    def test_tags_joined_from_plain_strings(self):
+        item = {"tags": ["RPG", "Action"]}
+
+        result = details_metadata_from_item(item)
+
+        self.assertEqual(result["tags"], "RPG, Action")
+
+    def test_fanart_url_from_ss_metadata(self):
+        item = {"ss_metadata": {"fanart_url": "https://example.com/fanart.jpg"}}
+
+        result = details_metadata_from_item(item)
+
+        self.assertEqual(result["fanart_url"], "https://example.com/fanart.jpg")
+
+    def test_fanart_url_falls_back_to_gamelist_metadata(self):
+        item = {
+            "ss_metadata": {},
+            "gamelist_metadata": {"fanart_url": "https://example.com/fanart2.jpg"},
+        }
+
+        result = details_metadata_from_item(item)
+
+        self.assertEqual(result["fanart_url"], "https://example.com/fanart2.jpg")
+
+    def test_companies_from_igdb_metadata(self):
+        item = {"igdb_metadata": {"companies": ["Capcom", "Inafune"]}}
+
+        result = details_metadata_from_item(item)
+
+        self.assertEqual(result["companies"], "Capcom, Inafune")
+
+    def test_first_release_date_from_epoch(self):
+        item = {"igdb_metadata": {"first_release_date": 0}}
+
+        result = details_metadata_from_item(item)
+
+        self.assertEqual(result["first_release_date"], "1970-01-01")
 
 
 if __name__ == "__main__":

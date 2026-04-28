@@ -69,9 +69,10 @@ class _XInputPollThread(QThread):
 
     event_received = Signal(str, float)  # event_code, state_value
 
-    def __init__(self, parent: QObject | None = None) -> None:
+    def __init__(self, parent: QObject | None = None, is_install_active=None) -> None:
         super().__init__(parent)
         self._running = True
+        self._is_install_active = is_install_active if callable(is_install_active) else lambda: False
 
     def stop(self) -> None:
         self._running = False
@@ -191,7 +192,7 @@ class _XInputPollThread(QThread):
                 prev_axes[user_index] = axes_now
                 last_axis_emit_times[user_index] = last_axis_emit
 
-            time.sleep(0.016)  # ~60 Hz
+            time.sleep(0.033 if self._is_install_active() else 0.016)
 
 
 # ---------------------------------------------------------------------------
@@ -208,9 +209,10 @@ class _PygameGuidePollThread(QThread):
 
     event_received = Signal(str, float)
 
-    def __init__(self, parent: QObject | None = None) -> None:
+    def __init__(self, parent: QObject | None = None, is_install_active=None) -> None:
         super().__init__(parent)
         self._running = True
+        self._is_install_active = is_install_active if callable(is_install_active) else lambda: False
 
     def stop(self) -> None:
         self._running = False
@@ -287,7 +289,7 @@ class _PygameGuidePollThread(QThread):
                             )
                 except Exception:
                     pass
-            time.sleep(0.016)
+            time.sleep(0.033 if self._is_install_active() else 0.016)
 
         try:
             pygame.quit()
@@ -329,9 +331,10 @@ class _GamepadPollThread(QThread):
 
     event_received = Signal(str, float)
 
-    def __init__(self, parent: QObject | None = None) -> None:
+    def __init__(self, parent: QObject | None = None, is_install_active=None) -> None:
         super().__init__(parent)
         self._running = True
+        self._is_install_active = is_install_active if callable(is_install_active) else lambda: False
 
     def stop(self) -> None:
         self._running = False
@@ -390,7 +393,7 @@ class _GamepadPollThread(QThread):
                         self.event_received.emit("ABS_HAT0Y", float(-y))
             except Exception:
                 pass
-            time.sleep(0.008)
+            time.sleep(0.033 if self._is_install_active() else 0.008)
 
         try:
             pygame.quit()
@@ -450,21 +453,23 @@ class ControllerBackend(QObject):
         if self._poll_thread is not None and self._poll_thread.isRunning():
             return
 
+        _is_active = (lambda: bool(getattr(self._game_backend, "isInstallActive", False))) if self._game_backend is not None else None
+
         if sys.platform == "win32":
             # Windows: XInput for standard buttons + pygame for guide button
-            self._poll_thread = _XInputPollThread(self)
+            self._poll_thread = _XInputPollThread(self, is_install_active=_is_active)
             self._poll_thread.event_received.connect(
                 self._on_raw_event, Qt.ConnectionType.QueuedConnection
             )
             self._poll_thread.start()
 
-            self._guide_thread = _PygameGuidePollThread(self)
+            self._guide_thread = _PygameGuidePollThread(self, is_install_active=_is_active)
             self._guide_thread.event_received.connect(
                 self._on_raw_event, Qt.ConnectionType.QueuedConnection
             )
             self._guide_thread.start()
         else:
-            self._poll_thread = _GamepadPollThread(self)
+            self._poll_thread = _GamepadPollThread(self, is_install_active=_is_active)
             self._poll_thread.event_received.connect(
                 self._on_raw_event, Qt.ConnectionType.QueuedConnection
             )

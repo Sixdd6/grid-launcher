@@ -259,6 +259,18 @@ class ControllerBackendTests(unittest.TestCase):
         with patch("builtins.__import__", side_effect=_import_with_missing_pygame):
             thread.run()
 
+    def test_xinput_poll_thread_is_install_active_defaults_to_false(self):
+        from rom_mate.tv.bridge.controller import _XInputPollThread
+
+        thread = _XInputPollThread()
+        self.assertFalse(thread._is_install_active())
+
+    def test_xinput_poll_thread_uses_provided_callable(self):
+        from rom_mate.tv.bridge.controller import _XInputPollThread
+
+        thread = _XInputPollThread(is_install_active=lambda: True)
+        self.assertTrue(thread._is_install_active())
+
 
 class TestControllerGuideButton(unittest.TestCase):
     def test_guide_button_calls_request_pause_when_session_active(self):

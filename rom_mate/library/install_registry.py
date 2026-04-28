@@ -47,6 +47,12 @@ def build_installed_game_record(
         "ps3_game_id": _text_value(game, "ps3_game_id"),
         "ps4_game_id": _text_value(game, "ps4_game_id"),
         "ps4_content": _text_value(game, "ps4_content"),
+        "revision": _text_value(game, "revision"),
+        "languages": _text_value(game, "languages"),
+        "tags": _text_value(game, "tags"),
+        "fanart_url": _text_value(game, "fanart_url"),
+        "companies": _text_value(game, "companies"),
+        "first_release_date": _text_value(game, "first_release_date"),
     }
 
 

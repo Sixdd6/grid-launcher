@@ -168,6 +168,8 @@ def normalize_installed_games(
             "ps4_game_id": ps4_game_id.strip().upper() if isinstance(ps4_game_id, str) else "",
             "ps4_content": ps4_content.strip() if isinstance(ps4_content, str) else "",
         }
+        local_path = item.get("local_path")
+        normalized_game["local_path"] = local_path.strip() if isinstance(local_path, str) else ""
         key = game_key_fn(normalized_game)
         if key in seen:
             continue

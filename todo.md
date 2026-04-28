@@ -48,7 +48,7 @@
 
 
 # Medium Priority
-- [ ] Tweak design of emulator auto-install window, it's pretty basic right now and could be more robust.
+- [ ] Tweak design of emulator auto-install window, it's pretty basic right now and could be more robust/informative.
 - [ ] RomM server already has a maximum saves/states implementation, remove the save-retention/slot-limit code and implement the openapi functions instead.
 
 # Low Priority

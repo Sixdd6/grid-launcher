@@ -11,58 +11,10 @@ Item {
     property var _platformGames: []
     property bool _loadingGames: false
 
-    // Header bar
-    Rectangle {
-        id: header
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        height: 48
-        color: "#1e1f29"
-
-        Text {
-            anchors.centerIn: parent
-            text: root._selectedPlatform !== "" ? root._selectedPlatform : "Server"
-            color: "#f8f8f2"
-            font.pixelSize: 18
-            font.bold: true
-        }
-
-        // Back button (visible once a platform is selected)
-        Item {
-            anchors.left: parent.left
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.leftMargin: 16
-            visible: root._selectedPlatform !== ""
-            width: 80
-            height: parent.height
-
-            Text {
-                anchors.centerIn: parent
-                text: "\u2190 All"
-                color: "#bd93f9"
-                font.pixelSize: 13
-            }
-
-            MouseArea {
-                anchors.fill: parent
-                onClicked: root._clearPlatformSelection()
-            }
-        }
-
-        Rectangle {
-            anchors.bottom: parent.bottom
-            anchors.left: parent.left
-            anchors.right: parent.right
-            height: 1
-            color: "#44475a"
-        }
-    }
-
     // Platform carousel (visible when no platform selected)
     PlatformCarousel {
         id: carousel
-        anchors.top: header.bottom
+        anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
         visible: root._selectedPlatform === ""
@@ -93,7 +45,7 @@ Item {
     // Game wall (visible when platform selected and games loaded)
     GameWall {
         id: gameWall
-        anchors.top: header.bottom
+        anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom

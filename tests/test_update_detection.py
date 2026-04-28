@@ -98,6 +98,20 @@ class UpdateDetectionTests(unittest.TestCase):
 
         self.assertEqual(normalized[0]["ra_id"], "42")
 
+    def test_normalize_installed_games_preserves_local_path(self) -> None:
+        normalized = normalize_installed_games(
+            [
+                {
+                    "title": "SNES Game",
+                    "platform": "SNES",
+                    "local_path": "/library/SNES/game.sfc",
+                }
+            ],
+            self._game_key,
+        )
+
+        self.assertEqual(normalized[0]["local_path"], "/library/SNES/game.sfc")
+
     def test_game_has_server_update_true_when_server_timestamp_is_newer(self) -> None:
         installed = {
             "title": "Installed Game",

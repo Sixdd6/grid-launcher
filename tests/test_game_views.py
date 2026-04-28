@@ -68,6 +68,12 @@ class _StubWindow:
         self.details_version_label = None
         self.details_rating_label = None
         self.details_description_label = None
+        self.details_companies_group = None
+        self.details_companies_label = None
+        self.details_release_date_group = None
+        self.details_release_date_label = None
+        self.details_languages_group = None
+        self.details_languages_label = None
         self.details_primary_button = _StubButton()
         self.details_config_button = _StubButton()
         self.details_details_button = _StubButton()
@@ -1453,6 +1459,12 @@ class _OpenDetailsWindowStub:
         self.details_ps4_content_button = None
         self.details_secondary_button = None
         self.details_update_button = None
+        self.details_companies_group = None
+        self.details_companies_label = None
+        self.details_release_date_group = None
+        self.details_release_date_label = None
+        self.details_languages_group = None
+        self.details_languages_label = None
         self.stack = _OpenDetailsStackStub()
         self.nav_buttons = [_OpenDetailsButtonStub(), _OpenDetailsButtonStub()]
         self.install_in_progress = False
