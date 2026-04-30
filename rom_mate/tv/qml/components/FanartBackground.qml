@@ -55,8 +55,11 @@ Item {
         onTriggered: {
             if (root.screenshotUrls.length === 0) return
             root._currentIndex = (root._currentIndex + 1) % root.screenshotUrls.length
-            var nextImg = root._aOnTop ? imageB : imageA
-            nextImg.source = root.screenshotUrls[root._currentIndex]
+            if (root._aOnTop) {
+                imageB.source = root.screenshotUrls[root._currentIndex]
+            } else {
+                imageA.source = root.screenshotUrls[root._currentIndex]
+            }
             crossfadeAnim.start()
         }
     }
@@ -107,5 +110,10 @@ Item {
 
     onScreenshotUrlsChanged: {
         _startCycle()
+    }
+
+    Component.onDestruction: {
+        holdTimer.stop()
+        crossfadeAnim.stop()
     }
 }

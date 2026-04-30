@@ -151,14 +151,14 @@ Item {
                 width: parent.width
                 height: 44
                 color: "transparent"
-                border.color: "#6272a4"
-                border.width: 1
+                border.color: root._cursorIndex === root.candidates.length ? "#ff79c6" : "#6272a4"
+                border.width: root._cursorIndex === root.candidates.length ? 2 : 1
                 radius: 8
 
                 Text {
                     anchors.centerIn: parent
                     text: "Close"
-                    color: "#6272a4"
+                    color: root._cursorIndex === root.candidates.length ? "#f8f8f2" : "#6272a4"
                     font.pixelSize: 14
                 }
 
@@ -176,14 +176,17 @@ Item {
             if (!root.visible || !root._readyForInput) return
             if (direction === "back") { root.closed(); return }
             if (direction === "up") root._cursorIndex = Math.max(0, root._cursorIndex - 1)
-            if (direction === "down") root._cursorIndex = Math.min(root.candidates.length - 1, root._cursorIndex + 1)
-            if (direction === "confirm") root._selectCurrent()
+            if (direction === "down") root._cursorIndex = Math.min(root.candidates.length, root._cursorIndex + 1)
+            if (direction === "confirm") {
+                if (root._cursorIndex === root.candidates.length) root.closed()
+                else root._selectCurrent()
+            }
         }
     }
 
     Keys.onUpPressed: { if (!root._readyForInput) return; root._cursorIndex = Math.max(0, root._cursorIndex - 1) }
-    Keys.onDownPressed: { if (!root._readyForInput) return; root._cursorIndex = Math.min(root.candidates.length - 1, root._cursorIndex + 1) }
-    Keys.onReturnPressed: { if (!root._readyForInput) return; root._selectCurrent() }
-    Keys.onEnterPressed: { if (!root._readyForInput) return; root._selectCurrent() }
+    Keys.onDownPressed: { if (!root._readyForInput) return; root._cursorIndex = Math.min(root.candidates.length, root._cursorIndex + 1) }
+    Keys.onReturnPressed: { if (!root._readyForInput) return; if (root._cursorIndex === root.candidates.length) root.closed(); else root._selectCurrent() }
+    Keys.onEnterPressed: { if (!root._readyForInput) return; if (root._cursorIndex === root.candidates.length) root.closed(); else root._selectCurrent() }
     Keys.onEscapePressed: { if (!root._readyForInput) return; root.closed() }
 }

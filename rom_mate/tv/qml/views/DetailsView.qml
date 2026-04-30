@@ -63,7 +63,7 @@ Item {
     }
 
     function _navBlocked() {
-        return appBackend.uiOverlayActive
+        return appBackend.uiOverlayActive || pauseBackend.visible
     }
 
     function _isNativePcGame() {
@@ -118,6 +118,7 @@ Item {
     Connections {
         target: controllerBackend
         function onNavigationEvent(direction) {
+            if (pauseBackend.visible) return
             if (!root.visible) return
             if (root.StackView.status !== StackView.Active) return
             if (root._navBlocked()) return
@@ -241,6 +242,10 @@ Item {
         onTriggered: root._bannerText = ""
     }
 
+        Component.onDestruction: {
+        bannerTimer.stop()
+    }
+
     // Background fanart
     Image {
         anchors.fill: parent
@@ -253,6 +258,25 @@ Item {
         anchors.fill: parent
         color: "#282a36"
         opacity: 0.7
+    }
+
+    // Status banner
+    Rectangle {
+        width: parent.width
+        height: 40
+        anchors.top: parent.top
+        anchors.topMargin: 48
+        z: 10
+        color: root._bannerSuccess ? "#50fa7b" : "#ff5555"
+        visible: root._bannerText !== ""
+        
+        Text {
+            anchors.centerIn: parent
+            text: root._bannerText
+            color: "#1e1f29"
+            font.pixelSize: 14
+            font.bold: true
+        }
     }
 
     Column {
@@ -286,26 +310,10 @@ Item {
             }
         }
 
-        // Status banner
-        Rectangle {
-            width: parent.width
-            height: 40
-            color: root._bannerSuccess ? "#50fa7b" : "#ff5555"
-            visible: root._bannerText !== ""
-            
-            Text {
-                anchors.centerIn: parent
-                text: root._bannerText
-                color: "#1e1f29"
-                font.pixelSize: 14
-                font.bold: true
-            }
-        }
-
         // Main content
         Row {
             width: parent.width
-            height: parent.height - 48 - (root._bannerText !== "" ? 40 : 0)
+            height: parent.height - 48
             spacing: 0
 
             // Left Column

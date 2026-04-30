@@ -656,7 +656,7 @@ Item {
                 return
             }
 
-            if (appBackend.uiOverlayActive) return
+            if (appBackend.uiOverlayActive || pauseBackend.visible) return
 
             if (direction === "back") {
                 if (root.StackView.view) root.StackView.view.pop()

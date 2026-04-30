@@ -39,17 +39,17 @@ A simple, responsive launcher for RomM.
 | Xenia / Xenia Canary | Xbox 360 |
 | MAME | Arcade |
 | FBNeo | Arcade |
-| Redream | Sega Dreamcast |
+| Redream | Sega Dreamcast, Sega Naomi |
 
-Native Windows PC games are also supported by archiving the installed files and are extracted to a subfolder upon installation. You are responsible for what you do with this, don't come complain to me when a hacked copy of a game installs a rootkit on your pc.
+Native Windows PC games are also supported by archiving the installed files and are extracted to a subfolder upon installation. This is intended for legally obtained DRM-free games only. You are responsible for what you do with this, don't come complain to me when a hacked copy of a game installs a rootkit on your pc.
 
 ## PS3 Game Archiving
 
-RPCS3 requires PS3 content to be installed to specific paths depending on whether the game is a disc dump or a digital copy. rom-mate-neo auto-detects the archive layout and routes files accordingly - but the archive itself must be structured correctly.
+RPCS3 support requires PS3 content to be installed to specific paths depending on whether the game is a disc dump or a digital copy. rom-mate-neo auto-detects the archive layout and routes files accordingly - but the archive itself must be structured correctly.
 
-### Disc Dump (Preferred)
+### Disc Dump
 
-Wrap the dump in a game-ID folder alongside `PS3_DISC.SFB`. This is the preferred structure for disc-based games and routes the install to RPCS3's `/games/` directory:
+Wrap the dump in a game-ID folder containing `PS3_DISC.SFB` and the 'PS3_GAME' directory. This is the preferred structure for disc-based games and routes the install to RPCS3's `/games/` directory:
 
 ```
 BLUS30336/
@@ -63,7 +63,7 @@ BLUS30336/
 
 ### Digital / PSN Title
 
-Wrap the content in a game-ID folder without `PS3_DISC.SFB`. Routes to `dev_hdd0/game/`:
+Wrap the content in a game-ID folder containing the 'PS3_GAME' directory. Routes to `dev_hdd0/game/`:
 
 ```
 BLUS30336/
@@ -108,18 +108,16 @@ dev_hdd0/
 ### Notes
 
 - Game ID directories must match the pattern `XXXX#####` (four uppercase letters followed by five digits), e.g. `BLUS30336`.
-- `PS3_GAME/` and `PARAM.SFO` must be present for correct routing. `USRDIR/EBOOT.BIN` is typically required by RPCS3 to launch.
 - The presence of `PS3_DISC.SFB` determines whether the install targets the `/games/` VFS path (disc) or `dev_hdd0/game/` (digital).
-- Multiple game directories can coexist in a single archive - each will be routed and installed independently.
 
 ## Cloud Sync Notes
 - Game Details now displays `Manage Saves` or `Emulator Saves`, `Manage States` depending on the active emulator capabilities.
 - Shared-save emulators such as Xemu and Redream surface emulator-wide backups, be warned that actions can affect all games using the same shared media.
-- Native Windows games use PCGamingWiki to automatically discover save locations. All configured directories are bundled into a single versioned archive per session, preserving the standard 3-save retention. A Browse button allows manual path additions when automatic lookup finds nothing.
+- Native Windows games use PCGamingWiki to automatically discover save locations. All configured directories are bundled into a single versioned archive per session, preserving the standard 3-save retention. A Browse button allows manual path additions when automatic lookup fails.
 
 ## Save Archive Format
 
-rom-mate uploads saves to RomM as zip archives. The archive format varies by save type:
+rom-mate uploads saves to RomM as zip archives. The archive layout varies by save type:
 
 ### Emulator Saves (single file or folder)
 

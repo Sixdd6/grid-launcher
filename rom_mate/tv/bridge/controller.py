@@ -5,6 +5,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+from PySide6.QtGui import QGuiApplication
 
 if TYPE_CHECKING:
     pass
@@ -412,6 +413,7 @@ class ControllerBackend(QObject):
     """
 
     navigationEvent = Signal(str)
+    pauseNavigationEvent = Signal(str)
 
     # Button code → navigation event name
     _BUTTON_MAP: dict[str, str] = {
@@ -447,6 +449,16 @@ class ControllerBackend(QObject):
         self._guide_thread: Any = None
         # Axis repeat state: axis_code → (last_direction, last_fire_time)
         self._axis_state: dict[str, tuple[str, float]] = {}
+        self._focus_windows: list[Any] = []
+        self._pause_backend: Any = None
+
+    def set_focus_windows(self, windows: list[Any]) -> None:
+        """Register the TV window(s) whose focus grants controller input."""
+        self._focus_windows = [w for w in windows if w is not None]
+
+    def set_pause_backend(self, pause_backend: Any) -> None:
+        """Register the PauseBackend so navigation can be routed when pause is active."""
+        self._pause_backend = pause_backend
 
     def start(self) -> None:
         """Start the gamepad polling thread(s)."""
@@ -530,12 +542,34 @@ class ControllerBackend(QObject):
         exclusion_list = self._app_backend.tvGuideExclusionList if self._app_backend else []
         return any(active.casefold() == e.casefold() for e in exclusion_list if isinstance(e, str))
 
+    def _tv_window_active(self) -> bool:
+        """Return True if any registered TV window currently has OS focus."""
+        if not self._focus_windows:
+            return True  # no restriction when no windows registered
+        focus = QGuiApplication.focusWindow()
+        return focus is not None and focus in self._focus_windows
+
     # ------------------------------------------------------------------
     # Raw event handler
     # ------------------------------------------------------------------
 
     @Slot(str, float)
     def _on_raw_event(self, code: str, value: float) -> None:
+        # Guide button press → pause is allowed even without TV window focus
+        # (game is in foreground; user presses Guide to summon pause menu)
+        # Only act on press (value == 1.0), not release.
+        if code == "BTN_MODE" and value == 1.0 and bool(getattr(self._game_backend, "isSessionActive", False)):
+            self._handle_button(code)
+            return
+
+        if bool(getattr(self._game_backend, "isSessionActive", False)):
+            pause_visible = self._pause_backend is not None and bool(getattr(self._pause_backend, "visible", False))
+            if not pause_visible:
+                return
+
+        if not self._tv_window_active():
+            return
+
         event_type = self._classify_event_type(code)
 
         if event_type == "button":
@@ -564,7 +598,10 @@ class ControllerBackend(QObject):
                 if callable(request_pause):
                     request_pause()
                 return
-        self.navigationEvent.emit(nav_event)
+        if self._pause_backend is not None and bool(getattr(self._pause_backend, "visible", False)):
+            self.pauseNavigationEvent.emit(nav_event)
+        else:
+            self.navigationEvent.emit(nav_event)
 
     def _handle_axis(self, code: str, value: float) -> None:
         neg_event, pos_event = self._AXIS_MAP.get(code, (None, None))
@@ -586,4 +623,7 @@ class ControllerBackend(QObject):
 
         if direction != last_direction or (now - last_fire) >= _REPEAT_INTERVAL:
             self._axis_state[code] = (direction, now)
-            self.navigationEvent.emit(direction)
+            if self._pause_backend is not None and bool(getattr(self._pause_backend, "visible", False)):
+                self.pauseNavigationEvent.emit(direction)
+            else:
+                self.navigationEvent.emit(direction)

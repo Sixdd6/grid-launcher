@@ -45,16 +45,6 @@ ApplicationWindow {
 
     }
 
-    PauseOverlay {
-        id: pauseOverlay
-        anchors.fill: parent
-        visible: false
-        gameName: gameBackend.activeEmulatorName
-        z: 100
-        onResumed: pauseOverlay.visible = false
-        onQuitted: pauseOverlay.visible = false
-    }
-
     Component { id: detailsViewComponent; DetailsView {} }
     Component { id: settingsViewComponent; SettingsView {} }
 
@@ -142,14 +132,11 @@ ApplicationWindow {
                     } else if (direction === "tab_next") {
                         tabBar.selectNext()
                     } else if (direction === "back") {
-                        if (outerStack.depth > 1 && !appBackend.uiOverlayActive) {
+                        if (outerStack.depth > 1 && !appBackend.uiOverlayActive && !pauseBackend.visible) {
                             outerStack.pop()
                         }
                     } else if (direction === "guide_button") {
-                        if (gameBackend.isSessionActive) {
-                            pauseOverlay.gameName = gameBackend.activeEmulatorName
-                            pauseOverlay.visible = true
-                        } else if (outerStack.depth <= 1) {
+                        if (!gameBackend.isSessionActive && outerStack.depth <= 1) {
                             outerStack.push(settingsViewComponent)
                         }
                     }
@@ -159,16 +146,4 @@ ApplicationWindow {
         }
     }
 
-    Connections {
-        target: gameBackend
-        function onPauseRequested() {
-            pauseOverlay.gameName = gameBackend.activeEmulatorName
-            pauseOverlay.visible = true
-        }
-        function onSessionEnded(emulatorName) {
-            pauseOverlay.visible = false
-        }
-    }
-
 }
-

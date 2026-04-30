@@ -19,7 +19,7 @@ Item {
         anchors.right: parent.right
         visible: root._selectedPlatform === ""
         platformLabels: appBackend.platforms
-        navigationActive: !appBackend.uiOverlayActive && root._selectedPlatform === "" && (!root.outerStackRef || root.outerStackRef.depth <= 1)
+        navigationActive: !appBackend.uiOverlayActive && !pauseBackend.visible && root._selectedPlatform === "" && (!root.outerStackRef || root.outerStackRef.depth <= 1)
 
         onPlatformSelected: function(label) {
             root._selectPlatform(label)
@@ -51,7 +51,7 @@ Item {
         anchors.bottom: parent.bottom
         visible: root._selectedPlatform !== "" && !root._loadingGames
         games: root._platformGames
-        navigationActive: !appBackend.uiOverlayActive && (!root.outerStackRef || root.outerStackRef.depth <= 1)
+        navigationActive: !appBackend.uiOverlayActive && !pauseBackend.visible && (!root.outerStackRef || root.outerStackRef.depth <= 1)
 
         onGameSelected: function(game) {
             if (root.outerStackRef) {

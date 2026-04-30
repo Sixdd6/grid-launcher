@@ -51,7 +51,7 @@ class _RomMetaFetchWorker(QObject):
 class AppBackend(QObject):
     """Exposes config, library games, and server data to QML."""
 
-    _DEFAULT_EXCLUSION_LIST = ["RPCS3", "Cemu", "Dolphin", "Xemu", "Xenia"]
+    _DEFAULT_EXCLUSION_LIST = ["RPCS3", "Cemu", "Dolphin", "Xemu", "Xenia", "RetroArch"]
 
     libraryGamesChanged = Signal()
     platformsChanged = Signal()
@@ -194,7 +194,9 @@ class AppBackend(QObject):
         value = self._config.get("tv_guide_button_exclusion_list")
         if not isinstance(value, list):
             return self._DEFAULT_EXCLUSION_LIST
-        return value
+        default_lower = {e.lower() for e in self._DEFAULT_EXCLUSION_LIST}
+        extras = [e for e in value if isinstance(e, str) and e.lower() not in default_lower]
+        return self._DEFAULT_EXCLUSION_LIST + extras
 
     @Property(list, notify=libraryGamesChanged)
     def availableEmulatorNames(self) -> list[str]:

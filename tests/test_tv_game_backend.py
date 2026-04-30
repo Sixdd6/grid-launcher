@@ -48,6 +48,24 @@ class TestGameBackend(unittest.TestCase):
     def test_active_emulator_name_is_empty_on_init(self):
         self.assertEqual(self.backend.activeEmulatorName, "")
 
+    def test_active_game_title_empty_on_init(self):
+        self.assertEqual(self.backend.activeGameTitle, "")
+
+    def test_active_game_title_returns_title_field(self):
+        self.backend._session_game = {"title": "Metroid", "name": ""}
+
+        self.assertEqual(self.backend.activeGameTitle, "Metroid")
+
+    def test_active_game_title_falls_back_to_name_when_title_empty(self):
+        self.backend._session_game = {"title": "", "name": "Metroid Prime"}
+
+        self.assertEqual(self.backend.activeGameTitle, "Metroid Prime")
+
+    def test_active_game_title_empty_when_no_session_game(self):
+        self.backend._session_game = None
+
+        self.assertEqual(self.backend.activeGameTitle, "")
+
     def test_is_session_active_is_false_on_init(self):
         self.assertFalse(self.backend.isSessionActive)
 
@@ -276,6 +294,59 @@ class TestGameBackendSync(unittest.TestCase):
         self.assertEqual(backend._active_emulator_name, "")
         self.assertIsNone(backend._process)
         self.assertEqual(emitted, ["RetroArch"])
+
+    def test_process_watch_thread_monitors_native_game_with_empty_emulator_name(self):
+        from rom_mate.tv.bridge.game_backend import _ProcessWatchThread, GameBackend
+
+        backend = GameBackend({"emulators": [], "default_emulators": {}, "launch_args": ""}, MagicMock())
+        backend._process = MagicMock()
+        backend._process.wait.return_value = 0
+        backend._active_emulator_name = ""
+
+        thread = _ProcessWatchThread(backend)
+
+        emitted: list[str] = []
+        thread._exited.connect(lambda name: emitted.append(name))
+
+        with patch("rom_mate.tv.bridge.game_backend._ProcessWatchThread.start"):
+            thread.run()
+
+        self.assertEqual(emitted, [""])
+
+    def test_do_launch_connects_watch_thread_exited_signal(self):
+        from PySide6.QtCore import Qt
+        from rom_mate.tv.bridge.game_backend import GameBackend, _ProcessWatchThread
+
+        backend = GameBackend({"emulators": [], "default_emulators": {}, "launch_args": ""}, MagicMock())
+
+        mock_process = MagicMock()
+        mock_process.poll.return_value = None
+
+        created_threads: list[_ProcessWatchThread] = []
+
+        original_init = _ProcessWatchThread.__init__
+
+        def capture_thread(self_t, b):
+            original_init(self_t, b)
+            created_threads.append(self_t)
+
+        with patch("rom_mate.tv.bridge.game_backend._subprocess_popen", return_value=mock_process), patch.object(
+            _ProcessWatchThread, "__init__", capture_thread
+        ), patch("rom_mate.tv.bridge.game_backend._ProcessWatchThread.start"):
+            backend._do_launch("RetroArch", ["retroarch"], None)
+
+        self.assertEqual(len(created_threads), 1)
+        thread = created_threads[0]
+
+        backend._process = mock_process
+        handler = MagicMock()
+        thread._exited.connect(handler, Qt.ConnectionType.QueuedConnection)
+
+        thread._exited.emit("RetroArch")
+        self.app.processEvents()
+
+        self.assertTrue(handler.called)
+        self.assertIsNone(backend._process)
 
 
 class TestGameBackendAutoCloudSync(unittest.TestCase):

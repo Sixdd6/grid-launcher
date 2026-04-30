@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -70,6 +72,8 @@ except ImportError:
 
 
 class _ProcessWatchThread(QThread):
+    _exited = Signal(str)
+
     def __init__(self, backend: "GameBackend") -> None:
         super().__init__(backend)
         self._backend = backend
@@ -77,7 +81,7 @@ class _ProcessWatchThread(QThread):
     def run(self) -> None:
         process = self._backend._process
         emulator_name = self._backend._active_emulator_name
-        if process is None or not emulator_name:
+        if process is None:
             return
 
         try:
@@ -85,7 +89,7 @@ class _ProcessWatchThread(QThread):
         except Exception:
             return
 
-        self._backend._on_process_exited(emulator_name)
+        self._exited.emit(emulator_name)
 
 
 class _TvAutoUploadWorker(QObject):
@@ -133,7 +137,7 @@ class GameBackend(QObject):
     nativeExecPickerNeeded = Signal(list)
     _installStateChanged = Signal()
     _sessionStateChanged = Signal()
-    _finalizeResult = Signal(object, str, str, str)
+    _finalizeResult = Signal(str, str, str, str)
 
     def __init__(self, config: dict[str, Any], main_window: Any, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -149,6 +153,7 @@ class GameBackend(QObject):
         self._session_started_at = 0.0
         self._session_game: dict[str, str] | None = None
         self._pending_native_game: dict[str, str] | None = None
+        self._pending_restore_launch: tuple | None = None
         self._restore_thread: QThread | None = None
         self._restore_worker = None
         self._auto_upload_thread: QThread | None = None
@@ -161,6 +166,19 @@ class GameBackend(QObject):
     @Property(str, notify=_sessionStateChanged)
     def activeEmulatorName(self) -> str:
         return self._active_emulator_name
+
+    @Property(str, notify=_sessionStateChanged)
+    def activeGameTitle(self) -> str:
+        game = self._session_game
+        if game is None:
+            return ""
+        title = game.get("title", "")
+        if isinstance(title, str) and title.strip():
+            return title
+        name = game.get("name", "")
+        if isinstance(name, str) and name.strip():
+            return name
+        return ""
 
     @Property(bool, notify=_sessionStateChanged)
     def isSessionActive(self) -> bool:
@@ -300,10 +318,8 @@ class GameBackend(QObject):
                 thread = QThread(self)
                 worker.moveToThread(thread)
                 thread.started.connect(worker.run)
-                worker.finished.connect(
-                    lambda ok, msg, en=emulator_name, cmd=command, d=cwd: self._on_restore_done(ok, msg, en, cmd, d),
-                    Qt.ConnectionType.QueuedConnection,
-                )
+                self._pending_restore_launch = (emulator_name, command, cwd)
+                worker.finished.connect(self._on_restore_worker_done, Qt.ConnectionType.QueuedConnection)
                 worker.finished.connect(thread.quit)
                 worker.finished.connect(worker.deleteLater)
                 thread.finished.connect(thread.deleteLater)
@@ -363,7 +379,8 @@ class GameBackend(QObject):
 
     def _do_launch(self, emulator_name: str, command: list[str], cwd: str | None) -> None:
         try:
-            process = _subprocess_popen(command, cwd=cwd, close_fds=True)
+            _creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+            process = _subprocess_popen(command, cwd=cwd, close_fds=True, creationflags=_creationflags)
         except (OSError, ValueError) as error:
             self.launchError.emit(str(error))
             return
@@ -376,8 +393,17 @@ class GameBackend(QObject):
 
         watch_thread = _ProcessWatchThread(self)
         self._watch_thread = watch_thread
-        watch_thread.finished.connect(watch_thread.deleteLater)
+        watch_thread._exited.connect(self._on_process_exited, Qt.ConnectionType.QueuedConnection)
         watch_thread.start()
+
+    @Slot(bool, str)
+    def _on_restore_worker_done(self, ok: bool, msg: str) -> None:
+        params = self._pending_restore_launch
+        self._pending_restore_launch = None
+        if params is None:
+            return
+        em_name, cmd, d = params
+        self._on_restore_done(ok, msg, em_name, cmd, d)
 
     def _on_restore_done(self, success: bool, message: str, emulator_name: str, command: list[str], cwd: str | None) -> None:
         del success, message
@@ -496,6 +522,8 @@ class GameBackend(QObject):
         self._install_thread = thread
         self._install_worker = worker
         self._install_target_game = dict(game_dict)
+        print(f"[TV Install] Starting download thread for rom_id={game_dict.get('id', '?')!r}")
+        sys.stdout.flush()
         thread.start()
         self._installStateChanged.emit()
 
@@ -506,8 +534,14 @@ class GameBackend(QObject):
     @Slot(str, str)
     def _on_install_download_done(self, archive_path: str, error: str) -> None:
         game_dict = self._install_target_game or {}
+        print(f"[TV Install] Download done: archive={archive_path!r} error={error!r}")
+        sys.stdout.flush()
+        thread = self._install_thread
         self._install_thread = None
         self._install_worker = None
+        if thread is not None:
+            thread.quit()
+            thread.wait(2000)
         if error:
             self.installComplete.emit(False, error, game_dict)
             self._install_target_game = None
@@ -551,7 +585,11 @@ class GameBackend(QObject):
             )
 
         def _run_finalize() -> None:
+            print("[TV Install] Finalize thread started")
+            sys.stdout.flush()
             try:
+                print("[TV Install] Calling prepare_installed_game_without_ui")
+                sys.stdout.flush()
                 prepared_game, warning_text = prepare_installed_game_without_ui(
                     _game, archive_path_obj,
                     should_extract_archive_for_game=_should_extract,
@@ -561,9 +599,11 @@ class GameBackend(QObject):
                     ps3_games_root=_ps3_games_root,
                     cleanup_archive_on_success=False,
                 )
+                print(f"[TV Install] prepare_installed_game_without_ui done: prepared_game={'ok' if prepared_game else 'None'}, warning={warning_text!r}")
+                sys.stdout.flush()
                 if prepared_game is None:
                     _error = (warning_text or "").strip() or "Install preparation failed"
-                    self._finalizeResult.emit(None, str(archive_path_obj), "", _error)
+                    self._finalizeResult.emit("", str(archive_path_obj), "", _error)
                     return
 
                 # Cleanup main archive (pure filesystem, no MainWindow)
@@ -576,18 +616,24 @@ class GameBackend(QObject):
                 # Skip supplemental archives and firmware in TV mode — they are desktop-only features
                 # that require MainWindow context and are not needed for basic ROM installs
 
-                self._finalizeResult.emit(prepared_game, str(archive_path_obj), warning_text, "")
+                print("[TV Install] Emitting success result")
+                sys.stdout.flush()
+                self._finalizeResult.emit(json.dumps(prepared_game) if prepared_game is not None else "", str(archive_path_obj), warning_text, "")
 
             except Exception as _e:
-                self._finalizeResult.emit(None, str(archive_path_obj), "", str(_e))
+                print(f"[TV Install] Finalize exception: {_e!r}")
+                sys.stdout.flush()
+                self._finalizeResult.emit("", str(archive_path_obj), "", str(_e))
 
         finalize_thread = threading.Thread(target=_run_finalize, daemon=True)
         self._finalize_thread = finalize_thread
         finalize_thread.start()
         self._installStateChanged.emit()
 
-    @Slot(object, str, str, str)
-    def _on_install_finalize_done(self, prepared_game: Any, archive_path: str, warning_text: str, error: str) -> None:
+    @Slot(str, str, str, str)
+    def _on_install_finalize_done(self, game_json: str, archive_path: str, warning_text: str, error: str) -> None:
+        import json
+        prepared_game = json.loads(game_json) if game_json else None
         game_dict = self._install_target_game or {}
         self._finalize_thread = None
         self._install_target_game = None
@@ -693,15 +739,18 @@ class GameBackend(QObject):
         self._handle_native_launch(game_dict)
 
     def _on_process_exited(self, emulator_name: str) -> None:
+        thread = self._watch_thread
+        self._watch_thread = None
+        if thread is not None:
+            thread.wait()
+
         if self._process is None:
-            self._watch_thread = None
             return
 
         self._process = None
         self._sessionStateChanged.emit()
         self._active_emulator_name = ""
         self._sessionStateChanged.emit()
-        self._watch_thread = None
         self.sessionEnded.emit(emulator_name)
 
         if self._session_game is not None:

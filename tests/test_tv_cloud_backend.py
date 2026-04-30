@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from PySide6.QtCore import QCoreApplication
 
@@ -211,6 +211,20 @@ class TestCloudBackend(unittest.TestCase):
 
         mock_thread_start.assert_called_once_with()
         self.assertIsNotNone(backend._upload_thread)
+
+    def test_upload_save_cancels_previous_upload_thread(self):
+        backend = CloudBackend(dict(BASE_CONFIG))
+        previous_thread = MagicMock()
+        previous_thread.isRunning.return_value = True
+        backend._upload_thread = previous_thread
+
+        with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
+            "rom_mate.tv.bridge.cloud_backend.QThread.start"
+        ):
+            backend.uploadSave({"id": "5", "name": "Game", "install_dir": "/tmp/fake"}, "save")
+
+        previous_thread.quit.assert_called_once_with()
+        previous_thread.wait.assert_called_once_with(2000)
 
     def test_on_upload_done_emits_upload_complete(self):
         backend = CloudBackend(dict(BASE_CONFIG))

@@ -227,6 +227,8 @@ class CloudBackend(QObject):
             self.uploadComplete.emit(False, "Not signed in to cloud saves.")
             return
 
+        self._cancel_upload_thread()
+
         game_dict = self._normalize_game(game)
 
         worker = _CloudUploadWorker(config=self._config, game_dict=game_dict, save_type=save_type)
@@ -248,6 +250,13 @@ class CloudBackend(QObject):
             self._fetch_thread.wait(2000)
         self._fetch_thread = None
         self._fetch_worker = None
+
+    def _cancel_upload_thread(self) -> None:
+        if self._upload_thread and self._upload_thread.isRunning():
+            self._upload_thread.quit()
+            self._upload_thread.wait(2000)
+        self._upload_thread = None
+        self._upload_worker = None
 
     @Slot(str, list)
     def _on_slots_loaded(self, save_type: str, slots: list) -> None:

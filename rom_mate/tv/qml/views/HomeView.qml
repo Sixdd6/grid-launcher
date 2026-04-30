@@ -25,6 +25,10 @@ Item {
         onTriggered: root._fanartUrls = root._pendingFanartUrls
     }
 
+        Component.onDestruction: {
+        fanartDebounce.stop()
+    }
+
     FanartBackground {
         id: fanart
         screenshotUrls: root._fanartUrls
@@ -76,6 +80,7 @@ Item {
     }
 
     function _navBlocked() {
+        if (pauseBackend.visible) return true
         if (appBackend.uiOverlayActive) return true
         if (root.outerStackRef && root.outerStackRef.depth > 1) return true
         return false

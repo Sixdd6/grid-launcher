@@ -263,7 +263,8 @@ def _ensure_portable_7z() -> Path | None:
     tmp_path = _PORTABLE_7ZR_PATH.with_suffix(".tmp")
     try:
         _APP_TOOLS_DIR.mkdir(parents=True, exist_ok=True)
-        urllib.request.urlretrieve(_PORTABLE_7ZR_URL, tmp_path)
+        with urllib.request.urlopen(_PORTABLE_7ZR_URL, timeout=30) as response:
+            tmp_path.write_bytes(response.read())
         tmp_path.replace(_PORTABLE_7ZR_PATH)
         return _PORTABLE_7ZR_PATH
     except Exception:
@@ -286,7 +287,8 @@ def _ensure_full_7z() -> Path | None:
         _APP_TOOLS_DIR.mkdir(parents=True, exist_ok=True)
         tmp_path = _APP_TOOLS_DIR / "7z-extra.tmp"
         try:
-            urllib.request.urlretrieve(_PORTABLE_7ZZ_URL, tmp_path)
+            with urllib.request.urlopen(_PORTABLE_7ZZ_URL, timeout=60) as response:
+                tmp_path.write_bytes(response.read())
             result = subprocess.run(
                 [str(portable_7zr), "x", str(tmp_path), f"-o{_APP_TOOLS_DIR}", "-y"],
                 stdout=subprocess.DEVNULL,
@@ -469,6 +471,7 @@ def extract_archive_into_directory(
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 text=True,
+                creationflags=_subprocess_creationflags(),
             )
             while process.poll() is None:
                 if install_progress_callback is not None:

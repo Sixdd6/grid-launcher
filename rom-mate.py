@@ -582,6 +582,8 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self._tv_cloud_backend: "CloudBackend | None" = None
         self._tv_controller_backend: Any = None
         self._tv_window: Any = None
+        self._tv_pause_backend: Any = None
+        self._tv_pause_window: Any = None
         self.session_poll_timer = QTimer(self)
         self.session_poll_timer.setSingleShot(False)
         self.session_poll_timer.setInterval(2500)
@@ -716,6 +718,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             from rom_mate.tv.bridge.cloud_backend import CloudBackend
             from rom_mate.tv.bridge.controller import ControllerBackend
             from rom_mate.tv.bridge.game_backend import GameBackend
+            from rom_mate.tv.bridge.pause_backend import PauseBackend
             from rom_mate.tv.bridge.image_provider import CoverImageProvider
 
             image_cache_dir = self._image_cache_dir()
@@ -727,6 +730,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             app_backend = AppBackend(self.config, image_cache_dir, parent=None)
             cloud_backend = CloudBackend(self.config, parent=None)
             game_backend = GameBackend(self.config, self, parent=None)
+            pause_backend = PauseBackend(game_backend=game_backend)
             game_backend.installComplete.connect(
                 lambda ok, _msg, _game: app_backend.syncConfig(self.config) if ok else None
             )
@@ -737,13 +741,11 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             def _on_tv_install(ok: bool, _msg: str, _game: object) -> None:
                 if ok:
                     self.library_games = self.config.get("installed_games", [])
-                    self._refresh_library_grid()
                     app_backend.libraryGamesChanged.emit()
 
             def _on_tv_uninstall(ok: bool, _msg: str, _game: object) -> None:
                 if ok:
                     self.library_games = self.config.get("installed_games", [])
-                    self._refresh_library_grid()
                     app_backend.libraryGamesChanged.emit()
 
             game_backend.installComplete.connect(_on_tv_install)
@@ -777,18 +779,44 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             engine.rootContext().setContextProperty("cloudBackend", cloud_backend)
             engine.rootContext().setContextProperty("gameBackend", game_backend)
             engine.rootContext().setContextProperty("controllerBackend", controller_backend)
+            engine.rootContext().setContextProperty("pauseBackend", pause_backend)
             qml_path = Path(__file__).parent / "rom_mate" / "tv" / "qml" / "Main.qml"
             engine.load(QUrl.fromLocalFile(str(qml_path)))
             if not engine.rootObjects():
                 self._show_toast("TV Mode failed to load. Check that PySide6 QtQuick is available.", "error")
                 engine.deleteLater()
                 return
+
+            pause_window_qml = Path(__file__).parent / "rom_mate" / "tv" / "qml" / "windows" / "PauseWindow.qml"
+            engine.load(QUrl.fromLocalFile(str(pause_window_qml)))
+            all_roots = engine.rootObjects()
+            pause_window = all_roots[1] if len(all_roots) >= 2 else None
+
             self._tv_engine = engine
-            self._tv_window = engine.rootObjects()[0]
+            self._tv_window = all_roots[0]
             self._tv_controller_backend = controller_backend
             self._tv_app_backend = app_backend
             self._tv_cloud_backend = cloud_backend
             self._tv_game_backend = game_backend
+            self._tv_pause_window = pause_window
+            self._tv_pause_backend = pause_backend
+            controller_backend.set_focus_windows([self._tv_window, pause_window])
+            controller_backend.set_pause_backend(pause_backend)
+
+            if pause_window is not None:
+                def _on_tv_pause_requested() -> None:
+                    if pause_backend.visible:
+                        return
+                    pause_backend.openForActiveSession()
+                    if self._tv_pause_window is not None:
+                        try:
+                            self._tv_pause_window.raise_()
+                            self._tv_pause_window.requestActivate()
+                        except RuntimeError:
+                            pass
+
+                game_backend.pauseRequested.connect(_on_tv_pause_requested)
+                game_backend.sessionEnded.connect(pause_backend.forceClose)
 
         if self._tv_controller_backend is not None:
             self._tv_controller_backend.start()
@@ -808,11 +836,16 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
     def _switch_to_desktop_mode(self) -> None:
         if self._tv_game_backend is not None and self._tv_game_backend.isSessionActive:
             self._tv_game_backend.stopGame()
+        if getattr(self, "_tv_pause_backend", None) is not None:
+            self._tv_pause_backend.forceClose()
+        if getattr(self, "_tv_pause_window", None) is not None:
+            self._tv_pause_window.hide()
         if self._tv_window is not None:
             self._tv_window.hide()
         if self._tv_controller_backend is not None:
             self._tv_controller_backend.stop()
         self.config = self._load_config()
+        self.library_games = self.config.get("installed_games", [])
         if self.auto_cloud_checkbox is not None:
             self.auto_cloud_checkbox.setChecked(self._auto_cloud_save_download_enabled())
         self.show()
