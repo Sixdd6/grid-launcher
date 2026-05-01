@@ -310,7 +310,8 @@ class TestEnsureFullSevenZip(unittest.TestCase):
         with patch("sys.platform", "win32"), \
                          patch("pathlib.Path.exists", side_effect=[False, True, True]), \
              patch("rom_mate.library.archive_preparation._ensure_portable_7z", return_value=Path("C:/tools/7zr.exe")), \
-             patch("rom_mate.library.archive_preparation.urllib.request.urlretrieve"), \
+                         patch("rom_mate.library.archive_preparation.urllib.request.urlopen", return_value=MagicMock(read=MagicMock(return_value=b""))), \
+                         patch("pathlib.Path.write_bytes", return_value=0), \
                patch("pathlib.Path.mkdir"), \
              patch("rom_mate.library.archive_preparation.subprocess.run", return_value=MagicMock(returncode=0, stderr="")):
             result = _ensure_full_7z()

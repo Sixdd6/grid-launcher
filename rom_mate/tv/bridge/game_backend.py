@@ -74,8 +74,8 @@ except ImportError:
 class _ProcessWatchThread(QThread):
     _exited = Signal(str)
 
-    def __init__(self, backend: "GameBackend") -> None:
-        super().__init__(backend)
+    def __init__(self, backend: "GameBackend", parent: "QObject | None" = None) -> None:
+        super().__init__(parent)
         self._backend = backend
 
     def run(self) -> None:
@@ -93,7 +93,7 @@ class _ProcessWatchThread(QThread):
 
 
 class _TvAutoUploadWorker(QObject):
-    finished = Signal(bool, str)
+    finished = Signal(object)
 
     def __init__(self, config: dict[str, Any], game: dict[str, str], emulator_name: str, emulator_entry: dict[str, str]) -> None:
         super().__init__()
@@ -114,13 +114,13 @@ class _TvAutoUploadWorker(QObject):
             )
             del failed
             if total == 0:
-                self.finished.emit(False, "No save files found.")
+                self.finished.emit({"success": False, "message": "No save files found."})
             elif uploaded == total:
-                self.finished.emit(True, f"Auto-uploaded {uploaded} save file(s).")
+                self.finished.emit({"success": True, "message": f"Auto-uploaded {uploaded} save file(s)."})
             else:
-                self.finished.emit(uploaded > 0, f"Auto-uploaded {uploaded}/{total} save file(s).")
+                self.finished.emit({"success": uploaded > 0, "message": f"Auto-uploaded {uploaded}/{total} save file(s)."})
         except Exception as exc:
-            self.finished.emit(False, str(exc))
+            self.finished.emit({"success": False, "message": str(exc)})
 
 
 class GameBackend(QObject):
@@ -130,14 +130,14 @@ class GameBackend(QObject):
     sessionPaused = Signal()
     sessionResumed = Signal()
     pauseRequested = Signal()
-    installProgress = Signal(int, int, float)
-    installComplete = Signal(bool, str, object)
-    uninstallComplete = Signal(bool, str, object)
+    installProgress = Signal(object)
+    installComplete = Signal(object)
+    uninstallComplete = Signal(object)
     cloudSyncStatus = Signal(str)
-    nativeExecPickerNeeded = Signal(list)
+    nativeExecPickerNeeded = Signal(object)
     _installStateChanged = Signal()
     _sessionStateChanged = Signal()
-    _finalizeResult = Signal(str, str, str, str)
+    _finalizeResult = Signal(object)
 
     def __init__(self, config: dict[str, Any], main_window: Any, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -192,7 +192,11 @@ class GameBackend(QObject):
 
     @Property(bool, notify=_installStateChanged)
     def isInstallActive(self) -> bool:
-        download_active = self._install_thread is not None and self._install_thread.isRunning()
+        try:
+            download_active = self._install_thread is not None and self._install_thread.isRunning()
+        except RuntimeError:
+            download_active = False
+            self._install_thread = None
         finalize_active = self._finalize_thread is not None and self._finalize_thread.is_alive()
         return download_active or finalize_active
 
@@ -391,13 +395,15 @@ class GameBackend(QObject):
         self._sessionStateChanged.emit()
         self.sessionStarted.emit(emulator_name)
 
-        watch_thread = _ProcessWatchThread(self)
+        watch_thread = _ProcessWatchThread(self, parent=None)
         self._watch_thread = watch_thread
         watch_thread._exited.connect(self._on_process_exited, Qt.ConnectionType.QueuedConnection)
         watch_thread.start()
 
-    @Slot(bool, str)
-    def _on_restore_worker_done(self, ok: bool, msg: str) -> None:
+    @Slot(object)
+    def _on_restore_worker_done(self, bundle: object) -> None:
+        ok = bundle.get("ok", False) if isinstance(bundle, dict) else False
+        msg = bundle.get("message", "") if isinstance(bundle, dict) else ""
         params = self._pending_restore_launch
         self._pending_restore_launch = None
         if params is None:
@@ -481,7 +487,7 @@ class GameBackend(QObject):
             return
 
         if self._install_target_game is not None:
-            self.installComplete.emit(False, "An install is already in progress.", {})
+            self.installComplete.emit({"success": False, "message": "An install is already in progress.", "game": {}})
             return
 
         library_path_value = self._config.get("library_path", "")
@@ -505,10 +511,17 @@ class GameBackend(QObject):
         try:
             platform_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
-            self.installComplete.emit(False, str(e), game_dict)
+            self.installComplete.emit({"success": False, "message": str(e), "game": game_dict})
             return
         archive_name = rom_file_name if rom_file_name else f"_tv_download_{rom_id}.tmp"
         archive_path = platform_dir / archive_name
+
+        # Remove any stale partial download before starting
+        if archive_path.exists():
+            try:
+                archive_path.unlink()
+            except OSError:
+                pass
 
         worker = _InstallDownloadWorker(download_url, headers, archive_path)
         thread = QThread(self)
@@ -518,7 +531,6 @@ class GameBackend(QObject):
         worker.finished.connect(self._on_install_download_done)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
         self._install_thread = thread
         self._install_worker = worker
         self._install_target_game = dict(game_dict)
@@ -527,12 +539,21 @@ class GameBackend(QObject):
         thread.start()
         self._installStateChanged.emit()
 
-    @Slot(object, object, float)
-    def _on_install_progress(self, downloaded: int, total: int, speed: float) -> None:
-        self.installProgress.emit(downloaded, total, speed)
+    @Slot(object)
+    def _on_install_progress(self, bundle: object) -> None:
+        downloaded = bundle.get("downloaded", 0) if isinstance(bundle, dict) else 0
+        total = bundle.get("total", 0) if isinstance(bundle, dict) else 0
+        speed = bundle.get("speed", 0.0) if isinstance(bundle, dict) else 0.0
+        self.installProgress.emit({"downloaded": downloaded, "total": total, "speed": speed})
 
-    @Slot(str, str)
-    def _on_install_download_done(self, archive_path: str, error: str) -> None:
+    @Slot(object)
+    def _on_install_download_done(self, bundle: object, legacy_error: str | None = None) -> None:
+        if legacy_error is not None:
+            archive_path = str(bundle)
+            error = legacy_error
+        else:
+            archive_path = bundle.get("archive_path", "") if isinstance(bundle, dict) else ""
+            error = bundle.get("error", "") if isinstance(bundle, dict) else str(bundle)
         game_dict = self._install_target_game or {}
         print(f"[TV Install] Download done: archive={archive_path!r} error={error!r}")
         sys.stdout.flush()
@@ -542,15 +563,16 @@ class GameBackend(QObject):
         if thread is not None:
             thread.quit()
             thread.wait(2000)
+            thread.deleteLater()
         if error:
-            self.installComplete.emit(False, error, game_dict)
+            self.installComplete.emit({"success": False, "message": error, "game": game_dict})
             self._install_target_game = None
             self._installStateChanged.emit()
             return
 
         library_path = str(self._config.get("library_path", "")).strip()
         if not library_path:
-            self.installComplete.emit(False, "No library path configured.", game_dict)
+            self.installComplete.emit({"success": False, "message": "No library path configured.", "game": game_dict})
             self._install_target_game = None
             self._installStateChanged.emit()
             return
@@ -603,7 +625,12 @@ class GameBackend(QObject):
                 sys.stdout.flush()
                 if prepared_game is None:
                     _error = (warning_text or "").strip() or "Install preparation failed"
-                    self._finalizeResult.emit("", str(archive_path_obj), "", _error)
+                    self._finalizeResult.emit({
+                        "game_json": "",
+                        "archive_path": str(archive_path_obj),
+                        "warning": "",
+                        "error": _error,
+                    })
                     return
 
                 # Cleanup main archive (pure filesystem, no MainWindow)
@@ -618,20 +645,34 @@ class GameBackend(QObject):
 
                 print("[TV Install] Emitting success result")
                 sys.stdout.flush()
-                self._finalizeResult.emit(json.dumps(prepared_game) if prepared_game is not None else "", str(archive_path_obj), warning_text, "")
+                self._finalizeResult.emit({
+                    "game_json": json.dumps(prepared_game) if prepared_game is not None else "",
+                    "archive_path": str(archive_path_obj),
+                    "warning": warning_text,
+                    "error": "",
+                })
 
             except Exception as _e:
                 print(f"[TV Install] Finalize exception: {_e!r}")
                 sys.stdout.flush()
-                self._finalizeResult.emit("", str(archive_path_obj), "", str(_e))
+                self._finalizeResult.emit({
+                    "game_json": "",
+                    "archive_path": str(archive_path_obj),
+                    "warning": "",
+                    "error": str(_e),
+                })
 
         finalize_thread = threading.Thread(target=_run_finalize, daemon=True)
         self._finalize_thread = finalize_thread
         finalize_thread.start()
         self._installStateChanged.emit()
 
-    @Slot(str, str, str, str)
-    def _on_install_finalize_done(self, game_json: str, archive_path: str, warning_text: str, error: str) -> None:
+    @Slot(object)
+    def _on_install_finalize_done(self, bundle: object) -> None:
+        game_json = bundle.get("game_json", "") if isinstance(bundle, dict) else ""
+        archive_path = bundle.get("archive_path", "") if isinstance(bundle, dict) else ""
+        warning_text = bundle.get("warning", "") if isinstance(bundle, dict) else ""
+        error = bundle.get("error", "") if isinstance(bundle, dict) else ""
         import json
         prepared_game = json.loads(game_json) if game_json else None
         game_dict = self._install_target_game or {}
@@ -655,11 +696,16 @@ class GameBackend(QObject):
                 and str(entry.get("id") or entry.get("rom_id") or "") != rom_id
             ]
             installed.append(installed_game)
-            self.installComplete.emit(True, "Game installed.", installed_game)
+            self.installComplete.emit({"success": True, "message": "Game installed.", "game": installed_game})
             self._main_window._save_config(self._main_window.config)
         else:
-            self.installComplete.emit(False, error or "Install preparation failed.", game_dict)
+            self.installComplete.emit({"success": False, "message": error or "Install preparation failed.", "game": game_dict})
         self._installStateChanged.emit()
+
+    @Slot()
+    def cancelInstall(self) -> None:
+        if self._install_worker is not None:
+            self._install_worker.request_cancel()
 
     @Slot("QVariant")
     def uninstallGame(self, game: Any) -> None:
@@ -670,15 +716,15 @@ class GameBackend(QObject):
         try:
             removed = self._main_window._uninstall_game(game_dict)
         except Exception as error:
-            self.uninstallComplete.emit(False, str(error), game_dict)
+            self.uninstallComplete.emit({"success": False, "message": str(error), "game": game_dict})
             return
 
         if removed:
-            self.uninstallComplete.emit(True, "Game uninstalled.", game_dict)
+            self.uninstallComplete.emit({"success": True, "message": "Game uninstalled.", "game": game_dict})
         else:
-            self.uninstallComplete.emit(False, "Game not found in library.", game_dict)
+            self.uninstallComplete.emit({"success": False, "message": "Game not found in library.", "game": game_dict})
 
-    @Slot(str, result=list)
+    @Slot(str, result="QVariantList")
     def getNativeExecutableCandidates(self, rom_id: str) -> list:
         if not rom_id:
             return []
@@ -738,11 +784,13 @@ class GameBackend(QObject):
             return
         self._handle_native_launch(game_dict)
 
+    @Slot(str)
     def _on_process_exited(self, emulator_name: str) -> None:
         thread = self._watch_thread
         self._watch_thread = None
         if thread is not None:
             thread.wait()
+            thread.deleteLater()
 
         if self._process is None:
             return
@@ -770,8 +818,11 @@ class GameBackend(QObject):
                     self._auto_upload_worker = worker
                     thread.start()
 
-    def _on_auto_upload_done(self, success: bool, message: str) -> None:
-        del success
+    @Slot(object)
+    def _on_auto_upload_done(self, bundle: object) -> None:
+        ok = bundle.get("success", False) if isinstance(bundle, dict) else False
+        message = bundle.get("message", "") if isinstance(bundle, dict) else ""
+        del ok
         self._auto_upload_thread = None
         self._auto_upload_worker = None
         if message:

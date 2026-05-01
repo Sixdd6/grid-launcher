@@ -5,6 +5,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .metadata import details_metadata_from_item
+from .platform_metadata import PLATFORM_METADATA, logo_file_for_platform
+
+
+_LOGO_DIR = Path(__file__).parent.parent.parent / "assets" / "retroarch-assets"
 
 
 def connected_username(me_payload: Any) -> str:
@@ -14,6 +18,20 @@ def connected_username(me_payload: Any) -> str:
     if not isinstance(username, str):
         return ""
     return username.strip()
+
+
+def _platform_display_name(entry: dict) -> str:
+    label = entry.get("display_name") or entry.get("name") or entry.get("slug")
+    if not isinstance(label, str):
+        return ""
+
+    platform_id = entry.get("id")
+    base_label = label.strip()
+    if base_label:
+        return base_label
+    if isinstance(platform_id, int):
+        return f"Platform {platform_id}"
+    return ""
 
 
 def server_platform_ids(payload: Any) -> dict[str, int]:
@@ -26,16 +44,15 @@ def server_platform_ids(payload: Any) -> dict[str, int]:
             continue
 
         platform_id = entry.get("id")
-        label = entry.get("display_name") or entry.get("name") or entry.get("slug")
+        base_label = _platform_display_name(entry)
         rom_count = entry.get("rom_count")
         if (
             not isinstance(platform_id, int)
-            or not isinstance(label, str)
+            or not base_label
             or (isinstance(rom_count, int) and rom_count <= 0)
         ):
             continue
 
-        base_label = label.strip() or f"Platform {platform_id}"
         display_label = base_label
         counter = 2
         while display_label in platform_ids:
@@ -45,6 +62,61 @@ def server_platform_ids(payload: Any) -> dict[str, int]:
         platform_ids[display_label] = platform_id
 
     return platform_ids
+
+
+def server_platform_details(payload: Any) -> list[dict]:
+    if not isinstance(payload, list):
+        return []
+
+    details: list[dict] = []
+    used_names: set[str] = set()
+
+    for entry in payload:
+        if not isinstance(entry, dict):
+            continue
+
+        slug = entry.get("slug")
+        if not isinstance(slug, str) or not slug.strip():
+            continue
+        slug = slug.strip()
+
+        base_name = _platform_display_name(entry)
+        if not base_name:
+            continue
+
+        rom_count = entry.get("rom_count")
+        if isinstance(rom_count, int) and rom_count <= 0:
+            continue
+
+        display_name = base_name
+        counter = 2
+        while display_name in used_names:
+            display_name = f"{base_name} ({counter})"
+            counter += 1
+        used_names.add(display_name)
+
+        metadata = PLATFORM_METADATA.get(slug, {})
+        manufacturer = metadata.get("manufacturer", "") if isinstance(metadata, dict) else ""
+        release_year = metadata.get("release_year", "") if isinstance(metadata, dict) else ""
+        player_count = metadata.get("player_count", "") if isinstance(metadata, dict) else ""
+        logo_file = logo_file_for_platform(slug, base_name)
+        local_logo_path = (_LOGO_DIR / logo_file).as_uri() if logo_file else ""
+
+        details.append(
+            {
+                "slug": slug,
+                "name": display_name,
+                "rom_count": rom_count,
+                "manufacturer": manufacturer if isinstance(manufacturer, str) else "",
+                "release_year": release_year if isinstance(release_year, str) else "",
+                "player_count": player_count if isinstance(player_count, str) else "",
+                "local_logo_path": local_logo_path,
+                "url_logo": entry.get("url_logo") or "",
+            }
+        )
+
+    details.sort(key=lambda item: item["name"].lower())
+    return details
 
 
 def fetch_platform_rom_items(

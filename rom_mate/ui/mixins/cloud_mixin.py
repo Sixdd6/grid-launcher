@@ -2976,7 +2976,9 @@ class CloudSaveMixin:
         self.auto_cloud_upload_threads = [item for item in self.auto_cloud_upload_threads if item is not thread]
         self.auto_cloud_upload_workers = [item for item in self.auto_cloud_upload_workers if item is not worker]
 
-    def _on_auto_cloud_upload_finished(self, game: object, result: object) -> None:
+    def _on_auto_cloud_upload_finished(self, bundle: object) -> None:
+        game = bundle.get("game") if isinstance(bundle, dict) else None
+        result = bundle.get("result") if isinstance(bundle, dict) else None
         if not isinstance(game, dict) or not isinstance(result, dict):
             return
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import time
+import uuid
 from io import UnsupportedOperation
 from pathlib import Path
 from typing import Any
@@ -105,6 +106,60 @@ def multipart_payload(files: dict[str, Path]) -> tuple[str, bytes]:
 
     body.extend(f"--{boundary}--\r\n".encode("utf-8"))
     return f"multipart/form-data; boundary={boundary}", bytes(body)
+
+
+def multipart_text_payload(fields: dict[str, str]) -> tuple[str, bytes]:
+    boundary = f"----RomMateBoundary{uuid.uuid4().hex}"
+    body = bytearray()
+
+    for field_name, value in fields.items():
+        body.extend(f"--{boundary}\r\n".encode("utf-8"))
+        body.extend((f'Content-Disposition: form-data; name="{field_name}"\r\n\r\n').encode("utf-8"))
+        body.extend(value.encode("utf-8"))
+        body.extend(b"\r\n")
+
+    body.extend(f"--{boundary}--\r\n".encode("utf-8"))
+    return f"multipart/form-data; boundary={boundary}", bytes(body)
+
+
+def api_put_multipart_text_json(
+    base_url: str,
+    api_token: str,
+    path: str,
+    fields: dict[str, str],
+    params: dict[str, Any] | None = None,
+) -> Any:
+    if not base_url:
+        raise ValueError("Server URL is required")
+
+    content_type, payload = multipart_text_payload(fields)
+    headers = build_auth_headers(api_token)
+    headers["Content-Type"] = content_type
+
+    request = Request(_build_url(base_url, path, params), headers=headers, method="PUT", data=payload)
+    with urlopen(request, timeout=60) as response:
+        raw = response.read().decode("utf-8")
+    return json.loads(raw)
+
+
+def api_post_multipart_text_json(
+    base_url: str,
+    api_token: str,
+    path: str,
+    fields: dict[str, str],
+    params: dict[str, Any] | None = None,
+) -> Any:
+    if not base_url:
+        raise ValueError("Server URL is required")
+
+    content_type, payload = multipart_text_payload(fields)
+    headers = build_auth_headers(api_token)
+    headers["Content-Type"] = content_type
+
+    request = Request(_build_url(base_url, path, params), headers=headers, method="POST", data=payload)
+    with urlopen(request, timeout=60) as response:
+        raw = response.read().decode("utf-8")
+    return json.loads(raw)
 
 
 def api_post_multipart_json(

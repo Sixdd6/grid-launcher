@@ -12,6 +12,7 @@ from rom_mate.background.workers import (
     DetailsCloudRecordsWorker,
     InstallDownloadWorker,
     InstallFinalizeWorker,
+    MissingCoverReplenishWorker,
     PCGamingWikiWorker,
     RetroAchievementsWorker,
 )
@@ -40,23 +41,26 @@ class DetailsCloudRecordsWorkerTests(unittest.TestCase):
     def test_worker_fetches_save_records(self) -> None:
         window = _StubWindow()
         worker = DetailsCloudRecordsWorker(window, 7, "99", "save")
-        results: list[tuple[int, str, object, str]] = []
-        worker.finished.connect(lambda request_id, save_type, records, error: results.append((request_id, save_type, records, error)))
+        results: list[dict[str, object]] = []
+        worker.finished.connect(lambda payload: results.append(payload))
 
         worker.run()
 
         self.assertEqual(window.called, [("save", "99")])
-        self.assertEqual(results, [(7, "save", [{"id": "1", "file_name": "save-1.zip"}], "")])
+        self.assertEqual(
+            results,
+            [{"request_id": 7, "save_type": "save", "records": [{"id": "1", "file_name": "save-1.zip"}], "error": ""}],
+        )
 
     def test_worker_emits_error_for_failed_requests(self) -> None:
         window = _FailingWindow()
         worker = DetailsCloudRecordsWorker(window, 9, "88", "save")
-        results: list[tuple[int, str, object, str]] = []
-        worker.finished.connect(lambda request_id, save_type, records, error: results.append((request_id, save_type, records, error)))
+        results: list[dict[str, object]] = []
+        worker.finished.connect(lambda payload: results.append(payload))
 
         worker.run()
 
-        self.assertEqual(results, [(9, "save", [], "boom")])
+        self.assertEqual(results, [{"request_id": 9, "save_type": "save", "records": [], "error": "boom"}])
 
 
 class InstallDownloadWorkerTests(unittest.TestCase):
@@ -89,8 +93,8 @@ class InstallDownloadWorkerTests(unittest.TestCase):
                 {"Accept": "*/*"},
                 archive_path,
             )
-            results: list[tuple[str, str]] = []
-            worker.finished.connect(lambda path, error: results.append((path, error)))
+            results: list[dict[str, str]] = []
+            worker.finished.connect(lambda payload: results.append(payload))
 
             http_error = HTTPError(
                 "https://server.example/api/roms/1/content/game.zip",
@@ -103,10 +107,10 @@ class InstallDownloadWorkerTests(unittest.TestCase):
                 worker.run()
 
             self.assertEqual(len(results), 1)
-            self.assertEqual(results[0][0], "")
-            self.assertIn("HTTP 403 Forbidden", results[0][1])
-            self.assertIn("url=https://server.example/api/roms/1/content/game.zip", results[0][1])
-            self.assertIn("Token invalid for this ROM", results[0][1])
+            self.assertEqual(results[0].get("archive_path", ""), "")
+            self.assertIn("HTTP 403 Forbidden", results[0].get("error", ""))
+            self.assertIn("url=https://server.example/api/roms/1/content/game.zip", results[0].get("error", ""))
+            self.assertIn("Token invalid for this ROM", results[0].get("error", ""))
 
     def test_debug_logging_prints_url_and_error_details(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -117,8 +121,8 @@ class InstallDownloadWorkerTests(unittest.TestCase):
                 archive_path,
                 debug_enabled=True,
             )
-            results: list[tuple[str, str]] = []
-            worker.finished.connect(lambda path, error: results.append((path, error)))
+            results: list[dict[str, str]] = []
+            worker.finished.connect(lambda payload: results.append(payload))
 
             http_error = HTTPError(
                 "https://server.example/api/roms/1/content/game.zip",
@@ -157,8 +161,8 @@ class InstallDownloadWorkerTests(unittest.TestCase):
                     ],
                 },
             )
-            results: list[tuple[str, str]] = []
-            worker.finished.connect(lambda path, error: results.append((path, error)))
+            results: list[dict[str, str]] = []
+            worker.finished.connect(lambda payload: results.append(payload))
 
             release_payload = json.dumps(
                 {
@@ -183,7 +187,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
             ):
                 worker.run()
 
-            self.assertEqual(results, [(str(archive_path), "")])
+            self.assertEqual(results, [{"archive_path": str(archive_path), "error": ""}])
             self.assertTrue(archive_path.exists())
             self.assertEqual(archive_path.read_bytes(), archive_payload)
 
@@ -208,8 +212,8 @@ class InstallDownloadWorkerTests(unittest.TestCase):
                     ],
                 },
             )
-            results: list[tuple[str, str]] = []
-            worker.finished.connect(lambda path, error: results.append((path, error)))
+            results: list[dict[str, str]] = []
+            worker.finished.connect(lambda payload: results.append(payload))
 
             release_payload = json.dumps(
                 {
@@ -240,8 +244,8 @@ class InstallDownloadWorkerTests(unittest.TestCase):
                 worker.run()
 
             self.assertEqual(len(results), 1)
-            self.assertEqual(results[0][0], "")
-            self.assertIn("HTTP 404 Not Found", results[0][1])
+            self.assertEqual(results[0].get("archive_path", ""), "")
+            self.assertIn("HTTP 404 Not Found", results[0].get("error", ""))
             self.assertFalse(archive_path.exists())
 
     def test_source_metadata_windows_assets_mismatch_does_not_fallback_to_linux_asset(self) -> None:
@@ -688,8 +692,8 @@ class InstallDownloadWorkerTests(unittest.TestCase):
                     ],
                 },
             )
-            results: list[tuple[str, str]] = []
-            worker.finished.connect(lambda path, error: results.append((path, error)))
+            results: list[dict[str, str]] = []
+            worker.finished.connect(lambda payload: results.append(payload))
 
             main_payload = b"retroarch-main"
             supplemental_payload = b"retroarch-cores"
@@ -703,7 +707,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
             ):
                 worker.run()
 
-            self.assertEqual(results, [(str(expected_archive_path), "")])
+            self.assertEqual(results, [{"archive_path": str(expected_archive_path), "error": ""}])
             self.assertTrue(expected_archive_path.exists())
             self.assertEqual(expected_archive_path.read_bytes(), main_payload)
             self.assertTrue(expected_supplemental_path.exists())
@@ -730,8 +734,8 @@ class InstallDownloadWorkerTests(unittest.TestCase):
                     ],
                 },
             )
-            results: list[tuple[str, str]] = []
-            worker.finished.connect(lambda path, error: results.append((path, error)))
+            results: list[dict[str, str]] = []
+            worker.finished.connect(lambda payload: results.append(payload))
 
             release_payload = json.dumps(
                 {
@@ -755,7 +759,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
             ):
                 worker.run()
 
-            self.assertEqual(results, [(str(expected_archive_path), "")])
+            self.assertEqual(results, [{"archive_path": str(expected_archive_path), "error": ""}])
             self.assertFalse(initial_archive_path.exists())
             self.assertTrue(expected_archive_path.exists())
             self.assertEqual(expected_archive_path.read_bytes(), archive_payload)
@@ -816,8 +820,8 @@ class InstallFinalizeWorkerTests(unittest.TestCase):
             {"title": "RetroArch", "_install_mode": "source_emulator"},
             Path("retroarch.7z"),
         )
-        results: list[tuple[object, str, str, str]] = []
-        worker.finished.connect(lambda prepared, archive_path, warning_text, error: results.append((prepared, archive_path, warning_text, error)))
+        results: list[dict[str, object]] = []
+        worker.finished.connect(lambda payload: results.append(payload))
 
         worker.run()
 
@@ -831,8 +835,8 @@ class InstallFinalizeWorkerTests(unittest.TestCase):
             ],
         )
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0][3], "")
-        self.assertEqual(results[0][2], "")
+        self.assertEqual(results[0].get("error", ""), "")
+        self.assertEqual(results[0].get("warning", ""), "")
 
     def test_worker_skips_main_cleanup_for_direct_file_installs(self) -> None:
         window = _FinalizeWindowDirectFileStub()
@@ -841,8 +845,8 @@ class InstallFinalizeWorkerTests(unittest.TestCase):
             {"title": "Gran Turismo 4", "_install_mode": "native_game"},
             Path("gran_turismo_4.chd"),
         )
-        results: list[tuple[object, str, str, str]] = []
-        worker.finished.connect(lambda prepared, archive_path, warning_text, error: results.append((prepared, archive_path, warning_text, error)))
+        results: list[dict[str, object]] = []
+        worker.finished.connect(lambda payload: results.append(payload))
 
         worker.run()
 
@@ -855,8 +859,8 @@ class InstallFinalizeWorkerTests(unittest.TestCase):
             ],
         )
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0][3], "")
-        self.assertEqual(results[0][2], "")
+        self.assertEqual(results[0].get("error", ""), "")
+        self.assertEqual(results[0].get("warning", ""), "")
 
 
 class TestRetroAchievementsWorker(unittest.TestCase):
@@ -911,6 +915,117 @@ class TestPCGamingWikiWorker(unittest.TestCase):
             worker = PCGamingWikiWorker(9, "Game")
             results = self._run_worker(worker)
         self.assertEqual(results, [(9, [], "timeout")])
+
+
+class MissingCoverReplenishWorkerTests(unittest.TestCase):
+    def _run_worker(self, worker):
+        cached: list[tuple[str, str]] = []
+        finished: list[bool] = []
+        worker.game_cover_cached.connect(
+            lambda payload: cached.append((
+                payload.get("game_key", "") if isinstance(payload, dict) else "",
+                payload.get("path", "") if isinstance(payload, dict) else "",
+            ))
+        )
+        worker.finished.connect(lambda: finished.append(True))
+        worker.run()
+        return cached, finished
+
+    def test_skips_game_with_empty_cover_url(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            worker = MissingCoverReplenishWorker(
+                [("key1", {}, "")],
+                {},
+                Path(tmp),
+            )
+            cached, finished = self._run_worker(worker)
+        self.assertEqual(cached, [])
+        self.assertEqual(len(finished), 1)
+
+    def test_skips_game_with_valid_cached_cover(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            cover_file = Path(tmp) / "existing.png"
+            cover_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
+            game = {"cached_cover_path": str(cover_file)}
+            with patch("rom_mate.background.workers.urlopen") as mock_urlopen:
+                worker = MissingCoverReplenishWorker(
+                    [("key1", game, "https://romm.local/cover.png")],
+                    {},
+                    Path(tmp),
+                )
+                cached, finished = self._run_worker(worker)
+            mock_urlopen.assert_not_called()
+        self.assertEqual(cached, [])
+        self.assertEqual(len(finished), 1)
+
+    def test_fetches_and_writes_cover_for_game_with_missing_path(self):
+        import tempfile
+        from unittest.mock import MagicMock
+        png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 20
+        mock_response = MagicMock()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_response.read.return_value = png_bytes
+        mock_response.headers.get.return_value = "image/png"
+        with tempfile.TemporaryDirectory() as tmp:
+            game = {"title": "Test Game", "platform": "NES"}
+            with patch("rom_mate.background.workers.urlopen", return_value=mock_response):
+                worker = MissingCoverReplenishWorker(
+                    [("key1", game, "https://romm.local/cover.png")],
+                    {},
+                    Path(tmp),
+                )
+                cached, finished = self._run_worker(worker)
+            self.assertEqual(len(cached), 1)
+            self.assertEqual(cached[0][0], "key1")
+            self.assertTrue(Path(cached[0][1]).exists())
+        self.assertEqual(len(finished), 1)
+
+    def test_emits_finished_after_processing_all_games(self):
+        import tempfile
+        from unittest.mock import MagicMock
+        png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 20
+        mock_response = MagicMock()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_response.read.return_value = png_bytes
+        mock_response.headers.get.return_value = "image/png"
+        with tempfile.TemporaryDirectory() as tmp:
+            cover_file = Path(tmp) / "existing.png"
+            cover_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
+            game_cached = {"cached_cover_path": str(cover_file)}
+            game_missing = {"title": "Missing", "platform": "SNES"}
+            with patch("rom_mate.background.workers.urlopen", return_value=mock_response):
+                worker = MissingCoverReplenishWorker(
+                    [
+                        ("key_cached", game_cached, "https://romm.local/a.png"),
+                        ("key_missing", game_missing, "https://romm.local/b.png"),
+                    ],
+                    {},
+                    Path(tmp),
+                )
+                cached, finished = self._run_worker(worker)
+        self.assertEqual(len(cached), 1)
+        self.assertEqual(len(finished), 1)
+
+    def test_http_error_during_fetch_skips_game_gracefully(self):
+        import tempfile
+        from urllib.error import HTTPError
+        with tempfile.TemporaryDirectory() as tmp:
+            game = {"title": "Bad Game", "platform": "GBA"}
+            with patch("rom_mate.background.workers.urlopen", side_effect=HTTPError(
+                "https://romm.local/cover.png", 404, "Not Found", {}, None
+            )):
+                worker = MissingCoverReplenishWorker(
+                    [("key1", game, "https://romm.local/cover.png")],
+                    {},
+                    Path(tmp),
+                )
+                cached, finished = self._run_worker(worker)
+        self.assertEqual(cached, [])
+        self.assertEqual(len(finished), 1)
 
 
 if __name__ == "__main__":

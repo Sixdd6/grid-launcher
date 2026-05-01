@@ -93,16 +93,17 @@ ApplicationWindow {
                         property: "x"
                         from: innerStack.slideDir * innerStack.width
                         to: 0
-                        duration: 220
+                        duration: 200
                         easing.type: Easing.OutCubic
                     }
                 }
+
                 replaceExit: Transition {
                     NumberAnimation {
                         property: "x"
                         from: 0
                         to: -innerStack.slideDir * innerStack.width
-                        duration: 220
+                        duration: 200
                         easing.type: Easing.OutCubic
                     }
                 }
@@ -132,9 +133,11 @@ ApplicationWindow {
                     } else if (direction === "tab_next") {
                         tabBar.selectNext()
                     } else if (direction === "back") {
-                        if (outerStack.depth > 1 && !appBackend.uiOverlayActive && !pauseBackend.visible) {
-                            outerStack.pop()
-                        }
+                        Qt.callLater(function() {
+                            if (outerStack.depth > 1 && !appBackend.uiOverlayActive && !pauseBackend.visible) {
+                                outerStack.pop()
+                            }
+                        })
                     } else if (direction === "guide_button") {
                         if (!gameBackend.isSessionActive && outerStack.depth <= 1) {
                             outerStack.push(settingsViewComponent)

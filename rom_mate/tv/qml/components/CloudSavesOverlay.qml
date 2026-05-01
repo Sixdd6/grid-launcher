@@ -43,6 +43,10 @@ Item {
         onTriggered: root._statusText = ""
     }
 
+    Component.onDestruction: {
+        statusTimer.stop()
+    }
+
     Connections {
         target: controllerBackend
         function onNavigationEvent(event) {
@@ -94,45 +98,45 @@ Item {
     Connections {
         target: cloudBackend
 
-        function onSlotsLoaded(saveType, slots) {
-            if (saveType !== root.saveType) return
-            _slots = slots
+        function onSlotsLoaded(bundle) {
+            if (bundle.save_type !== root.saveType) return
+            _slots = bundle.slots
             _loading = false
             _errorText = ""
         }
 
-        function onSlotsError(saveType, error) {
-            if (saveType !== root.saveType) return
+        function onSlotsError(bundle) {
+            if (bundle.save_type !== root.saveType) return
             _loading = false
-            _errorText = error
+            _errorText = bundle.error
         }
 
-        function onRestoreComplete(success, message) {
-            _statusText = message
-            _statusSuccess = success
+        function onRestoreComplete(bundle) {
+            _statusText = bundle.message
+            _statusSuccess = bundle.success
             statusTimer.restart()
-            if (success) {
+            if (bundle.success) {
                 _loading = true
                 cloudBackend.loadSlotsForGame(root.game, root.saveType)
             }
         }
 
-        function onDeleteComplete(success, message) {
-            _statusText = message
-            _statusSuccess = success
+        function onDeleteComplete(bundle) {
+            _statusText = bundle.message
+            _statusSuccess = bundle.success
             statusTimer.restart()
-            if (success) {
+            if (bundle.success) {
                 _loading = true
                 cloudBackend.loadSlotsForGame(root.game, root.saveType)
             }
         }
 
-        function onUploadComplete(success, message) {
+        function onUploadComplete(bundle) {
             _uploading = false
-            _statusText = message
-            _statusSuccess = success
+            _statusText = bundle.message
+            _statusSuccess = bundle.success
             statusTimer.restart()
-            if (success) {
+            if (bundle.success) {
                 _loading = true
                 cloudBackend.loadSlotsForGame(root.game, root.saveType)
             }

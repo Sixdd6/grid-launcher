@@ -11,7 +11,7 @@ from urllib.parse import quote, urljoin, urlparse
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, Slot
 
 from ..core.api import api_get_json, format_http_error_details
 from ..emulator.source import (
@@ -25,8 +25,8 @@ if TYPE_CHECKING:
 
 
 class InstallDownloadWorker(QObject):
-    finished = Signal(str, str)
-    progress = Signal(object, object, float)
+    finished = Signal(object)
+    progress = Signal(object)
 
     def __init__(
         self,
@@ -56,7 +56,7 @@ class InstallDownloadWorker(QObject):
                 print(f"[DEBUG][InstallDownload] url={resolved_download_url}")
             self._download_to_path(resolved_download_url, self.archive_path)
             self._download_supplemental_archives(self.archive_path)
-            self.finished.emit(str(self.archive_path), "")
+            self.finished.emit({"archive_path": str(self.archive_path), "error": ""})
         except HTTPError as error:
             detail = format_http_error_details(error)
             if self.debug_enabled:
@@ -66,7 +66,7 @@ class InstallDownloadWorker(QObject):
                     self.archive_path.unlink()
                 except OSError:
                     pass
-            self.finished.emit("", detail)
+            self.finished.emit({"archive_path": "", "error": detail})
         except (URLError, OSError, ValueError, OverflowError) as error:
             if self.debug_enabled:
                 print(f"[DEBUG][InstallDownload] error={error}")
@@ -75,7 +75,7 @@ class InstallDownloadWorker(QObject):
                     self.archive_path.unlink()
                 except OSError:
                     pass
-            self.finished.emit("", str(error))
+            self.finished.emit({"archive_path": "", "error": str(error)})
 
     def _resolved_download_target(self) -> tuple[str, Path]:
         if self.download_url:
@@ -113,7 +113,7 @@ class InstallDownloadWorker(QObject):
                     if now - last_emit_at >= _PROGRESS_EMIT_INTERVAL:
                         elapsed = max(now - started_at, 1e-6)
                         speed_bps = downloaded_bytes / elapsed
-                        self.progress.emit(downloaded_bytes, total_bytes, speed_bps)
+                        self.progress.emit({"downloaded": downloaded_bytes, "total": total_bytes, "speed": speed_bps})
                         last_emit_at = now
 
     def _download_supplemental_archives(self, primary_archive_path: Path) -> None:
@@ -403,7 +403,7 @@ class InstallDownloadWorker(QObject):
 
 
 class SourceVersionCheckWorker(QObject):
-    finished = Signal(str, str, str)  # (installed_tag, available_tag, error_msg)
+    finished = Signal(object)
 
     def __init__(self, source_metadata: dict, installed_tag: str) -> None:
         super().__init__()
@@ -424,7 +424,7 @@ class SourceVersionCheckWorker(QObject):
                     f"[DEBUG] SourceVersionCheckWorker emitting: installed={self.installed_tag} "
                     f"available=direct error="
                 )
-                self.finished.emit(self.installed_tag, "direct", "")
+                self.finished.emit({"installed_tag": self.installed_tag, "available_tag": "direct", "error": ""})
                 return
 
             owner = source["owner"]
@@ -450,7 +450,7 @@ class SourceVersionCheckWorker(QObject):
                     f"[DEBUG] SourceVersionCheckWorker emitting: installed= available= "
                     f"error=Unsupported provider: {provider}"
                 )
-                self.finished.emit("", "", f"Unsupported provider: {provider}")
+                self.finished.emit({"installed_tag": "", "available_tag": "", "error": f"Unsupported provider: {provider}"})
                 return
 
             if not isinstance(payload, dict):
@@ -462,12 +462,12 @@ class SourceVersionCheckWorker(QObject):
                 f"[DEBUG] SourceVersionCheckWorker emitting: installed={self.installed_tag} "
                 f"available={resolved_tag} error="
             )
-            self.finished.emit(self.installed_tag, resolved_tag, "")
+            self.finished.emit({"installed_tag": self.installed_tag, "available_tag": resolved_tag, "error": ""})
         except Exception as error:
             print(
                 f"[DEBUG] SourceVersionCheckWorker emitting: installed= available= error={error}"
             )
-            self.finished.emit("", "", str(error))
+            self.finished.emit({"installed_tag": "", "available_tag": "", "error": str(error)})
 
     def _github_release_headers(self) -> dict[str, str]:
         headers: dict[str, str] = {}
@@ -492,8 +492,8 @@ class SourceVersionCheckWorker(QObject):
 
 
 class InstallFinalizeWorker(QObject):
-    finished = Signal(object, str, str, str)
-    progress = Signal(object, object)
+    finished = Signal(object)
+    progress = Signal(object)
 
     def __init__(
         self,
@@ -539,7 +539,7 @@ class InstallFinalizeWorker(QObject):
                 )
             if prepared_game is None:
                 error_detail = warning_text.strip() if isinstance(warning_text, str) and warning_text.strip() else "Install preparation failed"
-                self.finished.emit(None, str(self.archive_path), "", error_detail)
+                self.finished.emit({"game": None, "archive_path": str(self.archive_path), "warning": "", "error": error_detail})
                 return
             cleanup_install_archives = getattr(self.window, "_cleanup_install_archives_without_ui", None)
             if callable(cleanup_install_archives):
@@ -580,16 +580,16 @@ class InstallFinalizeWorker(QObject):
                 except Exception as firmware_error:
                     firmware_warning = f"Firmware install error: {firmware_error}"
                     warning_text = "\n\n".join(part for part in (warning_text.strip(), firmware_warning.strip()) if part)
-            self.finished.emit(prepared_game, str(self.archive_path), warning_text, "")
+            self.finished.emit({"game": prepared_game, "archive_path": str(self.archive_path), "warning": warning_text, "error": ""})
         except Exception as error:
-            self.finished.emit(None, str(self.archive_path), "", str(error))
+            self.finished.emit({"game": None, "archive_path": str(self.archive_path), "warning": "", "error": str(error)})
 
     def _emit_progress(self, installed_bytes: int, total_bytes: int) -> None:
-        self.progress.emit(max(0, installed_bytes), max(0, total_bytes))
+        self.progress.emit({"installed": max(0, installed_bytes), "total": max(0, total_bytes)})
 
 
 class AutoCloudSaveUploadWorker(QObject):
-    finished = Signal(object, object)
+    finished = Signal(object)
 
     def __init__(
         self,
@@ -624,31 +624,35 @@ class AutoCloudSaveUploadWorker(QObject):
                 }
 
             self.finished.emit(
-                self.game,
                 {
+                    "game": self.game,
+                    "result": {
                     "per_type": per_type,
                     "local_latest_mtimes": self.local_latest_mtimes,
+                },
                 },
             )
         except (HTTPError, URLError, OSError, ValueError, json.JSONDecodeError) as error:
             self.finished.emit(
-                self.game,
                 {
-                    "per_type": {
-                        save_type: {
-                            "uploaded_count": 0,
-                            "total_count": 0,
-                            "failed_files": [str(error)],
-                        }
-                        for save_type in self.upload_types
+                    "game": self.game,
+                    "result": {
+                        "per_type": {
+                            save_type: {
+                                "uploaded_count": 0,
+                                "total_count": 0,
+                                "failed_files": [str(error)],
+                            }
+                            for save_type in self.upload_types
+                        },
+                        "local_latest_mtimes": self.local_latest_mtimes,
                     },
-                    "local_latest_mtimes": self.local_latest_mtimes,
                 },
             )
 
 
 class DetailsCloudRecordsWorker(QObject):
-    finished = Signal(int, str, object, str)
+    finished = Signal(object)
 
     def __init__(self, window: MainWindowProtocol, request_id: int, rom_id: str, save_type: str) -> None:
         super().__init__()
@@ -683,7 +687,7 @@ class DetailsCloudRecordsWorker(QObject):
                     f"[DEBUG][Timing] exit DetailsCloudRecordsWorker.run elapsed_ms={elapsed_ms:.1f} "
                     f"result=success count={len(records) if isinstance(records, list) else 0}"
                 )
-            self.finished.emit(self.request_id, self.save_type, records, "")
+            self.finished.emit({"request_id": self.request_id, "save_type": self.save_type, "records": records, "error": ""})
         except (HTTPError, URLError, OSError, ValueError, json.JSONDecodeError) as error:
             if debug_enabled:
                 elapsed_ms = max(0.0, (time.perf_counter() - started_at) * 1000.0)
@@ -691,11 +695,11 @@ class DetailsCloudRecordsWorker(QObject):
                     f"[DEBUG][Timing] exit DetailsCloudRecordsWorker.run elapsed_ms={elapsed_ms:.1f} "
                     f"result=error message={error}"
                 )
-            self.finished.emit(self.request_id, self.save_type, [], str(error))
+            self.finished.emit({"request_id": self.request_id, "save_type": self.save_type, "records": [], "error": str(error)})
 
 
 class RomDetailWorker(QObject):
-    finished = Signal(str, dict, str)
+    finished = Signal(object)
 
     def __init__(self, base_url: str, api_token: str, rom_id: str) -> None:
         super().__init__()
@@ -708,13 +712,13 @@ class RomDetailWorker(QObject):
             payload = api_get_json(self.base_url, self.api_token, f"/api/roms/{self.rom_id}")
             if not isinstance(payload, dict):
                 raise ValueError("ROM detail API returned an unsupported payload shape.")
-            self.finished.emit(self.rom_id, payload, "")
+            self.finished.emit({"rom_id": self.rom_id, "payload": payload, "error": ""})
         except Exception as error:
-            self.finished.emit(self.rom_id, {}, str(error))
+            self.finished.emit({"rom_id": self.rom_id, "payload": {}, "error": str(error)})
 
 
 class RetroAchievementsWorker(QObject):
-    finished = Signal(int, list, str)
+    finished = Signal(object)
 
     def __init__(self, request_id: int, ra_game_id: int, username: str, api_key: str) -> None:
         super().__init__()
@@ -728,15 +732,15 @@ class RetroAchievementsWorker(QObject):
 
         try:
             achievements = fetch_game_achievements(self.ra_game_id, self.username, self.api_key)
-            self.finished.emit(self.request_id, achievements, "")
+            self.finished.emit({"request_id": self.request_id, "achievements": achievements, "error": ""})
         except (RetroAchievementsError, ValueError, OSError) as error:
-            self.finished.emit(self.request_id, [], str(error))
+            self.finished.emit({"request_id": self.request_id, "achievements": [], "error": str(error)})
 
 
 class RALoginWorker(QObject):
     """Worker that authenticates with RetroAchievements and returns a login token."""
 
-    finished = Signal(str, str, str)  # (username, token, error)
+    finished = Signal(object)
 
     def __init__(self, username: str, password: str) -> None:
         super().__init__()
@@ -748,13 +752,13 @@ class RALoginWorker(QObject):
 
         try:
             result = ra_login(self._username, self._password)
-            self.finished.emit(result["username"], result["token"], "")
+            self.finished.emit({"username": result["username"], "token": result["token"], "error": ""})
         except (RetroAchievementsError, ValueError, OSError) as error:
-            self.finished.emit("", "", str(error))
+            self.finished.emit({"username": "", "token": "", "error": str(error)})
 
 
 class PCGamingWikiWorker(QObject):
-    finished = Signal(int, list, str)  # (request_id, paths: list[str], error: str)
+    finished = Signal(object)
 
     def __init__(self, request_id: int, title: str) -> None:
         super().__init__()
@@ -765,6 +769,55 @@ class PCGamingWikiWorker(QObject):
         try:
             from rom_mate.server.pcgamingwiki import fetch_windows_save_paths, PCGamingWikiError
             paths = fetch_windows_save_paths(self._title)
-            self.finished.emit(self._request_id, paths, "")
+            self.finished.emit({"request_id": self._request_id, "paths": paths, "error": ""})
         except Exception as exc:
-            self.finished.emit(self._request_id, [], str(exc))
+            self.finished.emit({"request_id": self._request_id, "paths": [], "error": str(exc)})
+
+
+class MissingCoverReplenishWorker(QObject):
+    game_cover_cached = Signal(object)
+    finished = Signal()
+
+    def __init__(
+        self,
+        games: list[tuple[str, dict, str]],
+        auth_headers: dict,
+        image_cache_dir: Path,
+    ) -> None:
+        super().__init__()
+        self._games = games
+        self._auth_headers = auth_headers
+        self._image_cache_dir = image_cache_dir
+
+    @Slot()
+    def run(self) -> None:
+        from rom_mate.cover.utils import cached_cover_path_from_game, cover_cache_extension_from_payload, installed_cover_cache_key
+
+        for game_key, game_snapshot, cover_url in self._games:
+            if not cover_url:
+                continue
+            cached_path = cached_cover_path_from_game(game_snapshot)
+            if cached_path is not None and cached_path.exists() and cached_path.is_file():
+                continue
+            try:
+                headers = dict(self._auth_headers)
+                headers.setdefault("Accept", "image/*")
+                request = Request(cover_url, headers=headers, method="GET")
+                with urlopen(request, timeout=30) as response:
+                    payload = response.read()
+                    content_type = response.headers.get("Content-Type", "")
+            except (HTTPError, URLError, OSError, ValueError, OverflowError):
+                continue
+            if not payload:
+                continue
+            extension = cover_cache_extension_from_payload(cover_url, payload, content_type)
+            cache_file_name = f"{installed_cover_cache_key(game_snapshot)}{extension}"
+            cache_file = self._image_cache_dir / cache_file_name
+            try:
+                self._image_cache_dir.mkdir(parents=True, exist_ok=True)
+                cache_file.write_bytes(payload)
+            except OSError:
+                continue
+            self.game_cover_cached.emit({"game_key": game_key, "path": str(cache_file)})
+
+        self.finished.emit()

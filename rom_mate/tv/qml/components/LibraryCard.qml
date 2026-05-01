@@ -11,12 +11,13 @@ Item {
     property string platform: ""
     property string releaseYear: ""
     property bool cloudSaveEnabled: false
+    property bool hasSaves: false
+    property bool isFavorite: false
     property bool isFocused: false
 
     signal selected()
 
     scale: (activeFocus || root.isFocused) ? 1.05 : 1.0
-    Behavior on scale { NumberAnimation { duration: 120 } }
 
     Rectangle {
         anchors.centerIn: parent
@@ -25,7 +26,6 @@ Item {
         radius: 14
         color: "#ff79c6"
         opacity: (activeFocus || root.isFocused) ? 0.15 : 0.0
-        Behavior on opacity { NumberAnimation { duration: 120 } }
     }
 
     Rectangle {
@@ -35,7 +35,6 @@ Item {
         radius: 11
         color: "#ff79c6"
         opacity: (activeFocus || root.isFocused) ? 0.25 : 0.0
-        Behavior on opacity { NumberAnimation { duration: 120 } }
     }
 
     Rectangle {
@@ -45,8 +44,6 @@ Item {
         border.color: (root.activeFocus || root.isFocused) ? "#ff79c6" : "#44475a"
         border.width: (root.activeFocus || root.isFocused) ? 2 : 1
         clip: true
-
-        Behavior on border.color { ColorAnimation { duration: 60 } }
 
         Item {
             id: coverArea
@@ -80,12 +77,37 @@ Item {
             }
         }
         
+        // Favorite badge
+        Rectangle {
+            width: 18
+            height: 18
+            radius: 9
+            visible: root.isFavorite
+            color: "#282a36"
+            border.color: "#f1fa8c"
+            border.width: 2
+            anchors.top: coverArea.top
+            anchors.left: coverArea.left
+            anchors.topMargin: 8
+            anchors.leftMargin: 8
+
+            Text {
+                text: "\u2605"
+                color: "#f1fa8c"
+                font.pixelSize: 10
+                anchors.centerIn: parent
+            }
+        }
+
         // Cloud save badge
         Rectangle {
             width: 18
             height: 18
             radius: 9
-            color: root.cloudSaveEnabled ? "#50fa7b" : "#ff79c6"
+            visible: root.hasSaves
+            color: "#282a36"
+            border.color: "#50fa7b"
+            border.width: 2
             anchors.top: coverArea.top
             anchors.right: coverArea.right
             anchors.topMargin: 8
@@ -93,7 +115,7 @@ Item {
             
             Text {
                 text: "☁"
-                color: "white"
+                color: "#50fa7b"
                 font.pixelSize: 10
                 anchors.centerIn: parent
                 anchors.verticalCenterOffset: -1 // Tweaked for visual centering

@@ -62,13 +62,12 @@ _XINPUT_BUTTON_BITS: list[tuple[int, str]] = [
 
 class _XInputPollThread(QThread):
     """
-    Polls XInput1_4.dll directly for up to 4 controllers.
+    Polls XInput1_4.dll (via XInputGetStateEx, ordinal 100) for up to 4 controllers.
     Emits edge-triggered button events and normalised axis events.
-    Guide button is NOT polled here (XInputGetState doesn't expose it);
-    it is handled separately by _PygameGuidePollThread.
+    Includes the guide button (bit 0x0400) which XInputGetStateEx exposes.
     """
 
-    event_received = Signal(str, float)  # event_code, state_value
+    event_received = Signal(object)  # {"code": event_code, "value": state_value}
 
     def __init__(self, parent: QObject | None = None, is_install_active=None) -> None:
         super().__init__(parent)
@@ -154,9 +153,9 @@ class _XInputPollThread(QThread):
                     was = bool(old_buttons & bit)
                     now = bool(buttons & bit)
                     if now and not was:
-                        self.event_received.emit(code, 1.0)
+                        self.event_received.emit({"code": code, "value": 1.0})
                     elif was and not now:
-                        self.event_received.emit(code, 0.0)
+                        self.event_received.emit({"code": code, "value": 0.0})
 
                 prev_buttons[user_index] = buttons
 
@@ -164,10 +163,10 @@ class _XInputPollThread(QThread):
                 lt_pressed = gp.bLeftTrigger > _XINPUT_TRIGGER_THRESHOLD
                 rt_pressed = gp.bRightTrigger > _XINPUT_TRIGGER_THRESHOLD
                 if lt_pressed != prev_lt.get(user_index, False):
-                    self.event_received.emit("BTN_TL2", 1.0 if lt_pressed else 0.0)
+                    self.event_received.emit({"code": "BTN_TL2", "value": 1.0 if lt_pressed else 0.0})
                     prev_lt[user_index] = lt_pressed
                 if rt_pressed != prev_rt.get(user_index, False):
-                    self.event_received.emit("BTN_TR2", 1.0 if rt_pressed else 0.0)
+                    self.event_received.emit({"code": "BTN_TR2", "value": 1.0 if rt_pressed else 0.0})
                     prev_rt[user_index] = rt_pressed
 
                 # Analog sticks: emit on value change OR periodically when held above dead zone
@@ -188,7 +187,7 @@ class _XInputPollThread(QThread):
                     held_above_dead_zone = abs(val) > _AXIS_DEAD_ZONE
                     repeat_due = (now_t - last_axis_emit.get(axis_code, 0.0)) >= _AXIS_REPEAT_INTERVAL
                     if changed or (held_above_dead_zone and repeat_due):
-                        self.event_received.emit(axis_code, val)
+                        self.event_received.emit({"code": axis_code, "value": val})
                         last_axis_emit[axis_code] = now_t
                 prev_axes[user_index] = axes_now
                 last_axis_emit_times[user_index] = last_axis_emit
@@ -208,7 +207,7 @@ class _PygameGuidePollThread(QThread):
     _XInputPollThread which cannot see the guide button via XInput API.
     """
 
-    event_received = Signal(str, float)
+    event_received = Signal(object)
 
     def __init__(self, parent: QObject | None = None, is_install_active=None) -> None:
         super().__init__(parent)
@@ -267,9 +266,9 @@ class _PygameGuidePollThread(QThread):
                             file=sys.stderr,
                         )
                     elif event.type == pygame.JOYBUTTONDOWN and event.button == 10:
-                        self.event_received.emit("BTN_MODE", 1.0)
+                        self.event_received.emit({"code": "BTN_MODE", "value": 1.0})
                     elif event.type == pygame.JOYBUTTONUP and event.button == 10:
-                        self.event_received.emit("BTN_MODE", 0.0)
+                        self.event_received.emit({"code": "BTN_MODE", "value": 0.0})
             except Exception:
                 pass
 
@@ -330,7 +329,7 @@ _PYGAME_AXIS_MAP: dict[int, str] = {
 class _GamepadPollThread(QThread):
     """Full pygame joystick poll thread - used on non-Windows platforms."""
 
-    event_received = Signal(str, float)
+    event_received = Signal(object)
 
     def __init__(self, parent: QObject | None = None, is_install_active=None) -> None:
         super().__init__(parent)
@@ -379,19 +378,19 @@ class _GamepadPollThread(QThread):
                     elif event.type == pygame.JOYBUTTONDOWN:
                         code = _PYGAME_BUTTON_MAP.get(event.button)
                         if code:
-                            self.event_received.emit(code, 1.0)
+                            self.event_received.emit({"code": code, "value": 1.0})
                     elif event.type == pygame.JOYBUTTONUP:
                         code = _PYGAME_BUTTON_MAP.get(event.button)
                         if code:
-                            self.event_received.emit(code, 0.0)
+                            self.event_received.emit({"code": code, "value": 0.0})
                     elif event.type == pygame.JOYAXISMOTION:
                         code = _PYGAME_AXIS_MAP.get(event.axis)
                         if code:
-                            self.event_received.emit(code, float(event.value))
+                            self.event_received.emit({"code": code, "value": float(event.value)})
                     elif event.type == pygame.JOYHATMOTION:
                         x, y = event.value
-                        self.event_received.emit("ABS_HAT0X", float(x))
-                        self.event_received.emit("ABS_HAT0Y", float(-y))
+                        self.event_received.emit({"code": "ABS_HAT0X", "value": float(x)})
+                        self.event_received.emit({"code": "ABS_HAT0Y", "value": float(-y)})
             except Exception:
                 pass
             time.sleep(0.033 if self._is_install_active() else 0.008)
@@ -468,23 +467,19 @@ class ControllerBackend(QObject):
         _is_active = (lambda: bool(getattr(self._game_backend, "isInstallActive", False))) if self._game_backend is not None else None
 
         if sys.platform == "win32":
-            # Windows: XInput for standard buttons + pygame for guide button
-            self._poll_thread = _XInputPollThread(self, is_install_active=_is_active)
+            # Windows: XInput for all buttons including guide (via XInputGetStateEx ordinal 100)
+            self._poll_thread = _XInputPollThread(None, is_install_active=_is_active)
             self._poll_thread.event_received.connect(
                 self._on_raw_event, Qt.ConnectionType.QueuedConnection
             )
+            self._poll_thread.finished.connect(self._poll_thread.deleteLater)
             self._poll_thread.start()
-
-            self._guide_thread = _PygameGuidePollThread(self, is_install_active=_is_active)
-            self._guide_thread.event_received.connect(
-                self._on_raw_event, Qt.ConnectionType.QueuedConnection
-            )
-            self._guide_thread.start()
         else:
-            self._poll_thread = _GamepadPollThread(self, is_install_active=_is_active)
+            self._poll_thread = _GamepadPollThread(None, is_install_active=_is_active)
             self._poll_thread.event_received.connect(
                 self._on_raw_event, Qt.ConnectionType.QueuedConnection
             )
+            self._poll_thread.finished.connect(self._poll_thread.deleteLater)
             self._poll_thread.start()
 
     def stop(self) -> None:
@@ -509,13 +504,46 @@ class ControllerBackend(QObject):
     @Slot(result=int)
     def joystickCount(self) -> int:
         """Returns the number of detected joysticks (for diagnostics)."""
-        try:
-            import pygame
-            if pygame.joystick.get_init():
-                return pygame.joystick.get_count()
-        except Exception:
-            pass
-        return -1
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                import ctypes.wintypes as wt
+                xinput = None
+                for dll_name in ("XInput1_4.dll", "XInput9_1_0.dll", "XInput1_3.dll"):
+                    try:
+                        xinput = ctypes.WinDLL(dll_name)
+                        break
+                    except OSError:
+                        continue
+                if xinput is None:
+                    return 0
+
+                class _State(ctypes.Structure):
+                    _fields_ = [("dwPacketNumber", wt.DWORD), ("Gamepad", ctypes.c_byte * 14)]
+
+                try:
+                    get_state = xinput[100]
+                except (AttributeError, OSError):
+                    get_state = xinput.XInputGetState
+                get_state.argtypes = [wt.DWORD, ctypes.POINTER(_State)]
+                get_state.restype = wt.DWORD
+
+                count = 0
+                for i in range(4):
+                    s = _State()
+                    if get_state(i, ctypes.byref(s)) == 0:
+                        count += 1
+                return count
+            except Exception:
+                return 0
+        else:
+            try:
+                import pygame
+                if pygame.joystick.get_init():
+                    return pygame.joystick.get_count()
+            except Exception:
+                pass
+            return -1
 
     # ------------------------------------------------------------------
     # Public query
@@ -553,13 +581,16 @@ class ControllerBackend(QObject):
     # Raw event handler
     # ------------------------------------------------------------------
 
-    @Slot(str, float)
-    def _on_raw_event(self, code: str, value: float) -> None:
+    @Slot(object)
+    def _on_raw_event(self, bundle: object) -> None:
+        event_code = bundle.get("code", "") if isinstance(bundle, dict) else ""
+        state_value = bundle.get("value", 0.0) if isinstance(bundle, dict) else 0.0
+
         # Guide button press → pause is allowed even without TV window focus
         # (game is in foreground; user presses Guide to summon pause menu)
         # Only act on press (value == 1.0), not release.
-        if code == "BTN_MODE" and value == 1.0 and bool(getattr(self._game_backend, "isSessionActive", False)):
-            self._handle_button(code)
+        if event_code == "BTN_MODE" and state_value == 1.0 and bool(getattr(self._game_backend, "isSessionActive", False)):
+            self._handle_button(event_code)
             return
 
         if bool(getattr(self._game_backend, "isSessionActive", False)):
@@ -570,13 +601,13 @@ class ControllerBackend(QObject):
         if not self._tv_window_active():
             return
 
-        event_type = self._classify_event_type(code)
+        event_type = self._classify_event_type(event_code)
 
         if event_type == "button":
-            if value == 1.0:  # button pressed (not released)
-                self._handle_button(code)
+            if state_value == 1.0:  # button pressed (not released)
+                self._handle_button(event_code)
         elif event_type == "axis":
-            self._handle_axis(code, value)
+            self._handle_axis(event_code, state_value)
 
     def _classify_event_type(self, code: str) -> str:
         if code in self._BUTTON_MAP:

@@ -22,7 +22,6 @@ Item {
     }
 
     scale: root.isFocused ? 1.04 : 1.0
-    Behavior on scale { NumberAnimation { duration: 80 } }
 
     // Outer glow — extends OUTSIDE the card body, centered on Item
     Rectangle {
@@ -32,7 +31,6 @@ Item {
         radius: 14
         color: "#ff79c6"
         opacity: root.isFocused ? 0.15 : 0.0
-        Behavior on opacity { NumberAnimation { duration: 120 } }
     }
 
     // Inner glow
@@ -43,7 +41,6 @@ Item {
         radius: 11
         color: "#ff79c6"
         opacity: root.isFocused ? 0.25 : 0.0
-        Behavior on opacity { NumberAnimation { duration: 120 } }
     }
 
     // Main card body — layer.enabled clips image to rounded corners
@@ -54,8 +51,6 @@ Item {
         color: "#1e1f29"
         border.color: root.isFocused ? "#ff79c6" : "#44475a"
         border.width: root.isFocused ? 2 : 1
-
-        Behavior on border.color { ColorAnimation { duration: 60 } }
 
         Image {
             id: coverImage

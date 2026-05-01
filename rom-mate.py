@@ -195,6 +195,7 @@ from rom_mate.cover import (
     cleanup_cached_cover_for_game,
     cover_cache_extension_from_payload,
     cover_url_from_rom_payload,
+    filter_to_server_host,
     installed_cover_cache_key,
     on_cover_reply,
     queue_cover_load,
@@ -375,7 +376,7 @@ from rom_mate.server import (
     server_base_url,
     server_platform_ids,
 )
-from rom_mate.background import AutoCloudSaveUploadWorker, DetailsCloudRecordsWorker, InstallDownloadWorker, InstallFinalizeWorker
+from rom_mate.background import AutoCloudSaveUploadWorker, DetailsCloudRecordsWorker, InstallDownloadWorker, InstallFinalizeWorker, MissingCoverReplenishWorker
 from rom_mate.ui.mixins.cloud_mixin import CloudSaveMixin
 from rom_mate.ui.mixins.emulator_ui_mixin import EmulatorUIMixin
 from rom_mate.ui.mixins.install_mixin import InstallMixin
@@ -384,8 +385,8 @@ from rom_mate.ui.mixins.details_view_mixin import DetailsViewMixin
 
 class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin, QMainWindow):
     _emulator_refresh_requested = Signal()
-    _toast_requested = Signal(str, str)  # message, level
-    _firmware_download_progress = Signal(int, int, float)  # downloaded_bytes, total_bytes, speed_bps
+    _toast_requested = Signal(object)
+    _firmware_download_progress = Signal(object)
     _firmware_download_done = Signal(str)  # error string (empty on success)
     _platform_games_ready = Signal(str)  # platform_label — results staged in _platform_games_results
 
@@ -511,6 +512,8 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self._pcgw_worker: QObject | None = None
         self._rom_detail_thread: QThread | None = None
         self._rom_detail_worker = None
+        self._cover_replenish_thread: QThread | None = None
+        self._cover_replenish_worker = None
         self._pcgw_paths_cache: dict[str, list[str]] = {}
         self._retroarch_core_ids_cache: dict[str, set[str]] = {}
         self._platform_default_emulator_cache: dict[str, str] = {}
@@ -699,6 +702,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
     def _switch_to_tv_mode(self) -> None:
         from PySide6.QtQml import QQmlApplicationEngine
         from PySide6.QtCore import QUrl
+        from PySide6.QtQuickControls2 import QQuickStyle
 
         if getattr(self, "install_in_progress", False):
             from PySide6.QtWidgets import QMessageBox
@@ -712,51 +716,77 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
                 return
 
         self._save_config(self.config)
+        self.session_poll_timer.stop()
 
         if self._tv_engine is None:
+            QQuickStyle.setStyle("Basic")
+            from PySide6.QtCore import Qt
+            from PySide6.QtWidgets import QApplication
+            QApplication.setEffectEnabled(Qt.UIEffect.UI_AnimateCombo, False)
+            QApplication.setEffectEnabled(Qt.UIEffect.UI_AnimateMenu, False)
+            QApplication.setEffectEnabled(Qt.UIEffect.UI_AnimateToolBox, False)
+            QApplication.setEffectEnabled(Qt.UIEffect.UI_AnimateTooltip, False)
+            QApplication.setEffectEnabled(Qt.UIEffect.UI_FadeMenu, False)
+            QApplication.setEffectEnabled(Qt.UIEffect.UI_FadeTooltip, False)
             from rom_mate.tv.bridge.app_backend import AppBackend
             from rom_mate.tv.bridge.cloud_backend import CloudBackend
             from rom_mate.tv.bridge.controller import ControllerBackend
             from rom_mate.tv.bridge.game_backend import GameBackend
-            from rom_mate.tv.bridge.pause_backend import PauseBackend
             from rom_mate.tv.bridge.image_provider import CoverImageProvider
+            from rom_mate.tv.bridge.pause_backend import PauseBackend
 
             image_cache_dir = self._image_cache_dir()
-            cover_url_map: dict[str, str] = {
-                g["cover_url"]: g["cached_cover_path"]
-                for g in self.config.get("installed_games", [])
-                if isinstance(g, dict) and g.get("cover_url") and g.get("cached_cover_path")
-            }
-            app_backend = AppBackend(self.config, image_cache_dir, parent=None)
+            app_backend = AppBackend(
+                self.config,
+                image_cache_dir,
+                parent=None,
+            )
             cloud_backend = CloudBackend(self.config, parent=None)
             game_backend = GameBackend(self.config, self, parent=None)
             pause_backend = PauseBackend(game_backend=game_backend)
-            game_backend.installComplete.connect(
-                lambda ok, _msg, _game: app_backend.syncConfig(self.config) if ok else None
-            )
-            game_backend.uninstallComplete.connect(
-                lambda ok, _msg, _game: app_backend.syncConfig(self.config) if ok else None
-            )
-
-            def _on_tv_install(ok: bool, _msg: str, _game: object) -> None:
-                if ok:
-                    self.library_games = self.config.get("installed_games", [])
-                    app_backend.libraryGamesChanged.emit()
-
-            def _on_tv_uninstall(ok: bool, _msg: str, _game: object) -> None:
-                if ok:
-                    self.library_games = self.config.get("installed_games", [])
-                    app_backend.libraryGamesChanged.emit()
-
-            game_backend.installComplete.connect(_on_tv_install)
-            game_backend.uninstallComplete.connect(_on_tv_uninstall)
-            app_backend.switchToDesktopModeRequested.connect(self._switch_to_desktop_mode)
-            app_backend.saveConfigRequested.connect(lambda: self._save_config(self.config))
             controller_backend = ControllerBackend(
                 app_backend=app_backend,
                 game_backend=game_backend,
                 parent=None,
             )
+            self._tv_controller_backend = controller_backend
+            self._tv_game_backend = game_backend
+            self._tv_pause_backend = pause_backend
+            game_backend.pauseRequested.connect(pause_backend.openForActiveSession)
+            game_backend.installComplete.connect(
+                lambda b: app_backend.syncConfig(self.config) if (b.get("success") if isinstance(b, dict) else False) else None
+            )
+            def _on_tv_install(bundle: object) -> None:
+                ok = bundle.get("success") if isinstance(bundle, dict) else False
+                if ok:
+                    self.library_games = self.config.get("installed_games", [])
+                    app_backend.libraryGamesChanged.emit()
+                    app_backend.highlyRatedGamesChanged.emit()
+                    app_backend.favoritesGamesChanged.emit()
+                    app_backend.newAdditionsGamesChanged.emit()
+
+            def _on_tv_uninstall(bundle: object) -> None:
+                ok = bundle.get("success") if isinstance(bundle, dict) else False
+                if ok:
+                    self.library_games = self.config.get("installed_games", [])
+                    app_backend.libraryGamesChanged.emit()
+                    app_backend.highlyRatedGamesChanged.emit()
+                    app_backend.favoritesGamesChanged.emit()
+                    app_backend.newAdditionsGamesChanged.emit()
+
+            game_backend.installComplete.connect(_on_tv_install)
+            game_backend.uninstallComplete.connect(_on_tv_uninstall)
+            app_backend.switchToDesktopModeRequested.connect(self._switch_to_desktop_mode)
+            app_backend.saveConfigRequested.connect(lambda: self._save_config(self.config))
+
+            self._tv_app_backend = app_backend
+            self._tv_cloud_backend = cloud_backend
+
+            cover_url_map: dict[str, str] = {
+                g["cover_url"]: g["cached_cover_path"]
+                for g in self.config.get("installed_games", [])
+                if isinstance(g, dict) and g.get("cover_url") and g.get("cached_cover_path")
+            }
             cover_provider = CoverImageProvider(
                 image_cache_dir,
                 self.config.get("api_token", ""),
@@ -765,6 +795,11 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             )
 
             engine = QQmlApplicationEngine()
+            engine.rootContext().setContextProperty("appBackend", app_backend)
+            engine.rootContext().setContextProperty("cloudBackend", cloud_backend)
+            engine.rootContext().setContextProperty("gameBackend", game_backend)
+            engine.rootContext().setContextProperty("pauseBackend", pause_backend)
+            engine.rootContext().setContextProperty("controllerBackend", controller_backend)
             import PySide6 as _pyside6_pkg
             _pyside6_qml_dir = Path(_pyside6_pkg.__file__).parent / "Qt" / "qml"
             if _pyside6_qml_dir.exists():
@@ -775,63 +810,34 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             engine.addImportPath(str(qml_root / "components"))
             engine.addImportPath(str(qml_root / "theme"))
             engine.addImageProvider("covers", cover_provider)
-            engine.rootContext().setContextProperty("appBackend", app_backend)
-            engine.rootContext().setContextProperty("cloudBackend", cloud_backend)
-            engine.rootContext().setContextProperty("gameBackend", game_backend)
-            engine.rootContext().setContextProperty("controllerBackend", controller_backend)
-            engine.rootContext().setContextProperty("pauseBackend", pause_backend)
             qml_path = Path(__file__).parent / "rom_mate" / "tv" / "qml" / "Main.qml"
             engine.load(QUrl.fromLocalFile(str(qml_path)))
             if not engine.rootObjects():
-                self._show_toast("TV Mode failed to load. Check that PySide6 QtQuick is available.", "error")
+                print("[TV] QML load failed!", flush=True)
                 engine.deleteLater()
                 return
-
-            pause_window_qml = Path(__file__).parent / "rom_mate" / "tv" / "qml" / "windows" / "PauseWindow.qml"
-            engine.load(QUrl.fromLocalFile(str(pause_window_qml)))
-            all_roots = engine.rootObjects()
-            pause_window = all_roots[1] if len(all_roots) >= 2 else None
-
             self._tv_engine = engine
-            self._tv_window = all_roots[0]
-            self._tv_controller_backend = controller_backend
-            self._tv_app_backend = app_backend
-            self._tv_cloud_backend = cloud_backend
-            self._tv_game_backend = game_backend
-            self._tv_pause_window = pause_window
-            self._tv_pause_backend = pause_backend
-            controller_backend.set_focus_windows([self._tv_window, pause_window])
-            controller_backend.set_pause_backend(pause_backend)
+            self._tv_window = engine.rootObjects()[0]
 
+            from PySide6.QtQml import QQmlComponent, QQmlEngine
+            pause_qml_path = Path(__file__).parent / "rom_mate" / "tv" / "qml" / "windows" / "PauseWindow.qml"
+            pause_component = QQmlComponent(engine, QUrl.fromLocalFile(str(pause_qml_path)))
+            pause_window = pause_component.create(engine.rootContext())
+            if pause_component.isError():
+                print("[TV] PauseWindow load failed:", pause_component.errorString(), flush=True)
+                pause_window = None
             if pause_window is not None:
-                def _on_tv_pause_requested() -> None:
-                    if pause_backend.visible:
-                        return
-                    pause_backend.openForActiveSession()
-                    if self._tv_pause_window is not None:
-                        try:
-                            self._tv_pause_window.raise_()
-                            self._tv_pause_window.requestActivate()
-                        except RuntimeError:
-                            pass
+                QQmlEngine.setObjectOwnership(pause_window, QQmlEngine.ObjectOwnership.CppOwnership)
+            self._tv_pause_window = pause_window
 
-                game_backend.pauseRequested.connect(_on_tv_pause_requested)
-                game_backend.sessionEnded.connect(pause_backend.forceClose)
+            controller_backend.set_pause_backend(pause_backend)
+            focus_wins = [w for w in [self._tv_window, pause_window] if w is not None]
+            controller_backend.set_focus_windows(focus_wins)
 
-        if self._tv_controller_backend is not None:
-            self._tv_controller_backend.start()
-        if self._tv_app_backend is not None:
-            self._tv_app_backend.syncConfig(self.config)
-            self._tv_app_backend.connectToServer()
-        if self._tv_game_backend is not None:
-            self._tv_game_backend.syncConfig(self.config)
-        if self._tv_cloud_backend is not None:
-            self._tv_cloud_backend.syncConfig(self.config)
-
-        self.session_poll_timer.stop()
-        self.hide()
+        self._tv_controller_backend.start()
+        self._tv_app_backend.connectToServer()
         self._tv_window.showFullScreen()
-        self._tv_window.requestActivate()
+        self.hide()
 
     def _switch_to_desktop_mode(self) -> None:
         if self._tv_game_backend is not None and self._tv_game_backend.isSessionActive:
@@ -839,7 +845,10 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         if getattr(self, "_tv_pause_backend", None) is not None:
             self._tv_pause_backend.forceClose()
         if getattr(self, "_tv_pause_window", None) is not None:
-            self._tv_pause_window.hide()
+            try:
+                self._tv_pause_window.hide()
+            except RuntimeError:
+                self._tv_pause_window = None
         if self._tv_window is not None:
             self._tv_window.hide()
         if self._tv_controller_backend is not None:
@@ -1916,6 +1925,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             "retroachievements_token": "",
             "tv_mode_home_view": "home",
             "tv_guide_button_exclusion_list": [],
+            "tv_guide_button_default_opt_outs": [],
             "tv_mode_last_active": False,
         }
 
@@ -2060,6 +2070,10 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         values["installed_games"] = self.library_games
         values["tv_mode_home_view"] = self.config.get("tv_mode_home_view", "home")
         values["tv_guide_button_exclusion_list"] = self.config.get("tv_guide_button_exclusion_list", values["tv_guide_button_exclusion_list"])
+        values["tv_guide_button_default_opt_outs"] = self.config.get(
+            "tv_guide_button_default_opt_outs",
+            values["tv_guide_button_default_opt_outs"]
+        )
         values["tv_mode_last_active"] = self.config.get("tv_mode_last_active", False)
         values["emulator_source_installs"] = self._normalize_emulator_source_installs(
             self.config.get("emulator_source_installs", {})
@@ -2164,7 +2178,10 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self._ra_login_thread = thread
         self._ra_login_worker = worker
 
-    def _on_ra_login_finished(self, username: str, token: str, error: str) -> None:
+    def _on_ra_login_finished(self, bundle: object) -> None:
+        username = bundle.get("username", "") if isinstance(bundle, dict) else ""
+        token = bundle.get("token", "") if isinstance(bundle, dict) else ""
+        error = bundle.get("error", "") if isinstance(bundle, dict) else str(bundle)
         if self.ra_login_button is not None:
             self.ra_login_button.setEnabled(True)
         if error:
@@ -2277,8 +2294,55 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
     def _server_base_url(self) -> str:
         return server_base_url(self.config)
 
+    def _start_missing_cover_replenish(self) -> None:
+        if self._cover_replenish_thread is not None and self._cover_replenish_thread.isRunning():
+            return
+        games_to_fetch: list[tuple[str, dict, str]] = []
+        for game in self.library_games:
+            if not isinstance(game, dict):
+                continue
+            cached_path = self._cached_cover_path_from_game(game)
+            if cached_path is not None and cached_path.exists() and cached_path.is_file():
+                continue
+            cover_url = self._resolved_cover_url_for_game(game)
+            if not cover_url:
+                continue
+            games_to_fetch.append((self._game_key(game), dict(game), cover_url))
+        if not games_to_fetch:
+            return
+        auth_headers = self._auth_headers()
+        image_cache_dir = self._image_cache_dir()
+        worker = MissingCoverReplenishWorker(games_to_fetch, auth_headers, image_cache_dir)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.game_cover_cached.connect(self._on_cover_replenish_game_cached)
+        worker.finished.connect(self._on_cover_replenish_finished)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        self._cover_replenish_thread = thread
+        self._cover_replenish_worker = worker
+        thread.start()
+
+    def _on_cover_replenish_game_cached(self, bundle: object) -> None:
+        game_key = bundle.get("game_key", "") if isinstance(bundle, dict) else ""
+        new_path = bundle.get("path", "") if isinstance(bundle, dict) else ""
+        if not new_path:
+            return
+        for game in self.library_games:
+            if isinstance(game, dict) and self._game_key(game) == game_key:
+                game["cached_cover_path"] = new_path
+                break
+
+    def _on_cover_replenish_finished(self) -> None:
+        self._save_config(self.config)
+        self._cover_replenish_thread = None
+        self._cover_replenish_worker = None
+
     def _resolve_cover_url(self, value: Any) -> str:
-        return resolve_cover_url(value, self._server_base_url())
+        base_url = self._server_base_url()
+        return filter_to_server_host(resolve_cover_url(value, base_url), base_url)
 
     def _cover_url_from_rom_payload(self, payload: dict[str, Any]) -> str:
         return cover_url_from_rom_payload(payload, self._resolve_cover_url)
@@ -2423,6 +2487,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             self._populate_server_platforms(platforms)
             self._set_server_status("Connected", self._theme_color("success", "#50fa7b"))
             self._update_top_bar_identity()
+            self._start_missing_cover_replenish()
             return
         except (HTTPError, URLError, ValueError, json.JSONDecodeError) as error:
             last_error = error
@@ -3126,9 +3191,12 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             ignore_extensions=ignore_extensions,
         )
 
-    def _show_toast(self, message: str, level: str = "info") -> None:
+    def _show_toast(self, bundle: object) -> None:
+        message = bundle.get("message", "") if isinstance(bundle, dict) else str(bundle)
+        level = bundle.get("level", "info") if isinstance(bundle, dict) else "info"
         del level
         resolve_show_toast(self, message)
+
 
 def main() -> None:
     app = QApplication(sys.argv)

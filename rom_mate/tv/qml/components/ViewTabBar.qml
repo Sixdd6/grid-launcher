@@ -60,13 +60,6 @@ Item {
                             text: modelData.icon
                             font.pixelSize: index === root.currentIndex ? 24 : 20
                             color: index === root.currentIndex ? "#ff79c6" : "#bd93f9"
-
-                            Behavior on font.pixelSize {
-                                NumberAnimation { duration: 120 }
-                            }
-                            Behavior on color {
-                                ColorAnimation { duration: 120 }
-                            }
                         }
 
                         Text {
@@ -75,10 +68,6 @@ Item {
                             font.pixelSize: 11
                             font.bold: index === root.currentIndex
                             color: index === root.currentIndex ? "#f8f8f2" : "#6272a4"
-
-                            Behavior on color {
-                                ColorAnimation { duration: 120 }
-                            }
                         }
                     }
 

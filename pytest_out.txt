@@ -1,2 +1,12 @@
-........................................................................ [  8%]
-........................
+============================= test session starts =============================
+platform win32 -- Python 3.13.13, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\Sam\Programming\rom-mate-neo\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\Sam\Programming\rom-mate-neo
+collecting ... collected 4 items
+
+tests/test_tv_image_provider.py::TestCoverImageProviderCacheHit::test_does_not_import_loader PASSED [ 25%]
+tests/test_tv_image_provider.py::TestCoverImageProviderCacheHit::test_requestImage_returns_image_from_cached_path PASSED [ 50%]
+tests/test_tv_image_provider.py::TestCoverImageProviderCacheHit::test_requestImage_returns_null_for_empty_id PASSED [ 75%]
+tests/test_tv_image_provider.py::TestCoverImageProviderCacheHit::test_requestImage_returns_null_for_unknown_key_without_network PASSED [100%]
+
+============================== 4 passed in 4.26s ==============================

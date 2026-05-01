@@ -83,6 +83,10 @@ from rom_mate.ui.emulators import (
     save_button_label,
 )
 
+_TV_GUIDE_DEFAULT_EXCLUSIONS: frozenset[str] = frozenset({
+    "rpcs3", "cemu", "dolphin", "xemu", "xenia", "retroarch"
+})
+
 
 class EmulatorUIMixin:
     """Mixin containing emulator management UI methods for MainWindow."""
@@ -507,8 +511,10 @@ class EmulatorUIMixin:
                     fw_btn.clicked.connect(
                         lambda checked=False, ep=path_text, pp=str(pup_path): (
                             self._show_toast(
-                                "PS3 firmware installation started — follow the RPCS3 dialog to complete.",
-                                level="success",
+                                {
+                                    "message": "PS3 firmware installation started — follow the RPCS3 dialog to complete.",
+                                    "level": "success",
+                                }
                             )
                             if trigger_rpcs3_firmware_install(ep, pp)
                             else self._show_toast(
@@ -1019,9 +1025,10 @@ class EmulatorUIMixin:
         install_game = self._build_source_emulator_install_game(source_entry, "source_emulator_update")
         self._start_async_install(install_game)
 
-    def _on_source_version_check_finished_slot(
-        self, installed_tag: str, available_tag: str, error_msg: str
-    ) -> None:
+    def _on_source_version_check_finished_slot(self, bundle: object) -> None:
+        installed_tag = bundle.get("installed_tag", "") if isinstance(bundle, dict) else ""
+        available_tag = bundle.get("available_tag", "") if isinstance(bundle, dict) else ""
+        error_msg = bundle.get("error", "") if isinstance(bundle, dict) else str(bundle)
         index = getattr(self, "_source_check_index", 0)
         self._on_source_version_check_finished(installed_tag, available_tag, error_msg, index)
 
@@ -1107,17 +1114,55 @@ class EmulatorUIMixin:
         selected_row = row if 0 <= row < len(emulators) else -1
         existing_entry = emulators[selected_row] if selected_row >= 0 else None
 
+        _config_exclusion_list = self.config.get("tv_guide_button_exclusion_list", [])
+        if not isinstance(_config_exclusion_list, list):
+            _config_exclusion_list = []
+        _config_exclusion_lower = {e.lower() for e in _config_exclusion_list if isinstance(e, str)}
+        _opt_outs_raw = self.config.get("tv_guide_button_default_opt_outs", [])
+        _opt_outs_lower = {e.lower() for e in _opt_outs_raw if isinstance(e, str)} if isinstance(_opt_outs_raw, list) else set()
+        _existing_name_lower = existing_entry.get("name", "").strip().lower() if existing_entry else ""
+        _is_guide_default = _existing_name_lower in _TV_GUIDE_DEFAULT_EXCLUSIONS
+        _is_guide_excluded = (
+            (_is_guide_default and _existing_name_lower not in _opt_outs_lower)
+            or (not _is_guide_default and _existing_name_lower in _config_exclusion_lower)
+        )
+
         dialog = EmulatorConfigDialog(
             self,
             emulator=existing_entry,
             is_new_entry=selected_row < 0,
             save_strategy_values=["auto", "single_file", "folder"],
+            guide_button_excluded=_is_guide_excluded,
+            is_guide_button_default_locked=_is_guide_default,
         )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
         entry = dialog.entry_payload()
         entry_name = entry.get("name", "").strip()
+        if _is_guide_default:
+            _opt_outs = self.config.get("tv_guide_button_default_opt_outs", [])
+            if not isinstance(_opt_outs, list):
+                _opt_outs = []
+            if not dialog.guide_button_excluded():
+                if entry_name.lower() not in {e.lower() for e in _opt_outs if isinstance(e, str)}:
+                    _opt_outs = _opt_outs + [entry_name]
+            else:
+                _opt_outs = [e for e in _opt_outs if isinstance(e, str) and e.lower() != entry_name.lower()]
+            self.config["tv_guide_button_default_opt_outs"] = _opt_outs
+        else:
+            _exclusion_list = self.config.get("tv_guide_button_exclusion_list", [])
+            if not isinstance(_exclusion_list, list):
+                _exclusion_list = []
+            if dialog.guide_button_excluded():
+                _entry_name_lower = entry_name.lower()
+                _existing_in_list_lower = {e.lower() for e in _exclusion_list if isinstance(e, str)}
+                if _entry_name_lower not in _TV_GUIDE_DEFAULT_EXCLUSIONS and _entry_name_lower not in _existing_in_list_lower:
+                    _exclusion_list = _exclusion_list + [entry_name]
+            else:
+                _exclusion_list = [e for e in _exclusion_list if isinstance(e, str) and e.lower() != entry_name.lower()]
+            self.config["tv_guide_button_exclusion_list"] = _exclusion_list
+
         executable_path = entry.get("path", "").strip()
         archive_path_text = entry.get("archive_path", "").strip()
         if archive_path_text:
@@ -1250,7 +1295,7 @@ class EmulatorUIMixin:
         self._clear_emulator_selection()
         self._save_config(self.config)
         if is_new_manual_entry:
-            self._show_toast(f"Added emulator '{name}'.", level="success")
+            self._show_toast({"message": f"Added emulator '{name}'.", "level": "success"})
 
     def _remove_emulator_at_index(self, index: int) -> None:
         emulators = self._emulators()
@@ -1423,7 +1468,7 @@ class EmulatorUIMixin:
 
         def _worker() -> None:
             def _progress(downloaded: int, total: int, speed: float) -> None:
-                self._firmware_download_progress.emit(downloaded, total, speed)
+                self._firmware_download_progress.emit({"downloaded": downloaded, "total": total, "speed": speed})
 
             warnings = download_ps3_firmware_direct(firmware_dirs, skip_existing=True, progress_callback=_progress)
             if warnings and platform_id is not None:

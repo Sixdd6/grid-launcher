@@ -130,5 +130,54 @@ class EmulatorConfigDialogAddNewTests(unittest.TestCase):
         self.assertEqual(dialog.entry_payload()["path"], "")
 
 
+class EmulatorConfigDialogGuideButtonTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_guide_button_checkbox_unchecked_by_default_for_new_entry(self) -> None:
+        dialog = EmulatorConfigDialog(None, is_new_entry=True)
+
+        self.assertFalse(dialog.guide_button_excluded())
+
+    def test_guide_button_checkbox_checked_when_excluded_flag_set(self) -> None:
+        dialog = EmulatorConfigDialog(None, guide_button_excluded=True)
+
+        self.assertTrue(dialog.guide_button_excluded())
+
+    def test_guide_button_default_checkbox_is_enabled(self) -> None:
+        dialog = EmulatorConfigDialog(
+            None,
+            guide_button_excluded=True,
+            is_guide_button_default_locked=True,
+        )
+
+        self.assertTrue(dialog.guide_button_checkbox.isEnabled())
+
+    def test_guide_button_default_checkbox_can_be_unchecked(self) -> None:
+        dialog = EmulatorConfigDialog(
+            None,
+            guide_button_excluded=True,
+            is_guide_button_default_locked=True,
+        )
+
+        dialog.guide_button_checkbox.setChecked(False)
+        self.assertFalse(dialog.guide_button_excluded())
+
+    def test_guide_button_default_tooltip_set(self) -> None:
+        dialog = EmulatorConfigDialog(
+            None,
+            guide_button_excluded=True,
+            is_guide_button_default_locked=True,
+        )
+
+        self.assertIn("by default", dialog.guide_button_checkbox.toolTip())
+
+    def test_guide_button_checkbox_not_in_entry_payload(self) -> None:
+        dialog = EmulatorConfigDialog(None, is_new_entry=True)
+
+        self.assertNotIn("guide_button_excluded", dialog.entry_payload())
+
+
 if __name__ == "__main__":
     unittest.main()

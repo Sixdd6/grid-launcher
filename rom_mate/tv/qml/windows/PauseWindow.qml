@@ -25,14 +25,24 @@ Window {
         }
     }
 
+    Timer {
+        id: resumeTimer
+        interval: 150
+        onTriggered: pauseBackend.resumeGame()
+    }
+
+    Component.onDestruction: {
+        resumeTimer.stop()
+    }
+
     Item {
         id: keyHandler
         anchors.fill: parent
         focus: true
 
-        Keys.onEscapePressed: pauseBackend.resumeGame()
-        Keys.onReturnPressed: _dispatchAction(_currentIndex)
-        Keys.onEnterPressed: _dispatchAction(_currentIndex)
+        Keys.onEscapePressed: resumeTimer.start()
+        Keys.onReturnPressed: resumeTimer.start()
+        Keys.onEnterPressed: resumeTimer.start()
     }
 
     Rectangle {
@@ -122,7 +132,7 @@ Window {
     }
 
     function _dispatchAction(index) {
-        if (index === 0) pauseBackend.resumeGame()
+        if (index === 0) resumeTimer.start()
         else if (index === 1) pauseBackend.quitGame()
     }
 

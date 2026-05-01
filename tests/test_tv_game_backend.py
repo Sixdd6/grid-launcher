@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -326,8 +327,8 @@ class TestGameBackendSync(unittest.TestCase):
 
         original_init = _ProcessWatchThread.__init__
 
-        def capture_thread(self_t, b):
-            original_init(self_t, b)
+        def capture_thread(self_t, b, **kwargs):
+            original_init(self_t, b, **kwargs)
             created_threads.append(self_t)
 
         with patch("rom_mate.tv.bridge.game_backend._subprocess_popen", return_value=mock_process), patch.object(
@@ -513,7 +514,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
         statuses: list[str] = []
         backend.cloudSyncStatus.connect(statuses.append)
 
-        backend._on_auto_upload_done(True, "Auto-uploaded 1 save file(s).")
+        backend._on_auto_upload_done({"success": True, "message": "Auto-uploaded 1 save file(s)."})
 
         self.assertEqual(statuses, ["Auto-uploaded 1 save file(s)."])
 
@@ -524,7 +525,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
         statuses: list[str] = []
         backend.cloudSyncStatus.connect(statuses.append)
 
-        backend._on_auto_upload_done(False, "")
+        backend._on_auto_upload_done({"success": False, "message": ""})
 
         self.assertEqual(statuses, [])
 
@@ -639,7 +640,15 @@ class TestGameBackendInstall(unittest.TestCase):
         backend._install_target_game = {"id": "1", "name": "Test"}
 
         received: list[tuple[bool, str, object]] = []
-        backend.installComplete.connect(lambda ok, msg, payload: received.append((ok, msg, payload)))
+        backend.installComplete.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                    bundle.get("game", {}) if isinstance(bundle, dict) else {},
+                )
+            )
+        )
 
         backend._on_install_download_done("", "network timeout")
 
@@ -663,10 +672,25 @@ class TestGameBackendInstall(unittest.TestCase):
         backend._install_target_game = {"id": "99", "name": "Test"}
 
         received: list[tuple[bool, str, object]] = []
-        backend.installComplete.connect(lambda ok, msg, payload: received.append((ok, msg, payload)))
+        backend.installComplete.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                    bundle.get("game", {}) if isinstance(bundle, dict) else {},
+                )
+            )
+        )
 
         prepared_game = {"id": "99", "name": "Test", "extracted_path": "/games/Test/Test.iso"}
-        backend._on_install_finalize_done(prepared_game, "/tmp/archive.zip", "", "")
+        backend._on_install_finalize_done(
+            {
+                "game_json": json.dumps(prepared_game),
+                "archive_path": "/tmp/archive.zip",
+                "warning": "",
+                "error": "",
+            }
+        )
 
         self.assertEqual(len(received), 1)
         ok, msg, payload = received[0]
@@ -721,7 +745,15 @@ class TestGameBackendInstall(unittest.TestCase):
         )
 
         received: list[tuple[bool, str, object]] = []
-        backend.uninstallComplete.connect(lambda ok, msg, payload: received.append((ok, msg, payload)))
+        backend.uninstallComplete.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                    bundle.get("game", {}) if isinstance(bundle, dict) else {},
+                )
+            )
+        )
 
         backend.uninstallGame({"id": "77", "name": "Test", "local_path": ""})
 
@@ -746,10 +778,25 @@ class TestGameBackendInstall(unittest.TestCase):
         backend._install_target_game = {"id": "55", "name": "Test"}
 
         received: list[tuple[bool, str, object]] = []
-        backend.installComplete.connect(lambda ok, msg, payload: received.append((ok, msg, payload)))
+        backend.installComplete.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                    bundle.get("game", {}) if isinstance(bundle, dict) else {},
+                )
+            )
+        )
 
         prepared_game = {"id": "55", "name": "Test", "extracted_path": ""}
-        backend._on_install_finalize_done(prepared_game, "/tmp/archive.zip", "", "")
+        backend._on_install_finalize_done(
+            {
+                "game_json": json.dumps(prepared_game),
+                "archive_path": "/tmp/archive.zip",
+                "warning": "",
+                "error": "",
+            }
+        )
 
         self.assertEqual(len(received), 1)
         ok, _msg, payload = received[0]
@@ -784,7 +831,14 @@ class TestGameBackendInstall(unittest.TestCase):
         backend._install_target_game = {"id": "99", "name": "Test"}
 
         prepared_game = {"id": "99", "name": "Test", "extracted_path": "/games/Test/Test.iso"}
-        backend._on_install_finalize_done(prepared_game, "/tmp/archive.zip", "", "")
+        backend._on_install_finalize_done(
+            {
+                "game_json": json.dumps(prepared_game),
+                "archive_path": "/tmp/archive.zip",
+                "warning": "",
+                "error": "",
+            }
+        )
 
         mock_main_window._save_config.assert_called_once()
 
@@ -805,7 +859,14 @@ class TestGameBackendInstall(unittest.TestCase):
         )
         backend._install_target_game = {"id": "99", "name": "Test"}
 
-        backend._on_install_finalize_done(None, "/tmp/archive.zip", "", "Archive error")
+        backend._on_install_finalize_done(
+            {
+                "game_json": "",
+                "archive_path": "/tmp/archive.zip",
+                "warning": "",
+                "error": "Archive error",
+            }
+        )
 
         mock_main_window._save_config.assert_not_called()
 
@@ -850,7 +911,15 @@ class TestGameBackendInstall(unittest.TestCase):
         )
 
         received: list[tuple[bool, str, object]] = []
-        backend.uninstallComplete.connect(lambda ok, msg, payload: received.append((ok, msg, payload)))
+        backend.uninstallComplete.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                    bundle.get("game", {}) if isinstance(bundle, dict) else {},
+                )
+            )
+        )
 
         backend.uninstallGame({"id": "nonexistent", "name": "Test"})
 
@@ -987,7 +1056,15 @@ class TestGameBackendInstallActiveFinalize(unittest.TestCase):
         backend._install_target_game = {"rom_id": "123", "name": "In Progress Game"}
 
         received: list[tuple[bool, str, object]] = []
-        backend.installComplete.connect(lambda ok, msg, payload: received.append((ok, msg, payload)))
+        backend.installComplete.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                    bundle.get("game", {}) if isinstance(bundle, dict) else {},
+                )
+            )
+        )
 
         with patch("rom_mate.tv.bridge.game_backend.QThread.start") as mock_thread_start:
             backend.installGame({"id": "99", "name": "New Game"})

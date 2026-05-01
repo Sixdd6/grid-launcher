@@ -1259,7 +1259,9 @@ class InstallMixin:
         return True
 
 
-    def _on_async_install_finished(self, archive_path: str, error: str) -> None:
+    def _on_async_install_finished(self, bundle: object) -> None:
+        archive_path = bundle.get("archive_path", "") if isinstance(bundle, dict) else ""
+        error = bundle.get("error", "") if isinstance(bundle, dict) else str(bundle)
         game = self.install_pending_game
         entry_id = self.active_download_entry_id
         self.install_in_progress = False
@@ -1350,13 +1352,11 @@ class InstallMixin:
         thread.start()
 
 
-    def _on_async_install_finalize_finished(
-        self,
-        prepared_game: object,
-        archive_path: str,
-        warning_text: str,
-        error: str,
-    ) -> None:
+    def _on_async_install_finalize_finished(self, bundle: object) -> None:
+        prepared_game = bundle.get("game") if isinstance(bundle, dict) else None
+        archive_path = bundle.get("archive_path", "") if isinstance(bundle, dict) else ""
+        warning_text = bundle.get("warning", "") if isinstance(bundle, dict) else ""
+        error = bundle.get("error", "") if isinstance(bundle, dict) else str(bundle)
         game = self.install_finalize_game
         entry_id = self.install_finalize_entry_id
         self.install_finalize_in_progress = False
@@ -1428,7 +1428,7 @@ class InstallMixin:
             if entry_id:
                 self._set_download_entry_status(entry_id, "completed")
             self._show_install_warning_if_actionable(warning_text)
-            self._show_toast(f"Updated '{title}' successfully.", level="success")
+            self._show_toast({"message": f"Updated '{title}' successfully.", "level": "success"})
             self._update_download_status_ui()
             self._update_details_action_buttons()
             self._start_next_queued_install()
@@ -1448,9 +1448,9 @@ class InstallMixin:
             if auto_configured:
                 emulator_title = installed_game.get("title", "Emulator")
                 if is_source_update:
-                    self._show_toast(f"Updated emulator '{emulator_title}' from source.", level="success")
+                    self._show_toast({"message": f"Updated emulator '{emulator_title}' from source.", "level": "success"})
                 else:
-                    self._show_toast(f"Installed emulator '{emulator_title}' from source.", level="success")
+                    self._show_toast({"message": f"Installed emulator '{emulator_title}' from source.", "level": "success"})
             else:
                 QMessageBox.warning(
                     self,
@@ -1473,7 +1473,10 @@ class InstallMixin:
         self.install_finalize_worker = None
 
 
-    def _on_async_install_progress(self, downloaded_bytes: int, total_bytes: int, speed_bps: float) -> None:
+    def _on_async_install_progress(self, bundle: object) -> None:
+        downloaded_bytes = bundle.get("downloaded", 0) if isinstance(bundle, dict) else 0
+        total_bytes = bundle.get("total", 0) if isinstance(bundle, dict) else 0
+        speed_bps = bundle.get("speed", 0.0) if isinstance(bundle, dict) else 0.0
         (
             self.active_download_bytes,
             self.active_download_total,
@@ -1489,7 +1492,9 @@ class InstallMixin:
         self._update_download_status_ui()
 
 
-    def _on_async_install_finalize_progress(self, installed_bytes: int, total_bytes: int) -> None:
+    def _on_async_install_finalize_progress(self, bundle: object) -> None:
+        installed_bytes = bundle.get("installed", 0) if isinstance(bundle, dict) else 0
+        total_bytes = bundle.get("total", 0) if isinstance(bundle, dict) else 0
         self.active_install_bytes, self.active_install_total = normalized_transfer_progress(installed_bytes, total_bytes)
         if self.install_finalize_entry_id:
             self._set_download_entry_install_progress(
@@ -1500,7 +1505,10 @@ class InstallMixin:
         self._update_download_status_ui()
 
 
-    def _on_firmware_download_progress(self, downloaded_bytes: int, total_bytes: int, speed_bps: float) -> None:
+    def _on_firmware_download_progress(self, bundle: object) -> None:
+        downloaded_bytes = bundle.get("downloaded", 0) if isinstance(bundle, dict) else 0
+        total_bytes = bundle.get("total", 0) if isinstance(bundle, dict) else 0
+        speed_bps = bundle.get("speed", 0.0) if isinstance(bundle, dict) else 0.0
         self.active_download_bytes = downloaded_bytes
         self.active_download_total = total_bytes
         self.active_download_speed_bps = speed_bps

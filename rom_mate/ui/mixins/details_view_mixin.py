@@ -813,13 +813,11 @@ class DetailsViewMixin:
         self.details_cloud_threads = [item for item in self.details_cloud_threads if item is not thread]
         self.details_cloud_workers = [item for item in self.details_cloud_workers if item is not worker]
 
-    def _on_details_cloud_records_loaded(
-        self,
-        request_id: int,
-        save_type: str,
-        records: object,
-        error: str,
-    ) -> None:
+    def _on_details_cloud_records_loaded(self, bundle: object) -> None:
+        request_id = bundle.get("request_id", -1) if isinstance(bundle, dict) else -1
+        save_type = bundle.get("save_type", "") if isinstance(bundle, dict) else ""
+        records = bundle.get("records", []) if isinstance(bundle, dict) else []
+        error = bundle.get("error", "") if isinstance(bundle, dict) else str(bundle)
         timing_start = getattr(self, "_debug_timing_start", None)
         timing_end = getattr(self, "_debug_timing_end", None)
         started_at = timing_start("_on_details_cloud_records_loaded", request_id=request_id, save_type=save_type) if callable(timing_start) else 0.0

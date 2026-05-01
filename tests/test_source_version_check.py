@@ -26,8 +26,8 @@ class SourceVersionCheckWorkerTests(unittest.TestCase):
             },
             "v0.9.0",
         )
-        results: list[tuple[str, str, str]] = []
-        worker.finished.connect(lambda a, b, c: results.append((a, b, c)))
+        results: list[dict[str, str]] = []
+        worker.finished.connect(lambda payload: results.append(payload))
 
         with patch(
             "rom_mate.background.workers.urlopen",
@@ -36,7 +36,7 @@ class SourceVersionCheckWorkerTests(unittest.TestCase):
             worker.run()
 
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0], ("v0.9.0", "v1.2.3", ""))
+        self.assertEqual(results[0], {"installed_tag": "v0.9.0", "available_tag": "v1.2.3", "error": ""})
 
     def test_github_specific_tag_uses_tags_endpoint(self) -> None:
         worker = SourceVersionCheckWorker(
@@ -48,8 +48,8 @@ class SourceVersionCheckWorkerTests(unittest.TestCase):
             },
             "v0.9.0",
         )
-        results: list[tuple[str, str, str]] = []
-        worker.finished.connect(lambda a, b, c: results.append((a, b, c)))
+        results: list[dict[str, str]] = []
+        worker.finished.connect(lambda payload: results.append(payload))
 
         with patch(
             "rom_mate.background.workers.urlopen",
@@ -72,8 +72,8 @@ class SourceVersionCheckWorkerTests(unittest.TestCase):
             },
             "v0.9.0",
         )
-        results: list[tuple[str, str, str]] = []
-        worker.finished.connect(lambda a, b, c: results.append((a, b, c)))
+        results: list[dict[str, str]] = []
+        worker.finished.connect(lambda payload: results.append(payload))
 
         with patch(
             "rom_mate.background.workers.urlopen",
@@ -82,7 +82,7 @@ class SourceVersionCheckWorkerTests(unittest.TestCase):
             worker.run()
 
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0], ("v0.9.0", "v1.2.3", ""))
+        self.assertEqual(results[0], {"installed_tag": "v0.9.0", "available_tag": "v1.2.3", "error": ""})
 
     def test_direct_provider_emits_direct_with_no_network(self) -> None:
         worker = SourceVersionCheckWorker(
@@ -94,14 +94,14 @@ class SourceVersionCheckWorkerTests(unittest.TestCase):
             },
             "v0.9.0",
         )
-        results: list[tuple[str, str, str]] = []
-        worker.finished.connect(lambda a, b, c: results.append((a, b, c)))
+        results: list[dict[str, str]] = []
+        worker.finished.connect(lambda payload: results.append(payload))
 
         with patch("rom_mate.background.workers.urlopen") as mock_urlopen:
             worker.run()
 
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0], ("v0.9.0", "direct", ""))
+        self.assertEqual(results[0], {"installed_tag": "v0.9.0", "available_tag": "direct", "error": ""})
         mock_urlopen.assert_not_called()
 
     def test_network_error_emits_error(self) -> None:
@@ -114,14 +114,14 @@ class SourceVersionCheckWorkerTests(unittest.TestCase):
             },
             "v0.9.0",
         )
-        results: list[tuple[str, str, str]] = []
-        worker.finished.connect(lambda a, b, c: results.append((a, b, c)))
+        results: list[dict[str, str]] = []
+        worker.finished.connect(lambda payload: results.append(payload))
 
         with patch("rom_mate.background.workers.urlopen", side_effect=URLError("timeout")):
             worker.run()
 
         self.assertEqual(len(results), 1)
-        self.assertTrue(results[0][2])
+        self.assertTrue(results[0].get("error", ""))
 
     def test_http_error_emits_error(self) -> None:
         worker = SourceVersionCheckWorker(
@@ -133,8 +133,8 @@ class SourceVersionCheckWorkerTests(unittest.TestCase):
             },
             "v0.9.0",
         )
-        results: list[tuple[str, str, str]] = []
-        worker.finished.connect(lambda a, b, c: results.append((a, b, c)))
+        results: list[dict[str, str]] = []
+        worker.finished.connect(lambda payload: results.append(payload))
 
         error = HTTPError(
             "https://api.github.com/repos/testowner/testrepo/releases/latest",
@@ -147,7 +147,7 @@ class SourceVersionCheckWorkerTests(unittest.TestCase):
             worker.run()
 
         self.assertEqual(len(results), 1)
-        self.assertTrue(results[0][2])
+        self.assertTrue(results[0].get("error", ""))
 
     def test_unsupported_provider_emits_error(self) -> None:
         worker = SourceVersionCheckWorker(
@@ -158,13 +158,13 @@ class SourceVersionCheckWorkerTests(unittest.TestCase):
             },
             "v0.9.0",
         )
-        results: list[tuple[str, str, str]] = []
-        worker.finished.connect(lambda a, b, c: results.append((a, b, c)))
+        results: list[dict[str, str]] = []
+        worker.finished.connect(lambda payload: results.append(payload))
 
         worker.run()
 
         self.assertEqual(len(results), 1)
-        self.assertTrue(results[0][2])
+        self.assertTrue(results[0].get("error", ""))
 
 
 if __name__ == "__main__":

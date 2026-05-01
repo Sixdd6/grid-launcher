@@ -31,6 +31,15 @@ Item {
         })
     }
 
+    onSharedIndexChanged: {
+        Qt.callLater(function() {
+            var target = root.sharedIndex >= 0 ? root.sharedIndex : 0
+            if (listView.currentIndex !== target && target < root.games.length) {
+                listView.currentIndex = target
+            }
+        })
+    }
+
     signal gameSelected(var game)
 
     Column {
@@ -50,6 +59,7 @@ Item {
             x: root.homeStyle ? 48 : 0
             width: parent.width - (root.homeStyle ? 48 + 48 : 0)
             height: root._cardHeight + (root.homeStyle ? 38 : 18)
+            currentIndex: 0
             orientation: ListView.Horizontal
             spacing: root.homeStyle ? 20 : 12
             clip: !root.homeStyle
@@ -59,12 +69,6 @@ Item {
             keyNavigationEnabled: true
             focus: root.activeFocus
             highlightMoveDuration: 0
-
-            Binding {
-                target: listView
-                property: "currentIndex"
-                value: root.sharedIndex >= 0 ? root.sharedIndex : 0
-            }
             highlightFollowsCurrentItem: false
 
             onCurrentIndexChanged: {

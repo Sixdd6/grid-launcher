@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import "../components"
 
 Item {
@@ -15,16 +14,14 @@ Item {
         id: grid
         anchors.fill: parent
         anchors.margins: 40
+        anchors.rightMargin: 56
+        cacheBuffer: 0
         cellWidth: Math.floor(width / 5)
-            cellHeight: Math.ceil((cellWidth - 40) * 1.5) + 50 + 60
+        cellHeight: Math.ceil((cellWidth - 40) * 1.5) + 50 + 60
         clip: true
         keyNavigationEnabled: true
         keyNavigationWraps: false
-        model: appBackend.libraryGames
-
-        ScrollBar.vertical: ScrollBar {
-            policy: ScrollBar.AsNeeded
-        }
+        model: []
 
         delegate: Item {
             width: grid.cellWidth
@@ -42,6 +39,8 @@ Item {
                 platform: parent.modelData.platform || ""
                 releaseYear: parent.modelData.release_year || ""
                 cloudSaveEnabled: (parent.modelData.rom_id !== undefined && parent.modelData.rom_id !== "")
+                hasSaves: (parent.modelData.has_cloud_saves === "true")
+                isFavorite: (parent.modelData.is_favorite === "true")
 
                 focus: grid.currentIndex === parent.index
                 isFocused: grid.currentIndex === parent.index
@@ -74,6 +73,26 @@ Item {
         }
     }
 
+    Rectangle {
+        anchors.top: grid.top
+        anchors.bottom: grid.bottom
+        anchors.right: root.right
+        anchors.rightMargin: 16
+        width: 6
+        radius: 3
+        color: "#44475a"
+        visible: grid.visibleArea.heightRatio > 0.0 && grid.visibleArea.heightRatio < 1.0
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            y: grid.visibleArea.yPosition * grid.height
+            height: grid.visibleArea.heightRatio * grid.height
+            radius: 3
+            color: grid.moving ? "#ff79c6" : "#6272a4"
+        }
+    }
+
     Connections {
         target: controllerBackend
         enabled: root.navigationActive
@@ -101,10 +120,21 @@ Item {
         }
     }
 
-    // Reload when library changes
     Connections {
         target: appBackend
         function onLibraryGamesChanged() {
+            if (root.visible) {
+                grid.model = appBackend.libraryGames
+            }
+        }
+    }
+
+    Component.onCompleted: {
+        grid.model = appBackend.libraryGames
+    }
+
+    onVisibleChanged: {
+        if (visible) {
             grid.model = appBackend.libraryGames
         }
     }

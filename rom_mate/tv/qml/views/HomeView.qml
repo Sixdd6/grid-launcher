@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 import "../components"
 
@@ -25,7 +24,19 @@ Item {
         onTriggered: root._fanartUrls = root._pendingFanartUrls
     }
 
-        Component.onDestruction: {
+    onVisibleChanged: {
+        if (visible) {
+            continueRow.games = root._buildRecentGames()
+        } else {
+            fanartDebounce.stop()
+        }
+    }
+
+    Component.onCompleted: {
+        continueRow.games = root._buildRecentGames()
+    }
+
+    Component.onDestruction: {
         fanartDebounce.stop()
     }
 
@@ -37,6 +48,9 @@ Item {
     Connections {
         target: appBackend
         function onLibraryGamesChanged() {
+            if (root.visible) {
+                continueRow.games = root._buildRecentGames()
+            }
             if (root._fanartUrls.length === 0) {
                 var recent = root._buildRecentGames()
                 if (recent.length > 0) {
@@ -86,102 +100,96 @@ Item {
         return false
     }
 
-    ScrollView {
+    Column {
         anchors.fill: parent
-        contentWidth: parent.width
-        clip: false
+        spacing: 24
+        topPadding: 24
+        bottomPadding: 24
 
-        Column {
+        GameRow {
+            id: continueRow
+            homeStyle: true
             width: root.width
-            spacing: 24
-            topPadding: 24
-            bottomPadding: 24
+            rowTitle: "Continue Playing"
+            games: []
+            focus: true
+            navigationActive: root._activeRowIndex === 0 && !root._navBlocked()
+            sharedIndex: root._rowIndex0
 
-            GameRow {
-                id: continueRow
-                homeStyle: true
-                width: root.width
-                rowTitle: "Continue Playing"
-                games: root._buildRecentGames()
-                focus: true
-                navigationActive: root._activeRowIndex === 0 && !root._navBlocked()
-                sharedIndex: root._rowIndex0
-
-                onGameSelected: function(game) {
-                    if (root.outerStackRef) {
-                        root.outerStackRef.push(detailsViewComponent, { game: game })
-                    }
-                }
-                onActiveFocusGameChanged: function(game) {
-                    root._pendingFanartUrls = root._screenshotUrlsFromGame(game)
-                    fanartDebounce.restart()
+            onGameSelected: function(game) {
+                if (root.outerStackRef) {
+                    root.outerStackRef.push(detailsViewComponent, { game: game })
                 }
             }
+            onActiveFocusGameChanged: function(game) {
+                root._pendingFanartUrls = root._screenshotUrlsFromGame(game)
+                fanartDebounce.restart()
+            }
+        }
 
-            GameRow {
-                homeStyle: true
-                id: favoritesRow
-                width: root.width
-                rowTitle: "Favorites"
-                games: appBackend.favoritesGames
-                navigationActive: root._activeRowIndex === 1 && !root._navBlocked()
-                sharedIndex: root._rowIndex1
+        GameRow {
+            homeStyle: true
+            id: favoritesRow
+            width: root.width
+            rowTitle: "Favorites"
+            games: appBackend.favoritesGames
+            navigationActive: root._activeRowIndex === 1 && !root._navBlocked()
+            sharedIndex: root._rowIndex1
 
-                KeyNavigation.up: continueRow
-                KeyNavigation.down: newAdditionsRow
-                onGameSelected: function(game) {
-                    if (root.outerStackRef) {
-                        root.outerStackRef.push(detailsViewComponent, { game: game })
-                    }
-                }
-                onActiveFocusGameChanged: function(game) {
-                    root._pendingFanartUrls = root._screenshotUrlsFromGame(game)
-                    fanartDebounce.restart()
+            KeyNavigation.up: continueRow
+            KeyNavigation.down: newAdditionsRow
+            onGameSelected: function(game) {
+                if (root.outerStackRef) {
+                    root.outerStackRef.push(detailsViewComponent, { game: game })
                 }
             }
+            onActiveFocusGameChanged: function(game) {
+                root._pendingFanartUrls = root._screenshotUrlsFromGame(game)
+                fanartDebounce.restart()
+            }
+        }
 
-            GameRow {
-                homeStyle: true
-                id: newAdditionsRow
-                width: root.width
-                rowTitle: "New Additions"
-                games: appBackend.newAdditionsGames
-                navigationActive: root._activeRowIndex === 2 && !root._navBlocked()
-                sharedIndex: root._rowIndex2
+        GameRow {
+            homeStyle: true
+            id: newAdditionsRow
+            width: root.width
+            rowTitle: "New Additions"
+            games: appBackend.newAdditionsGames
+            navigationActive: root._activeRowIndex === 2 && !root._navBlocked()
+            sharedIndex: root._rowIndex2
 
-                KeyNavigation.up: favoritesRow
-                KeyNavigation.down: highlyRatedRow
+            KeyNavigation.up: favoritesRow
+            KeyNavigation.down: highlyRatedRow
 
-                onGameSelected: function(game) {
-                    if (root.outerStackRef) {
-                        root.outerStackRef.push(detailsViewComponent, { game: game })
-                    }
-                }
-                onActiveFocusGameChanged: function(game) {
-                    root._pendingFanartUrls = root._screenshotUrlsFromGame(game)
-                    fanartDebounce.restart()
+            onGameSelected: function(game) {
+                if (root.outerStackRef) {
+                    root.outerStackRef.push(detailsViewComponent, { game: game })
                 }
             }
+            onActiveFocusGameChanged: function(game) {
+                root._pendingFanartUrls = root._screenshotUrlsFromGame(game)
+                fanartDebounce.restart()
+            }
+        }
 
-            GameRow {
-                homeStyle: true
-                id: highlyRatedRow
-                width: root.width
-                rowTitle: "Highly Rated"
-                games: appBackend.highlyRatedGames
-                navigationActive: root._activeRowIndex === 3 && !root._navBlocked()
-                sharedIndex: root._rowIndex3
+        GameRow {
+            homeStyle: true
+            id: highlyRatedRow
+            width: root.width
+            rowTitle: "Highly Rated"
+            games: appBackend.highlyRatedGames
+            navigationActive: root._activeRowIndex === 3 && !root._navBlocked()
+            sharedIndex: root._rowIndex3
 
-                KeyNavigation.up: newAdditionsRow
-                onGameSelected: function(game) {
-                    if (root.outerStackRef) {
-                        root.outerStackRef.push(detailsViewComponent, { game: game })
-                    }
+            KeyNavigation.up: newAdditionsRow
+            onGameSelected: function(game) {
+                if (root.outerStackRef) {
+                    root.outerStackRef.push(detailsViewComponent, { game: game })
                 }
-                onActiveFocusGameChanged: function(game) {
-                    root._pendingFanartUrls = root._screenshotUrlsFromGame(game)
-                    fanartDebounce.restart()
-                }
+            }
+            onActiveFocusGameChanged: function(game) {
+                root._pendingFanartUrls = root._screenshotUrlsFromGame(game)
+                fanartDebounce.restart()
             }
         }
     }
@@ -193,49 +201,32 @@ Item {
             if (root._navBlocked()) return
 
             if (direction === "up") {
-                var fromRowUp = _activeRowIndex === 0 ? continueRow
-                              : _activeRowIndex === 1 ? favoritesRow
-                              : _activeRowIndex === 2 ? newAdditionsRow
-                              : highlyRatedRow
-                var fromIdxUp = root._getActiveIndex()
-                root._activeRowIndex = Math.max(0, root._activeRowIndex - 1)
-                var toRowUp = _activeRowIndex === 0 ? continueRow
-                            : _activeRowIndex === 1 ? favoritesRow
-                            : _activeRowIndex === 2 ? newAdditionsRow
-                            : highlyRatedRow
-                root._setActiveIndex(root._visuallyClosestIndex(fromRowUp, fromIdxUp, toRowUp))
+                var newRowUp = Math.max(0, root._activeRowIndex - 1)
+                if (newRowUp !== root._activeRowIndex) {
+                    var rowsUp = [continueRow, favoritesRow, newAdditionsRow, highlyRatedRow]
+                    var closestUp = root._visuallyClosestIndex(rowsUp[root._activeRowIndex], root._getActiveIndex(), rowsUp[newRowUp])
+                    root._activeRowIndex = newRowUp
+                    root._setActiveIndex(closestUp)
+                }
             } else if (direction === "down") {
-                var fromRowDown = _activeRowIndex === 0 ? continueRow
-                                : _activeRowIndex === 1 ? favoritesRow
-                                : _activeRowIndex === 2 ? newAdditionsRow
-                                : highlyRatedRow
-                var fromIdxDown = root._getActiveIndex()
-                root._activeRowIndex = Math.min(3, root._activeRowIndex + 1)
-                var toRowDown = _activeRowIndex === 0 ? continueRow
-                              : _activeRowIndex === 1 ? favoritesRow
-                              : _activeRowIndex === 2 ? newAdditionsRow
-                              : highlyRatedRow
-                root._setActiveIndex(root._visuallyClosestIndex(fromRowDown, fromIdxDown, toRowDown))
+                var newRowDown = Math.min(3, root._activeRowIndex + 1)
+                if (newRowDown !== root._activeRowIndex) {
+                    var rowsDown = [continueRow, favoritesRow, newAdditionsRow, highlyRatedRow]
+                    var closestDown = root._visuallyClosestIndex(rowsDown[root._activeRowIndex], root._getActiveIndex(), rowsDown[newRowDown])
+                    root._activeRowIndex = newRowDown
+                    root._setActiveIndex(closestDown)
+                }
             } else if (direction === "left") {
-                var activeRowLeft = root._activeRowIndex === 0 ? continueRow
-                                  : root._activeRowIndex === 1 ? favoritesRow
-                                  : root._activeRowIndex === 2 ? newAdditionsRow
-                                  : highlyRatedRow
-                var maxIdxLeft = Math.max(0, activeRowLeft.games.length - 1)
+                var activeRow = [continueRow, favoritesRow, newAdditionsRow, highlyRatedRow][root._activeRowIndex]
+                var maxIdxLeft = Math.max(0, activeRow.games.length - 1)
                 root._setActiveIndex(Math.min(maxIdxLeft, Math.max(0, root._getActiveIndex() - 1)))
             } else if (direction === "right") {
-                var activeRow = root._activeRowIndex === 0 ? continueRow
-                              : root._activeRowIndex === 1 ? favoritesRow
-                              : root._activeRowIndex === 2 ? newAdditionsRow
-                              : highlyRatedRow
-                var maxIdx = Math.max(0, activeRow.games.length - 1)
+                var activeRowR = [continueRow, favoritesRow, newAdditionsRow, highlyRatedRow][root._activeRowIndex]
+                var maxIdx = Math.max(0, activeRowR.games.length - 1)
                 root._setActiveIndex(Math.min(maxIdx, root._getActiveIndex() + 1))
             } else if (direction === "confirm") {
-                var row = root._activeRowIndex === 0 ? continueRow
-                        : root._activeRowIndex === 1 ? favoritesRow
-                        : root._activeRowIndex === 2 ? newAdditionsRow
-                        : highlyRatedRow
-                var game = row.games[root._getActiveIndex()]
+                var rows = [continueRow, favoritesRow, newAdditionsRow, highlyRatedRow]
+                var game = rows[root._activeRowIndex].games[root._getActiveIndex()]
                 if (game && root.outerStackRef) {
                     root.outerStackRef.push(detailsViewComponent, { game: game })
                 }

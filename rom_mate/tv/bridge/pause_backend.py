@@ -54,7 +54,7 @@ class PauseBackend(QObject):
         if self._visible:
             self._visible = False
             self.visibleChanged.emit()
-        self._game_backend.resumeEmulator()
+            self._game_backend.resumeEmulator()
 
     @Slot()
     def quitGame(self) -> None:

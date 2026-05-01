@@ -7,6 +7,10 @@ Item {
     width: parent ? parent.width : 0
     height: parent ? parent.height : 0
 
+    Component.onCompleted: {
+        appBackend.logHandleDiag("details-open")
+    }
+
     property var game: ({})
     property string _pendingMetadataRomId: ""
     property bool _metadataLoading: false
@@ -24,6 +28,7 @@ Item {
     property int _focusedColumn: 0
     property int _leftButtonIndex: 0
     property real _installProgress: 0.0
+    property real _installSpeed: 0.0
     property string _bannerText: ""
     property bool _bannerSuccess: true
     property var _screenshotList: {
@@ -31,19 +36,19 @@ Item {
         if (!raw) return []
         return raw.split("\n").filter(function(s) { return s.trim() !== "" })
     }
-    property string _installedLocalPath: {
+    property var _installedGameEntry: {
         var rid = root.game ? (root.game.rom_id || root.game.id || "") : ""
         if (rid !== "") {
             var lib = appBackend.libraryGames
             for (var i = 0; i < lib.length; i++) {
                 var entry = lib[i]
-                if ((entry.rom_id || entry.id || "") === rid) {
-                    return entry.local_path || ""
-                }
+                if ((entry.rom_id || entry.id || "") === rid) return entry
             }
         }
-        return root.game ? (root.game.local_path || "") : ""
+        return null
     }
+    property string _installedLocalPath: root._installedGameEntry
+        ? (root._installedGameEntry.local_path || "") : ""
 
     function formatFilesize(bytes) {
         if (!bytes) return ""
@@ -58,6 +63,7 @@ Item {
         var count = 1
         if (root._installedLocalPath) count++
         if (root._installedLocalPath && _isNativePcGame()) count++
+        if (appBackend.isConnected) count++
         if (appBackend.isConnected) count++
         return count
     }
@@ -75,11 +81,13 @@ Item {
     function _triggerLeftButton() {
         var idx = 0
 
-        // Index 0: Play / Install
+        // Index 0: Play / Install / Cancel
         if (_leftButtonIndex === idx) {
-            if (!gameBackend.isInstallActive && !gameBackend.isSessionActive) {
+            if (gameBackend.isInstallActive) {
+                gameBackend.cancelInstall()
+            } else if (!gameBackend.isSessionActive) {
                 if (root._installedLocalPath) {
-                    gameBackend.launchGame(root.game)
+                    gameBackend.launchGame(root._installedGameEntry || root.game)
                 } else if (appBackend.isConnected) {
                     gameBackend.installGame(root.game)
                 }
@@ -110,9 +118,19 @@ Item {
         }
 
         // Next index (if server connected): Cloud Saves
-        if (appBackend.isConnected && _leftButtonIndex === idx) {
-            cloudSavesOverlay.visible = true
+        if (appBackend.isConnected) {
+            if (_leftButtonIndex === idx) {
+                cloudSavesOverlay.visible = true
+                return
+            }
+            idx++
         }
+
+        if (appBackend.isConnected && _leftButtonIndex === idx) {
+            appBackend.toggleFavorite(root.game.rom_id || root.game.id || "")
+            return
+        }
+        idx++
     }
 
     Connections {
@@ -173,7 +191,9 @@ Item {
                 root._metadataLoading = true
             }
         }
-        function onRomMetadataReady(romId, metadataJson) {
+        function onRomMetadataReady(payload) {
+            var romId = payload.rom_id
+            var metadataJson = payload.metadata_json
             if (!root.game || String(root.game.rom_id) !== String(romId)) return
             var metadata = {}
             try { metadata = JSON.parse(metadataJson) } catch(e) {}
@@ -186,29 +206,37 @@ Item {
                 appBackend.fetchRomMetadata(JSON.stringify(root.game))
             }
         }
+        function onFavoriteToggleComplete(payload) {
+            if (!root.game) return
+            var isNowFavorite = payload.is_now_favorite
+            root.game = Object.assign({}, root.game, { is_favorite: isNowFavorite ? "true" : "false" })
+        }
     }
 
     Connections {
         target: gameBackend
-        function onInstallProgress(downloaded, total, speed) {
-            if (total > 0) root._installProgress = downloaded / total
+        function onInstallProgress(bundle) {
+            if (bundle.total > 0) root._installProgress = Math.min(1.0, Math.max(0.0, bundle.downloaded / bundle.total))
+            root._installSpeed = bundle.speed
         }
-        function onInstallComplete(success, message, returnedGame) {
-            root._bannerText = message
-            root._bannerSuccess = success
+        function onInstallComplete(bundle) {
+            root._bannerText = bundle.message
+            root._bannerSuccess = bundle.success
             bannerTimer.restart()
-            if (success && returnedGame && returnedGame.local_path) {
-                root.game = Object.assign({}, root.game, { local_path: returnedGame.local_path })
+            if (bundle.success && bundle.game) {
+                root.game = Object.assign({}, root.game, bundle.game)
             }
             root._leftButtonIndex = 0
         }
-        function onUninstallComplete(success, message, returnedGame) {
-            root._bannerText = message
-            root._bannerSuccess = success
+        function onUninstallComplete(bundle) {
+            root._bannerText = bundle.message
+            root._bannerSuccess = bundle.success
             bannerTimer.restart()
-            if (success) {
+            if (bundle.success) {
                 var updated = Object.assign({}, root.game)
                 delete updated.local_path
+                delete updated.extracted_path
+                delete updated.archive_path
                 root.game = updated
             }
             root._leftButtonIndex = 0
@@ -242,15 +270,18 @@ Item {
         onTriggered: root._bannerText = ""
     }
 
-        Component.onDestruction: {
+    Component.onDestruction: {
+        appBackend.logHandleDiag("details-close")
         bannerTimer.stop()
     }
 
     // Background fanart
     Image {
         anchors.fill: parent
-        source: root.game.fanart_url ? root.game.fanart_url : (root._screenshotList.length > 0 ? root._screenshotList[0] : "")
+        source: root.game.fanart_url ? "image://covers/" + root.game.fanart_url : (root._screenshotList.length > 0 ? "image://covers/" + root._screenshotList[0] : "")
         fillMode: Image.PreserveAspectCrop
+        cache: false
+        asynchronous: true
         opacity: 0.3
     }
     
@@ -335,7 +366,7 @@ Item {
                     // Cover Art
                     Rectangle {
                         width: parent.width
-                        height: coverImage.implicitHeight > 0 ? coverImage.implicitHeight : width * 1.33
+                        height: coverImage.implicitHeight > 0 && coverImage.implicitWidth > 0 ? Math.round(width * coverImage.implicitHeight / coverImage.implicitWidth) : width * 1.33
                         color: "#1e1f29"
                         radius: 8
                         clip: true
@@ -346,6 +377,8 @@ Item {
                             height: implicitHeight > 0 ? implicitWidth > 0 ? Math.round(width * implicitHeight / implicitWidth) : width * 1.33 : width * 1.33
                             source: root.game.cover_url ? "image://covers/" + root.game.cover_url : ""
                             fillMode: Image.PreserveAspectFit
+                            cache: false
+                            asynchronous: true
                             onStatusChanged: fallbackText.visible = (status === Image.Error || status === Image.Null)
                         }
 
@@ -397,14 +430,22 @@ Item {
                         }
                     }
 
-                    // Install Progress (Visible when installing)
+                    // Install Progress + Cancel (Visible when installing)
                     Column {
                         width: parent.width
-                        spacing: 4
+                        spacing: 8
                         visible: gameBackend.isInstallActive
 
                         Text {
-                            text: "Installing..."
+                            text: {
+                                var pct = Math.round(root._installProgress * 100) + "%"
+                                var spd = root._installSpeed
+                                var spdStr
+                                if (spd >= 1048576) spdStr = (spd / 1048576).toFixed(1) + " MB/s"
+                                else if (spd >= 1024) spdStr = (spd / 1024).toFixed(1) + " KB/s"
+                                else spdStr = spd.toFixed(0) + " B/s"
+                                return "Installing... " + pct + "  " + spdStr
+                            }
                             color: "#f8f8f2"
                             font.pixelSize: 14
                         }
@@ -415,12 +456,31 @@ Item {
                             height: 6
                             color: "#44475a"
                             radius: 3
+                            clip: true
 
                             Rectangle {
                                 width: track.width * root._installProgress
                                 height: parent.height
                                 color: "#ff79c6"
                                 radius: 3
+                            }
+                        }
+
+                        // Cancel Button
+                        Rectangle {
+                            width: parent.width
+                            height: 48
+                            radius: 8
+                            color: "#383a59"
+                            border.color: (root._focusedColumn === 0 && root._leftButtonIndex === 0) ? "#ff79c6" : "#ff5555"
+                            border.width: (root._focusedColumn === 0 && root._leftButtonIndex === 0) ? 2 : 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "✕  Cancel"
+                                color: (root._focusedColumn === 0 && root._leftButtonIndex === 0) ? "#f8f8f2" : "#ff5555"
+                                font.pixelSize: 16
+                                font.bold: true
                             }
                         }
                     }
@@ -480,6 +540,26 @@ Item {
                             anchors.centerIn: parent
                             text: "☁  Cloud Saves"
                             color: (root._focusedColumn === 0 && root._leftButtonIndex === parent.myIndex) ? "#f8f8f2" : "#bd93f9"
+                            font.pixelSize: 16
+                            font.bold: true
+                        }
+                    }
+
+                    // Favorite Button
+                    Rectangle {
+                        property int myIndex: root._installedLocalPath ? (_isNativePcGame() ? 4 : 3) : 2
+                        width: parent.width
+                        height: 48
+                        radius: 8
+                        color: "#1e1f29"
+                        border.color: (root._focusedColumn === 0 && root._leftButtonIndex === myIndex) ? "#ff79c6" : (root.game.is_favorite === "true" ? "#f1fa8c" : "#6272a4")
+                        border.width: (root._focusedColumn === 0 && root._leftButtonIndex === myIndex) ? 2 : 1
+                        visible: appBackend.isConnected
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: root.game.is_favorite === "true" ? "★  Remove from Favorites" : "☆  Add to Favorites"
+                            color: (root._focusedColumn === 0 && root._leftButtonIndex === parent.myIndex) ? "#f8f8f2" : (root.game.is_favorite === "true" ? "#f1fa8c" : "#6272a4")
                             font.pixelSize: 16
                             font.bold: true
                         }
@@ -761,8 +841,10 @@ Item {
                                 delegate: Image {
                                     width: screenshotColumn.width
                                     height: width > 0 ? Math.round(width * 9 / 16) : 0
-                                    source: root._screenshotList[index] || ""
+                                    source: root._screenshotList[index] ? "image://covers/" + root._screenshotList[index] : ""
                                     fillMode: Image.PreserveAspectCrop
+                                    cache: false
+                                    asynchronous: true
                                 }
                             }
                         }

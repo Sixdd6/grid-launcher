@@ -7,6 +7,12 @@ Item {
     id: root
     width: parent ? parent.width : 0
     height: parent ? parent.height : 0
+    Component.onCompleted: {
+        appBackend.logHandleDiag("settings-open")
+    }
+    Component.onDestruction: {
+        appBackend.logHandleDiag("settings-close")
+    }
 
     // --- Focus tracking ---
     property int currentFocusIndex: 0
@@ -414,7 +420,6 @@ Item {
                 color: "#1e1f29"
                 border.color: "#44475a"
                 border.width: 1
-                Behavior on height { NumberAnimation { duration: 150 } }
 
                 // Empty state
                 Rectangle {

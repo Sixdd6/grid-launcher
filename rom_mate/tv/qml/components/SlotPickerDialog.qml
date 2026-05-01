@@ -32,24 +32,24 @@ Item {
     Connections {
         target: cloudBackend
         
-        function onSlotsLoaded(saveType, slots) {
-            if (saveType !== root.saveType) return
+        function onSlotsLoaded(bundle) {
+            if (bundle.save_type !== root.saveType) return
             _loading = false
-            _slots = slots
+            _slots = bundle.slots
         }
         
-        function onSlotsError(saveType, error) {
-            if (saveType !== root.saveType) return
+        function onSlotsError(bundle) {
+            if (bundle.save_type !== root.saveType) return
             _loading = false
-            _errorText = error
+            _errorText = bundle.error
         }
         
-        function onRestoreComplete(success, message) {
+        function onRestoreComplete(bundle) {
             root.closed()
         }
         
-        function onDeleteComplete(success, message) {
-            if (success) {
+        function onDeleteComplete(bundle) {
+            if (bundle.success) {
                 cloudBackend.loadSlotsForGame(root.game, root.saveType)
             }
         }

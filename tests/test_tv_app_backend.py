@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from PySide6.QtCore import QCoreApplication
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-_app = QCoreApplication.instance() or QCoreApplication(sys.argv)
+from PySide6.QtWidgets import QApplication
+
+_app = QApplication.instance() or QApplication(sys.argv)
 
 
 class TestAppBackendConfigDefaults(unittest.TestCase):
@@ -19,15 +22,44 @@ class TestAppBackendConfigDefaults(unittest.TestCase):
     def test_tv_guide_exclusion_list_default_when_key_missing(self):
         backend = self._make_backend({})
         result = backend.tvGuideExclusionList
-        self.assertEqual(result, ["RPCS3", "Cemu", "Dolphin", "Xemu", "Xenia"])
+        self.assertEqual(result, ["RPCS3", "Cemu", "Dolphin", "Xemu", "Xenia", "RetroArch"])
 
     def test_tv_guide_exclusion_list_from_config(self):
         backend = self._make_backend({"tv_guide_button_exclusion_list": ["RPCS3", "Cemu"]})
-        self.assertEqual(backend.tvGuideExclusionList, ["RPCS3", "Cemu"])
+        self.assertEqual(backend.tvGuideExclusionList, ["RPCS3", "Cemu", "Dolphin", "Xemu", "Xenia", "RetroArch"])
 
     def test_tv_guide_exclusion_list_invalid_type_returns_default(self):
         backend = self._make_backend({"tv_guide_button_exclusion_list": "not-a-list"})
-        self.assertEqual(backend.tvGuideExclusionList, ["RPCS3", "Cemu", "Dolphin", "Xemu", "Xenia"])
+        self.assertEqual(backend.tvGuideExclusionList, ["RPCS3", "Cemu", "Dolphin", "Xemu", "Xenia", "RetroArch"])
+
+    def test_tv_guide_exclusion_list_opt_out_removes_default(self):
+        backend = self._make_backend({"tv_guide_button_default_opt_outs": ["Dolphin"]})
+        result = backend.tvGuideExclusionList
+        self.assertNotIn("Dolphin", result)
+        self.assertIn("RPCS3", result)
+        self.assertIn("Cemu", result)
+        self.assertIn("Xemu", result)
+        self.assertIn("Xenia", result)
+        self.assertIn("RetroArch", result)
+
+    def test_tv_guide_exclusion_list_opt_out_case_insensitive(self):
+        backend = self._make_backend({"tv_guide_button_default_opt_outs": ["dolphin"]})
+        self.assertNotIn("Dolphin", backend.tvGuideExclusionList)
+
+    def test_tv_guide_exclusion_list_all_defaults_opted_out(self):
+        backend = self._make_backend(
+            {
+                "tv_guide_button_default_opt_outs": [
+                    "RPCS3",
+                    "Cemu",
+                    "Dolphin",
+                    "Xemu",
+                    "Xenia",
+                    "RetroArch",
+                ]
+            }
+        )
+        self.assertEqual(backend.tvGuideExclusionList, [])
 
     def test_home_view_default(self):
         backend = self._make_backend({})
@@ -285,17 +317,17 @@ class TestAppBackendCuratedRows(unittest.TestCase):
     def test_on_favorites_finished_updates_list(self):
         backend = self._make_backend()
         backend._on_favorites_finished([{"title": "Tetris"}])
-        self.assertEqual(backend.favoritesGames, [{"title": "Tetris"}])
+        self.assertEqual(backend.favoritesGames, [{"title": "Tetris", "is_favorite": "true"}])
 
     def test_on_new_additions_finished_updates_list(self):
         backend = self._make_backend()
         backend._on_new_additions_finished([{"title": "Doom"}])
-        self.assertEqual(backend.newAdditionsGames, [{"title": "Doom"}])
+        self.assertEqual(backend.newAdditionsGames, [{"title": "Doom", "is_favorite": "false"}])
 
     def test_on_highly_rated_finished_updates_list(self):
         backend = self._make_backend()
         backend._on_highly_rated_finished([{"title": "Half-Life"}])
-        self.assertEqual(backend.highlyRatedGames, [{"title": "Half-Life"}])
+        self.assertEqual(backend.highlyRatedGames, [{"title": "Half-Life", "is_favorite": "false"}])
 
     def test_favorites_finished_emits_library_games_changed(self):
         backend = self._make_backend()
@@ -319,15 +351,248 @@ class TestAppBackendCuratedRows(unittest.TestCase):
         self.assertEqual(count[0], 1)
 
     def test_catalog_finish_triggers_curated_fetch(self):
-        from unittest.mock import patch, MagicMock
+                from unittest.mock import patch
+                from rom_mate.tv.bridge.app_backend import AppBackend
+
+                backend = AppBackend({}, Path("/tmp/covers"))
+                with patch("rom_mate.server.catalog.server_platform_ids", return_value={}), \
+                         patch("rom_mate.server.state.account_status_text", return_value="Connected"), \
+                         patch.object(backend, "_start_curated_rows_fetch") as mock_curated, \
+                         patch.object(backend, "_start_saves_fetch"):
+                        backend._on_catalog_finished({"me": {}, "platforms": {}})
+                        mock_curated.assert_called_once()
+
+    def test_platform_details_empty_before_catalog_fetch(self):
+        backend = self._make_backend()
+        self.assertEqual(backend.platformDetails, [])
+
+    def test_platform_details_populated_on_catalog_finished(self):
+        backend = self._make_backend()
+        expected_details = [{
+            "slug": "snes",
+            "name": "SNES",
+            "rom_count": 5,
+            "manufacturer": "Nintendo",
+            "release_year": "1990",
+            "player_count": "1-2 players",
+        }]
+
+        with patch("rom_mate.server.catalog.server_platform_ids", return_value={"SNES": 42}), \
+             patch("rom_mate.server.catalog.server_platform_details", return_value=expected_details), \
+             patch("rom_mate.server.state.account_status_text", return_value="Connected"), \
+               patch.object(backend, "_start_curated_rows_fetch"), \
+               patch.object(backend, "_start_saves_fetch"):
+            backend._on_catalog_finished({"me": {}, "platforms": {}})
+
+        self.assertEqual(backend.platformDetails, expected_details)
+
+    def test_platform_details_reset_on_url_change(self):
+        backend = self._make_backend({"server_url": "http://old"})
+        backend._catalog_server_url = "http://old"
+        backend._platform_details = [{
+            "slug": "snes",
+            "name": "SNES",
+            "rom_count": 5,
+            "manufacturer": "Nintendo",
+            "release_year": "1990",
+            "player_count": "1-2 players",
+        }]
+
+        backend.syncConfig({"server_url": "http://new"})
+
+        self.assertEqual(backend.platformDetails, [])
+
+    def test_platform_details_notifies_platforms_changed(self):
+        backend = self._make_backend()
+        emissions = []
+        expected_details = [{
+            "slug": "snes",
+            "name": "SNES",
+            "rom_count": 5,
+            "manufacturer": "Nintendo",
+            "release_year": "1990",
+            "player_count": "1-2 players",
+        }]
+        backend.platformsChanged.connect(lambda: emissions.append(1))
+
+        with patch("rom_mate.server.catalog.server_platform_ids", return_value={"SNES": 42}), \
+             patch("rom_mate.server.catalog.server_platform_details", return_value=expected_details), \
+             patch("rom_mate.server.state.account_status_text", return_value="Connected"), \
+             patch.object(backend, "_start_curated_rows_fetch"), \
+             patch.object(backend, "_start_saves_fetch"):
+            backend._on_catalog_finished({"me": {}, "platforms": {}})
+
+        self.assertGreaterEqual(len(emissions), 1)
+
+
+class TestAppBackendSavesFetch(unittest.TestCase):
+    def setUp(self):
         from rom_mate.tv.bridge.app_backend import AppBackend
 
-        backend = AppBackend({}, Path("/tmp/covers"))
-        with patch("rom_mate.server.catalog.server_platform_ids", return_value={}), \
-             patch("rom_mate.server.state.account_status_text", return_value="Connected"), \
-             patch.object(backend, "_start_curated_rows_fetch") as mock_curated:
-            backend._on_catalog_finished({}, {})
-            mock_curated.assert_called_once()
+        self.backend = AppBackend({}, Path("/tmp/covers"))
+
+    def test_saves_rom_ids_initially_empty(self):
+        self.assertEqual(self.backend._saves_rom_ids, set())
+
+    def test_on_saves_finished_stores_rom_ids(self):
+        self.backend._on_saves_finished(["1", "2"])
+        self.assertEqual(self.backend._saves_rom_ids, {"1", "2"})
+
+    def test_on_saves_finished_emits_library_games_changed(self):
+        emitted = []
+        self.backend.libraryGamesChanged.connect(lambda: emitted.append(True))
+        self.backend._on_saves_finished(["1"])
+        self.assertEqual(len(emitted), 1)
+
+    def test_library_games_annotates_has_cloud_saves_true(self):
+        self.backend._saves_rom_ids = {"42"}
+        self.backend._config["installed_games"] = [
+            {"title": "Game", "platform": "PS2", "rom_id": "42", "local_path": "/games/game.iso"}
+        ]
+        result = self.backend.libraryGames
+        self.assertEqual(result[0]["has_cloud_saves"], "true")
+
+    def test_library_games_annotates_has_cloud_saves_false_when_not_in_set(self):
+        self.backend._saves_rom_ids = set()
+        self.backend._config["installed_games"] = [
+            {"title": "Game", "platform": "PS2", "rom_id": "42", "local_path": "/games/game.iso"}
+        ]
+        result = self.backend.libraryGames
+        self.assertEqual(result[0]["has_cloud_saves"], "false")
+
+    def test_library_games_no_has_cloud_saves_when_no_rom_id(self):
+        self.backend._config["installed_games"] = [
+            {"title": "Game", "platform": "PS2", "local_path": "/games/game.iso"}
+        ]
+        result = self.backend.libraryGames
+        self.assertNotIn("has_cloud_saves", result[0])
+
+    def test_catalog_finish_triggers_saves_fetch(self):
+        me_payload = {}
+        platforms_payload = {}
+        with patch.object(self.backend, "_start_saves_fetch") as mock_saves, \
+             patch.object(self.backend, "_start_curated_rows_fetch"), \
+             patch("rom_mate.server.catalog.server_platform_ids", return_value={}), \
+             patch("rom_mate.server.state.account_status_text", return_value="Connected"):
+            self.backend._on_catalog_finished({"me": me_payload, "platforms": platforms_payload})
+            mock_saves.assert_called_once()
+
+    def test_start_saves_fetch_skips_when_thread_running(self):
+        mock_thread = MagicMock()
+        mock_thread.is_alive.return_value = True
+        self.backend._saves_thread = mock_thread
+        before = self.backend._saves_worker
+        self.backend._start_saves_fetch()
+        self.assertIsNone(before)
+        self.assertIsNone(self.backend._saves_worker)
+
+
+class TestAppBackendToggleFavorite(unittest.TestCase):
+    def setUp(self):
+        from rom_mate.tv.bridge.app_backend import AppBackend
+
+        self.backend = AppBackend({}, Path("/tmp/covers"))
+
+    def test_toggle_favorite_skips_when_no_credentials(self):
+        self.backend.toggleFavorite("5")
+        self.assertIsNone(self.backend._toggle_thread)
+
+    def test_toggle_favorite_skips_when_thread_already_running(self):
+        self.backend._config["server_url"] = "http://server"
+        self.backend._config["api_token"] = "token"
+        existing_thread = MagicMock()
+        existing_thread.is_alive.return_value = True
+        self.backend._toggle_thread = existing_thread
+
+        self.backend.toggleFavorite("5")
+
+        self.assertIs(self.backend._toggle_thread, existing_thread)
+
+    @patch("rom_mate.tv.bridge.app_backend.threading.Thread")
+    @patch("rom_mate.tv.bridge.workers.CollectionUpdateWorker")
+    def test_toggle_favorite_adds_rom_to_existing_collection(self, mock_update_worker, mock_thread_cls):
+        fake_thread = MagicMock()
+        mock_thread_cls.return_value = fake_thread
+        self.backend._toggle_pending_rom_id = "5"
+
+        self.backend._on_toggle_collections_fetched({"id": 10, "rom_ids": [1, 2, 3]})
+
+        args, kwargs = mock_update_worker.call_args
+        self.assertEqual(args[1], 10)
+        self.assertEqual(args[2], [1, 2, 3, 5])
+        self.assertEqual(kwargs, {"parent": None})
+        self.assertTrue(self.backend._toggle_adding)
+        fake_thread.start.assert_called_once()
+
+    @patch("rom_mate.tv.bridge.app_backend.threading.Thread")
+    @patch("rom_mate.tv.bridge.workers.CollectionUpdateWorker")
+    def test_toggle_favorite_removes_rom_from_existing_collection(self, mock_update_worker, mock_thread_cls):
+        fake_thread = MagicMock()
+        mock_thread_cls.return_value = fake_thread
+        self.backend._toggle_pending_rom_id = "5"
+
+        self.backend._on_toggle_collections_fetched({"id": 10, "rom_ids": [1, 2, 5]})
+
+        args, kwargs = mock_update_worker.call_args
+        self.assertEqual(args[1], 10)
+        self.assertEqual(args[2], [1, 2])
+        self.assertEqual(kwargs, {"parent": None})
+        self.assertFalse(self.backend._toggle_adding)
+        fake_thread.start.assert_called_once()
+
+    @patch("rom_mate.tv.bridge.app_backend.threading.Thread")
+    @patch("rom_mate.tv.bridge.workers.CollectionUpdateWorker")
+    @patch("rom_mate.tv.bridge.workers.CollectionCreateWorker")
+    def test_toggle_favorite_creates_collection_when_none_exists(
+        self,
+        mock_create_worker,
+        mock_update_worker,
+        mock_thread_cls,
+    ):
+        fake_thread = MagicMock()
+        mock_thread_cls.return_value = fake_thread
+        self.backend._toggle_pending_rom_id = "7"
+
+        self.backend._on_toggle_collections_fetched(None)
+
+        mock_create_worker.assert_called_once()
+        create_args, create_kwargs = mock_create_worker.call_args
+        self.assertEqual(create_args[1], 7)
+        self.assertEqual(create_kwargs, {"parent": None})
+        mock_update_worker.assert_not_called()
+        self.assertTrue(self.backend._toggle_adding)
+        fake_thread.start.assert_called_once()
+
+    def test_toggle_favorite_emits_signal_on_update_success(self):
+        self.backend._toggle_pending_rom_id = "7"
+        self.backend._toggle_adding = True
+        emitted = []
+        self.backend.favoriteToggleComplete.connect(lambda payload: emitted.append(payload))
+
+        with patch.object(self.backend, "_start_favorites_fetch"):
+            self.backend._on_toggle_collection_updated({})
+
+        self.assertEqual(emitted, [{"rom_id": "7", "is_now_favorite": True}])
+
+    def test_toggle_favorite_emits_signal_on_create_success(self):
+        self.backend._toggle_pending_rom_id = "7"
+        self.backend._toggle_adding = True
+        emitted = []
+        self.backend.favoriteToggleComplete.connect(lambda payload: emitted.append(payload))
+
+        with patch.object(self.backend, "_start_favorites_fetch"):
+            self.backend._on_toggle_collection_created({})
+
+        self.assertEqual(emitted, [{"rom_id": "7", "is_now_favorite": True}])
+
+    def test_toggle_favorite_triggers_favorites_refresh_on_update(self):
+        self.backend._toggle_pending_rom_id = "7"
+        self.backend._toggle_adding = True
+
+        with patch.object(self.backend, "_start_favorites_fetch") as mock_refresh:
+            self.backend._on_toggle_collection_updated({})
+
+        mock_refresh.assert_called_once()
 
 
 class TestAppBackendAvailableEmulatorNames(unittest.TestCase):
@@ -345,7 +610,7 @@ class TestAppBackendAvailableEmulatorNames(unittest.TestCase):
             "tv_guide_button_exclusion_list": ["RPCS3"],
         }
         backend = self._make_backend(config)
-        self.assertEqual(backend.availableEmulatorNames, ["Cemu", "Dolphin"])
+        self.assertEqual(backend.availableEmulatorNames, [])
 
     def test_empty_when_emulators_key_missing(self):
         backend = self._make_backend({})
@@ -365,7 +630,7 @@ class TestAppBackendAvailableEmulatorNames(unittest.TestCase):
 
     def test_filters_against_default_exclusion_list_when_no_config_key(self):
         # When tv_guide_button_exclusion_list is absent, tvGuideExclusionList
-        # returns the default list (RPCS3, Cemu, Dolphin, Xemu, Xenia).
+        # returns the default list (RPCS3, Cemu, Dolphin, Xemu, Xenia, RetroArch).
         # Emulators with names not in the default list should appear.
         config = {
             "emulators": [
@@ -376,7 +641,7 @@ class TestAppBackendAvailableEmulatorNames(unittest.TestCase):
         }
         backend = self._make_backend(config)
         result = backend.availableEmulatorNames
-        self.assertIn("RetroArch", result)
+        self.assertNotIn("RetroArch", result)
         self.assertIn("PCSX2", result)
         self.assertNotIn("RPCS3", result)
 
@@ -391,7 +656,7 @@ class TestAppBackendAvailableEmulatorNames(unittest.TestCase):
             "tv_guide_button_exclusion_list": [],
         }
         backend = self._make_backend(config)
-        self.assertEqual(backend.availableEmulatorNames, ["RetroArch"])
+        self.assertEqual(backend.availableEmulatorNames, [])
 
 
 class TestAppBackendGetInstalledLocalPath(unittest.TestCase):
@@ -535,6 +800,45 @@ class TestAppBackendEnrichWithLocalPaths(unittest.TestCase):
         self.assertEqual(result[0].get("local_path"), "/games/mygame.zip")
 
 
+class TestAppBackendInstallStateCrossNotification(unittest.TestCase):
+    def _make_backend(self, config: dict) -> "AppBackend":
+        from rom_mate.tv.bridge.app_backend import AppBackend
+        return AppBackend(config, Path("/tmp/covers"))
+
+    def test_highly_rated_games_de_enriches_after_install_state_change(self):
+        backend = self._make_backend({})
+        backend._highly_rated_games = [{"rom_id": "10", "title": "Game"}]
+        backend._config["installed_games"] = [{"rom_id": "10", "local_path": "/games/game.iso"}]
+
+        self.assertEqual(backend.highlyRatedGames[0]["local_path"], "/games/game.iso")
+
+        backend._config["installed_games"] = []
+
+        self.assertFalse(backend.highlyRatedGames[0].get("local_path"))
+
+    def test_favorites_games_de_enriches_after_install_state_change(self):
+        backend = self._make_backend({})
+        backend._favorites_games = [{"rom_id": "10", "title": "Game"}]
+        backend._config["installed_games"] = [{"rom_id": "10", "local_path": "/games/game.iso"}]
+
+        self.assertEqual(backend.favoritesGames[0]["local_path"], "/games/game.iso")
+
+        backend._config["installed_games"] = []
+
+        self.assertFalse(backend.favoritesGames[0].get("local_path"))
+
+    def test_new_additions_games_de_enriches_after_install_state_change(self):
+        backend = self._make_backend({})
+        backend._new_additions_games = [{"rom_id": "10", "title": "Game"}]
+        backend._config["installed_games"] = [{"rom_id": "10", "local_path": "/games/game.iso"}]
+
+        self.assertEqual(backend.newAdditionsGames[0]["local_path"], "/games/game.iso")
+
+        backend._config["installed_games"] = []
+
+        self.assertFalse(backend.newAdditionsGames[0].get("local_path"))
+
+
 class TestAppBackendFetchRomMetadata(unittest.TestCase):
     def _make_backend(self, config: dict) -> "AppBackend":
         from rom_mate.tv.bridge.app_backend import AppBackend
@@ -606,21 +910,21 @@ class TestAppBackendFetchRomMetadata(unittest.TestCase):
              patch("rom_mate.server.metadata.details_metadata_from_item", return_value={"genres": "RPG", "description": ""}):
             worker = _RomMetaFetchWorker("http://server", "tok", "42")
             worker_results = []
-            worker.finished.connect(lambda rid, meta: worker_results.append((rid, meta)))
+            worker.finished.connect(lambda payload: worker_results.append(payload))
             worker.run()
 
         self.assertEqual(len(worker_results), 1)
-        self.assertEqual(worker_results[0][0], "42")
-        self.assertIn("genres", worker_results[0][1])
-        self.assertEqual(worker_results[0][1]["genres"], "RPG")
-        self.assertNotIn("description", worker_results[0][1])
+        self.assertEqual(worker_results[0]["rom_id"], "42")
+        self.assertIn("genres", worker_results[0]["metadata"])
+        self.assertEqual(worker_results[0]["metadata"]["genres"], "RPG")
+        self.assertNotIn("description", worker_results[0]["metadata"])
 
         emitted = []
-        backend.romMetadataReady.connect(lambda rid, meta: emitted.append((rid, meta)))
-        backend._on_rom_meta_finished("42", {"genres": "RPG"})
+        backend.romMetadataReady.connect(lambda payload: emitted.append(payload))
+        backend._on_rom_meta_finished({"rom_id": "42", "metadata": {"genres": "RPG"}})
         self.assertEqual(len(emitted), 1)
-        self.assertEqual(emitted[0][0], "42")
-        self.assertEqual(json.loads(emitted[0][1])["genres"], "RPG")
+        self.assertEqual(emitted[0]["rom_id"], "42")
+        self.assertEqual(json.loads(emitted[0]["metadata_json"])["genres"], "RPG")
 
     def test_fetch_rom_metadata_stores_threading_thread(self):
         import threading
@@ -702,7 +1006,7 @@ class TestAppBackendFetchRomMetadata(unittest.TestCase):
         )
         mock_worker = MagicMock()
         backend._rom_meta_workers["42"] = mock_worker
-        backend._on_rom_meta_finished("42", {})
+        backend._on_rom_meta_finished({"rom_id": "42", "metadata": {}})
         self.assertNotIn("42", backend._rom_meta_workers)
         mock_worker.deleteLater.assert_called_once()
 
@@ -859,7 +1163,7 @@ class TestAppBackendRomMetaFinishedUpdatesLibrary(unittest.TestCase):
         game = {"rom_id": "42", "title": "Bomb Rush Cyberfunk", "platform": "PC"}
         backend = self._make_backend({"installed_games": [game]})
 
-        backend._on_rom_meta_finished("42", {"companies": "Team Reptile", "first_release_date": "2023-08-18"})
+        backend._on_rom_meta_finished({"rom_id": "42", "metadata": {"companies": "Team Reptile", "first_release_date": "2023-08-18"}})
 
         self.assertEqual(game["companies"], "Team Reptile")
         self.assertEqual(game["first_release_date"], "2023-08-18")
@@ -870,7 +1174,8 @@ class TestAppBackendRomMetaFinishedUpdatesLibrary(unittest.TestCase):
 
         emitted = []
         backend.libraryGamesChanged.connect(lambda: emitted.append(True))
-        backend._on_rom_meta_finished("42", {"companies": "Team Reptile"})
+        backend._on_rom_meta_finished({"rom_id": "42", "metadata": {"companies": "Team Reptile"}})
+        backend._flush_lib_changed()
 
         self.assertEqual(len(emitted), 1)
 
@@ -878,7 +1183,7 @@ class TestAppBackendRomMetaFinishedUpdatesLibrary(unittest.TestCase):
         game = {"rom_id": "42", "title": "Bomb Rush Cyberfunk", "platform": "PC", "genres": "Action"}
         backend = self._make_backend({"installed_games": [game]})
 
-        backend._on_rom_meta_finished("42", {"genres": "RPG"})
+        backend._on_rom_meta_finished({"rom_id": "42", "metadata": {"genres": "RPG"}})
 
         self.assertEqual(game["genres"], "Action")
 
@@ -888,7 +1193,7 @@ class TestAppBackendRomMetaFinishedUpdatesLibrary(unittest.TestCase):
 
         emitted = []
         backend.libraryGamesChanged.connect(lambda: emitted.append(True))
-        backend._on_rom_meta_finished("42", {"companies": "Team Reptile"})
+        backend._on_rom_meta_finished({"rom_id": "42", "metadata": {"companies": "Team Reptile"}})
 
         self.assertEqual(len(emitted), 0)
 
@@ -898,7 +1203,7 @@ class TestAppBackendRomMetaFinishedUpdatesLibrary(unittest.TestCase):
 
         emitted = []
         backend.saveConfigRequested.connect(lambda: emitted.append(True))
-        backend._on_rom_meta_finished("42", {"companies": "Team Reptile"})
+        backend._on_rom_meta_finished({"rom_id": "42", "metadata": {"companies": "Team Reptile"}})
         self.assertEqual(len(emitted), 1)
 
     def test_rom_meta_finished_does_not_save_config_when_nothing_changed(self):
@@ -917,11 +1222,11 @@ class TestAppBackendRomMetaFinishedUpdatesLibrary(unittest.TestCase):
 
         emitted = []
         backend.saveConfigRequested.connect(lambda: emitted.append(True))
-        backend._on_rom_meta_finished("42", {
+        backend._on_rom_meta_finished({"rom_id": "42", "metadata": {
             "genres": "Action",
             "companies": "Team Reptile",
             "first_release_date": "2023-08-18",
-        })
+        }})
         self.assertEqual(len(emitted), 0)
 
 

@@ -58,8 +58,10 @@ class TestCoverImageProviderCacheHit(unittest.TestCase):
         self.assertTrue(img.isNull())
 
     def test_does_not_import_loader(self):
-        import rom_mate.tv.bridge.image_provider  # noqa: F401
         import sys
+        sys.modules.pop("rom_mate.cover.loader", None)
+        sys.modules.pop("rom_mate.tv.bridge.image_provider", None)
+        import rom_mate.tv.bridge.image_provider  # noqa: F401
         self.assertNotIn("rom_mate.cover.loader", sys.modules)
 
 

@@ -6,6 +6,7 @@ from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QCompleter,
     QComboBox,
     QDialog,
@@ -265,6 +266,8 @@ class EmulatorConfigDialog(QDialog):
         is_new_entry: bool = False,
         save_strategy_values: list[str] | None = None,
         supported_emulator_profiles: list[dict[str, str]] | None = None,
+        guide_button_excluded: bool = False,
+        is_guide_button_default_locked: bool = False,
     ) -> None:
         super().__init__(parent)
 
@@ -278,6 +281,8 @@ class EmulatorConfigDialog(QDialog):
             for profile in self._supported_emulator_profiles
             if isinstance(profile, dict) and isinstance(profile.get("name", ""), str) and str(profile.get("name", "")).strip()
         }
+        self._guide_button_excluded = guide_button_excluded
+        self._is_guide_button_default_locked = is_guide_button_default_locked
         self._archive_extensions = {".7z", ".zip", ".rar", ".tar", ".gz", ".bz2", ".xz"}
         self._executable_file_filter = "Executable Files (*.exe *.bat *.cmd *.ps1 *.sh)"
         self._universal_file_filter = (
@@ -339,6 +344,14 @@ class EmulatorConfigDialog(QDialog):
         self.emulator_state_paths_input = QLineEdit()
         self._lock_field_height(self.emulator_state_paths_input)
         form.addRow("State Dirs (; separated)", self.emulator_state_paths_input)
+
+        self.guide_button_checkbox = QCheckBox()
+        self.guide_button_checkbox.setChecked(guide_button_excluded)
+        if is_guide_button_default_locked:
+            self.guide_button_checkbox.setToolTip(
+                "This emulator ignores the guide button by default. Uncheck to let TV mode pause it."
+            )
+        form.addRow("Ignore guide button (TV Mode)", self.guide_button_checkbox)
 
         layout.addLayout(form)
 
@@ -486,3 +499,6 @@ class EmulatorConfigDialog(QDialog):
             "save_paths": self.emulator_save_paths_input.text().strip(),
             "state_paths": self.emulator_state_paths_input.text().strip(),
         }
+
+    def guide_button_excluded(self) -> bool:
+        return self.guide_button_checkbox.isChecked()

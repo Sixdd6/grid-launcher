@@ -29,8 +29,8 @@ _restore_single_save_payload = restore_single_save_payload
 
 
 class _SlotFetchWorker(QObject):
-    finished = Signal(str, list)  # save_type, slot_dicts
-    error = Signal(str, str)      # save_type, error_message
+    finished = Signal(object)
+    error = Signal(object)
 
     def __init__(self, *, config: dict[str, Any], rom_id: str, save_type: str, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -62,13 +62,13 @@ class _SlotFetchWorker(QObject):
                         "updated_at": str(record.get("updated_at", "") or ""),
                     }
                 )
-            self.finished.emit(self._save_type, slot_dicts)
+            self.finished.emit({"save_type": self._save_type, "slots": slot_dicts})
         except Exception as error:
-            self.error.emit(self._save_type, str(error))
+            self.error.emit({"save_type": self._save_type, "error": str(error)})
 
 
 class _CloudUploadWorker(QObject):
-    finished = Signal(bool, str)  # success, message
+    finished = Signal(object)  # {"success": bool, "message": str}
 
     def __init__(self, *, config: dict[str, Any], game_dict: dict[str, Any], save_type: str, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -80,7 +80,7 @@ class _CloudUploadWorker(QObject):
     def run(self) -> None:
         emulator_name, emulator_entry = resolve_emulator_entry_for_game(self._game_dict, self._config)
         if emulator_entry is None:
-            self.finished.emit(False, "No emulator configured for this game's platform.")
+            self.finished.emit({"success": False, "message": "No emulator configured for this game's platform."})
             return
         try:
             uploaded, total, failed = perform_tv_save_upload(
@@ -92,23 +92,23 @@ class _CloudUploadWorker(QObject):
             )
             del failed
         except Exception as exc:
-            self.finished.emit(False, str(exc))
+            self.finished.emit({"success": False, "message": str(exc)})
             return
 
         if total == 0:
-            self.finished.emit(False, "No save files found for this game.")
+            self.finished.emit({"success": False, "message": "No save files found for this game."})
         elif uploaded == total:
-            self.finished.emit(True, f"Uploaded {uploaded} file(s).")
+            self.finished.emit({"success": True, "message": f"Uploaded {uploaded} file(s)."})
         else:
-            self.finished.emit(uploaded > 0, f"Uploaded {uploaded}/{total} file(s).")
+            self.finished.emit({"success": uploaded > 0, "message": f"Uploaded {uploaded}/{total} file(s)."})
 
 
 class CloudBackend(QObject):
-    slotsLoaded = Signal(str, list)       # save_type ("save"|"state"), list of slot dicts
-    slotsError = Signal(str, str)         # save_type, error message
-    restoreComplete = Signal(bool, str)   # success, message
-    deleteComplete = Signal(bool, str)    # success, message
-    uploadComplete = Signal(bool, str)    # success, message
+    slotsLoaded = Signal(object)       # {"save_type": str, "slots": list}
+    slotsError = Signal(object)        # {"save_type": str, "error": str}
+    restoreComplete = Signal(object)   # {"success": bool, "message": str}
+    deleteComplete = Signal(object)    # {"success": bool, "message": str}
+    uploadComplete = Signal(object)    # {"success": bool, "message": str}
 
     def __init__(self, config: dict[str, Any], *, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -127,12 +127,12 @@ class CloudBackend(QObject):
         game_dict = self._normalize_game(game)
 
         if not credentials_present(self._config):
-            self.slotsError.emit(save_type, "Not connected to server.")
+            self.slotsError.emit({"save_type": save_type, "error": "Not connected to server."})
             return
 
         rom_id = str(game_dict.get("rom_id", "") or game_dict.get("id", "")).strip()
         if not rom_id:
-            self.slotsError.emit(save_type, "Game has no server ID.")
+            self.slotsError.emit({"save_type": save_type, "error": "Game has no server ID."})
             return
 
         self._cancel_fetch_thread()
@@ -145,8 +145,6 @@ class CloudBackend(QObject):
         worker.error.connect(self._on_slots_error)
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
-        worker.error.connect(lambda *_: thread.quit())
-        worker.error.connect(lambda *_: worker.deleteLater())
         thread.finished.connect(thread.deleteLater)
 
         self._fetch_thread = thread
@@ -156,7 +154,7 @@ class CloudBackend(QObject):
     @Slot(str, str)
     def deleteSlot(self, save_id: str, save_type: str) -> None:
         if not credentials_present(self._config):
-            self.deleteComplete.emit(False, "Not connected to server.")
+            self.deleteComplete.emit({"success": False, "message": "Not connected to server."})
             return
 
         try:
@@ -171,13 +169,13 @@ class CloudBackend(QObject):
                 endpoint = "/api/states/delete"
                 payload = {"states": [save_id_int]}
             else:
-                self.deleteComplete.emit(False, "Unknown save type.")
+                self.deleteComplete.emit({"success": False, "message": "Unknown save type."})
                 return
 
             _api_post_json(base_url, api_token, endpoint, payload)
-            self.deleteComplete.emit(True, "Save deleted.")
+            self.deleteComplete.emit({"success": True, "message": "Save deleted."})
         except Exception as error:
-            self.deleteComplete.emit(False, str(error))
+            self.deleteComplete.emit({"success": False, "message": str(error)})
 
     @Slot("QVariant", str, str)
     def restoreSlot(self, game: Any, save_id: str, save_type: str) -> None:
@@ -185,12 +183,12 @@ class CloudBackend(QObject):
 
         try:
             if not credentials_present(self._config):
-                self.restoreComplete.emit(False, "Not connected to server.")
+                self.restoreComplete.emit({"success": False, "message": "Not connected to server."})
                 return
 
             rom_id = str(game_dict.get("rom_id", "") or game_dict.get("id", "")).strip()
             if not rom_id:
-                self.restoreComplete.emit(False, "Game has no server ID.")
+                self.restoreComplete.emit({"success": False, "message": "Game has no server ID."})
                 return
 
             base_url = server_base_url(self._config)
@@ -207,7 +205,7 @@ class CloudBackend(QObject):
                     target_dir_str = str(Path(local_path_value.strip()).parent)
 
             if not target_dir_str:
-                self.restoreComplete.emit(False, "Cannot determine save location. Use Desktop Mode to restore.")
+                self.restoreComplete.emit({"success": False, "message": "Cannot determine save location. Use Desktop Mode to restore."})
                 return
 
             target_dir = Path(target_dir_str)
@@ -217,14 +215,14 @@ class CloudBackend(QObject):
             game_name = game_name_value if isinstance(game_name_value, str) and game_name_value else "save"
             save_record = {"file_name": game_name, "slot": ""}
             _restore_single_save_payload([target_dir], save_record, payload, [], game_name)
-            self.restoreComplete.emit(True, "Save restored successfully.")
+            self.restoreComplete.emit({"success": True, "message": "Save restored successfully."})
         except Exception as error:
-            self.restoreComplete.emit(False, str(error))
+            self.restoreComplete.emit({"success": False, "message": str(error)})
 
     @Slot("QVariant", str)
     def uploadSave(self, game: Any, save_type: str) -> None:
         if not credentials_present(self._config):
-            self.uploadComplete.emit(False, "Not signed in to cloud saves.")
+            self.uploadComplete.emit({"success": False, "message": "Not signed in to cloud saves."})
             return
 
         self._cancel_upload_thread()
@@ -258,23 +256,33 @@ class CloudBackend(QObject):
         self._upload_thread = None
         self._upload_worker = None
 
-    @Slot(str, list)
-    def _on_slots_loaded(self, save_type: str, slots: list) -> None:
-        self.slotsLoaded.emit(save_type, slots)
+    @Slot(object)
+    def _on_slots_loaded(self, bundle: object) -> None:
+        save_type = bundle.get("save_type", "") if isinstance(bundle, dict) else ""
+        slots = bundle.get("slots", []) if isinstance(bundle, dict) else []
+        self.slotsLoaded.emit({"save_type": save_type, "slots": slots})
         self._fetch_thread = None
         self._fetch_worker = None
 
-    @Slot(str, str)
-    def _on_slots_error(self, save_type: str, error: str) -> None:
-        self.slotsError.emit(save_type, error)
+    @Slot(object)
+    def _on_slots_error(self, bundle: object) -> None:
+        save_type = bundle.get("save_type", "") if isinstance(bundle, dict) else ""
+        error = bundle.get("error", "") if isinstance(bundle, dict) else ""
+        self.slotsError.emit({"save_type": save_type, "error": error})
+        if self._fetch_thread is not None:
+            self._fetch_thread.quit()
+        if self._fetch_worker is not None:
+            self._fetch_worker.deleteLater()
         self._fetch_thread = None
         self._fetch_worker = None
 
-    @Slot(bool, str)
-    def _on_upload_done(self, success: bool, message: str) -> None:
+    @Slot(object)
+    def _on_upload_done(self, bundle: object) -> None:
+        success = bundle.get("success", False) if isinstance(bundle, dict) else False
+        message = bundle.get("message", "") if isinstance(bundle, dict) else ""
         self._upload_thread = None
         self._upload_worker = None
-        self.uploadComplete.emit(success, message)
+        self.uploadComplete.emit({"success": success, "message": message})
 
     def _normalize_game(self, game: Any) -> dict[str, Any]:
         payload = game

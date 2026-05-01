@@ -44,6 +44,22 @@ def resolve_cover_url(value: Any, base_url: str) -> str:
     return urlunsplit((split.scheme, split.netloc, safe_path, safe_query, split.fragment))
 
 
+def filter_to_server_host(url: str, base_url: str) -> str:
+    """Return url unchanged if its host matches base_url's host, otherwise return ''.
+
+    Permissive when base_url is empty or has no parseable netloc.
+    """
+    if not url or not base_url:
+        return url
+    base_netloc = urlsplit(base_url).netloc
+    if not base_netloc:
+        return url
+    candidate_netloc = urlsplit(url).netloc
+    if candidate_netloc and candidate_netloc != base_netloc:
+        return ""
+    return url
+
+
 def cover_url_from_rom_payload(payload: dict[str, Any], resolver: Callable[[Any], str]) -> str:
     def resolve_cover_value(value: Any) -> str:
         if isinstance(value, str):

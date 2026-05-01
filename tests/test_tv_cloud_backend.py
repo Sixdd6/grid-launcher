@@ -35,7 +35,14 @@ class TestCloudBackend(unittest.TestCase):
     def test_load_slots_for_game_without_credentials_emits_error_and_skips_thread(self):
         backend = CloudBackend(dict(BASE_CONFIG))
         received: list[tuple[str, str]] = []
-        backend.slotsError.connect(lambda save_type, msg: received.append((save_type, msg)))
+        backend.slotsError.connect(
+            lambda bundle: received.append(
+                (
+                    bundle.get("save_type", "") if isinstance(bundle, dict) else "",
+                    bundle.get("error", "") if isinstance(bundle, dict) else "",
+                )
+            )
+        )
 
         with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=False), patch(
             "rom_mate.tv.bridge.cloud_backend.QThread.start"
@@ -48,7 +55,14 @@ class TestCloudBackend(unittest.TestCase):
     def test_load_slots_for_game_without_rom_id_emits_error(self):
         backend = CloudBackend(dict(BASE_CONFIG))
         received: list[tuple[str, str]] = []
-        backend.slotsError.connect(lambda save_type, msg: received.append((save_type, msg)))
+        backend.slotsError.connect(
+            lambda bundle: received.append(
+                (
+                    bundle.get("save_type", "") if isinstance(bundle, dict) else "",
+                    bundle.get("error", "") if isinstance(bundle, dict) else "",
+                )
+            )
+        )
 
         with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True):
             backend.loadSlotsForGame({"rom_id": "", "id": ""}, "save")
@@ -58,7 +72,14 @@ class TestCloudBackend(unittest.TestCase):
     def test_slot_fetch_worker_run_success_emits_finished_slots(self):
         worker = _SlotFetchWorker(config=dict(BASE_CONFIG), rom_id="42", save_type="save")
         finished: list[tuple[str, list[dict[str, str]]]] = []
-        worker.finished.connect(lambda save_type, slots: finished.append((save_type, slots)))
+        worker.finished.connect(
+            lambda bundle: finished.append(
+                (
+                    bundle.get("save_type", "") if isinstance(bundle, dict) else "",
+                    bundle.get("slots", []) if isinstance(bundle, dict) else [],
+                )
+            )
+        )
 
         records = [
             {
@@ -98,7 +119,14 @@ class TestCloudBackend(unittest.TestCase):
     def test_slot_fetch_worker_run_success_emits_finished_empty_slots(self):
         worker = _SlotFetchWorker(config=dict(BASE_CONFIG), rom_id="42", save_type="state")
         finished: list[tuple[str, list[dict[str, str]]]] = []
-        worker.finished.connect(lambda save_type, slots: finished.append((save_type, slots)))
+        worker.finished.connect(
+            lambda bundle: finished.append(
+                (
+                    bundle.get("save_type", "") if isinstance(bundle, dict) else "",
+                    bundle.get("slots", []) if isinstance(bundle, dict) else [],
+                )
+            )
+        )
 
         with patch("rom_mate.tv.bridge.cloud_backend._api_get_json", return_value=[]), patch(
             "rom_mate.tv.bridge.cloud_backend._server_records_from_payload", return_value=[]
@@ -110,7 +138,14 @@ class TestCloudBackend(unittest.TestCase):
     def test_slot_fetch_worker_run_api_error_emits_error_signal(self):
         worker = _SlotFetchWorker(config=dict(BASE_CONFIG), rom_id="42", save_type="save")
         errors: list[tuple[str, str]] = []
-        worker.error.connect(lambda save_type, msg: errors.append((save_type, msg)))
+        worker.error.connect(
+            lambda bundle: errors.append(
+                (
+                    bundle.get("save_type", "") if isinstance(bundle, dict) else "",
+                    bundle.get("error", "") if isinstance(bundle, dict) else "",
+                )
+            )
+        )
 
         with patch("rom_mate.tv.bridge.cloud_backend._api_get_json", side_effect=Exception("connection refused")):
             worker.run()
@@ -122,7 +157,14 @@ class TestCloudBackend(unittest.TestCase):
     def test_delete_slot_success_emits_complete_true(self):
         backend = CloudBackend(dict(BASE_CONFIG))
         received: list[tuple[bool, str]] = []
-        backend.deleteComplete.connect(lambda ok, msg: received.append((ok, msg)))
+        backend.deleteComplete.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                )
+            )
+        )
 
         with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
             "rom_mate.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
@@ -134,7 +176,14 @@ class TestCloudBackend(unittest.TestCase):
     def test_delete_slot_api_error_emits_complete_false(self):
         backend = CloudBackend(dict(BASE_CONFIG))
         received: list[tuple[bool, str]] = []
-        backend.deleteComplete.connect(lambda ok, msg: received.append((ok, msg)))
+        backend.deleteComplete.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                )
+            )
+        )
 
         with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
             "rom_mate.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
@@ -148,7 +197,14 @@ class TestCloudBackend(unittest.TestCase):
     def test_restore_slot_without_install_dir_emits_complete_false(self):
         backend = CloudBackend(dict(BASE_CONFIG))
         received: list[tuple[bool, str]] = []
-        backend.restoreComplete.connect(lambda ok, msg: received.append((ok, msg)))
+        backend.restoreComplete.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                )
+            )
+        )
 
         game = {"rom_id": "42", "id": "42", "name": "My Game", "install_dir": "", "local_path": ""}
 
@@ -164,7 +220,14 @@ class TestCloudBackend(unittest.TestCase):
     def test_restore_slot_success_emits_complete_true(self):
         backend = CloudBackend(dict(BASE_CONFIG))
         received: list[tuple[bool, str]] = []
-        backend.restoreComplete.connect(lambda ok, msg: received.append((ok, msg)))
+        backend.restoreComplete.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                )
+            )
+        )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             install_dir = Path(temp_dir) / "games" / "mygame"
@@ -194,7 +257,14 @@ class TestCloudBackend(unittest.TestCase):
     def test_upload_save_emits_upload_complete_false_when_no_credentials(self):
         backend = CloudBackend(dict(BASE_CONFIG))
         received: list[tuple[bool, str]] = []
-        backend.uploadComplete.connect(lambda ok, msg: received.append((ok, msg)))
+        backend.uploadComplete.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                )
+            )
+        )
 
         with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=False):
             backend.uploadSave({"id": "5", "name": "Game"}, "save")
@@ -229,9 +299,16 @@ class TestCloudBackend(unittest.TestCase):
     def test_on_upload_done_emits_upload_complete(self):
         backend = CloudBackend(dict(BASE_CONFIG))
         received: list[tuple[bool, str]] = []
-        backend.uploadComplete.connect(lambda ok, msg: received.append((ok, msg)))
+        backend.uploadComplete.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                )
+            )
+        )
 
-        backend._on_upload_done(True, "Save uploaded successfully.")
+        backend._on_upload_done({"success": True, "message": "Save uploaded successfully."})
 
         self.assertEqual(received, [(True, "Save uploaded successfully.")])
 
@@ -248,7 +325,14 @@ class TestCloudUploadWorker(unittest.TestCase):
             save_type="save",
         )
         received: list[tuple[bool, str]] = []
-        worker.finished.connect(lambda ok, msg: received.append((ok, msg)))
+        worker.finished.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                )
+            )
+        )
 
         with patch(
             "rom_mate.tv.bridge.cloud_backend.resolve_emulator_entry_for_game",
@@ -271,7 +355,14 @@ class TestCloudUploadWorker(unittest.TestCase):
             save_type="save",
         )
         received: list[tuple[bool, str]] = []
-        worker.finished.connect(lambda ok, msg: received.append((ok, msg)))
+        worker.finished.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                )
+            )
+        )
 
         with patch(
             "rom_mate.tv.bridge.cloud_backend.resolve_emulator_entry_for_game",
@@ -290,7 +381,14 @@ class TestCloudUploadWorker(unittest.TestCase):
             save_type="save",
         )
         received: list[tuple[bool, str]] = []
-        worker.finished.connect(lambda ok, msg: received.append((ok, msg)))
+        worker.finished.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                )
+            )
+        )
 
         with patch(
             "rom_mate.tv.bridge.cloud_backend.resolve_emulator_entry_for_game",
@@ -312,7 +410,14 @@ class TestCloudUploadWorker(unittest.TestCase):
             save_type="save",
         )
         received: list[tuple[bool, str]] = []
-        worker.finished.connect(lambda ok, msg: received.append((ok, msg)))
+        worker.finished.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                )
+            )
+        )
 
         with patch(
             "rom_mate.tv.bridge.cloud_backend.resolve_emulator_entry_for_game",
@@ -330,7 +435,14 @@ class TestCloudUploadWorker(unittest.TestCase):
     def test_upload_save_skips_when_no_credentials(self):
         backend = CloudBackend(dict(BASE_CONFIG))
         received: list[tuple[bool, str]] = []
-        backend.uploadComplete.connect(lambda ok, msg: received.append((ok, msg)))
+        backend.uploadComplete.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                )
+            )
+        )
 
         with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=False), patch(
             "rom_mate.tv.bridge.cloud_backend.QThread.start"
@@ -364,7 +476,14 @@ class TestCloudBackendState(unittest.TestCase):
     def test_restore_slot_uses_local_path_parent_when_no_install_dir(self):
         backend = CloudBackend(dict(BASE_CONFIG))
         received: list[tuple[bool, str]] = []
-        backend.restoreComplete.connect(lambda ok, msg: received.append((ok, msg)))
+        backend.restoreComplete.connect(
+            lambda bundle: received.append(
+                (
+                    bool(bundle.get("success", False)) if isinstance(bundle, dict) else False,
+                    str(bundle.get("message", "")) if isinstance(bundle, dict) else "",
+                )
+            )
+        )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             local_path = Path(temp_dir) / "games" / "mygame" / "rom.sfc"

@@ -301,7 +301,7 @@ def perform_tv_save_upload(
 
 
 class _TvAutoRestoreWorker(QObject):
-    finished = Signal(bool, str)
+    finished = Signal(object)
 
     def __init__(self, config: dict[str, Any], game: dict[str, str], emulator_name: str, emulator_entry: dict[str, str]) -> None:
         super().__init__()
@@ -315,7 +315,7 @@ class _TvAutoRestoreWorker(QObject):
         try:
             rom_id = str(self._game.get("rom_id") or self._game.get("id") or "").strip()
             if not rom_id:
-                self.finished.emit(False, "")
+                self.finished.emit({"ok": False, "message": ""})
                 return
 
             base_url = str(self._config.get("server_url", "") or "").rstrip("/")
@@ -324,7 +324,7 @@ class _TvAutoRestoreWorker(QObject):
             records = _server_records_from_payload(raw_payload)
             record = _latest_server_record(records, self._emulator_name, _save_record_timestamp)
             if not record:
-                self.finished.emit(False, "")
+                self.finished.emit({"ok": False, "message": ""})
                 return
 
             payload_bytes = _api_get_bytes(base_url, api_token, f"/api/saves/{record['id']}/content")
@@ -346,6 +346,6 @@ class _TvAutoRestoreWorker(QObject):
                 [],
                 str(self._game.get("title", "") or ""),
             )
-            self.finished.emit(True, "Save restored from cloud.")
+            self.finished.emit({"ok": True, "message": "Save restored from cloud."})
         except Exception as error:
-            self.finished.emit(False, str(error))
+            self.finished.emit({"ok": False, "message": str(error)})
