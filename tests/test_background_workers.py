@@ -866,7 +866,15 @@ class InstallFinalizeWorkerTests(unittest.TestCase):
 class TestRetroAchievementsWorker(unittest.TestCase):
     def _run_worker(self, worker):
         results = []
-        worker.finished.connect(lambda rid, achs, err: results.append((rid, achs, err)))
+        worker.finished.connect(
+            lambda bundle: results.append(
+                (
+                    bundle.get("request_id", -1) if isinstance(bundle, dict) else -1,
+                    bundle.get("achievements", []) if isinstance(bundle, dict) else [],
+                    bundle.get("error", "") if isinstance(bundle, dict) else str(bundle),
+                )
+            )
+        )
         worker.run()
         return results
 
@@ -898,7 +906,15 @@ class TestRetroAchievementsWorker(unittest.TestCase):
 class TestPCGamingWikiWorker(unittest.TestCase):
     def _run_worker(self, worker):
         results = []
-        worker.finished.connect(lambda rid, paths, err: results.append((rid, paths, err)))
+        worker.finished.connect(
+            lambda bundle: results.append(
+                (
+                    bundle.get("request_id", -1) if isinstance(bundle, dict) else -1,
+                    bundle.get("paths", []) if isinstance(bundle, dict) else [],
+                    bundle.get("error", "") if isinstance(bundle, dict) else str(bundle),
+                )
+            )
+        )
         worker.run()
         return results
 

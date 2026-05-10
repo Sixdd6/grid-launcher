@@ -191,6 +191,26 @@ class ControllerBackendTests(unittest.TestCase):
         backend._on_raw_event({"code": "ABS_Y", "value": -0.9})
         self.assertEqual(emitted, ["up"])
 
+    def test_tv_window_active_with_qwidget(self):
+        import rom_mate.tv.bridge.controller as mod
+
+        backend = self._make_backend()
+        mock_qwindow = MagicMock()
+        mock_qwindow.winId.return_value = 12345
+
+        mock_widget = MagicMock(spec=["windowHandle"])
+        mock_widget.windowHandle.return_value = mock_qwindow
+
+        backend._focus_windows = [mock_widget]
+
+        mock_focus = MagicMock()
+        mock_focus.winId.return_value = 12345
+
+        with patch.object(mod.QGuiApplication, "focusWindow", return_value=mock_focus):
+            result = backend._tv_window_active()
+
+        self.assertTrue(result)
+
     def test_axis_center_clears_repeat_state(self):
         backend = self._make_backend()
         emitted = []

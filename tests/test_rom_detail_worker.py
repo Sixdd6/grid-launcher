@@ -37,7 +37,15 @@ class RomDetailWorkerTests(unittest.TestCase):
     def test_worker_emits_payload_on_success(self) -> None:
         worker = RomDetailWorker("https://romm.example", "token", "123")
         results: list[tuple[str, dict, str]] = []
-        worker.finished.connect(lambda rom_id, payload, error: results.append((rom_id, payload, error)))
+        worker.finished.connect(
+            lambda bundle: results.append(
+                (
+                    bundle.get("rom_id", "") if isinstance(bundle, dict) else "",
+                    bundle.get("payload") if isinstance(bundle, dict) else None,
+                    bundle.get("error", "") if isinstance(bundle, dict) else str(bundle),
+                )
+            )
+        )
 
         payload = {"id": 123, "name": "Test Rom"}
         with patch("rom_mate.background.workers.api_get_json", return_value=payload) as mock_api_get:
@@ -49,7 +57,15 @@ class RomDetailWorkerTests(unittest.TestCase):
     def test_worker_emits_error_on_exception(self) -> None:
         worker = RomDetailWorker("https://romm.example", "token", "321")
         results: list[tuple[str, dict, str]] = []
-        worker.finished.connect(lambda rom_id, payload, error: results.append((rom_id, payload, error)))
+        worker.finished.connect(
+            lambda bundle: results.append(
+                (
+                    bundle.get("rom_id", "") if isinstance(bundle, dict) else "",
+                    bundle.get("payload") if isinstance(bundle, dict) else None,
+                    bundle.get("error", "") if isinstance(bundle, dict) else str(bundle),
+                )
+            )
+        )
 
         with patch("rom_mate.background.workers.api_get_json", side_effect=ValueError("boom")):
             worker.run()
@@ -98,7 +114,7 @@ class RomDetailWorkerTests(unittest.TestCase):
         }
 
         with patch("rom_mate.ui.mixins.details_view_mixin.open_game_details"):
-            window._on_rom_detail_loaded("123", payload, "")
+            window._on_rom_detail_loaded({"rom_id": "123", "payload": payload, "error": ""})
 
         game = window.current_details_game
         self.assertEqual(game.get("revision"), "v2.0")

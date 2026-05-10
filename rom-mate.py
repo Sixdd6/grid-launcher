@@ -579,7 +579,6 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self.details_cloud_workers: list[DetailsCloudRecordsWorker] = []
         self.details_cloud_request_id = 0
         self.details_cloud_request_context: dict[str, Any] = {}
-        self._tv_engine: Any = None
         self._tv_app_backend: Any = None
         self._tv_game_backend: "GameBackend | None" = None
         self._tv_cloud_backend: "CloudBackend | None" = None
@@ -689,21 +688,19 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self._persist_window_geometry()
         if self._tv_window is not None:
             self._tv_window.hide()
+        if getattr(self, "_tv_pause_window", None) is not None:
+            try:
+                self._tv_pause_window.hide()
+            except RuntimeError:
+                self._tv_pause_window = None
         if self._tv_game_backend is not None and self._tv_game_backend.isSessionActive:
             self._tv_game_backend.stopGame()
         if self._tv_controller_backend is not None:
             self._tv_controller_backend.stop()
             self._tv_controller_backend = None
-        if self._tv_engine is not None:
-            self._tv_engine.deleteLater()
-            self._tv_engine = None
         super().closeEvent(event)
 
     def _switch_to_tv_mode(self) -> None:
-        from PySide6.QtQml import QQmlApplicationEngine
-        from PySide6.QtCore import QUrl
-        from PySide6.QtQuickControls2 import QQuickStyle
-
         if getattr(self, "install_in_progress", False):
             from PySide6.QtWidgets import QMessageBox
             result = QMessageBox.question(
@@ -717,23 +714,17 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
         self._save_config(self.config)
         self.session_poll_timer.stop()
+        self._switch_to_tv_mode_widget()
 
-        if self._tv_engine is None:
-            QQuickStyle.setStyle("Basic")
-            from PySide6.QtCore import Qt
-            from PySide6.QtWidgets import QApplication
-            QApplication.setEffectEnabled(Qt.UIEffect.UI_AnimateCombo, False)
-            QApplication.setEffectEnabled(Qt.UIEffect.UI_AnimateMenu, False)
-            QApplication.setEffectEnabled(Qt.UIEffect.UI_AnimateToolBox, False)
-            QApplication.setEffectEnabled(Qt.UIEffect.UI_AnimateTooltip, False)
-            QApplication.setEffectEnabled(Qt.UIEffect.UI_FadeMenu, False)
-            QApplication.setEffectEnabled(Qt.UIEffect.UI_FadeTooltip, False)
+    def _switch_to_tv_mode_widget(self) -> None:
+        if self._tv_window is None:
             from rom_mate.tv.bridge.app_backend import AppBackend
             from rom_mate.tv.bridge.cloud_backend import CloudBackend
             from rom_mate.tv.bridge.controller import ControllerBackend
             from rom_mate.tv.bridge.game_backend import GameBackend
-            from rom_mate.tv.bridge.image_provider import CoverImageProvider
             from rom_mate.tv.bridge.pause_backend import PauseBackend
+            from rom_mate.tv.widgets.cover_loader import CoverLoader
+            from rom_mate.tv.widgets.window import TVWindow
 
             image_cache_dir = self._image_cache_dir()
             app_backend = AppBackend(
@@ -749,13 +740,18 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
                 game_backend=game_backend,
                 parent=None,
             )
-            self._tv_controller_backend = controller_backend
+
+            self._tv_app_backend = app_backend
+            self._tv_cloud_backend = cloud_backend
             self._tv_game_backend = game_backend
             self._tv_pause_backend = pause_backend
+            self._tv_controller_backend = controller_backend
+
             game_backend.pauseRequested.connect(pause_backend.openForActiveSession)
             game_backend.installComplete.connect(
                 lambda b: app_backend.syncConfig(self.config) if (b.get("success") if isinstance(b, dict) else False) else None
             )
+
             def _on_tv_install(bundle: object) -> None:
                 ok = bundle.get("success") if isinstance(bundle, dict) else False
                 if ok:
@@ -779,65 +775,35 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             app_backend.switchToDesktopModeRequested.connect(self._switch_to_desktop_mode)
             app_backend.saveConfigRequested.connect(lambda: self._save_config(self.config))
 
-            self._tv_app_backend = app_backend
-            self._tv_cloud_backend = cloud_backend
-
             cover_url_map: dict[str, str] = {
                 g["cover_url"]: g["cached_cover_path"]
                 for g in self.config.get("installed_games", [])
                 if isinstance(g, dict) and g.get("cover_url") and g.get("cached_cover_path")
             }
-            cover_provider = CoverImageProvider(
+            cover_loader = CoverLoader(
                 image_cache_dir,
                 self.config.get("api_token", ""),
                 self.config.get("server_url", ""),
                 cover_url_map,
             )
 
-            engine = QQmlApplicationEngine()
-            engine.rootContext().setContextProperty("appBackend", app_backend)
-            engine.rootContext().setContextProperty("cloudBackend", cloud_backend)
-            engine.rootContext().setContextProperty("gameBackend", game_backend)
-            engine.rootContext().setContextProperty("pauseBackend", pause_backend)
-            engine.rootContext().setContextProperty("controllerBackend", controller_backend)
-            import PySide6 as _pyside6_pkg
-            _pyside6_qml_dir = Path(_pyside6_pkg.__file__).parent / "Qt" / "qml"
-            if _pyside6_qml_dir.exists():
-                engine.addImportPath(str(_pyside6_qml_dir))
-            qml_root = Path(__file__).parent / "rom_mate" / "tv" / "qml"
-            engine.addImportPath(str(qml_root))
-            engine.addImportPath(str(qml_root / "views"))
-            engine.addImportPath(str(qml_root / "components"))
-            engine.addImportPath(str(qml_root / "theme"))
-            engine.addImageProvider("covers", cover_provider)
-            qml_path = Path(__file__).parent / "rom_mate" / "tv" / "qml" / "Main.qml"
-            engine.load(QUrl.fromLocalFile(str(qml_path)))
-            if not engine.rootObjects():
-                print("[TV] QML load failed!", flush=True)
-                engine.deleteLater()
-                return
-            self._tv_engine = engine
-            self._tv_window = engine.rootObjects()[0]
-
-            from PySide6.QtQml import QQmlComponent, QQmlEngine
-            pause_qml_path = Path(__file__).parent / "rom_mate" / "tv" / "qml" / "windows" / "PauseWindow.qml"
-            pause_component = QQmlComponent(engine, QUrl.fromLocalFile(str(pause_qml_path)))
-            pause_window = pause_component.create(engine.rootContext())
-            if pause_component.isError():
-                print("[TV] PauseWindow load failed:", pause_component.errorString(), flush=True)
-                pause_window = None
-            if pause_window is not None:
-                QQmlEngine.setObjectOwnership(pause_window, QQmlEngine.ObjectOwnership.CppOwnership)
-            self._tv_pause_window = pause_window
-
+            tv_window = TVWindow(
+                app_backend,
+                cloud_backend,
+                game_backend,
+                pause_backend,
+                controller_backend,
+                cover_loader,
+            )
             controller_backend.set_pause_backend(pause_backend)
-            focus_wins = [w for w in [self._tv_window, pause_window] if w is not None]
-            controller_backend.set_focus_windows(focus_wins)
+            controller_backend.set_focus_windows([tv_window, tv_window._pause_window])
 
-        self._tv_controller_backend.start()
+            self._tv_window = tv_window
+            self._tv_pause_window = tv_window._pause_window
         self._tv_app_backend.connectToServer()
         self._tv_window.showFullScreen()
         self.hide()
+        self._tv_controller_backend.start()
 
     def _switch_to_desktop_mode(self) -> None:
         if self._tv_game_backend is not None and self._tv_game_backend.isSessionActive:

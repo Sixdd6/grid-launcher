@@ -29,7 +29,7 @@ class PauseBackend(QObject):
     def emulatorName(self) -> str:
         return self._emulator_name
 
-    @Property("QVariantList", constant=True)
+    @Property(list, constant=True)
     def actions(self) -> list[str]:
         return ["Resume Game", "Quit to TV Mode"]
 

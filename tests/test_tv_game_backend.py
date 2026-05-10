@@ -981,7 +981,7 @@ class TestGameBackendNativeLaunch(unittest.TestCase):
             ]
         }
         backend = self._make_backend(config)
-        backend.saveNativeExecutable("42", "/games/mygame/launcher.exe")
+        backend.saveNativeExecutable({"rom_id": "42", "exe_path": "/games/mygame/launcher.exe"})
         self.assertEqual(config["installed_games"][0]["native_executable_path"], "/games/mygame/launcher.exe")
         mock_write.assert_called_once()
 

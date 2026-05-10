@@ -1899,7 +1899,10 @@ class EmulatorEnsureDispatchTests(unittest.TestCase):
                 pass
 
         window = _WindowStub()
-        module.MainWindow._on_ra_login_finished(window, "psp_user", "new_token", "")
+        module.MainWindow._on_ra_login_finished(
+            window,
+            {"username": "psp_user", "token": "new_token", "error": ""},
+        )
 
         self.assertEqual(window.config.get("retroachievements_username"), "psp_user")
         self.assertEqual(window.config.get("retroachievements_token"), "new_token")
@@ -1928,7 +1931,10 @@ class EmulatorEnsureDispatchTests(unittest.TestCase):
                 pass
 
         window = _WindowStub()
-        module.MainWindow._on_ra_login_finished(window, "", "", "Invalid credentials")
+        module.MainWindow._on_ra_login_finished(
+            window,
+            {"username": "", "token": "", "error": "Invalid credentials"},
+        )
 
         self.assertEqual(sync_called, [])
 

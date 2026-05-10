@@ -122,8 +122,16 @@ class CloudBackend(QObject):
     def syncConfig(self, config: dict[str, Any]) -> None:
         self._config = config
 
-    @Slot("QVariant", str)
-    def loadSlotsForGame(self, game: Any, save_type: str) -> None:
+    @Slot(object)
+    def loadSlotsForGame(self, bundle: Any) -> None:
+        if isinstance(bundle, dict) and "game" in bundle:
+            game = bundle.get("game")
+            save_type = str(bundle.get("save_type", ""))
+        else:
+            # legacy call with separate args — not expected from QML
+            game = bundle
+            save_type = ""
+
         game_dict = self._normalize_game(game)
 
         if not credentials_present(self._config):
@@ -151,8 +159,15 @@ class CloudBackend(QObject):
         self._fetch_worker = worker
         thread.start()
 
-    @Slot(str, str)
-    def deleteSlot(self, save_id: str, save_type: str) -> None:
+    @Slot(object)
+    def deleteSlot(self, bundle: Any) -> None:
+        if isinstance(bundle, dict):
+            save_id = str(bundle.get("save_id", ""))
+            save_type = str(bundle.get("save_type", ""))
+        else:
+            save_id = str(bundle)
+            save_type = ""
+
         if not credentials_present(self._config):
             self.deleteComplete.emit({"success": False, "message": "Not connected to server."})
             return
@@ -177,8 +192,18 @@ class CloudBackend(QObject):
         except Exception as error:
             self.deleteComplete.emit({"success": False, "message": str(error)})
 
-    @Slot("QVariant", str, str)
-    def restoreSlot(self, game: Any, save_id: str, save_type: str) -> None:
+    @Slot(object)
+    def restoreSlot(self, bundle: Any) -> None:
+        if isinstance(bundle, dict) and "game" in bundle:
+            game = bundle.get("game")
+            save_id = str(bundle.get("save_id", ""))
+            save_type = str(bundle.get("save_type", ""))
+        else:
+            # legacy — not expected from QML
+            game = bundle
+            save_id = ""
+            save_type = ""
+
         game_dict = self._normalize_game(game)
 
         try:
@@ -219,8 +244,15 @@ class CloudBackend(QObject):
         except Exception as error:
             self.restoreComplete.emit({"success": False, "message": str(error)})
 
-    @Slot("QVariant", str)
-    def uploadSave(self, game: Any, save_type: str) -> None:
+    @Slot(object)
+    def uploadSave(self, bundle: Any) -> None:
+        if isinstance(bundle, dict) and "game" in bundle:
+            game = bundle.get("game")
+            save_type = str(bundle.get("save_type", ""))
+        else:
+            game = bundle
+            save_type = ""
+
         if not credentials_present(self._config):
             self.uploadComplete.emit({"success": False, "message": "Not signed in to cloud saves."})
             return

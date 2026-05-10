@@ -80,7 +80,7 @@ class TestAppBackendConfigDefaults(unittest.TestCase):
     def test_library_games_returns_installed_games(self):
         games = [{"title": "Doom", "platform": "PC"}]
         backend = self._make_backend({"installed_games": games})
-        self.assertEqual(backend.libraryGames, games)
+        self.assertEqual(backend.libraryGames, [{"title": "Doom", "platform": "PC", "is_favorite": "false"}])
 
     def test_library_games_excludes_emulator_platform_entries(self):
         games = [
@@ -135,7 +135,7 @@ class TestAppBackendSyncConfig(unittest.TestCase):
         backend = AppBackend({}, Path("/tmp/covers"))
         new_config = {"installed_games": [{"title": "Zelda", "platform": "N64"}]}
         backend.syncConfig(new_config)
-        self.assertEqual(backend.libraryGames, new_config["installed_games"])
+        self.assertEqual(backend.libraryGames, [{"title": "Zelda", "platform": "N64", "is_favorite": "false"}])
 
 
 class TestAppBackendConnectToServer(unittest.TestCase):

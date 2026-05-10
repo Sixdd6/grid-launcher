@@ -575,7 +575,21 @@ class ControllerBackend(QObject):
         if not self._focus_windows:
             return True  # no restriction when no windows registered
         focus = QGuiApplication.focusWindow()
-        return focus is not None and focus in self._focus_windows
+        if focus is None:
+            return False
+        try:
+            focus_id = focus.winId()
+            for win in self._focus_windows:
+                if win is None:
+                    continue
+                qwindow = win.windowHandle() if hasattr(win, "windowHandle") else win
+                if qwindow is None:
+                    continue
+                if qwindow.winId() == focus_id:
+                    return True
+            return False
+        except RuntimeError:
+            return False
 
     # ------------------------------------------------------------------
     # Raw event handler

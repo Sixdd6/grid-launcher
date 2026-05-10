@@ -47,7 +47,7 @@ class TestCloudBackend(unittest.TestCase):
         with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=False), patch(
             "rom_mate.tv.bridge.cloud_backend.QThread.start"
         ) as mock_thread_start:
-            backend.loadSlotsForGame({"rom_id": "42"}, "save")
+            backend.loadSlotsForGame({"game": {"rom_id": "42"}, "save_type": "save"})
 
         self.assertEqual(received, [("save", "Not connected to server.")])
         mock_thread_start.assert_not_called()
@@ -65,7 +65,7 @@ class TestCloudBackend(unittest.TestCase):
         )
 
         with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True):
-            backend.loadSlotsForGame({"rom_id": "", "id": ""}, "save")
+            backend.loadSlotsForGame({"game": {"rom_id": "", "id": ""}, "save_type": "save"})
 
         self.assertEqual(received, [("save", "Game has no server ID.")])
 
@@ -169,7 +169,7 @@ class TestCloudBackend(unittest.TestCase):
         with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
             "rom_mate.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
         ), patch("rom_mate.tv.bridge.cloud_backend._api_post_json", return_value=None):
-            backend.deleteSlot("42", "save")
+            backend.deleteSlot({"save_id": "42", "save_type": "save"})
 
         self.assertEqual(received, [(True, "Save deleted.")])
 
@@ -188,7 +188,7 @@ class TestCloudBackend(unittest.TestCase):
         with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
             "rom_mate.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
         ), patch("rom_mate.tv.bridge.cloud_backend._api_post_json", side_effect=Exception("timeout")):
-            backend.deleteSlot("42", "save")
+            backend.deleteSlot({"save_id": "42", "save_type": "save"})
 
         self.assertEqual(len(received), 1)
         self.assertFalse(received[0][0])
@@ -211,7 +211,7 @@ class TestCloudBackend(unittest.TestCase):
         with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
             "rom_mate.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
         ), patch("rom_mate.tv.bridge.cloud_backend._api_get_bytes", return_value=b"fake bytes"):
-            backend.restoreSlot(game, "1", "save")
+            backend.restoreSlot({"game": game, "save_id": "1", "save_type": "save"})
 
         self.assertEqual(len(received), 1)
         self.assertFalse(received[0][0])
@@ -245,7 +245,7 @@ class TestCloudBackend(unittest.TestCase):
                 "rom_mate.tv.bridge.cloud_backend._restore_single_save_payload",
                 return_value=Path(temp_dir) / "save.sav",
             ):
-                backend.restoreSlot(game, "1", "save")
+                backend.restoreSlot({"game": game, "save_id": "1", "save_type": "save"})
 
         self.assertEqual(received, [(True, "Save restored successfully.")])
 
@@ -267,7 +267,7 @@ class TestCloudBackend(unittest.TestCase):
         )
 
         with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=False):
-            backend.uploadSave({"id": "5", "name": "Game"}, "save")
+            backend.uploadSave({"game": {"id": "5", "name": "Game"}, "save_type": "save"})
 
         self.assertEqual(received, [(False, "Not signed in to cloud saves.")])
 
@@ -277,7 +277,7 @@ class TestCloudBackend(unittest.TestCase):
         with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
             "rom_mate.tv.bridge.cloud_backend.QThread.start"
         ) as mock_thread_start:
-            backend.uploadSave({"id": "5", "name": "Game", "install_dir": "/tmp/fake"}, "save")
+            backend.uploadSave({"game": {"id": "5", "name": "Game", "install_dir": "/tmp/fake"}, "save_type": "save"})
 
         mock_thread_start.assert_called_once_with()
         self.assertIsNotNone(backend._upload_thread)
@@ -291,7 +291,7 @@ class TestCloudBackend(unittest.TestCase):
         with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
             "rom_mate.tv.bridge.cloud_backend.QThread.start"
         ):
-            backend.uploadSave({"id": "5", "name": "Game", "install_dir": "/tmp/fake"}, "save")
+            backend.uploadSave({"game": {"id": "5", "name": "Game", "install_dir": "/tmp/fake"}, "save_type": "save"})
 
         previous_thread.quit.assert_called_once_with()
         previous_thread.wait.assert_called_once_with(2000)
@@ -447,7 +447,7 @@ class TestCloudUploadWorker(unittest.TestCase):
         with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=False), patch(
             "rom_mate.tv.bridge.cloud_backend.QThread.start"
         ) as mock_thread_start:
-            backend.uploadSave({"id": "5", "name": "Game"}, "save")
+            backend.uploadSave({"game": {"id": "5", "name": "Game"}, "save_type": "save"})
 
         self.assertEqual(received, [(False, "Not signed in to cloud saves.")])
         mock_thread_start.assert_not_called()
@@ -464,7 +464,7 @@ class TestCloudBackendState(unittest.TestCase):
         with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
             "rom_mate.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
         ), patch("rom_mate.tv.bridge.cloud_backend._api_post_json", return_value=None) as mock_post:
-            backend.deleteSlot("99", "state")
+            backend.deleteSlot({"save_id": "99", "save_type": "state"})
 
         mock_post.assert_called_once_with(
             "http://server",
@@ -501,7 +501,7 @@ class TestCloudBackendState(unittest.TestCase):
                 "rom_mate.tv.bridge.cloud_backend._restore_single_save_payload",
                 return_value=Path(temp_dir) / "restored.sav",
             ):
-                backend.restoreSlot(game, "1", "save")
+                backend.restoreSlot({"game": game, "save_id": "1", "save_type": "save"})
 
         self.assertEqual(received, [(True, "Save restored successfully.")])
 

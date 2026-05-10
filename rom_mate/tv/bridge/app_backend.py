@@ -154,7 +154,7 @@ class AppBackend(QObject):
                     index[rid] = g
         return index
 
-    @Property("QVariantList", notify=libraryGamesChanged)
+    @Property(list, notify=libraryGamesChanged)
     def libraryGames(self) -> list[dict[str, str]]:
         games = self._config.get("installed_games", [])
         if not isinstance(games, list):
@@ -162,7 +162,17 @@ class AppBackend(QObject):
         _has_server_data = bool(self._server_games or self._favorites_games or self._new_additions_games or self._highly_rated_games)
         server_index = self._server_metadata_index() if _has_server_data else {}
         _favorite_rom_ids = {g.get("rom_id", "") for g in self._favorites_games if isinstance(g, dict) and g.get("rom_id")}
-        _META_FIELDS = ("first_release_date", "release_year", "companies", "languages", "revision", "fanart_url", "genres", "rating")
+        _META_FIELDS = (
+            "first_release_date",
+            "release_year",
+            "companies",
+            "languages",
+            "revision",
+            "fanart_url",
+            "cover_url",
+            "genres",
+            "rating",
+        )
         result = []
         for g in games:
             if not isinstance(g, dict):
@@ -188,27 +198,27 @@ class AppBackend(QObject):
             result.append(g)
         return result
 
-    @Property("QVariantList", notify=favoritesGamesChanged)
+    @Property(list, notify=favoritesGamesChanged)
     def favoritesGames(self) -> list:
         return [{**g, "is_favorite": "true"} for g in self._enrich_with_local_paths(self._favorites_games)]
 
-    @Property("QVariantList", notify=newAdditionsGamesChanged)
+    @Property(list, notify=newAdditionsGamesChanged)
     def newAdditionsGames(self) -> list:
         _favorite_rom_ids = {g.get("rom_id", "") for g in self._favorites_games if isinstance(g, dict) and g.get("rom_id")}
         return [{**g, "is_favorite": "true" if g.get("rom_id") and g.get("rom_id") in _favorite_rom_ids else "false"}
             for g in self._enrich_with_local_paths(self._new_additions_games)]
 
-    @Property("QVariantList", notify=highlyRatedGamesChanged)
+    @Property(list, notify=highlyRatedGamesChanged)
     def highlyRatedGames(self) -> list:
         _favorite_rom_ids = {g.get("rom_id", "") for g in self._favorites_games if isinstance(g, dict) and g.get("rom_id")}
         return [{**g, "is_favorite": "true" if g.get("rom_id") and g.get("rom_id") in _favorite_rom_ids else "false"}
             for g in self._enrich_with_local_paths(self._highly_rated_games)]
 
-    @Property("QVariantList", notify=platformsChanged)
+    @Property(list, notify=platformsChanged)
     def platforms(self) -> list[str]:
         return sorted(self._platforms.keys())
 
-    @Property("QVariantList", notify=platformsChanged)
+    @Property(list, notify=platformsChanged)
     def platformDetails(self) -> list[dict]:
         return self._platform_details
 
@@ -216,7 +226,7 @@ class AppBackend(QObject):
     def isConnected(self) -> bool:
         return self._is_connected
 
-    @Property("QVariantList", notify=exclusionDataChanged)
+    @Property(list, notify=exclusionDataChanged)
     def tvGuideExclusionList(self) -> list[str]:
         opt_outs_raw = self._config.get("tv_guide_button_default_opt_outs")
         opt_outs = {e.lower() for e in opt_outs_raw if isinstance(e, str)} if isinstance(opt_outs_raw, list) else set()
@@ -229,7 +239,7 @@ class AppBackend(QObject):
         extras = [e for e in value if isinstance(e, str) and e.lower() not in default_lower]
         return effective_defaults + extras
 
-    @Property("QVariantList", notify=exclusionDataChanged)
+    @Property(list, notify=exclusionDataChanged)
     def availableEmulatorNames(self) -> list[str]:
         emulators = self._config.get("emulators", [])
         if not isinstance(emulators, list):
@@ -276,7 +286,7 @@ class AppBackend(QObject):
     def requestDesktopMode(self) -> None:
         self.switchToDesktopModeRequested.emit()
 
-    @Slot("QVariantList")
+    @Slot(list)
     def setGuideExclusionList(self, entries: list) -> None:
         self._set_guide_exclusion_list_from_values(entries)
 
@@ -394,7 +404,7 @@ class AppBackend(QObject):
             return
         self._start_catalog_fetch()
 
-    @Slot(str, result="QVariantList")
+    @Slot(str, result=list)
     def serverGamesForPlatform(self, platform_label: str) -> list[dict[str, str]]:
         games = self._enrich_with_local_paths(self._server_games.get(platform_label, []))
         _favorite_rom_ids = {g.get("rom_id", "") for g in self._favorites_games if isinstance(g, dict) and g.get("rom_id")}

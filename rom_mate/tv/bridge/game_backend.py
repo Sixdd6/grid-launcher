@@ -724,7 +724,7 @@ class GameBackend(QObject):
         else:
             self.uninstallComplete.emit({"success": False, "message": "Game not found in library.", "game": game_dict})
 
-    @Slot(str, result="QVariantList")
+    @Slot(str, result=list)
     def getNativeExecutableCandidates(self, rom_id: str) -> list:
         if not rom_id:
             return []
@@ -751,8 +751,14 @@ class GameBackend(QObject):
             result.append({"label": label, "path": str(c)})
         return result
 
-    @Slot(str, str)
-    def saveNativeExecutable(self, rom_id: str, exe_path: str) -> None:
+    @Slot(object)
+    def saveNativeExecutable(self, bundle: Any) -> None:
+        if isinstance(bundle, dict):
+            rom_id = str(bundle.get("rom_id", ""))
+            exe_path = str(bundle.get("exe_path", ""))
+        else:
+            rom_id = str(bundle)
+            exe_path = ""
         if not rom_id:
             return
         installed_games = self._config.get("installed_games", [])
@@ -769,9 +775,15 @@ class GameBackend(QObject):
         except OSError:
             pass
 
-    @Slot(str, str)
-    def launchWithNativeExecutable(self, rom_id: str, exe_path: str) -> None:
-        self.saveNativeExecutable(rom_id, exe_path)
+    @Slot(object)
+    def launchWithNativeExecutable(self, bundle: Any) -> None:
+        if isinstance(bundle, dict):
+            rom_id = str(bundle.get("rom_id", ""))
+            exe_path = str(bundle.get("exe_path", ""))
+        else:
+            rom_id = str(bundle)
+            exe_path = ""
+        self.saveNativeExecutable({"rom_id": rom_id, "exe_path": exe_path})
         installed_games = self._config.get("installed_games", [])
         game_dict: dict[str, str] | None = None
         if isinstance(installed_games, list):

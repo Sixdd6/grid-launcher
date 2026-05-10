@@ -154,10 +154,12 @@ class NativeCloudPanelTests(unittest.TestCase):
 
         module.MainWindow._on_details_cloud_records_loaded(
             window,
-            7,
-            "save",
-            [{"id": "42", "emulator": "native_multi_dir", "file_size_bytes": 12}],
-            "",
+            {
+                "request_id": 7,
+                "save_type": "save",
+                "records": [{"id": "42", "emulator": "native_multi_dir", "file_size_bytes": 12}],
+                "error": "",
+            },
         )
 
         rendered_widgets = [

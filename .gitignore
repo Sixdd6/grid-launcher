@@ -27,6 +27,7 @@ unittest_*
 
 # Logs
 *.log
+pytest_*
 
 # IDE and editor user files
 .vscode/settings.json

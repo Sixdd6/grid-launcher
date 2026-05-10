@@ -221,7 +221,10 @@ class DetailsViewMixin:
             self._rom_detail_worker = None
 
 
-    def _on_rom_detail_loaded(self, rom_id: str, payload: dict, error: str) -> None:
+    def _on_rom_detail_loaded(self, bundle: dict) -> None:
+        rom_id = bundle.get("rom_id", "")
+        payload = bundle.get("payload", {})
+        error = bundle.get("error", "")
         if error:
             return
         current_game = self.current_details_game
