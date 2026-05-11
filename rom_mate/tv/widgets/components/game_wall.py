@@ -11,7 +11,7 @@ from rom_mate.tv.widgets.cover_loader import CoverLoader
 class GameWall(QWidget):
     game_selected = Signal(object)
 
-    def __init__(self, cover_loader: CoverLoader, columns: int = 6, parent: QWidget | None = None) -> None:
+    def __init__(self, cover_loader: CoverLoader, columns: int = 4, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._cover_loader = cover_loader
         self._columns = max(1, int(columns))
@@ -34,7 +34,7 @@ class GameWall(QWidget):
         self._grid.setContentsMargins(0, 0, 0, 0)
         self._grid.setHorizontalSpacing(16)
         self._grid.setVerticalSpacing(18)
-        self._grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self._grid.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
 
         self._scroll_area.setWidget(self._container)
         root_layout.addWidget(self._scroll_area, 1)
@@ -104,11 +104,31 @@ class GameWall(QWidget):
         card.setFocus()
         self._scroll_area.ensureWidgetVisible(card)
 
-    def _clear_grid(self) -> None:
+    def _compute_columns(self) -> int:
+        usable = self.width() - 80 - 24
+        result = usable // (280 + 16)
+        return max(1, result)
+
+    def _rebuild_grid(self) -> None:
+        self._clear_grid(delete_cards=False)
+        for idx, card in enumerate(self._cards):
+            row = idx // self._columns
+            col = idx % self._columns
+            self._grid.addWidget(card, row, col)
+
+    def _clear_grid(self, delete_cards: bool = True) -> None:
         while self._grid.count() > 0:
             item = self._grid.takeAt(0)
             widget = item.widget()
             if widget is None:
                 continue
-            widget.setParent(None)
-            widget.deleteLater()
+            if delete_cards:
+                widget.setParent(None)
+                widget.deleteLater()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        new_cols = self._compute_columns()
+        if new_cols != self._columns:
+            self._columns = new_cols
+            self._rebuild_grid()

@@ -31,6 +31,7 @@ class LibraryCard(QWidget):
         self._has_saves = bool(self._game.get("has_saves"))
         self._pixmap = None
         self.update()
+        self.setVisible(bool(self._game))
 
     def set_pixmap(self, pixmap: QPixmap | None) -> None:
         if pixmap is None or pixmap.isNull():

@@ -16,11 +16,11 @@ class GameCard(QWidget):
         self._game: dict = {}
         self._title = ""
         self._pixmap: QPixmap | None = None
-        self._title_height = 30
+        self._title_height = 36
         self._focus_scale = 1.05
         self._scale_val = 1.0
         self._scale_anim: QPropertyAnimation | None = None
-        self.setFixedSize(180, 270)
+        self.setFixedSize(296, 480)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def _set_scale(self, value: float) -> None:
@@ -72,13 +72,13 @@ class GameCard(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         if self._scale_val != 1.0:
-            center_x = self.width() / 2.0
-            center_y = self.height() / 2.0
-            painter.translate(center_x, center_y)
+            cx = self.width() / 2.0
+            cy = self.height() / 2.0
+            painter.translate(cx, cy)
             painter.scale(self._scale_val, self._scale_val)
-            painter.translate(-center_x, -center_y)
+            painter.translate(-cx, -cy)
 
-        rect = self.rect().adjusted(1, 1, -1, -1)
+        rect = self.rect().adjusted(8, 12, -8, -12)
         focused = self.hasFocus()
         inset = 0 if focused else 2
         card_rect = rect.adjusted(inset, inset, -inset, -inset)
@@ -106,9 +106,7 @@ class GameCard(QWidget):
             )
             pix_x = cover_rect.left() + (cover_rect.width() - scaled.width()) // 2
             pix_y = cover_rect.top() + (cover_rect.height() - scaled.height()) // 2
-            target_rect = QRect(pix_x, pix_y, scaled.width(), scaled.height())
-            source_rect = QRect(0, 0, scaled.width(), scaled.height())
-            painter.drawPixmap(target_rect, scaled, source_rect)
+            painter.drawPixmap(pix_x, pix_y, scaled)
 
         strip_rect = QRect(
             card_rect.left() + border_width,

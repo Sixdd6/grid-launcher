@@ -122,6 +122,5 @@ class HomeViewAnimationTests(unittest.TestCase):
         self.assertFalse(view._anim_blocked)
         self.assertIsNone(view._row_anim)
 
-
 if __name__ == "__main__":
     unittest.main()

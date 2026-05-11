@@ -17,8 +17,8 @@ class PlatformCard(QWidget):
         self._platform: dict = {}
         self._name = ""
         self._pixmap: QPixmap | None = None
-        self._title_height = 30
-        self.setFixedSize(200, 140)
+        self._title_height = 36
+        self.setFixedSize(280, 190)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def set_platform(self, platform_dict: dict) -> None:

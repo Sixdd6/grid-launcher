@@ -35,6 +35,8 @@ class TVWindow(QWidget):
         self._pause_geometry_initialized = False
         self._slide_anim: QParallelAnimationGroup | None = None
         self._transition_overlay: QWidget | None = None
+        self._tab_slide_anim: QParallelAnimationGroup | None = None
+        self._tab_transition_overlay: QWidget | None = None
 
         self.setStyleSheet(f"background: {theme.BG};")
 
@@ -42,18 +44,18 @@ class TVWindow(QWidget):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        self._outer_stack = QStackedWidget()
+        self._outer_stack = QStackedWidget(self)
         root_layout.addWidget(self._outer_stack)
 
-        root_widget = QWidget()
+        root_widget = QWidget(self._outer_stack)
         root_inner_layout = QVBoxLayout(root_widget)
         root_inner_layout.setContentsMargins(0, 0, 0, 0)
         root_inner_layout.setSpacing(0)
 
-        self._tab_bar = ViewTabBar()
+        self._tab_bar = ViewTabBar(root_widget)
         root_inner_layout.addWidget(self._tab_bar)
 
-        self._inner_stack = QStackedWidget()
+        self._inner_stack = QStackedWidget(root_widget)
         root_inner_layout.addWidget(self._inner_stack)
 
         self._home_view = HomeView(
@@ -65,6 +67,7 @@ class TVWindow(QWidget):
             self._cover_loader,
             self.push_view,
             self.pop_view,
+            parent=self._inner_stack,
         )
         self._library_view = LibraryView(
             self._app_backend,
@@ -75,6 +78,7 @@ class TVWindow(QWidget):
             self._cover_loader,
             self.push_view,
             self.pop_view,
+            parent=self._inner_stack,
         )
         self._server_view = ServerView(
             self._app_backend,
@@ -85,6 +89,7 @@ class TVWindow(QWidget):
             self._cover_loader,
             self.push_view,
             self.pop_view,
+            parent=self._inner_stack,
         )
         self._inner_stack.addWidget(self._home_view)
         self._inner_stack.addWidget(self._library_view)
@@ -95,14 +100,18 @@ class TVWindow(QWidget):
 
         self._tab_bar.tabChanged.connect(self._on_tab_changed)
         self._controller_backend.navigationEvent.connect(self._on_nav_event)
+        self._controller_backend.pauseNavigationEvent.connect(self._on_nav_event)
 
-        self._pause_window = PauseWindow(self._pause_backend, parent=None)
+        self._pause_window = PauseWindow(self._pause_backend, parent=self)
 
     def _on_tab_changed(self, index: object) -> None:
         try:
             idx = int(index)
         except (TypeError, ValueError):
             return
+        old_idx = self._inner_stack.currentIndex()
+        forward = idx > old_idx
+        from_pixmap = self._capture_widget_pixmap(self._inner_stack.currentWidget())
         self._inner_stack.setCurrentIndex(idx)
         if idx == 0:
             self._home_view.focus_default_row()
@@ -110,6 +119,9 @@ class TVWindow(QWidget):
             self._library_view.activate()
         if idx == 2:
             self._server_view.activate()
+        to_pixmap = self._capture_widget_pixmap(self._inner_stack.currentWidget())
+        if idx != old_idx:
+            self._start_tab_slide_transition(from_pixmap, to_pixmap, forward=forward)
 
     def _on_nav_event(self, direction: object) -> None:
         if self._pause_window and self._pause_window.isVisible():
@@ -127,6 +139,13 @@ class TVWindow(QWidget):
                 self.push_view(SettingsView(self._app_backend, self.pop_view, parent=self))
             return
         if direction == "back" and self._outer_stack.currentIndex() > 0:
+            current_view = self.get_current_view()
+            intercepts = getattr(current_view, "intercepts_back", None)
+            if callable(intercepts) and intercepts():
+                handler = getattr(current_view, "handle_nav", None)
+                if callable(handler):
+                    handler(direction)
+                return
             self.pop_view()
             return
 
@@ -177,6 +196,14 @@ class TVWindow(QWidget):
         if self._transition_overlay is not None:
             self._transition_overlay.deleteLater()
             self._transition_overlay = None
+
+    def _clear_tab_transition_overlay(self) -> None:
+        if self._tab_slide_anim is not None and self._tab_slide_anim.state() == QPropertyAnimation.State.Running:
+            self._tab_slide_anim.stop()
+        self._tab_slide_anim = None
+        if self._tab_transition_overlay is not None:
+            self._tab_transition_overlay.deleteLater()
+            self._tab_transition_overlay = None
 
     def _start_slide_transition(self, from_pixmap: QPixmap | None, to_pixmap: QPixmap | None, forward: bool) -> None:
         if from_pixmap is None or to_pixmap is None:
@@ -248,6 +275,77 @@ class TVWindow(QWidget):
         self._transition_overlay = overlay
         self._slide_anim = group
         self._slide_anim.start()
+
+    def _start_tab_slide_transition(self, from_pixmap: QPixmap | None, to_pixmap: QPixmap | None, forward: bool) -> None:
+        if from_pixmap is None or to_pixmap is None:
+            return
+
+        width = self._inner_stack.width()
+        height = self._inner_stack.height()
+        if width <= 0 or height <= 0:
+            return
+
+        self._clear_tab_transition_overlay()
+
+        overlay = QWidget(self._inner_stack)
+        overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        overlay.setGeometry(self._inner_stack.rect())
+
+        from_label = QLabel(overlay)
+        from_label.setGeometry(0, 0, width, height)
+        from_label.setPixmap(
+            from_pixmap.scaled(
+                width,
+                height,
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+
+        to_start_x = width if forward else -width
+        to_end_x = 0
+        from_end_x = -width if forward else width
+
+        to_label = QLabel(overlay)
+        to_label.setGeometry(to_start_x, 0, width, height)
+        to_label.setPixmap(
+            to_pixmap.scaled(
+                width,
+                height,
+                Qt.AspectRatioMode.IgnoreAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+
+        overlay.show()
+        overlay.raise_()
+
+        anim_from = QPropertyAnimation(from_label, b"geometry", self)
+        anim_from.setDuration(200)
+        anim_from.setStartValue(QRect(0, 0, width, height))
+        anim_from.setEndValue(QRect(from_end_x, 0, width, height))
+        anim_from.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        anim_to = QPropertyAnimation(to_label, b"geometry", self)
+        anim_to.setDuration(200)
+        anim_to.setStartValue(QRect(to_start_x, 0, width, height))
+        anim_to.setEndValue(QRect(to_end_x, 0, width, height))
+        anim_to.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+        group = QParallelAnimationGroup(self)
+        group.addAnimation(anim_from)
+        group.addAnimation(anim_to)
+
+        def _finish() -> None:
+            if self._tab_transition_overlay is overlay:
+                self._tab_transition_overlay.deleteLater()
+                self._tab_transition_overlay = None
+            self._tab_slide_anim = None
+
+        group.finished.connect(_finish)
+        self._tab_transition_overlay = overlay
+        self._tab_slide_anim = group
+        self._tab_slide_anim.start()
 
     def get_current_view(self) -> QWidget:
         if self._outer_stack.currentIndex() > 0:

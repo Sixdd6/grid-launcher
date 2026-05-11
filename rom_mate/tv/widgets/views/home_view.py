@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QEasingCurve, QParallelAnimationGroup, QPropertyAnimation, QRect, Qt
+from PySide6.QtCore import QEasingCurve, QParallelAnimationGroup, QPropertyAnimation, QRect, Qt, QTimer
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QShowEvent
 from PySide6.QtWidgets import QWidget
 
@@ -68,6 +68,26 @@ class HomeView(QWidget):
         self._rows[1].active_game_changed.connect(self._on_active_game_changed)
         self._rows[2].active_game_changed.connect(self._on_active_game_changed)
         self._rows[3].active_game_changed.connect(self._on_active_game_changed)
+
+        self._library_row_debounce = QTimer(self)
+        self._library_row_debounce.setSingleShot(True)
+        self._library_row_debounce.setInterval(80)
+        self._library_row_debounce.timeout.connect(self._do_refresh_library_row)
+
+        self._favorites_row_debounce = QTimer(self)
+        self._favorites_row_debounce.setSingleShot(True)
+        self._favorites_row_debounce.setInterval(80)
+        self._favorites_row_debounce.timeout.connect(self._do_refresh_favorites_row)
+
+        self._new_additions_row_debounce = QTimer(self)
+        self._new_additions_row_debounce.setSingleShot(True)
+        self._new_additions_row_debounce.setInterval(80)
+        self._new_additions_row_debounce.timeout.connect(self._do_refresh_new_additions_row)
+
+        self._highly_rated_row_debounce = QTimer(self)
+        self._highly_rated_row_debounce.setSingleShot(True)
+        self._highly_rated_row_debounce.setInterval(80)
+        self._highly_rated_row_debounce.timeout.connect(self._do_refresh_highly_rated_row)
 
         self._app_backend.libraryGamesChanged.connect(self._refresh_library_row)
         self._app_backend.favoritesGamesChanged.connect(self._refresh_favorites_row)
@@ -179,17 +199,29 @@ class HomeView(QWidget):
         self._did_focus_initial = True
 
     def _refresh_library_row(self) -> None:
+        self._library_row_debounce.start()
+
+    def _do_refresh_library_row(self) -> None:
         library_games = list(getattr(self._app_backend, "libraryGames", []) or [])
         recent = list(reversed(library_games))[:20]
         self._rows[0].set_games(recent)
 
     def _refresh_favorites_row(self) -> None:
+        self._favorites_row_debounce.start()
+
+    def _do_refresh_favorites_row(self) -> None:
         self._rows[1].set_games(list(getattr(self._app_backend, "favoritesGames", []) or []))
 
     def _refresh_new_additions_row(self) -> None:
+        self._new_additions_row_debounce.start()
+
+    def _do_refresh_new_additions_row(self) -> None:
         self._rows[2].set_games(list(getattr(self._app_backend, "newAdditionsGames", []) or []))
 
     def _refresh_highly_rated_row(self) -> None:
+        self._highly_rated_row_debounce.start()
+
+    def _do_refresh_highly_rated_row(self) -> None:
         self._rows[3].set_games(list(getattr(self._app_backend, "highlyRatedGames", []) or []))
 
     def _on_active_game_changed(self, game_dict: object) -> None:
@@ -274,3 +306,5 @@ class HomeView(QWidget):
         super().showEvent(event)
         if not self._did_focus_initial:
             self.focus_default_row()
+        else:
+            self._rows[self._active_row].refocus()

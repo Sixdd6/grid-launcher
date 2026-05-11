@@ -8,9 +8,9 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication
+from PySide6.QtWidgets import QApplication
 
-_app = QCoreApplication.instance() or QCoreApplication(sys.argv)
+_app = QApplication.instance() or QApplication(sys.argv)
 
 
 class _StubAppBackend:
@@ -138,6 +138,19 @@ class ControllerBackendTests(unittest.TestCase):
         backend._on_raw_event({"code": "BTN_UNKNOWN_XYZ", "value": 1.0})
         self.assertEqual(emitted, [])
 
+    def test_button_emits_pause_nav_event_when_pause_visible(self):
+        backend = self._make_backend()
+        backend.set_pause_backend(MagicMock(visible=True))
+        emitted_nav = []
+        emitted_pause_nav = []
+        backend.navigationEvent.connect(lambda e: emitted_nav.append(e))
+        backend.pauseNavigationEvent.connect(lambda e: emitted_pause_nav.append(e))
+
+        backend._on_raw_event({"code": "BTN_SOUTH", "value": 1.0})
+
+        self.assertEqual(emitted_pause_nav, ["confirm"])
+        self.assertEqual(emitted_nav, [])
+
     def test_emit_navigation_emits_signal(self):
         backend = self._make_backend()
         received = []
@@ -190,6 +203,19 @@ class ControllerBackendTests(unittest.TestCase):
         backend.navigationEvent.connect(lambda e: emitted.append(e))
         backend._on_raw_event({"code": "ABS_Y", "value": -0.9})
         self.assertEqual(emitted, ["up"])
+
+    def test_axis_emits_pause_nav_event_when_pause_visible(self):
+        backend = self._make_backend()
+        backend.set_pause_backend(MagicMock(visible=True))
+        emitted_nav = []
+        emitted_pause_nav = []
+        backend.navigationEvent.connect(lambda e: emitted_nav.append(e))
+        backend.pauseNavigationEvent.connect(lambda e: emitted_pause_nav.append(e))
+
+        backend._on_raw_event({"code": "ABS_X", "value": 0.9})
+
+        self.assertEqual(emitted_pause_nav, ["right"])
+        self.assertEqual(emitted_nav, [])
 
     def test_tv_window_active_with_qwidget(self):
         import rom_mate.tv.bridge.controller as mod

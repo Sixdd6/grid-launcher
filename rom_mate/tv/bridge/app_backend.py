@@ -51,13 +51,12 @@ class _RomMetaFetchWorker(QObject):
 class AppBackend(QObject):
     """Exposes config, library games, and server data to QML."""
 
-    _DEFAULT_EXCLUSION_LIST = ["RPCS3", "Cemu", "Dolphin", "Xemu", "Xenia", "RetroArch"]
-
     libraryGamesChanged = Signal()
     platformsChanged = Signal()
     serverGamesChanged = Signal(str)      # platform_label
     connectionStatusChanged = Signal(str) # status text
     switchToDesktopModeRequested = Signal()
+    quitRequested = Signal()
     exclusionListChanged = Signal(object)
     exclusionDataChanged = Signal()
     homeViewTabChanged = Signal(str)
@@ -226,18 +225,13 @@ class AppBackend(QObject):
     def isConnected(self) -> bool:
         return self._is_connected
 
-    @Property(list, notify=exclusionDataChanged)
-    def tvGuideExclusionList(self) -> list[str]:
-        opt_outs_raw = self._config.get("tv_guide_button_default_opt_outs")
-        opt_outs = {e.lower() for e in opt_outs_raw if isinstance(e, str)} if isinstance(opt_outs_raw, list) else set()
-        effective_defaults = [e for e in self._DEFAULT_EXCLUSION_LIST if e.lower() not in opt_outs]
-
-        value = self._config.get("tv_guide_button_exclusion_list")
-        if not isinstance(value, list):
-            return effective_defaults
-        default_lower = {e.lower() for e in effective_defaults}
-        extras = [e for e in value if isinstance(e, str) and e.lower() not in default_lower]
-        return effective_defaults + extras
+    @Property("QVariantList")
+    def tvGuideExclusionList(self):
+        config = self._config
+        entries = config.get("tv_guide_button_exclusion_list", [])
+        if not isinstance(entries, list):
+            return []
+        return [e for e in entries if isinstance(e, str) and e.strip()]
 
     @Property(list, notify=exclusionDataChanged)
     def availableEmulatorNames(self) -> list[str]:
@@ -285,6 +279,10 @@ class AppBackend(QObject):
     @Slot()
     def requestDesktopMode(self) -> None:
         self.switchToDesktopModeRequested.emit()
+
+    @Slot()
+    def requestQuit(self) -> None:
+        self.quitRequested.emit()
 
     @Slot(list)
     def setGuideExclusionList(self, entries: list) -> None:

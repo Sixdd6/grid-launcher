@@ -52,13 +52,29 @@ class GameRow(QWidget):
         layout.addWidget(self._scroll_area)
 
     def set_games(self, games: list[dict]) -> None:
+        # Preserve focused game identity and Qt focus ownership across refresh
+        focused_key: str = ""
+        if self._games and 0 <= self._focused_index < len(self._games):
+            g = self._games[self._focused_index]
+            focused_key = str(g.get("rom_id") or g.get("id") or g.get("name") or "").strip()
+
         self._games = [game for game in (games or []) if isinstance(game, dict)]
-        self._focused_index = 0
+
+        # Try to restore the previously focused position by matching identity
+        restored_index = 0
+        if focused_key:
+            for i, game in enumerate(self._games):
+                key = str(game.get("rom_id") or game.get("id") or game.get("name") or "").strip()
+                if key == focused_key:
+                    restored_index = i
+                    break
+        self._focused_index = restored_index
 
         while self._cards_layout.count() > 1:
             item = self._cards_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                widget.hide()
                 widget.setParent(None)
                 widget.deleteLater()
 
@@ -72,7 +88,7 @@ class GameRow(QWidget):
             self._cards.append(card)
 
         if self._games:
-            self.active_game_changed.emit(self._games[0])
+            self.active_game_changed.emit(self._games[self._focused_index])
 
     def handle_nav(self, direction: str) -> None:
         if not self._cards:
@@ -95,6 +111,12 @@ class GameRow(QWidget):
         if not self._cards:
             return
         self._focused_index = 0
+        self._focus_current_card()
+
+    def refocus(self) -> None:
+        """Re-apply Qt focus to the currently focused card without resetting the index."""
+        if not self._cards:
+            return
         self._focus_current_card()
 
     @property

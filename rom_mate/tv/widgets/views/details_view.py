@@ -48,6 +48,9 @@ class DetailsView(QWidget):
 
         self._focused_column = 0
         self._button_index = 0
+        self._shot_index = 0
+        self._shot_cards: list[QLabel] = []
+        self._shot_pixmaps: list[QPixmap | None] = []
         self._buttons: list[dict[str, str]] = []
         self._install_progress = 0.0
         self._install_speed = 0.0
@@ -58,8 +61,6 @@ class DetailsView(QWidget):
         self.setStyleSheet(f"background: {theme.BG};")
 
         self._fanart = FanartBackground(self._cover_loader, self)
-        self._scrim = QWidget(self)
-        self._scrim.setStyleSheet("background: rgba(40, 42, 54, 0.7);")
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -72,7 +73,7 @@ class DetailsView(QWidget):
 
         self._header = QFrame(self._content)
         self._header.setFixedHeight(48)
-        self._header.setStyleSheet(f"background: {theme.PANEL};")
+        self._header.setStyleSheet("background: rgba(30, 31, 41, 0.6);")
         header_layout = QHBoxLayout(self._header)
         header_layout.setContentsMargins(16, 0, 16, 0)
         header_layout.setSpacing(12)
@@ -102,7 +103,7 @@ class DetailsView(QWidget):
         self._cover_label.setMinimumHeight(360)
         self._cover_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._cover_label.setStyleSheet(
-            f"background: rgba(30, 31, 41, 0.85); border: 1px solid {theme.BORDER_INACTIVE}; border-radius: 8px;"
+            "background: rgba(30, 31, 41, 0.85); border: none; border-radius: 8px;"
         )
         self._cover_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         left_layout.addWidget(self._cover_label, 1)
@@ -130,7 +131,7 @@ class DetailsView(QWidget):
 
         self._title_label = QLabel(self._game_title(), self._center_col)
         self._title_label.setWordWrap(True)
-        self._title_label.setStyleSheet(f"color: {theme.SUCCESS}; font-size: 32px; font-weight: 800;")
+        self._title_label.setStyleSheet(f"color: {theme.SUCCESS}; font-size: 28px; font-weight: 700;")
         center_layout.addWidget(self._title_label)
 
         self._desc_scroll = QScrollArea(self._center_col)
@@ -153,36 +154,47 @@ class DetailsView(QWidget):
         center_layout.addWidget(self._desc_scroll, 1)
 
         self._metadata_panel = QFrame(self._center_col)
-        self._metadata_panel.setStyleSheet(
-            f"background: {theme.PANEL}; border: 1px solid {theme.BORDER_INACTIVE}; border-radius: 8px;"
-        )
+        self._metadata_panel.setStyleSheet("background: transparent; border: none;")
         meta_layout = QGridLayout(self._metadata_panel)
-        meta_layout.setContentsMargins(10, 10, 10, 10)
-        meta_layout.setHorizontalSpacing(12)
-        meta_layout.setVerticalSpacing(8)
+        meta_layout.setContentsMargins(10, 8, 10, 8)
+        meta_layout.setHorizontalSpacing(16)
+        meta_layout.setVerticalSpacing(10)
         self._metadata_labels: dict[str, QLabel] = {}
 
         fields = [
-            "Platform",
-            "Released",
-            "By",
-            "Version",
-            "Size",
-            "Rating",
-            "Region",
-            "Languages",
-            "Genres",
+            ("platform", "PLATFORM"), ("released", "RELEASED"), ("by", "BY"),
+            ("version", "VERSION"), ("size", "SIZE"), ("rating", "RATING"),
+            ("region", "REGION"), ("languages", "LANGUAGES"), ("genres", "GENRES"),
         ]
-        for row, label in enumerate(fields):
-            key = label.lower()
-            name = QLabel(f"{label}:", self._metadata_panel)
-            name.setStyleSheet(f"color: {theme.TEXT_SECONDARY}; font-size: 12px; font-weight: 700;")
-            value = QLabel("-", self._metadata_panel)
-            value.setWordWrap(True)
-            value.setStyleSheet(f"color: {theme.TEXT_PRIMARY}; font-size: 12px;")
-            meta_layout.addWidget(name, row, 0)
-            meta_layout.addWidget(value, row, 1)
-            self._metadata_labels[key] = value
+        for index, (key, display_name) in enumerate(fields):
+            grid_row = index // 3
+            grid_col = index % 3
+
+            cell_widget = QWidget(self._metadata_panel)
+            cell_widget.setStyleSheet("background: transparent; border: none;")
+            cell_layout = QVBoxLayout(cell_widget)
+            cell_layout.setContentsMargins(0, 0, 0, 0)
+            cell_layout.setSpacing(2)
+
+            name_lbl = QLabel(display_name, cell_widget)
+            name_lbl.setStyleSheet(
+                f"color: {theme.TEXT_SECONDARY}; font-size: 11px; font-weight: 700;"
+                " background: transparent; border: none;"
+            )
+
+            value_lbl = QLabel("—", cell_widget)
+            value_lbl.setWordWrap(True)
+            value_lbl.setStyleSheet(
+                f"color: {theme.TEXT_PRIMARY}; font-size: 13px;"
+                " background: transparent; border: none;"
+            )
+
+            cell_layout.addWidget(name_lbl)
+            cell_layout.addWidget(value_lbl)
+            cell_layout.addStretch()
+
+            meta_layout.addWidget(cell_widget, grid_row, grid_col)
+            self._metadata_labels[key] = value_lbl
 
         center_layout.addWidget(self._metadata_panel)
 
@@ -228,6 +240,35 @@ class DetailsView(QWidget):
         self._cloud_overlay = CloudSavesOverlay(self._cloud_backend, self._app_backend, self)
         self._native_picker = NativeExecPickerDialog(self._game_backend, self._app_backend, self)
 
+        # Lightbox overlay for enlarged screenshot view
+        self._lightbox = QWidget(self)
+        self._lightbox.setStyleSheet("background: rgba(0, 0, 0, 0.88);")
+        self._lightbox.hide()
+        lb_layout = QVBoxLayout(self._lightbox)
+        lb_layout.setContentsMargins(0, 0, 0, 0)
+        lb_layout.setSpacing(0)
+
+        self._lightbox_image = QLabel(self._lightbox)
+        self._lightbox_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lightbox_image.setStyleSheet("background: transparent;")
+        lb_layout.addWidget(self._lightbox_image, 1)
+
+        self._lightbox_counter = QLabel("", self._lightbox)
+        self._lightbox_counter.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lightbox_counter.setFixedHeight(28)
+        self._lightbox_counter.setStyleSheet(
+            f"color: {theme.TEXT_PRIMARY}; font-size: 14px; font-weight: 700; background: transparent;"
+        )
+        lb_layout.addWidget(self._lightbox_counter)
+
+        self._lightbox_hint = QLabel("B  Close    ↑↓ ◀▶  Navigate", self._lightbox)
+        self._lightbox_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lightbox_hint.setFixedHeight(32)
+        self._lightbox_hint.setStyleSheet(
+            f"color: {theme.TEXT_SECONDARY}; font-size: 12px; background: transparent;"
+        )
+        lb_layout.addWidget(self._lightbox_hint)
+
         self._game_backend.installProgress.connect(self._on_install_progress)
         self._game_backend.installComplete.connect(self._on_install_complete)
         self._game_backend.uninstallComplete.connect(self._on_uninstall_complete)
@@ -249,6 +290,19 @@ class DetailsView(QWidget):
         self._app_backend.fetchRomMetadata(json.dumps(self._game))
 
     def handle_nav(self, direction: str) -> None:
+        if self._lightbox.isVisible():
+            if direction in ("back", "confirm"):
+                self._close_lightbox()
+            elif direction in ("left", "up"):
+                if self._shot_index > 0:
+                    self._shot_index -= 1
+                    self._update_lightbox_image()
+            elif direction in ("right", "down"):
+                if self._shot_index < len(self._shot_pixmaps) - 1:
+                    self._shot_index += 1
+                    self._update_lightbox_image()
+            return
+
         if self._cloud_overlay.isVisible():
             self._cloud_overlay.handle_nav(direction)
             return
@@ -262,13 +316,17 @@ class DetailsView(QWidget):
             return
 
         if direction == "left":
-            self._focused_column = max(0, self._focused_column - 1)
-            self._refresh_ui()
+            if self._focused_column == 2:
+                self._focused_column = 0
+                self._shot_index = 0
+                self._refresh_ui()
             return
 
         if direction == "right":
-            self._focused_column = min(2, self._focused_column + 1)
-            self._refresh_ui()
+            if self._focused_column == 0:
+                self._focused_column = 2
+                self._shot_index = 0
+                self._refresh_ui()
             return
 
         if direction == "up":
@@ -276,10 +334,10 @@ class DetailsView(QWidget):
                 self._button_index = max(0, self._button_index - 1)
                 self._refresh_ui()
                 return
-            if self._focused_column == 1:
-                self._scroll_area_by(self._desc_scroll, -80)
-                return
-            self._scroll_area_by(self._shots_scroll, -120)
+            if self._shot_cards:
+                self._shot_index = max(0, self._shot_index - 1)
+                self._sync_shot_focus()
+                self._scroll_area_by(self._shots_scroll, -140)
             return
 
         if direction == "down":
@@ -288,22 +346,29 @@ class DetailsView(QWidget):
                 self._button_index = min(max_button, self._button_index + 1)
                 self._refresh_ui()
                 return
-            if self._focused_column == 1:
-                self._scroll_area_by(self._desc_scroll, 80)
-                return
-            self._scroll_area_by(self._shots_scroll, 120)
+            if self._shot_cards:
+                self._shot_index = min(len(self._shot_cards) - 1, self._shot_index + 1)
+                self._sync_shot_focus()
+                self._scroll_area_by(self._shots_scroll, 140)
             return
 
-        if direction == "confirm" and self._focused_column == 0:
-            self._trigger_action()
+        if direction == "confirm":
+            if self._focused_column == 0:
+                self._trigger_action()
+            elif self._focused_column == 2 and self._shot_cards:
+                self._open_lightbox()
+
+    def intercepts_back(self) -> bool:
+        return self._lightbox.isVisible()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         rect = self.rect()
         self._fanart.setGeometry(rect)
-        self._scrim.setGeometry(rect)
         self._cloud_overlay.setGeometry(rect)
         self._native_picker.setGeometry(rect)
+        self._lightbox.setGeometry(rect)
+        self._update_lightbox_image()
         self._status_banner.setGeometry(16, 56, max(120, rect.width() - 32), 40)
         self._update_cover_pixmap()
 
@@ -336,15 +401,17 @@ class DetailsView(QWidget):
 
         self._update_metadata_panel()
         self._sync_column_focus_style()
+        self._sync_shot_focus()
 
         self._fanart.lower()
-        self._scrim.raise_()
         self._content.raise_()
         self._status_banner.raise_()
         if self._cloud_overlay.isVisible():
             self._cloud_overlay.raise_()
         if self._native_picker.isVisible():
             self._native_picker.raise_()
+        if self._lightbox.isVisible():
+            self._lightbox.raise_()
 
     def _build_buttons(self, installed: bool, connected: bool, native_pc: bool, installing: bool) -> list[dict[str, str]]:
         buttons: list[dict[str, str]] = []
@@ -384,33 +451,48 @@ class DetailsView(QWidget):
             focused = self._focused_column == 0 and idx == self._button_index
             bg = theme.ACCENT if focused else "rgba(68, 71, 90, 0.5)"
             fg = theme.PANEL if focused else theme.TEXT_PRIMARY
-            border = theme.ACCENT if focused else theme.BORDER_INACTIVE
 
             row = QLabel(item["label"], self._button_container)
             row.setFixedHeight(44)
             row.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-            row.setStyleSheet(
-                f"padding: 0 12px; color: {fg}; background: {bg}; border: 1px solid {border}; "
-                "border-radius: 8px; font-size: 14px; font-weight: 700;"
-            )
+            if focused:
+                row.setStyleSheet(
+                    f"padding: 0 12px; color: {fg}; background: {bg}; border: 1px solid {theme.ACCENT}; "
+                    "border-radius: 8px; font-size: 14px; font-weight: 700;"
+                )
+            else:
+                row.setStyleSheet(
+                    f"padding: 0 12px; color: {fg}; background: {bg}; border: none; "
+                    "border-radius: 8px; font-size: 14px; font-weight: 700;"
+                )
             self._button_layout.addWidget(row)
 
         self._button_layout.addStretch(1)
 
     def _sync_column_focus_style(self) -> None:
-        left_border = theme.ACCENT if self._focused_column == 0 else "transparent"
-        center_border = theme.ACCENT if self._focused_column == 1 else theme.BORDER_INACTIVE
-        right_border = theme.ACCENT if self._focused_column == 2 else theme.BORDER_INACTIVE
-
         self._left_col.setStyleSheet(
-            f"background: transparent; border: 2px solid {left_border}; border-radius: 10px;"
+            "background: transparent; border: none; border-radius: 10px;"
         )
         self._center_col.setStyleSheet(
-            f"background: rgba(30, 31, 41, 0.82); border: 1px solid {center_border}; border-radius: 10px;"
+            "background: rgba(30, 31, 41, 0.82); border: none; border-radius: 10px;"
         )
         self._right_col.setStyleSheet(
-            f"background: rgba(30, 31, 41, 0.82); border: 1px solid {right_border}; border-radius: 10px;"
+            "background: rgba(30, 31, 41, 0.82); border: none; border-radius: 10px;"
         )
+
+    def _sync_shot_focus(self) -> None:
+        focused_in_shots = self._focused_column == 2
+        for idx, card in enumerate(self._shot_cards):
+            if focused_in_shots and idx == self._shot_index:
+                card.setProperty("shotFocused", True)
+                card.setStyleSheet(
+                    f"background: rgba(30, 31, 41, 0.9); border: 2px solid {theme.ACCENT}; border-radius: 8px;"
+                )
+            else:
+                card.setProperty("shotFocused", False)
+                card.setStyleSheet(
+                    "background: rgba(30, 31, 41, 0.9); border: none; border-radius: 8px;"
+                )
 
     def _trigger_action(self) -> None:
         if not self._buttons:
@@ -465,7 +547,7 @@ class DetailsView(QWidget):
             self._cover_pixmap = None
             self._cover_label.setText("No Cover")
             self._cover_label.setStyleSheet(
-                f"background: rgba(30, 31, 41, 0.85); border: 1px solid {theme.BORDER_INACTIVE};"
+                f"background: rgba(30, 31, 41, 0.85); border: none;"
                 f"border-radius: 8px; color: {theme.TEXT_SECONDARY};"
             )
             return
@@ -485,11 +567,45 @@ class DetailsView(QWidget):
         )
         self._cover_label.setPixmap(scaled)
 
+    def _update_lightbox_image(self) -> None:
+        if not self._lightbox.isVisible():
+            return
+        total = len(self._shot_pixmaps)
+        if self._shot_index < 0 or self._shot_index >= total:
+            self._lightbox_image.clear()
+            self._lightbox_counter.setText("")
+            return
+        self._lightbox_counter.setText(f"{self._shot_index + 1} of {total}")
+        pixmap = self._shot_pixmaps[self._shot_index]
+        if pixmap is None or pixmap.isNull():
+            self._lightbox_image.clear()
+            return
+        available = self._lightbox_image.size()
+        if available.width() <= 0 or available.height() <= 0:
+            return
+        scaled = pixmap.scaled(
+            available,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self._lightbox_image.setPixmap(scaled)
+
+    def _open_lightbox(self) -> None:
+        self._lightbox.setGeometry(self.rect())
+        self._lightbox.show()
+        self._lightbox.raise_()
+        QTimer.singleShot(0, self._update_lightbox_image)
+
+    def _close_lightbox(self) -> None:
+        self._lightbox.hide()
+
     def _refresh_fanart(self) -> None:
         urls = self._screenshot_urls()
         self._fanart.set_urls(urls)
 
     def _refresh_screenshots(self) -> None:
+        self._shot_cards: list[QLabel] = []
+        self._shot_pixmaps = []
         while self._shots_layout.count() > 0:
             item = self._shots_layout.takeAt(0)
             widget = item.widget()
@@ -510,27 +626,33 @@ class DetailsView(QWidget):
 
         self._shots_header.setText("Screenshots")
         for url in urls:
+            card_index = len(self._shot_cards)
+            self._shot_pixmaps.append(None)
+
             card = QLabel(self._shots_container)
             card.setFixedHeight(132)
             card.setAlignment(Qt.AlignmentFlag.AlignCenter)
             card.setStyleSheet(
-                f"background: rgba(30, 31, 41, 0.9); border: 1px solid {theme.BORDER_INACTIVE}; border-radius: 8px;"
+                "background: rgba(30, 31, 41, 0.9); border: none; border-radius: 8px;"
             )
             self._shots_layout.addWidget(card)
+            self._shot_cards.append(card)
 
-            def _set_shot(pixmap: QPixmap | None, target: QLabel = card) -> None:
+            def _set_shot(pixmap: QPixmap | None, target: QLabel = card, idx: int = card_index) -> None:
                 if target.parent() is None:
                     return
                 if pixmap is None or pixmap.isNull():
                     target.setText("Image unavailable")
                     target.setStyleSheet(
-                        f"background: rgba(30, 31, 41, 0.9); border: 1px solid {theme.BORDER_INACTIVE};"
+                        f"background: rgba(30, 31, 41, 0.9); border: none;"
                         f"border-radius: 8px; color: {theme.TEXT_SECONDARY};"
                     )
                     return
+                if idx < len(self._shot_pixmaps):
+                    self._shot_pixmaps[idx] = pixmap
                 scaled = pixmap.scaled(
                     target.size(),
-                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                    Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
                 target.setPixmap(scaled)
@@ -538,6 +660,7 @@ class DetailsView(QWidget):
             self._cover_loader.load_async(url, _set_shot)
 
         self._shots_layout.addStretch(1)
+        self._sync_shot_focus()
 
     def _update_metadata_panel(self) -> None:
         values = {

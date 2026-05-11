@@ -19,46 +19,20 @@ class TestAppBackendConfigDefaults(unittest.TestCase):
         from rom_mate.tv.bridge.app_backend import AppBackend
         return AppBackend(config, Path("/tmp/covers"))
 
-    def test_tv_guide_exclusion_list_default_when_key_missing(self):
+    def test_tv_guide_exclusion_list_empty_when_key_missing(self):
         backend = self._make_backend({})
-        result = backend.tvGuideExclusionList
-        self.assertEqual(result, ["RPCS3", "Cemu", "Dolphin", "Xemu", "Xenia", "RetroArch"])
+        self.assertEqual(backend.tvGuideExclusionList, [])
 
-    def test_tv_guide_exclusion_list_from_config(self):
+    def test_tv_guide_exclusion_list_returns_config_entries(self):
         backend = self._make_backend({"tv_guide_button_exclusion_list": ["RPCS3", "Cemu"]})
-        self.assertEqual(backend.tvGuideExclusionList, ["RPCS3", "Cemu", "Dolphin", "Xemu", "Xenia", "RetroArch"])
+        self.assertEqual(backend.tvGuideExclusionList, ["RPCS3", "Cemu"])
 
-    def test_tv_guide_exclusion_list_invalid_type_returns_default(self):
-        backend = self._make_backend({"tv_guide_button_exclusion_list": "not-a-list"})
-        self.assertEqual(backend.tvGuideExclusionList, ["RPCS3", "Cemu", "Dolphin", "Xemu", "Xenia", "RetroArch"])
+    def test_tv_guide_exclusion_list_invalid_type_returns_empty(self):
+        backend = self._make_backend({"tv_guide_button_exclusion_list": "bad"})
+        self.assertEqual(backend.tvGuideExclusionList, [])
 
-    def test_tv_guide_exclusion_list_opt_out_removes_default(self):
-        backend = self._make_backend({"tv_guide_button_default_opt_outs": ["Dolphin"]})
-        result = backend.tvGuideExclusionList
-        self.assertNotIn("Dolphin", result)
-        self.assertIn("RPCS3", result)
-        self.assertIn("Cemu", result)
-        self.assertIn("Xemu", result)
-        self.assertIn("Xenia", result)
-        self.assertIn("RetroArch", result)
-
-    def test_tv_guide_exclusion_list_opt_out_case_insensitive(self):
-        backend = self._make_backend({"tv_guide_button_default_opt_outs": ["dolphin"]})
-        self.assertNotIn("Dolphin", backend.tvGuideExclusionList)
-
-    def test_tv_guide_exclusion_list_all_defaults_opted_out(self):
-        backend = self._make_backend(
-            {
-                "tv_guide_button_default_opt_outs": [
-                    "RPCS3",
-                    "Cemu",
-                    "Dolphin",
-                    "Xemu",
-                    "Xenia",
-                    "RetroArch",
-                ]
-            }
-        )
+    def test_tv_guide_exclusion_list_empty_list_returns_empty(self):
+        backend = self._make_backend({"tv_guide_button_exclusion_list": []})
         self.assertEqual(backend.tvGuideExclusionList, [])
 
     def test_home_view_default(self):
@@ -610,7 +584,7 @@ class TestAppBackendAvailableEmulatorNames(unittest.TestCase):
             "tv_guide_button_exclusion_list": ["RPCS3"],
         }
         backend = self._make_backend(config)
-        self.assertEqual(backend.availableEmulatorNames, [])
+        self.assertEqual(backend.availableEmulatorNames, ["Cemu", "Dolphin"])
 
     def test_empty_when_emulators_key_missing(self):
         backend = self._make_backend({})
@@ -628,22 +602,16 @@ class TestAppBackendAvailableEmulatorNames(unittest.TestCase):
         backend = self._make_backend(config)
         self.assertEqual(backend.availableEmulatorNames, [])
 
-    def test_filters_against_default_exclusion_list_when_no_config_key(self):
-        # When tv_guide_button_exclusion_list is absent, tvGuideExclusionList
-        # returns the default list (RPCS3, Cemu, Dolphin, Xemu, Xenia, RetroArch).
-        # Emulators with names not in the default list should appear.
+    def test_no_exclusions_when_config_key_missing(self):
         config = {
             "emulators": [
                 {"name": "RetroArch"},
                 {"name": "PCSX2"},
-                {"name": "RPCS3"},   # in default list, should be filtered
+                {"name": "RPCS3"},
             ],
         }
         backend = self._make_backend(config)
-        result = backend.availableEmulatorNames
-        self.assertNotIn("RetroArch", result)
-        self.assertIn("PCSX2", result)
-        self.assertNotIn("RPCS3", result)
+        self.assertEqual(backend.availableEmulatorNames, ["PCSX2", "RPCS3", "RetroArch"])
 
     def test_skips_invalid_emulator_entries(self):
         config = {
@@ -656,7 +624,7 @@ class TestAppBackendAvailableEmulatorNames(unittest.TestCase):
             "tv_guide_button_exclusion_list": [],
         }
         backend = self._make_backend(config)
-        self.assertEqual(backend.availableEmulatorNames, [])
+        self.assertEqual(backend.availableEmulatorNames, ["RetroArch"])
 
 
 class TestAppBackendGetInstalledLocalPath(unittest.TestCase):

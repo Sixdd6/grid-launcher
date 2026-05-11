@@ -36,7 +36,7 @@ class ServerView(QWidget):
         self._cover_loader = cover_loader
         self._push_view_callback = push_view_callback
         self._pop_view_callback = pop_view_callback
-        self._columns = 4
+        self._columns = 1
         self._platforms: list[dict] = []
         self._platform_cards: list[PlatformCard] = []
         self._current_platform_idx = 0
@@ -73,7 +73,7 @@ class ServerView(QWidget):
         self._platform_grid.setContentsMargins(0, 0, 0, 0)
         self._platform_grid.setHorizontalSpacing(16)
         self._platform_grid.setVerticalSpacing(20)
-        self._platform_grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self._platform_grid.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
         self._platform_scroll.setWidget(self._platform_container)
         platform_content_layout.addWidget(self._platform_scroll, 1)
 
@@ -91,7 +91,7 @@ class ServerView(QWidget):
         game_page_layout.setContentsMargins(0, 0, 0, 0)
         game_page_layout.setSpacing(0)
 
-        self._game_wall = GameWall(self._cover_loader, columns=6, parent=self._game_page)
+        self._game_wall = GameWall(self._cover_loader, columns=4, parent=self._game_page)
         game_page_layout.addWidget(self._game_wall)
 
         self._loading_label = QLabel("Loading...", self._game_page)
@@ -275,19 +275,35 @@ class ServerView(QWidget):
         self._loading_label.hide()
         self._game_wall.show()
 
-    def _clear_platform_grid(self) -> None:
+    def _clear_platform_grid(self, delete_cards: bool = True) -> None:
         while self._platform_grid.count() > 0:
             item = self._platform_grid.takeAt(0)
             widget = item.widget()
             if widget is None:
                 continue
-            widget.setParent(None)
-            widget.deleteLater()
+            if delete_cards:
+                widget.setParent(None)
+                widget.deleteLater()
+
+    def _compute_columns(self) -> int:
+        available = self.width() - 80 - 24
+        result = available // (280 + 16)
+        return max(1, result)
+
+    def _rebuild_platform_grid(self) -> None:
+        self._clear_platform_grid(delete_cards=False)
+        for idx, card in enumerate(self._platform_cards):
+            row = idx // self._columns
+            col = idx % self._columns
+            self._platform_grid.addWidget(card, row, col)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._loading_label.setGeometry(self._game_page.rect())
+        new_cols = self._compute_columns()
+        if new_cols != self._columns:
+            self._columns = new_cols
+            self._rebuild_platform_grid()
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
-        self.activate()

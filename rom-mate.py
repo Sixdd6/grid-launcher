@@ -773,6 +773,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             game_backend.installComplete.connect(_on_tv_install)
             game_backend.uninstallComplete.connect(_on_tv_uninstall)
             app_backend.switchToDesktopModeRequested.connect(self._switch_to_desktop_mode)
+            app_backend.quitRequested.connect(QApplication.instance().quit)
             app_backend.saveConfigRequested.connect(lambda: self._save_config(self.config))
 
             cover_url_map: dict[str, str] = {
@@ -801,6 +802,9 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             self._tv_window = tv_window
             self._tv_pause_window = tv_window._pause_window
         self._tv_app_backend.connectToServer()
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            self._tv_window.setGeometry(screen.geometry())
         self._tv_window.showFullScreen()
         self.hide()
         self._tv_controller_backend.start()

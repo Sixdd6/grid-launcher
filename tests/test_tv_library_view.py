@@ -108,23 +108,25 @@ class LibraryViewCarouselTests(unittest.TestCase):
 
         self.assertEqual(view._current_idx, 0)
 
-    def test_handle_nav_up_is_noop(self):
+    def test_handle_nav_up_enters_filter_bar(self):
         view = _make_view(_fake_games(5))
         self.addCleanup(view.deleteLater)
         self._resize_view(view, 1920, 1080)
+        self.assertFalse(view._filter_focused)
 
         view.handle_nav("up")
 
-        self.assertEqual(view._current_idx, 0)
+        self.assertTrue(view._filter_focused)
 
-    def test_handle_nav_down_is_noop(self):
+    def test_handle_nav_down_exits_filter_bar(self):
         view = _make_view(_fake_games(5))
         self.addCleanup(view.deleteLater)
         self._resize_view(view, 1920, 1080)
+        view._filter_focused = True
 
         view.handle_nav("down")
 
-        self.assertEqual(view._current_idx, 0)
+        self.assertFalse(view._filter_focused)
 
     def test_handle_nav_confirm_emits_game_selected(self):
         view = _make_view(_fake_games(5))
@@ -200,6 +202,48 @@ class LibraryViewCarouselTests(unittest.TestCase):
 
         self.assertEqual(len(view._games), 3)
 
+    def test_games_sorted_alphabetically(self):
+        games = [{"name": "Zelda"}, {"name": "Banjo"}, {"name": "Asteroids"}]
+        view = _make_view(games)
+        self.addCleanup(view.deleteLater)
+        self.assertEqual([g["name"] for g in view._all_games], ["Asteroids", "Banjo", "Zelda"])
+
+    def test_filter_by_letter(self):
+        games = [{"name": "Asteroids"}, {"name": "Banjo"}, {"name": "Bomberman"}]
+        view = _make_view(games)
+        self.addCleanup(view.deleteLater)
+        view._active_letter = "B"
+        view._apply_filter()
+        self.assertEqual(len(view._games), 2)
+        self.assertTrue(all(g["name"].startswith("B") for g in view._games))
+
+    def test_filter_all_restores_full_list(self):
+        games = [{"name": "Asteroids"}, {"name": "Banjo"}]
+        view = _make_view(games)
+        self.addCleanup(view.deleteLater)
+        view._active_letter = "A"
+        view._apply_filter()
+        view._active_letter = "All"
+        view._apply_filter()
+        self.assertEqual(len(view._games), 2)
+
+    def test_filter_btn_idx_sticky(self):
+        view = _make_view(_fake_games(5))
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view.handle_nav("up")
+        view.handle_nav("right")
+        view.handle_nav("right")
+        view.handle_nav("down")
+        self.assertEqual(view._filter_btn_idx, 2)
+        view.handle_nav("up")
+        self.assertEqual(view._filter_btn_idx, 2)
+        self.assertTrue(view._filter_focused)
+
+    def test_filter_bar_hidden_when_no_games(self):
+        view = _make_view([])
+        self.addCleanup(view.deleteLater)
+        self.assertFalse(view._filter_bar.isVisible())
 
 if __name__ == "__main__":
     unittest.main()
