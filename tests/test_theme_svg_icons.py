@@ -17,7 +17,7 @@ class ThemedSvgIconTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def test_themed_svg_pixmap_tints_hardcoded_fill_asset(self) -> None:
-        pixmap = themed_svg_pixmap("add-plus-svgrepo-com.svg", "#00cc88", size=(32, 32))
+        pixmap = themed_svg_pixmap("svg/plus", "#00cc88", size=(32, 32))
 
         self.assertFalse(pixmap.isNull())
         image = pixmap.toImage()
@@ -42,7 +42,7 @@ class ThemedSvgIconTests(unittest.TestCase):
         self.assertTrue(tinted_pixel_found)
 
     def test_themed_svg_icon_and_missing_asset_behavior(self) -> None:
-        icon = themed_svg_icon("game-controller-svgrepo-com.svg", "#3498db", size=(20, 20))
+        icon = themed_svg_icon("svg/controller", "#3498db", size=(20, 20))
         missing_pixmap = themed_svg_pixmap("does-not-exist.svg", "#ffffff")
 
         self.assertFalse(icon.isNull())

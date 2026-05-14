@@ -157,7 +157,7 @@ class LibraryViewCarouselTests(unittest.TestCase):
         self._resize_view(view, 1920, 1080)
         view._bind_pool()
 
-        self.assertFalse(view._pool[5]._dimmed)
+        self.assertFalse(hasattr(view._pool[5], "_dimmed"))
 
     def test_pool_side_cards_are_dimmed(self):
         view = _make_view(_fake_games(9))
@@ -165,8 +165,8 @@ class LibraryViewCarouselTests(unittest.TestCase):
         self._resize_view(view, 1920, 1080)
         view._bind_pool()
 
-        self.assertTrue(view._pool[0]._dimmed)
-        self.assertTrue(view._pool[10]._dimmed)
+        self.assertFalse(hasattr(view._pool[0], "_dimmed"))
+        self.assertFalse(hasattr(view._pool[10], "_dimmed"))
 
     def test_place_strip_y_at_anchor(self):
         view = _make_view(_fake_games(3))
@@ -239,6 +239,156 @@ class LibraryViewCarouselTests(unittest.TestCase):
         view.handle_nav("up")
         self.assertEqual(view._filter_btn_idx, 2)
         self.assertTrue(view._filter_focused)
+
+    def test_toggle_bar_hidden_when_no_games(self):
+        view = _make_view([])
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+
+        self.assertFalse(view._toggle_bar.isVisible())
+
+    def test_toggle_bar_visible_when_games_present(self):
+        view = _make_view([])
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._app_backend.libraryGames = _fake_games(3)
+
+        view._refresh()
+
+        self.assertTrue(view._toggle_bar.isVisible())
+
+    def test_handle_nav_down_enters_toggle_bar(self):
+        view = _make_view(_fake_games(5))
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+
+        view.handle_nav("down")
+
+        self.assertTrue(view._toggle_focused)
+
+    def test_handle_nav_up_exits_toggle_bar(self):
+        view = _make_view(_fake_games(5))
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._toggle_focused = True
+
+        view.handle_nav("up")
+
+        self.assertFalse(view._toggle_focused)
+
+    def test_handle_nav_right_moves_toggle_cursor(self):
+        view = _make_view(_fake_games(5))
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._toggle_focused = True
+        view._toggle_btn_idx = 0
+
+        view.handle_nav("right")
+
+        self.assertEqual(view._toggle_btn_idx, 1)
+
+    def test_handle_nav_left_clamps_toggle_cursor(self):
+        view = _make_view(_fake_games(5))
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._toggle_focused = True
+        view._toggle_btn_idx = 0
+
+        view.handle_nav("left")
+
+        self.assertEqual(view._toggle_btn_idx, 0)
+
+    def test_toggle_confirm_activates_favorites(self):
+        games = [
+            {"title": "Zeta", "is_favorite": "false"},
+            {"title": "Alpha", "is_favorite": "true"},
+            {"title": "Bravo", "is_favorite": "true"},
+        ]
+        view = _make_view(games)
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._toggle_focused = True
+        view._toggle_btn_idx = 0
+
+        view.handle_nav("confirm")
+
+        self.assertEqual(view._active_toggle, "favorites")
+        self.assertTrue(all(g.get("is_favorite") == "true" for g in view._games))
+
+    def test_toggle_confirm_deactivates_when_already_active(self):
+        games = [
+            {"title": "Alpha", "is_favorite": "true"},
+            {"title": "Bravo", "is_favorite": "false"},
+        ]
+        view = _make_view(games)
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._active_toggle = "favorites"
+        view._toggle_focused = True
+        view._toggle_btn_idx = 0
+
+        view.handle_nav("confirm")
+
+        self.assertEqual(view._active_toggle, "")
+
+    def test_toggle_mutual_exclusion(self):
+        games = [
+            {"title": "Alpha", "is_favorite": "true", "last_played": "2024-01-01T10:00:00"},
+            {"title": "Bravo", "is_favorite": "false", "last_played": "2024-01-02T10:00:00"},
+        ]
+        view = _make_view(games)
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._toggle_focused = True
+        view._toggle_btn_idx = 0
+        view.handle_nav("confirm")
+
+        view._toggle_btn_idx = 1
+        view.handle_nav("confirm")
+
+        self.assertEqual(view._active_toggle, "recently_played")
+
+    def test_recently_played_filter_sorts_descending(self):
+        games = [
+            {"title": "Old", "last_played": "2024-01-01T10:00:00"},
+            {"title": "Newest", "last_played": "2024-03-01T10:00:00"},
+            {"title": "Missing", "last_played": ""},
+            {"title": "Middle", "last_played": "2024-02-01T10:00:00"},
+        ]
+        view = _make_view(games)
+        self.addCleanup(view.deleteLater)
+        view._active_toggle = "recently_played"
+
+        view._apply_filter()
+
+        self.assertEqual([g.get("title") for g in view._games], ["Newest", "Middle", "Old"])
+
+    def test_favorites_filter_sorts_alphabetically(self):
+        games = [
+            {"title": "zeta", "is_favorite": "true"},
+            {"title": "Beta", "is_favorite": "false"},
+            {"title": "alpha", "is_favorite": "true"},
+        ]
+        view = _make_view(games)
+        self.addCleanup(view.deleteLater)
+        view._active_toggle = "favorites"
+
+        view._apply_filter()
+
+        self.assertEqual([g.get("title") for g in view._games], ["alpha", "zeta"])
+
+    def test_az_confirm_resets_toggle(self):
+        games = [{"name": "Asteroids"}, {"name": "Banjo"}]
+        view = _make_view(games)
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._active_toggle = "favorites"
+
+        view.handle_nav("up")
+        view._filter_btn_idx = 1
+        view.handle_nav("confirm")
+
+        self.assertEqual(view._active_toggle, "")
 
     def test_filter_bar_hidden_when_no_games(self):
         view = _make_view([])

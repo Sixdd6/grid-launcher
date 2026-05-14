@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import subprocess
 import sys
@@ -796,6 +797,35 @@ class GameBackend(QObject):
             return
         self._handle_native_launch(game_dict)
 
+    def _write_last_played_for_game(self, game_dict: dict[str, str]) -> None:
+        installed_games = self._config.get("installed_games", [])
+        if not isinstance(installed_games, list):
+            return
+
+        game_id = str(game_dict.get("id") or game_dict.get("rom_id") or "")
+        if not game_id:
+            return
+
+        matched_entry: dict[str, Any] | None = None
+        for entry in installed_games:
+            if not isinstance(entry, dict):
+                continue
+            entry_id = str(entry.get("id") or entry.get("rom_id") or "")
+            if entry_id == game_id:
+                matched_entry = entry
+                break
+
+        if matched_entry is None:
+            return
+
+        matched_entry["last_played"] = datetime.utcnow().isoformat()
+        config_dir = Path.home() / ".rom-mate"
+        config_file = config_dir / "config.json"
+        try:
+            _write_config_file(config_dir, config_file, self._config)
+        except OSError:
+            pass
+
     @Slot(str)
     def _on_process_exited(self, emulator_name: str) -> None:
         thread = self._watch_thread
@@ -814,6 +844,7 @@ class GameBackend(QObject):
         self.sessionEnded.emit(emulator_name)
 
         if self._session_game is not None:
+            self._write_last_played_for_game(self._session_game)
             config = dict(self._config)
             if config.get("auto_cloud_save_upload_on_exit", True) and _credentials_present(config):
                 em_name, em_entry = resolve_emulator_entry_for_game(self._session_game, config)

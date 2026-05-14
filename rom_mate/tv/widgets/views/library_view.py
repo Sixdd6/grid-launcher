@@ -23,6 +23,10 @@ _SLIDE_DURATION_MS = 260
 _SCALE_ANIM_MS = 190
 _FILTER_BAR_H = 48
 _FILTER_BAR_GAP = 16
+_TOGGLE_BAR_H = 40
+_TOGGLE_BAR_GAP = 24
+_TOGGLE_BTN_W = 160
+_TOGGLE_BTN_GAP = 20
 
 
 class LibraryView(QWidget):
@@ -57,8 +61,11 @@ class LibraryView(QWidget):
         self._nav_anim: QParallelAnimationGroup | None = None
         self._all_games: list[dict] = []
         self._active_letter: str = "All"
+        self._active_toggle: str = ""
         self._filter_focused: bool = False
         self._filter_btn_idx: int = 0
+        self._toggle_focused: bool = False
+        self._toggle_btn_idx: int = 0
         self._fanart_timer: QTimer = QTimer(self)
         self._fanart_timer.setSingleShot(True)
         self._fanart_timer.setInterval(500)
@@ -86,6 +93,14 @@ class LibraryView(QWidget):
             self._filter_labels.append(lbl)
         self._filter_bar.hide()
 
+        self._toggle_bar = QWidget(self)
+        self._toggle_bar.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self._toggle_labels: list[QLabel] = []
+        for label_text in ("Favorites", "Recently Played"):
+            lbl = QLabel(label_text, self._toggle_bar)
+            self._toggle_labels.append(lbl)
+        self._toggle_bar.hide()
+
         self._empty_label = QLabel("No installed games", self)
         self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._empty_label.setStyleSheet(f"color: {theme.TEXT_SECONDARY}; font-size: 22px;")
@@ -94,6 +109,7 @@ class LibraryView(QWidget):
         self._fanart.lower()
         self._strip_container.raise_()
         self._filter_bar.raise_()
+        self._toggle_bar.raise_()
 
         self._app_backend.libraryGamesChanged.connect(self._refresh)
         self.game_selected.connect(self._on_game_selected)
@@ -137,6 +153,25 @@ class LibraryView(QWidget):
         for i, lbl in enumerate(self._filter_labels):
             lbl.setGeometry(x_off + i * btn_w, 0, btn_w, _FILTER_BAR_H)
         self._update_filter_styles()
+        self._place_toggle_bar()
+
+    def _place_toggle_bar(self) -> None:
+        if self.height() == 0:
+            return
+
+        cards_bottom = self._strip_container.y() + _Y_BUFFER + _CARD_H
+        if not self._strip_container.isVisible():
+            cards_bottom = int(self.height() * _ROW_ANCHOR_RATIO) + _Y_BUFFER + _CARD_H
+
+        total_w = _TOGGLE_BTN_W * 2 + _TOGGLE_BTN_GAP
+        x = (self.width() - total_w) // 2
+        y = cards_bottom + _TOGGLE_BAR_GAP
+        self._toggle_bar.setGeometry(x, y, total_w, _TOGGLE_BAR_H)
+
+        for i, lbl in enumerate(self._toggle_labels):
+            lbl.setGeometry(i * (_TOGGLE_BTN_W + _TOGGLE_BTN_GAP), 0, _TOGGLE_BTN_W, _TOGGLE_BAR_H)
+
+        self._update_toggle_styles()
 
     def _update_filter_styles(self) -> None:
         letters = ["All"] + list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -163,15 +198,58 @@ class LibraryView(QWidget):
                 f"background: {bg}; color: {fg}; font-size: 15px; font-weight: {weight}; {border}"
             )
 
+    def _update_toggle_styles(self) -> None:
+        for i, lbl in enumerate(self._toggle_labels):
+            key = ("favorites", "recently_played")[i]
+            is_active = self._active_toggle == key
+            is_cursor = self._toggle_focused and self._toggle_btn_idx == i
+
+            if is_cursor:
+                style = (
+                    f"background: {theme.ACCENT}; "
+                    f"color: {theme.BG}; "
+                    f"border: 2px solid {theme.ACCENT}; "
+                    "border-radius: 6px; "
+                    "font-size: 15px; "
+                    "font-weight: 700;"
+                )
+            elif is_active:
+                style = (
+                    "background: transparent; "
+                    f"color: {theme.ACCENT}; "
+                    f"border: 1px solid {theme.ACCENT}; "
+                    "border-radius: 4px; "
+                    "font-size: 15px; "
+                    "font-weight: 700;"
+                )
+            else:
+                style = (
+                    "background: transparent; "
+                    f"color: {theme.TEXT_SECONDARY}; "
+                    "border: none; "
+                    "font-size: 15px; "
+                    "font-weight: 400;"
+                )
+
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet(style)
+
     def _apply_filter(self) -> None:
-        if self._active_letter == "All":
-            self._games = list(self._all_games)
+        if self._active_toggle == "favorites":
+            games = [g for g in self._all_games if g.get("is_favorite") == "true"]
+            games = sorted(games, key=lambda g: str(g.get("title", "")).lower())
+        elif self._active_toggle == "recently_played":
+            games = [g for g in self._all_games if g.get("last_played")]
+            games = sorted(games, key=lambda g: str(g.get("last_played", "")), reverse=True)
+        elif self._active_letter == "All":
+            games = list(self._all_games)
         else:
-            self._games = [
+            games = [
                 g
                 for g in self._all_games
                 if (g.get("name") or g.get("title") or "").upper().startswith(self._active_letter)
             ]
+        self._games = games
         self._current_idx = min(self._current_idx, max(0, len(self._games) - 1))
         self._first_slot = 0
         if not self._games:
@@ -205,7 +283,6 @@ class LibraryView(QWidget):
                 )
             else:
                 card.set_game({})
-            card.set_dimmed(j != center_slot)
 
     def _grow_center_card(self) -> None:
         if not self._games:
@@ -246,6 +323,28 @@ class LibraryView(QWidget):
         self.focus_first()
 
     def handle_nav(self, direction: str) -> None:
+        if self._toggle_focused:
+            if direction == "up":
+                self._toggle_focused = False
+                self._update_toggle_styles()
+            elif direction == "left":
+                self._toggle_btn_idx = max(0, self._toggle_btn_idx - 1)
+                self._update_toggle_styles()
+            elif direction == "right":
+                self._toggle_btn_idx = min(1, self._toggle_btn_idx + 1)
+                self._update_toggle_styles()
+            elif direction == "confirm":
+                key = ("favorites", "recently_played")[self._toggle_btn_idx]
+                if self._active_toggle == key:
+                    self._active_toggle = ""
+                else:
+                    self._active_toggle = key
+                    self._active_letter = "All"
+                    self._update_filter_styles()
+                self._apply_filter()
+                self._update_toggle_styles()
+            return
+
         if self._filter_focused:
             if direction == "down":
                 self._filter_focused = False
@@ -262,11 +361,24 @@ class LibraryView(QWidget):
             if direction == "confirm":
                 letters = ["All"] + list("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
                 new_letter = letters[self._filter_btn_idx]
-                if new_letter != self._active_letter:
+                if new_letter == self._active_letter:
+                    self._active_letter = "All"
+                else:
                     self._active_letter = new_letter
-                    self._apply_filter()
+                self._active_toggle = ""
+                self._apply_filter()
                 self._update_filter_styles()
+                self._update_toggle_styles()
                 return
+            return
+
+        if direction == "down":
+            if self._anim_blocked:
+                return
+            self._toggle_focused = True
+            self._filter_focused = False
+            self._update_filter_styles()
+            self._update_toggle_styles()
             return
 
         if direction == "up":
@@ -299,30 +411,39 @@ class LibraryView(QWidget):
     def focus_first(self) -> None:
         self._filter_focused = False
         self._filter_btn_idx = 0
+        self._toggle_focused = False
+        self._toggle_btn_idx = 0
         self._current_idx = 0
         self._bind_pool()
         self._schedule_fanart_update()
         self._place_strip()
         self._place_filter_bar()
         self._update_filter_styles()
+        self._update_toggle_styles()
         self._grow_center_card()
 
     def _refresh(self) -> None:
         raw = [g for g in (getattr(self._app_backend, "libraryGames", []) or []) if isinstance(g, dict)]
         self._all_games = sorted(raw, key=lambda g: (g.get("name") or g.get("title") or "").casefold())
         self._active_letter = "All"
+        self._active_toggle = ""
         self._filter_btn_idx = 0
         self._filter_focused = False
+        self._toggle_btn_idx = 0
+        self._toggle_focused = False
         if not self._all_games:
             self._empty_label.show()
             self._strip_container.hide()
             self._filter_bar.hide()
+            self._toggle_bar.hide()
             self._fanart.set_urls([])
             return
         self._empty_label.hide()
         self._filter_bar.show()
+        self._toggle_bar.show()
         self._apply_filter()
         self._place_filter_bar()
+        self._place_toggle_bar()
 
     def _start_nav_anim(self, direction: str) -> None:
         self._anim_blocked = True
@@ -414,7 +535,6 @@ class LibraryView(QWidget):
                 )
             else:
                 recycle_card.set_game({})
-            recycle_card.set_dimmed(True)
         else:
             recycle_card = self._card_at_slot(10)
             self._first_slot = (self._first_slot - 1 + _POOL_SIZE) % _POOL_SIZE
@@ -428,7 +548,6 @@ class LibraryView(QWidget):
                 )
             else:
                 recycle_card.set_game({})
-            recycle_card.set_dimmed(True)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -444,6 +563,7 @@ class LibraryView(QWidget):
         self._bind_pool()
         self._place_strip()
         self._place_filter_bar()
+        self._place_toggle_bar()
         if self._games and self.height() > 0 and not self._strip_container.isVisible():
             self._strip_container.show()
             self._grow_center_card()

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QRect, Qt, Signal
+from PySide6.QtCore import QRect, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QKeyEvent, QPainter, QPaintEvent, QPixmap
 from PySide6.QtWidgets import QWidget
 
 from rom_mate.tv.widgets import theme
+from rom_mate.ui.theme import themed_svg_pixmap
 
 
 class LibraryCard(QWidget):
@@ -20,15 +21,14 @@ class LibraryCard(QWidget):
         self._has_saves = False
         self._title_height = 34
         self.resize(200, 300)
-        self._dimmed: bool = False
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def set_game(self, game_dict: dict) -> None:
         self._game = game_dict or {}
         self._title = str(self._game.get("name") or self._game.get("title") or "")
         self._platform = str(self._game.get("platform") or "")
-        self._is_favorite = bool(self._game.get("is_favorite"))
-        self._has_saves = bool(self._game.get("has_saves"))
+        self._is_favorite = self._game.get("is_favorite") == "true"
+        self._has_saves = self._game.get("has_saves") == "true"
         self._pixmap = None
         self.update()
         self.setVisible(bool(self._game))
@@ -38,10 +38,6 @@ class LibraryCard(QWidget):
             self._pixmap = None
         else:
             self._pixmap = pixmap
-        self.update()
-
-    def set_dimmed(self, flag: bool) -> None:
-        self._dimmed = flag
         self.update()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
@@ -55,9 +51,6 @@ class LibraryCard(QWidget):
         _ = event
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        if self._dimmed:
-            painter.setOpacity(0.6)
 
         rect = self.rect().adjusted(1, 1, -1, -1)
         inset = 2
@@ -91,15 +84,10 @@ class LibraryCard(QWidget):
             painter.drawPixmap(target_rect, scaled, source_rect)
 
         if self._is_favorite:
-            star_rect = QRect(cover_rect.right() - 24, cover_rect.top() + 8, 20, 20)
-            painter.setBrush(QColor(255, 215, 0, 220))
+            pix = themed_svg_pixmap("svg/favorite", QColor(theme.ACCENT), size=QSize(20, 20))
+            painter.drawPixmap(cover_rect.right() - 24, cover_rect.top() + 8, pix)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawEllipse(star_rect)
-            painter.setPen(QColor(40, 42, 54))
-            font = painter.font()
-            font.setPixelSize(11)
-            painter.setFont(font)
-            painter.drawText(star_rect, Qt.AlignmentFlag.AlignCenter, "★")
+            painter.setBrush(Qt.BrushStyle.NoBrush)
 
         if self._has_saves:
             cloud_rect = QRect(cover_rect.left() + 6, cover_rect.bottom() - 24, 20, 20)

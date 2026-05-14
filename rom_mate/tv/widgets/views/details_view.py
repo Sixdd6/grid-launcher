@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any, Callable
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtGui import QPixmap
+from rom_mate.ui.theme import themed_svg_pixmap
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -21,6 +23,10 @@ from rom_mate.tv.widgets.components.cloud_saves_overlay import CloudSavesOverlay
 from rom_mate.tv.widgets.components.fanart_background import FanartBackground
 from rom_mate.tv.widgets.components.install_progress_bar import InstallProgressBar
 from rom_mate.tv.widgets.components.native_exec_picker import NativeExecPickerDialog
+
+
+_ASSETS = Path(__file__).resolve().parents[4] / "assets" / "retroarch-assets"
+_SVG_ASSETS_ROOT = Path(__file__).resolve().parents[4] / "assets"
 
 
 class DetailsView(QWidget):
@@ -78,8 +84,21 @@ class DetailsView(QWidget):
         header_layout.setContentsMargins(16, 0, 16, 0)
         header_layout.setSpacing(12)
 
-        self._back_label = QLabel("<- Back", self._header)
-        self._back_label.setStyleSheet(f"color: {theme.TEXT_SECONDARY}; font-size: 14px; font-weight: 700;")
+        self._back_label = QWidget(self._header)
+        _back_hlayout = QHBoxLayout(self._back_label)
+        _back_hlayout.setContentsMargins(0, 0, 0, 0)
+        _back_hlayout.setSpacing(4)
+        _arrow_pix = themed_svg_pixmap("svg/back", theme.TEXT_SECONDARY, size=QSize(16, 16))
+        _back_icon_lbl = QLabel(self._back_label)
+        _back_icon_lbl.setPixmap(_arrow_pix)
+        _back_icon_lbl.setFixedSize(QSize(16, 16))
+        _back_icon_lbl.setStyleSheet("background: transparent;")
+        _back_hlayout.addWidget(_back_icon_lbl)
+        _back_text_lbl = QLabel("Back", self._back_label)
+        _back_text_lbl.setStyleSheet(
+            f"color: {theme.TEXT_SECONDARY}; font-size: 14px; font-weight: 700;"
+        )
+        _back_hlayout.addWidget(_back_text_lbl)
         header_layout.addWidget(self._back_label)
 
         self._header_title = QLabel(self._game_title(), self._header)
@@ -261,12 +280,54 @@ class DetailsView(QWidget):
         )
         lb_layout.addWidget(self._lightbox_counter)
 
-        self._lightbox_hint = QLabel("B  Close    ↑↓ ◀▶  Navigate", self._lightbox)
-        self._lightbox_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lightbox_hint = QWidget(self._lightbox)
         self._lightbox_hint.setFixedHeight(32)
-        self._lightbox_hint.setStyleSheet(
+        self._lightbox_hint.setStyleSheet("background: transparent;")
+        _hint_layout = QHBoxLayout(self._lightbox_hint)
+        _hint_layout.setContentsMargins(0, 0, 0, 0)
+        _hint_layout.setSpacing(0)
+        _hint_layout.addStretch()
+
+        _btn_r_pix = QPixmap(str(_ASSETS / "input_BTN-R.png")).scaled(
+            QSize(20, 20), Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        _btn_r_lbl = QLabel(self._lightbox_hint)
+        _btn_r_lbl.setPixmap(_btn_r_pix)
+        _btn_r_lbl.setFixedSize(QSize(20, 20))
+        _btn_r_lbl.setStyleSheet("background: transparent;")
+        _hint_layout.addWidget(_btn_r_lbl)
+        _hint_layout.addSpacing(8)
+        _close_lbl = QLabel("Close", self._lightbox_hint)
+        _close_lbl.setStyleSheet(
             f"color: {theme.TEXT_SECONDARY}; font-size: 12px; background: transparent;"
         )
+        _hint_layout.addWidget(_close_lbl)
+
+        _hint_layout.addSpacing(32)
+
+        for _i, _dpad_file in enumerate(
+            ("input_DPAD-U.png", "input_DPAD-D.png", "input_DPAD-L.png", "input_DPAD-R.png")
+        ):
+            if _i > 0:
+                _hint_layout.addSpacing(4)
+            _dp_pix = QPixmap(str(_ASSETS / _dpad_file)).scaled(
+                QSize(20, 20), Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            _dp_lbl = QLabel(self._lightbox_hint)
+            _dp_lbl.setPixmap(_dp_pix)
+            _dp_lbl.setFixedSize(QSize(20, 20))
+            _dp_lbl.setStyleSheet("background: transparent;")
+            _hint_layout.addWidget(_dp_lbl)
+        _hint_layout.addSpacing(8)
+        _nav_lbl = QLabel("Navigate", self._lightbox_hint)
+        _nav_lbl.setStyleSheet(
+            f"color: {theme.TEXT_SECONDARY}; font-size: 12px; background: transparent;"
+        )
+        _hint_layout.addWidget(_nav_lbl)
+
+        _hint_layout.addStretch()
         lb_layout.addWidget(self._lightbox_hint)
 
         self._game_backend.installProgress.connect(self._on_install_progress)
@@ -417,24 +478,24 @@ class DetailsView(QWidget):
         buttons: list[dict[str, str]] = []
 
         if installing:
-            buttons.append({"id": "cancel", "label": "X  Cancel"})
+            buttons.append({"id": "cancel", "icon": "svg/trashcan", "label": "Cancel"})
         elif installed:
-            buttons.append({"id": "play", "label": ">  Play"})
+            buttons.append({"id": "play", "icon": "svg/play", "label": "Play"})
         else:
-            buttons.append({"id": "install", "label": "v  Install"})
+            buttons.append({"id": "install", "icon": "svg/plus", "label": "Install"})
 
         if installed:
-            buttons.append({"id": "uninstall", "label": "X  Uninstall"})
+            buttons.append({"id": "uninstall", "icon": "svg/trashcan", "label": "Uninstall"})
 
         if installed and native_pc:
-            buttons.append({"id": "native_exec", "label": "Config  Change Executable"})
+            buttons.append({"id": "native_exec", "icon": "svg/config", "label": "Change Executable"})
 
         if connected:
-            buttons.append({"id": "cloud", "label": "Cloud  Cloud Saves"})
+            buttons.append({"id": "cloud", "icon": "svg/cloud", "label": "Cloud Saves"})
 
             is_favorite = self._boolish(self._game.get("is_favorite", False))
-            fav_label = "Star  Remove from Favorites" if is_favorite else "Star  Add to Favorites"
-            buttons.append({"id": "favorite", "label": fav_label})
+            fav_label = "Remove from Favorites" if is_favorite else "Add to Favorites"
+            buttons.append({"id": "favorite", "icon": "svg/star", "label": fav_label})
 
         return buttons
 
@@ -452,19 +513,44 @@ class DetailsView(QWidget):
             bg = theme.ACCENT if focused else "rgba(68, 71, 90, 0.5)"
             fg = theme.PANEL if focused else theme.TEXT_PRIMARY
 
-            row = QLabel(item["label"], self._button_container)
+            row = QWidget(self._button_container)
+            row.setObjectName("buttonRow")
             row.setFixedHeight(44)
-            row.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
             if focused:
                 row.setStyleSheet(
-                    f"padding: 0 12px; color: {fg}; background: {bg}; border: 1px solid {theme.ACCENT}; "
-                    "border-radius: 8px; font-size: 14px; font-weight: 700;"
+                    f"QWidget#buttonRow {{ background: {bg}; border: 1px solid {theme.ACCENT}; border-radius: 8px; }}"
                 )
             else:
                 row.setStyleSheet(
-                    f"padding: 0 12px; color: {fg}; background: {bg}; border: none; "
-                    "border-radius: 8px; font-size: 14px; font-weight: 700;"
+                    f"QWidget#buttonRow {{ background: {bg}; border: none; border-radius: 8px; }}"
                 )
+
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(12, 0, 12, 0)
+            row_layout.setSpacing(8)
+
+            icon_file = item.get("icon", "")
+            if icon_file:
+                if icon_file.endswith(".png"):
+                    icon_pix = QPixmap(str(_ASSETS / icon_file)).scaled(
+                        QSize(20, 20),
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                else:
+                    icon_pix = themed_svg_pixmap(icon_file, fg, size=QSize(20, 20))
+                icon_lbl = QLabel(row)
+                icon_lbl.setPixmap(icon_pix)
+                icon_lbl.setFixedSize(QSize(20, 20))
+                icon_lbl.setStyleSheet("background: transparent;")
+                row_layout.addWidget(icon_lbl)
+
+            text_lbl = QLabel(item["label"], row)
+            text_lbl.setStyleSheet(
+                f"color: {fg}; font-size: 14px; font-weight: 700; background: transparent;"
+            )
+            row_layout.addWidget(text_lbl, 1)
+
             self._button_layout.addWidget(row)
 
         self._button_layout.addStretch(1)

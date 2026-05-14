@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 
-from PySide6.QtCore import QThread, QTimer, Qt
+from PySide6.QtCore import QSize, QThread, QTimer, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -25,6 +25,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from PySide6.QtGui import QIcon, QPixmap
+from rom_mate.ui.theme import themed_svg_pixmap
 
 from rom_mate.background import DetailsCloudRecordsWorker
 from rom_mate.emulator import (
@@ -257,7 +259,12 @@ class DetailsViewMixin:
         open_game_details(self, current_game, self.current_details_source)
 
 
-    def _on_pcgw_paths_loaded(self, request_id: int, raw_paths: list, error: str) -> None:
+    def _on_pcgw_paths_loaded(self, bundle: object) -> None:
+        if not isinstance(bundle, dict):
+            return
+        request_id = bundle.get("request_id")
+        raw_paths = bundle.get("paths", [])
+        error = bundle.get("error", "")
         if request_id != self._pending_pcgw_request_id:
             return
         game = self._current_details_game
@@ -1096,9 +1103,13 @@ class DetailsViewMixin:
             label.setToolTip(expanded)
             label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             row_layout.addWidget(label, 1)
-            remove_btn = QPushButton("✕")
-            remove_btn.setFixedWidth(28)
+            _close_pix = themed_svg_pixmap("svg/trashcan", "#888888", size=QSize(14, 14))
+            remove_btn = QPushButton()
+            remove_btn.setIcon(QIcon(_close_pix))
+            remove_btn.setIconSize(QSize(14, 14))
+            remove_btn.setFixedSize(QSize(24, 24))
             remove_btn.setToolTip("Remove this path")
+            remove_btn.setAccessibleName("Remove")
             raw_path_capture = raw_path
 
             def _remove(checked=False, rp=raw_path_capture):

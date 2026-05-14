@@ -484,6 +484,37 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
 
         mock_upload_worker.assert_not_called()
 
+    def test_on_process_exited_stamps_last_played(self):
+        from rom_mate.tv.bridge.game_backend import GameBackend
+
+        backend = GameBackend(dict(self.base_config), MagicMock())
+        backend._config["installed_games"] = [{"id": 42, "rom_id": "42"}]
+        backend._session_game = {"id": 42, "rom_id": "42", "title": "Doom"}
+        backend._process = MagicMock()
+
+        with patch("rom_mate.tv.bridge.game_backend._ProcessWatchThread.start"), patch(
+            "rom_mate.tv.bridge.game_backend._write_config_file"
+        ), patch("rom_mate.tv.bridge.game_backend._credentials_present", return_value=False):
+            backend._on_process_exited("RetroArch")
+
+        stamped = backend._config["installed_games"][0].get("last_played")
+        self.assertIsInstance(stamped, str)
+        self.assertTrue(stamped)
+        self.assertIn("T", stamped)
+
+    def test_on_process_exited_no_stamp_when_no_session_game(self):
+        from rom_mate.tv.bridge.game_backend import GameBackend
+
+        backend = GameBackend(dict(self.base_config), MagicMock())
+        backend._config["installed_games"] = [{"id": 42}]
+        backend._session_game = None
+        backend._process = MagicMock()
+
+        with patch("rom_mate.tv.bridge.game_backend._write_config_file"):
+            backend._on_process_exited("RetroArch")
+
+        self.assertNotIn("last_played", backend._config["installed_games"][0])
+
     def test_on_restore_done_calls_do_launch_on_success(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
 
