@@ -5,6 +5,7 @@ A simple, responsive launcher for RomM.
 
 ## Desktop Mode Screenshots
 
+![Library Tab](.github/images/desktop5.png)
 ![Server Tab](.github/images/desktop4.png)
 ![Game Details](.github/images/desktop1.png)
 ![Emulators Tab](.github/images/desktop2.png)
@@ -12,6 +13,7 @@ A simple, responsive launcher for RomM.
 
 ## TV Mode Screenshots
 ![Home Tab](.github/images/tv1.png)
+![Library Tab](.github/images/tv5.png)
 ![Server Tab](.github/images/tv2.png)
 ![Platform View](.github/images/tv3.png)
 ![Game Details](.github/images/tv4.png)
