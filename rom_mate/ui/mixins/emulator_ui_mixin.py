@@ -415,22 +415,22 @@ class EmulatorUIMixin:
             themed_svg_icon_fn = themed_svg_icon
 
         launch_icon = themed_svg_icon_fn(
-            "play-1003-svgrepo-com.svg",
+            "svg/play.svg",
             accent_color,
             size=action_icon_size,
         )
         config_icon = themed_svg_icon_fn(
-            "gear-tools-wrench-svgrepo-com.svg",
+            "svg/config.svg",
             text_color,
             size=action_icon_size,
         )
         uninstall_icon = themed_svg_icon_fn(
-            "trashcan-svgrepo-com.svg",
+            "svg/trashcan.svg",
             error_color,
             size=action_icon_size,
         )
         source_update_icon = themed_svg_icon_fn(
-            "cloud-download-svgrepo-com.svg",
+            "svg/cloud.svg",
             accent_color,
             size=action_icon_size,
         )

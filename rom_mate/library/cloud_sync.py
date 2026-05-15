@@ -119,7 +119,12 @@ def partition_active_game_sessions(active_game_sessions: list[dict[str, Any]]) -
         poll = getattr(process, "poll", None)
         if not callable(poll):
             continue
-        if poll() is None:
+        try:
+            poll_result = poll()
+        except Exception:
+            remaining.append(session)
+            continue
+        if poll_result is None:
             remaining.append(session)
         else:
             finished.append(session)

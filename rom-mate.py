@@ -1785,22 +1785,22 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
         action_icon_size = QSize(16, 16)
         launch_icon = self._themed_svg_icon(
-            "play-1003-svgrepo-com.svg",
+            "svg/play.svg",
             self._theme_color("accent", "#8be9fd"),
             size=action_icon_size,
         )
         config_icon = self._themed_svg_icon(
-            "gear-tools-wrench-svgrepo-com.svg",
+            "svg/config.svg",
             self._theme_color("text", "#f8f8f2"),
             size=action_icon_size,
         )
         uninstall_icon = self._themed_svg_icon(
-            "trashcan-svgrepo-com.svg",
+            "svg/trashcan.svg",
             self._theme_color("error", "#ff5555"),
             size=action_icon_size,
         )
         source_update_icon = self._themed_svg_icon(
-            "save-floppy-svgrepo-com.svg",
+            "svg/cloud.svg",
             self._theme_color("accent", "#8be9fd"),
             size=action_icon_size,
         )
