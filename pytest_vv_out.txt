@@ -1,1 +1,0 @@
-C:\Users\Sam\Programming\rom-mate-neo\.venv\Scripts\python.exe: No module named pytest

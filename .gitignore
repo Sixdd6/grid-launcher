@@ -28,10 +28,12 @@ unittest_*
 # Logs
 *.log
 pytest_*
+*.sync-conflict-*
 
 # IDE and editor user files
 .vscode/settings.json
 .vscode/tasks.json
+.vscode/launch.json
 .vscode/*.code-workspace
 rom-mate-neo.code-workspace
 
