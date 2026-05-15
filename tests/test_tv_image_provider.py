@@ -58,38 +58,40 @@ class TestCoverLoader(unittest.TestCase):
         loader = self._make_loader()
         self.assertIsNone(loader.load_pixmap(None))
 
-    @patch("rom_mate.tv.widgets.cover_loader.requests.get")
-    def test_load_pixmap_fetches_over_http_when_not_cached(self, mock_get):
+    @patch("rom_mate.tv.widgets.cover_loader.urllib.request.urlopen")
+    def test_load_pixmap_fetches_over_http_when_not_cached(self, mock_urlopen):
         png_bytes = self._make_png_bytes()
-        response = Mock()
-        response.content = png_bytes
-        response.raise_for_status.return_value = None
-        mock_get.return_value = response
+        mock_response = Mock()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = Mock(return_value=False)
+        mock_response.read.return_value = png_bytes
+        mock_urlopen.return_value = mock_response
 
         loader = self._make_loader()
         pixmap = loader.load_pixmap("http://example.com/cover.jpg")
 
         self.assertIsNotNone(pixmap)
         self.assertFalse(pixmap.isNull())
-        mock_get.assert_called_once()
+        mock_urlopen.assert_called_once()
 
-    @patch("rom_mate.tv.widgets.cover_loader.requests.get")
-    def test_load_pixmap_returns_none_when_http_fetch_fails(self, mock_get):
-        from requests import RequestException
+    @patch("rom_mate.tv.widgets.cover_loader.urllib.request.urlopen")
+    def test_load_pixmap_returns_none_when_http_fetch_fails(self, mock_urlopen):
+        import urllib.error
 
-        mock_get.side_effect = RequestException("network error")
+        mock_urlopen.side_effect = urllib.error.URLError("network error")
         loader = self._make_loader()
 
         self.assertIsNone(loader.load_pixmap("http://example.com/cover.jpg"))
-        mock_get.assert_called_once()
+        mock_urlopen.assert_called_once()
 
-    @patch("rom_mate.tv.widgets.cover_loader.requests.get")
-    def test_load_pixmap_stale_cached_entry_falls_back_to_http(self, mock_get):
+    @patch("rom_mate.tv.widgets.cover_loader.urllib.request.urlopen")
+    def test_load_pixmap_stale_cached_entry_falls_back_to_http(self, mock_urlopen):
         png_bytes = self._make_png_bytes()
-        response = Mock()
-        response.content = png_bytes
-        response.raise_for_status.return_value = None
-        mock_get.return_value = response
+        mock_response = Mock()
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = Mock(return_value=False)
+        mock_response.read.return_value = png_bytes
+        mock_urlopen.return_value = mock_response
 
         missing_file = self.cache_dir / "missing.png"
         loader = self._make_loader({"http://example.com/cover.jpg": str(missing_file)})
@@ -97,16 +99,16 @@ class TestCoverLoader(unittest.TestCase):
         pixmap = loader.load_pixmap("http://example.com/cover.jpg")
         self.assertIsNotNone(pixmap)
         self.assertFalse(pixmap.isNull())
-        mock_get.assert_called_once()
+        mock_urlopen.assert_called_once()
 
-    @patch("rom_mate.tv.widgets.cover_loader.requests.get")
-    def test_load_pixmap_returns_none_for_unknown_key_without_network(self, mock_get):
-        from requests import RequestException
+    @patch("rom_mate.tv.widgets.cover_loader.urllib.request.urlopen")
+    def test_load_pixmap_returns_none_for_unknown_key_without_network(self, mock_urlopen):
+        import urllib.error
 
-        mock_get.side_effect = RequestException("unreachable")
+        mock_urlopen.side_effect = urllib.error.URLError("unreachable")
         loader = self._make_loader()
         self.assertIsNone(loader.load_pixmap("http://localhost:19999/nonexistent.jpg"))
-        mock_get.assert_called_once()
+        mock_urlopen.assert_called_once()
 
     def test_does_not_import_loader(self):
         import sys

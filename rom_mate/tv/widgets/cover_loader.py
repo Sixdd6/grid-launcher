@@ -6,7 +6,8 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
 
-import requests
+import urllib.error
+import urllib.request
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QApplication
@@ -141,10 +142,10 @@ class CoverLoader:
             headers["Authorization"] = f"Bearer {self._api_token}"
 
         try:
-            response = requests.get(cover_url, headers=headers, timeout=15)
-            response.raise_for_status()
-            payload = response.content
-        except (requests.RequestException, OSError, ValueError):
+            req = urllib.request.Request(cover_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as response:
+                payload = response.read()
+        except (urllib.error.URLError, OSError, ValueError):
             with self._lock:
                 self._cache[cover_url] = ""
             return None
