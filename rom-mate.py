@@ -323,6 +323,7 @@ from rom_mate.emulator.retroarch import retroarch_core_flags as resolve_retroarc
 from rom_mate.emulator.retroarch import retroarch_core_flags_for_platform as resolve_retroarch_core_flags_for_platform
 from rom_mate.emulator.retroarch import flycast_vmu_file_candidates as resolve_flycast_vmu_file_candidates
 from rom_mate.ui import (
+    AspectRatioLabel,
     EmulatorConfigDialog,
     FirstRunSetupDialog,
     NativeGameSettingsDialog,
@@ -1654,18 +1655,13 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
         self.details_screenshot_labels = []
         for index in range(5):
-            screenshot_label = QLabel(f"Screenshot {index + 1}")
+            screenshot_label = AspectRatioLabel(f"Screenshot {index + 1}")
             screenshot_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            screenshot_label.setMinimumSize(210, 118)
-            screenshot_label.setMaximumSize(520, 320)
             screenshot_label.setStyleSheet(
                 f"background-color: {self._theme_color('window', '#282a36')}; border: none; border-radius: 8px;"
             )
             self.details_screenshot_labels.append(screenshot_label)
-            screenshots_content_layout.addWidget(
-                screenshot_label,
-                alignment=Qt.AlignmentFlag.AlignHCenter,
-            )
+            screenshots_content_layout.addWidget(screenshot_label)
         screenshots_content_layout.addStretch()
 
         screenshots_scroll.setWidget(screenshots_content)

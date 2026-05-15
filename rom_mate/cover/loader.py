@@ -24,6 +24,9 @@ class CoverLoaderWindowProtocol(Protocol):
 def apply_cover_to_label(label: QLabel, pixmap: QPixmap | None) -> None:
     if pixmap is None or pixmap.isNull():
         return
+    if hasattr(label, "set_source_pixmap"):
+        label.set_source_pixmap(pixmap)
+        return
     try:
         label.setText("")
         label.setPixmap(

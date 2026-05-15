@@ -106,17 +106,13 @@ def update_details_layout_metrics(window: CoverDetailsWindowProtocol) -> None:
     if window.details_cover_label is not None:
         window.details_cover_label.setFixedSize(cover_width, cover_height)
 
-    screenshot_aspect_ratio = 0.62
-    screenshot_max_height = max(96, min(240, int(content_height * 0.24)))
     screenshot_width = max(
         160,
         min(
             420,
             int(content_width * 0.19),
-            int(screenshot_max_height / screenshot_aspect_ratio),
         ),
     )
-    screenshot_height = max(90, min(screenshot_max_height, int(screenshot_width * screenshot_aspect_ratio)))
 
     compact_cloud_layout = window.current_details_cloud_mode != "overview" and (
         content_width < 1360
@@ -139,7 +135,7 @@ def update_details_layout_metrics(window: CoverDetailsWindowProtocol) -> None:
     if window.details_screenshots_scroll is not None:
         window.details_screenshots_scroll.setFixedWidth(screenshot_width + 28)
     for label in window.details_screenshot_labels:
-        label.setFixedSize(screenshot_width, screenshot_height)
+        label.setMaximumWidth(screenshot_width)
 
     if window.details_description_label is not None:
         description_width = max(280, min(1200, int(content_width * 0.42)))

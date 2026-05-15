@@ -155,6 +155,20 @@ class CoverDetailsLayoutMetricsTests(unittest.TestCase):
 
         self.assertTrue(window.details_screenshots_panel.visible)
 
+    def test_screenshot_labels_receive_max_width_not_fixed_size(self) -> None:
+        window = _StubWindow(
+            content_width=1480,
+            content_height=760,
+            window_width=1600,
+            window_height=900,
+        )
+
+        update_details_layout_metrics(window)
+
+        for label in window.details_screenshot_labels:
+            self.assertIsNone(label.fixed_size)
+            self.assertIsNotNone(label.maximum_width)
+
 
 class _StubDetailsOpenWindow:
     def __init__(self) -> None:

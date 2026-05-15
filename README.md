@@ -3,22 +3,28 @@ A simple, responsive launcher for RomM.
 
 [![Latest Build](https://github.com/Sixdd6/rom-mate-neo/actions/workflows/pyinstaller-windows.yml/badge.svg)](https://github.com/Sixdd6/rom-mate-neo/actions/workflows/pyinstaller-windows.yml)
 
-## Feature Checklist
-- [x] Library view with cover art grid for installed games
-- [x] Server view with platform list and game grid for games on your server
-- [x] Emulator auto-install from RomM server with autopopulated launch arguments
-    - [x] Emulator auto-download from supported source metadata (MVP)
-- [x] Settings view with necessary configuration options
-- [x] Game launching functionality
-- Game management
-    - [x] install
-    - [x] update
-    - [x] delete
-- [x] Light/Dark Themes
-- [x] Responsive layout
-- [x] Cloud save support and in-app management
-- [x] RetroAchievements integration and browsing
-- [x] Supports screen resolutions from 720p and up, good for small handhelds AND large screens
+## Desktop Mode Screenshots
+
+![Server Tab](.github/images/desktop4.png)
+![Game Details](.github/images/desktop1.png)
+![Emulators Tab](.github/images/desktop2.png)
+![Settings Tab](.github/images/desktop3.png)
+
+## TV Mode Screenshots
+![Home Tab](.github/images/tv1.png)
+![Server Tab](.github/images/tv2.png)
+![Platform View](.github/images/tv3.png)
+![Game Details](.github/images/tv4.png)
+
+## Features
+- Library tab with cover art grid for installed games
+- Server tab with platform list and game grid for games on your server
+- Settings tab with configuration options for server address and client token, retroachievements details, theme selection and cloud saves toggle
+- Emulator auto-install from supported sources
+- Light/Dark Themes
+- Cloud save support and in-app management
+- RetroAchievements integration and browsing
+- Supports screen resolutions from 720p and up, good for small handhelds AND large screens
 
 ## Supported Platforms
 
@@ -30,7 +36,7 @@ A simple, responsive launcher for RomM.
 | PPSSPP | PlayStation Portable (PSP) |
 | RPCS3 | PlayStation 3 |
 | ShadPS4 | PlayStation 4 |
-| Dolphin | GameCube, Wii |
+| Dolphin | GameCube, Wii, Tri-Force (untested) |
 | Cemu | Wii U |
 | Azahar | Nintendo 3DS |
 | Eden | Nintendo Switch |
@@ -41,7 +47,13 @@ A simple, responsive launcher for RomM.
 | FBNeo | Arcade |
 | Redream | Sega Dreamcast, Sega Naomi |
 
-Native Windows PC games are also supported by archiving the installed files and are extracted to a subfolder upon installation. This is intended for legally obtained DRM-free games only. You are responsible for what you do with this, don't come complain to me when a hacked copy of a game installs a rootkit on your pc.
+- Emulators can be manually added with launch arguments editable by the user. This way it is possible to use almost any emulator you could launch from a standard shortcut or batch file.
+
+## PC Games
+
+Native Windows PC games are also supported by archiving the installed files. When installing the files are extracted to a subfolder, based on the archive name. This is intended for legally obtained DRM-free games only.
+
+<!> You are responsible for what you do with this, don't come complain to me when a hacked copy of a game installs a rootkit on your pc. <!>
 
 ## PS3 Game Archiving
 
@@ -113,7 +125,7 @@ dev_hdd0/
 ## Cloud Sync Notes
 - Game Details now displays `Manage Saves` or `Emulator Saves`, `Manage States` depending on the active emulator capabilities.
 - Shared-save emulators such as Xemu and Redream surface emulator-wide backups, be warned that actions can affect all games using the same shared media.
-- Native Windows games use PCGamingWiki to automatically discover save locations. All configured directories are bundled into a single versioned archive per session, preserving the standard 3-save retention. A Browse button allows manual path additions when automatic lookup fails.
+- Native Windows games use PCGamingWiki to attempt to automatically discover save locations. A Browse button allows manual path additions when automatic lookup fails. Multiple directories/files can be selected from the game details page in Desktop Mode. All configured directories/files are bundled into a single versioned archive per session.
 
 ## Save Archive Format
 

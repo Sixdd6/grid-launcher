@@ -2,10 +2,55 @@ from __future__ import annotations
 
 from typing import Any, Callable, Protocol
 
-from PySide6.QtCore import QTimer, Qt
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLayout, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtCore import QSize, QTimer, Qt
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLayout, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from rom_mate.library import rom_file_name_version
+
+
+class AspectRatioLabel(QLabel):
+    def __init__(self, text: str = "") -> None:
+        super().__init__(text)
+        self._source_pixmap: QPixmap | None = None
+        self._aspect_ratio: float | None = None
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, w: int) -> int:
+        if self._aspect_ratio is not None:
+            return max(1, int(w * self._aspect_ratio))
+        return max(1, int(w * 0.5625))
+
+    def sizeHint(self) -> QSize:
+        return QSize(self.width(), self.heightForWidth(self.width()))
+
+    def set_source_pixmap(self, pixmap: QPixmap | None) -> None:
+        self._source_pixmap = pixmap
+        if pixmap is not None and not pixmap.isNull() and pixmap.width() > 0:
+            self._aspect_ratio = pixmap.height() / pixmap.width()
+        else:
+            self._aspect_ratio = None
+        self.updateGeometry()
+        self._rescale()
+
+    def _rescale(self) -> None:
+        if self.width() <= 0:
+            return
+        if self._source_pixmap is None:
+            return
+        scaled = self._source_pixmap.scaled(
+            QSize(self.width(), self.heightForWidth(self.width())),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self.setPixmap(scaled)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._rescale()
 
 
 class GameCardWindowProtocol(Protocol):

@@ -10,6 +10,7 @@ from .emulators import (
     upsert_emulator_entry,
 )
 from .game_views import (
+    AspectRatioLabel,
     is_hidden_library_platform,
     make_game_card,
     open_game_details,
@@ -32,6 +33,7 @@ __all__ = [
     "FirstRunSetupDialog",
     "NativeGameSettingsDialog",
     "build_downloads_page",
+    "AspectRatioLabel",
     "emulator_form_state_for_row",
     "make_emulator_entry_payload",
     "make_download_entry_widget",

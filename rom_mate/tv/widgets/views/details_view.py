@@ -716,7 +716,7 @@ class DetailsView(QWidget):
             self._shot_pixmaps.append(None)
 
             card = QLabel(self._shots_container)
-            card.setFixedHeight(132)
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             card.setAlignment(Qt.AlignmentFlag.AlignCenter)
             card.setStyleSheet(
                 "background: rgba(30, 31, 41, 0.9); border: none; border-radius: 8px;"
@@ -736,8 +736,11 @@ class DetailsView(QWidget):
                     return
                 if idx < len(self._shot_pixmaps):
                     self._shot_pixmaps[idx] = pixmap
+                card_w = max(1, target.width() or (self._right_col.width() - 24))
+                card_h = max(60, int(card_w * pixmap.height() / pixmap.width())) if pixmap.width() > 0 else 90
+                target.setFixedHeight(card_h)
                 scaled = pixmap.scaled(
-                    target.size(),
+                    QSize(card_w, card_h),
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
