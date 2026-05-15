@@ -225,13 +225,15 @@ def _ensure_section_values(
 
 
 def dolphin_ini_path_candidates(emulator_path_text: str, ini_name: str) -> list[Path]:
-    portable_path = Path(emulator_path_text).expanduser().parent / "User" / "Config" / ini_name
-    candidates = [
-        portable_path,
+    emulator_path = Path(emulator_path_text).expanduser()
+    candidates: list[Path] = []
+    if emulator_path.is_absolute():
+        candidates.append(emulator_path.parent / "User" / "Config" / ini_name)
+    candidates.extend([
         Path(os.path.expandvars("%APPDATA%")) / "Dolphin Emulator" / "Config" / ini_name,
         Path.home() / ".local" / "share" / "dolphin-emu" / ini_name,
         Path.home() / "Library" / "Application Support" / "Dolphin" / ini_name,
-    ]
+    ])
 
     unique: list[Path] = []
     seen: set[str] = set()
