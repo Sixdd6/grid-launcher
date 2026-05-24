@@ -1,5 +1,6 @@
 # rom-mate-neo
 A simple, responsive launcher for RomM.
+Please be aware that this application is created using AI tools/coding, if this is a problem for you I welcome you to make your own.
 
 [![Latest Build](https://github.com/Sixdd6/rom-mate-neo/actions/workflows/pyinstaller-windows.yml/badge.svg)](https://github.com/Sixdd6/rom-mate-neo/actions/workflows/pyinstaller-windows.yml)
 
