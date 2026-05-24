@@ -5,7 +5,9 @@ from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPaintEvent, QPainter
-from PySide6.QtWidgets import QFrame, QLabel, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
+
+from rom_mate.tv.widgets.components.nav_scroll_area import NavScrollArea
 
 from rom_mate.tv.widgets import theme
 
@@ -43,13 +45,13 @@ class EmulatorPickerOverlay(QWidget):
         )
         panel_layout.addWidget(self._title)
 
-        self._scroll = QScrollArea(self._panel)
+        self._scroll = NavScrollArea(self._panel)
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._scroll.setStyleSheet(
-            "QScrollArea { border: none; background: transparent; } "
-            "QScrollArea > QWidget > QWidget { border: none; background: transparent; }"
+            "NavScrollArea { border: none; background: transparent; } "
+            "NavScrollArea > QWidget > QWidget { border: none; background: transparent; }"
         )
 
         self._list_container = QWidget(self._scroll)

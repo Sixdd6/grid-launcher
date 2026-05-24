@@ -4,7 +4,9 @@ from typing import Any
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor, QPaintEvent, QPainter
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+
+from rom_mate.tv.widgets.components.nav_scroll_area import NavScrollArea
 
 from rom_mate.tv.widgets import theme
 
@@ -54,7 +56,7 @@ class CloudSavesOverlay(QWidget):
         self._status_label.setStyleSheet("padding: 0 10px; border-radius: 8px;")
         panel_layout.addWidget(self._status_label)
 
-        self._scroll = QScrollArea(self._panel)
+        self._scroll = NavScrollArea(self._panel)
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)

@@ -248,7 +248,7 @@
       ]
     },
     "name": "Cemu (Wii U)",
-    "args": "-g \"%rom%\" -f",
+    "args": "-g \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["wii u", "wiiu"],
     "use_game_title_as_name": false,

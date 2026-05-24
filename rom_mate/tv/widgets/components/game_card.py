@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Property, QEasingCurve, QPropertyAnimation, QRect, Qt, Signal
-from PySide6.QtGui import QColor, QKeyEvent, QPainter, QPaintEvent, QPixmap
+from PySide6.QtGui import QColor, QPainter, QPaintEvent, QPixmap
 from PySide6.QtWidgets import QWidget
 
 from rom_mate.tv.widgets import theme
@@ -20,8 +20,9 @@ class GameCard(QWidget):
         self._focus_scale = 1.05
         self._scale_val = 1.0
         self._scale_anim: QPropertyAnimation | None = None
+        self._focused = False
         self.setFixedSize(296, 480)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     def _set_scale(self, value: float) -> None:
         self._scale_val = float(value)
@@ -51,20 +52,13 @@ class GameCard(QWidget):
             self._pixmap = pixmap
         self.update()
 
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self.selected.emit(self._game)
-            event.accept()
-            return
-        super().keyPressEvent(event)
-
-    def focusInEvent(self, event) -> None:
-        super().focusInEvent(event)
-        self._animate_scale(self._focus_scale, QEasingCurve.Type.OutQuad)
-
-    def focusOutEvent(self, event) -> None:
-        super().focusOutEvent(event)
-        self._animate_scale(1.0, QEasingCurve.Type.InQuad)
+    def set_focused(self, focused: bool) -> None:
+        if self._focused != focused:
+            self._focused = focused
+            if focused:
+                self._animate_scale(self._focus_scale, QEasingCurve.Type.OutQuad)
+            else:
+                self._animate_scale(1.0, QEasingCurve.Type.InQuad)
 
     def paintEvent(self, event: QPaintEvent) -> None:
         _ = event
@@ -79,7 +73,7 @@ class GameCard(QWidget):
             painter.translate(-cx, -cy)
 
         rect = self.rect().adjusted(8, 12, -8, -12)
-        focused = self.hasFocus()
+        focused = self._focused
         inset = 0 if focused else 2
         card_rect = rect.adjusted(inset, inset, -inset, -inset)
         radius = 8

@@ -5,9 +5,15 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPaintEvent
 from PySide6.QtWidgets import QWidget
 
 from rom_mate.tv.widgets import theme
+from rom_mate.tv.widgets.components.controls_bar import ControlHint
 
 
 class PauseWindow(QWidget):
+    CONTROL_HINTS: list[ControlHint] = [
+        ControlHint("Select", "input_DPAD-U", "↑↓"),
+        ControlHint("Confirm", "input_BTN-D", "Enter"),
+        ControlHint("Resume", "input_BTN-R", "Backspace"),
+    ]
     def __init__(self, pause_backend, parent=None):
         super().__init__(parent)
         self._pause_backend = pause_backend
@@ -136,7 +142,7 @@ class PauseWindow(QWidget):
         if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.handle_nav("confirm")
             return
-        if key == Qt.Key.Key_Escape:
+        if key in (Qt.Key.Key_Escape, Qt.Key.Key_Backspace):
             self.handle_nav("back")
             return
         super().keyPressEvent(event)

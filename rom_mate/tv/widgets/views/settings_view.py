@@ -8,10 +8,12 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
+
+from rom_mate.tv.widgets.components.controls_bar import ControlHint
+from rom_mate.tv.widgets.components.nav_scroll_area import NavScrollArea
 
 from rom_mate.tv.widgets.components.emulator_picker_overlay import EmulatorPickerOverlay
 from rom_mate.tv.widgets import theme
@@ -299,6 +301,12 @@ class SettingsView(QWidget):
     _HOME_TABS = ["home", "library", "server"]
     _ACTION_GROUP = frozenset({"back", "desktop", "exit"})
 
+    CONTROL_HINTS: list[ControlHint] = [
+        ControlHint("Confirm", "input_BTN-D", "Enter"),
+        ControlHint("Back", "input_BTN-R", "Backspace"),
+        ControlHint("Navigate", "input_DPAD-U", "Arrows"),
+    ]
+
     def __init__(self, app_backend: Any, pop_callback, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._app_backend = app_backend
@@ -322,7 +330,7 @@ class SettingsView(QWidget):
         header_layout.addWidget(title)
         root_layout.addWidget(header)
 
-        self._scroll = QScrollArea(self)
+        self._scroll = NavScrollArea(self)
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setStyleSheet(

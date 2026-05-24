@@ -212,7 +212,8 @@ class PS4ContentApplyTests(unittest.TestCase):
         with patch("rom_mate.library.archive_preparation._BUNDLED_7Z_PATH", bundled_path), \
              patch("subprocess.run", side_effect=fake_run), \
              patch("rom_mate.library.archive_preparation._ensure_full_7z", return_value=full_7z_path), \
-             patch("shutil.rmtree"):
+             patch("shutil.rmtree"), \
+             patch("pathlib.Path.mkdir"):
             _extract_7z_with_fallbacks(archive, out_dir)
 
     def test_bundled_7z_used_when_available(self) -> None:

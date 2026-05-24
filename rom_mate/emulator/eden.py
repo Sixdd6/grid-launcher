@@ -364,6 +364,28 @@ def eden_settings_path_candidates(
     )
 
 
+def eden_keys_path(emulator_path_text: str) -> Path | None:
+    """Return the path to prod.keys in the emulator's user/keys/ directory, or None if not found."""
+    path_text = emulator_path_text.strip() if isinstance(emulator_path_text, str) else ""
+    if not path_text:
+        return None
+    emulator_path = Path(path_text).expanduser()
+    emulator_dir = emulator_path if emulator_path.is_dir() else emulator_path.parent
+    keys_path = emulator_dir / "user" / "keys" / "prod.keys"
+    return keys_path.resolve() if keys_path.exists() and keys_path.is_file() else None
+
+
+def eden_has_firmware(emulator_path_text: str) -> bool:
+    """Return True if the emulator's firmware directory contains at least one file."""
+    path_text = emulator_path_text.strip() if isinstance(emulator_path_text, str) else ""
+    if not path_text:
+        return False
+    emulator_path = Path(path_text).expanduser()
+    emulator_dir = emulator_path if emulator_path.is_dir() else emulator_path.parent
+    firmware_dir = emulator_dir / "user" / "nand" / "system" / "Contents" / "registered"
+    return firmware_dir.is_dir() and any(firmware_dir.iterdir())
+
+
 def eden_directory_settings(
     emulator_path_text: str,
     launch_template: str,

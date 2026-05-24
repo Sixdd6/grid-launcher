@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRect, Qt, Signal
-from PySide6.QtGui import QColor, QKeyEvent, QPainter, QPaintEvent, QPixmap
+from PySide6.QtGui import QColor, QPainter, QPaintEvent, QPixmap
 from PySide6.QtWidgets import QWidget
 
 from rom_mate.tv.widgets import theme
@@ -18,8 +18,9 @@ class PlatformCard(QWidget):
         self._name = ""
         self._pixmap: QPixmap | None = None
         self._title_height = 36
+        self._focused = False
         self.setFixedSize(280, 190)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     def set_platform(self, platform_dict: dict) -> None:
         self._platform = platform_dict or {}
@@ -39,20 +40,10 @@ class PlatformCard(QWidget):
             self._pixmap = pixmap
         self.update()
 
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self.selected.emit(self._platform)
-            event.accept()
-            return
-        super().keyPressEvent(event)
-
-    def focusInEvent(self, event) -> None:
-        super().focusInEvent(event)
-        self.update()
-
-    def focusOutEvent(self, event) -> None:
-        super().focusOutEvent(event)
-        self.update()
+    def set_focused(self, focused: bool) -> None:
+        if self._focused != focused:
+            self._focused = focused
+            self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:
         _ = event
@@ -60,7 +51,7 @@ class PlatformCard(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         rect = self.rect().adjusted(1, 1, -1, -1)
-        focused = self.hasFocus()
+        focused = self._focused
         inset = 0 if focused else 2
         card_rect = rect.adjusted(inset, inset, -inset, -inset)
         radius = 8

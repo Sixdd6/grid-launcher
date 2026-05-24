@@ -1400,6 +1400,8 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
         self.assertIn("<use_discord_presence>false</use_discord_presence>", text)
         self.assertIn("<receive_untested_updates>false</receive_untested_updates>", text)
         self.assertIn("<gp_download>true</gp_download>", text)
+        self.assertIn("<fullscreen>false</fullscreen>", text)
+        self.assertIn("<window_maximized>true</window_maximized>", text)
         self.assertIn("<api>3</api>", text)
 
     def test_cemu_audio_block_created_when_absent(self) -> None:
@@ -1563,6 +1565,70 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
         self.assertTrue(result["changed"])
         self.assertIn("<gp_download>true</gp_download>", text)
 
+    def test_cemu_enforces_fullscreen_false(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cemu_dir = Path(temp_dir) / "Cemu"
+            cemu_dir.mkdir()
+            emulator_path = cemu_dir / "cemu.exe"
+            emulator_path.write_bytes(b"")
+            config_path = cemu_dir / "portable" / "settings.xml"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(
+                "\n".join(
+                    [
+                        '<?xml version="1.0" encoding="utf-8"?>',
+                        "<content>",
+                        "<use_discord_presence>false</use_discord_presence>",
+                        "<check_update>false</check_update>",
+                        "<receive_untested_updates>false</receive_untested_updates>",
+                        "<gp_download>true</gp_download>",
+                        "<fullscreen>true</fullscreen>",
+                        "<window_maximized>true</window_maximized>",
+                        "</content>",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = ensure_cemu_settings(str(emulator_path))
+            text = config_path.read_text(encoding="utf-8")
+
+        self.assertTrue(result["changed"])
+        self.assertIn("<fullscreen>false</fullscreen>", text)
+
+    def test_cemu_enforces_window_maximized_true(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cemu_dir = Path(temp_dir) / "Cemu"
+            cemu_dir.mkdir()
+            emulator_path = cemu_dir / "cemu.exe"
+            emulator_path.write_bytes(b"")
+            config_path = cemu_dir / "portable" / "settings.xml"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(
+                "\n".join(
+                    [
+                        '<?xml version="1.0" encoding="utf-8"?>',
+                        "<content>",
+                        "<use_discord_presence>false</use_discord_presence>",
+                        "<check_update>false</check_update>",
+                        "<receive_untested_updates>false</receive_untested_updates>",
+                        "<gp_download>true</gp_download>",
+                        "<fullscreen>false</fullscreen>",
+                        "<window_maximized>false</window_maximized>",
+                        "</content>",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = ensure_cemu_settings(str(emulator_path))
+            text = config_path.read_text(encoding="utf-8")
+
+        self.assertTrue(result["changed"])
+        self.assertIn("<window_maximized>true</window_maximized>", text)
+
     def test_cemu_preserves_unmanaged_settings(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             cemu_dir = Path(temp_dir) / "Cemu"
@@ -1576,7 +1642,6 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
                     [
                         '<?xml version="1.0" encoding="utf-8"?>',
                         "<content>",
-                        "<fullscreen>true</fullscreen>",
                         "<mlc_path>/some/path</mlc_path>",
                         "</content>",
                     ]
@@ -1588,7 +1653,6 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
             ensure_cemu_settings(str(emulator_path))
             text = config_path.read_text(encoding="utf-8")
 
-        self.assertIn("<fullscreen>true</fullscreen>", text)
         self.assertIn("<mlc_path>/some/path</mlc_path>", text)
 
     def test_cemu_no_change_when_all_already_correct(self) -> None:
@@ -1608,6 +1672,8 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
                         "<check_update>false</check_update>",
                         "<receive_untested_updates>false</receive_untested_updates>",
                         "<gp_download>true</gp_download>",
+                        "<fullscreen>false</fullscreen>",
+                        "<window_maximized>true</window_maximized>",
                         "<Audio><api>3</api><TVVolume>100</TVVolume><TVDevice></TVDevice></Audio>",
                         "</content>",
                     ]
@@ -2260,9 +2326,7 @@ class TestRpcs3FirmwareBackgroundDownload(unittest.TestCase):
                 return _ThreadStub()
 
             with (
-                patch.object(
-                    module, "download_ps3_firmware_direct", return_value=["network error"]
-                ),
+                patch("rom_mate.ui.mixins.emulator_ui_mixin.download_ps3_firmware_direct", return_value=["network error"]),
                 patch("rom_mate.ui.mixins.emulator_ui_mixin.install_platform_firmware") as install_firmware,
                 patch("threading.Thread", side_effect=_thread_side_effect),
             ):

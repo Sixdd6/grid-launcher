@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QLinearGradient, QPainter, QShowEvent
 from PySide6.QtWidgets import QWidget
 
 from rom_mate.tv.widgets import theme
+from rom_mate.tv.widgets.components.controls_bar import ControlHint
 from rom_mate.tv.widgets.components.fanart_background import FanartBackground
 from rom_mate.tv.widgets.components.game_row import GameRow
 from rom_mate.tv.widgets.cover_loader import CoverLoader
@@ -17,7 +18,18 @@ _ROW_ANCHOR_RATIO = 0.70
 _ANIM_DURATION_MS = 300
 
 
+CONTROL_HINTS: list[ControlHint] = [
+    ControlHint("Confirm", "input_BTN-D", "Enter"),
+    ControlHint("Back", "input_BTN-R", "Backspace"),
+    ControlHint("Navigate", "input_DPAD-U", "Arrows"),
+    ControlHint("Tab ←", "input_LB", "End"),
+    ControlHint("Tab →", "input_RB", "PgDn"),
+    ControlHint("Settings", None, "Esc"),
+]
+
+
 class HomeView(QWidget):
+    CONTROL_HINTS = CONTROL_HINTS
     def __init__(
         self,
         app_backend,
@@ -43,6 +55,8 @@ class HomeView(QWidget):
         self._did_focus_initial = False
         self._row_anim: QParallelAnimationGroup | None = None
         self._anim_blocked = False
+        self._pending_nav: str | None = None
+        self._nav_speed: float = 1.0
 
         self.setObjectName("home_view")
         self.setStyleSheet(f"QWidget#home_view {{ background: {theme.BG}; }}")
@@ -120,6 +134,7 @@ class HomeView(QWidget):
     def handle_nav(self, direction: str) -> None:
         if direction == "up":
             if self._anim_blocked:
+                self._pending_nav = direction
                 return
             new_index = max(0, self._active_row - 1)
             if new_index == self._active_row:
@@ -130,6 +145,7 @@ class HomeView(QWidget):
 
         if direction == "down":
             if self._anim_blocked:
+                self._pending_nav = direction
                 return
             new_index = min(len(self._rows) - 1, self._active_row + 1)
             if new_index == self._active_row:
@@ -160,16 +176,18 @@ class HomeView(QWidget):
 
         incoming_row.setGeometry(incoming_start)
 
+        duration = int(_ANIM_DURATION_MS * self._nav_speed)
+
         current_anim = QPropertyAnimation(current_row, b"geometry", self)
         current_anim.setStartValue(current_row.geometry())
         current_anim.setEndValue(current_end)
-        current_anim.setDuration(_ANIM_DURATION_MS)
+        current_anim.setDuration(duration)
         current_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         incoming_anim = QPropertyAnimation(incoming_row, b"geometry", self)
         incoming_anim.setStartValue(incoming_start)
         incoming_anim.setEndValue(incoming_end)
-        incoming_anim.setDuration(_ANIM_DURATION_MS)
+        incoming_anim.setDuration(duration)
         incoming_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
 
         group = QParallelAnimationGroup(self)
@@ -191,6 +209,11 @@ class HomeView(QWidget):
             active_row.focus_nearest_to_screen_x(screen_x)
         else:
             active_row.focus_first_card()
+        pending = self._pending_nav
+        self._pending_nav = None
+        self._nav_speed = 0.9 if pending is not None else 1.0
+        if pending is not None:
+            self.handle_nav(pending)
 
     def focus_default_row(self) -> None:
         self._active_row = 0
@@ -205,24 +228,32 @@ class HomeView(QWidget):
         library_games = list(getattr(self._app_backend, "libraryGames", []) or [])
         recent = list(reversed(library_games))[:20]
         self._rows[0].set_games(recent)
+        if self._active_row == 0:
+            self._rows[0].refocus()
 
     def _refresh_favorites_row(self) -> None:
         self._favorites_row_debounce.start()
 
     def _do_refresh_favorites_row(self) -> None:
         self._rows[1].set_games(list(getattr(self._app_backend, "favoritesGames", []) or []))
+        if self._active_row == 1:
+            self._rows[1].refocus()
 
     def _refresh_new_additions_row(self) -> None:
         self._new_additions_row_debounce.start()
 
     def _do_refresh_new_additions_row(self) -> None:
         self._rows[2].set_games(list(getattr(self._app_backend, "newAdditionsGames", []) or []))
+        if self._active_row == 2:
+            self._rows[2].refocus()
 
     def _refresh_highly_rated_row(self) -> None:
         self._highly_rated_row_debounce.start()
 
     def _do_refresh_highly_rated_row(self) -> None:
         self._rows[3].set_games(list(getattr(self._app_backend, "highlyRatedGames", []) or []))
+        if self._active_row == 3:
+            self._rows[3].refocus()
 
     def _on_active_game_changed(self, game_dict: object) -> None:
         game = game_dict if isinstance(game_dict, dict) else {}

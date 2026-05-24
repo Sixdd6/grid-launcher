@@ -5,6 +5,7 @@ from PySide6.QtGui import QKeyEvent, QPixmap
 from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from rom_mate.tv.widgets import theme
+from rom_mate.tv.widgets.components.controls_bar import ControlsBar
 from rom_mate.tv.widgets.pause_window import PauseWindow
 from rom_mate.tv.widgets.tab_bar import ViewTabBar
 from rom_mate.tv.widgets.views.home_view import HomeView
@@ -98,11 +99,17 @@ class TVWindow(QWidget):
         self._outer_stack.addWidget(root_widget)
         self._outer_stack.setCurrentIndex(0)
 
+        self._controls_bar = ControlsBar(self)
+        root_layout.addWidget(self._controls_bar)
+
         self._tab_bar.tabChanged.connect(self._on_tab_changed)
         self._controller_backend.navigationEvent.connect(self._on_nav_event)
         self._controller_backend.pauseNavigationEvent.connect(self._on_nav_event)
 
         self._pause_window = PauseWindow(self._pause_backend, parent=self)
+        self._pause_backend.visibleChanged.connect(self._update_controls_bar)
+
+        self._update_controls_bar()
 
     def _on_tab_changed(self, index: object) -> None:
         try:
@@ -122,6 +129,7 @@ class TVWindow(QWidget):
         to_pixmap = self._capture_widget_pixmap(self._inner_stack.currentWidget())
         if idx != old_idx:
             self._start_tab_slide_transition(from_pixmap, to_pixmap, forward=forward)
+        self._update_controls_bar()
 
     def _on_nav_event(self, direction: object) -> None:
         if self._pause_window and self._pause_window.isVisible():
@@ -160,9 +168,15 @@ class TVWindow(QWidget):
 
         self._outer_stack.addWidget(widget)
         self._outer_stack.setCurrentWidget(widget)
+        self.setFocus()
+
+        sig = getattr(widget, "controlHintsChanged", None)
+        if sig is not None:
+            sig.connect(self._update_controls_bar)
 
         target_pixmap = self._capture_widget_pixmap(widget)
         self._start_slide_transition(previous_pixmap, target_pixmap, forward=True)
+        self._update_controls_bar()
 
     def pop_view(self) -> None:
         if self._outer_stack.currentIndex() <= 0:
@@ -180,6 +194,8 @@ class TVWindow(QWidget):
             current.setParent(None)
 
         self._start_slide_transition(current_pixmap, target_pixmap, forward=False)
+        self.setFocus()
+        self._update_controls_bar()
 
     def _capture_widget_pixmap(self, widget: QWidget | None) -> QPixmap | None:
         if widget is None:
@@ -352,6 +368,14 @@ class TVWindow(QWidget):
             return self._outer_stack.currentWidget()
         return self._inner_stack.currentWidget()
 
+    def _update_controls_bar(self) -> None:
+        """Refresh the controls bar to match the currently active view/state."""
+        if self._pause_window is not None and self._pause_window.isVisible():
+            hints = getattr(PauseWindow, "CONTROL_HINTS", [])
+        else:
+            hints = getattr(self.get_current_view(), "CONTROL_HINTS", [])
+        self._controls_bar.update_hints(hints)
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
         if self._pause_window is None:
@@ -368,13 +392,16 @@ class TVWindow(QWidget):
     def keyPressEvent(self, event: QKeyEvent) -> None:
         key = event.key()
 
-        if key == Qt.Key.Key_Delete:
+        if key == Qt.Key.Key_End:
             self._on_nav_event("tab_prev")
             return
-        if key == Qt.Key.Key_End:
+        if key == Qt.Key.Key_PageDown:
             self._on_nav_event("tab_next")
             return
         if key == Qt.Key.Key_Escape:
+            self._on_nav_event("guide_button")
+            return
+        if key == Qt.Key.Key_Backspace:
             self._on_nav_event("back")
             return
         if key == Qt.Key.Key_Up:

@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
-from PySide6.QtCore import Qt, QSize, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtCore import QEvent, Qt, QSize, QTimer, Signal
+from PySide6.QtGui import QPixmap, QWheelEvent
 from rom_mate.ui.theme import themed_svg_pixmap
 from PySide6.QtWidgets import (
     QFrame,
@@ -20,16 +20,35 @@ from PySide6.QtWidgets import (
 
 from rom_mate.tv.widgets import theme
 from rom_mate.tv.widgets.components.cloud_saves_overlay import CloudSavesOverlay
+from rom_mate.tv.widgets.components.controls_bar import ControlHint
 from rom_mate.tv.widgets.components.fanart_background import FanartBackground
 from rom_mate.tv.widgets.components.install_progress_bar import InstallProgressBar
 from rom_mate.tv.widgets.components.native_exec_picker import NativeExecPickerDialog
+from rom_mate.tv.widgets.components.nav_scroll_area import NavScrollArea
 
 
 _ASSETS = Path(__file__).resolve().parents[4] / "assets" / "retroarch-assets"
 _SVG_ASSETS_ROOT = Path(__file__).resolve().parents[4] / "assets"
 
 
+_DETAILS_HINTS: list[ControlHint] = [
+    ControlHint("Confirm", "input_BTN-D", "Enter"),
+    ControlHint("Back", "input_BTN-R", "Backspace"),
+    ControlHint("Navigate", "input_DPAD-U", "Arrows"),
+]
+_LIGHTBOX_HINTS: list[ControlHint] = [
+    ControlHint("Close", "input_BTN-R", "Backspace"),
+    ControlHint("Navigate", "input_DPAD-U", "←↑↓→"),
+]
+
+
 class DetailsView(QWidget):
+    controlHintsChanged = Signal()
+
+    @property
+    def CONTROL_HINTS(self) -> list[ControlHint]:
+        return _LIGHTBOX_HINTS if self._lightbox.isVisible() else _DETAILS_HINTS
+
     def __init__(
         self,
         game_dict: dict,
@@ -153,7 +172,7 @@ class DetailsView(QWidget):
         self._title_label.setStyleSheet(f"color: {theme.SUCCESS}; font-size: 28px; font-weight: 700;")
         center_layout.addWidget(self._title_label)
 
-        self._desc_scroll = QScrollArea(self._center_col)
+        self._desc_scroll = NavScrollArea(self._center_col)
         self._desc_scroll.setWidgetResizable(True)
         self._desc_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._desc_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -227,18 +246,39 @@ class DetailsView(QWidget):
         self._shots_header.setStyleSheet(f"color: {theme.TEXT_SECONDARY}; font-size: 13px; font-weight: 700;")
         right_layout.addWidget(self._shots_header)
 
-        self._shots_scroll = QScrollArea(self._right_col)
+        self._shots_scroll = NavScrollArea(self._right_col)
         self._shots_scroll.setWidgetResizable(True)
         self._shots_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._shots_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._shots_scroll.setFrameShape(QFrame.Shape.NoFrame)
 
         self._shots_container = QWidget(self._shots_scroll)
         self._shots_layout = QVBoxLayout(self._shots_container)
-        self._shots_layout.setContentsMargins(0, 0, 0, 0)
+        self._shots_layout.setContentsMargins(4, 4, 4, 4)
         self._shots_layout.setSpacing(10)
         self._shots_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self._shots_scroll.setWidget(self._shots_container)
+        self._shots_scroll.viewport().installEventFilter(self)
+
+        _arrow_style = (
+            "background: rgba(0,0,0,0.6); border-radius: 16px;"
+            f" color: {theme.TEXT_PRIMARY}; font-size: 13px;"
+        )
+        self._shot_up_arrow = QLabel("▲", self._shots_scroll.viewport())
+        self._shot_up_arrow.setFixedSize(32, 32)
+        self._shot_up_arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._shot_up_arrow.setStyleSheet(_arrow_style)
+        self._shot_up_arrow.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._shot_up_arrow.hide()
+
+        self._shot_down_arrow = QLabel("▼", self._shots_scroll.viewport())
+        self._shot_down_arrow.setFixedSize(32, 32)
+        self._shot_down_arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._shot_down_arrow.setStyleSheet(_arrow_style)
+        self._shot_down_arrow.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._shot_down_arrow.hide()
+
         right_layout.addWidget(self._shots_scroll, 1)
 
         main_layout.addWidget(self._left_col, 1)
@@ -297,6 +337,15 @@ class DetailsView(QWidget):
         _btn_r_lbl.setFixedSize(QSize(20, 20))
         _btn_r_lbl.setStyleSheet("background: transparent;")
         _hint_layout.addWidget(_btn_r_lbl)
+        _hint_layout.addSpacing(4)
+        _backspace_badge = QLabel("Backspace", self._lightbox_hint)
+        _backspace_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        _backspace_badge.setStyleSheet(
+            f"color: {theme.TEXT_PRIMARY}; background: {theme.TERTIARY};"
+            f"border: 1px solid {theme.BORDER_INACTIVE}; border-radius: 4px;"
+            f"font-size: 10px; padding: 1px 6px;"
+        )
+        _hint_layout.addWidget(_backspace_badge)
         _hint_layout.addSpacing(8)
         _close_lbl = QLabel("Close", self._lightbox_hint)
         _close_lbl.setStyleSheet(
@@ -320,6 +369,15 @@ class DetailsView(QWidget):
             _dp_lbl.setFixedSize(QSize(20, 20))
             _dp_lbl.setStyleSheet("background: transparent;")
             _hint_layout.addWidget(_dp_lbl)
+        _hint_layout.addSpacing(4)
+        _arrows_badge = QLabel("←↑↓→", self._lightbox_hint)
+        _arrows_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        _arrows_badge.setStyleSheet(
+            f"color: {theme.TEXT_PRIMARY}; background: {theme.TERTIARY};"
+            f"border: 1px solid {theme.BORDER_INACTIVE}; border-radius: 4px;"
+            f"font-size: 10px; padding: 1px 6px;"
+        )
+        _hint_layout.addWidget(_arrows_badge)
         _hint_layout.addSpacing(8)
         _nav_lbl = QLabel("Navigate", self._lightbox_hint)
         _nav_lbl.setStyleSheet(
@@ -398,7 +456,7 @@ class DetailsView(QWidget):
             if self._shot_cards:
                 self._shot_index = max(0, self._shot_index - 1)
                 self._sync_shot_focus()
-                self._scroll_area_by(self._shots_scroll, -140)
+                self._shots_scroll.ensureWidgetVisible(self._shot_cards[self._shot_index], 4, 4)
             return
 
         if direction == "down":
@@ -410,7 +468,7 @@ class DetailsView(QWidget):
             if self._shot_cards:
                 self._shot_index = min(len(self._shot_cards) - 1, self._shot_index + 1)
                 self._sync_shot_focus()
-                self._scroll_area_by(self._shots_scroll, 140)
+                self._shots_scroll.ensureWidgetVisible(self._shot_cards[self._shot_index], 4, 4)
             return
 
         if direction == "confirm":
@@ -418,6 +476,38 @@ class DetailsView(QWidget):
                 self._trigger_action()
             elif self._focused_column == 2 and self._shot_cards:
                 self._open_lightbox()
+
+    def eventFilter(self, watched: object, event: object) -> bool:
+        if watched is self._shots_scroll.viewport():
+            if isinstance(event, QWheelEvent):
+                delta = event.angleDelta().y()
+                if delta != 0:
+                    if self._focused_column != 2:
+                        self._focused_column = 2
+                        self._refresh_ui()
+                    self.handle_nav("up" if delta > 0 else "down")
+                return True
+            if isinstance(event, QEvent) and event.type() == QEvent.Type.Resize:
+                self._reposition_shot_arrows()
+        return super().eventFilter(watched, event)
+
+    def _reposition_shot_arrows(self) -> None:
+        vp = self._shots_scroll.viewport()
+        w, h = vp.width(), vp.height()
+        size = 32
+        x = (w - size) // 2
+        self._shot_up_arrow.move(x, 8)
+        self._shot_down_arrow.move(x, h - size - 8)
+
+    def _update_shot_arrows(self) -> None:
+        self._reposition_shot_arrows()
+        n = len(self._shot_cards)
+        self._shot_up_arrow.setVisible(n > 0 and self._shot_index > 0)
+        self._shot_down_arrow.setVisible(n > 0 and self._shot_index < n - 1)
+        if self._shot_up_arrow.isVisible():
+            self._shot_up_arrow.raise_()
+        if self._shot_down_arrow.isVisible():
+            self._shot_down_arrow.raise_()
 
     def intercepts_back(self) -> bool:
         return self._lightbox.isVisible()
@@ -577,8 +667,9 @@ class DetailsView(QWidget):
             else:
                 card.setProperty("shotFocused", False)
                 card.setStyleSheet(
-                    "background: rgba(30, 31, 41, 0.9); border: none; border-radius: 8px;"
+                    "background: rgba(30, 31, 41, 0.9); border: 2px solid transparent; border-radius: 8px;"
                 )
+        self._update_shot_arrows()
 
     def _trigger_action(self) -> None:
         if not self._buttons:
@@ -680,10 +771,12 @@ class DetailsView(QWidget):
         self._lightbox.setGeometry(self.rect())
         self._lightbox.show()
         self._lightbox.raise_()
+        self.controlHintsChanged.emit()
         QTimer.singleShot(0, self._update_lightbox_image)
 
     def _close_lightbox(self) -> None:
         self._lightbox.hide()
+        self.controlHintsChanged.emit()
 
     def _refresh_fanart(self) -> None:
         urls = self._screenshot_urls()
@@ -719,7 +812,7 @@ class DetailsView(QWidget):
             card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             card.setAlignment(Qt.AlignmentFlag.AlignCenter)
             card.setStyleSheet(
-                "background: rgba(30, 31, 41, 0.9); border: none; border-radius: 8px;"
+                "background: rgba(30, 31, 41, 0.9); border: 2px solid transparent; border-radius: 8px;"
             )
             self._shots_layout.addWidget(card)
             self._shot_cards.append(card)
@@ -730,7 +823,7 @@ class DetailsView(QWidget):
                 if pixmap is None or pixmap.isNull():
                     target.setText("Image unavailable")
                     target.setStyleSheet(
-                        f"background: rgba(30, 31, 41, 0.9); border: none;"
+                        f"background: rgba(30, 31, 41, 0.9); border: 2px solid transparent;"
                         f"border-radius: 8px; color: {theme.TEXT_SECONDARY};"
                     )
                     return

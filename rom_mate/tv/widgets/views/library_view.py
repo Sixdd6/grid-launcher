@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QLinearGradient, QPainter, QShowEvent
 from PySide6.QtWidgets import QLabel, QWidget
 
 from rom_mate.tv.widgets import theme
+from rom_mate.tv.widgets.components.controls_bar import ControlHint
 from rom_mate.tv.widgets.components.fanart_background import FanartBackground
 from rom_mate.tv.widgets.components.library_card import LibraryCard
 from rom_mate.tv.widgets.cover_loader import CoverLoader
@@ -29,7 +30,18 @@ _TOGGLE_BTN_W = 160
 _TOGGLE_BTN_GAP = 20
 
 
+CONTROL_HINTS: list[ControlHint] = [
+    ControlHint("Confirm", "input_BTN-D", "Enter"),
+    ControlHint("Back", "input_BTN-R", "Backspace"),
+    ControlHint("Navigate", "input_DPAD-U", "Arrows"),
+    ControlHint("Tab ←", "input_LB", "End"),
+    ControlHint("Tab →", "input_RB", "PgDn"),
+    ControlHint("Settings", None, "Esc"),
+]
+
+
 class LibraryView(QWidget):
+    CONTROL_HINTS = CONTROL_HINTS
     game_selected = Signal(object)
 
     def __init__(
@@ -56,6 +68,8 @@ class LibraryView(QWidget):
         self._games: list[dict] = []
         self._current_idx: int = 0
         self._anim_blocked: bool = False
+        self._pending_nav: str | None = None
+        self._nav_speed: float = 1.0
         self._card_scale_anim: QPropertyAnimation | None = None
         self._first_slot: int = 0
         self._nav_anim: QParallelAnimationGroup | None = None
@@ -386,7 +400,10 @@ class LibraryView(QWidget):
             self._update_filter_styles()
             return
         if direction == "left":
-            if self._anim_blocked or not self._games:
+            if self._anim_blocked:
+                self._pending_nav = direction
+                return
+            if not self._games:
                 return
             new_idx = max(0, self._current_idx - 1)
             if new_idx == self._current_idx:
@@ -395,7 +412,10 @@ class LibraryView(QWidget):
             self._schedule_fanart_update()
             self._start_nav_anim(direction)
         elif direction == "right":
-            if self._anim_blocked or not self._games:
+            if self._anim_blocked:
+                self._pending_nav = direction
+                return
+            if not self._games:
                 return
             new_idx = min(len(self._games) - 1, self._current_idx + 1)
             if new_idx == self._current_idx:
@@ -461,7 +481,7 @@ class LibraryView(QWidget):
             return
 
         shrink = QPropertyAnimation(center, b"geometry", self)
-        shrink.setDuration(_SHRINK_ANIM_MS)
+        shrink.setDuration(int(_SHRINK_ANIM_MS * self._nav_speed))
         shrink.setStartValue(current_rect)
         shrink.setEndValue(base_rect)
         shrink.setEasingCurve(QEasingCurve.Type.InCubic)
@@ -498,11 +518,11 @@ class LibraryView(QWidget):
             start_rect = QRect(j * stride, _Y_BUFFER, _CARD_W, _CARD_H)
             if j == new_center_slot:
                 end_rect = grown_rect
-                duration = _SCALE_ANIM_MS
+                duration = int(_SCALE_ANIM_MS * self._nav_speed)
                 easing = QEasingCurve.Type.OutQuint
             else:
                 end_rect = QRect((j + delta) * stride, _Y_BUFFER, _CARD_W, _CARD_H)
-                duration = _SLIDE_DURATION_MS
+                duration = int(_SLIDE_DURATION_MS * self._nav_speed)
                 easing = QEasingCurve.Type.OutCubic
 
             anim = QPropertyAnimation(card, b"geometry", self)
@@ -548,6 +568,11 @@ class LibraryView(QWidget):
                 )
             else:
                 recycle_card.set_game({})
+        pending = self._pending_nav
+        self._pending_nav = None
+        self._nav_speed = 0.9 if pending is not None else 1.0
+        if pending is not None:
+            self.handle_nav(pending)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -557,6 +582,7 @@ class LibraryView(QWidget):
             self._nav_anim.stop()
             self._nav_anim = None
             self._anim_blocked = False
+            self._pending_nav = None
         if self._card_scale_anim is not None:
             self._card_scale_anim.stop()
             self._card_scale_anim = None

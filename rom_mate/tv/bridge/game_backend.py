@@ -548,13 +548,9 @@ class GameBackend(QObject):
         self.installProgress.emit({"downloaded": downloaded, "total": total, "speed": speed})
 
     @Slot(object)
-    def _on_install_download_done(self, bundle: object, legacy_error: str | None = None) -> None:
-        if legacy_error is not None:
-            archive_path = str(bundle)
-            error = legacy_error
-        else:
-            archive_path = bundle.get("archive_path", "") if isinstance(bundle, dict) else ""
-            error = bundle.get("error", "") if isinstance(bundle, dict) else str(bundle)
+    def _on_install_download_done(self, bundle: object) -> None:
+        archive_path = bundle.get("archive_path", "") if isinstance(bundle, dict) else ""
+        error = bundle.get("error", "") if isinstance(bundle, dict) else str(bundle)
         game_dict = self._install_target_game or {}
         print(f"[TV Install] Download done: archive={archive_path!r} error={error!r}")
         sys.stdout.flush()

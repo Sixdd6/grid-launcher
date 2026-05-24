@@ -681,7 +681,7 @@ class TestGameBackendInstall(unittest.TestCase):
             )
         )
 
-        backend._on_install_download_done("", "network timeout")
+        backend._on_install_download_done({"archive_path": "", "error": "network timeout"})
 
         self.assertEqual(received, [(False, "network timeout", {"id": "1", "name": "Test"})])
 
@@ -752,7 +752,7 @@ class TestGameBackendInstall(unittest.TestCase):
         with patch("rom_mate.tv.bridge.game_backend.threading.Thread") as mock_thread_cls:
             mock_thread_instance = MagicMock()
             mock_thread_cls.return_value = mock_thread_instance
-            backend._on_install_download_done("/tmp/archive.zip", "")
+            backend._on_install_download_done({"archive_path": "/tmp/archive.zip", "error": ""})
 
         mock_thread_cls.assert_called_once()
         mock_thread_instance.start.assert_called_once()

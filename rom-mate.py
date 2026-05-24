@@ -18,11 +18,10 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
 
 from PySide6.QtCore import QObject, QSize, QThread, QTimer, Qt, QUrl, Signal
 from PySide6.QtGui import QCloseEvent, QDesktopServices, QIcon, QPixmap
-from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -802,6 +801,9 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
             self._tv_window = tv_window
             self._tv_pause_window = tv_window._pause_window
+        self._tv_app_backend.syncConfig(self.config)
+        self._tv_cloud_backend.syncConfig(self.config)
+        self._tv_game_backend.syncConfig(self.config)
         self._tv_app_backend.connectToServer()
         screen = QApplication.primaryScreen()
         if screen is not None:

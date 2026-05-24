@@ -39,7 +39,7 @@ A simple, responsive launcher for RomM.
 | RPCS3 | PlayStation 3 |
 | ShadPS4 | PlayStation 4 |
 | Dolphin | GameCube, Wii, Tri-Force (untested) |
-| Cemu | Wii U |
+| Cemu | Wii U — see note below |
 | Azahar | Nintendo 3DS |
 | Eden | Nintendo Switch |
 | Pico-8 | Pico-8 |
@@ -50,6 +50,8 @@ A simple, responsive launcher for RomM.
 | Redream | Sega Dreamcast, Sega Naomi |
 
 - Emulators can be manually added with launch arguments editable by the user. This way it is possible to use almost any emulator you could launch from a standard shortcut or batch file.
+
+> **Cemu note:** Cemu does not reliably respect window maximization on launch, which interferes with the RomMate pause menu. The recommended workaround is [Borderless Gaming](https://github.com/Codeusa/Borderless-Gaming) — add Cemu as a favorite and it will automatically maximize the window on launch. A thin menubar will remain visible at the top of the Cemu window, but the pause menu will otherwise function correctly.
 
 ## PC Games
 

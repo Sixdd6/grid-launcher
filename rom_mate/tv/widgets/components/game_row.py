@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from rom_mate.tv.widgets import theme
 from rom_mate.tv.widgets.components.home_card import HomeCard
+from rom_mate.tv.widgets.components.nav_scroll_area import NavScrollArea
 from rom_mate.tv.widgets.cover_loader import CoverLoader
 
 
@@ -22,6 +23,7 @@ class GameRow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._cover_loader = cover_loader
         self._focused_index = 0
+        self._prev_focused_index = -1
         self._games: list[dict] = []
         self._cards: list[HomeCard] = []
 
@@ -33,7 +35,7 @@ class GameRow(QWidget):
         self._title_label.setStyleSheet(f"background: transparent; color: {theme.PURPLE}; font-size: 28px; font-weight: 700;")
         layout.addWidget(self._title_label)
 
-        self._scroll_area = QScrollArea(self)
+        self._scroll_area = NavScrollArea(self)
         self._scroll_area.setWidgetResizable(True)
         self._scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -154,7 +156,10 @@ class GameRow(QWidget):
     def _focus_current_card(self) -> None:
         if not self._cards:
             return
+        if 0 <= self._prev_focused_index < len(self._cards) and self._prev_focused_index != self._focused_index:
+            self._cards[self._prev_focused_index].set_focused(False)
+        self._prev_focused_index = self._focused_index
         card = self._cards[self._focused_index]
-        card.setFocus()
+        card.set_focused(True)
         self._scroll_area.ensureWidgetVisible(card)
         self.active_game_changed.emit(self._games[self._focused_index])

@@ -107,6 +107,43 @@ class LibraryViewCarouselTests(unittest.TestCase):
         view.handle_nav("right")
 
         self.assertEqual(view._current_idx, 0)
+        self.assertEqual(view._pending_nav, "right")
+
+    def test_pending_nav_queues_latest_direction(self):
+        view = _make_view(_fake_games(5))
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._anim_blocked = True
+
+        view.handle_nav("right")
+        view.handle_nav("left")  # overwrites previous pending
+
+        self.assertEqual(view._pending_nav, "left")
+
+    def test_pending_nav_fires_after_anim_finished(self):
+        view = _make_view(_fake_games(5))
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._current_idx = 0
+        view._anim_blocked = True
+        view._pending_nav = "right"
+
+        with patch("rom_mate.tv.widgets.views.library_view.QParallelAnimationGroup.start"):
+            view._on_nav_finished("right")
+
+        self.assertIsNone(view._pending_nav)
+        self.assertEqual(view._current_idx, 1)
+
+    def test_pending_nav_not_queued_when_no_games(self):
+        view = _make_view([])
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._anim_blocked = False
+
+        view.handle_nav("right")
+
+        self.assertIsNone(view._pending_nav)
+        self.assertEqual(view._current_idx, 0)
 
     def test_handle_nav_up_enters_filter_bar(self):
         view = _make_view(_fake_games(5))

@@ -88,7 +88,7 @@ _DEFAULT_CEMU_SETTINGS_XML = """\
         <x>-1</x>
         <y>-1</y>
     </window_size>
-    <window_maximized>false</window_maximized>
+    <window_maximized>true</window_maximized>
     <open_pad>false</open_pad>
     <pad_position>
         <x>-1</x>
@@ -258,6 +258,8 @@ def ensure_cemu_settings(emulator_path_text: str) -> dict:
         changed = _ensure_xml_element_value(root, "check_update", "false") or changed
         changed = _ensure_xml_element_value(root, "receive_untested_updates", "false") or changed
         changed = _ensure_xml_element_value(root, "gp_download", "true") or changed
+        changed = _ensure_xml_element_value(root, "fullscreen", "false") or changed
+        changed = _ensure_xml_element_value(root, "window_maximized", "true") or changed
 
         if changed:
             xml_body = ET.tostring(root, encoding="unicode", xml_declaration=False)

@@ -4,7 +4,9 @@ from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFontMetrics, QPaintEvent, QPainter
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+
+from rom_mate.tv.widgets.components.nav_scroll_area import NavScrollArea
 
 from rom_mate.tv.widgets import theme
 
@@ -40,7 +42,7 @@ class NativeExecPickerDialog(QWidget):
         subtitle.setStyleSheet(f"color: {theme.TEXT_SECONDARY}; font-size: 13px;")
         panel_layout.addWidget(subtitle)
 
-        self._scroll = QScrollArea(self._panel)
+        self._scroll = NavScrollArea(self._panel)
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)

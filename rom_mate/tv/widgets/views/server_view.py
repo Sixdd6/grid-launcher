@@ -4,17 +4,30 @@ from collections.abc import Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QShowEvent
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QScrollArea, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from rom_mate.cover.utils import resolve_cover_url
 from rom_mate.tv.widgets import theme
+from rom_mate.tv.widgets.components.controls_bar import ControlHint
 from rom_mate.tv.widgets.components.game_wall import GameWall
+from rom_mate.tv.widgets.components.nav_scroll_area import NavScrollArea
 from rom_mate.tv.widgets.components.platform_card import PlatformCard
 from rom_mate.tv.widgets.components.scrollbar import TvScrollBar
 from rom_mate.tv.widgets.cover_loader import CoverLoader
 
 
+CONTROL_HINTS: list[ControlHint] = [
+    ControlHint("Confirm", "input_BTN-D", "Enter"),
+    ControlHint("Back", "input_BTN-R", "Backspace"),
+    ControlHint("Navigate", "input_DPAD-U", "Arrows"),
+    ControlHint("Tab ←", "input_LB", "End"),
+    ControlHint("Tab →", "input_RB", "PgDn"),
+    ControlHint("Settings", None, "Esc"),
+]
+
+
 class ServerView(QWidget):
+    CONTROL_HINTS = CONTROL_HINTS
     def __init__(
         self,
         app_backend,
@@ -62,7 +75,7 @@ class ServerView(QWidget):
         platform_content_layout.setContentsMargins(40, 40, 16, 40)
         platform_content_layout.setSpacing(12)
 
-        self._platform_scroll = QScrollArea(platform_content)
+        self._platform_scroll = NavScrollArea(platform_content)
         self._platform_scroll.setWidgetResizable(True)
         self._platform_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._platform_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -262,9 +275,11 @@ class ServerView(QWidget):
     def _focus_platform_card(self, idx: int) -> None:
         if idx < 0 or idx >= len(self._platform_cards):
             return
+        if 0 <= self._current_platform_idx < len(self._platform_cards) and self._current_platform_idx != idx:
+            self._platform_cards[self._current_platform_idx].set_focused(False)
         self._current_platform_idx = idx
         card = self._platform_cards[idx]
-        card.setFocus()
+        card.set_focused(True)
         self._platform_scroll.ensureWidgetVisible(card)
 
     def _sync_loading_state(self) -> None:

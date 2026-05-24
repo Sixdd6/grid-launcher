@@ -62,6 +62,8 @@ from rom_mate.emulator import (
     retroarch_markdown_label,
     retroarch_platform_tokens,
     retroarch_system_keys_for_platform,
+    eden_has_firmware,
+    eden_keys_path,
     rpcs3_pup_path,
     trigger_rpcs3_firmware_install,
 )
@@ -477,6 +479,26 @@ class EmulatorUIMixin:
                 eden_note.setWordWrap(True)
                 eden_note.setStyleSheet("color: palette(mid); font-size: 10px; padding: 1px 0;")
                 outer_layout.addWidget(eden_note)
+
+                path_value = entry.get("path", "")
+                path_text = path_value.strip() if isinstance(path_value, str) else ""
+                if not eden_keys_path(path_text):
+                    keys_note = QLabel(
+                        "Switch keys (prod.keys) must be placed in user/keys/ before playing games."
+                    )
+                    keys_note.setObjectName("edenKeysNote")
+                    keys_note.setWordWrap(True)
+                    keys_note.setStyleSheet("color: palette(mid); font-size: 10px; padding: 1px 0;")
+                    outer_layout.addWidget(keys_note)
+
+                if not eden_has_firmware(path_text):
+                    firmware_note = QLabel(
+                        "Switch firmware must be installed via Emulation \u2192 Install Firmware before playing games."
+                    )
+                    firmware_note.setObjectName("edenFirmwareNote")
+                    firmware_note.setWordWrap(True)
+                    firmware_note.setStyleSheet("color: palette(mid); font-size: 10px; padding: 1px 0;")
+                    outer_layout.addWidget(firmware_note)
 
             if self._is_xemu_emulator_name(entry.get("name", ""), entry):
                 xemu_note = QLabel(
@@ -1488,6 +1510,81 @@ class EmulatorUIMixin:
 
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
+
+    def _trigger_firmware_install_for_source_emulator(self, emulator_name: str) -> None:
+        """Download and install firmware for a freshly installed source emulator.
+
+        RPCS3 is skipped — its firmware is already handled by
+        _trigger_rpcs3_firmware_download_background.  All other emulators
+        that have firmware_directories entries have their server firmware
+        fetched into those directories in a background thread.
+
+        Only call this on a fresh install (not a source update).
+        """
+        if self._is_rpcs3_emulator_name(emulator_name):
+            return
+
+        emulator_entry = self._emulator_entry_by_name(emulator_name)
+        if emulator_entry is None:
+            return
+
+        firmware_dirs = self._resolved_firmware_directories(emulator_entry)
+        if not firmware_dirs:
+            return
+
+        profile = self._emulator_profile_for_entry(emulator_entry)
+        if not isinstance(profile, dict):
+            return
+
+        platform_ids = getattr(self, "server_platform_ids", {})
+        if profile.get("all_platforms") and self._is_retroarch_emulator_name(emulator_name):
+            platform_id_list = [
+                v
+                for p, v in platform_ids.items()
+                if isinstance(v, int) and self._retroarch_cores_for_platform(p)
+            ]
+        elif profile.get("all_platforms"):
+            platform_id_list = [v for v in platform_ids.values() if isinstance(v, int)]
+        else:
+            platform_keywords_raw = profile.get("platform_keywords", [])
+            platform_keywords = (
+                [str(k).strip() for k in platform_keywords_raw if isinstance(k, str) and str(k).strip()]
+                if isinstance(platform_keywords_raw, list)
+                else []
+            )
+            if not platform_keywords:
+                return
+            matching_platforms = self._matching_platforms_for_emulator_keywords(platform_keywords)
+            platform_id_list = [
+                platform_ids[p]
+                for p in matching_platforms
+                if isinstance(platform_ids.get(p), int)
+            ]
+        if not platform_id_list:
+            return
+
+        api_get = getattr(self, "_api_get", None)
+        api_get_bytes = getattr(self, "_api_get_bytes", None)
+        if not callable(api_get) or not callable(api_get_bytes):
+            return
+
+        captured_firmware_dirs = list(firmware_dirs)
+
+        def _worker() -> None:
+            for platform_id in platform_id_list:
+                try:
+                    install_platform_firmware(
+                        api_get,
+                        api_get_bytes,
+                        platform_id,
+                        captured_firmware_dirs,
+                        skip_existing=True,
+                    )
+                except Exception:
+                    pass
+            self._emulator_refresh_requested.emit()
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _is_retroarch_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
         return self._emulator_matches_tokens(emulator_name, "retroarch", emulator=emulator)

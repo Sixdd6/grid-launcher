@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QScrollArea, QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QWidget
 
 from rom_mate.tv.widgets.components.game_card import GameCard
+from rom_mate.tv.widgets.components.nav_scroll_area import NavScrollArea
 from rom_mate.tv.widgets.components.scrollbar import TvScrollBar
 from rom_mate.tv.widgets.cover_loader import CoverLoader
 
@@ -23,7 +24,7 @@ class GameWall(QWidget):
         root_layout.setContentsMargins(40, 40, 16, 40)
         root_layout.setSpacing(12)
 
-        self._scroll_area = QScrollArea(self)
+        self._scroll_area = NavScrollArea(self)
         self._scroll_area.setWidgetResizable(True)
         self._scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -99,9 +100,11 @@ class GameWall(QWidget):
     def _focus_card(self, idx: int) -> None:
         if idx < 0 or idx >= len(self._cards):
             return
+        if 0 <= self._current_idx < len(self._cards) and self._current_idx != idx:
+            self._cards[self._current_idx].set_focused(False)
         self._current_idx = idx
         card = self._cards[idx]
-        card.setFocus()
+        card.set_focused(True)
         self._scroll_area.ensureWidgetVisible(card)
 
     def _compute_columns(self) -> int:

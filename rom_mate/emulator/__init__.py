@@ -67,6 +67,8 @@ from .dolphin import (
 )
 from .eden import (
     eden_directory_settings,
+    eden_has_firmware,
+    eden_keys_path,
     eden_save_path_overrides,
     ensure_eden_settings,
 )
@@ -205,6 +207,8 @@ __all__ = [
     "defaulted_manual_emulator_entry",
     "defaults_for_manual_emulator_entry",
     "eden_directory_settings",
+    "eden_has_firmware",
+    "eden_keys_path",
     "eden_save_path_overrides",
     "ensure_eden_settings",
     "fbneo_directory_settings",

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QKeyEvent, QPainter, QPaintEvent, QPixmap
+from PySide6.QtGui import QColor, QPainter, QPaintEvent, QPixmap
 from PySide6.QtWidgets import QWidget
 
 from rom_mate.tv.widgets import theme
@@ -21,7 +21,7 @@ class LibraryCard(QWidget):
         self._has_saves = False
         self._title_height = 34
         self.resize(200, 300)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     def set_game(self, game_dict: dict) -> None:
         self._game = game_dict or {}
@@ -39,13 +39,6 @@ class LibraryCard(QWidget):
         else:
             self._pixmap = pixmap
         self.update()
-
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self.selected.emit(self._game)
-            event.accept()
-            return
-        super().keyPressEvent(event)
 
     def paintEvent(self, event: QPaintEvent) -> None:
         _ = event

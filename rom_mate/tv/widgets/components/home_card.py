@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRect, Qt, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QKeyEvent, QPainter, QPainterPath, QPaintEvent, QPen, QPixmap
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QPaintEvent, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
 from rom_mate.tv.widgets import theme
@@ -19,8 +19,9 @@ class HomeCard(QWidget):
         self._year = ""
         self._genre = ""
         self._installed = False
+        self._focused = False
         self.setFixedSize(780, 260)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     def set_game(self, game_dict: dict) -> None:
         self._game = game_dict or {}
@@ -48,20 +49,10 @@ class HomeCard(QWidget):
             self._pixmap = pixmap
         self.update()
 
-    def focusInEvent(self, event) -> None:
-        super().focusInEvent(event)
-        self.update()
-
-    def focusOutEvent(self, event) -> None:
-        super().focusOutEvent(event)
-        self.update()
-
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self.selected.emit(self._game)
-            event.accept()
-            return
-        super().keyPressEvent(event)
+    def set_focused(self, focused: bool) -> None:
+        if self._focused != focused:
+            self._focused = focused
+            self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:
         _ = event
@@ -69,7 +60,7 @@ class HomeCard(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         card_rect = self.rect().adjusted(1, 1, -1, -1)
-        focused = self.hasFocus()
+        focused = self._focused
         border_width = 6 if focused else 2
         border_color = QColor(theme.ACCENT if focused else theme.BORDER_INACTIVE)
         radius = 16

@@ -1439,6 +1439,8 @@ class InstallMixin:
         self._write_rpcs3_games_yml_for_game(installed_game)
         self._queue_xbox360_content_for_game(installed_game)
         auto_configured = self._auto_configure_installed_emulator(installed_game, archive_file)
+        if is_source_install and not is_source_update:
+            self._trigger_firmware_install_for_source_emulator(installed_game.get("title", ""))
         if is_source_install:
             self._record_source_emulator_install(installed_game)
         if entry_id:
