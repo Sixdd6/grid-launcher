@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Callable
 
@@ -29,6 +30,7 @@ def normalize_emulators(
         source_owner = item.get("source_owner", "")
         source_repo = item.get("source_repo", "")
         source_release_tag = item.get("source_release_tag", "")
+        autodetected = item.get("autodetected", "")
         if not isinstance(name, str) or not name.strip():
             continue
         if not isinstance(path, str):
@@ -55,6 +57,11 @@ def normalize_emulators(
             source_repo = ""
         if not isinstance(source_release_tag, str):
             source_release_tag = ""
+        autodetected_enabled = False
+        if isinstance(autodetected, str):
+            autodetected_enabled = autodetected.strip().casefold() == "true"
+        else:
+            autodetected_enabled = bool(autodetected)
         normalized_entry = {
             "name": name.strip(),
             "path": path.strip(),
@@ -75,6 +82,8 @@ def normalize_emulators(
             normalized_entry["source_repo"] = source_repo.strip()
         if source_release_tag.strip():
             normalized_entry["source_release_tag"] = source_release_tag.strip()
+        if autodetected_enabled:
+            normalized_entry["autodetected"] = "true"
         normalized.append(normalized_entry)
 
     normalized.sort(key=lambda emulator: emulator["name"].lower())
@@ -231,3 +240,15 @@ def write_config_file(config_dir: Path, config_file: Path, config: dict[str, Any
         json.dumps(serialized_config(config), indent=2, sort_keys=True),
         encoding="utf-8",
     )
+
+
+def share_dir() -> Path:
+    """Return the directory containing shared data files (retroarch-core-list.json, etc).
+
+    Inside a Flatpak, ROM_MATE_SHARE_DIR is set to /app/share/rom-mate-neo/.
+    In development, falls back to the repository root (two levels up from this file).
+    """
+    env_val = os.environ.get("ROM_MATE_SHARE_DIR", "").strip()
+    if env_val:
+        return Path(env_val)
+    return Path(__file__).resolve().parents[2]

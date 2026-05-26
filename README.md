@@ -142,7 +142,7 @@ Standard saves are uploaded as a flat zip of the relevant save files, preserving
 
 ### Native Windows Saves (`emulator: native_multi_dir`)
 
-Native game saves bundle all configured save directories into one archive per upload session:
+Native game saves bundle all configured save directories into one archive per session:
 
 ```
 _rom_mate_dirs.json       ← directory manifest
@@ -172,3 +172,7 @@ This project bundles the following third-party software:
 - **7-Zip** — Copyright © 1999-2026 Igor Pavlov. Licensed under GNU LGPL. The unRAR code is licensed under a mixed license (GNU LGPL + unRAR restriction). See [assets/tools/7z/License.txt](assets/tools/7z/License.txt) for full license details. Source code: https://github.com/ip7z/7zip
 - **RetroArch assets** — PNG image files in [assets/retroarch-assets](assets/retroarch-assets) sourced from the libretro/retroarch-assets repository. Licensed under Creative Commons Attribution 4.0 International (CC BY 4.0). Source: https://github.com/libretro/retroarch-assets
 - **SVG Repo** — Icons by [SVG Repo](https://www.svgrepo.com/)
+
+## Contribution
+
+I welcome others to contribute to this project, even Ai-assisted contribution, however keep in mind that I expect any contribution to be fully tested by yourself before you make a pull request. Any code not fully tested or tested poorly will not be accepted, you are responsible for this crucial step not your toolset or AI agents.

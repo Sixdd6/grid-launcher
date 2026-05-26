@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+from rom_mate.core.path import xdg_data_home
+
 
 def _unique_paths(paths: list[Path]) -> list[Path]:
     unique: list[Path] = []
@@ -152,8 +154,12 @@ def pico8_user_root_candidates(
         home_path = Path.home()
         if sys.platform == "darwin":
             candidates.append((home_path / "Library" / "Application Support" / "pico-8").resolve())
-        else:
+
+        if launch_home_root is None:
             candidates.append((home_path / ".lexaloffle" / "pico-8").resolve())
+            xdg_data = xdg_data_home()
+            if xdg_data is not None:
+                candidates.append((xdg_data / "pico-8").resolve())
 
     return _unique_paths([candidate.expanduser().resolve() for candidate in candidates if str(candidate)])
 

@@ -1,6 +1,133 @@
 from __future__ import annotations
+
+import os
 import re
+import sys
 from pathlib import Path
+from typing import Callable
+
+
+def _unique_paths(paths: list[Path]) -> list[Path]:
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for candidate in paths:
+        key = str(candidate).casefold()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
+
+
+def _split_launch_args(
+    launch_template: str,
+    split_launch_template_args: Callable[[str], list[str]] | None,
+) -> list[str]:
+    template = launch_template.strip() if isinstance(launch_template, str) else ""
+    if not template or not callable(split_launch_template_args):
+        return []
+
+    try:
+        return split_launch_template_args(template)
+    except ValueError:
+        return []
+
+
+def _consume_arg_value(args: list[str], start_index: int) -> tuple[str, int]:
+    if start_index >= len(args):
+        return "", start_index
+
+    token = args[start_index].strip()
+    if not token:
+        return "", start_index
+
+    quote = token[0] if token[0] in {'"', "'"} else ""
+    if quote and (len(token) == 1 or not token.endswith(quote)):
+        parts = [token]
+        index = start_index + 1
+        while index < len(args):
+            parts.append(args[index])
+            if args[index].strip().endswith(quote):
+                break
+            index += 1
+        token = " ".join(parts)
+        return token.strip().strip('"').strip("'"), index
+
+    return token.strip().strip('"').strip("'"), start_index
+
+
+def _launch_home_root(
+    launch_template: str,
+    split_launch_template_args: Callable[[str], list[str]] | None,
+) -> Path | None:
+    args = _split_launch_args(launch_template, split_launch_template_args)
+    index = 0
+
+    while index < len(args):
+        raw_arg = args[index]
+        index += 1
+        if not isinstance(raw_arg, str) or not raw_arg.strip():
+            continue
+
+        normalized_arg = raw_arg.strip()
+        lowered_arg = normalized_arg.casefold()
+
+        if lowered_arg in {"-home", "--home"} and index < len(args):
+            value, consumed_index = _consume_arg_value(args, index)
+            index = consumed_index + 1
+            if value:
+                return Path(os.path.expandvars(value)).expanduser().resolve()
+            continue
+
+        for prefix in ("-home=", "--home="):
+            if lowered_arg.startswith(prefix):
+                _, _, raw_value = normalized_arg.partition("=")
+                value = raw_value.strip().strip('"').strip("'")
+                if value:
+                    return Path(os.path.expandvars(value)).expanduser().resolve()
+
+    return None
+
+
+def ppsspp_psp_root_candidates(
+    emulator_path_text: str,
+    launch_template: str = "",
+    split_launch_template_args: Callable[[str], list[str]] | None = None,
+) -> list[Path]:
+    candidates: list[Path] = []
+
+    launch_home_root = _launch_home_root(launch_template, split_launch_template_args)
+    if launch_home_root is not None:
+        candidates.append((launch_home_root / "PSP").resolve())
+
+    path_text = emulator_path_text.strip() if isinstance(emulator_path_text, str) else ""
+    if path_text:
+        emulator_path = Path(path_text).expanduser()
+        emulator_dir = emulator_path if emulator_path.is_dir() else emulator_path.parent
+        if str(emulator_dir):
+            candidates.append((emulator_dir / "memstick" / "PSP").resolve())
+
+    if not path_text and launch_home_root is None and sys.platform != "win32":
+        home_path = Path.home()
+        candidates.append((home_path / ".config" / "ppsspp" / "PSP").resolve())
+        candidates.append(
+            (home_path / ".var" / "app" / "org.ppsspp.PPSSPP" / "config" / "ppsspp" / "PSP").resolve()
+        )
+
+    return _unique_paths(candidates)
+
+
+def ppsspp_ini_path_candidates(
+    emulator_path_text: str,
+    launch_template: str = "",
+    split_launch_template_args: Callable[[str], list[str]] | None = None,
+) -> list[Path]:
+    return _unique_paths(
+        [
+            root / "SYSTEM" / "PPSSPP.INI"
+            for root in ppsspp_psp_root_candidates(emulator_path_text, launch_template, split_launch_template_args)
+        ]
+    )
 
 
 def _ensure_section_values(
@@ -94,7 +221,14 @@ def ensure_ppsspp_settings(
         except OSError:
             pass
 
-    ini_path = emulator_dir / "memstick" / "PSP" / "SYSTEM" / "PPSSPP.INI"
+    if sys.platform == "win32":
+        ini_path = emulator_dir / "memstick" / "PSP" / "SYSTEM" / "PPSSPP.INI"
+    else:
+        ini_candidates = ppsspp_ini_path_candidates(path_text)
+        if not ini_candidates:
+            return {"changed": changed}
+        ini_path = next((candidate for candidate in ini_candidates if candidate.exists()), ini_candidates[0])
+
     content = ini_path.read_text(encoding="utf-8") if ini_path.exists() else ""
 
     sections: list[tuple[str, dict[str, str]]] = [

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 
 
@@ -29,6 +30,9 @@ def duckstation_config_path_candidates(emulator_path_text: str) -> list[Path]:
             user_profile / "Library" / "Application Support" / "DuckStation",
         ]
     )
+
+    if sys.platform != "win32":
+        search_roots.append(user_profile / ".var" / "app" / "org.duckstation.DuckStation" / "config" / "duckstation")
 
     xdg_data_home = os.environ.get("XDG_DATA_HOME", "").strip()
     if xdg_data_home:
@@ -207,12 +211,13 @@ def ensure_duckstation_memory_card_settings(
     if isinstance(emulator_path_text, str) and emulator_path_text.strip():
         _emulator_path = Path(emulator_path_text.strip()).expanduser()
         _emulator_dir = _emulator_path if _emulator_path.is_dir() else _emulator_path.parent
-        _portable_txt = _emulator_dir / "portable.txt"
-        if not _portable_txt.exists():
-            try:
-                _portable_txt.write_text("", encoding="utf-8")
-            except OSError:
-                pass
+        if sys.platform == "win32":
+            _portable_txt = _emulator_dir / "portable.txt"
+            if not _portable_txt.exists():
+                try:
+                    _portable_txt.write_text("", encoding="utf-8")
+                except OSError:
+                    pass
 
     settings = duckstation_memory_card_settings(emulator_path_text)
     config_candidates = duckstation_config_path_candidates(emulator_path_text)
@@ -222,14 +227,10 @@ def ensure_duckstation_memory_card_settings(
         result["changed"] = False
         return result
 
-    if _emulator_dir is not None:
+    if _emulator_dir is not None and sys.platform == "win32":
         config_path = _emulator_dir / "settings.ini"
     else:
-        configured_path = settings.get("config_path", "")
-        if isinstance(configured_path, str) and configured_path.strip():
-            config_path = Path(configured_path.strip()).expanduser()
-        else:
-            config_path = config_candidates[0]
+        config_path = next((candidate for candidate in config_candidates if candidate.exists()), config_candidates[0])
 
     current_card1_type = str(settings.get("card1_type", "")).strip()
     current_card2_type = str(settings.get("card2_type", "")).strip()

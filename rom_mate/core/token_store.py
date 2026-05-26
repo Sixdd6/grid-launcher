@@ -7,6 +7,32 @@ from pathlib import Path
 from typing import Any, Callable
 
 
+def _linux_load_token(service: str, username: str) -> str:
+    try:
+        import keyring
+
+        value = keyring.get_password(service, username)
+        return value or ""
+    except Exception:
+        return ""
+
+
+def _linux_save_token(service: str, username: str, token: str) -> bool:
+    try:
+        import keyring
+
+        if token:
+            keyring.set_password(service, username, token)
+        else:
+            try:
+                keyring.delete_password(service, username)
+            except keyring.errors.PasswordDeleteError:
+                pass
+        return True
+    except Exception:
+        return False
+
+
 def windows_protect_data(raw: bytes) -> bytes:
     class DataBlob(ctypes.Structure):
         _fields_ = [("cbData", ctypes.c_uint32), ("pbData", ctypes.POINTER(ctypes.c_byte))]
@@ -64,6 +90,11 @@ def windows_unprotect_data(protected: bytes) -> bytes:
 
 
 def load_api_token(token_file: Path) -> str:
+    if sys.platform == "linux":
+        keyring_token = _linux_load_token("rom-mate-neo", "api-token")
+        if keyring_token:
+            return keyring_token
+
     if not token_file.exists():
         return ""
 
@@ -80,12 +111,24 @@ def load_api_token(token_file: Path) -> str:
             raw = windows_unprotect_data(payload)
         else:
             raw = base64.b64decode(payload, validate=True)
-        return raw.decode("utf-8")
+        decoded = raw.decode("utf-8")
+        if sys.platform == "linux" and _linux_save_token("rom-mate-neo", "api-token", decoded):
+            try:
+                if token_file.exists():
+                    token_file.unlink()
+            except OSError:
+                pass
+        return decoded
     except (OSError, ValueError, UnicodeDecodeError):
         return ""
 
 
 def load_ra_token(token_file: Path) -> str:
+    if sys.platform == "linux":
+        keyring_token = _linux_load_token("rom-mate-neo", "ra-token")
+        if keyring_token:
+            return keyring_token
+
     if not token_file.exists():
         return ""
 
@@ -102,13 +145,30 @@ def load_ra_token(token_file: Path) -> str:
             raw = windows_unprotect_data(payload)
         else:
             raw = base64.b64decode(payload, validate=True)
-        return raw.decode("utf-8")
+        decoded = raw.decode("utf-8")
+        if sys.platform == "linux" and _linux_save_token("rom-mate-neo", "ra-token", decoded):
+            try:
+                if token_file.exists():
+                    token_file.unlink()
+            except OSError:
+                pass
+        return decoded
     except (OSError, ValueError, UnicodeDecodeError):
         return ""
 
 
 def save_api_token(config_dir: Path, token_file: Path, token: str) -> bool:
     normalized = token.strip()
+
+    if sys.platform == "linux":
+        saved = _linux_save_token("rom-mate-neo", "api-token", normalized)
+        if saved:
+            try:
+                if token_file.exists():
+                    token_file.unlink()
+            except OSError:
+                pass
+            return True
 
     if not normalized:
         try:
@@ -133,6 +193,16 @@ def save_api_token(config_dir: Path, token_file: Path, token: str) -> bool:
 
 def save_ra_token(config_dir: Path, token_file: Path, token: str) -> bool:
     normalized = token.strip()
+
+    if sys.platform == "linux":
+        saved = _linux_save_token("rom-mate-neo", "ra-token", normalized)
+        if saved:
+            try:
+                if token_file.exists():
+                    token_file.unlink()
+            except OSError:
+                pass
+            return True
 
     if not normalized:
         try:

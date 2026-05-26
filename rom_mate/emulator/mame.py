@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Callable
+
+from rom_mate.core.path import xdg_config_home
 
 
 def _unique_paths(paths: list[Path]) -> list[Path]:
@@ -138,6 +141,11 @@ def _ini_path_candidates(
                 (base_root / "ini" / "presets").resolve(),
             ]
         )
+        if sys.platform != "win32":
+            directories.append((Path.home() / ".mame").resolve())
+            xdg_config = xdg_config_home()
+            if xdg_config is not None:
+                directories.append((xdg_config / "mame").resolve())
 
     candidates = [directory / "mame.ini" for directory in directories]
     return _unique_paths(candidates)

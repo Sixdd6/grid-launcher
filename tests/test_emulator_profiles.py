@@ -62,6 +62,7 @@ from rom_mate.emulator.xenia import (
 )
 from rom_mate.emulator.profiles import (
     emulator_entry_matches_tokens,
+    emulator_profile_for_entry,
     emulator_profile_for_game,
     load_emulator_autoprofiles,
     matching_platforms_for_emulator_keywords,
@@ -1106,6 +1107,91 @@ class ManualEmulatorAutopopulateTests(unittest.TestCase):
         self.assertEqual(resolved_defaults.get("Sony PlayStation"), "RetroArch (Multi-System)")
         self.assertEqual(resolved_defaults.get("Nintendo Wii U"), "")
         self.assertEqual(resolved_core_defaults.get("Sony PlayStation"), "pcsx_rearmed_libretro.dll")
+
+
+class TestEmulatorProfileForEntryFlatpak(unittest.TestCase):
+    def test_pcsx2_flatpak_finds_profile(self) -> None:
+        profiles = [
+            {
+                "name": "PCSX2 (Playstation 2)",
+                "platform_keywords": ["playstation 2", "ps2"],
+                "match_tokens": ["pcsx2-qt.exe"],
+            }
+        ]
+
+        profile = emulator_profile_for_entry(
+            {
+                "name": "PCSX2",
+                "path": "/usr/bin/flatpak",
+                "args": "run net.pcsx2.PCSX2 %rom%",
+            },
+            profiles,
+        )
+
+        self.assertIsNotNone(profile)
+        self.assertEqual(profile["name"], "PCSX2 (Playstation 2)")
+
+    def test_azahar_flatpak_finds_profile(self) -> None:
+        profiles = [
+            {
+                "name": "Azahar (Nintendo 3DS)",
+                "platform_keywords": ["3ds"],
+                "match_tokens": ["azahar.exe"],
+            }
+        ]
+
+        profile = emulator_profile_for_entry(
+            {
+                "name": "Azahar",
+                "path": "/usr/bin/flatpak",
+                "args": "run org.azahar_emu.Azahar %rom%",
+            },
+            profiles,
+        )
+
+        self.assertIsNotNone(profile)
+        self.assertEqual(profile["name"], "Azahar (Nintendo 3DS)")
+
+    def test_exact_name_still_works(self) -> None:
+        profiles = [
+            {
+                "name": "Dolphin",
+                "platform_keywords": ["wii", "gamecube"],
+                "match_tokens": ["dolphin.exe"],
+            }
+        ]
+
+        profile = emulator_profile_for_entry(
+            {
+                "name": "Dolphin",
+                "path": "/usr/bin/flatpak",
+                "args": "run org.DolphinEmu.dolphin-emu %rom%",
+            },
+            profiles,
+        )
+
+        self.assertIsNotNone(profile)
+        self.assertEqual(profile["name"], "Dolphin")
+
+    def test_no_match_returns_none(self) -> None:
+        profiles = [
+            {
+                "name": "Dolphin",
+                "platform_keywords": ["wii", "gamecube"],
+                "match_tokens": ["dolphin.exe"],
+            }
+        ]
+
+        profile = emulator_profile_for_entry(
+            {
+                "name": "unknownthing",
+                "path": "/usr/bin/flatpak",
+                "args": "run com.example.Unknown %rom%",
+            },
+            profiles,
+        )
+
+        self.assertIsNone(profile)
 
 
 class ManualEmulatorAutofillSuggestionTests(unittest.TestCase):

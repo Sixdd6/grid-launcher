@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+from rom_mate.core.path import xdg_data_home
+
 _REGION_NAMES = ("USA", "JPN", "JAP", "EUR", "DEV")
 _MEMCARD_SIZE_SUFFIXES = ("", ".59", ".123", ".251", ".507", ".1019", ".2043")
 _WII_TITLE_GROUPS = ("00010000", "00010001", "00010002", "00010004", "00010005", "00010008")
@@ -122,6 +124,8 @@ def dolphin_user_root_candidates(
         if registry_user_root is not None:
             candidates.append(registry_user_root)
 
+    home_path = Path.home()
+
     if sys.platform == "win32":
         for raw_base in (os.environ.get("OneDrive", ""), os.environ.get("USERPROFILE", "")):
             if isinstance(raw_base, str) and raw_base.strip():
@@ -130,8 +134,12 @@ def dolphin_user_root_candidates(
         appdata = os.environ.get("APPDATA", "")
         if isinstance(appdata, str) and appdata.strip():
             candidates.append(Path(appdata).expanduser() / "Dolphin Emulator")
+    else:
+        xdg_data = xdg_data_home()
+        if xdg_data is not None:
+            candidates.append(xdg_data / "dolphin-emu")
+        candidates.append(home_path / ".var" / "app" / "org.DolphinEmu.dolphin-emu" / "data" / "dolphin-emu")
 
-    home_path = Path.home()
     candidates.extend(
         [
             home_path / ".dolphin-emu",
@@ -229,11 +237,16 @@ def dolphin_ini_path_candidates(emulator_path_text: str, ini_name: str) -> list[
     candidates: list[Path] = []
     if emulator_path.is_absolute():
         candidates.append(emulator_path.parent / "User" / "Config" / ini_name)
-    candidates.extend([
-        Path(os.path.expandvars("%APPDATA%")) / "Dolphin Emulator" / "Config" / ini_name,
-        Path.home() / ".local" / "share" / "dolphin-emu" / ini_name,
-        Path.home() / "Library" / "Application Support" / "Dolphin" / ini_name,
-    ])
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA", "")
+        if isinstance(appdata, str) and appdata.strip():
+            candidates.append(Path(appdata).expanduser() / "Dolphin Emulator" / "Config" / ini_name)
+    candidates.extend(
+        [
+            Path.home() / ".local" / "share" / "dolphin-emu" / ini_name,
+            Path.home() / "Library" / "Application Support" / "Dolphin" / ini_name,
+        ]
+    )
 
     unique: list[Path] = []
     seen: set[str] = set()
@@ -250,12 +263,13 @@ def ensure_dolphin_settings(emulator_path_text: str) -> dict:
     if isinstance(emulator_path_text, str) and emulator_path_text.strip():
         _emulator_path = Path(emulator_path_text.strip()).expanduser()
         _emulator_dir = _emulator_path if _emulator_path.is_dir() else _emulator_path.parent
-        _portable_txt = _emulator_dir / "portable.txt"
-        if not _portable_txt.exists():
-            try:
-                _portable_txt.write_text("", encoding="utf-8")
-            except OSError:
-                pass
+        if sys.platform == "win32":
+            _portable_txt = _emulator_dir / "portable.txt"
+            if not _portable_txt.exists():
+                try:
+                    _portable_txt.write_text("", encoding="utf-8")
+                except OSError:
+                    pass
 
     changed = False
     dolphin_ini_path: str | None = None

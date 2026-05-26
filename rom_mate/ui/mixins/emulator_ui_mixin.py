@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import threading
 from datetime import UTC, datetime
@@ -69,6 +70,7 @@ from rom_mate.emulator import (
 )
 from rom_mate.library import extract_archive_into_directory
 from rom_mate.library.firmware_install import download_ps3_firmware_direct, install_platform_firmware
+from rom_mate.emulator.profiles import is_available_on_current_platform
 from rom_mate.ui import (
     EmulatorConfigDialog,
     emulator_form_state_for_row,
@@ -88,6 +90,13 @@ from rom_mate.ui.emulators import (
 _TV_GUIDE_DEFAULT_EXCLUSIONS: frozenset[str] = frozenset({
     "rpcs3", "cemu", "dolphin", "xemu", "xenia", "retroarch"
 })
+
+
+def _emulator_slug_from_name(emulator_name: str) -> str:
+    name = emulator_name.strip().casefold().split("(", 1)[0].strip()
+    if not name:
+        return ""
+    return re.sub(r"[^a-z0-9]+", "-", name).strip("-")
 
 
 class EmulatorUIMixin:
@@ -366,7 +375,11 @@ class EmulatorUIMixin:
             return
 
         selected_before_refresh = self.default_emulator_combo.currentText().strip()
-        compatible_emulators = self._compatible_emulator_names_for_platform(platform)
+        compatible_emulators = [
+            emulator_name
+            for emulator_name in self._compatible_emulator_names_for_platform(platform)
+            if is_available_on_current_platform(_emulator_slug_from_name(emulator_name))
+        ]
         self.default_emulator_combo.blockSignals(True)
         self.default_emulator_combo.clear()
         self.default_emulator_combo.addItems(compatible_emulators)
@@ -580,6 +593,9 @@ class EmulatorUIMixin:
             uninstall_button.setIcon(uninstall_icon)
             uninstall_button.setIconSize(action_icon_size)
             uninstall_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            if entry.get("autodetected") == "true":
+                uninstall_button.setEnabled(False)
+                uninstall_button.setToolTip("Autodetected – cannot remove")
             uninstall_button.clicked.connect(lambda checked=False, current_row=row: self._remove_emulator_at_index(current_row))
             bottom_row.addWidget(uninstall_button)
 
@@ -587,7 +603,7 @@ class EmulatorUIMixin:
                 entry.get("name", ""),
                 entry,
             )
-            if source_entry is not None:
+            if source_entry is not None and entry.get("autodetected") != "true":
                 source_update_button = QPushButton()
                 source_update_button.setObjectName("installedEmulatorSourceUpdateButton")
                 source_update_button.setToolTip("Update from Source")
@@ -1325,6 +1341,9 @@ class EmulatorUIMixin:
             return
 
         emulator_to_remove = emulators[index]
+        if emulator_to_remove.get("autodetected") == "true":
+            return
+
         if not self._uninstall_emulator_files(emulator_to_remove):
             return
 

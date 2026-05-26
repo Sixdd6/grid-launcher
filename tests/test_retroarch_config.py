@@ -3,7 +3,9 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from rom_mate.emulator.launch import retroarch_core_argument_path
 from rom_mate.emulator.retroarch import (
     ensure_retroarch_save_location_settings,
     retroarch_core_flags,
@@ -188,6 +190,16 @@ class TestRetroarchCoreFlags(unittest.TestCase):
             set(result.keys()),
             {"supports_save_states", "supports_saves", "cloud_sync_safe", "vmu_shared_saves"},
         )
+
+
+class RetroarchCoreArgumentPathTests(unittest.TestCase):
+    def test_core_argument_path_linux_so(self) -> None:
+        with patch("rom_mate.emulator.launch.sys.platform", "linux"):
+            self.assertEqual("cores/snes9x_libretro.so", retroarch_core_argument_path("snes9x"))
+
+    def test_core_argument_path_macos_dylib(self) -> None:
+        with patch("rom_mate.emulator.launch.sys.platform", "darwin"):
+            self.assertEqual("cores/snes9x_libretro.dylib", retroarch_core_argument_path("snes9x"))
 
 if __name__ == "__main__":
     unittest.main()

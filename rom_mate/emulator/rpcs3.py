@@ -4,6 +4,7 @@ import configparser
 import os
 import re
 import shutil
+import sys
 from pathlib import Path
 from typing import Callable
 
@@ -395,8 +396,15 @@ def ensure_rpcs3_vfs_settings(emulator_path_text: str, ps3_library_path: str) ->
         return {"vfs_path": None, "dev_hdd0": "", "games": "", "changed": False}
 
     emulator_dir = emulator_path.parent
-    portable_dir = emulator_dir / "portable"
-    config_dir = portable_dir / "config"
+    if sys.platform == "win32":
+        data_root = emulator_dir / "portable"
+    else:
+        data_root = next(
+            (candidate for candidate in rpcs3_data_root_candidates(path_text) if candidate.exists() and candidate.is_dir()),
+            Path.home() / ".config" / "rpcs3",
+        )
+
+    config_dir = data_root / "config"
     vfs_path = config_dir / "vfs.yml"
 
     library_path = Path(library_text).expanduser().resolve()
@@ -533,15 +541,23 @@ def ensure_rpcs3_settings(emulator_path_text: str, ps3_library_path: str = "") -
         return {"config_path": None, "gui_config_path": None, "changed": False}
 
     emulator_dir = emulator_path.parent
-    portable_dir = emulator_dir / "portable"
-    config_dir = portable_dir / "config"
-    gui_dir = portable_dir / "GuiConfigs"
+    if sys.platform == "win32":
+        data_root = emulator_dir / "portable"
+    else:
+        data_root = next(
+            (candidate for candidate in rpcs3_data_root_candidates(path_text) if candidate.exists() and candidate.is_dir()),
+            Path.home() / ".config" / "rpcs3",
+        )
+
+    config_dir = data_root / "config"
+    gui_dir = data_root / "GuiConfigs"
     config_path = config_dir / "config.yml"
     gui_path = gui_dir / "GuiSettings.ini"
     current_settings_path = gui_dir / "CurrentSettings.ini"
 
     try:
-        portable_dir.mkdir(parents=True, exist_ok=True)
+        if sys.platform == "win32":
+            data_root.mkdir(parents=True, exist_ok=True)
         config_dir.mkdir(parents=True, exist_ok=True)
         gui_dir.mkdir(parents=True, exist_ok=True)
 
@@ -613,12 +629,10 @@ def rpcs3_data_root_candidates(emulator_path_text: str) -> list[Path]:
         candidates.insert(1 if candidates else 0, Path(config_env).expanduser().resolve())
 
     home_path = Path.home()
-    candidates.extend(
-        [
-            home_path / ".config" / "rpcs3",
-            home_path / "Library" / "Application Support" / "rpcs3",
-        ]
-    )
+    candidates.append(home_path / ".config" / "rpcs3")
+    if sys.platform != "win32":
+        candidates.append(home_path / ".var" / "app" / "net.rpcs3.RPCS3" / "config" / "rpcs3")
+    candidates.append(home_path / "Library" / "Application Support" / "rpcs3")
 
     return _unique_paths(candidates)
 

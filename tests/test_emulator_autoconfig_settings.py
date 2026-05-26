@@ -9,13 +9,17 @@ from pathlib import Path
 from unittest.mock import patch, ANY, MagicMock
 import json
 
+from rom_mate.core.config import normalize_emulators
 from rom_mate.emulator.azahar import ensure_azahar_settings
-from rom_mate.emulator.cemu import ensure_cemu_controller_config, ensure_cemu_settings
+from rom_mate.emulator.cemu import cemu_settings_path_candidates, ensure_cemu_controller_config, ensure_cemu_settings
 from rom_mate.emulator import ensure_dolphin_settings, ensure_dolphin_skip_ipl, ensure_dolphin_gcpad_config
+from rom_mate.emulator.dolphin import dolphin_user_root_candidates
 from rom_mate.emulator.duckstation import ensure_duckstation_memory_card_settings
 from rom_mate.emulator.eden import _ensure_eden_section_values, ensure_eden_settings
-from rom_mate.emulator.pcsx2 import ensure_pcsx2_settings, pcsx2_data_root_candidates
-from rom_mate.emulator.ppsspp import ensure_ppsspp_settings
+from rom_mate.emulator.mame import _ini_path_candidates
+from rom_mate.emulator.pcsx2 import ensure_pcsx2_settings, pcsx2_config_path_candidates, pcsx2_data_root_candidates
+from rom_mate.emulator.pico8 import pico8_user_root_candidates
+from rom_mate.emulator.ppsspp import ensure_ppsspp_settings, ppsspp_psp_root_candidates
 from rom_mate.emulator.rpcs3 import (
     copy_ps3_custom_config_to_emulator,
     ensure_rpcs3_settings,
@@ -122,6 +126,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
         self.assertIn("ConfirmPowerOff = true", text)
         self.assertNotIn("ConfirmPowerOff = false", text)
 
+    @patch("rom_mate.emulator.duckstation.sys.platform", new="win32")
     def test_duckstation_creates_portable_txt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             emulator_dir = Path(temp_dir) / "DuckStation"
@@ -148,6 +153,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
 
         self.assertEqual("custom", portable_content)
 
+    @patch("rom_mate.emulator.duckstation.sys.platform", new="win32")
     def test_duckstation_config_written_to_portable_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             emulator_dir = Path(temp_dir) / "DuckStation"
@@ -178,6 +184,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
         self.assertIn("[EmuCore]", text)
         self.assertIn("EnableDiscordPresence = false", text)
 
+    @patch("rom_mate.emulator.pcsx2.sys.platform", new="win32")
     def test_pcsx2_ensure_creates_portable_ini(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             emulator_dir = Path(temp_dir) / "PCSX2"
@@ -192,6 +199,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
 
         self.assertTrue(portable_exists)
 
+    @patch("rom_mate.emulator.pcsx2.sys.platform", new="win32")
     def test_pcsx2_ensure_does_not_overwrite_existing_portable_ini(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             emulator_dir = Path(temp_dir) / "PCSX2"
@@ -207,6 +215,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
 
         self.assertEqual("custom", portable_content)
 
+    @patch("rom_mate.emulator.pcsx2.sys.platform", new="win32")
     def test_pcsx2_ensure_config_at_portable_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             emulator_dir = Path(temp_dir) / "PCSX2"
@@ -545,6 +554,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
         self.assertIn("[Settings]", gfx_text)
         self.assertIn("UseVerticalSync = True", gfx_text)
 
+    @patch("rom_mate.emulator.dolphin.sys.platform", new="win32")
     def test_dolphin_creates_portable_txt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             emulator_dir = Path(temp_dir) / "Dolphin"
@@ -557,6 +567,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
 
         self.assertTrue(portable_exists)
 
+    @patch("rom_mate.emulator.dolphin.sys.platform", new="win32")
     def test_dolphin_does_not_overwrite_existing_portable_txt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             emulator_dir = Path(temp_dir) / "Dolphin"
@@ -839,6 +850,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
 
         self.assertEqual(1, text.count("resolution_factor\\default"))
 
+    @patch("rom_mate.emulator.azahar.sys.platform", new="win32")
     def test_azahar_creates_user_dir(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             emulator_dir = Path(temp_dir) / "Azahar"
@@ -918,6 +930,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
         self.assertIn(annotation, result)
         self.assertLess(result.index(annotation), result.index("confirmStop = 2"))
 
+    @patch("rom_mate.emulator.eden.sys.platform", new="win32")
     def test_eden_creates_user_dir(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             emulator_dir = Path(temp_dir) / "Eden"
@@ -1234,6 +1247,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
         self.assertTrue(result["changed"])
         self.assertFalse(installed_exists)
 
+    @patch("rom_mate.emulator.ppsspp.sys.platform", new="win32")
     def test_ppsspp_writes_default_settings_without_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             emulator_dir = Path(temp_dir) / "PPSSPP"
@@ -1261,6 +1275,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
 
         self.assertFalse(result["changed"])
 
+    @patch("rom_mate.emulator.ppsspp.sys.platform", new="win32")
     def test_ppsspp_writes_retroachievements_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             emulator_dir = Path(temp_dir) / "PPSSPP"
@@ -1293,6 +1308,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
         self.assertIn("AchievementsUnlockedPos = 4", text)
         self.assertEqual(dat_text, "psp_tok")
 
+    @patch("rom_mate.emulator.ppsspp.sys.platform", new="win32")
     def test_ppsspp_skips_retroachievements_when_no_credentials(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             emulator_dir = Path(temp_dir) / "PPSSPP"
@@ -1374,6 +1390,126 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
                     for token in blocked_tokens:
                         self.assertNotIn(token, directory)
 
+    def test_dolphin_user_root_candidates_include_linux_xdg_data_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            xdg_config = temp_root / "config"
+            xdg_data = temp_root / "data"
+            with patch("sys.platform", "linux"):
+                with patch.dict(
+                    os.environ,
+                    {
+                        "XDG_CONFIG_HOME": str(xdg_config),
+                        "XDG_DATA_HOME": str(xdg_data),
+                    },
+                    clear=False,
+                ):
+                    candidates = dolphin_user_root_candidates("", "", lambda _: [])
+
+        self.assertIn((xdg_data / "dolphin-emu").resolve(), candidates)
+        for candidate in candidates:
+            self.assertNotIn("%APPDATA%", str(candidate))
+
+    def test_pcsx2_config_path_candidates_include_linux_xdg_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            xdg_config = temp_root / "config"
+            xdg_data = temp_root / "data"
+            with patch("sys.platform", "linux"):
+                with patch.dict(
+                    os.environ,
+                    {
+                        "XDG_CONFIG_HOME": str(xdg_config),
+                        "XDG_DATA_HOME": str(xdg_data),
+                    },
+                    clear=False,
+                ):
+                    candidates = pcsx2_config_path_candidates("")
+
+        self.assertIn(xdg_config / "PCSX2" / "inis" / "PCSX2.ini", candidates)
+        for candidate in candidates:
+            self.assertNotIn("%APPDATA%", str(candidate))
+
+    def test_cemu_settings_path_candidates_include_linux_xdg_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            xdg_config = temp_root / "config"
+            xdg_data = temp_root / "data"
+            with patch("sys.platform", "linux"):
+                with patch.dict(
+                    os.environ,
+                    {
+                        "XDG_CONFIG_HOME": str(xdg_config),
+                        "XDG_DATA_HOME": str(xdg_data),
+                    },
+                    clear=False,
+                ):
+                    candidates = cemu_settings_path_candidates("")
+
+        self.assertIn(xdg_config / "Cemu" / "settings.xml", candidates)
+        for candidate in candidates:
+            self.assertNotIn("%APPDATA%", str(candidate))
+
+    def test_ppsspp_psp_root_candidates_include_linux_home_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            xdg_config = temp_root / "config"
+            xdg_data = temp_root / "data"
+            with patch("sys.platform", "linux"):
+                with patch.dict(
+                    os.environ,
+                    {
+                        "XDG_CONFIG_HOME": str(xdg_config),
+                        "XDG_DATA_HOME": str(xdg_data),
+                    },
+                    clear=False,
+                ):
+                    candidates = ppsspp_psp_root_candidates("", "", lambda _: [])
+
+        self.assertIn((Path.home() / ".config" / "ppsspp" / "PSP").resolve(), candidates)
+        for candidate in candidates:
+            self.assertNotIn("%APPDATA%", str(candidate))
+
+    def test_mame_ini_path_candidates_include_linux_home_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            xdg_config = temp_root / "config"
+            xdg_data = temp_root / "data"
+            with patch("sys.platform", "linux"):
+                with patch.dict(
+                    os.environ,
+                    {
+                        "XDG_CONFIG_HOME": str(xdg_config),
+                        "XDG_DATA_HOME": str(xdg_data),
+                    },
+                    clear=False,
+                ):
+                    candidates = _ini_path_candidates(temp_root / "MAME", "", lambda _: [])
+
+        self.assertIn((Path.home() / ".mame" / "mame.ini").resolve(), candidates)
+        for candidate in candidates:
+            self.assertNotIn("%APPDATA%", str(candidate))
+
+    def test_pico8_user_root_candidates_include_linux_home_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            xdg_config = temp_root / "config"
+            xdg_data = temp_root / "data"
+            with patch("sys.platform", "linux"):
+                with patch.dict(
+                    os.environ,
+                    {
+                        "XDG_CONFIG_HOME": str(xdg_config),
+                        "XDG_DATA_HOME": str(xdg_data),
+                    },
+                    clear=False,
+                ):
+                    candidates = pico8_user_root_candidates("", "", lambda _: [])
+
+        self.assertIn((Path.home() / ".lexaloffle" / "pico-8").resolve(), candidates)
+        for candidate in candidates:
+            self.assertNotIn("%APPDATA%", str(candidate))
+
     def test_cemu_creates_xml_when_absent(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             cemu_dir = Path(temp_dir) / "Cemu"
@@ -1423,6 +1559,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
         self.assertEqual("30", audio.findtext("TVVolume"))
         self.assertIn("<TVDevice>default</TVDevice>", text)
 
+    @patch("rom_mate.emulator.cemu.sys.platform", new="win32")
     def test_cemu_creates_portable_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             cemu_dir = Path(temp_dir) / "Cemu"
@@ -1435,6 +1572,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
 
         self.assertTrue(portable_is_dir)
 
+    @patch("rom_mate.emulator.cemu.sys.platform", new="win32")
     def test_cemu_settings_xml_written_to_portable_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             cemu_dir = Path(temp_dir) / "Cemu"
@@ -1686,6 +1824,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
 
         self.assertFalse(result["changed"])
 
+    @patch("rom_mate.emulator.cemu.sys.platform", new="win32")
     def test_cemu_controller_config_creates_controller0_xml(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             result = ensure_cemu_controller_config(temp_dir)
@@ -1710,7 +1849,8 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
 
     def test_cemu_controller_config_xml_contains_xinput_api(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            ensure_cemu_controller_config(temp_dir)
+            with unittest.mock.patch("rom_mate.emulator.cemu.sys.platform", "win32"):
+                ensure_cemu_controller_config(temp_dir)
             profile_path = Path(temp_dir) / "portable" / "controllerProfiles" / "controller0.xml"
             text = profile_path.read_text(encoding="utf-8")
 
@@ -1739,6 +1879,7 @@ class Rpcs3AutoConfigTests(unittest.TestCase):
 
         self.assertEqual(Path(tmp).resolve(), result)
 
+    @patch("rom_mate.emulator.rpcs3.sys.platform", new="win32")
     def test_rpcs3_creates_portable_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             exe = Path(tmp) / "rpcs3.exe"
@@ -1746,6 +1887,7 @@ class Rpcs3AutoConfigTests(unittest.TestCase):
             ensure_rpcs3_settings(str(exe))
             self.assertTrue((Path(tmp) / "portable").exists())
 
+    @patch("rom_mate.emulator.rpcs3.sys.platform", new="win32")
     def test_rpcs3_writes_config_yml_fullscreen(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             exe = Path(tmp) / "rpcs3.exe"
@@ -1754,6 +1896,7 @@ class Rpcs3AutoConfigTests(unittest.TestCase):
             text = (Path(tmp) / "portable" / "config" / "config.yml").read_text(encoding="utf-8")
         self.assertIn("Start games in fullscreen mode: true", text)
 
+    @patch("rom_mate.emulator.rpcs3.sys.platform", new="win32")
     def test_rpcs3_writes_config_yml_volume(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             exe = Path(tmp) / "rpcs3.exe"
@@ -1777,6 +1920,7 @@ class Rpcs3AutoConfigTests(unittest.TestCase):
         self.assertIn("Start games in fullscreen mode: false", text)
         self.assertNotIn("Start games in fullscreen mode: true", text)
 
+    @patch("rom_mate.emulator.rpcs3.sys.platform", new="win32")
     def test_rpcs3_writes_gui_settings_wizard_suppression(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             exe = Path(tmp) / "rpcs3.exe"
@@ -1786,6 +1930,7 @@ class Rpcs3AutoConfigTests(unittest.TestCase):
         self.assertIn("[main_window]", text)
         self.assertIn("infoBoxEnabledWelcome = false", text)
 
+    @patch("rom_mate.emulator.rpcs3.sys.platform", new="win32")
     def test_rpcs3_gui_settings_contains_only_main_window_section(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             exe = Path(tmp) / "rpcs3.exe"
@@ -1801,6 +1946,7 @@ class Rpcs3AutoConfigTests(unittest.TestCase):
         self.assertNotIn("useRichPresence", text)
         self.assertNotIn("checkUpdateStart", text)
 
+    @patch("rom_mate.emulator.rpcs3.sys.platform", new="win32")
     def test_rpcs3_writes_current_settings_check_update_and_rich_presence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             exe = Path(tmp) / "rpcs3.exe"
@@ -2485,6 +2631,133 @@ class Rpcs3VfsSettingsTests(unittest.TestCase):
         self.assertIsNotNone(result)
         expected = library.resolve() / ".vfs" / "dev_hdd0"
         self.assertEqual(result, expected)
+
+
+class TestEnsureLinuxPortableModeGuard(unittest.TestCase):
+    @staticmethod
+    def _make_exe(tmp: str) -> Path:
+        exe = Path(tmp) / "rpcs3.exe"
+        exe.write_bytes(b"")
+        return exe
+
+    def test_pcsx2_no_portable_ini_on_linux(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_dir = Path(temp_dir)
+            exe_path = tmp_dir / "pcsx2-qt"
+            exe_path.write_bytes(b"")
+            linux_config_path = tmp_dir / "PCSX2.ini"
+
+            with patch("rom_mate.emulator.pcsx2.sys.platform", "linux"):
+                with patch("rom_mate.emulator.pcsx2.pcsx2_config_path_candidates", return_value=[linux_config_path]):
+                    ensure_pcsx2_settings(str(exe_path))
+
+            self.assertFalse((tmp_dir / "portable.ini").exists())
+
+    def test_duckstation_no_portable_txt_on_linux(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_dir = Path(temp_dir)
+            exe_path = tmp_dir / "duckstation-qt"
+
+            with patch("rom_mate.emulator.duckstation.sys.platform", "linux"):
+                ensure_duckstation_memory_card_settings(str(exe_path))
+
+            self.assertFalse((tmp_dir / "portable.txt").exists())
+
+    def test_dolphin_no_portable_txt_on_linux(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_dir = Path(temp_dir)
+            exe_path = tmp_dir / "dolphin-emu"
+
+            with patch("rom_mate.emulator.dolphin.sys.platform", "linux"):
+                ensure_dolphin_settings(str(exe_path))
+
+            self.assertFalse((tmp_dir / "portable.txt").exists())
+
+    def test_ppsspp_no_portable_memstick_on_linux(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_dir = Path(temp_dir)
+            exe_path = tmp_dir / "ppsspp"
+            linux_ini_path = tmp_dir / "linux-config" / "SYSTEM" / "PPSSPP.INI"
+
+            with patch("rom_mate.emulator.ppsspp.sys.platform", "linux"):
+                with patch("rom_mate.emulator.ppsspp.ppsspp_ini_path_candidates", return_value=[linux_ini_path]):
+                    ensure_ppsspp_settings(str(exe_path))
+
+            self.assertFalse((tmp_dir / "memstick").exists())
+
+    def test_rpcs3_no_portable_dir_on_linux(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_dir = Path(temp_dir)
+            exe_path = tmp_dir / "rpcs3"
+            exe_path.write_bytes(b"")
+
+            with patch("rom_mate.emulator.rpcs3.sys.platform", "linux"):
+                ensure_rpcs3_settings(str(exe_path))
+
+            self.assertFalse((tmp_dir / "portable").exists())
+
+    def test_azahar_no_user_dir_on_linux(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_dir = Path(temp_dir)
+            exe_path = tmp_dir / "azahar"
+            xdg_data = tmp_dir / "xdg-data"
+            azahar_config = xdg_data / "azahar-emu" / "qt-config.ini"
+            azahar_config.parent.mkdir(parents=True, exist_ok=True)
+            azahar_config.write_text("", encoding="utf-8")
+
+            with patch("rom_mate.emulator.azahar.sys.platform", "linux"):
+                with patch.dict(os.environ, {"XDG_DATA_HOME": str(xdg_data)}, clear=False):
+                    ensure_azahar_settings(str(exe_path))
+
+            self.assertFalse((tmp_dir / "user").exists())
+
+    def test_eden_no_user_dir_on_linux(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp_dir = Path(temp_dir)
+            exe_path = tmp_dir / "eden"
+            xdg_config = tmp_dir / "xdg-config"
+
+            with patch("rom_mate.emulator.eden.sys.platform", "linux"):
+                with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(xdg_config)}, clear=False):
+                    ensure_eden_settings(str(exe_path))
+
+            self.assertFalse((tmp_dir / "user").exists())
+
+    def test_normalize_emulators_preserves_autodetected(self) -> None:
+        normalize_save_strategy_value = lambda value: str(value).strip() or "auto"
+
+        normalized_str = normalize_emulators(
+            [{
+                "name": "RetroArch",
+                "path": "/usr/bin/retroarch",
+                "args": "%rom%",
+                "autodetected": "true",
+            }],
+            normalize_save_strategy_value,
+        )
+        self.assertEqual(normalized_str[0].get("autodetected"), "true")
+
+        normalized_bool = normalize_emulators(
+            [{
+                "name": "RetroArch",
+                "path": "/usr/bin/retroarch",
+                "args": "%rom%",
+                "autodetected": True,
+            }],
+            normalize_save_strategy_value,
+        )
+        self.assertEqual(normalized_bool[0].get("autodetected"), "true")
+
+        normalized_empty = normalize_emulators(
+            [{
+                "name": "RetroArch",
+                "path": "/usr/bin/retroarch",
+                "args": "%rom%",
+                "autodetected": "",
+            }],
+            normalize_save_strategy_value,
+        )
+        self.assertNotIn("autodetected", normalized_empty[0])
 
     def test_ps3_vfs_dev_hdd0_path_returns_none_with_no_vfs_and_no_library(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shlex
+import sys
 from pathlib import Path
 from typing import Callable
 
@@ -21,6 +22,14 @@ def launchable_emulator_file(path: Path) -> bool:
     return _has_launchable_suffix(path, _EMULATOR_SUFFIXES)
 
 
+def _core_extension() -> str:
+    if sys.platform == "win32":
+        return ".dll"
+    if sys.platform == "darwin":
+        return ".dylib"
+    return ".so"
+
+
 def retroarch_core_argument_path(configured_core: str) -> str:
     core = configured_core.strip()
     if not core:
@@ -30,12 +39,16 @@ def retroarch_core_argument_path(configured_core: str) -> str:
     if "/" in normalized:
         return normalized
 
-    if normalized.casefold().endswith(".dll"):
-        core_file = normalized
-    elif normalized.casefold().endswith("_libretro"):
-        core_file = f"{normalized}.dll"
+    ext = _core_extension()
+    for old_ext in (".dll", ".so", ".dylib"):
+        if normalized.casefold().endswith(old_ext):
+            normalized = normalized[: -len(old_ext)]
+            break
+
+    if normalized.casefold().endswith("_libretro"):
+        core_file = f"{normalized}{ext}"
     else:
-        core_file = f"{normalized}_libretro.dll"
+        core_file = f"{normalized}_libretro{ext}"
     return f"cores/{core_file}"
 
 

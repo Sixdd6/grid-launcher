@@ -169,6 +169,7 @@ from .selection import (
     mapping_value_for_platform,
     resolved_emulator_entry_for_game,
 )
+from .detection import detect_linux_emulators
 
 __all__ = [
     "all_retroarch_cores",
@@ -202,6 +203,7 @@ __all__ = [
     "ensure_dolphin_skip_ipl",
     "compatible_emulator_names_for_platform",
     "default_assignable_server_platforms",
+    "detect_linux_emulators",
     "default_emulator_autoprofiles",
     "duckstation_memory_card_settings",
     "defaulted_manual_emulator_entry",

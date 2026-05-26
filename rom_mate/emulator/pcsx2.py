@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+from rom_mate.core.path import xdg_config_home
+
 
 def _windows_documents_folder() -> Path | None:
     """Return the user's Documents folder using the Windows Shell API.
@@ -161,6 +163,15 @@ def pcsx2_config_path_candidates(emulator_path_text: str) -> list[Path]:
     if documents is None:
         documents = Path.home() / "Documents"
     candidates.append(documents / "PCSX2" / "inis" / "PCSX2.ini")
+
+    if sys.platform != "win32":
+        xdg_config = xdg_config_home()
+        if xdg_config is not None:
+            candidates.append(xdg_config / "PCSX2" / "inis" / "PCSX2.ini")
+        candidates.append(
+            Path.home() / ".var" / "app" / "net.pcsx2.PCSX2" / "config" / "PCSX2" / "inis" / "PCSX2.ini"
+        )
+
     candidates.append(Path.home() / ".config" / "PCSX2" / "inis" / "PCSX2.ini")
     candidates.append(Path.home() / "Library" / "Application Support" / "PCSX2" / "inis" / "PCSX2.ini")
 
@@ -183,15 +194,20 @@ def ensure_pcsx2_settings(
     if not emulator_path.exists() or not emulator_path.is_file():
         return {"config_path": None, "changed": False}
 
-    emulator_dir = Path(emulator_path_text).parent
-    portable_ini_path = emulator_dir / "portable.ini"
-    if not portable_ini_path.exists():
-        try:
-            portable_ini_path.write_text("", encoding="utf-8")
-        except OSError:
-            pass
-
-    config_path = emulator_dir / "inis" / "PCSX2.ini"
+    emulator_dir = emulator_path.parent
+    if sys.platform == "win32":
+        portable_ini_path = emulator_dir / "portable.ini"
+        if not portable_ini_path.exists():
+            try:
+                portable_ini_path.write_text("", encoding="utf-8")
+            except OSError:
+                pass
+        config_path = emulator_dir / "inis" / "PCSX2.ini"
+    else:
+        config_candidates = pcsx2_config_path_candidates(path_text)
+        if not config_candidates:
+            return {"config_path": None, "changed": False}
+        config_path = next((candidate for candidate in config_candidates if candidate.exists()), config_candidates[0])
 
     try:
         content = config_path.read_text(encoding="utf-8") if config_path.exists() else ""

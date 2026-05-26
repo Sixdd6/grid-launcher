@@ -155,6 +155,8 @@ def xemu_base_path_candidates(
                 candidates.append(emulator_dir.resolve())
 
     candidates.append(_default_base_root())
+    if sys.platform != "win32":
+        candidates.append(Path.home() / ".var" / "app" / "app.xemu.xemu" / "data" / "xemu" / "xemu")
     return _unique_paths(candidates)
 
 

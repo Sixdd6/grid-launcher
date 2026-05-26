@@ -209,6 +209,7 @@ from rom_mate.cover import (
 )
 from rom_mate.emulator import (
     all_retroarch_cores as resolve_all_retroarch_cores,
+    detect_linux_emulators as resolve_detect_linux_emulators,
     apply_launch_placeholders_to_args as resolve_apply_launch_placeholders_to_args,
     apply_manual_emulator_profile_defaults as resolve_apply_manual_emulator_profile_defaults,
     assign_profile_platform_defaults as resolve_assign_profile_platform_defaults,
@@ -1962,40 +1963,77 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         config_path = self._config_file()
 
         if not config_path.exists():
-            return defaults
-
-        try:
-            content = json.loads(config_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return defaults
-
-        merged = resolve_merge_config_with_defaults(
-            defaults,
-            content,
-            normalize_emulators=self._normalize_emulators,
-            normalize_default_emulators=self._normalize_default_emulators,
-            normalize_default_retroarch_cores=self._normalize_default_retroarch_cores,
-            normalize_installed_games=self._normalize_installed_games,
-            normalize_cloud_sync_state=self._normalize_cloud_sync_state,
-        )
-        merged["emulator_source_installs"] = self._normalize_emulator_source_installs(
-            content.get("emulator_source_installs", {})
-        )
-
-        stored_token = self._load_api_token()
-        if stored_token:
-            merged["api_token"] = stored_token
+            merged = defaults
         else:
-            legacy_token = merged.get("api_token", "")
-            if isinstance(legacy_token, str) and legacy_token.strip() and self._save_api_token(legacy_token):
-                merged["api_token"] = legacy_token.strip()
-                migrated = merged.copy()
-                migrated["api_token"] = ""
-                self._save_config(migrated)
+            try:
+                content = json.loads(config_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                merged = defaults
+            else:
+                merged = resolve_merge_config_with_defaults(
+                    defaults,
+                    content,
+                    normalize_emulators=self._normalize_emulators,
+                    normalize_default_emulators=self._normalize_default_emulators,
+                    normalize_default_retroarch_cores=self._normalize_default_retroarch_cores,
+                    normalize_installed_games=self._normalize_installed_games,
+                    normalize_cloud_sync_state=self._normalize_cloud_sync_state,
+                )
+                merged["emulator_source_installs"] = self._normalize_emulator_source_installs(
+                    content.get("emulator_source_installs", {})
+                )
 
-        ra_token = self._load_ra_token()
-        if ra_token:
-            merged["retroachievements_token"] = ra_token
+                stored_token = self._load_api_token()
+                if stored_token:
+                    merged["api_token"] = stored_token
+                else:
+                    legacy_token = merged.get("api_token", "")
+                    if isinstance(legacy_token, str) and legacy_token.strip() and self._save_api_token(legacy_token):
+                        merged["api_token"] = legacy_token.strip()
+                        migrated = merged.copy()
+                        migrated["api_token"] = ""
+                        self._save_config(migrated)
+
+                ra_token = self._load_ra_token()
+                if ra_token:
+                    merged["retroachievements_token"] = ra_token
+
+        configured_emulators = merged.get("emulators", [])
+        detected_emulators = resolve_detect_linux_emulators()
+        if isinstance(configured_emulators, list) and detected_emulators:
+            existing_slugs: set[str] = set()
+
+            def _entry_slug(entry: dict[str, Any]) -> str:
+                slug_value = entry.get("slug", "")
+                if isinstance(slug_value, str) and slug_value.strip():
+                    return slug_value.strip().casefold()
+
+                name_value = entry.get("name", "")
+                if not isinstance(name_value, str):
+                    return ""
+                base_name = name_value.strip().split("(", 1)[0].strip().casefold()
+                return re.sub(r"[^a-z0-9]+", "-", base_name).strip("-")
+
+            normalized_existing: list[dict[str, Any]] = []
+            for emulator in configured_emulators:
+                if not isinstance(emulator, dict):
+                    continue
+                normalized_existing.append(dict(emulator))
+                slug = _entry_slug(emulator)
+                if slug:
+                    existing_slugs.add(slug)
+
+            for emulator in detected_emulators:
+                if not isinstance(emulator, dict):
+                    continue
+                slug_value = emulator.get("slug", "")
+                slug = slug_value.strip().casefold() if isinstance(slug_value, str) else ""
+                if not slug or slug in existing_slugs:
+                    continue
+                normalized_existing.append(dict(emulator))
+                existing_slugs.add(slug)
+
+            merged["emulators"] = self._normalize_emulators(normalized_existing)
 
         return merged
 

@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Callable
+
+from rom_mate.core.path import xdg_config_home
 
 
 _DEFAULT_CEMU_XINPUT_CONTROLLER_PROFILE = """\
@@ -57,6 +60,42 @@ _DEFAULT_CEMU_XINPUT_CONTROLLER_PROFILE = """\
     </controller>
 </emulated_controller>
 """
+
+_DEFAULT_CEMU_SDL_CONTROLLER_PROFILE = """\
+<?xml version="1.0" encoding="UTF-8"?>
+<emulated_controller>
+    <type>Wii U GamePad</type>
+    <controller>
+        <api>SDLController</api>
+        <uuid>0_030000005e0400008e02000014010000</uuid>
+        <mappings>
+            <entry><mapping>1</mapping><button>1</button></entry>
+            <entry><mapping>2</mapping><button>0</button></entry>
+            <entry><mapping>3</mapping><button>3</button></entry>
+            <entry><mapping>4</mapping><button>2</button></entry>
+            <entry><mapping>5</mapping><button>9</button></entry>
+            <entry><mapping>6</mapping><button>10</button></entry>
+            <entry><mapping>7</mapping><button>42</button></entry>
+            <entry><mapping>8</mapping><button>43</button></entry>
+            <entry><mapping>9</mapping><button>6</button></entry>
+            <entry><mapping>10</mapping><button>4</button></entry>
+            <entry><mapping>11</mapping><button>11</button></entry>
+            <entry><mapping>12</mapping><button>12</button></entry>
+            <entry><mapping>13</mapping><button>13</button></entry>
+            <entry><mapping>14</mapping><button>14</button></entry>
+            <entry><mapping>15</mapping><button>7</button></entry>
+            <entry><mapping>16</mapping><button>8</button></entry>
+            <entry><mapping>17</mapping><button>45</button></entry>
+            <entry><mapping>18</mapping><button>39</button></entry>
+            <entry><mapping>19</mapping><button>44</button></entry>
+            <entry><mapping>20</mapping><button>38</button></entry>
+            <entry><mapping>21</mapping><button>47</button></entry>
+            <entry><mapping>22</mapping><button>41</button></entry>
+            <entry><mapping>23</mapping><button>46</button></entry>
+            <entry><mapping>24</mapping><button>40</button></entry>
+        </mappings>
+    </controller>
+</emulated_controller>"""
 
 _DEFAULT_CEMU_SETTINGS_XML = """\
 <?xml version="1.0" encoding="UTF-8"?>
@@ -206,10 +245,16 @@ def cemu_settings_path_candidates(emulator_path_text: str) -> list[Path]:
             candidates.append(emulator_dir / "portable" / "settings.xml")
             candidates.append(emulator_dir / "settings.xml")
 
-    for env_name in ("APPDATA", "LOCALAPPDATA"):
-        env_value = os.environ.get(env_name, "")
-        if isinstance(env_value, str) and env_value.strip():
-            candidates.append(Path(env_value).expanduser() / "Cemu" / "settings.xml")
+    if sys.platform == "win32":
+        for env_name in ("APPDATA", "LOCALAPPDATA"):
+            env_value = os.environ.get(env_name, "")
+            if isinstance(env_value, str) and env_value.strip():
+                candidates.append(Path(env_value).expanduser() / "Cemu" / "settings.xml")
+    else:
+        xdg_config = xdg_config_home()
+        if xdg_config is not None:
+            candidates.append(xdg_config / "Cemu" / "settings.xml")
+        candidates.append(Path.home() / ".var" / "app" / "info.cemu.Cemu" / "config" / "Cemu" / "settings.xml")
 
     return _unique_paths(candidates)
 
@@ -226,6 +271,22 @@ def _ensure_xml_element_value(root, tag: str, value: str) -> bool:
     return True
 
 
+def _first_existing_or_writable_path(candidates: list[Path]) -> Path | None:
+    existing = next((candidate for candidate in candidates if candidate.exists() and candidate.is_file()), None)
+    if existing is not None:
+        return existing
+
+    for candidate in candidates:
+        parent = candidate.parent
+        try:
+            parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
+        return candidate
+
+    return None
+
+
 def ensure_cemu_settings(emulator_path_text: str) -> dict:
     try:
         path_text = emulator_path_text.strip() if isinstance(emulator_path_text, str) else ""
@@ -237,9 +298,15 @@ def ensure_cemu_settings(emulator_path_text: str) -> dict:
         if not str(emulator_dir):
             return {"config_path": None, "changed": False}
 
-        portable_dir = emulator_dir / "portable"
-        portable_dir.mkdir(parents=True, exist_ok=True)
-        target = portable_dir / "settings.xml"
+        if sys.platform == "win32":
+            portable_dir = emulator_dir / "portable"
+            portable_dir.mkdir(parents=True, exist_ok=True)
+            target = portable_dir / "settings.xml"
+        else:
+            target = _first_existing_or_writable_path(cemu_settings_path_candidates(path_text))
+            if target is None:
+                return {"config_path": None, "changed": False}
+
         if not target.exists():
             target.write_text(_DEFAULT_CEMU_SETTINGS_XML, encoding="utf-8")
             return {"config_path": str(target), "changed": True}
@@ -271,20 +338,31 @@ def ensure_cemu_settings(emulator_path_text: str) -> dict:
 
 
 def ensure_cemu_controller_config(emulator_path_text: str) -> dict:
-    """Write default XInput Pro Controller profile to portable/controllerProfiles/controller0.xml if not already present."""
+    """Write default Cemu controller profile to portable/controllerProfiles/controller0.xml if not already present."""
     changed = False
     profile_path: str | None = None
 
     try:
-        emulator_path = Path(emulator_path_text)
+        emulator_path = Path(emulator_path_text).expanduser()
         emulator_dir = emulator_path if emulator_path.is_dir() else emulator_path.parent
-        target = emulator_dir / "portable" / "controllerProfiles" / "controller0.xml"
+        if sys.platform == "win32":
+            target = emulator_dir / "portable" / "controllerProfiles" / "controller0.xml"
+        else:
+            settings_candidates = cemu_settings_path_candidates(emulator_path_text)
+            existing_settings = next(
+                (candidate for candidate in settings_candidates if candidate.exists() and candidate.is_file()),
+                settings_candidates[0] if settings_candidates else None,
+            )
+            if existing_settings is None:
+                return {"profile_path": None, "changed": False}
+            target = existing_settings.parent / "controllerProfiles" / "controller0.xml"
 
         if target.exists():
             return {"profile_path": str(target), "changed": False}
 
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(_DEFAULT_CEMU_XINPUT_CONTROLLER_PROFILE, encoding="utf-8")
+        profile = _DEFAULT_CEMU_SDL_CONTROLLER_PROFILE if sys.platform != "win32" else _DEFAULT_CEMU_XINPUT_CONTROLLER_PROFILE
+        target.write_text(profile, encoding="utf-8")
         changed = True
         profile_path = str(target)
     except OSError:

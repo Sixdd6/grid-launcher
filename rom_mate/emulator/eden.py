@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+from rom_mate.core.path import xdg_config_home
+
 
 def _unique_paths(paths: list[Path]) -> list[Path]:
     unique: list[Path] = []
@@ -203,21 +205,37 @@ def _ensure_eden_section_values(
 
 def eden_config_path_candidates(emulator_path_text: str) -> list[Path]:
     portable_candidate = Path(emulator_path_text).parent / "user" / "config" / "qt-config.ini"
-    windows_candidate = Path(os.path.expandvars("%APPDATA%")) / "eden" / "config" / "qt-config.ini"
-    linux_candidate = Path.home() / ".config" / "eden" / "qt-config.ini"
-    return [portable_candidate, windows_candidate, linux_candidate]
+    candidates: list[Path] = []
+
+    if sys.platform == "win32":
+        candidates.append(portable_candidate)
+        appdata = os.environ.get("APPDATA", "")
+        if isinstance(appdata, str) and appdata.strip():
+            candidates.append(Path(appdata).expanduser() / "eden" / "config" / "qt-config.ini")
+    else:
+        xdg_config = xdg_config_home()
+        if xdg_config is not None:
+            candidates.append(xdg_config / "eden" / "qt-config.ini")
+        candidates.append(Path.home() / ".config" / "eden" / "qt-config.ini")
+        candidates.append(portable_candidate)
+
+    if sys.platform == "win32":
+        candidates.append(Path.home() / ".config" / "eden" / "qt-config.ini")
+
+    return candidates
 
 
 def ensure_eden_settings(emulator_path_text: str) -> dict:
     if isinstance(emulator_path_text, str) and emulator_path_text.strip():
         _emulator_path = Path(emulator_path_text.strip()).expanduser()
         _emulator_dir = _emulator_path if _emulator_path.is_dir() else _emulator_path.parent
-        _user_dir = _emulator_dir / "user"
-        if not _user_dir.exists():
-            try:
-                _user_dir.mkdir(parents=True, exist_ok=True)
-            except OSError:
-                pass
+        if sys.platform == "win32":
+            _user_dir = _emulator_dir / "user"
+            if not _user_dir.exists():
+                try:
+                    _user_dir.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    pass
 
     candidates = eden_config_path_candidates(emulator_path_text)
     if not candidates:

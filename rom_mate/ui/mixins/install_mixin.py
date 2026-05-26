@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import stat
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -301,6 +302,8 @@ class InstallMixin:
 
 
     def _xbox360_content_install_block_reason(self, game: dict[str, str]) -> str:
+        if sys.platform != "win32":
+            return "Xbox 360 game installation requires Windows."
         if not self._is_game_installed(game):
             return "Game must be installed before content can be applied."
         rom_id = self._resolve_rom_id_for_game(game)

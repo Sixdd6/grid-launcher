@@ -6,9 +6,107 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QPushButton
+from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QListWidget, QPushButton
 
 from rom_mate.ui.dialogs import EmulatorConfigDialog
+from rom_mate.ui.mixins.emulator_ui_mixin import EmulatorUIMixin
+
+
+class _EmulatorRowsStubWindow(EmulatorUIMixin):
+    def __init__(self) -> None:
+        self.config = {
+            "emulators": [
+                {
+                    "name": "Auto Detected",
+                    "path": "/usr/bin/retroarch",
+                    "args": "%rom%",
+                    "save_strategy": "auto",
+                    "autodetected": "true",
+                },
+                {
+                    "name": "Manual Entry",
+                    "path": "/opt/emulators/manual",
+                    "args": "%rom%",
+                    "save_strategy": "auto",
+                },
+            ],
+            "default_emulators": {},
+            "default_retroarch_cores": {},
+        }
+        self.emulator_list = QListWidget()
+        self.default_platform_combo = None
+        self.default_mapping_list = None
+        self._retroarch_core_ids_cache: dict[str, set[str]] = {}
+        self._platform_default_emulator_cache: dict[str, str] = {}
+        self._platform_available_emulator_cache: dict[str, str] = {}
+        self.server_platform_ids: dict[str, int] = {}
+        self.library_games: list[dict[str, str]] = []
+
+    def _emulators(self) -> list[dict[str, str]]:
+        value = self.config.get("emulators", [])
+        return value if isinstance(value, list) else []
+
+    def _normalize_emulators(self, value: object) -> list[dict[str, str]]:
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+        return []
+
+    def _default_assignable_server_platforms(self) -> list[str]:
+        return []
+
+    def _normalize_default_emulators(self, value: object) -> dict[str, str]:
+        if isinstance(value, dict):
+            return {str(key): str(item) for key, item in value.items()}
+        return {}
+
+    def _normalize_default_retroarch_cores(self, value: object) -> dict[str, str]:
+        if isinstance(value, dict):
+            return {str(key): str(item) for key, item in value.items()}
+        return {}
+
+    def _is_retroarch_emulator_name(self, emulator_name: str) -> bool:
+        return emulator_name.strip().casefold() == "retroarch"
+
+    def _is_azahar_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        del emulator
+        return emulator_name.strip().casefold() == "azahar"
+
+    def _is_eden_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        del emulator
+        return emulator_name.strip().casefold() == "eden"
+
+    def _is_xemu_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+        del emulator
+        return emulator_name.strip().casefold() == "xemu"
+
+    def _is_rpcs3_emulator_name(self, emulator_name: str) -> bool:
+        return emulator_name.strip().casefold() == "rpcs3"
+
+    def _on_default_platform_changed(self, platform: str) -> None:
+        return None
+
+    def _warm_emulator_platform_caches(self) -> None:
+        return None
+
+    def _source_download_entry_for_emulator_name(
+        self,
+        emulator_name: str,
+        emulator: dict[str, str] | None = None,
+    ) -> dict[str, str] | None:
+        del emulator_name, emulator
+        return None
+
+    def _launch_emulator_at_index(self, row: int) -> None:
+        return None
+
+    def _open_emulator_config_dialog_for_row(self, row: int) -> None:
+        return None
+
+    def _remove_emulator_at_index(self, row: int) -> None:
+        return None
+
+    def _start_source_emulator_update_at_index(self, index: int) -> None:
+        return None
 
 
 class EmulatorConfigDialogAddNewTests(unittest.TestCase):
@@ -177,6 +275,44 @@ class EmulatorConfigDialogGuideButtonTests(unittest.TestCase):
         dialog = EmulatorConfigDialog(None, is_new_entry=True)
 
         self.assertNotIn("guide_button_excluded", dialog.entry_payload())
+
+
+class EmulatorListAutodetectedTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_autodetected_emulator_uninstall_button_disabled(self) -> None:
+        window = _EmulatorRowsStubWindow()
+
+        window._refresh_emulator_views()
+
+        autodetected_button = None
+        manual_button = None
+        for row in range(window.emulator_list.count()):
+            item = window.emulator_list.item(row)
+            row_widget = window.emulator_list.itemWidget(item)
+            self.assertIsNotNone(row_widget)
+            assert row_widget is not None
+
+            labels = [label.text().strip() for label in row_widget.findChildren(QLabel) if label.text().strip()]
+            uninstall_button = next(
+                button
+                for button in row_widget.findChildren(QPushButton)
+                if button.objectName() == "installedEmulatorUninstallButton"
+            )
+            if "Auto Detected" in labels:
+                autodetected_button = uninstall_button
+            elif "Manual Entry" in labels:
+                manual_button = uninstall_button
+
+        self.assertIsNotNone(autodetected_button)
+        self.assertIsNotNone(manual_button)
+        assert autodetected_button is not None
+        assert manual_button is not None
+        self.assertFalse(autodetected_button.isEnabled())
+        self.assertIn("cannot remove", autodetected_button.toolTip().casefold())
+        self.assertTrue(manual_button.isEnabled())
 
 
 if __name__ == "__main__":

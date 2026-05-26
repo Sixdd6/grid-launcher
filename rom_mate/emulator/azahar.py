@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+from rom_mate.core.path import xdg_config_home, xdg_data_home
+
 _SDMC_TITLE_GROUPS = ("00040000", "00040002", "0004000e", "0004008c", "00048004")
 _NAND_TITLE_GROUPS = ("00040010", "00040030")
 _ZERO_ID = "0" * 32
@@ -126,24 +128,50 @@ def azahar_config_path_candidates(emulator_path_text: str) -> list[Path]:
         return []
 
     emulator_path = Path(emulator_path_text).expanduser()
-    return [
+    candidates = [
         emulator_path.parent / "user" / "config" / "qt-config.ini",
         emulator_path.parent / "qt-config.ini",
-        Path(os.path.expandvars("%APPDATA%")) / "Azahar" / "qt-config.ini",
-        Path.home() / ".config" / "Azahar" / "qt-config.ini",
     ]
+
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA", "")
+        if isinstance(appdata, str) and appdata.strip():
+            candidates.append(Path(appdata).expanduser() / "Azahar" / "qt-config.ini")
+    else:
+        xdg_data = xdg_data_home()
+        if xdg_data is not None:
+            candidates.append(xdg_data / "azahar-emu" / "qt-config.ini")
+
+        candidates.append(
+            Path.home()
+            / ".var"
+            / "app"
+            / "org.azahar_emu.Azahar"
+            / "data"
+            / "azahar-emu"
+            / "qt-config.ini"
+        )
+
+        xdg_config = xdg_config_home()
+        if xdg_config is not None:
+            candidates.append(xdg_config / "azahar-emu" / "qt-config.ini")
+
+    candidates.append(Path.home() / ".config" / "Azahar" / "qt-config.ini")
+
+    return candidates
 
 
 def ensure_azahar_settings(emulator_path_text: str) -> dict:
     if isinstance(emulator_path_text, str) and emulator_path_text.strip():
         _emulator_path = Path(emulator_path_text.strip()).expanduser()
         _emulator_dir = _emulator_path if _emulator_path.is_dir() else _emulator_path.parent
-        _user_dir = _emulator_dir / "user"
-        if not _user_dir.exists():
-            try:
-                _user_dir.mkdir(parents=True, exist_ok=True)
-            except OSError:
-                pass
+        if sys.platform == "win32":
+            _user_dir = _emulator_dir / "user"
+            if not _user_dir.exists():
+                try:
+                    _user_dir.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    pass
 
     config_candidates = azahar_config_path_candidates(emulator_path_text)
     if not config_candidates:
@@ -236,9 +264,9 @@ def azahar_user_root_candidates(
         if isinstance(appdata, str) and appdata.strip():
             candidates.append((Path(appdata).expanduser() / "Azahar").resolve())
     else:
-        xdg_data_home = os.environ.get("XDG_DATA_HOME", "")
-        if isinstance(xdg_data_home, str) and xdg_data_home.strip():
-            candidates.append((Path(xdg_data_home).expanduser() / "Azahar").resolve())
+        xdg_data_value = os.environ.get("XDG_DATA_HOME", "")
+        if isinstance(xdg_data_value, str) and xdg_data_value.strip():
+            candidates.append((Path(xdg_data_value).expanduser() / "Azahar").resolve())
 
         home_path = Path.home()
         candidates.extend(

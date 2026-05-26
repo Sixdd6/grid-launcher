@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any, Callable
 
@@ -12,6 +13,14 @@ DEFAULT_CLOUD_SYNC_IGNORE_BASENAMES = {
     "ehthumbs.db",
     "thumbs.db",
 }
+
+_WINDOWS_ONLY_EMULATOR_SLUGS: frozenset[str] = frozenset({"xenia", "xenia-canary"})
+
+
+def is_available_on_current_platform(emulator_slug: str) -> bool:
+    if sys.platform != "win32" and emulator_slug.casefold() in _WINDOWS_ONLY_EMULATOR_SLUGS:
+        return False
+    return True
 
 
 def matching_platforms_for_emulator_keywords(assignable_platforms: list[str], keywords: list[str]) -> list[str]:
@@ -156,6 +165,13 @@ def emulator_profile_for_entry(
             return profile
         if executable_stem and any(Path(token).stem.casefold() == executable_stem for token in normalized_tokens):
             return profile
+
+    if name:
+        for profile in profiles:
+            profile_name = profile.get("name", "")
+            profile_name_folded = profile_name.strip().casefold() if isinstance(profile_name, str) else ""
+            if profile_name_folded.startswith(f"{name} "):
+                return profile
 
     return None
 
