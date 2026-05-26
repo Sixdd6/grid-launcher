@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import unittest
 from unittest.mock import MagicMock
 
@@ -64,11 +65,10 @@ class TvDetailsViewScreenshotTests(unittest.TestCase):
         controller_backend = MagicMock()
         return app_backend, cloud_backend, game_backend, pause_backend, controller_backend
 
-    def test_refresh_screenshots_sets_card_height_from_pixmap_aspect_ratio(self) -> None:
+    def setUp(self) -> None:
         app_backend, cloud_backend, game_backend, pause_backend, controller_backend = self._make_backends()
-        cover_loader = _StubCoverLoader()
-
-        view = DetailsView(
+        self.cover_loader = _StubCoverLoader()
+        self.view = DetailsView(
             {
                 "title": "Metroid Prime",
                 "screenshot_urls": ["shot://1"],
@@ -78,21 +78,22 @@ class TvDetailsViewScreenshotTests(unittest.TestCase):
             game_backend,
             pause_backend,
             controller_backend,
-            cover_loader,
+            self.cover_loader,
             lambda: None,
         )
-        self.addCleanup(view.deleteLater)
+        self.addCleanup(self.view.deleteLater)
 
-        view.resize(1600, 900)
-        view.show()
+    def test_refresh_screenshots_sets_card_height_from_pixmap_aspect_ratio(self) -> None:
+        self.view.resize(1600, 900)
+        self.view.show()
         self.app.processEvents()
 
-        view._refresh_screenshots()
+        self.view._refresh_screenshots()
 
-        shot_callbacks = [callback for url, callback in cover_loader.calls if url == "shot://1"]
+        shot_callbacks = [callback for url, callback in self.cover_loader.calls if url == "shot://1"]
         self.assertTrue(shot_callbacks)
 
-        card = view._shot_cards[0]
+        card = self.view._shot_cards[0]
         card.setFixedWidth(500)
         self.app.processEvents()
         card_width = 500
@@ -104,6 +105,47 @@ class TvDetailsViewScreenshotTests(unittest.TestCase):
         expected_height = int(card_width * 1080 / 1920)
         actual_height = card.height()
         self.assertLessEqual(abs(actual_height - expected_height), 2)
+
+    def test_font_scale_increases_above_1080p(self) -> None:
+        self.view.resize(1920, 1620)
+        self.view._update_font_scale()
+        match = re.search(r"font-size:\s*(\d+)px", self.view._title_label.styleSheet())
+        self.assertIsNotNone(match)
+        self.assertGreater(int(match.group(1)), 28)
+
+    def test_font_scale_floor_at_small_height(self) -> None:
+        self.view.resize(1280, 360)
+        self.view._update_font_scale()
+        match = re.search(r"font-size:\s*(\d+)px", self.view._title_label.styleSheet())
+        self.assertIsNotNone(match)
+        self.assertLessEqual(int(match.group(1)), 24)
+
+    def test_font_scale_cap_at_max(self) -> None:
+        self.view.resize(1920, 2700)
+        self.view._update_font_scale()
+        match = re.search(r"font-size:\s*(\d+)px", self.view._title_label.styleSheet())
+        self.assertIsNotNone(match)
+        self.assertEqual(int(match.group(1)), round(28 * 2.5))
+
+    def test_rebuild_buttons_uses_current_font_scale(self) -> None:
+        self.view.resize(1920, 1620)
+        self.view._update_font_scale()
+        original_scale = self.view._current_font_scale
+        self.assertGreater(original_scale, 1.0)
+
+        self.view._refresh_ui()
+
+        found_scaled = False
+        for lbl in self.view._button_container.findChildren(type(self.view._title_label)):
+            ss = lbl.styleSheet()
+            if "font-size" not in ss or "font-weight: 700" not in ss:
+                continue
+            match = re.search(r"font-size:\s*(\d+)px", ss)
+            if match and int(match.group(1)) != 14:
+                found_scaled = True
+                break
+
+        self.assertTrue(found_scaled)
 
 
 if __name__ == "__main__":

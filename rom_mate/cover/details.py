@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import re as _re
 from typing import Any, Callable, Protocol
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QLabel
+
+
+_FONT_REF_HEIGHT = 1080
+_FONT_MAX_SCALE = 2.5
 
 
 def resolved_cover_url_for_game(
@@ -37,6 +42,8 @@ class CoverDetailsWindowProtocol(Protocol):
     details_content_frame: Any | None
     details_cover_label: QLabel | None
     details_description_label: QLabel | None
+    details_title_label: QLabel | None
+    details_metadata_scalable_labels: list[tuple[QLabel, str]]
     details_screenshot_labels: list[QLabel]
     details_screenshots_panel: Any | None
     details_screenshots_scroll: Any | None
@@ -76,6 +83,14 @@ def update_details_screenshots(window: CoverDetailsWindowProtocol, game: dict[st
             window._queue_cover_load(screenshot_urls[index], label)
         else:
             label.setVisible(False)
+
+
+def _apply_font_scale(base_stylesheet: str, scale: float) -> str:
+    def _replace(m: _re.Match) -> str:
+        px = max(8, round(int(m.group(1)) * scale))
+        return f"font-size: {px}px"
+
+    return _re.sub(r"font-size:\s*(\d+)px", _replace, base_stylesheet)
 
 
 def update_details_layout_metrics(window: CoverDetailsWindowProtocol) -> None:
@@ -140,6 +155,10 @@ def update_details_layout_metrics(window: CoverDetailsWindowProtocol) -> None:
     if window.details_description_label is not None:
         description_width = max(280, min(1200, int(content_width * 0.42)))
         window.details_description_label.setMaximumWidth(description_width)
+
+    scale = max(720 / _FONT_REF_HEIGHT, min(_FONT_MAX_SCALE, window.height() / _FONT_REF_HEIGHT))
+    for label, base_stylesheet in getattr(window, "details_metadata_scalable_labels", []):
+        label.setStyleSheet(_apply_font_scale(base_stylesheet, scale))
 
     QTimer.singleShot(0, window._rescale_details_media_for_current_sizes)
 

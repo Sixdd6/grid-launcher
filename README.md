@@ -20,14 +20,28 @@ Please be aware that this application is created using AI tools/coding, if this 
 ![Game Details](.github/images/tv4.png)
 
 ## Features
-- Library tab with cover art grid for installed games
+
+### Both Modes
+- Library tab with cover art display for installed games
 - Server tab with platform list and game grid for games on your server
-- Settings tab with configuration options for server address and client token, retroachievements details, theme selection and cloud saves toggle
-- Emulator auto-install from supported sources
-- Light/Dark Themes
 - Cloud save support and in-app management
+- Supports screen resolutions from 720p and up, good for small handhelds up to 4k monitor/tv
+
+### Desktop Mode
+- Settings tab with configuration options for server address and client token, retroachievements details, theme selection and cloud saves toggle
+- Emulator tab for manual or automated install and setup of emulators from official sources
+- Light/Dark Themes
 - RetroAchievements integration and browsing
-- Supports screen resolutions from 720p and up, good for small handhelds AND large screens
+
+### TV Mode
+- Home tab with several rows to help you discover your collection
+    - Continue Playing: Auto-sorts your most recently played and installed games to quickly jump back in
+    - Favorites: Shows any games marked as favorite for your account
+    - New Additions: Sorts newly added games to the front of the row
+    - Highly Rated: Displays highest rated games on your server based on an average of all available ratings data for your server
+- Fullscreen Pause feature to quickly pause and resume games and quit out of any game/emulator that doesn't already include an in-app menu
+
+> Fullscreen Pause may conflict with the Windows Game Bar or Steam Overlay, for best results disable both before using Fullscreen Pause or disable Fullscreen Pause from the TV Mode settings menu using <ESC/Guide>
 
 ## Supported Platforms
 
@@ -50,17 +64,22 @@ Please be aware that this application is created using AI tools/coding, if this 
 | FBNeo | Arcade |
 | Redream | Sega Dreamcast, Sega Naomi |
 
-- Emulators can be manually added with launch arguments editable by the user. This way it is possible to use almost any emulator you could launch from a standard shortcut or batch file.
+> **Cemu** does not reliably respect window priorities in fullscreen mode and will conflict with the RomMate pause menu. The recommended workaround on Windows is to run the emulator in windowed mode, RomMate will maximize the window automatically which can then be made borderless with [Borderless Gaming](https://github.com/Codeusa/Borderless-Gaming) - add Cemu as a profile and it will automatically hide the window frame on launch. A thin menubar will remain visible at the top of the Cemu window, but the pause menu will otherwise function correctly to allow easily exiting the emulator (without needing a mouse/keyboard). I am still searching for a proper fullscreen solution but this works fairly well for now.
 
-> **Cemu note:** Cemu does not reliably respect window maximization on launch, which interferes with the RomMate pause menu. The recommended workaround is [Borderless Gaming](https://github.com/Codeusa/Borderless-Gaming) — add Cemu as a favorite and it will automatically maximize the window on launch. A thin menubar will remain visible at the top of the Cemu window, but the pause menu will otherwise function correctly.
+## Emulator Setup
+
+- Windows: Emulators can be installed manually or automatically on Windows builds with automated download and setup, firmware will be pulled from your server as well and placed in the default directory for the emulator.
+- Linux: Emulators installed via flatpak are auto-detected and launch args set up accordingly, firmware is downloaded to the correct directory automatically on first emulator launch. Manual setup is also supported via locating executable and populating launch args manually.
 
 ## PC Games
 
-Native Windows PC games are also supported by archiving the installed files. When installing the files are extracted to a subfolder, based on the archive name. This is intended for legally obtained DRM-free games only.
+Native Windows PC games are also supported by archiving the installed files of DRM-free games and adding them to RomM under the 'win' rom directory. When installing, the files are extracted to a folder based on the archive name. This is intended for legally obtained DRM-free games only.
 
-<!> You are responsible for what you do with this, don't come complain to me when a hacked copy of a game installs a rootkit on your pc. <!>
+> <!> You are responsible for what you do with this, don't come complain to me if you use this to install an illegally hacked copy of a game and it installs a rootkit on your pc.
 
 ## PS3 Game Archiving
+
+> <!> Update: RPCS3 now supports booting PS3 ISO games directly, though be warned this is not yet covered/tested by RomMate and may leave game files in an installed state even after selecting the Uninstall button from the app.
 
 RPCS3 support requires PS3 content to be installed to specific paths depending on whether the game is a disc dump or a digital copy. rom-mate-neo auto-detects the archive layout and routes files accordingly - but the archive itself must be structured correctly.
 

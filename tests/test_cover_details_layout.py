@@ -28,12 +28,19 @@ class _StubLabel:
     def __init__(self) -> None:
         self.fixed_size: tuple[int, int] | None = None
         self.maximum_width: int | None = None
+        self._stylesheet: str = ""
 
     def setFixedSize(self, width: int, height: int) -> None:
         self.fixed_size = (width, height)
 
     def setMaximumWidth(self, width: int) -> None:
         self.maximum_width = width
+
+    def styleSheet(self) -> str:
+        return self._stylesheet
+
+    def setStyleSheet(self, s: str) -> None:
+        self._stylesheet = s
 
 
 class _StubScroll:
@@ -65,6 +72,15 @@ class _StubWindow:
         self.details_content_frame = _StubFrame(content_width, content_height)
         self.details_cover_label = _StubLabel()
         self.details_description_label = _StubLabel()
+        self.details_title_label = _StubLabel()
+        self.details_title_label.setStyleSheet("font-size: 30px; font-weight: 700; color: #f8f8f2;")
+
+        _meta_label = _StubLabel()
+        _meta_label.setStyleSheet("font-size: 14px; color: #f8f8f2;")
+        self.details_metadata_scalable_labels: list[tuple[_StubLabel, str]] = [
+            (self.details_title_label, self.details_title_label.styleSheet()),
+            (_meta_label, _meta_label.styleSheet()),
+        ]
         self.details_screenshot_labels = [_StubLabel() for _ in range(5)]
         self.details_screenshots_scroll = _StubScroll()
         self.details_screenshots_panel = _StubWidget()
@@ -98,6 +114,9 @@ class _StubWindow:
 
 
 class CoverDetailsLayoutMetricsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.window = _StubWindow(content_width=1200, content_height=700, window_width=1920, window_height=1080)
+
     def test_update_details_layout_metrics_limits_cover_height_for_720p_windows(self) -> None:
         window = _StubWindow(content_width=1050, content_height=520, window_width=1280, window_height=720)
 
@@ -168,6 +187,37 @@ class CoverDetailsLayoutMetricsTests(unittest.TestCase):
         for label in window.details_screenshot_labels:
             self.assertIsNone(label.fixed_size)
             self.assertIsNotNone(label.maximum_width)
+
+    def test_font_scale_decreases_at_720p(self) -> None:
+        self.window._window_height = 720
+        update_details_layout_metrics(self.window)
+        ss = self.window.details_title_label.styleSheet()
+        import re
+
+        m = re.search(r"font-size:\s*(\d+)px", ss)
+        self.assertIsNotNone(m)
+        self.assertLessEqual(int(m.group(1)), 24)
+
+    def test_font_scale_unchanged_at_1080p(self) -> None:
+        self.window._window_height = 1080
+        update_details_layout_metrics(self.window)
+        ss = self.window.details_title_label.styleSheet()
+        import re
+
+        m = re.search(r"font-size:\s*(\d+)px", ss)
+        self.assertIsNotNone(m)
+        self.assertEqual(int(m.group(1)), 30)
+
+    def test_font_scale_increases_at_1440p(self) -> None:
+        self.window._window_height = 1440
+        update_details_layout_metrics(self.window)
+        ss = self.window.details_title_label.styleSheet()
+        import re
+
+        m = re.search(r"font-size:\s*(\d+)px", ss)
+        self.assertIsNotNone(m)
+        self.assertGreater(int(m.group(1)), 30)
+        self.assertLessEqual(int(m.group(1)), 75)
 
 
 class _StubDetailsOpenWindow:

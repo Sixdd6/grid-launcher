@@ -425,6 +425,148 @@ def zip_directory_for_upload(
         raise
 
 
+def zip_native_save_dirs_for_upload(
+    dir_map: list[tuple[str, Path]],
+    safe_title: str,
+) -> tuple[Path, int, dict[str, str]]:
+    """Create a combined zip archive from multiple native save directories.
+
+    Returns ``(archive_path, total_files, manifest)`` where *manifest* maps
+    ``str(idx)`` to the raw (unexpanded) path string for each directory whose
+    contents were successfully iterated. Directories that raise an
+    ``OSError`` during traversal are silently skipped. Individual files that
+    raise an ``OSError`` during write are silently skipped.
+
+    The archive always contains ``_rom_mate_dirs.json`` even when no files
+    were added. If the underlying ``ZipFile`` creation itself raises
+    ``OSError`` the temp file is cleaned up and the exception is re-raised.
+    """
+    import json
+
+    archive_path = _temporary_archive_path(safe_title)
+    total_files = 0
+    manifest: dict[str, str] = {}
+
+    try:
+        with zipfile.ZipFile(archive_path, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for idx, (raw_path, directory) in enumerate(dir_map):
+                prefix = f"{idx}/"
+                try:
+                    candidates = sorted(directory.rglob("*"), key=lambda p: str(p).casefold())
+                except OSError:
+                    continue
+                manifest[str(idx)] = raw_path
+                for candidate in candidates:
+                    if not candidate.is_file():
+                        continue
+                    try:
+                        relative = candidate.relative_to(directory)
+                    except ValueError:
+                        relative = Path(candidate.name)
+                    archive_member = prefix + relative.as_posix()
+                    try:
+                        archive.write(candidate, archive_member)
+                        total_files += 1
+                    except OSError:
+                        pass
+            manifest_bytes = json.dumps(manifest, indent=2).encode("utf-8")
+            archive.writestr("_rom_mate_dirs.json", manifest_bytes)
+    except OSError:
+        archive_path.unlink(missing_ok=True)
+        raise
+
+    return archive_path, total_files, manifest
+
+
+def resolve_native_save_dir(raw_path: str, windows_documents: "Path | None") -> "Path":
+    """Expand a raw env-var save path, correcting for Windows Documents folder redirection.
+
+    On Windows the Documents folder may be redirected to a network share or
+    non-default location.  ``%USERPROFILE%\\Documents`` then resolves to the
+    wrong drive.  This function detects that situation and replaces the
+    ``%USERPROFILE%\\Documents`` prefix with the Shell-resolved path supplied
+    in *windows_documents*.
+
+    Pass ``pcsx2_windows_documents_folder()`` as *windows_documents*.
+    Pass ``None`` on non-Windows (no adjustment is made).
+    """
+    import os
+
+    expanded = Path(os.path.expandvars(raw_path))
+    if windows_documents is None:
+        return expanded
+
+    docs_via_env = Path(os.path.expandvars("%USERPROFILE%")) / "Documents"
+
+    # If Shell Documents matches env-expanded Documents, no redirection — return as-is.
+    if (
+        str(windows_documents).casefold().rstrip("/\\")
+        == str(docs_via_env).casefold().rstrip("/\\")
+    ):
+        return expanded
+
+    # Check whether the expanded path is rooted under %USERPROFILE%\Documents.
+    expanded_cf = str(expanded).casefold()
+    docs_prefix = str(docs_via_env).rstrip("/\\").casefold()
+
+    if expanded_cf == docs_prefix:
+        return windows_documents
+
+    if expanded_cf.startswith(docs_prefix + "\\") or expanded_cf.startswith(
+        docs_prefix + "/"
+    ):
+        suffix = str(expanded)[len(str(docs_via_env)) :].lstrip("/\\")
+        return windows_documents / suffix
+
+    return expanded
+
+
+def normalize_manual_save_path(folder: str) -> str:
+    """Replace hardcoded user-profile path prefixes with env-var equivalents.
+
+    Converts paths like ``C:\\Users\\Sam\\AppData\\Roaming\\...`` to
+    ``%APPDATA%\\...`` so saves are portable across Windows reinstalls or
+    username changes. Forward slashes (as returned by QFileDialog) are
+    normalised to backslashes. On non-Windows, or when no known prefix
+    matches, the path is returned unchanged.
+    """
+    from pathlib import Path as _Path
+
+    folder_str = str(_Path(folder))
+
+    userprofile = os.path.expandvars("%USERPROFILE%")
+
+    candidates: list[tuple[str, str]] = [
+        ("%APPDATA%", os.path.expandvars("%APPDATA%")),
+        ("%LOCALAPPDATA%", os.path.expandvars("%LOCALAPPDATA%")),
+        (
+            r"%USERPROFILE%\AppData\LocalLow",
+            str(_Path(userprofile) / "AppData" / "LocalLow"),
+        ),
+        (
+            r"%USERPROFILE%\Documents",
+            str(_Path(userprofile) / "Documents"),
+        ),
+        ("%USERPROFILE%", userprofile),
+    ]
+
+    for env_var, expanded in candidates:
+        if expanded.startswith("%"):
+            continue
+        prefix = expanded.rstrip("\\")
+        if not folder_str.lower().startswith(prefix.lower()):
+            continue
+        after = folder_str[len(prefix) :]
+        if after and after[0] not in "\\/":
+            continue
+        remainder = after.lstrip("\\/")
+        if remainder:
+            return env_var + "\\" + remainder
+        return env_var
+
+    return folder
+
+
 def ppsspp_state_upload_jobs(
     id_tokens: list[str],
     directories: list[Path],

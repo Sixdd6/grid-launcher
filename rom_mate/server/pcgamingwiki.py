@@ -68,7 +68,7 @@ def _expand_pcgw_path(raw_path: str) -> str | None:
 
     # Remove template artifacts and trim wildcard suffixes to keep directory paths.
     path = _PATH_VAR_RE.sub(lambda _: expanded_var, text, count=1)
-    path = path.split("|", 1)[0].strip()
+    path = re.sub(r'\{\{[^{}]*\}\}', '', path).strip()
     path = _TRAILING_WILDCARD_RE.sub("", path).rstrip("\\/").strip()
     return path or None
 
@@ -182,31 +182,27 @@ def _split_template_args(inner_template: str) -> list[str]:
     return args
 
 
-def _build_cargo_page_id_url(title: str) -> str:
+def _build_page_id_url(title: str) -> str:
     encoded_title = quote(title, safe="")
-    return (
-        f"{_PCGW_API_BASE}?action=cargoquery&tables=Infobox_game"
-        f"&fields=_pageID&where=_pageName%3D%22{encoded_title}%22&format=json"
-    )
+    return f"{_PCGW_API_BASE}?action=query&titles={encoded_title}&prop=info&format=json"
 
 
-def _extract_page_id(cargo_payload: dict) -> int | None:
-    rows = cargo_payload.get("cargoquery")
-    if not isinstance(rows, list) or not rows:
+def _extract_page_id_from_query(payload: dict) -> int | None:
+    query_section = payload.get("query")
+    if not isinstance(query_section, dict):
         return None
-    row0 = rows[0]
-    if not isinstance(row0, dict):
+    pages = query_section.get("pages")
+    if not isinstance(pages, dict) or not pages:
         return None
-    title_section = row0.get("title")
-    if not isinstance(title_section, dict):
-        return None
-    page_id_raw = title_section.get("_pageID")
-    if page_id_raw is None:
-        return None
-    try:
-        return int(page_id_raw)
-    except (TypeError, ValueError):
-        return None
+
+    for page_id_raw, page_data in pages.items():
+        if page_id_raw == "-1" or not isinstance(page_data, dict) or "missing" in page_data:
+            continue
+        try:
+            return int(page_id_raw)
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def _extract_title_from_url(url: str) -> str | None:
@@ -224,8 +220,8 @@ def fetch_page_id_by_title(title: str) -> int | None:
     if not query_title:
         return None
 
-    payload = _fetch_json(_build_cargo_page_id_url(query_title))
-    page_id = _extract_page_id(payload)
+    payload = _fetch_json(_build_page_id_url(query_title))
+    page_id = _extract_page_id_from_query(payload)
     if page_id is not None:
         return page_id
 
@@ -247,8 +243,8 @@ def fetch_page_id_by_title(title: str) -> int | None:
     if not resolved_title:
         return None
 
-    fallback_payload = _fetch_json(_build_cargo_page_id_url(resolved_title))
-    return _extract_page_id(fallback_payload)
+    fallback_payload = _fetch_json(_build_page_id_url(resolved_title))
+    return _extract_page_id_from_query(fallback_payload)
 
 
 def fetch_page_wikitext(page_id: int) -> str:

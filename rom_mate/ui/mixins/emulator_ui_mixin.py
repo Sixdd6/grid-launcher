@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1382,7 +1383,11 @@ class EmulatorUIMixin:
         command = [str(emulator_path)]
         try:
             self._ensure_emulator_sync_settings(emulator_name, emulator_path_text)
-            process = subprocess.Popen(command, cwd=str(emulator_path.parent))
+            process = subprocess.Popen(
+                command,
+                cwd=str(emulator_path.parent),
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+            )
             QTimer.singleShot(500, lambda p=process, c=command: self._warn_if_process_exited_early(p, c))
         except OSError as error:
             QMessageBox.warning(self, "Launch Error", f"Failed to launch emulator:\n{error}")

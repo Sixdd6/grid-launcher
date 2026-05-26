@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from PySide6.QtCore import QEvent, Qt, QSize, QTimer, Signal
 from PySide6.QtGui import QPixmap, QWheelEvent
+from rom_mate.cover.details import _apply_font_scale
 from rom_mate.ui.theme import themed_svg_pixmap
 from PySide6.QtWidgets import (
     QFrame,
@@ -29,6 +30,8 @@ from rom_mate.tv.widgets.components.nav_scroll_area import NavScrollArea
 
 _ASSETS = Path(__file__).resolve().parents[4] / "assets" / "retroarch-assets"
 _SVG_ASSETS_ROOT = Path(__file__).resolve().parents[4] / "assets"
+_TV_FONT_REF_HEIGHT = 1080
+_TV_FONT_MAX_SCALE = 2.5
 
 
 _DETAILS_HINTS: list[ControlHint] = [
@@ -82,6 +85,8 @@ class DetailsView(QWidget):
         self._metadata_loading = False
         self._installed_local_path = ""
         self._cover_pixmap: QPixmap | None = None
+        self._current_font_scale: float = 1.0
+        self._scalable_labels: list[tuple[QLabel, str]] = []
 
         self.setStyleSheet(f"background: {theme.BG};")
 
@@ -113,15 +118,17 @@ class DetailsView(QWidget):
         _back_icon_lbl.setFixedSize(QSize(16, 16))
         _back_icon_lbl.setStyleSheet("background: transparent;")
         _back_hlayout.addWidget(_back_icon_lbl)
-        _back_text_lbl = QLabel("Back", self._back_label)
-        _back_text_lbl.setStyleSheet(
+        self._back_text_lbl = QLabel("Back", self._back_label)
+        self._back_text_lbl.setStyleSheet(
             f"color: {theme.TEXT_SECONDARY}; font-size: 14px; font-weight: 700;"
         )
-        _back_hlayout.addWidget(_back_text_lbl)
+        self._scalable_labels.append((self._back_text_lbl, self._back_text_lbl.styleSheet()))
+        _back_hlayout.addWidget(self._back_text_lbl)
         header_layout.addWidget(self._back_label)
 
         self._header_title = QLabel(self._game_title(), self._header)
         self._header_title.setStyleSheet(f"color: {theme.TEXT_PRIMARY}; font-size: 16px; font-weight: 700;")
+        self._scalable_labels.append((self._header_title, self._header_title.styleSheet()))
         header_layout.addWidget(self._header_title, 1)
 
         content_layout.addWidget(self._header)
@@ -148,6 +155,7 @@ class DetailsView(QWidget):
 
         self._install_text = QLabel("", self._left_col)
         self._install_text.setStyleSheet(f"color: {theme.TEXT_PRIMARY}; font-size: 13px;")
+        self._scalable_labels.append((self._install_text, self._install_text.styleSheet()))
         self._install_text.setVisible(False)
         left_layout.addWidget(self._install_text)
 
@@ -170,6 +178,7 @@ class DetailsView(QWidget):
         self._title_label = QLabel(self._game_title(), self._center_col)
         self._title_label.setWordWrap(True)
         self._title_label.setStyleSheet(f"color: {theme.SUCCESS}; font-size: 28px; font-weight: 700;")
+        self._scalable_labels.append((self._title_label, self._title_label.styleSheet()))
         center_layout.addWidget(self._title_label)
 
         self._desc_scroll = NavScrollArea(self._center_col)
@@ -185,6 +194,7 @@ class DetailsView(QWidget):
         self._desc_label.setWordWrap(True)
         self._desc_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         self._desc_label.setStyleSheet(f"color: {theme.TEXT_PRIMARY}; font-size: 14px;")
+        self._scalable_labels.append((self._desc_label, self._desc_label.styleSheet()))
         desc_layout.addWidget(self._desc_label)
         desc_layout.addStretch(1)
 
@@ -219,6 +229,7 @@ class DetailsView(QWidget):
                 f"color: {theme.TEXT_SECONDARY}; font-size: 11px; font-weight: 700;"
                 " background: transparent; border: none;"
             )
+            self._scalable_labels.append((name_lbl, name_lbl.styleSheet()))
 
             value_lbl = QLabel("—", cell_widget)
             value_lbl.setWordWrap(True)
@@ -226,6 +237,7 @@ class DetailsView(QWidget):
                 f"color: {theme.TEXT_PRIMARY}; font-size: 13px;"
                 " background: transparent; border: none;"
             )
+            self._scalable_labels.append((value_lbl, value_lbl.styleSheet()))
 
             cell_layout.addWidget(name_lbl)
             cell_layout.addWidget(value_lbl)
@@ -244,6 +256,7 @@ class DetailsView(QWidget):
 
         self._shots_header = QLabel("Screenshots", self._right_col)
         self._shots_header.setStyleSheet(f"color: {theme.TEXT_SECONDARY}; font-size: 13px; font-weight: 700;")
+        self._scalable_labels.append((self._shots_header, self._shots_header.styleSheet()))
         right_layout.addWidget(self._shots_header)
 
         self._shots_scroll = NavScrollArea(self._right_col)
@@ -318,6 +331,7 @@ class DetailsView(QWidget):
         self._lightbox_counter.setStyleSheet(
             f"color: {theme.TEXT_PRIMARY}; font-size: 14px; font-weight: 700; background: transparent;"
         )
+        self._scalable_labels.append((self._lightbox_counter, self._lightbox_counter.styleSheet()))
         lb_layout.addWidget(self._lightbox_counter)
 
         self._lightbox_hint = QWidget(self._lightbox)
@@ -403,6 +417,7 @@ class DetailsView(QWidget):
         self._refresh_fanart()
         self._refresh_screenshots()
         self._refresh_ui()
+        QTimer.singleShot(0, self._update_font_scale)
 
         self._cover_loader.load_async(str(self._game.get("cover_url", "") or ""), self._on_cover_loaded)
         self._app_backend.logHandleDiag("details-open")
@@ -522,6 +537,16 @@ class DetailsView(QWidget):
         self._update_lightbox_image()
         self._status_banner.setGeometry(16, 56, max(120, rect.width() - 32), 40)
         self._update_cover_pixmap()
+        self._update_font_scale()
+
+    def _update_font_scale(self) -> None:
+        h = self.height()
+        if h <= 0:
+            return
+        scale = max(720 / _TV_FONT_REF_HEIGHT, min(_TV_FONT_MAX_SCALE, h / _TV_FONT_REF_HEIGHT))
+        self._current_font_scale = scale
+        for label, base_stylesheet in self._scalable_labels:
+            label.setStyleSheet(_apply_font_scale(base_stylesheet, scale))
 
     def _refresh_ui(self) -> None:
         self._header_title.setText(self._game_title())
@@ -637,7 +662,10 @@ class DetailsView(QWidget):
 
             text_lbl = QLabel(item["label"], row)
             text_lbl.setStyleSheet(
-                f"color: {fg}; font-size: 14px; font-weight: 700; background: transparent;"
+                _apply_font_scale(
+                    f"color: {fg}; font-size: 14px; font-weight: 700; background: transparent;",
+                    self._current_font_scale,
+                )
             )
             row_layout.addWidget(text_lbl, 1)
 

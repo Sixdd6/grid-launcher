@@ -83,7 +83,9 @@ from rom_mate.library import (
 from rom_mate.library.cloud_transfer import (
     SUPPORTED_IMAGE_EXTENSIONS,
     normalize_candidate_url,
+    resolve_native_save_dir,
     session_screenshot_path,
+    zip_native_save_dirs_for_upload,
 )
 
 
@@ -2122,7 +2124,8 @@ class CloudSaveMixin:
         cached = self._pcgw_paths_for_game(game) or []
         manual = self._pcgw_paths_cache.get(manual_key, [])
         all_raw = list(cached) + [p for p in manual if p not in cached]
-        fallback_dirs = [Path(os.path.expandvars(r)) for r in all_raw]
+        _win_docs = pcsx2_windows_documents_folder()
+        fallback_dirs = [resolve_native_save_dir(r, _win_docs) for r in all_raw]
 
         rom_id = self._cloud_sync_rom_id_for_game(game)
         if not rom_id:
@@ -2188,7 +2191,7 @@ class CloudSaveMixin:
                                 # Resolve target directory
                                 if dir_idx in manifest:
                                     raw_path = manifest[dir_idx]
-                                    target_root = Path(os.path.expandvars(raw_path))
+                                    target_root = resolve_native_save_dir(raw_path, _win_docs)
                                 elif fallback_dirs:
                                     target_root = fallback_dirs[0]
                                 else:
@@ -2212,7 +2215,7 @@ class CloudSaveMixin:
                 elif emulator_field.startswith("native_dir:"):
                     # Previous per-directory format (legacy)
                     raw_path = emulator_field[len("native_dir:"):]
-                    restore_dir = Path(os.path.expandvars(raw_path))
+                    restore_dir = resolve_native_save_dir(raw_path, _win_docs)
                     restore_dir.mkdir(parents=True, exist_ok=True)
                     self._extract_zip_archive_bytes_to_directory(payload, restore_dir)
 
@@ -2652,11 +2655,7 @@ class CloudSaveMixin:
         *,
         show_dialogs: bool = True,
     ) -> tuple[int, int, list[str]]:
-        import io
-        import json as _json
-        import os
-        import tempfile
-        import zipfile as _zipfile
+        import os as _os
         from pathlib import Path
 
         def show_warning(msg: str) -> None:
@@ -2686,45 +2685,28 @@ class CloudSaveMixin:
             show_warning("Missing ROM id for this game.")
             return 0, 0, []
 
-        # Build dir_map: only include directories that currently exist
+        # Build dir_map: only include directories that currently exist.
+        # Use the Shell-resolved Documents path to handle network drive redirection.
+        _win_docs = pcsx2_windows_documents_folder()
         dir_map: list[tuple[str, Path]] = []
         for raw in all_raw:
-            expanded = Path(os.path.expandvars(raw))
+            expanded = resolve_native_save_dir(raw, _win_docs)
             if expanded.exists():
                 dir_map.append((raw, expanded))
 
         if not dir_map:
-            show_warning("None of the configured save locations exist on this device yet.")
+            path_list = "\n".join(f"  • {resolve_native_save_dir(r, _win_docs)}" for r in all_raw)
+            show_warning(
+                f"None of the configured save locations exist on this device yet.\n\n"
+                f"Checked:\n{path_list}"
+            )
             return 0, 0, []
 
         # Build a single combined zip archive
         safe_title = self._sanitize_path_component(game.get("title", "game"), "save")
-        fd, tmp_path = tempfile.mkstemp(prefix=f"rom-mate-{safe_title}-", suffix=".zip")
-        os.close(fd)
-        archive_path = Path(tmp_path)
-
-        total_files = 0
-        manifest: dict[str, str] = {}
         try:
-            with _zipfile.ZipFile(archive_path, mode="w", compression=_zipfile.ZIP_DEFLATED) as archive:
-                for idx, (raw_path, directory) in enumerate(dir_map):
-                    manifest[str(idx)] = raw_path
-                    prefix = f"{idx}/"
-                    for candidate in sorted(directory.rglob("*"), key=lambda p: str(p).casefold()):
-                        if not candidate.is_file():
-                            continue
-                        try:
-                            relative = candidate.relative_to(directory)
-                        except ValueError:
-                            relative = Path(candidate.name)
-                        archive_member = prefix + relative.as_posix()
-                        archive.write(candidate, archive_member)
-                        total_files += 1
-                # Write manifest last so it's easy to find
-                manifest_bytes = _json.dumps(manifest, indent=2).encode("utf-8")
-                archive.writestr("_rom_mate_dirs.json", manifest_bytes)
+            archive_path, total_files, _manifest = zip_native_save_dirs_for_upload(dir_map, safe_title)
         except OSError as exc:
-            archive_path.unlink(missing_ok=True)
             show_warning(f"Failed to create save archive: {exc}")
             return 0, 0, []
 

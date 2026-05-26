@@ -57,7 +57,14 @@ class PCGamingWikiTests(unittest.TestCase):
 
     @patch("rom_mate.server.pcgamingwiki._fetch_json")
     def test_fetch_page_id_by_title_exact_match(self, mock_fetch_json) -> None:
-        mock_fetch_json.return_value = {"cargoquery": [{"title": {"_pageID": "12345"}}]}
+        mock_fetch_json.return_value = {
+            "batchcomplete": "",
+            "query": {
+                "pages": {
+                    "12345": {"pageid": 12345, "ns": 0, "title": "Stardew Valley"}
+                }
+            },
+        }
 
         page_id = fetch_page_id_by_title("Stardew Valley")
 
@@ -67,8 +74,18 @@ class PCGamingWikiTests(unittest.TestCase):
     @patch("rom_mate.server.pcgamingwiki._fetch_json")
     def test_fetch_page_id_by_title_opensearch_fallback(self, mock_fetch_json, mock_fetch_json_value) -> None:
         mock_fetch_json.side_effect = [
-            {"cargoquery": []},
-            {"cargoquery": [{"title": {"_pageID": "54321"}}]},
+            {
+                "batchcomplete": "",
+                "query": {"pages": {"-1": {"ns": 0, "title": "Stardew Valley", "missing": ""}}},
+            },
+            {
+                "batchcomplete": "",
+                "query": {
+                    "pages": {
+                        "54321": {"pageid": 54321, "ns": 0, "title": "Stardew Valley"}
+                    }
+                },
+            },
         ]
         mock_fetch_json_value.return_value = [
             "Stardew Valley",
@@ -84,7 +101,14 @@ class PCGamingWikiTests(unittest.TestCase):
     @patch("rom_mate.server.pcgamingwiki._fetch_json")
     def test_fetch_windows_save_paths_full_round_trip(self, mock_fetch_json) -> None:
         mock_fetch_json.side_effect = [
-            {"cargoquery": [{"title": {"_pageID": "12345"}}]},
+            {
+                "batchcomplete": "",
+                "query": {
+                    "pages": {
+                        "12345": {"pageid": 12345, "ns": 0, "title": "My Game"}
+                    }
+                },
+            },
             {
                 "parse": {
                     "wikitext": {
@@ -97,6 +121,25 @@ class PCGamingWikiTests(unittest.TestCase):
         paths = fetch_windows_save_paths("My Game")
 
         self.assertEqual(paths, ["%APPDATA%\\MyGame\\saves"])
+
+    def test_parse_windows_save_paths_note_annotation_stripped(self) -> None:
+        wikitext = (
+            "{{Game data/saves|Windows|{{p|userprofile\\Documents}}\\Square Enix\\Batman Arkham Asylum GOTY\\SaveData\\{{note|name=Game of the Year Edition}}}}"
+        )
+
+        paths = parse_windows_save_paths(wikitext)
+
+        self.assertIn("%USERPROFILE%\\Documents\\Square Enix\\Batman Arkham Asylum GOTY\\SaveData", paths)
+
+    def test_parse_windows_save_paths_batman_arkham_asylum(self) -> None:
+        wikitext = (
+            "{{Game data/saves|Windows|{{p|userprofile\\Documents}}\\Eidos\\Batman Arkham Asylum\\SaveData\\|{{p|userprofile\\Documents}}\\Square Enix\\Batman Arkham Asylum GOTY\\SaveData\\{{note|name=Game of the Year Edition}}}}"
+        )
+
+        paths = parse_windows_save_paths(wikitext)
+
+        self.assertIn("%USERPROFILE%\\Documents\\Eidos\\Batman Arkham Asylum\\SaveData", paths)
+        self.assertIn("%USERPROFILE%\\Documents\\Square Enix\\Batman Arkham Asylum GOTY\\SaveData", paths)
 
     @patch("rom_mate.server.pcgamingwiki._fetch_json")
     def test_fetch_windows_save_paths_http_error_raises(self, mock_fetch_json) -> None:

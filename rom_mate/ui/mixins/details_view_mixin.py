@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -1207,6 +1208,9 @@ class DetailsViewMixin:
             )
 
     def _pcgw_add_manual_path_for_game(self, game: dict, folder: str) -> None:
+        from rom_mate.library.cloud_transfer import normalize_manual_save_path
+
+        folder = normalize_manual_save_path(folder)
         key = self._pcgw_cache_key(game)
         manual_key = key + "__manual"
         existing = self._pcgw_paths_cache.get(manual_key, [])
@@ -1425,7 +1429,11 @@ class DetailsViewMixin:
                     self._resolved_native_executable_path_for_game,
                     self._split_launch_template_args,
                 )
-                process = subprocess.Popen(command, cwd=working_directory)
+                process = subprocess.Popen(
+                    command,
+                    cwd=working_directory,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+                )
                 QTimer.singleShot(500, lambda p=process, c=command: self._warn_if_process_exited_early(p, c))
                 return True
 
@@ -1450,7 +1458,11 @@ class DetailsViewMixin:
                         _rpcs3_root = self._rpcs3_data_root_for_game(game)
                         if _ps3_dev_hdd0 is not None and _rpcs3_root is not None:
                             copy_ps3_custom_config_to_emulator(_ps3_dev_hdd0.parent / "config", _rpcs3_root)
-            process = subprocess.Popen(command, cwd=working_directory)
+            process = subprocess.Popen(
+                command,
+                cwd=working_directory,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
+            )
             QTimer.singleShot(500, lambda p=process, c=command: self._warn_if_process_exited_early(p, c))
             self._register_game_session_for_auto_upload(game, process, emulator_name)
             return True

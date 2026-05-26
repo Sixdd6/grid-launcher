@@ -1,25 +1,200 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from rom_mate.library.cloud_sync import cemu_save_directories_for_game, cloud_sync_candidates_for_game
 from rom_mate.library.cloud_transfer import (
     appended_image_sidecar_path,
     grouped_file_upload_jobs,
+    normalize_manual_save_path,
     ppsspp_state_upload_jobs,
+    resolve_native_save_dir,
     retroarch_state_upload_jobs,
     session_screenshot_path,
     screenshot_download_candidate_paths,
     zip_directory_for_upload,
+    zip_native_save_dirs_for_upload,
     zip_selected_files_for_upload,
 )
 
 
 class CloudTransferTests(unittest.TestCase):
+    def test_resolve_native_save_dir_returns_expanded_when_no_windows_documents(self) -> None:
+        raw_path = "%USERPROFILE%\\Documents\\Game\\saves"
+        expansions = {
+            "%USERPROFILE%\\Documents\\Game\\saves": "C:\\Users\\TestUser\\Documents\\Game\\saves",
+        }
+
+        with patch(
+            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            side_effect=lambda value: expansions.get(value, value),
+        ):
+            result = resolve_native_save_dir(raw_path, windows_documents=None)
+
+        self.assertEqual(result, Path("C:\\Users\\TestUser\\Documents\\Game\\saves"))
+
+    def test_resolve_native_save_dir_no_redirection_returns_standard_expansion(self) -> None:
+        raw_path = "%USERPROFILE%\\Documents\\Game\\saves"
+        windows_documents = Path("C:\\Users\\TestUser\\Documents")
+        expansions = {
+            "%USERPROFILE%": "C:\\Users\\TestUser",
+            "%USERPROFILE%\\Documents\\Game\\saves": "C:\\Users\\TestUser\\Documents\\Game\\saves",
+        }
+
+        with patch(
+            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            side_effect=lambda value: expansions.get(value, value),
+        ):
+            result = resolve_native_save_dir(raw_path, windows_documents)
+
+        self.assertEqual(result, Path("C:\\Users\\TestUser\\Documents\\Game\\saves"))
+
+    def test_resolve_native_save_dir_redirected_documents_uses_shell_path(self) -> None:
+        raw_path = "%USERPROFILE%\\Documents\\Square Enix\\Batman GOTY\\SaveData"
+        windows_documents = Path("Y:\\Users\\TestUser\\Documents")
+        expansions = {
+            "%USERPROFILE%": "C:\\Users\\TestUser",
+            "%USERPROFILE%\\Documents\\Square Enix\\Batman GOTY\\SaveData": "C:\\Users\\TestUser\\Documents\\Square Enix\\Batman GOTY\\SaveData",
+        }
+
+        with patch(
+            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            side_effect=lambda value: expansions.get(value, value),
+        ):
+            result = resolve_native_save_dir(raw_path, windows_documents)
+
+        self.assertEqual(
+            result,
+            Path("Y:\\Users\\TestUser\\Documents\\Square Enix\\Batman GOTY\\SaveData"),
+        )
+
+    def test_resolve_native_save_dir_non_documents_path_unaffected_by_redirection(self) -> None:
+        raw_path = "%APPDATA%\\Game\\saves"
+        windows_documents = Path("Y:\\Users\\TestUser\\Documents")
+        expansions = {
+            "%USERPROFILE%": "C:\\Users\\TestUser",
+            "%APPDATA%\\Game\\saves": "C:\\Users\\TestUser\\AppData\\Roaming\\Game\\saves",
+        }
+
+        with patch(
+            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            side_effect=lambda value: expansions.get(value, value),
+        ):
+            result = resolve_native_save_dir(raw_path, windows_documents)
+
+        self.assertEqual(result, Path("C:\\Users\\TestUser\\AppData\\Roaming\\Game\\saves"))
+
+    def test_normalize_manual_save_path_appdata_roaming(self) -> None:
+        expansions = {
+            "%APPDATA%": "C:\\Users\\TestUser\\AppData\\Roaming",
+            "%LOCALAPPDATA%": "C:\\Users\\TestUser\\AppData\\Local",
+            "%USERPROFILE%": "C:\\Users\\TestUser",
+        }
+
+        with patch(
+            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            side_effect=lambda value: expansions.get(value, value),
+        ):
+            result = normalize_manual_save_path("C:\\Users\\TestUser\\AppData\\Roaming\\SomeGame\\saves")
+
+        self.assertEqual(result, "%APPDATA%\\SomeGame\\saves")
+
+    def test_normalize_manual_save_path_appdata_local(self) -> None:
+        expansions = {
+            "%APPDATA%": "C:\\Users\\TestUser\\AppData\\Roaming",
+            "%LOCALAPPDATA%": "C:\\Users\\TestUser\\AppData\\Local",
+            "%USERPROFILE%": "C:\\Users\\TestUser",
+        }
+
+        with patch(
+            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            side_effect=lambda value: expansions.get(value, value),
+        ):
+            result = normalize_manual_save_path("C:\\Users\\TestUser\\AppData\\Local\\SomeGame\\saves")
+
+        self.assertEqual(result, "%LOCALAPPDATA%\\SomeGame\\saves")
+
+    def test_normalize_manual_save_path_appdata_locallow(self) -> None:
+        expansions = {
+            "%APPDATA%": "C:\\Users\\TestUser\\AppData\\Roaming",
+            "%LOCALAPPDATA%": "C:\\Users\\TestUser\\AppData\\Local",
+            "%USERPROFILE%": "C:\\Users\\TestUser",
+        }
+
+        with patch(
+            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            side_effect=lambda value: expansions.get(value, value),
+        ):
+            result = normalize_manual_save_path("C:\\Users\\TestUser\\AppData\\LocalLow\\Paralives\\MySaves.mod")
+
+        self.assertEqual(result, "%USERPROFILE%\\AppData\\LocalLow\\Paralives\\MySaves.mod")
+
+    def test_normalize_manual_save_path_documents(self) -> None:
+        expansions = {
+            "%APPDATA%": "C:\\Users\\TestUser\\AppData\\Roaming",
+            "%LOCALAPPDATA%": "C:\\Users\\TestUser\\AppData\\Local",
+            "%USERPROFILE%": "C:\\Users\\TestUser",
+        }
+
+        with patch(
+            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            side_effect=lambda value: expansions.get(value, value),
+        ):
+            result = normalize_manual_save_path("C:\\Users\\TestUser\\Documents\\MyGame\\saves")
+
+        self.assertEqual(result, "%USERPROFILE%\\Documents\\MyGame\\saves")
+
+    def test_normalize_manual_save_path_other_userprofile_subpath(self) -> None:
+        expansions = {
+            "%APPDATA%": "C:\\Users\\TestUser\\AppData\\Roaming",
+            "%LOCALAPPDATA%": "C:\\Users\\TestUser\\AppData\\Local",
+            "%USERPROFILE%": "C:\\Users\\TestUser",
+        }
+
+        with patch(
+            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            side_effect=lambda value: expansions.get(value, value),
+        ):
+            result = normalize_manual_save_path("C:\\Users\\TestUser\\Saved Games\\SomeGame")
+
+        self.assertEqual(result, "%USERPROFILE%\\Saved Games\\SomeGame")
+
+    def test_normalize_manual_save_path_unrecognized_path_unchanged(self) -> None:
+        expansions = {
+            "%APPDATA%": "C:\\Users\\TestUser\\AppData\\Roaming",
+            "%LOCALAPPDATA%": "C:\\Users\\TestUser\\AppData\\Local",
+            "%USERPROFILE%": "C:\\Users\\TestUser",
+        }
+
+        with patch(
+            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            side_effect=lambda value: expansions.get(value, value),
+        ):
+            result = normalize_manual_save_path("D:\\GameSaves\\SomeGame")
+
+        self.assertEqual(result, "D:\\GameSaves\\SomeGame")
+
+    def test_normalize_manual_save_path_forward_slashes_normalized(self) -> None:
+        expansions = {
+            "%APPDATA%": "C:\\Users\\TestUser\\AppData\\Roaming",
+            "%LOCALAPPDATA%": "C:\\Users\\TestUser\\AppData\\Local",
+            "%USERPROFILE%": "C:\\Users\\TestUser",
+        }
+
+        with patch(
+            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            side_effect=lambda value: expansions.get(value, value),
+        ):
+            result = normalize_manual_save_path("C:/Users/TestUser/AppData/Roaming/SomeGame/saves")
+
+        self.assertEqual(result, "%APPDATA%\\SomeGame\\saves")
+
     def test_zip_directory_for_upload_skips_os_metadata_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             save_dir = Path(temp_dir) / "ULUS12345"
@@ -40,6 +215,97 @@ class CloudTransferTests(unittest.TestCase):
         self.assertIn("ULUS12345/ICON0.PNG", members)
         self.assertNotIn("ULUS12345/Thumbs.db", members)
         self.assertNotIn("ULUS12345/desktop.ini", members)
+
+    def test_zip_native_save_dirs_skips_unreadable_directory(self) -> None:
+        _ConcreteBase = type(Path())
+
+        class _FailingPath(_ConcreteBase):
+            def rglob(self, pattern):
+                raise PermissionError("access denied")
+
+        with tempfile.TemporaryDirectory() as temp_dir_a, tempfile.TemporaryDirectory() as temp_dir_b:
+            dir_a = Path(temp_dir_a)
+            (dir_a / "save.dat").write_text("save", encoding="utf-8")
+            failing_dir_b = _FailingPath(temp_dir_b)
+            dir_map = [
+                ("%APPDATA%\\DirB", failing_dir_b),
+                ("%APPDATA%\\DirA", dir_a),
+            ]
+
+            archive_path = None
+            try:
+                archive_path, total_files, manifest = zip_native_save_dirs_for_upload(dir_map, "TestGame")
+
+                self.assertEqual(total_files, 1)
+                self.assertEqual(manifest, {"1": "%APPDATA%\\DirA"})
+
+                with zipfile.ZipFile(archive_path) as archive:
+                    members = set(archive.namelist())
+
+                self.assertIn("1/save.dat", members)
+                self.assertFalse(any(member.startswith("0/") for member in members))
+            finally:
+                if archive_path is not None:
+                    archive_path.unlink(missing_ok=True)
+
+    def test_zip_native_save_dirs_skips_locked_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            save_dir = Path(temp_dir)
+            locked_file = save_dir / "locked.sav"
+            good_file = save_dir / "good.sav"
+            locked_file.write_text("locked", encoding="utf-8")
+            good_file.write_text("good", encoding="utf-8")
+            dir_map = [("%APPDATA%\\DirA", save_dir)]
+
+            original_write = zipfile.ZipFile.write
+
+            def _write(self, filename, arcname=None, *args, **kwargs):
+                if str(arcname or filename).endswith("locked.sav"):
+                    raise PermissionError("locked")
+                return original_write(self, filename, arcname, *args, **kwargs)
+
+            archive_path = None
+            try:
+                with patch("zipfile.ZipFile.write", side_effect=_write, autospec=True):
+                    archive_path, total_files, _ = zip_native_save_dirs_for_upload(dir_map, "TestGame")
+
+                self.assertEqual(total_files, 1)
+
+                with zipfile.ZipFile(archive_path) as archive:
+                    members = set(archive.namelist())
+
+                self.assertIn("0/good.sav", members)
+                self.assertNotIn("0/locked.sav", members)
+            finally:
+                if archive_path is not None:
+                    archive_path.unlink(missing_ok=True)
+
+    def test_zip_native_save_dirs_all_dirs_fail_returns_zero_files_and_empty_manifest(self) -> None:
+        _ConcreteBase = type(Path())
+
+        class _FailingPath(_ConcreteBase):
+            def rglob(self, pattern):
+                raise PermissionError("access denied")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            failing_path = _FailingPath(temp_dir)
+            dir_map = [("%APPDATA%\\DirA", failing_path)]
+
+            archive_path = None
+            try:
+                archive_path, total_files, manifest = zip_native_save_dirs_for_upload(dir_map, "TestGame")
+
+                self.assertEqual(total_files, 0)
+                self.assertEqual(manifest, {})
+
+                with zipfile.ZipFile(archive_path) as archive:
+                    self.assertIn("_rom_mate_dirs.json", archive.namelist())
+                    parsed_manifest = json.loads(archive.read("_rom_mate_dirs.json").decode("utf-8"))
+
+                self.assertEqual(parsed_manifest, {})
+            finally:
+                if archive_path is not None:
+                    archive_path.unlink(missing_ok=True)
 
     def test_ppsspp_state_upload_jobs_uses_supported_image_sidecars_only(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

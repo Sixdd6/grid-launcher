@@ -111,7 +111,7 @@ def _ensure_eden_section_values(
     section_name: str,
     desired_values: dict[str, str],
 ) -> tuple[str, bool]:
-    """Like _ensure_section_values but also manages key\default=false annotations for Eden's QSettings format."""
+    """Like _ensure_section_values but also manages key\\default=false annotations for Eden's QSettings format."""
     if not desired_values:
         return raw_content, False
 

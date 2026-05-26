@@ -438,6 +438,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self.default_emulator_combo: QComboBox | None = None
         self.default_core_combo: QComboBox | None = None
         self.default_mapping_list: QListWidget | None = None
+        self.details_metadata_scalable_labels: list[tuple[QLabel, str]] = []
         self.details_title_label: QLabel | None = None
         self.details_content_frame: QFrame | None = None
         self.details_center_stack: QStackedWidget | None = None
@@ -1437,6 +1438,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         title.setStyleSheet(f"font-size: 30px; font-weight: 700; color: {self._theme_color('text', '#f8f8f2')};")
         self.details_title_label = title
+        self.details_metadata_scalable_labels.append((self.details_title_label, self.details_title_label.styleSheet()))
         overview_content_layout.addWidget(title)
 
         description = QLabel("Description")
@@ -1446,6 +1448,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         description.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         description.setStyleSheet(f"font-size: 17px; color: {self._theme_color('text', '#f8f8f2')};")
         self.details_description_label = description
+        self.details_metadata_scalable_labels.append((self.details_description_label, self.details_description_label.styleSheet()))
         overview_content_layout.addWidget(description)
 
         overview_content_layout.addSpacing(4)
@@ -1483,6 +1486,8 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             else:
                 value_label.setStyleSheet(value_style)
             group_layout.addWidget(value_label)
+
+            self.details_metadata_scalable_labels.append((value_label, value_label.styleSheet()))
 
             return group, value_label
 
