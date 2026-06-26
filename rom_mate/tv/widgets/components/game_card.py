@@ -46,11 +46,17 @@ class GameCard(QWidget):
         self.update()
 
     def set_pixmap(self, pixmap: QPixmap | None) -> None:
-        if pixmap is None or pixmap.isNull():
-            self._pixmap = None
-        else:
-            self._pixmap = pixmap
-        self.update()
+        # Guard: calling update() on an orphaned widget causes it to become a top-level window
+        try:
+            if self.parent() is None:
+                return
+            if pixmap is None or pixmap.isNull():
+                self._pixmap = None
+            else:
+                self._pixmap = pixmap
+            self.update()
+        except RuntimeError:
+            pass
 
     def set_focused(self, focused: bool) -> None:
         if self._focused != focused:

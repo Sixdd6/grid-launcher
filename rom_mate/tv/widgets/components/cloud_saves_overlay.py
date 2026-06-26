@@ -183,6 +183,7 @@ class CloudSavesOverlay(QWidget):
             widget = item.widget()
             if widget is None:
                 continue
+            widget.hide()
             widget.setParent(None)
             widget.deleteLater()
 

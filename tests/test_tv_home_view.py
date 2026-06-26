@@ -162,5 +162,67 @@ class HomeViewAnimationTests(unittest.TestCase):
         self.assertFalse(view._anim_blocked)
         self.assertIsNone(view._row_anim)
 
+    def test_row_up_arrow_hidden_at_row_zero(self):
+        view = self._make_view()
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._active_row = 0
+        view._place_rows()
+        self.assertFalse(view._row_up_arrow.isVisible())
+
+    def test_row_down_arrow_hidden_at_last_row(self):
+        view = self._make_view()
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._active_row = 3
+        view._place_rows()
+        self.assertFalse(view._row_down_arrow.isVisible())
+
+    def test_both_arrows_visible_at_middle_row(self):
+        view = self._make_view()
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._active_row = 1
+        view._place_rows()
+        self.assertTrue(view._row_up_arrow.isVisible())
+        self.assertTrue(view._row_down_arrow.isVisible())
+
+    def test_row_up_arrow_x_centered(self):
+        view = self._make_view()
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._active_row = 1
+        view._place_rows()
+        self.assertEqual(view._row_up_arrow.x(), 1920 // 2 - (32 * 2 + 8) // 2)
+
+    def test_row_down_arrow_x_centered(self):
+        view = self._make_view()
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._active_row = 1
+        view._place_rows()
+        self.assertEqual(view._row_down_arrow.x(), 1920 // 2 - (32 * 2 + 8) // 2 + 32 + 8)
+
+    def test_both_arrows_at_title_y(self):
+        view = self._make_view()
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._active_row = 1
+        view._place_rows()
+        expected_y = int(round(1080 * 0.70)) + 16
+        self.assertEqual(view._row_up_arrow.y(), expected_y)
+        self.assertEqual(view._row_down_arrow.y(), expected_y)
+
+    def test_arrows_update_on_animate_start(self):
+        view = self._make_view()
+        self.addCleanup(view.deleteLater)
+        self._resize_view(view, 1920, 1080)
+        view._active_row = 0
+
+        with patch("rom_mate.tv.widgets.views.home_view.QParallelAnimationGroup.start"):
+            view.handle_nav("down")
+
+        self.assertTrue(view._row_up_arrow.isVisible())
+
 if __name__ == "__main__":
     unittest.main()

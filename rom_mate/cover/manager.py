@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Protocol
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QLabel
 
@@ -79,7 +79,8 @@ def cached_cover_for_game(window: CoverManagerWindowProtocol, game: dict[str, st
 def queue_game_cover_load(window: CoverManagerWindowProtocol, game: dict[str, str], label: QLabel) -> None:
     cached_cover = cached_cover_for_game(window, game)
     if cached_cover is not None:
-        window._apply_cover_to_label(label, cached_cover)
+        _c, _l = cached_cover, label
+        QTimer.singleShot(0, lambda: window._apply_cover_to_label(_l, _c))
         return
 
     cached_cover_path = window._cached_cover_path_from_game(game)

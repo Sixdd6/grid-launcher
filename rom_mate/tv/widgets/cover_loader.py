@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import threading
+import weakref
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
@@ -58,6 +59,20 @@ class CoverLoader:
             for k, v in cover_url_to_cached_path.items()
             if isinstance(k, str) and isinstance(v, str) and v
         }
+        self._next_batch_id = 0
+        self._cancelled_batches = set()
+
+    def create_batch(self) -> int:
+        """Create a new batch ID for load_async calls. Use this when loading a new set of cards."""
+        with self._lock:
+            batch_id = self._next_batch_id
+            self._next_batch_id += 1
+        return batch_id
+
+    def cancel_batch(self, batch_id: int) -> None:
+        """Cancel all pending callbacks for a batch. Prevents orphaned widgets from showing."""
+        with self._lock:
+            self._cancelled_batches.add(batch_id)
 
     def load_pixmap(self, url: str) -> QPixmap | None:
         raw = self._load_bytes((url or "").strip())
@@ -68,21 +83,34 @@ class CoverLoader:
             return None
         return pixmap
 
-    def load_async(self, url: str, callback: Callable[[QPixmap | None], None]) -> None:
+    def load_async(self, url: str, callback: Callable[[QPixmap | None], None], batch_id: int | None = None) -> None:
         target_url = (url or "").strip()
 
         def _worker() -> None:
             raw = self._load_bytes(target_url)
 
             def _deliver() -> None:
-                if not raw:
-                    callback(None)
-                    return
-                pixmap = QPixmap()
-                if not pixmap.loadFromData(raw):
-                    callback(None)
-                    return
-                callback(pixmap)
+                # Check if this batch was cancelled before delivering the callback
+                if batch_id is not None:
+                    with self._lock:
+                        is_cancelled = batch_id in self._cancelled_batches
+                    if is_cancelled:
+                        return  # Batch was cancelled, skip callback
+                
+                # Wrap entire delivery in try-except to prevent exceptions in Qt event loop
+                try:
+                    if not raw:
+                        callback(None)
+                        return
+                    pixmap = QPixmap()
+                    if not pixmap.loadFromData(raw):
+                        callback(None)
+                        return
+                    callback(pixmap)
+                except RuntimeError as e:
+                    # Widget may have been deleted; ignore silently to prevent event loop corruption
+                    if "already deleted" not in str(e):
+                        raise
 
             _app = QApplication.instance()
             if _app is not None:

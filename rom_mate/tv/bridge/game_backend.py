@@ -535,8 +535,6 @@ class GameBackend(QObject):
         self._install_thread = thread
         self._install_worker = worker
         self._install_target_game = dict(game_dict)
-        print(f"[TV Install] Starting download thread for rom_id={game_dict.get('id', '?')!r}")
-        sys.stdout.flush()
         thread.start()
         self._installStateChanged.emit()
 
@@ -552,8 +550,6 @@ class GameBackend(QObject):
         archive_path = bundle.get("archive_path", "") if isinstance(bundle, dict) else ""
         error = bundle.get("error", "") if isinstance(bundle, dict) else str(bundle)
         game_dict = self._install_target_game or {}
-        print(f"[TV Install] Download done: archive={archive_path!r} error={error!r}")
-        sys.stdout.flush()
         thread = self._install_thread
         self._install_thread = None
         self._install_worker = None
@@ -604,11 +600,7 @@ class GameBackend(QObject):
             )
 
         def _run_finalize() -> None:
-            print("[TV Install] Finalize thread started")
-            sys.stdout.flush()
             try:
-                print("[TV Install] Calling prepare_installed_game_without_ui")
-                sys.stdout.flush()
                 prepared_game, warning_text = prepare_installed_game_without_ui(
                     _game, archive_path_obj,
                     should_extract_archive_for_game=_should_extract,
@@ -618,8 +610,6 @@ class GameBackend(QObject):
                     ps3_games_root=_ps3_games_root,
                     cleanup_archive_on_success=False,
                 )
-                print(f"[TV Install] prepare_installed_game_without_ui done: prepared_game={'ok' if prepared_game else 'None'}, warning={warning_text!r}")
-                sys.stdout.flush()
                 if prepared_game is None:
                     _error = (warning_text or "").strip() or "Install preparation failed"
                     self._finalizeResult.emit({
@@ -640,8 +630,6 @@ class GameBackend(QObject):
                 # Skip supplemental archives and firmware in TV mode — they are desktop-only features
                 # that require MainWindow context and are not needed for basic ROM installs
 
-                print("[TV Install] Emitting success result")
-                sys.stdout.flush()
                 self._finalizeResult.emit({
                     "game_json": json.dumps(prepared_game) if prepared_game is not None else "",
                     "archive_path": str(archive_path_obj),
@@ -650,8 +638,6 @@ class GameBackend(QObject):
                 })
 
             except Exception as _e:
-                print(f"[TV Install] Finalize exception: {_e!r}")
-                sys.stdout.flush()
                 self._finalizeResult.emit({
                     "game_json": "",
                     "archive_path": str(archive_path_obj),

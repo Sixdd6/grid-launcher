@@ -34,6 +34,12 @@ class PlatformCard(QWidget):
         self._cover_loader.load_async(logo, self.set_pixmap)
 
     def set_pixmap(self, pixmap: QPixmap | None) -> None:
+        # Safety check: verify widget is still part of the widget tree before calling update()
+        # Calling update() on an orphaned widget causes it to become a top-level window
+        if self.parent() is None:
+            # Widget has been orphaned from the tree, don't try to update it
+            return
+        
         if pixmap is None or pixmap.isNull():
             self._pixmap = None
         else:

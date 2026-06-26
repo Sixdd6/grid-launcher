@@ -191,6 +191,7 @@ class TVWindow(QWidget):
 
         if current is not None:
             self._outer_stack.removeWidget(current)
+            current.hide()
             current.setParent(None)
 
         self._start_slide_transition(current_pixmap, target_pixmap, forward=False)

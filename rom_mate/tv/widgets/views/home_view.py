@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import QEasingCurve, QParallelAnimationGroup, QPropertyAnimation, QRect, Qt, QTimer
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QShowEvent
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QLabel, QWidget
 
 from rom_mate.tv.widgets import theme
 from rom_mate.tv.widgets.components.controls_bar import ControlHint
@@ -115,6 +115,25 @@ class HomeView(QWidget):
 
         self._fanart.lower()
         self._rows_container.raise_()
+
+        _arrow_style = (
+            "background: rgba(0,0,0,0.6); border-radius: 16px;"
+            f" color: {theme.TEXT_PRIMARY}; font-size: 13px;"
+        )
+        self._row_up_arrow = QLabel("▲", self)
+        self._row_up_arrow.setFixedSize(32, 32)
+        self._row_up_arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._row_up_arrow.setStyleSheet(_arrow_style)
+        self._row_up_arrow.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._row_up_arrow.hide()
+
+        self._row_down_arrow = QLabel("▼", self)
+        self._row_down_arrow.setFixedSize(32, 32)
+        self._row_down_arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._row_down_arrow.setStyleSheet(_arrow_style)
+        self._row_down_arrow.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._row_down_arrow.hide()
+
         self._place_rows()
 
     def _place_rows(self) -> None:
@@ -130,6 +149,28 @@ class HomeView(QWidget):
             else:
                 row.setGeometry(0, self.height(), w, _ROW_STRIP_HEIGHT)
             row.setVisible(True)
+        self._update_row_arrows()
+
+    def _reposition_row_arrows(self) -> None:
+        if self.height() == 0:
+            return
+        size = 32
+        gap = 8
+        total_width = size * 2 + gap
+        cx = self.width() // 2
+        strip_y = int(round(self.height() * _ROW_ANCHOR_RATIO))
+        y = strip_y + 16  # aligns with the title label top margin inside GameRow
+        self._row_up_arrow.move(cx - total_width // 2, y)
+        self._row_down_arrow.move(cx - total_width // 2 + size + gap, y)
+
+    def _update_row_arrows(self) -> None:
+        self._reposition_row_arrows()
+        self._row_up_arrow.setVisible(self._active_row > 0)
+        self._row_down_arrow.setVisible(self._active_row < len(self._rows) - 1)
+        if self._row_up_arrow.isVisible():
+            self._row_up_arrow.raise_()
+        if self._row_down_arrow.isVisible():
+            self._row_down_arrow.raise_()
 
     def handle_nav(self, direction: str) -> None:
         if direction == "up":
@@ -195,6 +236,7 @@ class HomeView(QWidget):
         group.addAnimation(incoming_anim)
 
         self._active_row = new_index
+        self._update_row_arrows()
         group.finished.connect(lambda: self._on_row_anim_finished(screen_x))
 
         self._row_anim = group

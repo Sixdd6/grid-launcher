@@ -620,6 +620,7 @@ class DetailsView(QWidget):
             widget = item.widget()
             if widget is None:
                 continue
+            widget.hide()
             widget.setParent(None)
             widget.deleteLater()
 
@@ -748,6 +749,10 @@ class DetailsView(QWidget):
                 self._app_backend.toggleFavorite(rom_id)
 
     def _on_cover_loaded(self, pixmap: QPixmap | None) -> None:
+        # Safety check: verify widget is still part of the widget tree before updating UI
+        if self.parent() is None:
+            return
+        
         if pixmap is None or pixmap.isNull():
             self._cover_pixmap = None
             self._cover_label.setText("No Cover")
@@ -818,6 +823,7 @@ class DetailsView(QWidget):
             widget = item.widget()
             if widget is None:
                 continue
+            widget.hide()
             widget.setParent(None)
             widget.deleteLater()
 

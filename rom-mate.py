@@ -352,6 +352,7 @@ from rom_mate.ui import (
 )
 from rom_mate.ui.emulators import save_button_label
 from rom_mate.ui.emulators import available_source_download_emulator_entries as resolve_available_source_download_emulator_entries
+from rom_mate.ui.spinner import LoadingSpinnerWidget
 from rom_mate.server import (
     account_status_text,
     apply_server_status,
@@ -489,6 +490,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self.library_scroll: QScrollArea | None = None
         self.library_empty_label: QLabel | None = None
         self.server_games_scroll: QScrollArea | None = None
+        self.server_loading_spinner: LoadingSpinnerWidget | None = None
         self.server_status_label: QLabel | None = None
         self.server_platform_ids: dict[str, int] = {}
         self.server_connected = False
@@ -520,6 +522,10 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self._platform_default_emulator_cache: dict[str, str] = {}
         self._platform_available_emulator_cache: dict[str, str] = {}
         self._server_platforms_loading: set[str] = set()
+        self._server_render_generation: int = 0
+        self._server_render_platform: str = ""
+        self._server_scroll_handler: Callable | None = None
+        self._server_pending_rows: dict[int, list[int]] = {}
         self._platform_games_results: dict[str, tuple] = {}  # platform_label -> (games, rom_payloads, error)
         self._emulator_sync_settings_done: set[str] = set()
         self._cloud_emulator_entry_cache: dict[str, tuple] = {}  # (title::platform::save_type) -> (emulator_name, entry)
@@ -980,6 +986,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.viewport().setObjectName("serverGamesScrollViewport")
         self.server_games_scroll = scroll
+        self.server_loading_spinner = LoadingSpinnerWidget(self.server_games_scroll)
 
         content = QWidget()
         content.setObjectName("serverGamesContent")
@@ -3172,6 +3179,12 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
 
 def main() -> None:
+    import logging as _logging
+    _logging.basicConfig(
+        level=_logging.DEBUG,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
     app = QApplication(sys.argv)
 
     from PySide6.QtNetwork import QLocalServer, QLocalSocket

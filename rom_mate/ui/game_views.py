@@ -258,7 +258,6 @@ def make_game_card(window: GameCardWindowProtocol, game: dict[str, str], source:
     cover.setStyleSheet("background-color: transparent;")
 
     layout.addWidget(cover)
-    layout.activate()
     window._queue_game_cover_load(game, cover)
 
     title_label = QLabel(game["title"])

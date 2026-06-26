@@ -85,6 +85,11 @@ class FanartBackground(QWidget):
         self._cover_loader.load_async(self._urls[self._current_index], self._on_pixmap_loaded)
 
     def _on_pixmap_loaded(self, pixmap: QPixmap | None) -> None:
+        # Safety check: verify widget is still part of the widget tree before calling update()
+        if self.parent() is None:
+            # Widget has been orphaned from the tree, don't try to update it
+            return
+        
         if pixmap is None or pixmap.isNull():
             return
         blurred = _blur_pixmap(pixmap)

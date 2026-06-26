@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QStacked
 
 from rom_mate.cover.utils import resolve_cover_url
 from rom_mate.tv.widgets import theme
+from rom_mate.ui.spinner import LoadingSpinnerWidget
 from rom_mate.tv.widgets.components.controls_bar import ControlHint
 from rom_mate.tv.widgets.components.game_wall import GameWall
 from rom_mate.tv.widgets.components.nav_scroll_area import NavScrollArea
@@ -55,6 +56,7 @@ class ServerView(QWidget):
         self._current_platform_idx = 0
         self._selected_platform = ""
         self._loading_games = False
+        self._did_activate: bool = False
 
         self.setStyleSheet(f"background: {theme.BG};")
 
@@ -107,10 +109,7 @@ class ServerView(QWidget):
         self._game_wall = GameWall(self._cover_loader, columns=4, parent=self._game_page)
         game_page_layout.addWidget(self._game_wall)
 
-        self._loading_label = QLabel("Loading...", self._game_page)
-        self._loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._loading_label.setStyleSheet(f"color: {theme.TEXT_SECONDARY}; font-size: 20px;")
-        self._loading_label.hide()
+        self._loading_spinner = LoadingSpinnerWidget(self._game_page, diameter=64)
 
         self._stack.addWidget(self._platform_page)
         self._stack.addWidget(self._game_page)
@@ -128,6 +127,7 @@ class ServerView(QWidget):
         self._refresh_platforms()
 
     def activate(self) -> None:
+        self._did_activate = True
         self._refresh_platforms()
         if self._stack.currentIndex() == 0:
             self._focus_first_platform()
@@ -141,7 +141,7 @@ class ServerView(QWidget):
                 self._loading_games = False
                 self._stack.setCurrentIndex(0)
                 self._sync_platform_empty_state()
-                self._focus_first_platform()
+                self._focus_platform_card(self._current_platform_idx)
                 return
             self._game_wall.handle_nav(direction)
             return
@@ -284,10 +284,11 @@ class ServerView(QWidget):
 
     def _sync_loading_state(self) -> None:
         if self._loading_games:
-            self._loading_label.show()
+            self._loading_spinner.show()
+            self._loading_spinner.raise_()
             self._game_wall.hide()
             return
-        self._loading_label.hide()
+        self._loading_spinner.hide()
         self._game_wall.show()
 
     def _clear_platform_grid(self, delete_cards: bool = True) -> None:
@@ -297,6 +298,7 @@ class ServerView(QWidget):
             if widget is None:
                 continue
             if delete_cards:
+                widget.hide()
                 widget.setParent(None)
                 widget.deleteLater()
 
@@ -314,7 +316,6 @@ class ServerView(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._loading_label.setGeometry(self._game_page.rect())
         new_cols = self._compute_columns()
         if new_cols != self._columns:
             self._columns = new_cols
@@ -322,3 +323,9 @@ class ServerView(QWidget):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
+        if not self._did_activate:
+            return
+        if self._stack.currentIndex() == 0:
+            self._focus_platform_card(self._current_platform_idx)
+        else:
+            self._game_wall.refocus()

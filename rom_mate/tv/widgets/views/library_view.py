@@ -80,6 +80,7 @@ class LibraryView(QWidget):
         self._filter_btn_idx: int = 0
         self._toggle_focused: bool = False
         self._toggle_btn_idx: int = 0
+        self._did_focus_initial: bool = False
         self._fanart_timer: QTimer = QTimer(self)
         self._fanart_timer.setSingleShot(True)
         self._fanart_timer.setInterval(500)
@@ -441,6 +442,16 @@ class LibraryView(QWidget):
         self._update_filter_styles()
         self._update_toggle_styles()
         self._grow_center_card()
+        self._did_focus_initial = True
+
+    def _refocus(self) -> None:
+        self._bind_pool()
+        self._schedule_fanart_update()
+        self._place_strip()
+        self._place_filter_bar()
+        self._update_filter_styles()
+        self._update_toggle_styles()
+        self._grow_center_card()
 
     def _refresh(self) -> None:
         raw = [g for g in (getattr(self._app_backend, "libraryGames", []) or []) if isinstance(g, dict)]
@@ -609,6 +620,8 @@ class LibraryView(QWidget):
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
+        if self._did_focus_initial:
+            self._refocus()
 
     def _on_game_selected(self, game_dict: object) -> None:
         if not isinstance(game_dict, dict):

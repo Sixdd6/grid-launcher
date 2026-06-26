@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QWidget
 
@@ -19,6 +21,9 @@ class GameWall(QWidget):
         self._games: list[dict] = []
         self._cards: list[GameCard] = []
         self._current_idx = 0
+        self._current_batch_id = None  # Track current batch for callback cancellation
+        self._populated: set[int] = set()
+        self._scroll_handler: Callable | None = None
 
         root_layout = QHBoxLayout(self)
         root_layout.setContentsMargins(40, 40, 16, 40)
@@ -50,24 +55,72 @@ class GameWall(QWidget):
         self._scrollbar.set_value(vbar.value())
 
     def set_games(self, games: list[dict]) -> None:
+        vbar = self._scroll_area.verticalScrollBar()
+        if self._scroll_handler is not None:
+            try:
+                vbar.valueChanged.disconnect(self._scroll_handler)
+            except RuntimeError:
+                pass
+            self._scroll_handler = None
+
+        if self._current_batch_id is not None:
+            self._cover_loader.cancel_batch(self._current_batch_id)
+        self._current_batch_id = self._cover_loader.create_batch()
+
         self._games = [game for game in (games or []) if isinstance(game, dict)]
+        self._populated = set()
         self._current_idx = 0
         self._clear_grid()
-
         self._cards = []
-        for idx, game in enumerate(self._games):
-            card = GameCard(self._container)
-            card.set_game(game)
-            self._cover_loader.load_async(str(game.get("cover_url", "") or ""), card.set_pixmap)
-            card.selected.connect(self.game_selected.emit)
 
-            row = idx // self._columns
-            col = idx % self._columns
-            self._grid.addWidget(card, row, col)
+        for i, game in enumerate(self._games):
+            card = GameCard(self._container)
+            card.selected.connect(self.game_selected.emit)
+            self._grid.addWidget(card, i // self._columns, i % self._columns)
             self._cards.append(card)
 
         if self._cards:
             self._focus_card(0)
+
+        vbar.valueChanged.connect(self._upgrade_visible_tv_cards)
+        self._scroll_handler = self._upgrade_visible_tv_cards
+        self._upgrade_visible_tv_cards()
+
+    def _upgrade_visible_tv_cards(self) -> None:
+        if len(self._populated) == len(self._games):
+            return
+
+        vbar = self._scroll_area.verticalScrollBar()
+        visible_top = vbar.value()
+        visible_bottom = visible_top + self._scroll_area.viewport().height()
+        card_h = 480
+        v_spacing = 18
+        row_h = card_h + v_spacing
+
+        min_row = max(0, visible_top // row_h)
+        max_row = max(0, visible_bottom // row_h) + 1
+
+        for row in range(min_row, max_row + 1):
+            for col in range(self._columns):
+                idx = row * self._columns + col
+                if idx >= len(self._cards) or idx in self._populated:
+                    continue
+                self._populated.add(idx)
+                card = self._cards[idx]
+                game = self._games[idx]
+                card.set_game(game)
+                self._cover_loader.load_async(
+                    str(game.get("cover_url", "") or ""),
+                    card.set_pixmap,
+                    batch_id=self._current_batch_id,
+                )
+
+        if len(self._populated) == len(self._games) and self._scroll_handler is not None:
+            try:
+                self._scroll_area.verticalScrollBar().valueChanged.disconnect(self._scroll_handler)
+            except RuntimeError:
+                pass
+            self._scroll_handler = None
 
     def handle_nav(self, direction: str) -> None:
         if not self._cards:
@@ -97,6 +150,11 @@ class GameWall(QWidget):
             return
         self._focus_card(0)
 
+    def refocus(self) -> None:
+        if not self._cards:
+            return
+        self._focus_card(self._current_idx)
+
     def _focus_card(self, idx: int) -> None:
         if idx < 0 or idx >= len(self._cards):
             return
@@ -118,6 +176,7 @@ class GameWall(QWidget):
             row = idx // self._columns
             col = idx % self._columns
             self._grid.addWidget(card, row, col)
+        self._upgrade_visible_tv_cards()  # populate newly visible cards after re-layout
 
     def _clear_grid(self, delete_cards: bool = True) -> None:
         while self._grid.count() > 0:
@@ -126,6 +185,7 @@ class GameWall(QWidget):
             if widget is None:
                 continue
             if delete_cards:
+                widget.hide()
                 widget.setParent(None)
                 widget.deleteLater()
 
