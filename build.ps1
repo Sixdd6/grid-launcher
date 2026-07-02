@@ -39,6 +39,9 @@ python -m PyInstaller `
     --add-data "assets;assets" `
     --add-data "retroarch-core-list.json;." `
     --add-data "emulator-autoprofiles.json;." `
+    --hidden-import brotli `
+    --hidden-import pyzstd `
+    --hidden-import pyppmd `
     rom-mate.py
 
 # Check if build was successful
