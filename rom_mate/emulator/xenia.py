@@ -182,6 +182,11 @@ def _is_canary_variant(emulator_path_text: str) -> bool:
     return any(token in normalized for token in ("xenia_canary", "xenia-canary", "canary"))
 
 
+def _is_edge_variant(emulator_path_text: str) -> bool:
+    normalized = emulator_path_text.strip().casefold() if isinstance(emulator_path_text, str) else ""
+    return any(token in normalized for token in ("xenia_edge", "xenia-edge"))
+
+
 def _resolve_launch_path(base_root: Path, raw_value: str) -> str:
     value = _clean_path_value(raw_value)
     if not value:
@@ -284,9 +289,17 @@ def _default_user_storage_root() -> Path:
     return (home_path / ".local" / "share" / "Xenia").resolve()
 
 
-def _config_name_candidates(is_canary: bool) -> list[str]:
+def _config_name_candidates(is_canary: bool, is_edge: bool = False) -> list[str]:
     names = ["xenia.config.toml", "xenia-config.toml"]
-    if is_canary:
+    if is_edge:
+        names = [
+            "xenia-edge.config.toml",
+            "xenia-edge-config.toml",
+            "xenia_edge.config.toml",
+            "xenia_edge-config.toml",
+            *names,
+        ]
+    elif is_canary:
         names = [
             "xenia-canary.config.toml",
             "xenia-canary-config.toml",
@@ -337,6 +350,7 @@ def xenia_directory_settings(
 ) -> dict[str, str]:
     emulator_dir = _emulator_dir(emulator_path_text)
     is_canary = _is_canary_variant(emulator_path_text)
+    is_edge = _is_edge_variant(emulator_path_text)
     launch_overrides = _launch_path_overrides(emulator_path_text, launch_template, split_launch_template_args)
 
     portable_file_exists = bool(str(emulator_dir) and (emulator_dir / "portable.txt").exists())
@@ -355,11 +369,11 @@ def xenia_directory_settings(
         storage_root = _default_user_storage_root()
 
     defaults = {
-        "variant": "canary" if is_canary else "master",
+        "variant": "canary" if is_canary else "edge" if is_edge else "master",
         "config_path": "",
         "storage_root": str(storage_root.resolve()),
         "content_root": str((storage_root / "content").resolve()),
-        "cache_root": str((storage_root / ("cache_host" if is_canary else "cache")).resolve()),
+        "cache_root": str((storage_root / ("cache_host" if is_canary or is_edge else "cache")).resolve()),
         "portable": "true" if portable_mode else "false",
     }
 
@@ -372,7 +386,7 @@ def xenia_directory_settings(
         defaults["cache_root"] = _resolve_setting_path(
             storage_root,
             cache_root_override,
-            "cache_host" if is_canary else "cache",
+            "cache_host" if is_canary or is_edge else "cache",
         )
 
     config_candidates: list[Path] = []
@@ -381,7 +395,7 @@ def xenia_directory_settings(
         config_candidates.append(Path(config_override).expanduser().resolve())
 
     for root in _unique_paths([candidate for candidate in (storage_root, emulator_dir) if str(candidate)]):
-        config_candidates.extend((root / name).resolve() for name in _config_name_candidates(is_canary))
+        config_candidates.extend((root / name).resolve() for name in _config_name_candidates(is_canary, is_edge))
 
     for candidate in _unique_paths(config_candidates):
         if not candidate.exists() or not candidate.is_file():
@@ -407,7 +421,7 @@ def xenia_directory_settings(
             defaults["cache_root"] = _resolve_setting_path(
                 storage_root,
                 storage.get("cache_root", ""),
-                "cache_host" if is_canary else "cache",
+                "cache_host" if is_canary or is_edge else "cache",
             )
         return defaults
 

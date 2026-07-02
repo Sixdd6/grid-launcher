@@ -3,7 +3,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Callable
 
 
@@ -234,7 +234,7 @@ def emulator_profile_for_game(
 ) -> dict[str, Any]:
     title_value = game.get("title", "")
     title = title_value.strip() if isinstance(title_value, str) else ""
-    executable_name = Path(executable_path).name.strip().casefold()
+    executable_name = PureWindowsPath(executable_path).name.strip().casefold()
     token_matches: list[dict[str, Any]] = []
 
     for profile in profiles:

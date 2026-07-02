@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -56,6 +57,7 @@ from rom_mate.emulator.xemu import (
     xemu_save_path_overrides,
 )
 from rom_mate.emulator.xenia import (
+    _is_edge_variant,
     xenia_directory_settings,
     xenia_save_path_overrides,
     xenia_state_path_overrides,
@@ -722,6 +724,45 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
         self.assertIn(str((save_root / "profile").resolve()), overrides)
         self.assertNotIn(str((save_root / "00000002").resolve()), overrides)
         self.assertEqual(state_overrides, [])
+
+    def test_xenia_is_edge_variant_detects_appimage_filename(self) -> None:
+        self.assertTrue(_is_edge_variant("xenia_edge_linux.AppImage"))
+        self.assertTrue(_is_edge_variant("/path/to/xenia-edge"))
+        self.assertFalse(_is_edge_variant("xenia_canary.exe"))
+        self.assertFalse(_is_edge_variant("xenia.exe"))
+
+    def test_xenia_directory_settings_edge_variant_uses_edge_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            edge_dir = Path(temp_dir) / "xenia-edge"
+            edge_dir.mkdir()
+            config_path = edge_dir / "xenia-edge.config.toml"
+            config_path.write_text(
+                '[Storage]\ncontent_root = "content-edge"\n',
+                encoding="utf-8",
+            )
+
+            settings = xenia_directory_settings(
+                str(edge_dir / "xenia_edge_linux.AppImage"),
+                '"%rom%"',
+                str.split,
+            )
+
+        self.assertEqual(settings["variant"], "edge")
+        self.assertEqual(settings["config_path"], str(config_path.resolve()))
+
+    def test_xenia_edge_profile_in_autoprofiles_json(self) -> None:
+        autoprofiles_path = Path(__file__).resolve().parents[1] / "emulator-autoprofiles.json"
+        profiles = json.loads(autoprofiles_path.read_text(encoding="utf-8"))
+
+        edge_profile = next(
+            profile
+            for profile in profiles
+            if profile.get("name") == "Xenia Edge (Xbox 360)"
+        )
+
+        self.assertIn("xenia_edge_linux.AppImage", edge_profile["match_tokens"])
+        linux_override = edge_profile["source"]["platform_overrides"]["linux"]
+        self.assertIn("xenia_edge_linux.AppImage", linux_override["asset_patterns"])
 
     def test_redream_directory_settings_detect_portable_data_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

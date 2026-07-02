@@ -780,6 +780,7 @@ class _DetailsPageStubWindow:
         self.details_secondary_button = None
         self.details_update_button = None
         self.details_screenshot_labels = []
+        self.details_metadata_scalable_labels = []
         self.details_screenshots_panel = None
         self.details_screenshots_scroll = None
         self.overview_calls = 0

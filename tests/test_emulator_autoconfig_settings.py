@@ -20,6 +20,7 @@ from rom_mate.emulator import ensure_dolphin_settings, ensure_dolphin_skip_ipl, 
 from rom_mate.emulator.dolphin import dolphin_ini_path_candidates, dolphin_user_root_candidates
 from rom_mate.emulator.duckstation import ensure_duckstation_memory_card_settings
 from rom_mate.emulator.eden import _ensure_eden_section_values, ensure_eden_settings, eden_config_path_candidates
+from rom_mate.emulator.launch import retroarch_core_argument_path
 from rom_mate.emulator.pico8 import pico8_user_root_candidates
 from rom_mate.emulator.pcsx2 import (
     ensure_pcsx2_settings,
@@ -1818,11 +1819,23 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
 
     def test_cemu_controller_config_xml_contains_xinput_api(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            ensure_cemu_controller_config(temp_dir)
+            with patch("rom_mate.emulator.cemu.sys.platform", "win32"):
+                ensure_cemu_controller_config(temp_dir)
             profile_path = Path(temp_dir) / "portable" / "controllerProfiles" / "controller0.xml"
             text = profile_path.read_text(encoding="utf-8")
 
         self.assertIn("<api>XInput</api>", text)
+        self.assertIn("<type>Wii U Pro Controller</type>", text)
+
+    def test_cemu_controller_config_linux_writes_sdl_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch("rom_mate.emulator.cemu.sys.platform", "linux"):
+                ensure_cemu_controller_config(temp_dir)
+            profile_path = Path(temp_dir) / "portable" / "controllerProfiles" / "controller0.xml"
+            text = profile_path.read_text(encoding="utf-8")
+
+        self.assertIn("<api>SDLController</api>", text)
+        self.assertNotIn("<api>XInput</api>", text)
         self.assertIn("<type>Wii U Pro Controller</type>", text)
 
 
@@ -3274,6 +3287,43 @@ class FlatpakEmulatorDetectionTests(unittest.TestCase):
 
         self.assertFalse(window.save_called)
         self.assertFalse(window.refresh_called)
+
+
+class RetroarchCoreArgumentPathTests(unittest.TestCase):
+    def test_bare_name_on_windows(self) -> None:
+        with patch("sys.platform", "win32"):
+            self.assertEqual(retroarch_core_argument_path("snes9x"), "cores/snes9x_libretro.dll")
+
+    def test_bare_name_on_linux(self) -> None:
+        with patch("sys.platform", "linux"):
+            self.assertEqual(retroarch_core_argument_path("snes9x"), "cores/snes9x_libretro.so")
+
+    def test_bare_name_on_macos(self) -> None:
+        with patch("sys.platform", "darwin"):
+            self.assertEqual(retroarch_core_argument_path("snes9x"), "cores/snes9x_libretro.dylib")
+
+    def test_libretro_suffix_on_linux(self) -> None:
+        with patch("sys.platform", "linux"):
+            self.assertEqual(retroarch_core_argument_path("snes9x_libretro"), "cores/snes9x_libretro.so")
+
+    def test_dll_extension_reextensioned_on_linux(self) -> None:
+        with patch("sys.platform", "linux"):
+            self.assertEqual(retroarch_core_argument_path("snes9x_libretro.dll"), "cores/snes9x_libretro.so")
+
+    def test_so_extension_reextensioned_on_windows(self) -> None:
+        with patch("sys.platform", "win32"):
+            self.assertEqual(retroarch_core_argument_path("snes9x_libretro.so"), "cores/snes9x_libretro.dll")
+
+    def test_full_path_returned_as_is(self) -> None:
+        with patch("sys.platform", "linux"):
+            self.assertEqual(
+                retroarch_core_argument_path("/opt/cores/snes9x_libretro.dll"),
+                "/opt/cores/snes9x_libretro.dll",
+            )
+
+    def test_empty_string(self) -> None:
+        with patch("sys.platform", "linux"):
+            self.assertEqual(retroarch_core_argument_path(""), "")
 
 
 if __name__ == "__main__":

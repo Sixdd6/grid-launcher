@@ -419,10 +419,10 @@ def _fallback_state_candidates(state_candidates: list[Path]) -> list[Path]:
     if len(state_candidates) == 1:
         return list(state_candidates)
 
-    latest_candidate = max(
+    latest_candidate = sorted(
         state_candidates,
-        key=lambda item: item.stat().st_mtime if item.exists() else 0,
-    )
+        key=lambda item: (-(item.stat().st_mtime if item.exists() else 0), item.name.casefold()),
+    )[0]
     latest_group_key = _state_candidate_hash_group_key(latest_candidate)
     if not latest_group_key:
         return []
@@ -432,7 +432,7 @@ def _fallback_state_candidates(state_candidates: list[Path]) -> list[Path]:
         for candidate in state_candidates
         if _state_candidate_hash_group_key(candidate) == latest_group_key
     ]
-    grouped.sort(key=lambda item: item.stat().st_mtime if item.exists() else 0, reverse=True)
+    grouped.sort(key=lambda item: (-(item.stat().st_mtime if item.exists() else 0), item.name.casefold()))
     return _unique_casefold_paths(grouped)
 
 
@@ -635,5 +635,5 @@ def cloud_sync_candidates_for_game(
     if save_type == "state":
         candidates = matched_state_candidates or _fallback_state_candidates(unmatched_state_candidates)
 
-    candidates.sort(key=lambda item: item.stat().st_mtime if item.exists() else 0, reverse=True)
+    candidates.sort(key=lambda item: (-(item.stat().st_mtime if item.exists() else 0), item.name.casefold()))
     return _unique_casefold_paths(candidates)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -249,7 +250,7 @@ class PS4ContentApplyTests(unittest.TestCase):
 
 
 class TestExtractArchiveIntoDirectory(unittest.TestCase):
-    @unittest.skipUnless(_BUNDLED_7Z_PATH.exists(), "Bundled 7z.exe not available")
+    @unittest.skipUnless(_BUNDLED_7Z_PATH.exists() and sys.platform == "win32", "Bundled 7z.exe not available or not on Windows")
     def test_bundled_7z_extracts_real_7z_archive(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -345,11 +346,14 @@ class TestEnsureFullSevenZip(unittest.TestCase):
                     (tools_dir / name).write_bytes(b"extra")
                 return MagicMock(returncode=0, stderr="")
 
+            urlopen_response = MagicMock(read=MagicMock(return_value=b""))
+            urlopen_response.__enter__.return_value = urlopen_response
+
             with patch("sys.platform", "win32"), \
                  patch.object(archive_preparation, "_APP_TOOLS_DIR", tools_dir), \
                  patch.object(archive_preparation, "_PORTABLE_7ZZ_PATH", portable_7zz_path), \
                  patch("rom_mate.library.archive_preparation._ensure_portable_7z", return_value=Path("C:/tools/7zr.exe")), \
-                 patch("rom_mate.library.archive_preparation.urllib.request.urlretrieve"), \
+                 patch("rom_mate.library.archive_preparation.urllib.request.urlopen", return_value=urlopen_response), \
                  patch("rom_mate.library.archive_preparation.subprocess.run", side_effect=fake_extract):
                 result = archive_preparation._ensure_full_7z()
 

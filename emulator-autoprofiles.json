@@ -475,6 +475,32 @@
     "screenshot_directories": ["screenshots"]
   },
   {
+    "match_tokens": ["xenia_edge_linux.AppImage", "xenia_edge", "xenia-edge"],
+    "source": {
+      "provider": "github-release",
+      "owner": "has207",
+      "repo": "xenia-edge",
+      "release_tag": "latest",
+      "platform_overrides": {
+        "linux": {
+          "asset_patterns": ["xenia_edge_linux.AppImage"],
+          "launch_executable": "xenia_edge_linux.AppImage"
+        }
+      }
+    },
+    "name": "Xenia Edge (Xbox 360)",
+    "args": "\"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["xbox 360", "microsoft xbox 360", "xbox360"],
+    "use_game_title_as_name": false,
+    "save_strategy": "single_file",
+    "save_directories": [
+      "content"
+    ],
+    "state_directories": [],
+    "screenshot_directories": ["screenshots"]
+  },
+  {
     "match_tokens": ["redream.exe"],
     "source": {
       "provider": "direct",

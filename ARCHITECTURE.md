@@ -51,7 +51,9 @@ This document is a stable module map for the current codebase.
 - `rom_mate/emulator/`
   - Emulator selection, profiles, auto-configuration, RetroArch integration, and launching.
   - `autoconfig.py`: known emulator auto-configuration.
-  - `launch.py`: launch argument substitution and command preparation.
+  - `launch.py`: launch argument substitution and command preparation. `retroarch_core_argument_path()` branches on platform, emitting `.so` on Linux, `.dylib` on macOS, and `.dll` on Windows; it strips any existing known core extension before applying the platform-appropriate one.
+  - `cemu.py`: Cemu portable-mode settings and controller profile writing. `ensure_cemu_controller_config()` writes the XInput Pro Controller profile (`_DEFAULT_CEMU_XINPUT_CONTROLLER_PROFILE`) on Windows and the SDL controller profile (`_DEFAULT_CEMU_SDL_CONTROLLER_PROFILE`, using `<api>SDLController</api>`) on all other platforms.
+  - `xenia.py`: Xenia variant detection and directory resolution. Supports master, Canary, and Edge variants; `_is_edge_variant()` plus edge-aware `_config_name_candidates()`/`xenia_directory_settings()` map the Edge build (variant `edge`) to `xenia-edge.config.toml` and the `cache_host` cache directory.
   - `profiles.py`: emulator profile defaults and matching.
   - `retroarch.py`: RetroArch core discovery and compatibility mapping.
   - `selection.py`: default emulator and platform resolution, including cloud save scope classification such as per-game vs shared emulator media.
@@ -107,4 +109,6 @@ This document is a stable module map for the current codebase.
 - Emulator autoprofiles (`emulator-autoprofiles.json`) define `screenshot_directories` alongside `save_directories` and `state_directories`. The `_resolved_screenshot_directories()` method in `rom-mate.py` resolves these paths; `session_screenshot_path()` in `cloud_transfer.py` finds the most recent session-window screenshot to attach to cloud uploads. These are intentionally absent for PPSSPP and RetroArch which use file sidecars instead.
 - The `InstallFinalizeWorker` in `workers.py` only deletes the downloaded archive after installation when extraction actually occurred (`extracted_path` is non-empty). Direct game file formats (.chd, .iso, .bin, etc.) must never be deleted post-install.
 - RetroArch firmware routing details are in `retroarch-core-list.json` and `firmware_install.py`. Debug output available via the `rom_mate.library.firmware_install` logger.
+- Cross-platform emulator support is handled inline within the emulator modules rather than a dedicated Linux layer: RetroArch core paths branch by platform in `launch.py` (`.so`/`.dylib`/`.dll`), Cemu picks the SDL controller profile on non-Windows platforms in `cemu.py`, and Xenia Edge ships as a native Linux AppImage. Keep new platform behavior alongside the emulator it affects.
+- Xenia Edge (Xbox 360) is defined in `emulator-autoprofiles.json` as the `"Xenia Edge (Xbox 360)"` profile, sourced as a native Linux AppImage from the `has207/xenia-edge` GitHub release. Its variant handling lives in `xenia.py` (see `_is_edge_variant()`).
 - `MainWindow` is composed via four mixins (`CloudSaveMixin`, `EmulatorUIMixin`, `InstallMixin`, `DetailsViewMixin`) in `rom_mate/ui/mixins/`. When behavior spans mixins (e.g., install triggering a cloud refresh), the call crosses from `InstallMixin` into a method resolved on `self` that lives in another mixin — check the mixin that owns the behavior you're tracing before searching `rom-mate.py`.

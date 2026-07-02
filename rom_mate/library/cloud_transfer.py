@@ -496,7 +496,9 @@ def resolve_native_save_dir(raw_path: str, windows_documents: "Path | None") -> 
     if windows_documents is None:
         return expanded
 
-    docs_via_env = Path(os.path.expandvars("%USERPROFILE%")) / "Documents"
+    from pathlib import PureWindowsPath
+
+    docs_via_env = PureWindowsPath(os.path.expandvars("%USERPROFILE%")) / "Documents"
 
     # If Shell Documents matches env-expanded Documents, no redirection — return as-is.
     if (
@@ -506,7 +508,7 @@ def resolve_native_save_dir(raw_path: str, windows_documents: "Path | None") -> 
         return expanded
 
     # Check whether the expanded path is rooted under %USERPROFILE%\Documents.
-    expanded_cf = str(expanded).casefold()
+    expanded_cf = str(PureWindowsPath(os.path.expandvars(raw_path))).casefold()
     docs_prefix = str(docs_via_env).rstrip("/\\").casefold()
 
     if expanded_cf == docs_prefix:
@@ -515,8 +517,8 @@ def resolve_native_save_dir(raw_path: str, windows_documents: "Path | None") -> 
     if expanded_cf.startswith(docs_prefix + "\\") or expanded_cf.startswith(
         docs_prefix + "/"
     ):
-        suffix = str(expanded)[len(str(docs_via_env)) :].lstrip("/\\")
-        return windows_documents / suffix
+        suffix = str(PureWindowsPath(os.path.expandvars(raw_path)))[len(str(docs_via_env)) :].lstrip("/\\")
+        return Path(str(windows_documents) + "\\" + suffix)
 
     return expanded
 
@@ -530,9 +532,9 @@ def normalize_manual_save_path(folder: str) -> str:
     normalised to backslashes. On non-Windows, or when no known prefix
     matches, the path is returned unchanged.
     """
-    from pathlib import Path as _Path
+    from pathlib import PureWindowsPath
 
-    folder_str = str(_Path(folder))
+    folder_str = str(PureWindowsPath(folder))
 
     userprofile = os.path.expandvars("%USERPROFILE%")
 
@@ -541,11 +543,11 @@ def normalize_manual_save_path(folder: str) -> str:
         ("%LOCALAPPDATA%", os.path.expandvars("%LOCALAPPDATA%")),
         (
             r"%USERPROFILE%\AppData\LocalLow",
-            str(_Path(userprofile) / "AppData" / "LocalLow"),
+            str(PureWindowsPath(userprofile) / "AppData" / "LocalLow"),
         ),
         (
             r"%USERPROFILE%\Documents",
-            str(_Path(userprofile) / "Documents"),
+            str(PureWindowsPath(userprofile) / "Documents"),
         ),
         ("%USERPROFILE%", userprofile),
     ]

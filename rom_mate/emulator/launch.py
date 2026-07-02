@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shlex
+import sys
 from pathlib import Path
 from typing import Callable
 
@@ -30,12 +31,23 @@ def retroarch_core_argument_path(configured_core: str) -> str:
     if "/" in normalized:
         return normalized
 
-    if normalized.casefold().endswith(".dll"):
-        core_file = normalized
-    elif normalized.casefold().endswith("_libretro"):
-        core_file = f"{normalized}.dll"
+    if sys.platform == "win32":
+        extension = ".dll"
+    elif sys.platform == "darwin":
+        extension = ".dylib"
     else:
-        core_file = f"{normalized}_libretro.dll"
+        extension = ".so"
+
+    base = normalized
+    for known in (".dll", ".dylib", ".so"):
+        if base.casefold().endswith(known):
+            base = base[: -len(known)]
+            break
+
+    if base.casefold().endswith("_libretro"):
+        core_file = f"{base}{extension}"
+    else:
+        core_file = f"{base}_libretro{extension}"
     return f"cores/{core_file}"
 
 
