@@ -9,12 +9,21 @@ from pathlib import Path
 from unittest.mock import patch, ANY, MagicMock
 import json
 
-from rom_mate.emulator.azahar import ensure_azahar_settings
+from rom_mate.emulator.azahar import (
+    azahar_config_path_candidates,
+    azahar_user_root_candidates,
+    ensure_azahar_settings,
+)
 from rom_mate.emulator.cemu import ensure_cemu_controller_config, ensure_cemu_settings
 from rom_mate.emulator import ensure_dolphin_settings, ensure_dolphin_skip_ipl, ensure_dolphin_gcpad_config
+from rom_mate.emulator.dolphin import dolphin_ini_path_candidates, dolphin_user_root_candidates
 from rom_mate.emulator.duckstation import ensure_duckstation_memory_card_settings
 from rom_mate.emulator.eden import _ensure_eden_section_values, ensure_eden_settings
-from rom_mate.emulator.pcsx2 import ensure_pcsx2_settings, pcsx2_data_root_candidates
+from rom_mate.emulator.pcsx2 import (
+    ensure_pcsx2_settings,
+    pcsx2_config_path_candidates,
+    pcsx2_data_root_candidates,
+)
 from rom_mate.emulator.ppsspp import ensure_ppsspp_settings
 from rom_mate.emulator.rpcs3 import (
     copy_ps3_custom_config_to_emulator,
@@ -25,7 +34,7 @@ from rom_mate.emulator.rpcs3 import (
 )
 from rom_mate.emulator.redream import ensure_redream_settings
 from rom_mate.emulator.retroarch import ensure_retroarch_save_location_settings
-from rom_mate.emulator.xemu import ensure_xemu_settings
+from rom_mate.emulator.xemu import ensure_xemu_settings, xemu_base_path_candidates
 from rom_mate.emulator import xemu_missing_bios_files
 from rom_mate.ui.mixins.emulator_ui_mixin import EmulatorUIMixin
 
@@ -497,6 +506,17 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
                 candidates = pcsx2_data_root_candidates("", "", lambda s: [])
         self.assertIn(fake_docs / "PCSX2", candidates)
 
+    def test_pcsx2_data_root_candidates_includes_flatpak_path(self) -> None:
+        candidates = pcsx2_data_root_candidates("", "", lambda s: [])
+        self.assertIn(Path.home() / ".var" / "app" / "net.pcsx2.PCSX2" / "config" / "PCSX2", candidates)
+
+    def test_pcsx2_config_path_candidates_includes_flatpak_path(self) -> None:
+        candidates = pcsx2_config_path_candidates("/nonexistent/pcsx2-qt.exe")
+        self.assertIn(
+            Path.home() / ".var" / "app" / "net.pcsx2.PCSX2" / "config" / "PCSX2" / "inis" / "PCSX2.ini",
+            candidates,
+        )
+
     def test_pcsx2_windows_documents_folder_exported_from_module(self) -> None:
         from rom_mate.emulator import pcsx2_windows_documents_folder
 
@@ -579,6 +599,17 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
             portable_content = portable_path.read_text(encoding="utf-8")
 
         self.assertEqual("custom", portable_content)
+
+    def test_dolphin_user_root_candidates_includes_flatpak_path(self) -> None:
+        candidates = dolphin_user_root_candidates("", "", lambda s: [])
+        self.assertIn(Path.home() / ".var" / "app" / "org.DolphinEmu.dolphin-emu" / "data" / "dolphin-emu", candidates)
+
+    def test_dolphin_ini_path_candidates_includes_flatpak_path(self) -> None:
+        candidates = dolphin_ini_path_candidates("/nonexistent/dolphin.exe", "Dolphin.ini")
+        self.assertIn(
+            Path.home() / ".var" / "app" / "org.DolphinEmu.dolphin-emu" / "data" / "dolphin-emu" / "Dolphin.ini",
+            candidates,
+        )
 
     def test_dolphin_analytics_both_keys_written(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -876,6 +907,17 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
             marker_content = marker_path.read_text(encoding="utf-8")
 
         self.assertEqual("x", marker_content)
+
+    def test_azahar_user_root_candidates_includes_flatpak_path(self) -> None:
+        candidates = azahar_user_root_candidates("")
+        self.assertIn(Path.home() / ".var" / "app" / "org.azahar_emu.Azahar" / "data" / "Azahar", candidates)
+
+    def test_azahar_config_path_candidates_includes_flatpak_path(self) -> None:
+        candidates = azahar_config_path_candidates("/nonexistent/azahar.exe")
+        self.assertIn(
+            Path.home() / ".var" / "app" / "org.azahar_emu.Azahar" / "config" / "Azahar" / "qt-config.ini",
+            candidates,
+        )
 
     def test_eden_writes_telemetry_and_discord(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1229,6 +1271,10 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
             text = config_path.read_text(encoding="utf-8")
 
         self.assertIn("eeprom_path = '/custom/path/eeprom.bin'", text)
+
+    def test_xemu_base_path_candidates_includes_flatpak_path(self) -> None:
+        candidates = xemu_base_path_candidates("", "", lambda s: [])
+        self.assertIn(Path.home() / ".var" / "app" / "app.xemu.xemu" / "data" / "xemu" / "xemu", candidates)
 
     def test_ppsspp_deletes_installed_txt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

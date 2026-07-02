@@ -138,6 +138,7 @@ def dolphin_user_root_candidates(
             home_path / "Library" / "Application Support" / "Dolphin",
         ]
     )
+    candidates.append(home_path / ".var" / "app" / "org.DolphinEmu.dolphin-emu" / "data" / "dolphin-emu")
 
     if emulator_dir:
         candidates.append((emulator_dir / "User").resolve())
@@ -229,11 +230,14 @@ def dolphin_ini_path_candidates(emulator_path_text: str, ini_name: str) -> list[
     candidates: list[Path] = []
     if emulator_path.is_absolute():
         candidates.append(emulator_path.parent / "User" / "Config" / ini_name)
+    appdata = os.environ.get("APPDATA", "")
+    if isinstance(appdata, str) and appdata.strip():
+        candidates.append(Path(appdata).expanduser() / "Dolphin Emulator" / "Config" / ini_name)
     candidates.extend([
-        Path(os.path.expandvars("%APPDATA%")) / "Dolphin Emulator" / "Config" / ini_name,
         Path.home() / ".local" / "share" / "dolphin-emu" / ini_name,
         Path.home() / "Library" / "Application Support" / "Dolphin" / ini_name,
     ])
+    candidates.append(Path.home() / ".var" / "app" / "org.DolphinEmu.dolphin-emu" / "data" / "dolphin-emu" / ini_name)
 
     unique: list[Path] = []
     seen: set[str] = set()

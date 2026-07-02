@@ -126,12 +126,16 @@ def azahar_config_path_candidates(emulator_path_text: str) -> list[Path]:
         return []
 
     emulator_path = Path(emulator_path_text).expanduser()
-    return [
+    candidates = [
         emulator_path.parent / "user" / "config" / "qt-config.ini",
         emulator_path.parent / "qt-config.ini",
-        Path(os.path.expandvars("%APPDATA%")) / "Azahar" / "qt-config.ini",
-        Path.home() / ".config" / "Azahar" / "qt-config.ini",
     ]
+    appdata = os.environ.get("APPDATA", "")
+    if isinstance(appdata, str) and appdata.strip():
+        candidates.append(Path(appdata).expanduser() / "Azahar" / "qt-config.ini")
+    candidates.append(Path.home() / ".config" / "Azahar" / "qt-config.ini")
+    candidates.append(Path.home() / ".var" / "app" / "org.azahar_emu.Azahar" / "config" / "Azahar" / "qt-config.ini")
+    return candidates
 
 
 def ensure_azahar_settings(emulator_path_text: str) -> dict:
@@ -247,6 +251,7 @@ def azahar_user_root_candidates(
                 home_path / "Library" / "Application Support" / "Azahar",
             ]
         )
+        candidates.append(home_path / ".var" / "app" / "org.azahar_emu.Azahar" / "data" / "Azahar")
 
     if emulator_dir:
         candidates.append((emulator_dir / "user").resolve())
