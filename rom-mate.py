@@ -394,6 +394,7 @@ from rom_mate.ui.mixins.details_view_mixin import DetailsViewMixin
 
 class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin, QMainWindow):
     _emulator_refresh_requested = Signal()
+    _flatpak_detection_completed = Signal(list)
     _toast_requested = Signal(object)
     _firmware_download_progress = Signal(object)
     _firmware_download_done = Signal(str)  # error string (empty on success)
@@ -567,6 +568,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self.downloads_refresh_timer.setInterval(120)
         self.downloads_refresh_timer.timeout.connect(self._refresh_downloads_page)
         self._emulator_refresh_requested.connect(self._refresh_emulator_views)
+        self._flatpak_detection_completed.connect(self._on_flatpak_detection_completed)
         self._platform_games_ready.connect(self._on_platform_games_ready)
         self._toast_requested.connect(self._show_toast)
         self._firmware_download_progress.connect(self._on_firmware_download_progress)
@@ -706,6 +708,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
         self._refresh_library_grid()
         self._refresh_emulator_views()
+        self._trigger_flatpak_emulator_detection_background()
         self._restore_window_geometry()
         self._connect_to_server(show_errors=False)
 

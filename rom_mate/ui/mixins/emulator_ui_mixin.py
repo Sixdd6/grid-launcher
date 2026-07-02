@@ -36,6 +36,7 @@ from rom_mate.emulator import (
     apply_manual_emulator_profile_defaults,
     assign_profile_platform_defaults,
     default_emulator_autoprofiles,
+    detect_installed_flatpak_emulators,
     emulator_autoprofiles_path,
     emulator_install_directory,
     emulator_profile_for_entry,
@@ -149,7 +150,13 @@ class EmulatorUIMixin:
         self.config["emulator_source_installs"] = installs
         self._save_config(self.config)
 
-    def _ensure_emulator_sync_settings(self, emulator_name: str, emulator_path_text: str) -> None:
+    def _ensure_emulator_sync_settings(
+        self,
+        emulator_name: str,
+        emulator_path_text: str,
+        *,
+        flatpak_config_root: str = "",
+    ) -> None:
         timing_start = getattr(self, "_debug_timing_start", None)
         timing_end = getattr(self, "_debug_timing_end", None)
         started_at = timing_start("_ensure_emulator_sync_settings", emulator=emulator_name) if callable(timing_start) else 0.0
@@ -211,7 +218,7 @@ class EmulatorUIMixin:
             self._trigger_rpcs3_firmware_download_background(emulator_entry, path_text)
         if self._is_ppsspp_emulator_name(emulator_name, emulator_entry):
             ensure_ppsspp_settings(
-                path_text,
+                flatpak_config_root.strip() or path_text,
                 retroachievements_username=ra_username,
                 retroachievements_token=ra_token,
             )
@@ -1515,6 +1522,88 @@ class EmulatorUIMixin:
 
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
+
+    def _trigger_flatpak_emulator_detection_background(self) -> None:
+        """Detect installed Flatpak emulators in the background and auto-add any
+        not already configured. No-op on non-Linux (detection.py already no-ops,
+        but skip thread creation entirely here as a fast path)."""
+        if not sys.platform.startswith("linux"):
+            return
+
+        autoprofiles = self._emulator_autoprofiles()
+        existing_emulators = self._emulators()
+        known_app_ids = {
+            str(entry.get("flatpak_app_id", "")).strip()
+            for entry in existing_emulators
+            if isinstance(entry, dict) and str(entry.get("flatpak_app_id", "")).strip()
+        }
+        known_names = {
+            str(entry.get("name", "")).strip().casefold()
+            for entry in existing_emulators
+            if isinstance(entry, dict) and str(entry.get("name", "")).strip()
+        }
+
+        def _worker() -> None:
+            detected = detect_installed_flatpak_emulators(autoprofiles)
+            new_entries = [
+                entry for entry in detected
+                if isinstance(entry, dict)
+                and str(entry.get("flatpak_app_id", "")).strip() not in known_app_ids
+                and str(entry.get("name", "")).strip().casefold() not in known_names
+            ]
+            if new_entries:
+                self._flatpak_detection_completed.emit(new_entries)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_flatpak_detection_completed(self, new_entries: list) -> None:
+        """Main-thread slot: adds newly detected Flatpak emulators to the config,
+        applies profile defaults, triggers config sync, and refreshes the UI."""
+        if not new_entries:
+            return
+
+        emulators = self._emulators()
+        autoprofiles = self._emulator_autoprofiles()
+        added_names: list[str] = []
+
+        for detected_entry in new_entries:
+            if not isinstance(detected_entry, dict):
+                continue
+
+            entry = dict(detected_entry)
+            flatpak_config_root = str(entry.pop("_flatpak_config_root", "")).strip()
+
+            entry = apply_manual_emulator_profile_defaults(
+                entry,
+                autoprofiles,
+                emulator_profile_for_entry=emulator_profile_for_entry,
+                normalize_save_strategy_value=self._normalize_save_strategy_value,
+            )
+
+            entry_name = str(entry.get("name", "")).strip()
+            entry_path = str(entry.get("path", "")).strip()
+            if not entry_name or not entry_path:
+                continue
+
+            self._ensure_emulator_sync_settings(
+                entry_name, entry_path, flatpak_config_root=flatpak_config_root
+            )
+
+            emulators = upsert_emulator_entry(emulators, entry, -1)
+            added_names.append(entry_name)
+
+        if not added_names:
+            return
+
+        self.config["emulators"] = self._normalize_emulators(emulators)
+        self._refresh_emulator_views()
+        self._save_config(self.config)
+
+        label = "emulator" if len(added_names) == 1 else "emulators"
+        self._show_toast({
+            "message": f"Detected {len(added_names)} installed Flatpak {label}: {', '.join(added_names)}.",
+            "level": "success",
+        })
 
     def _trigger_firmware_install_for_source_emulator(self, emulator_name: str) -> None:
         """Download and install firmware for a freshly installed source emulator.

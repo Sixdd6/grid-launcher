@@ -2974,5 +2974,287 @@ class RPCS3CustomConfigCopyTests(unittest.TestCase):
             self.assertTrue((dest_dir / "config_BCUS98174.yml").exists())
 
 
+class FlatpakEmulatorDetectionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        module_path = Path(__file__).resolve().parents[1] / "rom-mate.py"
+        spec = importlib.util.spec_from_file_location("rom_mate_main_for_flatpak_detection_tests", module_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError("Could not load rom-mate.py for tests.")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        cls.module = module
+
+    def test_ensure_emulator_sync_settings_uses_flatpak_config_root_for_ppsspp(self) -> None:
+        module = type(self).module
+
+        class _WindowStub:
+            def __init__(self) -> None:
+                self.config = {
+                    "retroachievements_username": "psp_user",
+                    "retroachievements_token": "psp_token",
+                }
+
+            def _is_retroarch_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _is_duckstation_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _is_xemu_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _is_pcsx2_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _resolved_firmware_directories(self, emulator_entry: dict[str, str]) -> list[tuple[str, str]]:
+                return []
+
+            def _is_dolphin_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _is_azahar_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _is_eden_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _is_rpcs3_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _is_ppsspp_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return True
+
+            def _is_cemu_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _is_redream_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+        window = _WindowStub()
+
+        with patch("rom_mate.ui.mixins.emulator_ui_mixin.ensure_ppsspp_settings") as ensure_ppsspp:
+            module.MainWindow._ensure_emulator_sync_settings(
+                window,
+                "PPSSPP",
+                "/home/user/.var/app/org.ppsspp.PPSSPP/exports/bin/flatpak",
+                flatpak_config_root="/home/user/.var/app/org.ppsspp.PPSSPP/config/ppsspp",
+            )
+
+        ensure_ppsspp.assert_called_once_with(
+            "/home/user/.var/app/org.ppsspp.PPSSPP/config/ppsspp",
+            retroachievements_username="psp_user",
+            retroachievements_token="psp_token",
+        )
+
+    def test_ensure_emulator_sync_settings_without_flatpak_config_root_uses_path_text(self) -> None:
+        module = type(self).module
+
+        class _WindowStub:
+            def __init__(self) -> None:
+                self.config = {
+                    "retroachievements_username": "psp_user",
+                    "retroachievements_token": "psp_token",
+                }
+
+            def _is_retroarch_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _is_duckstation_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _is_xemu_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _is_pcsx2_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _resolved_firmware_directories(self, emulator_entry: dict[str, str]) -> list[tuple[str, str]]:
+                return []
+
+            def _is_dolphin_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _is_azahar_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _is_eden_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _is_rpcs3_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _is_ppsspp_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return True
+
+            def _is_cemu_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+            def _is_redream_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
+                return False
+
+        window = _WindowStub()
+
+        with patch("rom_mate.ui.mixins.emulator_ui_mixin.ensure_ppsspp_settings") as ensure_ppsspp:
+            module.MainWindow._ensure_emulator_sync_settings(window, "PPSSPP", "C:/Emulators/PPSSPPWindows64.exe")
+
+        ensure_ppsspp.assert_called_once_with(
+            "C:/Emulators/PPSSPPWindows64.exe",
+            retroachievements_username="psp_user",
+            retroachievements_token="psp_token",
+        )
+
+    def test_trigger_flatpak_emulator_detection_background_noop_on_non_linux(self) -> None:
+        module = type(self).module
+
+        class _WindowStub:
+            pass
+
+        window = _WindowStub()
+
+        with patch("sys.platform", "win32"), patch("threading.Thread") as thread_ctor:
+            module.MainWindow._trigger_flatpak_emulator_detection_background(window)
+
+        thread_ctor.assert_not_called()
+
+    def test_trigger_flatpak_emulator_detection_background_filters_known_emulators(self) -> None:
+        module = type(self).module
+        emitted: list = []
+
+        class _SignalStub:
+            def emit(self, entries: list) -> None:
+                emitted.append(entries)
+
+        class _WindowStub:
+            def __init__(self) -> None:
+                self.config = {
+                    "emulators": [
+                        {"name": "PPSSPP", "path": "/existing/ppsspp", "flatpak_app_id": "org.ppsspp.PPSSPP"},
+                        {"name": "Dolphin", "path": "/existing/dolphin"},
+                    ]
+                }
+                self._flatpak_detection_completed = _SignalStub()
+
+            def _emulators(self) -> list[dict]:
+                return self.config.get("emulators", [])
+
+            def _emulator_autoprofiles(self) -> list[dict]:
+                return []
+
+        window = _WindowStub()
+
+        detected = [
+            {"name": "PPSSPP", "path": "/usr/bin/flatpak", "flatpak_app_id": "org.ppsspp.PPSSPP"},  # known by app id
+            {"name": "Dolphin", "path": "/usr/bin/flatpak", "flatpak_app_id": "org.DolphinEmu.dolphin-emu"},  # known by name
+            {"name": "PCSX2", "path": "/usr/bin/flatpak", "flatpak_app_id": "net.pcsx2.PCSX2"},  # new
+        ]
+
+        class _ThreadStub:
+            def __init__(self, target=None, daemon=None) -> None:
+                self._target = target
+
+            def start(self) -> None:
+                if self._target is not None:
+                    self._target()
+
+        with patch("sys.platform", "linux"), \
+                patch("rom_mate.ui.mixins.emulator_ui_mixin.detect_installed_flatpak_emulators", return_value=detected), \
+                patch("threading.Thread", _ThreadStub):
+            module.MainWindow._trigger_flatpak_emulator_detection_background(window)
+
+        self.assertEqual(len(emitted), 1)
+        new_entries = emitted[0]
+        self.assertEqual(len(new_entries), 1)
+        self.assertEqual(new_entries[0]["name"], "PCSX2")
+
+    def test_on_flatpak_detection_completed_adds_entries(self) -> None:
+        module = type(self).module
+
+        class _WindowStub:
+            def __init__(self) -> None:
+                self.config = {"emulators": []}
+                self.sync_calls: list[tuple[str, str, str]] = []
+                self.saved_config: dict | None = None
+                self.refreshed = False
+                self.toasts: list[dict] = []
+
+            def _emulators(self) -> list[dict]:
+                return self.config.get("emulators", [])
+
+            def _emulator_autoprofiles(self) -> list[dict]:
+                return []
+
+            def _normalize_save_strategy_value(self, value: str) -> str:
+                return "auto"
+
+            def _normalize_emulators(self, value: list) -> list:
+                return value
+
+            def _ensure_emulator_sync_settings(self, name: str, path: str, *, flatpak_config_root: str = "") -> None:
+                self.sync_calls.append((name, path, flatpak_config_root))
+
+            def _refresh_emulator_views(self) -> None:
+                self.refreshed = True
+
+            def _save_config(self, config: dict) -> None:
+                self.saved_config = config
+
+            def _show_toast(self, payload: dict) -> None:
+                self.toasts.append(payload)
+
+        window = _WindowStub()
+
+        new_entries = [
+            {
+                "name": "PPSSPP",
+                "path": "/usr/bin/flatpak",
+                "args": "run org.ppsspp.PPSSPP",
+                "flatpak_app_id": "org.ppsspp.PPSSPP",
+                "_flatpak_config_root": "/home/user/.var/app/org.ppsspp.PPSSPP/config/ppsspp",
+            },
+            {
+                "name": "PCSX2",
+                "path": "/usr/bin/flatpak",
+                "args": "run net.pcsx2.PCSX2",
+                "flatpak_app_id": "net.pcsx2.PCSX2",
+            },
+        ]
+
+        module.MainWindow._on_flatpak_detection_completed(window, new_entries)
+
+        self.assertEqual(len(window.config["emulators"]), 2)
+        self.assertIn(
+            ("PPSSPP", "/usr/bin/flatpak", "/home/user/.var/app/org.ppsspp.PPSSPP/config/ppsspp"),
+            window.sync_calls,
+        )
+        self.assertIn(("PCSX2", "/usr/bin/flatpak", ""), window.sync_calls)
+        self.assertTrue(window.refreshed)
+        self.assertIsNotNone(window.saved_config)
+        self.assertEqual(len(window.toasts), 1)
+        self.assertEqual(window.toasts[0]["level"], "success")
+        for emulator in window.config["emulators"]:
+            self.assertNotIn("_flatpak_config_root", emulator)
+
+    def test_on_flatpak_detection_completed_empty_list_is_noop(self) -> None:
+        module = type(self).module
+
+        class _WindowStub:
+            def __init__(self) -> None:
+                self.save_called = False
+                self.refresh_called = False
+
+            def _save_config(self, config: dict) -> None:
+                self.save_called = True
+
+            def _refresh_emulator_views(self) -> None:
+                self.refresh_called = True
+
+        window = _WindowStub()
+        module.MainWindow._on_flatpak_detection_completed(window, [])
+
+        self.assertFalse(window.save_called)
+        self.assertFalse(window.refresh_called)
+
+
 if __name__ == "__main__":
     unittest.main()
