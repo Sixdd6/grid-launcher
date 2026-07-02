@@ -1,0 +1,23 @@
+# Normalize all text files to LF line endings.
+* text=auto eol=lf
+
+# Images
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+
+# Archives
+*.7z binary
+*.zip binary
+
+# Fonts
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+
+# Executables/libraries (e.g. assets/tools/7z/)
+*.exe binary
+*.dll binary
