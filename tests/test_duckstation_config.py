@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from rom_mate.emulator.duckstation import (
+    duckstation_config_path_candidates,
     duckstation_memory_card_settings,
     ensure_duckstation_memory_card_settings,
 )
@@ -415,6 +417,32 @@ class DuckStationConfigTests(unittest.TestCase):
         self.assertIn("LeaderboardTrackers = false", portable_text)
         self.assertIn("Username = portable_user", portable_text)
         self.assertIn("Token = portable_token", portable_text)
+
+    def test_config_path_candidates_falls_back_to_dotfile_dirs_when_xdg_unset(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("XDG_DATA_HOME", None)
+            os.environ.pop("XDG_CONFIG_HOME", None)
+            candidates = duckstation_config_path_candidates("/nonexistent/duckstation.exe")
+
+        home = Path.home()
+        self.assertIn(home / ".local" / "share" / "duckstation" / "settings.ini", candidates)
+        self.assertIn(home / ".config" / "duckstation" / "settings.ini", candidates)
+
+    def test_config_path_candidates_honors_xdg_data_home_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xdg_data_home = Path(temp_dir) / "xdg-data"
+            with patch.dict(os.environ, {"XDG_DATA_HOME": str(xdg_data_home)}, clear=False):
+                candidates = duckstation_config_path_candidates("/nonexistent/duckstation.exe")
+
+        self.assertIn(xdg_data_home / "duckstation" / "settings.ini", candidates)
+
+    def test_config_path_candidates_honors_xdg_config_home_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xdg_config_home = Path(temp_dir) / "xdg-config"
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(xdg_config_home)}, clear=False):
+                candidates = duckstation_config_path_candidates("/nonexistent/duckstation.exe")
+
+        self.assertIn(xdg_config_home / "duckstation" / "settings.ini", candidates)
 
 if __name__ == "__main__":
     unittest.main()

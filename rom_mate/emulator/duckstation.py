@@ -4,6 +4,8 @@ import os
 import re
 from pathlib import Path
 
+from rom_mate.core.path import xdg_config_home, xdg_data_home
+
 
 def duckstation_config_path_candidates(emulator_path_text: str) -> list[Path]:
     if not emulator_path_text:
@@ -30,13 +32,8 @@ def duckstation_config_path_candidates(emulator_path_text: str) -> list[Path]:
         ]
     )
 
-    xdg_data_home = os.environ.get("XDG_DATA_HOME", "").strip()
-    if xdg_data_home:
-        search_roots.append(Path(xdg_data_home) / "duckstation")
-
-    xdg_config_home = os.environ.get("XDG_CONFIG_HOME", "").strip()
-    if xdg_config_home:
-        search_roots.append(Path(xdg_config_home) / "duckstation")
+    search_roots.append(xdg_data_home() / "duckstation")
+    search_roots.append(xdg_config_home() / "duckstation")
 
     candidates: list[Path] = []
     seen: set[str] = set()

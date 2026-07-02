@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+from rom_mate.core.path import xdg_config_home
+
 
 def _unique_paths(paths: list[Path]) -> list[Path]:
     unique: list[Path] = []
@@ -203,9 +205,12 @@ def _ensure_eden_section_values(
 
 def eden_config_path_candidates(emulator_path_text: str) -> list[Path]:
     portable_candidate = Path(emulator_path_text).parent / "user" / "config" / "qt-config.ini"
-    windows_candidate = Path(os.path.expandvars("%APPDATA%")) / "eden" / "config" / "qt-config.ini"
-    linux_candidate = Path.home() / ".config" / "eden" / "qt-config.ini"
-    return [portable_candidate, windows_candidate, linux_candidate]
+    linux_candidate = xdg_config_home() / "eden" / "qt-config.ini"
+    appdata = os.environ.get("APPDATA", "")
+    if isinstance(appdata, str) and appdata.strip():
+        windows_candidate = Path(appdata).expanduser() / "eden" / "config" / "qt-config.ini"
+        return [portable_candidate, windows_candidate, linux_candidate]
+    return [portable_candidate, linux_candidate]
 
 
 def ensure_eden_settings(emulator_path_text: str) -> dict:

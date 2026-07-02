@@ -18,7 +18,8 @@ from rom_mate.emulator.cemu import ensure_cemu_controller_config, ensure_cemu_se
 from rom_mate.emulator import ensure_dolphin_settings, ensure_dolphin_skip_ipl, ensure_dolphin_gcpad_config
 from rom_mate.emulator.dolphin import dolphin_ini_path_candidates, dolphin_user_root_candidates
 from rom_mate.emulator.duckstation import ensure_duckstation_memory_card_settings
-from rom_mate.emulator.eden import _ensure_eden_section_values, ensure_eden_settings
+from rom_mate.emulator.eden import _ensure_eden_section_values, ensure_eden_settings, eden_config_path_candidates
+from rom_mate.emulator.pico8 import pico8_user_root_candidates
 from rom_mate.emulator.pcsx2 import (
     ensure_pcsx2_settings,
     pcsx2_config_path_candidates,
@@ -918,6 +919,21 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
             Path.home() / ".var" / "app" / "org.azahar_emu.Azahar" / "config" / "Azahar" / "qt-config.ini",
             candidates,
         )
+
+    def test_eden_config_path_candidates_honors_xdg_config_home_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xdg_config_home = Path(temp_dir) / "xdg-config"
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(xdg_config_home)}, clear=False):
+                candidates = eden_config_path_candidates("/nonexistent/eden.exe")
+
+        self.assertIn(xdg_config_home / "eden" / "qt-config.ini", candidates)
+
+    def test_eden_config_path_candidates_falls_back_to_dotfile_dir_when_xdg_unset(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("XDG_CONFIG_HOME", None)
+            candidates = eden_config_path_candidates("/nonexistent/eden.exe")
+
+        self.assertIn(Path.home() / ".config" / "eden" / "qt-config.ini", candidates)
 
     def test_eden_writes_telemetry_and_discord(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1921,6 +1937,23 @@ class Rpcs3AutoConfigTests(unittest.TestCase):
             ensure_rpcs3_settings(str(exe))
             result = ensure_rpcs3_settings(str(exe))
         self.assertFalse(result["changed"])
+
+    def test_pico8_user_root_candidates_honors_xdg_data_home_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xdg_data_home = Path(temp_dir) / "xdg-data"
+            with patch.dict(os.environ, {"XDG_DATA_HOME": str(xdg_data_home)}, clear=False):
+                with patch("sys.platform", "linux"):
+                    candidates = pico8_user_root_candidates("", "", lambda s: [])
+
+        self.assertIn((xdg_data_home / "pico-8").resolve(), candidates)
+
+    def test_pico8_user_root_candidates_keeps_dotfile_dir_as_fallback_when_xdg_unset(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("XDG_DATA_HOME", None)
+            with patch("sys.platform", "linux"):
+                candidates = pico8_user_root_candidates("", "", lambda s: [])
+
+        self.assertIn((Path.home() / ".lexaloffle" / "pico-8").resolve(), candidates)
 
 
 class EmulatorEnsureDispatchTests(unittest.TestCase):

@@ -917,7 +917,7 @@ class CloudSaveMixin:
         library_path = Path(library_value).expanduser() if isinstance(library_value, str) and library_value.strip() else Path()
         config_dir = self._config_dir()
         win_docs = pcsx2_windows_documents_folder()
-        documents_str = str(win_docs) if win_docs is not None else os.path.join(os.path.expandvars("%USERPROFILE%"), "Documents")
+        documents_str = str(win_docs) if win_docs is not None else os.path.join(os.environ.get("USERPROFILE", ""), "Documents")
 
         resolved: list[Path] = []
         for raw_path in all_paths:
