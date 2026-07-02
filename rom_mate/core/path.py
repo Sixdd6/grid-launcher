@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 
@@ -27,3 +28,17 @@ def path_within_path(path: Path, root: Path) -> bool:
     return resolved_path_key == resolved_root_key or resolved_path_key.startswith(
         f"{resolved_root_key}\\"
     ) or resolved_path_key.startswith(f"{resolved_root_key}/")
+
+
+def xdg_config_home() -> Path:
+    value = os.environ.get("XDG_CONFIG_HOME")
+    if value:
+        return Path(value).expanduser()
+    return Path.home() / ".config"
+
+
+def xdg_data_home() -> Path:
+    value = os.environ.get("XDG_DATA_HOME")
+    if value:
+        return Path(value).expanduser()
+    return Path.home() / ".local" / "share"

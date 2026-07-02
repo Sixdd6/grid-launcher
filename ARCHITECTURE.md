@@ -16,7 +16,7 @@ This document is a stable module map for the current codebase.
   - Shared low-level helpers used across the app.
   - `api.py`: authenticated HTTP and multipart helpers.
   - `config.py`: config normalization, merging, and persistence.
-  - `path.py`: path sanitization and containment helpers.
+  - `path.py`: path sanitization and containment helpers; also provides XDG base-directory helpers (`xdg_config_home`, `xdg_data_home`).
   - `token_store.py`: secure API token persistence.
   - `types.py`: shared protocol typing.
 
