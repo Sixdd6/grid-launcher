@@ -525,7 +525,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
         with patch.object(backend, "_do_launch") as mock_do_launch:
             backend._on_restore_done(True, "Save restored.", "RetroArch", ["retroarch"], None)
 
-        mock_do_launch.assert_called_once_with("RetroArch", ["retroarch"], None)
+        mock_do_launch.assert_called_once_with("RetroArch", ["retroarch"], None, env=None)
         self.assertEqual(statuses, [""])
 
     def test_on_restore_done_calls_do_launch_even_on_failure(self):
@@ -536,7 +536,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
         with patch.object(backend, "_do_launch") as mock_do_launch:
             backend._on_restore_done(False, "Restore failed.", "RetroArch", ["retroarch"], None)
 
-        mock_do_launch.assert_called_once_with("RetroArch", ["retroarch"], None)
+        mock_do_launch.assert_called_once_with("RetroArch", ["retroarch"], None, env=None)
 
     def test_on_auto_upload_done_emits_cloud_sync_status(self):
         from rom_mate.tv.bridge.game_backend import GameBackend
@@ -980,7 +980,7 @@ class TestGameBackendNativeLaunch(unittest.TestCase):
 
     @patch("rom_mate.tv.bridge.game_backend._ProcessWatchThread.start")
     @patch("rom_mate.tv.bridge.game_backend._subprocess_popen")
-    @patch("rom_mate.tv.bridge.game_backend.prepare_native_launch_command", return_value=(["game.exe"], "/fake/dir"))
+    @patch("rom_mate.tv.bridge.game_backend.prepare_native_launch_command", return_value=(["game.exe"], "/fake/dir", {}))
     @patch("rom_mate.tv.bridge.game_backend.resolved_native_executable_path_for_game", return_value=Path("/fake/dir/game.exe"))
     @patch("rom_mate.tv.bridge.game_backend.native_executable_candidates_for_game", return_value=[Path("/fake/dir/game.exe")])
     @patch("rom_mate.tv.bridge.game_backend.native_install_dir_for_game", return_value=Path("/fake/dir"))

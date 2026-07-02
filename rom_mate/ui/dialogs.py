@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -189,11 +190,16 @@ class NativeGameSettingsDialog(QDialog):
         selected_executable_path: str = "",
         existing_launch_parameters: str = "",
         section_title_factory: callable | None = None,
+        available_compat_tools: list[dict[str, str]] = (),
+        existing_compat_tool: str = "",
+        existing_wineprefix: str = "",
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Game Settings - {game_title}")
         self.setModal(True)
         self.resize(700, 300)
+
+        self.compat_tool_combo: QComboBox | None = None
 
         dialog_layout = QVBoxLayout(self)
         form_layout = QFormLayout()
@@ -216,6 +222,28 @@ class NativeGameSettingsDialog(QDialog):
             if selected_index >= 0:
                 self.executable_combo.setCurrentIndex(selected_index)
         form_layout.addRow("Executable", self.executable_combo)
+
+        if sys.platform != "win32":
+            compat_tool_combo = QComboBox()
+            compat_tool_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            for tool in available_compat_tools:
+                if not isinstance(tool, dict):
+                    continue
+                tool_name = str(tool.get("name", "")).strip() or "Unknown"
+                tool_path = str(tool.get("path", ""))
+                compat_tool_combo.addItem(tool_name)
+                compat_tool_combo.setItemData(compat_tool_combo.count() - 1, tool_path, Qt.UserRole)
+            if existing_compat_tool:
+                match_index = compat_tool_combo.findData(existing_compat_tool, Qt.UserRole)
+                if match_index >= 0:
+                    compat_tool_combo.setCurrentIndex(match_index)
+            self.compat_tool_combo = compat_tool_combo
+            form_layout.addRow("Compatibility Tool", compat_tool_combo)
+
+            wineprefix_text = existing_wineprefix.strip() if isinstance(existing_wineprefix, str) else ""
+            wineprefix_label = QLabel(wineprefix_text or "(will be created at install)")
+            wineprefix_label.setWordWrap(True)
+            form_layout.addRow("Wine Prefix (read-only)", wineprefix_label)
 
         dialog_layout.addLayout(form_layout)
 
@@ -251,6 +279,12 @@ class NativeGameSettingsDialog(QDialog):
 
     def selected_executable_path(self) -> str:
         selected_value = self.executable_combo.currentData()
+        return selected_value.strip() if isinstance(selected_value, str) else ""
+
+    def selected_compat_tool_path(self) -> str:
+        if self.compat_tool_combo is None:
+            return ""
+        selected_value = self.compat_tool_combo.currentData(Qt.UserRole)
         return selected_value.strip() if isinstance(selected_value, str) else ""
 
     def launch_parameters(self) -> str:

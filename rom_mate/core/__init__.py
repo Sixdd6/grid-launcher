@@ -17,7 +17,12 @@ from .config import (
     normalize_installed_games,
     write_config_file,
 )
-from .path import path_key, path_within_path, sanitize_path_component
+from .path import (
+    compat_tool_install_directory,
+    path_key,
+    path_within_path,
+    sanitize_path_component,
+)
 from .token_store import (
     load_api_token,
     load_ra_api_key,
@@ -40,6 +45,7 @@ __all__ = [
     "api_put_multipart_json",
     "build_auth_headers",
     "build_binary_auth_headers",
+    "compat_tool_install_directory",
     "format_http_error_details",
     "multipart_payload",
     "merge_config_with_defaults",

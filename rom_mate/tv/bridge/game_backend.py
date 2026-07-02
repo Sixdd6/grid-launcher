@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -323,7 +324,7 @@ class GameBackend(QObject):
                 thread = QThread(self)
                 worker.moveToThread(thread)
                 thread.started.connect(worker.run)
-                self._pending_restore_launch = (emulator_name, command, cwd)
+                self._pending_restore_launch = (emulator_name, command, cwd, None)
                 worker.finished.connect(self._on_restore_worker_done, Qt.ConnectionType.QueuedConnection)
                 worker.finished.connect(thread.quit)
                 worker.finished.connect(worker.deleteLater)
@@ -369,7 +370,7 @@ class GameBackend(QObject):
             return
 
         try:
-            command, cwd = prepare_native_launch_command(
+            command, cwd, compat_env = prepare_native_launch_command(
                 game_dict,
                 lambda g: exe_path,
                 split_launch_template_args,
@@ -380,12 +381,18 @@ class GameBackend(QObject):
 
         self._session_game = game_dict
         self._session_started_at = time.time()
-        self._do_launch("", command, cwd)
+        self._do_launch("", command, cwd, env={**os.environ, **compat_env} if compat_env else None)
 
-    def _do_launch(self, emulator_name: str, command: list[str], cwd: str | None) -> None:
+    def _do_launch(
+        self,
+        emulator_name: str,
+        command: list[str],
+        cwd: str | None,
+        env: dict[str, str] | None = None,
+    ) -> None:
         try:
             _creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
-            process = _subprocess_popen(command, cwd=cwd, close_fds=True, creationflags=_creationflags)
+            process = _subprocess_popen(command, cwd=cwd, close_fds=True, env=env, creationflags=_creationflags)
         except (OSError, ValueError) as error:
             self.launchError.emit(str(error))
             return
@@ -409,15 +416,15 @@ class GameBackend(QObject):
         self._pending_restore_launch = None
         if params is None:
             return
-        em_name, cmd, d = params
-        self._on_restore_done(ok, msg, em_name, cmd, d)
+        em_name, cmd, d, env = params
+        self._on_restore_done(ok, msg, em_name, cmd, d, env)
 
-    def _on_restore_done(self, success: bool, message: str, emulator_name: str, command: list[str], cwd: str | None) -> None:
+    def _on_restore_done(self, success: bool, message: str, emulator_name: str, command: list[str], cwd: str | None, env: dict[str, str] | None = None) -> None:
         del success, message
         self._restore_thread = None
         self._restore_worker = None
         self.cloudSyncStatus.emit("")
-        self._do_launch(emulator_name, command, cwd)
+        self._do_launch(emulator_name, command, cwd, env=env)
 
     @Slot()
     def stopGame(self) -> None:

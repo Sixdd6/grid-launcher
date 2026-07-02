@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import shlex
+import shutil
 import sys
 from pathlib import Path
 from typing import Callable
@@ -12,6 +14,10 @@ _EMULATOR_SUFFIXES = frozenset({*_NATIVE_GAME_SUFFIXES, ".appimage"})
 
 def _has_launchable_suffix(path: Path, allowed_suffixes: frozenset[str]) -> bool:
     return path.suffix.casefold() in allowed_suffixes
+
+
+def detect_umu_run() -> str | None:
+    return shutil.which("umu-run")
 
 
 def launchable_native_game_file(path: Path) -> bool:
@@ -217,7 +223,7 @@ def prepare_native_launch_command(
     game: dict[str, str],
     resolved_native_executable_path_for_game: Callable[[dict[str, str]], Path | None],
     split_launch_template_args_fn: Callable[[str], list[str]],
-) -> tuple[list[str], str]:
+) -> tuple[list[str], str, dict[str, str]]:
     native_executable = resolved_native_executable_path_for_game(game)
     if native_executable is None:
         raise ValueError(
@@ -231,7 +237,32 @@ def prepare_native_launch_command(
     except ValueError as error:
         raise ValueError(f"Invalid custom launch parameters: {error}") from error
 
-    return [str(native_executable), *native_args], str(native_executable.parent)
+    command = [str(native_executable), *native_args]
+    working_directory = str(native_executable.parent)
+
+    native_compat_tool = game.get("native_compat_tool", "").strip() if isinstance(game, dict) else ""
+    native_wineprefix = game.get("native_wineprefix", "").strip() if isinstance(game, dict) else ""
+
+    env_overrides: dict[str, str] = {}
+
+    if native_compat_tool == "wine":
+        command = [shutil.which("wine") or "wine"] + command
+        if native_wineprefix:
+            os.makedirs(native_wineprefix, exist_ok=True)
+            env_overrides["WINEPREFIX"] = native_wineprefix
+    elif native_compat_tool:
+        umu = detect_umu_run()
+        if not umu:
+            raise ValueError(
+                "umu-run is not installed. Install the umu-launcher package to use Proton compatibility tools."
+            )
+        command = [umu] + command
+        env_overrides["PROTONPATH"] = native_compat_tool
+        if native_wineprefix:
+            os.makedirs(native_wineprefix, exist_ok=True)
+            env_overrides["WINEPREFIX"] = native_wineprefix
+
+    return command, working_directory, env_overrides
 
 
 

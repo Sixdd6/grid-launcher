@@ -15,6 +15,8 @@ from urllib.request import Request, urlopen
 from PySide6.QtCore import QObject, Signal, Slot
 
 from ..core.api import api_get_json, format_http_error_details
+from ..core.path import sanitize_path_component
+from ..emulator.selection import is_native_executable_platform
 from ..emulator.source import (
     EmulatorSourceResolutionError,
     normalize_emulator_source_metadata,
@@ -558,6 +560,27 @@ class InstallFinalizeWorker(QObject):
                 error_detail = warning_text.strip() if isinstance(warning_text, str) and warning_text.strip() else "Install preparation failed"
                 self.finished.emit({"game": None, "archive_path": str(self.archive_path), "warning": "", "error": error_detail})
                 return
+            if is_native_executable_platform(prepared_game):
+                extracted_dir = Path(prepared_game.get("extracted_dir", ""))
+                if str(extracted_dir) and extracted_dir.is_dir():
+                    prefix_dir = extracted_dir / "prefix"
+                    prefix_dir.mkdir(exist_ok=True)
+                    prepared_game["native_wineprefix"] = str(prefix_dir)
+            install_mode = str(self.game.get("_install_mode", "")).strip().lower()
+            if install_mode == "compat_tool":
+                install_dir_value = str(self.game.get("_compat_tool_install_dir", "")).strip()
+                extracted_dir_value = str(prepared_game.get("extracted_dir", "")).strip()
+                if extracted_dir_value:
+                    compat_tool_install_path = extracted_dir_value
+                elif install_dir_value:
+                    safe_name = sanitize_path_component(
+                        str(self.game.get("title", "")), "compat-tool"
+                    )
+                    compat_tool_install_path = str(Path(install_dir_value) / safe_name)
+                else:
+                    compat_tool_install_path = ""
+                if compat_tool_install_path:
+                    prepared_game["_compat_tool_install_path"] = compat_tool_install_path
             cleanup_install_archives = getattr(self.window, "_cleanup_install_archives_without_ui", None)
             if callable(cleanup_install_archives):
                 if bool(prepared_game.get("extracted_path", "")):

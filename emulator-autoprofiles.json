@@ -501,6 +501,50 @@
     "screenshot_directories": ["screenshots"]
   },
   {
+    "match_tokens": [],
+    "name": "GE-Proton",
+    "is_compat_tool": true,
+    "compat_tool_type": "proton",
+    "source": {
+      "provider": "github-release",
+      "owner": "GloriousEggroll",
+      "repo": "proton-ge-custom",
+      "release_tag": "latest",
+      "platform_overrides": {
+        "linux": {
+          "asset_patterns": ["GE-Proton*[0-9].tar.gz"],
+          "launch_executable": ""
+        }
+      }
+    },
+    "args": "",
+    "all_platforms": false,
+    "platform_keywords": [],
+    "use_game_title_as_name": false
+  },
+  {
+    "match_tokens": [],
+    "name": "Proton-CachyOS",
+    "is_compat_tool": true,
+    "compat_tool_type": "proton",
+    "source": {
+      "provider": "github-release",
+      "owner": "CachyOS",
+      "repo": "proton-cachyos",
+      "release_tag": "latest",
+      "platform_overrides": {
+        "linux": {
+          "asset_patterns": ["proton-cachyos-*-x86_64.tar.xz"],
+          "launch_executable": ""
+        }
+      }
+    },
+    "args": "",
+    "all_platforms": false,
+    "platform_keywords": [],
+    "use_game_title_as_name": false
+  },
+  {
     "match_tokens": ["redream.exe"],
     "source": {
       "provider": "direct",

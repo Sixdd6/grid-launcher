@@ -43,6 +43,8 @@ def build_installed_game_record(
         "archive_path": stored_archive_path,
         "native_executable_path": _text_value(game, "native_executable_path"),
         "native_launch_parameters": _text_value(game, "native_launch_parameters"),
+        "native_compat_tool": _text_value(game, "native_compat_tool"),
+        "native_wineprefix": _text_value(game, "native_wineprefix"),
         "ps3_trophy_paths": _text_value(game, "ps3_trophy_paths"),
         "ps3_game_id": _text_value(game, "ps3_game_id"),
         "ps4_game_id": _text_value(game, "ps4_game_id"),

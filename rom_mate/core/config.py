@@ -139,6 +139,8 @@ def normalize_installed_games(
         archive_path = item.get("archive_path")
         native_executable_path = item.get("native_executable_path")
         native_launch_parameters = item.get("native_launch_parameters")
+        native_compat_tool = item.get("native_compat_tool")
+        native_wineprefix = item.get("native_wineprefix")
         ps3_trophy_paths = item.get("ps3_trophy_paths")
         ps3_game_id = item.get("ps3_game_id")
         ps4_game_id = item.get("ps4_game_id")
@@ -163,6 +165,8 @@ def normalize_installed_games(
             "archive_path": archive_path.strip() if isinstance(archive_path, str) else "",
             "native_executable_path": native_executable_path.strip() if isinstance(native_executable_path, str) else "",
             "native_launch_parameters": native_launch_parameters.strip() if isinstance(native_launch_parameters, str) else "",
+            "native_compat_tool": native_compat_tool.strip() if isinstance(native_compat_tool, str) else "",
+            "native_wineprefix": native_wineprefix.strip() if isinstance(native_wineprefix, str) else "",
             "ps3_trophy_paths": ps3_trophy_paths.strip() if isinstance(ps3_trophy_paths, str) else "",
             "ps3_game_id": ps3_game_id.strip().upper() if isinstance(ps3_game_id, str) else "",
             "ps4_game_id": ps4_game_id.strip().upper() if isinstance(ps4_game_id, str) else "",
@@ -175,6 +179,28 @@ def normalize_installed_games(
             continue
         seen.add(key)
         normalized.append(normalized_game)
+    return normalized
+
+
+def normalize_compat_tool_installs(value: Any) -> dict[str, dict[str, str]]:
+    if not isinstance(value, dict):
+        return {}
+
+    normalized: dict[str, dict[str, str]] = {}
+    for key, item in value.items():
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name", "")
+        compat_tool_type = item.get("compat_tool_type", "")
+        install_path = item.get("install_path", "")
+        name = name.strip() if isinstance(name, str) else ""
+        if not name:
+            continue
+        normalized[key.strip() if isinstance(key, str) else str(key)] = {
+            "name": name,
+            "compat_tool_type": compat_tool_type.strip() if isinstance(compat_tool_type, str) else "",
+            "install_path": install_path.strip() if isinstance(install_path, str) else "",
+        }
     return normalized
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import threading
@@ -8,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QSize, QThread, QTimer
+from PySide6.QtCore import Qt, QSize, QThread, QTimer
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -25,11 +26,13 @@ from PySide6.QtWidgets import (
 )
 
 from rom_mate.core import (
+    compat_tool_install_directory,
     normalize_default_emulators,
     normalize_default_retroarch_cores,
     normalize_emulators,
     normalize_installed_games,
 )
+from rom_mate.core.config import normalize_compat_tool_installs
 from rom_mate.core.path import rom_mate_share_dir
 from rom_mate.background.workers import SourceVersionCheckWorker
 from rom_mate.emulator import (
@@ -86,6 +89,7 @@ from rom_mate.ui import (
 from rom_mate.ui.emulators import (
     available_source_download_emulator_entries,
     save_button_label,
+    source_download_emulator_entries,
 )
 
 _TV_GUIDE_DEFAULT_EXCLUSIONS: frozenset[str] = frozenset({
@@ -150,6 +154,110 @@ class EmulatorUIMixin:
         }
         self.config["emulator_source_installs"] = installs
         self._save_config(self.config)
+
+    def _normalize_compat_tool_installs(self, value: Any) -> dict[str, dict[str, str]]:
+        return normalize_compat_tool_installs(value)
+
+    def _compat_tool_installs(self) -> dict[str, dict[str, str]]:
+        raw = self.config.get("compat_tool_installs", {})
+        normalized = self._normalize_compat_tool_installs(raw)
+        if normalized != raw:
+            self.config["compat_tool_installs"] = normalized
+        return normalized
+
+    def _compat_tool_install_dir(self) -> Path:
+        return compat_tool_install_directory()
+
+    def _record_compat_tool_install(self, name: str, compat_tool_type: str, install_path: str) -> None:
+        installs = self._compat_tool_installs()
+        installs[name] = {
+            "name": name,
+            "compat_tool_type": compat_tool_type,
+            "install_path": install_path,
+        }
+        self.config["compat_tool_installs"] = installs
+        self._save_config(self.config)
+
+    def _available_compat_tools_for_dialog(self) -> list[dict[str, str]]:
+        tools: list[dict[str, str]] = [{"name": "None", "type": "", "path": ""}]
+        if shutil.which("wine"):
+            tools.append({"name": "Wine (system)", "type": "wine", "path": "wine"})
+        for entry in self._compat_tool_installs().values():
+            install_path = entry.get("install_path", "")
+            if install_path:
+                tools.append(
+                    {
+                        "name": entry["name"],
+                        "type": entry.get("compat_tool_type", "proton"),
+                        "path": install_path,
+                    }
+                )
+        return tools
+
+    def _refresh_compat_tool_list(self) -> None:
+        if not getattr(self, "compat_tool_list", None):
+            return
+
+        self.compat_tool_list.clear()
+        added_any = False
+
+        wine_path = shutil.which("wine")
+        if wine_path:
+            self.compat_tool_list.addItem(f"Wine (system) — {wine_path}")
+            added_any = True
+
+        for entry in self._compat_tool_installs().values():
+            install_path = entry.get("install_path", "")
+            if install_path:
+                self.compat_tool_list.addItem(f"{entry['name']} — {install_path}")
+                added_any = True
+
+        if not added_any:
+            placeholder = QListWidgetItem("No compatibility tools installed")
+            placeholder.setFlags(placeholder.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+            self.compat_tool_list.addItem(placeholder)
+
+    def _open_compat_tool_download_dialog(self) -> None:
+        if sys.platform == "win32":
+            return
+
+        compat_profiles = [
+            profile
+            for profile in self._emulator_autoprofiles()
+            if isinstance(profile, dict) and profile.get("is_compat_tool") is True
+        ]
+        source_rows = source_download_emulator_entries(compat_profiles)
+        if not source_rows:
+            QMessageBox.information(
+                self,
+                "Compatibility Tools",
+                "No supported compatibility tool downloads are currently available.",
+            )
+            return
+
+        labels = [
+            f"{row['name']} - {row['source_id']} ({row['release_tag']})"
+            for row in source_rows
+        ]
+        selected_label, ok = QInputDialog.getItem(
+            self,
+            "Download Compatibility Tool",
+            "Select compatibility tool source:",
+            labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+
+        selected_index = labels.index(selected_label) if selected_label in labels else -1
+        if selected_index < 0:
+            return
+
+        selected = source_rows[selected_index]
+        install_game = self._build_source_emulator_install_game(selected, "compat_tool")
+        install_game["_compat_tool_install_dir"] = str(self._compat_tool_install_dir())
+        self._start_async_install(install_game)
 
     def _ensure_emulator_sync_settings(
         self,
@@ -735,8 +843,13 @@ class EmulatorUIMixin:
                 if source_id:
                     installed_source_ids.append(source_id)
 
+        autoprofiles = [
+            profile
+            for profile in self._emulator_autoprofiles()
+            if not (isinstance(profile, dict) and profile.get("is_compat_tool") is True)
+        ]
         return available_source_download_emulator_entries(
-            self._emulator_autoprofiles(),
+            autoprofiles,
             query=query,
             installed_emulator_names=installed_emulator_names,
             installed_source_ids=installed_source_ids,

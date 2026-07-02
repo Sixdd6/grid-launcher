@@ -450,6 +450,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self.default_emulator_combo: QComboBox | None = None
         self.default_core_combo: QComboBox | None = None
         self.default_mapping_list: QListWidget | None = None
+        self.compat_tool_list: QListWidget | None = None
         self.details_metadata_scalable_labels: list[tuple[QLabel, str]] = []
         self.details_title_label: QLabel | None = None
         self.details_content_frame: QFrame | None = None
@@ -710,6 +711,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
         self._refresh_library_grid()
         self._refresh_emulator_views()
+        self._refresh_compat_tool_list()
         self._trigger_flatpak_emulator_detection_background()
         self._restore_window_geometry()
         self._connect_to_server(show_errors=False)
@@ -1177,6 +1179,20 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         download_source_button = QPushButton("Download Supported Emulator")
         download_source_button.clicked.connect(lambda: MainWindow._open_source_emulator_download_dialog(self))
         left_layout.addWidget(download_source_button)
+
+        if sys.platform != "win32":
+            left_layout.addWidget(self._make_section_title("Compatibility Tools"))
+
+            compat_tool_list = QListWidget()
+            compat_tool_list.setObjectName("compatToolList")
+            compat_tool_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+            compat_tool_list.setAlternatingRowColors(True)
+            self.compat_tool_list = compat_tool_list
+            left_layout.addWidget(compat_tool_list)
+
+            download_compat_tool_button = QPushButton("Download Compatibility Tool")
+            download_compat_tool_button.clicked.connect(lambda: MainWindow._open_compat_tool_download_dialog(self))
+            left_layout.addWidget(download_compat_tool_button)
 
         layout.addWidget(left_panel, 1)
 
@@ -2019,6 +2035,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             "default_retroarch_cores": {},
             "installed_games": [],
             "emulator_source_installs": {},
+            "compat_tool_installs": {},
             "auto_cloud_save_download_on_launch": True,
             "auto_cloud_save_upload_on_exit": True,
             "auto_cloud_save_skip_download_if_local_newer": True,

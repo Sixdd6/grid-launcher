@@ -55,3 +55,7 @@ def rom_mate_share_dir(fallback: Path) -> Path:
     if share_dir:
         return Path(share_dir).expanduser()
     return fallback
+
+
+def compat_tool_install_directory() -> Path:
+    return xdg_data_home() / "rom-mate" / "compat-tools"

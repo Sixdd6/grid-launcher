@@ -14,6 +14,7 @@ from .autoconfig import (
 )
 from .launch import (
     apply_launch_placeholders_to_args,
+    detect_umu_run,
     launch_placeholders_for_game,
     launchable_emulator_file,
     launchable_native_game_file,
@@ -191,6 +192,7 @@ __all__ = [
     "cloud_save_block_reason_for_game",
     "cloud_save_scope_for_game",
     "detect_installed_flatpak_emulators",
+    "detect_umu_run",
     "installed_flatpak_app_ids",
     "azahar_directory_settings",
     "azahar_save_path_overrides",

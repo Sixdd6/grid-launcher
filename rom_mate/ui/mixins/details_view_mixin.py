@@ -1424,7 +1424,7 @@ class DetailsViewMixin:
     def _launch_installed_game(self, game: dict[str, str]) -> bool:
         try:
             if self._is_native_executable_platform(game):
-                command, working_directory = prepare_native_launch_command(
+                command, working_directory, compat_env = prepare_native_launch_command(
                     game,
                     self._resolved_native_executable_path_for_game,
                     self._split_launch_template_args,
@@ -1432,6 +1432,7 @@ class DetailsViewMixin:
                 process = subprocess.Popen(
                     command,
                     cwd=working_directory,
+                    env={**os.environ, **compat_env} if compat_env else None,
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
                 )
                 QTimer.singleShot(500, lambda p=process, c=command: self._warn_if_process_exited_early(p, c))
@@ -1727,6 +1728,18 @@ class DetailsViewMixin:
             existing_launch_parameters_value.strip() if isinstance(existing_launch_parameters_value, str) else ""
         )
 
+        available_compat_tools = (
+            self._available_compat_tools_for_dialog() if sys.platform != "win32" else []
+        )
+        existing_compat_tool_value = installed_game.get("native_compat_tool", "")
+        existing_compat_tool = (
+            existing_compat_tool_value.strip() if isinstance(existing_compat_tool_value, str) else ""
+        )
+        existing_wineprefix_value = installed_game.get("native_wineprefix", "")
+        existing_wineprefix = (
+            existing_wineprefix_value.strip() if isinstance(existing_wineprefix_value, str) else ""
+        )
+
         dialog = NativeGameSettingsDialog(
             self,
             game_title=str(installed_game.get("title", "Game")),
@@ -1735,6 +1748,9 @@ class DetailsViewMixin:
             selected_executable_path=selected_executable_path,
             existing_launch_parameters=existing_launch_parameters,
             section_title_factory=self._make_section_title,
+            available_compat_tools=available_compat_tools,
+            existing_compat_tool=existing_compat_tool,
+            existing_wineprefix=existing_wineprefix,
         )
         if dialog.exec() != int(QDialog.DialogCode.Accepted):
             return
@@ -1746,9 +1762,13 @@ class DetailsViewMixin:
         native_launch_parameters = dialog.launch_parameters()
         installed_game["native_executable_path"] = selected_executable
         installed_game["native_launch_parameters"] = native_launch_parameters
+        if sys.platform != "win32":
+            installed_game["native_compat_tool"] = dialog.selected_compat_tool_path()
         if self.current_details_game is not None:
             self.current_details_game["native_executable_path"] = selected_executable
             self.current_details_game["native_launch_parameters"] = native_launch_parameters
+            if sys.platform != "win32":
+                self.current_details_game["native_compat_tool"] = dialog.selected_compat_tool_path()
 
         if self._debug_prints_enabled():
             try:
