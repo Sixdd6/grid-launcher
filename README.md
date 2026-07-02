@@ -1,5 +1,6 @@
 # GRID Launcher
 Game Repository Interface & Downloader — A launcher for RomM.
+
 Please be aware that this application is created using AI tools/coding, if this is a problem for you I invite you to make your own.
 
 [![Latest Build](https://github.com/Sixdd6/rom-mate-neo/actions/workflows/pyinstaller-windows.yml/badge.svg)](https://github.com/Sixdd6/rom-mate-neo/actions/workflows/pyinstaller-windows.yml)
@@ -33,7 +34,7 @@ Please be aware that this application is created using AI tools/coding, if this 
 - Light/Dark Themes
 - RetroAchievements integration and browsing
 
-### TV Mode
+### TV Mode (Pending Rewrite)
 - Home tab with several rows to help you discover your collection
     - Continue Playing: Auto-sorts your most recently played and installed games to quickly jump back in
     - Favorites: Shows any games marked as favorite for your account
@@ -53,7 +54,7 @@ Please be aware that this application is created using AI tools/coding, if this 
 | PPSSPP | PlayStation Portable (PSP) |
 | RPCS3 | PlayStation 3 |
 | ShadPS4 | PlayStation 4 |
-| Dolphin | GameCube, Wii, Tri-Force (untested) |
+| Dolphin | GameCube, Wii, Tri-Force (Tri-Force untested) |
 | Cemu | Wii U — see note below |
 | Azahar | Nintendo 3DS |
 | Eden | Nintendo Switch |
@@ -64,24 +65,28 @@ Please be aware that this application is created using AI tools/coding, if this 
 | FBNeo | Arcade |
 | Redream | Sega Dreamcast, Sega Naomi |
 
-> **Cemu** does not reliably respect window priorities in fullscreen mode and will conflict with the GRID Launcher pause menu. The recommended workaround on Windows is to run the emulator in windowed mode, GRID Launcher will maximize the window automatically which can then be made borderless with [Borderless Gaming](https://github.com/Codeusa/Borderless-Gaming) - add Cemu as a profile and it will automatically hide the window frame on launch. A thin menubar will remain visible at the top of the Cemu window, but the pause menu will otherwise function correctly to allow easily exiting the emulator (without needing a mouse/keyboard). I am still searching for a proper fullscreen solution but this works fairly well for now.
+> **Cemu on Windows** does not reliably respect window priorities in fullscreen mode and will conflict with the GRID Launcher pause menu. The recommended workaround on Windows is to run the emulator in windowed mode, GRID Launcher will maximize the window automatically which can then be made borderless with [Borderless Gaming](https://github.com/Codeusa/Borderless-Gaming) - add Cemu as a profile and it will automatically hide the window frame on launch. A thin menubar will remain visible at the top of the Cemu window, but the pause menu will otherwise function correctly to allow easily exiting the emulator (without needing a mouse/keyboard). I am still searching for a proper fullscreen solution but this works fairly well for now. As an alternative you can tell GRID to ignore guide button for Cemu in the emulator settings menu.
 
 ## Emulator Setup
 
 - Windows: Emulators can be installed manually or automatically on Windows builds with automated download and setup, firmware will be pulled from your server as well and placed in the default directory for the emulator.
-- Linux: Emulators installed via flatpak are auto-detected and launch args set up accordingly, firmware is downloaded to the correct directory automatically on first emulator launch. Manual setup is also supported via locating executable and populating launch args manually.
+- Linux: Emulators installed via flatpak are auto-detected and launch args set up accordingly, firmware is downloaded to the correct directory automatically on first emulator launch. Auto-download and setup is supported for several emulators that are distributed via AppImage and as native binaries.
 
 ## PC Games
 
-Native Windows PC games are also supported by archiving the installed files of DRM-free games and adding them to RomM under the 'win' rom directory. When installing, the files are extracted to a folder based on the archive name. This is intended for legally obtained DRM-free games only.
+Windows PC games are supported by archiving the installed files of DRM-free games and uploading the archive to RomM under the 'win' rom directory or another directory set as a platform variant in the RomM WebUI (GRID recognizes any platform beginning with "windows" such as "Windows 9x" or "Windows - Source Ports"). When installing, the files are extracted to a folder based on the game name. This is intended for legally obtained DRM-free games only, we do not support or condone piracy. Developers work hard to make games for us to enjoy so the least we can do is reward them for their efforts.
+
+Linux support for Windows games requires installing a compatibility tool from the emulators tab. You can also install GE Proton or Proton Cachy OS externally and GRID will attempt to auto detect the install location on startup. After installing a compat tool select the radial button to set it as default, launching a windows game on linux will select this default tool and can also be overwritten per-game by clicking the config button on the game details page.
 
 > <!> You are responsible for what you do with this, don't come complain to me if you use this to install an illegally hacked copy of a game and it installs a rootkit on your pc.
 
-## PS3 Game Archiving
+## PS3 Game Support
 
-> <!> Update: RPCS3 now supports booting PS3 ISO games directly, though be warned this is not yet covered/tested by GRID Launcher and may leave game files in an installed state even after selecting the Uninstall button from the app.
+> PS3 Support is functional on Windows but quite messy with many workarounds. On linux it's just flat out untested, feel free to let me know if it works or doesn't. I'll get around to fixing it eventually.
 
-RPCS3 support requires PS3 content to be installed to specific paths depending on whether the game is a disc dump or a digital copy. grid-launcher auto-detects the archive layout and routes files accordingly - but the archive itself must be structured correctly.
+> <!> Update: RPCS3 now supports booting PS3 ISO games directly, though be warned this is not yet covered/tested by GRID Launcher and may leave game files in an installed state even after selecting Uninstall in the launcher.
+
+RPCS3 archive support requires PS3 content to be installed to specific paths depending on whether the game is a disc dump or a digital copy. grid-launcher auto-detects the archive layout and routes files accordingly - but the archive itself must be structured correctly.
 
 ### Disc Dump
 
@@ -148,20 +153,20 @@ dev_hdd0/
 
 ## Cloud Sync Notes
 - Game Details now displays `Manage Saves` or `Emulator Saves`, `Manage States` depending on the active emulator capabilities.
-- Shared-save emulators such as Xemu and Redream surface emulator-wide backups, be warned that actions can affect all games using the same shared media.
+- Shared-save emulators such as Xemu and Redream surface emulator-wide storage, be warned that actions with these saves can affect all games using the same shared media. I know this can work better, I'll figure it out eventually.
 - Native Windows games use PCGamingWiki to attempt to automatically discover save locations. A Browse button allows manual path additions when automatic lookup fails. Multiple directories/files can be selected from the game details page in Desktop Mode. All configured directories/files are bundled into a single versioned archive per session.
 
 ## Save Archive Format
 
-grid-launcher uploads saves to RomM as zip archives. The archive layout varies by save type:
+GRID Launcher uploads game saves to RomM as zip archives. The archive layout depends on the emulator or game.
 
-### Emulator Saves (single file or folder)
+## Emulator Saves (single file or folder)
 
-Standard saves are uploaded as a flat zip of the relevant save files, preserving relative paths from within the emulator's save directory. The `emulator` field on the server record identifies which emulator produced the save, allowing correct routing on restore.
+Emulator saves are uploaded as a flat zip of the relevant save files, preserving relative paths from within the emulator's save directory. The `emulator` field on the server record identifies which emulator produced the save, allowing correct routing on restore.
 
 ### Native Windows Saves (`emulator: native_multi_dir`)
 
-Native game saves bundle all configured save directories into one archive per upload session:
+Native game saves bundle all configured save directories into one archive per game session. The following is an example:
 
 ```
 _grid_launcher_dirs.json       ← directory manifest
@@ -182,7 +187,7 @@ _grid_launcher_dirs.json       ← directory manifest
 
 Paths use `%ENVVAR%` tokens rather than absolute paths so archives are portable across user accounts and machines.
 
-On restore, each `N/` prefix is decoded via the manifest, env vars are expanded, and files are written back to the correct directory. The `emulator` field on the server record is set to `native_multi_dir` to identify this format. Legacy per-directory records (emulator field `native_dir:<path>`) from an earlier format are still supported.
+On restore, each `N/` prefix is decoded via the manifest, env vars are expanded, and files are written back to the correct directory. The `emulator` field on the server record is set to `native_multi_dir` to identify this format.
 
 ## Third-Party Software
 
