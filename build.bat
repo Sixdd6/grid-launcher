@@ -44,6 +44,7 @@ python -m PyInstaller ^
     --hidden-import brotli ^
     --hidden-import pyzstd ^
     --hidden-import pyppmd ^
+    --hidden-import keyring.backends.Windows ^
     rom-mate.py
 
 REM Check if build was successful

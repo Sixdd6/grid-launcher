@@ -17,7 +17,7 @@ This document is a stable module map for the current codebase.
   - `api.py`: authenticated HTTP and multipart helpers.
   - `config.py`: config normalization, merging, and persistence.
   - `path.py`: path sanitization and containment helpers; also provides XDG base-directory helpers (`xdg_config_home`, `xdg_data_home`).
-  - `token_store.py`: secure API token persistence.
+  - `token_store.py`: keyring-backed secret persistence (OS Credential Manager / Keychain / Secret Service) for the API token, RetroAchievements token, and RetroAchievements Web API key, with DPAPI-encrypted file storage as a Windows-only fallback when the keyring backend is unavailable, and automatic migration from the legacy per-platform file format.
   - `types.py`: shared protocol typing.
 
 - `rom_mate/server/`

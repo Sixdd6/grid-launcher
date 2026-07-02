@@ -65,12 +65,14 @@ from rom_mate.core import (
     normalize_emulators as resolve_normalize_emulators,
     normalize_installed_games as resolve_normalize_installed_games,
     load_api_token as resolve_load_api_token,
+    load_ra_api_key as resolve_load_ra_api_key,
     load_ra_token as resolve_load_ra_token,
     path_key,
     path_within_path,
     sanitize_path_component,
     multipart_payload,
     save_api_token as resolve_save_api_token,
+    save_ra_api_key as resolve_save_ra_api_key,
     save_ra_token as resolve_save_ra_token,
     set_api_token as resolve_set_api_token,
     windows_protect_data as resolve_windows_protect_data,
@@ -2070,6 +2072,9 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
     def _ra_token_file(self) -> Path:
         return self._config_dir() / "ra_token.bin"
 
+    def _ra_api_key_file(self) -> Path:
+        return self._config_dir() / "ra_api_key.bin"
+
     def _windows_protect_data(self, raw: bytes) -> bytes:
         return resolve_windows_protect_data(raw)
 
@@ -2082,11 +2087,17 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
     def _load_ra_token(self) -> str:
         return resolve_load_ra_token(self._ra_token_file())
 
+    def _load_ra_api_key(self) -> str:
+        return resolve_load_ra_api_key(self._ra_api_key_file())
+
     def _save_api_token(self, token: str) -> bool:
         return resolve_save_api_token(self._config_dir(), self._token_file(), token)
 
     def _save_ra_token(self, token: str) -> bool:
         return resolve_save_ra_token(self._config_dir(), self._ra_token_file(), token)
+
+    def _save_ra_api_key(self, api_key: str) -> bool:
+        return resolve_save_ra_api_key(self._config_dir(), self._ra_api_key_file(), api_key)
 
     def _set_api_token(self, token: str) -> bool:
         return resolve_set_api_token(self.config, token, save_token=self._save_api_token)
@@ -2117,19 +2128,40 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         )
 
         stored_token = self._load_api_token()
+        api_token_migrated = False
         if stored_token:
             merged["api_token"] = stored_token
         else:
             legacy_token = merged.get("api_token", "")
             if isinstance(legacy_token, str) and legacy_token.strip() and self._save_api_token(legacy_token):
                 merged["api_token"] = legacy_token.strip()
-                migrated = merged.copy()
-                migrated["api_token"] = ""
-                self._save_config(migrated)
+                api_token_migrated = True
 
         ra_token = self._load_ra_token()
         if ra_token:
             merged["retroachievements_token"] = ra_token
+
+        stored_ra_api_key = self._load_ra_api_key()
+        ra_api_key_migrated = False
+        if stored_ra_api_key:
+            merged["retroachievements_api_key"] = stored_ra_api_key
+        else:
+            legacy_ra_api_key = merged.get("retroachievements_api_key", "")
+            if (
+                isinstance(legacy_ra_api_key, str)
+                and legacy_ra_api_key.strip()
+                and self._save_ra_api_key(legacy_ra_api_key)
+            ):
+                merged["retroachievements_api_key"] = legacy_ra_api_key.strip()
+                ra_api_key_migrated = True
+
+        if api_token_migrated or ra_api_key_migrated:
+            migrated = merged.copy()
+            if api_token_migrated:
+                migrated["api_token"] = ""
+            if ra_api_key_migrated:
+                migrated["retroachievements_api_key"] = ""
+            self._save_config(migrated)
 
         return merged
 
@@ -2242,6 +2274,12 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             if self.settings_status_label is not None:
                 self.settings_status_label.setText("Failed to securely save API token")
             QMessageBox.warning(self, "Save Error", "Could not securely save API token")
+            return
+        ra_api_key_value = self.config.get("retroachievements_api_key", "")
+        if not isinstance(ra_api_key_value, str) or not self._save_ra_api_key(ra_api_key_value):
+            if self.settings_status_label is not None:
+                self.settings_status_label.setText("Failed to securely save RetroAchievements API key")
+            QMessageBox.warning(self, "Save Error", "Could not securely save RetroAchievements API key")
             return
         if not self._ensure_library_path_exists():
             return

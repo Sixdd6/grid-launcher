@@ -45,6 +45,8 @@ python -m PyInstaller \
     --hidden-import brotli \
     --hidden-import pyzstd \
     --hidden-import pyppmd \
+    --hidden-import keyring.backends.SecretService \
+    --hidden-import keyring.backends.kwallet \
     rom-mate.py
 
 BUILD_EXIT_CODE=$?

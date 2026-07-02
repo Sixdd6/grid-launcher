@@ -222,6 +222,7 @@ def serialized_config(config: dict[str, Any]) -> dict[str, Any]:
     serialized = config.copy()
     serialized["api_token"] = ""
     serialized["retroachievements_token"] = ""
+    serialized["retroachievements_api_key"] = ""
     return serialized
 
 

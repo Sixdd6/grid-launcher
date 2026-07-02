@@ -25,11 +25,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyinstaller PySide6
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
 
       - name: Build executable
         run: |
-          pyinstaller --noconfirm --clean --windowed --onefile --name rom-mate-neo --add-data "assets:assets" --add-data "retroarch-core-list.json:." --add-data "emulator-autoprofiles.json:." rom-mate.py
+          pyinstaller --noconfirm --clean --windowed --onefile --name rom-mate-neo --add-data "assets:assets" --add-data "retroarch-core-list.json:." --add-data "emulator-autoprofiles.json:." --hidden-import brotli --hidden-import pyzstd --hidden-import pyppmd --hidden-import keyring.backends.SecretService --hidden-import keyring.backends.kwallet rom-mate.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
