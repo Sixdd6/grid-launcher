@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import platform
 import re
+import sys
 import time
 import zipfile
 from pathlib import Path
@@ -150,6 +151,13 @@ class InstallDownloadWorker(QObject):
         source = normalize_emulator_source_metadata(source_metadata)
         provider = source.get("provider", "")
         if provider == "direct":
+            allowed_platforms = source_metadata.get("platforms")
+            if isinstance(allowed_platforms, list) and allowed_platforms:
+                if not any(sys.platform.startswith(str(entry)) for entry in allowed_platforms):
+                    raise EmulatorSourceResolutionError(
+                        f"{source_metadata.get('name', 'This emulator')} has no auto-install source "
+                        f"available for this platform. {source_metadata.get('manual_install_hint', '')}".strip()
+                    )
             request_headers = self._github_release_headers()
             return self._resolve_direct_source_download(source, request_headers)
 
@@ -210,6 +218,15 @@ class InstallDownloadWorker(QObject):
         }
 
     def _resolve_direct_source_download(self, source: dict[str, Any], headers: dict[str, str]) -> dict[str, str]:
+        platform_overrides = source.get("platform_overrides")
+        if isinstance(platform_overrides, dict):
+            for platform_key, override in platform_overrides.items():
+                if not isinstance(override, dict):
+                    continue
+                if sys.platform.startswith(str(platform_key)):
+                    source = {**source, **override}
+                    break
+
         download_url = str(source.get("download_url", "")).strip()
         page_url = str(source.get("page_url", "")).strip()
         download_url_regex = str(source.get("download_url_regex", "")).strip()
@@ -821,3 +838,84 @@ class MissingCoverReplenishWorker(QObject):
             self.game_cover_cached.emit({"game_key": game_key, "path": str(cache_file)})
 
         self.finished.emit()
+
+
+class DiscoverLoadWorker(QObject):
+    """Background worker for loading Discover tab sections from the server."""
+
+    finished = Signal(object)
+    error = Signal(str)
+
+    def __init__(
+        self,
+        base_url: str,
+        api_token: str,
+        cache: Any,
+        force_refresh: bool,
+    ) -> None:
+        super().__init__()
+        self.base_url = base_url
+        self.api_token = api_token
+        self.cache = cache
+        self.force_refresh = force_refresh
+
+    @Slot()
+    def run(self) -> None:
+        from ..server.discover import (
+            fetch_all_games,
+            fetch_games_by_genre,
+            filter_games_by_installed,
+        )
+        result: dict[str, Any] = {}
+
+        # Single call to get games + genre list
+        all_games: list[dict[str, Any]] = []
+        genres_available: list[str] = []
+        try:
+            cached = self.cache.get_section("all_games", self.force_refresh)
+            if cached is not None:
+                all_games = cached.get("games", [])
+                genres_available = cached.get("genres", [])
+            else:
+                all_games, genres_available = fetch_all_games(
+                    self.base_url, self.api_token, limit=20
+                )
+                all_games = filter_games_by_installed(all_games, self.cache.installed_game_keys)
+                self.cache.set_section("all_games", {"games": all_games, "genres": genres_available})
+        except Exception:
+            pass
+
+        if all_games:
+            result["all_games"] = {"games": all_games}
+
+        # Per-genre sections (capped at 6)
+        if genres_available:
+            try:
+                cached_genres = self.cache.get_section("genres", self.force_refresh)
+                if cached_genres is not None:
+                    result["genres"] = cached_genres
+                else:
+                    games_by_genre: dict[str, list] = {}
+                    for genre in genres_available[:6]:
+                        try:
+                            genre_games = fetch_games_by_genre(
+                                self.base_url, self.api_token, genre, limit=10
+                            )
+                            genre_games = filter_games_by_installed(
+                                genre_games, self.cache.installed_game_keys
+                            )
+                            if genre_games:
+                                games_by_genre[genre] = genre_games
+                        except Exception:
+                            continue
+                    if games_by_genre:
+                        genres_section = {
+                            "genres": list(games_by_genre.keys()),
+                            "games_by_genre": games_by_genre,
+                        }
+                        self.cache.set_section("genres", genres_section)
+                        result["genres"] = genres_section
+            except Exception:
+                pass
+
+        self.finished.emit(result)

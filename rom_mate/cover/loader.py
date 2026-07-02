@@ -68,7 +68,6 @@ def on_cover_reply(window: CoverLoaderWindowProtocol, cover_url: str, reply: QNe
         parsed = QPixmap()
         if payload and parsed.loadFromData(payload):
             pixmap = parsed
-
     window.cover_cache[cover_url] = pixmap
     window.cover_loading.discard(cover_url)
     waiters = window.cover_waiters.pop(cover_url, [])

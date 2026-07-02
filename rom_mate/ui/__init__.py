@@ -1,4 +1,5 @@
 from .dialogs import EmulatorConfigDialog, FirstRunSetupDialog, NativeGameSettingsDialog
+from .discover import DiscoverPageWidget
 from .downloads import build_downloads_page, make_download_entry_widget, refresh_downloads_page
 from .emulators import (
     emulator_form_state_for_row,
@@ -32,6 +33,7 @@ __all__ = [
     "EmulatorConfigDialog",
     "FirstRunSetupDialog",
     "NativeGameSettingsDialog",
+    "DiscoverPageWidget",
     "build_downloads_page",
     "AspectRatioLabel",
     "emulator_form_state_for_row",

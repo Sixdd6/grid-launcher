@@ -1,3 +1,3 @@
-from .workers import AutoCloudSaveUploadWorker, DetailsCloudRecordsWorker, InstallDownloadWorker, InstallFinalizeWorker, MissingCoverReplenishWorker
+from .workers import AutoCloudSaveUploadWorker, DetailsCloudRecordsWorker, DiscoverLoadWorker, InstallDownloadWorker, InstallFinalizeWorker, MissingCoverReplenishWorker
 
-__all__ = ["AutoCloudSaveUploadWorker", "DetailsCloudRecordsWorker", "InstallDownloadWorker", "InstallFinalizeWorker", "MissingCoverReplenishWorker"]
+__all__ = ["AutoCloudSaveUploadWorker", "DetailsCloudRecordsWorker", "DiscoverLoadWorker", "InstallDownloadWorker", "InstallFinalizeWorker", "MissingCoverReplenishWorker"]

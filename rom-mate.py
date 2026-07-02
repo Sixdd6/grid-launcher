@@ -350,9 +350,17 @@ from rom_mate.ui import (
     show_toast as resolve_show_toast,
     upsert_emulator_entry,
 )
+from rom_mate.ui.discover import DiscoverPageWidget
 from rom_mate.ui.emulators import save_button_label
 from rom_mate.ui.emulators import available_source_download_emulator_entries as resolve_available_source_download_emulator_entries
 from rom_mate.ui.spinner import LoadingSpinnerWidget
+from rom_mate.server.discover import (
+    DiscoverCache,
+    fetch_all_games,
+    fetch_games_by_genre,
+    filter_games_by_installed,
+    get_top_genres_from_games,
+)
 from rom_mate.server import (
     account_status_text,
     apply_server_status,
@@ -377,7 +385,7 @@ from rom_mate.server import (
     server_base_url,
     server_platform_ids,
 )
-from rom_mate.background import AutoCloudSaveUploadWorker, DetailsCloudRecordsWorker, InstallDownloadWorker, InstallFinalizeWorker, MissingCoverReplenishWorker
+from rom_mate.background import AutoCloudSaveUploadWorker, DetailsCloudRecordsWorker, DiscoverLoadWorker, InstallDownloadWorker, InstallFinalizeWorker, MissingCoverReplenishWorker
 from rom_mate.ui.mixins.cloud_mixin import CloudSaveMixin
 from rom_mate.ui.mixins.emulator_ui_mixin import EmulatorUIMixin
 from rom_mate.ui.mixins.install_mixin import InstallMixin
@@ -593,6 +601,13 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self._tv_window: Any = None
         self._tv_pause_backend: Any = None
         self._tv_pause_window: Any = None
+        
+        # Discover tab
+        self.discover_cache = DiscoverCache(ttl=3600)
+        self.discover_page: DiscoverPageWidget | None = None
+        self._discover_load_thread: QThread | None = None
+        self._discover_load_worker: Any = None
+        
         self.session_poll_timer = QTimer(self)
         self.session_poll_timer.setSingleShot(False)
         self.session_poll_timer.setInterval(2500)
@@ -613,6 +628,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self.stack = QStackedWidget()
         self.stack.addWidget(self._build_library_page())
         self.stack.addWidget(self._build_server_page())
+        self.stack.addWidget(self._build_discover_page())
         self.stack.addWidget(self._build_downloads_page())
         self.stack.addWidget(self._build_emulators_page())
         self.stack.addWidget(self._build_settings_page())
@@ -620,7 +636,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         layout.addWidget(self.stack)
 
         nav_buttons_by_label: dict[str, QPushButton] = {}
-        for index, label in enumerate(("Library", "Server", "Downloads", "Emulators", "Settings")):
+        for index, label in enumerate(("Library", "Server", "Discover", "Downloads", "Emulators", "Settings")):
             button = QPushButton(label)
             button.setCheckable(True)
             button.clicked.connect(lambda checked, idx=index: self._switch_page(idx))
@@ -630,6 +646,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self.nav_buttons = [
             nav_buttons_by_label["Library"],
             nav_buttons_by_label["Server"],
+            nav_buttons_by_label["Discover"],
             nav_buttons_by_label["Downloads"],
             nav_buttons_by_label["Emulators"],
             nav_buttons_by_label["Settings"],
@@ -637,6 +654,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
         nav_row.addWidget(nav_buttons_by_label["Library"])
         nav_row.addWidget(nav_buttons_by_label["Server"])
+        nav_row.addWidget(nav_buttons_by_label["Discover"])
         nav_row.addWidget(nav_buttons_by_label["Downloads"])
 
         nav_row.addStretch()
@@ -848,7 +866,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
     def _switch_page(self, index: int) -> None:
         previous_index = self.stack.currentIndex()
-        if previous_index == 5 and index != 5:
+        if previous_index == 6 and index != 6:
             self._cleanup_details_view_state()
         self.stack.setCurrentIndex(index)
         self.current_main_page_index = index
@@ -856,6 +874,9 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             button.setChecked(i == index)
         if index == 1 and not self.server_connected and self.server_auto_reconnect:
             self._connect_to_server(show_errors=False)
+        if index == 2:  # Discover tab
+            if self.discover_cache.is_stale("all_games"):
+                self._refresh_discover_data(force_refresh=False)
         QTimer.singleShot(0, self._reflow_current_page_grid)
 
     def _reflow_current_page_grid(self) -> None:
@@ -1001,6 +1022,104 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
         layout.addWidget(right, 1)
         return page
+
+    def _build_discover_page(self) -> QWidget:
+        """Build the Discover tab page."""
+        page = DiscoverPageWidget(self, self)
+        page.set_refresh_callback(self._refresh_discover_data)
+        self.discover_page = page
+        return page
+
+    def _refresh_discover_data(self, force_refresh: bool = True) -> None:
+        """Refresh discover data asynchronously."""
+        if not self._server_connected():
+            return
+
+        if self.discover_page is None:
+            return
+
+        # Update installed games cache
+        self.discover_cache.set_installed_games(self.library_games)
+
+        # Start background fetch thread
+        self.discover_page.set_loading(True)
+        self._start_discover_load_thread(force_refresh)
+
+    def _start_discover_load_thread(self, force_refresh: bool = False) -> None:
+        """Start background thread to load discover data."""
+        if self._discover_load_thread is not None and self._discover_load_thread.isRunning():
+            return
+
+        self._discover_load_worker = DiscoverLoadWorker(
+            self.config.get("server_url", "").rstrip("/"),
+            self.config.get("api_token", ""),
+            self.discover_cache,
+            force_refresh,
+        )
+
+        self._discover_load_thread = QThread()
+        self._discover_load_worker.moveToThread(self._discover_load_thread)
+        self._discover_load_worker.finished.connect(self._on_discover_data_loaded)
+        self._discover_load_worker.error.connect(self._on_discover_data_error)
+        self._discover_load_thread.started.connect(self._discover_load_worker.run)
+        self._discover_load_thread.start()
+
+    def _on_discover_data_loaded(self, result: dict[str, Any]) -> None:
+        """Handle discover data loaded successfully."""
+        if self.discover_page is None:
+            return
+
+        self.discover_page.set_loading(False)
+        self.discover_page._clear_sections()
+
+        sections_added = 0
+
+        all_games = result.get("all_games", {}).get("games", [])
+        if all_games:
+            self.discover_page.add_carousel_section("all_games", "Games on Server", all_games)
+            sections_added += 1
+
+        genres_data = result.get("genres", {})
+        genres = genres_data.get("genres", [])
+        games_by_genre = genres_data.get("games_by_genre", {})
+        if genres and games_by_genre:
+            self.discover_page.add_genre_section(genres, games_by_genre)
+            sections_added += 1
+
+        if sections_added == 0:
+            no_content = QLabel("No games found. Make sure the server is connected and has games.")
+            no_content.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            no_content.setStyleSheet("color: #6272a4; font-size: 14px;")
+            self.discover_page.content_layout.addWidget(no_content)
+
+        self.discover_page.add_stretch()
+
+        if self._discover_load_thread is not None:
+            self._discover_load_thread.quit()
+            self._discover_load_thread.wait()
+            self._discover_load_thread = None
+        self._discover_load_worker = None
+
+    def _on_discover_data_error(self, error_msg: str) -> None:
+        """Handle discover data load error."""
+        if self.discover_page is None:
+            return
+
+        self.discover_page.set_loading(False)
+        self.discover_page._clear_sections()
+
+        error_label = QLabel(f"Failed to load discover data: {error_msg}")
+        error_label.setStyleSheet("color: #ff5555;")
+        error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.discover_page.content_layout.addWidget(error_label)
+        self.discover_page.add_stretch()
+
+        # Stop thread
+        if self._discover_load_thread is not None:
+            self._discover_load_thread.quit()
+            self._discover_load_thread.wait()
+            self._discover_load_thread = None
+        self._discover_load_worker = None
 
     def _build_downloads_page(self) -> QWidget:
         page, empty_label, scroll, list_layout = build_downloads_page()

@@ -254,7 +254,7 @@ def make_game_card(window: GameCardWindowProtocol, game: dict[str, str], source:
     cover = QLabel("Cover Art")
     cover.setObjectName("gameCardCover")
     cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    cover.setFixedHeight(170)
+    cover.setFixedSize(164, 170)
     cover.setStyleSheet("background-color: transparent;")
 
     layout.addWidget(cover)
@@ -428,7 +428,7 @@ def open_game_details(window: GameDetailsWindowProtocol, game: dict[str, str], s
     window._show_details_overview()
     window._update_details_action_buttons()
 
-    window.stack.setCurrentIndex(5)
+    window.stack.setCurrentIndex(window.stack.count() - 1)
     window._update_details_layout_metrics()
     QTimer.singleShot(0, window._update_details_layout_metrics)
     for button in window.nav_buttons:
