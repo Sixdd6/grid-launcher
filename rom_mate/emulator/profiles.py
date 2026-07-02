@@ -482,6 +482,9 @@ def normalize_emulator_autoprofiles(
                 elif isinstance(entry, dict):
                     normalized_firmware_directories.append(entry.copy())
 
+        flatpak_app_id = item.get("flatpak_app_id", "")
+        normalized_flatpak_app_id = flatpak_app_id.strip() if isinstance(flatpak_app_id, str) else ""
+
         source = item.get("source")
         normalized_source = source.copy() if isinstance(source, dict) else None
 
@@ -499,6 +502,7 @@ def normalize_emulator_autoprofiles(
             "state_directories": normalized_state_directories,
             "screenshot_directories": normalized_screenshot_directories,
             "firmware_directories": normalized_firmware_directories,
+            "flatpak_app_id": normalized_flatpak_app_id,
         }
         if normalized_source is not None:
             normalized_profile["source"] = normalized_source

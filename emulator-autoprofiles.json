@@ -92,6 +92,7 @@
       ]
     },
     "name": "PCSX2 (Playstation 2)",
+    "flatpak_app_id": "net.pcsx2.PCSX2",
     "args": "-fullscreen -batch \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation 2", "ps2"],
@@ -127,6 +128,7 @@
       ]
     },
     "name": "PPSSPP (Playstation Portable)",
+    "flatpak_app_id": "org.ppsspp.PPSSPP",
     "args": "--fullscreen --pause-menu-exit \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation portable", "psp"],
@@ -152,6 +154,7 @@
       ]
     },
     "name": "RPCS3 (Playstation 3)",
+    "flatpak_app_id": "net.rpcs3.RPCS3",
     "args": "--no-gui \"%RPCS3_GAMEID%:%ps3_gameid%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation 3", "ps3"],
@@ -226,6 +229,7 @@
       "manual_install_hint": "Dolphin has no official direct-download build for Linux. Install it via Flatpak instead: flatpak install flathub org.DolphinEmu.dolphin-emu"
     },
     "name": "Dolphin",
+    "flatpak_app_id": "org.DolphinEmu.dolphin-emu",
     "args": "-b -e \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["gamecube", "wii"],
@@ -264,6 +268,7 @@
       ]
     },
     "name": "Cemu (Wii U)",
+    "flatpak_app_id": "info.cemu.Cemu",
     "args": "-g \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["wii u", "wiiu"],
@@ -293,6 +298,7 @@
       ]
     },
     "name": "Azahar (Nintendo 3DS)",
+    "flatpak_app_id": "org.azahar_emu.Azahar",
     "args": "-f \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["3ds"],
@@ -342,6 +348,7 @@
       ]
     },
     "name": "Xemu (Xbox)",
+    "flatpak_app_id": "app.xemu.xemu",
     "args": "-full-screen -dvd_path \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["xbox"],
@@ -391,6 +398,7 @@
   {
     "match_tokens": ["mame.exe"],
     "name": "MAME (Arcade)",
+    "flatpak_app_id": "org.mamedev.MAME",
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["arcade", "mame"],
