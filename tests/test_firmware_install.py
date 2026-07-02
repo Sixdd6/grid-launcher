@@ -3,11 +3,14 @@ from __future__ import annotations
 import io
 import json
 import shutil
+import tarfile
 import tempfile
 import unittest
 import zipfile
 from pathlib import Path
 from unittest.mock import Mock, patch
+
+import py7zr
 
 from rom_mate.library.firmware_install import (
     download_firmware_bytes,
@@ -17,6 +20,11 @@ from rom_mate.library.firmware_install import (
     install_platform_firmware,
     resolve_firmware_targets,
     PS3_FIRMWARE_MANIFEST_URL,
+)
+from rom_mate.library.archive_preparation import (
+    _extract_7z_with_fallbacks,
+    _try_py7zr,
+    extract_archive_into_directory,
 )
 from rom_mate.emulator.retroarch import (
     retroarch_core_config_files_metadata,
@@ -1401,3 +1409,53 @@ class RetroArchFirmwareDirsFilteringTests(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertIsInstance(result[0], tuple)
         self.assertEqual(result[0], (Path("/retroarch/system/dc"), ["some_filter"]))
+
+
+class ArchiveSevenZipFallbackTests(unittest.TestCase):
+    def _make_7z_fixture(self, temp_dir: str) -> Path:
+        source_file = Path(temp_dir) / "payload.bin"
+        source_file.write_bytes(b"PAYLOADDATA")
+        archive_path = Path(temp_dir) / "fixture.7z"
+        with py7zr.SevenZipFile(archive_path, mode="w") as archive:
+            archive.write(source_file, arcname="payload.bin")
+        return archive_path
+
+    def test_py7zr_fallback_extracts_when_no_bundled_or_system_7z_available(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            archive_path = self._make_7z_fixture(temp_dir)
+            extracted_dir = Path(temp_dir) / "out"
+            extracted_dir.mkdir()
+
+            with patch("rom_mate.library.archive_preparation._BUNDLED_7Z_PATH", Path(temp_dir) / "missing-7z.exe"):
+                with patch("rom_mate.library.archive_preparation._try_system_7z", return_value=False):
+                    _extract_7z_with_fallbacks(archive_path, extracted_dir)
+
+            self.assertEqual((extracted_dir / "payload.bin").read_bytes(), b"PAYLOADDATA")
+
+    def test_py7zr_failure_detail_included_in_final_error_message(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            archive_path = Path(temp_dir) / "corrupt.7z"
+            archive_path.write_bytes(b"not a real 7z archive")
+            extracted_dir = Path(temp_dir) / "out"
+            extracted_dir.mkdir()
+
+            with patch("rom_mate.library.archive_preparation._BUNDLED_7Z_PATH", Path(temp_dir) / "missing-7z.exe"):
+                with patch("rom_mate.library.archive_preparation._try_system_7z", return_value=False):
+                    with patch("rom_mate.library.archive_preparation._ensure_full_7z", return_value=None):
+                        with self.assertRaises(OSError) as raised:
+                            _extract_7z_with_fallbacks(archive_path, extracted_dir)
+
+            self.assertIn("py7zr also failed", str(raised.exception))
+
+    def test_tar_gz_extraction_succeeds_via_tar_code_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_file = Path(temp_dir) / "payload.bin"
+            source_file.write_bytes(b"TARGZDATA")
+            archive_path = Path(temp_dir) / "fixture.tar.gz"
+            with tarfile.open(archive_path, "w:gz") as archive:
+                archive.add(source_file, arcname="payload.bin")
+            extracted_dir = Path(temp_dir) / "out"
+
+            extract_archive_into_directory(archive_path, extracted_dir)
+
+            self.assertEqual((extracted_dir / "payload.bin").read_bytes(), b"TARGZDATA")

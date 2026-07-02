@@ -31,6 +31,15 @@ from rom_mate.ui.mixins.emulator_ui_mixin import EmulatorUIMixin
 
 
 class EmulatorAutoConfigSettingsTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._home_tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._home_tempdir.cleanup)
+        home_dir = Path(self._home_tempdir.name) / "home"
+        home_dir.mkdir(parents=True, exist_ok=True)
+        patcher = patch("pathlib.Path.home", return_value=home_dir)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_retroarch_writes_missing_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             retroarch_dir = Path(temp_dir) / "RetroArch"
@@ -663,8 +672,9 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             appdata_dir = Path(temp_dir) / "appdata"
             with patch.dict(os.environ, {"APPDATA": str(appdata_dir)}, clear=False):
-                result = ensure_dolphin_skip_ipl("")
-        self.assertIsNotNone(result["dolphin_ini_path"])
+                with patch("rom_mate.emulator.dolphin.Path.home", return_value=Path(temp_dir) / "home"):
+                    result = ensure_dolphin_skip_ipl("")
+        self.assertTrue(str(result["dolphin_ini_path"]).startswith(str(appdata_dir)))
 
     def test_dolphin_gcpad_creates_ini_when_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -747,9 +757,10 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             appdata_dir = Path(temp_dir) / "appdata"
             with patch.dict(os.environ, {"APPDATA": str(appdata_dir)}, clear=False):
-                result = ensure_dolphin_gcpad_config("")
+                with patch("rom_mate.emulator.dolphin.Path.home", return_value=Path(temp_dir) / "home"):
+                    result = ensure_dolphin_gcpad_config("")
 
-        self.assertIsNotNone(result["gcpad_ini_path"])
+        self.assertTrue(str(result["gcpad_ini_path"]).startswith(str(appdata_dir)))
 
     def test_azahar_writes_renderer_settings(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import stat
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -1177,6 +1178,19 @@ class InstallMixin:
                 "Selected emulator source is missing metadata and cannot be downloaded.",
             )
             return False
+
+        if source_metadata.get("provider") == "direct":
+            allowed_platforms = source_metadata.get("platforms")
+            if isinstance(allowed_platforms, list) and allowed_platforms:
+                if not any(sys.platform.startswith(str(entry)) for entry in allowed_platforms):
+                    title = game.get("title", "Emulator")
+                    QMessageBox.information(
+                        self,
+                        "Not Available",
+                        f"{title} cannot be auto-installed on this platform. "
+                        f"{source_metadata.get('manual_install_hint', '')}".strip(),
+                    )
+                    return False
 
         install_path = self._platform_library_dir(game)
         if install_path is None:

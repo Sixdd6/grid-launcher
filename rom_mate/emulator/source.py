@@ -156,6 +156,10 @@ def normalize_emulator_source_metadata(source_metadata: dict[str, Any]) -> dict[
                 if isinstance(item, dict)
             ]
 
+        platform_overrides = source_metadata.get("platform_overrides")
+        if isinstance(platform_overrides, dict) and platform_overrides:
+            normalized["platform_overrides"] = platform_overrides
+
     return normalized
 
 

@@ -630,6 +630,115 @@ class InstallDownloadWorkerTests(unittest.TestCase):
         )
         self.assertEqual(resolved["asset_name"], "redream.x86_64-windows-v1.5.0-1133-g03c2ae9.zip")
 
+    def test_source_metadata_direct_platform_overrides_resolve_linux_retroarch_asset(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("retroarch.zip"))
+        source_metadata = {
+            "provider": "direct",
+            "owner": "buildbot.libretro.com",
+            "repo": "retroarch-nightly",
+            "page_url": "https://buildbot.libretro.com/nightly/windows/x86_64/",
+            "download_url_regex": r'https://buildbot\.libretro\.com/nightly/windows/x86_64/RetroArch\.7z',
+            "asset_name": "RetroArch.7z",
+            "platform_overrides": {
+                "linux": {
+                    "page_url": "https://buildbot.libretro.com/nightly/linux/x86_64/",
+                    "download_url_regex": r'https://buildbot\.libretro\.com/nightly/linux/x86_64/RetroArch\.7z',
+                    "asset_name": "RetroArch.7z",
+                }
+            },
+        }
+        page_payload = self._ResponseStub(
+            b'<a href="https://buildbot.libretro.com/nightly/linux/x86_64/RetroArch.7z">RetroArch.7z</a>'
+        )
+
+        with patch("sys.platform", "linux"):
+            with patch("rom_mate.background.workers.urlopen", return_value=page_payload):
+                resolved = worker._resolve_source_download(source_metadata)
+
+        self.assertEqual(resolved["provider"], "direct")
+        self.assertEqual(resolved["asset_name"], "RetroArch.7z")
+        self.assertEqual(
+            resolved["download_url"],
+            "https://buildbot.libretro.com/nightly/linux/x86_64/RetroArch.7z",
+        )
+
+    def test_source_metadata_direct_platform_overrides_resolve_linux_redream_asset(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("redream.zip"))
+        source_metadata = {
+            "provider": "direct",
+            "owner": "inolen",
+            "repo": "redream",
+            "page_url": "https://redream.io/download",
+            "download_url_regex": r'https://redream\.io/download/redream\.x86_64-windows-v[0-9.]+-[0-9]+-g[0-9a-f]+\.zip',
+            "platform_overrides": {
+                "linux": {
+                    "page_url": "https://redream.io/download",
+                    "download_url_regex": r'https://redream\.io/download/redream\.x86_64-linux-v[0-9.]+-[0-9]+-g[0-9a-f]+\.tar\.gz',
+                }
+            },
+        }
+        page_payload = self._ResponseStub(
+            b'\n'.join(
+                [
+                    b'<a href="/download/redream.x86_64-windows-v1.5.0-1133-g03c2ae9.zip">windows nightly</a>',
+                    b'<a href="/download/redream.x86_64-linux-v1.5.0-1133-g03c2ae9.tar.gz">linux nightly</a>',
+                ]
+            )
+        )
+
+        with patch("sys.platform", "linux"):
+            with patch("rom_mate.background.workers.urlopen", return_value=page_payload):
+                resolved = worker._resolve_source_download(source_metadata)
+
+        self.assertEqual(
+            resolved["download_url"],
+            "https://redream.io/download/redream.x86_64-linux-v1.5.0-1133-g03c2ae9.tar.gz",
+        )
+        self.assertEqual(resolved["asset_name"], "redream.x86_64-linux-v1.5.0-1133-g03c2ae9.tar.gz")
+
+    def test_source_metadata_direct_platforms_restriction_raises_on_unsupported_platform(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("dolphin.zip"))
+        source_metadata = {
+            "provider": "direct",
+            "name": "Dolphin",
+            "owner": "dolphin-emu",
+            "repo": "dolphin-master",
+            "page_url": "https://dolphin-emu.org/download/list/master/1/",
+            "download_url_regex": r'https://dl\.dolphin-emu\.org/builds/[^\"\s]+/dolphin-master-[0-9-]+-x64\.7z',
+            "platforms": ["win32"],
+            "manual_install_hint": "Install it via Flatpak instead.",
+        }
+
+        with patch("sys.platform", "linux"):
+            with self.assertRaises(EmulatorSourceResolutionError):
+                worker._resolve_source_download(source_metadata)
+
+    def test_source_metadata_direct_without_platform_overrides_is_platform_independent(self) -> None:
+        source_metadata = {
+            "provider": "direct",
+            "owner": "buildbot.libretro.com",
+            "repo": "retroarch-nightly",
+            "page_url": "https://buildbot.libretro.com/nightly/windows/x86_64/",
+            "download_url_regex": r'https://buildbot\.libretro\.com/nightly/windows/x86_64/RetroArch\.7z',
+            "asset_name": "RetroArch.7z",
+        }
+        page_payload_factory = lambda: self._ResponseStub(
+            b'<a href="https://buildbot.libretro.com/nightly/windows/x86_64/RetroArch.7z">RetroArch.7z</a>'
+        )
+
+        worker_win = InstallDownloadWorker("", {}, Path("retroarch.zip"))
+        with patch("sys.platform", "win32"):
+            with patch("rom_mate.background.workers.urlopen", return_value=page_payload_factory()):
+                resolved_win = worker_win._resolve_source_download(source_metadata)
+
+        worker_linux = InstallDownloadWorker("", {}, Path("retroarch.zip"))
+        with patch("sys.platform", "linux"):
+            with patch("rom_mate.background.workers.urlopen", return_value=page_payload_factory()):
+                resolved_linux = worker_linux._resolve_source_download(source_metadata)
+
+        self.assertEqual(resolved_win["download_url"], resolved_linux["download_url"])
+        self.assertEqual(resolved_win["asset_name"], resolved_linux["asset_name"])
+
     def test_source_metadata_gitea_builds_correct_api_url(self):
         """Worker uses Gitea API URL for gitea provider."""
         captured_urls = []

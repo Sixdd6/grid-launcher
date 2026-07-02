@@ -9,6 +9,13 @@
       "page_url": "https://buildbot.libretro.com/nightly/windows/x86_64/",
       "download_url_regex": "https://buildbot\\.libretro\\.com/nightly/windows/x86_64/RetroArch\\.7z",
       "asset_name": "RetroArch.7z",
+      "platform_overrides": {
+        "linux": {
+          "page_url": "https://buildbot.libretro.com/nightly/linux/x86_64/",
+          "download_url_regex": "https://buildbot\\.libretro\\.com/nightly/linux/x86_64/RetroArch\\.7z",
+          "asset_name": "RetroArch.7z"
+        }
+      },
       "supplemental_downloads": [
         {
           "provider": "direct",
@@ -17,7 +24,14 @@
           "release_tag": "nightly-cores",
           "page_url": "https://buildbot.libretro.com/nightly/windows/x86_64/",
           "download_url_regex": "https://buildbot\\.libretro\\.com/nightly/windows/x86_64/RetroArch_cores\\.7z",
-          "asset_name": "RetroArch_cores.7z"
+          "asset_name": "RetroArch_cores.7z",
+          "platform_overrides": {
+            "linux": {
+              "page_url": "https://buildbot.libretro.com/nightly/linux/x86_64/",
+              "download_url_regex": "https://buildbot\\.libretro\\.com/nightly/linux/x86_64/RetroArch_cores\\.7z",
+              "asset_name": "RetroArch_cores.7z"
+            }
+          }
         }
       ]
     },
@@ -207,7 +221,9 @@
       "repo": "dolphin-master",
       "release_tag": "latest",
       "page_url": "https://dolphin-emu.org/download/list/master/1/",
-      "download_url_regex": "https://dl\\.dolphin-emu\\.org/builds/[^\\\"\\s]+/dolphin-master-[0-9-]+-x64\\.7z"
+      "download_url_regex": "https://dl\\.dolphin-emu\\.org/builds/[^\\\"\\s]+/dolphin-master-[0-9-]+-x64\\.7z",
+      "platforms": ["win32"],
+      "manual_install_hint": "Dolphin has no official direct-download build for Linux. Install it via Flatpak instead: flatpak install flathub org.DolphinEmu.dolphin-emu"
     },
     "name": "Dolphin",
     "args": "-b -e \"%rom%\"",
@@ -452,7 +468,13 @@
       "repo": "redream",
       "release_tag": "nightly",
       "page_url": "https://redream.io/download",
-      "download_url_regex": "https://redream\\.io/download/redream\\.x86_64-windows-v[0-9.]+-[0-9]+-g[0-9a-f]+\\.zip"
+      "download_url_regex": "https://redream\\.io/download/redream\\.x86_64-windows-v[0-9.]+-[0-9]+-g[0-9a-f]+\\.zip",
+      "platform_overrides": {
+        "linux": {
+          "page_url": "https://redream.io/download",
+          "download_url_regex": "https://redream\\.io/download/redream\\.x86_64-linux-v[0-9.]+-[0-9]+-g[0-9a-f]+\\.tar\\.gz"
+        }
+      }
     },
     "name": "Redream (Sega Dreamcast)",
     "args": "\"%rom%\"",

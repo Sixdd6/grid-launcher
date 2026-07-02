@@ -397,6 +397,22 @@ def _try_system_7z(archive_path: Path, extracted_dir: Path) -> bool:
     return False
 
 
+def _try_py7zr(archive_path: Path, extracted_dir: Path) -> str | None:
+    """Attempt extraction via the pure-Python py7zr library. Returns None on
+    success, an error message string on failure, or a special sentinel if
+    py7zr itself is unavailable."""
+    try:
+        import py7zr
+    except ImportError:
+        return "__py7zr_unavailable__"
+    try:
+        with py7zr.SevenZipFile(archive_path, mode="r") as archive:
+            archive.extractall(path=extracted_dir)
+        return None
+    except Exception as error:
+        return str(error)
+
+
 def _extract_7z_with_fallbacks(archive_path: Path, extracted_dir: Path) -> None:
     if _BUNDLED_7Z_PATH.exists():
         try:
@@ -409,6 +425,14 @@ def _extract_7z_with_fallbacks(archive_path: Path, extracted_dir: Path) -> None:
             pass
     if _try_system_7z(archive_path, extracted_dir):
         return
+
+    py7zr_error: str | None = None
+    py7zr_result = _try_py7zr(archive_path, extracted_dir)
+    if py7zr_result is None:
+        return
+    if py7zr_result != "__py7zr_unavailable__":
+        py7zr_error = py7zr_result
+
     shutil.rmtree(extracted_dir, ignore_errors=True)
     extracted_dir.mkdir(parents=True, exist_ok=True)
     full_7z = _ensure_full_7z()
@@ -418,11 +442,14 @@ def _extract_7z_with_fallbacks(archive_path: Path, extracted_dir: Path) -> None:
             failure_message="Portable 7zz extraction failed",
         )
         return
-    raise OSError(
+    error_message = (
         "Cannot extract this archive: no bundled, system, or portable 7-Zip was found. "
         "On Windows, check your internet connection and try again. "
         "On Linux/Mac, install p7zip-full (apt/dnf) or p7zip (brew)."
     )
+    if py7zr_error:
+        error_message += f" py7zr also failed: {py7zr_error}"
+    raise OSError(error_message)
 
 
 def extract_archive_into_directory(
