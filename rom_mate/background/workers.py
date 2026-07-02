@@ -149,6 +149,15 @@ class InstallDownloadWorker(QObject):
 
     def _resolve_source_download(self, source_metadata: dict[str, Any]) -> dict[str, Any]:
         source = normalize_emulator_source_metadata(source_metadata)
+        platform_overrides = source.get("platform_overrides")
+        if isinstance(platform_overrides, dict):
+            for platform_key, override in platform_overrides.items():
+                if not isinstance(override, dict):
+                    continue
+                if sys.platform.startswith(str(platform_key)):
+                    source = {**source, **override}
+                    break
+
         provider = source.get("provider", "")
         if provider == "direct":
             allowed_platforms = source_metadata.get("platforms")
@@ -218,15 +227,6 @@ class InstallDownloadWorker(QObject):
         }
 
     def _resolve_direct_source_download(self, source: dict[str, Any], headers: dict[str, str]) -> dict[str, str]:
-        platform_overrides = source.get("platform_overrides")
-        if isinstance(platform_overrides, dict):
-            for platform_key, override in platform_overrides.items():
-                if not isinstance(override, dict):
-                    continue
-                if sys.platform.startswith(str(platform_key)):
-                    source = {**source, **override}
-                    break
-
         download_url = str(source.get("download_url", "")).strip()
         page_url = str(source.get("page_url", "")).strip()
         download_url_regex = str(source.get("download_url_regex", "")).strip()

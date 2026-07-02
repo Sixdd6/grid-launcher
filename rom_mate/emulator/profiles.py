@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 from pathlib import Path
@@ -125,6 +126,20 @@ def normalize_ignore_extension_value(value: str) -> str:
     return normalized
 
 
+def _match_token_matches_executable(token: str, executable_name: str) -> bool:
+    """Compare a match_tokens entry against an executable's basename.
+
+    Tokens containing glob wildcards (``*``/``?``) are matched with fnmatch so
+    versioned downloads (e.g. an AppImage with the release version baked into
+    its filename) can still resolve to the correct emulator profile.
+    """
+    if not token or not executable_name:
+        return False
+    if "*" in token or "?" in token:
+        return fnmatch.fnmatchcase(executable_name, token)
+    return token == executable_name
+
+
 def emulator_profile_for_entry(
     emulator: dict[str, str],
     profiles: list[dict[str, Any]],
@@ -152,7 +167,7 @@ def emulator_profile_for_entry(
         if not normalized_tokens:
             continue
 
-        if executable_name and executable_name in normalized_tokens:
+        if executable_name and any(_match_token_matches_executable(token, executable_name) for token in normalized_tokens):
             return profile
         if executable_stem and any(Path(token).stem.casefold() == executable_stem for token in normalized_tokens):
             return profile
@@ -224,7 +239,11 @@ def emulator_profile_for_game(
 
     for profile in profiles:
         match_tokens = profile.get("match_tokens", [])
-        if executable_name and isinstance(match_tokens, list) and any(token == executable_name for token in match_tokens):
+        if executable_name and isinstance(match_tokens, list) and any(
+            _match_token_matches_executable(token.strip().casefold(), executable_name)
+            for token in match_tokens
+            if isinstance(token, str)
+        ):
             token_matches.append(profile)
 
     selected_profile: dict[str, Any] | None = None

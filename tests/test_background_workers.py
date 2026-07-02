@@ -775,6 +775,50 @@ class InstallDownloadWorkerTests(unittest.TestCase):
             captured_urls[0].startswith("https://git.example.com/api/v1/repos/my-org/my-repo/releases")
         )
 
+    def test_source_metadata_gitea_platform_overrides_resolve_linux_asset(self) -> None:
+        """Worker merges gitea platform_overrides so Linux picks the AppImage asset over the Windows zip."""
+        worker = InstallDownloadWorker("", {}, Path("eden.zip"))
+        source_metadata = {
+            "provider": "gitea",
+            "base_url": "https://git.eden-emu.dev",
+            "owner": "eden-emu",
+            "repo": "eden",
+            "release_tag": "latest",
+            "asset_patterns": ["Eden-Windows-*-amd64-msvc-standard.zip"],
+            "platform_overrides": {
+                "linux": {
+                    "asset_patterns": ["Eden-Linux-*-amd64-clang-pgo.AppImage"],
+                    "launch_executable": "Eden-Linux-*-amd64-clang-pgo.AppImage",
+                }
+            },
+        }
+        release_payload = {
+            "tag_name": "v0.2.1",
+            "assets": [
+                {
+                    "name": "Eden-Windows-v0.2.1-amd64-msvc-standard.zip",
+                    "browser_download_url": (
+                        "https://git.eden-emu.dev/eden-emu/eden/releases/download/"
+                        "v0.2.1/Eden-Windows-v0.2.1-amd64-msvc-standard.zip"
+                    ),
+                },
+                {
+                    "name": "Eden-Linux-v0.2.1-amd64-clang-pgo.AppImage",
+                    "browser_download_url": (
+                        "https://git.eden-emu.dev/eden-emu/eden/releases/download/"
+                        "v0.2.1/Eden-Linux-v0.2.1-amd64-clang-pgo.AppImage"
+                    ),
+                },
+            ],
+        }
+
+        with patch("sys.platform", "linux"):
+            with patch.object(worker, "_load_json", return_value=release_payload):
+                resolved = worker._resolve_source_download(source_metadata)
+
+        self.assertEqual(resolved["asset_name"], "Eden-Linux-v0.2.1-amd64-clang-pgo.AppImage")
+        self.assertTrue(resolved["download_url"].endswith("Eden-Linux-v0.2.1-amd64-clang-pgo.AppImage"))
+
     def test_source_metadata_downloads_supplemental_archives_for_direct_sources(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             initial_archive_path = Path(temp_dir) / "retroarch.zip"

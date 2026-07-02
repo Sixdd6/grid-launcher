@@ -115,6 +115,11 @@ def normalize_emulator_source_metadata(source_metadata: dict[str, Any]) -> dict[
         "asset_preferred_patterns": preferred_patterns,
     }
 
+    if normalized_provider in ("github", "gitea"):
+        platform_overrides = source_metadata.get("platform_overrides")
+        if isinstance(platform_overrides, dict) and platform_overrides:
+            normalized["platform_overrides"] = platform_overrides
+
     if normalized_provider == "gitea":
         base_url = _normalized_required_string(source_metadata, "base_url")
         normalized["base_url"] = base_url.rstrip("/")

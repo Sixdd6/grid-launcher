@@ -356,7 +356,7 @@
     "screenshot_directories": ["."]
   },
   {
-    "match_tokens": ["eden.exe"],
+    "match_tokens": ["eden.exe", "Eden-Linux-*-amd64-clang-pgo.AppImage"],
     "source": {
       "provider": "gitea",
       "base_url": "https://git.eden-emu.dev",
@@ -364,7 +364,13 @@
       "repo": "eden",
       "release_tag": "latest",
       "asset_patterns": ["Eden-Windows-*-amd64-msvc-standard.zip"],
-      "launch_executable": "eden.exe"
+      "launch_executable": "eden.exe",
+      "platform_overrides": {
+        "linux": {
+          "asset_patterns": ["Eden-Linux-*-amd64-clang-pgo.AppImage"],
+          "launch_executable": "Eden-Linux-*-amd64-clang-pgo.AppImage"
+        }
+      }
     },
     "name": "Eden (Nintendo Switch)",
     "args": "-f -g \"%rom%\"",

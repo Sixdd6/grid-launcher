@@ -231,6 +231,41 @@ class GiteaProviderTests(unittest.TestCase):
         normalized = normalize_emulator_source_metadata(metadata)
         self.assertFalse(normalized["base_url"].endswith("/"))
 
+    def test_normalize_gitea_passes_through_platform_overrides(self):
+        metadata = {
+            "provider": "gitea",
+            "base_url": "https://git.eden-emu.dev",
+            "owner": "eden-emu",
+            "repo": "eden",
+            "asset_patterns": ["Eden-Windows-*-amd64-msvc-standard.zip"],
+            "platform_overrides": {
+                "linux": {
+                    "asset_patterns": ["Eden-Linux-*-amd64-clang-pgo.AppImage"],
+                    "launch_executable": "Eden-Linux-*-amd64-clang-pgo.AppImage",
+                }
+            },
+        }
+        normalized = normalize_emulator_source_metadata(metadata)
+        self.assertEqual(
+            normalized["platform_overrides"],
+            {
+                "linux": {
+                    "asset_patterns": ["Eden-Linux-*-amd64-clang-pgo.AppImage"],
+                    "launch_executable": "Eden-Linux-*-amd64-clang-pgo.AppImage",
+                }
+            },
+        )
+
+    def test_normalize_gitea_without_platform_overrides_omits_key(self):
+        metadata = {
+            "provider": "gitea",
+            "base_url": "https://git.example.com",
+            "owner": "my-org",
+            "repo": "my-repo",
+        }
+        normalized = normalize_emulator_source_metadata(metadata)
+        self.assertNotIn("platform_overrides", normalized)
+
     def test_resolve_gitea_latest_release_asset(self):
         source_metadata = {
             "provider": "gitea",

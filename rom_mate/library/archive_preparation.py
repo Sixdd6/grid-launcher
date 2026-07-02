@@ -944,6 +944,11 @@ def prepare_installed_game_without_ui(
     prepared["ps3_trophy_paths"] = ""
     prepared["ps4_game_id"] = ""
     if not should_extract_archive_for_game(prepared, archive_path):
+        if archive_path.suffix.casefold() == ".appimage" and archive_path.exists():
+            try:
+                os.chmod(archive_path, 0o755)
+            except OSError:
+                pass
         return prepared, ""
 
     try:
