@@ -42,3 +42,16 @@ def xdg_data_home() -> Path:
     if value:
         return Path(value).expanduser()
     return Path.home() / ".local" / "share"
+
+
+def rom_mate_share_dir(fallback: Path) -> Path:
+    """Return the directory containing rom-mate-neo's bundled data files
+    (retroarch-core-list.json, emulator-autoprofiles.json, assets/).
+    Under Flatpak, this is /app/share/rom-mate-neo (set via the
+    ROM_MATE_SHARE_DIR environment variable by the Flatpak launch wrapper).
+    Falls back to the given path (the existing dev/PyInstaller resolution)
+    when the env var is unset or empty."""
+    share_dir = os.environ.get("ROM_MATE_SHARE_DIR", "").strip()
+    if share_dir:
+        return Path(share_dir).expanduser()
+    return fallback

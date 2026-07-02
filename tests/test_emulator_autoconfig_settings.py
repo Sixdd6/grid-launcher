@@ -2763,6 +2763,26 @@ class SourceVersionCheckHandlerTests(unittest.TestCase):
         mock_message_box.information.assert_not_called()
 
 
+class EmulatorSharedDataPathTests(unittest.TestCase):
+    class _StubWindow(EmulatorUIMixin):
+        def __init__(self) -> None:
+            pass
+
+    def test_retroarch_core_list_path_respects_rom_mate_share_dir(self) -> None:
+        stub = self._StubWindow()
+        with patch.dict(os.environ, {"ROM_MATE_SHARE_DIR": "/app/share/rom-mate-neo"}, clear=False):
+            result = stub._retroarch_core_list_path()
+
+        self.assertEqual(result, Path("/app/share/rom-mate-neo/retroarch-core-list.json"))
+
+    def test_emulator_autoprofiles_path_respects_rom_mate_share_dir(self) -> None:
+        stub = self._StubWindow()
+        with patch.dict(os.environ, {"ROM_MATE_SHARE_DIR": "/app/share/rom-mate-neo"}, clear=False):
+            result = stub._emulator_autoprofiles_path()
+
+        self.assertEqual(result, Path("/app/share/rom-mate-neo/emulator-autoprofiles.json"))
+
+
 class RPCS3GamesYmlTests(unittest.TestCase):
     def test_prefers_games_dir_for_disc_layout_when_provided(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

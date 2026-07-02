@@ -1,0 +1,57 @@
+app-id: io.github.Sixdd6.RomMateNeo
+runtime: org.kde.Platform
+runtime-version: "6.10"
+sdk: org.kde.Sdk
+base: io.qt.PySide.BaseApp
+base-version: "6.10"
+command: rom-mate-neo
+
+finish-args:
+  # Wayland + X11 fallback
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # GPU rendering (needed by Qt6/OpenGL cover art)
+  - --device=dri
+  # Network for RomM server communication
+  - --share=network
+  # Home directory access for emulator configs and ROM library
+  - --filesystem=home
+  # Controller input via /dev/input (hidraw for joysticks)
+  - --device=all
+  # Secret storage (GNOME Keyring / KWallet via libsecret portal)
+  - --talk-name=org.freedesktop.secrets
+
+modules:
+  - name: python-dependencies
+    # Placeholder: this module's build-commands/sources should be replaced with
+    # the output of flatpak-pip-generator run against requirements.txt at build
+    # time, e.g.:
+    #   python3 flatpak-pip-generator --runtime org.kde.Sdk//6.10 \
+    #       --output python-dependencies --ignore-pkg PySide6 \
+    #       $(grep -iv '^PySide6' requirements.txt)
+    # PySide6 must stay excluded since it ships with the io.qt.PySide.BaseApp base.
+    buildsystem: simple
+    build-commands: []
+    sources: []
+
+  - name: rom-mate-neo
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 rom-mate.py /app/bin/rom-mate-neo-launcher.py
+      - cp -r rom_mate /app/lib/rom_mate
+      - install -Dm644 retroarch-core-list.json /app/share/rom-mate-neo/retroarch-core-list.json
+      - install -Dm644 emulator-autoprofiles.json /app/share/rom-mate-neo/emulator-autoprofiles.json
+      - cp -r assets /app/share/rom-mate-neo/assets
+      - install -Dm755 flatpak/rom-mate-neo.sh /app/bin/rom-mate-neo
+      - install -Dm644 flatpak/io.github.Sixdd6.RomMateNeo.desktop /app/share/applications/io.github.Sixdd6.RomMateNeo.desktop
+      # TODO: no suitable app icon exists under assets/svg yet (icons there are
+      # small in-app UI glyphs, not a standalone app icon). Supply a real
+      # io.github.Sixdd6.RomMateNeo.svg (or .png set) before a production build
+      # and install it here, e.g.:
+      # - install -Dm644 assets/svg/app-icon.svg /app/share/icons/hicolor/scalable/apps/io.github.Sixdd6.RomMateNeo.svg
+    sources:
+      - type: git
+        url: https://github.com/Sixdd6/rom-mate-neo
+        # TODO: update this tag to the release being packaged before each build.
+        tag: v1.0.0

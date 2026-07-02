@@ -30,6 +30,7 @@ from rom_mate.core import (
     normalize_emulators,
     normalize_installed_games,
 )
+from rom_mate.core.path import rom_mate_share_dir
 from rom_mate.background.workers import SourceVersionCheckWorker
 from rom_mate.emulator import (
     all_retroarch_cores,
@@ -233,7 +234,7 @@ class EmulatorUIMixin:
             timing_end("_ensure_emulator_sync_settings", started_at, result="done")
 
     def _emulator_autoprofiles_path(self) -> Path:
-        return emulator_autoprofiles_path(Path(__file__).resolve().parents[3])
+        return emulator_autoprofiles_path(rom_mate_share_dir(Path(__file__).resolve().parents[3]))
 
     def _default_emulator_autoprofiles(self) -> list[dict[str, Any]]:
         return default_emulator_autoprofiles()
@@ -256,7 +257,7 @@ class EmulatorUIMixin:
         return profiles
 
     def _retroarch_core_list_path(self) -> Path:
-        return retroarch_core_list_path(Path(__file__).resolve().parents[3])
+        return retroarch_core_list_path(rom_mate_share_dir(Path(__file__).resolve().parents[3]))
 
     def _retroarch_markdown_label(self, value: str) -> str:
         return retroarch_markdown_label(value)
