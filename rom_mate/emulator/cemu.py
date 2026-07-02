@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Callable
+
+from rom_mate.core.path import xdg_config_home
 
 
 _DEFAULT_CEMU_XINPUT_CONTROLLER_PROFILE = """\
@@ -206,10 +209,16 @@ def cemu_settings_path_candidates(emulator_path_text: str) -> list[Path]:
             candidates.append(emulator_dir / "portable" / "settings.xml")
             candidates.append(emulator_dir / "settings.xml")
 
-    for env_name in ("APPDATA", "LOCALAPPDATA"):
-        env_value = os.environ.get(env_name, "")
-        if isinstance(env_value, str) and env_value.strip():
-            candidates.append(Path(env_value).expanduser() / "Cemu" / "settings.xml")
+    if sys.platform == "win32":
+        for env_name in ("APPDATA", "LOCALAPPDATA"):
+            env_value = os.environ.get(env_name, "")
+            if isinstance(env_value, str) and env_value.strip():
+                candidates.append(Path(env_value).expanduser() / "Cemu" / "settings.xml")
+    else:
+        candidates.append(xdg_config_home() / "Cemu" / "settings.xml")
+        candidates.append(
+            Path.home() / ".var" / "app" / "info.cemu.Cemu" / "config" / "Cemu" / "settings.xml"
+        )
 
     return _unique_paths(candidates)
 

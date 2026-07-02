@@ -9,12 +9,13 @@ from pathlib import Path
 from unittest.mock import patch, ANY, MagicMock
 import json
 
+from rom_mate.core.path import xdg_config_home
 from rom_mate.emulator.azahar import (
     azahar_config_path_candidates,
     azahar_user_root_candidates,
     ensure_azahar_settings,
 )
-from rom_mate.emulator.cemu import ensure_cemu_controller_config, ensure_cemu_settings
+from rom_mate.emulator.cemu import cemu_settings_path_candidates, ensure_cemu_controller_config, ensure_cemu_settings
 from rom_mate.emulator import ensure_dolphin_settings, ensure_dolphin_skip_ipl, ensure_dolphin_gcpad_config
 from rom_mate.emulator.dolphin import dolphin_ini_path_candidates, dolphin_user_root_candidates
 from rom_mate.emulator.duckstation import ensure_duckstation_memory_card_settings
@@ -1518,6 +1519,39 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
             result = ensure_cemu_settings(str(emulator_path))
 
         self.assertEqual(cemu_dir / "portable" / "settings.xml", Path(str(result["config_path"])))
+
+    def test_cemu_settings_path_candidates_windows_uses_appdata(self) -> None:
+        with patch("sys.platform", "win32"):
+            with patch.dict(
+                os.environ,
+                {"APPDATA": "/fake/appdata", "LOCALAPPDATA": "/fake/localappdata"},
+                clear=False,
+            ):
+                candidates = cemu_settings_path_candidates("")
+
+        self.assertIn(Path("/fake/appdata").expanduser() / "Cemu" / "settings.xml", candidates)
+        self.assertIn(Path("/fake/localappdata").expanduser() / "Cemu" / "settings.xml", candidates)
+
+    def test_cemu_settings_path_candidates_linux_uses_xdg_and_flatpak(self) -> None:
+        with patch("sys.platform", "linux"):
+            with patch.dict(os.environ, {"APPDATA": "/some/windows/path"}, clear=False):
+                candidates = cemu_settings_path_candidates("")
+
+        self.assertIn(xdg_config_home() / "Cemu" / "settings.xml", candidates)
+        self.assertIn(
+            Path.home() / ".var" / "app" / "info.cemu.Cemu" / "config" / "Cemu" / "settings.xml",
+            candidates,
+        )
+        self.assertNotIn(Path("/some/windows/path").expanduser() / "Cemu" / "settings.xml", candidates)
+
+    def test_cemu_settings_path_candidates_honors_xdg_config_home_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xdg_config_home_override = Path(temp_dir) / "xdg-config"
+            with patch("sys.platform", "linux"):
+                with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(xdg_config_home_override)}, clear=False):
+                    candidates = cemu_settings_path_candidates("")
+
+        self.assertIn(xdg_config_home_override / "Cemu" / "settings.xml", candidates)
 
     def test_cemu_overwrites_check_update_true(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
