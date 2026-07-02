@@ -328,6 +328,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
         self.assertEqual(resolved["asset_name"], "xenia_canary_windows.zip")
         self.assertEqual(resolved["download_url"], "https://example.test/xenia_canary_windows.zip")
 
+    @patch('sys.platform', 'win32')
     def test_source_metadata_cemu_regex_asset_name_resolution(self) -> None:
         worker = InstallDownloadWorker("", {}, Path("cemu.zip"))
         source_metadata = {
@@ -362,6 +363,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
         self.assertEqual(resolved["asset_name"], "cemu-2.6-windows-x64.zip")
         self.assertEqual(resolved["download_url"], "https://example.test/cemu-2.6-windows-x64.zip")
 
+    @patch('sys.platform', 'win32')
     def test_source_metadata_xemu_resolves_x64_and_arm64_assets_by_windows_arch(self) -> None:
         worker = InstallDownloadWorker("", {}, Path("xemu.zip"))
         source_metadata = {
@@ -565,6 +567,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
             "https://example.test/shadps4-macos-sdl-0.16.0.zip",
         )
 
+    @patch('sys.platform', 'win32')
     def test_source_metadata_shadps4_qt_launcher_regex_asset_name_resolution(self) -> None:
         worker = InstallDownloadWorker("", {}, Path("shadps4-qtlauncher.zip"))
         source_metadata = {
@@ -885,6 +888,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
         self.assertEqual(resolved["asset_name"], "Vita3K-x86_64.AppImage")
         self.assertEqual(resolved["download_url"], "https://example.test/Vita3K-x86_64.AppImage")
 
+    @patch('sys.platform', 'win32')
     def test_source_metadata_azahar_regex_asset_name_resolution(self) -> None:
         worker = InstallDownloadWorker("", {}, Path("azahar.zip"))
         source_metadata = {
@@ -922,6 +926,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
             "https://example.test/azahar-windows-msvc-1.2.3.zip",
         )
 
+    @patch('sys.platform', 'win32')
     def test_source_metadata_pcsx2_qt_7z_regex_asset_name_resolution(self) -> None:
         worker = InstallDownloadWorker("", {}, Path("pcsx2.7z"))
         source_metadata = {
@@ -1435,6 +1440,7 @@ class _FinalizeWindowNativePrefixStub:
 
 
 class InstallFinalizeWorkerNativePrefixTests(unittest.TestCase):
+    @unittest.skipIf(sys.platform == 'win32', "Wine prefix paths are Linux-only")
     def test_prefix_placed_in_native_game_dir_on_linux(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             native_game_dir = Path(temp_dir) / "Windows Game"

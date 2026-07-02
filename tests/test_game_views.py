@@ -1223,7 +1223,7 @@ class EmulatorsPageLayoutTests(unittest.TestCase):
         module = self._load_main_module()
         window = _SourceDownloadDialogStubWindow()
 
-        with patch.object(module.QInputDialog, "getItem", return_value=("DuckStation - stenzek/duckstation (latest)", True)):
+        with patch.object(module.QInputDialog, "getItem", return_value=("[GitHub] DuckStation - stenzek/duckstation (latest)", True)):
             module.MainWindow._open_source_emulator_download_dialog(window)
 
         self.assertEqual(
@@ -1918,7 +1918,7 @@ class TestBuildAchievementsPanel(unittest.TestCase):
         }
 
         build_achievements_panel([ach], load_image_fn=fake_loader)
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls), 3)
         self.assertIn("54321_lock", calls[0][0])
 
 

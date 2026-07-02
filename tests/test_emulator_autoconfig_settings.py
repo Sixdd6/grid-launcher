@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
@@ -604,6 +605,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
 
         self.assertEqual("custom", portable_content)
 
+    @unittest.skipIf(sys.platform == 'win32', "Flatpak paths are Linux-only")
     def test_dolphin_user_root_candidates_includes_flatpak_path(self) -> None:
         candidates = dolphin_user_root_candidates("", "", lambda s: [])
         self.assertIn(Path.home() / ".var" / "app" / "org.DolphinEmu.dolphin-emu" / "data" / "dolphin-emu", candidates)
@@ -912,6 +914,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
 
         self.assertEqual("x", marker_content)
 
+    @unittest.skipIf(sys.platform == 'win32', "Flatpak paths are Linux-only")
     def test_azahar_user_root_candidates_includes_flatpak_path(self) -> None:
         candidates = azahar_user_root_candidates("")
         self.assertIn(Path.home() / ".var" / "app" / "org.azahar_emu.Azahar" / "data" / "Azahar", candidates)
@@ -1291,6 +1294,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
 
         self.assertIn("eeprom_path = '/custom/path/eeprom.bin'", text)
 
+    @unittest.skipIf(sys.platform == 'win32', "Flatpak paths are Linux-only")
     def test_xemu_base_path_candidates_includes_flatpak_path(self) -> None:
         candidates = xemu_base_path_candidates("", "", lambda s: [])
         self.assertIn(Path.home() / ".var" / "app" / "app.xemu.xemu" / "data" / "xemu" / "xemu", candidates)
@@ -2648,7 +2652,7 @@ class Rpcs3VfsSettingsTests(unittest.TestCase):
             result = ps3_vfs_dev_hdd0_path(str(exe), "")
 
         self.assertIsNotNone(result)
-        self.assertEqual(result, custom_path)
+        self.assertEqual(result.resolve(), custom_path.resolve())
 
     def test_ps3_vfs_dev_hdd0_path_falls_back_to_library_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2682,7 +2686,7 @@ class Rpcs3VfsSettingsTests(unittest.TestCase):
             result = ps3_vfs_games_path(str(exe), "")
 
         self.assertIsNotNone(result)
-        self.assertEqual(result, custom_path)
+        self.assertEqual(result.resolve(), custom_path.resolve())
 
     def test_ps3_vfs_games_path_falls_back_to_library_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -2810,7 +2814,7 @@ class RPCS3GamesYmlTests(unittest.TestCase):
             games_yml = data_root / "config" / "games.yml"
             self.assertTrue(result)
             content = games_yml.read_text(encoding="utf-8")
-            self.assertIn((games_dir / "BLUS30336").as_posix(), content)
+            self.assertIn((games_dir.resolve() / "BLUS30336").as_posix(), content)
 
     def test_writes_new_games_yml_disc_layout(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

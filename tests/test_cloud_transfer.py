@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -729,6 +730,7 @@ class TestSessionScreenshotPath(unittest.TestCase):
         self.assertEqual(result, img)
 
 
+@unittest.skipIf(sys.platform == 'win32', "Wine prefix paths are Linux-only")
 class WinePrefixPathTranslationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.prefix = Path("/home/testuser/.wine")

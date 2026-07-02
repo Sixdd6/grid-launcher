@@ -200,7 +200,7 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
                             lambda value: [value],
                         )
 
-        self.assertEqual(settings["memory_cards"], str(fake_home / "Documents" / "PCSX2" / "custom-memcards"))
+        self.assertEqual(settings["memory_cards"], str(fake_home.resolve() / "Documents" / "PCSX2" / "custom-memcards"))
         self.assertEqual(settings["savestates"], str(fake_home / "Documents" / "PCSX2" / "custom-sstates"))
 
     def test_pcsx2_save_path_overrides_use_portable_config_values(self) -> None:
@@ -230,12 +230,12 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
         self.assertEqual(
             save_overrides,
             [
-                str(emulator_dir / "memcards-custom" / "custom-slot-1.ps2"),
-                str(emulator_dir / "memcards-custom" / "custom-slot-2.ps2"),
-                str(emulator_dir / "memcards-custom"),
+                str(emulator_dir.resolve() / "memcards-custom" / "custom-slot-1.ps2"),
+                str(emulator_dir.resolve() / "memcards-custom" / "custom-slot-2.ps2"),
+                str(emulator_dir.resolve() / "memcards-custom"),
             ],
         )
-        self.assertEqual(state_overrides, [str(emulator_dir / "states-custom")])
+        self.assertEqual(state_overrides, [str(emulator_dir.resolve() / "states-custom")])
 
     def test_pcsx2_windows_documents_folder_is_public_wrapper(self) -> None:
         sentinel = Path("/fake/documents")

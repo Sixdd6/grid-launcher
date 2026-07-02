@@ -187,6 +187,7 @@ class PS4ContentApplyTests(unittest.TestCase):
         bundled_path.__str__.return_value = "C:/bundled/7z.exe"
 
         with patch("grid_launcher.library.archive_preparation._BUNDLED_7Z_PATH", bundled_path), \
+             patch("grid_launcher.library.archive_preparation.shutil.which", side_effect=lambda cmd: cmd), \
              patch("subprocess.run", side_effect=fake_run), \
              patch("grid_launcher.library.archive_preparation._ensure_full_7z", return_value=None):
             _extract_7z_with_fallbacks(archive, out_dir)
