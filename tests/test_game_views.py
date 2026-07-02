@@ -1422,8 +1422,15 @@ class GameDetailsPageLayoutTests(unittest.TestCase):
 
 
 class _OpenDetailsStackStub:
+    # Mirrors the real MainWindow.stack, which has 7 pages (library, server,
+    # discover, downloads, emulators, settings, game_details) since the
+    # Discover tab was added, so `count() - 1` resolves to the details page.
     def __init__(self) -> None:
         self.index: int | None = None
+        self.widget_count = 7
+
+    def count(self) -> int:
+        return self.widget_count
 
     def setCurrentIndex(self, value: int) -> None:
         self.index = value
