@@ -29,6 +29,10 @@ from .launch import (
     strip_wrapping_quotes,
     validate_launch_placeholders,
 )
+from .detection import (
+    detect_installed_flatpak_emulators,
+    installed_flatpak_app_ids,
+)
 from .profiles import (
     default_emulator_autoprofiles,
     emulator_autoprofiles_path,
@@ -186,6 +190,8 @@ __all__ = [
     "available_emulator_name_for_platform",
     "cloud_save_block_reason_for_game",
     "cloud_save_scope_for_game",
+    "detect_installed_flatpak_emulators",
+    "installed_flatpak_app_ids",
     "azahar_directory_settings",
     "azahar_save_path_overrides",
     "azahar_state_path_overrides",
