@@ -112,7 +112,7 @@ If the packaged Linux binary fails at runtime with missing shared library errors
 python -m pip install pyinstaller
 
 # Run build
-python -m PyInstaller --noconfirm --clean --windowed --onefile --name grid-launcher --add-data "assets;assets" --add-data "retroarch-core-list.json;." --add-data "emulator-autoprofiles.json;." grid-launcher.py
+python -m PyInstaller --noconfirm --clean --windowed --onefile --name grid-launcher --add-data "assets;assets" --add-data "retroarch-core-list.json;." --add-data "emulator-autoprofiles.json;." --add-data "romm-platform-cores.json;." grid-launcher.py
 ```
 
 ### Linux
@@ -124,5 +124,5 @@ source .venv/bin/activate
 python -m pip install pyinstaller
 
 # Run build
-python -m PyInstaller --noconfirm --clean --windowed --onefile --name grid-launcher --add-data "assets:assets" --add-data "retroarch-core-list.json:." --add-data "emulator-autoprofiles.json:." grid-launcher.py
+python -m PyInstaller --noconfirm --clean --windowed --onefile --name grid-launcher --add-data "assets:assets" --add-data "retroarch-core-list.json:." --add-data "emulator-autoprofiles.json:." --add-data "romm-platform-cores.json:." grid-launcher.py
 ```

@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Shadow for the Trophy -->
+    <filter id="trophy-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="4" stdDeviation="12" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+
+    <!-- Trophy Gold Gradient -->
+    <linearGradient id="gold_grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFEAA7"/>
+      <stop offset="30%" stop-color="#FDCB6E"/>
+      <stop offset="100%" stop-color="#E2A100"/>
+    </linearGradient>
+
+    <!-- Gradients for the 3x3 Grid of Game Boxes -->
+    <!-- Row 0, Col 0: Coral Red -->
+    <linearGradient id="g_coral" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFA28D"/>
+      <stop offset="12%" stop-color="#FF5733"/>
+      <stop offset="100%" stop-color="#D12E0C"/>
+    </linearGradient>
+
+    <!-- Row 0, Col 1: Lime Green -->
+    <linearGradient id="g_green" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#A5FF93"/>
+      <stop offset="12%" stop-color="#39FF14"/>
+      <stop offset="100%" stop-color="#1FBE00"/>
+    </linearGradient>
+
+    <!-- Row 0, Col 2: Electric Blue -->
+    <linearGradient id="g_blue" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#9AB1FF"/>
+      <stop offset="12%" stop-color="#1F51FF"/>
+      <stop offset="100%" stop-color="#002CC7"/>
+    </linearGradient>
+
+    <!-- Row 1, Col 0: Amber -->
+    <linearGradient id="g_amber" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFE48A"/>
+      <stop offset="12%" stop-color="#FFBF00"/>
+      <stop offset="100%" stop-color="#C48F00"/>
+    </linearGradient>
+
+    <!-- Row 1, Col 1: Violet -->
+    <linearGradient id="g_violet" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#C78DFF"/>
+      <stop offset="12%" stop-color="#7F00FF"/>
+      <stop offset="100%" stop-color="#4D009A"/>
+    </linearGradient>
+
+    <!-- Row 1, Col 2: Orange -->
+    <linearGradient id="g_orange" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFC68C"/>
+      <stop offset="12%" stop-color="#FF8C00"/>
+      <stop offset="100%" stop-color="#C45900"/>
+    </linearGradient>
+
+    <!-- Row 2, Col 0: Cyan -->
+    <linearGradient id="g_cyan" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#8FF8FF"/>
+      <stop offset="12%" stop-color="#00F5FF"/>
+      <stop offset="100%" stop-color="#00A3AA"/>
+    </linearGradient>
+
+    <!-- Row 2, Col 1: Magenta -->
+    <linearGradient id="g_magenta" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FF8CFF"/>
+      <stop offset="12%" stop-color="#FF00FF"/>
+      <stop offset="100%" stop-color="#B500B5"/>
+    </linearGradient>
+
+    <!-- Row 2, Col 2: Neon Teal -->
+    <linearGradient id="g_teal" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#91FFE9"/>
+      <stop offset="12%" stop-color="#00F5D4"/>
+      <stop offset="100%" stop-color="#00A18B"/>
+    </linearGradient>
+  </defs>
+
+  <!-- BACKGROUND: Fully transparent (no background rect) -->
+
+  <!-- MIDDLE LAYER: 3x3 grid of game boxes -->
+  <g id="game-boxes">
+    <!-- Row 0 -->
+    <!-- Row 0, Col 0: Coral Red -->
+    <rect x="86" y="86" width="96" height="100" rx="8" ry="8"
+          fill="url(#g_coral)" stroke="#961D04" stroke-width="1"/>
+    <!-- Row 0, Col 1: Lime Green -->
+    <rect x="188" y="86" width="132" height="100" rx="8" ry="8"
+          fill="url(#g_green)" stroke="#106700" stroke-width="1"/>
+    <!-- Row 0, Col 2: Electric Blue -->
+    <rect x="326" y="86" width="100" height="100" rx="8" ry="8"
+          fill="url(#g_blue)" stroke="#001C80" stroke-width="1"/>
+
+    <!-- Row 1 -->
+    <!-- Row 1, Col 0: Amber -->
+    <rect x="86" y="192" width="96" height="132" rx="8" ry="8"
+          fill="url(#g_amber)" stroke="#805D00" stroke-width="1"/>
+    <!-- Row 1, Col 1: Violet -->
+    <rect x="188" y="192" width="132" height="132" rx="8" ry="8"
+          fill="url(#g_violet)" stroke="#310063" stroke-width="1"/>
+    <!-- Row 1, Col 2: Orange -->
+    <rect x="326" y="192" width="100" height="132" rx="8" ry="8"
+          fill="url(#g_orange)" stroke="#803A00" stroke-width="1"/>
+
+    <!-- Row 2 -->
+    <!-- Row 2, Col 0: Cyan -->
+    <rect x="86" y="330" width="96" height="96" rx="8" ry="8"
+          fill="url(#g_cyan)" stroke="#006F74" stroke-width="1"/>
+    <!-- Row 2, Col 1: Magenta -->
+    <rect x="188" y="330" width="132" height="96" rx="8" ry="8"
+          fill="url(#g_magenta)" stroke="#750075" stroke-width="1"/>
+    <!-- Row 2, Col 2: Neon Teal -->
+    <rect x="326" y="330" width="100" height="96" rx="8" ry="8"
+          fill="url(#g_teal)" stroke="#006B5D" stroke-width="1"/>
+  </g>
+
+  <!-- TOP LAYER: Trophy Graphic (centered and slightly above center) -->
+  <g transform="translate(141, 114) scale(2.3)" filter="url(#trophy-shadow)">
+    <!-- Left handle -->
+    <path d="M32 22 Q14 22 14 38 Q14 52 32 52"
+          fill="none" stroke="#C9A800" stroke-width="3" stroke-linecap="round"/>
+    <!-- Right handle -->
+    <path d="M68 22 Q86 22 86 38 Q86 52 68 52"
+          fill="none" stroke="#C9A800" stroke-width="3" stroke-linecap="round"/>
+    <!-- Stem -->
+    <line x1="50" y1="70" x2="50" y2="88"
+          stroke="#C9A800" stroke-width="3.5" stroke-linecap="round"/>
+    <!-- Base platform -->
+    <rect x="30" y="88" width="40" height="7" rx="3"
+          fill="url(#gold_grad)" stroke="#C9A800" stroke-width="3.5" stroke-linejoin="round"/>
+    <!-- Bottom foot -->
+    <rect x="24" y="95" width="52" height="7" rx="3"
+          fill="url(#gold_grad)" stroke="#C9A800" stroke-width="3.5" stroke-linejoin="round"/>
+    <!-- Cup body -->
+    <path d="M30 8 H70 Q72 8 72 10 L68 58 Q67 65 50 70 Q33 65 32 58 Z"
+          fill="url(#gold_grad)" stroke="#C9A800" stroke-width="3.5" stroke-linejoin="round"/>
+  </g>
+</svg>

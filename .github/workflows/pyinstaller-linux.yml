@@ -30,7 +30,7 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --noconfirm --clean --windowed --onefile --name grid-launcher --add-data "assets:assets" --add-data "retroarch-core-list.json:." --add-data "emulator-autoprofiles.json:." --hidden-import brotli --hidden-import pyzstd --hidden-import pyppmd --hidden-import keyring.backends.SecretService --hidden-import keyring.backends.kwallet grid-launcher.py
+          pyinstaller --noconfirm --clean --windowed --onefile --name grid-launcher --add-data "assets:assets" --add-data "retroarch-core-list.json:." --add-data "emulator-autoprofiles.json:." --add-data "romm-platform-cores.json:." --hidden-import brotli --hidden-import pyzstd --hidden-import pyppmd --hidden-import keyring.backends.SecretService --hidden-import keyring.backends.kwallet grid-launcher.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

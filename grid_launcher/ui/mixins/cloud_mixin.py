@@ -2141,7 +2141,11 @@ class CloudSaveMixin:
         manual = self._pcgw_paths_cache.get(manual_key, [])
         all_raw = list(cached) + [p for p in manual if p not in cached]
         _win_docs = pcsx2_windows_documents_folder()
-        fallback_dirs = [resolve_native_save_dir(r, _win_docs) for r in all_raw]
+        _wine_prefix_str = game.get("native_wineprefix", "") or ""
+        _wine_prefix = Path(_wine_prefix_str.strip()) if _wine_prefix_str.strip() else None
+        fallback_dirs = [
+            resolve_native_save_dir(r, _win_docs, wine_prefix=_wine_prefix) for r in all_raw
+        ]
 
         rom_id = self._cloud_sync_rom_id_for_game(game)
         if not rom_id:
@@ -2207,7 +2211,7 @@ class CloudSaveMixin:
                                 # Resolve target directory
                                 if dir_idx in manifest:
                                     raw_path = manifest[dir_idx]
-                                    target_root = resolve_native_save_dir(raw_path, _win_docs)
+                                    target_root = resolve_native_save_dir(raw_path, _win_docs, wine_prefix=_wine_prefix)
                                 elif fallback_dirs:
                                     target_root = fallback_dirs[0]
                                 else:
@@ -2231,7 +2235,7 @@ class CloudSaveMixin:
                 elif emulator_field.startswith("native_dir:"):
                     # Previous per-directory format (legacy)
                     raw_path = emulator_field[len("native_dir:"):]
-                    restore_dir = resolve_native_save_dir(raw_path, _win_docs)
+                    restore_dir = resolve_native_save_dir(raw_path, _win_docs, wine_prefix=_wine_prefix)
                     restore_dir.mkdir(parents=True, exist_ok=True)
                     self._extract_zip_archive_bytes_to_directory(payload, restore_dir)
 
@@ -2704,14 +2708,16 @@ class CloudSaveMixin:
         # Build dir_map: only include directories that currently exist.
         # Use the Shell-resolved Documents path to handle network drive redirection.
         _win_docs = pcsx2_windows_documents_folder()
+        _wine_prefix_str = game.get("native_wineprefix", "") or ""
+        _wine_prefix = Path(_wine_prefix_str.strip()) if _wine_prefix_str.strip() else None
         dir_map: list[tuple[str, Path]] = []
         for raw in all_raw:
-            expanded = resolve_native_save_dir(raw, _win_docs)
+            expanded = resolve_native_save_dir(raw, _win_docs, wine_prefix=_wine_prefix)
             if expanded.exists():
                 dir_map.append((raw, expanded))
 
         if not dir_map:
-            path_list = "\n".join(f"  • {resolve_native_save_dir(r, _win_docs)}" for r in all_raw)
+            path_list = "\n".join(f"  • {resolve_native_save_dir(r, _win_docs, wine_prefix=_wine_prefix)}" for r in all_raw)
             show_warning(
                 f"None of the configured save locations exist on this device yet.\n\n"
                 f"Checked:\n{path_list}"

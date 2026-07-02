@@ -21,6 +21,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set release tag in Flatpak manifest
+        run: sed -i "s/@GRID_LAUNCHER_TAG@/${{ github.ref_name }}/g" flatpak/io.github.Sixdd6.GRIDLauncher.yml
+
       - name: Build Flatpak
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:

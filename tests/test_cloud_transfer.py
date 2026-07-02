@@ -8,6 +8,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+from grid_launcher.emulator.wine import translate_windows_path_to_wine_prefix
 from grid_launcher.library.cloud_sync import cemu_save_directories_for_game, cloud_sync_candidates_for_game
 from grid_launcher.library.cloud_transfer import (
     appended_image_sidecar_path,
@@ -39,6 +40,7 @@ class CloudTransferTests(unittest.TestCase):
 
         self.assertEqual(result, Path("C:\\Users\\TestUser\\Documents\\Game\\saves"))
 
+    @patch("grid_launcher.library.cloud_transfer.sys.platform", "win32")
     def test_resolve_native_save_dir_no_redirection_returns_standard_expansion(self) -> None:
         raw_path = "%USERPROFILE%\\Documents\\Game\\saves"
         windows_documents = Path("C:\\Users\\TestUser\\Documents")
@@ -55,6 +57,7 @@ class CloudTransferTests(unittest.TestCase):
 
         self.assertEqual(result, Path("C:\\Users\\TestUser\\Documents\\Game\\saves"))
 
+    @patch("grid_launcher.library.cloud_transfer.sys.platform", "win32")
     def test_resolve_native_save_dir_redirected_documents_uses_shell_path(self) -> None:
         raw_path = "%USERPROFILE%\\Documents\\Square Enix\\Batman GOTY\\SaveData"
         windows_documents = Path("Y:\\Users\\TestUser\\Documents")
@@ -74,6 +77,7 @@ class CloudTransferTests(unittest.TestCase):
             Path("Y:\\Users\\TestUser\\Documents\\Square Enix\\Batman GOTY\\SaveData"),
         )
 
+    @patch("grid_launcher.library.cloud_transfer.sys.platform", "win32")
     def test_resolve_native_save_dir_non_documents_path_unaffected_by_redirection(self) -> None:
         raw_path = "%APPDATA%\\Game\\saves"
         windows_documents = Path("Y:\\Users\\TestUser\\Documents")
@@ -723,6 +727,160 @@ class TestSessionScreenshotPath(unittest.TestCase):
             os.utime(img, (5000.0, 5000.0))
             result = session_screenshot_path([Path(temp_dir)], (1000.0, 9000.0))
         self.assertEqual(result, img)
+
+
+class WinePrefixPathTranslationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.prefix = Path("/home/testuser/.wine")
+        self.user_home = self.prefix / "drive_c" / "users" / "testuser"
+        patcher = patch("getpass.getuser", return_value="testuser")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_resolve_native_save_dir_appdata_roaming(self) -> None:
+        result = resolve_native_save_dir(
+            "%APPDATA%\\Game\\saves",
+            None,
+            wine_prefix=self.prefix,
+        )
+        self.assertEqual(
+            result,
+            self.user_home / "AppData" / "Roaming" / "Game" / "saves",
+        )
+
+    def test_resolve_native_save_dir_localappdata(self) -> None:
+        result = resolve_native_save_dir(
+            "%LOCALAPPDATA%\\Game",
+            None,
+            wine_prefix=self.prefix,
+        )
+        self.assertEqual(
+            result,
+            self.user_home / "AppData" / "Local" / "Game",
+        )
+
+    def test_resolve_native_save_dir_userprofile_documents(self) -> None:
+        result = resolve_native_save_dir(
+            "%USERPROFILE%\\Documents\\Game",
+            None,
+            wine_prefix=self.prefix,
+        )
+        self.assertEqual(
+            result,
+            self.user_home / "Documents" / "Game",
+        )
+
+    def test_resolve_native_save_dir_userprofile_locallow(self) -> None:
+        result = resolve_native_save_dir(
+            "%USERPROFILE%\\AppData\\LocalLow\\Game",
+            None,
+            wine_prefix=self.prefix,
+        )
+        self.assertEqual(
+            result,
+            self.user_home / "AppData" / "LocalLow" / "Game",
+        )
+
+    def test_resolve_native_save_dir_programdata(self) -> None:
+        result = resolve_native_save_dir(
+            "%PROGRAMDATA%\\Game",
+            None,
+            wine_prefix=self.prefix,
+        )
+        self.assertEqual(
+            result,
+            self.prefix / "drive_c" / "ProgramData" / "Game",
+        )
+
+    def test_resolve_native_save_dir_no_wine_prefix_uses_expandvars(self) -> None:
+        raw_path = "%APPDATA%\\Game\\saves"
+        expansions = {
+            "%APPDATA%\\Game\\saves": "/expanded/AppData/Roaming/Game/saves",
+        }
+        with patch(
+            "grid_launcher.library.cloud_transfer.os.path.expandvars",
+            side_effect=lambda value: expansions.get(value, value),
+        ):
+            result = resolve_native_save_dir(raw_path, None, wine_prefix=None)
+
+        self.assertEqual(result, Path("/expanded/AppData/Roaming/Game/saves"))
+
+    def test_resolve_native_save_dir_unrecognized_var_falls_back_to_expandvars(self) -> None:
+        raw_path = "%GAME_DIR%\\saves"
+        expansions = {
+            "%GAME_DIR%\\saves": "/expanded/game/saves",
+        }
+        with patch(
+            "grid_launcher.library.cloud_transfer.os.path.expandvars",
+            side_effect=lambda value: expansions.get(value, value),
+        ):
+            result = resolve_native_save_dir(raw_path, None, wine_prefix=self.prefix)
+
+        self.assertEqual(result, Path("/expanded/game/saves"))
+
+
+class TranslateWindowsPathToWinePrefixTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.prefix = Path("/home/testuser/.wine")
+        self.user_home = self.prefix / "drive_c" / "users" / "testuser"
+        patcher = patch("getpass.getuser", return_value="testuser")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_appdata(self) -> None:
+        result = translate_windows_path_to_wine_prefix("%APPDATA%\\Game", self.prefix)
+        self.assertEqual(result, self.user_home / "AppData" / "Roaming" / "Game")
+
+    def test_localappdata(self) -> None:
+        result = translate_windows_path_to_wine_prefix("%LOCALAPPDATA%\\Game", self.prefix)
+        self.assertEqual(result, self.user_home / "AppData" / "Local" / "Game")
+
+    def test_userprofile_documents_multi_level(self) -> None:
+        result = translate_windows_path_to_wine_prefix(
+            "%USERPROFILE%\\Documents\\Square Enix\\Game",
+            self.prefix,
+        )
+        self.assertEqual(
+            result,
+            self.user_home / "Documents" / "Square Enix" / "Game",
+        )
+
+    def test_userprofile_locallow(self) -> None:
+        result = translate_windows_path_to_wine_prefix(
+            "%USERPROFILE%\\AppData\\LocalLow\\Game",
+            self.prefix,
+        )
+        self.assertEqual(
+            result,
+            self.user_home / "AppData" / "LocalLow" / "Game",
+        )
+
+    def test_userprofile_bare(self) -> None:
+        result = translate_windows_path_to_wine_prefix("%USERPROFILE%", self.prefix)
+        self.assertEqual(result, self.user_home)
+
+    def test_programdata(self) -> None:
+        result = translate_windows_path_to_wine_prefix("%PROGRAMDATA%\\Game", self.prefix)
+        self.assertEqual(result, self.prefix / "drive_c" / "ProgramData" / "Game")
+
+    def test_windir(self) -> None:
+        result = translate_windows_path_to_wine_prefix("%WINDIR%\\Fonts", self.prefix)
+        self.assertEqual(result, self.prefix / "drive_c" / "windows" / "Fonts")
+
+    def test_public(self) -> None:
+        result = translate_windows_path_to_wine_prefix("%PUBLIC%\\Documents", self.prefix)
+        self.assertEqual(
+            result,
+            self.prefix / "drive_c" / "users" / "Public" / "Documents",
+        )
+
+    def test_unrecognized_var_returns_none(self) -> None:
+        result = translate_windows_path_to_wine_prefix("%GAME_DIR%\\saves", self.prefix)
+        self.assertIsNone(result)
+
+    def test_case_insensitive_match(self) -> None:
+        result = translate_windows_path_to_wine_prefix("%appdata%\\Game", self.prefix)
+        self.assertEqual(result, self.user_home / "AppData" / "Roaming" / "Game")
 
 
 if __name__ == "__main__":

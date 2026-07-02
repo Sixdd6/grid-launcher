@@ -23,17 +23,7 @@ finish-args:
   - --talk-name=org.freedesktop.secrets
 
 modules:
-  - name: python-dependencies
-    # Placeholder: this module's build-commands/sources should be replaced with
-    # the output of flatpak-pip-generator run against requirements.txt at build
-    # time, e.g.:
-    #   python3 flatpak-pip-generator --runtime org.kde.Sdk//6.10 \
-    #       --output python-dependencies --ignore-pkg PySide6 \
-    #       $(grep -iv '^PySide6' requirements.txt)
-    # PySide6 must stay excluded since it ships with the io.qt.PySide.BaseApp base.
-    buildsystem: simple
-    build-commands: []
-    sources: []
+  - flatpak/python-dependencies.json
 
   - name: grid-launcher
     buildsystem: simple
@@ -41,17 +31,14 @@ modules:
       - install -Dm755 grid-launcher.py /app/bin/grid-launcher-launcher.py
       - cp -r grid_launcher /app/lib/grid_launcher
       - install -Dm644 retroarch-core-list.json /app/share/grid-launcher/retroarch-core-list.json
+      - install -Dm644 romm-platform-cores.json /app/share/grid-launcher/romm-platform-cores.json
       - install -Dm644 emulator-autoprofiles.json /app/share/grid-launcher/emulator-autoprofiles.json
       - cp -r assets /app/share/grid-launcher/assets
       - install -Dm755 flatpak/grid-launcher.sh /app/bin/grid-launcher
       - install -Dm644 flatpak/io.github.Sixdd6.GRIDLauncher.desktop /app/share/applications/io.github.Sixdd6.GRIDLauncher.desktop
-      # TODO: no suitable app icon exists under assets/svg yet (icons there are
-      # small in-app UI glyphs, not a standalone app icon). Supply a real
-      # io.github.Sixdd6.GRIDLauncher.svg (or .png set) before a production build
-      # and install it here, e.g.:
-      # - install -Dm644 assets/svg/app-icon.svg /app/share/icons/hicolor/scalable/apps/io.github.Sixdd6.GRIDLauncher.svg
+      - install -Dm644 assets/svg/io.github.Sixdd6.GRIDLauncher.svg /app/share/icons/hicolor/scalable/apps/io.github.Sixdd6.GRIDLauncher.svg
     sources:
       - type: git
-        url: https://github.com/Sixdd6/rom-mate-neo
+        url: https://github.com/Sixdd6/grid-launcher
         # TODO: update this tag to the release being packaged before each build.
-        tag: v1.0.0
+        tag: "@GRID_LAUNCHER_TAG@"

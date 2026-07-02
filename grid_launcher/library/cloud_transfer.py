@@ -478,7 +478,12 @@ def zip_native_save_dirs_for_upload(
     return archive_path, total_files, manifest
 
 
-def resolve_native_save_dir(raw_path: str, windows_documents: "Path | None") -> "Path":
+def resolve_native_save_dir(
+    raw_path: str,
+    windows_documents: "Path | None",
+    *,
+    wine_prefix: "Path | None" = None,
+) -> "Path":
     """Expand a raw env-var save path, correcting for Windows Documents folder redirection.
 
     On Windows the Documents folder may be redirected to a network share or
@@ -489,11 +494,21 @@ def resolve_native_save_dir(raw_path: str, windows_documents: "Path | None") -> 
 
     Pass ``pcsx2_windows_documents_folder()`` as *windows_documents*.
     Pass ``None`` on non-Windows (no adjustment is made).
+
+    On non-Windows platforms, when *wine_prefix* is provided the raw env-var
+    path is translated into the equivalent location inside the Wine prefix.
     """
     import os
 
+    if wine_prefix is not None and sys.platform != "win32":
+        from grid_launcher.emulator.wine import translate_windows_path_to_wine_prefix
+
+        translated = translate_windows_path_to_wine_prefix(raw_path, wine_prefix)
+        if translated is not None:
+            return translated
+
     expanded = Path(os.path.expandvars(raw_path))
-    if windows_documents is None:
+    if windows_documents is None or sys.platform != "win32":
         return expanded
 
     from pathlib import PureWindowsPath
