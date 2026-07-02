@@ -201,12 +201,12 @@ Each section is a **scrollable grid** of game cards, using the existing `AspectR
 ### Module Organization
 
 #### New Files to Create
-1. **`rom_mate/ui/discover.py`** — Discover page widget and section builders
+1. **`grid_launcher/ui/discover.py`** — Discover page widget and section builders
    - `DiscoverPageWidget` — main page container
    - `DiscoverCarouselSection` — reusable carousel + header
    - Section-specific builders (trending, new, by-genre, etc.)
 
-2. **`rom_mate/server/discover.py`** — Server-side caching and data fetching
+2. **`grid_launcher/server/discover.py`** — Server-side caching and data fetching
    - `DiscoverCache` — in-memory + optional file-backed cache
    - `fetch_discover_sections()` — parallel API calls for all sections
    - `filter_already_installed()` — exclude user's installed games
@@ -216,16 +216,16 @@ Each section is a **scrollable grid** of game cards, using the existing `AspectR
 4. **`tests/test_discover_ui.py`** — UI layout and scroll behavior tests
 
 #### Modified Files
-1. **`rom-mate.py`** (MainWindow)
+1. **`grid-launcher.py`** (MainWindow)
    - Add Discover tab to `self.stack` in `__init__`
    - Add "Discover" button to nav bar (between Server and Downloads)
    - Update `_switch_page()` to handle Discover index (index=2)
    - Update `self.nav_buttons` list
 
-2. **`rom_mate/ui/__init__.py`**
+2. **`grid_launcher/ui/__init__.py`**
    - Export `DiscoverPageWidget`
 
-3. **`rom_mate/server/orchestrator.py`** (optional)
+3. **`grid_launcher/server/orchestrator.py`** (optional)
    - Add discover data to server sync flow (if live refresh desired)
 
 ### Class Hierarchy
@@ -304,7 +304,7 @@ User Opens Discover Tab
 
 - **Main Thread**: UI rendering, user interaction
 - **Background Worker Thread**: API calls (parallel fetch of 5-10 endpoints)
-  - Use existing `rom_mate.background.workers` pattern (similar to `DetailsCloudRecordsWorker`)
+  - Use existing `grid_launcher.background.workers` pattern (similar to `DetailsCloudRecordsWorker`)
   - Emit signals: `discover_sections_loaded(sections)`, `discover_error(error_msg)`
   - Timeout: 10 seconds (fallback to cached data if slow)
 
@@ -376,7 +376,7 @@ User Opens Discover Tab
 - Color contrast on badges (rating, NEW)
 
 ### Theming
-- Reuse existing theme colors from `rom_mate/ui/theme.py`
+- Reuse existing theme colors from `grid_launcher/ui/theme.py`
 - Apply same `#panel` styling to section containers
 - Consistent card styling (180px × 250px)
 
@@ -475,18 +475,18 @@ Track via lightweight event logging:
 - Card size: 180px × 250px (consistent with Server tab)
 
 ### Scrollable Carousels
-- Reference `rom_mate/server/view.py` for `_ServerGamePlaceholder` lazy loading pattern
+- Reference `grid_launcher/server/view.py` for `_ServerGamePlaceholder` lazy loading pattern
 - Use `QScrollArea` + `QGridLayout` (single row)
 - Implement scroll-on-hover arrows (optional) or rely on mouse wheel
 
 ### Async Data Loading
-- Use `QThread` + worker pattern from `rom_mate/background/workers.py`
+- Use `QThread` + worker pattern from `grid_launcher/background/workers.py`
 - Emit signals: `finished`, `error`
 - Connect to main thread slots for UI update
 
 ### Caching
 - No existing global cache pattern; implement simple dict-based TTL cache
-- Optional: serialize to `~/.config/rom-mate/discover_cache.json` for persistence
+- Optional: serialize to `~/.config/grid-launcher/discover_cache.json` for persistence
 
 ### Theming
 - Reference `self._theme_color('text', '#f8f8f2')` for dynamic color access

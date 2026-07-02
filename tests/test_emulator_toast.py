@@ -9,7 +9,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QComboBox, QLineEdit, QListWidget
-from rom_mate.ui.mixins.emulator_ui_mixin import EmulatorUIMixin
+from grid_launcher.ui.mixins.emulator_ui_mixin import EmulatorUIMixin
 
 
 class _SaveEmulatorToastStubWindow(EmulatorUIMixin):
@@ -180,8 +180,8 @@ class EmulatorAddToastTests(unittest.TestCase):
 
     @staticmethod
     def _load_main_module():
-        module_path = Path(__file__).resolve().parents[1] / "rom-mate.py"
-        spec = importlib.util.spec_from_file_location("rom_mate_main_for_emulator_toast_tests", module_path)
+        module_path = Path(__file__).resolve().parents[1] / "grid-launcher.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_main_for_emulator_toast_tests", module_path)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)

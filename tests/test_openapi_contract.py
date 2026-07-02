@@ -10,7 +10,7 @@ class OpenApiContractTests(unittest.TestCase):
 
     These tests do not hit a live server. They only guard against a future
     openapi.json spec bump silently removing fields/params that
-    RomMate-Neo's code depends on.
+    GRID Launcher's code depends on.
     """
 
     @classmethod

@@ -10,7 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication
 
-from rom_mate.tv.widgets.views.details_view import DetailsView
+from grid_launcher.tv.widgets.views.details_view import DetailsView
 
 
 class _StubCoverLoader:

@@ -5,18 +5,19 @@ import tempfile
 import unittest
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 
-from rom_mate.background.workers import (
+from grid_launcher.background.workers import (
     DetailsCloudRecordsWorker,
+    FlatpakInstallWorker,
     InstallDownloadWorker,
     InstallFinalizeWorker,
     MissingCoverReplenishWorker,
     PCGamingWikiWorker,
     RetroAchievementsWorker,
 )
-from rom_mate.emulator.source import EmulatorSourceResolutionError
+from grid_launcher.emulator.source import EmulatorSourceResolutionError
 
 
 class _StubWindow:
@@ -103,7 +104,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
                 None,
                 BytesIO(b'{"detail":"Token invalid for this ROM"}'),
             )
-            with patch("rom_mate.background.workers.urlopen", side_effect=http_error):
+            with patch("grid_launcher.background.workers.urlopen", side_effect=http_error):
                 worker.run()
 
             self.assertEqual(len(results), 1)
@@ -131,7 +132,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
                 None,
                 BytesIO(b"access denied"),
             )
-            with patch("rom_mate.background.workers.urlopen", side_effect=http_error):
+            with patch("grid_launcher.background.workers.urlopen", side_effect=http_error):
                 with patch("builtins.print") as mock_print:
                     worker.run()
 
@@ -179,7 +180,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
             archive_payload = b"zip-data"
 
             with patch(
-                "rom_mate.background.workers.urlopen",
+                "grid_launcher.background.workers.urlopen",
                 side_effect=[
                     self._ResponseStub(release_payload),
                     self._ResponseStub(archive_payload, content_length=len(archive_payload)),
@@ -235,7 +236,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
                 BytesIO(b"missing"),
             )
             with patch(
-                "rom_mate.background.workers.urlopen",
+                "grid_launcher.background.workers.urlopen",
                 side_effect=[
                     self._ResponseStub(release_payload),
                     download_error,
@@ -283,9 +284,10 @@ class InstallDownloadWorkerTests(unittest.TestCase):
                 ],
             }
 
-            with patch.object(worker, "_load_json", return_value=release_payload):
-                with self.assertRaises(EmulatorSourceResolutionError) as raised:
-                    worker._resolve_source_download(worker.source_metadata or {})
+            with patch("sys.platform", "win32"):
+                with patch.object(worker, "_load_json", return_value=release_payload):
+                    with self.assertRaises(EmulatorSourceResolutionError) as raised:
+                        worker._resolve_source_download(worker.source_metadata or {})
 
             message = str(raised.exception)
             self.assertIn("windows_assets", message)
@@ -414,38 +416,153 @@ class InstallDownloadWorkerTests(unittest.TestCase):
             "owner": "shadps4-emu",
             "repo": "shadPS4",
             "release_tag": "latest",
-            "windows_assets": [
-                {
-                    "arch": "x64",
-                    "asset_name_regex": "^shadps4-win64-sdl-[0-9.]+\\.zip$",
-                }
-            ],
+            "asset_patterns": ["shadps4-win64-sdl-*.zip"],
+            "launch_executable": "shadPS4.exe",
+            "platform_overrides": {
+                "linux": {
+                    "asset_patterns": ["shadps4-linux-sdl-*.zip"],
+                    "launch_executable": "shadPS4",
+                },
+                "darwin": {
+                    "asset_patterns": ["shadps4-macos-sdl-*.zip"],
+                    "launch_executable": "shadPS4",
+                },
+            },
         }
         release_payload = {
-            "tag_name": "v0.10.0",
+            "tag_name": "v0.16.0",
             "assets": [
                 {
-                    "name": "shadps4-win64-sdl-0.10.0.zip",
-                    "browser_download_url": "https://example.test/shadps4-win64-sdl-0.10.0.zip",
+                    "name": "shadps4-win64-sdl-0.16.0.zip",
+                    "browser_download_url": "https://example.test/shadps4-win64-sdl-0.16.0.zip",
                 },
                 {
-                    "name": "shadps4-linux-sdl-0.10.0.tar.xz",
-                    "browser_download_url": "https://example.test/shadps4-linux-sdl-0.10.0.tar.xz",
+                    "name": "shadps4-linux-sdl-0.16.0.zip",
+                    "browser_download_url": "https://example.test/shadps4-linux-sdl-0.16.0.zip",
                 },
                 {
-                    "name": "shadps4-macos-sdl-0.10.0.zip",
-                    "browser_download_url": "https://example.test/shadps4-macos-sdl-0.10.0.zip",
+                    "name": "shadps4-macos-sdl-0.16.0.zip",
+                    "browser_download_url": "https://example.test/shadps4-macos-sdl-0.16.0.zip",
+                },
+                {
+                    "name": "shadps4-ubuntu64-0.16.0.zip",
+                    "browser_download_url": "https://example.test/shadps4-ubuntu64-0.16.0.zip",
                 },
             ],
         }
 
-        with patch.object(worker, "_load_json", return_value=release_payload):
-            resolved = worker._resolve_source_download(source_metadata)
+        with patch("sys.platform", "win32"):
+            with patch.object(worker, "_load_json", return_value=release_payload):
+                resolved = worker._resolve_source_download(source_metadata)
 
-        self.assertEqual(resolved["asset_name"], "shadps4-win64-sdl-0.10.0.zip")
+        self.assertEqual(resolved["asset_name"], "shadps4-win64-sdl-0.16.0.zip")
         self.assertEqual(
             resolved["download_url"],
-            "https://example.test/shadps4-win64-sdl-0.10.0.zip",
+            "https://example.test/shadps4-win64-sdl-0.16.0.zip",
+        )
+
+    def test_source_metadata_shadps4_sdl_core_linux_asset_name_resolution(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("shadps4-sdl.zip"))
+        source_metadata = {
+            "provider": "github-release",
+            "owner": "shadps4-emu",
+            "repo": "shadPS4",
+            "release_tag": "latest",
+            "asset_patterns": ["shadps4-win64-sdl-*.zip"],
+            "launch_executable": "shadPS4.exe",
+            "platform_overrides": {
+                "linux": {
+                    "asset_patterns": ["shadps4-linux-sdl-*.zip"],
+                    "launch_executable": "shadPS4",
+                },
+                "darwin": {
+                    "asset_patterns": ["shadps4-macos-sdl-*.zip"],
+                    "launch_executable": "shadPS4",
+                },
+            },
+        }
+        release_payload = {
+            "tag_name": "v0.16.0",
+            "assets": [
+                {
+                    "name": "shadps4-win64-sdl-0.16.0.zip",
+                    "browser_download_url": "https://example.test/shadps4-win64-sdl-0.16.0.zip",
+                },
+                {
+                    "name": "shadps4-linux-sdl-0.16.0.zip",
+                    "browser_download_url": "https://example.test/shadps4-linux-sdl-0.16.0.zip",
+                },
+                {
+                    "name": "shadps4-macos-sdl-0.16.0.zip",
+                    "browser_download_url": "https://example.test/shadps4-macos-sdl-0.16.0.zip",
+                },
+                {
+                    "name": "shadps4-ubuntu64-0.16.0.zip",
+                    "browser_download_url": "https://example.test/shadps4-ubuntu64-0.16.0.zip",
+                },
+            ],
+        }
+
+        with patch("sys.platform", "linux"):
+            with patch.object(worker, "_load_json", return_value=release_payload):
+                resolved = worker._resolve_source_download(source_metadata)
+
+        self.assertEqual(resolved["asset_name"], "shadps4-linux-sdl-0.16.0.zip")
+        self.assertEqual(
+            resolved["download_url"],
+            "https://example.test/shadps4-linux-sdl-0.16.0.zip",
+        )
+
+    def test_source_metadata_shadps4_sdl_core_macos_asset_name_resolution(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("shadps4-sdl.zip"))
+        source_metadata = {
+            "provider": "github-release",
+            "owner": "shadps4-emu",
+            "repo": "shadPS4",
+            "release_tag": "latest",
+            "asset_patterns": ["shadps4-win64-sdl-*.zip"],
+            "launch_executable": "shadPS4.exe",
+            "platform_overrides": {
+                "linux": {
+                    "asset_patterns": ["shadps4-linux-sdl-*.zip"],
+                    "launch_executable": "shadPS4",
+                },
+                "darwin": {
+                    "asset_patterns": ["shadps4-macos-sdl-*.zip"],
+                    "launch_executable": "shadPS4",
+                },
+            },
+        }
+        release_payload = {
+            "tag_name": "v0.16.0",
+            "assets": [
+                {
+                    "name": "shadps4-win64-sdl-0.16.0.zip",
+                    "browser_download_url": "https://example.test/shadps4-win64-sdl-0.16.0.zip",
+                },
+                {
+                    "name": "shadps4-linux-sdl-0.16.0.zip",
+                    "browser_download_url": "https://example.test/shadps4-linux-sdl-0.16.0.zip",
+                },
+                {
+                    "name": "shadps4-macos-sdl-0.16.0.zip",
+                    "browser_download_url": "https://example.test/shadps4-macos-sdl-0.16.0.zip",
+                },
+                {
+                    "name": "shadps4-ubuntu64-0.16.0.zip",
+                    "browser_download_url": "https://example.test/shadps4-ubuntu64-0.16.0.zip",
+                },
+            ],
+        }
+
+        with patch("sys.platform", "darwin"):
+            with patch.object(worker, "_load_json", return_value=release_payload):
+                resolved = worker._resolve_source_download(source_metadata)
+
+        self.assertEqual(resolved["asset_name"], "shadps4-macos-sdl-0.16.0.zip")
+        self.assertEqual(
+            resolved["download_url"],
+            "https://example.test/shadps4-macos-sdl-0.16.0.zip",
         )
 
     def test_source_metadata_shadps4_qt_launcher_regex_asset_name_resolution(self) -> None:
@@ -484,6 +601,289 @@ class InstallDownloadWorkerTests(unittest.TestCase):
             resolved["download_url"],
             "https://example.test/shadPS4QtLauncher-win64-qt-v224.zip",
         )
+
+    def test_source_metadata_duckstation_linux_appimage_asset_name_resolution(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("DuckStation-x64.AppImage"))
+        source_metadata = {
+            "provider": "github-release",
+            "owner": "stenzek",
+            "repo": "duckstation",
+            "release_tag": "latest",
+            "windows_assets": [
+                {
+                    "arch": "x64",
+                    "asset_name": "duckstation-windows-x64-release.zip",
+                    "launch_executable": "duckstation-qt-x64-ReleaseLTCG.exe",
+                },
+                {
+                    "arch": "arm64",
+                    "asset_name": "duckstation-windows-arm64-release.zip",
+                    "launch_executable": "duckstation-qt-arm64-ReleaseLTCG.exe",
+                },
+            ],
+            "platform_overrides": {
+                "linux": {
+                    "asset_patterns": ["DuckStation-x64.AppImage"],
+                    "launch_executable": "DuckStation-x64.AppImage",
+                }
+            },
+        }
+        release_payload = {
+            "tag_name": "latest",
+            "assets": [
+                {
+                    "name": "duckstation-windows-x64-release.zip",
+                    "browser_download_url": "https://example.test/duckstation-windows-x64-release.zip",
+                },
+                {
+                    "name": "duckstation-windows-arm64-release.zip",
+                    "browser_download_url": "https://example.test/duckstation-windows-arm64-release.zip",
+                },
+                {
+                    "name": "DuckStation-x64.AppImage",
+                    "browser_download_url": "https://example.test/DuckStation-x64.AppImage",
+                },
+                {
+                    "name": "DuckStation-arm64.AppImage",
+                    "browser_download_url": "https://example.test/DuckStation-arm64.AppImage",
+                },
+            ],
+        }
+
+        with patch("sys.platform", "linux"):
+            with patch.object(worker, "_load_json", return_value=release_payload):
+                resolved = worker._resolve_source_download(source_metadata)
+
+        self.assertEqual(resolved["asset_name"], "DuckStation-x64.AppImage")
+        self.assertEqual(
+            resolved["download_url"],
+            "https://example.test/DuckStation-x64.AppImage",
+        )
+
+    def test_source_metadata_supermodel_windows_asset_name_resolution(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("supermodel-windows.zip"))
+        source_metadata = {
+            "provider": "github-release",
+            "owner": "trzy",
+            "repo": "Supermodel",
+            "release_tag": "latest",
+            "asset_patterns": ["supermodel-*-windows.zip"],
+            "launch_executable": "supermodel.exe",
+            "platform_overrides": {
+                "linux": {
+                    "asset_patterns": ["supermodel-*-linux.tar.gz"],
+                    "launch_executable": "supermodel",
+                },
+                "darwin": {
+                    "asset_patterns": ["supermodel-*-macos.tar.gz"],
+                    "launch_executable": "supermodel",
+                },
+            },
+        }
+        release_payload = {
+            "tag_name": "v0.3a-20260528-git-77d28ee",
+            "assets": [
+                {
+                    "name": "supermodel-0.3a-20260528-git-77d28ee-windows.zip",
+                    "browser_download_url": "https://example.test/supermodel-0.3a-windows.zip",
+                },
+                {
+                    "name": "supermodel-0.3a-20260528-git-77d28ee-linux.tar.gz",
+                    "browser_download_url": "https://example.test/supermodel-0.3a-linux.tar.gz",
+                },
+                {
+                    "name": "supermodel-0.3a-20260528-git-77d28ee-macos.tar.gz",
+                    "browser_download_url": "https://example.test/supermodel-0.3a-macos.tar.gz",
+                },
+            ],
+        }
+
+        with patch("sys.platform", "win32"):
+            with patch.object(worker, "_load_json", return_value=release_payload):
+                resolved = worker._resolve_source_download(source_metadata)
+
+        self.assertEqual(resolved["asset_name"], "supermodel-0.3a-20260528-git-77d28ee-windows.zip")
+        self.assertEqual(resolved["download_url"], "https://example.test/supermodel-0.3a-windows.zip")
+
+    def test_source_metadata_supermodel_linux_asset_name_resolution(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("supermodel-linux.tar.gz"))
+        source_metadata = {
+            "provider": "github-release",
+            "owner": "trzy",
+            "repo": "Supermodel",
+            "release_tag": "latest",
+            "asset_patterns": ["supermodel-*-windows.zip"],
+            "launch_executable": "supermodel.exe",
+            "platform_overrides": {
+                "linux": {
+                    "asset_patterns": ["supermodel-*-linux.tar.gz"],
+                    "launch_executable": "supermodel",
+                },
+                "darwin": {
+                    "asset_patterns": ["supermodel-*-macos.tar.gz"],
+                    "launch_executable": "supermodel",
+                },
+            },
+        }
+        release_payload = {
+            "tag_name": "v0.3a-20260528-git-77d28ee",
+            "assets": [
+                {
+                    "name": "supermodel-0.3a-20260528-git-77d28ee-windows.zip",
+                    "browser_download_url": "https://example.test/supermodel-0.3a-windows.zip",
+                },
+                {
+                    "name": "supermodel-0.3a-20260528-git-77d28ee-linux.tar.gz",
+                    "browser_download_url": "https://example.test/supermodel-0.3a-linux.tar.gz",
+                },
+                {
+                    "name": "supermodel-0.3a-20260528-git-77d28ee-macos.tar.gz",
+                    "browser_download_url": "https://example.test/supermodel-0.3a-macos.tar.gz",
+                },
+            ],
+        }
+
+        with patch("sys.platform", "linux"):
+            with patch.object(worker, "_load_json", return_value=release_payload):
+                resolved = worker._resolve_source_download(source_metadata)
+
+        self.assertEqual(resolved["asset_name"], "supermodel-0.3a-20260528-git-77d28ee-linux.tar.gz")
+        self.assertEqual(resolved["download_url"], "https://example.test/supermodel-0.3a-linux.tar.gz")
+
+    def test_source_metadata_supermodel_macos_asset_name_resolution(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("supermodel-macos.tar.gz"))
+        source_metadata = {
+            "provider": "github-release",
+            "owner": "trzy",
+            "repo": "Supermodel",
+            "release_tag": "latest",
+            "asset_patterns": ["supermodel-*-windows.zip"],
+            "launch_executable": "supermodel.exe",
+            "platform_overrides": {
+                "linux": {
+                    "asset_patterns": ["supermodel-*-linux.tar.gz"],
+                    "launch_executable": "supermodel",
+                },
+                "darwin": {
+                    "asset_patterns": ["supermodel-*-macos.tar.gz"],
+                    "launch_executable": "supermodel",
+                },
+            },
+        }
+        release_payload = {
+            "tag_name": "v0.3a-20260528-git-77d28ee",
+            "assets": [
+                {
+                    "name": "supermodel-0.3a-20260528-git-77d28ee-windows.zip",
+                    "browser_download_url": "https://example.test/supermodel-0.3a-windows.zip",
+                },
+                {
+                    "name": "supermodel-0.3a-20260528-git-77d28ee-linux.tar.gz",
+                    "browser_download_url": "https://example.test/supermodel-0.3a-linux.tar.gz",
+                },
+                {
+                    "name": "supermodel-0.3a-20260528-git-77d28ee-macos.tar.gz",
+                    "browser_download_url": "https://example.test/supermodel-0.3a-macos.tar.gz",
+                },
+            ],
+        }
+
+        with patch("sys.platform", "darwin"):
+            with patch.object(worker, "_load_json", return_value=release_payload):
+                resolved = worker._resolve_source_download(source_metadata)
+
+        self.assertEqual(resolved["asset_name"], "supermodel-0.3a-20260528-git-77d28ee-macos.tar.gz")
+        self.assertEqual(resolved["download_url"], "https://example.test/supermodel-0.3a-macos.tar.gz")
+
+    def test_source_metadata_vita3k_windows_asset_resolution(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("windows-latest.zip"))
+        source_metadata = {
+            "provider": "github-release",
+            "owner": "Vita3K",
+            "repo": "Vita3K",
+            "release_tag": "continuous",
+            "asset_patterns": ["windows-latest.zip"],
+            "launch_executable": "Vita3K.exe",
+            "platform_overrides": {
+                "linux": {
+                    "asset_patterns": ["Vita3K-x86_64.AppImage"],
+                    "launch_executable": "Vita3K-x86_64.AppImage",
+                },
+            },
+        }
+        release_payload = {
+            "tag_name": "continuous",
+            "assets": [
+                {
+                    "name": "windows-latest.zip",
+                    "browser_download_url": "https://example.test/windows-latest.zip",
+                },
+                {
+                    "name": "windows-arm64-latest.zip",
+                    "browser_download_url": "https://example.test/windows-arm64-latest.zip",
+                },
+                {
+                    "name": "Vita3K-x86_64.AppImage",
+                    "browser_download_url": "https://example.test/Vita3K-x86_64.AppImage",
+                },
+                {
+                    "name": "Vita3K-aarch64.AppImage",
+                    "browser_download_url": "https://example.test/Vita3K-aarch64.AppImage",
+                },
+            ],
+        }
+
+        with patch("sys.platform", "win32"):
+            with patch.object(worker, "_load_json", return_value=release_payload):
+                resolved = worker._resolve_source_download(source_metadata)
+
+        self.assertEqual(resolved["asset_name"], "windows-latest.zip")
+        self.assertEqual(resolved["download_url"], "https://example.test/windows-latest.zip")
+
+    def test_source_metadata_vita3k_linux_appimage_asset_resolution(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("Vita3K-x86_64.AppImage"))
+        source_metadata = {
+            "provider": "github-release",
+            "owner": "Vita3K",
+            "repo": "Vita3K",
+            "release_tag": "continuous",
+            "asset_patterns": ["windows-latest.zip"],
+            "launch_executable": "Vita3K.exe",
+            "platform_overrides": {
+                "linux": {
+                    "asset_patterns": ["Vita3K-x86_64.AppImage"],
+                    "launch_executable": "Vita3K-x86_64.AppImage",
+                },
+            },
+        }
+        release_payload = {
+            "tag_name": "continuous",
+            "assets": [
+                {
+                    "name": "windows-latest.zip",
+                    "browser_download_url": "https://example.test/windows-latest.zip",
+                },
+                {
+                    "name": "windows-arm64-latest.zip",
+                    "browser_download_url": "https://example.test/windows-arm64-latest.zip",
+                },
+                {
+                    "name": "Vita3K-x86_64.AppImage",
+                    "browser_download_url": "https://example.test/Vita3K-x86_64.AppImage",
+                },
+                {
+                    "name": "Vita3K-aarch64.AppImage",
+                    "browser_download_url": "https://example.test/Vita3K-aarch64.AppImage",
+                },
+            ],
+        }
+
+        with patch("sys.platform", "linux"):
+            with patch.object(worker, "_load_json", return_value=release_payload):
+                resolved = worker._resolve_source_download(source_metadata)
+
+        self.assertEqual(resolved["asset_name"], "Vita3K-x86_64.AppImage")
+        self.assertEqual(resolved["download_url"], "https://example.test/Vita3K-x86_64.AppImage")
 
     def test_source_metadata_azahar_regex_asset_name_resolution(self) -> None:
         worker = InstallDownloadWorker("", {}, Path("azahar.zip"))
@@ -593,7 +993,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
             b'<a href="https://buildbot.libretro.com/nightly/windows/x86_64/RetroArch.7z">RetroArch.7z</a>'
         )
 
-        with patch("rom_mate.background.workers.urlopen", return_value=page_payload):
+        with patch("grid_launcher.background.workers.urlopen", return_value=page_payload):
             resolved = worker._resolve_source_download(source_metadata)
 
         self.assertEqual(resolved["provider"], "direct")
@@ -621,7 +1021,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
             )
         )
 
-        with patch("rom_mate.background.workers.urlopen", return_value=page_payload):
+        with patch("grid_launcher.background.workers.urlopen", return_value=page_payload):
             resolved = worker._resolve_source_download(source_metadata)
 
         self.assertEqual(
@@ -652,7 +1052,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
         )
 
         with patch("sys.platform", "linux"):
-            with patch("rom_mate.background.workers.urlopen", return_value=page_payload):
+            with patch("grid_launcher.background.workers.urlopen", return_value=page_payload):
                 resolved = worker._resolve_source_download(source_metadata)
 
         self.assertEqual(resolved["provider"], "direct")
@@ -687,7 +1087,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
         )
 
         with patch("sys.platform", "linux"):
-            with patch("rom_mate.background.workers.urlopen", return_value=page_payload):
+            with patch("grid_launcher.background.workers.urlopen", return_value=page_payload):
                 resolved = worker._resolve_source_download(source_metadata)
 
         self.assertEqual(
@@ -728,12 +1128,12 @@ class InstallDownloadWorkerTests(unittest.TestCase):
 
         worker_win = InstallDownloadWorker("", {}, Path("retroarch.zip"))
         with patch("sys.platform", "win32"):
-            with patch("rom_mate.background.workers.urlopen", return_value=page_payload_factory()):
+            with patch("grid_launcher.background.workers.urlopen", return_value=page_payload_factory()):
                 resolved_win = worker_win._resolve_source_download(source_metadata)
 
         worker_linux = InstallDownloadWorker("", {}, Path("retroarch.zip"))
         with patch("sys.platform", "linux"):
-            with patch("rom_mate.background.workers.urlopen", return_value=page_payload_factory()):
+            with patch("grid_launcher.background.workers.urlopen", return_value=page_payload_factory()):
                 resolved_linux = worker_linux._resolve_source_download(source_metadata)
 
         self.assertEqual(resolved_win["download_url"], resolved_linux["download_url"])
@@ -852,7 +1252,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
             supplemental_payload = b"retroarch-cores"
 
             with patch(
-                "rom_mate.background.workers.urlopen",
+                "grid_launcher.background.workers.urlopen",
                 side_effect=[
                     self._ResponseStub(main_payload, content_length=len(main_payload)),
                     self._ResponseStub(supplemental_payload, content_length=len(supplemental_payload)),
@@ -904,7 +1304,7 @@ class InstallDownloadWorkerTests(unittest.TestCase):
             archive_payload = b"7z-data"
 
             with patch(
-                "rom_mate.background.workers.urlopen",
+                "grid_launcher.background.workers.urlopen",
                 side_effect=[
                     self._ResponseStub(release_payload),
                     self._ResponseStub(archive_payload, content_length=len(archive_payload)),
@@ -1016,6 +1416,113 @@ class InstallFinalizeWorkerTests(unittest.TestCase):
         self.assertEqual(results[0].get("warning", ""), "")
 
 
+class _FinalizeWindowNativePrefixStub:
+    def __init__(self, prepared_game: dict[str, str]) -> None:
+        self.prepared_game = prepared_game
+        self.calls: list[tuple[str, object]] = []
+
+    def _prepare_installed_game_without_ui(
+        self,
+        game: dict[str, str],
+        archive_path: Path,
+        *,
+        cleanup_archive_on_success: bool = True,
+        install_progress_callback=None,
+    ):
+        del game, archive_path, install_progress_callback
+        self.calls.append(("prepare", cleanup_archive_on_success))
+        return (dict(self.prepared_game), "")
+
+
+class InstallFinalizeWorkerNativePrefixTests(unittest.TestCase):
+    def test_prefix_placed_in_native_game_dir_on_linux(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            native_game_dir = Path(temp_dir) / "Windows Game"
+            extracted_dir = native_game_dir / "Some Game"
+            extracted_dir.mkdir(parents=True)
+            window = _FinalizeWindowNativePrefixStub(
+                {
+                    "title": "Some Game",
+                    "platform": "Windows",
+                    "extracted_dir": str(extracted_dir),
+                    "native_game_dir": str(native_game_dir),
+                }
+            )
+            worker = InstallFinalizeWorker(
+                window,
+                {"title": "Some Game", "platform": "Windows", "_install_mode": "native_game"},
+                Path("some_game.zip"),
+            )
+            results: list[dict[str, object]] = []
+            worker.finished.connect(lambda payload: results.append(payload))
+
+            with patch("grid_launcher.background.workers.sys.platform", "linux"):
+                worker.run()
+
+            self.assertEqual(len(results), 1)
+            prepared_game = results[0].get("game", {})
+            expected_prefix = native_game_dir / "prefix"
+            self.assertEqual(prepared_game.get("native_wineprefix"), str(expected_prefix))
+            self.assertTrue(str(prepared_game.get("native_wineprefix", "")).endswith("/prefix"))
+            self.assertTrue(expected_prefix.is_dir())
+
+    def test_prefix_placed_in_extracted_dir_on_linux_when_no_native_game_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            extracted_dir = Path(temp_dir) / "Some Game"
+            extracted_dir.mkdir(parents=True)
+            window = _FinalizeWindowNativePrefixStub(
+                {
+                    "title": "Some Game",
+                    "platform": "Windows",
+                    "extracted_dir": str(extracted_dir),
+                }
+            )
+            worker = InstallFinalizeWorker(
+                window,
+                {"title": "Some Game", "platform": "Windows", "_install_mode": "native_game"},
+                Path("some_game.zip"),
+            )
+            results: list[dict[str, object]] = []
+            worker.finished.connect(lambda payload: results.append(payload))
+
+            with patch("grid_launcher.background.workers.sys.platform", "linux"):
+                worker.run()
+
+            self.assertEqual(len(results), 1)
+            prepared_game = results[0].get("game", {})
+            expected_prefix = extracted_dir / "prefix"
+            self.assertEqual(prepared_game.get("native_wineprefix"), str(expected_prefix))
+            self.assertTrue(expected_prefix.is_dir())
+
+    def test_no_prefix_on_non_linux(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            extracted_dir = Path(temp_dir) / "Some Game"
+            extracted_dir.mkdir(parents=True)
+            window = _FinalizeWindowNativePrefixStub(
+                {
+                    "title": "Some Game",
+                    "platform": "Windows",
+                    "extracted_dir": str(extracted_dir),
+                    "native_game_dir": str(Path(temp_dir)),
+                }
+            )
+            worker = InstallFinalizeWorker(
+                window,
+                {"title": "Some Game", "platform": "Windows", "_install_mode": "native_game"},
+                Path("some_game.zip"),
+            )
+            results: list[dict[str, object]] = []
+            worker.finished.connect(lambda payload: results.append(payload))
+
+            with patch("grid_launcher.background.workers.sys.platform", "win32"):
+                worker.run()
+
+            self.assertEqual(len(results), 1)
+            prepared_game = results[0].get("game", {})
+            self.assertFalse(prepared_game.get("native_wineprefix", ""))
+            self.assertFalse((extracted_dir / "prefix").exists())
+
+
 class TestRetroAchievementsWorker(unittest.TestCase):
     def _run_worker(self, worker):
         results = []
@@ -1032,7 +1539,7 @@ class TestRetroAchievementsWorker(unittest.TestCase):
         return results
 
     def test_worker_emits_achievements_on_success(self):
-        with patch("rom_mate.server.retroachievements.fetch_game_achievements") as mock_fetch:
+        with patch("grid_launcher.server.retroachievements.fetch_game_achievements") as mock_fetch:
             mock_fetch.return_value = [{"id": 1, "title": "Test"}]
             worker = RetroAchievementsWorker(42, 100, "user", "key")
             results = self._run_worker(worker)
@@ -1043,9 +1550,9 @@ class TestRetroAchievementsWorker(unittest.TestCase):
         self.assertEqual(err, "")
 
     def test_worker_emits_error_on_failure(self):
-        from rom_mate.server.retroachievements import RetroAchievementsError
+        from grid_launcher.server.retroachievements import RetroAchievementsError
 
-        with patch("rom_mate.server.retroachievements.fetch_game_achievements") as mock_fetch:
+        with patch("grid_launcher.server.retroachievements.fetch_game_achievements") as mock_fetch:
             mock_fetch.side_effect = RetroAchievementsError("network error")
             worker = RetroAchievementsWorker(7, 50, "user", "key")
             results = self._run_worker(worker)
@@ -1072,14 +1579,14 @@ class TestPCGamingWikiWorker(unittest.TestCase):
         return results
 
     def test_pcgamingwiki_worker_emits_paths_on_success(self):
-        with patch("rom_mate.server.pcgamingwiki.fetch_windows_save_paths") as mock_fetch:
+        with patch("grid_launcher.server.pcgamingwiki.fetch_windows_save_paths") as mock_fetch:
             mock_fetch.return_value = ["%APPDATA%\\Game"]
             worker = PCGamingWikiWorker(42, "Game")
             results = self._run_worker(worker)
         self.assertEqual(results, [(42, ["%APPDATA%\\Game"], "")])
 
     def test_pcgamingwiki_worker_emits_error_on_failure(self):
-        with patch("rom_mate.server.pcgamingwiki.fetch_windows_save_paths") as mock_fetch:
+        with patch("grid_launcher.server.pcgamingwiki.fetch_windows_save_paths") as mock_fetch:
             mock_fetch.side_effect = Exception("timeout")
             worker = PCGamingWikiWorker(9, "Game")
             results = self._run_worker(worker)
@@ -1118,7 +1625,7 @@ class MissingCoverReplenishWorkerTests(unittest.TestCase):
             cover_file = Path(tmp) / "existing.png"
             cover_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
             game = {"cached_cover_path": str(cover_file)}
-            with patch("rom_mate.background.workers.urlopen") as mock_urlopen:
+            with patch("grid_launcher.background.workers.urlopen") as mock_urlopen:
                 worker = MissingCoverReplenishWorker(
                     [("key1", game, "https://romm.local/cover.png")],
                     {},
@@ -1140,7 +1647,7 @@ class MissingCoverReplenishWorkerTests(unittest.TestCase):
         mock_response.headers.get.return_value = "image/png"
         with tempfile.TemporaryDirectory() as tmp:
             game = {"title": "Test Game", "platform": "NES"}
-            with patch("rom_mate.background.workers.urlopen", return_value=mock_response):
+            with patch("grid_launcher.background.workers.urlopen", return_value=mock_response):
                 worker = MissingCoverReplenishWorker(
                     [("key1", game, "https://romm.local/cover.png")],
                     {},
@@ -1166,7 +1673,7 @@ class MissingCoverReplenishWorkerTests(unittest.TestCase):
             cover_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
             game_cached = {"cached_cover_path": str(cover_file)}
             game_missing = {"title": "Missing", "platform": "SNES"}
-            with patch("rom_mate.background.workers.urlopen", return_value=mock_response):
+            with patch("grid_launcher.background.workers.urlopen", return_value=mock_response):
                 worker = MissingCoverReplenishWorker(
                     [
                         ("key_cached", game_cached, "https://romm.local/a.png"),
@@ -1184,7 +1691,7 @@ class MissingCoverReplenishWorkerTests(unittest.TestCase):
         from urllib.error import HTTPError
         with tempfile.TemporaryDirectory() as tmp:
             game = {"title": "Bad Game", "platform": "GBA"}
-            with patch("rom_mate.background.workers.urlopen", side_effect=HTTPError(
+            with patch("grid_launcher.background.workers.urlopen", side_effect=HTTPError(
                 "https://romm.local/cover.png", 404, "Not Found", {}, None
             )):
                 worker = MissingCoverReplenishWorker(
@@ -1195,6 +1702,70 @@ class MissingCoverReplenishWorkerTests(unittest.TestCase):
                 cached, finished = self._run_worker(worker)
         self.assertEqual(cached, [])
         self.assertEqual(len(finished), 1)
+
+
+class FlatpakInstallWorkerTests(unittest.TestCase):
+    def test_success_emits_empty_error(self) -> None:
+        results: list[object] = []
+        worker = FlatpakInstallWorker("org.ppsspp.PPSSPP")
+        worker.finished.connect(lambda value: results.append(value))
+
+        with patch("grid_launcher.background.workers.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            worker.run()
+
+        self.assertEqual(results, [{"app_id": "org.ppsspp.PPSSPP", "error": ""}])
+
+    def test_nonzero_returncode_emits_stderr_as_error(self) -> None:
+        results: list[dict[str, str]] = []
+        worker = FlatpakInstallWorker("org.ppsspp.PPSSPP")
+        worker.finished.connect(lambda value: results.append(value))
+
+        with patch("grid_launcher.background.workers.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error msg")
+            worker.run()
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["app_id"], "org.ppsspp.PPSSPP")
+        self.assertTrue(results[0]["error"])
+
+    def test_oserror_emits_error(self) -> None:
+        results: list[dict[str, str]] = []
+        worker = FlatpakInstallWorker("org.ppsspp.PPSSPP")
+        worker.finished.connect(lambda value: results.append(value))
+
+        with patch(
+            "grid_launcher.background.workers.subprocess.run",
+            side_effect=OSError("flatpak not found"),
+        ):
+            worker.run()
+
+        self.assertEqual(len(results), 1)
+        self.assertTrue(results[0]["error"])
+
+    def test_uses_correct_cli_args(self) -> None:
+        worker = FlatpakInstallWorker("org.ppsspp.PPSSPP")
+
+        with patch("grid_launcher.background.workers.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            worker.run()
+
+        args, kwargs = mock_run.call_args
+        self.assertEqual(
+            args[0],
+            ["flatpak", "install", "--noninteractive", "flathub", "org.ppsspp.PPSSPP"],
+        )
+        self.assertNotEqual(kwargs.get("shell"), True)
+
+    def test_uses_custom_flatpak_binary(self) -> None:
+        worker = FlatpakInstallWorker("org.ppsspp.PPSSPP", flatpak_binary="/usr/local/bin/flatpak")
+
+        with patch("grid_launcher.background.workers.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            worker.run()
+
+        args, _ = mock_run.call_args
+        self.assertEqual(args[0][0], "/usr/local/bin/flatpak")
 
 
 if __name__ == "__main__":

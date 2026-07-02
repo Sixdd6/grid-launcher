@@ -1,6 +1,6 @@
 import unittest
 
-from rom_mate.emulator.selection import cloud_save_block_reason_for_game
+from grid_launcher.emulator.selection import cloud_save_block_reason_for_game
 
 
 def _is_retroarch(name: str) -> bool:

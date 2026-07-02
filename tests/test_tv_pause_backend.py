@@ -14,7 +14,7 @@ _app = QCoreApplication.instance() or QCoreApplication(sys.argv)
 
 class PauseBackendTests(unittest.TestCase):
     def setUp(self):
-        from rom_mate.tv.bridge.pause_backend import PauseBackend
+        from grid_launcher.tv.bridge.pause_backend import PauseBackend
 
         self.game_backend = MagicMock()
         self.game_backend.isSessionActive = False

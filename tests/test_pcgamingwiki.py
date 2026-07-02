@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from rom_mate.server.pcgamingwiki import (
+from grid_launcher.server.pcgamingwiki import (
     PCGamingWikiError,
     fetch_page_id_by_title,
     fetch_windows_save_paths,
@@ -55,7 +55,7 @@ class PCGamingWikiTests(unittest.TestCase):
         self.assertIn("%LOCALAPPDATA%\\MyGame\\saves", paths)
         self.assertIn("%USERPROFILE%\\Documents\\MyGame\\saves", paths)
 
-    @patch("rom_mate.server.pcgamingwiki._fetch_json")
+    @patch("grid_launcher.server.pcgamingwiki._fetch_json")
     def test_fetch_page_id_by_title_exact_match(self, mock_fetch_json) -> None:
         mock_fetch_json.return_value = {
             "batchcomplete": "",
@@ -70,8 +70,8 @@ class PCGamingWikiTests(unittest.TestCase):
 
         self.assertEqual(page_id, 12345)
 
-    @patch("rom_mate.server.pcgamingwiki._fetch_json_value")
-    @patch("rom_mate.server.pcgamingwiki._fetch_json")
+    @patch("grid_launcher.server.pcgamingwiki._fetch_json_value")
+    @patch("grid_launcher.server.pcgamingwiki._fetch_json")
     def test_fetch_page_id_by_title_opensearch_fallback(self, mock_fetch_json, mock_fetch_json_value) -> None:
         mock_fetch_json.side_effect = [
             {
@@ -98,7 +98,7 @@ class PCGamingWikiTests(unittest.TestCase):
 
         self.assertEqual(page_id, 54321)
 
-    @patch("rom_mate.server.pcgamingwiki._fetch_json")
+    @patch("grid_launcher.server.pcgamingwiki._fetch_json")
     def test_fetch_windows_save_paths_full_round_trip(self, mock_fetch_json) -> None:
         mock_fetch_json.side_effect = [
             {
@@ -141,7 +141,7 @@ class PCGamingWikiTests(unittest.TestCase):
         self.assertIn("%USERPROFILE%\\Documents\\Eidos\\Batman Arkham Asylum\\SaveData", paths)
         self.assertIn("%USERPROFILE%\\Documents\\Square Enix\\Batman Arkham Asylum GOTY\\SaveData", paths)
 
-    @patch("rom_mate.server.pcgamingwiki._fetch_json")
+    @patch("grid_launcher.server.pcgamingwiki._fetch_json")
     def test_fetch_windows_save_paths_http_error_raises(self, mock_fetch_json) -> None:
         mock_fetch_json.side_effect = PCGamingWikiError("HTTP failure")
 

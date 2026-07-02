@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 from PySide6.QtCore import QCoreApplication
 
-from rom_mate.tv.bridge.cloud_backend import CloudBackend, _CloudUploadWorker, _SlotFetchWorker
+from grid_launcher.tv.bridge.cloud_backend import CloudBackend, _CloudUploadWorker, _SlotFetchWorker
 
 BASE_CONFIG = {
     "server_url": "http://romm.local",
@@ -44,8 +44,8 @@ class TestCloudBackend(unittest.TestCase):
             )
         )
 
-        with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=False), patch(
-            "rom_mate.tv.bridge.cloud_backend.QThread.start"
+        with patch("grid_launcher.tv.bridge.cloud_backend.credentials_present", return_value=False), patch(
+            "grid_launcher.tv.bridge.cloud_backend.QThread.start"
         ) as mock_thread_start:
             backend.loadSlotsForGame({"game": {"rom_id": "42"}, "save_type": "save"})
 
@@ -64,7 +64,7 @@ class TestCloudBackend(unittest.TestCase):
             )
         )
 
-        with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True):
+        with patch("grid_launcher.tv.bridge.cloud_backend.credentials_present", return_value=True):
             backend.loadSlotsForGame({"game": {"rom_id": "", "id": ""}, "save_type": "save"})
 
         self.assertEqual(received, [("save", "Game has no server ID.")])
@@ -91,12 +91,12 @@ class TestCloudBackend(unittest.TestCase):
             }
         ]
 
-        with patch("rom_mate.tv.bridge.cloud_backend._api_get_json", return_value=[{"id": 100}]), patch(
-            "rom_mate.tv.bridge.cloud_backend._server_records_from_payload", return_value=records
-        ), patch("rom_mate.tv.bridge.cloud_backend._latest_server_records_by_slot", return_value=records), patch(
-            "rom_mate.tv.bridge.cloud_backend._save_record_timestamp", return_value=1713096000.0
+        with patch("grid_launcher.tv.bridge.cloud_backend._api_get_json", return_value=[{"id": 100}]), patch(
+            "grid_launcher.tv.bridge.cloud_backend._server_records_from_payload", return_value=records
+        ), patch("grid_launcher.tv.bridge.cloud_backend._latest_server_records_by_slot", return_value=records), patch(
+            "grid_launcher.tv.bridge.cloud_backend._save_record_timestamp", return_value=1713096000.0
         ), patch(
-            "rom_mate.tv.bridge.cloud_backend._relative_timestamp_text", return_value="just now"
+            "grid_launcher.tv.bridge.cloud_backend._relative_timestamp_text", return_value="just now"
         ):
             worker.run()
 
@@ -128,9 +128,9 @@ class TestCloudBackend(unittest.TestCase):
             )
         )
 
-        with patch("rom_mate.tv.bridge.cloud_backend._api_get_json", return_value=[]), patch(
-            "rom_mate.tv.bridge.cloud_backend._server_records_from_payload", return_value=[]
-        ), patch("rom_mate.tv.bridge.cloud_backend._latest_server_records_by_slot", return_value=[]):
+        with patch("grid_launcher.tv.bridge.cloud_backend._api_get_json", return_value=[]), patch(
+            "grid_launcher.tv.bridge.cloud_backend._server_records_from_payload", return_value=[]
+        ), patch("grid_launcher.tv.bridge.cloud_backend._latest_server_records_by_slot", return_value=[]):
             worker.run()
 
         self.assertEqual(finished, [("state", [])])
@@ -147,7 +147,7 @@ class TestCloudBackend(unittest.TestCase):
             )
         )
 
-        with patch("rom_mate.tv.bridge.cloud_backend._api_get_json", side_effect=Exception("connection refused")):
+        with patch("grid_launcher.tv.bridge.cloud_backend._api_get_json", side_effect=Exception("connection refused")):
             worker.run()
 
         self.assertEqual(len(errors), 1)
@@ -166,9 +166,9 @@ class TestCloudBackend(unittest.TestCase):
             )
         )
 
-        with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
-            "rom_mate.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
-        ), patch("rom_mate.tv.bridge.cloud_backend._api_post_json", return_value=None):
+        with patch("grid_launcher.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
+            "grid_launcher.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
+        ), patch("grid_launcher.tv.bridge.cloud_backend._api_post_json", return_value=None):
             backend.deleteSlot({"save_id": "42", "save_type": "save"})
 
         self.assertEqual(received, [(True, "Save deleted.")])
@@ -185,9 +185,9 @@ class TestCloudBackend(unittest.TestCase):
             )
         )
 
-        with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
-            "rom_mate.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
-        ), patch("rom_mate.tv.bridge.cloud_backend._api_post_json", side_effect=Exception("timeout")):
+        with patch("grid_launcher.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
+            "grid_launcher.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
+        ), patch("grid_launcher.tv.bridge.cloud_backend._api_post_json", side_effect=Exception("timeout")):
             backend.deleteSlot({"save_id": "42", "save_type": "save"})
 
         self.assertEqual(len(received), 1)
@@ -208,9 +208,9 @@ class TestCloudBackend(unittest.TestCase):
 
         game = {"rom_id": "42", "id": "42", "name": "My Game", "install_dir": "", "local_path": ""}
 
-        with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
-            "rom_mate.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
-        ), patch("rom_mate.tv.bridge.cloud_backend._api_get_bytes", return_value=b"fake bytes"):
+        with patch("grid_launcher.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
+            "grid_launcher.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
+        ), patch("grid_launcher.tv.bridge.cloud_backend._api_get_bytes", return_value=b"fake bytes"):
             backend.restoreSlot({"game": game, "save_id": "1", "save_type": "save"})
 
         self.assertEqual(len(received), 1)
@@ -239,10 +239,10 @@ class TestCloudBackend(unittest.TestCase):
                 "local_path": "",
             }
 
-            with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
-                "rom_mate.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
-            ), patch("rom_mate.tv.bridge.cloud_backend._api_get_bytes", return_value=b"fake bytes"), patch(
-                "rom_mate.tv.bridge.cloud_backend._restore_single_save_payload",
+            with patch("grid_launcher.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
+                "grid_launcher.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
+            ), patch("grid_launcher.tv.bridge.cloud_backend._api_get_bytes", return_value=b"fake bytes"), patch(
+                "grid_launcher.tv.bridge.cloud_backend._restore_single_save_payload",
                 return_value=Path(temp_dir) / "save.sav",
             ):
                 backend.restoreSlot({"game": game, "save_id": "1", "save_type": "save"})
@@ -266,7 +266,7 @@ class TestCloudBackend(unittest.TestCase):
             )
         )
 
-        with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=False):
+        with patch("grid_launcher.tv.bridge.cloud_backend.credentials_present", return_value=False):
             backend.uploadSave({"game": {"id": "5", "name": "Game"}, "save_type": "save"})
 
         self.assertEqual(received, [(False, "Not signed in to cloud saves.")])
@@ -274,8 +274,8 @@ class TestCloudBackend(unittest.TestCase):
     def test_upload_save_starts_thread_when_credentials_present(self):
         backend = CloudBackend(dict(BASE_CONFIG))
 
-        with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
-            "rom_mate.tv.bridge.cloud_backend.QThread.start"
+        with patch("grid_launcher.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
+            "grid_launcher.tv.bridge.cloud_backend.QThread.start"
         ) as mock_thread_start:
             backend.uploadSave({"game": {"id": "5", "name": "Game", "install_dir": "/tmp/fake"}, "save_type": "save"})
 
@@ -288,8 +288,8 @@ class TestCloudBackend(unittest.TestCase):
         previous_thread.isRunning.return_value = True
         backend._upload_thread = previous_thread
 
-        with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
-            "rom_mate.tv.bridge.cloud_backend.QThread.start"
+        with patch("grid_launcher.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
+            "grid_launcher.tv.bridge.cloud_backend.QThread.start"
         ):
             backend.uploadSave({"game": {"id": "5", "name": "Game", "install_dir": "/tmp/fake"}, "save_type": "save"})
 
@@ -335,10 +335,10 @@ class TestCloudUploadWorker(unittest.TestCase):
         )
 
         with patch(
-            "rom_mate.tv.bridge.cloud_backend.resolve_emulator_entry_for_game",
+            "grid_launcher.tv.bridge.cloud_backend.resolve_emulator_entry_for_game",
             return_value=("RetroArch", {"name": "RetroArch"}),
         ), patch(
-            "rom_mate.tv.bridge.cloud_backend.perform_tv_save_upload",
+            "grid_launcher.tv.bridge.cloud_backend.perform_tv_save_upload",
             return_value=(1, 1, []),
         ):
             worker.run()
@@ -365,7 +365,7 @@ class TestCloudUploadWorker(unittest.TestCase):
         )
 
         with patch(
-            "rom_mate.tv.bridge.cloud_backend.resolve_emulator_entry_for_game",
+            "grid_launcher.tv.bridge.cloud_backend.resolve_emulator_entry_for_game",
             return_value=("", None),
         ):
             worker.run()
@@ -391,10 +391,10 @@ class TestCloudUploadWorker(unittest.TestCase):
         )
 
         with patch(
-            "rom_mate.tv.bridge.cloud_backend.resolve_emulator_entry_for_game",
+            "grid_launcher.tv.bridge.cloud_backend.resolve_emulator_entry_for_game",
             return_value=("RetroArch", {"name": "RetroArch"}),
         ), patch(
-            "rom_mate.tv.bridge.cloud_backend.perform_tv_save_upload",
+            "grid_launcher.tv.bridge.cloud_backend.perform_tv_save_upload",
             return_value=(0, 0, ["No save directories found for this emulator"]),
         ):
             worker.run()
@@ -420,10 +420,10 @@ class TestCloudUploadWorker(unittest.TestCase):
         )
 
         with patch(
-            "rom_mate.tv.bridge.cloud_backend.resolve_emulator_entry_for_game",
+            "grid_launcher.tv.bridge.cloud_backend.resolve_emulator_entry_for_game",
             return_value=("RetroArch", {"name": "RetroArch"}),
         ), patch(
-            "rom_mate.tv.bridge.cloud_backend.perform_tv_save_upload",
+            "grid_launcher.tv.bridge.cloud_backend.perform_tv_save_upload",
             return_value=(1, 2, ["file2.srm"]),
         ):
             worker.run()
@@ -444,8 +444,8 @@ class TestCloudUploadWorker(unittest.TestCase):
             )
         )
 
-        with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=False), patch(
-            "rom_mate.tv.bridge.cloud_backend.QThread.start"
+        with patch("grid_launcher.tv.bridge.cloud_backend.credentials_present", return_value=False), patch(
+            "grid_launcher.tv.bridge.cloud_backend.QThread.start"
         ) as mock_thread_start:
             backend.uploadSave({"game": {"id": "5", "name": "Game"}, "save_type": "save"})
 
@@ -461,9 +461,9 @@ class TestCloudBackendState(unittest.TestCase):
     def test_delete_slot_uses_state_endpoint(self):
         backend = CloudBackend(dict(BASE_CONFIG))
 
-        with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
-            "rom_mate.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
-        ), patch("rom_mate.tv.bridge.cloud_backend._api_post_json", return_value=None) as mock_post:
+        with patch("grid_launcher.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
+            "grid_launcher.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
+        ), patch("grid_launcher.tv.bridge.cloud_backend._api_post_json", return_value=None) as mock_post:
             backend.deleteSlot({"save_id": "99", "save_type": "state"})
 
         mock_post.assert_called_once_with(
@@ -495,10 +495,10 @@ class TestCloudBackendState(unittest.TestCase):
                 "local_path": str(local_path),
             }
 
-            with patch("rom_mate.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
-                "rom_mate.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
-            ), patch("rom_mate.tv.bridge.cloud_backend._api_get_bytes", return_value=b"data"), patch(
-                "rom_mate.tv.bridge.cloud_backend._restore_single_save_payload",
+            with patch("grid_launcher.tv.bridge.cloud_backend.credentials_present", return_value=True), patch(
+                "grid_launcher.tv.bridge.cloud_backend.server_base_url", return_value="http://server"
+            ), patch("grid_launcher.tv.bridge.cloud_backend._api_get_bytes", return_value=b"data"), patch(
+                "grid_launcher.tv.bridge.cloud_backend._restore_single_save_payload",
                 return_value=Path(temp_dir) / "restored.sav",
             ):
                 backend.restoreSlot({"game": game, "save_id": "1", "save_type": "save"})

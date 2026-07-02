@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from rom_mate.cover.manager import MAX_CACHED_COVER_BYTES, queue_game_cover_load
+from grid_launcher.cover.manager import MAX_CACHED_COVER_BYTES, queue_game_cover_load
 
 
 class _StubWindow:
@@ -43,7 +43,7 @@ class CoverManagerTests(unittest.TestCase):
             window = _StubWindow(cached_cover_path)
             label = object()
 
-            with patch("rom_mate.cover.manager.QPixmap", side_effect=AssertionError("unexpected sync decode")):
+            with patch("grid_launcher.cover.manager.QPixmap", side_effect=AssertionError("unexpected sync decode")):
                 queue_game_cover_load(window, {"title": "Test Game", "platform": "Test Platform"}, label)
 
             self.assertEqual(window.applied, [])

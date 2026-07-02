@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from rom_mate.server.discover import (
+from grid_launcher.server.discover import (
     DiscoverCache,
     fetch_all_games,
     filter_games_by_installed,
@@ -152,7 +152,7 @@ class TestNormalizeDiscoverItem(unittest.TestCase):
 class TestDiscoverAPI(unittest.TestCase):
     """Test API fetch functions with mocked api_get_json."""
 
-    @patch("rom_mate.server.discover.api_get_json")
+    @patch("grid_launcher.server.discover.api_get_json")
     def test_fetch_all_games_returns_games_and_genres(self, mock_api: Mock) -> None:
         mock_api.return_value = {
             "items": [
@@ -175,28 +175,28 @@ class TestDiscoverAPI(unittest.TestCase):
         # Ensure no order_by param that would cause 422
         self.assertNotIn("order_by", call_params)
 
-    @patch("rom_mate.server.discover.api_get_json")
+    @patch("grid_launcher.server.discover.api_get_json")
     def test_fetch_all_games_api_error_returns_empty(self, mock_api: Mock) -> None:
         mock_api.side_effect = Exception("connection refused")
         games, genres = fetch_all_games("http://test", "token")
         self.assertEqual(games, [])
         self.assertEqual(genres, [])
 
-    @patch("rom_mate.server.discover.api_get_json")
+    @patch("grid_launcher.server.discover.api_get_json")
     def test_fetch_all_games_non_dict_response(self, mock_api: Mock) -> None:
         mock_api.return_value = "unexpected string"
         games, genres = fetch_all_games("http://test", "token")
         self.assertEqual(games, [])
         self.assertEqual(genres, [])
 
-    @patch("rom_mate.server.discover.api_get_json")
+    @patch("grid_launcher.server.discover.api_get_json")
     def test_fetch_all_games_no_filter_values(self, mock_api: Mock) -> None:
         mock_api.return_value = {"items": [{"id": 1, "name": "Solo"}]}
         games, genres = fetch_all_games("http://test", "token")
         self.assertEqual(len(games), 1)
         self.assertEqual(genres, [])
 
-    @patch("rom_mate.server.discover.api_get_json")
+    @patch("grid_launcher.server.discover.api_get_json")
     def test_fetch_all_games_genre_dicts(self, mock_api: Mock) -> None:
         mock_api.return_value = {
             "items": [],

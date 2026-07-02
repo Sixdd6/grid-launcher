@@ -8,61 +8,61 @@ from inspect import signature
 from pathlib import Path
 from unittest.mock import patch
 
-from rom_mate.emulator import autoconfig as emulator_autoconfig
-from rom_mate.emulator.azahar import (
+from grid_launcher.emulator import autoconfig as emulator_autoconfig
+from grid_launcher.emulator.azahar import (
     azahar_directory_settings,
     azahar_save_path_overrides,
     azahar_state_path_overrides,
 )
-from rom_mate.emulator.cemu import cemu_save_path_overrides
-from rom_mate.emulator.eden import (
+from grid_launcher.emulator.cemu import cemu_save_path_overrides
+from grid_launcher.emulator.eden import (
     eden_directory_settings,
     eden_save_path_overrides,
 )
-from rom_mate.emulator.fbneo import (
+from grid_launcher.emulator.fbneo import (
     fbneo_directory_settings,
     fbneo_save_path_overrides,
     fbneo_state_path_overrides,
 )
-from rom_mate.emulator.dolphin import (
+from grid_launcher.emulator.dolphin import (
     dolphin_directory_settings,
     dolphin_save_path_overrides,
     dolphin_state_path_overrides,
 )
-from rom_mate.emulator.mame import (
+from grid_launcher.emulator.mame import (
     mame_directory_settings,
     mame_save_path_overrides,
     mame_state_path_overrides,
 )
-from rom_mate.emulator.pcsx2 import (
+from grid_launcher.emulator.pcsx2 import (
     pcsx2_directory_settings,
     pcsx2_save_path_overrides,
     pcsx2_state_path_overrides,
 )
-from rom_mate.emulator.pico8 import (
+from grid_launcher.emulator.pico8 import (
     pico8_directory_settings,
     pico8_save_path_overrides,
 )
-from rom_mate.emulator.redream import (
+from grid_launcher.emulator.redream import (
     redream_directory_settings,
     redream_save_path_overrides,
     redream_state_path_overrides,
 )
-from rom_mate.emulator.rpcs3 import (
+from grid_launcher.emulator.rpcs3 import (
     rpcs3_directory_settings,
     rpcs3_save_path_overrides,
 )
-from rom_mate.emulator.xemu import (
+from grid_launcher.emulator.xemu import (
     xemu_directory_settings,
     xemu_save_path_overrides,
 )
-from rom_mate.emulator.xenia import (
+from grid_launcher.emulator.xenia import (
     _is_edge_variant,
     xenia_directory_settings,
     xenia_save_path_overrides,
     xenia_state_path_overrides,
 )
-from rom_mate.emulator.profiles import (
+from grid_launcher.emulator.profiles import (
     emulator_entry_matches_tokens,
     emulator_profile_for_game,
     load_emulator_autoprofiles,
@@ -70,7 +70,7 @@ from rom_mate.emulator.profiles import (
     normalize_ignore_extension_value,
     normalize_save_strategy_value,
 )
-from rom_mate.emulator.selection import (
+from grid_launcher.emulator.selection import (
     cloud_save_block_reason_for_game,
     install_block_reason_for_game,
     is_xbox360_platform,
@@ -84,7 +84,7 @@ def _resolve_autoconfig_helper(*candidate_names: str):
         if callable(helper):
             return helper
     raise AssertionError(
-        "Expected one of the manual auto-populate helpers to exist in rom_mate.emulator.autoconfig: "
+        "Expected one of the manual auto-populate helpers to exist in grid_launcher.emulator.autoconfig: "
         + ", ".join(candidate_names)
     )
 
@@ -192,8 +192,8 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
                 {"USERPROFILE": str(fake_home), "HOME": str(fake_home), "OneDrive": ""},
                 clear=False,
             ):
-                with patch("rom_mate.emulator.pcsx2.Path.home", return_value=fake_home):
-                    with patch("rom_mate.emulator.pcsx2._windows_documents_folder", return_value=None):
+                with patch("grid_launcher.emulator.pcsx2.Path.home", return_value=fake_home):
+                    with patch("grid_launcher.emulator.pcsx2._windows_documents_folder", return_value=None):
                         settings = pcsx2_directory_settings(
                             r"C:\Emulators\PCSX2\pcsx2-qt.exe",
                             "",
@@ -239,8 +239,8 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
 
     def test_pcsx2_windows_documents_folder_is_public_wrapper(self) -> None:
         sentinel = Path("/fake/documents")
-        with patch("rom_mate.emulator.pcsx2._windows_documents_folder", return_value=sentinel):
-            from rom_mate.emulator.pcsx2 import pcsx2_windows_documents_folder
+        with patch("grid_launcher.emulator.pcsx2._windows_documents_folder", return_value=sentinel):
+            from grid_launcher.emulator.pcsx2 import pcsx2_windows_documents_folder
 
             result = pcsx2_windows_documents_folder()
         self.assertEqual(result, sentinel)
@@ -942,6 +942,38 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
             )
 
         self.assertEqual(profiles, [])
+
+    def test_normalize_emulator_autoprofiles_includes_flatpak_only_entry(self) -> None:
+        """Entries with only flatpak_app_id (no match_tokens, not a compat tool)
+        must survive normalization so Flatpak detection can match them."""
+        from grid_launcher.emulator.profiles import normalize_emulator_autoprofiles
+
+        profiles = [
+            {
+                "flatpak_app_id": "com.supermodel3.Supermodel",
+                "name": "Supermodel (Sega Model 3)",
+                "args": "\"%rom%\"",
+                "all_platforms": False,
+                "platform_keywords": ["model 3", "sega model 3"],
+                "save_strategy": "single_file",
+                "save_directories": ["Saves"],
+                "state_directories": [],
+            },
+            {
+                "name": "No tokens, no flatpak",
+                "args": "\"%rom%\"",
+            },
+        ]
+
+        normalized = normalize_emulator_autoprofiles(
+            profiles,
+            lambda v: v,
+            lambda v: v,
+        )
+
+        names = [p["name"] for p in normalized]
+        self.assertIn("Supermodel (Sega Model 3)", names, "Flatpak-only entry should survive normalization")
+        self.assertNotIn("No tokens, no flatpak", names, "Entry with no tokens and no flatpak_app_id should be dropped")
 
     def test_emulator_profile_for_game_prefers_exact_title_when_match_tokens_duplicate(self) -> None:
         profiles = [

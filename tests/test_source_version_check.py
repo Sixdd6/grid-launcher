@@ -5,7 +5,7 @@ import unittest
 from urllib.error import HTTPError, URLError
 from unittest.mock import MagicMock, patch
 
-from rom_mate.background.workers import SourceVersionCheckWorker
+from grid_launcher.background.workers import SourceVersionCheckWorker
 
 
 class SourceVersionCheckWorkerTests(unittest.TestCase):
@@ -30,7 +30,7 @@ class SourceVersionCheckWorkerTests(unittest.TestCase):
         worker.finished.connect(lambda payload: results.append(payload))
 
         with patch(
-            "rom_mate.background.workers.urlopen",
+            "grid_launcher.background.workers.urlopen",
             return_value=self._make_json_response({"tag_name": "v1.2.3"}),
         ):
             worker.run()
@@ -52,7 +52,7 @@ class SourceVersionCheckWorkerTests(unittest.TestCase):
         worker.finished.connect(lambda payload: results.append(payload))
 
         with patch(
-            "rom_mate.background.workers.urlopen",
+            "grid_launcher.background.workers.urlopen",
             return_value=self._make_json_response({"tag_name": "v1.0.0"}),
         ) as mock_urlopen:
             worker.run()
@@ -76,7 +76,7 @@ class SourceVersionCheckWorkerTests(unittest.TestCase):
         worker.finished.connect(lambda payload: results.append(payload))
 
         with patch(
-            "rom_mate.background.workers.urlopen",
+            "grid_launcher.background.workers.urlopen",
             return_value=self._make_json_response({"tag_name": "v1.2.3"}),
         ):
             worker.run()
@@ -97,7 +97,7 @@ class SourceVersionCheckWorkerTests(unittest.TestCase):
         results: list[dict[str, str]] = []
         worker.finished.connect(lambda payload: results.append(payload))
 
-        with patch("rom_mate.background.workers.urlopen") as mock_urlopen:
+        with patch("grid_launcher.background.workers.urlopen") as mock_urlopen:
             worker.run()
 
         self.assertEqual(len(results), 1)
@@ -117,7 +117,7 @@ class SourceVersionCheckWorkerTests(unittest.TestCase):
         results: list[dict[str, str]] = []
         worker.finished.connect(lambda payload: results.append(payload))
 
-        with patch("rom_mate.background.workers.urlopen", side_effect=URLError("timeout")):
+        with patch("grid_launcher.background.workers.urlopen", side_effect=URLError("timeout")):
             worker.run()
 
         self.assertEqual(len(results), 1)
@@ -143,7 +143,7 @@ class SourceVersionCheckWorkerTests(unittest.TestCase):
             {},
             None,
         )
-        with patch("rom_mate.background.workers.urlopen", side_effect=error):
+        with patch("grid_launcher.background.workers.urlopen", side_effect=error):
             worker.run()
 
         self.assertEqual(len(results), 1)

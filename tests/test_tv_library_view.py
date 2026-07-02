@@ -9,7 +9,7 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 from PySide6.QtWidgets import QApplication
 
-from rom_mate.tv.widgets.views.library_view import LibraryView
+from grid_launcher.tv.widgets.views.library_view import LibraryView
 
 
 def _make_view(games: list[dict] | None = None) -> LibraryView:
@@ -69,7 +69,7 @@ class LibraryViewCarouselTests(unittest.TestCase):
         self.addCleanup(view.deleteLater)
         self._resize_view(view, 1920, 1080)
 
-        with patch("rom_mate.tv.widgets.views.library_view.QParallelAnimationGroup.start"):
+        with patch("grid_launcher.tv.widgets.views.library_view.QParallelAnimationGroup.start"):
             view.handle_nav("right")
 
         self.assertEqual(view._current_idx, 1)
@@ -80,7 +80,7 @@ class LibraryViewCarouselTests(unittest.TestCase):
         self._resize_view(view, 1920, 1080)
         view._current_idx = 0
 
-        with patch("rom_mate.tv.widgets.views.library_view.QParallelAnimationGroup.start"):
+        with patch("grid_launcher.tv.widgets.views.library_view.QParallelAnimationGroup.start"):
             view.handle_nav("left")
 
         self.assertEqual(view._current_idx, 0)
@@ -92,7 +92,7 @@ class LibraryViewCarouselTests(unittest.TestCase):
         self._resize_view(view, 1920, 1080)
         view._current_idx = 4
 
-        with patch("rom_mate.tv.widgets.views.library_view.QParallelAnimationGroup.start"):
+        with patch("grid_launcher.tv.widgets.views.library_view.QParallelAnimationGroup.start"):
             view.handle_nav("right")
 
         self.assertEqual(view._current_idx, 4)
@@ -128,7 +128,7 @@ class LibraryViewCarouselTests(unittest.TestCase):
         view._anim_blocked = True
         view._pending_nav = "right"
 
-        with patch("rom_mate.tv.widgets.views.library_view.QParallelAnimationGroup.start"):
+        with patch("grid_launcher.tv.widgets.views.library_view.QParallelAnimationGroup.start"):
             view._on_nav_finished("right")
 
         self.assertIsNone(view._pending_nav)

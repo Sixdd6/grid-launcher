@@ -5,15 +5,15 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from rom_mate.library.archive_preparation import prepare_installed_game_without_ui
-from rom_mate.library.ps3_install import (
+from grid_launcher.library.archive_preparation import prepare_installed_game_without_ui
+from grid_launcher.library.ps3_install import (
     ps3_classify_extracted_contents,
     ps3_game_id_from_text,
     ps3_game_id_from_paths,
     detected_ps3_game_id,
     ps3_route_extracted_contents,
 )
-from rom_mate.ui.mixins.install_mixin import InstallMixin
+from grid_launcher.ui.mixins.install_mixin import InstallMixin
 
 
 class PS3InstallTests(unittest.TestCase):
@@ -33,7 +33,7 @@ class PS3InstallTests(unittest.TestCase):
                 (game_dir / "PS3_DISC.SFB").write_bytes(b"disc")
 
             with patch(
-                "rom_mate.library.archive_preparation.extract_archive_into_directory",
+                "grid_launcher.library.archive_preparation.extract_archive_into_directory",
                 side_effect=fake_extract,
             ):
                 prepared, warning_text = prepare_installed_game_without_ui(
@@ -72,7 +72,7 @@ class PS3InstallTests(unittest.TestCase):
                 (game_dir / "PS3_GAME" / "PARAM.SFO").write_bytes(b"sfo")
 
             with patch(
-                "rom_mate.library.archive_preparation.extract_archive_into_directory",
+                "grid_launcher.library.archive_preparation.extract_archive_into_directory",
                 side_effect=fake_extract,
             ):
                 prepared, warning_text = prepare_installed_game_without_ui(
@@ -108,7 +108,7 @@ class PS3InstallTests(unittest.TestCase):
                 (game_dir / "PS3_GAME" / "PARAM.SFO").write_bytes(b"sfo")
 
             with patch(
-                "rom_mate.library.archive_preparation.extract_archive_into_directory",
+                "grid_launcher.library.archive_preparation.extract_archive_into_directory",
                 side_effect=fake_extract,
             ):
                 prepared, warning_text = prepare_installed_game_without_ui(
@@ -140,7 +140,7 @@ class PS3InstallTests(unittest.TestCase):
                 (destination / "some_unknown_dir" / "data.bin").write_bytes(b"data")
 
             with patch(
-                "rom_mate.library.archive_preparation.extract_archive_into_directory",
+                "grid_launcher.library.archive_preparation.extract_archive_into_directory",
                 side_effect=fake_extract,
             ):
                 prepared, warning_text = prepare_installed_game_without_ui(
@@ -556,7 +556,7 @@ class PS3GamesYmlCallSiteTests(unittest.TestCase):
             )
             game = {"platform": "PlayStation 3", "ps3_game_id": "BLUS30336"}
 
-            with patch("rom_mate.ui.mixins.install_mixin.update_rpcs3_games_yml") as update_games:
+            with patch("grid_launcher.ui.mixins.install_mixin.update_rpcs3_games_yml") as update_games:
                 window._write_rpcs3_games_yml_for_game(game)
 
         update_games.assert_called_once_with(data_root, "BLUS30336", dev_hdd0, games_dir)
@@ -571,7 +571,7 @@ class PS3GamesYmlCallSiteTests(unittest.TestCase):
             )
             game = {"platform": "PC", "ps3_game_id": "BLUS30336"}
 
-            with patch("rom_mate.ui.mixins.install_mixin.update_rpcs3_games_yml") as update_games:
+            with patch("grid_launcher.ui.mixins.install_mixin.update_rpcs3_games_yml") as update_games:
                 window._write_rpcs3_games_yml_for_game(game)
 
         update_games.assert_not_called()
@@ -582,7 +582,7 @@ class PS3GamesYmlCallSiteTests(unittest.TestCase):
             window = _StubInstallWindow(is_ps3=True, data_root=None, dev_hdd0=tmp_path / "dev_hdd0")
             game = {"platform": "PlayStation 3", "ps3_game_id": "BLUS30336"}
 
-            with patch("rom_mate.ui.mixins.install_mixin.update_rpcs3_games_yml") as update_games:
+            with patch("grid_launcher.ui.mixins.install_mixin.update_rpcs3_games_yml") as update_games:
                 window._write_rpcs3_games_yml_for_game(game)
 
         update_games.assert_not_called()
@@ -597,7 +597,7 @@ class PS3GamesYmlCallSiteTests(unittest.TestCase):
             )
             game = {"platform": "PlayStation 3"}
 
-            with patch("rom_mate.ui.mixins.install_mixin.update_rpcs3_games_yml") as update_games:
+            with patch("grid_launcher.ui.mixins.install_mixin.update_rpcs3_games_yml") as update_games:
                 window._write_rpcs3_games_yml_for_game(game)
 
         update_games.assert_not_called()

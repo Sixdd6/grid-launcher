@@ -8,8 +8,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from rom_mate.cover.details import update_details_layout_metrics
-from rom_mate.ui.game_views import open_game_details
+from grid_launcher.cover.details import update_details_layout_metrics
+from grid_launcher.ui.game_views import open_game_details
 
 
 class _StubFrame:

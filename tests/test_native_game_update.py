@@ -7,11 +7,11 @@ import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from rom_mate.library.archive_preparation import (
+from grid_launcher.library.archive_preparation import (
     merge_archive_into_directory,
     prepare_native_game_update_without_ui,
 )
-from rom_mate.library.install_registry import build_installed_game_record
+from grid_launcher.library.install_registry import build_installed_game_record
 
 
 class TestMergeArchiveIntoDirectory(unittest.TestCase):

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 
-from rom_mate.server.catalog import games_from_rom_items
+from grid_launcher.server.catalog import games_from_rom_items
 
 
 class ServerCatalogPs4MetadataTests(unittest.TestCase):

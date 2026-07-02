@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QGridLayout, QLabel, QScrollArea, QWidget
 
-from rom_mate.server.view import (
+from grid_launcher.server.view import (
     _ServerGamePlaceholder,
     _upgrade_visible_server_cards,
     render_server_games,

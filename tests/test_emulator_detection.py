@@ -5,10 +5,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from rom_mate.emulator.detection import (
+import json
+
+from grid_launcher.emulator.detection import (
     detect_installed_flatpak_emulators,
     installed_flatpak_app_ids,
 )
+from grid_launcher.ui.mixins.emulator_ui_mixin import EmulatorUIMixin
 
 
 class InstalledFlatpakAppIdsTests(unittest.TestCase):
@@ -27,7 +30,7 @@ class InstalledFlatpakAppIdsTests(unittest.TestCase):
             (user_app_dir / "not-an-app.txt").write_text("", encoding="utf-8")
 
             with patch("sys.platform", "linux"), patch(
-                "rom_mate.emulator.detection.xdg_data_home", return_value=data_home
+                "grid_launcher.emulator.detection.xdg_data_home", return_value=data_home
             ):
                 result = installed_flatpak_app_ids()
 
@@ -41,7 +44,7 @@ class InstalledFlatpakAppIdsTests(unittest.TestCase):
             data_home = Path(temp_dir) / "nonexistent-data-home"
 
             with patch("sys.platform", "linux"), patch(
-                "rom_mate.emulator.detection.xdg_data_home", return_value=data_home
+                "grid_launcher.emulator.detection.xdg_data_home", return_value=data_home
             ):
                 result = installed_flatpak_app_ids()
 
@@ -86,9 +89,9 @@ class DetectInstalledFlatpakEmulatorsTests(unittest.TestCase):
 
     def test_returns_empty_list_when_flatpak_binary_missing(self) -> None:
         with patch("sys.platform", "linux"), patch(
-            "rom_mate.emulator.detection.shutil.which", return_value=None
+            "grid_launcher.emulator.detection.shutil.which", return_value=None
         ), patch(
-            "rom_mate.emulator.detection.installed_flatpak_app_ids",
+            "grid_launcher.emulator.detection.installed_flatpak_app_ids",
             return_value={"org.azahar_emu.Azahar"},
         ):
             result = detect_installed_flatpak_emulators(self._autoprofiles())
@@ -102,9 +105,9 @@ class DetectInstalledFlatpakEmulatorsTests(unittest.TestCase):
             "org.uninstalled.NotReal",
         }
         with patch("sys.platform", "linux"), patch(
-            "rom_mate.emulator.detection.shutil.which", return_value="/usr/bin/flatpak"
+            "grid_launcher.emulator.detection.shutil.which", return_value="/usr/bin/flatpak"
         ), patch(
-            "rom_mate.emulator.detection.installed_flatpak_app_ids",
+            "grid_launcher.emulator.detection.installed_flatpak_app_ids",
             return_value=installed,
         ):
             result = detect_installed_flatpak_emulators(self._autoprofiles())
@@ -148,13 +151,98 @@ class DetectInstalledFlatpakEmulatorsTests(unittest.TestCase):
     def test_skips_profiles_with_no_flatpak_app_id(self) -> None:
         installed = {"Pico-8", "org.uninstalled.NotReal"}
         with patch("sys.platform", "linux"), patch(
-            "rom_mate.emulator.detection.shutil.which", return_value="/usr/bin/flatpak"
+            "grid_launcher.emulator.detection.shutil.which", return_value="/usr/bin/flatpak"
         ), patch(
-            "rom_mate.emulator.detection.installed_flatpak_app_ids",
+            "grid_launcher.emulator.detection.installed_flatpak_app_ids",
             return_value=installed,
         ):
             result = detect_installed_flatpak_emulators(self._autoprofiles())
         self.assertEqual(result, [])
+
+
+class TestFlatpakRetroarchDetection(unittest.TestCase):
+    """Tests for the RetroArch flatpak_cores_dir wiring in
+    detect_installed_flatpak_emulators().
+    """
+
+    def _real_autoprofiles(self) -> list[dict]:
+        autoprofiles_path = (
+            Path(__file__).resolve().parent.parent / "emulator-autoprofiles.json"
+        )
+        with open(autoprofiles_path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+
+    def _detect_retroarch_entry(self) -> dict:
+        with patch("sys.platform", "linux"), patch(
+            "grid_launcher.emulator.detection.shutil.which", return_value="/usr/bin/flatpak"
+        ), patch(
+            "grid_launcher.emulator.detection.installed_flatpak_app_ids",
+            return_value={"org.libretro.RetroArch"},
+        ):
+            result = detect_installed_flatpak_emulators(self._real_autoprofiles())
+
+        retroarch_entries = [
+            entry
+            for entry in result
+            if entry.get("flatpak_app_id") == "org.libretro.RetroArch"
+        ]
+        self.assertEqual(len(retroarch_entries), 1)
+        return retroarch_entries[0]
+
+    def test_retroarch_flatpak_entry_contains_flatpak_cores_dir(self) -> None:
+        entry = self._detect_retroarch_entry()
+        self.assertIn("flatpak_cores_dir", entry)
+        cores_dir = entry["flatpak_cores_dir"]
+        self.assertIn("org.libretro.RetroArch", cores_dir)
+        self.assertIn("cores", cores_dir)
+
+    def test_retroarch_flatpak_cores_dir_key_has_no_underscore_prefix(self) -> None:
+        entry = self._detect_retroarch_entry()
+        self.assertIn("flatpak_cores_dir", entry)
+        self.assertNotIn("_flatpak_cores_dir", entry)
+
+
+class _MigrateFlatpakCoresDirStubWindow(EmulatorUIMixin):
+    def __init__(self, emulators: list[dict]) -> None:
+        self.config = {"emulators": emulators}
+        self.saved_configs: list[dict] = []
+
+    def _save_config(self, config: dict) -> None:
+        self.saved_configs.append(config)
+
+
+class MigrateFlatpakRetroArchCoresDirTests(unittest.TestCase):
+    def test_migration_backfills_missing_cores_dir(self) -> None:
+        window = _MigrateFlatpakCoresDirStubWindow(
+            [{"name": "RetroArch", "flatpak_app_id": "org.libretro.RetroArch"}]
+        )
+        window._migrate_flatpak_retroarch_cores_dir()
+        entry = window.config["emulators"][0]
+        self.assertIn("org.libretro.RetroArch", entry["flatpak_cores_dir"])
+        self.assertIn("cores", entry["flatpak_cores_dir"])
+
+    def test_migration_skips_entry_that_already_has_cores_dir(self) -> None:
+        window = _MigrateFlatpakCoresDirStubWindow(
+            [
+                {
+                    "name": "RetroArch",
+                    "flatpak_app_id": "org.libretro.RetroArch",
+                    "flatpak_cores_dir": "/custom/cores",
+                }
+            ]
+        )
+        window._migrate_flatpak_retroarch_cores_dir()
+        entry = window.config["emulators"][0]
+        self.assertEqual(entry["flatpak_cores_dir"], "/custom/cores")
+        self.assertEqual(window.saved_configs, [])
+
+    def test_migration_skips_non_retroarch_flatpak_entries(self) -> None:
+        window = _MigrateFlatpakCoresDirStubWindow(
+            [{"name": "PPSSPP", "flatpak_app_id": "org.ppsspp.PPSSPP"}]
+        )
+        window._migrate_flatpak_retroarch_cores_dir()
+        entry = window.config["emulators"][0]
+        self.assertNotIn("flatpak_cores_dir", entry)
 
 
 if __name__ == "__main__":

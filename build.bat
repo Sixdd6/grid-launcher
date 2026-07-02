@@ -1,10 +1,10 @@
 @echo off
-REM Build script for rom-mate-neo
+REM Build script for GRID Launcher
 REM This script builds the application into a standalone Windows executable
 
 echo.
 echo ================================
-echo rom-mate-neo Build Script
+echo GRID Launcher Build Script
 echo ================================
 echo.
 
@@ -37,15 +37,16 @@ python -m PyInstaller ^
     --clean ^
     --windowed ^
     --onefile ^
-    --name rom-mate-neo ^
+    --name grid-launcher ^
     --add-data "assets;assets" ^
     --add-data "retroarch-core-list.json;." ^
+    --add-data "romm-platform-cores.json;." ^
     --add-data "emulator-autoprofiles.json;." ^
     --hidden-import brotli ^
     --hidden-import pyzstd ^
     --hidden-import pyppmd ^
     --hidden-import keyring.backends.Windows ^
-    rom-mate.py
+    grid-launcher.py
 
 REM Check if build was successful
 if %errorlevel% equ 0 (
@@ -55,10 +56,10 @@ if %errorlevel% equ 0 (
     echo ================================
     echo.
     echo Executable location:
-    echo   .\dist\rom-mate-neo.exe
+    echo   .\dist\grid-launcher.exe
     echo.
     echo You can now:
-    echo   1. Run it directly: .\dist\rom-mate-neo.exe
+    echo   1. Run it directly: .\dist\grid-launcher.exe
     echo   2. Move it to any location
     echo   3. Share the executable file
 ) else (

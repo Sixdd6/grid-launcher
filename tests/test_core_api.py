@@ -4,7 +4,7 @@ import unittest
 from io import BytesIO
 from urllib.error import HTTPError
 
-from rom_mate.core.api import build_auth_headers, build_binary_auth_headers, format_http_error_details
+from grid_launcher.core.api import build_auth_headers, build_binary_auth_headers, format_http_error_details
 
 
 class CoreApiTests(unittest.TestCase):

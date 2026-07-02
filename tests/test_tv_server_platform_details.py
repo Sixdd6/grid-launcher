@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from rom_mate.server.catalog import server_platform_details
+from grid_launcher.server.catalog import server_platform_details
 
 
 class ServerPlatformDetailsTests(unittest.TestCase):

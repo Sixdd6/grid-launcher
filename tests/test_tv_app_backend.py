@@ -16,7 +16,7 @@ _app = QApplication.instance() or QApplication(sys.argv)
 
 class TestAppBackendConfigDefaults(unittest.TestCase):
     def _make_backend(self, config: dict) -> "AppBackend":
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
         return AppBackend(config, Path("/tmp/covers"))
 
     def test_tv_guide_exclusion_list_empty_when_key_missing(self):
@@ -74,28 +74,28 @@ class TestAppBackendConfigDefaults(unittest.TestCase):
 
 class TestAppBackendSetGuideExclusionList(unittest.TestCase):
     def _make_backend(self, config: dict) -> "AppBackend":
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
         return AppBackend(config, Path("/tmp/covers"))
 
-    @patch("rom_mate.tv.bridge.app_backend._write_config_file")
+    @patch("grid_launcher.tv.bridge.app_backend._write_config_file")
     def test_set_guide_exclusion_list_updates_config(self, mock_write):
         backend = self._make_backend({})
         backend.setGuideExclusionList(["RPCS3", "Dolphin"])
         self.assertEqual(backend._config["tv_guide_button_exclusion_list"], ["RPCS3", "Dolphin"])
 
-    @patch("rom_mate.tv.bridge.app_backend._write_config_file")
+    @patch("grid_launcher.tv.bridge.app_backend._write_config_file")
     def test_set_guide_exclusion_list_persists(self, mock_write):
         backend = self._make_backend({})
         backend.setGuideExclusionList(["RPCS3"])
         self.assertTrue(mock_write.called)
 
-    @patch("rom_mate.tv.bridge.app_backend._write_config_file")
+    @patch("grid_launcher.tv.bridge.app_backend._write_config_file")
     def test_set_home_view_valid(self, mock_write):
         backend = self._make_backend({})
         backend.setHomeView("server")
         self.assertEqual(backend._config["tv_mode_home_view"], "server")
 
-    @patch("rom_mate.tv.bridge.app_backend._write_config_file")
+    @patch("grid_launcher.tv.bridge.app_backend._write_config_file")
     def test_set_home_view_invalid_ignored(self, mock_write):
         backend = self._make_backend({"tv_mode_home_view": "home"})
         backend.setHomeView("invalid_value")
@@ -105,7 +105,7 @@ class TestAppBackendSetGuideExclusionList(unittest.TestCase):
 
 class TestAppBackendSyncConfig(unittest.TestCase):
     def test_sync_config_updates_library_games(self):
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
         backend = AppBackend({}, Path("/tmp/covers"))
         new_config = {"installed_games": [{"title": "Zelda", "platform": "N64"}]}
         backend.syncConfig(new_config)
@@ -114,7 +114,7 @@ class TestAppBackendSyncConfig(unittest.TestCase):
 
 class TestAppBackendConnectToServer(unittest.TestCase):
     def _make_backend(self, config: dict) -> "AppBackend":
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
         return AppBackend(config, Path("/tmp/covers"))
 
     def test_connect_to_server_emits_status_when_no_credentials(self):
@@ -149,9 +149,9 @@ class TestAppBackendConnectToServer(unittest.TestCase):
 
 class TestAppBackendSettings(unittest.TestCase):
     def setUp(self):
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
 
-        self._write_patcher = patch("rom_mate.tv.bridge.app_backend._write_config_file")
+        self._write_patcher = patch("grid_launcher.tv.bridge.app_backend._write_config_file")
         self.mock_write = self._write_patcher.start()
         self.addCleanup(self._write_patcher.stop)
 
@@ -232,20 +232,20 @@ class TestAppBackendSettings(unittest.TestCase):
 
 class TestAppBackendOverlayState(unittest.TestCase):
     def test_ui_overlay_active_defaults_false(self):
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
 
         backend = AppBackend(config={}, image_cache_dir=Path("/tmp"))
         self.assertFalse(backend.uiOverlayActive)
 
     def test_set_ui_overlay_active_true(self):
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
 
         backend = AppBackend(config={}, image_cache_dir=Path("/tmp"))
         backend.setUiOverlayActive(True)
         self.assertTrue(backend.uiOverlayActive)
 
     def test_set_ui_overlay_active_false(self):
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
 
         backend = AppBackend(config={}, image_cache_dir=Path("/tmp"))
         backend.setUiOverlayActive(True)
@@ -253,7 +253,7 @@ class TestAppBackendOverlayState(unittest.TestCase):
         self.assertFalse(backend.uiOverlayActive)
 
     def test_set_ui_overlay_active_emits_signal_on_change(self):
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
 
         backend = AppBackend(config={}, image_cache_dir=Path("/tmp"))
         fired = []
@@ -262,7 +262,7 @@ class TestAppBackendOverlayState(unittest.TestCase):
         self.assertEqual(len(fired), 1)
 
     def test_set_ui_overlay_active_no_emit_if_unchanged(self):
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
 
         backend = AppBackend(config={}, image_cache_dir=Path("/tmp"))
         fired = []
@@ -273,7 +273,7 @@ class TestAppBackendOverlayState(unittest.TestCase):
 
 class TestAppBackendCuratedRows(unittest.TestCase):
     def _make_backend(self, config: dict = None) -> "AppBackend":
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
         return AppBackend(config or {}, Path("/tmp/covers"))
 
     def test_favorites_games_initially_empty(self):
@@ -326,11 +326,11 @@ class TestAppBackendCuratedRows(unittest.TestCase):
 
     def test_catalog_finish_triggers_curated_fetch(self):
                 from unittest.mock import patch
-                from rom_mate.tv.bridge.app_backend import AppBackend
+                from grid_launcher.tv.bridge.app_backend import AppBackend
 
                 backend = AppBackend({}, Path("/tmp/covers"))
-                with patch("rom_mate.server.catalog.server_platform_ids", return_value={}), \
-                         patch("rom_mate.server.state.account_status_text", return_value="Connected"), \
+                with patch("grid_launcher.server.catalog.server_platform_ids", return_value={}), \
+                         patch("grid_launcher.server.state.account_status_text", return_value="Connected"), \
                          patch.object(backend, "_start_curated_rows_fetch") as mock_curated, \
                          patch.object(backend, "_start_saves_fetch"):
                         backend._on_catalog_finished({"me": {}, "platforms": {}})
@@ -351,9 +351,9 @@ class TestAppBackendCuratedRows(unittest.TestCase):
             "player_count": "1-2 players",
         }]
 
-        with patch("rom_mate.server.catalog.server_platform_ids", return_value={"SNES": 42}), \
-             patch("rom_mate.server.catalog.server_platform_details", return_value=expected_details), \
-             patch("rom_mate.server.state.account_status_text", return_value="Connected"), \
+        with patch("grid_launcher.server.catalog.server_platform_ids", return_value={"SNES": 42}), \
+             patch("grid_launcher.server.catalog.server_platform_details", return_value=expected_details), \
+             patch("grid_launcher.server.state.account_status_text", return_value="Connected"), \
                patch.object(backend, "_start_curated_rows_fetch"), \
                patch.object(backend, "_start_saves_fetch"):
             backend._on_catalog_finished({"me": {}, "platforms": {}})
@@ -389,9 +389,9 @@ class TestAppBackendCuratedRows(unittest.TestCase):
         }]
         backend.platformsChanged.connect(lambda: emissions.append(1))
 
-        with patch("rom_mate.server.catalog.server_platform_ids", return_value={"SNES": 42}), \
-             patch("rom_mate.server.catalog.server_platform_details", return_value=expected_details), \
-             patch("rom_mate.server.state.account_status_text", return_value="Connected"), \
+        with patch("grid_launcher.server.catalog.server_platform_ids", return_value={"SNES": 42}), \
+             patch("grid_launcher.server.catalog.server_platform_details", return_value=expected_details), \
+             patch("grid_launcher.server.state.account_status_text", return_value="Connected"), \
              patch.object(backend, "_start_curated_rows_fetch"), \
              patch.object(backend, "_start_saves_fetch"):
             backend._on_catalog_finished({"me": {}, "platforms": {}})
@@ -401,7 +401,7 @@ class TestAppBackendCuratedRows(unittest.TestCase):
 
 class TestAppBackendSavesFetch(unittest.TestCase):
     def setUp(self):
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
 
         self.backend = AppBackend({}, Path("/tmp/covers"))
 
@@ -446,8 +446,8 @@ class TestAppBackendSavesFetch(unittest.TestCase):
         platforms_payload = {}
         with patch.object(self.backend, "_start_saves_fetch") as mock_saves, \
              patch.object(self.backend, "_start_curated_rows_fetch"), \
-             patch("rom_mate.server.catalog.server_platform_ids", return_value={}), \
-             patch("rom_mate.server.state.account_status_text", return_value="Connected"):
+             patch("grid_launcher.server.catalog.server_platform_ids", return_value={}), \
+             patch("grid_launcher.server.state.account_status_text", return_value="Connected"):
             self.backend._on_catalog_finished({"me": me_payload, "platforms": platforms_payload})
             mock_saves.assert_called_once()
 
@@ -463,7 +463,7 @@ class TestAppBackendSavesFetch(unittest.TestCase):
 
 class TestAppBackendToggleFavorite(unittest.TestCase):
     def setUp(self):
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
 
         self.backend = AppBackend({}, Path("/tmp/covers"))
 
@@ -482,8 +482,8 @@ class TestAppBackendToggleFavorite(unittest.TestCase):
 
         self.assertIs(self.backend._toggle_thread, existing_thread)
 
-    @patch("rom_mate.tv.bridge.app_backend.threading.Thread")
-    @patch("rom_mate.tv.bridge.workers.CollectionUpdateWorker")
+    @patch("grid_launcher.tv.bridge.app_backend.threading.Thread")
+    @patch("grid_launcher.tv.bridge.workers.CollectionUpdateWorker")
     def test_toggle_favorite_adds_rom_to_existing_collection(self, mock_update_worker, mock_thread_cls):
         fake_thread = MagicMock()
         mock_thread_cls.return_value = fake_thread
@@ -498,8 +498,8 @@ class TestAppBackendToggleFavorite(unittest.TestCase):
         self.assertTrue(self.backend._toggle_adding)
         fake_thread.start.assert_called_once()
 
-    @patch("rom_mate.tv.bridge.app_backend.threading.Thread")
-    @patch("rom_mate.tv.bridge.workers.CollectionUpdateWorker")
+    @patch("grid_launcher.tv.bridge.app_backend.threading.Thread")
+    @patch("grid_launcher.tv.bridge.workers.CollectionUpdateWorker")
     def test_toggle_favorite_removes_rom_from_existing_collection(self, mock_update_worker, mock_thread_cls):
         fake_thread = MagicMock()
         mock_thread_cls.return_value = fake_thread
@@ -514,9 +514,9 @@ class TestAppBackendToggleFavorite(unittest.TestCase):
         self.assertFalse(self.backend._toggle_adding)
         fake_thread.start.assert_called_once()
 
-    @patch("rom_mate.tv.bridge.app_backend.threading.Thread")
-    @patch("rom_mate.tv.bridge.workers.CollectionUpdateWorker")
-    @patch("rom_mate.tv.bridge.workers.CollectionCreateWorker")
+    @patch("grid_launcher.tv.bridge.app_backend.threading.Thread")
+    @patch("grid_launcher.tv.bridge.workers.CollectionUpdateWorker")
+    @patch("grid_launcher.tv.bridge.workers.CollectionCreateWorker")
     def test_toggle_favorite_creates_collection_when_none_exists(
         self,
         mock_create_worker,
@@ -571,7 +571,7 @@ class TestAppBackendToggleFavorite(unittest.TestCase):
 
 class TestAppBackendAvailableEmulatorNames(unittest.TestCase):
     def _make_backend(self, config):
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
         return AppBackend(config, Path("/tmp/covers"))
 
     def test_returns_sorted_names_excluding_already_excluded(self):
@@ -629,7 +629,7 @@ class TestAppBackendAvailableEmulatorNames(unittest.TestCase):
 
 class TestAppBackendGetInstalledLocalPath(unittest.TestCase):
     def _make_backend(self, config: dict) -> "AppBackend":
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
         return AppBackend(config, Path("/tmp/covers"))
 
     def test_returns_local_path_when_game_is_installed(self):
@@ -694,7 +694,7 @@ class TestAppBackendGetInstalledLocalPath(unittest.TestCase):
 
 class TestAppBackendEnrichWithLocalPaths(unittest.TestCase):
     def _make_backend(self, config: dict) -> "AppBackend":
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
         return AppBackend(config, Path("/tmp/covers"))
 
     def test_server_games_for_platform_enriches_installed_game(self):
@@ -770,7 +770,7 @@ class TestAppBackendEnrichWithLocalPaths(unittest.TestCase):
 
 class TestAppBackendInstallStateCrossNotification(unittest.TestCase):
     def _make_backend(self, config: dict) -> "AppBackend":
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
         return AppBackend(config, Path("/tmp/covers"))
 
     def test_highly_rated_games_de_enriches_after_install_state_change(self):
@@ -809,7 +809,7 @@ class TestAppBackendInstallStateCrossNotification(unittest.TestCase):
 
 class TestAppBackendFetchRomMetadata(unittest.TestCase):
     def _make_backend(self, config: dict) -> "AppBackend":
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
         return AppBackend(config, Path("/tmp/covers"))
 
     def test_fetch_rom_metadata_skips_when_no_rom_id(self):
@@ -839,7 +839,7 @@ class TestAppBackendFetchRomMetadata(unittest.TestCase):
     def test_fetch_rom_metadata_runs_when_first_release_date_missing(self):
         import threading
         from unittest.mock import patch
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
 
         backend = AppBackend(
             {"server_url": "http://server", "api_token": "tok"},
@@ -854,8 +854,8 @@ class TestAppBackendFetchRomMetadata(unittest.TestCase):
             "filesize_bytes": "1024",
             "companies": "Nintendo",
         }
-        with patch("rom_mate.core.api.api_get_json", return_value={}), \
-             patch("rom_mate.server.metadata.details_metadata_from_item", return_value={}):
+        with patch("grid_launcher.core.api.api_get_json", return_value={}), \
+             patch("grid_launcher.server.metadata.details_metadata_from_item", return_value={}):
             backend.fetchRomMetadata(json.dumps(game))
 
         t = backend._rom_meta_threads.get("55")
@@ -866,7 +866,7 @@ class TestAppBackendFetchRomMetadata(unittest.TestCase):
 
     def test_fetch_rom_metadata_emits_romMetadataReady(self):
         from unittest.mock import patch
-        from rom_mate.tv.bridge.app_backend import AppBackend, _RomMetaFetchWorker
+        from grid_launcher.tv.bridge.app_backend import AppBackend, _RomMetaFetchWorker
 
         backend = AppBackend(
             {"server_url": "http://server", "api_token": "tok"},
@@ -874,8 +874,8 @@ class TestAppBackendFetchRomMetadata(unittest.TestCase):
         )
 
         fake_api_payload = {"igdb_metadata": {"genres": ["RPG"]}}
-        with patch("rom_mate.core.api.api_get_json", return_value=fake_api_payload), \
-             patch("rom_mate.server.metadata.details_metadata_from_item", return_value={"genres": "RPG", "description": ""}):
+        with patch("grid_launcher.core.api.api_get_json", return_value=fake_api_payload), \
+             patch("grid_launcher.server.metadata.details_metadata_from_item", return_value={"genres": "RPG", "description": ""}):
             worker = _RomMetaFetchWorker("http://server", "tok", "42")
             worker_results = []
             worker.finished.connect(lambda payload: worker_results.append(payload))
@@ -897,15 +897,15 @@ class TestAppBackendFetchRomMetadata(unittest.TestCase):
     def test_fetch_rom_metadata_stores_threading_thread(self):
         import threading
         from unittest.mock import patch
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
 
         backend = AppBackend(
             {"server_url": "http://server", "api_token": "tok"},
             Path("/tmp/covers"),
         )
         game = {"rom_id": "99", "genres": "", "description": "", "rating": "", "filesize_bytes": "", "companies": ""}
-        with patch("rom_mate.core.api.api_get_json", return_value={}), \
-             patch("rom_mate.server.metadata.details_metadata_from_item", return_value={}):
+        with patch("grid_launcher.core.api.api_get_json", return_value={}), \
+             patch("grid_launcher.server.metadata.details_metadata_from_item", return_value={}):
             backend.fetchRomMetadata(json.dumps(game))
 
         t = backend._rom_meta_threads.get("99")
@@ -917,7 +917,7 @@ class TestAppBackendFetchRomMetadata(unittest.TestCase):
     def test_fetch_rom_metadata_dedup_skips_when_alive(self):
         import threading
         from unittest.mock import MagicMock
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
 
         backend = AppBackend(
             {"server_url": "http://server", "api_token": "tok"},
@@ -930,14 +930,14 @@ class TestAppBackendFetchRomMetadata(unittest.TestCase):
         fake_thread.is_alive.return_value = True
         backend._rom_meta_threads["77"] = fake_thread
 
-        with patch("rom_mate.tv.bridge.app_backend.threading") as mock_threading:
+        with patch("grid_launcher.tv.bridge.app_backend.threading") as mock_threading:
             backend.fetchRomMetadata(json.dumps(game))
             mock_threading.Thread.assert_not_called()
 
     def test_rom_metadata_fetch_started_signal_emitted(self):
         import threading
         from unittest.mock import patch
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
 
         backend = AppBackend(
             {"server_url": "http://server", "api_token": "tok"},
@@ -955,8 +955,8 @@ class TestAppBackendFetchRomMetadata(unittest.TestCase):
         emitted_ids: list[str] = []
         backend.romMetadataFetchStarted.connect(lambda rid: emitted_ids.append(rid))
 
-        with patch("rom_mate.core.api.api_get_json", return_value={}), \
-             patch("rom_mate.server.metadata.details_metadata_from_item", return_value={}):
+        with patch("grid_launcher.core.api.api_get_json", return_value={}), \
+             patch("grid_launcher.server.metadata.details_metadata_from_item", return_value={}):
             backend.fetchRomMetadata(json.dumps(game))
 
         t = backend._rom_meta_threads.get("88")
@@ -966,7 +966,7 @@ class TestAppBackendFetchRomMetadata(unittest.TestCase):
         self.assertEqual(emitted_ids, ["88"])
 
     def test_on_rom_meta_finished_removes_worker_and_calls_delete_later(self):
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
 
         backend = AppBackend(
             {"server_url": "http://server", "api_token": "tok"},
@@ -981,13 +981,13 @@ class TestAppBackendFetchRomMetadata(unittest.TestCase):
 
 class TestAppBackendStartRomFetch(unittest.TestCase):
     def _make_backend(self, config: dict = None) -> "AppBackend":
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
         return AppBackend(config or {}, Path("/tmp/covers"))
 
     def test_start_rom_fetch_stores_threading_thread(self):
         import threading
         from unittest.mock import MagicMock, patch
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
 
         backend = AppBackend(
             {"server_url": "http://server", "installed_games": []},
@@ -998,8 +998,8 @@ class TestAppBackendStartRomFetch(unittest.TestCase):
         fake_thread = MagicMock(spec=threading.Thread)
         fake_thread.is_alive.return_value = False
 
-        with patch("rom_mate.tv.bridge.app_backend.threading") as mock_threading, \
-             patch("rom_mate.tv.bridge.workers.RomListFetchWorker") as _mock_worker_cls:
+        with patch("grid_launcher.tv.bridge.app_backend.threading") as mock_threading, \
+             patch("grid_launcher.tv.bridge.workers.RomListFetchWorker") as _mock_worker_cls:
             mock_threading.Thread.return_value = fake_thread
             backend._start_rom_fetch("PS2", 2)
 
@@ -1010,7 +1010,7 @@ class TestAppBackendStartRomFetch(unittest.TestCase):
     def test_start_rom_fetch_skips_when_thread_alive(self):
         import threading
         from unittest.mock import MagicMock, patch
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
 
         backend = AppBackend(
             {"server_url": "http://server", "installed_games": []},
@@ -1020,14 +1020,14 @@ class TestAppBackendStartRomFetch(unittest.TestCase):
         fake_thread.is_alive.return_value = True
         backend._rom_threads["PS2"] = fake_thread
 
-        with patch("rom_mate.tv.bridge.app_backend.threading") as mock_threading:
+        with patch("grid_launcher.tv.bridge.app_backend.threading") as mock_threading:
             backend._start_rom_fetch("PS2", 2)
             mock_threading.Thread.assert_not_called()
 
     def test_on_rom_fetch_thread_done_removes_finished_entries(self):
         import threading
         from unittest.mock import MagicMock
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
 
         backend = AppBackend({}, Path("/tmp/covers"))
 
@@ -1050,7 +1050,7 @@ class TestAppBackendStartRomFetch(unittest.TestCase):
 
 class TestAppBackendLibraryGamesServerMetadataMerge(unittest.TestCase):
     def _make_backend(self, config: dict) -> "AppBackend":
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
         return AppBackend(config, Path("/tmp/covers"))
 
     def test_library_games_merges_genres_and_rating_from_server(self):
@@ -1124,7 +1124,7 @@ class TestAppBackendLibraryGamesServerMetadataMerge(unittest.TestCase):
 
 class TestAppBackendRomMetaFinishedUpdatesLibrary(unittest.TestCase):
     def _make_backend(self, config: dict) -> "AppBackend":
-        from rom_mate.tv.bridge.app_backend import AppBackend
+        from grid_launcher.tv.bridge.app_backend import AppBackend
         return AppBackend(config, Path("/tmp/covers"))
 
     def test_rom_meta_finished_updates_installed_game(self):

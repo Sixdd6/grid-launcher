@@ -5,7 +5,7 @@ import unittest
 
 from PySide6.QtWidgets import QApplication, QWidget
 
-from rom_mate.ui.spinner import LoadingSpinnerWidget
+from grid_launcher.ui.spinner import LoadingSpinnerWidget
 
 
 class LoadingSpinnerTests(unittest.TestCase):

@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from rom_mate.core import token_store
+from grid_launcher.core import token_store
 
 
 class TokenStoreTests(unittest.TestCase):

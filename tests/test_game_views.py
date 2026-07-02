@@ -13,9 +13,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QAbstractItemView, QComboBox, QFrame, QLabel, QLineEdit, QPushButton, QScrollArea
 
-from rom_mate.ui.game_views import make_game_card, open_game_details, update_details_action_buttons
-from rom_mate.ui.mixins.emulator_ui_mixin import EmulatorUIMixin
-from rom_mate.ui.theme import apply_theme_inline_styles
+from grid_launcher.ui.game_views import make_game_card, open_game_details, update_details_action_buttons
+from grid_launcher.ui.mixins.emulator_ui_mixin import EmulatorUIMixin
+from grid_launcher.ui.theme import apply_theme_inline_styles
 
 
 class _StubButton:
@@ -831,8 +831,8 @@ class _DetailsPageStubWindow:
 
 class GameViewCloudToggleTests(unittest.TestCase):
     def test_toggle_details_cloud_mode_switches_views_before_loading_records(self) -> None:
-        module_path = Path(__file__).resolve().parents[1] / "rom-mate.py"
-        spec = importlib.util.spec_from_file_location("rom_mate_main_for_tests", module_path)
+        module_path = Path(__file__).resolve().parents[1] / "grid-launcher.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_main_for_tests", module_path)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -854,8 +854,8 @@ class GameViewCloudToggleTests(unittest.TestCase):
 class EmulatorSaveButtonLabelTests(unittest.TestCase):
     @staticmethod
     def _load_emulators_module():
-        module_path = Path(__file__).resolve().parents[1] / "rom_mate" / "ui" / "emulators.py"
-        spec = importlib.util.spec_from_file_location("rom_mate_ui_emulators_for_tests", module_path)
+        module_path = Path(__file__).resolve().parents[1] / "grid_launcher" / "ui" / "emulators.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_ui_emulators_for_tests", module_path)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -881,8 +881,8 @@ class EmulatorSaveButtonLabelTests(unittest.TestCase):
 class EmulatorSourceDownloadHelperTests(unittest.TestCase):
     @staticmethod
     def _load_emulators_module():
-        module_path = Path(__file__).resolve().parents[1] / "rom_mate" / "ui" / "emulators.py"
-        spec = importlib.util.spec_from_file_location("rom_mate_ui_emulators_source_helpers_for_tests", module_path)
+        module_path = Path(__file__).resolve().parents[1] / "grid_launcher" / "ui" / "emulators.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_ui_emulators_source_helpers_for_tests", module_path)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -1046,6 +1046,114 @@ class EmulatorSourceDownloadHelperTests(unittest.TestCase):
 
         self.assertEqual(rows, [])
 
+    def test_source_download_entries_excludes_win32_only_on_linux(self) -> None:
+        module = self._load_emulators_module()
+        autoprofiles = [
+            {
+                "name": "DuckStation (Playstation 1)",
+                "source": {
+                    "platforms": ["win32"],
+                    "provider": "github",
+                    "owner": "stenzek",
+                    "repo": "duckstation",
+                },
+            },
+            {
+                "name": "RetroArch (Multi-System)",
+                "source": {
+                    "provider": "github",
+                    "owner": "libretro",
+                    "repo": "RetroArch",
+                },
+            },
+        ]
+
+        rows = module.source_download_emulator_entries(autoprofiles, current_platform="linux")
+
+        self.assertEqual([row["name"] for row in rows], ["RetroArch (Multi-System)"])
+
+    def test_source_download_entries_includes_win32_only_on_win32(self) -> None:
+        module = self._load_emulators_module()
+        autoprofiles = [
+            {
+                "name": "DuckStation (Playstation 1)",
+                "source": {
+                    "platforms": ["win32"],
+                    "provider": "github",
+                    "owner": "stenzek",
+                    "repo": "duckstation",
+                },
+            },
+            {
+                "name": "RetroArch (Multi-System)",
+                "source": {
+                    "provider": "github",
+                    "owner": "libretro",
+                    "repo": "RetroArch",
+                },
+            },
+        ]
+
+        rows = module.source_download_emulator_entries(autoprofiles, current_platform="win32")
+
+        self.assertEqual(
+            [row["name"] for row in rows],
+            ["DuckStation (Playstation 1)", "RetroArch (Multi-System)"],
+        )
+
+    def test_source_download_entries_no_platforms_field_always_included(self) -> None:
+        module = self._load_emulators_module()
+        autoprofiles = [
+            {
+                "name": "RetroArch (Multi-System)",
+                "source": {
+                    "provider": "github",
+                    "owner": "libretro",
+                    "repo": "RetroArch",
+                },
+            },
+        ]
+
+        rows = module.source_download_emulator_entries(autoprofiles, current_platform="linux")
+
+        self.assertEqual([row["name"] for row in rows], ["RetroArch (Multi-System)"])
+
+    def test_available_source_download_entries_includes_flatpak_on_linux(self) -> None:
+        autoprofiles = [
+            {
+                "name": "PPSSPP (Playstation Portable)",
+                "flatpak_app_id": "org.ppsspp.PPSSPP",
+                "source": {"provider": "github-release", "platforms": ["win32"]},
+            }
+        ]
+        window = _MixinSourceDownloadStub(autoprofiles)
+
+        with patch("grid_launcher.ui.mixins.emulator_ui_mixin.sys.platform", "linux"):
+            rows = EmulatorUIMixin._available_source_download_emulator_entries(
+                window,
+                installed_emulator_names=[],
+            )
+
+        self.assertTrue(any(row.get("provider") == "flatpak" for row in rows))
+
+    def test_available_source_download_entries_excludes_flatpak_when_name_installed(self) -> None:
+        autoprofiles = [
+            {
+                "name": "PPSSPP (Playstation Portable)",
+                "flatpak_app_id": "org.ppsspp.PPSSPP",
+                "source": {"provider": "github-release", "platforms": ["win32"]},
+            }
+        ]
+        window = _MixinSourceDownloadStub(autoprofiles)
+
+        with patch("grid_launcher.ui.mixins.emulator_ui_mixin.sys.platform", "linux"):
+            rows = EmulatorUIMixin._available_source_download_emulator_entries(
+                window,
+                installed_emulator_names=["PPSSPP (Playstation Portable)"],
+            )
+
+        self.assertFalse(any(row.get("provider") == "flatpak" for row in rows))
+
 class EmulatorsPageLayoutTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -1053,8 +1161,8 @@ class EmulatorsPageLayoutTests(unittest.TestCase):
 
     @staticmethod
     def _load_main_module():
-        module_path = Path(__file__).resolve().parents[1] / "rom-mate.py"
-        spec = importlib.util.spec_from_file_location("rom_mate_main_for_emulator_layout_tests", module_path)
+        module_path = Path(__file__).resolve().parents[1] / "grid-launcher.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_main_for_emulator_layout_tests", module_path)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -1369,8 +1477,8 @@ class CoreDropdownBehaviorTests(unittest.TestCase):
 
     @staticmethod
     def _load_main_module():
-        module_path = Path(__file__).resolve().parents[1] / "rom-mate.py"
-        spec = importlib.util.spec_from_file_location("rom_mate_main_for_core_dropdown_tests", module_path)
+        module_path = Path(__file__).resolve().parents[1] / "grid-launcher.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_main_for_core_dropdown_tests", module_path)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -1394,8 +1502,8 @@ class GameDetailsPageLayoutTests(unittest.TestCase):
 
     @staticmethod
     def _load_main_module():
-        module_path = Path(__file__).resolve().parents[1] / "rom-mate.py"
-        spec = importlib.util.spec_from_file_location("rom_mate_main_for_details_tests", module_path)
+        module_path = Path(__file__).resolve().parents[1] / "grid-launcher.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_main_for_details_tests", module_path)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -1655,8 +1763,8 @@ class _MainWindowVersionTextStub:
 class MainWindowVersionFormattingTests(unittest.TestCase):
     @staticmethod
     def _load_main_module():
-        module_path = Path(__file__).resolve().parents[1] / "rom-mate.py"
-        spec = importlib.util.spec_from_file_location("rom_mate_main_for_version_format_tests", module_path)
+        module_path = Path(__file__).resolve().parents[1] / "grid-launcher.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_main_for_version_format_tests", module_path)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -1722,7 +1830,7 @@ class TestBuildAchievementsPanel(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def test_empty_achievements_shows_empty_label(self):
-        from rom_mate.ui.game_views import build_achievements_panel
+        from grid_launcher.ui.game_views import build_achievements_panel
 
         panel = build_achievements_panel([])
         labels = panel.findChildren(QLabel)
@@ -1730,7 +1838,7 @@ class TestBuildAchievementsPanel(unittest.TestCase):
         self.assertIn("achievementsEmptyLabel", object_names)
 
     def test_single_achievement_renders_row(self):
-        from rom_mate.ui.game_views import build_achievements_panel
+        from grid_launcher.ui.game_views import build_achievements_panel
 
         achievement = {
             "id": 1,
@@ -1745,7 +1853,7 @@ class TestBuildAchievementsPanel(unittest.TestCase):
         self.assertGreaterEqual(len(rows), 1)
 
     def test_earned_achievement_shows_checkmark(self):
-        from rom_mate.ui.game_views import build_achievements_panel
+        from grid_launcher.ui.game_views import build_achievements_panel
 
         achievement = {
             "id": 2,
@@ -1761,7 +1869,7 @@ class TestBuildAchievementsPanel(unittest.TestCase):
         self.assertEqual(earned_labels[0].text(), "✓")
 
     def test_earned_achievement_shows_date(self):
-        from rom_mate.ui.game_views import build_achievements_panel
+        from grid_launcher.ui.game_views import build_achievements_panel
 
         ach = {
             "id": 2,
@@ -1778,7 +1886,7 @@ class TestBuildAchievementsPanel(unittest.TestCase):
         self.assertGreater(len(date_labels[0].text()), len("Unlocked: "))
 
     def test_locked_achievement_no_date(self):
-        from rom_mate.ui.game_views import build_achievements_panel
+        from grid_launcher.ui.game_views import build_achievements_panel
 
         ach = {
             "id": 3,
@@ -1793,7 +1901,7 @@ class TestBuildAchievementsPanel(unittest.TestCase):
         self.assertEqual(len(date_labels), 0)
 
     def test_badge_image_label_created_per_achievement(self):
-        from rom_mate.ui.game_views import build_achievements_panel
+        from grid_launcher.ui.game_views import build_achievements_panel
 
         calls = []
 
@@ -1821,8 +1929,8 @@ class SettingsPageLayoutTests(unittest.TestCase):
 
     @staticmethod
     def _load_main_module():
-        module_path = Path(__file__).resolve().parents[1] / "rom-mate.py"
-        spec = importlib.util.spec_from_file_location("rom_mate_main_for_settings_tests", module_path)
+        module_path = Path(__file__).resolve().parents[1] / "grid-launcher.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_main_for_settings_tests", module_path)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
@@ -1857,6 +1965,169 @@ class SettingsPageLayoutTests(unittest.TestCase):
             assert widget is not None
             self.assertGreaterEqual(widget.minimumHeight(), 32)
             self.assertEqual(widget.minimumHeight(), widget.maximumHeight())
+
+
+class _MixinSourceDownloadStub:
+    def __init__(self, autoprofiles: list[dict]) -> None:
+        self._autoprofiles = autoprofiles
+        self.config = {"emulator_autoprofiles": autoprofiles}
+
+    def _emulators(self):
+        return []
+
+    def _normalize_emulators(self, emulators):
+        return list(emulators)
+
+    def _emulator_autoprofiles(self):
+        return self._autoprofiles
+
+    def _emulator_profile_for_entry(self, emulator):
+        return {}
+
+
+class FlatpakInstallableEmulatorEntriesTests(unittest.TestCase):
+    @staticmethod
+    def _load_emulators_module():
+        module_path = Path(__file__).resolve().parents[1] / "grid_launcher" / "ui" / "emulators.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_ui_emulators_flatpak_entries_for_tests", module_path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_returns_empty_on_non_linux(self) -> None:
+        module = self._load_emulators_module()
+        profiles = [
+            {
+                "name": "PPSSPP",
+                "flatpak_app_id": "org.ppsspp.PPSSPP",
+                "source": {"provider": "github-release", "platforms": ["win32"]},
+            }
+        ]
+
+        self.assertEqual(
+            module.flatpak_installable_emulator_entries(profiles, current_platform="win32"),
+            [],
+        )
+
+    def test_returns_entry_for_profile_with_flatpak_app_id_and_win32_source(self) -> None:
+        module = self._load_emulators_module()
+        profiles = [
+            {
+                "name": "PPSSPP",
+                "flatpak_app_id": "org.ppsspp.PPSSPP",
+                "source": {"provider": "github-release", "platforms": ["win32"]},
+            }
+        ]
+
+        rows = module.flatpak_installable_emulator_entries(profiles, current_platform="linux")
+
+        self.assertEqual(len(rows), 1)
+        entry = rows[0]
+        self.assertEqual(entry["provider"], "flatpak")
+        self.assertEqual(entry["app_id"], "org.ppsspp.PPSSPP")
+        self.assertEqual(entry["source_id"], "flatpak/org.ppsspp.PPSSPP")
+        self.assertEqual(entry["release_tag"], "flathub")
+
+    def test_excludes_profile_with_linux_compatible_source(self) -> None:
+        module = self._load_emulators_module()
+        profiles = [
+            {
+                "name": "Example",
+                "flatpak_app_id": "org.example.App",
+                "source": {"provider": "github-release"},
+            }
+        ]
+
+        self.assertEqual(
+            module.flatpak_installable_emulator_entries(profiles, current_platform="linux"),
+            [],
+        )
+
+    def test_includes_profile_with_no_source_field(self) -> None:
+        module = self._load_emulators_module()
+        profiles = [
+            {
+                "name": "MAME",
+                "flatpak_app_id": "org.mame.MAME",
+            }
+        ]
+
+        rows = module.flatpak_installable_emulator_entries(profiles, current_platform="linux")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["app_id"], "org.mame.MAME")
+
+    def test_excludes_installed_by_name(self) -> None:
+        module = self._load_emulators_module()
+        profiles = [
+            {
+                "name": "PPSSPP",
+                "flatpak_app_id": "org.ppsspp.PPSSPP",
+                "source": {"provider": "github-release", "platforms": ["win32"]},
+            }
+        ]
+
+        self.assertEqual(
+            module.flatpak_installable_emulator_entries(
+                profiles,
+                installed_names=["PPSSPP"],
+                current_platform="linux",
+            ),
+            [],
+        )
+
+    def test_entries_sorted_by_name(self) -> None:
+        module = self._load_emulators_module()
+        profiles = [
+            {"name": "Zebra", "flatpak_app_id": "org.z.Z"},
+            {"name": "Alpha", "flatpak_app_id": "org.a.A"},
+            {"name": "Mango", "flatpak_app_id": "org.m.M"},
+        ]
+
+        rows = module.flatpak_installable_emulator_entries(profiles, current_platform="linux")
+
+        self.assertEqual([row["name"] for row in rows], ["Alpha", "Mango", "Zebra"])
+
+
+class SourceEntryLabelTests(unittest.TestCase):
+    @staticmethod
+    def _load_emulators_module():
+        module_path = Path(__file__).resolve().parents[1] / "grid_launcher" / "ui" / "emulators.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_ui_emulators_source_label_for_tests", module_path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_flatpak_entry_returns_flatpak(self) -> None:
+        module = self._load_emulators_module()
+
+        self.assertEqual(module.source_entry_label({"provider": "flatpak"}), "[Flatpak]")
+
+    def test_appimage_entry_returns_appimage(self) -> None:
+        module = self._load_emulators_module()
+        entry = {"source_metadata": {"asset_patterns": ["SomeEmulator-x86_64.AppImage"]}}
+
+        self.assertEqual(module.source_entry_label(entry), "[AppImage]")
+
+    def test_appimage_in_platform_override_returns_appimage(self) -> None:
+        module = self._load_emulators_module()
+        entry = {"source_metadata": {"platform_overrides": {"linux": {"asset_patterns": ["app.AppImage"]}}}}
+
+        self.assertEqual(module.source_entry_label(entry), "[AppImage]")
+
+    def test_github_release_returns_github(self) -> None:
+        module = self._load_emulators_module()
+        entry = {"provider": "github-release", "source_metadata": {"asset_patterns": ["app.zip"]}}
+
+        self.assertEqual(module.source_entry_label(entry), "[GitHub]")
+
+    def test_gitea_without_appimage_returns_github(self) -> None:
+        module = self._load_emulators_module()
+        entry = {"provider": "gitea", "source_metadata": {"asset_patterns": ["app.zip"]}}
+
+        self.assertEqual(module.source_entry_label(entry), "[GitHub]")
 
 
 if __name__ == "__main__":

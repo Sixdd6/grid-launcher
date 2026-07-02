@@ -4,7 +4,7 @@ import importlib.util
 import unittest
 from pathlib import Path
 
-from rom_mate.library.cloud_sync import (
+from grid_launcher.library.cloud_sync import (
     _state_candidate_base_variants,
     _state_candidate_hash_group_key,
     _state_candidate_matches_game_tokens,
@@ -24,10 +24,10 @@ class _WindowStub:
 class CloudStateFilterTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        module_path = Path(__file__).resolve().parents[1] / "rom-mate.py"
-        spec = importlib.util.spec_from_file_location("rom_mate_main_for_cloud_state_filter_tests", module_path)
+        module_path = Path(__file__).resolve().parents[1] / "grid-launcher.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_main_for_cloud_state_filter_tests", module_path)
         if spec is None or spec.loader is None:
-            raise RuntimeError("Could not load rom-mate.py for tests.")
+            raise RuntimeError("Could not load grid-launcher.py for tests.")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         cls.module = module

@@ -2,7 +2,7 @@
 
 > **Status**: Pre-implementation research document. Nothing described here is built yet.
 > This document defines the scope, design decisions, and sequencing for adding full
-> first-class Linux support to rom-mate-neo.
+> first-class Linux support to grid-launcher.
 
 ---
 
@@ -11,7 +11,7 @@
 "First-class Linux support" means parity with the Windows experience, not just "boots on Linux." The bar is:
 
 - **Distribution**: A self-contained Flatpak on Flathub (or direct download) — no user-installed Python, no venv setup.
-- **Emulator autoconfig**: Every `ensure_*` setting function in `rom_mate/emulator/` resolves correct XDG/Linux paths, not Windows registry or `%APPDATA%` paths.
+- **Emulator autoconfig**: Every `ensure_*` setting function in `grid_launcher/emulator/` resolves correct XDG/Linux paths, not Windows registry or `%APPDATA%` paths.
 - **Library operations**: Install, extract, cloud-save, and launch all function without Windows-specific syscalls.
 - **Secure token storage**: API token and RetroAchievements token are stored via the platform keyring (GNOME Keyring / KWallet), not bare base64.
 - **Controller input (TV mode)**: Full gamepad input through the existing pygame path — no code changes needed, but Flatpak portal access must be configured.
@@ -54,14 +54,14 @@ The generated `python-modules.json` is included in the manifest via the `modules
 ### 2.3 Flatpak Manifest Skeleton
 
 ```yaml
-# io.github.yourorg.rommatenezo.yml  (or .json if preferred)
-app-id: io.github.yourorg.rommateneoz
+# io.github.yourorg.gridlauncher.yml  (or .json if preferred)
+app-id: io.github.yourorg.gridlauncher
 runtime: org.kde.Platform
 runtime-version: "6.10"
 sdk: org.kde.Sdk
 base: io.qt.PySide.BaseApp
 base-version: "6.10"
-command: rom-mate-neo
+command: grid-launcher
 
 finish-args:
   # Wayland + X11 fallback
@@ -87,38 +87,38 @@ modules:
     build-commands: []
     # ... (flatpak-pip-generator output inlined here)
 
-  - name: rom-mate-neo
+  - name: grid-launcher
     buildsystem: simple
     build-commands:
-      - install -Dm755 rom-mate.py /app/bin/rom-mate-neo-launcher.py
-      - cp -r rom_mate /app/lib/rom_mate
-      - cp retroarch-core-list.json /app/share/rom-mate-neo/
-      - cp emulator-autoprofiles.json /app/share/rom-mate-neo/
-      - cp -r assets /app/share/rom-mate-neo/assets
-      - install -Dm755 flatpak/rom-mate-neo.sh /app/bin/rom-mate-neo
-      - install -Dm644 flatpak/io.github.yourorg.rommateneoz.desktop /app/share/applications/
-      - install -Dm644 assets/svg/icon.svg /app/share/icons/hicolor/scalable/apps/io.github.yourorg.rommateneoz.svg
+      - install -Dm755 grid-launcher.py /app/bin/grid-launcher-launcher.py
+      - cp -r grid_launcher /app/lib/grid_launcher
+      - cp retroarch-core-list.json /app/share/grid-launcher/
+      - cp emulator-autoprofiles.json /app/share/grid-launcher/
+      - cp -r assets /app/share/grid-launcher/assets
+      - install -Dm755 flatpak/grid-launcher.sh /app/bin/grid-launcher
+      - install -Dm644 flatpak/io.github.yourorg.gridlauncher.desktop /app/share/applications/
+      - install -Dm644 assets/svg/icon.svg /app/share/icons/hicolor/scalable/apps/io.github.yourorg.gridlauncher.svg
     sources:
       - type: git
         url: https://github.com/yourorg/rom-mate-neo
         tag: v1.x.x
 ```
 
-The `rom-mate-neo.sh` wrapper:
+The `grid-launcher.sh` wrapper:
 
 ```bash
 #!/bin/bash
-exec python3 /app/bin/rom-mate-neo-launcher.py "$@"
+exec python3 /app/bin/grid-launcher-launcher.py "$@"
 ```
 
-The launcher script will need a path patch to resolve `retroarch-core-list.json` and `emulator-autoprofiles.json` from `/app/share/rom-mate-neo/` instead of the current directory. The simplest approach is an environment variable:
+The launcher script will need a path patch to resolve `retroarch-core-list.json` and `emulator-autoprofiles.json` from `/app/share/grid-launcher/` instead of the current directory. The simplest approach is an environment variable:
 
 ```bash
-export ROM_MATE_SHARE_DIR=/app/share/rom-mate-neo
-exec python3 /app/bin/rom-mate-neo-launcher.py "$@"
+export GRID_LAUNCHER_SHARE_DIR=/app/share/grid-launcher
+exec python3 /app/bin/grid-launcher-launcher.py "$@"
 ```
 
-`rom-mate.py` reads these files relative to `__file__` or `sys.argv[0]` — add a helper in `rom_mate/core/config.py` that checks `ROM_MATE_SHARE_DIR` first, then falls back to the script directory.
+`grid-launcher.py` reads these files relative to `__file__` or `sys.argv[0]` — add a helper in `grid_launcher/core/config.py` that checks `GRID_LAUNCHER_SHARE_DIR` first, then falls back to the script directory.
 
 ### 2.4 GitHub Actions CI Workflow
 
@@ -155,21 +155,21 @@ jobs:
       - name: Build Flatpak
         uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
-          bundle: rom-mate-neo.flatpak
-          manifest-path: flatpak/io.github.yourorg.rommateneoz.yml
+          bundle: grid-launcher.flatpak
+          manifest-path: flatpak/io.github.yourorg.gridlauncher.yml
           cache-key: flatpak-builder-${{ github.sha }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rom-mate-neo-linux-flatpak
-          path: rom-mate-neo.flatpak
+          name: grid-launcher-linux-flatpak
+          path: grid-launcher.flatpak
           if-no-files-found: error
 
       - name: Attach Flatpak to release
         uses: softprops/action-gh-release@v2
         with:
-          files: rom-mate-neo.flatpak
+          files: grid-launcher.flatpak
 ```
 
 ### 2.5 Flatpak Sandboxing and File System Access
@@ -183,9 +183,9 @@ The `--filesystem=home` finish-arg grants broad home directory access. This is t
 | App config/data | `--filesystem=xdg-config`, `--filesystem=xdg-data` |
 | Emulator configs | `--filesystem=home` (emulators live anywhere) |
 
-For Flathub submission, `--filesystem=home` is discouraged. The right long-term approach is to request paths via the file chooser portal the first time, then persist the granted path using `~/.var/app/<app-id>/config/` for the rom-mate config file. Given the app already has a first-run dialog (`rom_mate/ui/dialogs.py`), this portal prompt can be integrated there.
+For Flathub submission, `--filesystem=home` is discouraged. The right long-term approach is to request paths via the file chooser portal the first time, then persist the granted path using `~/.var/app/<app-id>/config/` for the grid-launcher config file. Given the app already has a first-run dialog (`grid_launcher/ui/dialogs.py`), this portal prompt can be integrated there.
 
-The Flatpak app data directory will be `~/.var/app/io.github.yourorg.rommateneoz/`. The config file and token store must resolve to `~/.var/app/<id>/config/rom-mate-neo/` inside the sandbox, which maps correctly when the app uses `$XDG_CONFIG_HOME` (Flatpak sets this to the per-app config dir automatically).
+The Flatpak app data directory will be `~/.var/app/io.github.yourorg.gridlauncher/`. The config file and token store must resolve to `~/.var/app/<id>/config/grid-launcher/` inside the sandbox, which maps correctly when the app uses `$XDG_CONFIG_HOME` (Flatpak sets this to the per-app config dir automatically).
 
 ### 2.6 Flathub Submission vs. Personal Builds
 
@@ -216,7 +216,7 @@ Always read the environment variable first and fall back to the default. Never h
 
 ### 3.2 Platform-Aware Path Resolver
 
-Add `xdg_config_home()` and `xdg_data_home()` helpers to `rom_mate/core/path.py`:
+Add `xdg_config_home()` and `xdg_data_home()` helpers to `grid_launcher/core/path.py`:
 
 ```python
 import os
@@ -455,11 +455,11 @@ Auto-detect available Wine/Proton installations in this priority order:
 4. **System Wine**: `shutil.which("wine")` and `shutil.which("wine64")`.
 5. **Flatpak Bottles**: `flatpak list --app` output containing `com.usebottles.bottles`.
 
-Detection logic should live in a new `rom_mate/emulator/wine.py` module, keeping it separate from launch dispatch.
+Detection logic should live in a new `grid_launcher/emulator/wine.py` module, keeping it separate from launch dispatch.
 
 #### `launch.py` Integration
 
-The launch pipeline in `rom-mate.py` / `InstallMixin` builds a command list from the emulator path and template. For Windows executables on Linux with Wine configured, prepend the Wine/Proton command:
+The launch pipeline in `grid-launcher.py` / `InstallMixin` builds a command list from the emulator path and template. For Windows executables on Linux with Wine configured, prepend the Wine/Proton command:
 
 ```python
 # Pseudo-code in launch dispatch:
@@ -492,10 +492,10 @@ The STFS content installation code in `xenia.py` is purely file I/O and will wor
 
 ### 5.1 Where to Put the Guard
 
-Per ARCHITECTURE.md, emulator management lives in `rom_mate/ui/mixins/emulator_ui_mixin.py` (`EmulatorUIMixin`). The emulator list shown to the user is built there. The guard should live in `EmulatorUIMixin._filter_emulators_for_platform()` (or equivalent — check the current method name). A simple helper suffices:
+Per ARCHITECTURE.md, emulator management lives in `grid_launcher/ui/mixins/emulator_ui_mixin.py` (`EmulatorUIMixin`). The emulator list shown to the user is built there. The guard should live in `EmulatorUIMixin._filter_emulators_for_platform()` (or equivalent — check the current method name). A simple helper suffices:
 
 ```python
-# In rom_mate/emulator/profiles.py or selection.py
+# In grid_launcher/emulator/profiles.py or selection.py
 _WINDOWS_ONLY_EMULATOR_SLUGS = frozenset({"xenia", "xenia-canary"})
 
 def is_available_on_current_platform(emulator_slug: str) -> bool:
@@ -512,7 +512,7 @@ def is_available_on_current_platform(emulator_slug: str) -> bool:
 
 ### 5.3 Emulator Dialog
 
-`rom_mate/ui/emulators.py` builds the form helpers. The emulator type dropdown that lets users add a new emulator should filter `_WINDOWS_ONLY_EMULATOR_SLUGS` via `is_available_on_current_platform()`. No other changes are needed in this file.
+`grid_launcher/ui/emulators.py` builds the form helpers. The emulator type dropdown that lets users add a new emulator should filter `_WINDOWS_ONLY_EMULATOR_SLUGS` via `is_available_on_current_platform()`. No other changes are needed in this file.
 
 ### 5.4 Details View
 
@@ -524,7 +524,7 @@ def is_available_on_current_platform(emulator_slug: str) -> bool:
 
 ### 6.1 Current Architecture
 
-`rom_mate/tv/bridge/controller.py` already has three poll thread classes:
+`grid_launcher/tv/bridge/controller.py` already has three poll thread classes:
 
 - `_XInputPollThread`: Windows-only, polls XInput DLL. Imports `ctypes.wintypes` inside `run()` (not at module load), so no import error on Linux.
 - `_PygameGuidePollThread`: Windows helper for guide button only via pygame/SDL HID path.
@@ -596,7 +596,7 @@ def _linux_save_token(service: str, username: str, token: str) -> bool:
         return False
 ```
 
-The service name should be `"rom-mate-neo"` with `username` values `"api-token"` and `"ra-token"`.
+The service name should be `"grid-launcher"` with `username` values `"api-token"` and `"ra-token"`.
 
 **Fallback**: If `import keyring` fails (not installed, or no backend available — e.g. headless CI, Flatpak sandbox without D-Bus), fall back to the current base64 file approach with a logged warning. This ensures the app still works in all environments.
 
@@ -733,14 +733,14 @@ All new tests must follow the project convention of using `unittest` (per AGENTS
 
 **Tasks** (in order):
 
-1. Add `xdg_config_home()` and `xdg_data_home()` to `rom_mate/core/path.py`.
+1. Add `xdg_config_home()` and `xdg_data_home()` to `grid_launcher/core/path.py`.
 2. Fix the unconditional `%APPDATA%` expansions in `azahar.py` (line 132) and `eden.py` (line 206) — wrap in `sys.platform == "win32"` guards.
 3. Add XDG path candidates to all emulator files that currently lack them: `cemu.py`, `ppsspp.py`, `mame.py`, `pico8.py`. Confirm Flatpak variant paths for `dolphin.py`, `pcsx2.py`, `duckstation.py`, `xemu.py`.
 4. Fix `retroarch_core_argument_path()` in `launch.py` to use `.so` on Linux.
-5. Add `is_available_on_current_platform()` to `rom_mate/emulator/profiles.py` and gate Xenia in `EmulatorUIMixin` and `InstallMixin`.
+5. Add `is_available_on_current_platform()` to `grid_launcher/emulator/profiles.py` and gate Xenia in `EmulatorUIMixin` and `InstallMixin`.
 6. Add a GitHub Actions test workflow (`.github/workflows/tests.yml`) with both `windows-latest` and `ubuntu-latest` matrix entries.
 7. Add a Flatpak manifest under `flatpak/` and a GitHub Actions Flatpak build workflow (`.github/workflows/flatpak-linux.yml`).
-8. Add `ROM_MATE_SHARE_DIR` environment variable support for locating `retroarch-core-list.json` and `emulator-autoprofiles.json` from `/app/share/`.
+8. Add `GRID_LAUNCHER_SHARE_DIR` environment variable support for locating `retroarch-core-list.json` and `emulator-autoprofiles.json` from `/app/share/`.
 9. Update `requirements.txt` with platform-conditional `keyring` and `secretstorage` entries.
 
 **Exit criteria**: `python -m pytest tests/` passes on `ubuntu-latest`. Flatpak CI job produces a `.flatpak` bundle.
@@ -752,7 +752,7 @@ All new tests must follow the project convention of using `unittest` (per AGENTS
 **Tasks** (in order):
 
 1. Manual QA pass: install each native Linux emulator (Dolphin, PCSX2, DuckStation, RPCS3, Xemu, Cemu, Eden, Azahar, PPSSPP, Redream, RetroArch), point the app at them, verify autoconfig writes correct settings.
-2. Fix any `ensure_*` functions that write incorrect paths on Linux (discovered during QA). These will be in `rom_mate/emulator/autoconfig.py` and the per-emulator files.
+2. Fix any `ensure_*` functions that write incorrect paths on Linux (discovered during QA). These will be in `grid_launcher/emulator/autoconfig.py` and the per-emulator files.
 3. Implement `keyring`-based token storage and add `test_token_store_linux.py`.
 4. Add new test coverage for Linux path candidates in `test_emulator_autoconfig_settings.py` and a new `test_emulator_path_candidates_linux.py`.
 5. Test cloud save upload/restore cycle with a Linux-native emulator.
@@ -766,9 +766,9 @@ All new tests must follow the project convention of using `unittest` (per AGENTS
 
 **Tasks** (in order):
 
-1. Create `rom_mate/emulator/wine.py` with Proton/Wine auto-detection logic.
+1. Create `grid_launcher/emulator/wine.py` with Proton/Wine auto-detection logic.
 2. Add a "Wine/Proton executable" setting to the Emulators settings page (in `EmulatorUIMixin`), visible only on Linux.
-3. Modify the launch dispatch in `InstallMixin` / `rom-mate.py` to prepend the Wine command for `.exe` games on Linux when Wine is configured.
+3. Modify the launch dispatch in `InstallMixin` / `grid-launcher.py` to prepend the Wine command for `.exe` games on Linux when Wine is configured.
 4. Update `launchable_native_game_file()` in `launch.py` to gate `.exe` launches on Linux behind a "Wine configured" check.
 5. Write `test_wine_detection.py`.
 6. Document setup steps in README.
@@ -782,7 +782,7 @@ All new tests must follow the project convention of using `unittest` (per AGENTS
 **Tasks** (in order):
 
 1. Replace `--filesystem=home` with targeted portal-based file access using `org.freedesktop.portal.FileChooser` for the ROM library root and emulator paths.
-2. Integrate the first-run dialog (`rom_mate/ui/dialogs.py`) with file chooser portal for initial path configuration.
+2. Integrate the first-run dialog (`grid_launcher/ui/dialogs.py`) with file chooser portal for initial path configuration.
 3. Run `org.flathub.Flathub` linter checks and address all warnings.
 4. Set up Flathub bot integration for automated build PRs on new releases.
 5. Update app metadata (`.desktop` file, `AppStream` metainfo XML with screenshots and release notes).

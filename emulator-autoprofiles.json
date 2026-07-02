@@ -1,6 +1,6 @@
 [
   {
-    "match_tokens": ["retroarch.exe"],
+    "match_tokens": ["retroarch.exe", "retroarch", "retroarch*.appimage"],
     "source": {
       "provider": "direct",
       "owner": "libretro",
@@ -46,7 +46,19 @@
     "firmware_directories": ["system"]
   },
   {
-    "match_tokens": ["duckstation-qt-x64-ReleaseLTCG.exe"],
+    "flatpak_app_id": "org.libretro.RetroArch",
+    "name": "RetroArch (Multi-System)",
+    "args": "-L \"%core%\" \"%rom%\"",
+    "all_platforms": true,
+    "platform_keywords": [],
+    "use_game_title_as_name": false,
+    "save_strategy": "single_file",
+    "save_directories": ["saves", "savefiles"],
+    "state_directories": ["states", "savestates"],
+    "firmware_directories": ["system"]
+  },
+  {
+    "match_tokens": ["duckstation-qt-x64-ReleaseLTCG.exe", "DuckStation-x64.AppImage", "duckstation*.appimage"],
     "source": {
       "provider": "github-release",
       "owner": "stenzek",
@@ -63,7 +75,13 @@
           "asset_name": "duckstation-windows-arm64-release.zip",
           "launch_executable": "duckstation-qt-arm64-ReleaseLTCG.exe"
         }
-      ]
+      ],
+      "platform_overrides": {
+        "linux": {
+          "asset_patterns": ["DuckStation-x64.AppImage"],
+          "launch_executable": "DuckStation-x64.AppImage"
+        }
+      }
     },
     "name": "DuckStation (Playstation 1)",
     "args": "-fullscreen -batch \"%rom%\"",
@@ -83,6 +101,7 @@
       "owner": "PCSX2",
       "repo": "pcsx2",
       "release_tag": "latest",
+      "platforms": ["win32"],
       "windows_assets": [
         {
           "arch": "x64",
@@ -114,6 +133,7 @@
       "owner": "hrydgard",
       "repo": "ppsspp",
       "release_tag": "latest",
+      "platforms": ["win32"],
       "windows_assets": [
         {
           "arch": "x64",
@@ -145,6 +165,7 @@
       "owner": "RPCS3",
       "repo": "rpcs3-binaries-win",
       "release_tag": "latest",
+      "platforms": ["win32"],
       "windows_assets": [
         {
           "arch": "x64",
@@ -169,19 +190,49 @@
     "screenshot_directories": []
   },
   {
-    "match_tokens": ["shadPS4.exe"],
+    "match_tokens": ["Vita3K.exe", "Vita3K-x86_64.AppImage", "Vita3K-aarch64.AppImage", "vita3k*.appimage"],
+    "source": {
+      "provider": "github-release",
+      "owner": "Vita3K",
+      "repo": "Vita3K",
+      "release_tag": "continuous",
+      "asset_patterns": ["windows-latest.zip"],
+      "launch_executable": "Vita3K.exe",
+      "platform_overrides": {
+        "linux": {
+          "asset_patterns": ["Vita3K-x86_64.AppImage"],
+          "launch_executable": "Vita3K-x86_64.AppImage"
+        }
+      }
+    },
+    "name": "Vita3K (Playstation Vita)",
+    "args": "\"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["ps vita", "playstation vita", "psvita", "vita"],
+    "use_game_title_as_name": false,
+    "save_strategy": "folder",
+    "save_directories": [],
+    "state_directories": []
+  },
+  {
+    "match_tokens": ["shadPS4.exe", "shadPS4", "shadps4*sdl*.appimage"],
     "source": {
       "provider": "github-release",
       "owner": "shadps4-emu",
       "repo": "shadPS4",
       "release_tag": "latest",
-      "windows_assets": [
-        {
-          "arch": "x64",
-          "asset_name_regex": "^shadps4-win64-sdl-[0-9.]+\\.zip$",
-          "launch_executable": "shadPS4.exe"
+      "asset_patterns": ["shadps4-win64-sdl-*.zip"],
+      "launch_executable": "shadPS4.exe",
+      "platform_overrides": {
+        "linux": {
+          "asset_patterns": ["shadps4-linux-sdl-*.zip"],
+          "launch_executable": "shadPS4"
+        },
+        "darwin": {
+          "asset_patterns": ["shadps4-macos-sdl-*.zip"],
+          "launch_executable": "shadPS4"
         }
-      ]
+      }
     },
     "name": "ShadPS4 (Playstation 4)",
     "args": "\"%rom%\"",
@@ -199,6 +250,7 @@
       "owner": "shadps4-emu",
       "repo": "shadps4-qtlauncher",
       "release_tag": "latest",
+      "platforms": ["win32"],
       "windows_assets": [
         {
           "arch": "x64",
@@ -259,6 +311,7 @@
       "owner": "cemu-project",
       "repo": "Cemu",
       "release_tag": "latest",
+      "platforms": ["win32"],
       "windows_assets": [
         {
           "arch": "x64",
@@ -289,6 +342,7 @@
       "owner": "azahar-emu",
       "repo": "azahar",
       "release_tag": "latest",
+      "platforms": ["win32"],
       "windows_assets": [
         {
           "arch": "x64",
@@ -334,6 +388,7 @@
       "owner": "xemu-project",
       "repo": "xemu",
       "release_tag": "latest",
+      "platforms": ["win32"],
       "windows_assets": [
         {
           "arch": "x64",
@@ -363,7 +418,7 @@
     "screenshot_directories": ["."]
   },
   {
-    "match_tokens": ["eden.exe", "Eden-Linux-*-amd64-clang-pgo.AppImage"],
+    "match_tokens": ["eden.exe", "Eden-Linux-*-amd64-clang-pgo.AppImage", "eden*.appimage"],
     "source": {
       "provider": "gitea",
       "base_url": "https://git.eden-emu.dev",
@@ -434,12 +489,53 @@
     "screenshot_directories": ["screenshots"]
   },
   {
+    "match_tokens": ["supermodel.exe", "supermodel"],
+    "source": {
+      "provider": "github-release",
+      "owner": "trzy",
+      "repo": "Supermodel",
+      "release_tag": "latest",
+      "asset_patterns": ["supermodel-*-windows.zip"],
+      "launch_executable": "supermodel.exe",
+      "platform_overrides": {
+        "linux": {
+          "asset_patterns": ["supermodel-*-linux.tar.gz"],
+          "launch_executable": "supermodel"
+        },
+        "darwin": {
+          "asset_patterns": ["supermodel-*-macos.tar.gz"],
+          "launch_executable": "supermodel"
+        }
+      }
+    },
+    "name": "Supermodel (Sega Model 3)",
+    "args": "\"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["model 3", "sega model 3", "model3"],
+    "use_game_title_as_name": false,
+    "save_strategy": "single_file",
+    "save_directories": ["Saves"],
+    "state_directories": []
+  },
+  {
+    "flatpak_app_id": "com.supermodel3.Supermodel",
+    "name": "Supermodel (Sega Model 3)",
+    "args": "\"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["model 3", "sega model 3", "model3"],
+    "use_game_title_as_name": false,
+    "save_strategy": "single_file",
+    "save_directories": ["Saves"],
+    "state_directories": []
+  },
+  {
     "match_tokens": ["xenia_canary.exe", "xenia-canary.exe"],
     "source": {
       "provider": "github-release",
       "owner": "xenia-canary",
       "repo": "xenia-canary",
       "release_tag": "latest",
+      "platforms": ["win32"],
       "windows_assets": [
         {
           "arch": "x64",
@@ -475,7 +571,7 @@
     "screenshot_directories": ["screenshots"]
   },
   {
-    "match_tokens": ["xenia_edge_linux.AppImage", "xenia_edge", "xenia-edge"],
+    "match_tokens": ["xenia_edge_linux.AppImage", "xenia_edge", "xenia-edge", "xenia*edge*.appimage"],
     "source": {
       "provider": "github-release",
       "owner": "has207",
@@ -545,7 +641,7 @@
     "use_game_title_as_name": false
   },
   {
-    "match_tokens": ["redream.exe"],
+    "match_tokens": ["redream.exe", "redream"],
     "source": {
       "provider": "direct",
       "owner": "inolen",

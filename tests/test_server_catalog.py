@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from rom_mate.server.catalog import games_from_rom_items, fetch_rom_items_by_params
-from rom_mate.server.details_cache import rom_file_name_from_payload
-from rom_mate.server.metadata import normalize_rating_to_five
+from grid_launcher.server.catalog import games_from_rom_items, fetch_rom_items_by_params
+from grid_launcher.server.catalog import server_platform_slug_map
+from grid_launcher.server.details_cache import rom_file_name_from_payload
+from grid_launcher.server.metadata import normalize_rating_to_five
 
 
 class ServerCatalogFileNameTests(unittest.TestCase):
@@ -352,6 +353,68 @@ class TestFetchRomItemsByParams(unittest.TestCase):
         api_get = lambda path, params: {"items": [{"id": 1}, "bad", None]}
         result = fetch_rom_items_by_params(api_get, {})
         self.assertEqual(result, [{"id": 1}])
+
+
+class ServerPlatformSlugMapTests(unittest.TestCase):
+    def test_server_platform_slug_map_extracts_slug(self) -> None:
+        payload = [
+            {
+                "id": 1,
+                "name": "Game Boy Advance",
+                "display_name": "Game Boy Advance",
+                "slug": "gba",
+                "rom_count": 5,
+            }
+        ]
+        self.assertEqual(server_platform_slug_map(payload), {"Game Boy Advance": "gba"})
+
+    def test_server_platform_slug_map_skips_missing_slug(self) -> None:
+        payload = [
+            {
+                "id": 1,
+                "name": "Game Boy Advance",
+                "display_name": "Game Boy Advance",
+                "rom_count": 5,
+            }
+        ]
+        self.assertEqual(server_platform_slug_map(payload), {})
+
+    def test_server_platform_slug_map_skips_zero_rom_count(self) -> None:
+        payload = [
+            {
+                "id": 1,
+                "name": "Game Boy Advance",
+                "display_name": "Game Boy Advance",
+                "slug": "gba",
+                "rom_count": 0,
+            }
+        ]
+        self.assertEqual(server_platform_slug_map(payload), {})
+
+    def test_server_platform_slug_map_dedup_counter_matches_platform_ids(self) -> None:
+        payload = [
+            {
+                "id": 1,
+                "name": "Name",
+                "display_name": "Name",
+                "slug": "slug-one",
+                "rom_count": 3,
+            },
+            {
+                "id": 2,
+                "name": "Name",
+                "display_name": "Name",
+                "slug": "slug-two",
+                "rom_count": 4,
+            },
+        ]
+        self.assertEqual(
+            server_platform_slug_map(payload),
+            {"Name": "slug-one", "Name (2)": "slug-two"},
+        )
+
+    def test_server_platform_slug_map_returns_empty_for_non_list(self) -> None:
+        self.assertEqual(server_platform_slug_map(None), {})
 
 
 if __name__ == "__main__":

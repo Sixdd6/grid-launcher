@@ -44,3 +44,7 @@ Thumbs.db
 # Ignore the agents and related files
 agents/
 skills/
+
+#graphify
+graphify-out/
+.graphify-out/

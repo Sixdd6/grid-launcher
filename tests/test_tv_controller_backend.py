@@ -26,7 +26,7 @@ class _StubGameBackend:
 class ControllerBackendTests(unittest.TestCase):
 
     def _make_backend(self, exclusion_list=None, emulator_name=""):
-        from rom_mate.tv.bridge.controller import ControllerBackend
+        from grid_launcher.tv.bridge.controller import ControllerBackend
         app_backend = _StubAppBackend(exclusion_list or [])
         game_backend = _StubGameBackend(emulator_name)
         return ControllerBackend(app_backend=app_backend, game_backend=game_backend)
@@ -56,7 +56,7 @@ class ControllerBackendTests(unittest.TestCase):
         self.assertFalse(backend.should_suppress_guide_button())
 
     def test_guide_button_allowed_when_no_backends(self):
-        from rom_mate.tv.bridge.controller import ControllerBackend
+        from grid_launcher.tv.bridge.controller import ControllerBackend
         backend = ControllerBackend()
         self.assertFalse(backend.should_suppress_guide_button())
 
@@ -218,7 +218,7 @@ class ControllerBackendTests(unittest.TestCase):
         self.assertEqual(emitted_nav, [])
 
     def test_tv_window_active_with_qwidget(self):
-        import rom_mate.tv.bridge.controller as mod
+        import grid_launcher.tv.bridge.controller as mod
 
         backend = self._make_backend()
         mock_qwindow = MagicMock()
@@ -277,22 +277,22 @@ class ControllerBackendTests(unittest.TestCase):
     # ------------------------------------------------------------------
 
     def test_classify_button_event(self):
-        from rom_mate.tv.bridge.controller import ControllerBackend
+        from grid_launcher.tv.bridge.controller import ControllerBackend
         backend = ControllerBackend()
         self.assertEqual(backend._classify_event_type("BTN_SOUTH"), "button")
 
     def test_classify_axis_event(self):
-        from rom_mate.tv.bridge.controller import ControllerBackend
+        from grid_launcher.tv.bridge.controller import ControllerBackend
         backend = ControllerBackend()
         self.assertEqual(backend._classify_event_type("ABS_X"), "axis")
 
     def test_classify_unknown_event(self):
-        from rom_mate.tv.bridge.controller import ControllerBackend
+        from grid_launcher.tv.bridge.controller import ControllerBackend
         backend = ControllerBackend()
         self.assertEqual(backend._classify_event_type("SYN_REPORT"), "unknown")
 
     def test_gamepad_poll_thread_run_returns_when_pygame_missing(self):
-        from rom_mate.tv.bridge.controller import _GamepadPollThread
+        from grid_launcher.tv.bridge.controller import _GamepadPollThread
 
         original_import = __import__
 
@@ -306,13 +306,13 @@ class ControllerBackendTests(unittest.TestCase):
             thread.run()
 
     def test_xinput_poll_thread_is_install_active_defaults_to_false(self):
-        from rom_mate.tv.bridge.controller import _XInputPollThread
+        from grid_launcher.tv.bridge.controller import _XInputPollThread
 
         thread = _XInputPollThread()
         self.assertFalse(thread._is_install_active())
 
     def test_xinput_poll_thread_uses_provided_callable(self):
-        from rom_mate.tv.bridge.controller import _XInputPollThread
+        from grid_launcher.tv.bridge.controller import _XInputPollThread
 
         thread = _XInputPollThread(is_install_active=lambda: True)
         self.assertTrue(thread._is_install_active())
@@ -320,7 +320,7 @@ class ControllerBackendTests(unittest.TestCase):
 
 class TestControllerGuideButton(unittest.TestCase):
     def test_guide_button_calls_request_pause_when_session_active(self):
-        from rom_mate.tv.bridge.controller import ControllerBackend
+        from grid_launcher.tv.bridge.controller import ControllerBackend
 
         app_backend = MagicMock()
         app_backend.tvGuideExclusionList = []
@@ -342,7 +342,7 @@ class TestControllerGuideButton(unittest.TestCase):
         self.assertEqual(emitted, [])
 
     def test_should_suppress_guide_button_casefold_match(self):
-        from rom_mate.tv.bridge.controller import ControllerBackend
+        from grid_launcher.tv.bridge.controller import ControllerBackend
 
         app_backend = MagicMock()
         app_backend.tvGuideExclusionList = ["RPCS3", "RetroArch"]
@@ -355,7 +355,7 @@ class TestControllerGuideButton(unittest.TestCase):
         self.assertTrue(backend.should_suppress_guide_button())
 
     def test_should_not_suppress_guide_button_for_non_matching_emulator(self):
-        from rom_mate.tv.bridge.controller import ControllerBackend
+        from grid_launcher.tv.bridge.controller import ControllerBackend
 
         app_backend = MagicMock()
         app_backend.tvGuideExclusionList = ["RPCS3"]

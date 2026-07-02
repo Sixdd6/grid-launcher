@@ -5,15 +5,15 @@ import unittest
 from pathlib import Path
 from typing import Any
 
-from rom_mate.core.config import normalize_installed_games
-from rom_mate.library.install_registry import build_installed_game_record
-from rom_mate.library.update_detection import (
+from grid_launcher.core.config import normalize_installed_games
+from grid_launcher.library.install_registry import build_installed_game_record
+from grid_launcher.library.update_detection import (
     game_has_server_update,
     game_server_updated_at,
     has_newer_server_rom_version,
     rom_file_name_version,
 )
-from rom_mate.server.catalog import games_from_rom_items
+from grid_launcher.server.catalog import games_from_rom_items
 
 
 class UpdateDetectionTests(unittest.TestCase):
@@ -269,8 +269,8 @@ class UpdateDetectionTests(unittest.TestCase):
 class MainWindowUpdateFlowTests(unittest.TestCase):
     @staticmethod
     def _load_main_module() -> Any:
-        module_path = Path(__file__).resolve().parents[1] / "rom-mate.py"
-        spec = importlib.util.spec_from_file_location("rom_mate_main_for_update_tests", module_path)
+        module_path = Path(__file__).resolve().parents[1] / "grid-launcher.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_main_for_update_tests", module_path)
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)

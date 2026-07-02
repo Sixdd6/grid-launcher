@@ -7,10 +7,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rom_mate.emulator.retroarch import flycast_vmu_file_candidates
-from rom_mate.emulator.retroarch import retroarch_core_flags
-from rom_mate.emulator.retroarch import retroarch_core_flags_for_platform
-from rom_mate.emulator.selection import cloud_save_scope_for_game
+from grid_launcher.emulator.retroarch import flycast_vmu_file_candidates
+from grid_launcher.emulator.retroarch import retroarch_core_flags
+from grid_launcher.emulator.retroarch import retroarch_core_flags_for_platform
+from grid_launcher.emulator.selection import cloud_save_scope_for_game
 
 
 def _is_retroarch(name: str) -> bool:
@@ -25,10 +25,10 @@ def _is_not_retroarch(name: str) -> bool:
 class FlycastVmuTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        module_path = Path(__file__).resolve().parents[1] / "rom-mate.py"
-        spec = importlib.util.spec_from_file_location("rom_mate_main_for_flycast_vmu_tests", module_path)
+        module_path = Path(__file__).resolve().parents[1] / "grid-launcher.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_main_for_flycast_vmu_tests", module_path)
         if spec is None or spec.loader is None:
-            raise RuntimeError("Could not load rom-mate.py for tests.")
+            raise RuntimeError("Could not load grid-launcher.py for tests.")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         cls.module = module

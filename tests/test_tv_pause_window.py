@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from rom_mate.tv.widgets.pause_window import PauseWindow
+from grid_launcher.tv.widgets.pause_window import PauseWindow
 
 
 class PauseWindowNavTests(unittest.TestCase):
@@ -75,7 +75,7 @@ class PauseWindowNavTests(unittest.TestCase):
         window = PauseWindow(pause_backend, parent=None)
         window._current_index = 0
 
-        with patch("rom_mate.tv.widgets.pause_window.QTimer.singleShot", side_effect=lambda _ms, callback: callback()):
+        with patch("grid_launcher.tv.widgets.pause_window.QTimer.singleShot", side_effect=lambda _ms, callback: callback()):
             window.handle_nav("confirm")
 
         pause_backend.resumeGame.assert_called_once_with()

@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from rom_mate.ui.dialogs import NativeGameSettingsDialog
+from grid_launcher.ui.dialogs import NativeGameSettingsDialog
 
 
 def _make_dialog(available_compat_tools, existing_compat_tool=""):

@@ -9,14 +9,14 @@
             "name": "Desktop Mode",
             "type": "debugpy",
             "request": "launch",
-            "program": "rom-mate.py",
+            "program": "grid-launcher.py",
             "console": "integratedTerminal"
         },
         {
             "name": "TV Mode",
             "type": "debugpy",
             "request": "launch",
-            "program": "rom-mate.py",
+            "program": "grid-launcher.py",
             "args": ["-tv"],
             "console": "integratedTerminal"
         }

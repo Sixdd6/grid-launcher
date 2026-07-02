@@ -6,7 +6,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from rom_mate.library.cloud_restore import (
+from grid_launcher.library.cloud_restore import (
     latest_server_records_by_slot,
     relative_timestamp_text,
     restore_single_save_payload,
@@ -14,7 +14,7 @@ from rom_mate.library.cloud_restore import (
     save_record_timestamp,
     sort_server_records_by_recency,
 )
-from rom_mate.library.cloud_sync import cloud_sync_candidates_for_game
+from grid_launcher.library.cloud_sync import cloud_sync_candidates_for_game
 
 
 class CloudRestoreTests(unittest.TestCase):

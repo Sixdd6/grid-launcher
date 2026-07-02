@@ -25,7 +25,7 @@ class TestCoverLoader(unittest.TestCase):
         self.tmp.cleanup()
 
     def _make_loader(self, cover_url_map=None):
-        from rom_mate.tv.widgets.cover_loader import CoverLoader
+        from grid_launcher.tv.widgets.cover_loader import CoverLoader
 
         return CoverLoader(str(self.cache_dir), "test-token", "", cover_url_map or {})
 
@@ -58,7 +58,7 @@ class TestCoverLoader(unittest.TestCase):
         loader = self._make_loader()
         self.assertIsNone(loader.load_pixmap(None))
 
-    @patch("rom_mate.tv.widgets.cover_loader.urllib.request.urlopen")
+    @patch("grid_launcher.tv.widgets.cover_loader.urllib.request.urlopen")
     def test_load_pixmap_fetches_over_http_when_not_cached(self, mock_urlopen):
         png_bytes = self._make_png_bytes()
         mock_response = Mock()
@@ -74,7 +74,7 @@ class TestCoverLoader(unittest.TestCase):
         self.assertFalse(pixmap.isNull())
         mock_urlopen.assert_called_once()
 
-    @patch("rom_mate.tv.widgets.cover_loader.urllib.request.urlopen")
+    @patch("grid_launcher.tv.widgets.cover_loader.urllib.request.urlopen")
     def test_load_pixmap_returns_none_when_http_fetch_fails(self, mock_urlopen):
         import urllib.error
 
@@ -84,7 +84,7 @@ class TestCoverLoader(unittest.TestCase):
         self.assertIsNone(loader.load_pixmap("http://example.com/cover.jpg"))
         mock_urlopen.assert_called_once()
 
-    @patch("rom_mate.tv.widgets.cover_loader.urllib.request.urlopen")
+    @patch("grid_launcher.tv.widgets.cover_loader.urllib.request.urlopen")
     def test_load_pixmap_stale_cached_entry_falls_back_to_http(self, mock_urlopen):
         png_bytes = self._make_png_bytes()
         mock_response = Mock()
@@ -101,7 +101,7 @@ class TestCoverLoader(unittest.TestCase):
         self.assertFalse(pixmap.isNull())
         mock_urlopen.assert_called_once()
 
-    @patch("rom_mate.tv.widgets.cover_loader.urllib.request.urlopen")
+    @patch("grid_launcher.tv.widgets.cover_loader.urllib.request.urlopen")
     def test_load_pixmap_returns_none_for_unknown_key_without_network(self, mock_urlopen):
         import urllib.error
 
@@ -113,11 +113,11 @@ class TestCoverLoader(unittest.TestCase):
     def test_does_not_import_loader(self):
         import sys
 
-        sys.modules.pop("rom_mate.cover.loader", None)
-        sys.modules.pop("rom_mate.tv.widgets.cover_loader", None)
-        import rom_mate.tv.widgets.cover_loader  # noqa: F401
+        sys.modules.pop("grid_launcher.cover.loader", None)
+        sys.modules.pop("grid_launcher.tv.widgets.cover_loader", None)
+        import grid_launcher.tv.widgets.cover_loader  # noqa: F401
 
-        self.assertNotIn("rom_mate.cover.loader", sys.modules)
+        self.assertNotIn("grid_launcher.cover.loader", sys.modules)
 
 
 if __name__ == "__main__":

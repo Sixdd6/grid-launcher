@@ -1,4 +1,4 @@
-# Building rom-mate-neo
+# Building GRID Launcher
 
 Build scripts are provided for easy building on Windows and Linux.
 
@@ -30,18 +30,18 @@ This applies to all three scripts (`build.ps1`, `build.bat`, `build.sh`):
 1. **Verify Setup** — Checks that the virtual environment exists
 2. **Activate Environment** — Sets up the Python environment with required dependencies (the Linux script activates via `.venv/bin/activate` instead of `.venv\Scripts\Activate.ps1`)
 3. **Install Dependencies** — Ensures PyInstaller is installed
-4. **Build Executable** — Creates a standalone `rom-mate-neo` executable with all assets bundled
+4. **Build Executable** — Creates a standalone `grid-launcher` executable with all assets bundled
 5. **Report Status** — Shows success/failure and output location
 
 ## Output
 
 On successful build, the executable will be located at:
 ```
-.\dist\rom-mate-neo.exe
+.\dist\grid-launcher.exe
 ```
 
 The executable is self-contained and can be:
-- Run directly: Double-click `rom-mate-neo.exe`
+- Run directly: Double-click `grid-launcher.exe`
 - Moved anywhere on your system
 - Distributed to others (single file, no dependencies needed)
 
@@ -49,12 +49,12 @@ The executable is self-contained and can be:
 
 On successful build, the binary will be located at:
 ```
-./dist/rom-mate-neo
+./dist/grid-launcher
 ```
 
 The executable bit is already set by PyInstaller, so it can be run directly:
 ```bash
-./dist/rom-mate-neo
+./dist/grid-launcher
 ```
 
 ## Troubleshooting
@@ -112,7 +112,7 @@ If the packaged Linux binary fails at runtime with missing shared library errors
 python -m pip install pyinstaller
 
 # Run build
-python -m PyInstaller --noconfirm --clean --windowed --onefile --name rom-mate-neo --add-data "assets;assets" --add-data "retroarch-core-list.json;." --add-data "emulator-autoprofiles.json;." rom-mate.py
+python -m PyInstaller --noconfirm --clean --windowed --onefile --name grid-launcher --add-data "assets;assets" --add-data "retroarch-core-list.json;." --add-data "emulator-autoprofiles.json;." grid-launcher.py
 ```
 
 ### Linux
@@ -124,5 +124,5 @@ source .venv/bin/activate
 python -m pip install pyinstaller
 
 # Run build
-python -m PyInstaller --noconfirm --clean --windowed --onefile --name rom-mate-neo --add-data "assets:assets" --add-data "retroarch-core-list.json:." --add-data "emulator-autoprofiles.json:." rom-mate.py
+python -m PyInstaller --noconfirm --clean --windowed --onefile --name grid-launcher --add-data "assets:assets" --add-data "retroarch-core-list.json:." --add-data "emulator-autoprofiles.json:." grid-launcher.py
 ```

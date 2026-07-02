@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from rom_mate.emulator.launch import prepare_native_launch_command, detect_umu_run
+from grid_launcher.emulator.launch import prepare_native_launch_command, detect_umu_run
 
 
 def _resolve_executable(game):
@@ -33,8 +33,8 @@ class CompatToolLaunchTests(unittest.TestCase):
         self.assertNotIn("umu-run", command[0])
 
     def test_prepare_native_launch_wine(self):
-        with patch("rom_mate.emulator.launch.shutil.which", return_value="/usr/bin/wine"), patch(
-            "rom_mate.emulator.launch.os.makedirs"
+        with patch("grid_launcher.emulator.launch.shutil.which", return_value="/usr/bin/wine"), patch(
+            "grid_launcher.emulator.launch.os.makedirs"
         ):
             command, cwd, env_overrides = prepare_native_launch_command(
                 _game(native_compat_tool="wine", native_wineprefix="/tmp/prefix"),
@@ -45,7 +45,7 @@ class CompatToolLaunchTests(unittest.TestCase):
         self.assertEqual(env_overrides, {"WINEPREFIX": "/tmp/prefix"})
 
     def test_prepare_native_launch_wine_no_prefix(self):
-        with patch("rom_mate.emulator.launch.shutil.which", return_value="/usr/bin/wine"):
+        with patch("grid_launcher.emulator.launch.shutil.which", return_value="/usr/bin/wine"):
             command, cwd, env_overrides = prepare_native_launch_command(
                 _game(native_compat_tool="wine", native_wineprefix=""),
                 _resolve_executable,
@@ -55,8 +55,8 @@ class CompatToolLaunchTests(unittest.TestCase):
         self.assertEqual(env_overrides, {})
 
     def test_prepare_native_launch_proton_umu_found(self):
-        with patch("rom_mate.emulator.launch.shutil.which", return_value="/usr/bin/umu-run"), patch(
-            "rom_mate.emulator.launch.os.makedirs"
+        with patch("grid_launcher.emulator.launch.shutil.which", return_value="/usr/bin/umu-run"), patch(
+            "grid_launcher.emulator.launch.os.makedirs"
         ):
             command, cwd, env_overrides = prepare_native_launch_command(
                 _game(native_compat_tool="/path/to/GE-Proton", native_wineprefix="/tmp/pfx"),
@@ -70,7 +70,7 @@ class CompatToolLaunchTests(unittest.TestCase):
         )
 
     def test_prepare_native_launch_proton_umu_missing(self):
-        with patch("rom_mate.emulator.launch.shutil.which", return_value=None):
+        with patch("grid_launcher.emulator.launch.shutil.which", return_value=None):
             with self.assertRaises(ValueError):
                 prepare_native_launch_command(
                     _game(native_compat_tool="/path/to/GE-Proton"),
@@ -79,11 +79,11 @@ class CompatToolLaunchTests(unittest.TestCase):
                 )
 
     def test_detect_umu_run_found(self):
-        with patch("rom_mate.emulator.launch.shutil.which", return_value="/usr/bin/umu-run"):
+        with patch("grid_launcher.emulator.launch.shutil.which", return_value="/usr/bin/umu-run"):
             self.assertEqual(detect_umu_run(), "/usr/bin/umu-run")
 
     def test_detect_umu_run_not_found(self):
-        with patch("rom_mate.emulator.launch.shutil.which", return_value=None):
+        with patch("grid_launcher.emulator.launch.shutil.which", return_value=None):
             self.assertIsNone(detect_umu_run())
 
 

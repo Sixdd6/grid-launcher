@@ -9,7 +9,7 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 from PySide6.QtWidgets import QApplication
 
-from rom_mate.tv.widgets.views.home_view import HomeView
+from grid_launcher.tv.widgets.views.home_view import HomeView
 
 
 class HomeViewAnimationTests(unittest.TestCase):
@@ -106,7 +106,7 @@ class HomeViewAnimationTests(unittest.TestCase):
         view._anim_blocked = True
         view._pending_nav = "down"
 
-        with patch("rom_mate.tv.widgets.views.home_view.QParallelAnimationGroup.start"):
+        with patch("grid_launcher.tv.widgets.views.home_view.QParallelAnimationGroup.start"):
             view._on_row_anim_finished(-1)
 
         self.assertIsNone(view._pending_nav)
@@ -120,7 +120,7 @@ class HomeViewAnimationTests(unittest.TestCase):
         view._anim_blocked = True
         view._pending_nav = "down"
 
-        with patch("rom_mate.tv.widgets.views.home_view.QParallelAnimationGroup.start"):
+        with patch("grid_launcher.tv.widgets.views.home_view.QParallelAnimationGroup.start"):
             view._on_row_anim_finished(-1)
 
         # _pending_nav consumed; the new animation would have set _anim_blocked again
@@ -132,7 +132,7 @@ class HomeViewAnimationTests(unittest.TestCase):
         self._resize_view(view, 1920, 1080)
         view._active_row = 0
 
-        with patch("rom_mate.tv.widgets.views.home_view.QParallelAnimationGroup.start"):
+        with patch("grid_launcher.tv.widgets.views.home_view.QParallelAnimationGroup.start"):
             view.handle_nav("up")
 
         self.assertEqual(view._active_row, 0)
@@ -144,7 +144,7 @@ class HomeViewAnimationTests(unittest.TestCase):
         self._resize_view(view, 1920, 1080)
         view._active_row = 3
 
-        with patch("rom_mate.tv.widgets.views.home_view.QParallelAnimationGroup.start"):
+        with patch("grid_launcher.tv.widgets.views.home_view.QParallelAnimationGroup.start"):
             view.handle_nav("down")
 
         self.assertEqual(view._active_row, 3)
@@ -219,7 +219,7 @@ class HomeViewAnimationTests(unittest.TestCase):
         self._resize_view(view, 1920, 1080)
         view._active_row = 0
 
-        with patch("rom_mate.tv.widgets.views.home_view.QParallelAnimationGroup.start"):
+        with patch("grid_launcher.tv.widgets.views.home_view.QParallelAnimationGroup.start"):
             view.handle_nav("down")
 
         self.assertTrue(view._row_up_arrow.isVisible())

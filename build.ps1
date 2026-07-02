@@ -1,8 +1,8 @@
-# Build script for rom-mate-neo
+# Build script for GRID Launcher
 # This script builds the application into a standalone Windows executable
 
 Write-Host "================================" -ForegroundColor Cyan
-Write-Host "rom-mate-neo Build Script" -ForegroundColor Cyan
+Write-Host "GRID Launcher Build Script" -ForegroundColor Cyan
 Write-Host "================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -35,15 +35,16 @@ python -m PyInstaller `
     --clean `
     --windowed `
     --onefile `
-    --name rom-mate-neo `
+    --name grid-launcher `
     --add-data "assets;assets" `
     --add-data "retroarch-core-list.json;." `
+    --add-data "romm-platform-cores.json;." `
     --add-data "emulator-autoprofiles.json;." `
     --hidden-import brotli `
     --hidden-import pyzstd `
     --hidden-import pyppmd `
     --hidden-import keyring.backends.Windows `
-    rom-mate.py
+    grid-launcher.py
 
 # Check if build was successful
 if ($LASTEXITCODE -eq 0) {
@@ -53,10 +54,10 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "Executable location:" -ForegroundColor Cyan
-    Write-Host "  .\dist\rom-mate-neo.exe" -ForegroundColor White
+    Write-Host "  .\dist\grid-launcher.exe" -ForegroundColor White
     Write-Host ""
     Write-Host "You can now:" -ForegroundColor Cyan
-    Write-Host "  1. Run it directly: .\dist\rom-mate-neo.exe" -ForegroundColor White
+    Write-Host "  1. Run it directly: .\dist\grid-launcher.exe" -ForegroundColor White
     Write-Host "  2. Move it to any location" -ForegroundColor White
     Write-Host "  3. Share the executable file" -ForegroundColor White
 } else {

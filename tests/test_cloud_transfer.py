@@ -8,8 +8,8 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from rom_mate.library.cloud_sync import cemu_save_directories_for_game, cloud_sync_candidates_for_game
-from rom_mate.library.cloud_transfer import (
+from grid_launcher.library.cloud_sync import cemu_save_directories_for_game, cloud_sync_candidates_for_game
+from grid_launcher.library.cloud_transfer import (
     appended_image_sidecar_path,
     grouped_file_upload_jobs,
     normalize_manual_save_path,
@@ -32,7 +32,7 @@ class CloudTransferTests(unittest.TestCase):
         }
 
         with patch(
-            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            "grid_launcher.library.cloud_transfer.os.path.expandvars",
             side_effect=lambda value: expansions.get(value, value),
         ):
             result = resolve_native_save_dir(raw_path, windows_documents=None)
@@ -48,7 +48,7 @@ class CloudTransferTests(unittest.TestCase):
         }
 
         with patch(
-            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            "grid_launcher.library.cloud_transfer.os.path.expandvars",
             side_effect=lambda value: expansions.get(value, value),
         ):
             result = resolve_native_save_dir(raw_path, windows_documents)
@@ -64,7 +64,7 @@ class CloudTransferTests(unittest.TestCase):
         }
 
         with patch(
-            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            "grid_launcher.library.cloud_transfer.os.path.expandvars",
             side_effect=lambda value: expansions.get(value, value),
         ):
             result = resolve_native_save_dir(raw_path, windows_documents)
@@ -83,7 +83,7 @@ class CloudTransferTests(unittest.TestCase):
         }
 
         with patch(
-            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            "grid_launcher.library.cloud_transfer.os.path.expandvars",
             side_effect=lambda value: expansions.get(value, value),
         ):
             result = resolve_native_save_dir(raw_path, windows_documents)
@@ -98,7 +98,7 @@ class CloudTransferTests(unittest.TestCase):
         }
 
         with patch(
-            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            "grid_launcher.library.cloud_transfer.os.path.expandvars",
             side_effect=lambda value: expansions.get(value, value),
         ):
             result = normalize_manual_save_path("C:\\Users\\TestUser\\AppData\\Roaming\\SomeGame\\saves")
@@ -113,7 +113,7 @@ class CloudTransferTests(unittest.TestCase):
         }
 
         with patch(
-            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            "grid_launcher.library.cloud_transfer.os.path.expandvars",
             side_effect=lambda value: expansions.get(value, value),
         ):
             result = normalize_manual_save_path("C:\\Users\\TestUser\\AppData\\Local\\SomeGame\\saves")
@@ -128,7 +128,7 @@ class CloudTransferTests(unittest.TestCase):
         }
 
         with patch(
-            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            "grid_launcher.library.cloud_transfer.os.path.expandvars",
             side_effect=lambda value: expansions.get(value, value),
         ):
             result = normalize_manual_save_path("C:\\Users\\TestUser\\AppData\\LocalLow\\Paralives\\MySaves.mod")
@@ -143,7 +143,7 @@ class CloudTransferTests(unittest.TestCase):
         }
 
         with patch(
-            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            "grid_launcher.library.cloud_transfer.os.path.expandvars",
             side_effect=lambda value: expansions.get(value, value),
         ):
             result = normalize_manual_save_path("C:\\Users\\TestUser\\Documents\\MyGame\\saves")
@@ -158,7 +158,7 @@ class CloudTransferTests(unittest.TestCase):
         }
 
         with patch(
-            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            "grid_launcher.library.cloud_transfer.os.path.expandvars",
             side_effect=lambda value: expansions.get(value, value),
         ):
             result = normalize_manual_save_path("C:\\Users\\TestUser\\Saved Games\\SomeGame")
@@ -173,7 +173,7 @@ class CloudTransferTests(unittest.TestCase):
         }
 
         with patch(
-            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            "grid_launcher.library.cloud_transfer.os.path.expandvars",
             side_effect=lambda value: expansions.get(value, value),
         ):
             result = normalize_manual_save_path("D:\\GameSaves\\SomeGame")
@@ -188,7 +188,7 @@ class CloudTransferTests(unittest.TestCase):
         }
 
         with patch(
-            "rom_mate.library.cloud_transfer.os.path.expandvars",
+            "grid_launcher.library.cloud_transfer.os.path.expandvars",
             side_effect=lambda value: expansions.get(value, value),
         ):
             result = normalize_manual_save_path("C:/Users/TestUser/AppData/Roaming/SomeGame/saves")
@@ -299,8 +299,8 @@ class CloudTransferTests(unittest.TestCase):
                 self.assertEqual(manifest, {})
 
                 with zipfile.ZipFile(archive_path) as archive:
-                    self.assertIn("_rom_mate_dirs.json", archive.namelist())
-                    parsed_manifest = json.loads(archive.read("_rom_mate_dirs.json").decode("utf-8"))
+                    self.assertIn("_grid_launcher_dirs.json", archive.namelist())
+                    parsed_manifest = json.loads(archive.read("_grid_launcher_dirs.json").decode("utf-8"))
 
                 self.assertEqual(parsed_manifest, {})
             finally:

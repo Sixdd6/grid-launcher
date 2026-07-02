@@ -6,8 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from rom_mate.emulator.launch import prepare_emulator_launch_command
-from rom_mate.ui.mixins.details_view_mixin import DetailsViewMixin
+from grid_launcher.emulator.launch import prepare_emulator_launch_command
+from grid_launcher.ui.mixins.details_view_mixin import DetailsViewMixin
 
 
 class _StubWindow:
@@ -71,10 +71,10 @@ class _StubWindow:
 class PerformGameActionFirmwareTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        module_path = Path(__file__).resolve().parents[1] / "rom-mate.py"
-        spec = importlib.util.spec_from_file_location("rom_mate_main_for_firmware_launch_tests", module_path)
+        module_path = Path(__file__).resolve().parents[1] / "grid-launcher.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_main_for_firmware_launch_tests", module_path)
         if spec is None or spec.loader is None:
-            raise RuntimeError("Could not load rom-mate.py for tests.")
+            raise RuntimeError("Could not load grid-launcher.py for tests.")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         cls.module = module
@@ -204,12 +204,12 @@ class PS3CustomConfigCopyOnLaunchTests(unittest.TestCase):
 
             with (
                 patch(
-                    "rom_mate.ui.mixins.details_view_mixin.prepare_emulator_launch_command",
+                    "grid_launcher.ui.mixins.details_view_mixin.prepare_emulator_launch_command",
                     return_value=("RPCS3", ["/fake/rpcs3", "/fake/rom"], None),
                 ),
-                patch("rom_mate.ui.mixins.details_view_mixin.subprocess.Popen", return_value=process),
-                patch("rom_mate.ui.mixins.details_view_mixin.QTimer.singleShot"),
-                patch("rom_mate.ui.mixins.details_view_mixin.copy_ps3_custom_config_to_emulator") as copy_cfg,
+                patch("grid_launcher.ui.mixins.details_view_mixin.subprocess.Popen", return_value=process),
+                patch("grid_launcher.ui.mixins.details_view_mixin.QTimer.singleShot"),
+                patch("grid_launcher.ui.mixins.details_view_mixin.copy_ps3_custom_config_to_emulator") as copy_cfg,
             ):
                 launched = window._launch_installed_game(game)
 
@@ -227,12 +227,12 @@ class PS3CustomConfigCopyOnLaunchTests(unittest.TestCase):
 
             with (
                 patch(
-                    "rom_mate.ui.mixins.details_view_mixin.prepare_emulator_launch_command",
+                    "grid_launcher.ui.mixins.details_view_mixin.prepare_emulator_launch_command",
                     return_value=("RPCS3", ["/fake/rpcs3", "/fake/rom"], None),
                 ),
-                patch("rom_mate.ui.mixins.details_view_mixin.subprocess.Popen", return_value=process),
-                patch("rom_mate.ui.mixins.details_view_mixin.QTimer.singleShot"),
-                patch("rom_mate.ui.mixins.details_view_mixin.copy_ps3_custom_config_to_emulator") as copy_cfg,
+                patch("grid_launcher.ui.mixins.details_view_mixin.subprocess.Popen", return_value=process),
+                patch("grid_launcher.ui.mixins.details_view_mixin.QTimer.singleShot"),
+                patch("grid_launcher.ui.mixins.details_view_mixin.copy_ps3_custom_config_to_emulator") as copy_cfg,
             ):
                 launched = window._launch_installed_game(game)
 
@@ -249,12 +249,12 @@ class PS3CustomConfigCopyOnLaunchTests(unittest.TestCase):
 
             with (
                 patch(
-                    "rom_mate.ui.mixins.details_view_mixin.prepare_emulator_launch_command",
+                    "grid_launcher.ui.mixins.details_view_mixin.prepare_emulator_launch_command",
                     return_value=("RPCS3", ["/fake/rpcs3", "/fake/rom"], None),
                 ),
-                patch("rom_mate.ui.mixins.details_view_mixin.subprocess.Popen", return_value=process),
-                patch("rom_mate.ui.mixins.details_view_mixin.QTimer.singleShot"),
-                patch("rom_mate.ui.mixins.details_view_mixin.copy_ps3_custom_config_to_emulator") as copy_cfg,
+                patch("grid_launcher.ui.mixins.details_view_mixin.subprocess.Popen", return_value=process),
+                patch("grid_launcher.ui.mixins.details_view_mixin.QTimer.singleShot"),
+                patch("grid_launcher.ui.mixins.details_view_mixin.copy_ps3_custom_config_to_emulator") as copy_cfg,
             ):
                 launched = window._launch_installed_game(game)
 

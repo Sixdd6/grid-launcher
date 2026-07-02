@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from rom_mate.emulator.duckstation import (
+from grid_launcher.emulator.duckstation import (
     duckstation_config_path_candidates,
     duckstation_memory_card_settings,
     ensure_duckstation_memory_card_settings,

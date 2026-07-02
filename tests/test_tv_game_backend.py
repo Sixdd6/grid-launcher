@@ -19,8 +19,8 @@ class TestGameBackend(unittest.TestCase):
         cls.app = QCoreApplication.instance() or QCoreApplication(sys.argv)
 
     def setUp(self):
-        from rom_mate.emulator import retroarch as retroarch_module
-        from rom_mate.emulator import rpcs3 as rpcs3_module
+        from grid_launcher.emulator import retroarch as retroarch_module
+        from grid_launcher.emulator import rpcs3 as rpcs3_module
 
         if not hasattr(retroarch_module, "is_retroarch_emulator_name"):
             retroarch_module.is_retroarch_emulator_name = (  # type: ignore[attr-defined]
@@ -31,7 +31,7 @@ class TestGameBackend(unittest.TestCase):
                 lambda name: "rpcs3" in str(name).strip().casefold()
             )
 
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         self.config = {
             "emulators": [{"name": "RetroArch", "path": "/usr/bin/retroarch", "args": "%rom%"}],
@@ -78,10 +78,10 @@ class TestGameBackend(unittest.TestCase):
         mock_process.poll.return_value = None
 
         with patch(
-            "rom_mate.tv.bridge.game_backend.prepare_emulator_launch_command",
+            "grid_launcher.tv.bridge.game_backend.prepare_emulator_launch_command",
             return_value=("RetroArch", ["retroarch", "/games/super_game.sfc"], "/tmp"),
-        ), patch("rom_mate.tv.bridge.game_backend._subprocess_popen", return_value=mock_process), patch(
-            "rom_mate.tv.bridge.game_backend._ProcessWatchThread.start"
+        ), patch("grid_launcher.tv.bridge.game_backend._subprocess_popen", return_value=mock_process), patch(
+            "grid_launcher.tv.bridge.game_backend._ProcessWatchThread.start"
         ):
             self.backend.launchGame(self.game)
 
@@ -92,10 +92,10 @@ class TestGameBackend(unittest.TestCase):
         mock_process.poll.return_value = None
 
         with patch(
-            "rom_mate.tv.bridge.game_backend.prepare_emulator_launch_command",
+            "grid_launcher.tv.bridge.game_backend.prepare_emulator_launch_command",
             return_value=("RetroArch", ["retroarch", "/games/super_game.sfc"], "/tmp"),
-        ), patch("rom_mate.tv.bridge.game_backend._subprocess_popen", return_value=mock_process), patch(
-            "rom_mate.tv.bridge.game_backend._ProcessWatchThread.start"
+        ), patch("grid_launcher.tv.bridge.game_backend._subprocess_popen", return_value=mock_process), patch(
+            "grid_launcher.tv.bridge.game_backend._ProcessWatchThread.start"
         ):
             self.backend.launchGame(self.game)
 
@@ -106,10 +106,10 @@ class TestGameBackend(unittest.TestCase):
         mock_process.poll.return_value = None
 
         with patch(
-            "rom_mate.tv.bridge.game_backend.prepare_emulator_launch_command",
+            "grid_launcher.tv.bridge.game_backend.prepare_emulator_launch_command",
             return_value=("RetroArch", ["retroarch", "/games/super_game.sfc"], "/tmp"),
-        ), patch("rom_mate.tv.bridge.game_backend._subprocess_popen", return_value=mock_process), patch(
-            "rom_mate.tv.bridge.game_backend._ProcessWatchThread.start"
+        ), patch("grid_launcher.tv.bridge.game_backend._subprocess_popen", return_value=mock_process), patch(
+            "grid_launcher.tv.bridge.game_backend._ProcessWatchThread.start"
         ):
             self.backend.launchGame(self.game)
 
@@ -120,7 +120,7 @@ class TestGameBackend(unittest.TestCase):
         self.backend.launchError.connect(lambda message: received.append(message))
 
         with patch(
-            "rom_mate.tv.bridge.game_backend.prepare_emulator_launch_command",
+            "grid_launcher.tv.bridge.game_backend.prepare_emulator_launch_command",
             side_effect=ValueError("no emulator"),
         ):
             self.backend.launchGame(self.game)
@@ -129,7 +129,7 @@ class TestGameBackend(unittest.TestCase):
 
     def test_launch_game_error_keeps_session_inactive(self):
         with patch(
-            "rom_mate.tv.bridge.game_backend.prepare_emulator_launch_command",
+            "grid_launcher.tv.bridge.game_backend.prepare_emulator_launch_command",
             side_effect=ValueError("no emulator"),
         ):
             self.backend.launchGame(self.game)
@@ -145,10 +145,10 @@ class TestGameBackend(unittest.TestCase):
         mock_process.wait.side_effect = RuntimeError("watch thread should not clear process in this test")
 
         with patch(
-            "rom_mate.tv.bridge.game_backend.prepare_emulator_launch_command",
+            "grid_launcher.tv.bridge.game_backend.prepare_emulator_launch_command",
             return_value=("RetroArch", ["retroarch", "/games/super_game.sfc"], "/tmp"),
-        ), patch("rom_mate.tv.bridge.game_backend._subprocess_popen", return_value=mock_process), patch(
-            "rom_mate.tv.bridge.game_backend._ProcessWatchThread.start"
+        ), patch("grid_launcher.tv.bridge.game_backend._subprocess_popen", return_value=mock_process), patch(
+            "grid_launcher.tv.bridge.game_backend._ProcessWatchThread.start"
         ):
             self.backend.launchGame(self.game)
             self.backend.stopGame()
@@ -162,10 +162,10 @@ class TestGameBackend(unittest.TestCase):
         mock_process.wait.side_effect = RuntimeError("watch thread should not clear process in this test")
 
         with patch(
-            "rom_mate.tv.bridge.game_backend.prepare_emulator_launch_command",
+            "grid_launcher.tv.bridge.game_backend.prepare_emulator_launch_command",
             return_value=("RetroArch", ["retroarch", "/games/super_game.sfc"], "/tmp"),
-        ), patch("rom_mate.tv.bridge.game_backend._subprocess_popen", return_value=mock_process), patch(
-            "rom_mate.tv.bridge.game_backend._ProcessWatchThread.start"
+        ), patch("grid_launcher.tv.bridge.game_backend._subprocess_popen", return_value=mock_process), patch(
+            "grid_launcher.tv.bridge.game_backend._ProcessWatchThread.start"
         ):
             self.backend.launchGame(self.game)
             self.backend.stopGame()
@@ -191,7 +191,7 @@ class TestGameBackendPause(unittest.TestCase):
         cls.app = QCoreApplication.instance() or QCoreApplication(sys.argv)
 
     def setUp(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         self.backend = GameBackend(
             {
@@ -203,7 +203,7 @@ class TestGameBackendPause(unittest.TestCase):
         )
 
     def test_pause_emulator_calls_suspend(self):
-        from rom_mate.tv.bridge import game_backend as game_backend_module
+        from grid_launcher.tv.bridge import game_backend as game_backend_module
 
         emitted: list[bool] = []
         self.backend.sessionPaused.connect(lambda: emitted.append(True))
@@ -232,7 +232,7 @@ class TestGameBackendPause(unittest.TestCase):
         self.assertEqual(emitted, [])
 
     def test_resume_emulator_calls_resume(self):
-        from rom_mate.tv.bridge import game_backend as game_backend_module
+        from grid_launcher.tv.bridge import game_backend as game_backend_module
 
         emitted: list[bool] = []
         self.backend.sessionResumed.connect(lambda: emitted.append(True))
@@ -280,7 +280,7 @@ class TestGameBackendSync(unittest.TestCase):
         cls.app = QCoreApplication.instance() or QCoreApplication(sys.argv)
 
     def test_process_watch_thread_clears_state_on_exit(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend({"emulators": [], "default_emulators": {}, "launch_args": ""}, MagicMock())
         backend._active_emulator_name = "RetroArch"
@@ -297,7 +297,7 @@ class TestGameBackendSync(unittest.TestCase):
         self.assertEqual(emitted, ["RetroArch"])
 
     def test_process_watch_thread_monitors_native_game_with_empty_emulator_name(self):
-        from rom_mate.tv.bridge.game_backend import _ProcessWatchThread, GameBackend
+        from grid_launcher.tv.bridge.game_backend import _ProcessWatchThread, GameBackend
 
         backend = GameBackend({"emulators": [], "default_emulators": {}, "launch_args": ""}, MagicMock())
         backend._process = MagicMock()
@@ -309,14 +309,14 @@ class TestGameBackendSync(unittest.TestCase):
         emitted: list[str] = []
         thread._exited.connect(lambda name: emitted.append(name))
 
-        with patch("rom_mate.tv.bridge.game_backend._ProcessWatchThread.start"):
+        with patch("grid_launcher.tv.bridge.game_backend._ProcessWatchThread.start"):
             thread.run()
 
         self.assertEqual(emitted, [""])
 
     def test_do_launch_connects_watch_thread_exited_signal(self):
         from PySide6.QtCore import Qt
-        from rom_mate.tv.bridge.game_backend import GameBackend, _ProcessWatchThread
+        from grid_launcher.tv.bridge.game_backend import GameBackend, _ProcessWatchThread
 
         backend = GameBackend({"emulators": [], "default_emulators": {}, "launch_args": ""}, MagicMock())
 
@@ -331,9 +331,9 @@ class TestGameBackendSync(unittest.TestCase):
             original_init(self_t, b, **kwargs)
             created_threads.append(self_t)
 
-        with patch("rom_mate.tv.bridge.game_backend._subprocess_popen", return_value=mock_process), patch.object(
+        with patch("grid_launcher.tv.bridge.game_backend._subprocess_popen", return_value=mock_process), patch.object(
             _ProcessWatchThread, "__init__", capture_thread
-        ), patch("rom_mate.tv.bridge.game_backend._ProcessWatchThread.start"):
+        ), patch("grid_launcher.tv.bridge.game_backend._ProcessWatchThread.start"):
             backend._do_launch("RetroArch", ["retroarch"], None)
 
         self.assertEqual(len(created_threads), 1)
@@ -356,7 +356,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
         cls.app = QCoreApplication.instance() or QCoreApplication(sys.argv)
 
     def setUp(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         self.game = {
             "id": "1",
@@ -374,20 +374,20 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
         }
 
     def test_launch_game_starts_restore_worker_when_auto_sync_enabled(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend({**self.base_config, "auto_cloud_save_download_on_launch": True}, MagicMock())
         statuses: list[str] = []
         backend.cloudSyncStatus.connect(statuses.append)
 
-        with patch("rom_mate.tv.bridge.game_backend._credentials_present", return_value=True), patch(
-            "rom_mate.tv.bridge.game_backend.resolve_emulator_entry_for_game",
+        with patch("grid_launcher.tv.bridge.game_backend._credentials_present", return_value=True), patch(
+            "grid_launcher.tv.bridge.game_backend.resolve_emulator_entry_for_game",
             return_value=("RetroArch", {"name": "RetroArch"}),
         ), patch(
-            "rom_mate.tv.bridge.game_backend.prepare_emulator_launch_command",
+            "grid_launcher.tv.bridge.game_backend.prepare_emulator_launch_command",
             return_value=("RetroArch", ["retroarch"], None),
-        ), patch("rom_mate.tv.bridge.game_backend._TvAutoRestoreWorker") as mock_restore_worker, patch(
-            "rom_mate.tv.bridge.game_backend.QThread.start"
+        ), patch("grid_launcher.tv.bridge.game_backend._TvAutoRestoreWorker") as mock_restore_worker, patch(
+            "grid_launcher.tv.bridge.game_backend.QThread.start"
         ):
             backend.launchGame(self.game)
 
@@ -395,7 +395,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
         mock_restore_worker.assert_called_once()
 
     def test_launch_game_calls_do_launch_directly_when_auto_sync_disabled(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend(dict(self.base_config), MagicMock())
         started: list[str] = []
@@ -405,19 +405,19 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
         mock_process.poll.return_value = None
 
         with patch(
-            "rom_mate.tv.bridge.game_backend.prepare_emulator_launch_command",
+            "grid_launcher.tv.bridge.game_backend.prepare_emulator_launch_command",
             return_value=("RetroArch", ["retroarch"], None),
-        ), patch("rom_mate.tv.bridge.game_backend._TvAutoRestoreWorker") as mock_restore_worker, patch(
-            "rom_mate.tv.bridge.game_backend._subprocess_popen",
+        ), patch("grid_launcher.tv.bridge.game_backend._TvAutoRestoreWorker") as mock_restore_worker, patch(
+            "grid_launcher.tv.bridge.game_backend._subprocess_popen",
             return_value=mock_process,
-        ), patch("rom_mate.tv.bridge.game_backend._ProcessWatchThread.start"):
+        ), patch("grid_launcher.tv.bridge.game_backend._ProcessWatchThread.start"):
             backend.launchGame(self.game)
 
         self.assertEqual(started, ["RetroArch"])
         mock_restore_worker.assert_not_called()
 
     def test_launch_game_skips_restore_when_no_emulator_entry(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend({**self.base_config, "auto_cloud_save_download_on_launch": True}, MagicMock())
         started: list[str] = []
@@ -426,75 +426,75 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
         mock_process = MagicMock()
         mock_process.poll.return_value = None
 
-        with patch("rom_mate.tv.bridge.game_backend._credentials_present", return_value=True), patch(
-            "rom_mate.tv.bridge.game_backend.resolve_emulator_entry_for_game",
+        with patch("grid_launcher.tv.bridge.game_backend._credentials_present", return_value=True), patch(
+            "grid_launcher.tv.bridge.game_backend.resolve_emulator_entry_for_game",
             return_value=("", None),
         ), patch(
-            "rom_mate.tv.bridge.game_backend.prepare_emulator_launch_command",
+            "grid_launcher.tv.bridge.game_backend.prepare_emulator_launch_command",
             return_value=("RetroArch", ["retroarch"], None),
-        ), patch("rom_mate.tv.bridge.game_backend._TvAutoRestoreWorker") as mock_restore_worker, patch(
-            "rom_mate.tv.bridge.game_backend._subprocess_popen",
+        ), patch("grid_launcher.tv.bridge.game_backend._TvAutoRestoreWorker") as mock_restore_worker, patch(
+            "grid_launcher.tv.bridge.game_backend._subprocess_popen",
             return_value=mock_process,
-        ), patch("rom_mate.tv.bridge.game_backend._ProcessWatchThread.start"):
+        ), patch("grid_launcher.tv.bridge.game_backend._ProcessWatchThread.start"):
             backend.launchGame(self.game)
 
         mock_restore_worker.assert_not_called()
         self.assertEqual(started, ["RetroArch"])
 
     def test_on_process_exited_triggers_auto_upload_when_enabled(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend({**self.base_config, "auto_cloud_save_upload_on_exit": True}, MagicMock())
         backend._session_game = dict(self.game)
         backend._process = MagicMock()
 
-        with patch("rom_mate.tv.bridge.game_backend._credentials_present", return_value=True), patch(
-            "rom_mate.tv.bridge.game_backend.resolve_emulator_entry_for_game",
+        with patch("grid_launcher.tv.bridge.game_backend._credentials_present", return_value=True), patch(
+            "grid_launcher.tv.bridge.game_backend.resolve_emulator_entry_for_game",
             return_value=("RetroArch", {"name": "RetroArch"}),
-        ), patch("rom_mate.tv.bridge.game_backend._TvAutoUploadWorker") as mock_upload_worker, patch(
-            "rom_mate.tv.bridge.game_backend.QThread.start"
+        ), patch("grid_launcher.tv.bridge.game_backend._TvAutoUploadWorker") as mock_upload_worker, patch(
+            "grid_launcher.tv.bridge.game_backend.QThread.start"
         ):
             backend._on_process_exited("RetroArch")
 
         mock_upload_worker.assert_called_once()
 
     def test_on_process_exited_skips_upload_when_no_session_game(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend({**self.base_config, "auto_cloud_save_upload_on_exit": True}, MagicMock())
         backend._session_game = None
         backend._process = MagicMock()
 
-        with patch("rom_mate.tv.bridge.game_backend._credentials_present", return_value=True), patch(
-            "rom_mate.tv.bridge.game_backend._TvAutoUploadWorker"
+        with patch("grid_launcher.tv.bridge.game_backend._credentials_present", return_value=True), patch(
+            "grid_launcher.tv.bridge.game_backend._TvAutoUploadWorker"
         ) as mock_upload_worker:
             backend._on_process_exited("RetroArch")
 
         mock_upload_worker.assert_not_called()
 
     def test_on_process_exited_skips_upload_when_auto_sync_disabled(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend(dict(self.base_config), MagicMock())
         backend._session_game = dict(self.game)
         backend._process = MagicMock()
 
-        with patch("rom_mate.tv.bridge.game_backend._TvAutoUploadWorker") as mock_upload_worker:
+        with patch("grid_launcher.tv.bridge.game_backend._TvAutoUploadWorker") as mock_upload_worker:
             backend._on_process_exited("RetroArch")
 
         mock_upload_worker.assert_not_called()
 
     def test_on_process_exited_stamps_last_played(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend(dict(self.base_config), MagicMock())
         backend._config["installed_games"] = [{"id": 42, "rom_id": "42"}]
         backend._session_game = {"id": 42, "rom_id": "42", "title": "Doom"}
         backend._process = MagicMock()
 
-        with patch("rom_mate.tv.bridge.game_backend._ProcessWatchThread.start"), patch(
-            "rom_mate.tv.bridge.game_backend._write_config_file"
-        ), patch("rom_mate.tv.bridge.game_backend._credentials_present", return_value=False):
+        with patch("grid_launcher.tv.bridge.game_backend._ProcessWatchThread.start"), patch(
+            "grid_launcher.tv.bridge.game_backend._write_config_file"
+        ), patch("grid_launcher.tv.bridge.game_backend._credentials_present", return_value=False):
             backend._on_process_exited("RetroArch")
 
         stamped = backend._config["installed_games"][0].get("last_played")
@@ -503,20 +503,20 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
         self.assertIn("T", stamped)
 
     def test_on_process_exited_no_stamp_when_no_session_game(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend(dict(self.base_config), MagicMock())
         backend._config["installed_games"] = [{"id": 42}]
         backend._session_game = None
         backend._process = MagicMock()
 
-        with patch("rom_mate.tv.bridge.game_backend._write_config_file"):
+        with patch("grid_launcher.tv.bridge.game_backend._write_config_file"):
             backend._on_process_exited("RetroArch")
 
         self.assertNotIn("last_played", backend._config["installed_games"][0])
 
     def test_on_restore_done_calls_do_launch_on_success(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend(dict(self.base_config), MagicMock())
         statuses: list[str] = []
@@ -529,7 +529,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
         self.assertEqual(statuses, [""])
 
     def test_on_restore_done_calls_do_launch_even_on_failure(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend(dict(self.base_config), MagicMock())
 
@@ -539,7 +539,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
         mock_do_launch.assert_called_once_with("RetroArch", ["retroarch"], None, env=None)
 
     def test_on_auto_upload_done_emits_cloud_sync_status(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend(dict(self.base_config), MagicMock())
         statuses: list[str] = []
@@ -550,7 +550,7 @@ class TestGameBackendAutoCloudSync(unittest.TestCase):
         self.assertEqual(statuses, ["Auto-uploaded 1 save file(s)."])
 
     def test_on_auto_upload_done_skips_signal_when_empty_message(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend(dict(self.base_config), MagicMock())
         statuses: list[str] = []
@@ -567,7 +567,7 @@ class TestGameBackendInstall(unittest.TestCase):
         cls.app = QCoreApplication.instance() or QCoreApplication(sys.argv)
 
     def test_is_install_active_false_initially(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend(
             {
@@ -584,7 +584,7 @@ class TestGameBackendInstall(unittest.TestCase):
         self.assertFalse(backend.isInstallActive)
 
     def test_install_game_emits_error_when_no_server_url(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend(
             {
@@ -606,7 +606,7 @@ class TestGameBackendInstall(unittest.TestCase):
         self.assertFalse(backend.isInstallActive)
 
     def test_install_game_emits_error_when_no_library_path(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend(
             {
@@ -629,7 +629,7 @@ class TestGameBackendInstall(unittest.TestCase):
         self.assertFalse(backend.isInstallActive)
 
     def test_install_game_emits_error_when_already_installing(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend(
             {
@@ -648,14 +648,14 @@ class TestGameBackendInstall(unittest.TestCase):
         received: list[str] = []
         backend.launchError.connect(lambda message: received.append(message))
 
-        with patch("rom_mate.tv.bridge.game_backend.QThread.start") as mock_thread_start:
+        with patch("grid_launcher.tv.bridge.game_backend.QThread.start") as mock_thread_start:
             backend.installGame({"id": "42", "name": "Test Game"})
 
         self.assertEqual(received, ["An install is already in progress."])
         mock_thread_start.assert_not_called()
 
     def test_on_install_download_done_error_emits_install_complete_false(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         backend = GameBackend(
             {
@@ -686,7 +686,7 @@ class TestGameBackendInstall(unittest.TestCase):
         self.assertEqual(received, [(False, "network timeout", {"id": "1", "name": "Test"})])
 
     def test_on_install_finalize_done_success_adds_to_installed_games(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         mock_main_window = MagicMock()
         backend = GameBackend(
@@ -733,7 +733,7 @@ class TestGameBackendInstall(unittest.TestCase):
         self.assertTrue(any(entry.get("id") == "99" and entry.get("local_path") == "/games/Test/Test.iso" for entry in installed_games))
 
     def test_on_install_download_done_success_starts_finalize_thread(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         mock_main_window = MagicMock()
         backend = GameBackend(
@@ -749,7 +749,7 @@ class TestGameBackendInstall(unittest.TestCase):
         )
         backend._install_target_game = {"id": "42", "name": "Test"}
 
-        with patch("rom_mate.tv.bridge.game_backend.threading.Thread") as mock_thread_cls:
+        with patch("grid_launcher.tv.bridge.game_backend.threading.Thread") as mock_thread_cls:
             mock_thread_instance = MagicMock()
             mock_thread_cls.return_value = mock_thread_instance
             backend._on_install_download_done({"archive_path": "/tmp/archive.zip", "error": ""})
@@ -759,7 +759,7 @@ class TestGameBackendInstall(unittest.TestCase):
         self.assertIs(backend._finalize_thread, mock_thread_instance)
 
     def test_uninstall_game_emits_complete_and_removes_from_installed_games(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         mock_main_window = MagicMock()
         mock_main_window._uninstall_game.return_value = True
@@ -792,7 +792,7 @@ class TestGameBackendInstall(unittest.TestCase):
         self.assertEqual(received, [(True, "Game uninstalled.", {"id": "77", "name": "Test", "local_path": ""})])
 
     def test_on_install_finalize_done_non_extracted_sets_archive_path(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         mock_main_window = MagicMock()
         backend = GameBackend(
@@ -845,7 +845,7 @@ class TestGameBackendInstall(unittest.TestCase):
         )
 
     def test_on_install_finalize_done_persists_config(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         mock_main_window = MagicMock()
         backend = GameBackend(
@@ -874,7 +874,7 @@ class TestGameBackendInstall(unittest.TestCase):
         mock_main_window._save_config.assert_called_once()
 
     def test_on_install_finalize_done_failure_does_not_persist_config(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         mock_main_window = MagicMock()
         backend = GameBackend(
@@ -902,7 +902,7 @@ class TestGameBackendInstall(unittest.TestCase):
         mock_main_window._save_config.assert_not_called()
 
     def test_uninstall_game_delegates_to_main_window(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         mock_main_window = MagicMock()
         mock_main_window._uninstall_game.return_value = True
@@ -925,7 +925,7 @@ class TestGameBackendInstall(unittest.TestCase):
         self.assertEqual(call_arg.get("id"), "55")
 
     def test_uninstall_game_emits_failure_when_not_found(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         mock_main_window = MagicMock()
         mock_main_window._uninstall_game.return_value = False
@@ -959,14 +959,14 @@ class TestGameBackendInstall(unittest.TestCase):
 
 class TestGameBackendNativeLaunch(unittest.TestCase):
     def _make_backend(self, config=None):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         return GameBackend(config or {}, MagicMock())
 
-    @patch("rom_mate.tv.bridge.game_backend.is_native_executable_platform", return_value=True)
-    @patch("rom_mate.tv.bridge.game_backend.native_install_dir_for_game", return_value=Path("/fake/dir"))
-    @patch("rom_mate.tv.bridge.game_backend.native_executable_candidates_for_game", return_value=[Path("/fake/dir/sub/game.exe")])
-    @patch("rom_mate.tv.bridge.game_backend.resolved_native_executable_path_for_game", return_value=None)
+    @patch("grid_launcher.tv.bridge.game_backend.is_native_executable_platform", return_value=True)
+    @patch("grid_launcher.tv.bridge.game_backend.native_install_dir_for_game", return_value=Path("/fake/dir"))
+    @patch("grid_launcher.tv.bridge.game_backend.native_executable_candidates_for_game", return_value=[Path("/fake/dir/sub/game.exe")])
+    @patch("grid_launcher.tv.bridge.game_backend.resolved_native_executable_path_for_game", return_value=None)
     def test_launch_game_native_no_exe_emits_picker_needed(self, *_):
         backend = self._make_backend()
         captured = []
@@ -978,13 +978,13 @@ class TestGameBackendNativeLaunch(unittest.TestCase):
         self.assertIn("path", captured[0][0])
         self.assertEqual(captured[0][0]["path"], str(Path("/fake/dir/sub/game.exe")))
 
-    @patch("rom_mate.tv.bridge.game_backend._ProcessWatchThread.start")
-    @patch("rom_mate.tv.bridge.game_backend._subprocess_popen")
-    @patch("rom_mate.tv.bridge.game_backend.prepare_native_launch_command", return_value=(["game.exe"], "/fake/dir", {}))
-    @patch("rom_mate.tv.bridge.game_backend.resolved_native_executable_path_for_game", return_value=Path("/fake/dir/game.exe"))
-    @patch("rom_mate.tv.bridge.game_backend.native_executable_candidates_for_game", return_value=[Path("/fake/dir/game.exe")])
-    @patch("rom_mate.tv.bridge.game_backend.native_install_dir_for_game", return_value=Path("/fake/dir"))
-    @patch("rom_mate.tv.bridge.game_backend.is_native_executable_platform", return_value=True)
+    @patch("grid_launcher.tv.bridge.game_backend._ProcessWatchThread.start")
+    @patch("grid_launcher.tv.bridge.game_backend._subprocess_popen")
+    @patch("grid_launcher.tv.bridge.game_backend.prepare_native_launch_command", return_value=(["game.exe"], "/fake/dir", {}))
+    @patch("grid_launcher.tv.bridge.game_backend.resolved_native_executable_path_for_game", return_value=Path("/fake/dir/game.exe"))
+    @patch("grid_launcher.tv.bridge.game_backend.native_executable_candidates_for_game", return_value=[Path("/fake/dir/game.exe")])
+    @patch("grid_launcher.tv.bridge.game_backend.native_install_dir_for_game", return_value=Path("/fake/dir"))
+    @patch("grid_launcher.tv.bridge.game_backend.is_native_executable_platform", return_value=True)
     def test_launch_game_native_with_exe_calls_do_launch(self, _isnative, _installdir, _candidates, _resolved, _prepare, mock_popen, _watchstart):
         mock_popen.return_value = MagicMock()
         backend = self._make_backend()
@@ -992,10 +992,10 @@ class TestGameBackendNativeLaunch(unittest.TestCase):
         mock_popen.assert_called_once()
         self.assertIsNotNone(backend._session_game)
 
-    @patch("rom_mate.tv.bridge.game_backend.resolved_native_executable_path_for_game", return_value=None)
-    @patch("rom_mate.tv.bridge.game_backend.native_executable_candidates_for_game", return_value=[])
-    @patch("rom_mate.tv.bridge.game_backend.native_install_dir_for_game", return_value=Path("/fake/dir"))
-    @patch("rom_mate.tv.bridge.game_backend.is_native_executable_platform", return_value=True)
+    @patch("grid_launcher.tv.bridge.game_backend.resolved_native_executable_path_for_game", return_value=None)
+    @patch("grid_launcher.tv.bridge.game_backend.native_executable_candidates_for_game", return_value=[])
+    @patch("grid_launcher.tv.bridge.game_backend.native_install_dir_for_game", return_value=Path("/fake/dir"))
+    @patch("grid_launcher.tv.bridge.game_backend.is_native_executable_platform", return_value=True)
     def test_launch_game_native_no_candidates_emits_error(self, *_):
         backend = self._make_backend()
         captured = []
@@ -1004,7 +1004,7 @@ class TestGameBackendNativeLaunch(unittest.TestCase):
         self.assertEqual(len(captured), 1)
         self.assertIn("No executable", captured[0])
 
-    @patch("rom_mate.tv.bridge.game_backend._write_config_file")
+    @patch("grid_launcher.tv.bridge.game_backend._write_config_file")
     def test_save_native_executable_updates_config(self, mock_write):
         config = {
             "installed_games": [
@@ -1016,8 +1016,8 @@ class TestGameBackendNativeLaunch(unittest.TestCase):
         self.assertEqual(config["installed_games"][0]["native_executable_path"], "/games/mygame/launcher.exe")
         mock_write.assert_called_once()
 
-    @patch("rom_mate.tv.bridge.game_backend.native_executable_candidates_for_game", return_value=[Path("/fake/dir/sub/game.exe")])
-    @patch("rom_mate.tv.bridge.game_backend.native_install_dir_for_game", return_value=Path("/fake/dir"))
+    @patch("grid_launcher.tv.bridge.game_backend.native_executable_candidates_for_game", return_value=[Path("/fake/dir/sub/game.exe")])
+    @patch("grid_launcher.tv.bridge.game_backend.native_install_dir_for_game", return_value=Path("/fake/dir"))
     def test_get_native_executable_candidates_returns_list(self, *_):
         config = {
             "installed_games": [
@@ -1037,7 +1037,7 @@ class TestGameBackendInstallActiveFinalize(unittest.TestCase):
         cls.app = QCoreApplication.instance() or QCoreApplication(sys.argv)
 
     def _make_backend(self):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         return GameBackend(
             {
@@ -1072,7 +1072,7 @@ class TestGameBackendInstallActiveFinalize(unittest.TestCase):
         received: list[str] = []
         backend.launchError.connect(lambda message: received.append(message))
 
-        with patch("rom_mate.tv.bridge.game_backend.QThread.start") as mock_thread_start:
+        with patch("grid_launcher.tv.bridge.game_backend.QThread.start") as mock_thread_start:
             backend.installGame({"id": "42", "name": "Test Game"})
 
         self.assertEqual(received, ["An install is already in progress."])
@@ -1097,7 +1097,7 @@ class TestGameBackendInstallActiveFinalize(unittest.TestCase):
             )
         )
 
-        with patch("rom_mate.tv.bridge.game_backend.QThread.start") as mock_thread_start:
+        with patch("grid_launcher.tv.bridge.game_backend.QThread.start") as mock_thread_start:
             backend.installGame({"id": "99", "name": "New Game"})
 
         self.assertEqual(len(received), 1)
@@ -1144,7 +1144,7 @@ class TestGameBackendInstallPlatformSubfolder(unittest.TestCase):
         cls.app = QCoreApplication.instance() or QCoreApplication(sys.argv)
 
     def _make_backend(self, extra_config=None):
-        from rom_mate.tv.bridge.game_backend import GameBackend
+        from grid_launcher.tv.bridge.game_backend import GameBackend
 
         config = {
             "emulators": [],
@@ -1173,9 +1173,9 @@ class TestGameBackendInstallPlatformSubfolder(unittest.TestCase):
 
         game = {"id": "42", "name": "Breath of the Wild", "platform": "Nintendo Switch"}
 
-        with patch("rom_mate.tv.bridge.game_backend._InstallDownloadWorker", side_effect=fake_worker), \
-             patch("rom_mate.tv.bridge.game_backend.QThread") as mock_qthread_cls, \
-             patch("rom_mate.tv.bridge.game_backend.Path.mkdir"):
+        with patch("grid_launcher.tv.bridge.game_backend._InstallDownloadWorker", side_effect=fake_worker), \
+             patch("grid_launcher.tv.bridge.game_backend.QThread") as mock_qthread_cls, \
+             patch("grid_launcher.tv.bridge.game_backend.Path.mkdir"):
             mock_thread = MagicMock()
             mock_thread.isRunning.return_value = False
             mock_qthread_cls.return_value = mock_thread
@@ -1201,9 +1201,9 @@ class TestGameBackendInstallPlatformSubfolder(unittest.TestCase):
 
         game = {"id": "99", "name": "Mystery Game"}
 
-        with patch("rom_mate.tv.bridge.game_backend._InstallDownloadWorker", side_effect=fake_worker), \
-             patch("rom_mate.tv.bridge.game_backend.QThread") as mock_qthread_cls, \
-             patch("rom_mate.tv.bridge.game_backend.Path.mkdir"):
+        with patch("grid_launcher.tv.bridge.game_backend._InstallDownloadWorker", side_effect=fake_worker), \
+             patch("grid_launcher.tv.bridge.game_backend.QThread") as mock_qthread_cls, \
+             patch("grid_launcher.tv.bridge.game_backend.Path.mkdir"):
             mock_thread = MagicMock()
             mock_thread.isRunning.return_value = False
             mock_qthread_cls.return_value = mock_thread
@@ -1236,9 +1236,9 @@ class TestGameBackendInstallPlatformSubfolder(unittest.TestCase):
             "rom_file_name": "Sonic the Hedgehog (USA).zip",
         }
 
-        with patch("rom_mate.tv.bridge.game_backend._InstallDownloadWorker", side_effect=fake_worker), \
-             patch("rom_mate.tv.bridge.game_backend.QThread") as mock_qthread_cls, \
-             patch("rom_mate.tv.bridge.game_backend.Path.mkdir"):
+        with patch("grid_launcher.tv.bridge.game_backend._InstallDownloadWorker", side_effect=fake_worker), \
+             patch("grid_launcher.tv.bridge.game_backend.QThread") as mock_qthread_cls, \
+             patch("grid_launcher.tv.bridge.game_backend.Path.mkdir"):
             mock_thread = MagicMock()
             mock_thread.isRunning.return_value = False
             mock_qthread_cls.return_value = mock_thread
@@ -1263,9 +1263,9 @@ class TestGameBackendInstallPlatformSubfolder(unittest.TestCase):
 
         game = {"id": "1470", "name": "Mystery Game", "platform": "Sega Genesis"}
 
-        with patch("rom_mate.tv.bridge.game_backend._InstallDownloadWorker", side_effect=fake_worker), \
-             patch("rom_mate.tv.bridge.game_backend.QThread") as mock_qthread_cls, \
-             patch("rom_mate.tv.bridge.game_backend.Path.mkdir"):
+        with patch("grid_launcher.tv.bridge.game_backend._InstallDownloadWorker", side_effect=fake_worker), \
+             patch("grid_launcher.tv.bridge.game_backend.QThread") as mock_qthread_cls, \
+             patch("grid_launcher.tv.bridge.game_backend.Path.mkdir"):
             mock_thread = MagicMock()
             mock_thread.isRunning.return_value = False
             mock_qthread_cls.return_value = mock_thread

@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication
 
-from rom_mate.ui.theme import themed_svg_icon, themed_svg_pixmap
+from grid_launcher.ui.theme import themed_svg_icon, themed_svg_pixmap
 
 
 class ThemedSvgIconTests(unittest.TestCase):

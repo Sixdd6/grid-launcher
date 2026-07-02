@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 
 import py7zr
 
-from rom_mate.library.firmware_install import (
+from grid_launcher.library.firmware_install import (
     download_firmware_bytes,
     fetch_platform_firmware,
     fetch_ps3_firmware_url,
@@ -21,12 +21,12 @@ from rom_mate.library.firmware_install import (
     resolve_firmware_targets,
     PS3_FIRMWARE_MANIFEST_URL,
 )
-from rom_mate.library.archive_preparation import (
+from grid_launcher.library.archive_preparation import (
     _extract_7z_with_fallbacks,
     _try_py7zr,
     extract_archive_into_directory,
 )
-from rom_mate.emulator.retroarch import (
+from grid_launcher.emulator.retroarch import (
     retroarch_core_config_files_metadata,
     retroarch_core_firmware_metadata,
     retroarch_core_saves_files_metadata,
@@ -193,7 +193,7 @@ class Rpcs3FirmwareRoutingTests(unittest.TestCase):
         self.assertEqual(result, [Path(".")])
 
     def test_rpcs3_pup_detected_when_present(self) -> None:
-        from rom_mate.emulator.rpcs3 import rpcs3_pup_path
+        from grid_launcher.emulator.rpcs3 import rpcs3_pup_path
 
         with tempfile.TemporaryDirectory() as tmp:
             exe = Path(tmp) / "rpcs3.exe"
@@ -204,7 +204,7 @@ class Rpcs3FirmwareRoutingTests(unittest.TestCase):
         self.assertIsNotNone(result)
 
     def test_rpcs3_pup_absent_returns_none(self) -> None:
-        from rom_mate.emulator.rpcs3 import rpcs3_pup_path
+        from grid_launcher.emulator.rpcs3 import rpcs3_pup_path
 
         with tempfile.TemporaryDirectory() as tmp:
             exe = Path(tmp) / "rpcs3.exe"
@@ -554,7 +554,7 @@ class FirmwareExtractZipWithPathsTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             target_dir = Path(temp_dir)
-            with patch("rom_mate.library.archive_preparation.extract_archive_into_directory") as mock_extract:
+            with patch("grid_launcher.library.archive_preparation.extract_archive_into_directory") as mock_extract:
                 result = install_platform_firmware(
                     mock_json_fn,
                     mock_bytes_fn,
@@ -574,7 +574,7 @@ class FirmwareExtractZipWithPathsTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             target_dir = Path(temp_dir)
-            with patch("rom_mate.library.archive_preparation.extract_archive_into_directory") as mock_extract:
+            with patch("grid_launcher.library.archive_preparation.extract_archive_into_directory") as mock_extract:
                 result = install_platform_firmware(
                     mock_json_fn,
                     mock_bytes_fn,
@@ -864,7 +864,7 @@ class FirmwareExtractZipWithPathsTests(unittest.TestCase):
             existing_file = target_dir / "existing.bin"
             existing_file.write_bytes(b"KEEPME")
 
-            with patch("rom_mate.library.archive_preparation.extract_archive_into_directory", side_effect=fake_extract):
+            with patch("grid_launcher.library.archive_preparation.extract_archive_into_directory", side_effect=fake_extract):
                 install_platform_firmware(
                     mock_json_fn, mock_bytes_fn, 19, [target_dir],
                 )
@@ -885,7 +885,7 @@ class FirmwareExtractZipWithPathsTests(unittest.TestCase):
             target_dir = Path(temp_dir)
             (target_dir / "IPL.bin").write_bytes(b"ORIGINAL")
 
-            with patch("rom_mate.library.archive_preparation.extract_archive_into_directory", side_effect=fake_extract):
+            with patch("grid_launcher.library.archive_preparation.extract_archive_into_directory", side_effect=fake_extract):
                 install_platform_firmware(
                     mock_json_fn, mock_bytes_fn, 19, [target_dir],
                     skip_existing=True,
@@ -904,7 +904,7 @@ class FirmwareExtractZipWithPathsTests(unittest.TestCase):
             target_dir = Path(temp_dir)
             (target_dir / "IPL.bin").write_bytes(b"ORIGINAL")
 
-            with patch("rom_mate.library.archive_preparation.extract_archive_into_directory", side_effect=fake_extract):
+            with patch("grid_launcher.library.archive_preparation.extract_archive_into_directory", side_effect=fake_extract):
                 install_platform_firmware(
                     mock_json_fn, mock_bytes_fn, 19, [target_dir],
                     skip_existing=False,
@@ -926,7 +926,7 @@ class FirmwareExtractZipWithPathsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             target_dir = Path(temp_dir)
 
-            with patch("rom_mate.library.archive_preparation.extract_archive_into_directory", side_effect=fake_extract):
+            with patch("grid_launcher.library.archive_preparation.extract_archive_into_directory", side_effect=fake_extract):
                 install_platform_firmware(
                     mock_json_fn, mock_bytes_fn, 19, [target_dir],
                 )
@@ -1282,7 +1282,7 @@ class RetroArchFirmwareDirectoryRoutingTests(unittest.TestCase):
 
 
 class RetroArchConfigFileDirsFilteringTests(unittest.TestCase):
-    """Tests for config_file_dirs assembly logic used in rom-mate.py."""
+    """Tests for config_file_dirs assembly logic used in grid-launcher.py."""
 
     @staticmethod
     def _build_config_file_dirs(config_metadata: dict, emulator_dir: Path) -> list:
@@ -1326,7 +1326,7 @@ class RetroArchConfigFileDirsFilteringTests(unittest.TestCase):
 
 
 class RetroArchSavesFileDirsAssemblyTests(unittest.TestCase):
-    """Tests for saves_file_dirs assembly logic used in rom-mate.py."""
+    """Tests for saves_file_dirs assembly logic used in grid-launcher.py."""
 
     @staticmethod
     def _build_saves_file_dirs(saves_metadata: dict | None, saves_dir: Path) -> list:
@@ -1358,7 +1358,7 @@ class RetroArchSavesFileDirsAssemblyTests(unittest.TestCase):
 
 
 class RetroArchFirmwareDirsFilteringTests(unittest.TestCase):
-    """Tests for firmware_dirs tuple-filter assembly logic used in rom-mate.py."""
+    """Tests for firmware_dirs tuple-filter assembly logic used in grid-launcher.py."""
 
     @staticmethod
     def _apply_firmware_file_filter(firmware_dirs: list, metadata: dict) -> list:
@@ -1426,8 +1426,8 @@ class ArchiveSevenZipFallbackTests(unittest.TestCase):
             extracted_dir = Path(temp_dir) / "out"
             extracted_dir.mkdir()
 
-            with patch("rom_mate.library.archive_preparation._BUNDLED_7Z_PATH", Path(temp_dir) / "missing-7z.exe"):
-                with patch("rom_mate.library.archive_preparation._try_system_7z", return_value=False):
+            with patch("grid_launcher.library.archive_preparation._BUNDLED_7Z_PATH", Path(temp_dir) / "missing-7z.exe"):
+                with patch("grid_launcher.library.archive_preparation._try_system_7z", return_value=False):
                     _extract_7z_with_fallbacks(archive_path, extracted_dir)
 
             self.assertEqual((extracted_dir / "payload.bin").read_bytes(), b"PAYLOADDATA")
@@ -1439,13 +1439,13 @@ class ArchiveSevenZipFallbackTests(unittest.TestCase):
             extracted_dir = Path(temp_dir) / "out"
             extracted_dir.mkdir()
 
-            with patch("rom_mate.library.archive_preparation._BUNDLED_7Z_PATH", Path(temp_dir) / "missing-7z.exe"):
-                with patch("rom_mate.library.archive_preparation._try_system_7z", return_value=False):
-                    with patch("rom_mate.library.archive_preparation._ensure_full_7z", return_value=None):
+            with patch("grid_launcher.library.archive_preparation._BUNDLED_7Z_PATH", Path(temp_dir) / "missing-7z.exe"):
+                with patch("grid_launcher.library.archive_preparation._try_system_7z", return_value=False):
+                    with patch("grid_launcher.library.archive_preparation._ensure_full_7z", return_value=None):
                         with self.assertRaises(OSError) as raised:
                             _extract_7z_with_fallbacks(archive_path, extracted_dir)
 
-            self.assertIn("py7zr also failed", str(raised.exception))
+            self.assertIn("The built-in Python fallback could not extract this archive", str(raised.exception))
 
     def test_tar_gz_extraction_succeeds_via_tar_code_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

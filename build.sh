@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Build script for rom-mate-neo
+# Build script for GRID Launcher
 # This script builds the application into a standalone Linux executable
 
 echo ""
 echo "================================"
-echo "rom-mate-neo Build Script"
+echo "GRID Launcher Build Script"
 echo "================================"
 echo ""
 
@@ -38,16 +38,17 @@ python -m PyInstaller \
     --clean \
     --windowed \
     --onefile \
-    --name rom-mate-neo \
+    --name grid-launcher \
     --add-data "assets:assets" \
     --add-data "retroarch-core-list.json:." \
+    --add-data "romm-platform-cores.json:." \
     --add-data "emulator-autoprofiles.json:." \
     --hidden-import brotli \
     --hidden-import pyzstd \
     --hidden-import pyppmd \
     --hidden-import keyring.backends.SecretService \
     --hidden-import keyring.backends.kwallet \
-    rom-mate.py
+    grid-launcher.py
 
 BUILD_EXIT_CODE=$?
 
@@ -59,10 +60,10 @@ if [ $BUILD_EXIT_CODE -eq 0 ]; then
     echo "================================"
     echo ""
     echo "Executable location:"
-    echo "  ./dist/rom-mate-neo"
+    echo "  ./dist/grid-launcher"
     echo ""
     echo "You can now:"
-    echo "  1. Run it directly: ./dist/rom-mate-neo"
+    echo "  1. Run it directly: ./dist/grid-launcher"
     echo "  2. Move it to any location"
     echo "  3. Share the executable file"
 else

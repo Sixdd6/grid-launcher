@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rom_mate.emulator.selection import is_xbox360_platform
-from rom_mate.emulator.xenia import apply_xenia_content_without_ui, _read_stfs_header
+from grid_launcher.emulator.selection import is_xbox360_platform
+from grid_launcher.emulator.xenia import apply_xenia_content_without_ui, _read_stfs_header
 
 
 def _make_stfs_header(title_id: int, content_type: int) -> bytes:
@@ -173,7 +173,7 @@ class XeniaContentArchiveTests(unittest.TestCase):
                 zf.writestr(name, data)
 
     def test_installs_stfs_files_from_zip(self) -> None:
-        from rom_mate.library.archive_preparation import apply_xenia_content_archive_without_ui
+        from grid_launcher.library.archive_preparation import apply_xenia_content_archive_without_ui
         import zipfile
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -208,7 +208,7 @@ class XeniaContentArchiveTests(unittest.TestCase):
         self.assertEqual(results[0]["title_id"], "545107FC")
 
     def test_returns_error_for_non_stfs_files_in_zip(self) -> None:
-        from rom_mate.library.archive_preparation import apply_xenia_content_archive_without_ui
+        from grid_launcher.library.archive_preparation import apply_xenia_content_archive_without_ui
         import zipfile
 
         with tempfile.TemporaryDirectory() as tmp:

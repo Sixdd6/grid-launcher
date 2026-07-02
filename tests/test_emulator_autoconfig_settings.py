@@ -9,26 +9,26 @@ from pathlib import Path
 from unittest.mock import patch, ANY, MagicMock
 import json
 
-from rom_mate.core.path import xdg_config_home
-from rom_mate.emulator.azahar import (
+from grid_launcher.core.path import xdg_config_home
+from grid_launcher.emulator.azahar import (
     azahar_config_path_candidates,
     azahar_user_root_candidates,
     ensure_azahar_settings,
 )
-from rom_mate.emulator.cemu import cemu_settings_path_candidates, ensure_cemu_controller_config, ensure_cemu_settings
-from rom_mate.emulator import ensure_dolphin_settings, ensure_dolphin_skip_ipl, ensure_dolphin_gcpad_config
-from rom_mate.emulator.dolphin import dolphin_ini_path_candidates, dolphin_user_root_candidates
-from rom_mate.emulator.duckstation import ensure_duckstation_memory_card_settings
-from rom_mate.emulator.eden import _ensure_eden_section_values, ensure_eden_settings, eden_config_path_candidates
-from rom_mate.emulator.launch import retroarch_core_argument_path
-from rom_mate.emulator.pico8 import pico8_user_root_candidates
-from rom_mate.emulator.pcsx2 import (
+from grid_launcher.emulator.cemu import cemu_settings_path_candidates, ensure_cemu_controller_config, ensure_cemu_settings
+from grid_launcher.emulator import ensure_dolphin_settings, ensure_dolphin_skip_ipl, ensure_dolphin_gcpad_config
+from grid_launcher.emulator.dolphin import dolphin_ini_path_candidates, dolphin_user_root_candidates
+from grid_launcher.emulator.duckstation import ensure_duckstation_memory_card_settings
+from grid_launcher.emulator.eden import _ensure_eden_section_values, ensure_eden_settings, eden_config_path_candidates
+from grid_launcher.emulator.launch import retroarch_core_argument_path
+from grid_launcher.emulator.pico8 import pico8_user_root_candidates
+from grid_launcher.emulator.pcsx2 import (
     ensure_pcsx2_settings,
     pcsx2_config_path_candidates,
     pcsx2_data_root_candidates,
 )
-from rom_mate.emulator.ppsspp import ensure_ppsspp_settings
-from rom_mate.emulator.rpcs3 import (
+from grid_launcher.emulator.ppsspp import ensure_ppsspp_settings
+from grid_launcher.emulator.rpcs3 import (
     copy_ps3_custom_config_to_emulator,
     ensure_rpcs3_settings,
     rpcs3_data_root,
@@ -36,11 +36,11 @@ from rom_mate.emulator.rpcs3 import (
     update_rpcs3_games_yml,
     ps3_vfs_games_path,
 )
-from rom_mate.emulator.redream import ensure_redream_settings
-from rom_mate.emulator.retroarch import ensure_retroarch_save_location_settings
-from rom_mate.emulator.xemu import ensure_xemu_settings, xemu_base_path_candidates
-from rom_mate.emulator import xemu_missing_bios_files
-from rom_mate.ui.mixins.emulator_ui_mixin import EmulatorUIMixin
+from grid_launcher.emulator.redream import ensure_redream_settings
+from grid_launcher.emulator.retroarch import ensure_retroarch_save_location_settings
+from grid_launcher.emulator.xemu import ensure_xemu_settings, xemu_base_path_candidates
+from grid_launcher.emulator import xemu_missing_bios_files
+from grid_launcher.ui.mixins.emulator_ui_mixin import EmulatorUIMixin
 
 
 class EmulatorAutoConfigSettingsTests(unittest.TestCase):
@@ -506,7 +506,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             fake_docs = Path(temp_dir) / "MyDocs"
             fake_docs.mkdir()
-            with patch("rom_mate.emulator.pcsx2._windows_documents_folder", return_value=fake_docs):
+            with patch("grid_launcher.emulator.pcsx2._windows_documents_folder", return_value=fake_docs):
                 candidates = pcsx2_data_root_candidates("", "", lambda s: [])
         self.assertIn(fake_docs / "PCSX2", candidates)
 
@@ -522,7 +522,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
         )
 
     def test_pcsx2_windows_documents_folder_exported_from_module(self) -> None:
-        from rom_mate.emulator import pcsx2_windows_documents_folder
+        from grid_launcher.emulator import pcsx2_windows_documents_folder
 
         self.assertTrue(callable(pcsx2_windows_documents_folder))
 
@@ -707,7 +707,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             appdata_dir = Path(temp_dir) / "appdata"
             with patch.dict(os.environ, {"APPDATA": str(appdata_dir)}, clear=False):
-                with patch("rom_mate.emulator.dolphin.Path.home", return_value=Path(temp_dir) / "home"):
+                with patch("grid_launcher.emulator.dolphin.Path.home", return_value=Path(temp_dir) / "home"):
                     result = ensure_dolphin_skip_ipl("")
         self.assertTrue(str(result["dolphin_ini_path"]).startswith(str(appdata_dir)))
 
@@ -792,7 +792,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             appdata_dir = Path(temp_dir) / "appdata"
             with patch.dict(os.environ, {"APPDATA": str(appdata_dir)}, clear=False):
-                with patch("rom_mate.emulator.dolphin.Path.home", return_value=Path(temp_dir) / "home"):
+                with patch("grid_launcher.emulator.dolphin.Path.home", return_value=Path(temp_dir) / "home"):
                     result = ensure_dolphin_gcpad_config("")
 
         self.assertTrue(str(result["gcpad_ini_path"]).startswith(str(appdata_dir)))
@@ -1819,7 +1819,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
 
     def test_cemu_controller_config_xml_contains_xinput_api(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            with patch("rom_mate.emulator.cemu.sys.platform", "win32"):
+            with patch("grid_launcher.emulator.cemu.sys.platform", "win32"):
                 ensure_cemu_controller_config(temp_dir)
             profile_path = Path(temp_dir) / "portable" / "controllerProfiles" / "controller0.xml"
             text = profile_path.read_text(encoding="utf-8")
@@ -1829,7 +1829,7 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
 
     def test_cemu_controller_config_linux_writes_sdl_profile(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            with patch("rom_mate.emulator.cemu.sys.platform", "linux"):
+            with patch("grid_launcher.emulator.cemu.sys.platform", "linux"):
                 ensure_cemu_controller_config(temp_dir)
             profile_path = Path(temp_dir) / "portable" / "controllerProfiles" / "controller0.xml"
             text = profile_path.read_text(encoding="utf-8")
@@ -2045,10 +2045,10 @@ class Rpcs3AutoConfigTests(unittest.TestCase):
 class EmulatorEnsureDispatchTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        module_path = Path(__file__).resolve().parents[1] / "rom-mate.py"
-        spec = importlib.util.spec_from_file_location("rom_mate_main_for_ensure_dispatch_tests", module_path)
+        module_path = Path(__file__).resolve().parents[1] / "grid-launcher.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_main_for_ensure_dispatch_tests", module_path)
         if spec is None or spec.loader is None:
-            raise RuntimeError("Could not load rom-mate.py for tests.")
+            raise RuntimeError("Could not load grid-launcher.py for tests.")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         cls.module = module
@@ -2101,7 +2101,7 @@ class EmulatorEnsureDispatchTests(unittest.TestCase):
 
         window = _WindowStub()
 
-        with patch("rom_mate.ui.mixins.emulator_ui_mixin.ensure_ppsspp_settings") as ensure_ppsspp:
+        with patch("grid_launcher.ui.mixins.emulator_ui_mixin.ensure_ppsspp_settings") as ensure_ppsspp:
             module.MainWindow._ensure_emulator_sync_settings(window, "PPSSPP", "C:/Emulators/PPSSPPWindows64.exe")
 
         ensure_ppsspp.assert_called_once_with(
@@ -2184,10 +2184,10 @@ class EmulatorEnsureDispatchTests(unittest.TestCase):
 class TestRpcs3FirmwareBackgroundDownload(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        module_path = Path(__file__).resolve().parents[1] / "rom-mate.py"
-        spec = importlib.util.spec_from_file_location("rom_mate_main_for_rpcs3_firmware_background_tests", module_path)
+        module_path = Path(__file__).resolve().parents[1] / "grid-launcher.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_main_for_rpcs3_firmware_background_tests", module_path)
         if spec is None or spec.loader is None:
-            raise RuntimeError("Could not load rom-mate.py for tests.")
+            raise RuntimeError("Could not load grid-launcher.py for tests.")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         cls.module = module
@@ -2369,8 +2369,8 @@ class TestRpcs3FirmwareBackgroundDownload(unittest.TestCase):
                 return _ThreadStub()
 
             with (
-                patch("rom_mate.ui.mixins.emulator_ui_mixin.download_ps3_firmware_direct", return_value=[]) as download_direct,
-                patch("rom_mate.ui.mixins.emulator_ui_mixin.install_platform_firmware") as install_firmware,
+                patch("grid_launcher.ui.mixins.emulator_ui_mixin.download_ps3_firmware_direct", return_value=[]) as download_direct,
+                patch("grid_launcher.ui.mixins.emulator_ui_mixin.install_platform_firmware") as install_firmware,
                 patch.object(window._emulator_refresh_requested, "emit") as emit_signal,
                 patch("threading.Thread", side_effect=_thread_side_effect),
             ):
@@ -2435,9 +2435,9 @@ class TestRpcs3FirmwareBackgroundDownload(unittest.TestCase):
 
             with (
                 patch(
-                    "rom_mate.ui.mixins.emulator_ui_mixin.download_ps3_firmware_direct", return_value=["network error"]
+                    "grid_launcher.ui.mixins.emulator_ui_mixin.download_ps3_firmware_direct", return_value=["network error"]
                 ) as download_direct,
-                patch("rom_mate.ui.mixins.emulator_ui_mixin.install_platform_firmware") as install_firmware,
+                patch("grid_launcher.ui.mixins.emulator_ui_mixin.install_platform_firmware") as install_firmware,
                 patch.object(window._emulator_refresh_requested, "emit") as emit_signal,
                 patch("threading.Thread", side_effect=_thread_side_effect),
             ):
@@ -2502,8 +2502,8 @@ class TestRpcs3FirmwareBackgroundDownload(unittest.TestCase):
                 return _ThreadStub()
 
             with (
-                patch("rom_mate.ui.mixins.emulator_ui_mixin.download_ps3_firmware_direct", return_value=["network error"]),
-                patch("rom_mate.ui.mixins.emulator_ui_mixin.install_platform_firmware") as install_firmware,
+                patch("grid_launcher.ui.mixins.emulator_ui_mixin.download_ps3_firmware_direct", return_value=["network error"]),
+                patch("grid_launcher.ui.mixins.emulator_ui_mixin.install_platform_firmware") as install_firmware,
                 patch("threading.Thread", side_effect=_thread_side_effect),
             ):
                 module.MainWindow._trigger_rpcs3_firmware_download_background(
@@ -2560,7 +2560,7 @@ class Rpcs3VfsSettingsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             exe = self._make_exe(tmp)
             library = Path(tmp) / "PS3 Library"
-            from rom_mate.emulator.rpcs3 import ensure_rpcs3_vfs_settings
+            from grid_launcher.emulator.rpcs3 import ensure_rpcs3_vfs_settings
             result = ensure_rpcs3_vfs_settings(str(exe), str(library))
 
             self.assertTrue(result["changed"])
@@ -2575,7 +2575,7 @@ class Rpcs3VfsSettingsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             exe = self._make_exe(tmp)
             library = Path(tmp) / "PS3 Library"
-            from rom_mate.emulator.rpcs3 import ensure_rpcs3_vfs_settings
+            from grid_launcher.emulator.rpcs3 import ensure_rpcs3_vfs_settings
             result1 = ensure_rpcs3_vfs_settings(str(exe), str(library))
             result2 = ensure_rpcs3_vfs_settings(str(exe), str(library))
 
@@ -2599,7 +2599,7 @@ class Rpcs3VfsSettingsTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            from rom_mate.emulator.rpcs3 import ensure_rpcs3_vfs_settings
+            from grid_launcher.emulator.rpcs3 import ensure_rpcs3_vfs_settings
             result = ensure_rpcs3_vfs_settings(str(exe), str(library))
 
             self.assertTrue(result["changed"])
@@ -2619,7 +2619,7 @@ class Rpcs3VfsSettingsTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            from rom_mate.emulator.rpcs3 import ensure_rpcs3_vfs_settings
+            from grid_launcher.emulator.rpcs3 import ensure_rpcs3_vfs_settings
             result = ensure_rpcs3_vfs_settings(str(exe), str(library))
 
             self.assertFalse(result["changed"])
@@ -2629,7 +2629,7 @@ class Rpcs3VfsSettingsTests(unittest.TestCase):
     def test_ensure_rpcs3_vfs_settings_returns_no_change_for_missing_exe(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             library = Path(tmp) / "PS3 Library"
-            from rom_mate.emulator.rpcs3 import ensure_rpcs3_vfs_settings
+            from grid_launcher.emulator.rpcs3 import ensure_rpcs3_vfs_settings
             result = ensure_rpcs3_vfs_settings(str(Path(tmp) / "nonexistent.exe"), str(library))
 
         self.assertFalse(result["changed"])
@@ -2644,7 +2644,7 @@ class Rpcs3VfsSettingsTests(unittest.TestCase):
             vfs_path = config_dir / "vfs.yml"
             vfs_path.write_text(f'"/dev_hdd0/": "{custom_path.as_posix()}/"\n', encoding="utf-8")
 
-            from rom_mate.emulator.rpcs3 import ps3_vfs_dev_hdd0_path
+            from grid_launcher.emulator.rpcs3 import ps3_vfs_dev_hdd0_path
             result = ps3_vfs_dev_hdd0_path(str(exe), "")
 
         self.assertIsNotNone(result)
@@ -2655,7 +2655,7 @@ class Rpcs3VfsSettingsTests(unittest.TestCase):
             exe = self._make_exe(tmp)
             library = Path(tmp) / "PS3 Library"
 
-            from rom_mate.emulator.rpcs3 import ps3_vfs_dev_hdd0_path
+            from grid_launcher.emulator.rpcs3 import ps3_vfs_dev_hdd0_path
             result = ps3_vfs_dev_hdd0_path(str(exe), str(library))
 
         self.assertIsNotNone(result)
@@ -2665,7 +2665,7 @@ class Rpcs3VfsSettingsTests(unittest.TestCase):
     def test_ps3_vfs_dev_hdd0_path_returns_none_with_no_vfs_and_no_library(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             exe = self._make_exe(tmp)
-            from rom_mate.emulator.rpcs3 import ps3_vfs_dev_hdd0_path
+            from grid_launcher.emulator.rpcs3 import ps3_vfs_dev_hdd0_path
             result = ps3_vfs_dev_hdd0_path(str(exe), "")
 
         self.assertIsNone(result)
@@ -2709,7 +2709,7 @@ class SourceVersionCheckHandlerTests(unittest.TestCase):
             self._do_start_source_emulator_update_at_index = MagicMock()
             self._source_check_emulator_name = "TestEmulator"
 
-    @patch("rom_mate.ui.mixins.emulator_ui_mixin.QMessageBox")
+    @patch("grid_launcher.ui.mixins.emulator_ui_mixin.QMessageBox")
     def test_error_shows_warning(self, mock_message_box) -> None:
         stub = self._StubWindow()
 
@@ -2717,7 +2717,7 @@ class SourceVersionCheckHandlerTests(unittest.TestCase):
 
         mock_message_box.warning.assert_called_once()
 
-    @patch("rom_mate.ui.mixins.emulator_ui_mixin.QMessageBox")
+    @patch("grid_launcher.ui.mixins.emulator_ui_mixin.QMessageBox")
     def test_version_match_shows_info_no_install(self, mock_message_box) -> None:
         stub = self._StubWindow()
 
@@ -2727,7 +2727,7 @@ class SourceVersionCheckHandlerTests(unittest.TestCase):
         self.assertEqual(mock_message_box.information.call_args[0][1], "No Updates Available")
         stub._do_start_source_emulator_update_at_index.assert_not_called()
 
-    @patch("rom_mate.ui.mixins.emulator_ui_mixin.QMessageBox")
+    @patch("grid_launcher.ui.mixins.emulator_ui_mixin.QMessageBox")
     def test_version_mismatch_yes_calls_install(self, mock_message_box) -> None:
         stub = self._StubWindow()
         mock_message_box.StandardButton.Yes = 1
@@ -2739,7 +2739,7 @@ class SourceVersionCheckHandlerTests(unittest.TestCase):
         mock_message_box.question.assert_called_once()
         stub._do_start_source_emulator_update_at_index.assert_called_once_with(0)
 
-    @patch("rom_mate.ui.mixins.emulator_ui_mixin.QMessageBox")
+    @patch("grid_launcher.ui.mixins.emulator_ui_mixin.QMessageBox")
     def test_version_mismatch_no_skips_install(self, mock_message_box) -> None:
         stub = self._StubWindow()
         mock_message_box.StandardButton.Yes = 1
@@ -2751,7 +2751,7 @@ class SourceVersionCheckHandlerTests(unittest.TestCase):
         mock_message_box.question.assert_called_once()
         stub._do_start_source_emulator_update_at_index.assert_not_called()
 
-    @patch("rom_mate.ui.mixins.emulator_ui_mixin.QMessageBox")
+    @patch("grid_launcher.ui.mixins.emulator_ui_mixin.QMessageBox")
     def test_latest_installed_shows_update_dialog(self, mock_message_box) -> None:
         stub = self._StubWindow()
         mock_message_box.StandardButton.Yes = 1
@@ -2763,7 +2763,7 @@ class SourceVersionCheckHandlerTests(unittest.TestCase):
         mock_message_box.question.assert_called_once()
         mock_message_box.information.assert_not_called()
 
-    @patch("rom_mate.ui.mixins.emulator_ui_mixin.QMessageBox")
+    @patch("grid_launcher.ui.mixins.emulator_ui_mixin.QMessageBox")
     def test_direct_provider_shows_update_dialog(self, mock_message_box) -> None:
         stub = self._StubWindow()
         mock_message_box.StandardButton.Yes = 1
@@ -2781,19 +2781,19 @@ class EmulatorSharedDataPathTests(unittest.TestCase):
         def __init__(self) -> None:
             pass
 
-    def test_retroarch_core_list_path_respects_rom_mate_share_dir(self) -> None:
+    def test_retroarch_core_list_path_respects_grid_launcher_share_dir(self) -> None:
         stub = self._StubWindow()
-        with patch.dict(os.environ, {"ROM_MATE_SHARE_DIR": "/app/share/rom-mate-neo"}, clear=False):
+        with patch.dict(os.environ, {"GRID_LAUNCHER_SHARE_DIR": "/app/share/grid-launcher"}, clear=False):
             result = stub._retroarch_core_list_path()
 
-        self.assertEqual(result, Path("/app/share/rom-mate-neo/retroarch-core-list.json"))
+        self.assertEqual(result, Path("/app/share/grid-launcher/retroarch-core-list.json"))
 
-    def test_emulator_autoprofiles_path_respects_rom_mate_share_dir(self) -> None:
+    def test_emulator_autoprofiles_path_respects_grid_launcher_share_dir(self) -> None:
         stub = self._StubWindow()
-        with patch.dict(os.environ, {"ROM_MATE_SHARE_DIR": "/app/share/rom-mate-neo"}, clear=False):
+        with patch.dict(os.environ, {"GRID_LAUNCHER_SHARE_DIR": "/app/share/grid-launcher"}, clear=False):
             result = stub._emulator_autoprofiles_path()
 
-        self.assertEqual(result, Path("/app/share/rom-mate-neo/emulator-autoprofiles.json"))
+        self.assertEqual(result, Path("/app/share/grid-launcher/emulator-autoprofiles.json"))
 
 
 class RPCS3GamesYmlTests(unittest.TestCase):
@@ -3010,10 +3010,10 @@ class RPCS3CustomConfigCopyTests(unittest.TestCase):
 class FlatpakEmulatorDetectionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        module_path = Path(__file__).resolve().parents[1] / "rom-mate.py"
-        spec = importlib.util.spec_from_file_location("rom_mate_main_for_flatpak_detection_tests", module_path)
+        module_path = Path(__file__).resolve().parents[1] / "grid-launcher.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_main_for_flatpak_detection_tests", module_path)
         if spec is None or spec.loader is None:
-            raise RuntimeError("Could not load rom-mate.py for tests.")
+            raise RuntimeError("Could not load grid-launcher.py for tests.")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         cls.module = module
@@ -3066,7 +3066,7 @@ class FlatpakEmulatorDetectionTests(unittest.TestCase):
 
         window = _WindowStub()
 
-        with patch("rom_mate.ui.mixins.emulator_ui_mixin.ensure_ppsspp_settings") as ensure_ppsspp:
+        with patch("grid_launcher.ui.mixins.emulator_ui_mixin.ensure_ppsspp_settings") as ensure_ppsspp:
             module.MainWindow._ensure_emulator_sync_settings(
                 window,
                 "PPSSPP",
@@ -3128,7 +3128,7 @@ class FlatpakEmulatorDetectionTests(unittest.TestCase):
 
         window = _WindowStub()
 
-        with patch("rom_mate.ui.mixins.emulator_ui_mixin.ensure_ppsspp_settings") as ensure_ppsspp:
+        with patch("grid_launcher.ui.mixins.emulator_ui_mixin.ensure_ppsspp_settings") as ensure_ppsspp:
             module.MainWindow._ensure_emulator_sync_settings(window, "PPSSPP", "C:/Emulators/PPSSPPWindows64.exe")
 
         ensure_ppsspp.assert_called_once_with(
@@ -3191,7 +3191,7 @@ class FlatpakEmulatorDetectionTests(unittest.TestCase):
                     self._target()
 
         with patch("sys.platform", "linux"), \
-                patch("rom_mate.ui.mixins.emulator_ui_mixin.detect_installed_flatpak_emulators", return_value=detected), \
+                patch("grid_launcher.ui.mixins.emulator_ui_mixin.detect_installed_flatpak_emulators", return_value=detected), \
                 patch("threading.Thread", _ThreadStub):
             module.MainWindow._trigger_flatpak_emulator_detection_background(window)
 
@@ -3235,6 +3235,36 @@ class FlatpakEmulatorDetectionTests(unittest.TestCase):
             def _show_toast(self, payload: dict) -> None:
                 self.toasts.append(payload)
 
+            def _trigger_firmware_install_for_source_emulator(self, emulator_name: str) -> None:
+                pass
+
+            def _emulator_profile_for_entry(self, entry: dict) -> dict:
+                return {}
+
+            def _normalize_default_emulators(self, value: dict) -> dict:
+                return value if isinstance(value, dict) else {}
+
+            def _normalize_default_retroarch_cores(self, value: dict) -> dict:
+                return value if isinstance(value, dict) else {}
+
+            def _is_retroarch_emulator_name(self, name: str) -> bool:
+                return False
+
+            def _default_assignable_server_platforms(self) -> list:
+                return []
+
+            def _installed_retroarch_cores_for_platform(self, platform, name, emulator_entry=None) -> list:
+                return []
+
+            def _matching_platforms_for_emulator_keywords(self, keywords) -> list:
+                return []
+
+            def _dolphin_variant_label_for_game(self, game) -> str:
+                return ""
+
+            def _dolphin_target_platforms_for_variant(self, variant) -> list:
+                return []
+
         window = _WindowStub()
 
         new_entries = [
@@ -3268,6 +3298,238 @@ class FlatpakEmulatorDetectionTests(unittest.TestCase):
         for emulator in window.config["emulators"]:
             self.assertNotIn("_flatpak_config_root", emulator)
 
+    def test_on_flatpak_detection_completed_assigns_default_emulator(self) -> None:
+        module = type(self).module
+
+        class _WindowStub:
+            def __init__(self) -> None:
+                self.config = {"emulators": [], "default_emulators": {}}
+
+            def _emulators(self) -> list[dict]:
+                return self.config.get("emulators", [])
+
+            def _emulator_autoprofiles(self) -> list[dict]:
+                return []
+
+            def _normalize_save_strategy_value(self, value: str) -> str:
+                return "auto"
+
+            def _normalize_emulators(self, value: list) -> list:
+                return value
+
+            def _ensure_emulator_sync_settings(self, name: str, path: str, *, flatpak_config_root: str = "") -> None:
+                pass
+
+            def _refresh_emulator_views(self) -> None:
+                pass
+
+            def _save_config(self, config: dict) -> None:
+                pass
+
+            def _show_toast(self, payload: dict) -> None:
+                pass
+
+            def _trigger_firmware_install_for_source_emulator(self, emulator_name: str) -> None:
+                pass
+
+            def _emulator_profile_for_entry(self, entry: dict) -> dict:
+                return {"name": "PPSSPP", "platform_keywords": ["PlayStation Portable"]}
+
+            def _normalize_default_emulators(self, value: dict) -> dict:
+                return value if isinstance(value, dict) else {}
+
+            def _normalize_default_retroarch_cores(self, value: dict) -> dict:
+                return value if isinstance(value, dict) else {}
+
+            def _is_retroarch_emulator_name(self, name: str) -> bool:
+                return False
+
+            def _default_assignable_server_platforms(self) -> list:
+                return ["PlayStation Portable"]
+
+            def _installed_retroarch_cores_for_platform(self, platform, name, emulator_entry=None) -> list:
+                return []
+
+            def _matching_platforms_for_emulator_keywords(self, keywords) -> list:
+                return ["PlayStation Portable"]
+
+            def _dolphin_variant_label_for_game(self, game) -> str:
+                return ""
+
+            def _dolphin_target_platforms_for_variant(self, variant) -> list:
+                return []
+
+        window = _WindowStub()
+
+        new_entries = [
+            {
+                "name": "PPSSPP",
+                "path": "/usr/bin/flatpak",
+                "args": "run org.ppsspp.PPSSPP",
+                "flatpak_app_id": "org.ppsspp.PPSSPP",
+            },
+        ]
+
+        module.MainWindow._on_flatpak_detection_completed(window, new_entries)
+
+        self.assertEqual(window.config["default_emulators"].get("PlayStation Portable"), "PPSSPP")
+
+    def test_on_flatpak_detection_completed_does_not_overwrite_existing_default(self) -> None:
+        module = type(self).module
+
+        class _WindowStub:
+            def __init__(self) -> None:
+                self.config = {"emulators": [], "default_emulators": {"PlayStation Portable": "MyPSP"}}
+
+            def _emulators(self) -> list[dict]:
+                return self.config.get("emulators", [])
+
+            def _emulator_autoprofiles(self) -> list[dict]:
+                return []
+
+            def _normalize_save_strategy_value(self, value: str) -> str:
+                return "auto"
+
+            def _normalize_emulators(self, value: list) -> list:
+                return value
+
+            def _ensure_emulator_sync_settings(self, name: str, path: str, *, flatpak_config_root: str = "") -> None:
+                pass
+
+            def _refresh_emulator_views(self) -> None:
+                pass
+
+            def _save_config(self, config: dict) -> None:
+                pass
+
+            def _show_toast(self, payload: dict) -> None:
+                pass
+
+            def _trigger_firmware_install_for_source_emulator(self, emulator_name: str) -> None:
+                pass
+
+            def _emulator_profile_for_entry(self, entry: dict) -> dict:
+                return {"name": "PPSSPP", "platform_keywords": ["PlayStation Portable"]}
+
+            def _normalize_default_emulators(self, value: dict) -> dict:
+                return value if isinstance(value, dict) else {}
+
+            def _normalize_default_retroarch_cores(self, value: dict) -> dict:
+                return value if isinstance(value, dict) else {}
+
+            def _is_retroarch_emulator_name(self, name: str) -> bool:
+                return False
+
+            def _default_assignable_server_platforms(self) -> list:
+                return ["PlayStation Portable"]
+
+            def _installed_retroarch_cores_for_platform(self, platform, name, emulator_entry=None) -> list:
+                return []
+
+            def _matching_platforms_for_emulator_keywords(self, keywords) -> list:
+                return ["PlayStation Portable"]
+
+            def _dolphin_variant_label_for_game(self, game) -> str:
+                return ""
+
+            def _dolphin_target_platforms_for_variant(self, variant) -> list:
+                return []
+
+        window = _WindowStub()
+
+        new_entries = [
+            {
+                "name": "PPSSPP",
+                "path": "/usr/bin/flatpak",
+                "args": "run org.ppsspp.PPSSPP",
+                "flatpak_app_id": "org.ppsspp.PPSSPP",
+            },
+        ]
+
+        module.MainWindow._on_flatpak_detection_completed(window, new_entries)
+
+        self.assertEqual(window.config["default_emulators"]["PlayStation Portable"], "MyPSP")
+
+    def test_on_flatpak_detection_completed_assigns_retroarch_core_default(self) -> None:
+        module = type(self).module
+
+        class _WindowStub:
+            def __init__(self) -> None:
+                self.config = {"emulators": [], "default_emulators": {}, "default_retroarch_cores": {}}
+
+            def _emulators(self) -> list[dict]:
+                return self.config.get("emulators", [])
+
+            def _emulator_autoprofiles(self) -> list[dict]:
+                return []
+
+            def _normalize_save_strategy_value(self, value: str) -> str:
+                return "auto"
+
+            def _normalize_emulators(self, value: list) -> list:
+                return value
+
+            def _ensure_emulator_sync_settings(self, name: str, path: str, *, flatpak_config_root: str = "") -> None:
+                pass
+
+            def _refresh_emulator_views(self) -> None:
+                pass
+
+            def _save_config(self, config: dict) -> None:
+                pass
+
+            def _show_toast(self, payload: dict) -> None:
+                pass
+
+            def _trigger_firmware_install_for_source_emulator(self, emulator_name: str) -> None:
+                pass
+
+            def _emulator_profile_for_entry(self, entry: dict) -> dict:
+                return {
+                    "name": "RetroArch (Multi-System)",
+                    "platform_keywords": ["Game Boy Advance"],
+                    "all_platforms": False,
+                }
+
+            def _normalize_default_emulators(self, value: dict) -> dict:
+                return value if isinstance(value, dict) else {}
+
+            def _normalize_default_retroarch_cores(self, value: dict) -> dict:
+                return value if isinstance(value, dict) else {}
+
+            def _is_retroarch_emulator_name(self, name: str) -> bool:
+                return True
+
+            def _default_assignable_server_platforms(self) -> list:
+                return ["Game Boy Advance"]
+
+            def _installed_retroarch_cores_for_platform(self, platform, name, emulator_entry=None) -> list:
+                return ["mgba"]
+
+            def _matching_platforms_for_emulator_keywords(self, keywords) -> list:
+                return ["Game Boy Advance"]
+
+            def _dolphin_variant_label_for_game(self, game) -> str:
+                return ""
+
+            def _dolphin_target_platforms_for_variant(self, variant) -> list:
+                return []
+
+        window = _WindowStub()
+
+        new_entries = [
+            {
+                "name": "RetroArch (Multi-System)",
+                "path": "/usr/bin/flatpak",
+                "args": "run org.libretro.RetroArch",
+                "flatpak_app_id": "org.libretro.RetroArch",
+            },
+        ]
+
+        module.MainWindow._on_flatpak_detection_completed(window, new_entries)
+
+        self.assertEqual(window.config["default_retroarch_cores"].get("Game Boy Advance"), "mgba")
+
     def test_on_flatpak_detection_completed_empty_list_is_noop(self) -> None:
         module = type(self).module
 
@@ -3287,6 +3549,83 @@ class FlatpakEmulatorDetectionTests(unittest.TestCase):
 
         self.assertFalse(window.save_called)
         self.assertFalse(window.refresh_called)
+
+
+class BackfillMissingEmulatorDefaultsTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        module_path = Path(__file__).resolve().parents[1] / "grid-launcher.py"
+        spec = importlib.util.spec_from_file_location("grid_launcher_main_for_backfill_tests", module_path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError("Could not load grid-launcher.py for tests.")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        cls.module = module
+
+    @staticmethod
+    def _make_window_stub(config: dict):
+        class _WindowStub:
+            def __init__(self) -> None:
+                self.config = config
+                self.save_called = False
+
+            def _save_config(self, cfg: dict) -> None:
+                self.save_called = True
+
+            def _emulator_profile_for_entry(self, entry: dict) -> dict:
+                return {"name": "PPSSPP", "platform_keywords": ["PlayStation Portable"]}
+
+            def _normalize_default_emulators(self, value: dict) -> dict:
+                return value if isinstance(value, dict) else {}
+
+            def _normalize_default_retroarch_cores(self, value: dict) -> dict:
+                return value if isinstance(value, dict) else {}
+
+            def _is_retroarch_emulator_name(self, name: str) -> bool:
+                return False
+
+            def _default_assignable_server_platforms(self) -> list:
+                return ["PlayStation Portable"]
+
+            def _installed_retroarch_cores_for_platform(self, platform, name, emulator_entry=None) -> list:
+                return []
+
+            def _matching_platforms_for_emulator_keywords(self, keywords) -> list:
+                return ["PlayStation Portable"]
+
+            def _dolphin_variant_label_for_game(self, game) -> str:
+                return ""
+
+            def _dolphin_target_platforms_for_variant(self, variant) -> list:
+                return []
+
+        return _WindowStub()
+
+    def test_backfill_assigns_default_for_emulator_with_no_default(self) -> None:
+        module = type(self).module
+        window = self._make_window_stub({
+            "emulators": [{"name": "PPSSPP", "path": "/usr/bin/ppsspp"}],
+            "default_emulators": {},
+            "default_retroarch_cores": {},
+        })
+
+        module.MainWindow._backfill_missing_emulator_defaults(window)
+
+        self.assertEqual(window.config["default_emulators"].get("PlayStation Portable"), "PPSSPP")
+        self.assertTrue(window.save_called)
+
+    def test_backfill_does_not_overwrite_existing_default(self) -> None:
+        module = type(self).module
+        window = self._make_window_stub({
+            "emulators": [{"name": "PPSSPP", "path": "/usr/bin/ppsspp"}],
+            "default_emulators": {"PlayStation Portable": "AnotherEmulator"},
+            "default_retroarch_cores": {},
+        })
+
+        module.MainWindow._backfill_missing_emulator_defaults(window)
+
+        self.assertEqual(window.config["default_emulators"]["PlayStation Portable"], "AnotherEmulator")
+        self.assertFalse(window.save_called)
 
 
 class RetroarchCoreArgumentPathTests(unittest.TestCase):

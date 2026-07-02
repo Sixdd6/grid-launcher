@@ -8,7 +8,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication
 
-from rom_mate.tv.widgets.components.game_wall import GameWall
+from grid_launcher.tv.widgets.components.game_wall import GameWall
 
 
 def _make_games(count: int) -> list[dict]:

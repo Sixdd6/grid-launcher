@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from rom_mate.core.config import merge_config_with_defaults, normalize_installed_games
-from rom_mate.library.archive_preparation import (
+from grid_launcher.core.config import merge_config_with_defaults, normalize_installed_games
+from grid_launcher.library.archive_preparation import (
     _is_ps4_platform,
     cleanup_install_archive,
     prepare_installed_game_without_ui,
@@ -84,8 +84,8 @@ class PS4InstallTests(unittest.TestCase):
                     raise PermissionError("[WinError 32] file is being used by another process")
                 return original_unlink(path_obj, *args, **kwargs)
 
-            with patch("rom_mate.library.archive_preparation.time.sleep", return_value=None):
-                with patch("rom_mate.library.archive_preparation._wait_for_extractor_processes") as mock_wait:
+            with patch("grid_launcher.library.archive_preparation.time.sleep", return_value=None):
+                with patch("grid_launcher.library.archive_preparation._wait_for_extractor_processes") as mock_wait:
                     with patch.object(Path, "unlink", new=flaky_unlink):
                         prepared, warning_text = prepare_installed_game_without_ui(
                             {"title": "Test PS4 Game", "platform": "PlayStation 4"},
@@ -108,11 +108,11 @@ class PS4InstallTests(unittest.TestCase):
             archive_path.write_bytes(b"placeholder")
 
             with patch(
-                "rom_mate.library.archive_preparation._unlink_file_with_retries",
+                "grid_launcher.library.archive_preparation._unlink_file_with_retries",
                 side_effect=PermissionError("[WinError 32] file is being used by another process"),
             ):
-                with patch("rom_mate.library.archive_preparation._schedule_delete_on_reboot", return_value=False):
-                    with patch("rom_mate.library.archive_preparation._delete_with_background_retry") as mock_background_retry:
+                with patch("grid_launcher.library.archive_preparation._schedule_delete_on_reboot", return_value=False):
+                    with patch("grid_launcher.library.archive_preparation._delete_with_background_retry") as mock_background_retry:
                         warning_text = cleanup_install_archive(archive_path)
 
         self.assertEqual(warning_text, "")

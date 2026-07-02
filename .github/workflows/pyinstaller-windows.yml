@@ -30,16 +30,16 @@ jobs:
 
       - name: Build executable
         run: |
-          pyinstaller --noconfirm --clean --windowed --onefile --name rom-mate-neo --add-data "assets;assets" --add-data "retroarch-core-list.json;." --add-data "emulator-autoprofiles.json;." --hidden-import brotli --hidden-import pyzstd --hidden-import pyppmd --hidden-import keyring.backends.Windows rom-mate.py
+          pyinstaller --noconfirm --clean --windowed --onefile --name grid-launcher --add-data "assets;assets" --add-data "retroarch-core-list.json;." --add-data "emulator-autoprofiles.json;." --hidden-import brotli --hidden-import pyzstd --hidden-import pyppmd --hidden-import keyring.backends.Windows grid-launcher.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rom-mate-neo-windows-exe
-          path: dist/rom-mate-neo.exe
+          name: grid-launcher-windows-exe
+          path: dist/grid-launcher.exe
           if-no-files-found: error
 
       - name: Attach exe to release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/rom-mate-neo.exe
+          files: dist/grid-launcher.exe

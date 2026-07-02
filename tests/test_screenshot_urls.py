@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from rom_mate.cover.utils import resolve_cover_url, screenshot_urls_from_game, screenshot_urls_from_rom_payload
+from grid_launcher.cover.utils import resolve_cover_url, screenshot_urls_from_game, screenshot_urls_from_rom_payload
 
 
 class ScreenshotUrlsTests(unittest.TestCase):
@@ -112,33 +112,33 @@ class ScreenshotUrlsTests(unittest.TestCase):
 
 class ResolveCoverUrlTests(unittest.TestCase):
     def test_external_url_rejected_when_base_url_set(self):
-        from rom_mate.cover.utils import filter_to_server_host
+        from grid_launcher.cover.utils import filter_to_server_host
         result = filter_to_server_host("https://neoclone.screenscraper.fr/img/123.jpg", "https://my-romm-server")
         self.assertEqual(result, "")
 
     def test_external_url_allowed_when_base_url_empty(self):
-        from rom_mate.cover.utils import filter_to_server_host
+        from grid_launcher.cover.utils import filter_to_server_host
         result = filter_to_server_host("https://neoclone.screenscraper.fr/img/123.jpg", "")
         self.assertEqual(result, "https://neoclone.screenscraper.fr/img/123.jpg")
 
     def test_same_host_url_allowed(self):
-        from rom_mate.cover.utils import filter_to_server_host
+        from grid_launcher.cover.utils import filter_to_server_host
         result = filter_to_server_host("https://my-romm-server/api/roms/123/cover", "https://my-romm-server")
         self.assertEqual(result, "https://my-romm-server/api/roms/123/cover")
 
     def test_relative_url_resolves_to_base_host_and_passes_filter(self):
-        from rom_mate.cover.utils import resolve_cover_url, filter_to_server_host
+        from grid_launcher.cover.utils import resolve_cover_url, filter_to_server_host
         resolved = resolve_cover_url("/api/roms/123/cover", "https://my-romm-server")
         result = filter_to_server_host(resolved, "https://my-romm-server")
         self.assertEqual(result, "https://my-romm-server/api/roms/123/cover")
 
     def test_port_mismatch_rejected(self):
-        from rom_mate.cover.utils import filter_to_server_host
+        from grid_launcher.cover.utils import filter_to_server_host
         result = filter_to_server_host("https://my-romm-server:9090/img/cover.jpg", "https://my-romm-server:8080")
         self.assertEqual(result, "")
 
     def test_external_url_allowed_when_base_url_has_no_netloc(self):
-        from rom_mate.cover.utils import filter_to_server_host
+        from grid_launcher.cover.utils import filter_to_server_host
         result = filter_to_server_host("https://neoclone.screenscraper.fr/img/123.jpg", "not-a-url")
         self.assertEqual(result, "https://neoclone.screenscraper.fr/img/123.jpg")
 

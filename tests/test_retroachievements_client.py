@@ -6,7 +6,7 @@ from io import BytesIO
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from rom_mate.server.retroachievements import RetroAchievementsError, fetch_game_achievements, ra_login, resolve_ra_game_id
+from grid_launcher.server.retroachievements import RetroAchievementsError, fetch_game_achievements, ra_login, resolve_ra_game_id
 
 
 class _ResponseStub:
@@ -24,7 +24,7 @@ class _ResponseStub:
 
 
 class RetroAchievementsClientTests(unittest.TestCase):
-    @patch("rom_mate.server.retroachievements.urlopen")
+    @patch("grid_launcher.server.retroachievements.urlopen")
     def test_ra_login_success(self, mock_urlopen) -> None:
         mock_urlopen.return_value = _ResponseStub(
             json.dumps({"Success": True, "User": "testuser", "Token": "abc123"}).encode("utf-8")
@@ -34,7 +34,7 @@ class RetroAchievementsClientTests(unittest.TestCase):
 
         self.assertEqual(result, {"username": "testuser", "token": "abc123"})
 
-    @patch("rom_mate.server.retroachievements.urlopen")
+    @patch("grid_launcher.server.retroachievements.urlopen")
     def test_ra_login_failure(self, mock_urlopen) -> None:
         mock_urlopen.return_value = _ResponseStub(
             json.dumps({"Success": False, "Error": "Invalid credentials"}).encode("utf-8")
@@ -51,7 +51,7 @@ class RetroAchievementsClientTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ra_login("user", "")
 
-    @patch("rom_mate.server.retroachievements.urlopen")
+    @patch("grid_launcher.server.retroachievements.urlopen")
     def test_fetch_game_achievements_with_user_credentials(self, mock_urlopen) -> None:
         payload = {
             "Achievements": {
@@ -87,7 +87,7 @@ class RetroAchievementsClientTests(unittest.TestCase):
         self.assertIn("u=sam", called_url)
         self.assertNotIn("z=", called_url)
 
-    @patch("rom_mate.server.retroachievements.urlopen")
+    @patch("grid_launcher.server.retroachievements.urlopen")
     def test_fetch_game_achievements_public_fallback(self, mock_urlopen) -> None:
         mock_urlopen.return_value = _ResponseStub(json.dumps({"Achievements": {}}).encode("utf-8"))
 
@@ -99,7 +99,7 @@ class RetroAchievementsClientTests(unittest.TestCase):
         self.assertNotIn("u=", called_url)
         self.assertEqual(achievements, [])
 
-    @patch("rom_mate.server.retroachievements.urlopen")
+    @patch("grid_launcher.server.retroachievements.urlopen")
     def test_fetch_game_achievements_http_error(self, mock_urlopen) -> None:
         mock_urlopen.side_effect = HTTPError(
             "https://retroachievements.org/API/API_GetGameInfoAndUserProgress.php",

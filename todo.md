@@ -38,7 +38,7 @@
 - [x] Setup automatic download and install of BIOS files — complete for all supported platforms
 
 ## RetroAchievements for emulators
-- [ ] Research and implement RetroAchievements for emulators which support it. Prefill configs with the credentials the user has already input in Settings. Keep in mind that the user will need username and login token for the emulators while rom-mate uses the api key to do lookups.
+- [ ] Research and implement RetroAchievements for emulators which support it. Prefill configs with the credentials the user has already input in Settings. Keep in mind that the user will need username and login token for the emulators while GRID Launcher uses the api key to do lookups.
 
 ## PS3 Trophy Data
 - [ ] **Research** — Investigate how RPCS3 stores trophy unlock data on disk (location within `dev_hdd0`, file format, per-user layout) and whether it can be extracted/restored without breaking RPCS3's internal trophy state

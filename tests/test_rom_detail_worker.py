@@ -3,8 +3,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from rom_mate.background.workers import RomDetailWorker
-from rom_mate.ui.mixins.details_view_mixin import DetailsViewMixin
+from grid_launcher.background.workers import RomDetailWorker
+from grid_launcher.ui.mixins.details_view_mixin import DetailsViewMixin
 
 
 class _StubAchievementsButton:
@@ -48,7 +48,7 @@ class RomDetailWorkerTests(unittest.TestCase):
         )
 
         payload = {"id": 123, "name": "Test Rom"}
-        with patch("rom_mate.background.workers.api_get_json", return_value=payload) as mock_api_get:
+        with patch("grid_launcher.background.workers.api_get_json", return_value=payload) as mock_api_get:
             worker.run()
 
         mock_api_get.assert_called_once_with("https://romm.example", "token", "/api/roms/123")
@@ -67,7 +67,7 @@ class RomDetailWorkerTests(unittest.TestCase):
             )
         )
 
-        with patch("rom_mate.background.workers.api_get_json", side_effect=ValueError("boom")):
+        with patch("grid_launcher.background.workers.api_get_json", side_effect=ValueError("boom")):
             worker.run()
 
         self.assertEqual(len(results), 1)
@@ -86,8 +86,8 @@ class RomDetailWorkerTests(unittest.TestCase):
             "rating": "",
         }
 
-        with patch("rom_mate.ui.mixins.details_view_mixin.open_game_details"), patch(
-            "rom_mate.server.retroachievements.resolve_ra_game_id", return_value=None
+        with patch("grid_launcher.ui.mixins.details_view_mixin.open_game_details"), patch(
+            "grid_launcher.server.retroachievements.resolve_ra_game_id", return_value=None
         ):
             window._open_game_details(game, "library")
 
@@ -113,7 +113,7 @@ class RomDetailWorkerTests(unittest.TestCase):
             },
         }
 
-        with patch("rom_mate.ui.mixins.details_view_mixin.open_game_details"):
+        with patch("grid_launcher.ui.mixins.details_view_mixin.open_game_details"):
             window._on_rom_detail_loaded({"rom_id": "123", "payload": payload, "error": ""})
 
         game = window.current_details_game

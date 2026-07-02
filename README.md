@@ -1,6 +1,6 @@
-# rom-mate-neo
-A simple, responsive launcher for RomM.
-Please be aware that this application is created using AI tools/coding, if this is a problem for you I welcome you to make your own.
+# GRID Launcher
+Game Repository Interface & Downloader — A launcher for RomM.
+Please be aware that this application is created using AI tools/coding, if this is a problem for you I invite you to make your own.
 
 [![Latest Build](https://github.com/Sixdd6/rom-mate-neo/actions/workflows/pyinstaller-windows.yml/badge.svg)](https://github.com/Sixdd6/rom-mate-neo/actions/workflows/pyinstaller-windows.yml)
 
@@ -64,7 +64,7 @@ Please be aware that this application is created using AI tools/coding, if this 
 | FBNeo | Arcade |
 | Redream | Sega Dreamcast, Sega Naomi |
 
-> **Cemu** does not reliably respect window priorities in fullscreen mode and will conflict with the RomMate pause menu. The recommended workaround on Windows is to run the emulator in windowed mode, RomMate will maximize the window automatically which can then be made borderless with [Borderless Gaming](https://github.com/Codeusa/Borderless-Gaming) - add Cemu as a profile and it will automatically hide the window frame on launch. A thin menubar will remain visible at the top of the Cemu window, but the pause menu will otherwise function correctly to allow easily exiting the emulator (without needing a mouse/keyboard). I am still searching for a proper fullscreen solution but this works fairly well for now.
+> **Cemu** does not reliably respect window priorities in fullscreen mode and will conflict with the GRID Launcher pause menu. The recommended workaround on Windows is to run the emulator in windowed mode, GRID Launcher will maximize the window automatically which can then be made borderless with [Borderless Gaming](https://github.com/Codeusa/Borderless-Gaming) - add Cemu as a profile and it will automatically hide the window frame on launch. A thin menubar will remain visible at the top of the Cemu window, but the pause menu will otherwise function correctly to allow easily exiting the emulator (without needing a mouse/keyboard). I am still searching for a proper fullscreen solution but this works fairly well for now.
 
 ## Emulator Setup
 
@@ -79,9 +79,9 @@ Native Windows PC games are also supported by archiving the installed files of D
 
 ## PS3 Game Archiving
 
-> <!> Update: RPCS3 now supports booting PS3 ISO games directly, though be warned this is not yet covered/tested by RomMate and may leave game files in an installed state even after selecting the Uninstall button from the app.
+> <!> Update: RPCS3 now supports booting PS3 ISO games directly, though be warned this is not yet covered/tested by GRID Launcher and may leave game files in an installed state even after selecting the Uninstall button from the app.
 
-RPCS3 support requires PS3 content to be installed to specific paths depending on whether the game is a disc dump or a digital copy. rom-mate-neo auto-detects the archive layout and routes files accordingly - but the archive itself must be structured correctly.
+RPCS3 support requires PS3 content to be installed to specific paths depending on whether the game is a disc dump or a digital copy. grid-launcher auto-detects the archive layout and routes files accordingly - but the archive itself must be structured correctly.
 
 ### Disc Dump
 
@@ -112,7 +112,7 @@ BLUS30336/
 
 ### Bare Disc Dump (No Wrapper)
 
-If the archive contains `PS3_GAME/` at the root with no game-ID folder, rom-mate-neo will attempt to read the title ID from `PARAM.SFO` and synthesize the correct install path automatically:
+If the archive contains `PS3_GAME/` at the root with no game-ID folder, grid-launcher will attempt to read the title ID from `PARAM.SFO` and synthesize the correct install path automatically:
 
 ```
 PS3_GAME/
@@ -153,7 +153,7 @@ dev_hdd0/
 
 ## Save Archive Format
 
-rom-mate uploads saves to RomM as zip archives. The archive layout varies by save type:
+grid-launcher uploads saves to RomM as zip archives. The archive layout varies by save type:
 
 ### Emulator Saves (single file or folder)
 
@@ -164,14 +164,14 @@ Standard saves are uploaded as a flat zip of the relevant save files, preserving
 Native game saves bundle all configured save directories into one archive per upload session:
 
 ```
-_rom_mate_dirs.json       ← directory manifest
+_grid_launcher_dirs.json       ← directory manifest
 0/saves/game.sav          ← files from directory 0, relative to that directory root
 0/profile.dat
 1/settings.ini            ← files from directory 1, relative to that directory root
 1/keybindings.cfg
 ```
 
-**`_rom_mate_dirs.json`** maps integer index strings to the raw (unexpanded) Windows path for each directory:
+**`_grid_launcher_dirs.json`** maps integer index strings to the raw (unexpanded) Windows path for each directory:
 
 ```json
 {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from rom_mate.server.metadata import (
+from grid_launcher.server.metadata import (
     details_metadata_from_item,
     format_rating_to_five,
     normalize_rating_to_five,

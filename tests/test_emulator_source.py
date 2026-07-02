@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from rom_mate.emulator.source import (
+from grid_launcher.emulator.source import (
     EmulatorSourceResolutionError,
     normalize_emulator_source_metadata,
     resolve_emulator_source_release_asset,
 )
-from rom_mate.emulator.profiles import normalize_emulator_autoprofiles
+from grid_launcher.emulator.profiles import normalize_emulator_autoprofiles
 
 
 def _asset(name: str, url: str, **overrides: object) -> dict[str, object]:

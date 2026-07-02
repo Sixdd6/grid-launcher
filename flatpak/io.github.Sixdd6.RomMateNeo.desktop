@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=RomMate Neo
-Comment=Manage and launch your ROM library
-Exec=rom-mate-neo
-Icon=io.github.Sixdd6.RomMateNeo
-Categories=Game;Utility;
-Terminal=false
