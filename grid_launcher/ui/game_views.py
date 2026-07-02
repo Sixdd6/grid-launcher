@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Any, Callable, Protocol
 
 from PySide6.QtCore import QByteArray, QSize, QTimer, Qt
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPainter, QPixmap
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLayout, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
@@ -569,6 +570,22 @@ def _format_achievement_date(raw: str) -> str:
     return locale.toString(dt, QLocale.FormatType.ShortFormat)
 
 
+PLACEHOLDER_BADGE_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <circle cx="12" cy="12" r="10" fill="#2a2a3d" stroke="#55556a" stroke-width="1.5" stroke-dasharray="3 2"/>
+  <circle cx="12" cy="12" r="4" fill="none" stroke="#55556a" stroke-width="1"/>
+</svg>"""
+
+
+def _make_placeholder_badge_pixmap(size: int) -> QPixmap:
+    renderer = QSvgRenderer(QByteArray(PLACEHOLDER_BADGE_SVG))
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    renderer.render(painter)
+    painter.end()
+    return pixmap
+
+
 TROPHY_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120">
   <!-- Cup body -->
   <path d="M30 8 H70 Q72 8 72 10 L68 58 Q67 65 50 70 Q33 65 32 58 Z"
@@ -680,68 +697,87 @@ def _build_achievements_summary(
     )
     stats_col.addWidget(progress_bar)
 
-    def _make_info_row(label_text: str, ach: dict | None, locked: bool = False) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(6)
-        lbl = QLabel(label_text)
-        lbl.setStyleSheet("font-size: 11px; color: rgba(255,255,255,0.55);")
-        row.addWidget(lbl)
+    tier_colors = {
+        "Unstarted": "rgba(255,255,255,0.35)",
+        "Beginner": "#6EB5FF",
+        "In Progress": "#7ED957",
+        "Advanced": "#F4A623",
+        "Near Complete": "#E8524A",
+        "Mastered": "#C9A800",
+    }
+
+    def _make_info_row(label_text: str, ach: dict | None, locked: bool = False) -> QFrame:
+        accent = "rgba(255,255,255,0.2)" if locked else "#C9A800"
+        card = QFrame()
+        card.setObjectName("achievementInfoCard")
+        card.setFrameShape(QFrame.Shape.NoFrame)
+        card.setStyleSheet(
+            f"QFrame#achievementInfoCard {{ background: rgba(255,255,255,0.04);"
+            f" border: 1px solid rgba(255,255,255,0.08);"
+            f" border-left: 3px solid {accent}; border-radius: 4px; }}"
+        )
+        card_layout = QHBoxLayout(card)
+        card_layout.setContentsMargins(8, 5, 8, 5)
+        card_layout.setSpacing(8)
+        lbl = QLabel(label_text.upper().rstrip(":"))
+        lbl.setStyleSheet("font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.45); background: transparent; border: none;")
+        card_layout.addWidget(lbl)
         badge = QLabel()
         badge.setFixedSize(24, 24)
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setStyleSheet("background: transparent; border: none;")
         if ach is not None and load_image_fn is not None:
             bn = str(ach.get("badge_name", "")).strip()
             if bn:
                 suffix = "_lock" if locked else ""
                 load_image_fn(f"https://media.retroachievements.org/Badge/{bn}{suffix}.png", badge)
-        row.addWidget(badge)
-        if ach is not None:
-            name = QLabel(f"<i>{ach.get('title', '')}</i>")
-        else:
-            name = QLabel("<i>None</i>")
-        name.setTextFormat(Qt.TextFormat.RichText)
+        elif ach is None:
+            badge.setPixmap(_make_placeholder_badge_pixmap(24))
+        card_layout.addWidget(badge)
+        title_text = ach.get("title", "") if ach is not None else ""
+        name = QLabel(title_text if title_text else "None")
+        name.setStyleSheet("font-size: 13px; font-weight: 600; color: #FFFFFF; background: transparent; border: none;")
         name.setWordWrap(False)
-        name.setStyleSheet("font-size: 13px;")
-        row.addWidget(name, 1)
-        return row
+        card_layout.addWidget(name, 1)
+        return card
 
-    def _make_tier_block() -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(6)
-        lbl = QLabel("Completion tier:")
-        lbl.setStyleSheet("font-size: 11px; color: rgba(255,255,255,0.55);")
-        row.addWidget(lbl)
-        tier_colors = {
-            "Unstarted": "rgba(255,255,255,0.35)",
-            "Beginner": "#6EB5FF",
-            "In Progress": "#7ED957",
-            "Advanced": "#F4A623",
-            "Near Complete": "#E8524A",
-            "Mastered": "#C9A800",
-        }
-        tier_label = QLabel(completion_tier)
-        tier_label.setStyleSheet(
-            f"font-size: 13px; font-weight: 700; color: {tier_colors.get(completion_tier, 'white')};"
+    def _make_tier_block() -> QFrame:
+        tier_color = tier_colors.get(completion_tier, "white")
+        card = QFrame()
+        card.setObjectName("achievementTierCard")
+        card.setFrameShape(QFrame.Shape.NoFrame)
+        card.setStyleSheet(
+            f"QFrame#achievementTierCard {{ background: rgba(255,255,255,0.04);"
+            f" border: 1px solid rgba(255,255,255,0.08);"
+            f" border-left: 3px solid {tier_color}; border-radius: 4px; }}"
         )
-        row.addWidget(tier_label)
-        row.addStretch()
-        return row
+        card_layout = QHBoxLayout(card)
+        card_layout.setContentsMargins(8, 5, 8, 5)
+        card_layout.setSpacing(8)
+        lbl = QLabel("COMPLETION TIER")
+        lbl.setStyleSheet("font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.45); background: transparent; border: none;")
+        card_layout.addWidget(lbl)
+        tier_label = QLabel(completion_tier)
+        tier_label.setStyleSheet(f"font-size: 13px; font-weight: 700; color: {tier_color}; background: transparent; border: none;")
+        card_layout.addWidget(tier_label)
+        card_layout.addStretch()
+        return card
 
     # Two-column grid for the six info items
     info_grid = QHBoxLayout()
     info_grid.setSpacing(12)
 
     left_col = QVBoxLayout()
-    left_col.setSpacing(8)
-    left_col.addLayout(_make_info_row("First unlocked:", first_unlocked, locked=False))
-    left_col.addLayout(_make_info_row("Last unlocked:", most_recent, locked=False))
-    left_col.addLayout(_make_info_row("Next goal:", next_goal, locked=True))
+    left_col.setSpacing(6)
+    left_col.addWidget(_make_info_row("First unlocked:", first_unlocked, locked=False))
+    left_col.addWidget(_make_info_row("Last unlocked:", most_recent, locked=False))
+    left_col.addWidget(_make_info_row("Next goal:", next_goal, locked=True))
 
     right_col = QVBoxLayout()
-    right_col.setSpacing(8)
-    right_col.addLayout(_make_info_row("Hardest earned:", hardest_earned, locked=False))
-    right_col.addLayout(_make_info_row("Biggest prize:", biggest_prize, locked=True))
-    right_col.addLayout(_make_tier_block())
+    right_col.setSpacing(6)
+    right_col.addWidget(_make_info_row("Hardest earned:", hardest_earned, locked=False))
+    right_col.addWidget(_make_info_row("Biggest prize:", biggest_prize, locked=True))
+    right_col.addWidget(_make_tier_block())
 
     info_grid.addLayout(left_col, 1)
     info_grid.addLayout(right_col, 1)
