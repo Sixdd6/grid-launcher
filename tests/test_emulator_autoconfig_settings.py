@@ -31,6 +31,7 @@ from rom_mate.emulator.rpcs3 import (
     copy_ps3_custom_config_to_emulator,
     ensure_rpcs3_settings,
     rpcs3_data_root,
+    rpcs3_data_root_candidates,
     update_rpcs3_games_yml,
     ps3_vfs_games_path,
 )
@@ -1971,6 +1972,44 @@ class Rpcs3AutoConfigTests(unittest.TestCase):
             ensure_rpcs3_settings(str(exe))
             result = ensure_rpcs3_settings(str(exe))
         self.assertFalse(result["changed"])
+
+    def test_rpcs3_data_root_candidates_honors_xdg_config_home_override(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            xdg_config_home_override = Path(temp_dir) / "xdg-config"
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(xdg_config_home_override)}, clear=False):
+                os.environ.pop("RPCS3_CONFIG_DIR", None)
+                candidates = rpcs3_data_root_candidates("")
+
+        self.assertIn(xdg_config_home_override / "rpcs3", candidates)
+
+    def test_rpcs3_data_root_candidates_includes_flatpak_path(self) -> None:
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("RPCS3_CONFIG_DIR", None)
+            candidates = rpcs3_data_root_candidates("")
+
+        self.assertIn(Path.home() / ".var" / "app" / "net.rpcs3.RPCS3" / "config" / "rpcs3", candidates)
+
+    def test_rpcs3_data_root_candidates_order_is_unchanged_aside_from_flatpak_addition(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp) / "rpcs3.exe"
+            exe.write_bytes(b"")
+            portable_dir = Path(tmp) / "portable"
+            portable_dir.mkdir()
+
+            with patch.dict(os.environ, {"RPCS3_CONFIG_DIR": "/fake/rpcs3-config"}, clear=False):
+                candidates = rpcs3_data_root_candidates(str(exe))
+
+        self.assertEqual(
+            [
+                portable_dir.resolve(),
+                Path("/fake/rpcs3-config").expanduser().resolve(),
+                Path(tmp).resolve(),
+                xdg_config_home() / "rpcs3",
+                Path.home() / ".var" / "app" / "net.rpcs3.RPCS3" / "config" / "rpcs3",
+                Path.home() / "Library" / "Application Support" / "rpcs3",
+            ],
+            candidates,
+        )
 
     def test_pico8_user_root_candidates_honors_xdg_data_home_override(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

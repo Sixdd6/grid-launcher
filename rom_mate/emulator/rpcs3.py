@@ -7,6 +7,8 @@ import shutil
 from pathlib import Path
 from typing import Callable
 
+from rom_mate.core.path import xdg_config_home
+
 _USER_ID_PATTERN = re.compile(r"^\d{8}$")
 
 
@@ -615,7 +617,8 @@ def rpcs3_data_root_candidates(emulator_path_text: str) -> list[Path]:
     home_path = Path.home()
     candidates.extend(
         [
-            home_path / ".config" / "rpcs3",
+            xdg_config_home() / "rpcs3",
+            home_path / ".var" / "app" / "net.rpcs3.RPCS3" / "config" / "rpcs3",
             home_path / "Library" / "Application Support" / "rpcs3",
         ]
     )
