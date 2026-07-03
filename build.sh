@@ -8,24 +8,38 @@ echo "GRID Launcher Build Script"
 echo "================================"
 echo ""
 
-# Check if virtual environment exists
-if [ ! -f ".venv/bin/activate" ]; then
-    echo "ERROR: Virtual environment not found at ./.venv"
-    echo "Please run: python3 -m venv .venv"
+# pygame 2.6.1 has no Python 3.14 wheel — build requires Python 3.12 or 3.13.
+BUILD_PYTHON=$(command -v python3.12 || command -v python3.13)
+if [ -z "$BUILD_PYTHON" ]; then
+    echo "ERROR: Python 3.12 or 3.13 is required to build (pygame has no 3.14 wheel)"
+    echo "Install with: sudo dnf install python3.12  # or python3.13"
     exit 1
 fi
 
-# Activate virtual environment
-echo "Activating virtual environment..."
-source .venv/bin/activate
-
-# Install/check PyInstaller
-echo "Checking dependencies..."
-python -m pip list | grep -qi PyInstaller
-if [ $? -ne 0 ]; then
-    echo "Installing PyInstaller..."
-    python -m pip install pyinstaller
+# Recreate the venv if it is missing or was built with the wrong Python.
+VENV_PYTHON=".venv/bin/python"
+if [ -f "$VENV_PYTHON" ]; then
+    VENV_VER=$("$VENV_PYTHON" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    BUILD_VER=$("$BUILD_PYTHON" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+    if [ "$VENV_VER" != "$BUILD_VER" ]; then
+        echo "Venv Python ($VENV_VER) does not match build Python ($BUILD_VER) — recreating venv..."
+        rm -rf .venv
+    fi
 fi
+if [ ! -f "$VENV_PYTHON" ]; then
+    echo "Creating virtual environment with $("$BUILD_PYTHON" --version)..."
+    "$BUILD_PYTHON" -m venv .venv
+fi
+
+# Use the venv's pip/python directly — avoids activation edge cases.
+VENV_PIP=".venv/bin/pip"
+VENV_PYTHON=".venv/bin/python"
+
+# Install app dependencies + PyInstaller into the venv.
+echo "Activating virtual environment..."
+echo "Checking dependencies..."
+"$VENV_PIP" install -r requirements.txt
+"$VENV_PIP" install pyinstaller
 
 # Run PyInstaller
 echo ""
@@ -33,7 +47,7 @@ echo "Building executable..."
 echo ""
 
 # --windowed is a no-op on Linux (PyInstaller will print a harmless warning); kept for CLI consistency with the Windows scripts
-python -m PyInstaller \
+"$VENV_PYTHON" -m PyInstaller \
     --noconfirm \
     --clean \
     --windowed \
