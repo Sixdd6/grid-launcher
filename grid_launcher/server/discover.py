@@ -114,7 +114,7 @@ class DiscoverCache:
         except Exception:
             pass
 
-    def load_from_disk(self, path: "Path") -> None:
+    def load_from_disk(self, path: "Path", max_age: int | None = None) -> None:
         """Load cache from disk JSON. Silently ignores missing file or corrupt data."""
         import json as _json
         from pathlib import Path as _Path
@@ -132,6 +132,8 @@ class DiscoverCache:
                     and "timestamp" in entry
                     and isinstance(entry["timestamp"], (int, float))
                 ):
+                    if max_age is not None and time.time() - entry["timestamp"] > max_age:
+                        continue
                     self.cache.setdefault(key, entry)
         except Exception:
             pass
@@ -261,6 +263,46 @@ def fetch_all_games(
     return [normalize_discover_item(i) for i in items], genres
 
 
+def fetch_short_games(
+    base_url: str,
+    api_token: str,
+    limit: int = 20,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    try:
+        params: dict[str, Any] = {
+            "limit": 100,
+            "with_char_index": "false",
+            "with_filter_values": "true",
+            "metadata_providers": ["hltb"],
+        }
+        response = api_get_json(base_url, api_token, "/api/roms", params)
+
+        if not isinstance(response, dict):
+            return [], []
+        raw_items = [i for i in (response.get("items") or []) if isinstance(i, dict)]
+        genres = _extract_genres_from_response(response)
+
+        _HLTB_SHORT_THRESHOLD = 1200
+        short_raw: list[dict[str, Any]] = []
+        other_raw: list[dict[str, Any]] = []
+        for item in raw_items:
+            hltb = item.get("hltb_metadata") or {}
+            main_story = hltb.get("main_story") or 0
+            if isinstance(main_story, (int, float)) and 0 < main_story <= _HLTB_SHORT_THRESHOLD:
+                short_raw.append(item)
+            else:
+                other_raw.append(item)
+
+        import random as _random
+        _random.shuffle(short_raw)
+        _random.shuffle(other_raw)
+        combined = short_raw + other_raw
+        normalized = [normalize_discover_item(i) for i in combined[:limit * 3]]
+        return normalized[:limit], genres
+    except Exception:
+        return [], []
+
+
 def fetch_games_by_genre(
     base_url: str,
     api_token: str,
@@ -284,6 +326,31 @@ def filter_games_by_installed(
         title = (game.get("title") or game.get("name") or "").lower()
         if title and title in installed_keys:
             continue
+        result.append(game)
+    return result
+
+
+def client_filter_games(
+    games: list[dict[str, Any]],
+    genres: set[str],
+    platforms: set[str],
+) -> list[dict[str, Any]]:
+    if not genres and not platforms:
+        return games
+    genre_tokens = {g.lower() for g in genres}
+    platform_tokens = {p.lower() for p in platforms}
+    result = []
+    for game in games:
+        if not isinstance(game, dict):
+            continue
+        if genre_tokens:
+            game_genres = (game.get("genres") or "").lower()
+            if not any(token in game_genres for token in genre_tokens):
+                continue
+        if platform_tokens:
+            game_platform = (game.get("platform") or "").lower()
+            if game_platform not in platform_tokens:
+                continue
         result.append(game)
     return result
 
@@ -317,6 +384,35 @@ def get_top_genres_from_games(
                 genre_scores[g] = genre_scores.get(g, 0) + weight
 
     return [k for k, _ in sorted(genre_scores.items(), key=lambda x: x[1], reverse=True)][:top_n]
+
+
+def genre_stats_from_games(
+    all_games: list[dict[str, Any]],
+    installed_games: list[dict[str, Any]],
+) -> dict[str, tuple[int, int]]:
+    total_counts: dict[str, int] = {}
+    installed_counts: dict[str, int] = {}
+
+    for game in all_games:
+        if not isinstance(game, dict):
+            continue
+        for g in (game.get("genres") or "").split(","):
+            g = g.strip()
+            if g:
+                total_counts[g] = total_counts.get(g, 0) + 1
+
+    for game in installed_games:
+        if not isinstance(game, dict):
+            continue
+        for g in (game.get("genres") or "").split(","):
+            g = g.strip()
+            if g:
+                installed_counts[g] = installed_counts.get(g, 0) + 1
+
+    return {
+        genre: (total_counts.get(genre, 0), installed_counts.get(genre, 0))
+        for genre in total_counts
+    }
 
 
 def fetch_server_platforms(base_url: str, api_token: str) -> list[dict[str, Any]]:
@@ -389,6 +485,99 @@ def fetch_games_by_platform(
     return [normalize_discover_item(i) for i in items]
 
 
+def fetch_recommendations(
+    base_url: str,
+    api_token: str,
+    library_games: list[dict[str, Any]],
+    installed_keys: set[str],
+    limit: int = 20,
+    preferred_platforms: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    try:
+        genre_counts: dict[str, int] = {}
+        for game in library_games:
+            if not isinstance(game, dict):
+                continue
+            for g in (game.get("genres") or "").split(","):
+                g = g.strip()
+                if g:
+                    genre_counts[g] = genre_counts.get(g, 0) + 1
+
+        if not genre_counts:
+            return []
+
+        top_genres = [
+            k for k, _ in sorted(genre_counts.items(), key=lambda x: x[1], reverse=True)
+        ][:3]
+
+        deduped: dict[str, dict[str, Any]] = {}
+        for genre in top_genres:
+            for game in fetch_games_by_genre(base_url, api_token, genre, limit=limit):
+                deduped.setdefault(game["rom_id"], game)
+
+        all_candidates = list(deduped.values())
+
+        if preferred_platforms:
+            all_candidates = [
+                g for g in all_candidates
+                if g.get("platform", "").strip().lower() in {p.strip().lower() for p in preferred_platforms}
+            ]
+
+        filtered = filter_games_by_installed(all_candidates, installed_keys)
+        return filtered[:limit]
+    except Exception:
+        return []
+
+
+def record_discover_event(
+    path: "Path",
+    event: str,
+    section_id: str,
+    rom_id: str,
+) -> None:
+    import json as _json
+    import time as _time
+    from pathlib import Path as _Path
+    try:
+        p = _Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if p.exists() and p.stat().st_size > 1_048_576:
+            return
+        line = _json.dumps({"event": event, "section_id": section_id, "rom_id": rom_id, "ts": _time.time()})
+        with p.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+
+def load_watchlist(path: "Path") -> set[str]:
+    import json as _json
+    from pathlib import Path as _Path
+    try:
+        p = _Path(path)
+        if not p.exists():
+            return set()
+        raw = _json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(raw, list):
+            return set()
+        return {str(item) for item in raw if isinstance(item, str) and item}
+    except Exception:
+        return set()
+
+
+def save_watchlist(path: "Path", rom_ids: set[str]) -> None:
+    import json as _json
+    from pathlib import Path as _Path
+    try:
+        p = _Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(_json.dumps(sorted(rom_ids)), encoding="utf-8")
+        tmp.replace(p)
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Legacy aliases kept so any remaining callers don't break at import time
 # ---------------------------------------------------------------------------
@@ -408,7 +597,15 @@ def fetch_new_games(
     api_token: str,
     limit: int = 20,
 ) -> list[dict[str, Any]]:
-    """Deprecated — delegates to fetch_all_games."""
-    games, _ = fetch_all_games(base_url, api_token, limit=limit)
-    return games
+    """Fetch recently added games from the server, sorted by creation date."""
+    items = _fetch_roms(
+        base_url,
+        api_token,
+        {
+            "order_by": "created_at",
+            "order_dir": "desc",
+            "limit": limit,
+        },
+    )
+    return [normalize_discover_item(i) for i in items]
 

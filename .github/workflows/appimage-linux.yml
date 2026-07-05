@@ -1,0 +1,77 @@
+name: AppImage Linux Build
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  appimage:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Build with PyInstaller (onedir)
+        run: |
+          pyinstaller \
+            --onedir \
+            --windowed \
+            --name grid-launcher \
+            --hidden-import brotli \
+            --hidden-import pyzstd \
+            --hidden-import pyppmd \
+            --hidden-import "keyring.backends.SecretService" \
+            --hidden-import "keyring.backends.kwallet" \
+            --add-data "assets:assets" \
+            --add-data "retroarch-core-list.json:." \
+            --add-data "romm-platform-cores.json:." \
+            --add-data "emulator-autoprofiles.json:." \
+            grid-launcher.py
+
+      - name: Rasterize app icon
+        run: |
+          sudo apt-get install -y librsvg2-bin
+          rsvg-convert -w 256 -h 256 \
+            assets/svg/io.github.Sixdd6.GRIDLauncher.svg \
+            -o appimage/grid-launcher.png
+
+      - name: Assemble AppDir
+        run: |
+          mkdir -p AppDir/usr/bin
+          cp -r dist/grid-launcher/* AppDir/usr/bin/
+          cp appimage/AppRun AppDir/AppRun
+          chmod +x AppDir/AppRun
+          cp appimage/grid-launcher.desktop AppDir/grid-launcher.desktop
+          cp appimage/grid-launcher.png AppDir/grid-launcher.png
+
+      - name: Download appimagetool
+        run: |
+          wget -q -O appimagetool \
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x appimagetool
+
+      - name: Build AppImage
+        run: |
+          ./appimagetool --appimage-extract-and-run AppDir grid-launcher-x86_64.AppImage
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: grid-launcher-linux-appimage
+          path: grid-launcher-x86_64.AppImage
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: grid-launcher-x86_64.AppImage

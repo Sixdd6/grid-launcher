@@ -351,7 +351,6 @@ User Opens Discover Tab
 3. Add "See All" links per section (navigate to Server with filters)
 4. Implement section preferences (user can hide/reorder sections)
 5. Add watchlist feature (mark games as "Interested", separate view)
-6. Analytics integration (track which sections drive installs)
 
 **Timeline**: ~2-3 days
 

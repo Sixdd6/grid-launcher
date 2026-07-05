@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 import zipfile
@@ -434,6 +435,61 @@ def _try_py7zr(archive_path: Path, extracted_dir: Path) -> str | None:
         return str(error)
 
 
+def _7z_uncompressed_total_bytes(archive_path: Path) -> int:
+    """Return total uncompressed bytes of a .7z or .rar archive, or 0 on failure.
+
+    For .7z archives, py7zr reads only the archive header (fast even for 100 GB+
+    archives). For .rar archives or when py7zr fails, the 7z CLI list command is
+    used instead.
+    """
+    if archive_path.suffix.casefold() != ".rar":
+        try:
+            import py7zr
+            with py7zr.SevenZipFile(archive_path, mode="r") as arc:
+                return sum(
+                    info.uncompressed
+                    for info in arc.list()
+                    if not info.is_directory
+                )
+        except Exception:
+            pass
+
+    # Fallback: ask the CLI tool for a listing
+    exe: str | None = None
+    if _BUNDLED_7Z_PATH.exists():
+        exe = str(_BUNDLED_7Z_PATH)
+    else:
+        for cmd in ("7z", "7za", "7zz"):
+            resolved = shutil.which(cmd)
+            if resolved:
+                exe = resolved
+                break
+        if exe is None:
+            for known in _KNOWN_7Z_PATHS:
+                if Path(known).is_file():
+                    exe = known
+                    break
+    if exe is None:
+        return 0
+    try:
+        result = subprocess.run(
+            [exe, "l", "-slt", str(archive_path)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=30,
+            creationflags=_subprocess_creationflags(),
+        )
+        total = 0
+        for line in result.stdout.splitlines():
+            m = re.match(r"^Size\s*=\s*(\d+)", line)
+            if m:
+                total += int(m.group(1))
+        return total
+    except Exception:
+        return 0
+
+
 def _extract_7z_with_fallbacks(archive_path: Path, extracted_dir: Path) -> None:
     if _BUNDLED_7Z_PATH.exists():
         try:
@@ -502,11 +558,32 @@ def extract_archive_into_directory(
     try:
         if archive_path.suffix.casefold() in (".7z", ".rar"):
             if install_progress_callback is not None:
-                install_progress_callback(0, 0)
-            _extract_7z_with_fallbacks(archive_path, extracted_dir)
-            if install_progress_callback is not None:
+                total_bytes = _7z_uncompressed_total_bytes(archive_path)
+                install_progress_callback(0, total_bytes)
+                extraction_error: OSError | None = None
+
+                def _run_7z_extraction() -> None:
+                    nonlocal extraction_error
+                    try:
+                        _extract_7z_with_fallbacks(archive_path, extracted_dir)
+                    except OSError as exc:
+                        extraction_error = exc
+
+                thread = threading.Thread(target=_run_7z_extraction, daemon=True)
+                thread.start()
+                while thread.is_alive():
+                    if total_bytes > 0:
+                        installed = directory_total_file_bytes(extracted_dir)
+                        install_progress_callback(min(installed, total_bytes), total_bytes)
+                    time.sleep(0.15)
+                thread.join()
+                if extraction_error is not None:
+                    raise extraction_error
                 installed_bytes = directory_total_file_bytes(extracted_dir)
-                install_progress_callback(installed_bytes, installed_bytes)
+                resolved_total = max(total_bytes, installed_bytes)
+                install_progress_callback(installed_bytes, resolved_total)
+            else:
+                _extract_7z_with_fallbacks(archive_path, extracted_dir)
         elif zipfile.is_zipfile(archive_path):
             with zipfile.ZipFile(archive_path) as archive:
                 members = archive.infolist()

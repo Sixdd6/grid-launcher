@@ -277,6 +277,24 @@ def make_game_card(window: GameCardWindowProtocol, game: dict[str, str], source:
     update_indicator.setVisible(_is_truthy_flag(game.get("update_available")))
     layout.addWidget(update_indicator)
 
+    if source == "discover":
+        toggle_watchlist_fn = getattr(window, "toggle_watchlist", None)
+        is_watchlisted_fn = getattr(window, "is_watchlisted", None)
+        rom_id = game.get("rom_id", "")
+        if rom_id and (toggle_watchlist_fn is not None):
+            bookmark_btn = QPushButton("\u2605" if (is_watchlisted_fn and is_watchlisted_fn(rom_id)) else "\u2606")
+            bookmark_btn.setObjectName("gameCardBookmark")
+            bookmark_btn.setFlat(True)
+            bookmark_btn.setFixedSize(24, 24)
+            bookmark_btn.setParent(frame)
+            bookmark_btn.move(152, 4)
+            def _toggle(checked=False, rid=rom_id, btn=bookmark_btn):
+                toggle_watchlist_fn(rid)
+                new_state = is_watchlisted_fn(rid) if is_watchlisted_fn else False
+                btn.setText("\u2605" if new_state else "\u2606")
+            bookmark_btn.clicked.connect(_toggle)
+            bookmark_btn.show()
+
     return frame
 
 
@@ -611,7 +629,13 @@ TROPHY_SVG = b"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120">
 def _build_achievements_summary(
     achievements: list[dict],
     load_image_fn: Callable[[str, QLabel], None] | None = None,
+    colors: dict | None = None,
 ) -> QWidget:
+    from grid_launcher.ui.theme import theme_color as _tc
+    text = _tc(colors, "text", "#f8f8f2")
+    muted = _tc(colors, "muted", "#9baed6")
+    border = _tc(colors, "border", "#6272a4")
+    surface_alt = _tc(colors, "surface_alt", "#535873")
     earned = [a for a in achievements if a.get("date_earned", "")]
     unearned = [a for a in achievements if not a.get("date_earned", "")]
     num_earned = len(earned)
@@ -671,10 +695,11 @@ def _build_achievements_summary(
         card_layout.setSpacing(2)
         big = QLabel(big_text)
         big.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        big.setStyleSheet("font-size: 28px; font-weight: 700;")
+        big.setStyleSheet("font-size: 56px; font-weight: 700;")
         sub = QLabel(sub_text)
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sub.setStyleSheet("font-size: 13px; color: rgba(255,255,255,0.6);")
+        sub.setStyleSheet(f"font-size: 13px; color: {muted};")
+        card_layout.addStretch(1)
         card_layout.addWidget(big)
         card_layout.addWidget(sub)
         return card
@@ -692,13 +717,13 @@ def _build_achievements_summary(
     progress_bar.setFixedHeight(18)
     progress_bar.setTextVisible(True)
     progress_bar.setStyleSheet(
-        "QProgressBar { border-radius: 5px; background: rgba(255,255,255,0.1); font-size: 11px; text-align: center; }"
+        f"QProgressBar {{ border-radius: 5px; background: {surface_alt}; font-size: 11px; text-align: center; }}"
         "QProgressBar::chunk { border-radius: 5px; background: #C9A800; }"
     )
     stats_col.addWidget(progress_bar)
 
     tier_colors = {
-        "Unstarted": "rgba(255,255,255,0.35)",
+        "Unstarted": muted,
         "Beginner": "#6EB5FF",
         "In Progress": "#7ED957",
         "Advanced": "#F4A623",
@@ -707,20 +732,20 @@ def _build_achievements_summary(
     }
 
     def _make_info_row(label_text: str, ach: dict | None, locked: bool = False) -> QFrame:
-        accent = "rgba(255,255,255,0.2)" if locked else "#C9A800"
+        accent = muted if locked else "#C9A800"
         card = QFrame()
         card.setObjectName("achievementInfoCard")
         card.setFrameShape(QFrame.Shape.NoFrame)
         card.setStyleSheet(
-            f"QFrame#achievementInfoCard {{ background: rgba(255,255,255,0.04);"
-            f" border: 1px solid rgba(255,255,255,0.08);"
+            f"QFrame#achievementInfoCard {{ background: transparent;"
+            f" border: 1px solid {border};"
             f" border-left: 3px solid {accent}; border-radius: 4px; }}"
         )
         card_layout = QHBoxLayout(card)
         card_layout.setContentsMargins(8, 5, 8, 5)
         card_layout.setSpacing(8)
         lbl = QLabel(label_text.upper().rstrip(":"))
-        lbl.setStyleSheet("font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.45); background: transparent; border: none;")
+        lbl.setStyleSheet(f"font-size: 10px; font-weight: 700; color: {muted}; background: transparent; border: none;")
         card_layout.addWidget(lbl)
         badge = QLabel()
         badge.setFixedSize(24, 24)
@@ -736,7 +761,7 @@ def _build_achievements_summary(
         card_layout.addWidget(badge)
         title_text = ach.get("title", "") if ach is not None else ""
         name = QLabel(title_text if title_text else "None")
-        name.setStyleSheet("font-size: 13px; font-weight: 600; color: #FFFFFF; background: transparent; border: none;")
+        name.setStyleSheet(f"font-size: 13px; font-weight: 600; color: {text}; background: transparent; border: none;")
         name.setWordWrap(False)
         card_layout.addWidget(name, 1)
         return card
@@ -747,15 +772,15 @@ def _build_achievements_summary(
         card.setObjectName("achievementTierCard")
         card.setFrameShape(QFrame.Shape.NoFrame)
         card.setStyleSheet(
-            f"QFrame#achievementTierCard {{ background: rgba(255,255,255,0.04);"
-            f" border: 1px solid rgba(255,255,255,0.08);"
+            f"QFrame#achievementTierCard {{ background: transparent;"
+            f" border: 1px solid {border};"
             f" border-left: 3px solid {tier_color}; border-radius: 4px; }}"
         )
         card_layout = QHBoxLayout(card)
         card_layout.setContentsMargins(8, 5, 8, 5)
         card_layout.setSpacing(8)
         lbl = QLabel("COMPLETION TIER")
-        lbl.setStyleSheet("font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.45); background: transparent; border: none;")
+        lbl.setStyleSheet(f"font-size: 10px; font-weight: 700; color: {muted}; background: transparent; border: none;")
         card_layout.addWidget(lbl)
         tier_label = QLabel(completion_tier)
         tier_label.setStyleSheet(f"font-size: 13px; font-weight: 700; color: {tier_color}; background: transparent; border: none;")
@@ -790,7 +815,10 @@ def _build_achievements_summary(
 def build_achievements_panel(
     achievements: list[dict],
     load_image_fn: Callable[[str, QLabel], None] | None = None,
+    colors: dict | None = None,
 ) -> QWidget:
+    from grid_launcher.ui.theme import theme_color as _tc
+    border = _tc(colors, "border", "#6272a4")
     container = QFrame()
     container.setObjectName("achievementsPanelContainer")
     container.setStyleSheet("QFrame#achievementsPanelContainer { border: none; background: transparent; }")
@@ -810,10 +838,10 @@ def build_achievements_panel(
     summary_frame.setObjectName("achievementsSummaryFrame")
     summary_frame.setFrameShape(QFrame.Shape.StyledPanel)
     summary_frame.setFrameShadow(QFrame.Shadow.Raised)
-    summary_frame.setStyleSheet("QFrame#achievementsSummaryFrame { border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; }")
+    summary_frame.setStyleSheet(f"QFrame#achievementsSummaryFrame {{ border: 1px solid {border}; border-radius: 6px; }}")
     summary_inner_layout = QVBoxLayout(summary_frame)
     summary_inner_layout.setContentsMargins(0, 0, 0, 0)
-    summary_inner_layout.addWidget(_build_achievements_summary(achievements, load_image_fn))
+    summary_inner_layout.addWidget(_build_achievements_summary(achievements, load_image_fn, colors=colors))
 
     scroll = QScrollArea()
     scroll.setWidgetResizable(True)
@@ -881,7 +909,7 @@ def build_achievements_panel(
     list_frame.setObjectName("achievementsListFrame")
     list_frame.setFrameShape(QFrame.Shape.StyledPanel)
     list_frame.setFrameShadow(QFrame.Shadow.Raised)
-    list_frame.setStyleSheet("QFrame#achievementsListFrame { border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; }")
+    list_frame.setStyleSheet(f"QFrame#achievementsListFrame {{ border: 1px solid {border}; border-radius: 6px; }}")
     list_inner_layout = QVBoxLayout(list_frame)
     list_inner_layout.setContentsMargins(4, 4, 4, 4)
     list_inner_layout.addWidget(scroll)

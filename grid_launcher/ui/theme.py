@@ -24,7 +24,7 @@ _LIGHT_THEME_COLORS: dict[str, str] = {
     "active": "#7f5fd1",
     "active_text": "#ffffff",
     "success": "#1f9d55",
-    "muted": "#5f6aa8",
+    "muted": "#4c5a9c",
     "error": "#d13f4b",
     "warning": "#c37a2c",
 }
@@ -42,7 +42,7 @@ _DARK_THEME_COLORS: dict[str, str] = {
     "active": "#bd93f9",
     "active_text": "#282a36",
     "success": "#50fa7b",
-    "muted": "#6272a4",
+    "muted": "#9baed6",
     "error": "#ff5555",
     "warning": "#ffb86c",
 }
@@ -223,6 +223,9 @@ def theme_stylesheet(colors: Mapping[str, str] | None) -> str:
         }}
         QLabel {{
             color: {resolved_colors['text']};
+        }}
+        QLabel#detailsMetadataHeader {{
+            color: {resolved_colors['muted']};
         }}
         QCheckBox {{
             color: {resolved_colors['text']};
@@ -415,7 +418,9 @@ def theme_stylesheet(colors: Mapping[str, str] | None) -> str:
         QScrollArea#detailsCloudScroll,
         QScrollArea#detailsOverviewScroll,
         QScrollArea#settingsScroll,
-        QScrollArea#emulatorsScroll {{
+        QScrollArea#emulatorsScroll,
+        QScrollArea#discoverCarouselScroll,
+        QScrollArea#discoverMainScroll {{
             background-color: transparent;
             border: none;
         }}
@@ -426,12 +431,16 @@ def theme_stylesheet(colors: Mapping[str, str] | None) -> str:
         QWidget#detailsOverviewScrollViewport,
         QWidget#settingsScrollViewport,
         QWidget#emulatorsScrollViewport,
+        QWidget#discoverCarouselScrollViewport,
+        QWidget#discoverMainScrollViewport,
         QWidget#libraryGridContent,
         QWidget#serverGamesContent,
         QWidget#downloadsContent,
         QWidget#detailsOverviewContent,
         QWidget#settingsContent,
-        QWidget#emulatorsContent {{
+        QWidget#emulatorsContent,
+        QWidget#discoverCarouselContent,
+        QWidget#discoverMainContent {{
             background-color: transparent;
         }}
         QListWidget#serverPlatformsList {{

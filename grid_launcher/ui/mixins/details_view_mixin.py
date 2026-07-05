@@ -1957,7 +1957,7 @@ class DetailsViewMixin:
 
         from grid_launcher.ui.game_views import build_achievements_panel
 
-        panel = build_achievements_panel(achievements, load_image_fn=self._queue_cover_load)
+        panel = build_achievements_panel(achievements, load_image_fn=self._queue_cover_load, colors=self.active_theme_colors)
         self._show_achievements_panel(panel)
 
     def _show_achievements_panel(self, panel: QWidget) -> None:

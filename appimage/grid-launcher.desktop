@@ -3,6 +3,6 @@ Type=Application
 Name=GRID Launcher
 Comment=Game Repository Interface & Downloader
 Exec=grid-launcher
-Icon=io.github.Sixdd6.GRIDLauncher
+Icon=grid-launcher
 Categories=Game;Utility;
 Terminal=false

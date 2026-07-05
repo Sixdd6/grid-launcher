@@ -907,41 +907,146 @@ class DiscoverLoadWorker(QObject):
         api_token: str,
         cache: Any,
         force_refresh: bool,
+        library_games: list = None,
+        preferred_platforms: list[str] | None = None,
     ) -> None:
         super().__init__()
         self.base_url = base_url
         self.api_token = api_token
         self.cache = cache
         self.force_refresh = force_refresh
+        self.library_games = library_games if library_games is not None else []
+        self.preferred_platforms: set[str] = set(preferred_platforms) if preferred_platforms else set()
 
     @Slot()
     def run(self) -> None:
         from ..server.discover import (
-            fetch_all_games,
+            fetch_short_games,
             fetch_games_by_genre,
+            fetch_games_by_platform,
+            fetch_highly_rated_games,
+            fetch_new_games,
+            fetch_recommendations,
+            fetch_server_platforms,
             filter_games_by_installed,
+            filter_unexplored_platforms,
         )
         result: dict[str, Any] = {}
 
         # Single call to get games + genre list
-        all_games: list[dict[str, Any]] = []
+        short_games: list[dict[str, Any]] = []
         genres_available: list[str] = []
+        all_games_error: Exception | None = None
         try:
-            cached = self.cache.get_section("all_games", self.force_refresh)
+            cached = self.cache.get_section("short_games", self.force_refresh)
             if cached is not None:
-                all_games = cached.get("games", [])
+                short_games = cached.get("games", [])
                 genres_available = cached.get("genres", [])
             else:
-                all_games, genres_available = fetch_all_games(
+                short_games, genres_available = fetch_short_games(
                     self.base_url, self.api_token, limit=20
                 )
-                all_games = filter_games_by_installed(all_games, self.cache.installed_game_keys)
-                self.cache.set_section("all_games", {"games": all_games, "genres": genres_available})
+                short_games = filter_games_by_installed(short_games, self.cache.installed_game_keys)
+                self.cache.set_section("short_games", {"games": short_games, "genres": genres_available})
+        except Exception as exc:
+            all_games_error = exc
+
+        if short_games:
+            result["short_games"] = {"games": short_games}
+
+        # New on server (sorted by created_at desc)
+        try:
+            cached_new = self.cache.get_section("new_games", self.force_refresh)
+            if cached_new is not None:
+                new_games = cached_new.get("games", [])
+            else:
+                new_games = fetch_new_games(self.base_url, self.api_token, limit=20)
+                new_games = filter_games_by_installed(new_games, self.cache.installed_game_keys)
+                self.cache.set_section("new_games", {"games": new_games})
+            if new_games:
+                result["new_games"] = {"games": new_games}
         except Exception:
             pass
 
-        if all_games:
-            result["all_games"] = {"games": all_games}
+        # Highly rated (all-time)
+        try:
+            cached_rated = self.cache.get_section("highly_rated", self.force_refresh)
+            if cached_rated is not None:
+                highly_rated = cached_rated.get("games", [])
+            else:
+                highly_rated = fetch_highly_rated_games(self.base_url, self.api_token, limit=20)
+                highly_rated = filter_games_by_installed(highly_rated, self.cache.installed_game_keys)
+                self.cache.set_section("highly_rated", {"games": highly_rated})
+            if highly_rated:
+                result["highly_rated"] = {"games": highly_rated}
+        except Exception:
+            pass
+
+        # Recommendations (only for users with 20+ installed games)
+        if len(self.library_games) >= 20:
+            try:
+                cached_recs = self.cache.get_section("recommendations", self.force_refresh)
+                if cached_recs is not None:
+                    result["recommendations"] = cached_recs
+                else:
+                    rec_games = fetch_recommendations(
+                        self.base_url,
+                        self.api_token,
+                        self.library_games,
+                        self.cache.installed_game_keys,
+                        preferred_platforms=self.preferred_platforms,
+                    )
+                    if rec_games:
+                        section_data = {"games": rec_games}
+                        self.cache.set_section("recommendations", section_data)
+                        result["recommendations"] = section_data
+            except Exception:
+                pass
+
+        # Explore unexplored platforms (up to 3)
+        try:
+            cached_platforms = self.cache.get_section("platforms_list", self.force_refresh)
+            if cached_platforms is not None:
+                platform_sections = cached_platforms.get("platforms", [])
+            else:
+                platform_sections = []
+                platforms = fetch_server_platforms(self.base_url, self.api_token)
+                self.cache.set_section("all_platforms", {"platforms": platforms})
+                unexplored = filter_unexplored_platforms(
+                    platforms, self.cache.installed_platform_names, max_platforms=3
+                )
+                for platform in unexplored:
+                    platform_id = platform.get("id")
+                    if platform_id is None:
+                        continue
+                    section_id = f"platform:{platform_id}"
+                    cached_section = self.cache.get_section(section_id, self.force_refresh)
+                    if cached_section is not None:
+                        platform_games = cached_section.get("games", [])
+                    else:
+                        platform_games = fetch_games_by_platform(
+                            self.base_url, self.api_token, platform_id, limit=8
+                        )
+                        platform_games = filter_games_by_installed(
+                            platform_games, self.cache.installed_game_keys
+                        )
+                        self.cache.set_section(section_id, {"games": platform_games})
+                    if not platform_games:
+                        continue
+                    platform_sections.append(
+                        {
+                            "id": platform_id,
+                            "display_name": platform.get("display_name")
+                            or platform.get("name")
+                            or "",
+                            "games": platform_games,
+                        }
+                    )
+                self.cache.set_section("platforms_list", {"platforms": platform_sections})
+            if platform_sections:
+                result["platforms"] = platform_sections
+        except Exception:
+            pass
 
         # Per-genre sections (capped at 6)
         if genres_available:
@@ -972,5 +1077,9 @@ class DiscoverLoadWorker(QObject):
                         result["genres"] = genres_section
             except Exception:
                 pass
+
+        if not result and all_games_error is not None:
+            self.error.emit(str(all_games_error))
+            return
 
         self.finished.emit(result)

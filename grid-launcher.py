@@ -354,7 +354,7 @@ from grid_launcher.ui import (
     show_toast as resolve_show_toast,
     upsert_emulator_entry,
 )
-from grid_launcher.ui.discover import DiscoverPageWidget
+from grid_launcher.ui.discover import DiscoverPageWidget, DiscoverCarouselSection
 from grid_launcher.ui.emulators import save_button_label
 from grid_launcher.ui.emulators import available_source_download_emulator_entries as resolve_available_source_download_emulator_entries
 from grid_launcher.ui.spinner import LoadingSpinnerWidget
@@ -363,7 +363,12 @@ from grid_launcher.server.discover import (
     fetch_all_games,
     fetch_games_by_genre,
     filter_games_by_installed,
+    client_filter_games,
+    genre_stats_from_games,
     get_top_genres_from_games,
+    record_discover_event as _record_discover_event_to_file,
+    load_watchlist,
+    save_watchlist,
 )
 from grid_launcher.server import (
     account_status_text,
@@ -394,6 +399,16 @@ from grid_launcher.ui.mixins.cloud_mixin import CloudSaveMixin
 from grid_launcher.ui.mixins.emulator_ui_mixin import EmulatorUIMixin
 from grid_launcher.ui.mixins.install_mixin import InstallMixin
 from grid_launcher.ui.mixins.details_view_mixin import DetailsViewMixin
+
+
+_DISCOVER_SECTION_LABELS: dict[str, str] = {
+    "short_games": "Short But Fun",
+    "new_games": "New on Server",
+    "highly_rated": "Highly Rated (All-Time)",
+    "recommendations": "Recommended for You",
+    "genres": "Browse by Genre",
+    "watchlist": "Your Watchlist",
+}
 
 
 class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin, QMainWindow):
@@ -618,9 +633,17 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         
         # Discover tab
         self.discover_cache = DiscoverCache(ttl=3600)
+        self.discover_cache.load_from_disk(self._discover_cache_file(), max_age=7 * 86400)
+        _ui_state = self._load_discover_ui_state()
+        self._preferred_platforms: set[str] = {
+            p.strip().lower()
+            for p in _ui_state.get("preferred_platforms", [])
+            if isinstance(p, str) and p.strip()
+        }
         self.discover_page: DiscoverPageWidget | None = None
         self._discover_load_thread: QThread | None = None
         self._discover_load_worker: Any = None
+        self.watchlist_rom_ids: set[str] = load_watchlist(self._watchlist_file())
         
         self.session_poll_timer = QTimer(self)
         self.session_poll_timer.setSingleShot(False)
@@ -892,9 +915,18 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         if index == 1 and not self.server_connected and self.server_auto_reconnect:
             self._connect_to_server(show_errors=False)
         if index == 2:  # Discover tab
-            if self.discover_cache.is_stale("all_games"):
+            if self.discover_cache.is_stale("short_games"):
                 self._refresh_discover_data(force_refresh=False)
         QTimer.singleShot(0, self._reflow_current_page_grid)
+
+    def navigate_to_server_platform(self, platform_display_name: str | None) -> None:
+        if platform_display_name is not None and self.server_platforms_list is not None:
+            for i in range(self.server_platforms_list.count()):
+                item = self.server_platforms_list.item(i)
+                if item and item.text().strip().lower() == platform_display_name.strip().lower():
+                    self.server_platforms_list.setCurrentItem(item)
+                    break
+        self._switch_page(1)
 
     def _reflow_current_page_grid(self) -> None:
         current_index = self.stack.currentIndex()
@@ -1015,7 +1047,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         right_layout.addLayout(header_row)
 
         self.server_status_label = QLabel("Not connected")
-        self.server_status_label.setStyleSheet("color: #ff5555;")
+        self.server_status_label.setStyleSheet(f"color: {self._theme_color('error', '#ff5555')};")
         right_layout.addWidget(self.server_status_label)
 
         scroll = QScrollArea()
@@ -1044,8 +1076,187 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         """Build the Discover tab page."""
         page = DiscoverPageWidget(self, self)
         page.set_refresh_callback(self._refresh_discover_data)
+        ui_state = self._load_discover_ui_state()
+        page.set_collapsed_states(ui_state.get("collapsed_sections", {}))
+        page.collapsed_states_changed.connect(self._on_discover_collapsed_states_changed)
+        page.preferences_requested.connect(self._open_discover_preferences_dialog)
+        page.update_last_refresh_time(self._discover_cached_refresh_time())
         self.discover_page = page
         return page
+
+    def _on_discover_collapsed_states_changed(self, states: dict) -> None:
+        current = self._load_discover_ui_state()
+        current["collapsed_sections"] = states
+        self._save_discover_ui_state(current)
+
+    def _open_discover_preferences_dialog(self) -> None:
+        from PySide6.QtWidgets import (
+            QDialog,
+            QDialogButtonBox,
+            QListWidget,
+            QListWidgetItem,
+            QTabWidget,
+            QWidget,
+        )
+
+        ui_state = self._load_discover_ui_state()
+        hidden_sections = set(ui_state.get("hidden_sections", []))
+        section_order = ui_state.get("section_order", [])
+
+        current_sections = list(self.discover_page.sections.keys()) if self.discover_page else []
+
+        ordered = [s for s in section_order if s in current_sections]
+        ordered += [s for s in current_sections if s not in ordered]
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Discover Preferences")
+        dlg.setMinimumWidth(360)
+
+        layout = QVBoxLayout(dlg)
+
+        tab_widget = QTabWidget()
+
+        sections_tab = QWidget()
+        sections_layout = QVBoxLayout(sections_tab)
+        sections_layout.addWidget(QLabel("Show and order sections:"))
+
+        list_widget = QListWidget()
+        list_widget.setDragDropMode(QAbstractItemView.DragDropMode.NoDragDrop)
+
+        for sid in ordered:
+            if sid.startswith("platform_"):
+                section_widget = self.discover_page.sections.get(sid) if self.discover_page else None
+                label = getattr(section_widget, "title", sid) if section_widget else sid
+            else:
+                label = _DISCOVER_SECTION_LABELS.get(sid, sid)
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, sid)
+            item.setCheckState(
+                Qt.CheckState.Unchecked if sid in hidden_sections else Qt.CheckState.Checked
+            )
+            list_widget.addItem(item)
+
+        sections_layout.addWidget(list_widget)
+
+        btn_row = QHBoxLayout()
+        up_btn = QPushButton("\u25b2 Up")
+        down_btn = QPushButton("\u25bc Down")
+
+        def move_up() -> None:
+            row = list_widget.currentRow()
+            if row > 0:
+                item = list_widget.takeItem(row)
+                list_widget.insertItem(row - 1, item)
+                list_widget.setCurrentRow(row - 1)
+
+        def move_down() -> None:
+            row = list_widget.currentRow()
+            if row < list_widget.count() - 1:
+                item = list_widget.takeItem(row)
+                list_widget.insertItem(row + 1, item)
+                list_widget.setCurrentRow(row + 1)
+
+        up_btn.clicked.connect(move_up)
+        down_btn.clicked.connect(move_down)
+        btn_row.addWidget(up_btn)
+        btn_row.addWidget(down_btn)
+        btn_row.addStretch()
+        sections_layout.addLayout(btn_row)
+
+        tab_widget.addTab(sections_tab, "Sections")
+
+        platforms_tab = QWidget()
+        platforms_layout = QVBoxLayout(platforms_tab)
+        platforms_label = QLabel(
+            "Only recommend games from these platforms (leave empty for all):"
+        )
+        platforms_label.setWordWrap(True)
+        platforms_layout.addWidget(platforms_label)
+
+        saved_preferred = set(ui_state.get("preferred_platforms", []))
+        _all_platforms_cached = self.discover_cache.get_section("all_platforms")
+        if _all_platforms_cached is not None:
+            available_platforms = list(dict.fromkeys(sorted(
+                (p.get("display_name") or p.get("name") or "").strip()
+                for p in _all_platforms_cached.get("platforms", [])
+                if isinstance(p, dict) and (p.get("display_name") or p.get("name"))
+            )))
+        else:
+            from grid_launcher.server.discover import fetch_server_platforms as _fsp
+            _raw_platforms = _fsp(
+                self.config.get("server_url", "").rstrip("/"),
+                self.config.get("api_token", ""),
+            )
+            available_platforms = list(dict.fromkeys(sorted(
+                (p.get("display_name") or p.get("name") or "").strip()
+                for p in _raw_platforms
+                if isinstance(p, dict) and (p.get("display_name") or p.get("name"))
+            )))
+            if _raw_platforms:
+                self.discover_cache.set_section("all_platforms", {"platforms": _raw_platforms})
+        available_platforms = [p for p in available_platforms if p]
+
+        platform_list_widget = QListWidget()
+        for platform_name in available_platforms:
+            item = QListWidgetItem(platform_name)
+            item.setCheckState(
+                Qt.CheckState.Checked
+                if platform_name in saved_preferred
+                else Qt.CheckState.Unchecked
+            )
+            platform_list_widget.addItem(item)
+
+        platforms_layout.addWidget(platform_list_widget)
+
+        tab_widget.addTab(platforms_tab, "Platform Preferences")
+
+        layout.addWidget(tab_widget)
+
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.accepted.connect(dlg.accept)
+        button_box.rejected.connect(dlg.reject)
+        layout.addWidget(button_box)
+
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        new_order = []
+        new_hidden = []
+        for i in range(list_widget.count()):
+            item = list_widget.item(i)
+            sid = item.data(Qt.ItemDataRole.UserRole)
+            new_order.append(sid)
+            if item.checkState() == Qt.CheckState.Unchecked:
+                new_hidden.append(sid)
+
+        new_preferred_platforms = []
+        for i in range(platform_list_widget.count()):
+            item = platform_list_widget.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                new_preferred_platforms.append(item.text())
+
+        current_state = self._load_discover_ui_state()
+
+        old_preferred = set(current_state.get("preferred_platforms", []))
+        new_preferred_set = set(new_preferred_platforms)
+        if old_preferred != new_preferred_set:
+            self.discover_cache.invalidate_section("recommendations")
+
+        current_state["hidden_sections"] = new_hidden
+        current_state["section_order"] = new_order
+        current_state["preferred_platforms"] = new_preferred_platforms
+        self._save_discover_ui_state(current_state)
+
+        self._preferred_platforms = {
+            p.strip().lower()
+            for p in new_preferred_platforms
+            if isinstance(p, str) and p.strip()
+        }
+
+        self._refresh_discover_data(force_refresh=False)
+
 
     def _refresh_discover_data(self, force_refresh: bool = True) -> None:
         """Refresh discover data asynchronously."""
@@ -1057,6 +1268,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
         # Update installed games cache
         self.discover_cache.set_installed_games(self.library_games)
+        self.discover_cache.set_installed_platform_names(self.library_games)
 
         # Start background fetch thread
         self.discover_page.set_loading(True)
@@ -1072,6 +1284,8 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             self.config.get("api_token", ""),
             self.discover_cache,
             force_refresh,
+            library_games=self.library_games,
+            preferred_platforms=self._load_discover_ui_state().get("preferred_platforms", []),
         )
 
         self._discover_load_thread = QThread()
@@ -1087,29 +1301,144 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             return
 
         self.discover_page.set_loading(False)
+        self.discover_page.update_last_refresh_time(time.time())
         self.discover_page._clear_sections()
 
-        sections_added = 0
+        ui_state = self._load_discover_ui_state()
+        hidden_sections = set(ui_state.get("hidden_sections", []))
+        section_order = ui_state.get("section_order", [])
 
-        all_games = result.get("all_games", {}).get("games", [])
+        preferred_platforms = self._preferred_platforms
+
+        def _apply_platform_pref(games: list) -> list:
+            if not preferred_platforms:
+                return games
+            return [
+                g for g in games
+                if g.get("platform", "").strip().lower() in preferred_platforms
+            ]
+
+        all_games = _apply_platform_pref(result.get("short_games", {}).get("games", []))
+
+        pending: dict[str, Any] = {}
+
         if all_games:
-            self.discover_page.add_carousel_section("all_games", "Games on Server", all_games)
-            sections_added += 1
+            pending["short_games"] = (
+                "carousel", "Short But Fun", all_games,
+                lambda: self.navigate_to_server_platform(None),
+            )
+
+        new_games = _apply_platform_pref(result.get("new_games", {}).get("games", []))
+        if new_games:
+            pending["new_games"] = (
+                "carousel", "New on Server", new_games,
+                lambda: self.navigate_to_server_platform(None),
+            )
+
+        highly_rated = _apply_platform_pref(result.get("highly_rated", {}).get("games", []))
+        if highly_rated:
+            pending["highly_rated"] = (
+                "carousel", "Highly Rated (All-Time)", highly_rated,
+                lambda: self.navigate_to_server_platform(None),
+            )
+
+        recommendations = _apply_platform_pref(result.get("recommendations", {}).get("games", []))
+        if recommendations:
+            pending["recommendations"] = (
+                "carousel", "Recommended for You", recommendations,
+                lambda: self.navigate_to_server_platform(None),
+            )
+
+        for platform in result.get("platforms", []):
+            platform_games = _apply_platform_pref(platform.get("games", []))
+            if platform_games:
+                platform_display_name = platform["display_name"]
+                pending[f"platform_{platform['id']}"] = (
+                    "carousel",
+                    f"Explore {platform_display_name}",
+                    platform_games,
+                    lambda pname=platform_display_name: self.navigate_to_server_platform(pname),
+                )
 
         genres_data = result.get("genres", {})
         genres = genres_data.get("genres", [])
         games_by_genre = genres_data.get("games_by_genre", {})
+        if preferred_platforms:
+            games_by_genre = {
+                genre: filtered
+                for genre, glist in games_by_genre.items()
+                if (filtered := _apply_platform_pref(glist))
+            }
+            genres = [g for g in genres if g in games_by_genre]
         if genres and games_by_genre:
-            self.discover_page.add_genre_section(genres, games_by_genre)
-            sections_added += 1
+            pending["genres"] = ("genre", genres, games_by_genre)
+
+        # Build watchlist from already-filtered pending sections
+        _watchlist_candidates: list[dict] = []
+        for _wkey in ("short_games", "new_games", "highly_rated", "recommendations"):
+            _wentry = pending.get(_wkey)
+            if _wentry and _wentry[0] == "carousel":
+                _watchlist_candidates.extend(_wentry[2])
+        for _wsid, _wentry in pending.items():
+            if _wsid.startswith("platform_") and _wentry[0] == "carousel":
+                _watchlist_candidates.extend(_wentry[2])
+
+        _seen_wids: set[str] = set()
+        _deduped_watchlist: list[dict] = []
+        for _wg in _watchlist_candidates:
+            _wrid = _wg.get("rom_id", "")
+            if _wrid and _wrid in self.watchlist_rom_ids and _wrid not in _seen_wids:
+                _seen_wids.add(_wrid)
+                _deduped_watchlist.append(_wg)
+
+        pending["watchlist"] = ("watchlist", _deduped_watchlist)
+
+        ordered_ids = [sid for sid in section_order if sid in pending]
+        ordered_ids += [sid for sid in pending if sid not in ordered_ids]
+
+        sections_added = 0
+        for sid in ordered_ids:
+            if sid in hidden_sections:
+                continue
+            entry = pending[sid]
+            if entry[0] == "carousel":
+                _, title, games, see_all_cb = entry
+                self.discover_page.add_carousel_section(sid, title, games, see_all_cb)
+                sections_added += 1
+            elif entry[0] == "genre":
+                _, genre_list, genre_games = entry
+                self.discover_page.add_genre_section(genre_list, genre_games)
+                sections_added += 1
+                if "genres" in self.discover_page.sections:
+                    genre_section = self.discover_page.sections["genres"]
+                    stats = genre_stats_from_games(all_games, self.library_games)
+                    genre_section.set_genre_stats(stats)
+            elif entry[0] == "watchlist":
+                _, watchlist_games = entry
+                self.discover_page.add_watchlist_section(watchlist_games)
+                sections_added += 1
 
         if sections_added == 0:
             no_content = QLabel("No games found. Make sure the server is connected and has games.")
             no_content.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            no_content.setStyleSheet("color: #6272a4; font-size: 14px;")
+            no_content.setStyleSheet(f"color: {self._theme_color('muted', '#9baed6')}; font-size: 14px;")
             self.discover_page.content_layout.addWidget(no_content)
 
+        # Collect available genres and platforms for filter panel
+        filter_genres = list(self.discover_page.sections["genres"].genres) if "genres" in self.discover_page.sections else []
+        filter_platforms = sorted({
+            game.get("platform", "")
+            for sid, section in self.discover_page.sections.items()
+            if isinstance(section, DiscoverCarouselSection) and sid != "watchlist"
+            for game in section.games
+            if game.get("platform")
+        })
+        self.discover_page.set_filter_options(filter_genres, filter_platforms)
+
         self.discover_page.add_stretch()
+
+        if sections_added > 0:
+            self.discover_cache.save_to_disk(self._discover_cache_file())
 
         if self._discover_load_thread is not None:
             self._discover_load_thread.quit()
@@ -1126,7 +1455,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self.discover_page._clear_sections()
 
         error_label = QLabel(f"Failed to load discover data: {error_msg}")
-        error_label.setStyleSheet("color: #ff5555;")
+        error_label.setStyleSheet(f"color: {self._theme_color('error', '#ff5555')};")
         error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.discover_page.content_layout.addWidget(error_label)
         self.discover_page.add_stretch()
@@ -1598,7 +1927,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
         title = QLabel("Game Title")
         title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        title.setStyleSheet(f"font-size: 30px; font-weight: 700; color: {self._theme_color('text', '#f8f8f2')};")
+        title.setStyleSheet("font-size: 30px; font-weight: 700;")
         self.details_title_label = title
         self.details_metadata_scalable_labels.append((self.details_title_label, self.details_title_label.styleSheet()))
         overview_content_layout.addWidget(title)
@@ -1608,7 +1937,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         description.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         description.setMinimumWidth(0)
         description.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        description.setStyleSheet(f"font-size: 17px; color: {self._theme_color('text', '#f8f8f2')};")
+        description.setStyleSheet("font-size: 17px;")
         self.details_description_label = description
         self.details_metadata_scalable_labels.append((self.details_description_label, self.details_description_label.styleSheet()))
         overview_content_layout.addWidget(description)
@@ -1638,13 +1967,14 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
             group_layout.setSpacing(3)
 
             header_label = QLabel(header_text)
-            header_label.setStyleSheet(f"font-size: 10px; color: {muted}; font-weight: 700;")
+            header_label.setObjectName("detailsMetadataHeader")
+            header_label.setStyleSheet("font-size: 10px; font-weight: 700;")
             group_layout.addWidget(header_label)
 
             value_label = QLabel("")
             value_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             if value_style is None:
-                value_label.setStyleSheet(f"font-size: 14px; color: {text};")
+                value_label.setStyleSheet("font-size: 14px;")
             else:
                 value_label.setStyleSheet(value_style)
             group_layout.addWidget(value_label)
@@ -1685,10 +2015,10 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
         metadata_layout.addWidget(grid_widget)
 
-        version_group, version = _make_metadata_group(
-            "VERSION",
-            f"font-size: 16px; color: {self._theme_color('muted', '#6272a4')};",
-        )
+        version_group, version = _make_metadata_group("VERSION")
+        version.setObjectName("detailsMetadataHeader")
+        version.setStyleSheet("font-size: 16px;")
+        self.details_metadata_scalable_labels[-1] = (version, version.styleSheet())
         version_group.setVisible(False)
         self.details_version_group = version_group
         self.details_version_label = version
@@ -1699,7 +2029,8 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         genres_layout_outer.setContentsMargins(0, 0, 0, 0)
         genres_layout_outer.setSpacing(3)
         genres_header = QLabel("GENRES")
-        genres_header.setStyleSheet(f"font-size: 10px; color: {muted}; font-weight: 700;")
+        genres_header.setObjectName("detailsMetadataHeader")
+        genres_header.setStyleSheet("font-size: 10px; font-weight: 700;")
         genres_layout_outer.addWidget(genres_header)
 
         genres_chip_container = QWidget()
@@ -2014,6 +2345,8 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self.active_theme_colors = self._theme_colors(self.active_theme_variant)
         self.setStyleSheet(self._theme_stylesheet())
         self._apply_theme_inline_styles()
+        if self.discover_page is not None:
+            self.discover_page.refresh_theme(self.active_theme_colors)
         self._refresh_installed_emulator_action_icons()
         if self.current_details_cloud_mode in {"save", "state"}:
             self._refresh_details_cloud_panel()
@@ -2102,6 +2435,64 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
     def _ra_api_key_file(self) -> Path:
         return self._config_dir() / "ra_api_key.bin"
+
+    def _discover_cache_file(self) -> Path:
+        return self._config_dir() / "discover_cache.json"
+
+    def _watchlist_file(self) -> Path:
+        return self._config_dir() / "watchlist.json"
+
+    def toggle_watchlist(self, rom_id: str) -> None:
+        if rom_id in self.watchlist_rom_ids:
+            self.watchlist_rom_ids.discard(rom_id)
+        else:
+            self.watchlist_rom_ids.add(rom_id)
+        save_watchlist(self._watchlist_file(), self.watchlist_rom_ids)
+        self._refresh_discover_data(force_refresh=False)
+
+    def is_watchlisted(self, rom_id: str) -> bool:
+        return rom_id in self.watchlist_rom_ids
+
+    def _analytics_file(self) -> Path:
+        return self._config_dir() / "discover_events.jsonl"
+
+    def record_discover_event(self, event: str, section_id: str, rom_id: str) -> None:
+        _record_discover_event_to_file(self._analytics_file(), event, section_id, rom_id)
+
+    def _discover_ui_state_file(self) -> Path:
+        return self._config_dir() / "discover_ui.json"
+
+    def _load_discover_ui_state(self) -> dict:
+        import json as _json
+        try:
+            p = self._discover_ui_state_file()
+            if not p.exists():
+                return {}
+            raw = _json.loads(p.read_text(encoding="utf-8"))
+            return raw if isinstance(raw, dict) else {}
+        except Exception:
+            return {}
+
+    def _save_discover_ui_state(self, state: dict) -> None:
+        import json as _json
+        try:
+            p = self._discover_ui_state_file()
+            p.parent.mkdir(parents=True, exist_ok=True)
+            tmp = p.with_suffix(".tmp")
+            tmp.write_text(_json.dumps(state), encoding="utf-8")
+            tmp.replace(p)
+        except Exception:
+            pass
+
+    def _discover_cached_refresh_time(self) -> float:
+        if not self.discover_cache.cache:
+            return 0.0
+        timestamps = [
+            entry.get("timestamp", 0)
+            for entry in self.discover_cache.cache.values()
+            if isinstance(entry, dict)
+        ]
+        return min(timestamps) if timestamps else 0.0
 
     def _windows_protect_data(self, raw: bytes) -> bytes:
         return resolve_windows_protect_data(raw)

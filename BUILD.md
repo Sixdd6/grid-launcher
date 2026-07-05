@@ -57,6 +57,26 @@ The executable bit is already set by PyInstaller, so it can be run directly:
 ./dist/grid-launcher
 ```
 
+#### AppImage
+
+To package GRID Launcher as a portable AppImage instead of a single binary, run:
+```bash
+./build.sh --appimage
+```
+
+**Prerequisites:** In addition to the same Python 3.12+/venv prerequisites as the regular Linux build, the AppImage build needs:
+- `wget` — to download `appimagetool`
+- `rsvg-convert` (from the `librsvg2-bin` package) — to rasterize the app icon
+
+**Output:** On successful build, the AppImage will be located at:
+```
+./grid-launcher-x86_64.AppImage
+```
+
+> **Note:** `appimagetool` is downloaded automatically to the project root on first use, so no manual installation is required.
+>
+> The standard `./build.sh` (no flags) still produces `dist/grid-launcher` (a single self-contained binary) — that path is unchanged.
+
 ## Troubleshooting
 
 ### Virtual Environment Not Found
