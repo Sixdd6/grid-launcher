@@ -12,13 +12,10 @@ import json
 
 from grid_launcher.core.path import xdg_config_home
 from grid_launcher.emulator.azahar import (
-    azahar_config_path_candidates,
-    azahar_user_root_candidates,
     ensure_azahar_settings,
 )
 from grid_launcher.emulator.cemu import cemu_settings_path_candidates, ensure_cemu_controller_config, ensure_cemu_settings
 from grid_launcher.emulator import ensure_dolphin_settings, ensure_dolphin_skip_ipl, ensure_dolphin_gcpad_config
-from grid_launcher.emulator.dolphin import dolphin_ini_path_candidates, dolphin_user_root_candidates
 from grid_launcher.emulator.duckstation import ensure_duckstation_memory_card_settings
 from grid_launcher.emulator.eden import _ensure_eden_section_values, ensure_eden_settings, eden_config_path_candidates
 from grid_launcher.emulator.launch import retroarch_core_argument_path
@@ -511,17 +508,6 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
                 candidates = pcsx2_data_root_candidates("", "", lambda s: [])
         self.assertIn(fake_docs / "PCSX2", candidates)
 
-    def test_pcsx2_data_root_candidates_includes_flatpak_path(self) -> None:
-        candidates = pcsx2_data_root_candidates("", "", lambda s: [])
-        self.assertIn(Path.home() / ".var" / "app" / "net.pcsx2.PCSX2" / "config" / "PCSX2", candidates)
-
-    def test_pcsx2_config_path_candidates_includes_flatpak_path(self) -> None:
-        candidates = pcsx2_config_path_candidates("/nonexistent/pcsx2-qt.exe")
-        self.assertIn(
-            Path.home() / ".var" / "app" / "net.pcsx2.PCSX2" / "config" / "PCSX2" / "inis" / "PCSX2.ini",
-            candidates,
-        )
-
     def test_pcsx2_windows_documents_folder_exported_from_module(self) -> None:
         from grid_launcher.emulator import pcsx2_windows_documents_folder
 
@@ -604,18 +590,6 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
             portable_content = portable_path.read_text(encoding="utf-8")
 
         self.assertEqual("custom", portable_content)
-
-    @unittest.skipIf(sys.platform == 'win32', "Flatpak paths are Linux-only")
-    def test_dolphin_user_root_candidates_includes_flatpak_path(self) -> None:
-        candidates = dolphin_user_root_candidates("", "", lambda s: [])
-        self.assertIn(Path.home() / ".var" / "app" / "org.DolphinEmu.dolphin-emu" / "data" / "dolphin-emu", candidates)
-
-    def test_dolphin_ini_path_candidates_includes_flatpak_path(self) -> None:
-        candidates = dolphin_ini_path_candidates("/nonexistent/dolphin.exe", "Dolphin.ini")
-        self.assertIn(
-            Path.home() / ".var" / "app" / "org.DolphinEmu.dolphin-emu" / "data" / "dolphin-emu" / "Dolphin.ini",
-            candidates,
-        )
 
     def test_dolphin_analytics_both_keys_written(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -913,18 +887,6 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
             marker_content = marker_path.read_text(encoding="utf-8")
 
         self.assertEqual("x", marker_content)
-
-    @unittest.skipIf(sys.platform == 'win32', "Flatpak paths are Linux-only")
-    def test_azahar_user_root_candidates_includes_flatpak_path(self) -> None:
-        candidates = azahar_user_root_candidates("")
-        self.assertIn(Path.home() / ".var" / "app" / "org.azahar_emu.Azahar" / "data" / "Azahar", candidates)
-
-    def test_azahar_config_path_candidates_includes_flatpak_path(self) -> None:
-        candidates = azahar_config_path_candidates("/nonexistent/azahar.exe")
-        self.assertIn(
-            Path.home() / ".var" / "app" / "org.azahar_emu.Azahar" / "config" / "Azahar" / "qt-config.ini",
-            candidates,
-        )
 
     def test_eden_config_path_candidates_honors_xdg_config_home_override(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1294,11 +1256,6 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
 
         self.assertIn("eeprom_path = '/custom/path/eeprom.bin'", text)
 
-    @unittest.skipIf(sys.platform == 'win32', "Flatpak paths are Linux-only")
-    def test_xemu_base_path_candidates_includes_flatpak_path(self) -> None:
-        candidates = xemu_base_path_candidates("", "", lambda s: [])
-        self.assertIn(Path.home() / ".var" / "app" / "app.xemu.xemu" / "data" / "xemu" / "xemu", candidates)
-
     def test_ppsspp_deletes_installed_txt(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             emulator_dir = Path(temp_dir) / "PPSSPP"
@@ -1538,16 +1495,12 @@ class EmulatorAutoConfigSettingsTests(unittest.TestCase):
         self.assertIn(Path("/fake/appdata").expanduser() / "Cemu" / "settings.xml", candidates)
         self.assertIn(Path("/fake/localappdata").expanduser() / "Cemu" / "settings.xml", candidates)
 
-    def test_cemu_settings_path_candidates_linux_uses_xdg_and_flatpak(self) -> None:
+    def test_cemu_settings_path_candidates_linux_uses_xdg(self) -> None:
         with patch("sys.platform", "linux"):
             with patch.dict(os.environ, {"APPDATA": "/some/windows/path"}, clear=False):
                 candidates = cemu_settings_path_candidates("")
 
         self.assertIn(xdg_config_home() / "Cemu" / "settings.xml", candidates)
-        self.assertIn(
-            Path.home() / ".var" / "app" / "info.cemu.Cemu" / "config" / "Cemu" / "settings.xml",
-            candidates,
-        )
         self.assertNotIn(Path("/some/windows/path").expanduser() / "Cemu" / "settings.xml", candidates)
 
     def test_cemu_settings_path_candidates_honors_xdg_config_home_override(self) -> None:
@@ -1999,14 +1952,7 @@ class Rpcs3AutoConfigTests(unittest.TestCase):
 
         self.assertIn(xdg_config_home_override / "rpcs3", candidates)
 
-    def test_rpcs3_data_root_candidates_includes_flatpak_path(self) -> None:
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("RPCS3_CONFIG_DIR", None)
-            candidates = rpcs3_data_root_candidates("")
-
-        self.assertIn(Path.home() / ".var" / "app" / "net.rpcs3.RPCS3" / "config" / "rpcs3", candidates)
-
-    def test_rpcs3_data_root_candidates_order_is_unchanged_aside_from_flatpak_addition(self) -> None:
+    def test_rpcs3_data_root_candidates_order_is_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             exe = Path(tmp) / "rpcs3.exe"
             exe.write_bytes(b"")
@@ -2022,7 +1968,6 @@ class Rpcs3AutoConfigTests(unittest.TestCase):
                 Path("/fake/rpcs3-config").expanduser().resolve(),
                 Path(tmp).resolve(),
                 xdg_config_home() / "rpcs3",
-                Path.home() / ".var" / "app" / "net.rpcs3.RPCS3" / "config" / "rpcs3",
                 Path.home() / "Library" / "Application Support" / "rpcs3",
             ],
             candidates,
@@ -3009,550 +2954,6 @@ class RPCS3CustomConfigCopyTests(unittest.TestCase):
             dest_dir = rpcs3_root / "config" / "custom_configs"
             self.assertTrue((dest_dir / "config_BLUS30443.yml").exists())
             self.assertTrue((dest_dir / "config_BCUS98174.yml").exists())
-
-
-class FlatpakEmulatorDetectionTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        module_path = Path(__file__).resolve().parents[1] / "grid-launcher.py"
-        spec = importlib.util.spec_from_file_location("grid_launcher_main_for_flatpak_detection_tests", module_path)
-        if spec is None or spec.loader is None:
-            raise RuntimeError("Could not load grid-launcher.py for tests.")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        cls.module = module
-
-    def test_ensure_emulator_sync_settings_uses_flatpak_config_root_for_ppsspp(self) -> None:
-        module = type(self).module
-
-        class _WindowStub:
-            def __init__(self) -> None:
-                self.config = {
-                    "retroachievements_username": "psp_user",
-                    "retroachievements_token": "psp_token",
-                }
-
-            def _is_retroarch_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _is_duckstation_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _is_xemu_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _is_pcsx2_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _resolved_firmware_directories(self, emulator_entry: dict[str, str]) -> list[tuple[str, str]]:
-                return []
-
-            def _is_dolphin_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _is_azahar_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _is_eden_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _is_rpcs3_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _is_ppsspp_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return True
-
-            def _is_cemu_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _is_redream_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-        window = _WindowStub()
-
-        with patch("grid_launcher.ui.mixins.emulator_ui_mixin.ensure_ppsspp_settings") as ensure_ppsspp:
-            module.MainWindow._ensure_emulator_sync_settings(
-                window,
-                "PPSSPP",
-                "/home/user/.var/app/org.ppsspp.PPSSPP/exports/bin/flatpak",
-                flatpak_config_root="/home/user/.var/app/org.ppsspp.PPSSPP/config/ppsspp",
-            )
-
-        ensure_ppsspp.assert_called_once_with(
-            "/home/user/.var/app/org.ppsspp.PPSSPP/config/ppsspp",
-            retroachievements_username="psp_user",
-            retroachievements_token="psp_token",
-        )
-
-    def test_ensure_emulator_sync_settings_without_flatpak_config_root_uses_path_text(self) -> None:
-        module = type(self).module
-
-        class _WindowStub:
-            def __init__(self) -> None:
-                self.config = {
-                    "retroachievements_username": "psp_user",
-                    "retroachievements_token": "psp_token",
-                }
-
-            def _is_retroarch_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _is_duckstation_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _is_xemu_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _is_pcsx2_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _resolved_firmware_directories(self, emulator_entry: dict[str, str]) -> list[tuple[str, str]]:
-                return []
-
-            def _is_dolphin_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _is_azahar_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _is_eden_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _is_rpcs3_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _is_ppsspp_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return True
-
-            def _is_cemu_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-            def _is_redream_emulator_name(self, emulator_name: str, emulator: dict[str, str] | None = None) -> bool:
-                return False
-
-        window = _WindowStub()
-
-        with patch("grid_launcher.ui.mixins.emulator_ui_mixin.ensure_ppsspp_settings") as ensure_ppsspp:
-            module.MainWindow._ensure_emulator_sync_settings(window, "PPSSPP", "C:/Emulators/PPSSPPWindows64.exe")
-
-        ensure_ppsspp.assert_called_once_with(
-            "C:/Emulators/PPSSPPWindows64.exe",
-            retroachievements_username="psp_user",
-            retroachievements_token="psp_token",
-        )
-
-    def test_trigger_flatpak_emulator_detection_background_noop_on_non_linux(self) -> None:
-        module = type(self).module
-
-        class _WindowStub:
-            pass
-
-        window = _WindowStub()
-
-        with patch("sys.platform", "win32"), patch("threading.Thread") as thread_ctor:
-            module.MainWindow._trigger_flatpak_emulator_detection_background(window)
-
-        thread_ctor.assert_not_called()
-
-    def test_trigger_flatpak_emulator_detection_background_filters_known_emulators(self) -> None:
-        module = type(self).module
-        emitted: list = []
-
-        class _SignalStub:
-            def emit(self, entries: list) -> None:
-                emitted.append(entries)
-
-        class _WindowStub:
-            def __init__(self) -> None:
-                self.config = {
-                    "emulators": [
-                        {"name": "PPSSPP", "path": "/existing/ppsspp", "flatpak_app_id": "org.ppsspp.PPSSPP"},
-                        {"name": "Dolphin", "path": "/existing/dolphin"},
-                    ]
-                }
-                self._flatpak_detection_completed = _SignalStub()
-
-            def _emulators(self) -> list[dict]:
-                return self.config.get("emulators", [])
-
-            def _emulator_autoprofiles(self) -> list[dict]:
-                return []
-
-        window = _WindowStub()
-
-        detected = [
-            {"name": "PPSSPP", "path": "/usr/bin/flatpak", "flatpak_app_id": "org.ppsspp.PPSSPP"},  # known by app id
-            {"name": "Dolphin", "path": "/usr/bin/flatpak", "flatpak_app_id": "org.DolphinEmu.dolphin-emu"},  # known by name
-            {"name": "PCSX2", "path": "/usr/bin/flatpak", "flatpak_app_id": "net.pcsx2.PCSX2"},  # new
-        ]
-
-        class _ThreadStub:
-            def __init__(self, target=None, daemon=None) -> None:
-                self._target = target
-
-            def start(self) -> None:
-                if self._target is not None:
-                    self._target()
-
-        with patch("sys.platform", "linux"), \
-                patch("grid_launcher.ui.mixins.emulator_ui_mixin.detect_installed_flatpak_emulators", return_value=detected), \
-                patch("threading.Thread", _ThreadStub):
-            module.MainWindow._trigger_flatpak_emulator_detection_background(window)
-
-        self.assertEqual(len(emitted), 1)
-        new_entries = emitted[0]
-        self.assertEqual(len(new_entries), 1)
-        self.assertEqual(new_entries[0]["name"], "PCSX2")
-
-    def test_on_flatpak_detection_completed_adds_entries(self) -> None:
-        module = type(self).module
-
-        class _WindowStub:
-            def __init__(self) -> None:
-                self.config = {"emulators": []}
-                self.sync_calls: list[tuple[str, str, str]] = []
-                self.saved_config: dict | None = None
-                self.refreshed = False
-                self.toasts: list[dict] = []
-
-            def _emulators(self) -> list[dict]:
-                return self.config.get("emulators", [])
-
-            def _emulator_autoprofiles(self) -> list[dict]:
-                return []
-
-            def _normalize_save_strategy_value(self, value: str) -> str:
-                return "auto"
-
-            def _normalize_emulators(self, value: list) -> list:
-                return value
-
-            def _ensure_emulator_sync_settings(self, name: str, path: str, *, flatpak_config_root: str = "") -> None:
-                self.sync_calls.append((name, path, flatpak_config_root))
-
-            def _refresh_emulator_views(self) -> None:
-                self.refreshed = True
-
-            def _save_config(self, config: dict) -> None:
-                self.saved_config = config
-
-            def _show_toast(self, payload: dict) -> None:
-                self.toasts.append(payload)
-
-            def _trigger_firmware_install_for_source_emulator(self, emulator_name: str) -> None:
-                pass
-
-            def _emulator_profile_for_entry(self, entry: dict) -> dict:
-                return {}
-
-            def _normalize_default_emulators(self, value: dict) -> dict:
-                return value if isinstance(value, dict) else {}
-
-            def _normalize_default_retroarch_cores(self, value: dict) -> dict:
-                return value if isinstance(value, dict) else {}
-
-            def _is_retroarch_emulator_name(self, name: str) -> bool:
-                return False
-
-            def _default_assignable_server_platforms(self) -> list:
-                return []
-
-            def _installed_retroarch_cores_for_platform(self, platform, name, emulator_entry=None) -> list:
-                return []
-
-            def _matching_platforms_for_emulator_keywords(self, keywords) -> list:
-                return []
-
-            def _dolphin_variant_label_for_game(self, game) -> str:
-                return ""
-
-            def _dolphin_target_platforms_for_variant(self, variant) -> list:
-                return []
-
-        window = _WindowStub()
-
-        new_entries = [
-            {
-                "name": "PPSSPP",
-                "path": "/usr/bin/flatpak",
-                "args": "run org.ppsspp.PPSSPP",
-                "flatpak_app_id": "org.ppsspp.PPSSPP",
-                "_flatpak_config_root": "/home/user/.var/app/org.ppsspp.PPSSPP/config/ppsspp",
-            },
-            {
-                "name": "PCSX2",
-                "path": "/usr/bin/flatpak",
-                "args": "run net.pcsx2.PCSX2",
-                "flatpak_app_id": "net.pcsx2.PCSX2",
-            },
-        ]
-
-        module.MainWindow._on_flatpak_detection_completed(window, new_entries)
-
-        self.assertEqual(len(window.config["emulators"]), 2)
-        self.assertIn(
-            ("PPSSPP", "/usr/bin/flatpak", "/home/user/.var/app/org.ppsspp.PPSSPP/config/ppsspp"),
-            window.sync_calls,
-        )
-        self.assertIn(("PCSX2", "/usr/bin/flatpak", ""), window.sync_calls)
-        self.assertTrue(window.refreshed)
-        self.assertIsNotNone(window.saved_config)
-        self.assertEqual(len(window.toasts), 1)
-        self.assertEqual(window.toasts[0]["level"], "success")
-        for emulator in window.config["emulators"]:
-            self.assertNotIn("_flatpak_config_root", emulator)
-
-    def test_on_flatpak_detection_completed_assigns_default_emulator(self) -> None:
-        module = type(self).module
-
-        class _WindowStub:
-            def __init__(self) -> None:
-                self.config = {"emulators": [], "default_emulators": {}}
-
-            def _emulators(self) -> list[dict]:
-                return self.config.get("emulators", [])
-
-            def _emulator_autoprofiles(self) -> list[dict]:
-                return []
-
-            def _normalize_save_strategy_value(self, value: str) -> str:
-                return "auto"
-
-            def _normalize_emulators(self, value: list) -> list:
-                return value
-
-            def _ensure_emulator_sync_settings(self, name: str, path: str, *, flatpak_config_root: str = "") -> None:
-                pass
-
-            def _refresh_emulator_views(self) -> None:
-                pass
-
-            def _save_config(self, config: dict) -> None:
-                pass
-
-            def _show_toast(self, payload: dict) -> None:
-                pass
-
-            def _trigger_firmware_install_for_source_emulator(self, emulator_name: str) -> None:
-                pass
-
-            def _emulator_profile_for_entry(self, entry: dict) -> dict:
-                return {"name": "PPSSPP", "platform_keywords": ["PlayStation Portable"]}
-
-            def _normalize_default_emulators(self, value: dict) -> dict:
-                return value if isinstance(value, dict) else {}
-
-            def _normalize_default_retroarch_cores(self, value: dict) -> dict:
-                return value if isinstance(value, dict) else {}
-
-            def _is_retroarch_emulator_name(self, name: str) -> bool:
-                return False
-
-            def _default_assignable_server_platforms(self) -> list:
-                return ["PlayStation Portable"]
-
-            def _installed_retroarch_cores_for_platform(self, platform, name, emulator_entry=None) -> list:
-                return []
-
-            def _matching_platforms_for_emulator_keywords(self, keywords) -> list:
-                return ["PlayStation Portable"]
-
-            def _dolphin_variant_label_for_game(self, game) -> str:
-                return ""
-
-            def _dolphin_target_platforms_for_variant(self, variant) -> list:
-                return []
-
-        window = _WindowStub()
-
-        new_entries = [
-            {
-                "name": "PPSSPP",
-                "path": "/usr/bin/flatpak",
-                "args": "run org.ppsspp.PPSSPP",
-                "flatpak_app_id": "org.ppsspp.PPSSPP",
-            },
-        ]
-
-        module.MainWindow._on_flatpak_detection_completed(window, new_entries)
-
-        self.assertEqual(window.config["default_emulators"].get("PlayStation Portable"), "PPSSPP")
-
-    def test_on_flatpak_detection_completed_does_not_overwrite_existing_default(self) -> None:
-        module = type(self).module
-
-        class _WindowStub:
-            def __init__(self) -> None:
-                self.config = {"emulators": [], "default_emulators": {"PlayStation Portable": "MyPSP"}}
-
-            def _emulators(self) -> list[dict]:
-                return self.config.get("emulators", [])
-
-            def _emulator_autoprofiles(self) -> list[dict]:
-                return []
-
-            def _normalize_save_strategy_value(self, value: str) -> str:
-                return "auto"
-
-            def _normalize_emulators(self, value: list) -> list:
-                return value
-
-            def _ensure_emulator_sync_settings(self, name: str, path: str, *, flatpak_config_root: str = "") -> None:
-                pass
-
-            def _refresh_emulator_views(self) -> None:
-                pass
-
-            def _save_config(self, config: dict) -> None:
-                pass
-
-            def _show_toast(self, payload: dict) -> None:
-                pass
-
-            def _trigger_firmware_install_for_source_emulator(self, emulator_name: str) -> None:
-                pass
-
-            def _emulator_profile_for_entry(self, entry: dict) -> dict:
-                return {"name": "PPSSPP", "platform_keywords": ["PlayStation Portable"]}
-
-            def _normalize_default_emulators(self, value: dict) -> dict:
-                return value if isinstance(value, dict) else {}
-
-            def _normalize_default_retroarch_cores(self, value: dict) -> dict:
-                return value if isinstance(value, dict) else {}
-
-            def _is_retroarch_emulator_name(self, name: str) -> bool:
-                return False
-
-            def _default_assignable_server_platforms(self) -> list:
-                return ["PlayStation Portable"]
-
-            def _installed_retroarch_cores_for_platform(self, platform, name, emulator_entry=None) -> list:
-                return []
-
-            def _matching_platforms_for_emulator_keywords(self, keywords) -> list:
-                return ["PlayStation Portable"]
-
-            def _dolphin_variant_label_for_game(self, game) -> str:
-                return ""
-
-            def _dolphin_target_platforms_for_variant(self, variant) -> list:
-                return []
-
-        window = _WindowStub()
-
-        new_entries = [
-            {
-                "name": "PPSSPP",
-                "path": "/usr/bin/flatpak",
-                "args": "run org.ppsspp.PPSSPP",
-                "flatpak_app_id": "org.ppsspp.PPSSPP",
-            },
-        ]
-
-        module.MainWindow._on_flatpak_detection_completed(window, new_entries)
-
-        self.assertEqual(window.config["default_emulators"]["PlayStation Portable"], "MyPSP")
-
-    def test_on_flatpak_detection_completed_assigns_retroarch_core_default(self) -> None:
-        module = type(self).module
-
-        class _WindowStub:
-            def __init__(self) -> None:
-                self.config = {"emulators": [], "default_emulators": {}, "default_retroarch_cores": {}}
-
-            def _emulators(self) -> list[dict]:
-                return self.config.get("emulators", [])
-
-            def _emulator_autoprofiles(self) -> list[dict]:
-                return []
-
-            def _normalize_save_strategy_value(self, value: str) -> str:
-                return "auto"
-
-            def _normalize_emulators(self, value: list) -> list:
-                return value
-
-            def _ensure_emulator_sync_settings(self, name: str, path: str, *, flatpak_config_root: str = "") -> None:
-                pass
-
-            def _refresh_emulator_views(self) -> None:
-                pass
-
-            def _save_config(self, config: dict) -> None:
-                pass
-
-            def _show_toast(self, payload: dict) -> None:
-                pass
-
-            def _trigger_firmware_install_for_source_emulator(self, emulator_name: str) -> None:
-                pass
-
-            def _emulator_profile_for_entry(self, entry: dict) -> dict:
-                return {
-                    "name": "RetroArch (Multi-System)",
-                    "platform_keywords": ["Game Boy Advance"],
-                    "all_platforms": False,
-                }
-
-            def _normalize_default_emulators(self, value: dict) -> dict:
-                return value if isinstance(value, dict) else {}
-
-            def _normalize_default_retroarch_cores(self, value: dict) -> dict:
-                return value if isinstance(value, dict) else {}
-
-            def _is_retroarch_emulator_name(self, name: str) -> bool:
-                return True
-
-            def _default_assignable_server_platforms(self) -> list:
-                return ["Game Boy Advance"]
-
-            def _installed_retroarch_cores_for_platform(self, platform, name, emulator_entry=None) -> list:
-                return ["mgba"]
-
-            def _matching_platforms_for_emulator_keywords(self, keywords) -> list:
-                return ["Game Boy Advance"]
-
-            def _dolphin_variant_label_for_game(self, game) -> str:
-                return ""
-
-            def _dolphin_target_platforms_for_variant(self, variant) -> list:
-                return []
-
-        window = _WindowStub()
-
-        new_entries = [
-            {
-                "name": "RetroArch (Multi-System)",
-                "path": "/usr/bin/flatpak",
-                "args": "run org.libretro.RetroArch",
-                "flatpak_app_id": "org.libretro.RetroArch",
-            },
-        ]
-
-        module.MainWindow._on_flatpak_detection_completed(window, new_entries)
-
-        self.assertEqual(window.config["default_retroarch_cores"].get("Game Boy Advance"), "mgba")
-
-    def test_on_flatpak_detection_completed_empty_list_is_noop(self) -> None:
-        module = type(self).module
-
-        class _WindowStub:
-            def __init__(self) -> None:
-                self.save_called = False
-                self.refresh_called = False
-
-            def _save_config(self, config: dict) -> None:
-                self.save_called = True
-
-            def _refresh_emulator_views(self) -> None:
-                self.refresh_called = True
-
-        window = _WindowStub()
-        module.MainWindow._on_flatpak_detection_completed(window, [])
-
-        self.assertFalse(window.save_called)
-        self.assertFalse(window.refresh_called)
 
 
 class BackfillMissingEmulatorDefaultsTests(unittest.TestCase):

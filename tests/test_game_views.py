@@ -528,6 +528,15 @@ class _EmulatorRowsStubWindow:
         normalized_name = emulator_name.strip().casefold()
         return any(token in normalized_name for token in ("xemu", "xemu.exe"))
 
+    def _is_duckstation_emulator_name(
+        self,
+        emulator_name: str,
+        emulator: dict[str, str] | None = None,
+    ) -> bool:
+        del emulator
+        normalized_name = emulator_name.strip().casefold()
+        return any(token in normalized_name for token in ("duckstation", "duckstation.exe"))
+
     def _is_rpcs3_emulator_name(self, emulator_name: str) -> bool:
         normalized_name = emulator_name.strip().casefold()
         return any(token in normalized_name for token in ("rpcs3", "rpcs3.exe"))
@@ -1118,41 +1127,6 @@ class EmulatorSourceDownloadHelperTests(unittest.TestCase):
 
         self.assertEqual([row["name"] for row in rows], ["RetroArch (Multi-System)"])
 
-    def test_available_source_download_entries_includes_flatpak_on_linux(self) -> None:
-        autoprofiles = [
-            {
-                "name": "PPSSPP (Playstation Portable)",
-                "flatpak_app_id": "org.ppsspp.PPSSPP",
-                "source": {"provider": "github-release", "platforms": ["win32"]},
-            }
-        ]
-        window = _MixinSourceDownloadStub(autoprofiles)
-
-        with patch("grid_launcher.ui.mixins.emulator_ui_mixin.sys.platform", "linux"):
-            rows = EmulatorUIMixin._available_source_download_emulator_entries(
-                window,
-                installed_emulator_names=[],
-            )
-
-        self.assertTrue(any(row.get("provider") == "flatpak" for row in rows))
-
-    def test_available_source_download_entries_excludes_flatpak_when_name_installed(self) -> None:
-        autoprofiles = [
-            {
-                "name": "PPSSPP (Playstation Portable)",
-                "flatpak_app_id": "org.ppsspp.PPSSPP",
-                "source": {"provider": "github-release", "platforms": ["win32"]},
-            }
-        ]
-        window = _MixinSourceDownloadStub(autoprofiles)
-
-        with patch("grid_launcher.ui.mixins.emulator_ui_mixin.sys.platform", "linux"):
-            rows = EmulatorUIMixin._available_source_download_emulator_entries(
-                window,
-                installed_emulator_names=["PPSSPP (Playstation Portable)"],
-            )
-
-        self.assertFalse(any(row.get("provider") == "flatpak" for row in rows))
 
 class EmulatorsPageLayoutTests(unittest.TestCase):
     @classmethod
@@ -1302,7 +1276,10 @@ class EmulatorsPageLayoutTests(unittest.TestCase):
         name_labels = [label.text().strip() for label in row_widget.findChildren(QLabel)]
         action_buttons: list[QPushButton] = list(row_widget.findChildren(QPushButton))
 
-        self.assertEqual(name_labels, ["DuckStation"])
+        self.assertEqual(name_labels, [
+            "DuckStation",
+            "RetroAchievements: Configure login via Emulator Settings \u2192 Achievements (tokens are machine-encrypted)"
+        ])
         self.assertEqual(len(action_buttons), 3)
         self.assertTrue(all(not button.text().strip() for button in action_buttons))
 
@@ -1985,111 +1962,6 @@ class _MixinSourceDownloadStub:
         return {}
 
 
-class FlatpakInstallableEmulatorEntriesTests(unittest.TestCase):
-    @staticmethod
-    def _load_emulators_module():
-        module_path = Path(__file__).resolve().parents[1] / "grid_launcher" / "ui" / "emulators.py"
-        spec = importlib.util.spec_from_file_location("grid_launcher_ui_emulators_flatpak_entries_for_tests", module_path)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-
-    def test_returns_empty_on_non_linux(self) -> None:
-        module = self._load_emulators_module()
-        profiles = [
-            {
-                "name": "PPSSPP",
-                "flatpak_app_id": "org.ppsspp.PPSSPP",
-                "source": {"provider": "github-release", "platforms": ["win32"]},
-            }
-        ]
-
-        self.assertEqual(
-            module.flatpak_installable_emulator_entries(profiles, current_platform="win32"),
-            [],
-        )
-
-    def test_returns_entry_for_profile_with_flatpak_app_id_and_win32_source(self) -> None:
-        module = self._load_emulators_module()
-        profiles = [
-            {
-                "name": "PPSSPP",
-                "flatpak_app_id": "org.ppsspp.PPSSPP",
-                "source": {"provider": "github-release", "platforms": ["win32"]},
-            }
-        ]
-
-        rows = module.flatpak_installable_emulator_entries(profiles, current_platform="linux")
-
-        self.assertEqual(len(rows), 1)
-        entry = rows[0]
-        self.assertEqual(entry["provider"], "flatpak")
-        self.assertEqual(entry["app_id"], "org.ppsspp.PPSSPP")
-        self.assertEqual(entry["source_id"], "flatpak/org.ppsspp.PPSSPP")
-        self.assertEqual(entry["release_tag"], "flathub")
-
-    def test_excludes_profile_with_linux_compatible_source(self) -> None:
-        module = self._load_emulators_module()
-        profiles = [
-            {
-                "name": "Example",
-                "flatpak_app_id": "org.example.App",
-                "source": {"provider": "github-release"},
-            }
-        ]
-
-        self.assertEqual(
-            module.flatpak_installable_emulator_entries(profiles, current_platform="linux"),
-            [],
-        )
-
-    def test_includes_profile_with_no_source_field(self) -> None:
-        module = self._load_emulators_module()
-        profiles = [
-            {
-                "name": "MAME",
-                "flatpak_app_id": "org.mame.MAME",
-            }
-        ]
-
-        rows = module.flatpak_installable_emulator_entries(profiles, current_platform="linux")
-
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["app_id"], "org.mame.MAME")
-
-    def test_excludes_installed_by_name(self) -> None:
-        module = self._load_emulators_module()
-        profiles = [
-            {
-                "name": "PPSSPP",
-                "flatpak_app_id": "org.ppsspp.PPSSPP",
-                "source": {"provider": "github-release", "platforms": ["win32"]},
-            }
-        ]
-
-        self.assertEqual(
-            module.flatpak_installable_emulator_entries(
-                profiles,
-                installed_names=["PPSSPP"],
-                current_platform="linux",
-            ),
-            [],
-        )
-
-    def test_entries_sorted_by_name(self) -> None:
-        module = self._load_emulators_module()
-        profiles = [
-            {"name": "Zebra", "flatpak_app_id": "org.z.Z"},
-            {"name": "Alpha", "flatpak_app_id": "org.a.A"},
-            {"name": "Mango", "flatpak_app_id": "org.m.M"},
-        ]
-
-        rows = module.flatpak_installable_emulator_entries(profiles, current_platform="linux")
-
-        self.assertEqual([row["name"] for row in rows], ["Alpha", "Mango", "Zebra"])
-
-
 class SourceEntryLabelTests(unittest.TestCase):
     @staticmethod
     def _load_emulators_module():
@@ -2099,11 +1971,6 @@ class SourceEntryLabelTests(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
-
-    def test_flatpak_entry_returns_flatpak(self) -> None:
-        module = self._load_emulators_module()
-
-        self.assertEqual(module.source_entry_label({"provider": "flatpak"}), "[Flatpak]")
 
     def test_appimage_entry_returns_appimage(self) -> None:
         module = self._load_emulators_module()

@@ -183,7 +183,8 @@ def install_platform_firmware(
                             if member.endswith("/") or member.startswith("__MACOSX"):
                                 continue
                             if extract_zip_with_paths:
-                                normalized = Path(member)
+                                normalized_member = member.replace("\\", "/")
+                                normalized = Path(normalized_member)
                                 parts = normalized.parts
                                 if not parts or any(part == ".." for part in parts) or normalized.is_absolute():
                                     continue

@@ -58,52 +58,7 @@ class NormalizeEmulatorsTests(unittest.TestCase):
         result = normalize_emulators([entry], lambda value: value)
         return result[0]
 
-    def test_preserves_flatpak_app_id(self) -> None:
-        entry = self._normalize_entry(
-            {
-                "name": "PPSSPP",
-                "path": "/usr/bin/ppsspp",
-                "args": "%rom%",
-                "flatpak_app_id": "org.ppsspp.PPSSPP",
-            }
-        )
-        self.assertEqual(entry["flatpak_app_id"], "org.ppsspp.PPSSPP")
-
-    def test_preserves_flatpak_cores_dir(self) -> None:
-        cores_dir = "~/.var/app/org.libretro.RetroArch/config/retroarch/cores"
-        entry = self._normalize_entry(
-            {
-                "name": "RetroArch",
-                "path": "/usr/bin/retroarch",
-                "args": "%rom%",
-                "flatpak_cores_dir": cores_dir,
-            }
-        )
-        self.assertEqual(entry["flatpak_cores_dir"], cores_dir)
-
-    def test_omits_flatpak_app_id_when_empty(self) -> None:
-        entry = self._normalize_entry(
-            {
-                "name": "PPSSPP",
-                "path": "/usr/bin/ppsspp",
-                "args": "%rom%",
-                "flatpak_app_id": "",
-            }
-        )
-        self.assertNotIn("flatpak_app_id", entry)
-
-    def test_omits_flatpak_cores_dir_when_empty(self) -> None:
-        entry = self._normalize_entry(
-            {
-                "name": "RetroArch",
-                "path": "/usr/bin/retroarch",
-                "args": "%rom%",
-                "flatpak_cores_dir": "",
-            }
-        )
-        self.assertNotIn("flatpak_cores_dir", entry)
-
-    def test_omits_flatpak_fields_when_absent(self) -> None:
+    def test_normalizes_basic_entry(self) -> None:
         entry = self._normalize_entry(
             {
                 "name": "PPSSPP",
@@ -111,8 +66,9 @@ class NormalizeEmulatorsTests(unittest.TestCase):
                 "args": "%rom%",
             }
         )
-        self.assertNotIn("flatpak_app_id", entry)
-        self.assertNotIn("flatpak_cores_dir", entry)
+        self.assertEqual(entry["name"], "PPSSPP")
+        self.assertEqual(entry["path"], "/usr/bin/ppsspp")
+        self.assertEqual(entry["args"], "%rom%")
 
 
 if __name__ == "__main__":

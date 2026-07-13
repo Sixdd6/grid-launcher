@@ -23,6 +23,19 @@ chmod +x build.sh   # one-time
 ./build.sh
 ```
 
+`build.sh` accepts one or more build targets:
+
+| Command | Result |
+| --- | --- |
+| `./build.sh` | Default — builds the single-file `dist/grid-launcher` binary (backward compatible) |
+| `./build.sh --onefile` | Same as the default — builds the single-file binary explicitly |
+| `./build.sh --appimage` | Builds only the AppImage package |
+| `./build.sh --onefile --appimage` | Builds both targets sequentially |
+
+**Sequential execution and exit codes:** When multiple targets are given, they run one after another in the order listed. If any target fails, the script stops and exits with a non-zero status; it exits `0` only when all requested targets succeed. Unknown flags (and the unsupported `--windows` flag) cause the script to print usage and exit non-zero without building.
+
+> **Windows cross-compilation is not supported.** `build.sh` only produces Linux artifacts. To build for Windows, run `build.bat` or `build.ps1` on a Windows machine.
+
 ## What the Scripts Do
 
 This applies to all three scripts (`build.ps1`, `build.bat`, `build.sh`):
@@ -66,12 +79,18 @@ To package GRID Launcher as a portable AppImage instead of a single binary, run:
 
 **Prerequisites:** In addition to the same Python 3.12+/venv prerequisites as the regular Linux build, the AppImage build needs:
 - `wget` — to download `appimagetool`
-- `rsvg-convert` (from the `librsvg2-bin` package) — to rasterize the app icon
+- `rsvg-convert` — to rasterize the app icon (apt: `librsvg2-bin`; dnf: `librsvg2-tools`)
+
+**Runtime dependency (7z):** At runtime, extracting downloaded RetroArch/emulator archives uses the system `7z` binary when available (`7zip` on apt/dnf, or the legacy `p7zip-full`/`p7zip` packages on older distros), falling back to the bundled pure-Python `py7zr`. Installing `7zip` is recommended for faster, more reliable extraction. **Flatpak is not required** — GRID Launcher ships as an AppImage/native binary and auto-installs native/AppImage emulator builds only.
 
 **Output:** On successful build, the AppImage will be located at:
 ```
-./grid-launcher-x86_64.AppImage
+./dist/grid-launcher-<version>-x86_64.AppImage
 ```
+
+The `<version>` is detected automatically from `git describe --tags --always --dirty` (a leading `v` is stripped, e.g. `v0.7.0` → `0.7.0`). The build also generates `grid_launcher/version.py` so the running app reports the same version (shown in the window title). On a checkout with no tags the version falls back to `0.0.0-dev`.
+
+The desktop entry embeds `X-AppImage-UpdateInformation` (GitHub releases zsync), so AppImages built by CI can self-update via tools like `AppImageUpdate`. CI also publishes the matching `.zsync` file next to the AppImage.
 
 > **Note:** `appimagetool` is downloaded automatically to the project root on first use, so no manual installation is required.
 >

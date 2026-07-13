@@ -52,6 +52,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from grid_launcher import __version__
 from grid_launcher.core import (
     api_get_bytes,
     api_get_json,
@@ -394,7 +395,7 @@ from grid_launcher.server import (
     server_base_url,
     server_platform_ids,
 )
-from grid_launcher.background import AutoCloudSaveUploadWorker, DetailsCloudRecordsWorker, DiscoverLoadWorker, FlatpakInstallWorker, InstallDownloadWorker, InstallFinalizeWorker, MissingCoverReplenishWorker
+from grid_launcher.background import AutoCloudSaveUploadWorker, DetailsCloudRecordsWorker, DiscoverLoadWorker, InstallDownloadWorker, InstallFinalizeWorker, MissingCoverReplenishWorker
 from grid_launcher.ui.mixins.cloud_mixin import CloudSaveMixin
 from grid_launcher.ui.mixins.emulator_ui_mixin import EmulatorUIMixin
 from grid_launcher.ui.mixins.install_mixin import InstallMixin
@@ -413,7 +414,6 @@ _DISCOVER_SECTION_LABELS: dict[str, str] = {
 
 class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin, QMainWindow):
     _emulator_refresh_requested = Signal()
-    _flatpak_detection_completed = Signal(list)
     _toast_requested = Signal(object)
     _firmware_download_progress = Signal(object)
     _firmware_download_done = Signal(str)  # error string (empty on success)
@@ -421,7 +421,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("GRID Launcher")
+        self.setWindowTitle(f"GRID Launcher {__version__}")
         self.setMinimumSize(1280, 640)
         self.resize(1280, 760)
 
@@ -578,10 +578,6 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self.install_finalize_entry_id: str | None = None
         self.install_finalize_thread: QThread | None = None
         self.install_finalize_worker: InstallFinalizeWorker | None = None
-        self.flatpak_install_in_progress = False
-        self.flatpak_install_pending_game: dict | None = None
-        self.flatpak_install_thread = None
-        self.flatpak_install_worker = None
         self.download_status_widget: QWidget | None = None
         self.download_count_label: QLabel | None = None
         self.download_progress_bar: QProgressBar | None = None
@@ -595,7 +591,6 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self.downloads_refresh_timer.timeout.connect(self._refresh_downloads_page)
         self._emulator_refresh_requested.connect(self._refresh_emulator_views)
         self._emulator_refresh_requested.connect(self._backfill_missing_emulator_defaults)
-        self._flatpak_detection_completed.connect(self._on_flatpak_detection_completed)
         self._platform_games_ready.connect(self._on_platform_games_ready)
         self._toast_requested.connect(self._show_toast)
         self._firmware_download_progress.connect(self._on_firmware_download_progress)
@@ -744,8 +739,6 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self._refresh_library_grid()
         self._refresh_emulator_views()
         self._refresh_compat_tool_list()
-        self._migrate_flatpak_retroarch_cores_dir()
-        self._trigger_flatpak_emulator_detection_background()
         self._restore_window_geometry()
         self._connect_to_server(show_errors=False)
 
@@ -3074,7 +3067,6 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
     def _populate_server_platforms(self, payload: Any) -> None:
         resolve_populate_server_platforms(self, payload, server_platform_ids)
         self._backfill_missing_emulator_defaults()
-        self._trigger_flatpak_emulator_detection_background()
 
     def _on_server_platform_selected(self, platform_label: str) -> None:
         on_server_platform_selected(self, platform_label)

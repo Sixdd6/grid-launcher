@@ -25,6 +25,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from grid_launcher.emulator.profiles import is_available_on_current_platform
+
 
 def _default_emulator_profiles_path() -> Path:
     return Path(__file__).resolve().parents[2] / "emulator-autoprofiles.json"
@@ -46,6 +48,9 @@ def _load_supported_emulator_profiles() -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
     for item in parsed:
         if not isinstance(item, dict):
+            continue
+
+        if not is_available_on_current_platform(item):
             continue
 
         name = item.get("name", "")

@@ -15,11 +15,13 @@ from urllib.parse import quote, urlencode
 from PySide6.QtCore import QThread, QTimer
 from PySide6.QtWidgets import QLabel, QMessageBox, QWidget
 
-from grid_launcher.background import FlatpakInstallWorker, InstallDownloadWorker, InstallFinalizeWorker
+from grid_launcher.background import InstallDownloadWorker, InstallFinalizeWorker
 from grid_launcher.core import format_http_error_details, path_key, path_within_path, sanitize_path_component
 from grid_launcher.emulator import (
+    emulator_install_directory,
     ensure_dolphin_gcpad_config,
     ensure_dolphin_skip_ipl,
+    is_available_on_current_platform,
     is_ps3_emulator_entry,
     is_rpcs3_emulator_name,
     ps3_vfs_dev_hdd0_path,
@@ -357,6 +359,18 @@ class InstallMixin:
         emulator = self._emulator_entry_by_name(emulator_name) if emulator_name else None
         emulator_path = emulator.get("path", "") if isinstance(emulator, dict) else ""
         emulator_args = emulator.get("args", "") if isinstance(emulator, dict) else ""
+
+        if sys.platform != "win32":
+            if not emulator_name:
+                return None, (
+                    "Xbox 360 content requires a Linux-compatible emulator such as "
+                    "Xenia Edge. Install and configure Xenia Edge, then try again."
+                )
+            if not is_available_on_current_platform({"name": emulator_name}):
+                return None, (
+                    "The configured Xbox 360 emulator only runs on Windows. Install a "
+                    "Linux-compatible emulator such as Xenia Edge to apply content."
+                )
 
         settings = xenia_directory_settings(
             emulator_path,
@@ -1125,8 +1139,6 @@ class InstallMixin:
     def _start_async_install(self, game: dict[str, str]) -> bool:
         install_mode_value = game.get("_install_mode", "base")
         install_mode = install_mode_value.strip().lower() if isinstance(install_mode_value, str) else "base"
-        if install_mode == "flatpak_emulator":
-            return self._start_async_flatpak_emulator_install(game)
         if install_mode in {"source_emulator", "source_emulator_update", "compat_tool"}:
             return self._start_async_source_emulator_install(game)
         is_ps4_content_install = install_mode == "ps4_content"
@@ -1347,15 +1359,9 @@ class InstallMixin:
                     )
                     return False
 
-        install_path = self._platform_library_dir(game)
-        if install_path is None:
+        library_path = self._library_path_dir()
+        if library_path is None:
             QMessageBox.warning(self, "Install Error", "Set a Library Path in Settings before downloading emulators.")
-            return False
-
-        try:
-            install_path.mkdir(parents=True, exist_ok=True)
-        except OSError as error:
-            QMessageBox.warning(self, "Install Error", f"Could not prepare library folder: {error}")
             return False
 
         archive_name_value = game.get("_archive_name_override", "")
@@ -1364,6 +1370,14 @@ class InstallMixin:
             if isinstance(archive_name_value, str) and archive_name_value.strip()
             else self._archive_name_for_game(game)
         )
+
+        install_path = emulator_install_directory(library_path, Path(archive_name).stem)
+        try:
+            install_path.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            QMessageBox.warning(self, "Install Error", f"Could not prepare emulator folder: {error}")
+            return False
+
         archive_path = install_path / archive_name
 
         install_key = self._game_key(game)
@@ -1426,92 +1440,6 @@ class InstallMixin:
         self.install_worker = worker
         thread.start()
         return True
-
-
-    def _start_async_flatpak_emulator_install(self, game: dict[str, str]) -> bool:
-        source_metadata = game.get("_source_metadata", {})
-        app_id_value = source_metadata.get("app_id", "") if isinstance(source_metadata, dict) else ""
-        app_id = app_id_value.strip() if isinstance(app_id_value, str) else ""
-        if not app_id:
-            QMessageBox.warning(
-                self,
-                "Install Error",
-                "Selected Flatpak emulator is missing an application id and cannot be installed.",
-            )
-            return False
-
-        flatpak_binary = shutil.which("flatpak") or ""
-        if not flatpak_binary:
-            QMessageBox.information(
-                self,
-                "Flatpak Not Found",
-                "Flatpak is not installed on this system. Install Flatpak and try again.",
-            )
-            return False
-
-        if self.flatpak_install_in_progress:
-            QMessageBox.information(
-                self,
-                "Install In Progress",
-                "A Flatpak install is already running. Please wait for it to finish.",
-            )
-            return False
-
-        entry_id = self._create_download_entry(game, "downloading")
-
-        self.flatpak_install_in_progress = True
-        install_game = dict(game)
-        install_game["_download_entry_id"] = entry_id
-        self.flatpak_install_pending_game = install_game
-        self.active_download_count = (self.active_download_count or 0) + 1
-        self._update_download_status_ui()
-        self._update_details_action_buttons()
-
-        thread = QThread(self)
-        worker = FlatpakInstallWorker(app_id, flatpak_binary=flatpak_binary)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.finished.connect(self._on_flatpak_install_finished)
-        worker.finished.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(self._on_flatpak_install_thread_finished)
-
-        self.flatpak_install_thread = thread
-        self.flatpak_install_worker = worker
-        thread.start()
-        return True
-
-
-    def _on_flatpak_install_finished(self, bundle: object) -> None:
-        error = bundle.get("error", "") if isinstance(bundle, dict) else ""
-        app_id = bundle.get("app_id", "") if isinstance(bundle, dict) else ""
-        game = self.flatpak_install_pending_game
-        self.flatpak_install_in_progress = False
-        self.flatpak_install_pending_game = None
-        if self.active_download_count:
-            self.active_download_count -= 1
-        entry_id = (game or {}).get("_download_entry_id", "")
-        if error:
-            if entry_id:
-                self._set_download_entry_status(entry_id, "failed", error)
-            self._update_download_status_ui()
-            self._update_details_action_buttons()
-            QMessageBox.warning(self, "Flatpak Install Failed",
-                                f"Could not install emulator via Flatpak:\n{error}")
-            return
-        if entry_id:
-            self._set_download_entry_status(entry_id, "completed")
-        emulator_name = (game or {}).get("title", "Emulator")
-        self._show_toast({"message": f"Installed '{emulator_name}' via Flatpak.", "level": "success"})
-        self._update_download_status_ui()
-        self._update_details_action_buttons()
-        self._trigger_flatpak_emulator_detection_background()
-
-
-    def _on_flatpak_install_thread_finished(self) -> None:
-        self.flatpak_install_thread = None
-        self.flatpak_install_worker = None
 
 
     def _on_async_install_finished(self, bundle: object) -> None:
@@ -1802,7 +1730,7 @@ class InstallMixin:
             return
         queued_count = len(self.install_queue)
         has_active_downloads = self.active_download_count > 0
-        has_install_work = has_active_downloads or queued_count > 0 or self.install_finalize_in_progress or self.flatpak_install_in_progress
+        has_install_work = has_active_downloads or queued_count > 0 or self.install_finalize_in_progress
         self.download_status_widget.setVisible(has_install_work)
         if self.download_count_label is not None:
             self.download_count_label.setText(

@@ -524,42 +524,6 @@ class EmulatorAutoprofileNormalizationTests(unittest.TestCase):
         self.assertEqual(normalized[0]["screenshot_directories"], [])
         self.assertEqual(normalized[0]["firmware_directories"], [])
 
-    def test_normalize_emulator_autoprofiles_strips_flatpak_app_id(self) -> None:
-        profiles = [
-            {
-                "name": "Azahar (Nintendo 3DS)",
-                "match_tokens": ["azahar.exe"],
-                "flatpak_app_id": "  org.azahar_emu.Azahar  ",
-            }
-        ]
-
-        normalized = normalize_emulator_autoprofiles(
-            profiles,
-            lambda value: value,
-            lambda value: value,
-        )
-
-        self.assertEqual(len(normalized), 1)
-        self.assertEqual(normalized[0]["flatpak_app_id"], "org.azahar_emu.Azahar")
-
-    def test_normalize_emulator_autoprofiles_defaults_missing_flatpak_app_id(self) -> None:
-        profiles = [
-            {
-                "name": "TestEmu",
-                "match_tokens": ["test.exe"],
-            }
-        ]
-
-        normalized = normalize_emulator_autoprofiles(
-            profiles,
-            lambda value: value,
-            lambda value: value,
-        )
-
-        self.assertEqual(len(normalized), 1)
-        self.assertIn("flatpak_app_id", normalized[0])
-        self.assertEqual(normalized[0]["flatpak_app_id"], "")
-
     def test_normalize_emulator_autoprofiles_strips_invalid_firmware_directory_entries(self) -> None:
         profiles = [
             {

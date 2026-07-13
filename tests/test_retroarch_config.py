@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from grid_launcher.emulator.retroarch import (
     ensure_retroarch_save_location_settings,
     installed_retroarch_core_ids,
     load_retroarch_slug_core_map,
+    retroarch_config_path_candidates,
     retroarch_core_flags,
     retroarch_core_id_from_file_name,
     retroarch_cores_for_slug,
@@ -131,6 +134,57 @@ class RetroArchConfigTests(unittest.TestCase):
         self.assertIn('cheevos_visibility_lboard_start = "false"', text)
         self.assertIn('cheevos_visibility_lboard_submit = "false"', text)
         self.assertIn('cheevos_visibility_lboard_trackers = "false"', text)
+
+
+class TestRetroarchXdgConfigDiscovery(unittest.TestCase):
+    """Tests for XDG config discovery for native Linux RetroArch installs."""
+
+    def _isolated_env(self, temp_dir: str) -> dict[str, str]:
+        return {
+            "XDG_CONFIG_HOME": temp_dir,
+            "XDG_DATA_HOME": temp_dir,
+            "HOME": temp_dir,
+        }
+
+    def test_candidates_include_xdg_config_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, self._isolated_env(temp_dir), clear=False):
+                candidates = retroarch_config_path_candidates("/usr/bin/retroarch")
+        expected = Path(temp_dir) / "retroarch" / "retroarch.cfg"
+        self.assertIn(expected, candidates)
+
+    def test_native_linux_writes_credentials_to_xdg_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_dir = Path(temp_dir) / "retroarch"
+            config_dir.mkdir()
+            config_path = config_dir / "retroarch.cfg"
+            config_path.write_text('cheevos_enable = "false"\n', encoding="utf-8")
+
+            with patch.dict(os.environ, self._isolated_env(temp_dir), clear=False):
+                result = ensure_retroarch_save_location_settings(
+                    "/usr/bin/retroarch",
+                    retroachievements_username="retro_user",
+                    retroachievements_token="retro_token",
+                )
+            text = config_path.read_text(encoding="utf-8")
+
+        self.assertTrue(result["changed"])
+        self.assertIn('cheevos_enable = "true"', text)
+        self.assertIn('cheevos_username = "retro_user"', text)
+        self.assertIn('cheevos_token = "retro_token"', text)
+
+    def test_missing_config_returns_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.dict(os.environ, self._isolated_env(temp_dir), clear=False):
+                result = ensure_retroarch_save_location_settings(
+                    "/usr/bin/retroarch",
+                    retroachievements_username="retro_user",
+                    retroachievements_token="retro_token",
+                )
+        self.assertFalse(result["changed"])
+
+    def test_empty_path_returns_no_candidates(self) -> None:
+        self.assertEqual(retroarch_config_path_candidates(""), [])
 
 
 class TestRetroarchCoreFlags(unittest.TestCase):

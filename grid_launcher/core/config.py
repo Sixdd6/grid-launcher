@@ -29,8 +29,6 @@ def normalize_emulators(
         source_owner = item.get("source_owner", "")
         source_repo = item.get("source_repo", "")
         source_release_tag = item.get("source_release_tag", "")
-        flatpak_app_id = item.get("flatpak_app_id", "")
-        flatpak_cores_dir = item.get("flatpak_cores_dir", "")
         if not isinstance(name, str) or not name.strip():
             continue
         if not isinstance(path, str):
@@ -57,10 +55,6 @@ def normalize_emulators(
             source_repo = ""
         if not isinstance(source_release_tag, str):
             source_release_tag = ""
-        if not isinstance(flatpak_app_id, str):
-            flatpak_app_id = ""
-        if not isinstance(flatpak_cores_dir, str):
-            flatpak_cores_dir = ""
         normalized_entry = {
             "name": name.strip(),
             "path": path.strip(),
@@ -81,10 +75,6 @@ def normalize_emulators(
             normalized_entry["source_repo"] = source_repo.strip()
         if source_release_tag.strip():
             normalized_entry["source_release_tag"] = source_release_tag.strip()
-        if flatpak_app_id.strip():
-            normalized_entry["flatpak_app_id"] = flatpak_app_id.strip()
-        if flatpak_cores_dir.strip():
-            normalized_entry["flatpak_cores_dir"] = flatpak_cores_dir.strip()
         normalized.append(normalized_entry)
 
     normalized.sort(key=lambda emulator: emulator["name"].lower())

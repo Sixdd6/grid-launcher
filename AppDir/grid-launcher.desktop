@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=GRID Launcher
+Comment=Game Repository Interface & Downloader
+Exec=grid-launcher
+Icon=grid-launcher
+Categories=Game;Utility;
+Terminal=false

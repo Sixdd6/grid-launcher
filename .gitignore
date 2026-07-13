@@ -14,6 +14,9 @@ dist/
 *.egg-info/
 pip-wheel-metadata/
 
+# Generated at build time from git describe
+grid_launcher/version.py
+
 # Tool caches and coverage artifacts
 .pytest_cache/
 pytest-cache-files-*/

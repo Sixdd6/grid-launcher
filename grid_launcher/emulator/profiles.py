@@ -3,8 +3,57 @@ from __future__ import annotations
 import fnmatch
 import json
 import re
+import sys
 from pathlib import Path, PureWindowsPath
 from typing import Any, Callable
+
+
+# Emulator autoprofile slugs that only ship a Windows build and therefore must
+# not appear in the UI (or install flows) on non-Windows platforms.
+_WINDOWS_ONLY_EMULATOR_SLUGS = frozenset(
+    {
+        "xenia canary (xbox 360)",
+        "xenia (xbox 360)",
+        "shadps4 qt launcher",
+    }
+)
+
+
+def is_available_on_current_platform(
+    profile: dict[str, Any],
+    platform: str | None = None,
+) -> bool:
+    """Return True when an emulator autoprofile can run on the given platform.
+
+    Windows-only emulator variants (Xenia master/Canary, the ShadPS4 Qt
+    launcher) are gated out on non-Windows platforms. Gating is decided by the
+    profile slug (name) and by an explicit ``source.platforms`` allowlist.
+    Everything remains available on Windows so existing behavior is preserved.
+    """
+    current_platform = platform if isinstance(platform, str) and platform.strip() else sys.platform
+    if current_platform.casefold().startswith("win"):
+        return True
+
+    if not isinstance(profile, dict):
+        return True
+
+    name = profile.get("name", "")
+    if isinstance(name, str) and name.strip().casefold() in _WINDOWS_ONLY_EMULATOR_SLUGS:
+        return False
+
+    source = profile.get("source")
+    if isinstance(source, dict):
+        platforms = source.get("platforms")
+        if isinstance(platforms, list):
+            allowed = {
+                entry.strip().casefold()
+                for entry in platforms
+                if isinstance(entry, str) and entry.strip()
+            }
+            if allowed and current_platform.casefold() not in allowed:
+                return False
+
+    return True
 
 
 DEFAULT_CLOUD_SYNC_IGNORE_BASENAMES = {
@@ -397,8 +446,7 @@ def normalize_emulator_autoprofiles(
             if isinstance(token, str) and token.strip()
         ]
         is_compat_tool = item.get("is_compat_tool") is True
-        flatpak_app_id_raw = str(item.get("flatpak_app_id", "")).strip()
-        if not normalized_tokens and not is_compat_tool and not flatpak_app_id_raw:
+        if not normalized_tokens and not is_compat_tool:
             continue
 
         name = item.get("name", "")
@@ -483,9 +531,6 @@ def normalize_emulator_autoprofiles(
                 elif isinstance(entry, dict):
                     normalized_firmware_directories.append(entry.copy())
 
-        flatpak_app_id = item.get("flatpak_app_id", "")
-        normalized_flatpak_app_id = flatpak_app_id.strip() if isinstance(flatpak_app_id, str) else ""
-
         source = item.get("source")
         normalized_source = source.copy() if isinstance(source, dict) else None
 
@@ -508,7 +553,6 @@ def normalize_emulator_autoprofiles(
             "state_directories": normalized_state_directories,
             "screenshot_directories": normalized_screenshot_directories,
             "firmware_directories": normalized_firmware_directories,
-            "flatpak_app_id": normalized_flatpak_app_id,
             "is_compat_tool": is_compat_tool,
             "compat_tool_type": normalized_compat_tool_type,
         }

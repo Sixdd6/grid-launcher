@@ -1,8 +1,72 @@
 # Linux Support — Future Plans
 
-> **Status**: Pre-implementation research document. Nothing described here is built yet.
+> **Status**: ~85% Complete (Updated 2026-07-11). Core functionality implemented; versioning and release polish remain.
 > This document defines the scope, design decisions, and sequencing for adding full
 > first-class Linux support to grid-launcher.
+
+---
+
+## Implementation Status
+
+**Phase 1 - Build Infrastructure: ✅ ~95% Complete**
+- ✅ XDG path helpers implemented (`xdg_config_home()`, `xdg_data_home()`)
+- ✅ Platform guards in all major emulator files
+- ✅ RetroArch core extension support (`.so`/`.dll`/`.dylib`)
+- ✅ GitHub Actions workflows (Linux testing + AppImage builds)
+- ✅ Keyring-based token storage with fallbacks
+- ✅ AppImage packaging infrastructure
+- ❌ Xenia Canary platform gating (blocks Windows-only variant on Linux)
+
+**Phase 2 - Linux-Native Emulators: ✅ 95% Complete**
+- ✅ All native emulators (Dolphin, PCSX2, DuckStation, RPCS3, Xemu, Cemu, Eden, Azahar, PPSSPP, Redream, RetroArch) have XDG paths
+- ✅ Xenia Edge now has Linux AppImage support
+- ✅ Cemu SDL controller profile for Linux
+- ✅ Comprehensive Linux path candidate tests
+
+**Phase 3 - Wine/Proton: ✅ 85% Complete**
+- ✅ Wine/Proton auto-detection on startup (scans Steam directories)
+- ✅ Windows game launch dispatch via Wine/umu-run for Proton
+- ✅ Per-game and default compat tool configuration UI
+- ✅ Wine path translation utilities
+- ⚠️ Extended configuration (DXVK, env vars) could be enhanced
+
+**Phase 4 - Public Release: ❌ 30% Complete**
+- ✅ AppImage build script functional
+- ❌ AppImage versioning and update mechanism (BLOCKER)
+- ❌ AppStream metadata
+- ❌ First-run Linux setup experience
+- ❌ System dependency documentation
+
+---
+
+## Migration Note: Flatpak Support Dropped
+
+grid-launcher no longer targets Flatpak — neither for distributing the app itself nor for
+auto-installing emulators. Linux distribution is via **AppImage**, and emulator auto-install
+pulls **native or AppImage** builds only.
+
+Rationale:
+
+- **Fewer sandboxing issues.** An unsandboxed AppImage has direct access to the ROM library,
+  user-chosen emulator paths, `/dev/input`, and the system keyring — no portal negotiation,
+  D-Bus proxy policy, or `--filesystem=home` caveats.
+- **Simpler pipeline.** One PyInstaller-based build (`build.sh --appimage`) replaces the
+  Flatpak runtime/SDK/base-app stack and `flatpak-pip-generator` dependency conversion.
+
+What this means in practice:
+
+- **Auto-install** downloads native or AppImage emulator builds only. The Flatpak detection
+  and install code paths have been removed.
+- **Manual configuration still works.** Users who prefer a Flatpak emulator can install it
+  themselves and point grid-launcher at the Flatpak wrapper (or `~/.var/app/<id>/` config);
+  the app just won't install or auto-detect it for them.
+- **Dolphin and MAME are no longer part of auto-install.** Both remain fully playable through
+  their RetroArch cores (`dolphin_libretro`, `mame_libretro` / `mame2003_plus_libretro`),
+  which the RetroArch integration already covers.
+
+The remainder of this document has been updated for the AppImage-based approach. Emulator
+`~/.var/app/<id>/` paths are retained below only as candidates for locating configs of
+*manually installed* Flatpak emulators — they are not used to install or auto-detect them.
 
 ---
 
@@ -10,122 +74,64 @@
 
 "First-class Linux support" means parity with the Windows experience, not just "boots on Linux." The bar is:
 
-- **Distribution**: A self-contained Flatpak on Flathub (or direct download) — no user-installed Python, no venv setup.
+- **Distribution**: A self-contained AppImage — no user-installed Python, no venv setup.
 - **Emulator autoconfig**: Every `ensure_*` setting function in `grid_launcher/emulator/` resolves correct XDG/Linux paths, not Windows registry or `%APPDATA%` paths.
 - **Library operations**: Install, extract, cloud-save, and launch all function without Windows-specific syscalls.
 - **Secure token storage**: API token and RetroAchievements token are stored via the platform keyring (GNOME Keyring / KWallet), not bare base64.
-- **Controller input (TV mode)**: Full gamepad input through the existing pygame path — no code changes needed, but Flatpak portal access must be configured.
+- **Controller input (TV mode)**: Full gamepad input through the existing pygame path — no code changes needed. The AppImage runs unsandboxed, so `/dev/input` access works without any portal configuration.
 - **Native Linux emulators**: All emulators with native Linux builds are detected, configured, and launched correctly.
-- **Windows-only emulators**: Xenia (Xbox 360) is hidden/disabled on Linux. Emulators with both native Linux builds and Windows builds show the correct default path.
-- **CI**: A Linux build job produces the Flatpak artifact on every release, alongside the existing Windows `.exe`.
+- **Windows-only emulators**: Xenia Canary (original Xbox 360 emulator) should be hidden on Linux; Xenia Edge has native Linux builds and is fully supported. Emulators with both native Linux builds and Windows builds show the correct default path.
+- **CI**: A Linux build job produces the AppImage artifact on every release, alongside the existing Windows `.exe`.
 
 SPEC.md already acknowledges this intent: *"…intended to ship as a self-contained executable on Windows and a wrapper-based launch target on Linux."*
 
 ---
 
-## 2. Flatpak Packaging
+## 2. AppImage Packaging
 
-### 2.1 Runtime Selection
+> **Superseded**: Earlier drafts proposed distributing grid-launcher as a Flathub Flatpak.
+> That approach was dropped (see the migration note at the top). The app ships as an
+> AppImage, which the repository already builds via `build.sh --appimage` and `appimagetool`.
 
-| Component | Value |
-|---|---|
-| Runtime | `org.kde.Platform//6.10` |
-| SDK | `org.kde.Sdk//6.10` |
-| Base app | `io.qt.PySide.BaseApp//6.10` |
+### 2.1 Build Pipeline
 
-`io.qt.PySide.BaseApp` ships PySide6 6.x and all Qt6 shared libraries. This avoids bundling a ~300 MB Qt stack inside the Flatpak itself. The `6.10` branch (latest stable as of 2026) is the right target for PySide6 6.11.x — check Flathub's `shared-modules` for the exact branch name at build time.
+The Linux build reuses the existing PyInstaller spec (`grid-launcher.spec`) and wraps the
+output in an AppImage:
 
-### 2.2 Python Dependencies
+1. `build.sh` runs PyInstaller to produce a self-contained bundle (Python, PySide6/Qt6, and
+   every `requirements.txt` dependency included).
+2. The bundle is staged into an `AppDir` under `appimage/` (`AppRun`, `.desktop`, icon).
+3. `appimagetool` packages the `AppDir` into a single executable `.AppImage`.
 
-Use `flatpak-pip-generator` to convert `requirements.txt` to a Flatpak module JSON:
+No Flatpak runtime, SDK, base app, or `flatpak-pip-generator` step is involved — dependencies
+come straight from `requirements.txt` via PyInstaller.
 
-```bash
-# From the Flathub flatpak-builder-tools repo
-python3 flatpak-pip-generator \
-    --runtime org.kde.Sdk//6.10 \
-    --output python-modules.json \
-    py7zr pygame psutil requests
-```
+### 2.2 Runtime File Layout
 
-PySide6 must be **excluded** from this list (it comes from the base app). Add `--ignore-pkg PySide6` if the tool does not auto-detect it.
+`retroarch-core-list.json`, `emulator-autoprofiles.json`, and `assets/` are bundled alongside
+the frozen application. `grid-launcher.py` resolves these relative to `sys._MEIPASS`
+(PyInstaller) or the script directory, so no `GRID_LAUNCHER_SHARE_DIR` indirection is required.
 
-The generated `python-modules.json` is included in the manifest via the `modules` array.
+### 2.3 No Sandbox, No Portals
 
-### 2.3 Flatpak Manifest Skeleton
+The AppImage runs unsandboxed with the same permissions as the invoking user. This is a
+deliberate simplification: it removes the portal negotiation, D-Bus proxy, and
+`--filesystem=home` concerns a Flatpak build would impose:
 
-```yaml
-# io.github.yourorg.gridlauncher.yml  (or .json if preferred)
-app-id: io.github.yourorg.gridlauncher
-runtime: org.kde.Platform
-runtime-version: "6.10"
-sdk: org.kde.Sdk
-base: io.qt.PySide.BaseApp
-base-version: "6.10"
-command: grid-launcher
-
-finish-args:
-  # Wayland + X11 fallback
-  - --socket=wayland
-  - --socket=fallback-x11
-  - --share=ipc
-  # GPU rendering (needed by Qt6/OpenGL cover art)
-  - --device=dri
-  # Network for RomM server communication
-  - --share=network
-  # Home directory access for emulator configs and ROM library
-  # (see Section 2.5 for portal strategy)
-  - --filesystem=home
-  # Controller input via /dev/input (hidraw for joysticks)
-  - --device=all
-  # Secret storage (GNOME Keyring / KWallet via libsecret portal)
-  - --talk-name=org.freedesktop.secrets
-
-modules:
-  - name: python-dependencies
-    # generated by flatpak-pip-generator
-    buildsystem: simple
-    build-commands: []
-    # ... (flatpak-pip-generator output inlined here)
-
-  - name: grid-launcher
-    buildsystem: simple
-    build-commands:
-      - install -Dm755 grid-launcher.py /app/bin/grid-launcher-launcher.py
-      - cp -r grid_launcher /app/lib/grid_launcher
-      - cp retroarch-core-list.json /app/share/grid-launcher/
-      - cp emulator-autoprofiles.json /app/share/grid-launcher/
-      - cp -r assets /app/share/grid-launcher/assets
-      - install -Dm755 flatpak/grid-launcher.sh /app/bin/grid-launcher
-      - install -Dm644 flatpak/io.github.yourorg.gridlauncher.desktop /app/share/applications/
-      - install -Dm644 assets/svg/icon.svg /app/share/icons/hicolor/scalable/apps/io.github.yourorg.gridlauncher.svg
-    sources:
-      - type: git
-        url: https://github.com/yourorg/rom-mate-neo
-        tag: v1.x.x
-```
-
-The `grid-launcher.sh` wrapper:
-
-```bash
-#!/bin/bash
-exec python3 /app/bin/grid-launcher-launcher.py "$@"
-```
-
-The launcher script will need a path patch to resolve `retroarch-core-list.json` and `emulator-autoprofiles.json` from `/app/share/grid-launcher/` instead of the current directory. The simplest approach is an environment variable:
-
-```bash
-export GRID_LAUNCHER_SHARE_DIR=/app/share/grid-launcher
-exec python3 /app/bin/grid-launcher-launcher.py "$@"
-```
-
-`grid-launcher.py` reads these files relative to `__file__` or `sys.argv[0]` — add a helper in `grid_launcher/core/config.py` that checks `GRID_LAUNCHER_SHARE_DIR` first, then falls back to the script directory.
+- **ROM library / emulator paths**: Full read/write access to any user-chosen path — no
+  file-chooser portal round-trip.
+- **Controller input**: `/dev/input/event*` and `/dev/hidraw*` are directly accessible for the
+  pygame/SDL2 path (subject to the usual `input` group / udev rules on some distros).
+- **Secret storage**: The `org.freedesktop.secrets` D-Bus service is reachable directly, so
+  `keyring` works without any `--talk-name` allowance (see Section 7).
 
 ### 2.4 GitHub Actions CI Workflow
 
-Add `.github/workflows/flatpak-linux.yml`:
+The Linux release job runs `build.sh --appimage` on `ubuntu-latest` and attaches the resulting
+`.AppImage` to the release, mirroring the Windows `.exe` job:
 
 ```yaml
-name: Build Linux (Flatpak)
+name: Build Linux (AppImage)
 
 on:
   release:
@@ -135,69 +141,31 @@ permissions:
   contents: write
 
 jobs:
-  flatpak:
-    name: Build Flatpak
+  appimage:
+    name: Build AppImage
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/flathub/flatpak-builder-base:latest
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Flatpak runtimes
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y 7zip librsvg2-bin libfuse2
+      - name: Build AppImage
         run: |
-          flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          flatpak install -y flathub \
-            org.kde.Platform//6.10 \
-            org.kde.Sdk//6.10 \
-            io.qt.PySide.BaseApp//6.10
-
-      - name: Build Flatpak
-        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
-        with:
-          bundle: grid-launcher.flatpak
-          manifest-path: flatpak/io.github.yourorg.gridlauncher.yml
-          cache-key: flatpak-builder-${{ github.sha }}
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: grid-launcher-linux-flatpak
-          path: grid-launcher.flatpak
-          if-no-files-found: error
-
-      - name: Attach Flatpak to release
+          python3 -m venv .venv
+          . .venv/bin/activate
+          pip install -r requirements.txt
+          ./build.sh --appimage
+      - name: Attach AppImage to release
         uses: softprops/action-gh-release@v2
         with:
-          files: grid-launcher.flatpak
+          files: dist/grid-launcher-x86_64.AppImage
 ```
 
-### 2.5 Flatpak Sandboxing and File System Access
-
-The `--filesystem=home` finish-arg grants broad home directory access. This is the pragmatic starting point for a self-managed tool (consistent with how tools like Dolphin, RPCS3 Flatpaks are shipped). For a future Flathub submission, a stricter policy would be required:
-
-| Path Type | Flatpak Portal Strategy |
-|---|---|
-| ROM library | `--filesystem=home` or XDG Documents portal (`org.freedesktop.portal.FileChooser`) |
-| Emulator executables | `--filesystem=home` (user-configured paths) |
-| App config/data | `--filesystem=xdg-config`, `--filesystem=xdg-data` |
-| Emulator configs | `--filesystem=home` (emulators live anywhere) |
-
-For Flathub submission, `--filesystem=home` is discouraged. The right long-term approach is to request paths via the file chooser portal the first time, then persist the granted path using `~/.var/app/<app-id>/config/` for the grid-launcher config file. Given the app already has a first-run dialog (`grid_launcher/ui/dialogs.py`), this portal prompt can be integrated there.
-
-The Flatpak app data directory will be `~/.var/app/io.github.yourorg.gridlauncher/`. The config file and token store must resolve to `~/.var/app/<id>/config/grid-launcher/` inside the sandbox, which maps correctly when the app uses `$XDG_CONFIG_HOME` (Flatpak sets this to the per-app config dir automatically).
-
-### 2.6 Flathub Submission vs. Personal Builds
-
-| Concern | Personal Build | Flathub Submission |
-|---|---|---|
-| `--filesystem=home` | Acceptable | Must justify or replace with portals |
-| Proprietary emulators (Pico-8 etc.) | OK to configure but not bundle | Cannot bundle non-free software |
-| CI | Any runner | Must pass `flathub-linter` / `org.flathub.Flathub` CI checks |
-| App ID | Any reverse-DNS | Must match owned domain |
-| Update cadence | Manual | Automated via Flathub PR bot |
-
-The recommendation is to ship personal builds first (Phase 1–3), then pursue Flathub in Phase 4 with portal migration.
+`7zip` provides the `7z` binary that RetroArch archive extraction relies on (see
+`archive_preparation.py`); `librsvg2-bin` supplies `rsvg-convert` for the icon; `libfuse2`
+lets the AppImage mount at runtime.
 
 ---
 
@@ -246,6 +214,11 @@ def xdg_data_home() -> Path:
 Emulator modules then call these helpers instead of repeating the environment lookup inline. This consolidates the XDG logic that is already scattered across `duckstation.py`, `xemu.py`, `redream.py`, `azahar.py`, and `eden.py`.
 
 ### 3.3 Per-Emulator Linux Config Paths
+
+> The `~/.var/app/<id>/` "Flatpak <emulator>" candidates below are only for locating the
+> config of a Flatpak emulator a user installed and configured **manually**. Auto-install and
+> auto-detection target native/AppImage builds; these Flatpak paths are never used to install
+> or discover an emulator.
 
 #### `dolphin.py` — `dolphin_user_root_candidates()`
 
@@ -538,7 +511,7 @@ def is_available_on_current_platform(emulator_slug: str) -> bool:
 
 The main concerns are operational:
 
-1. **Flatpak device access**: The Flatpak manifest must include `--device=all` to grant access to `/dev/input/event*` and `/dev/hidraw*`. Without this, pygame cannot see joysticks. This is already in the manifest skeleton in Section 2.3.
+1. **Device access**: The AppImage runs unsandboxed, so `/dev/input/event*` and `/dev/hidraw*` are directly accessible to pygame — no Flatpak `--device=all` allowance or portal is needed.
 2. **SDL joystick permission in some distros**: Some distributions require the user to be in the `input` group or have a udev rule. This is a deployment/documentation concern, not a code concern.
 3. **`joystickCount()` on Linux**: The non-Windows branch returns `-1` when pygame joystick is not initialized. Consider returning `0` instead to avoid confusing any UI that displays this count.
 
@@ -598,7 +571,7 @@ def _linux_save_token(service: str, username: str, token: str) -> bool:
 
 The service name should be `"grid-launcher"` with `username` values `"api-token"` and `"ra-token"`.
 
-**Fallback**: If `import keyring` fails (not installed, or no backend available — e.g. headless CI, Flatpak sandbox without D-Bus), fall back to the current base64 file approach with a logged warning. This ensures the app still works in all environments.
+**Fallback**: If `import keyring` fails (not installed, or no backend available — e.g. headless CI without a running secret service), fall back to the current base64 file approach with a logged warning. This ensures the app still works in all environments.
 
 **Migration**: On first run after upgrade, if a base64 token file exists and `keyring` is available, migrate the token to the keyring and delete the file. Add a one-shot migration step in `set_api_token()` / `set_ra_token()`.
 
@@ -609,7 +582,7 @@ keyring>=24.0.0  ; sys_platform != "win32"
 secretstorage>=3.3.3  ; sys_platform == "linux"
 ```
 
-Add `keyring` and `secretstorage` to `flatpak-pip-generator` inputs. Ensure the Flatpak manifest includes `--talk-name=org.freedesktop.secrets` (already in the skeleton in Section 2.3).
+Both packages are pulled in by PyInstaller from `requirements.txt` and bundled into the AppImage. Because the AppImage is unsandboxed, `org.freedesktop.secrets` is reachable over D-Bus directly — no `--talk-name` allowance is required.
 
 ---
 
@@ -718,7 +691,8 @@ All new tests must follow the project convention of using `unittest` (per AGENTS
 | **Xenia Canary** | **Xbox 360** | **No** | **N/A** | N/A | N/A | **Yes** |
 
 **Notes**:
-- "Flatpak ID" listed where an official Flathub Flatpak exists — these have alternate config paths under `~/.var/app/<id>/` that should be added as additional candidates alongside the non-Flatpak paths.
+- "Flatpak ID" is listed where an official Flathub Flatpak exists. These are **not** auto-installed or auto-detected — the column is a reference for users who install a Flatpak emulator manually. Their `~/.var/app/<id>/` config paths can be added as candidates so autoconfig still finds a manually configured Flatpak emulator.
+- **Dolphin** and **MAME** are not part of the app's auto-install list. They are covered by their RetroArch cores (`dolphin_libretro`, `mame_libretro` / `mame2003_plus_libretro`); a user wanting the standalone emulator installs it manually.
 - Pico-8 is a commercial product. The Linux binary is distributed separately by the user; the app only launches it, not installs it.
 - Eden / Azahar forks are not on Flathub due to legal concerns around the original projects; users download binaries directly.
 - FinalBurn Neo's Linux availability refers to standalone builds. The libretro core (via RetroArch) is fully supported.
@@ -727,7 +701,7 @@ All new tests must follow the project convention of using `unittest` (per AGENTS
 
 ## 10. Phased Rollout Recommendation
 
-### Phase 1: Build Infrastructure
+### Phase 1: Build Infrastructure — ✅ ~95% Complete
 
 **Goal**: The app compiles, runs, and passes all tests on Linux. No feature regressions on Windows.
 
@@ -739,13 +713,13 @@ All new tests must follow the project convention of using `unittest` (per AGENTS
 4. Fix `retroarch_core_argument_path()` in `launch.py` to use `.so` on Linux.
 5. Add `is_available_on_current_platform()` to `grid_launcher/emulator/profiles.py` and gate Xenia in `EmulatorUIMixin` and `InstallMixin`.
 6. Add a GitHub Actions test workflow (`.github/workflows/tests.yml`) with both `windows-latest` and `ubuntu-latest` matrix entries.
-7. Add a Flatpak manifest under `flatpak/` and a GitHub Actions Flatpak build workflow (`.github/workflows/flatpak-linux.yml`).
-8. Add `GRID_LAUNCHER_SHARE_DIR` environment variable support for locating `retroarch-core-list.json` and `emulator-autoprofiles.json` from `/app/share/`.
+7. Add an AppImage build workflow (`.github/workflows/appimage-linux.yml`) that runs `build.sh --appimage` on `ubuntu-latest` (see Section 2.4).
+8. Confirm `retroarch-core-list.json` and `emulator-autoprofiles.json` resolve correctly from the PyInstaller bundle (`sys._MEIPASS`) inside the AppImage — no `GRID_LAUNCHER_SHARE_DIR` indirection needed.
 9. Update `requirements.txt` with platform-conditional `keyring` and `secretstorage` entries.
 
-**Exit criteria**: `python -m pytest tests/` passes on `ubuntu-latest`. Flatpak CI job produces a `.flatpak` bundle.
+**Exit criteria**: `python -m pytest tests/` passes on `ubuntu-latest`. The AppImage CI job produces a `.AppImage` bundle.
 
-### Phase 2: Linux-Native Emulators Working
+### Phase 2: Linux-Native Emulators Working — ✅ 95% Complete
 
 **Goal**: All emulators with native Linux builds can be configured, auto-configured, and launched.
 
@@ -760,7 +734,7 @@ All new tests must follow the project convention of using `unittest` (per AGENTS
 
 **Exit criteria**: All Linux-native emulators listed in the platform matrix function end-to-end (launch, save, cloud sync). No Windows-specific crashes.
 
-### Phase 3: Windows-Game-on-Linux Launching (Proton/Wine)
+### Phase 3: Windows-Game-on-Linux Launching (Proton/Wine) — ✅ 85% Complete
 
 **Goal**: Users can optionally configure Wine/Proton to launch `.exe`-based PC games.
 
@@ -775,28 +749,27 @@ All new tests must follow the project convention of using `unittest` (per AGENTS
 
 **Out of scope for Phase 3**: Bottles DBus integration, automatic DXVK configuration, Xenia-via-Wine.
 
-### Phase 4: Flathub Submission / User-Facing Release
+### Phase 4: Public User-Facing Release — ❌ 30% Complete
 
-**Goal**: Public release on Flathub with full portal compliance.
+**Goal**: A polished, self-updating AppImage release for end users.
 
 **Tasks** (in order):
 
-1. Replace `--filesystem=home` with targeted portal-based file access using `org.freedesktop.portal.FileChooser` for the ROM library root and emulator paths.
-2. Integrate the first-run dialog (`grid_launcher/ui/dialogs.py`) with file chooser portal for initial path configuration.
-3. Run `org.flathub.Flathub` linter checks and address all warnings.
-4. Set up Flathub bot integration for automated build PRs on new releases.
-5. Update app metadata (`.desktop` file, `AppStream` metainfo XML with screenshots and release notes).
-6. Submit PR to `flathub/flathub` repository.
+1. Finalize the AppImage `.desktop` file and app icon; embed AppStream `metainfo.xml` (screenshots, release notes) inside the `AppDir` for software-center discovery.
+2. Integrate the first-run dialog (`grid_launcher/ui/dialogs.py`) to prompt for the ROM library root and emulator paths on initial launch.
+3. Add AppImage update support (e.g. embed update information / ship a `.zsync` file) so users can update in place.
+4. Verify the AppImage runs across common distros (glibc floor, `libfuse2` availability) and document any required system packages (`7zip` for RetroArch extraction).
+5. Attach the `.AppImage` to GitHub Releases via the CI workflow from Section 2.4.
 
-**Note**: Flathub submission requires legal review of all bundled dependencies. Pico-8 is not bundled (user-supplied binary), so it is fine. No emulator binaries are bundled.
+**Note**: No emulator binaries are bundled. Pico-8 is user-supplied, so there are no proprietary-software distribution concerns.
 
 ---
 
 ## Open Questions
 
-1. **App ID**: A reverse-DNS app ID (`io.github.*`) requires an owned domain or GitHub organization. Confirm the intended public name/repo URL before finalizing the Flatpak manifest.
+1. **App ID**: The AppImage `.desktop` file and AppStream metainfo still need a stable reverse-DNS ID (`io.github.*`). Confirm the intended public name/repo URL before finalizing.
 2. **Eden legal status**: Eden is a yuzu fork. Its legal standing is uncertain following the yuzu settlement. The app should not bundle it; users supply their own binary. Confirm whether the app should show a warning in the emulator dialog about its status.
 3. **Azahar config path verification**: The Linux config path `~/.config/azahar-emu/` is based on the Qt app naming convention. Verify against an actual Azahar Linux installation before writing tests.
 4. **Cemu SDL controller profile**: The `<api>SDLController</api>` format for Cemu on Linux needs verification against Cemu's actual XML schema for SDL controller mappings.
-5. **Keyring in Flatpak sandbox**: Flatpak's D-Bus proxy must be configured to allow `org.freedesktop.secrets`. Verify the `--talk-name` finish-arg is sufficient or if a `xdg-dbus-proxy` policy is also needed.
-6. **RetroArch Flatpak core path**: The Flatpak RetroArch stores cores at `~/.var/app/org.libretro.RetroArch/config/retroarch/cores/`. The `retroarch_core_argument_path()` function generates a relative `cores/` path — verify this resolves correctly when the RetroArch working directory is the Flatpak data dir.
+5. **Keyring backend availability**: The AppImage reaches `org.freedesktop.secrets` over the session D-Bus directly. Verify a secret service (GNOME Keyring / KWallet) is running on target desktops; fall back to the base64 file store when it is absent (e.g. headless setups).
+6. **RetroArch core path**: `retroarch_core_argument_path()` generates a relative `cores/` path. Verify this resolves correctly against the RetroArch working directory for both a native install and a manually configured Flatpak RetroArch (`~/.var/app/org.libretro.RetroArch/config/retroarch/cores/`).

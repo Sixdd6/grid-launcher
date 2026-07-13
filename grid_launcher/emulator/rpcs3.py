@@ -618,7 +618,6 @@ def rpcs3_data_root_candidates(emulator_path_text: str) -> list[Path]:
     candidates.extend(
         [
             xdg_config_home() / "rpcs3",
-            home_path / ".var" / "app" / "net.rpcs3.RPCS3" / "config" / "rpcs3",
             home_path / "Library" / "Application Support" / "rpcs3",
         ]
     )

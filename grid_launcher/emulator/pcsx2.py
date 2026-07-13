@@ -162,7 +162,6 @@ def pcsx2_config_path_candidates(emulator_path_text: str) -> list[Path]:
         documents = Path.home() / "Documents"
     candidates.append(documents / "PCSX2" / "inis" / "PCSX2.ini")
     candidates.append(Path.home() / ".config" / "PCSX2" / "inis" / "PCSX2.ini")
-    candidates.append(Path.home() / ".var" / "app" / "net.pcsx2.PCSX2" / "config" / "PCSX2" / "inis" / "PCSX2.ini")
     candidates.append(Path.home() / "Library" / "Application Support" / "PCSX2" / "inis" / "PCSX2.ini")
 
     return candidates
@@ -477,8 +476,6 @@ def pcsx2_data_root_candidates(
     xdg_config_home = os.environ.get("XDG_CONFIG_HOME", "").strip()
     if xdg_config_home:
         user_roots.append(Path(xdg_config_home).expanduser() / "PCSX2")
-
-    user_roots.append(home_path / ".var" / "app" / "net.pcsx2.PCSX2" / "config" / "PCSX2")
 
     return _unique_paths([*portable_roots, *user_roots, *fallback_roots])
 

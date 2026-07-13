@@ -307,76 +307,7 @@ def available_source_download_emulator_entries(
     )
 
 
-def flatpak_installable_emulator_entries(
-    autoprofiles: list,
-    installed_names: list | None = None,
-    current_platform: str = sys.platform,
-) -> list:
-    if not current_platform.startswith("linux"):
-        return []
-
-    profiles = autoprofiles if isinstance(autoprofiles, list) else []
-    installed_lookup = {
-        name.strip().casefold()
-        for name in (installed_names or [])
-        if isinstance(name, str) and name.strip()
-    }
-
-    rows: list[dict[str, Any]] = []
-    seen_keys: set[tuple[str, str]] = set()
-
-    for profile in profiles:
-        if not isinstance(profile, dict):
-            continue
-
-        app_id_value = profile.get("flatpak_app_id", "")
-        app_id = app_id_value.strip() if isinstance(app_id_value, str) else ""
-        if not app_id:
-            continue
-
-        name_value = profile.get("name", "")
-        name = name_value.strip() if isinstance(name_value, str) else ""
-        if not name:
-            continue
-
-        source_value = profile.get("source")
-        if isinstance(source_value, dict):
-            provider = _normalized_source_provider(source_value.get("provider", ""))
-            if provider:
-                platforms = source_value.get("platforms")
-                if platforms is None:
-                    continue
-                if isinstance(platforms, list) and any(
-                    not str(p).startswith("win") for p in platforms
-                ):
-                    continue
-
-        if name.casefold() in installed_lookup:
-            continue
-
-        dedupe_key = (name.casefold(), app_id)
-        if dedupe_key in seen_keys:
-            continue
-        seen_keys.add(dedupe_key)
-
-        rows.append(
-            {
-                "name": name,
-                "provider": "flatpak",
-                "app_id": app_id,
-                "source_id": f"flatpak/{app_id}",
-                "release_tag": "flathub",
-                "source_metadata": {"provider": "flatpak", "app_id": app_id},
-            }
-        )
-
-    rows.sort(key=lambda row: row["name"].casefold())
-    return rows
-
-
 def source_entry_label(entry: dict) -> str:
-    if entry.get("provider") == "flatpak":
-        return "[Flatpak]"
     # Check asset patterns for AppImage
     meta = entry.get("source_metadata") or {}
     all_patterns = list(meta.get("asset_patterns") or [])

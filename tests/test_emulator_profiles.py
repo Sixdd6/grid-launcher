@@ -731,8 +731,12 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
         self.assertFalse(_is_edge_variant("xenia_canary.exe"))
         self.assertFalse(_is_edge_variant("xenia.exe"))
 
-    def test_xenia_directory_settings_edge_variant_uses_edge_config(self) -> None:
+    @patch("grid_launcher.emulator.xenia._default_user_storage_root")
+    def test_xenia_directory_settings_edge_variant_uses_edge_config(
+        self, mock_storage_root
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
+            mock_storage_root.return_value = Path(temp_dir) / "nonexistent-storage"
             edge_dir = Path(temp_dir) / "xenia-edge"
             edge_dir.mkdir()
             config_path = edge_dir / "xenia-edge.config.toml"
@@ -943,38 +947,6 @@ class EmulatorAutoprofilesLoadingTests(unittest.TestCase):
 
         self.assertEqual(profiles, [])
 
-    def test_normalize_emulator_autoprofiles_includes_flatpak_only_entry(self) -> None:
-        """Entries with only flatpak_app_id (no match_tokens, not a compat tool)
-        must survive normalization so Flatpak detection can match them."""
-        from grid_launcher.emulator.profiles import normalize_emulator_autoprofiles
-
-        profiles = [
-            {
-                "flatpak_app_id": "com.supermodel3.Supermodel",
-                "name": "Supermodel (Sega Model 3)",
-                "args": "\"%rom%\"",
-                "all_platforms": False,
-                "platform_keywords": ["model 3", "sega model 3"],
-                "save_strategy": "single_file",
-                "save_directories": ["Saves"],
-                "state_directories": [],
-            },
-            {
-                "name": "No tokens, no flatpak",
-                "args": "\"%rom%\"",
-            },
-        ]
-
-        normalized = normalize_emulator_autoprofiles(
-            profiles,
-            lambda v: v,
-            lambda v: v,
-        )
-
-        names = [p["name"] for p in normalized]
-        self.assertIn("Supermodel (Sega Model 3)", names, "Flatpak-only entry should survive normalization")
-        self.assertNotIn("No tokens, no flatpak", names, "Entry with no tokens and no flatpak_app_id should be dropped")
-
     def test_emulator_profile_for_game_prefers_exact_title_when_match_tokens_duplicate(self) -> None:
         profiles = [
             {
@@ -1024,7 +996,7 @@ class ManualEmulatorAutopopulateTests(unittest.TestCase):
             "save_strategy": "folder",
             "ignore_files": ["debug.log"],
             "ignore_extensions": ["tmp"],
-            "save_directories": ["mlc01\\usr\\save"],
+            "save_directories": ["mlc01/usr/save"],
             "state_directories": ["states"],
         }
 
@@ -1046,7 +1018,7 @@ class ManualEmulatorAutopopulateTests(unittest.TestCase):
         self.assertEqual(defaulted_entry.get("save_strategy"), "folder")
         self.assertEqual(defaulted_entry.get("ignore_files"), "debug.log")
         self.assertEqual(defaulted_entry.get("ignore_extensions"), "tmp")
-        self.assertEqual(defaulted_entry.get("save_paths"), r"mlc01\usr\save")
+        self.assertEqual(defaulted_entry.get("save_paths"), "mlc01/usr/save")
         self.assertEqual(defaulted_entry.get("state_paths"), "states")
 
     def test_manual_entry_defaults_do_not_overwrite_user_values(self) -> None:
@@ -1071,7 +1043,7 @@ class ManualEmulatorAutopopulateTests(unittest.TestCase):
             "save_strategy": "folder",
             "ignore_files": ["debug.log"],
             "ignore_extensions": ["tmp"],
-            "save_directories": ["mlc01\\usr\\save"],
+            "save_directories": ["mlc01/usr/save"],
             "state_directories": ["states"],
         }
 
@@ -1114,7 +1086,7 @@ class ManualEmulatorAutopopulateTests(unittest.TestCase):
             "match_tokens": ["rpcs3.exe"],
             "args": '--no-gui "%RPCS3_GAMEID%:%ps3_gameid%"',
             "save_strategy": "folder",
-            "save_directories": ["dev_hdd0\\home\\00000001\\savedata"],
+            "save_directories": ["dev_hdd0/home/00000001/savedata"],
             "state_directories": [],
         }
 

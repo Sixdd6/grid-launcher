@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from io import BytesIO
@@ -10,7 +11,6 @@ from urllib.error import HTTPError
 
 from grid_launcher.background.workers import (
     DetailsCloudRecordsWorker,
-    FlatpakInstallWorker,
     InstallDownloadWorker,
     InstallFinalizeWorker,
     MissingCoverReplenishWorker,
@@ -1710,68 +1710,46 @@ class MissingCoverReplenishWorkerTests(unittest.TestCase):
         self.assertEqual(len(finished), 1)
 
 
-class FlatpakInstallWorkerTests(unittest.TestCase):
-    def test_success_emits_empty_error(self) -> None:
-        results: list[object] = []
-        worker = FlatpakInstallWorker("org.ppsspp.PPSSPP")
-        worker.finished.connect(lambda value: results.append(value))
+class ArchivePathSuffixTests(unittest.TestCase):
+    def test_archive_path_preserves_appimage_full_name(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("cemu.zip"))
 
-        with patch("grid_launcher.background.workers.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-            worker.run()
+        upper = worker._archive_path_with_asset_suffix("Cemu-2.0-86-x86_64.AppImage")
+        self.assertEqual(upper.name, "Cemu-2.0-86-x86_64.AppImage")
 
-        self.assertEqual(results, [{"app_id": "org.ppsspp.PPSSPP", "error": ""}])
+        lower = worker._archive_path_with_asset_suffix("cemu-2.0-86-x86_64.appimage")
+        self.assertEqual(lower.name, "cemu-2.0-86-x86_64.appimage")
 
-    def test_nonzero_returncode_emits_stderr_as_error(self) -> None:
-        results: list[dict[str, str]] = []
-        worker = FlatpakInstallWorker("org.ppsspp.PPSSPP")
-        worker.finished.connect(lambda value: results.append(value))
+    def test_archive_path_replaces_suffix_for_non_appimage(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("retroarch.zip"))
 
-        with patch("grid_launcher.background.workers.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error msg")
-            worker.run()
+        sevenz = worker._archive_path_with_asset_suffix("retroarch-nightly-x64.7z")
+        self.assertEqual(sevenz.name, "retroarch.7z")
 
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["app_id"], "org.ppsspp.PPSSPP")
-        self.assertTrue(results[0]["error"])
+        targz = worker._archive_path_with_asset_suffix("retroarch-nightly-x64.tar.gz")
+        self.assertEqual(targz.name, "retroarch.gz")
 
-    def test_oserror_emits_error(self) -> None:
-        results: list[dict[str, str]] = []
-        worker = FlatpakInstallWorker("org.ppsspp.PPSSPP")
-        worker.finished.connect(lambda value: results.append(value))
+    def test_archive_path_handles_versioned_appimages_from_real_patterns(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("emu.zip"))
 
-        with patch(
-            "grid_launcher.background.workers.subprocess.run",
-            side_effect=OSError("flatpak not found"),
+        for asset_name in (
+            "pcsx2-v1.7.5247-linux-appimage-x64-Qt.AppImage",
+            "rpcs3-v0.0.30-16321_linux64.AppImage",
+            "PPSSPP-v1.17.1-anylinux-x86_64.AppImage",
         ):
-            worker.run()
+            with self.subTest(asset_name=asset_name):
+                result = worker._archive_path_with_asset_suffix(asset_name)
+                self.assertEqual(result.name, asset_name)
 
-        self.assertEqual(len(results), 1)
-        self.assertTrue(results[0]["error"])
+    def test_supplemental_archive_path_preserves_appimage_name(self) -> None:
+        worker = InstallDownloadWorker("", {}, Path("emu.zip"))
+        primary = Path("/tmp/cemu.AppImage")
 
-    def test_uses_correct_cli_args(self) -> None:
-        worker = FlatpakInstallWorker("org.ppsspp.PPSSPP")
+        appimage = worker._supplemental_archive_path(primary, 1, "firmware-v2.0.AppImage")
+        self.assertEqual(appimage.name, "cemu-supplemental-1-firmware-v2.0.AppImage")
 
-        with patch("grid_launcher.background.workers.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-            worker.run()
-
-        args, kwargs = mock_run.call_args
-        self.assertEqual(
-            args[0],
-            ["flatpak", "install", "--noninteractive", "flathub", "org.ppsspp.PPSSPP"],
-        )
-        self.assertNotEqual(kwargs.get("shell"), True)
-
-    def test_uses_custom_flatpak_binary(self) -> None:
-        worker = FlatpakInstallWorker("org.ppsspp.PPSSPP", flatpak_binary="/usr/local/bin/flatpak")
-
-        with patch("grid_launcher.background.workers.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
-            worker.run()
-
-        args, _ = mock_run.call_args
-        self.assertEqual(args[0][0], "/usr/local/bin/flatpak")
+        other = worker._supplemental_archive_path(primary, 2, "extra-data.7z")
+        self.assertEqual(other.name, "cemu-supplemental-2.7z")
 
 
 if __name__ == "__main__":

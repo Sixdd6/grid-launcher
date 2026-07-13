@@ -30,16 +30,13 @@ from .launch import (
     strip_wrapping_quotes,
     validate_launch_placeholders,
 )
-from .detection import (
-    detect_installed_flatpak_emulators,
-    installed_flatpak_app_ids,
-)
 from .profiles import (
     default_emulator_autoprofiles,
     emulator_autoprofiles_path,
     emulator_entry_matches_tokens,
     emulator_profile_for_entry,
     emulator_profile_for_game,
+    is_available_on_current_platform,
     load_emulator_autoprofiles,
     matching_platforms_for_emulator_keywords,
     normalize_emulator_autoprofiles,
@@ -198,9 +195,7 @@ __all__ = [
     "available_emulator_name_for_platform",
     "cloud_save_block_reason_for_game",
     "cloud_save_scope_for_game",
-    "detect_installed_flatpak_emulators",
     "detect_umu_run",
-    "installed_flatpak_app_ids",
     "azahar_directory_settings",
     "azahar_save_path_overrides",
     "azahar_state_path_overrides",
@@ -275,6 +270,7 @@ __all__ = [
     "emulator_profile_for_game",
     "install_block_reason_for_game",
     "is_arcade_platform",
+    "is_available_on_current_platform",
     "is_emulators_platform",
     "is_native_executable_platform",
     "is_ps3_emulator_entry",

@@ -531,9 +531,9 @@ def _extract_7z_with_fallbacks(archive_path: Path, extracted_dir: Path) -> None:
     error_message = (
         f"Cannot extract this archive: 7-Zip was not found on this system. {fallback_note}\n\n"
         "To fix this:\n"
-        "  • Linux (Debian/Ubuntu): sudo apt install p7zip-full\n"
-        "  • Linux (Fedora/RHEL):   sudo dnf install p7zip p7zip-plugins\n"
-        "  • Linux (Arch):          sudo pacman -S p7zip\n"
+        "  • Linux (Debian/Ubuntu): sudo apt install 7zip\n"
+        "  • Linux (Fedora/RHEL):   sudo dnf install 7zip\n"
+        "  • Linux (Arch):          sudo pacman -S 7zip\n"
         "  • macOS:                 brew install sevenzip\n"
         "  • Windows:               restart the app to re-download the bundled 7-Zip"
     )
@@ -544,6 +544,7 @@ def extract_archive_into_directory(
     archive_path: Path,
     extracted_dir: Path,
     install_progress_callback: Callable[[int, int], None] | None = None,
+    flatten_single_subdir: bool = False,
 ) -> None:
     if extracted_dir.exists():
         if extracted_dir.is_dir():
@@ -592,9 +593,20 @@ def extract_archive_into_directory(
                 if install_progress_callback is not None:
                     install_progress_callback(installed_bytes, total_install_bytes)
                 for member in members:
-                    archive.extract(member, extracted_dir)
                     if member.is_dir():
+                        # Create directory with normalized name
+                        normalized_name = member.filename.replace("\\", "/").rstrip("/")
+                        if normalized_name:
+                            (extracted_dir / normalized_name).mkdir(parents=True, exist_ok=True)
                         continue
+                    # Normalize path separators for cross-platform compatibility
+                    normalized_name = member.filename.replace("\\", "/")
+                    if normalized_name != member.filename:
+                        normalized_path = extracted_dir / normalized_name
+                        normalized_path.parent.mkdir(parents=True, exist_ok=True)
+                        normalized_path.write_bytes(archive.read(member))
+                    else:
+                        archive.extract(member, extracted_dir)
                     installed_bytes += max(0, int(member.file_size))
                     if install_progress_callback is not None:
                         install_progress_callback(installed_bytes, total_install_bytes)
@@ -627,6 +639,27 @@ def extract_archive_into_directory(
     except (OSError, zipfile.BadZipFile):
         shutil.rmtree(extracted_dir, ignore_errors=True)
         raise
+
+    if flatten_single_subdir:
+        _flatten_single_subdirectory(extracted_dir)
+
+
+def _flatten_single_subdirectory(extracted_dir: Path) -> None:
+    """If the extracted directory contains exactly one nested directory, move its
+    contents up one level and remove the now-empty subdirectory."""
+    try:
+        entries = list(extracted_dir.iterdir())
+    except OSError:
+        return
+    if len(entries) != 1 or not entries[0].is_dir():
+        return
+    nested_dir = entries[0]
+    try:
+        for item in list(nested_dir.iterdir()):
+            shutil.move(str(item), str(extracted_dir / item.name))
+        nested_dir.rmdir()
+    except OSError:
+        return
 
 
 def apply_ps4_content_archive_without_ui(

@@ -267,9 +267,6 @@ def cemu_settings_path_candidates(emulator_path_text: str) -> list[Path]:
                 candidates.append(Path(env_value).expanduser() / "Cemu" / "settings.xml")
     else:
         candidates.append(xdg_config_home() / "Cemu" / "settings.xml")
-        candidates.append(
-            Path.home() / ".var" / "app" / "info.cemu.Cemu" / "config" / "Cemu" / "settings.xml"
-        )
 
     return _unique_paths(candidates)
 

@@ -137,12 +137,16 @@ class InstallDownloadWorker(QObject):
             self._download_to_path(download_url, supplemental_path)
 
     def _supplemental_archive_path(self, primary_archive_path: Path, index: int, asset_name: str) -> Path:
+        if asset_name.lower().endswith(".appimage"):
+            return primary_archive_path.with_name(f"{primary_archive_path.stem}-supplemental-{index}-{asset_name}")
         suffix = Path(asset_name).suffix or primary_archive_path.suffix or ".zip"
         return primary_archive_path.with_name(f"{primary_archive_path.stem}-supplemental-{index}{suffix}")
 
     def _archive_path_with_asset_suffix(self, asset_name: str) -> Path:
         if not asset_name:
             return self.archive_path
+        if asset_name.lower().endswith(".appimage"):
+            return self.archive_path.with_name(asset_name)
         suffix = Path(asset_name).suffix
         if not suffix:
             return self.archive_path
@@ -633,31 +637,6 @@ class InstallFinalizeWorker(QObject):
 
     def _emit_progress(self, installed_bytes: int, total_bytes: int) -> None:
         self.progress.emit({"installed": max(0, installed_bytes), "total": max(0, total_bytes)})
-
-
-class FlatpakInstallWorker(QObject):
-    finished = Signal(object)  # {"app_id": str, "error": str}
-
-    def __init__(self, app_id: str, *, flatpak_binary: str = "flatpak") -> None:
-        super().__init__()
-        self.app_id = app_id.strip()
-        self.flatpak_binary = flatpak_binary.strip() or "flatpak"
-
-    def run(self) -> None:
-        try:
-            result = subprocess.run(
-                [self.flatpak_binary, "install", "--noninteractive", "flathub", self.app_id],
-                capture_output=True,
-                text=True,
-            )
-            if result.returncode != 0:
-                error_text = (result.stderr.strip() or result.stdout.strip() or
-                              f"flatpak install exited with code {result.returncode}")
-                self.finished.emit({"app_id": self.app_id, "error": error_text})
-            else:
-                self.finished.emit({"app_id": self.app_id, "error": ""})
-        except OSError as exc:
-            self.finished.emit({"app_id": self.app_id, "error": str(exc)})
 
 
 class AutoCloudSaveUploadWorker(QObject):

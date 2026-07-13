@@ -230,6 +230,9 @@ def theme_stylesheet(colors: Mapping[str, str] | None) -> str:
         QCheckBox {{
             color: {resolved_colors['text']};
         }}
+        QRadioButton {{
+            color: {resolved_colors['text']};
+        }}
         QPushButton {{
             background-color: {resolved_colors['surface']};
             color: {resolved_colors['text']};

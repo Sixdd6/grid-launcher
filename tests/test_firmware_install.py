@@ -66,14 +66,12 @@ class FirmwareRoutingTests(unittest.TestCase):
         self.assertEqual(result, [Path("/gc/jap"), Path("/gc/usa")])
 
     def test_resolve_ntsc_goes_to_jap_and_usa(self) -> None:
-        profile_path = Path(__file__).resolve().parent.parent / "emulator-autoprofiles.json"
-        profiles = json.loads(profile_path.read_text(encoding="utf-8"))
-        dolphin_profile = next(p for p in profiles if p.get("name") == "Dolphin")
-
+        # GameCube region routing: an NTSC firmware file must land in both the
+        # JAP and USA system directories. This asserts the routing logic only
+        # and intentionally does not depend on any emulator autoprofile.
         routed_targets = [
-            (Path(entry["path"]), entry["match"])
-            for entry in dolphin_profile.get("firmware_directories", [])
-            if isinstance(entry, dict) and entry.get("path") and entry.get("match")
+            (Path("Sys/GC/JAP"), ["ntsc"]),
+            (Path("Sys/GC/USA"), ["ntsc"]),
         ]
 
         result = resolve_firmware_targets("gc-ntsc.zip", routed_targets)
@@ -142,11 +140,11 @@ class EdenFirmwareRoutingTests(unittest.TestCase):
 
     def test_eden_keys_zip_routes_to_keys_dir(self) -> None:
         result = resolve_firmware_targets("switch-keys.zip", self.routed_targets)
-        self.assertEqual(result, [Path("user\\keys")])
+        self.assertEqual(result, [Path("user/keys")])
 
     def test_eden_firmware_zip_routes_to_registered_dir(self) -> None:
         result = resolve_firmware_targets("switch-firmware.zip", self.routed_targets)
-        self.assertEqual(result, [Path("user\\nand\\system\\Contents\\registered")])
+        self.assertEqual(result, [Path("user/nand/system/Contents/registered")])
 
     def test_eden_unrelated_file_routes_to_neither(self) -> None:
         result = resolve_firmware_targets("something-else.bin", self.routed_targets)
@@ -154,7 +152,7 @@ class EdenFirmwareRoutingTests(unittest.TestCase):
 
     def test_eden_firmware_routing_is_case_insensitive(self) -> None:
         result = resolve_firmware_targets("Switch-Keys.ZIP", self.routed_targets)
-        self.assertEqual(result, [Path("user\\keys")])
+        self.assertEqual(result, [Path("user/keys")])
 
 
 class XemuFirmwareRoutingTests(unittest.TestCase):
@@ -1023,6 +1021,73 @@ class Ps3FirmwareDirectDownloadTests(unittest.TestCase):
             warnings = download_ps3_firmware_direct([], skip_existing=False)
         mock_open.assert_not_called()
         self.assertEqual(warnings, [])
+
+
+class FirmwareExtractWindowsPathsOnLinuxTests(unittest.TestCase):
+    @staticmethod
+    def _zip_bytes(members: dict[str, bytes]) -> Path:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as zf:
+            for name, payload in members.items():
+                zf.writestr(name, payload)
+        return buffer.getvalue()
+
+    def _write_zip(self, tmp: Path, members: dict[str, bytes]) -> Path:
+        archive_path = tmp / "firmware.zip"
+        archive_path.write_bytes(self._zip_bytes(members))
+        return archive_path
+
+    def test_backslash_member_is_normalized_to_subdir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp = Path(temp_dir)
+            archive_path = self._write_zip(tmp, {"user\\keys\\prod.keys": b"KEYDATA"})
+            extracted_dir = tmp / "extracted"
+
+            extract_archive_into_directory(archive_path, extracted_dir)
+
+            self.assertTrue((extracted_dir / "user" / "keys" / "prod.keys").exists())
+            self.assertFalse((extracted_dir / "user\\keys\\prod.keys").exists())
+            self.assertEqual(
+                (extracted_dir / "user" / "keys" / "prod.keys").read_bytes(),
+                b"KEYDATA",
+            )
+
+    def test_nested_backslash_paths_create_subdirectories(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp = Path(temp_dir)
+            archive_path = self._write_zip(
+                tmp,
+                {
+                    "user\\nand\\system\\Contents\\registered\\fw.nca": b"FWDATA",
+                    "user\\keys\\prod.keys": b"KEYDATA",
+                },
+            )
+            extracted_dir = tmp / "extracted"
+
+            extract_archive_into_directory(archive_path, extracted_dir)
+
+            registered = extracted_dir / "user" / "nand" / "system" / "Contents" / "registered"
+            self.assertTrue(registered.is_dir())
+            self.assertEqual((registered / "fw.nca").read_bytes(), b"FWDATA")
+            self.assertTrue((extracted_dir / "user" / "keys").is_dir())
+            self.assertEqual(
+                (extracted_dir / "user" / "keys" / "prod.keys").read_bytes(),
+                b"KEYDATA",
+            )
+
+    def test_forward_slash_members_are_unaffected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp = Path(temp_dir)
+            archive_path = self._write_zip(tmp, {"user/keys/prod.keys": b"KEYDATA"})
+            extracted_dir = tmp / "extracted"
+
+            extract_archive_into_directory(archive_path, extracted_dir)
+
+            self.assertTrue((extracted_dir / "user" / "keys" / "prod.keys").exists())
+            self.assertEqual(
+                (extracted_dir / "user" / "keys" / "prod.keys").read_bytes(),
+                b"KEYDATA",
+            )
 
 
 if __name__ == "__main__":

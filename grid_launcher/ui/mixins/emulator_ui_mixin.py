@@ -42,7 +42,6 @@ from grid_launcher.emulator import (
     apply_manual_emulator_profile_defaults,
     assign_profile_platform_defaults,
     default_emulator_autoprofiles,
-    detect_installed_flatpak_emulators,
     emulator_autoprofiles_path,
     emulator_install_directory,
     emulator_profile_for_entry,
@@ -59,6 +58,7 @@ from grid_launcher.emulator import (
     ensure_rpcs3_settings,
     ensure_xemu_settings,
     installed_retroarch_core_ids,
+    is_available_on_current_platform,
     load_emulator_autoprofiles as resolve_emulator_autoprofiles,
     load_retroarch_compatibility_map,
     normalize_emulator_autoprofiles,
@@ -93,7 +93,6 @@ from grid_launcher.ui import (
 )
 from grid_launcher.ui.emulators import (
     available_source_download_emulator_entries,
-    flatpak_installable_emulator_entries,
     save_button_label,
     source_download_emulator_entries,
     source_entry_label,
@@ -366,8 +365,6 @@ class EmulatorUIMixin:
         self,
         emulator_name: str,
         emulator_path_text: str,
-        *,
-        flatpak_config_root: str = "",
     ) -> None:
         timing_start = getattr(self, "_debug_timing_start", None)
         timing_end = getattr(self, "_debug_timing_end", None)
@@ -430,7 +427,7 @@ class EmulatorUIMixin:
             self._trigger_rpcs3_firmware_download_background(emulator_entry, path_text)
         if self._is_ppsspp_emulator_name(emulator_name, emulator_entry):
             ensure_ppsspp_settings(
-                flatpak_config_root.strip() or path_text,
+                path_text,
                 retroachievements_username=ra_username,
                 retroachievements_token=ra_token,
             )
@@ -465,7 +462,7 @@ class EmulatorUIMixin:
             self._normalize_ignore_extension_value,
         )
         self.emulator_autoprofiles = profiles
-        return profiles
+        return [profile for profile in profiles if is_available_on_current_platform(profile)]
 
     def _retroarch_core_list_path(self) -> Path:
         return retroarch_core_list_path(grid_launcher_share_dir(Path(__file__).resolve().parents[3]))
@@ -538,16 +535,11 @@ class EmulatorUIMixin:
 
         emulator_path_value = emulator_entry.get("path", "")
         emulator_path_text = emulator_path_value.strip() if isinstance(emulator_path_value, str) else ""
-        flatpak_cores_dir_value = emulator_entry.get("flatpak_cores_dir", "")
-        flatpak_cores_dir = flatpak_cores_dir_value.strip() if isinstance(flatpak_cores_dir_value, str) else ""
 
-        cache_key = flatpak_cores_dir if flatpak_cores_dir else emulator_path_text
+        cache_key = emulator_path_text
         if cache_key in self._retroarch_core_ids_cache:
             return self._retroarch_core_ids_cache[cache_key]
-        result = installed_retroarch_core_ids(
-            emulator_path_text,
-            cores_dir=flatpak_cores_dir if flatpak_cores_dir else None,
-        )
+        result = installed_retroarch_core_ids(emulator_path_text)
         self._retroarch_core_ids_cache[cache_key] = result
         return result
 
@@ -659,10 +651,12 @@ class EmulatorUIMixin:
             accent_color = theme_color("accent", "#8be9fd")
             text_color = theme_color("text", "#f8f8f2")
             error_color = theme_color("error", "#ff5555")
+            muted_color = theme_color("muted", "#9baed6")
         else:
             accent_color = "#8be9fd"
             text_color = "#f8f8f2"
             error_color = "#ff5555"
+            muted_color = "#9baed6"
 
         themed_svg_icon_fn = getattr(self, "_themed_svg_icon", None)
         if not callable(themed_svg_icon_fn):
@@ -720,7 +714,7 @@ class EmulatorUIMixin:
                 )
                 azahar_note.setObjectName("azaharControllerNote")
                 azahar_note.setWordWrap(True)
-                azahar_note.setStyleSheet("color: palette(mid); font-size: 10px; padding: 1px 0;")
+                azahar_note.setStyleSheet(f"color: {muted_color}; font-size: 10px; padding: 1px 0;")
                 outer_layout.addWidget(azahar_note)
 
             if self._is_eden_emulator_name(entry.get("name", ""), entry):
@@ -729,7 +723,7 @@ class EmulatorUIMixin:
                 )
                 eden_note.setObjectName("edenControllerNote")
                 eden_note.setWordWrap(True)
-                eden_note.setStyleSheet("color: palette(mid); font-size: 10px; padding: 1px 0;")
+                eden_note.setStyleSheet(f"color: {muted_color}; font-size: 10px; padding: 1px 0;")
                 outer_layout.addWidget(eden_note)
 
                 path_value = entry.get("path", "")
@@ -740,7 +734,7 @@ class EmulatorUIMixin:
                     )
                     keys_note.setObjectName("edenKeysNote")
                     keys_note.setWordWrap(True)
-                    keys_note.setStyleSheet("color: palette(mid); font-size: 10px; padding: 1px 0;")
+                    keys_note.setStyleSheet(f"color: {muted_color}; font-size: 10px; padding: 1px 0;")
                     outer_layout.addWidget(keys_note)
 
                 if not eden_has_firmware(path_text):
@@ -749,7 +743,7 @@ class EmulatorUIMixin:
                     )
                     firmware_note.setObjectName("edenFirmwareNote")
                     firmware_note.setWordWrap(True)
-                    firmware_note.setStyleSheet("color: palette(mid); font-size: 10px; padding: 1px 0;")
+                    firmware_note.setStyleSheet(f"color: {muted_color}; font-size: 10px; padding: 1px 0;")
                     outer_layout.addWidget(firmware_note)
 
             if self._is_xemu_emulator_name(entry.get("name", ""), entry):
@@ -758,14 +752,25 @@ class EmulatorUIMixin:
                 )
                 xemu_note.setObjectName("xemuControllerNote")
                 xemu_note.setWordWrap(True)
-                xemu_note.setStyleSheet("color: palette(mid); font-size: 10px; padding: 1px 0;")
+                xemu_note.setStyleSheet(f"color: {muted_color}; font-size: 10px; padding: 1px 0;")
                 outer_layout.addWidget(xemu_note)
 
+            if self._is_duckstation_emulator_name(entry.get("name", ""), entry):
+                duckstation_note = QLabel(
+                    "RetroAchievements: Configure login via Emulator Settings \u2192 Achievements (tokens are machine-encrypted)"
+                )
+                duckstation_note.setObjectName("duckstationRetroAchievementsNote")
+                duckstation_note.setWordWrap(True)
+                duckstation_note.setStyleSheet(f"color: {muted_color}; font-size: 10px; padding: 1px 0;")
+                outer_layout.addWidget(duckstation_note)
+
             if self._is_rpcs3_emulator_name(entry.get("name", "")):
-                rpcs3_controller_note = QLabel("Must setup controller after install")
+                rpcs3_controller_note = QLabel(
+                    "Controller setup: Configure controllers via Config \u2192 Pads"
+                )
                 rpcs3_controller_note.setObjectName("rpcs3ControllerNote")
                 rpcs3_controller_note.setWordWrap(True)
-                rpcs3_controller_note.setStyleSheet("color: palette(mid); font-size: 10px; padding: 1px 0;")
+                rpcs3_controller_note.setStyleSheet(f"color: {muted_color}; font-size: 10px; padding: 1px 0;")
                 outer_layout.addWidget(rpcs3_controller_note)
 
                 path_value = entry.get("path", "")
@@ -774,7 +779,7 @@ class EmulatorUIMixin:
                 if pup_path is not None:
                     fw_note = QLabel("PS3 firmware downloaded \u2014 click Install to activate it.")
                     fw_note.setWordWrap(True)
-                    fw_note.setStyleSheet("color: palette(mid); font-size: 10px; padding: 1px 0;")
+                    fw_note.setStyleSheet(f"color: {muted_color}; font-size: 10px; padding: 1px 0;")
                     outer_layout.addWidget(fw_note)
 
                     fw_row = QHBoxLayout()
@@ -989,13 +994,6 @@ class EmulatorUIMixin:
             installed_emulator_names=installed_emulator_names,
             installed_source_ids=installed_source_ids,
         )
-        if sys.platform.startswith("linux"):
-            flatpak_rows = flatpak_installable_emulator_entries(
-                self.config.get("emulator_autoprofiles", []),
-                installed_names=installed_emulator_names,
-                current_platform=sys.platform,
-            )
-            source_rows = list(source_rows) + list(flatpak_rows)
         return source_rows
 
     def _source_download_entry_from_metadata(
@@ -1211,12 +1209,9 @@ class EmulatorUIMixin:
         labels = []
         for row in source_rows:
             label_prefix = source_entry_label(row)
-            if label_prefix == "[Flatpak]":
-                labels.append(f"[Flatpak] {row['name']} ({row['app_id']})")
-            else:
-                labels.append(
-                    f"{label_prefix} {row['name']} - {row['source_id']} ({row['release_tag']})"
-                )
+            labels.append(
+                f"{label_prefix} {row['name']} - {row['source_id']} ({row['release_tag']})"
+            )
         selected_label, ok = QInputDialog.getItem(
             self,
             "Download Supported Emulator",
@@ -1233,12 +1228,7 @@ class EmulatorUIMixin:
             return
 
         selected_entry = source_rows[selected_index]
-        install_mode = (
-            "flatpak_emulator"
-            if selected_entry.get("provider") == "flatpak"
-            else "source_emulator"
-        )
-        install_game = self._build_source_emulator_install_game(selected_entry, install_mode)
+        install_game = self._build_source_emulator_install_game(selected_entry, "source_emulator")
         self._start_async_install(install_game)
 
     def _start_source_emulator_update_at_index(self, index: int) -> None:
@@ -1794,128 +1784,6 @@ class EmulatorUIMixin:
 
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
-
-    def _migrate_flatpak_retroarch_cores_dir(self) -> None:
-        """One-time backfill for configs saved before flatpak_cores_dir was
-        preserved. Older entries have flatpak_app_id set but no flatpak_cores_dir,
-        which left the default emulator dropdown empty on Linux."""
-        cores_dir = "~/.var/app/org.libretro.RetroArch/config/retroarch/cores"
-        modified = False
-        for entry in self.config.get("emulators", []):
-            if not isinstance(entry, dict):
-                continue
-            if entry.get("flatpak_app_id") != "org.libretro.RetroArch":
-                continue
-            if str(entry.get("flatpak_cores_dir", "")).strip():
-                continue
-            entry["flatpak_cores_dir"] = cores_dir
-            modified = True
-        if modified:
-            self._save_config(self.config)
-
-    def _trigger_flatpak_emulator_detection_background(self) -> None:
-        """Detect installed Flatpak emulators in the background and auto-add any
-        not already configured. No-op on non-Linux (detection.py already no-ops,
-        but skip thread creation entirely here as a fast path)."""
-        if not sys.platform.startswith("linux"):
-            return
-
-        autoprofiles = self._emulator_autoprofiles()
-        existing_emulators = self._emulators()
-        known_app_ids = {
-            str(entry.get("flatpak_app_id", "")).strip()
-            for entry in existing_emulators
-            if isinstance(entry, dict) and str(entry.get("flatpak_app_id", "")).strip()
-        }
-        known_names = {
-            str(entry.get("name", "")).strip().casefold()
-            for entry in existing_emulators
-            if isinstance(entry, dict) and str(entry.get("name", "")).strip()
-        }
-
-        def _worker() -> None:
-            detected = detect_installed_flatpak_emulators(autoprofiles)
-            new_entries = [
-                entry for entry in detected
-                if isinstance(entry, dict)
-                and str(entry.get("flatpak_app_id", "")).strip() not in known_app_ids
-                and str(entry.get("name", "")).strip().casefold() not in known_names
-            ]
-            if new_entries:
-                self._flatpak_detection_completed.emit(new_entries)
-
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def _on_flatpak_detection_completed(self, new_entries: list) -> None:
-        """Main-thread slot: adds newly detected Flatpak emulators to the config,
-        applies profile defaults, triggers config sync, and refreshes the UI."""
-        if not new_entries:
-            return
-
-        emulators = self._emulators()
-        autoprofiles = self._emulator_autoprofiles()
-        added_names: list[str] = []
-
-        for detected_entry in new_entries:
-            if not isinstance(detected_entry, dict):
-                continue
-
-            entry = dict(detected_entry)
-            flatpak_config_root = str(entry.pop("_flatpak_config_root", "")).strip()
-
-            entry = apply_manual_emulator_profile_defaults(
-                entry,
-                autoprofiles,
-                emulator_profile_for_entry=emulator_profile_for_entry,
-                normalize_save_strategy_value=self._normalize_save_strategy_value,
-            )
-
-            entry_name = str(entry.get("name", "")).strip()
-            entry_path = str(entry.get("path", "")).strip()
-            if not entry_name or not entry_path:
-                continue
-
-            self._ensure_emulator_sync_settings(
-                entry_name, entry_path, flatpak_config_root=flatpak_config_root
-            )
-
-            emulators = upsert_emulator_entry(emulators, entry, -1)
-
-            profile = self._emulator_profile_for_entry(entry)
-            if isinstance(profile, dict):
-                new_defaults, new_core_defaults = assign_profile_platform_defaults(
-                    None,
-                    entry_name,
-                    profile,
-                    self._normalize_default_emulators(self.config.get("default_emulators", {})),
-                    self._normalize_default_retroarch_cores(self.config.get("default_retroarch_cores", {})),
-                    is_retroarch_emulator_name=self._is_retroarch_emulator_name,
-                    default_assignable_server_platforms=self._default_assignable_server_platforms,
-                    installed_retroarch_cores_for_platform=self._installed_retroarch_cores_for_platform,
-                    matching_platforms_for_emulator_keywords=self._matching_platforms_for_emulator_keywords,
-                    dolphin_variant_label_for_game=self._dolphin_variant_label_for_game,
-                    dolphin_target_platforms_for_variant=self._dolphin_target_platforms_for_variant,
-                )
-                self.config["default_emulators"] = new_defaults
-                self.config["default_retroarch_cores"] = new_core_defaults
-
-            added_names.append(entry_name)
-
-        if not added_names:
-            return
-
-        self.config["emulators"] = self._normalize_emulators(emulators)
-        self._refresh_emulator_views()
-        self._save_config(self.config)
-
-        label = "emulator" if len(added_names) == 1 else "emulators"
-        self._show_toast({
-            "message": f"Detected {len(added_names)} installed Flatpak {label}: {', '.join(added_names)}.",
-            "level": "success",
-        })
-
-        for emulator_name in added_names:
-            self._trigger_firmware_install_for_source_emulator(emulator_name)
 
     def _backfill_missing_emulator_defaults(self) -> None:
         """Assign platform defaults for every registered emulator that is still

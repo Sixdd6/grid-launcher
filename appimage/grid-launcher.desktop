@@ -6,3 +6,5 @@ Exec=grid-launcher
 Icon=grid-launcher
 Categories=Game;Utility;
 Terminal=false
+X-AppImage-Version=%GRIDLAUNCHER_VERSION%
+X-AppImage-UpdateInformation=gh-releases-zsync|six-gaming|grid-launcher|latest|grid-launcher-*-x86_64.AppImage.zsync

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sys
 from pathlib import Path
+
+from grid_launcher.core.path import xdg_config_home, xdg_data_home
+
+_logger = logging.getLogger(__name__)
 
 
 def retroarch_core_list_path(base_path: Path) -> Path:
@@ -141,13 +146,22 @@ def retroarch_config_path_candidates(emulator_path_text: str) -> list[Path]:
 
     candidates: list[Path] = []
     seen: set[str] = set()
+
+    def add_candidate(candidate: Path) -> None:
+        key_value = str(candidate).casefold()
+        if key_value in seen:
+            return
+        seen.add(key_value)
+        candidates.append(candidate)
+
     for root in search_roots:
-        for candidate in (root / "retroarch.cfg", root / "config" / "retroarch.cfg"):
-            key_value = str(candidate).casefold()
-            if key_value in seen:
-                continue
-            seen.add(key_value)
-            candidates.append(candidate)
+        add_candidate(root / "retroarch.cfg")
+        add_candidate(root / "config" / "retroarch.cfg")
+
+    for xdg_root in (xdg_config_home() / "retroarch", xdg_data_home() / "retroarch"):
+        add_candidate(xdg_root / "retroarch.cfg")
+    add_candidate(Path.home() / ".config" / "retroarch" / "retroarch.cfg")
+
     return candidates
 
 
@@ -228,6 +242,10 @@ def ensure_retroarch_save_location_settings(
 
     result = dict(settings)
     if not config_candidates:
+        _logger.warning(
+            "RetroArch config not found for %r; searched relative and XDG paths (~/.config/retroarch/retroarch.cfg)",
+            emulator_path_text,
+        )
         result["changed"] = False
         return result
 
