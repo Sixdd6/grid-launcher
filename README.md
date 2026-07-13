@@ -3,7 +3,7 @@ Game Repository Interface & Downloader — A launcher for RomM.
 
 Please be aware that this application is created using AI tools/coding, if this is a problem for you I invite you to make your own.
 
-[![Latest Build](https://github.com/Sixdd6/rom-mate-neo/actions/workflows/pyinstaller-windows.yml/badge.svg)](https://github.com/Sixdd6/rom-mate-neo/actions/workflows/pyinstaller-windows.yml)
+[![Windows Build](https://github.com/Sixdd6/grid-launcher/actions/workflows/pyinstaller-windows.yml/badge.svg)](https://github.com/Sixdd6/grid-launcher/actions/workflows/pyinstaller-windows.yml) [![AppImage Build](https://github.com/Sixdd6/grid-launcher/actions/workflows/appimage-linux.yml/badge.svg)](https://github.com/Sixdd6/grid-launcher/actions/workflows/appimage-linux.yml)
 
 ## Desktop Mode Screenshots
 
