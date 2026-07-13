@@ -51,3 +51,6 @@ skills/
 #graphify
 graphify-out/
 .graphify-out/
+
+# AppImage build artifacts
+AppDir/
