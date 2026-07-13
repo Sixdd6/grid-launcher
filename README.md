@@ -5,7 +5,8 @@ Please be aware that this application is created using AI tools/coding, if this 
 
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/sixdd6/grid-launcher/total)
 ![GitHub Release](https://img.shields.io/github/v/release/sixdd6/grid-launcher)
-[![Windows Build](https://github.com/Sixdd6/grid-launcher/actions/workflows/pyinstaller-windows.yml/badge.svg)](https://github.com/Sixdd6/grid-launcher/actions/workflows/pyinstaller-windows.yml) [![AppImage Build](https://github.com/Sixdd6/grid-launcher/actions/workflows/appimage-linux.yml/badge.svg)](https://github.com/Sixdd6/grid-launcher/actions/workflows/appimage-linux.yml)
+[![Windows Build](https://github.com/Sixdd6/grid-launcher/actions/workflows/pyinstaller-windows.yml/badge.svg)](https://github.com/Sixdd6/grid-launcher/actions/workflows/pyinstaller-windows.yml) [![AppImage Build](https://github.com/Sixdd6/grid-launcher/actions/workflows/appimage-linux.yml/badge.svg)](https://github.com/Sixdd6/grid-launcher/actions/workflows/appimage-linux.yml) [![Static Badge](https://img.shields.io/badge/wiki-documentation)](https://github.com/Sixdd6/grid-launcher/wiki)
+
 
 ## Desktop Mode Screenshots
 
