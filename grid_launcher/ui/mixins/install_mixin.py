@@ -874,6 +874,39 @@ class InstallMixin:
         return platform_library_dir / safe_title
 
 
+    def _multi_file_rom_content_entries(self, rom_id: str) -> list[dict[str, Any]]:
+        payload = self._fetch_server_rom_payload(rom_id)
+        entries: list[dict[str, Any]] = []
+        if not isinstance(payload, dict):
+            return entries
+        files_val = payload.get("files")
+        if not isinstance(files_val, list):
+            return entries
+        for entry in files_val:
+            if not isinstance(entry, dict):
+                continue
+            entry_name = entry.get("file_name") or entry.get("filename")
+            if not isinstance(entry_name, str) or not entry_name:
+                continue
+            # game.json is handled separately by _fetch_windows_game_json.
+            if entry_name.casefold() == "game.json":
+                continue
+            # Skip files that live in a subfolder; only top-level entries
+            # are valid download candidates.
+            if "/" in entry_name or "\\" in entry_name:
+                continue
+            entries.append(entry)
+        return entries
+
+
+    def _select_multi_file_launch_entry(self, entries: list[dict[str, Any]]) -> dict[str, Any]:
+        for entry in entries:
+            entry_name = str(entry.get("file_name") or entry.get("filename") or "")
+            if entry_name.casefold().endswith(".m3u"):
+                return entry
+        return entries[0]
+
+
     def _fetch_windows_game_json(self, game: dict[str, str], game_home_dir: Path) -> None:
         rom_id = game.get("rom_id", "").strip()
         if not rom_id:
@@ -1204,6 +1237,19 @@ class InstallMixin:
         archive_name_value = install_game.get("_archive_name_override", "")
         archive_name_override = archive_name_value.strip() if isinstance(archive_name_value, str) else ""
         archive_name = nested_file_name or archive_name_override or self._archive_name_for_game(install_game)
+        rom_id_path = quote(rom_id, safe="")
+        extra_downloads: list[tuple[str, Path]] = []
+        multi_file_entries: list[dict[str, Any]] = []
+        if (
+            not is_ps4_content_install
+            and not is_xbox360_content_install
+            and not self._is_native_executable_platform(install_game)
+        ):
+            # Folder-backed ROMs (e.g. multi-disc PS1 games stored as
+            # Disc1.chd/Disc2.chd/game.m3u) must be downloaded file-by-file into
+            # their own folder; requesting the content endpoint without file_ids
+            # makes the server bundle every file into a single response.
+            multi_file_entries = self._multi_file_rom_content_entries(rom_id)
         if self._is_native_executable_platform(install_game):
             game_home_dir = self._game_home_dir_for_game(install_game)
             if game_home_dir is None:
@@ -1216,55 +1262,88 @@ class InstallMixin:
                 return False
             install_game["native_game_dir"] = str(game_home_dir)
             archive_path = game_home_dir / archive_name
+        elif len(multi_file_entries) > 1:
+            game_home_dir = None
+            multi_file_dir = self._game_home_dir_for_game(install_game)
+            if multi_file_dir is None:
+                QMessageBox.warning(self, "Install Error", "Set a Library Path in Settings before installing games.")
+                return False
+            try:
+                multi_file_dir.mkdir(parents=True, exist_ok=True)
+            except OSError as error:
+                QMessageBox.warning(self, "Install Error", f"Could not prepare library folder: {error}")
+                return False
+            install_game["multi_file_game_dir"] = str(multi_file_dir)
+            launch_entry = self._select_multi_file_launch_entry(multi_file_entries)
+            launch_name = str(launch_entry.get("file_name") or launch_entry.get("filename") or "")
+            install_game["rom_file_name"] = launch_name
+            archive_path = multi_file_dir / launch_name
         else:
             game_home_dir = None
             archive_path = install_path / archive_name
-        rom_id_path = quote(rom_id, safe="")
-        file_name_path = quote(self._server_content_file_name_for_game(install_game), safe="")
-        download_url = f"{base_url}/api/roms/{rom_id_path}/content/{file_name_path}"
         native_file_id_set = False
-        file_ids_csv_value = install_game.get("_ps4_file_ids_csv", "")
-        file_ids_csv = file_ids_csv_value.strip() if isinstance(file_ids_csv_value, str) else ""
-        if file_ids_csv:
-            download_url = f"{download_url}?{urlencode({'file_ids': file_ids_csv})}"
+        if game_home_dir is None and len(multi_file_entries) > 1:
+            download_url = (
+                f"{base_url}/api/roms/{rom_id_path}/content/{quote(launch_name, safe='')}"
+                f"?{urlencode({'file_ids': launch_entry['id']})}"
+            )
             native_file_id_set = True
-        elif not is_ps4_content_install and not is_xbox360_content_install:
-            base_file_id_value = install_game.get("rom_base_file_id", "")
-            base_file_id = base_file_id_value.strip() if isinstance(base_file_id_value, str) else ""
-            if base_file_id:
-                download_url = f"{download_url}?{urlencode({'file_ids': base_file_id})}"
-                native_file_id_set = True
-        if game_home_dir is not None and not native_file_id_set:
-            # Native games must download each server file individually via its own
-            # file_ids. Requesting the content endpoint without file_ids makes the
-            # server bundle every file (game.json, m3u, archive) into a single ZIP.
-            payload = self._fetch_server_rom_payload(rom_id)
-            archive_entry = None
-            if isinstance(payload, dict) and isinstance(payload.get("files"), list) and payload["files"]:
-                for entry in payload["files"]:
-                    if not isinstance(entry, dict):
-                        continue
-                    entry_name = entry.get("file_name") or entry.get("filename")
-                    if not isinstance(entry_name, str) or not entry_name:
-                        continue
-                    # game.json is handled separately by _fetch_windows_game_json.
-                    if entry_name.casefold() == "game.json":
-                        continue
-                    # Skip files that live in a subfolder; only top-level entries
-                    # are valid archive candidates.
-                    if "/" in entry_name or "\\" in entry_name:
-                        continue
-                    archive_entry = entry
-                    break
-            if archive_entry is not None:
-                archive_file_name = archive_entry.get("file_name") or archive_entry.get("filename")
-                install_game["rom_file_name"] = archive_file_name
-                archive_path = game_home_dir / archive_file_name
-                download_url = (
-                    f"{base_url}/api/roms/{rom_id_path}/content/{quote(archive_file_name, safe='')}"
-                    f"?{urlencode({'file_ids': archive_entry['id']})}"
+            for entry in multi_file_entries:
+                if entry is launch_entry:
+                    continue
+                entry_name = str(entry.get("file_name") or entry.get("filename") or "")
+                if not entry_name:
+                    continue
+                entry_url = (
+                    f"{base_url}/api/roms/{rom_id_path}/content/{quote(entry_name, safe='')}"
+                    f"?{urlencode({'file_ids': entry['id']})}"
                 )
+                extra_downloads.append((entry_url, multi_file_dir / entry_name))
+        else:
+            file_name_path = quote(self._server_content_file_name_for_game(install_game), safe="")
+            download_url = f"{base_url}/api/roms/{rom_id_path}/content/{file_name_path}"
+            file_ids_csv_value = install_game.get("_ps4_file_ids_csv", "")
+            file_ids_csv = file_ids_csv_value.strip() if isinstance(file_ids_csv_value, str) else ""
+            if file_ids_csv:
+                download_url = f"{download_url}?{urlencode({'file_ids': file_ids_csv})}"
                 native_file_id_set = True
+            elif not is_ps4_content_install and not is_xbox360_content_install:
+                base_file_id_value = install_game.get("rom_base_file_id", "")
+                base_file_id = base_file_id_value.strip() if isinstance(base_file_id_value, str) else ""
+                if base_file_id:
+                    download_url = f"{download_url}?{urlencode({'file_ids': base_file_id})}"
+                    native_file_id_set = True
+            if game_home_dir is not None and not native_file_id_set:
+                # Native games must download each server file individually via its own
+                # file_ids. Requesting the content endpoint without file_ids makes the
+                # server bundle every file (game.json, m3u, archive) into a single ZIP.
+                payload = self._fetch_server_rom_payload(rom_id)
+                archive_entry = None
+                if isinstance(payload, dict) and isinstance(payload.get("files"), list) and payload["files"]:
+                    for entry in payload["files"]:
+                        if not isinstance(entry, dict):
+                            continue
+                        entry_name = entry.get("file_name") or entry.get("filename")
+                        if not isinstance(entry_name, str) or not entry_name:
+                            continue
+                        # game.json is handled separately by _fetch_windows_game_json.
+                        if entry_name.casefold() == "game.json":
+                            continue
+                        # Skip files that live in a subfolder; only top-level entries
+                        # are valid archive candidates.
+                        if "/" in entry_name or "\\" in entry_name:
+                            continue
+                        archive_entry = entry
+                        break
+                if archive_entry is not None:
+                    archive_file_name = archive_entry.get("file_name") or archive_entry.get("filename")
+                    install_game["rom_file_name"] = archive_file_name
+                    archive_path = game_home_dir / archive_file_name
+                    download_url = (
+                        f"{base_url}/api/roms/{rom_id_path}/content/{quote(archive_file_name, safe='')}"
+                        f"?{urlencode({'file_ids': archive_entry['id']})}"
+                    )
+                    native_file_id_set = True
 
         install_key = self._game_key(install_game)
         pending_key = pending_install_key(
@@ -1309,6 +1388,7 @@ class InstallMixin:
             download_url,
             self._download_headers(),
             archive_path,
+            extra_downloads=extra_downloads,
             debug_enabled=self._debug_prints_enabled(),
         )
         worker.moveToThread(thread)

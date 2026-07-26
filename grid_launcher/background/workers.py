@@ -39,6 +39,7 @@ class InstallDownloadWorker(QObject):
         archive_path: Path,
         *,
         source_metadata: dict[str, Any] | None = None,
+        extra_downloads: list[tuple[str, Path]] | None = None,
         debug_enabled: bool = False,
     ) -> None:
         super().__init__()
@@ -46,6 +47,7 @@ class InstallDownloadWorker(QObject):
         self.headers = dict(headers)
         self.archive_path = archive_path
         self.source_metadata = dict(source_metadata) if isinstance(source_metadata, dict) else None
+        self.extra_downloads = list(extra_downloads) if extra_downloads else []
         self.cancel_requested = False
         self.debug_enabled = bool(debug_enabled)
 
@@ -60,6 +62,7 @@ class InstallDownloadWorker(QObject):
                 print(f"[DEBUG][InstallDownload] url={resolved_download_url}")
             self._download_to_path(resolved_download_url, self.archive_path)
             self._download_supplemental_archives(self.archive_path)
+            self._download_extra_files()
             self.finished.emit({"archive_path": str(self.archive_path), "error": ""})
         except HTTPError as error:
             detail = format_http_error_details(error)
@@ -135,6 +138,10 @@ class InstallDownloadWorker(QObject):
             asset_name = str(resolved.get("asset_name", "")).strip()
             supplemental_path = self._supplemental_archive_path(primary_archive_path, index, asset_name)
             self._download_to_path(download_url, supplemental_path)
+
+    def _download_extra_files(self) -> None:
+        for extra_url, extra_path in self.extra_downloads:
+            self._download_to_path(str(extra_url), Path(extra_path))
 
     def _supplemental_archive_path(self, primary_archive_path: Path, index: int, asset_name: str) -> Path:
         if asset_name.lower().endswith(".appimage"):

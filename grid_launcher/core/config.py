@@ -142,6 +142,7 @@ def normalize_installed_games(
         native_compat_tool = item.get("native_compat_tool")
         native_wineprefix = item.get("native_wineprefix")
         native_game_dir = item.get("native_game_dir")
+        multi_file_game_dir = item.get("multi_file_game_dir")
         included_dlc = item.get("included_dlc")
         ps3_trophy_paths = item.get("ps3_trophy_paths")
         ps3_game_id = item.get("ps3_game_id")
@@ -170,6 +171,7 @@ def normalize_installed_games(
             "native_compat_tool": native_compat_tool.strip() if isinstance(native_compat_tool, str) else "",
             "native_wineprefix": native_wineprefix.strip() if isinstance(native_wineprefix, str) else "",
             "native_game_dir": native_game_dir.strip() if isinstance(native_game_dir, str) else "",
+            "multi_file_game_dir": multi_file_game_dir.strip() if isinstance(multi_file_game_dir, str) else "",
             "included_dlc": included_dlc.strip() if isinstance(included_dlc, str) else "",
             "ps3_trophy_paths": ps3_trophy_paths.strip() if isinstance(ps3_trophy_paths, str) else "",
             "ps3_game_id": ps3_game_id.strip().upper() if isinstance(ps3_game_id, str) else "",

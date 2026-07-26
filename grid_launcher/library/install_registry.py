@@ -46,6 +46,7 @@ def build_installed_game_record(
         "native_compat_tool": _text_value(game, "native_compat_tool"),
         "native_wineprefix": _text_value(game, "native_wineprefix"),
         "native_game_dir": _text_value(game, "native_game_dir"),
+        "multi_file_game_dir": _text_value(game, "multi_file_game_dir"),
         "included_dlc": _text_value(game, "included_dlc"),
         "ps3_trophy_paths": _text_value(game, "ps3_trophy_paths"),
         "ps3_game_id": _text_value(game, "ps3_game_id"),

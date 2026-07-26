@@ -57,6 +57,16 @@ def remove_game_files(
                 raise OSError(f"Could not remove folder: {extracted_dir}\n{error}") from error
         return
 
+    multi_file_game_dir_value = game.get("multi_file_game_dir", "")
+    if isinstance(multi_file_game_dir_value, str) and multi_file_game_dir_value.strip():
+        multi_file_game_dir = Path(multi_file_game_dir_value)
+        if multi_file_game_dir.exists() and multi_file_game_dir.is_dir():
+            try:
+                remove_directory_tree(multi_file_game_dir)
+            except OSError as error:
+                raise OSError(f"Could not remove folder: {multi_file_game_dir}\n{error}") from error
+            return
+
     for candidate in candidate_archive_paths_for_game(game):
         if not candidate.exists() or not candidate.is_file():
             continue
