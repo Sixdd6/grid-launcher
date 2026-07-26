@@ -3783,13 +3783,12 @@ def main() -> None:
     window = MainWindow()
     app.aboutToQuit.connect(_singleton_server.close)
 
+    window.show()
     if not window._run_first_run_setup_if_needed():
         window.close()
         return
     if "-tv" in sys.argv:
         window._switch_to_tv_mode()
-    else:
-        window.show()
     sys.exit(app.exec())
 
 
