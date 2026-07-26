@@ -53,6 +53,7 @@ python -m PyInstaller ^
     --windowed ^
     --onefile ^
     --name grid-launcher ^
+    --icon assets\icons\grid-launcher.ico ^
     --add-data "assets;assets" ^
     --add-data "retroarch-core-list.json;." ^
     --add-data "romm-platform-cores.json;." ^
