@@ -53,14 +53,21 @@ jobs:
         run: |
           pyinstaller --noconfirm --clean --windowed --onefile --name grid-launcher --icon assets\icons\grid-launcher.ico --add-data "assets;assets" --add-data "retroarch-core-list.json;." --add-data "emulator-autoprofiles.json;." --add-data "romm-platform-cores.json;." --hidden-import brotli --hidden-import pyzstd --hidden-import pyppmd --hidden-import certifi --hidden-import keyring.backends.Windows grid-launcher.py
 
+      - name: Rename artifact
+        id: artifact
+        run: |
+          $NAME = "grid-launcher-${{ steps.version.outputs.version }}-windows-x86_64.exe"
+          Rename-Item -Path "dist\grid-launcher.exe" -NewName $NAME
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "name=$NAME"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: grid-launcher-windows-exe
-          path: dist/grid-launcher.exe
+          name: ${{ steps.artifact.outputs.name }}
+          path: dist/${{ steps.artifact.outputs.name }}
           if-no-files-found: error
 
       - name: Attach exe to release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/grid-launcher.exe
+          files: dist/${{ steps.artifact.outputs.name }}

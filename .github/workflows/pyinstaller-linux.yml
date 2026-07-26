@@ -50,14 +50,21 @@ jobs:
         run: |
           pyinstaller --noconfirm --clean --windowed --onefile --name grid-launcher --add-data "assets:assets" --add-data "retroarch-core-list.json:." --add-data "emulator-autoprofiles.json:." --add-data "romm-platform-cores.json:." --hidden-import brotli --hidden-import pyzstd --hidden-import pyppmd --hidden-import keyring.backends.SecretService --hidden-import keyring.backends.kwallet grid-launcher.py
 
+      - name: Rename artifact
+        id: artifact
+        run: |
+          NAME="grid-launcher-${{ steps.version.outputs.version }}-linux-x86_64"
+          mv dist/grid-launcher "dist/$NAME"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: grid-launcher-linux
-          path: dist/grid-launcher
+          name: ${{ steps.artifact.outputs.name }}
+          path: dist/${{ steps.artifact.outputs.name }}
           if-no-files-found: error
 
       - name: Attach binary to release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/grid-launcher
+          files: dist/${{ steps.artifact.outputs.name }}
