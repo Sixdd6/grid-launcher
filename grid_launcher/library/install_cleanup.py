@@ -15,6 +15,15 @@ def remove_game_files(
     candidate_archive_paths_for_game: Callable[[dict[str, str]], list[Path]],
 ) -> None:
     if is_ps3_platform(game):
+        ps3_iso_path_value = game.get("ps3_iso_path", "")
+        if isinstance(ps3_iso_path_value, str) and ps3_iso_path_value.strip():
+            ps3_iso_path = Path(ps3_iso_path_value)
+            if ps3_iso_path.exists() and ps3_iso_path.is_file():
+                try:
+                    ps3_iso_path.unlink()
+                except OSError as error:
+                    raise OSError(f"Could not remove file: {ps3_iso_path}\n{error}") from error
+
         trophy_paths_value = game.get("ps3_trophy_paths", "")
         if isinstance(trophy_paths_value, str) and trophy_paths_value.strip():
             try:

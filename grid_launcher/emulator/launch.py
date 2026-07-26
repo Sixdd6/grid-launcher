@@ -82,18 +82,22 @@ def launch_placeholders_for_game(
     core_value: str,
     is_rpcs3_emulator_name: Callable[[str], bool],
     ps3_game_id: str,
+    ps3_iso_path: str = "",
 ) -> dict[str, str]:
-    rpcs3_game_token = ""
-    resolved_ps3_game_id = ""
+    ps3_launch_target = ""
     if is_rpcs3_emulator_name(emulator_name):
-        rpcs3_game_token = "%RPCS3_GAMEID%"
-        resolved_ps3_game_id = ps3_game_id.strip() if isinstance(ps3_game_id, str) else ""
+        resolved_ps3_iso_path = ps3_iso_path.strip() if isinstance(ps3_iso_path, str) else ""
+        if resolved_ps3_iso_path:
+            ps3_launch_target = resolved_ps3_iso_path
+        else:
+            resolved_ps3_game_id = ps3_game_id.strip() if isinstance(ps3_game_id, str) else ""
+            if resolved_ps3_game_id:
+                ps3_launch_target = f"%RPCS3_GAMEID%:{resolved_ps3_game_id}"
 
     return {
         "%rom%": rom_path,
         "%core%": core_value,
-        "%RPCS3_GAMEID%": rpcs3_game_token,
-        "%ps3_gameid%": resolved_ps3_game_id,
+        "%ps3_launch_target%": ps3_launch_target,
     }
 
 
@@ -136,13 +140,10 @@ def split_launch_template_args(template: str) -> list[str]:
 def validate_launch_placeholders(combined_template: str, placeholders: dict[str, str]) -> None:
     if "%core%" in combined_template and not placeholders.get("%core%", "").strip():
         raise ValueError("No RetroArch core is configured for this platform. Set one in Emulators > Defaults.")
-    if "%RPCS3_GAMEID%" in combined_template and not placeholders.get("%RPCS3_GAMEID%", "").strip():
+    if "%ps3_launch_target%" in combined_template and not placeholders.get("%ps3_launch_target%", "").strip():
         raise ValueError(
-            "No PS3 game ID was found for this title. Reinstall or verify extracted content includes a valid PS3 title ID."
-        )
-    if "%ps3_gameid%" in combined_template and not placeholders.get("%ps3_gameid%", "").strip():
-        raise ValueError(
-            "No PS3 game ID was found for this title. Reinstall or verify extracted content includes a valid PS3 title ID."
+            "No PS3 ISO or game ID was found for this title. Reinstall or verify the installed content includes "
+            "a valid PS3 ISO or title ID."
         )
 
 

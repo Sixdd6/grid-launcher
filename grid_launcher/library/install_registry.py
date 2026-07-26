@@ -50,6 +50,7 @@ def build_installed_game_record(
         "included_dlc": _text_value(game, "included_dlc"),
         "ps3_trophy_paths": _text_value(game, "ps3_trophy_paths"),
         "ps3_game_id": _text_value(game, "ps3_game_id"),
+        "ps3_iso_path": _text_value(game, "ps3_iso_path"),
         "ps4_game_id": _text_value(game, "ps4_game_id"),
         "ps4_content": _text_value(game, "ps4_content"),
         "revision": _text_value(game, "revision"),

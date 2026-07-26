@@ -800,7 +800,7 @@ def should_extract_archive_for_game(
     if is_arcade_platform(game):
         return False
     if is_ps3_platform(game):
-        return archive_path.suffix.casefold() in {".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz", ".iso"}
+        return archive_path.suffix.casefold() in {".zip", ".7z", ".rar", ".tar", ".gz", ".bz2", ".xz"}
     return archive_path.suffix.casefold() in {".7z", ".zip", ".tar", ".gz", ".bz2", ".xz"}
 
 
@@ -1093,6 +1093,7 @@ def prepare_installed_game_without_ui(
     prepared["extracted_dir"] = ""
     prepared["ps3_game_id"] = ""
     prepared["ps3_trophy_paths"] = ""
+    prepared["ps3_iso_path"] = ""
     prepared["ps4_game_id"] = ""
     if not should_extract_archive_for_game(prepared, archive_path):
         if archive_path.suffix.casefold() == ".appimage" and archive_path.exists():
@@ -1100,6 +1101,8 @@ def prepare_installed_game_without_ui(
                 os.chmod(archive_path, 0o755)
             except OSError:
                 pass
+        if is_ps3_platform(prepared) and archive_path.suffix.casefold() == ".iso":
+            prepared["ps3_iso_path"] = str(archive_path)
         return prepared, ""
 
     try:
@@ -1145,8 +1148,23 @@ def prepare_installed_game_without_ui(
     if is_ps3_platform(prepared):
         from grid_launcher.library.ps3_install import (
             extract_iso_to_ps3_layout,
+            ps3_iso_only_extracted_file,
             ps3_route_extracted_contents,
         )
+
+        iso_only_file = ps3_iso_only_extracted_file(extracted_dir)
+        if iso_only_file is not None:
+            iso_destination = archive_path.parent / iso_only_file.name
+            if iso_destination != iso_only_file:
+                if iso_destination.exists():
+                    iso_destination.unlink()
+                shutil.move(str(iso_only_file), str(iso_destination))
+            prepared["extracted_path"] = str(iso_destination)
+            prepared["extracted_dir"] = ""
+            prepared["ps3_iso_path"] = str(iso_destination)
+            shutil.rmtree(extracted_dir, ignore_errors=True)
+            return prepared, warning_text
+
         dev_hdd0_root = ps3_dev_hdd0_root(prepared) if callable(ps3_dev_hdd0_root) else None
         if dev_hdd0_root is None:
             return None, f"No PS3 VFS dev_hdd0 path configured for {prepared.get('title', 'Game')}"

@@ -178,7 +178,7 @@
       }
     },
     "name": "RPCS3 (Playstation 3)",
-    "args": "--no-gui \"%RPCS3_GAMEID%:%ps3_gameid%\"",
+    "args": "--no-gui \"%ps3_launch_target%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation 3", "ps3"],
     "use_game_title_as_name": false,

@@ -54,3 +54,4 @@ graphify-out/
 
 # AppImage build artifacts
 AppDir/
+appimagetool

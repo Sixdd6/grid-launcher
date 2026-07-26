@@ -146,6 +146,7 @@ def normalize_installed_games(
         included_dlc = item.get("included_dlc")
         ps3_trophy_paths = item.get("ps3_trophy_paths")
         ps3_game_id = item.get("ps3_game_id")
+        ps3_iso_path = item.get("ps3_iso_path")
         ps4_game_id = item.get("ps4_game_id")
         ps4_content = item.get("ps4_content")
         normalized_game = {
@@ -175,6 +176,7 @@ def normalize_installed_games(
             "included_dlc": included_dlc.strip() if isinstance(included_dlc, str) else "",
             "ps3_trophy_paths": ps3_trophy_paths.strip() if isinstance(ps3_trophy_paths, str) else "",
             "ps3_game_id": ps3_game_id.strip().upper() if isinstance(ps3_game_id, str) else "",
+            "ps3_iso_path": ps3_iso_path.strip() if isinstance(ps3_iso_path, str) else "",
             "ps4_game_id": ps4_game_id.strip().upper() if isinstance(ps4_game_id, str) else "",
             "ps4_content": ps4_content.strip() if isinstance(ps4_content, str) else "",
         }
@@ -245,8 +247,6 @@ def merge_config_with_defaults(
         elif isinstance(default_value, list) and isinstance(value, list):
             merged[key] = value
 
-    if "first_run_completed" not in content:
-        merged["first_run_completed"] = bool(content)
     return merged
 
 

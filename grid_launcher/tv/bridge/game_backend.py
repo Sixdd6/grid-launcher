@@ -251,6 +251,8 @@ class GameBackend(QObject):
             )
             ps3_game_id_value = current_game.get("ps3_game_id", "")
             ps3_game_id = ps3_game_id_value.strip() if isinstance(ps3_game_id_value, str) else ""
+            ps3_iso_path_value = current_game.get("ps3_iso_path", "")
+            ps3_iso_path = ps3_iso_path_value.strip() if isinstance(ps3_iso_path_value, str) else ""
             rom_path_text = resolved_rom_path_for_game(current_game)
             return launch_placeholders_for_game(
                 rom_path_text,
@@ -258,6 +260,7 @@ class GameBackend(QObject):
                 core_value,
                 is_rpcs3_emulator_name,
                 ps3_game_id,
+                ps3_iso_path,
             )
 
         def resolved_launch_arguments_for_game(current_game: dict[str, str]) -> tuple[str, list[str]]:

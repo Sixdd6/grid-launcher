@@ -361,7 +361,7 @@ class EmulatorConfigDialog(QDialog):
 
         self.emulator_args_input = QLineEdit("%rom%")
         self._lock_field_height(self.emulator_args_input)
-        form.addRow("Arguments (%rom%, %core%, %RPCS3_GAMEID%, %ps3_gameid%)", self.emulator_args_input)
+        form.addRow("Arguments (%rom%, %core%, %ps3_launch_target%)", self.emulator_args_input)
 
         self.emulator_save_strategy_input = QComboBox()
         self._lock_field_height(self.emulator_save_strategy_input)

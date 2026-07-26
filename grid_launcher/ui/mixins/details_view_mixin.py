@@ -1384,6 +1384,7 @@ class DetailsViewMixin:
             core_value,
             self._is_rpcs3_emulator_name,
             self._ps3_game_id_for_game(game),
+            game.get("ps3_iso_path", ""),
         )
 
     def _retroarch_core_argument_path(self, configured_core: str) -> str:

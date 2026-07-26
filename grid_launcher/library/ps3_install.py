@@ -143,6 +143,21 @@ def ps3_classify_extracted_contents(
     return results
 
 
+def ps3_iso_only_extracted_file(extracted_dir: Path) -> Path | None:
+    """Return the ISO path if extracted_dir contains nothing but a single ISO file.
+
+    RPCS3 can boot such an ISO directly, so callers can skip decompressing it
+    into the PS3_GAME/dev_hdd0 layout entirely.
+    """
+    classified = ps3_classify_extracted_contents(extracted_dir)
+    if len(classified) != 1:
+        return None
+    item_path, classification = classified[0]
+    if classification != "iso_file":
+        return None
+    return item_path
+
+
 # ---------------------------------------------------------------------------
 # Content routing
 # ---------------------------------------------------------------------------
