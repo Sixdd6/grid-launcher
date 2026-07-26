@@ -60,6 +60,7 @@ python -m PyInstaller ^
     --hidden-import brotli ^
     --hidden-import pyzstd ^
     --hidden-import pyppmd ^
+    --hidden-import certifi ^
     --hidden-import keyring.backends.Windows ^
     grid-launcher.py
 

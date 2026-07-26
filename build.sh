@@ -157,6 +157,7 @@ build_appimage() {
         --hidden-import brotli \
         --hidden-import pyzstd \
         --hidden-import pyppmd \
+        --hidden-import certifi \
         --hidden-import keyring.backends.SecretService \
         --hidden-import keyring.backends.kwallet \
         grid-launcher.py
@@ -247,6 +248,7 @@ build_onefile() {
         --hidden-import brotli \
         --hidden-import pyzstd \
         --hidden-import pyppmd \
+        --hidden-import certifi \
         --hidden-import keyring.backends.SecretService \
         --hidden-import keyring.backends.kwallet \
         grid-launcher.py
