@@ -58,7 +58,7 @@ jobs:
 
       - name: Rasterize app icon
         run: |
-          sudo apt-get install -y librsvg2-bin
+          sudo apt-get install -y librsvg2-bin zsync
           rsvg-convert -w 256 -h 256 \
             assets/svg/io.github.Sixdd6.GRIDLauncher.svg \
             -o appimage/grid-launcher.png
@@ -83,7 +83,12 @@ jobs:
         run: |
           mkdir -p dist
           OUTPUT_NAME="grid-launcher-${{ steps.version.outputs.version }}-x86_64.AppImage"
-          ./appimagetool --appimage-extract-and-run AppDir "dist/$OUTPUT_NAME"
+          UPDATE_INFO="gh-releases-zsync|Sixdd6|grid-launcher|latest|grid-launcher-*-x86_64.AppImage.zsync"
+          ./appimagetool --appimage-extract-and-run -u "$UPDATE_INFO" AppDir "dist/$OUTPUT_NAME"
+          # appimagetool may write the .zsync into the working directory;
+          # the upload steps expect it in dist/ next to the AppImage.
+          if [ -f "$OUTPUT_NAME.zsync" ]; then mv "$OUTPUT_NAME.zsync" dist/; fi
+          ls -l dist/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

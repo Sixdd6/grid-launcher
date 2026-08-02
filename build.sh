@@ -207,12 +207,26 @@ build_appimage() {
         chmod +x appimagetool
     fi
 
-    # Build the AppImage
+    # Build the AppImage with embedded update information so AppImage
+    # updaters (Gear Lever, AppImageUpdate, ...) can find new releases on
+    # GitHub. Generating the companion .zsync file requires zsyncmake
+    # (package "zsync"); without it the info is still embedded but only CI
+    # release builds produce the .zsync needed for delta updates.
     echo "Building AppImage..."
     mkdir -p dist
     local output_name="grid-launcher-${VERSION}-x86_64.AppImage"
-    ./appimagetool --appimage-extract-and-run AppDir "dist/$output_name"
+    local update_info="gh-releases-zsync|Sixdd6|grid-launcher|latest|grid-launcher-*-x86_64.AppImage.zsync"
+    if ! command -v zsyncmake >/dev/null 2>&1; then
+        echo "NOTE: zsyncmake not found — .zsync file will not be generated (fine for local builds)"
+    fi
+    ./appimagetool --appimage-extract-and-run -u "$update_info" AppDir "dist/$output_name"
     exit_code=$?
+
+    # appimagetool may write the .zsync into the current directory instead of
+    # next to the output file; keep both alongside each other in dist/.
+    if [ -f "$output_name.zsync" ]; then
+        mv "$output_name.zsync" dist/
+    fi
 
     if [ $exit_code -eq 0 ]; then
         echo ""
