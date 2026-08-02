@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -19,6 +20,8 @@ class DiscoverCache:
         """
         self.ttl = ttl
         self.cache: dict[str, dict[str, Any]] = {}
+        # Guards self.cache — sections are read/written from worker pool threads
+        self._lock = threading.Lock()
         self.installed_game_keys: set[str] = set()
         self.installed_platform_names: set[str] = set()
 
@@ -54,14 +57,15 @@ class DiscoverCache:
         if force_refresh:
             return None
 
-        entry = self.cache.get(section_id)
-        if entry is None:
-            return None
+        with self._lock:
+            entry = self.cache.get(section_id)
+            if entry is None:
+                return None
 
-        if time.time() - entry.get("timestamp", 0) > self.ttl:
-            return None
+            if time.time() - entry.get("timestamp", 0) > self.ttl:
+                return None
 
-        return entry.get("data")
+            return entry.get("data")
 
     def set_section(self, section_id: str, data: dict[str, Any]) -> None:
         """Store section data in cache.
@@ -70,10 +74,11 @@ class DiscoverCache:
             section_id: Section identifier
             data: Section data (games list, etc.)
         """
-        self.cache[section_id] = {
-            "data": data,
-            "timestamp": time.time(),
-        }
+        with self._lock:
+            self.cache[section_id] = {
+                "data": data,
+                "timestamp": time.time(),
+            }
 
     def invalidate_section(self, section_id: str) -> None:
         """Remove a section from cache.
@@ -81,7 +86,8 @@ class DiscoverCache:
         Args:
             section_id: Section identifier to invalidate
         """
-        self.cache.pop(section_id, None)
+        with self._lock:
+            self.cache.pop(section_id, None)
 
     def is_stale(self, section_id: str) -> bool:
         """Check if a section is stale or missing.
@@ -92,10 +98,11 @@ class DiscoverCache:
         Returns:
             True if section is stale or not in cache
         """
-        entry = self.cache.get(section_id)
-        if entry is None:
-            return True
-        return time.time() - entry.get("timestamp", 0) > self.ttl
+        with self._lock:
+            entry = self.cache.get(section_id)
+            if entry is None:
+                return True
+            return time.time() - entry.get("timestamp", 0) > self.ttl
 
     def clear(self) -> None:
         """Clear all cached sections."""
@@ -224,6 +231,7 @@ def normalize_discover_item(item: dict[str, Any]) -> dict[str, Any]:
         "tags": "",
         "fanart_url": "",
         "first_release_date": str(item.get("first_release_date") or ""),
+        "created_at": item.get("created_at") or "",
         "server_updated_at": "",
         "rom_file_name": "",
         "rom_nested_file_name": "",
@@ -355,40 +363,44 @@ def client_filter_games(
     return result
 
 
-def get_top_genres_from_games(
-    all_games: list[dict[str, Any]],
-    installed_games: list[dict[str, Any]],
-    top_n: int = 5,
-) -> list[str]:
-    """Get top genres from all games, weighted by rating."""
-    genre_scores: dict[str, float] = {}
-    installed_genres: set[str] = set()
+def fetch_genre_totals(
+    base_url: str,
+    api_token: str,
+    genres: list[str],
+) -> dict[str, int]:
+    """Fetch the server-side total rom count for each genre.
 
-    for game in installed_games:
-        if isinstance(game, dict):
-            for g in (game.get("genres") or "").split(","):
-                installed_genres.add(g.strip())
-
-    for game in all_games:
-        if not isinstance(game, dict):
+    One GET /api/roms?genres=<genre>&limit=1 per genre, reading the response `total`
+    field. Genres whose request fails are omitted rather than raising.
+    """
+    totals: dict[str, int] = {}
+    for genre in genres:
+        try:
+            response = api_get_json(
+                base_url,
+                api_token,
+                "/api/roms",
+                {
+                    "genres": [genre],
+                    "limit": 1,
+                    "with_char_index": "false",
+                    "with_filter_values": "false",
+                },
+            )
+        except Exception:
             continue
-        rating = game.get("rating", 0)
-        if not isinstance(rating, (int, float)):
-            rating = 0
-        for g in (game.get("genres") or "").split(","):
-            g = g.strip()
-            if g:
-                weight = float(rating)
-                if g not in installed_genres:
-                    weight *= 1.5
-                genre_scores[g] = genre_scores.get(g, 0) + weight
-
-    return [k for k, _ in sorted(genre_scores.items(), key=lambda x: x[1], reverse=True)][:top_n]
+        if not isinstance(response, dict):
+            continue
+        total = response.get("total")
+        if isinstance(total, int):
+            totals[genre] = total
+    return totals
 
 
 def genre_stats_from_games(
     all_games: list[dict[str, Any]],
     installed_games: list[dict[str, Any]],
+    totals: dict[str, int] | None = None,
 ) -> dict[str, tuple[int, int]]:
     total_counts: dict[str, int] = {}
     installed_counts: dict[str, int] = {}
@@ -409,9 +421,14 @@ def genre_stats_from_games(
             if g:
                 installed_counts[g] = installed_counts.get(g, 0) + 1
 
+    # Server-provided totals win over the sampled counts when available
+    genres = set(total_counts) | set(totals or {})
     return {
-        genre: (total_counts.get(genre, 0), installed_counts.get(genre, 0))
-        for genre in total_counts
+        genre: (
+            (totals or {}).get(genre, total_counts.get(genre, 0)),
+            installed_counts.get(genre, 0),
+        )
+        for genre in genres
     }
 
 
@@ -452,7 +469,11 @@ def fetch_highly_rated_games(
     api_token: str,
     limit: int = 20,
 ) -> list[dict[str, Any]]:
-    """Fetch highest rated games from the server."""
+    """Fetch highest rated games from the server, keeping only ratings >= 4.0.
+
+    The /api/roms endpoint has no rating threshold parameter, so the cut-off is
+    applied client-side; games without a parseable rating are excluded.
+    """
     items = _fetch_roms(
         base_url,
         api_token,
@@ -462,7 +483,15 @@ def fetch_highly_rated_games(
             "limit": limit,
         },
     )
-    return [normalize_discover_item(i) for i in items]
+    result: list[dict[str, Any]] = []
+    for game in (normalize_discover_item(i) for i in items):
+        try:
+            rating = float(game.get("rating") or 0)
+        except (TypeError, ValueError):
+            continue
+        if rating >= 4.0:
+            result.append(game)
+    return result
 
 
 def fetch_games_by_platform(
@@ -550,46 +579,43 @@ def record_discover_event(
         pass
 
 
-def load_watchlist(path: "Path") -> set[str]:
+def load_watchlist(path: "Path") -> dict[str, dict[str, Any]]:
+    """Load the watchlist as a rom_id -> game dict mapping.
+
+    Old-format files (a bare list of rom-id strings) load with empty game dicts;
+    those entries are re-hydrated the next time the game appears in a section.
+    """
     import json as _json
     from pathlib import Path as _Path
     try:
         p = _Path(path)
         if not p.exists():
-            return set()
+            return {}
         raw = _json.loads(p.read_text(encoding="utf-8"))
-        if not isinstance(raw, list):
-            return set()
-        return {str(item) for item in raw if isinstance(item, str) and item}
+        if isinstance(raw, list):
+            return {str(item): {} for item in raw if isinstance(item, str) and item}
+        if isinstance(raw, dict):
+            return {
+                str(rom_id): game
+                for rom_id, game in raw.items()
+                if rom_id and isinstance(game, dict)
+            }
+        return {}
     except Exception:
-        return set()
+        return {}
 
 
-def save_watchlist(path: "Path", rom_ids: set[str]) -> None:
+def save_watchlist(path: "Path", entries: dict[str, dict[str, Any]]) -> None:
     import json as _json
     from pathlib import Path as _Path
     try:
         p = _Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(".tmp")
-        tmp.write_text(_json.dumps(sorted(rom_ids)), encoding="utf-8")
+        tmp.write_text(_json.dumps(entries, default=str), encoding="utf-8")
         tmp.replace(p)
     except Exception:
         pass
-
-
-# ---------------------------------------------------------------------------
-# Legacy aliases kept so any remaining callers don't break at import time
-# ---------------------------------------------------------------------------
-
-def fetch_trending_games(
-    base_url: str,
-    api_token: str,
-    limit: int = 20,
-    min_rating: float = 3.5,
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Deprecated — delegates to fetch_all_games."""
-    return fetch_all_games(base_url, api_token, limit=limit)
 
 
 def fetch_new_games(

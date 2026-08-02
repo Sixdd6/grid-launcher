@@ -4,13 +4,16 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import unittest
+from typing import Any
 from unittest.mock import Mock, call, patch
 
+from grid_launcher.server.view import filter_server_games
 from grid_launcher.server.discover import (
     DiscoverCache,
     client_filter_games,
     fetch_all_games,
     fetch_games_by_platform,
+    fetch_genre_totals,
     fetch_highly_rated_games,
     fetch_new_games,
     fetch_recommendations,
@@ -19,7 +22,6 @@ from grid_launcher.server.discover import (
     filter_games_by_installed,
     filter_unexplored_platforms,
     genre_stats_from_games,
-    get_top_genres_from_games,
     load_watchlist,
     normalize_discover_item,
     record_discover_event,
@@ -82,6 +84,21 @@ class TestDiscoverCache(unittest.TestCase):
         self.assertIsNone(self.cache.get_section("test1"))
         self.assertIsNone(self.cache.get_section("test2"))
 
+    def test_concurrent_set_section_keeps_all_writes(self) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        def write(index: int) -> None:
+            self.cache.set_section(f"section{index}", {"games": [index]})
+            self.cache.is_stale(f"section{index}")
+            self.cache.get_section(f"section{index}")
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            for future in [executor.submit(write, i) for i in range(50)]:
+                future.result()
+
+        for i in range(50):
+            self.assertEqual(self.cache.get_section(f"section{i}"), {"games": [i]})
+
 
 class TestDiscoverFiltering(unittest.TestCase):
     """Test discover filtering functions."""
@@ -106,19 +123,6 @@ class TestDiscoverFiltering(unittest.TestCase):
         games = [{"title": "Game A"}, None, "bad", {"title": "Game B"}]
         result = filter_games_by_installed(games, set())  # type: ignore[arg-type]
         self.assertEqual(len(result), 2)
-
-    def test_get_top_genres_from_games(self) -> None:
-        all_games = [
-            {"genres": "Action,Adventure", "rating": 4.5},
-            {"genres": "Action,Platformer", "rating": 4.0},
-            {"genres": "RPG,Adventure", "rating": 3.5},
-            {"genres": "Puzzle", "rating": 3.0},
-        ]
-        installed_games = [{"genres": "Action,Adventure"}]
-        result = get_top_genres_from_games(all_games, installed_games, top_n=3)
-        self.assertEqual(len(result), 3)
-        self.assertIn("Action", result)
-        self.assertIn("Adventure", result)
 
 
 class TestNormalizeDiscoverItem(unittest.TestCase):
@@ -162,6 +166,13 @@ class TestNormalizeDiscoverItem(unittest.TestCase):
         result = normalize_discover_item({"id": 1})
         self.assertEqual(result["ps4_has_update"], "false")
         self.assertEqual(result["update_available"], "false")
+
+    def test_created_at_passed_through(self) -> None:
+        result = normalize_discover_item({"id": 1, "created_at": "2024-05-01T12:00:00.000000"})
+        self.assertEqual(result["created_at"], "2024-05-01T12:00:00.000000")
+
+    def test_created_at_missing_is_empty(self) -> None:
+        self.assertEqual(normalize_discover_item({"id": 1})["created_at"], "")
 
 
 class TestDiscoverAPI(unittest.TestCase):
@@ -370,7 +381,7 @@ class TestFetchHighlyRatedGames(unittest.TestCase):
 
     @patch("grid_launcher.server.discover.api_get_json")
     def test_returns_normalized_games(self, mock_api: Mock) -> None:
-        mock_api.return_value = {"items": [{"id": 7, "name": "Top Game"}]}
+        mock_api.return_value = {"items": [{"id": 7, "name": "Top Game", "rating": 4.5}]}
         games = fetch_highly_rated_games("http://test", "token")
         self.assertEqual(games[0]["title"], "Top Game")
         params = mock_api.call_args[0][3]
@@ -380,6 +391,29 @@ class TestFetchHighlyRatedGames(unittest.TestCase):
     @patch("grid_launcher.server.discover.api_get_json")
     def test_api_error_returns_empty(self, mock_api: Mock) -> None:
         mock_api.side_effect = Exception("boom")
+        self.assertEqual(fetch_highly_rated_games("http://test", "token"), [])
+
+    @patch("grid_launcher.server.discover.api_get_json")
+    def test_ratings_below_threshold_excluded(self, mock_api: Mock) -> None:
+        mock_api.return_value = {
+            "items": [
+                {"id": 1, "name": "Great", "rating": 4.0},
+                {"id": 2, "name": "Okay", "rating": 3.9},
+                {"id": 3, "name": "Best", "rating": 5},
+            ]
+        }
+        titles = [g["title"] for g in fetch_highly_rated_games("http://test", "token")]
+        self.assertEqual(titles, ["Great", "Best"])
+
+    @patch("grid_launcher.server.discover.api_get_json")
+    def test_missing_or_zero_rating_excluded(self, mock_api: Mock) -> None:
+        mock_api.return_value = {
+            "items": [
+                {"id": 1, "name": "No Rating"},
+                {"id": 2, "name": "Zero", "rating": 0},
+                {"id": 3, "name": "Unparseable", "rating": "n/a"},
+            ]
+        }
         self.assertEqual(fetch_highly_rated_games("http://test", "token"), [])
 
 
@@ -729,6 +763,53 @@ class TestGenreStatsFromGames(unittest.TestCase):
         self.assertIn("Action", result)
         self.assertNotIn("", result)
 
+    def test_totals_override_sample_counts(self) -> None:
+        all_games = [{"genres": "Action, RPG"}, {"genres": "Action"}]
+        installed_games = [{"genres": "Action"}]
+        result = genre_stats_from_games(all_games, installed_games, {"Action": 512, "RPG": 30})
+        self.assertEqual(result["Action"], (512, 1))
+        self.assertEqual(result["RPG"], (30, 0))
+
+    def test_totals_include_genres_missing_from_sample(self) -> None:
+        result = genre_stats_from_games([{"genres": "Action"}], [], {"Puzzle": 7})
+        self.assertEqual(result["Puzzle"], (7, 0))
+        self.assertEqual(result["Action"], (1, 0))
+
+
+class TestFetchGenreTotals(unittest.TestCase):
+    """Test fetch_genre_totals with mocked api_get_json."""
+
+    @patch("grid_launcher.server.discover.api_get_json")
+    def test_returns_total_per_genre(self, mock_api: Mock) -> None:
+        mock_api.side_effect = [{"total": 120, "items": []}, {"total": 8, "items": []}]
+        totals = fetch_genre_totals("http://test", "token", ["Action", "RPG"])
+        self.assertEqual(totals, {"Action": 120, "RPG": 8})
+        self.assertEqual(mock_api.call_count, 2)
+
+    @patch("grid_launcher.server.discover.api_get_json")
+    def test_request_params(self, mock_api: Mock) -> None:
+        mock_api.return_value = {"total": 1, "items": []}
+        fetch_genre_totals("http://test", "token", ["Action"])
+        params = mock_api.call_args[0][3]
+        self.assertEqual(params["genres"], ["Action"])
+        self.assertEqual(params["limit"], 1)
+        self.assertEqual(params["with_filter_values"], "false")
+
+    @patch("grid_launcher.server.discover.api_get_json")
+    def test_failing_genre_omitted(self, mock_api: Mock) -> None:
+        mock_api.side_effect = [Exception("boom"), {"total": 5, "items": []}]
+        totals = fetch_genre_totals("http://test", "token", ["Action", "RPG"])
+        self.assertEqual(totals, {"RPG": 5})
+
+    @patch("grid_launcher.server.discover.api_get_json")
+    def test_non_dict_or_missing_total_omitted(self, mock_api: Mock) -> None:
+        mock_api.side_effect = ["bad", {"items": []}]
+        totals = fetch_genre_totals("http://test", "token", ["Action", "RPG"])
+        self.assertEqual(totals, {})
+
+    def test_empty_genres_returns_empty(self) -> None:
+        self.assertEqual(fetch_genre_totals("http://test", "token", []), {})
+
 
 class TestWatchlistPersistence(unittest.TestCase):
 
@@ -742,29 +823,46 @@ class TestWatchlistPersistence(unittest.TestCase):
         if os.path.exists(self.path):
             os.unlink(self.path)
 
-    def test_load_missing_file_returns_empty_set(self) -> None:
-        self.assertEqual(load_watchlist(self.path), set())
+    def test_load_missing_file_returns_empty_dict(self) -> None:
+        self.assertEqual(load_watchlist(self.path), {})
 
-    def test_roundtrip(self) -> None:
-        save_watchlist(self.path, {"rom1", "rom2"})
-        self.assertEqual(load_watchlist(self.path), {"rom1", "rom2"})
+    def test_roundtrip_keeps_game_dicts(self) -> None:
+        entries = {
+            "1": {"title": "Game One", "platform": "SNES", "rom_id": "1"},
+            "2": {"title": "Game Two", "platform": "PS1", "rom_id": "2"},
+        }
+        save_watchlist(self.path, entries)
+        self.assertEqual(load_watchlist(self.path), entries)
 
-    def test_load_corrupt_file_returns_empty_set(self) -> None:
+    def test_load_corrupt_file_returns_empty_dict(self) -> None:
         with open(self.path, "w", encoding="utf-8") as fh:
             fh.write("not json")
-        self.assertEqual(load_watchlist(self.path), set())
+        self.assertEqual(load_watchlist(self.path), {})
 
-    def test_load_non_list_json_returns_empty_set(self) -> None:
+    def test_load_non_container_json_returns_empty_dict(self) -> None:
         with open(self.path, "w", encoding="utf-8") as fh:
-            fh.write('{"key": "value"}')
-        self.assertEqual(load_watchlist(self.path), set())
+            fh.write('"just a string"')
+        self.assertEqual(load_watchlist(self.path), {})
 
-    def test_save_writes_sorted_list(self) -> None:
+    def test_load_skips_non_dict_values(self) -> None:
+        with open(self.path, "w", encoding="utf-8") as fh:
+            fh.write('{"1": {"title": "Ok"}, "2": "bad"}')
+        self.assertEqual(load_watchlist(self.path), {"1": {"title": "Ok"}})
+
+    def test_save_writes_mapping(self) -> None:
         import json
-        save_watchlist(self.path, {"c", "a", "b"})
+        save_watchlist(self.path, {"7": {"title": "Seven", "rom_id": "7"}})
         with open(self.path, "r", encoding="utf-8") as fh:
             result = json.load(fh)
-        self.assertEqual(result, ["a", "b", "c"])
+        self.assertEqual(result, {"7": {"title": "Seven", "rom_id": "7"}})
+
+    def test_old_format_list_loads_as_ids_without_card_data(self) -> None:
+        with open(self.path, "w", encoding="utf-8") as fh:
+            fh.write('["12", "34"]')
+        loaded = load_watchlist(self.path)
+        self.assertEqual(set(loaded), {"12", "34"})
+        self.assertEqual(loaded["12"], {})
+        self.assertEqual(loaded["34"], {})
 
 
 class TestRecordDiscoverEvent(unittest.TestCase):
@@ -943,6 +1041,14 @@ class TestDiscoverPageWatchlistSection(unittest.TestCase):
         labels = list(container.findChildren(QLabel))
         self.assertTrue(any("No saved games" in lbl.text() for lbl in labels))
 
+    def test_add_watchlist_section_rebuilds_in_place(self) -> None:
+        page = self._page()
+        page.add_watchlist_section([_discover_game("Old", "1")])
+        page.add_carousel_section("later", "Later", [])
+        page.add_watchlist_section([_discover_game("New", "2")])
+        self.assertEqual(page.content_layout.indexOf(page.sections["watchlist"]), 0)
+        self.assertEqual(page.content_layout.indexOf(page.sections["later"]), 1)
+
     def test_add_watchlist_section_replaces_existing(self) -> None:
         from PySide6.QtCore import QEvent
         from PySide6.QtWidgets import QApplication
@@ -1070,6 +1176,518 @@ class TestFetchShortGames(unittest.TestCase):
         }
         games, _ = fetch_short_games("http://test", "token", limit=5)
         self.assertLessEqual(len(games), 5)
+
+
+class TestDiscoverGenreSection(unittest.TestCase):
+    """Test genre pill selection rebuilding the carousel."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication([])
+
+    def _section(self):
+        from grid_launcher.ui.discover import DiscoverGenreSection
+        games_by_genre = {
+            "Action": [_discover_game("A", "1")],
+            "RPG": [_discover_game("B", "2"), _discover_game("C", "3")],
+        }
+        return DiscoverGenreSection("genres", ["Action", "RPG"], games_by_genre, _MockWindow())
+
+    def test_first_genre_carousel_rendered_on_init(self) -> None:
+        section = self._section()
+        self.assertEqual(section.selected_genre, "Action")
+        self.assertIsNotNone(section.carousel_section)
+        self.assertEqual(len(section.carousel_section.game_cards), 1)
+
+    def test_clicking_pill_rebuilds_carousel_for_clicked_genre(self) -> None:
+        section = self._section()
+        section.genre_buttons["RPG"].click()
+        self.assertEqual(section.selected_genre, "RPG")
+        self.assertEqual(section.carousel_section.title, "Top RPG Games")
+        self.assertEqual(len(section.carousel_section.game_cards), 2)
+        self.assertTrue(section.genre_buttons["RPG"].isChecked())
+        self.assertFalse(section.genre_buttons["Action"].isChecked())
+
+    def test_genre_without_games_clears_carousel(self) -> None:
+        from grid_launcher.ui.discover import DiscoverGenreSection
+        section = DiscoverGenreSection(
+            "genres", ["Action", "Puzzle"], {"Action": [_discover_game("A")]}, _MockWindow()
+        )
+        section.genre_buttons["Puzzle"].click()
+        self.assertIsNone(section.carousel_section)
+        self.assertEqual(section.selected_genre, "Puzzle")
+
+    def test_set_genre_stats_only_updates_labels(self) -> None:
+        section = self._section()
+        carousel_before = section.carousel_section
+        section.set_genre_stats({"Action": (120, 3), "RPG": (40, 0)})
+        self.assertEqual(section.genre_buttons["Action"].text(), "Action (120 / 3)")
+        self.assertEqual(section.genre_buttons["RPG"].text(), "RPG (40)")
+        self.assertIs(section.carousel_section, carousel_before)
+        self.assertEqual(section.selected_genre, "Action")
+
+
+class TestDiscoverPageRefreshCallback(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_refresh_click_calls_callback_without_checked_arg(self) -> None:
+        from grid_launcher.ui.discover import DiscoverPageWidget
+        page = DiscoverPageWidget(_MockWindow())
+        calls: list[tuple] = []
+        page.set_refresh_callback(lambda *args: calls.append(args))
+        page.refresh_button.click()
+        self.assertEqual(calls, [()])
+
+    def test_set_refresh_callback_twice_calls_only_latest(self) -> None:
+        from grid_launcher.ui.discover import DiscoverPageWidget
+        page = DiscoverPageWidget(_MockWindow())
+        calls: list[str] = []
+        page.set_refresh_callback(lambda: calls.append("first"))
+        page.set_refresh_callback(lambda: calls.append("second"))
+        page.refresh_button.click()
+        self.assertEqual(calls, ["second"])
+
+
+class TestDiscoverLoadWorker(unittest.TestCase):
+    """Test the parallelized DiscoverLoadWorker.run()."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication([])
+
+    def _worker(self, library_games=None):
+        from grid_launcher.background.workers import DiscoverLoadWorker
+        return DiscoverLoadWorker(
+            "http://test",
+            "token",
+            DiscoverCache(ttl=3600),
+            True,
+            library_games=library_games if library_games is not None else [],
+        )
+
+    @patch("grid_launcher.server.discover.fetch_genre_totals")
+    @patch("grid_launcher.server.discover.fetch_games_by_genre")
+    @patch("grid_launcher.server.discover.fetch_games_by_platform")
+    @patch("grid_launcher.server.discover.fetch_server_platforms")
+    @patch("grid_launcher.server.discover.fetch_recommendations")
+    @patch("grid_launcher.server.discover.fetch_highly_rated_games")
+    @patch("grid_launcher.server.discover.fetch_new_games")
+    @patch("grid_launcher.server.discover.fetch_short_games")
+    def test_emits_finished_with_all_sections(
+        self,
+        mock_short: Mock,
+        mock_new: Mock,
+        mock_rated: Mock,
+        mock_recs: Mock,
+        mock_platforms: Mock,
+        mock_platform_games: Mock,
+        mock_genre_games: Mock,
+        mock_totals: Mock,
+    ) -> None:
+        mock_short.return_value = ([_discover_game("Short")], ["Action", "RPG"])
+        mock_new.return_value = [_discover_game("New", "2")]
+        mock_rated.return_value = [_discover_game("Rated", "3")]
+        mock_recs.return_value = [_discover_game("Rec", "4")]
+        mock_platforms.return_value = [
+            {"id": 9, "name": "n64", "display_name": "N64", "rom_count": 30}
+        ]
+        mock_platform_games.return_value = [_discover_game("Platform Game", "5")]
+        mock_genre_games.return_value = [_discover_game("Genre Game", "6")]
+        mock_totals.return_value = {"Action": 120, "RPG": 40}
+
+        worker = self._worker(library_games=[{"name": f"g{i}"} for i in range(20)])
+        results: list[dict] = []
+        errors: list[str] = []
+        worker.finished.connect(results.append)
+        worker.error.connect(errors.append)
+        worker.run()
+
+        self.assertEqual(errors, [])
+        self.assertEqual(len(results), 1)
+        result = results[0]
+        for key in (
+            "short_games",
+            "new_games",
+            "highly_rated",
+            "recommendations",
+            "platforms",
+            "genres",
+            "genre_totals",
+        ):
+            self.assertIn(key, result)
+        self.assertEqual(result["genre_totals"], {"Action": 120, "RPG": 40})
+        self.assertEqual(result["platforms"][0]["display_name"], "N64")
+        self.assertEqual(worker.cache.get_section("genre_totals"), {"totals": {"Action": 120, "RPG": 40}})
+
+    @patch("grid_launcher.server.discover.fetch_genre_totals")
+    @patch("grid_launcher.server.discover.fetch_games_by_genre")
+    @patch("grid_launcher.server.discover.fetch_server_platforms")
+    @patch("grid_launcher.server.discover.fetch_highly_rated_games")
+    @patch("grid_launcher.server.discover.fetch_new_games")
+    @patch("grid_launcher.server.discover.fetch_short_games")
+    def test_one_failing_section_does_not_kill_siblings(
+        self,
+        mock_short: Mock,
+        mock_new: Mock,
+        mock_rated: Mock,
+        mock_platforms: Mock,
+        mock_genre_games: Mock,
+        mock_totals: Mock,
+    ) -> None:
+        mock_short.return_value = ([_discover_game("Short")], ["Action"])
+        mock_new.side_effect = Exception("boom")
+        mock_rated.return_value = [_discover_game("Rated", "3")]
+        mock_platforms.return_value = []
+        mock_genre_games.return_value = [_discover_game("Genre Game", "6")]
+        mock_totals.side_effect = Exception("totals down")
+
+        worker = self._worker()
+        results: list[dict] = []
+        worker.finished.connect(results.append)
+        worker.run()
+
+        self.assertEqual(len(results), 1)
+        self.assertIn("highly_rated", results[0])
+        self.assertIn("genres", results[0])
+        self.assertNotIn("new_games", results[0])
+        self.assertNotIn("genre_totals", results[0])
+
+    @patch("grid_launcher.server.discover.fetch_server_platforms")
+    @patch("grid_launcher.server.discover.fetch_highly_rated_games")
+    @patch("grid_launcher.server.discover.fetch_new_games")
+    @patch("grid_launcher.server.discover.fetch_short_games")
+    def test_emits_error_when_everything_fails(
+        self,
+        mock_short: Mock,
+        mock_new: Mock,
+        mock_rated: Mock,
+        mock_platforms: Mock,
+    ) -> None:
+        mock_short.side_effect = Exception("server down")
+        mock_new.return_value = []
+        mock_rated.return_value = []
+        mock_platforms.return_value = []
+
+        worker = self._worker()
+        results: list[dict] = []
+        errors: list[str] = []
+        worker.finished.connect(results.append)
+        worker.error.connect(errors.append)
+        worker.run()
+
+        self.assertEqual(results, [])
+        self.assertEqual(errors, ["server down"])
+
+
+class TestFilterServerGamesGenre(unittest.TestCase):
+    """Test genre matching added to filter_server_games."""
+
+    def _games(self) -> list[dict]:
+        return [
+            {"title": "A", "platform": "SNES", "genres": "Action, Adventure"},
+            {"title": "B", "platform": "PS1", "genres": "Puzzle"},
+            {"title": "C", "platform": "PS1"},
+        ]
+
+    def test_genre_substring_match(self) -> None:
+        result = filter_server_games(self._games(), "Adven")
+        self.assertEqual([g["title"] for g in result], ["A"])
+
+    def test_genre_match_is_case_insensitive(self) -> None:
+        result = filter_server_games(self._games(), "pUzZlE")
+        self.assertEqual([g["title"] for g in result], ["B"])
+
+    def test_non_matching_genre_returns_empty(self) -> None:
+        self.assertEqual(filter_server_games(self._games(), "Racing"), [])
+
+    def test_title_and_platform_matching_still_work(self) -> None:
+        self.assertEqual(len(filter_server_games(self._games(), "PS1")), 2)
+        self.assertEqual(len(filter_server_games(self._games(), "B")), 1)
+
+    def test_genres_as_list_supported(self) -> None:
+        games = [{"title": "A", "platform": "SNES", "genres": ["Action", "Shooter"]}]
+        self.assertEqual(len(filter_server_games(games, "shooter")), 1)
+
+
+def _load_main_module() -> Any:
+    import importlib.util
+    from pathlib import Path
+    module_path = Path(__file__).resolve().parents[1] / "grid-launcher.py"
+    spec = importlib.util.spec_from_file_location("grid_launcher_main_for_discover_tests", module_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class _CacheStub:
+    """Minimal stand-in for MainWindow when exercising cache-only helpers."""
+
+    def __init__(self, module: Any, cache: DiscoverCache) -> None:
+        self.module = module
+        self.discover_cache = cache
+
+    def _discover_result_from_cache(self) -> dict:
+        return self.module.MainWindow._discover_result_from_cache(self)
+
+
+class TestDiscoverResultFromCache(unittest.TestCase):
+    """Test the cache-only result assembly used for offline / cold-start renders."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication([])
+        cls.module = _load_main_module()
+
+    def _warm_cache(self) -> DiscoverCache:
+        cache = DiscoverCache(ttl=3600)
+        cache.set_section("short_games", {"games": [_discover_game("Short", "1")], "genres": ["Action"]})
+        cache.set_section("new_games", {"games": [_discover_game("New", "2")]})
+        cache.set_section("highly_rated", {"games": [_discover_game("Rated", "3")]})
+        cache.set_section("recommendations", {"games": [_discover_game("Rec", "4")]})
+        cache.set_section("platforms_list", {"platforms": [{"id": 9, "display_name": "N64", "games": []}]})
+        cache.set_section(
+            "genres",
+            {"genres": ["Action"], "games_by_genre": {"Action": [_discover_game("Genre", "5")]}},
+        )
+        cache.set_section("genre_totals", {"totals": {"Action": 120}})
+        return cache
+
+    def test_returns_expected_result_shape(self) -> None:
+        window = _CacheStub(self.module, self._warm_cache())
+        result = window._discover_result_from_cache()
+        self.assertEqual(result["short_games"]["games"][0]["title"], "Short")
+        self.assertEqual(result["new_games"]["games"][0]["title"], "New")
+        self.assertEqual(result["highly_rated"]["games"][0]["title"], "Rated")
+        self.assertEqual(result["recommendations"]["games"][0]["title"], "Rec")
+        self.assertEqual(result["platforms"][0]["display_name"], "N64")
+        self.assertEqual(result["genres"]["genres"], ["Action"])
+        self.assertEqual(result["genre_totals"], {"Action": 120})
+
+    def test_empty_cache_returns_empty_result(self) -> None:
+        window = _CacheStub(self.module, DiscoverCache(ttl=3600))
+        self.assertEqual(window._discover_result_from_cache(), {})
+
+    def test_stale_entries_still_returned(self) -> None:
+        cache = self._warm_cache()
+        cache.ttl = 0
+        window = _CacheStub(self.module, cache)
+        self.assertIn("short_games", window._discover_result_from_cache())
+
+    def test_empty_sections_omitted(self) -> None:
+        cache = DiscoverCache(ttl=3600)
+        cache.set_section("short_games", {"games": []})
+        cache.set_section("new_games", {"games": [_discover_game("New", "2")]})
+        result = _CacheStub(self.module, cache)._discover_result_from_cache()
+        self.assertNotIn("short_games", result)
+        self.assertIn("new_games", result)
+
+
+class _WatchlistStub:
+    """Minimal stand-in for MainWindow when exercising watchlist helpers."""
+
+    def __init__(self, module: Any, path: str, entries: dict) -> None:
+        self.module = module
+        self.path = path
+        self.watchlist_games = entries
+        self.discover_page = None
+
+    def _watchlist_file(self):
+        from pathlib import Path
+        return Path(self.path)
+
+    def _watchlist_section_games(self) -> list[dict]:
+        return self.module.MainWindow._watchlist_section_games(self)
+
+    def _hydrate_watchlist_entries(self, games: list[dict]) -> None:
+        self.module.MainWindow._hydrate_watchlist_entries(self, games)
+
+    def toggle_watchlist(self, game: dict) -> None:
+        self.module.MainWindow.toggle_watchlist(self, game)
+
+    def is_watchlisted(self, rom_id: str) -> bool:
+        return self.module.MainWindow.is_watchlisted(self, rom_id)
+
+
+class TestWindowWatchlistStore(unittest.TestCase):
+    """Test the window-side watchlist store (full game dicts keyed by rom_id)."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication([])
+        cls.module = _load_main_module()
+
+    def setUp(self) -> None:
+        import tempfile
+        fd, self.path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        os.unlink(self.path)
+
+    def tearDown(self) -> None:
+        if os.path.exists(self.path):
+            os.unlink(self.path)
+
+    def test_toggle_stores_full_game_dict(self) -> None:
+        window = _WatchlistStub(self.module, self.path, {})
+        window.toggle_watchlist(_discover_game("Saved", "42", "Action", "SNES"))
+        self.assertEqual(window.watchlist_games["42"]["title"], "Saved")
+        self.assertTrue(window.is_watchlisted("42"))
+        self.assertEqual(load_watchlist(self.path)["42"]["platform"], "SNES")
+
+    def test_toggle_twice_removes_entry(self) -> None:
+        window = _WatchlistStub(self.module, self.path, {})
+        game = _discover_game("Saved", "42")
+        window.toggle_watchlist(game)
+        window.toggle_watchlist(game)
+        self.assertEqual(window.watchlist_games, {})
+        self.assertEqual(load_watchlist(self.path), {})
+
+    def test_toggle_without_rom_id_ignored(self) -> None:
+        window = _WatchlistStub(self.module, self.path, {})
+        window.toggle_watchlist({"title": "No Id"})
+        self.assertEqual(window.watchlist_games, {})
+
+    def test_section_games_skip_id_only_entries(self) -> None:
+        window = _WatchlistStub(
+            self.module, self.path, {"1": {}, "2": _discover_game("Has Data", "2")}
+        )
+        titles = [g["title"] for g in window._watchlist_section_games()]
+        self.assertEqual(titles, ["Has Data"])
+
+    def test_hydrate_fills_id_only_entry_and_saves(self) -> None:
+        window = _WatchlistStub(self.module, self.path, {"7": {}})
+        window._hydrate_watchlist_entries([_discover_game("Resurfaced", "7"), _discover_game("Other", "8")])
+        self.assertEqual(window.watchlist_games["7"]["title"], "Resurfaced")
+        self.assertNotIn("8", window.watchlist_games)
+        self.assertEqual(load_watchlist(self.path)["7"]["title"], "Resurfaced")
+
+    def test_hydrate_does_not_overwrite_existing_card_data(self) -> None:
+        window = _WatchlistStub(self.module, self.path, {"7": _discover_game("Original", "7")})
+        window._hydrate_watchlist_entries([_discover_game("Newer", "7")])
+        self.assertEqual(window.watchlist_games["7"]["title"], "Original")
+
+    def test_hydrate_without_matches_writes_nothing(self) -> None:
+        window = _WatchlistStub(self.module, self.path, {"7": {}})
+        window._hydrate_watchlist_entries([_discover_game("Unrelated", "9")])
+        self.assertFalse(os.path.exists(self.path))
+
+
+class TestDiscoverOfflineNotice(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication([])
+
+    def _page(self):
+        from grid_launcher.ui.discover import DiscoverPageWidget
+        page = DiscoverPageWidget(_MockWindow())
+        page.show()
+        return page
+
+    def test_notice_hidden_by_default(self) -> None:
+        self.assertFalse(self._page().offline_label.isVisible())
+
+    def test_notice_with_timestamp_mentions_cache_age(self) -> None:
+        import time
+        page = self._page()
+        page.set_offline_notice(time.time() - 2 * 86400)
+        self.assertTrue(page.offline_label.isVisible())
+        self.assertIn("cached results from 2 days ago", page.offline_label.text())
+
+    def test_notice_without_timestamp_says_no_cached_data(self) -> None:
+        page = self._page()
+        page.set_offline_notice(None)
+        self.assertTrue(page.offline_label.isVisible())
+        self.assertIn("no cached data", page.offline_label.text())
+
+    def test_clear_hides_notice(self) -> None:
+        page = self._page()
+        page.set_offline_notice(None)
+        page.clear_offline_notice()
+        self.assertFalse(page.offline_label.isVisible())
+
+
+class TestLastRefreshLabelTick(unittest.TestCase):
+    """Test the minute timer slot that re-renders the "Updated ..." label."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication([])
+
+    def _page(self):
+        from grid_launcher.ui.discover import DiscoverPageWidget
+        page = DiscoverPageWidget(_MockWindow())
+        page.show()
+        return page
+
+    def test_tick_updates_text_for_aged_timestamp(self) -> None:
+        import time
+        page = self._page()
+        page.update_last_refresh_time(time.time())
+        self.assertEqual(page.last_refresh_label.text(), "Updated just now")
+        page._last_refresh_time = time.time() - 605
+        page._tick_last_refresh_label()
+        self.assertEqual(page.last_refresh_label.text(), "Updated 10 minutes ago")
+
+    def test_tick_without_refresh_time_leaves_label_hidden(self) -> None:
+        page = self._page()
+        page._tick_last_refresh_label()
+        self.assertFalse(page.last_refresh_label.isVisible())
+
+
+class TestGenreSectionSeeAll(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from PySide6.QtWidgets import QApplication
+        cls.app = QApplication.instance() or QApplication([])
+
+    def _section(self, callback):
+        from grid_launcher.ui.discover import DiscoverGenreSection
+        games_by_genre = {
+            "Action": [_discover_game("A", "1")],
+            "RPG": [_discover_game("B", "2")],
+        }
+        return DiscoverGenreSection(
+            "genres", ["Action", "RPG"], games_by_genre, _MockWindow(), callback
+        )
+
+    def test_see_all_calls_callback_with_selected_genre(self) -> None:
+        calls: list[str] = []
+        section = self._section(calls.append)
+        section.carousel_section.see_all_callback()
+        self.assertEqual(calls, ["Action"])
+
+    def test_see_all_follows_pill_selection(self) -> None:
+        calls: list[str] = []
+        section = self._section(calls.append)
+        section.genre_buttons["RPG"].click()
+        section.carousel_section.see_all_callback()
+        self.assertEqual(calls, ["RPG"])
+
+    def test_no_callback_leaves_carousel_without_see_all(self) -> None:
+        section = self._section(None)
+        self.assertIsNone(section.carousel_section.see_all_callback)
+
+    def test_page_add_genre_section_threads_callback(self) -> None:
+        from grid_launcher.ui.discover import DiscoverPageWidget
+        calls: list[str] = []
+        page = DiscoverPageWidget(_MockWindow())
+        page.add_genre_section(
+            ["Action"], {"Action": [_discover_game("A", "1")]}, calls.append
+        )
+        page.sections["genres"].carousel_section.see_all_callback()
+        self.assertEqual(calls, ["Action"])
 
 
 if __name__ == "__main__":

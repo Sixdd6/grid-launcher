@@ -114,7 +114,17 @@ def filter_server_games(games: list[dict[str, str]], query: str) -> list[dict[st
     for game in games:
         title = game.get("title", "").casefold()
         game_platform = game.get("platform", "").casefold()
-        if normalized_query in title or normalized_query in game_platform:
+        raw_genres = game.get("genres", "") or ""
+        genres = (
+            ", ".join(str(g) for g in raw_genres)
+            if isinstance(raw_genres, (list, tuple))
+            else str(raw_genres)
+        ).casefold()
+        if (
+            normalized_query in title
+            or normalized_query in game_platform
+            or normalized_query in genres
+        ):
             filtered_games.append(game)
     return filtered_games
 
