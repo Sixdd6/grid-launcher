@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any, Callable, Protocol
 
 from PySide6.QtCore import QByteArray, QSize, QTimer, Qt
@@ -8,7 +9,78 @@ from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLayout, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
-from grid_launcher.library import rom_file_name_version
+from grid_launcher.library import is_game_installed, rom_file_name_version, save_record_timestamp
+from grid_launcher.ui.theme import themed_svg_icon, themed_svg_pixmap
+
+NEW_BADGE_MAX_AGE_SECONDS = 7 * 86400
+
+
+def _relative_age_text(ts: float) -> str:
+    """Human-readable age of a timestamp, e.g. "just now" or "3 days ago".
+
+    Mirrors ``grid_launcher.ui.discover._relative_age_text`` so this module
+    doesn't need to import the Discover page module for one helper.
+    """
+    delta = time.time() - ts
+    if delta < 60:
+        return "just now"
+    if delta < 3600:
+        return f"{int(delta // 60)} minutes ago"
+    if delta < 86400:
+        return f"{int(delta // 3600)} hours ago"
+    return f"{int(delta // 86400)} days ago"
+
+
+def _srgb_channel_luminance(channel_255: int) -> float:
+    channel = channel_255 / 255
+    return channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+
+
+def _relative_luminance(hex_color: str) -> float | None:
+    color = hex_color.lstrip("#")
+    if len(color) != 6:
+        return None
+    try:
+        red, green, blue = (int(color[i : i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return None
+    return (
+        0.2126 * _srgb_channel_luminance(red)
+        + 0.7152 * _srgb_channel_luminance(green)
+        + 0.0722 * _srgb_channel_luminance(blue)
+    )
+
+
+def _readable_badge_text_color(background_hex: str) -> str:
+    """Pick black or white text, whichever has the higher WCAG contrast ratio
+    against ``background_hex``.
+
+    Badges sit on an opaque pill background (not directly on cover art), so
+    contrast only needs to be solved between the badge's own fill and its
+    text. Computing actual contrast ratios (rather than a fixed brightness
+    cutoff) keeps text at or above the ~4.5:1 AA threshold for both theme
+    variants' mid-saturation accent/success colors, where a naive perceived-
+    brightness heuristic would pick the weaker option.
+    """
+    bg_luminance = _relative_luminance(background_hex)
+    if bg_luminance is None:
+        return "#ffffff"
+    black_contrast = (bg_luminance + 0.05) / 0.05
+    white_contrast = 1.05 / (bg_luminance + 0.05)
+    return "#1a1a1a" if black_contrast >= white_contrast else "#ffffff"
+
+
+def _parse_positive_rating(rating_value: object) -> float | None:
+    if not isinstance(rating_value, str):
+        return None
+    text = rating_value.strip()
+    if not text or text.casefold() == "n/a":
+        return None
+    try:
+        parsed = float(text)
+    except ValueError:
+        return None
+    return parsed if parsed > 0 else None
 
 
 class AspectRatioLabel(QLabel):
@@ -243,7 +315,12 @@ def visible_library_games(library_games: list[dict[str, str]]) -> list[dict[str,
     )
 
 
-def make_game_card(window: GameCardWindowProtocol, game: dict[str, str], source: str) -> QPushButton:
+def make_game_card(
+    window: GameCardWindowProtocol,
+    game: dict[str, str],
+    source: str,
+    show_added_date: bool = False,
+) -> QPushButton:
     frame = QPushButton()
     frame.setObjectName("gameCard")
     frame.setFixedSize(180, 250)
@@ -271,6 +348,15 @@ def make_game_card(window: GameCardWindowProtocol, game: dict[str, str], source:
     platform_label.setStyleSheet(f"color: {window._theme_color('muted', '#6272a4')};")
     layout.addWidget(platform_label)
 
+    if source == "discover" and show_added_date:
+        created_at_ts = save_record_timestamp(game)
+        added_date_label = QLabel(f"Added {_relative_age_text(created_at_ts)}" if created_at_ts else "")
+        added_date_label.setObjectName("gameCardAddedDate")
+        added_date_label.setStyleSheet(f"color: {window._theme_color('muted', '#9baed6')}; font-size: 10px;")
+        added_date_label.setVisible(bool(created_at_ts))
+        layout.addWidget(added_date_label)
+        frame.added_date_label = added_date_label  # type: ignore[attr-defined]
+
     update_indicator = QLabel("Update Available")
     update_indicator.setObjectName("gameCardUpdateIndicator")
     update_indicator.setStyleSheet(f"color: {window._theme_color('warning', '#ffb86c')}; font-size: 12px; font-weight: 600;")
@@ -282,18 +368,110 @@ def make_game_card(window: GameCardWindowProtocol, game: dict[str, str], source:
         is_watchlisted_fn = getattr(window, "is_watchlisted", None)
         rom_id = game.get("rom_id", "")
         if rom_id and (toggle_watchlist_fn is not None):
-            bookmark_btn = QPushButton("\u2605" if (is_watchlisted_fn and is_watchlisted_fn(rom_id)) else "\u2606")
+            bookmark_icon_size = QSize(14, 14)
+            bookmark_filled_color = window._theme_color("warning", "#ffb86c")
+            bookmark_outline_color = window._theme_color("muted", "#9baed6")
+
+            def _bookmark_icon(watchlisted: bool):
+                asset = "svg/star.svg" if watchlisted else "svg/star-outline.svg"
+                color = bookmark_filled_color if watchlisted else bookmark_outline_color
+                return themed_svg_icon(asset, color, size=bookmark_icon_size)
+
+            initial_watchlisted = bool(is_watchlisted_fn and is_watchlisted_fn(rom_id))
+            bookmark_btn = QPushButton()
+            bookmark_btn.setIcon(_bookmark_icon(initial_watchlisted))
+            bookmark_btn.setIconSize(bookmark_icon_size)
             bookmark_btn.setObjectName("gameCardBookmark")
             bookmark_btn.setFlat(True)
             bookmark_btn.setFixedSize(24, 24)
+            bookmark_btn.setToolTip("Remove from watchlist" if initial_watchlisted else "Add to watchlist")
+            bookmark_btn.setAccessibleName("Toggle watchlist")
             bookmark_btn.setParent(frame)
             bookmark_btn.move(152, 4)
-            def _toggle(checked=False, rid=rom_id, btn=bookmark_btn):
-                toggle_watchlist_fn(rid)
-                new_state = is_watchlisted_fn(rid) if is_watchlisted_fn else False
-                btn.setText("\u2605" if new_state else "\u2606")
+            def _set_watchlisted(watchlisted: bool, btn=bookmark_btn):
+                """Update this card's star icon/tooltip; called by the page-wide sync too."""
+                btn.setIcon(_bookmark_icon(watchlisted))
+                btn.setToolTip("Remove from watchlist" if watchlisted else "Add to watchlist")
+
+            def _toggle(checked=False, g=game, rid=rom_id):
+                toggle_watchlist_fn(g)
+                _set_watchlisted(bool(is_watchlisted_fn and is_watchlisted_fn(rid)))
             bookmark_btn.clicked.connect(_toggle)
             bookmark_btn.show()
+            frame.bookmark_btn = bookmark_btn  # type: ignore[attr-defined]
+            frame.watchlist_rom_id = rom_id  # type: ignore[attr-defined]
+            frame.set_watchlisted = _set_watchlisted  # type: ignore[attr-defined]
+
+        # "NEW" badge \u2014 created within the last 7 days (top-left, overlaying the cover).
+        created_at_ts = save_record_timestamp(game)
+        is_new = bool(created_at_ts) and (time.time() - created_at_ts) <= NEW_BADGE_MAX_AGE_SECONDS
+        new_badge = QLabel("NEW")
+        new_badge.setObjectName("gameCardNewBadge")
+        new_badge.setParent(frame)
+        new_bg = window._theme_color("success", "#50fa7b")
+        new_badge.setStyleSheet(
+            f"background-color: {new_bg}; color: {_readable_badge_text_color(new_bg)};"
+            " border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 700;"
+        )
+        new_badge.adjustSize()
+        new_badge.move(6, 6)
+        new_badge.setVisible(is_new)
+        frame.new_badge = new_badge  # type: ignore[attr-defined]
+
+        # Rating badge \u2014 bottom-right of the cover, e.g. a star icon + "4.5".
+        # ``rating_badge`` stays a plain QLabel holding just the numeric text
+        # (tests assert on its .text()); a small star pixmap is drawn
+        # alongside it (see the sibling `rating_star_icon` label below).
+        rating_value = _parse_positive_rating(game.get("rating"))
+        rating_badge = QLabel(f"{rating_value:.1f}" if rating_value is not None else "")
+        rating_badge.setObjectName("gameCardRatingBadge")
+        rating_badge.setParent(frame)
+        rating_bg = window._theme_color("accent", "#8be9fd")
+        rating_text_color = _readable_badge_text_color(rating_bg)
+        rating_badge.setStyleSheet(
+            f"background-color: {rating_bg}; color: {rating_text_color};"
+            " border-radius: 4px; padding: 2px 6px 2px 16px; font-size: 11px; font-weight: 700;"
+        )
+        rating_badge.adjustSize()
+        # Anchor to the bottom-right corner of the 164x170 cover (which sits at (8, 8)).
+        rating_badge.move(172 - rating_badge.width() - 4, 178 - rating_badge.height() - 4)
+        rating_badge.setVisible(rating_value is not None)
+        frame.rating_badge = rating_badge  # type: ignore[attr-defined]
+
+        # NOTE: this must be a sibling of `rating_badge`, not a child of it.
+        # QLabel with a QSS `padding` rule silently fails to composite child
+        # widgets on top of its painted background (verified empirically —
+        # the child is positioned correctly and has a valid pixmap, but
+        # never appears on screen), so the icon is placed on `frame`
+        # directly and manually kept in sync with the badge's position and
+        # visibility instead of relying on parent/child inheritance.
+        rating_star_icon = QLabel(frame)
+        rating_star_icon.setObjectName("gameCardRatingIcon")
+        rating_star_icon.setStyleSheet("background-color: transparent; border: none;")
+        rating_star_icon.setFixedSize(10, 10)
+        rating_star_icon.setPixmap(themed_svg_pixmap("svg/star.svg", rating_text_color, size=QSize(10, 10)))
+        rating_star_icon.move(rating_badge.x() + 4, rating_badge.y() + max(0, (rating_badge.height() - 10) // 2))
+        rating_star_icon.setVisible(rating_value is not None)
+        frame.rating_star_icon = rating_star_icon  # type: ignore[attr-defined]
+
+        # Installed check \u2014 most Discover sections already exclude installed games,
+        # but the watchlist can surface games the user has since installed.
+        library_games = getattr(window, "library_games", [])
+        installed = is_game_installed(game, library_games)
+        installed_badge = QLabel()
+        installed_badge.setObjectName("gameCardInstalledBadge")
+        installed_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        installed_badge.setParent(frame)
+        installed_bg = window._theme_color("active", "#bd93f9")
+        installed_text = window._theme_color("active_text", "#282a36")
+        installed_badge.setFixedSize(20, 20)
+        installed_badge.setStyleSheet(f"background-color: {installed_bg}; border-radius: 10px;")
+        installed_badge.setPixmap(themed_svg_pixmap("svg/check.svg", installed_text, size=QSize(12, 12)))
+        installed_badge.setToolTip("Installed")
+        # Sits just below the bookmark button (which occupies (152,4)-(176,28)).
+        installed_badge.move(150, 30)
+        installed_badge.setVisible(installed)
+        frame.installed_badge = installed_badge  # type: ignore[attr-defined]
 
     return frame
 

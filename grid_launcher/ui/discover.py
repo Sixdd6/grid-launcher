@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import math
 import time
 from typing import Any, Callable, Protocol
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -20,6 +19,36 @@ from PySide6.QtWidgets import (
 )
 
 from ..ui.spinner import LoadingSpinnerWidget
+from ..ui.theme import themed_svg_icon
+
+
+_TOGGLE_ICON_SIZE = QSize(12, 12)
+_PREFS_ICON_SIZE = QSize(16, 16)
+
+
+def _section_toggle_icon(collapsed: bool, color: str):
+    """Chevron icon for a collapsible section header: right when collapsed, down when expanded."""
+    asset = "svg/chevron-right.svg" if collapsed else "svg/chevron-down.svg"
+    return themed_svg_icon(asset, color, size=_TOGGLE_ICON_SIZE)
+
+
+def _window_theme_color(window: Any, role: str, fallback: str) -> str:
+    theme_color_fn = getattr(window, "_theme_color", None)
+    if callable(theme_color_fn):
+        return theme_color_fn(role, fallback)
+    return fallback
+
+
+def _relative_age_text(ts: float) -> str:
+    """Human-readable age of a timestamp, e.g. "just now" or "3 days ago"."""
+    delta = time.time() - ts
+    if delta < 60:
+        return "just now"
+    if delta < 3600:
+        return f"{int(delta // 60)} minutes ago"
+    if delta < 86400:
+        return f"{int(delta // 3600)} hours ago"
+    return f"{int(delta // 86400)} days ago"
 
 
 class DiscoverWindowProtocol(Protocol):
@@ -31,7 +60,7 @@ class DiscoverWindowProtocol(Protocol):
     def _theme_color(self, role: str, fallback: str) -> str:
         ...
 
-    def _make_game_card(self, game: dict[str, str], source: str) -> QWidget:
+    def _make_game_card(self, game: dict[str, str], source: str, show_added_date: bool = False) -> QWidget:
         ...
 
     def _clear_layout(self, layout: QGridLayout) -> None:
@@ -40,10 +69,13 @@ class DiscoverWindowProtocol(Protocol):
     def navigate_to_server_platform(self, platform_display_name: str | None) -> None:
         ...
 
+    def navigate_to_server_genre(self, genre: str) -> None:
+        ...
+
     def record_discover_event(self, event: str, section_id: str, rom_id: str) -> None:
         ...
 
-    def toggle_watchlist(self, rom_id: str) -> None:
+    def toggle_watchlist(self, game: dict[str, str]) -> None:
         ...
 
     def is_watchlisted(self, rom_id: str) -> bool:
@@ -63,14 +95,17 @@ class DiscoverCarouselSection(QWidget):
         window: DiscoverWindowProtocol,
         see_all_callback: Callable[[], None] | None = None,
         parent: QWidget | None = None,
+        show_added_date: bool = False,
     ) -> None:
         """Initialize carousel section.
-        
+
         Args:
             title: Section title
             games: List of game dicts to display
             window: MainWindow instance for callbacks
             parent: Parent widget
+            show_added_date: When True, cards render a "Added N days ago" caption
+                (used by the "New on Server" section only).
         """
         super().__init__(parent)
         self.title = title
@@ -80,6 +115,7 @@ class DiscoverCarouselSection(QWidget):
         self.game_cards: list[Any] = []
         self.section_id = section_id
         self.collapsed = False
+        self.show_added_date = show_added_date
 
         self._init_ui()
 
@@ -94,9 +130,15 @@ class DiscoverCarouselSection(QWidget):
         header_row.setSpacing(6)
         header_row.setContentsMargins(0, 0, 0, 0)
 
-        self._toggle_btn = QPushButton("\u25bc")
+        self._toggle_icon_color = _window_theme_color(self.window, "text", "#f8f8f2")
+        self._toggle_btn = QPushButton()
+        self._toggle_btn.setObjectName("discoverSectionToggle")
+        self._toggle_btn.setIcon(_section_toggle_icon(False, self._toggle_icon_color))
+        self._toggle_btn.setIconSize(_TOGGLE_ICON_SIZE)
         self._toggle_btn.setFlat(True)
         self._toggle_btn.setFixedWidth(24)
+        self._toggle_btn.setToolTip("Collapse section")
+        self._toggle_btn.setAccessibleName("Toggle section visibility")
         self._toggle_btn.clicked.connect(self.toggle_collapsed)
         header_row.addWidget(self._toggle_btn)
 
@@ -129,12 +171,7 @@ class DiscoverCarouselSection(QWidget):
         cards_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
 
         for game in self.games:
-            card = self.window._make_game_card(game, "discover")
-            rom_id = game.get("rom_id", "")
-            if rom_id and hasattr(card, "clicked"):
-                card.clicked.connect(
-                    lambda checked=False, sid=self.section_id, rid=rom_id: self.window.record_discover_event("card_opened", sid, rid)
-                )
+            card = self._build_card(game)
             cards_layout.addWidget(card)
             self.game_cards.append(card)
 
@@ -143,16 +180,40 @@ class DiscoverCarouselSection(QWidget):
         layout.addWidget(scroll)
         self._content_scroll = scroll
 
+    def _build_card(self, game: dict[str, Any]) -> Any:
+        """Build a single card, opting into the "Added N days ago" caption when enabled.
+
+        The kwarg is only passed when needed so windows/stubs whose
+        ``_make_game_card`` doesn't accept ``show_added_date`` keep working.
+        """
+        if self.show_added_date:
+            card = self.window._make_game_card(game, "discover", show_added_date=True)
+        else:
+            card = self.window._make_game_card(game, "discover")
+        rom_id = game.get("rom_id", "")
+        if rom_id and hasattr(card, "clicked"):
+            card.clicked.connect(
+                lambda checked=False, sid=self.section_id, rid=rom_id: self.window.record_discover_event("card_opened", sid, rid)
+            )
+        return card
+
     def toggle_collapsed(self) -> None:
         self.collapsed = not self.collapsed
         self._content_scroll.setVisible(not self.collapsed)
-        self._toggle_btn.setText("\u25b6" if self.collapsed else "\u25bc")
+        self._toggle_btn.setIcon(_section_toggle_icon(self.collapsed, self._toggle_icon_color))
+        self._toggle_btn.setToolTip("Expand section" if self.collapsed else "Collapse section")
         self.collapsed_changed.emit(self.section_id, self.collapsed)
 
     def apply_collapsed(self, collapsed: bool) -> None:
         self.collapsed = collapsed
         self._content_scroll.setVisible(not collapsed)
-        self._toggle_btn.setText("\u25b6" if collapsed else "\u25bc")
+        self._toggle_btn.setIcon(_section_toggle_icon(collapsed, self._toggle_icon_color))
+        self._toggle_btn.setToolTip("Expand section" if collapsed else "Collapse section")
+
+    def refresh_theme(self, colors: dict) -> None:
+        from grid_launcher.ui.theme import theme_color as _tc
+        self._toggle_icon_color = _tc(colors, "text", "#f8f8f2")
+        self._toggle_btn.setIcon(_section_toggle_icon(self.collapsed, self._toggle_icon_color))
 
     def update_games(self, games: list[dict]) -> None:
         content = self._content_scroll.widget()
@@ -168,12 +229,7 @@ class DiscoverCarouselSection(QWidget):
                 w.deleteLater()
         self.game_cards.clear()
         for game in games:
-            card = self.window._make_game_card(game, "discover")
-            rom_id = game.get("rom_id", "")
-            if rom_id and hasattr(card, "clicked"):
-                card.clicked.connect(
-                    lambda checked=False, sid=self.section_id, rid=rom_id: self.window.record_discover_event("card_opened", sid, rid)
-                )
+            card = self._build_card(game)
             cards_layout.addWidget(card)
             self.game_cards.append(card)
         content.setMinimumWidth(len(games) * 192)
@@ -192,20 +248,23 @@ class DiscoverGenreSection(QWidget):
         genres: list[str] | None = None,
         games_by_genre: dict[str, list[dict[str, Any]]] | None = None,
         window: DiscoverWindowProtocol | None = None,
+        see_all_callback: Callable[[str], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         """Initialize genre section.
-        
+
         Args:
             genres: List of genre names
             games_by_genre: Dict mapping genre to list of games
             window: MainWindow instance
+            see_all_callback: Called with the genre name when "See All" is clicked
             parent: Parent widget
         """
         super().__init__(parent)
         self.genres = genres or []
         self.games_by_genre = games_by_genre or {}
         self.window = window
+        self.see_all_callback = see_all_callback
         self.selected_genre: str | None = None
         self.carousel_section: DiscoverCarouselSection | None = None
         self.section_id = section_id
@@ -224,9 +283,15 @@ class DiscoverGenreSection(QWidget):
         header_row.setSpacing(6)
         header_row.setContentsMargins(0, 0, 0, 0)
 
-        self._toggle_btn = QPushButton("\u25bc")
+        self._toggle_icon_color = _window_theme_color(self.window, "text", "#f8f8f2")
+        self._toggle_btn = QPushButton()
+        self._toggle_btn.setObjectName("discoverSectionToggle")
+        self._toggle_btn.setIcon(_section_toggle_icon(False, self._toggle_icon_color))
+        self._toggle_btn.setIconSize(_TOGGLE_ICON_SIZE)
         self._toggle_btn.setFlat(True)
         self._toggle_btn.setFixedWidth(24)
+        self._toggle_btn.setToolTip("Collapse section")
+        self._toggle_btn.setAccessibleName("Toggle section visibility")
         self._toggle_btn.clicked.connect(self.toggle_collapsed)
         header_row.addWidget(self._toggle_btn)
 
@@ -272,17 +337,26 @@ class DiscoverGenreSection(QWidget):
     def toggle_collapsed(self) -> None:
         self.collapsed = not self.collapsed
         self._content_widget.setVisible(not self.collapsed)
-        self._toggle_btn.setText("\u25b6" if self.collapsed else "\u25bc")
+        self._toggle_btn.setIcon(_section_toggle_icon(self.collapsed, self._toggle_icon_color))
+        self._toggle_btn.setToolTip("Expand section" if self.collapsed else "Collapse section")
         self.collapsed_changed.emit(self.section_id, self.collapsed)
 
     def apply_collapsed(self, collapsed: bool) -> None:
         self.collapsed = collapsed
         self._content_widget.setVisible(not collapsed)
-        self._toggle_btn.setText("\u25b6" if collapsed else "\u25bc")
+        self._toggle_btn.setIcon(_section_toggle_icon(collapsed, self._toggle_icon_color))
+        self._toggle_btn.setToolTip("Expand section" if collapsed else "Collapse section")
+
+    def refresh_theme(self, colors: dict) -> None:
+        from grid_launcher.ui.theme import theme_color as _tc
+        self._toggle_icon_color = _tc(colors, "text", "#f8f8f2")
+        self._toggle_btn.setIcon(_section_toggle_icon(self.collapsed, self._toggle_icon_color))
+        if self.carousel_section is not None:
+            self.carousel_section.refresh_theme(colors)
 
     def _on_genre_selected(self, genre: str) -> None:
-        """Handle genre selection.
-        
+        """Handle genre selection: highlight the pill and rebuild its carousel.
+
         Args:
             genre: Selected genre name
         """
@@ -294,6 +368,31 @@ class DiscoverGenreSection(QWidget):
         if genre in self.genre_buttons:
             self.genre_buttons[genre].setChecked(True)
 
+        # Clear old carousel
+        if self.carousel_section is not None:
+            self.carousel_container.removeWidget(self.carousel_section)
+            self.carousel_section.deleteLater()
+            self.carousel_section = None
+
+        # Create new carousel for the clicked genre (a genre with no games shows nothing)
+        games = self.games_by_genre.get(genre, [])
+        if games:
+            see_all = None
+            if self.see_all_callback is not None:
+                see_all = lambda g=genre: self.see_all_callback(g)
+            self.carousel_section = DiscoverCarouselSection(
+                f"genre_{genre}",
+                f"Top {genre} Games",
+                games,
+                self.window,
+                see_all,
+                self,
+            )
+            self.carousel_container.addWidget(self.carousel_section)
+
+        self.selected_genre = genre
+        self.games_selected.emit(genre)
+
     def set_genre_stats(self, stats: dict[str, tuple[int, int]]) -> None:
         for genre, button in self.genre_buttons.items():
             total, installed = stats.get(genre, (0, 0))
@@ -303,27 +402,6 @@ class DiscoverGenreSection(QWidget):
                 button.setText(f"{genre} ({total})")
             else:
                 button.setText(genre)
-
-        # Clear old carousel
-        if self.carousel_section is not None:
-            self.carousel_container.removeWidget(self.carousel_section)
-            self.carousel_section.deleteLater()
-
-        # Create new carousel for selected genre
-        games = self.games_by_genre.get(genre, [])
-        if games:
-            self.carousel_section = DiscoverCarouselSection(
-                f"genre_{genre}",
-                f"Top {genre} Games",
-                games,
-                self.window,
-                None,
-                self,
-            )
-            self.carousel_container.addWidget(self.carousel_section)
-
-        self.selected_genre = genre
-        self.games_selected.emit(genre)
 
 
 class DiscoverFilterPanel(QWidget):
@@ -441,6 +519,12 @@ class DiscoverPageWidget(QWidget):
 
         self._init_ui()
 
+        # Keeps the "Updated N minutes ago" label current without a refresh
+        self._refresh_label_timer = QTimer(self)
+        self._refresh_label_timer.setInterval(60_000)
+        self._refresh_label_timer.timeout.connect(self._tick_last_refresh_label)
+        self._refresh_label_timer.start()
+
     def _init_ui(self) -> None:
         """Build the UI layout."""
         layout = QVBoxLayout(self)
@@ -467,20 +551,32 @@ class DiscoverPageWidget(QWidget):
         self.filter_btn = filter_btn
         header_layout.addWidget(filter_btn)
 
-        prefs_button = QPushButton("\u2699")
+        prefs_button = QPushButton()
+        prefs_button.setObjectName("discoverPrefsButton")
+        prefs_button.setIcon(themed_svg_icon("svg/config.svg", self.window._theme_color("text", "#f8f8f2"), size=_PREFS_ICON_SIZE))
+        prefs_button.setIconSize(_PREFS_ICON_SIZE)
         prefs_button.setFlat(True)
         prefs_button.setFixedWidth(28)
+        prefs_button.setToolTip("Discover preferences")
+        prefs_button.setAccessibleName("Discover preferences")
         prefs_button.clicked.connect(lambda: self.preferences_requested.emit())
         self.prefs_button = prefs_button
         header_layout.addWidget(prefs_button)
 
         refresh_button = QPushButton("Refresh")
         refresh_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        refresh_button.clicked.connect(self._on_refresh_clicked)
         self.refresh_button = refresh_button
+        self._refresh_slot: Callable[..., None] | None = None
         header_layout.addWidget(refresh_button)
 
         layout.addLayout(header_layout)
+
+        self.offline_label = QLabel("")
+        self.offline_label.setObjectName("discoverOfflineNotice")
+        self.offline_label.setWordWrap(True)
+        self._style_offline_label()
+        self.offline_label.hide()
+        layout.addWidget(self.offline_label)
 
         self._filter_panel = DiscoverFilterPanel(self)
         self._filter_panel.hide()
@@ -522,22 +618,72 @@ class DiscoverPageWidget(QWidget):
         from grid_launcher.ui.theme import theme_color as _tc
         muted = _tc(colors, "muted", "#9baed6")
         self.status_label.setStyleSheet(f"color: {muted}; font-size: 14px;")
+        self._style_offline_label(colors)
+        text_color = _tc(colors, "text", "#f8f8f2")
+        self.prefs_button.setIcon(themed_svg_icon("svg/config.svg", text_color, size=_PREFS_ICON_SIZE))
+        for section in self.sections.values():
+            refresh_section_theme = getattr(section, "refresh_theme", None)
+            if callable(refresh_section_theme):
+                refresh_section_theme(colors)
+
+    def _style_offline_label(self, colors: dict | None = None) -> None:
+        """Style the offline banner: a muted panel with a warning accent stripe.
+
+        Uses a full-strength `text`-on-`surface` pairing for the message body
+        (high contrast in both themes) and reserves the `warning` role for a
+        left accent border only, so the notice reads as "heads up" rather
+        than an alarming full-color block.
+        """
+        if colors is not None:
+            from grid_launcher.ui.theme import theme_color as _tc
+            text = _tc(colors, "text", "#f8f8f2")
+            surface = _tc(colors, "surface", "#44475a")
+            border = _tc(colors, "border", "#6272a4")
+            warning = _tc(colors, "warning", "#ffb86c")
+        else:
+            text = self.window._theme_color("text", "#f8f8f2")
+            surface = self.window._theme_color("surface", "#44475a")
+            border = self.window._theme_color("border", "#6272a4")
+            warning = self.window._theme_color("warning", "#ffb86c")
+        self.offline_label.setStyleSheet(
+            f"QLabel#discoverOfflineNotice {{"
+            f" color: {text};"
+            f" background-color: {surface};"
+            f" border: 1px solid {border};"
+            f" border-left: 3px solid {warning};"
+            " border-radius: 6px;"
+            " padding: 6px 10px;"
+            " font-size: 13px;"
+            " }"
+        )
+
+    def set_offline_notice(self, timestamp: float | None) -> None:
+        """Show the offline banner; timestamp is the cache age (None when no cache).
+
+        Args:
+            timestamp: Unix time the cached data was fetched, or None when nothing is cached
+        """
+        if timestamp:
+            self.offline_label.setText(
+                f"Offline — showing cached results from {_relative_age_text(timestamp)}"
+            )
+        else:
+            self.offline_label.setText("Server offline — no cached data yet")
+        self.offline_label.show()
+
+    def clear_offline_notice(self) -> None:
+        self.offline_label.hide()
+
+    def _tick_last_refresh_label(self) -> None:
+        if self._last_refresh_time:
+            self.update_last_refresh_time(self._last_refresh_time)
 
     def update_last_refresh_time(self, ts: float) -> None:
         self._last_refresh_time = ts
         if ts == 0:
             self.last_refresh_label.hide()
             return
-        delta = time.time() - ts
-        if delta < 60:
-            text = "Updated just now"
-        elif delta < 3600:
-            text = f"Updated {int(delta // 60)} minutes ago"
-        elif delta < 86400:
-            text = f"Updated {int(delta // 3600)} hours ago"
-        else:
-            text = f"Updated {int(delta // 86400)} days ago"
-        self.last_refresh_label.setText(text)
+        self.last_refresh_label.setText(f"Updated {_relative_age_text(ts)}")
         self.last_refresh_label.show()
 
     def set_collapsed_states(self, states: dict[str, bool]) -> None:
@@ -576,16 +722,20 @@ class DiscoverPageWidget(QWidget):
         title: str,
         games: list[dict[str, Any]],
         see_all_callback: Callable[[], None] | None = None,
+        show_added_date: bool = False,
     ) -> None:
         """Add a carousel section.
-        
+
         Args:
             section_id: Unique section identifier
             title: Section title
             games: List of game dicts
+            show_added_date: When True, cards show an "Added N days ago" caption
+                (used for the "New on Server" section).
         """
         section = DiscoverCarouselSection(
-            section_id, title, games, self.window, see_all_callback, self
+            section_id, title, games, self.window, see_all_callback, self,
+            show_added_date=show_added_date,
         )
         section.collapsed_changed.connect(self._on_section_collapse_changed)
         if self._collapsed_states.get(section_id):
@@ -595,12 +745,23 @@ class DiscoverPageWidget(QWidget):
         self._section_games[section_id] = list(games)
 
     def add_watchlist_section(self, games: list[dict]) -> None:
+        # Rebuild in place: keep the section's current position in the page
+        insert_at = -1
         if "watchlist" in self.sections:
             old = self.sections.pop("watchlist")
+            insert_at = self.content_layout.indexOf(old)
+            self.content_layout.removeWidget(old)
+            old.setParent(None)
             old.deleteLater()
 
+        def _place(widget: QWidget) -> None:
+            if insert_at >= 0:
+                self.content_layout.insertWidget(insert_at, widget)
+            else:
+                self.content_layout.addWidget(widget)
+
         if not games:
-            empty_label = QLabel("No saved games yet. Click \u2606 on any game to save it here.")
+            empty_label = QLabel("No saved games yet. Click the star on any game to save it here.")
             empty_label.setObjectName("watchlistEmpty")
             muted = self.window._theme_color("muted", "#9baed6")
             empty_label.setStyleSheet(f"color: {muted}; font-size: 13px;")
@@ -610,14 +771,14 @@ class DiscoverPageWidget(QWidget):
             container_layout = QVBoxLayout(container)
             container_layout.setContentsMargins(0, 8, 0, 8)
             container_layout.addWidget(empty_label)
-            self.content_layout.addWidget(container)
+            _place(container)
             self.sections["watchlist"] = container
         else:
             section = DiscoverCarouselSection("watchlist", "Your Watchlist", games, self.window, None, self)
             section.collapsed_changed.connect(self._on_section_collapse_changed)
             if self._collapsed_states.get("watchlist"):
                 section.apply_collapsed(True)
-            self.content_layout.addWidget(section)
+            _place(section)
             self.sections["watchlist"] = section
             self._section_games["watchlist"] = list(games)
 
@@ -647,34 +808,52 @@ class DiscoverPageWidget(QWidget):
         self,
         genres: list[str],
         games_by_genre: dict[str, list[dict[str, Any]]],
+        see_all_callback: Callable[[str], None] | None = None,
     ) -> None:
         """Add genre filter section.
-        
+
         Args:
             genres: List of available genres
             games_by_genre: Dict mapping genre to games
+            see_all_callback: Called with the genre name when "See All" is clicked
         """
-        section = DiscoverGenreSection("genres", genres, games_by_genre, self.window, self)
+        section = DiscoverGenreSection(
+            "genres", genres, games_by_genre, self.window, see_all_callback, self
+        )
         section.collapsed_changed.connect(self._on_section_collapse_changed)
         if self._collapsed_states.get("genres"):
             section.apply_collapsed(True)
         self.content_layout.addWidget(section)
         self.sections["genres"] = section
 
+    def sync_watchlist_state(self, rom_id: str) -> None:
+        """Refresh the star icon on every visible card for `rom_id` (a game can appear in several sections)."""
+        is_watchlisted_fn = getattr(self.window, "is_watchlisted", None)
+        if not rom_id or not callable(is_watchlisted_fn):
+            return
+        watchlisted = bool(is_watchlisted_fn(rom_id))
+        for section in self.sections.values():
+            carousels = [section, getattr(section, "carousel_section", None)]
+            for carousel in carousels:
+                for card in getattr(carousel, "game_cards", []) or []:
+                    set_watchlisted = getattr(card, "set_watchlisted", None)
+                    if getattr(card, "watchlist_rom_id", None) == rom_id and callable(set_watchlisted):
+                        set_watchlisted(watchlisted)
+
     def add_stretch(self) -> None:
         """Add stretch to push content to top."""
         self.content_layout.addStretch()
 
-    def _on_refresh_clicked(self) -> None:
-        """Handle refresh button click."""
-        # This will be connected to MainWindow's refresh handler
-        pass
-
     def set_refresh_callback(self, callback: Callable[[], None]) -> None:
         """Set callback for refresh button.
-        
+
+        The button's `checked` argument is swallowed so callbacks with optional
+        arguments (e.g. force_refresh) keep their defaults.
+
         Args:
             callback: Function to call when refresh is clicked
         """
-        self.refresh_button.clicked.disconnect()
-        self.refresh_button.clicked.connect(callback)
+        if self._refresh_slot is not None:
+            self.refresh_button.clicked.disconnect(self._refresh_slot)
+        self._refresh_slot = lambda checked=False: callback()
+        self.refresh_button.clicked.connect(self._refresh_slot)

@@ -361,12 +361,7 @@ from grid_launcher.ui.emulators import available_source_download_emulator_entrie
 from grid_launcher.ui.spinner import LoadingSpinnerWidget
 from grid_launcher.server.discover import (
     DiscoverCache,
-    fetch_all_games,
-    fetch_games_by_genre,
-    filter_games_by_installed,
-    client_filter_games,
     genre_stats_from_games,
-    get_top_genres_from_games,
     record_discover_event as _record_discover_event_to_file,
     load_watchlist,
     save_watchlist,
@@ -638,13 +633,20 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         self.discover_page: DiscoverPageWidget | None = None
         self._discover_load_thread: QThread | None = None
         self._discover_load_worker: Any = None
-        self.watchlist_rom_ids: set[str] = load_watchlist(self._watchlist_file())
-        
+        self.watchlist_games: dict[str, dict[str, Any]] = load_watchlist(self._watchlist_file())
+
         self.session_poll_timer = QTimer(self)
         self.session_poll_timer.setSingleShot(False)
         self.session_poll_timer.setInterval(2500)
         self.session_poll_timer.timeout.connect(self._poll_active_game_sessions)
         self.session_poll_timer.start()
+
+        # Hourly check that force-refreshes Discover once its cache is a week old
+        self.discover_auto_refresh_timer = QTimer(self)
+        self.discover_auto_refresh_timer.setSingleShot(False)
+        self.discover_auto_refresh_timer.setInterval(3_600_000)
+        self.discover_auto_refresh_timer.timeout.connect(self._auto_refresh_stale_discover)
+        self.discover_auto_refresh_timer.start()
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -908,9 +910,21 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         if index == 1 and not self.server_connected and self.server_auto_reconnect:
             self._connect_to_server(show_errors=False)
         if index == 2:  # Discover tab
-            if self.discover_cache.is_stale("short_games"):
-                self._refresh_discover_data(force_refresh=False)
+            self._show_discover_page()
         QTimer.singleShot(0, self._reflow_current_page_grid)
+
+    def _show_discover_page(self) -> None:
+        """Render Discover from cache immediately, then refresh in the background if stale."""
+        if self.discover_page is None:
+            return
+        if not self._server_connected():
+            self._render_discover_offline()
+            return
+        self.discover_page.clear_offline_notice()
+        if not self.discover_page.sections:
+            self._render_discover_from_cache()
+        if self.discover_cache.is_stale("short_games"):
+            self._refresh_discover_data(force_refresh=False)
 
     def navigate_to_server_platform(self, platform_display_name: str | None) -> None:
         if platform_display_name is not None and self.server_platforms_list is not None:
@@ -919,6 +933,12 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
                 if item and item.text().strip().lower() == platform_display_name.strip().lower():
                     self.server_platforms_list.setCurrentItem(item)
                     break
+        self._switch_page(1)
+
+    def navigate_to_server_genre(self, genre: str) -> None:
+        """Show the Server tab filtered to a genre via the search box (platform unchanged)."""
+        if self.server_search_input is not None:
+            self.server_search_input.setText(genre)
         self._switch_page(1)
 
     def _reflow_current_page_grid(self) -> None:
@@ -1132,8 +1152,13 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         sections_layout.addWidget(list_widget)
 
         btn_row = QHBoxLayout()
-        up_btn = QPushButton("\u25b2 Up")
-        down_btn = QPushButton("\u25bc Down")
+        reorder_icon_size = QSize(12, 12)
+        up_btn = QPushButton(" Up")
+        up_btn.setIcon(self._themed_svg_icon("svg/chevron-up.svg", self._theme_color("text", "#f8f8f2"), size=reorder_icon_size))
+        up_btn.setIconSize(reorder_icon_size)
+        down_btn = QPushButton(" Down")
+        down_btn.setIcon(self._themed_svg_icon("svg/chevron-down.svg", self._theme_color("text", "#f8f8f2"), size=reorder_icon_size))
+        down_btn.setIconSize(reorder_icon_size)
 
         def move_up() -> None:
             row = list_widget.currentRow()
@@ -1253,11 +1278,14 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
     def _refresh_discover_data(self, force_refresh: bool = True) -> None:
         """Refresh discover data asynchronously."""
-        if not self._server_connected():
-            return
-
         if self.discover_page is None:
             return
+
+        if not self._server_connected():
+            self._render_discover_offline()
+            return
+
+        self.discover_page.clear_offline_notice()
 
         # Update installed games cache
         self.discover_cache.set_installed_games(self.library_games)
@@ -1266,6 +1294,70 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         # Start background fetch thread
         self.discover_page.set_loading(True)
         self._start_discover_load_thread(force_refresh)
+
+    def _auto_refresh_stale_discover(self) -> None:
+        """Hourly timer slot: force a refresh once the cached sections are 7+ days old."""
+        if self.discover_page is None or not self._server_connected():
+            return
+        if self._discover_load_thread is not None and self._discover_load_thread.isRunning():
+            return
+        oldest = self._discover_cached_refresh_time()
+        if oldest and time.time() - oldest >= 7 * 86400:
+            self._refresh_discover_data(force_refresh=True)
+
+    def _discover_result_from_cache(self) -> dict[str, Any]:
+        """Assemble a render result dict from persisted cache entries. No network calls.
+
+        TTL staleness is deliberately ignored: this path exists so the page shows
+        something on a cold start or while the server is unreachable.
+        """
+        def _data(section_id: str) -> dict[str, Any] | None:
+            entry = self.discover_cache.cache.get(section_id)
+            data = entry.get("data") if isinstance(entry, dict) else None
+            return data if isinstance(data, dict) else None
+
+        result: dict[str, Any] = {}
+        for section_id in ("short_games", "new_games", "highly_rated", "recommendations"):
+            data = _data(section_id)
+            if data and data.get("games"):
+                result[section_id] = {"games": data["games"]}
+
+        platforms = _data("platforms_list")
+        if platforms and platforms.get("platforms"):
+            result["platforms"] = platforms["platforms"]
+
+        genres = _data("genres")
+        if genres and genres.get("genres"):
+            result["genres"] = genres
+
+        totals = _data("genre_totals")
+        if totals and totals.get("totals"):
+            result["genre_totals"] = totals["totals"]
+
+        return result
+
+    def _render_discover_from_cache(self) -> bool:
+        """Render Discover purely from cache. Returns True when something was rendered."""
+        if self.discover_page is None:
+            return False
+        result = self._discover_result_from_cache()
+        if not result:
+            return False
+        self.discover_page.set_loading(False)
+        self.discover_page.update_last_refresh_time(self._discover_cached_refresh_time())
+        self._render_discover_result(result, from_cache=True)
+        return True
+
+    def _render_discover_offline(self) -> None:
+        """Offline path: show cached sections (if any) plus the offline notice."""
+        if self.discover_page is None:
+            return
+        self.discover_page.set_loading(False)
+        if not self.discover_page.sections:
+            self._render_discover_from_cache()
+        self.discover_page.set_offline_notice(
+            self._discover_cached_refresh_time() if self.discover_page.sections else None
+        )
 
     def _start_discover_load_thread(self, force_refresh: bool = False) -> None:
         """Start background thread to load discover data."""
@@ -1290,11 +1382,22 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
     def _on_discover_data_loaded(self, result: dict[str, Any]) -> None:
         """Handle discover data loaded successfully."""
+        if self.discover_page is not None:
+            self.discover_page.set_loading(False)
+            self.discover_page.update_last_refresh_time(time.time())
+            self._render_discover_result(result, from_cache=False)
+
+        if self._discover_load_thread is not None:
+            self._discover_load_thread.quit()
+            self._discover_load_thread.wait()
+            self._discover_load_thread = None
+        self._discover_load_worker = None
+
+    def _render_discover_result(self, result: dict[str, Any], from_cache: bool) -> None:
+        """Rebuild every Discover section from a result dict (live fetch or cache)."""
         if self.discover_page is None:
             return
 
-        self.discover_page.set_loading(False)
-        self.discover_page.update_last_refresh_time(time.time())
         self.discover_page._clear_sections()
 
         ui_state = self._load_discover_ui_state()
@@ -1311,6 +1414,11 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
                 if g.get("platform", "").strip().lower() in preferred_platforms
             ]
 
+        def _see_all_first_platform(games: list) -> Any:
+            """See All jumps to the platform of the section's first game (no filter if empty)."""
+            platform = (games[0].get("platform") or None) if games else None
+            return lambda: self.navigate_to_server_platform(platform)
+
         all_games = _apply_platform_pref(result.get("short_games", {}).get("games", []))
 
         pending: dict[str, Any] = {}
@@ -1318,28 +1426,28 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         if all_games:
             pending["short_games"] = (
                 "carousel", "Short But Fun", all_games,
-                lambda: self.navigate_to_server_platform(None),
+                _see_all_first_platform(all_games), False,
             )
 
         new_games = _apply_platform_pref(result.get("new_games", {}).get("games", []))
         if new_games:
             pending["new_games"] = (
                 "carousel", "New on Server", new_games,
-                lambda: self.navigate_to_server_platform(None),
+                _see_all_first_platform(new_games), True,
             )
 
         highly_rated = _apply_platform_pref(result.get("highly_rated", {}).get("games", []))
         if highly_rated:
             pending["highly_rated"] = (
                 "carousel", "Highly Rated (All-Time)", highly_rated,
-                lambda: self.navigate_to_server_platform(None),
+                _see_all_first_platform(highly_rated), False,
             )
 
         recommendations = _apply_platform_pref(result.get("recommendations", {}).get("games", []))
         if recommendations:
             pending["recommendations"] = (
                 "carousel", "Recommended for You", recommendations,
-                lambda: self.navigate_to_server_platform(None),
+                _see_all_first_platform(recommendations), False,
             )
 
         for platform in result.get("platforms", []):
@@ -1351,6 +1459,7 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
                     f"Explore {platform_display_name}",
                     platform_games,
                     lambda pname=platform_display_name: self.navigate_to_server_platform(pname),
+                    False,
                 )
 
         genres_data = result.get("genres", {})
@@ -1366,25 +1475,13 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
         if genres and games_by_genre:
             pending["genres"] = ("genre", genres, games_by_genre)
 
-        # Build watchlist from already-filtered pending sections
-        _watchlist_candidates: list[dict] = []
-        for _wkey in ("short_games", "new_games", "highly_rated", "recommendations"):
-            _wentry = pending.get(_wkey)
-            if _wentry and _wentry[0] == "carousel":
-                _watchlist_candidates.extend(_wentry[2])
-        for _wsid, _wentry in pending.items():
-            if _wsid.startswith("platform_") and _wentry[0] == "carousel":
-                _watchlist_candidates.extend(_wentry[2])
+        # Watchlist comes from the persisted store; entries saved in the old id-only
+        # format get hydrated from whichever section the game reappears in.
+        for entry in pending.values():
+            if entry[0] == "carousel":
+                self._hydrate_watchlist_entries(entry[2])
 
-        _seen_wids: set[str] = set()
-        _deduped_watchlist: list[dict] = []
-        for _wg in _watchlist_candidates:
-            _wrid = _wg.get("rom_id", "")
-            if _wrid and _wrid in self.watchlist_rom_ids and _wrid not in _seen_wids:
-                _seen_wids.add(_wrid)
-                _deduped_watchlist.append(_wg)
-
-        pending["watchlist"] = ("watchlist", _deduped_watchlist)
+        pending["watchlist"] = ("watchlist", self._watchlist_section_games())
 
         ordered_ids = [sid for sid in section_order if sid in pending]
         ordered_ids += [sid for sid in pending if sid not in ordered_ids]
@@ -1395,16 +1492,22 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
                 continue
             entry = pending[sid]
             if entry[0] == "carousel":
-                _, title, games, see_all_cb = entry
-                self.discover_page.add_carousel_section(sid, title, games, see_all_cb)
+                _, title, games, see_all_cb, show_added_date = entry
+                self.discover_page.add_carousel_section(sid, title, games, see_all_cb, show_added_date=show_added_date)
                 sections_added += 1
             elif entry[0] == "genre":
                 _, genre_list, genre_games = entry
-                self.discover_page.add_genre_section(genre_list, genre_games)
+                self.discover_page.add_genre_section(
+                    genre_list, genre_games, self.navigate_to_server_genre
+                )
                 sections_added += 1
                 if "genres" in self.discover_page.sections:
                     genre_section = self.discover_page.sections["genres"]
-                    stats = genre_stats_from_games(all_games, self.library_games)
+                    stats = genre_stats_from_games(
+                        all_games,
+                        self.library_games,
+                        totals=result.get("genre_totals") or None,
+                    )
                     genre_section.set_genre_stats(stats)
             elif entry[0] == "watchlist":
                 _, watchlist_games = entry
@@ -1430,14 +1533,8 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
         self.discover_page.add_stretch()
 
-        if sections_added > 0:
+        if sections_added > 0 and not from_cache:
             self.discover_cache.save_to_disk(self._discover_cache_file())
-
-        if self._discover_load_thread is not None:
-            self._discover_load_thread.quit()
-            self._discover_load_thread.wait()
-            self._discover_load_thread = None
-        self._discover_load_worker = None
 
     def _on_discover_data_error(self, error_msg: str) -> None:
         """Handle discover data load error."""
@@ -2435,16 +2532,41 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
     def _watchlist_file(self) -> Path:
         return self._config_dir() / "watchlist.json"
 
-    def toggle_watchlist(self, rom_id: str) -> None:
-        if rom_id in self.watchlist_rom_ids:
-            self.watchlist_rom_ids.discard(rom_id)
+    def toggle_watchlist(self, game: dict[str, Any]) -> None:
+        """Add/remove a game from the watchlist, storing the full card data."""
+        rom_id = str(game.get("rom_id", "") or "")
+        if not rom_id:
+            return
+        if rom_id in self.watchlist_games:
+            del self.watchlist_games[rom_id]
         else:
-            self.watchlist_rom_ids.add(rom_id)
-        save_watchlist(self._watchlist_file(), self.watchlist_rom_ids)
-        self._refresh_discover_data(force_refresh=False)
+            self.watchlist_games[rom_id] = dict(game)
+        save_watchlist(self._watchlist_file(), self.watchlist_games)
+        if self.discover_page is not None and "watchlist" in self.discover_page.sections:
+            self.discover_page.add_watchlist_section(self._watchlist_section_games())
+        if self.discover_page is not None:
+            self.discover_page.sync_watchlist_state(rom_id)
 
     def is_watchlisted(self, rom_id: str) -> bool:
-        return rom_id in self.watchlist_rom_ids
+        return rom_id in self.watchlist_games
+
+    def _watchlist_section_games(self) -> list[dict[str, Any]]:
+        """Watchlist entries that carry card data (old id-only entries stay hidden)."""
+        return [
+            game for game in self.watchlist_games.values()
+            if isinstance(game, dict) and game.get("title")
+        ]
+
+    def _hydrate_watchlist_entries(self, games: list[dict[str, Any]]) -> None:
+        """Fill in card data for watchlist ids saved in the old id-only format."""
+        hydrated = False
+        for game in games:
+            rom_id = game.get("rom_id", "")
+            if rom_id in self.watchlist_games and not self.watchlist_games[rom_id]:
+                self.watchlist_games[rom_id] = dict(game)
+                hydrated = True
+        if hydrated:
+            save_watchlist(self._watchlist_file(), self.watchlist_games)
 
     def _analytics_file(self) -> Path:
         return self._config_dir() / "discover_events.jsonl"
@@ -3173,8 +3295,8 @@ class MainWindow(CloudSaveMixin, EmulatorUIMixin, InstallMixin, DetailsViewMixin
 
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(config_dir)))
 
-    def _make_game_card(self, game: dict[str, str], source: str) -> QPushButton:
-        return resolve_make_game_card(self, game, source)
+    def _make_game_card(self, game: dict[str, str], source: str, show_added_date: bool = False) -> QPushButton:
+        return resolve_make_game_card(self, game, source, show_added_date=show_added_date)
 
     def _refresh_library_grid(self) -> None:
         if not hasattr(self, "library_grid") or self.library_scroll is None:
