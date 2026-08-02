@@ -30,6 +30,7 @@ from PySide6.QtGui import QIcon, QPixmap
 from grid_launcher.ui.theme import themed_svg_pixmap
 
 from grid_launcher.background import DetailsCloudRecordsWorker
+from grid_launcher.core.process import clean_subprocess_env
 from grid_launcher.emulator import (
     apply_launch_placeholders_to_args,
     available_emulator_name_for_platform,
@@ -1433,7 +1434,7 @@ class DetailsViewMixin:
                 process = subprocess.Popen(
                     command,
                     cwd=working_directory,
-                    env={**os.environ, **compat_env} if compat_env else None,
+                    env=clean_subprocess_env({**os.environ, **compat_env} if compat_env else None),
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
                 )
                 QTimer.singleShot(500, lambda p=process, c=command: self._warn_if_process_exited_early(p, c))
@@ -1463,6 +1464,7 @@ class DetailsViewMixin:
             process = subprocess.Popen(
                 command,
                 cwd=working_directory,
+                env=clean_subprocess_env(),
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
             )
             QTimer.singleShot(500, lambda p=process, c=command: self._warn_if_process_exited_early(p, c))

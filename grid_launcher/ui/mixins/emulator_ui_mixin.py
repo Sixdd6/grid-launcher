@@ -35,6 +35,7 @@ from grid_launcher.core import (
     normalize_installed_games,
 )
 from grid_launcher.core.config import normalize_compat_tool_installs
+from grid_launcher.core.process import clean_subprocess_env
 from grid_launcher.core.path import grid_launcher_share_dir
 from grid_launcher.background.workers import SourceVersionCheckWorker
 from grid_launcher.emulator import (
@@ -1655,6 +1656,7 @@ class EmulatorUIMixin:
             process = subprocess.Popen(
                 command,
                 cwd=str(emulator_path.parent),
+                env=clean_subprocess_env(),
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
             )
             QTimer.singleShot(500, lambda p=process, c=command: self._warn_if_process_exited_early(p, c))

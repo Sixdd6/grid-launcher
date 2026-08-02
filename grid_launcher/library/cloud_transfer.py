@@ -10,6 +10,8 @@ import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
+
+from grid_launcher.core.process import clean_subprocess_env
 from typing import Any, Callable
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
@@ -172,6 +174,7 @@ def _extract_zip_with_7z(
                     stderr=subprocess.PIPE,
                     text=True,
                     creationflags=creationflags,
+                    env=clean_subprocess_env(),
                 )
                 extracted = True
                 break

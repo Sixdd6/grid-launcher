@@ -15,6 +15,7 @@ from PySide6.QtCore import Property, QObject, Qt, QThread, Signal, Slot
 
 from grid_launcher.core import sanitize_path_component
 from grid_launcher.core.config import write_config_file as _write_config_file
+from grid_launcher.core.process import clean_subprocess_env
 from grid_launcher.emulator.launch import (
     apply_launch_placeholders_to_args,
     launchable_native_game_file,
@@ -395,7 +396,13 @@ class GameBackend(QObject):
     ) -> None:
         try:
             _creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
-            process = _subprocess_popen(command, cwd=cwd, close_fds=True, env=env, creationflags=_creationflags)
+            process = _subprocess_popen(
+                command,
+                cwd=cwd,
+                close_fds=True,
+                env=clean_subprocess_env(env),
+                creationflags=_creationflags,
+            )
         except (OSError, ValueError) as error:
             self.launchError.emit(str(error))
             return

@@ -199,3 +199,45 @@ def apply_windows_game_json_to_game(game: dict[str, str], parsed: dict[str, str]
             game[field] = parsed_value
 
     game["included_dlc"] = parsed.get("included_dlc", "[]")
+
+
+_NATIVE_ARCHIVE_EXTENSIONS = (
+    ".7z",
+    ".zip",
+    ".rar",
+    ".tar",
+    ".gz",
+    ".tgz",
+    ".xz",
+    ".zst",
+    ".bz2",
+)
+
+
+def select_native_archive_entry(files: list[Any]) -> dict[str, Any] | None:
+    """Pick the server file entry holding a native game's archive.
+
+    game.json and entries inside subfolders are never candidates. Prefer the
+    first entry with a known archive extension so soundtrack/artwork extras
+    listed before the archive don't get downloaded in its place; fall back to
+    the first remaining top-level entry for ROMs whose payload is not an
+    archive (e.g. a bare .iso).
+    """
+    candidates: list[dict[str, Any]] = []
+    for entry in files:
+        if not isinstance(entry, dict):
+            continue
+        entry_name = entry.get("file_name") or entry.get("filename")
+        if not isinstance(entry_name, str) or not entry_name:
+            continue
+        if entry_name.casefold() == "game.json":
+            continue
+        if "/" in entry_name or "\\" in entry_name:
+            continue
+        candidates.append(entry)
+
+    for entry in candidates:
+        entry_name = entry.get("file_name") or entry.get("filename")
+        if entry_name.casefold().endswith(_NATIVE_ARCHIVE_EXTENSIONS):
+            return entry
+    return candidates[0] if candidates else None

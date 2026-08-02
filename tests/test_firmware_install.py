@@ -1492,7 +1492,10 @@ class ArchiveSevenZipFallbackTests(unittest.TestCase):
             extracted_dir.mkdir()
 
             with patch("grid_launcher.library.archive_preparation._BUNDLED_7Z_PATH", Path(temp_dir) / "missing-7z.exe"):
-                with patch("grid_launcher.library.archive_preparation._try_system_7z", return_value=False):
+                with patch(
+                    "grid_launcher.library.archive_preparation._try_system_7z",
+                    return_value=["no 7-Zip executable found on this system"],
+                ):
                     _extract_7z_with_fallbacks(archive_path, extracted_dir)
 
             self.assertEqual((extracted_dir / "payload.bin").read_bytes(), b"PAYLOADDATA")
@@ -1505,12 +1508,16 @@ class ArchiveSevenZipFallbackTests(unittest.TestCase):
             extracted_dir.mkdir()
 
             with patch("grid_launcher.library.archive_preparation._BUNDLED_7Z_PATH", Path(temp_dir) / "missing-7z.exe"):
-                with patch("grid_launcher.library.archive_preparation._try_system_7z", return_value=False):
+                with patch(
+                    "grid_launcher.library.archive_preparation._try_system_7z",
+                    return_value=["no 7-Zip executable found on this system"],
+                ):
                     with patch("grid_launcher.library.archive_preparation._ensure_full_7z", return_value=None):
                         with self.assertRaises(OSError) as raised:
                             _extract_7z_with_fallbacks(archive_path, extracted_dir)
 
-            self.assertIn("The built-in Python fallback could not extract this archive", str(raised.exception))
+            self.assertIn("python fallback (py7zr)", str(raised.exception))
+            self.assertIn("no working 7-Zip installation is available", str(raised.exception))
 
     def test_tar_gz_extraction_succeeds_via_tar_code_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

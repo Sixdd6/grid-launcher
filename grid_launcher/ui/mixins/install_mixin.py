@@ -92,6 +92,7 @@ from grid_launcher.library.firmware_install import install_platform_firmware
 from grid_launcher.library.install_metadata import (
     apply_windows_game_json_to_game,
     parse_windows_game_json,
+    select_native_archive_entry,
 )
 from grid_launcher.server import (
     fetch_server_rom_payload,
@@ -997,21 +998,10 @@ class InstallMixin:
             payload = self._fetch_server_rom_payload(rom_id)
             archive_entry = None
             if isinstance(payload, dict) and isinstance(payload.get("files"), list) and payload["files"]:
-                for entry in payload["files"]:
-                    if not isinstance(entry, dict):
-                        continue
-                    entry_name = entry.get("file_name") or entry.get("filename")
-                    if not isinstance(entry_name, str) or not entry_name:
-                        continue
-                    # game.json is handled separately by _fetch_windows_game_json.
-                    if entry_name.casefold() == "game.json":
-                        continue
-                    # Skip files that live in a subfolder; only top-level entries
-                    # are valid archive candidates.
-                    if "/" in entry_name or "\\" in entry_name:
-                        continue
-                    archive_entry = entry
-                    break
+                # game.json is handled separately by _fetch_windows_game_json;
+                # extras (soundtracks, artwork) listed before the archive must
+                # not be picked in its place.
+                archive_entry = select_native_archive_entry(payload["files"])
             if archive_entry is not None:
                 archive_file_name = archive_entry.get("file_name") or archive_entry.get("filename")
                 # Use the server's actual filename so downstream code resolves the
@@ -1654,12 +1644,8 @@ class InstallMixin:
             if entry_id:
                 failure_text = error.strip() if isinstance(error, str) and error.strip() else "Failed to extract downloaded archive"
                 self._set_download_entry_status(entry_id, "failed", failure_text)
-            archive_file = Path(archive_path)
-            if archive_file.exists() and archive_file.is_file():
-                try:
-                    archive_file.unlink()
-                except OSError:
-                    pass
+            # Keep the downloaded archive so a retry after fixing the cause
+            # (e.g. installing 7-Zip) does not have to re-download it.
             self._update_download_status_ui()
             self._update_details_action_buttons()
             if error:

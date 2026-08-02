@@ -7,6 +7,7 @@ from grid_launcher.library.install_metadata import (
     apply_windows_game_json_to_game,
     hydrate_install_game_metadata,
     parse_windows_game_json,
+    select_native_archive_entry,
     sync_install_metadata_to_details_game,
 )
 
@@ -326,6 +327,43 @@ class TestWindowsGameJson(unittest.TestCase):
         apply_windows_game_json_to_game(game, {})
 
         self.assertEqual(game, {"revision": "1.0", "tags": "RPG", "included_dlc": json.dumps(["keep"])})
+
+
+class SelectNativeArchiveEntryTests(unittest.TestCase):
+    def test_prefers_archive_over_earlier_extras(self) -> None:
+        files = [
+            {"id": 1, "file_name": "01 Soundtrack Song.mp3"},
+            {"id": 2, "file_name": "cover.JPG"},
+            {"id": 3, "file_name": "Absolver.7z"},
+            {"id": 4, "file_name": "game.json"},
+        ]
+        entry = select_native_archive_entry(files)
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["file_name"], "Absolver.7z")
+
+    def test_skips_game_json_and_subfolder_entries(self) -> None:
+        files = [
+            {"id": 1, "file_name": "game.json"},
+            {"id": 2, "file_name": "extras/bonus.7z"},
+            {"id": 3, "file_name": "Game.zip"},
+        ]
+        entry = select_native_archive_entry(files)
+        self.assertEqual(entry["file_name"], "Game.zip")
+
+    def test_falls_back_to_first_top_level_file_without_archive_extension(self) -> None:
+        files = [
+            {"id": 1, "file_name": "game.json"},
+            {"id": 2, "file_name": "Game Disc.iso"},
+            {"id": 3, "file_name": "manual.pdf"},
+        ]
+        entry = select_native_archive_entry(files)
+        self.assertEqual(entry["file_name"], "Game Disc.iso")
+
+    def test_returns_none_when_no_candidates(self) -> None:
+        self.assertIsNone(select_native_archive_entry([]))
+        self.assertIsNone(select_native_archive_entry([{"id": 1, "file_name": "game.json"}]))
+        self.assertIsNone(select_native_archive_entry([{"file_name": ""}, "not-a-dict", {"id": 2}]))
+
 
 
 if __name__ == "__main__":

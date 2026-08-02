@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from grid_launcher.core.path import xdg_config_home
+from grid_launcher.core.process import clean_subprocess_env
 
 _USER_ID_PATTERN = re.compile(r"^\d{8}$")
 
@@ -375,7 +376,11 @@ def trigger_rpcs3_firmware_install(exe_path: str, pup_path: str) -> bool:
     if not pup.exists() or not pup.is_file():
         return False
     try:
-        subprocess.Popen([str(exe), "--installfw", str(pup)], cwd=str(exe.parent))
+        subprocess.Popen(
+            [str(exe), "--installfw", str(pup)],
+            cwd=str(exe.parent),
+            env=clean_subprocess_env(),
+        )
         return True
     except OSError:
         return False

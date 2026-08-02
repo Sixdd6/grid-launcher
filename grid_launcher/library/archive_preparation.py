@@ -13,6 +13,8 @@ import zipfile
 from pathlib import Path
 from typing import Callable
 
+from grid_launcher.core.process import clean_subprocess_env
+
 
 _APP_TOOLS_DIR = Path.home() / ".grid-launcher" / "tools"
 _PORTABLE_7ZR_URL = "https://www.7-zip.org/a/7zr.exe"
@@ -388,13 +390,17 @@ def _run_extractor_process(command: list[str], *, failure_message: str) -> None:
         stderr=subprocess.PIPE,
         text=True,
         creationflags=_subprocess_creationflags(),
+        env=clean_subprocess_env(),
     )
     _wait_for_extractor_processes(timeout_seconds=1.0, poll_interval=0.1)
     if result.returncode != 0:
         raise OSError(str(result.stderr).strip() or failure_message)
 
 
-def _try_system_7z(archive_path: Path, extracted_dir: Path) -> bool:
+def _try_system_7z(archive_path: Path, extracted_dir: Path) -> list[str] | None:
+    """Extract with an installed 7-Zip. Returns None on success, otherwise a
+    list of failure descriptions (one per attempted executable, or a single
+    entry when no executable was found)."""
     seen: set[str] = set()
     candidates: list[str] = []
     for cmd in ("7z", "7za", "7zz"):
@@ -407,16 +413,20 @@ def _try_system_7z(archive_path: Path, extracted_dir: Path) -> bool:
             seen.add(known)
             candidates.append(known)
 
+    if not candidates:
+        return ["no 7-Zip executable found on this system"]
+
+    failures: list[str] = []
     for candidate in candidates:
         try:
             _run_extractor_process(
                 [candidate, "x", str(archive_path), f"-o{extracted_dir}", "-y"],
                 failure_message=f"{candidate} extraction failed",
             )
-            return True
-        except (FileNotFoundError, OSError):
-            continue
-    return False
+            return None
+        except (FileNotFoundError, OSError) as error:
+            failures.append(f"{candidate}: {error}")
+    return failures
 
 
 def _try_py7zr(archive_path: Path, extracted_dir: Path) -> str | None:
@@ -479,6 +489,7 @@ def _7z_uncompressed_total_bytes(archive_path: Path) -> int:
             text=True,
             timeout=30,
             creationflags=_subprocess_creationflags(),
+            env=clean_subprocess_env(),
         )
         total = 0
         for line in result.stdout.splitlines():
@@ -490,53 +501,72 @@ def _7z_uncompressed_total_bytes(archive_path: Path) -> int:
         return 0
 
 
+def _windows_7z_tools_supported() -> bool:
+    """The bundled and portable 7-Zip executables are Windows binaries."""
+    return os.name == "nt"
+
+
 def _extract_7z_with_fallbacks(archive_path: Path, extracted_dir: Path) -> None:
-    if _BUNDLED_7Z_PATH.exists():
+    stage_failures: list[str] = []
+
+    if _windows_7z_tools_supported() and _BUNDLED_7Z_PATH.exists():
         try:
             _run_extractor_process(
                 [str(_BUNDLED_7Z_PATH), "x", str(archive_path), f"-o{extracted_dir}", "-y"],
                 failure_message="Bundled 7z extraction failed",
             )
             return
-        except (FileNotFoundError, OSError):
-            pass
-    if _try_system_7z(archive_path, extracted_dir):
-        return
+        except (FileNotFoundError, OSError) as error:
+            stage_failures.append(f"bundled 7z: {error}")
 
-    py7zr_error: str | None = None
+    system_failures = _try_system_7z(archive_path, extracted_dir)
+    if system_failures is None:
+        return
+    stage_failures.extend(system_failures)
+    system_7z_found = not any("no 7-Zip executable found" in entry for entry in system_failures)
+
     py7zr_result = _try_py7zr(archive_path, extracted_dir)
     if py7zr_result is None:
         return
-    if py7zr_result != "__py7zr_unavailable__":
-        py7zr_error = py7zr_result
-
-    shutil.rmtree(extracted_dir, ignore_errors=True)
-    extracted_dir.mkdir(parents=True, exist_ok=True)
-    full_7z = _ensure_full_7z()
-    if full_7z is not None:
-        _run_extractor_process(
-            [str(full_7z), "x", str(archive_path), f"-o{extracted_dir}", "-y"],
-            failure_message="Portable 7zz extraction failed",
+    if py7zr_result == "__py7zr_unavailable__":
+        stage_failures.append("python fallback (py7zr): not installed")
+    else:
+        stage_failures.append(
+            f"python fallback (py7zr): {py7zr_result} "
+            "(py7zr does not support all 7z compression methods, e.g. BCJ2)"
         )
-        return
-    if py7zr_error:
-        fallback_note = (
-            "The built-in Python fallback could not extract this archive — "
-            "it does not support all compression methods (e.g. Ultra or BCJ2). "
-            "A full 7-Zip installation is required."
+
+    if _windows_7z_tools_supported():
+        full_7z = _ensure_full_7z()
+        if full_7z is not None:
+            # Starting over with a fresh directory is safe here: a working
+            # extractor is in hand and about to re-extract everything.
+            shutil.rmtree(extracted_dir, ignore_errors=True)
+            extracted_dir.mkdir(parents=True, exist_ok=True)
+            _run_extractor_process(
+                [str(full_7z), "x", str(archive_path), f"-o{extracted_dir}", "-y"],
+                failure_message="Portable 7zz extraction failed",
+            )
+            return
+        stage_failures.append("portable 7-Zip download failed")
+
+    failure_details = "\n".join(f"  • {entry}" for entry in stage_failures)
+    if system_7z_found:
+        error_message = (
+            "Cannot extract this archive: the installed 7-Zip failed to extract it.\n\n"
+            f"Attempted extractors:\n{failure_details}"
         )
     else:
-        fallback_note = "No Python fallback was available."
-
-    error_message = (
-        f"Cannot extract this archive: 7-Zip was not found on this system. {fallback_note}\n\n"
-        "To fix this:\n"
-        "  • Linux (Debian/Ubuntu): sudo apt install 7zip\n"
-        "  • Linux (Fedora/RHEL):   sudo dnf install 7zip\n"
-        "  • Linux (Arch):          sudo pacman -S 7zip\n"
-        "  • macOS:                 brew install sevenzip\n"
-        "  • Windows:               restart the app to re-download the bundled 7-Zip"
-    )
+        error_message = (
+            "Cannot extract this archive: no working 7-Zip installation is available.\n\n"
+            f"Attempted extractors:\n{failure_details}\n\n"
+            "To fix this:\n"
+            "  • Linux (Debian/Ubuntu): sudo apt install 7zip\n"
+            "  • Linux (Fedora/RHEL):   sudo dnf install 7zip\n"
+            "  • Linux (Arch):          sudo pacman -S 7zip\n"
+            "  • macOS:                 brew install sevenzip\n"
+            "  • Windows:               restart the app to re-download the bundled 7-Zip"
+        )
     raise OSError(error_message)
 
 
@@ -620,6 +650,7 @@ def extract_archive_into_directory(
                 stderr=subprocess.PIPE,
                 text=True,
                 creationflags=_subprocess_creationflags(),
+                env=clean_subprocess_env(),
             )
             while process.poll() is None:
                 if install_progress_callback is not None:
