@@ -254,6 +254,12 @@ def theme_stylesheet(colors: Mapping[str, str] | None) -> str:
             border-color: {resolved_colors['active']};
             color: {resolved_colors['active_text']};
         }}
+        QPushButton#gameCardBookmark,
+        QPushButton#discoverSectionToggle,
+        QPushButton#discoverPrefsButton {{
+            padding: 2px;
+            border-radius: 6px;
+        }}
         QPushButton#detailsCloudActionButton {{
             background-color: {resolved_colors['surface_alt']};
             color: {resolved_colors['text']};
