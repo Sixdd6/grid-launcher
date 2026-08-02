@@ -78,6 +78,49 @@ class CompatToolLaunchTests(unittest.TestCase):
                     _split_args,
                 )
 
+    def test_prepare_native_launch_default_compat_tool_proton(self):
+        with patch("grid_launcher.emulator.launch.shutil.which", return_value="/usr/bin/umu-run"):
+            command, cwd, env_overrides = prepare_native_launch_command(
+                _game(native_compat_tool=""),
+                _resolve_executable,
+                _split_args,
+                default_compat_tool="/path/to/proton",
+            )
+        self.assertEqual(command[0], "/usr/bin/umu-run")
+        self.assertEqual(env_overrides, {"PROTONPATH": "/path/to/proton"})
+
+    def test_prepare_native_launch_default_compat_tool_wine(self):
+        with patch("grid_launcher.emulator.launch.shutil.which", return_value="/usr/bin/wine"):
+            command, cwd, env_overrides = prepare_native_launch_command(
+                _game(native_compat_tool=""),
+                _resolve_executable,
+                _split_args,
+                default_compat_tool="wine",
+            )
+        self.assertEqual(command[0], "/usr/bin/wine")
+        self.assertEqual(env_overrides, {})
+
+    def test_prepare_native_launch_game_compat_tool_overrides_default(self):
+        with patch("grid_launcher.emulator.launch.shutil.which", return_value="/usr/bin/umu-run"):
+            command, cwd, env_overrides = prepare_native_launch_command(
+                _game(native_compat_tool="/path/to/GE-Proton"),
+                _resolve_executable,
+                _split_args,
+                default_compat_tool="/path/to/other-proton",
+            )
+        self.assertEqual(command[0], "/usr/bin/umu-run")
+        self.assertEqual(env_overrides, {"PROTONPATH": "/path/to/GE-Proton"})
+
+    def test_prepare_native_launch_no_compat_tool_and_no_default(self):
+        command, cwd, env_overrides = prepare_native_launch_command(
+            _game(native_compat_tool=""),
+            _resolve_executable,
+            _split_args,
+            default_compat_tool="",
+        )
+        self.assertEqual(env_overrides, {})
+        self.assertEqual(command, ["/games/mygame/game.exe"])
+
     def test_detect_umu_run_found(self):
         with patch("grid_launcher.emulator.launch.shutil.which", return_value="/usr/bin/umu-run"):
             self.assertEqual(detect_umu_run(), "/usr/bin/umu-run")

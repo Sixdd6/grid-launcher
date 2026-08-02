@@ -1430,6 +1430,7 @@ class DetailsViewMixin:
                     game,
                     self._resolved_native_executable_path_for_game,
                     self._split_launch_template_args,
+                    default_compat_tool=self._default_compat_tool() if sys.platform != "win32" else "",
                 )
                 process = subprocess.Popen(
                     command,

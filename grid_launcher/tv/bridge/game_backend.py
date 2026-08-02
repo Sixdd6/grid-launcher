@@ -378,6 +378,11 @@ class GameBackend(QObject):
                 game_dict,
                 lambda g: exe_path,
                 split_launch_template_args,
+                default_compat_tool=(
+                    str(self._config.get("default_compat_tool", "") or "").strip()
+                    if sys.platform != "win32"
+                    else ""
+                ),
             )
         except ValueError as err:
             self.launchError.emit(str(err))

@@ -224,6 +224,7 @@ def prepare_native_launch_command(
     game: dict[str, str],
     resolved_native_executable_path_for_game: Callable[[dict[str, str]], Path | None],
     split_launch_template_args_fn: Callable[[str], list[str]],
+    default_compat_tool: str = "",
 ) -> tuple[list[str], str, dict[str, str]]:
     native_executable = resolved_native_executable_path_for_game(game)
     if native_executable is None:
@@ -242,6 +243,8 @@ def prepare_native_launch_command(
     working_directory = str(native_executable.parent)
 
     native_compat_tool = game.get("native_compat_tool", "").strip() if isinstance(game, dict) else ""
+    if not native_compat_tool:
+        native_compat_tool = default_compat_tool.strip() if isinstance(default_compat_tool, str) else ""
     native_wineprefix = game.get("native_wineprefix", "").strip() if isinstance(game, dict) else ""
 
     env_overrides: dict[str, str] = {}
