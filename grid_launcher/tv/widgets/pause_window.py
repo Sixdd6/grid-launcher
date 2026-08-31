@@ -71,13 +71,6 @@ class PauseWindow(QWidget):
         logger.debug(f"PauseWindow: hiding (visible={self._pause_backend.visible}, session_active={is_session_active})")
         self.hide()
 
-    def show_on_screen(self, screen) -> None:
-        if screen is None:
-            return
-        logger.info(f"PauseWindow.show_on_screen() called")
-        self.setGeometry(screen.geometry())
-        self.show()
-
     def show(self) -> None:
         logger.info(f"PauseWindow.show() called")
         import traceback

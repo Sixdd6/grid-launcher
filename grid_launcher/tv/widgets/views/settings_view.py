@@ -22,30 +22,6 @@ from grid_launcher.tv.widgets import theme
 _PANEL_ALT = "#44454f"
 
 
-def _button_stylesheet() -> str:
-    return (
-        "QPushButton {"
-        f"background: {theme.TERTIARY};"
-        f"color: {theme.TEXT_PRIMARY};"
-        f"border: 1px solid {theme.BORDER_INACTIVE};"
-        "border-radius: 4px;"
-        "padding: 6px 16px;"
-        "font-size: 14px;"
-        "}"
-        "QPushButton:hover {"
-        f"background: {theme.ACCENT};"
-        f"color: {theme.BG};"
-        f"border: 1px solid {theme.ACCENT};"
-        "}"
-        "QPushButton:focus {"
-        f"background: {theme.ACCENT};"
-        f"color: {theme.BG};"
-        f"border: 1px solid {theme.ACCENT};"
-        "outline: none;"
-        "}"
-    )
-
-
 class _SettingRow(QWidget):
     def __init__(self, label: str, value: str = "", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -69,9 +45,6 @@ class _SettingRow(QWidget):
             f"color: {theme.TEXT_SECONDARY}; font-size: 14px; background: transparent; border: none;"
         )
         self.set_focused(False)
-
-    def set_label(self, label: str) -> None:
-        self._label.setText(label)
 
     def set_value(self, value: str) -> None:
         self._value.setText(value)
@@ -607,9 +580,6 @@ class SettingsView(QWidget):
 
     def _home_tab_display(self) -> str:
         return self._safe_home_tab().capitalize()
-
-    def _auto_sync_display(self) -> str:
-        return "On" if bool(getattr(self._app_backend, "isAutoSync", False)) else "Off"
 
     def _open_emulator_picker(self) -> None:
         names = list(getattr(self._app_backend, "availableEmulatorNames", []) or [])

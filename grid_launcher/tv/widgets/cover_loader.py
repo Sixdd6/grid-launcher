@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import threading
-import weakref
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse

@@ -288,16 +288,6 @@ class AppBackend(QObject):
     def setGuideExclusionList(self, entries: list) -> None:
         self._set_guide_exclusion_list_from_values(entries)
 
-    @Slot("QVariant")
-    def saveExclusionList(self, names: object) -> None:
-        values: Any = names
-        if hasattr(names, "toVariant"):
-            try:
-                values = names.toVariant()
-            except Exception:
-                values = names
-        self._set_guide_exclusion_list_from_values(values)
-
     @Slot(str)
     def addExclusionEntry(self, name: str) -> None:
         cleaned = name.strip()

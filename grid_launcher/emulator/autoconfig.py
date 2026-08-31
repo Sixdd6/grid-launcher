@@ -119,45 +119,6 @@ def _resolved_autoprofiles(
     return resolved_profiles if isinstance(resolved_profiles, list) else []
 
 
-def emulator_source_registry_for_profile(
-    profile: dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    if not isinstance(profile, dict):
-        return None
-    source_value = profile.get("source")
-    if not isinstance(source_value, dict):
-        return None
-    provider_value = source_value.get("provider", "")
-    provider = provider_value.strip() if isinstance(provider_value, str) else ""
-    if not provider:
-        return None
-    return dict(source_value)
-
-
-def emulator_source_registry_for_name(
-    emulator_name: str,
-    autoprofiles: list[dict[str, Any]] | None = None,
-    profiles: list[dict[str, Any]] | None = None,
-) -> dict[str, Any] | None:
-    selected_profile = _selected_manual_autoprofile(
-        emulator_name,
-        None,
-        None,
-        _resolved_autoprofiles(autoprofiles, profiles),
-    )
-    return emulator_source_registry_for_profile(selected_profile)
-
-
-def emulator_source_registry_for_entry(
-    emulator: EmulatorEntry,
-    autoprofiles: list[dict[str, Any]],
-    *,
-    emulator_profile_for_entry: Callable[[dict[str, str], list[dict[str, Any]]], dict[str, Any] | None],
-) -> dict[str, Any] | None:
-    profile = emulator_profile_for_entry(emulator, autoprofiles)
-    return emulator_source_registry_for_profile(profile)
-
-
 def _selected_manual_autoprofile(
     selected_name: str,
     selected_profile: dict[str, Any] | None,

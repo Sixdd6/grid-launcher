@@ -121,16 +121,6 @@ class GameRow(QWidget):
             return
         self._focus_current_card()
 
-    @property
-    def focused_index(self) -> int:
-        return self._focused_index
-
-    def focus_at_index(self, idx: int) -> None:
-        if not self._cards:
-            return
-        self._focused_index = max(0, min(len(self._cards) - 1, idx))
-        self._focus_current_card()
-
     def focused_card_screen_x(self) -> int:
         """Return the screen x-center of the currently focused card, or -1 if no cards."""
         if not self._cards or self._focused_index >= len(self._cards):

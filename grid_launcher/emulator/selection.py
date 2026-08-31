@@ -37,20 +37,6 @@ def is_ps4_platform(game: dict[str, str]) -> bool:
     return "playstation4" in compact
 
 
-def is_original_xbox_platform(game: dict[str, str]) -> bool:
-    platform_value = game.get("platform", "")
-    platform = platform_value.strip().casefold() if isinstance(platform_value, str) else ""
-    normalized = re.sub(r"[^a-z0-9]+", " ", platform).strip()
-    compact = normalized.replace(" ", "")
-    tokens = set(normalized.split())
-
-    if not normalized or "xbox" not in tokens:
-        return False
-    if "xbox360" in compact or "360" in tokens or "one" in tokens or "series" in tokens:
-        return False
-    return True
-
-
 def is_xbox360_platform(game: dict[str, str]) -> bool:
     platform_value = game.get("platform", "")
     platform = platform_value.strip().casefold() if isinstance(platform_value, str) else ""

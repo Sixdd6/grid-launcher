@@ -21,7 +21,6 @@ def _make_games(count: int) -> list[dict[str, str]]:
 class _StubWindow:
     def __init__(self) -> None:
         self._server_render_generation: int = 0
-        self._server_render_platform: str = ""
         self._server_platforms_loading: set[str] = set()
         self._server_scroll_handler = None
         self._server_pending_rows: dict = {}

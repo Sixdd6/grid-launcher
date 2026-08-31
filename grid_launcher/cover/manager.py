@@ -33,29 +33,8 @@ class CoverManagerWindowProtocol(Protocol):
         ...
 
 
-def _discard_unreadable_cached_cover(
-    window: CoverManagerWindowProtocol,
-    cached_cover_path: Path,
-    cache_key: str,
-) -> None:
-    window.cover_cache[cache_key] = None
-    try:
-        if cached_cover_path.exists() and cached_cover_path.is_file():
-            cached_cover_path.unlink()
-    except (OSError, ValueError):
-        pass
-
-
 def _cached_cover_url(cached_cover_path: Path) -> str:
     return QUrl.fromLocalFile(str(cached_cover_path)).toString()
-
-
-def _cached_cover_file_looks_safe(cached_cover_path: Path) -> bool:
-    try:
-        file_size = cached_cover_path.stat().st_size
-    except (OSError, ValueError):
-        return False
-    return 0 < file_size <= MAX_CACHED_COVER_BYTES
 
 
 def cached_cover_for_game(window: CoverManagerWindowProtocol, game: dict[str, str]) -> QPixmap | None:

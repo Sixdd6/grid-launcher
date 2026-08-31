@@ -24,7 +24,6 @@ class ServerViewWindowProtocol(Protocol):
     server_platforms_list: QListWidget | None
     _server_platforms_loading: set[str]
     _server_render_generation: int
-    _server_render_platform: str
     _server_scroll_handler: "Callable | None"
     _server_pending_rows: "dict[int, list[int]]"
 
@@ -189,7 +188,6 @@ def render_server_games(window: ServerViewWindowProtocol, platform: str) -> None
 
     columns = window._grid_columns_for_width(window.server_games_scroll, window.server_games_grid)
     window._server_render_generation += 1
-    window._server_render_platform = platform
     generation = window._server_render_generation
 
     grid = window.server_games_grid

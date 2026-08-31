@@ -123,10 +123,6 @@ def fetch_game_achievements(ra_game_id: int, username: str, api_key: str) -> lis
     return achievements
 
 
-def search_ra_game(title: str, api_key: str) -> list[dict]:
-    raise NotImplementedError("RA game search not implemented")
-
-
 def resolve_ra_game_id(game: dict, username: str, api_key: str) -> int | None:
     value = game.get("ra_id")
     if value is None:

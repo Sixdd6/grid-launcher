@@ -188,11 +188,6 @@ class GameBackend(QObject):
         process = self._process
         return bool(process is not None and process.poll() is None)
 
-    @Property(bool, notify=_sessionStateChanged)
-    def canPause(self) -> bool:
-        process = self._process
-        return bool(_psutil is not None and process is not None and process.poll() is None)
-
     @Property(bool, notify=_installStateChanged)
     def isInstallActive(self) -> bool:
         try:
@@ -779,27 +774,6 @@ class GameBackend(QObject):
             _write_config_file(config_dir, config_file, self._config)
         except OSError:
             pass
-
-    @Slot(object)
-    def launchWithNativeExecutable(self, bundle: Any) -> None:
-        if isinstance(bundle, dict):
-            rom_id = str(bundle.get("rom_id", ""))
-            exe_path = str(bundle.get("exe_path", ""))
-        else:
-            rom_id = str(bundle)
-            exe_path = ""
-        self.saveNativeExecutable({"rom_id": rom_id, "exe_path": exe_path})
-        installed_games = self._config.get("installed_games", [])
-        game_dict: dict[str, str] | None = None
-        if isinstance(installed_games, list):
-            for g in installed_games:
-                if isinstance(g, dict) and str(g.get("rom_id", "")) == rom_id:
-                    game_dict = g
-                    break
-        if game_dict is None:
-            self.launchError.emit("Game not found.")
-            return
-        self._handle_native_launch(game_dict)
 
     def _write_last_played_for_game(self, game_dict: dict[str, str]) -> None:
         installed_games = self._config.get("installed_games", [])

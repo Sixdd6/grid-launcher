@@ -1593,10 +1593,6 @@ class CloudSaveMixin:
         payload = self._api_get("/api/saves", {"rom_id": rom_id})
         return server_records_from_payload(payload)
 
-    def _latest_server_save_record(self, rom_id: str, emulator_name: str) -> dict[str, Any] | None:
-        records = self._server_save_records_for_rom(rom_id)
-        return latest_server_record(records, emulator_name, self._save_record_timestamp)
-
     def _latest_server_save_records_for_game(
         self,
         game: dict[str, str],
@@ -2675,7 +2671,6 @@ class CloudSaveMixin:
         *,
         show_dialogs: bool = True,
     ) -> tuple[int, int, list[str]]:
-        import os as _os
         from pathlib import Path
 
         def show_warning(msg: str) -> None:
@@ -2792,16 +2787,6 @@ class CloudSaveMixin:
         if self.current_details_cloud_mode != "overview":
             self._refresh_details_cloud_panel()
 
-    def _perform_restore_saves_action(self) -> None:
-        if self.current_details_game is None:
-            return
-        installed_game = self._installed_game_record(self.current_details_game)
-        if installed_game is None:
-            return
-        restored = self._restore_cloud_save_for_game(installed_game)
-        if restored and self.current_details_cloud_mode != "overview":
-            self._refresh_details_cloud_panel()
-
     def _perform_upload_states_action(self) -> None:
         if self.current_details_game is None:
             return
@@ -2810,16 +2795,6 @@ class CloudSaveMixin:
             return
         self._upload_cloud_files_for_game(installed_game, "state")
         if self.current_details_cloud_mode != "overview":
-            self._refresh_details_cloud_panel()
-
-    def _perform_restore_states_action(self) -> None:
-        if self.current_details_game is None:
-            return
-        installed_game = self._installed_game_record(self.current_details_game)
-        if installed_game is None:
-            return
-        restored = self._restore_cloud_state_for_game(installed_game)
-        if restored and self.current_details_cloud_mode != "overview":
             self._refresh_details_cloud_panel()
 
     def _auto_sync_before_launch(self, game: dict[str, str]) -> None:

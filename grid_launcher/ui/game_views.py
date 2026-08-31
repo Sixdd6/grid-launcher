@@ -7,7 +7,7 @@ from PySide6.QtCore import QByteArray, QSize, QTimer, Qt
 from PySide6.QtGui import QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtSvgWidgets import QSvgWidget
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLayout, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from grid_launcher.library import is_game_installed, rom_file_name_version, save_record_timestamp
 from grid_launcher.ui.theme import themed_svg_icon, themed_svg_pixmap
@@ -245,10 +245,6 @@ class GameDetailsWindowProtocol(Protocol):
 
     def _format_size(self, size_bytes: float) -> str:
         ...
-
-
-class GameAchievementsWindowProtocol(Protocol):
-    details_achievements_button: QPushButton
 
 
 def _is_windows_pc_platform(platform_value: object) -> bool:

@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -910,10 +909,6 @@ class DetailsView(QWidget):
         self._status_banner.raise_()
         self._status_timer.stop()
         self._status_timer.start(4000)
-
-    def _scroll_area_by(self, area: QScrollArea, delta: int) -> None:
-        bar = area.verticalScrollBar()
-        bar.setValue(bar.value() + int(delta))
 
     def _get_installed_entry(self) -> dict | None:
         rom_id = self._rom_id()
