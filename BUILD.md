@@ -43,8 +43,26 @@ This applies to all three scripts (`build.ps1`, `build.bat`, `build.sh`):
 1. **Verify Setup** — Checks that the virtual environment exists
 2. **Activate Environment** — Sets up the Python environment with required dependencies (the Linux script activates via `.venv/bin/activate` instead of `.venv\Scripts\Activate.ps1`)
 3. **Install Dependencies** — Ensures PyInstaller is installed
-4. **Build Executable** — Creates a standalone `grid-launcher` executable with all assets bundled
-5. **Report Status** — Shows success/failure and output location
+4. **Stage Assets** — Runs `scripts/stage_assets.py` to copy only the assets the app actually references into `build/bundle-assets`
+5. **Build Executable** — Creates a standalone `grid-launcher` executable with the staged assets bundled
+6. **Report Status** — Shows success/failure and output location
+
+### Asset staging (`scripts/stage_assets.py`)
+
+The full `assets/` tree stays in the repo for development, but builds bundle only the reachable subset. The script derives that subset from the source code on every run, so it cannot drift:
+
+- **Platform logos** — imported from `PLATFORM_LOGO_FILES` in `grid_launcher/server/platform_metadata.py`
+- **Gamepad glyphs** — `input_*` PNG stems found in `grid_launcher/` and `grid-launcher.py`
+- **SVG icons** — `svg/<name>` literals found in `grid_launcher/`, `grid-launcher.py`, and `tests/`
+- **`tools/7z`** — copied for `--platform windows` only (7z.exe/7z.dll are unused on Linux)
+
+The script recreates its output directory each run and exits non-zero if a derived file is missing from `assets/`. Builds then pass `--add-data "build/bundle-assets:assets"` (`;` on Windows), so runtime asset paths are unchanged. Run it manually with:
+
+```bash
+python scripts/stage_assets.py --platform linux --output build/bundle-assets
+```
+
+`assets/icons/grid-launcher.ico` (Windows `--icon`) and `assets/svg/io.github.Sixdd6.GRIDLauncher.svg` (AppImage icon rasterization) are read from the source tree and are intentionally not staged.
 
 ## Output
 
@@ -150,8 +168,11 @@ If the packaged Linux binary fails at runtime with missing shared library errors
 # Install PyInstaller
 python -m pip install pyinstaller
 
+# Stage the bundled asset subset
+python scripts\stage_assets.py --platform windows --output build\bundle-assets
+
 # Run build
-python -m PyInstaller --noconfirm --clean --windowed --onefile --name grid-launcher --add-data "assets;assets" --add-data "retroarch-core-list.json;." --add-data "emulator-autoprofiles.json;." --add-data "romm-platform-cores.json;." grid-launcher.py
+python -m PyInstaller --noconfirm --clean --windowed --onefile --name grid-launcher --add-data "build\bundle-assets;assets" --add-data "retroarch-core-list.json;." --add-data "emulator-autoprofiles.json;." --add-data "romm-platform-cores.json;." grid-launcher.py
 ```
 
 ### Linux
@@ -162,6 +183,9 @@ source .venv/bin/activate
 # Install PyInstaller
 python -m pip install pyinstaller
 
+# Stage the bundled asset subset
+python scripts/stage_assets.py --platform linux --output build/bundle-assets
+
 # Run build
-python -m PyInstaller --noconfirm --clean --windowed --onefile --name grid-launcher --add-data "assets:assets" --add-data "retroarch-core-list.json:." --add-data "emulator-autoprofiles.json:." --add-data "romm-platform-cores.json:." grid-launcher.py
+python -m PyInstaller --noconfirm --clean --windowed --onefile --name grid-launcher --add-data "build/bundle-assets:assets" --add-data "retroarch-core-list.json:." --add-data "emulator-autoprofiles.json:." --add-data "romm-platform-cores.json:." grid-launcher.py
 ```

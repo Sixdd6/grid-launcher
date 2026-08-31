@@ -49,9 +49,12 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller
 
+      - name: Stage bundled assets
+        run: python scripts\stage_assets.py --platform windows --output build\bundle-assets
+
       - name: Build executable
         run: |
-          pyinstaller --noconfirm --clean --windowed --onefile --name grid-launcher --icon assets\icons\grid-launcher.ico --add-data "assets;assets" --add-data "retroarch-core-list.json;." --add-data "emulator-autoprofiles.json;." --add-data "romm-platform-cores.json;." --hidden-import brotli --hidden-import pyzstd --hidden-import pyppmd --hidden-import certifi --hidden-import keyring.backends.Windows grid-launcher.py
+          pyinstaller --noconfirm --clean --windowed --onefile --name grid-launcher --icon assets\icons\grid-launcher.ico --add-data "build\bundle-assets;assets" --add-data "retroarch-core-list.json;." --add-data "emulator-autoprofiles.json;." --add-data "romm-platform-cores.json;." --hidden-import brotli --hidden-import pyzstd --hidden-import pyppmd --hidden-import certifi --hidden-import keyring.backends.Windows grid-launcher.py
 
       - name: Rename artifact
         id: artifact

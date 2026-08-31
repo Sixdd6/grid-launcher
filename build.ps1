@@ -46,6 +46,16 @@ __version__ = "$version"
 "@
 Set-Content -Path "grid_launcher\version.py" -Value $versionContent
 
+# Stage only the assets the app actually references. The full assets\ tree stays
+# in the repo; PyInstaller bundles this staging dir as "assets" instead.
+Write-Host "Staging bundled assets..." -ForegroundColor Yellow
+$bundleAssets = "build\bundle-assets"
+python scripts\stage_assets.py --platform windows --output $bundleAssets
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: asset staging failed" -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+
 # Run PyInstaller
 Write-Host ""
 Write-Host "Building executable..." -ForegroundColor Yellow
@@ -58,7 +68,7 @@ python -m PyInstaller `
     --onefile `
     --name grid-launcher `
     --icon "assets\icons\grid-launcher.ico" `
-    --add-data "assets;assets" `
+    --add-data "$bundleAssets;assets" `
     --add-data "retroarch-core-list.json;." `
     --add-data "romm-platform-cores.json;." `
     --add-data "emulator-autoprofiles.json;." `

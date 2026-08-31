@@ -136,6 +136,16 @@ echo "Checking dependencies..."
 "$VENV_PIP" install -r requirements.txt
 "$VENV_PIP" install pyinstaller
 
+# Stage only the assets the app actually references. The full assets/ tree stays
+# in the repo; PyInstaller bundles this staging dir as "assets" instead.
+# PyInstaller's --clean only wipes build/grid-launcher, so the staging dir survives.
+BUNDLE_ASSETS="build/bundle-assets"
+echo "Staging bundled assets..."
+if ! "$VENV_PYTHON" scripts/stage_assets.py --platform linux --output "$BUNDLE_ASSETS"; then
+    echo "ERROR: asset staging failed"
+    exit 1
+fi
+
 # Build the AppImage package. Returns the build exit code.
 build_appimage() {
     # Run PyInstaller in onedir mode for AppImage packaging
@@ -150,7 +160,7 @@ build_appimage() {
         --windowed \
         --onedir \
         --name grid-launcher \
-        --add-data "assets:assets" \
+        --add-data "$BUNDLE_ASSETS:assets" \
         --add-data "retroarch-core-list.json:." \
         --add-data "romm-platform-cores.json:." \
         --add-data "emulator-autoprofiles.json:." \
@@ -255,7 +265,7 @@ build_onefile() {
         --windowed \
         --onefile \
         --name grid-launcher \
-        --add-data "assets:assets" \
+        --add-data "$BUNDLE_ASSETS:assets" \
         --add-data "retroarch-core-list.json:." \
         --add-data "romm-platform-cores.json:." \
         --add-data "emulator-autoprofiles.json:." \
