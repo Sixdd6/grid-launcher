@@ -32,12 +32,13 @@ Please be aware that this application is created using AI tools/coding, if this 
 - Supports screen resolutions from 720p and up, good for small handhelds up to 4k monitor/tv
 
 ### Desktop Mode
+- Discover tab surfacing short games, new additions, highly rated titles, genre browsing, recommendations, and a personal watchlist from your server
 - Settings tab with configuration options for server address and client token, retroachievements details, theme selection and cloud saves toggle
 - Emulator tab for manual or automated install and setup of emulators from official sources
 - Light/Dark Themes
 - RetroAchievements integration and browsing
 
-### TV Mode (Pending Rewrite)
+### TV Mode
 - Home tab with several rows to help you discover your collection
     - Continue Playing: Auto-sorts your most recently played and installed games to quickly jump back in
     - Favorites: Shows any games marked as favorite for your account
@@ -50,7 +51,7 @@ Please be aware that this application is created using AI tools/coding, if this 
 ## Emulator Setup
 
 - Windows: Emulators can be installed manually or automatically on Windows builds with automated download and setup, firmware will be pulled from your server as well and placed in the default directory for the emulator.
-- Linux: Emulators installed via flatpak currently require manual setup (auto-setup is wip). Auto-download and setup is supported for emulators that are distributed via AppImage or native binaries.
+- Linux: Auto-download and setup is supported for emulators distributed as AppImages or native binaries. Flatpak emulators are not supported — GRID Launcher will not install or detect them, so point it at the flatpak wrapper and configure the paths yourself if you use one.
 
 ## Third-Party Software
 

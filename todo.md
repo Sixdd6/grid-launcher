@@ -1,6 +1,5 @@
 # Top Priority
 
-## Other Active Tasks
 - [ ] Setup automatic tweaking of emulator settings on install or launch.
     - [x] RetroArch, Dolphin, DuckStation, PCSX2, Azahar, Cemu, Eden, Xemu, RPCS3, PPSSPP, ShadPS4, Xenia, Redream — complete
     - [ ] MAME (Arcade) — not yet tested; needs autoinstall source and default config
@@ -37,8 +36,7 @@
 
 - [x] Setup automatic download and install of BIOS files — complete for all supported platforms
 
-## RetroAchievements for emulators
-- [ ] Research and implement RetroAchievements for emulators which support it. Prefill configs with the credentials the user has already input in Settings. Keep in mind that the user will need username and login token for the emulators while GRID Launcher uses the api key to do lookups.
+- [x] RetroAchievements for emulators — RA lookups use the Web API key (`grid_launcher/server/retroachievements.py`); emulator configs are pre-filled with the username/token from Settings where the emulator allows it (PCSX2, PPSSPP). DuckStation must be logged in through its own UI because its token is machine-encrypted.
 
 ## PS3 Trophy Data
 - [ ] **Research** — Investigate how RPCS3 stores trophy unlock data on disk (location within `dev_hdd0`, file format, per-user layout) and whether it can be extracted/restored without breaking RPCS3's internal trophy state
@@ -51,22 +49,9 @@
 - [ ] Tweak design of emulator auto-install window, it's pretty basic right now and could be more robust/informative.
 - [ ] RomM server already has a maximum saves/states implementation, remove the save-retention/slot-limit code and implement the openapi functions instead.
 
-# Low Priority
-all clear
-
-# Future-Plans
-nothing to see here
-
-# Dream Features
-nothing to see here
-
-
-# Project Cleanup Tasks
-nothing right now
 
 # Tasks For After v1.0 Release
-- [ ] Investigate cross-platform support
-    - [x] Windows - Native exe Support
-        - [x] Using pyinstaller to generate an executable
-    - [ ] Linux
-    - [ ] MacOS
+- [x] Investigate cross-platform support — see `future-plans/platform-support.md`
+    - [x] Windows — native exe via PyInstaller
+    - [x] Linux — AppImage with zsync updates, XDG paths, Wine/Proton dispatch for Windows-native games, platform gating for Windows-only emulators
+    - [ ] macOS — untargeted; no build script, CI job, or QA coverage

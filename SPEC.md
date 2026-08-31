@@ -1,6 +1,6 @@
 # Overview
 The application is a game launcher and manager for RomM which connects to the server API specified in `openapi.json`.
-It is built using Python + PySide6 and is intended to ship as a self-contained executable on Windows and a wrapper-based launch target on Linux.
+It is built using Python + PySide6 and ships as a self-contained executable on Windows and a self-contained AppImage on Linux.
 
 # Top Bar
 The top bar includes navigation buttons for the main sections of the application and shows the current signed-in user on the right.
@@ -10,12 +10,14 @@ It should also surface connection/download state in a lightweight, always-visibl
 There are several main sections to the application with buttons across the top bar to navigate between them:
 - Library
 - Server
+- Discover
 - Downloads
 - Emulators
 - Settings
 
 - **Library** contains a grid layout of all currently installed games, represented by cover art and sorted for quick browsing. Clicking a game opens the details sub view.
 - **Server** contains a vertical list of server-supported platforms on the left and a searchable grid layout of games for the selected platform on the right. Downloads and installs should be queued and handled in the background.
+- **Discover** contains collapsible, cached recommendation sections built from the server library — Short But Fun, New on Server, Highly Rated (All-Time), Recommended for You, Browse by Genre, and Your Watchlist — with genre/platform filters and a manual refresh. Sections load in the background and fall back to the cached view when the server is unreachable.
 - **Downloads** contains a list of queued, active, installing, completed, and failed download jobs. Each entry should display status/progress details and support the appropriate action such as Cancel, Retry, or Dismiss.
 - **Emulators** contains the list of emulators used to launch games. Users can add, update, remove, and assign defaults by platform. Each emulator entry includes a name, executable path, launch arguments, save strategy, ignore rules, and optional custom save/state directories.
 - **Settings** contains the application settings arranged by panels for server connection, library path, appearance, debug options, and cloud save sync behavior.
