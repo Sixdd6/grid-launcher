@@ -941,3 +941,15 @@ Run everything with `python -m unittest discover tests/`.
 | grid_launcher/tv/bridge/game_backend.py | TV/QML launch path: `launchGame`, `_handle_native_launch`, `_do_launch`, `stopGame`, pause/resume, `_ProcessWatchThread` |
 | grid-launcher.py | `MainWindow` glue: `_emulator_supports_platform`, `_resolved_native_executable_path_for_game`, `_ps3_game_id_for_game`, `_auto_configure_installed_emulator`, session poll timer, config defaults |
 | emulator-autoprofiles.json | Shipped profiles: match tokens, argument templates, platform keywords, source metadata, compat-tool entries |
+
+## Rust port deviations (milestone 3)
+
+Deliberate deviations from the reference when porting the launch module to Rust (grid-core):
+
+1. Duplicate launches of the same rom are rejected (reference desktop allowed them; the TV backend allowed one global session — we allow one per rom).
+2. Sessions are tracked for every emulated launch and drive UI state; the reference tracked them only for cloud auto-upload.
+3. PS3 titles cannot resolve `%ps3_launch_target%` yet (registry lacks PS3 fields until the PS3 install milestone); the reference's validation error is shown.
+4. RetroArch platform support = a non-blank `retroarch_cores` config entry, not a scan of installed core files.
+5. The per-platform default picker lists all emulators rather than filtering by the supports-platform test; the test still gates automatic selection.
+6. Desktop UI gains a Stop button (reference desktop had none).
+7. No `_ensure_emulator_sync_settings` call before spawn (doc 05 deferred).

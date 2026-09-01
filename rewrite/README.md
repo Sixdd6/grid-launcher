@@ -12,8 +12,8 @@ Spec: `../docs/superpowers/specs/2026-08-31-rust-tauri-walking-skeleton-design.m
     cd app && npm install && npx tauri dev
 
 ## Test
-    cargo test --workspace              # Rust — 173 tests
-    cd app && npm test                  # frontend — 46 tests
+    cargo test --workspace              # Rust — 312 tests
+    cd app && npm test                  # frontend — 53 tests
     npx svelte-check                    # SvelteKit type check
     scripts/check_secret_hygiene.sh     # secret rules (unchanged)
     python -m unittest discover tests/  # Python reference suite — ~1624 tests
@@ -27,6 +27,11 @@ Spec: `../docs/superpowers/specs/2026-08-31-rust-tauri-walking-skeleton-design.m
 
 Added for the install pipeline: `zip`, `tar`, `flate2`, `liblzma`, `bzip2`,
 `sevenz-rust2`, `rusqlite` (with bundled SQLite).
+
+## Milestone 3 dependencies
+
+`libc` (unix-only target dependency for session stop signals); `emulator-autoprofiles.json`
+at the repo root is embedded into grid-core at compile time with `include_str!`.
 
 ## Build
     cd app && npx tauri build           # AppImage on Linux
@@ -83,3 +88,25 @@ Core install pipeline exit gate. Desktop session and live RomM required.
 7. Quit and relaunch: installed badges persist (from `grid-launcher.db`).
 8. Uninstall from the details overlay: files and badge are gone.
 9. `config.toml` and `grid-launcher.db` contain no token or password.
+
+## Manual test checklist — Milestone 3
+
+Emulated launch core exit gate. Desktop session and live RomM required.
+
+1. Open Emulators from the footer; add a real emulator by path; name and args
+   auto-fill from its profile; save; relaunch app — entry persists in
+   config.toml.
+2. Set it as default for a platform with an installed game.
+3. Play the game from the details overlay; the emulator starts with the right
+   ROM; the overlay shows Playing and the session appears.
+4. Quit the emulator normally; within ~2.5 s the badge clears.
+5. Play again, press Stop; the emulator terminates and the badge clears.
+6. Point the entry at a nonexistent path and Play: the exact
+   "Emulator executable not found:" message shows inline.
+7. A RetroArch platform with no core mapping shows the exact "No RetroArch
+   core is configured…" message; adding `retroarch_cores` in config.toml
+   fixes it.
+8. Break an entry's args with an unclosed quote and confirm launch still
+   proceeds via the fallback splitter (or shows "Invalid launch arguments"
+   when truly unparseable).
+9. config.toml and grid-launcher.db still contain no secrets.
