@@ -17,7 +17,7 @@ fi
 # Real-looking secrets in tests/fixtures: long bearer-ish strings that are not
 # the sanctioned fake. The fake token is allowed everywhere.
 suspicious=$(grep -rnE "(Bearer|token|password)[\"': =]+[A-Za-z0-9+/_-]{30,}" \
-  crates app/src --include="*.rs" --include="*.ts" --include="*.json" \
+  crates app/src app/src-tauri --include="*.rs" --include="*.ts" --include="*.svelte" --include="*.json" \
   | grep -v "FAKE-TEST-TOKEN-not-real" || true)
 if [ -n "$suspicious" ]; then
   echo "Possible real credential in committed code/fixtures:" >&2
