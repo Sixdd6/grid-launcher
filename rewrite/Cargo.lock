@@ -1755,6 +1755,7 @@ dependencies = [
  "futures-util",
  "keyring",
  "liblzma",
+ "percent-encoding",
  "reqwest",
  "rusqlite",
  "secrecy",

@@ -87,7 +87,7 @@ pub fn platform_dir(library: &Path, platform: &str) -> PathBuf {
 /// form (a bare `~`, `~user/...`, or no tilde at all) is left untouched —
 /// this is a minimal, manual stand-in for shell tilde expansion, not a full
 /// implementation.
-fn expand_home(raw: &str) -> PathBuf {
+pub(crate) fn expand_home(raw: &str) -> PathBuf {
     if let Some(rest) = raw.strip_prefix("~/") {
         if let Some(base_dirs) = directories::BaseDirs::new() {
             return base_dirs.home_dir().join(rest);

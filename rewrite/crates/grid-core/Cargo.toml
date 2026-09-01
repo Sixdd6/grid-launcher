@@ -12,6 +12,7 @@ flate2 = "1.1.10"
 futures-util = "0.3.34"
 keyring = "4.2.0"
 liblzma = "0.4.8"
+percent-encoding = "2.3.2"
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "json", "query", "stream"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 secrecy = "0.10.3"
