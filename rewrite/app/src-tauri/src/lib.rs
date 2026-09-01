@@ -3,6 +3,7 @@ mod gamepad;
 
 use commands::AppState;
 use grid_core::config::Config;
+use grid_core::launch::LaunchService;
 use grid_core::library::registry::Registry;
 use grid_core::library::InstallService;
 use grid_core::secrets::KeyringStore;
@@ -54,19 +55,38 @@ pub fn run() {
         .expect("config path has a parent directory")
         .join("grid-launcher.db");
     // A registry open failure must not crash startup: it is carried into
-    // AppState and surfaced to the UI the first time an install command runs.
-    let install = Registry::open(&db_path)
-        .map(|registry| InstallService::new(Arc::new(registry), config_path))
+    // AppState and surfaced to the UI the first time an install/launch
+    // command runs. Opened once and shared: install and launch each get
+    // their own Arc clone of the same registry, and on failure both hold
+    // the same error string.
+    let registry = Registry::open(&db_path)
+        .map(Arc::new)
         .map_err(|e| e.to_string());
+    let install = registry
+        .clone()
+        .map(|registry| InstallService::new(registry, config_path.clone()));
+    let launch = registry.map(|registry| LaunchService::new(registry, config_path));
     tauri::Builder::default()
-        .manage(AppState { session, install })
+        .manage(AppState {
+            session,
+            install,
+            launch,
+        })
         .setup(|app| {
             gamepad::spawn(app.handle().clone());
-            if let Ok(install) = &app.state::<AppState>().install {
+            let state = app.state::<AppState>();
+            if let Ok(install) = &state.install {
                 let handle = app.handle().clone();
                 install.set_notify(Arc::new(move |snapshot| {
                     let _ = handle.emit("downloads-changed", snapshot);
                 }));
+            }
+            if let Ok(launch) = &state.launch {
+                let handle = app.handle().clone();
+                launch.set_notify(Arc::new(move |snapshot| {
+                    let _ = handle.emit("sessions-changed", snapshot);
+                }));
+                launch.spawn_poll_loop();
             }
             Ok(())
         })
@@ -86,6 +106,16 @@ pub fn run() {
             commands::list_installed,
             commands::get_library_path,
             commands::set_library_path,
+            commands::launch_game,
+            commands::stop_game,
+            commands::list_sessions,
+            commands::list_emulators,
+            commands::save_emulator,
+            commands::delete_emulator,
+            commands::list_profiles,
+            commands::match_profile,
+            commands::get_launch_defaults,
+            commands::set_default_emulator,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
