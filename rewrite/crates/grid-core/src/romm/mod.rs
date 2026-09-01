@@ -93,6 +93,28 @@ impl RommClient {
     pub async fn connect(&self) -> Result<UserInfo, RommError> {
         self.get_json("/api/users/me", &[]).await
     }
+
+    pub async fn get_bytes(&self, path: &str) -> Result<Vec<u8>, RommError> {
+        let resp = self
+            .http
+            .get(self.endpoint(path)?)
+            .header(reqwest::header::AUTHORIZATION, self.auth.clone())
+            .send()
+            .await
+            .map_err(|e| RommError::Connection(e.without_url().to_string()))?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(RommError::Http {
+                status: status.as_u16(),
+                excerpt: String::new(),
+            });
+        }
+        Ok(resp
+            .bytes()
+            .await
+            .map_err(|e| RommError::Connection(e.without_url().to_string()))?
+            .to_vec())
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
