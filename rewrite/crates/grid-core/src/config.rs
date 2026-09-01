@@ -4,6 +4,16 @@ use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EmulatorEntry {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub args: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("config io: {0}")]
@@ -25,6 +35,14 @@ pub struct Config {
     pub username: String,
     #[serde(default)]
     pub library_path: String,
+    #[serde(default)]
+    pub emulators: Vec<EmulatorEntry>,
+    #[serde(default)]
+    pub default_emulators: BTreeMap<String, String>,
+    #[serde(default)]
+    pub retroarch_cores: BTreeMap<String, String>,
+    #[serde(default)]
+    pub launch_args: String,
     /// Unknown keys survive load/save round trips for forward compatibility.
     #[serde(flatten)]
     pub extra: BTreeMap<String, toml::Value>,
@@ -37,6 +55,10 @@ impl Default for Config {
             server_url: String::new(),
             username: String::new(),
             library_path: String::new(),
+            emulators: Vec::new(),
+            default_emulators: BTreeMap::new(),
+            retroarch_cores: BTreeMap::new(),
+            launch_args: String::new(),
             extra: BTreeMap::new(),
         }
     }
@@ -51,11 +73,14 @@ impl Config {
     }
 
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
-        match std::fs::read_to_string(path) {
-            Ok(text) => Ok(toml::from_str(&text)?),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(e) => Err(e.into()),
-        }
+        let mut config = match std::fs::read_to_string(path) {
+            Ok(text) => toml::from_str(&text)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Self::default(),
+            Err(e) => return Err(e.into()),
+        };
+        // Filter out emulators with blank names
+        config.emulators.retain(|e| !e.name.trim().is_empty());
+        Ok(config)
     }
 
     /// Atomic + durable: write `<path>.tmp`, fsync it, then rename over the
@@ -91,6 +116,10 @@ mod tests {
             server_url: "https://romm.example".into(),
             username: "six".into(),
             library_path: String::new(),
+            emulators: Vec::new(),
+            default_emulators: BTreeMap::new(),
+            retroarch_cores: BTreeMap::new(),
+            launch_args: String::new(),
             extra: Default::default(),
         };
         cfg.save(&path).unwrap();
@@ -144,6 +173,10 @@ mod tests {
             server_url: "https://romm.example".into(),
             username: "six".into(),
             library_path: "/path/to/library".into(),
+            emulators: Vec::new(),
+            default_emulators: BTreeMap::new(),
+            retroarch_cores: BTreeMap::new(),
+            launch_args: String::new(),
             extra: Default::default(),
         };
         cfg.save(&path).unwrap();
@@ -163,6 +196,154 @@ mod tests {
         let cfg = Config::load(&path).unwrap();
         assert_eq!(cfg.library_path, "/lib");
         assert!(!cfg.extra.contains_key("library_path"));
+        assert!(cfg.extra.contains_key("future_key"));
+    }
+
+    #[test]
+    fn emulator_array_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut emulators = Vec::new();
+        emulators.push(EmulatorEntry {
+            name: "emulator1".into(),
+            path: "/path/to/emu1".into(),
+            args: "--arg1 --arg2".into(),
+        });
+        emulators.push(EmulatorEntry {
+            name: "emulator2".into(),
+            path: "/path/to/emu2".into(),
+            args: String::new(),
+        });
+        let cfg = Config {
+            schema_version: 1,
+            server_url: String::new(),
+            username: String::new(),
+            library_path: String::new(),
+            emulators,
+            default_emulators: BTreeMap::new(),
+            retroarch_cores: BTreeMap::new(),
+            launch_args: String::new(),
+            extra: BTreeMap::new(),
+        };
+        cfg.save(&path).unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.emulators.len(), 2);
+        assert_eq!(loaded.emulators[0].name, "emulator1");
+        assert_eq!(loaded.emulators[0].path, "/path/to/emu1");
+        assert_eq!(loaded.emulators[0].args, "--arg1 --arg2");
+        assert_eq!(loaded.emulators[1].name, "emulator2");
+        assert_eq!(loaded.emulators[1].path, "/path/to/emu2");
+        assert_eq!(loaded.emulators[1].args, "");
+    }
+
+    #[test]
+    fn blank_name_emulator_dropped_on_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "schema_version = 1\n[[emulators]]\nname = \"valid\"\npath = \"/path\"\nargs = \"\"\n[[emulators]]\nname = \"\"\npath = \"/path\"\nargs = \"\"\n[[emulators]]\nname = \"   \"\npath = \"/path\"\nargs = \"\"\n",
+        )
+        .unwrap();
+        let cfg = Config::load(&path).unwrap();
+        assert_eq!(cfg.emulators.len(), 1);
+        assert_eq!(cfg.emulators[0].name, "valid");
+    }
+
+    #[test]
+    fn default_emulators_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut default_emulators = BTreeMap::new();
+        default_emulators.insert("n64".into(), "mupen64plus".into());
+        default_emulators.insert("snes".into(), "snes9x".into());
+        let cfg = Config {
+            schema_version: 1,
+            server_url: String::new(),
+            username: String::new(),
+            library_path: String::new(),
+            emulators: Vec::new(),
+            default_emulators,
+            retroarch_cores: BTreeMap::new(),
+            launch_args: String::new(),
+            extra: BTreeMap::new(),
+        };
+        cfg.save(&path).unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(
+            loaded.default_emulators.get("n64").map(|s| s.as_str()),
+            Some("mupen64plus")
+        );
+        assert_eq!(
+            loaded.default_emulators.get("snes").map(|s| s.as_str()),
+            Some("snes9x")
+        );
+    }
+
+    #[test]
+    fn retroarch_cores_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut retroarch_cores = BTreeMap::new();
+        retroarch_cores.insert("n64".into(), "mupen64plus_next".into());
+        retroarch_cores.insert("gba".into(), "mgba".into());
+        let cfg = Config {
+            schema_version: 1,
+            server_url: String::new(),
+            username: String::new(),
+            library_path: String::new(),
+            emulators: Vec::new(),
+            default_emulators: BTreeMap::new(),
+            retroarch_cores,
+            launch_args: String::new(),
+            extra: BTreeMap::new(),
+        };
+        cfg.save(&path).unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(
+            loaded.retroarch_cores.get("n64").map(|s| s.as_str()),
+            Some("mupen64plus_next")
+        );
+        assert_eq!(
+            loaded.retroarch_cores.get("gba").map(|s| s.as_str()),
+            Some("mgba")
+        );
+    }
+
+    #[test]
+    fn launch_args_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config {
+            schema_version: 1,
+            server_url: String::new(),
+            username: String::new(),
+            library_path: String::new(),
+            emulators: Vec::new(),
+            default_emulators: BTreeMap::new(),
+            retroarch_cores: BTreeMap::new(),
+            launch_args: "--fullscreen --no-menu".into(),
+            extra: BTreeMap::new(),
+        };
+        cfg.save(&path).unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.launch_args, "--fullscreen --no-menu");
+    }
+
+    #[test]
+    fn new_fields_not_in_extra() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "schema_version = 1\nemulators = []\ndefault_emulators = {}\nretroarch_cores = {}\nlaunch_args = \"\"\nfuture_key = \"kept\"\n",
+        )
+        .unwrap();
+        let cfg = Config::load(&path).unwrap();
+        assert!(!cfg.extra.contains_key("emulators"));
+        assert!(!cfg.extra.contains_key("default_emulators"));
+        assert!(!cfg.extra.contains_key("retroarch_cores"));
+        assert!(!cfg.extra.contains_key("launch_args"));
         assert!(cfg.extra.contains_key("future_key"));
     }
 }
