@@ -181,9 +181,18 @@ mod tests {
     }
 
     fn profile_with(name: &str, all_platforms: bool, keywords: &[&str]) -> EmulatorProfile {
+        profile_with_tokens(name, all_platforms, keywords, &[])
+    }
+
+    fn profile_with_tokens(
+        name: &str,
+        all_platforms: bool,
+        keywords: &[&str],
+        tokens: &[&str],
+    ) -> EmulatorProfile {
         EmulatorProfile {
             name: name.to_string(),
-            match_tokens: vec![],
+            match_tokens: tokens.iter().map(|t| t.to_lowercase()).collect(),
             args: "%rom%".to_string(),
             all_platforms,
             platform_keywords: keywords.iter().map(|k| k.to_string()).collect(),
@@ -302,12 +311,25 @@ mod tests {
     }
 
     #[test]
-    fn supports_retroarch_gate_applies_even_when_profile_name_carries_it() {
-        // Entry name is generic but the matched profile's name mentions
-        // RetroArch, so the retroarch gate should still apply rather than
-        // falling through to the "no profile" or keyword branches.
-        let profiles = vec![profile_with("RetroArch (Multi-System)", false, &[])];
-        let e = entry("RetroArch (Multi-System)", "/x/retroarch.appimage");
+    fn supports_retroarch_gate_applies_when_only_the_profile_name_carries_it() {
+        // The entry's own name has no "retroarch" substring; it resolves to
+        // a profile purely by executable-basename token match, and that
+        // profile's name mentions RetroArch. The gate must still apply —
+        // this isolates the `profile.is_some_and(is_retroarch_name)` half
+        // of the OR from the entry-name half (already covered by
+        // `supports_retroarch_entry_true/false_when_...`).
+        let profiles = vec![profile_with_tokens(
+            "RetroArch (Multi-System)",
+            false,
+            &[],
+            &["retroarch.appimage"],
+        )];
+        let e = entry("Multi-System Frontend", "/x/RetroArch.AppImage");
+        assert!(!is_retroarch_name(&e.name));
+        let matched = profile_for_entry(&e.name, &e.path, &profiles)
+            .expect("executable basename should match the profile's token");
+        assert!(is_retroarch_name(&matched.name));
+
         assert!(!emulator_supports_platform(
             &e,
             "SNES",
@@ -340,14 +362,19 @@ mod tests {
 
     #[test]
     fn compatible_names_preserve_config_order_and_skip_blank_names() {
+        // Two entries both support the platform (Dolphin via keyword,
+        // RetroArch via all_platforms) so the assertion actually exercises
+        // order preservation rather than degenerating to a single element.
         let profiles = vec![
             profile_with("PCSX2", false, &["playstation 2"]),
             profile_with("Dolphin", false, &["gamecube"]),
+            profile_with("RetroArch", true, &[]),
         ];
         let emulators = vec![
             entry("PCSX2", "/x/pcsx2-qt"),
             entry("", "/x/blank"),
             entry("Dolphin", "/x/dolphin"),
+            entry("RetroArch", "/x/retroarch"),
         ];
         let names = compatible_emulator_names_for_platform(
             &emulators,
@@ -355,7 +382,7 @@ mod tests {
             &profiles,
             &BTreeMap::new(),
         );
-        assert_eq!(names, vec!["Dolphin".to_string()]);
+        assert_eq!(names, vec!["Dolphin".to_string(), "RetroArch".to_string()]);
     }
 
     #[test]
