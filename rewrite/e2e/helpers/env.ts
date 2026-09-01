@@ -43,3 +43,13 @@ export const FIXTURE_USERNAME = 'e2euser';
 /** Waits: app start is slow (webview + embedded server); UI transitions are not. */
 export const APP_START_TIMEOUT = 15_000;
 export const TRANSITION_TIMEOUT = 5_000;
+/** An install of one of the small (non-throttled) content fixtures. */
+export const INSTALL_TIMEOUT = 10_000;
+/**
+ * A download against the `downloads` stage group's throttled mock (100ms
+ * per ~20KB chunk against the ~300KB "Big Arcade Game" fixture — see
+ * mock-romm/server.mjs and rewrite/scripts/e2e.sh's mock_args_for_group).
+ * Generous on top of the ~1.5-2s the throttle itself adds, to leave room for
+ * wdio/WebDriver round-trip overhead without becoming a flaky spec.
+ */
+export const THROTTLED_DOWNLOAD_TIMEOUT = 20_000;

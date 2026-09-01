@@ -107,8 +107,13 @@ test("GET /api/roms filters by platform_ids", async () => {
       `${url}/api/roms?platform_ids=2&limit=200&offset=0&with_char_index=false&with_filter_values=false`,
       { headers: authHeader() },
     ).then((r) => r.json());
-    assert.equal(body.items.length, 1);
-    assert.equal(body.items[0].platform_id, 2);
+    // Pac-Man (201) plus the "Big Arcade Game" (301) throttle fixture.
+    assert.equal(body.items.length, 2);
+    assert.ok(body.items.every((i) => i.platform_id === 2));
+    assert.deepEqual(
+      body.items.map((i) => i.id).sort((a, b) => a - b),
+      [201, 301],
+    );
   });
 });
 
@@ -210,6 +215,145 @@ test("content endpoint 404s for an unknown file", async () => {
     });
     assert.equal(res.status, 404);
   });
+});
+
+// --- e2e_throttle (chunked slow streaming) --------------------------------
+
+test("content endpoint streams instantly with no throttle requested", async () => {
+  await withServer(async ({ url }) => {
+    const detail = await fetch(`${url}/api/roms/101`, { headers: authHeader() }).then((r) =>
+      r.json(),
+    );
+    const file = detail.files[0];
+    const start = Date.now();
+    const res = await fetch(
+      `${url}/api/roms/101/content/${encodeURIComponent(file.file_name)}?file_ids=${file.id}`,
+      { headers: authHeader() },
+    );
+    const buf = Buffer.from(await res.arrayBuffer());
+    assert.equal(buf.length, file.file_size_bytes);
+    assert.ok(Date.now() - start < 200, "an unthrottled response should not be artificially delayed");
+  });
+});
+
+// A single chunk under THROTTLE_CHUNK_BYTES delivers its whole
+// Content-Length-declared body in one write, so a client that only measures
+// "time to full body" never observes the trailing delay before res.end() —
+// it already has everything it declared it would get. So a *meaningful*
+// timing assertion needs content that spans multiple chunks: the "Big
+// Arcade Game" fixture (rom 301, ~300KB against a 20KB chunk size).
+
+test("content endpoint honors ?e2e_throttle= by streaming in delayed chunks", async () => {
+  await withServer(async ({ url }) => {
+    const detail = await fetch(`${url}/api/roms/301`, { headers: authHeader() }).then((r) =>
+      r.json(),
+    );
+    const file = detail.files[0];
+    assert.ok(file.file_size_bytes > 20 * 1024, "expected the big fixture to exceed one chunk");
+    const start = Date.now();
+    const res = await fetch(
+      `${url}/api/roms/301/content/${encodeURIComponent(file.file_name)}?file_ids=${file.id}&e2e_throttle=10`,
+      { headers: authHeader() },
+    );
+    assert.equal(res.status, 200);
+    const buf = Buffer.from(await res.arrayBuffer());
+    const elapsed = Date.now() - start;
+    // This server was started with no defaultThrottleMs, so any delay here
+    // is proof the query param alone drove the throttling.
+    assert.equal(buf.length, file.file_size_bytes);
+    assert.ok(elapsed >= 100, `expected a multi-chunk throttled response, took ${elapsed}ms`);
+  });
+});
+
+test("a server-wide defaultThrottleMs throttles content requests with no query param", async () => {
+  const handle = await startMockRomm({ port: 0, defaultThrottleMs: 10 });
+  try {
+    const detail = await fetch(`${handle.url}/api/roms/301`, { headers: authHeader() }).then(
+      (r) => r.json(),
+    );
+    const file = detail.files[0];
+    const start = Date.now();
+    const res = await fetch(
+      `${handle.url}/api/roms/301/content/${encodeURIComponent(file.file_name)}?file_ids=${file.id}`,
+      { headers: authHeader() },
+    );
+    const buf = Buffer.from(await res.arrayBuffer());
+    const elapsed = Date.now() - start;
+    assert.equal(buf.length, file.file_size_bytes);
+    assert.ok(elapsed >= 100, `expected the server-wide default to throttle, took ${elapsed}ms`);
+  } finally {
+    await handle.close();
+  }
+});
+
+test("an explicit ?e2e_throttle=0 request is not throttled even with a server-wide default", async () => {
+  const handle = await startMockRomm({ port: 0, defaultThrottleMs: 5000 });
+  try {
+    const detail = await fetch(`${handle.url}/api/roms/301`, { headers: authHeader() }).then(
+      (r) => r.json(),
+    );
+    const file = detail.files[0];
+    const start = Date.now();
+    await fetch(
+      `${handle.url}/api/roms/301/content/${encodeURIComponent(file.file_name)}?file_ids=${file.id}&e2e_throttle=0`,
+      { headers: authHeader() },
+    );
+    assert.ok(Date.now() - start < 1000, "e2e_throttle=0 should override the server-wide default");
+  } finally {
+    await handle.close();
+  }
+});
+
+test("the big-content fixture (rom 301) streams in multiple throttled chunks", async () => {
+  const handle = await startMockRomm({ port: 0, defaultThrottleMs: 20 });
+  try {
+    const detail = await fetch(`${handle.url}/api/roms/301`, { headers: authHeader() }).then(
+      (r) => r.json(),
+    );
+    const file = detail.files[0];
+    assert.ok(file.file_size_bytes > 20 * 1024, "expected the big fixture to exceed one chunk");
+    const start = Date.now();
+    const res = await fetch(
+      `${handle.url}/api/roms/301/content/${encodeURIComponent(file.file_name)}?file_ids=${file.id}`,
+      { headers: authHeader() },
+    );
+    const buf = Buffer.from(await res.arrayBuffer());
+    const elapsed = Date.now() - start;
+    assert.equal(buf.length, file.file_size_bytes);
+    // Multiple ~20KB chunks at 20ms each: comfortably more than one chunk's
+    // delay proves this really streamed in pieces, not one big write.
+    assert.ok(elapsed >= 40, `expected multiple throttled chunks, took ${elapsed}ms`);
+  } finally {
+    await handle.close();
+  }
+});
+
+test("a throttled response stops cleanly when the client aborts mid-stream", async () => {
+  const handle = await startMockRomm({ port: 0, defaultThrottleMs: 100 });
+  try {
+    const detail = await fetch(`${handle.url}/api/roms/301`, { headers: authHeader() }).then(
+      (r) => r.json(),
+    );
+    const file = detail.files[0];
+    const controller = new AbortController();
+    const res = await fetch(
+      `${handle.url}/api/roms/301/content/${encodeURIComponent(file.file_name)}?file_ids=${file.id}`,
+      { headers: authHeader(), signal: controller.signal },
+    );
+    assert.equal(res.status, 200);
+    // Headers arrive immediately (writeHead is not throttled); the body is
+    // still streaming in throttled chunks when the abort fires.
+    const readPromise = res.arrayBuffer().catch(() => {});
+    setTimeout(() => controller.abort(), 150);
+    await readPromise;
+    // The server must still be alive and answering other requests — an
+    // unhandled exception from writing to the aborted response would have
+    // crashed the process.
+    const health = await fetch(`${handle.url}/api/users/me`, { headers: authHeader() });
+    assert.equal(health.status, 200);
+  } finally {
+    await handle.close();
+  }
 });
 
 // --- cover -----------------------------------------------------------------

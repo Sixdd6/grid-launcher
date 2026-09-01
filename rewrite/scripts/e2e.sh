@@ -48,7 +48,15 @@ BUILD_STAMP="$REWRITE_DIR/target/debug/.e2e-build-stamp"
 STAGE_GROUPS=(
   "connect:specs/connect.spec.ts"
   "connect-restore:specs/connect-restore-a.spec.ts specs/connect-restore-b.spec.ts"
+  "library:specs/library.spec.ts"
+  "install:specs/install-a.spec.ts specs/install-b.spec.ts"
+  "downloads:specs/downloads.spec.ts"
 )
+
+# Run only the named groups by passing them as arguments, e.g.
+# `rewrite/scripts/e2e.sh library downloads` — already supported by the
+# positional-arg filter below (group_matches). There is no separate
+# E2E_ONLY variable; the positional form is the single way to select groups.
 
 # Extra attempts for a failed group, each from a clean slate.
 GROUP_RETRIES=1
@@ -277,6 +285,18 @@ dump_failure() {
   printf '\n---- end failure dump for %s ----\n\n' "$stage" >&2
 }
 
+# Extra CLI args for this group's mock server instance. Only `downloads`
+# needs a throttled content endpoint (100ms per ~20KB chunk — see
+# mock-romm/server.mjs — comfortable against the "Big Arcade Game" fixture
+# for a real, cancellable in-flight download); every other group gets the
+# plain, unthrottled server so its installs stay fast.
+mock_args_for_group() {
+  case "$1" in
+    downloads) printf -- '--throttle-ms 100' ;;
+    *) printf '' ;;
+  esac
+}
+
 # Runs every spec of one group against a freshly created data dir and mock.
 # Sets attempt_failed_stage / attempt_failed_log / attempt_out_dir on failure.
 run_group_attempt() {
@@ -291,7 +311,10 @@ run_group_attempt() {
   attempt_request_log="$E2E_DIR/last-run-requests.log"
   rm -f "$attempt_request_log"
 
-  ( cd "$E2E_DIR" && exec node mock-romm/server.mjs --port 0 ) >"$attempt_mock_log" 2>&1 &
+  local mock_args
+  mock_args="$(mock_args_for_group "$name")"
+  # shellcheck disable=SC2086 # mock_args is a small, script-controlled word list
+  ( cd "$E2E_DIR" && exec node mock-romm/server.mjs --port 0 $mock_args ) >"$attempt_mock_log" 2>&1 &
   mock_pid=$!
 
   local mock_url="" _

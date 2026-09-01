@@ -91,5 +91,24 @@
       "companies": ["Namco"],
       "first_release_date": 315532800
     }
+  },
+  "301": {
+    "id": 301,
+    "name": "Big Arcade Game",
+    "fs_name_no_ext": "Big Arcade Game",
+    "platform_id": 2,
+    "platform_display_name": "Arcade",
+    "fs_name": "Big Arcade Game.zip",
+    "summary": "A large fixture used to give the downloads E2E spec a comfortable cancel window.",
+    "regions": ["World"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      { "id": 3011, "file_name": "Big Arcade Game.zip", "file_size_bytes": 0, "is_top_level": true }
+    ],
+    "metadatum": null
   }
 }

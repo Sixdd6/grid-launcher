@@ -6,16 +6,22 @@
 //   GET  /api/platforms
 //   GET  /api/roms?platform_ids=&limit=&offset=&with_char_index=&with_filter_values=
 //   GET  /api/roms/:id
-//   GET  /api/roms/:id/content/:file_name?file_ids=
+//   GET  /api/roms/:id/content/:file_name?file_ids=[&e2e_throttle=<ms-per-chunk>]
 //   GET  /assets/romm/resources/roms/:id/cover/small.png
+//
+// The content endpoint's `e2e_throttle` query param (or the `defaultThrottleMs`
+// / `--throttle-ms` server-wide default, used by e2e.sh for the `downloads`
+// stage group) makes it stream the response in fixed-size chunks with a delay
+// between each, instead of writing the whole buffer at once — this is what
+// gives the downloads E2E spec a real, cancellable in-flight download.
 //
 // Usage as a library:
 //   import { startMockRomm } from "./server.mjs";
-//   const handle = await startMockRomm({ port: 0, fixturesDir });
+//   const handle = await startMockRomm({ port: 0, fixturesDir, defaultThrottleMs: 0 });
 //   // handle.port, handle.url, handle.requestLog, await handle.close()
 //
 // Standalone:
-//   node server.mjs --port 8931
+//   node server.mjs --port 8931 [--throttle-ms 100]
 
 import http from "node:http";
 import path from "node:path";
@@ -136,13 +142,24 @@ function dummyBytes(length, seed) {
 const PNG_1X1_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
+/**
+ * Content size of the "Big Arcade Game" fixture (rom 301): large enough that
+ * throttled streaming (see THROTTLE_CHUNK_BYTES below) takes a comfortable,
+ * multi-chunk amount of wall-clock time — long enough for the downloads E2E
+ * spec to observe an in-flight download and cancel it before it completes.
+ */
+const BIG_CONTENT_BYTES = 300 * 1024;
+
 function buildContentFixtures() {
   const zipBytes = buildZip([{ name: "game.sfc", data: dummyBytes(320, 0xa5) }]);
+  const bigZipBytes = buildZip([
+    { name: "big.bin", data: dummyBytes(BIG_CONTENT_BYTES, 0x7e) },
+  ]);
   const m3uBytes = Buffer.from("disc1.bin\ndisc2.bin\n", "utf8");
   const disc1Bytes = dummyBytes(256, 0x11);
   const disc2Bytes = dummyBytes(272, 0x22);
   const pngBytes = Buffer.from(PNG_1X1_BASE64, "base64");
-  return { zipBytes, m3uBytes, disc1Bytes, disc2Bytes, pngBytes };
+  return { zipBytes, bigZipBytes, m3uBytes, disc1Bytes, disc2Bytes, pngBytes };
 }
 
 /** Picks the content buffer for one RomFile entry, by name. */
@@ -151,6 +168,7 @@ function contentForFile(fileName, content) {
   if (fileName === "disc1.bin") return content.disc1Bytes;
   if (fileName === "disc2.bin") return content.disc2Bytes;
   if (lower.endsWith(".m3u")) return content.m3uBytes;
+  if (lower === "big arcade game.zip") return content.bigZipBytes;
   if (lower.endsWith(".zip")) return content.zipBytes;
   return dummyBytes(64, 0x00);
 }
@@ -201,6 +219,43 @@ function sendBuffer(res, status, contentType, buf) {
     "Content-Length": buf.length,
   });
   res.end(buf);
+}
+
+/** Chunk size for throttled content streaming (see sendBufferThrottled). */
+const THROTTLE_CHUNK_BYTES = 20 * 1024;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Like sendBuffer, but writes `buf` in THROTTLE_CHUNK_BYTES-sized chunks,
+ * awaiting `chunkMs` after every chunk (including the last, so even content
+ * smaller than one chunk still measurably delays — this is what the mock
+ * server's own unit test observes). Bails out cleanly if the client closes
+ * the connection mid-stream (e.g. the app cancelling an in-flight download),
+ * rather than throwing on a write to a destroyed socket.
+ */
+async function sendBufferThrottled(res, status, contentType, buf, chunkMs) {
+  res.writeHead(status, {
+    "Content-Type": contentType,
+    "Content-Length": buf.length,
+  });
+  let aborted = false;
+  res.once("close", () => {
+    aborted = true;
+  });
+  for (let offset = 0; offset < buf.length; offset += THROTTLE_CHUNK_BYTES) {
+    if (aborted || res.destroyed) return;
+    const chunk = buf.subarray(offset, offset + THROTTLE_CHUNK_BYTES);
+    const ok = res.write(chunk);
+    if (!ok && !aborted && !res.destroyed) {
+      await new Promise((resolve) => res.once("drain", resolve));
+    }
+    if (aborted || res.destroyed) return;
+    await sleep(chunkMs);
+  }
+  if (!aborted && !res.destroyed) res.end();
 }
 
 const COVER_PATH_RE = /^\/assets\/romm\/resources\/roms\/\d+\/cover\/small\.png$/;
@@ -280,7 +335,17 @@ function handleRequest(req, res, state) {
     const contentType = fileName.toLowerCase().endsWith(".zip")
       ? "application/zip"
       : "application/octet-stream";
-    sendBuffer(res, 200, contentType, bytes);
+    const requestedThrottle = Number(requestUrl.searchParams.get("e2e_throttle"));
+    const throttleMs =
+      requestedThrottle > 0 ? requestedThrottle : state.defaultThrottleMs > 0 ? state.defaultThrottleMs : 0;
+    if (throttleMs > 0) {
+      sendBufferThrottled(res, 200, contentType, bytes, throttleMs).catch(() => {
+        // The client (or a test) closing the connection mid-download is an
+        // expected way for this to end, not a server bug — nothing to log.
+      });
+    } else {
+      sendBuffer(res, 200, contentType, bytes);
+    }
     return;
   }
 
@@ -292,12 +357,21 @@ function handleRequest(req, res, state) {
 /**
  * Starts the mock RomM server.
  *
- * @param {{port?: number, fixturesDir?: string}} [options]
+ * @param {{port?: number, fixturesDir?: string, defaultThrottleMs?: number}} [options]
  * @returns {Promise<{port: number, url: string, close: () => Promise<void>, requestLog: Array<{method: string, path: string}>}>}
  */
-export async function startMockRomm({ port = 0, fixturesDir = DEFAULT_FIXTURES_DIR } = {}) {
+export async function startMockRomm({
+  port = 0,
+  fixturesDir = DEFAULT_FIXTURES_DIR,
+  defaultThrottleMs = 0,
+} = {}) {
   const state = await loadFixtures(fixturesDir);
   state.requestLog = [];
+  // Server-wide fallback used when a content request carries no explicit
+  // ?e2e_throttle=: set by e2e.sh for the `downloads` stage group only, so
+  // every content download made through this instance is throttled without
+  // the live app needing to add the query param itself.
+  state.defaultThrottleMs = defaultThrottleMs;
 
   const server = http.createServer((req, res) => handleRequest(req, res, state));
 
@@ -346,14 +420,18 @@ function isMainModule() {
 if (isMainModule()) {
   const args = process.argv.slice(2);
   let port = 0;
+  let defaultThrottleMs = 0;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port" && args[i + 1]) {
       port = Number(args[i + 1]);
       i++;
+    } else if (args[i] === "--throttle-ms" && args[i + 1]) {
+      defaultThrottleMs = Number(args[i + 1]);
+      i++;
     }
   }
 
-  const handle = await startMockRomm({ port });
+  const handle = await startMockRomm({ port, defaultThrottleMs });
   console.log(`mock RomM server listening at ${handle.url}`);
 
   const shutdown = async () => {

@@ -28,8 +28,13 @@ e2e-only build of the app, starts a mock RomM server, and runs the specs in
 
     scripts/e2e.sh                  # build, then run every stage
     scripts/e2e.sh connect          # run one stage group
+    scripts/e2e.sh library install  # or several — any number of names
     E2E_SKIP_BUILD=1 scripts/e2e.sh # reuse the existing binary
     E2E_KEEP=1 scripts/e2e.sh       # keep the temp run directory
+
+There is no separate `E2E_ONLY` variable — the positional group-name filter
+above is already the way to run a subset, so `E2E_SKIP_BUILD=1
+scripts/e2e.sh downloads` is the fast inner loop for one group's specs.
 
 Exit codes: 0 pass, 1 a stage group failed, 2 a prerequisite is missing or the
 binary is not a stamped e2e build. A failing stage prints the app's own
@@ -81,6 +86,9 @@ of the private bus and outlive `dbus-run-session`. A green run leaves no
 | --- | --- | --- |
 | `connect` | `connect.spec.ts` | wrong token → "rejected the credentials"; fixture token → library; the token never reaches the DOM; `config.toml` holds server_url + username and no secret |
 | `connect-restore` | `connect-restore-a/-b.spec.ts` | connect, then relaunch the binary against the same data dir and keyring — the session restores with no credential re-entry |
+| `library` | `library.spec.ts` | both fixture platforms render; selecting platform 1 shows its cards, including the server `name: null` game falling back to `fs_name_no_ext`; a cover `<img>` gets a real `src` and a nonzero `naturalWidth` (the regression test for the asset-protocol-scope fix); `ArrowRight` moves the focused card |
+| `install` | `install-a/-b.spec.ts` | the library-path banner appears when unset and hides once a path is saved; installing rom 101 from the details overlay reaches a `Completed` download row and an `installed` badge, and extracts `game.sfc` under the temp library dir; the badge survives a relaunch (part b); uninstalling via the details two-click removes the badge and the files; `grid-launcher.db` never contains the fixture token |
+| `downloads` | `downloads.spec.ts` | this group's mock server runs with `--throttle-ms 100` (chunked slow streaming — see `mock-romm/server.mjs`'s `e2e_throttle`) against the ~300KB "Big Arcade Game" fixture (rom 301), giving a real in-flight download to interact with: a second install queues behind the first; cancelling the active download shows `Cancelled`; retrying it reaches `Completed`; dismissing removes the row |
 
 The embedded WebDriver provider keeps one app process alive for a whole
 `wdio run` and cannot restart it, so the runner starts one `wdio run` per spec
