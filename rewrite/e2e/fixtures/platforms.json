@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "name": "Super Nintendo Entertainment System",
+    "slug": "snes",
+    "rom_count": 3
+  },
+  {
+    "id": 2,
+    "name": "Arcade",
+    "slug": "arcade",
+    "rom_count": 1
+  }
+]

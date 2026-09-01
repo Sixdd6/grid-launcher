@@ -1,0 +1,34 @@
+{
+  "1": [
+    {
+      "id": 101,
+      "name": "Super Mario World",
+      "fs_name_no_ext": "Super Mario World",
+      "platform_id": 1,
+      "path_cover_small": "/assets/romm/resources/roms/101/cover/small.png"
+    },
+    {
+      "id": 102,
+      "name": null,
+      "fs_name_no_ext": "Chrono Trigger (USA)",
+      "platform_id": 1,
+      "path_cover_small": "/assets/romm/resources/roms/102/cover/small.png"
+    },
+    {
+      "id": 103,
+      "name": "Secret of Mana Disc Set",
+      "fs_name_no_ext": "Secret of Mana Disc Set",
+      "platform_id": 1,
+      "path_cover_small": null
+    }
+  ],
+  "2": [
+    {
+      "id": 201,
+      "name": "Pac-Man",
+      "fs_name_no_ext": "Pac-Man",
+      "platform_id": 2,
+      "path_cover_small": "/assets/romm/resources/roms/201/cover/small.png"
+    }
+  ]
+}

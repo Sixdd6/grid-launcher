@@ -1,0 +1,95 @@
+{
+  "101": {
+    "id": 101,
+    "name": "Super Mario World",
+    "fs_name_no_ext": "Super Mario World",
+    "platform_id": 1,
+    "platform_display_name": "Super Nintendo Entertainment System",
+    "fs_name": "Super Mario World.zip",
+    "summary": "A classic platformer.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      { "id": 1001, "file_name": "Super Mario World.zip", "file_size_bytes": 0, "is_top_level": true }
+    ],
+    "metadatum": {
+      "average_rating": 9.2,
+      "genres": ["Platformer"],
+      "companies": ["Nintendo"],
+      "first_release_date": 653529600
+    }
+  },
+  "102": {
+    "id": 102,
+    "name": null,
+    "fs_name_no_ext": "Chrono Trigger (USA)",
+    "platform_id": 1,
+    "platform_display_name": "Super Nintendo Entertainment System",
+    "fs_name": "Chrono Trigger (USA).zip",
+    "summary": null,
+    "regions": [],
+    "languages": [],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      { "id": 1002, "file_name": "Chrono Trigger (USA).zip", "file_size_bytes": 0, "is_top_level": true }
+    ],
+    "metadatum": null
+  },
+  "103": {
+    "id": 103,
+    "name": "Secret of Mana Disc Set",
+    "fs_name_no_ext": "Secret of Mana Disc Set",
+    "platform_id": 1,
+    "platform_display_name": "Super Nintendo Entertainment System",
+    "fs_name": "Secret of Mana Disc Set",
+    "summary": "A multi-disc RPG.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": ["RPG"],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      { "id": 1031, "file_name": "disc1.bin", "file_size_bytes": 0, "is_top_level": true },
+      { "id": 1032, "file_name": "disc2.bin", "file_size_bytes": 0, "is_top_level": true },
+      { "id": 1033, "file_name": "game.m3u", "file_size_bytes": 0, "is_top_level": true }
+    ],
+    "metadatum": {
+      "average_rating": null,
+      "genres": ["RPG"],
+      "companies": [],
+      "first_release_date": null
+    }
+  },
+  "201": {
+    "id": 201,
+    "name": "Pac-Man",
+    "fs_name_no_ext": "Pac-Man",
+    "platform_id": 2,
+    "platform_display_name": "Arcade",
+    "fs_name": "Pac-Man.zip",
+    "summary": "The classic maze arcade game.",
+    "regions": ["World"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      { "id": 2011, "file_name": "Pac-Man.zip", "file_size_bytes": 0, "is_top_level": true }
+    ],
+    "metadatum": {
+      "average_rating": 8.5,
+      "genres": ["Arcade"],
+      "companies": ["Namco"],
+      "first_release_date": 315532800
+    }
+  }
+}
