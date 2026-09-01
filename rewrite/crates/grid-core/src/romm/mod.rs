@@ -66,6 +66,21 @@ impl RommClient {
         path: &str,
         query: &[(&str, String)],
     ) -> Result<T, RommError> {
+        let resp = self.get_response(path, query).await?;
+        resp.json::<T>()
+            .await
+            .map_err(|e| RommError::Decode(e.without_url().to_string()))
+    }
+
+    /// Status-checked GET returning the raw response for streaming (or for
+    /// `get_json` to decode). 401/403 map to `Unauthorized`; any other
+    /// non-2xx maps to `Http` with a body excerpt — the body is consumed
+    /// here so callers never see the excerpt logic duplicated.
+    pub(crate) async fn get_response(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+    ) -> Result<reqwest::Response, RommError> {
         let resp = self
             .http
             .get(self.endpoint(path)?)
@@ -85,9 +100,7 @@ impl RommClient {
                 excerpt: error::excerpt(&body),
             });
         }
-        resp.json::<T>()
-            .await
-            .map_err(|e| RommError::Decode(e.without_url().to_string()))
+        Ok(resp)
     }
 
     pub async fn connect(&self) -> Result<UserInfo, RommError> {
@@ -215,5 +228,128 @@ impl RommClient {
             offset += PAGE_SIZE;
         }
         Ok(out)
+    }
+
+    pub async fn rom_detail(&self, rom_id: i64) -> Result<RomDetail, RommError> {
+        let raw: RawRomDetail = self.get_json(&format!("/api/roms/{rom_id}"), &[]).await?;
+        Ok(raw.into())
+    }
+}
+
+/// Wire shape of `RomFileSchema`'s fields we use. Matches the public
+/// `RomFile` exactly, so it's decoded directly with no `Raw`/`From` pair.
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
+pub struct RomFile {
+    pub id: i64,
+    pub file_name: String,
+    #[serde(default)]
+    pub file_size_bytes: i64,
+    #[serde(default)]
+    pub is_top_level: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct RomDetail {
+    pub id: i64,
+    pub name: String,
+    pub platform_id: i64,
+    pub platform_name: String,
+    pub fs_name: String,
+    pub description: String,
+    pub regions: String,
+    pub languages: String,
+    pub tags: String,
+    pub revision: String,
+    pub rating: String,
+    pub genres: String,
+    pub companies: String,
+    pub first_release_date: String,
+    pub filesize_bytes: i64,
+    pub server_updated_at: String,
+    pub files: Vec<RomFile>,
+}
+
+/// Wire shape of `RomMetadataSchema` fields we use. Every field defaulted so
+/// a missing/null `metadatum` (or sparse fields within it) never fails the
+/// outer decode.
+#[derive(Deserialize, Default)]
+struct RawRomMetadata {
+    #[serde(default)]
+    average_rating: Option<f64>,
+    #[serde(default)]
+    genres: Vec<String>,
+    #[serde(default)]
+    companies: Vec<String>,
+    #[serde(default)]
+    first_release_date: Option<i64>,
+}
+
+/// Wire shape of `DetailedRomSchema`'s fields we use. All optionals are
+/// defaulted so a sparse payload never fails the decode — `From<RawRomDetail>
+/// for RomDetail` below applies the string-fallback conventions.
+#[derive(Deserialize)]
+struct RawRomDetail {
+    id: i64,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    fs_name_no_ext: String,
+    platform_id: i64,
+    #[serde(default)]
+    platform_display_name: String,
+    #[serde(default)]
+    fs_name: String,
+    #[serde(default)]
+    summary: Option<String>,
+    #[serde(default)]
+    regions: Vec<String>,
+    #[serde(default)]
+    languages: Vec<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    revision: Option<String>,
+    #[serde(default)]
+    fs_size_bytes: i64,
+    #[serde(default)]
+    updated_at: String,
+    #[serde(default)]
+    files: Vec<RomFile>,
+    #[serde(default)]
+    metadatum: Option<RawRomMetadata>,
+}
+
+impl From<RawRomDetail> for RomDetail {
+    fn from(raw: RawRomDetail) -> Self {
+        let name = raw
+            .name
+            .filter(|n| !n.is_empty())
+            .unwrap_or(raw.fs_name_no_ext);
+        let metadatum = raw.metadatum.unwrap_or_default();
+        RomDetail {
+            id: raw.id,
+            name,
+            platform_id: raw.platform_id,
+            platform_name: raw.platform_display_name,
+            fs_name: raw.fs_name,
+            description: raw.summary.unwrap_or_default(),
+            regions: raw.regions.join(", "),
+            languages: raw.languages.join(", "),
+            tags: raw.tags.join(", "),
+            revision: raw.revision.unwrap_or_default(),
+            rating: metadatum
+                .average_rating
+                .map(|r| format!("{r:.1}"))
+                .unwrap_or_default(),
+            genres: metadatum.genres.join(", "),
+            companies: metadatum.companies.join(", "),
+            first_release_date: metadatum
+                .first_release_date
+                .map(|d| d.to_string())
+                .unwrap_or_default(),
+            filesize_bytes: raw.fs_size_bytes,
+            server_updated_at: raw.updated_at,
+            files: raw.files,
+        }
     }
 }
