@@ -14,7 +14,12 @@ pub struct UserInfo {
 
 pub struct RommClient {
     http: reqwest::Client,
-    base: url::Url,
+    /// Base URL with any trailing slash trimmed. Kept as a string (not a
+    /// parsed `Url`) so that `endpoint()` can concatenate it with a path
+    /// verbatim — `Url::join` would silently drop a base subpath (e.g. a
+    /// server hosted at `https://host/romm`) because a leading-slash path
+    /// resets a join to the URL's origin root.
+    base: String,
     /// Prebuilt Authorization header value. Held as a reqwest HeaderValue
     /// marked sensitive so reqwest's own debug output redacts it.
     auth: reqwest::header::HeaderValue,
@@ -24,7 +29,8 @@ impl RommClient {
     /// The ONLY place (besides KeyringStore serialization) where a secret is
     /// exposed. Builds the Authorization header value once.
     pub fn new(base_url: &str, cred: Credential) -> Result<Self, RommError> {
-        let base = url::Url::parse(base_url).map_err(|_| RommError::InvalidUrl)?;
+        let parsed = url::Url::parse(base_url).map_err(|_| RommError::InvalidUrl)?;
+        let base = parsed.as_str().trim_end_matches('/').to_string();
         let raw = match &cred {
             Credential::Token(t) => format!("Bearer {}", t.expose_secret()),
             Credential::Basic { username, password } => {
@@ -45,8 +51,14 @@ impl RommClient {
         Ok(Self { http, base, auth })
     }
 
+    /// Appends `path` to the base URL verbatim, preserving any base subpath
+    /// (see the `base` field doc for why this can't use `Url::join`).
     fn endpoint(&self, path: &str) -> Result<url::Url, RommError> {
-        self.base.join(path).map_err(|_| RommError::InvalidUrl)
+        if !path.starts_with('/') {
+            return Err(RommError::InvalidUrl);
+        }
+        let combined = format!("{}{path}", self.base);
+        url::Url::parse(&combined).map_err(|_| RommError::InvalidUrl)
     }
 
     pub(crate) async fn get_json<T: serde::de::DeserializeOwned>(

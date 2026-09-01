@@ -18,7 +18,13 @@ pub(crate) fn excerpt(body: &str) -> String {
     const MAX: usize = 240;
     let collapsed: String = body.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.len() > MAX {
-        format!("{}...", &collapsed[..MAX])
+        // Walk back to a char boundary so we never split a multi-byte UTF-8
+        // sequence — the body is server-controlled input.
+        let mut end = MAX;
+        while end > 0 && !collapsed.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &collapsed[..end])
     } else {
         collapsed
     }
