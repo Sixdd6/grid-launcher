@@ -1755,6 +1755,7 @@ dependencies = [
  "futures",
  "futures-util",
  "keyring",
+ "libc",
  "liblzma",
  "percent-encoding",
  "reqwest",
