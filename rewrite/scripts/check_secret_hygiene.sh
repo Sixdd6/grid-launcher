@@ -15,13 +15,36 @@ if [ -n "$violations" ]; then
 fi
 
 # Real-looking secrets in tests/fixtures: long bearer-ish strings that are not
-# the sanctioned fake. The fake token is allowed everywhere.
+# the sanctioned fakes. The fake tokens are allowed everywhere.
+scan_dirs=(crates app/src app/src-tauri)
+if [ -d e2e ]; then
+  scan_dirs+=(e2e)
+fi
 suspicious=$(grep -rnE "(Bearer|token|password)[\"': =]+[A-Za-z0-9+/_-]{30,}" \
-  crates app/src app/src-tauri --include="*.rs" --include="*.ts" --include="*.svelte" --include="*.json" \
-  | grep -v "FAKE-TEST-TOKEN-not-real" || true)
+  "${scan_dirs[@]}" --include="*.rs" --include="*.ts" --include="*.svelte" --include="*.json" \
+  | grep -v -e "FAKE-TEST-TOKEN-not-real" -e "FAKE-E2E-TOKEN-not-real" || true)
 if [ -n "$suspicious" ]; then
   echo "Possible real credential in committed code/fixtures:" >&2
   echo "$suspicious" >&2
   exit 1
 fi
+
+# The `e2e` cargo feature embeds a WebDriver automation server
+# (tauri-plugin-wdio + tauri-plugin-wdio-webdriver). It must never appear in
+# the default (release) dependency tree, and it must be reachable when the
+# feature is explicitly enabled — otherwise the e2e harness is silently
+# broken. Run from the workspace root so `-p app` resolves either way.
+if cargo tree -p app --quiet 2>/dev/null | grep -qi wdio; then
+  echo "wdio plugin found in the DEFAULT dependency tree of 'app' (no --features e2e)." >&2
+  echo "The embedded WebDriver server must never ship in a release build." >&2
+  echo "Check the [features] e2e = [...] wiring in app/src-tauri/Cargo.toml." >&2
+  exit 1
+fi
+if ! cargo tree -p app --features e2e --quiet 2>/dev/null | grep -qi wdio; then
+  echo "wdio plugin NOT found in 'app' with --features e2e enabled." >&2
+  echo "The e2e feature should pull in tauri-plugin-wdio and tauri-plugin-wdio-webdriver." >&2
+  echo "Check the [features] e2e = [...] wiring in app/src-tauri/Cargo.toml." >&2
+  exit 1
+fi
+
 echo "secret hygiene OK"

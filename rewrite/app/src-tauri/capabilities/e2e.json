@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "e2e",
+  "description": "enables the embedded WebDriver automation plugins for E2E testing only — never included in a default build (see tauri.conf.json's explicit security.capabilities list, overridden by tauri.e2e.conf.json)",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "wdio:default",
+    "wdio-webdriver:default"
+  ]
+}

@@ -70,12 +70,20 @@ pub fn run() {
         .clone()
         .map(|registry| InstallService::new(registry, config_path.clone()));
     let launch = registry.map(|registry| LaunchService::new(registry, config_path));
-    tauri::Builder::default()
-        .manage(AppState {
-            session,
-            install,
-            launch,
-        })
+    let builder = tauri::Builder::default().manage(AppState {
+        session,
+        install,
+        launch,
+    });
+    // Embedded WebDriver automation server, gated behind the `e2e` cargo
+    // feature so it never ships in a release build (see
+    // rewrite/scripts/check_secret_hygiene.sh, which fails the build if
+    // these plugins appear in the default dependency tree).
+    #[cfg(feature = "e2e")]
+    let builder = builder
+        .plugin(tauri_plugin_wdio::init())
+        .plugin(tauri_plugin_wdio_webdriver::init());
+    builder
         .setup(|app| {
             gamepad::spawn(app.handle().clone());
             let state = app.state::<AppState>();
