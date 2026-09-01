@@ -9,6 +9,7 @@ pub mod sessions;
 pub mod spawn;
 pub mod template;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitStatus;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -79,6 +80,19 @@ pub struct LaunchService {
     /// order is always this gate first, the session store second — never the
     /// reverse — and no listener is ever called while it is held.
     reap_gate: Mutex<()>,
+    /// Sessions still inside their early-exit window, mapped to the command
+    /// line to quote if they die there. An entry is added at spawn and taken
+    /// out by whichever event comes first: the session being reaped (which
+    /// emits the warning), the session's own 500 ms check finding it still
+    /// alive (the window is over — a later exit is a normal quit), or a
+    /// [`Self::stop`] for it (the user asked; that is not a failure).
+    ///
+    /// It exists because the reap that observes an early exit is not always
+    /// that session's own check: any reaping path — the poll loop, or a
+    /// *sibling's* check running while this session is young — can be the one
+    /// that finds the dead child, and the warning has to survive whichever it
+    /// is. Bounded by the number of launches in flight.
+    early_exit_watch: Mutex<HashMap<u64, String>>,
 }
 
 impl LaunchService {
@@ -88,7 +102,8 @@ impl LaunchService {
 
     /// Same as [`Self::new`] with a caller-chosen reap interval. Tests use a
     /// short one so a stopped session is observed without waiting out the
-    /// production 2500 ms tick.
+    /// production 2500 ms tick; application code should call [`Self::new`].
+    #[doc(hidden)]
     pub fn new_with_poll_interval(
         registry: Arc<Registry>,
         config_path: PathBuf,
@@ -103,6 +118,7 @@ impl LaunchService {
             poll_started: AtomicBool::new(false),
             poll_interval,
             reap_gate: Mutex::new(()),
+            early_exit_watch: Mutex::new(HashMap::new()),
         })
     }
 
@@ -171,8 +187,13 @@ impl LaunchService {
             return Err(LaunchError::AlreadyRunning);
         }
 
+        self.early_exit_watch
+            .lock()
+            .unwrap()
+            .insert(session.id, joined_command);
+
         self.emit(None);
-        self.schedule_early_exit_check(session.id, joined_command);
+        self.schedule_early_exit_check(session.id);
         Ok(session)
     }
 
@@ -184,6 +205,10 @@ impl LaunchService {
         // (see `reap_gate`). It is not the session-store lock, which
         // `pid_of` takes and releases on its own.
         let _gate = self.reap_gate.lock().unwrap();
+        // The user asked for this exit, so it is not a failure to report.
+        // Dropped before the signal, and under the reap gate, so no reaping
+        // path can still see the entry once the process can be gone.
+        self.early_exit_watch.lock().unwrap().remove(&session_id);
         #[cfg(unix)]
         {
             // The pid is read under the store lock and signalled after that
@@ -232,11 +257,11 @@ impl LaunchService {
                 let Some(service) = weak.upgrade() else {
                     return;
                 };
-                // The loop leaves brand-new children to the early-exit
-                // check that owes the user a warning for them.
-                if !service.reap_exited(EARLY_EXIT_DELAY).is_empty() {
-                    service.emit(None);
-                }
+                // Reaps everything. A child still inside its early-exit
+                // window carries its warning in `early_exit_watch`, so
+                // reaping it here reports the failure just as its own check
+                // would have.
+                service.reap_and_notify();
             }
         });
     }
@@ -259,9 +284,10 @@ impl LaunchService {
             .ok_or(LaunchError::NotInstalled)
     }
 
-    /// Runs the 500 ms post-launch check: if the child is already gone, the
-    /// session is removed and the listener is told why.
-    fn schedule_early_exit_check(self: &Arc<Self>, session_id: u64, joined_command: String) {
+    /// Runs the 500 ms post-launch check: reap, which reports the failure if
+    /// this session (or any sibling) died inside its window, then close this
+    /// session's window so a later, ordinary quit says nothing.
+    fn schedule_early_exit_check(self: &Arc<Self>, session_id: u64) {
         let weak = Arc::downgrade(self);
         tokio::spawn(async move {
             tokio::time::sleep(EARLY_EXIT_DELAY).await;
@@ -269,33 +295,50 @@ impl LaunchService {
                 return;
             };
             // The same reaping path the poll loop uses: one place removes
-            // sessions, so the two can never double-remove or disagree. The
-            // age gate above means this session is still here to be found.
-            let exited = service.reap_exited(Duration::ZERO);
-            if exited.is_empty() {
-                return;
-            }
-            let warning = exited
-                .iter()
-                .find(|(id, _)| *id == session_id)
-                .map(|(_, status)| match status.code() {
-                    Some(code) => {
-                        format!("Game exited immediately (code {code}): {joined_command}")
-                    }
-                    // No exit code: killed by a signal. The `ExitStatus`
-                    // display already reads as "signal: 9 (SIGKILL)".
-                    None => format!("Game exited immediately ({status}): {joined_command}"),
-                });
-            service.emit(warning);
+            // sessions, so the two can never double-remove or disagree.
+            service.reap_and_notify();
+            service.early_exit_watch.lock().unwrap().remove(&session_id);
         });
     }
 
-    /// Reaps every child registered more than `min_age` ago, under the reap
-    /// gate. Never notifies: the caller decides which snapshot to emit, and
-    /// always does it with no lock held.
-    fn reap_exited(&self, min_age: Duration) -> Vec<(u64, ExitStatus)> {
+    /// Reaps, then tells the listener what happened: one warning snapshot per
+    /// session that died inside its early-exit window, or a single plain
+    /// snapshot when sessions went away with nothing to report. Emits nothing
+    /// when the store did not change.
+    ///
+    /// A warning gets its own snapshot because `SessionsSnapshot` carries at
+    /// most one message; two games failing in the same tick is rare, and
+    /// dropping one of the two messages would be worse than two emissions.
+    fn reap_and_notify(&self) {
+        let exited = self.reap_exited();
+        if exited.is_empty() {
+            return;
+        }
+        let warnings: Vec<String> = {
+            let mut watch = self.early_exit_watch.lock().unwrap();
+            exited
+                .iter()
+                .filter_map(|(id, status)| {
+                    watch
+                        .remove(id)
+                        .map(|command| early_exit_message(*status, &command))
+                })
+                .collect()
+        };
+        if warnings.is_empty() {
+            self.emit(None);
+            return;
+        }
+        for warning in warnings {
+            self.emit(Some(warning));
+        }
+    }
+
+    /// Reaps under the reap gate. Never notifies: [`Self::reap_and_notify`]
+    /// decides what the listener hears, always with no lock held.
+    fn reap_exited(&self) -> Vec<(u64, Option<ExitStatus>)> {
         let _gate = self.reap_gate.lock().unwrap();
-        self.sessions.reap(min_age)
+        self.sessions.reap()
     }
 
     /// Hands a snapshot to the listener with NO lock held: the callback is
@@ -312,6 +355,23 @@ impl LaunchService {
 }
 
 // --- resolution -------------------------------------------------------------
+
+/// The message for a game that died inside its early-exit window.
+///
+/// `status` is `None` only when `try_wait` itself failed, so no exit code was
+/// ever available; the process is gone either way and the user still needs to
+/// be told, so the code reads "unknown".
+fn early_exit_message(status: Option<ExitStatus>, joined_command: &str) -> String {
+    match status {
+        Some(status) => match status.code() {
+            Some(code) => format!("Game exited immediately (code {code}): {joined_command}"),
+            // No exit code: killed by a signal. The `ExitStatus` display
+            // already reads as "signal: 9 (SIGKILL)".
+            None => format!("Game exited immediately ({status}): {joined_command}"),
+        },
+        None => format!("Game exited immediately (unknown): {joined_command}"),
+    }
+}
 
 /// Everything the spawn step needs, once resolution has succeeded.
 struct LaunchPlan {
@@ -350,7 +410,13 @@ fn resolve_launch(game: &InstalledGame, config: &Config) -> Result<LaunchPlan, L
     let entry = emulator_entry_by_name(&config.emulators, &emulator_name);
     let is_retroarch = entry.is_some_and(|e| entry_is_retroarch(e, profiles));
 
-    let rom_path = resolve_rom_path(game, &expand_home(&config.library_path));
+    // Expanded once, here: the same string becomes both the `%rom%`
+    // placeholder and the path the existence check runs on, so a recorded
+    // `~/...` archive path can never pass validation and then reach the
+    // emulator as a literal tilde.
+    let rom_path = expand_home(&resolve_rom_path(game, &expand_home(&config.library_path)))
+        .to_string_lossy()
+        .into_owned();
 
     // The RetroArch gate decides both halves: no core placeholder value for a
     // non-RetroArch emulator, and no `-L` post-pass either.

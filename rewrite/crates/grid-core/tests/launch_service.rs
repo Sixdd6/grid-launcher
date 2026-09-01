@@ -279,11 +279,93 @@ async fn an_instant_exit_removes_the_session_and_warns() {
 }
 
 #[tokio::test]
+async fn a_siblings_check_still_reports_this_games_early_exit() {
+    // Regression guard: the reap that observes an early exit is not always
+    // that session's own check. A long-running game starts first, a second
+    // game starts 400 ms later and dies at once, and the *first* game's
+    // 500 ms check is what reaps it. The warning must still name the second
+    // game's command line, and must be emitted exactly once.
+    let h = Harness::new();
+    let sleeper = h.stub("sleeper", "sleep 30");
+    let quitter = h.stub("quitter", "exit 3");
+    h.write_config(
+        vec![
+            entry("Sleeper", &sleeper, "%rom%"),
+            entry("Quitter", &quitter, "%rom%"),
+        ],
+        &[("SNES", "Sleeper"), ("N64", "Quitter")],
+    );
+    h.install_game(7, "Chrono", "SNES");
+    let dying_rom = h.install_game(8, "Turok", "N64");
+
+    let service = h.service();
+    let recorder = Recorder::attach(&service);
+    let long_runner = service.launch(7).await.unwrap();
+
+    // Land inside the long-runner's early-exit window, so its check at
+    // t=500 ms is the reap that sees the second game's dead child.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    service.launch(8).await.unwrap();
+
+    let warned = wait_until(|| !recorder.warnings().is_empty()).await;
+    assert!(warned, "the early-exit warning was never emitted");
+    // Give the dying game's own check (t=900 ms) time to run too, so a
+    // duplicate would show up.
+    tokio::time::sleep(Duration::from_millis(700)).await;
+
+    let warnings = recorder.warnings();
+    assert_eq!(
+        warnings.len(),
+        1,
+        "expected exactly one warning: {warnings:?}"
+    );
+    assert_eq!(
+        warnings[0],
+        format!(
+            "Game exited immediately (code 3): {} {}",
+            quitter.to_string_lossy(),
+            dying_rom.to_string_lossy()
+        )
+    );
+
+    // The long runner is untouched by its sibling's death.
+    let sessions = service.snapshot().sessions;
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].id, long_runner.id);
+
+    service.stop(long_runner.id);
+}
+
+#[tokio::test]
+async fn a_stop_inside_the_early_exit_window_does_not_warn() {
+    // A game the user stopped on purpose died "immediately", but that is not
+    // a failure and must not be reported as one.
+    let h = Harness::new();
+    let exe = h.stub("sleeper", "sleep 30");
+    h.write_config(vec![entry("Stub", &exe, "%rom%")], &[("SNES", "Stub")]);
+    h.install_game(7, "Chrono", "SNES");
+
+    let service = h.service();
+    let recorder = Recorder::attach(&service);
+    let session = service.launch(7).await.unwrap();
+    service.stop(session.id);
+
+    let gone = wait_until(|| service.snapshot().sessions.is_empty()).await;
+    assert!(gone, "the stopped session was never reaped");
+    // Past the early-exit check, so a warning would have been emitted by now.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        recorder.warnings().is_empty(),
+        "a deliberate stop must not warn: {:?}",
+        recorder.warnings()
+    );
+}
+
+#[tokio::test]
 async fn a_running_poll_loop_does_not_swallow_the_early_exit_warning() {
     // Regression guard: the poll loop ticks every 50 ms here, well inside the
-    // 500 ms early-exit window. If it were allowed to reap a brand-new child,
-    // the early-exit check would find nothing and the user would never be
-    // told the game failed to start.
+    // 500 ms early-exit window. Whichever path reaps the dead child, the
+    // warning it owes the user has to survive.
     let h = Harness::new();
     let exe = h.stub("quitter", "exit 3");
     h.write_config(vec![entry("Stub", &exe, "%rom%")], &[("SNES", "Stub")]);

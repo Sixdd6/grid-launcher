@@ -10,7 +10,6 @@
 
 use std::process::{Child, ExitStatus};
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
 
 /// One running game, as handed to the UI. Serialized straight to the
 /// frontend, so field names are part of the IPC contract.
@@ -34,13 +33,10 @@ pub struct SessionsSnapshot {
     pub warning: Option<String>,
 }
 
-/// A live session: the public record, the child handle that backs it, and
-/// the moment it was registered (monotonic, so the early-exit window can be
-/// measured; `GameSession::started_at` is only second-resolution).
+/// A live session: the public record plus the child handle that backs it.
 struct Entry {
     info: GameSession,
     child: Child,
-    registered: Instant,
 }
 
 /// The live-session table. One mutex guards both the records and the child
@@ -65,11 +61,7 @@ impl SessionStore {
         if entries.iter().any(|e| e.info.rom_id == info.rom_id) {
             return Err(child);
         }
-        entries.push(Entry {
-            info,
-            child,
-            registered: Instant::now(),
-        });
+        entries.push(Entry { info, child });
         Ok(())
     }
 
@@ -92,35 +84,50 @@ impl SessionStore {
             .collect()
     }
 
-    /// `try_wait`s every child registered more than `min_age` ago and drops
-    /// the ones that have exited, returning `(session id, exit status)` for
-    /// each. This is the only place a session is removed, so a pid can never
-    /// be reaped while another caller still believes the session is live.
+    /// `try_wait`s every child and drops the ones that have exited,
+    /// returning one entry per *removed* session. This is the only place a
+    /// session is removed, so a pid can never be reaped while another caller
+    /// still believes the session is live.
     ///
-    /// `min_age` is what keeps the 500 ms early-exit check meaningful: the
-    /// background loop passes the early-exit delay, so it never reaps a
-    /// brand-new child out from under the check that owes the user a warning
-    /// for it. The check itself passes `Duration::ZERO`.
-    pub(crate) fn reap(&self, min_age: Duration) -> Vec<(u64, ExitStatus)> {
-        let mut entries = self.entries.lock().unwrap();
+    /// The result distinguishes two things a caller needs to tell apart:
+    ///
+    /// - **the store changed** — the result is non-empty, so the caller owes
+    ///   the listener a snapshot;
+    /// - **a status is available** — the entry is `Some(status)`. `None`
+    ///   means `try_wait` itself failed, which leaves the child unusable; it
+    ///   is removed anyway rather than left as a row nothing will ever clear,
+    ///   and the caller has no exit code to report for it.
+    ///
+    /// A child removed on the `try_wait` failure path is `wait`ed *after* the
+    /// store lock is released, so it cannot become a zombie for the lifetime
+    /// of the process. In practice such a failure is `ECHILD` — the child is
+    /// already reaped — and the `wait` returns immediately; it is done off
+    /// the lock so that even a pathological blocking `wait` cannot stall
+    /// every other session.
+    pub(crate) fn reap(&self) -> Vec<(u64, Option<ExitStatus>)> {
         let mut exited = Vec::new();
-        let now = Instant::now();
-        entries.retain_mut(|entry| {
-            if now.duration_since(entry.registered) < min_age {
-                return true;
-            }
-            match entry.child.try_wait() {
-                Ok(Some(status)) => {
-                    exited.push((entry.info.id, status));
-                    false
+        let mut unusable: Vec<Child> = Vec::new();
+        {
+            let mut entries = self.entries.lock().unwrap();
+            let mut kept = Vec::with_capacity(entries.len());
+            // Drained rather than retained so an unusable child can be moved
+            // out of its entry and waited once the lock is gone. Order is
+            // preserved: survivors are pushed back in the order they came.
+            for mut entry in entries.drain(..) {
+                match entry.child.try_wait() {
+                    Ok(Some(status)) => exited.push((entry.info.id, Some(status))),
+                    Ok(None) => kept.push(entry),
+                    Err(_) => {
+                        exited.push((entry.info.id, None));
+                        unusable.push(entry.child);
+                    }
                 }
-                // A `try_wait` error means the child is unusable; treat it as
-                // gone rather than leaking a row nothing will ever remove. The
-                // status is unavailable, so nothing is reported for it.
-                Err(_) => false,
-                Ok(None) => true,
             }
-        });
+            *entries = kept;
+        }
+        for mut child in unusable {
+            let _ = child.wait();
+        }
         exited
     }
 
@@ -218,7 +225,7 @@ mod tests {
     #[cfg(unix)]
     fn drain(store: &SessionStore) {
         for _ in 0..200 {
-            store.reap(Duration::ZERO);
+            store.reap();
             if store.list().is_empty() {
                 return;
             }
@@ -240,42 +247,28 @@ mod tests {
         // Give the short-lived child time to actually exit.
         let mut exited = Vec::new();
         for _ in 0..200 {
-            exited = store.reap(Duration::ZERO);
+            exited = store.reap();
             if !exited.is_empty() {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
+        // One removal reported, with a status — the "store changed" and
+        // "status available" halves of the result are both present.
         assert_eq!(exited.len(), 1);
         assert_eq!(exited[0].0, 2);
-        assert_eq!(exited[0].1.code(), Some(7));
+        assert_eq!(exited[0].1.map(|status| status.code()), Some(Some(7)));
         assert_eq!(store.list().len(), 1);
         assert_eq!(store.list()[0].id, 1);
         assert_eq!(store.pid_of(1), Some(alive_pid));
         assert_eq!(store.pid_of(2), None);
 
+        // A reap that removes nothing reports nothing, so a caller can use
+        // "non-empty" as "the store changed".
+        assert!(store.reap().is_empty());
+
         unsafe { libc::kill(alive_pid as i32, libc::SIGKILL) };
         drain(&store);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn reap_leaves_children_younger_than_the_minimum_age_alone() {
-        let store = SessionStore::default();
-        let dead = quitter();
-        let dead_pid = dead.id();
-        assert!(store.register(session(1, 7, dead_pid), dead).is_ok());
-
-        // Wait for the child to really be gone, then prove the age gate — not
-        // the child's state — is what holds the session in place.
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        assert!(store.reap(Duration::from_secs(30)).is_empty());
-        assert_eq!(store.list().len(), 1);
-
-        let exited = store.reap(Duration::ZERO);
-        assert_eq!(exited.len(), 1);
-        assert_eq!(exited[0].1.code(), Some(7));
-        assert!(store.list().is_empty());
     }
 }
