@@ -2,6 +2,7 @@
   import { api, type DownloadStatus, type GameSummary } from './api';
   import { downloads } from './stores/downloads.svelte';
   import { isInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
+  import { sessions } from './stores/sessions.svelte';
   import Cover from './Cover.svelte';
 
   let {
@@ -18,15 +19,19 @@
 
   const LIVE_INSTALL_STATUSES: DownloadStatus[] = ['queued', 'downloading', 'installing', 'cancelling'];
 
+  type PendingAction = 'install' | 'uninstall' | 'play' | 'stop' | null;
+
   let confirmingUninstall = $state(false);
-  let pending = $state(false);
+  let pendingAction = $state<PendingAction>(null);
   let error = $state<string | null>(null);
   let panelEl = $state<HTMLElement | null>(null);
 
+  let pending = $derived(pendingAction !== null);
   let liveEntry = $derived(
     downloads.entries.find((e) => e.rom_id === game.id && LIVE_INSTALL_STATUSES.includes(e.status))
   );
   let installedNow = $derived(isInstalled(game, platformName));
+  let liveSession = $derived(sessions.sessionFor(game.id));
 
   $effect(() => {
     panelEl?.focus();
@@ -38,7 +43,7 @@
 
   async function handleInstall() {
     error = null;
-    pending = true;
+    pendingAction = 'install';
     try {
       await api.installGame(game.id);
     } catch (err) {
@@ -46,7 +51,7 @@
       error = message;
       if (message.includes('library folder')) onLibraryPathUnset();
     } finally {
-      pending = false;
+      pendingAction = null;
     }
   }
 
@@ -56,7 +61,7 @@
       return;
     }
     error = null;
-    pending = true;
+    pendingAction = 'uninstall';
     try {
       await api.uninstallGame(game.id);
       await refreshInstalled();
@@ -65,7 +70,32 @@
       error = errorMessage(err);
       confirmingUninstall = false;
     } finally {
-      pending = false;
+      pendingAction = null;
+    }
+  }
+
+  async function handlePlay() {
+    error = null;
+    pendingAction = 'play';
+    try {
+      await api.launchGame(game.id);
+    } catch (err) {
+      error = errorMessage(err);
+    } finally {
+      pendingAction = null;
+    }
+  }
+
+  async function handleStop() {
+    if (!liveSession) return;
+    error = null;
+    pendingAction = 'stop';
+    try {
+      await api.stopGame(liveSession.id);
+    } catch (err) {
+      error = errorMessage(err);
+    } finally {
+      pendingAction = null;
     }
   }
 
@@ -96,22 +126,45 @@
       <Cover {game} />
     </div>
     <h2>{game.name}</h2>
+    {#if liveSession}
+      <span class="chip">Playing</span>
+    {/if}
     <p class="platform">{platformName}</p>
 
     <div class="action">
       {#if liveEntry}
         <button disabled>Installing…</button>
+      {:else if liveSession}
+        <button disabled={pending} onclick={handleStop}>
+          {pendingAction === 'stop' ? 'Stopping…' : 'Stop'}
+        </button>
       {:else if installedNow}
-        <button class:confirm={confirmingUninstall} disabled={pending} onclick={handleUninstallClick}>
+        <button disabled={pending} onclick={handlePlay}>
+          {pendingAction === 'play' ? 'Launching…' : 'Play'}
+        </button>
+        <button
+          class="secondary"
+          class:confirm={confirmingUninstall}
+          disabled={pending}
+          onclick={handleUninstallClick}
+        >
           {confirmingUninstall ? 'Confirm uninstall' : 'Uninstall'}
         </button>
       {:else}
-        <button disabled={pending} onclick={handleInstall}>{pending ? 'Installing…' : 'Install'}</button>
+        <button disabled={pending} onclick={handleInstall}>
+          {pendingAction === 'install' ? 'Installing…' : 'Install'}
+        </button>
       {/if}
     </div>
 
     {#if error}
       <p class="error" role="alert">{error}</p>
+    {/if}
+    {#if sessions.lastWarning}
+      <p class="error warning" role="alert">
+        {sessions.lastWarning}
+        <button class="dismiss" onclick={() => sessions.dismissWarning()} aria-label="Dismiss warning">×</button>
+      </p>
     {/if}
   </div>
 </div>
@@ -188,6 +241,17 @@
     font-size: 18px;
   }
 
+  .chip {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 2px 10px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+  }
+
   .platform {
     margin: 0;
     color: var(--text);
@@ -197,6 +261,9 @@
   .action {
     margin-top: 8px;
     width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
 
   .action button {
@@ -214,6 +281,19 @@
     background: #e5484d;
   }
 
+  .action button.secondary {
+    padding: 8px 16px;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  .action button.secondary.confirm {
+    background: transparent;
+    color: #e5484d;
+    border-color: #e5484d;
+  }
+
   .action button:disabled {
     opacity: 0.6;
     cursor: default;
@@ -224,5 +304,31 @@
     color: #e5484d;
     font-size: 13px;
     text-align: center;
+  }
+
+  .error.warning {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .dismiss {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    line-height: 1;
+    padding: 0;
+    font-size: 14px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: #e5484d;
+    cursor: pointer;
+  }
+
+  .dismiss:hover,
+  .dismiss:focus-visible {
+    background: var(--border);
   }
 </style>

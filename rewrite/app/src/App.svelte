@@ -6,6 +6,7 @@
   import Emulators from './lib/Emulators.svelte';
   import { session, restore } from './lib/stores/session.svelte';
   import { init as initDownloads } from './lib/stores/downloads.svelte';
+  import { init as initSessions } from './lib/stores/sessions.svelte';
 
   let library = $state<ReturnType<typeof Library> | null>(null);
   let restored = false; // restore() must fire once on mount, not on every connected toggle
@@ -20,9 +21,11 @@
       library?.handleNav(e.payload.action);
     });
     const unDownloads = session.state?.connected ? initDownloads() : undefined;
+    const unSessions = session.state?.connected ? initSessions() : undefined;
     return () => {
       un.then((f) => f());
       unDownloads?.then((f) => f());
+      unSessions?.then((f) => f());
     };
   });
 </script>
