@@ -3,11 +3,13 @@
   import Connect from './lib/Connect.svelte';
   import Library from './lib/Library.svelte';
   import Downloads from './lib/Downloads.svelte';
+  import Emulators from './lib/Emulators.svelte';
   import { session, restore } from './lib/stores/session.svelte';
   import { init as initDownloads } from './lib/stores/downloads.svelte';
 
   let library = $state<ReturnType<typeof Library> | null>(null);
   let restored = false; // restore() must fire once on mount, not on every connected toggle
+  let showEmulators = $state(false);
 
   $effect(() => {
     if (!restored) {
@@ -27,7 +29,10 @@
 
 {#if session.state?.connected}
   <Library bind:this={library} />
-  <Downloads />
+  <Downloads onOpenEmulators={() => (showEmulators = true)} />
+  {#if showEmulators}
+    <Emulators onClose={() => (showEmulators = false)} />
+  {/if}
 {:else}
   <Connect />
 {/if}

@@ -4,6 +4,8 @@
   import { api, type DownloadEntry } from './api';
   import { aggregate, actionFor, entryDetail, percent } from './downloads/format';
 
+  let { onOpenEmulators }: { onOpenEmulators: () => void } = $props();
+
   let open = $state(false);
   let errors = $state<Record<number, string>>({});
   let pending = $state<Record<number, boolean>>({});
@@ -17,6 +19,18 @@
       e.preventDefault();
       toggle();
     }
+  }
+
+  function openEmulatorsClick(e: MouseEvent) {
+    e.stopPropagation();
+    onOpenEmulators();
+  }
+
+  // Enter/Space on this button reach the footer's own keydown listener via
+  // bubbling before the button's synthesized click fires, so without this
+  // the drawer would toggle open alongside the panel on keyboard activation.
+  function stopKeydownPropagation(e: KeyboardEvent) {
+    e.stopPropagation();
   }
 
   function errorMessage(err: unknown): string {
@@ -89,6 +103,7 @@
   onkeydown={toggleOnKey}
 >
   <span class="label">{footerLabel}</span>
+  <button class="emulators-btn" onclick={openEmulatorsClick} onkeydown={stopKeydownPropagation}>Emulators</button>
   {#if bar}
     <span class="bar-track" class:indeterminate={bar.indeterminate}>
       <span class="bar-fill" style={bar.indeterminate ? '' : `width: ${bar.pct}%`}></span>
@@ -164,6 +179,24 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .emulators-btn {
+    flex: none;
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-h);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .emulators-btn:hover,
+  .emulators-btn:focus-visible {
+    background: var(--border);
   }
 
   .bar-track {
