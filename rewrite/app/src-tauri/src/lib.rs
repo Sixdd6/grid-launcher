@@ -1,4 +1,5 @@
 mod commands;
+mod gamepad;
 
 use commands::AppState;
 use grid_core::config::Config;
@@ -27,6 +28,10 @@ pub fn run() {
     );
     tauri::Builder::default()
         .manage(AppState { session })
+        .setup(|app| {
+            gamepad::spawn(app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::connect,
             commands::restore_session,
