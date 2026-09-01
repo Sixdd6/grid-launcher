@@ -1752,6 +1752,7 @@ dependencies = [
  "directories",
  "flate2",
  "futures",
+ "futures-util",
  "keyring",
  "liblzma",
  "reqwest",
