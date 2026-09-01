@@ -1354,3 +1354,18 @@ Run everything with `python -m unittest discover tests/`.
 | `grid_launcher/emulator/autoconfig.py` | `emulator_install_directory` (`<library>/Emulators/<name>`). |
 | `grid_launcher/emulator/xenia.py` | STFS header parsing and content placement under the Xenia content root. |
 | `grid-launcher.py` | Config/cache directory constants, window state fields, PS3 VFS path resolvers, registry persistence. |
+
+---
+
+## Rust port deviations (milestone 2)
+
+Rust implementation diverges from the reference in six ways; each resolves an open
+question from the design spec, cited in
+`docs/superpowers/specs/2026-08-31-install-pipeline-core-design.md`:
+
+1. **Typed cancellation** (Deviations §1): Cancellation is a dedicated error variant mapped to `Cancelled` status, not a substring match on "cancel".
+2. **Uninstall continues past failures** (Deviations §2): Batch uninstall processes each game independently; per-game failures leave that row and files intact; all failures reported together.
+3. **Archive-deletion failures are visible** (Deviations §3): Retrying delete reports failure as a warning on the completed entry, not always success silently.
+4. **No registry field loss** (Deviations §4): SQLite schema persists every field (revision, languages, tags, companies, first_release_date) without normalizer drops.
+5. **Traversal guard everywhere** (Deviations §5): Absolute and `..` member paths rejected in all archive formats, not only firmware zips.
+6. **Flattening is not ported** (Deviations §6): `flatten_single_subdir` dead code in reference (no real caller); port omits it.

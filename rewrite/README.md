@@ -12,9 +12,21 @@ Spec: `../docs/superpowers/specs/2026-08-31-rust-tauri-walking-skeleton-design.m
     cd app && npm install && npx tauri dev
 
 ## Test
-    cargo test --workspace              # Rust — 25 tests (grid-core 22, app_lib gamepad mapper 3)
-    cd app && npm test                  # frontend focus model — 3 tests
-    scripts/check_secret_hygiene.sh     # secret rules
+    cargo test --workspace              # Rust — 173 tests
+    cd app && npm test                  # frontend — 46 tests
+    npx svelte-check                    # SvelteKit type check
+    scripts/check_secret_hygiene.sh     # secret rules (unchanged)
+    python -m unittest discover tests/  # Python reference suite — ~1624 tests
+
+## Persisted state
+
+- `config.toml` — app configuration (config directory determined by `directories` crate).
+- `grid-launcher.db` — SQLite registry of installed games (same config directory).
+
+## New crates (milestone 2)
+
+Added for the install pipeline: `zip`, `tar`, `flate2`, `liblzma`, `bzip2`,
+`sevenz-rust2`, `rusqlite` (with bundled SQLite).
 
 ## Build
     cd app && npx tauri build           # AppImage on Linux
@@ -40,7 +52,7 @@ Credentials live only in the OS keyring and in redacting in-memory types.
 They never appear in config files, logs, IPC payloads, or fixtures.
 See the spec's "Secret handling" section — those rules are normative.
 
-## Manual test checklist
+## Manual test checklist — Milestone 1
 
 Milestone 1's exit gate. These steps need a desktop session, a live RomM
 server, and a gamepad, so they are not automated.
@@ -55,3 +67,19 @@ server, and a gamepad, so they are not automated.
 5. Quit and relaunch: the session restores without re-entering credentials.
 6. `cat ~/.config/grid-launcher/config.toml` — confirm no token/password
    present.
+
+## Manual test checklist — Milestone 2
+
+Core install pipeline exit gate. Desktop session and live RomM required.
+
+1. Set the library path in the UI; confirm it persists in `config.toml`.
+2. Install a small single-file game: entry appears, progress and speed move,
+   archive extracts, entry completes, card shows the installed badge.
+3. Install a multi-file game: all files land in one `<SafeTitle>/` folder.
+4. Cancel a download mid-stream: entry shows `cancelled`, partial file gone.
+5. Retry a cancelled entry: fresh download starts.
+6. Queue two installs: second waits as `queued`, starts when the first
+   finishes.
+7. Quit and relaunch: installed badges persist (from `grid-launcher.db`).
+8. Uninstall from the details overlay: files and badge are gone.
+9. `config.toml` and `grid-launcher.db` contain no token or password.
