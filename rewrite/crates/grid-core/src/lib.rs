@@ -3,6 +3,7 @@
 
 pub mod config;
 pub mod covers;
+pub mod launch;
 pub mod library;
 pub mod romm;
 pub mod secrets;

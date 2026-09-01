@@ -203,17 +203,18 @@ mod tests {
     fn emulator_array_round_trips() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
-        let mut emulators = Vec::new();
-        emulators.push(EmulatorEntry {
-            name: "emulator1".into(),
-            path: "/path/to/emu1".into(),
-            args: "--arg1 --arg2".into(),
-        });
-        emulators.push(EmulatorEntry {
-            name: "emulator2".into(),
-            path: "/path/to/emu2".into(),
-            args: String::new(),
-        });
+        let emulators = vec![
+            EmulatorEntry {
+                name: "emulator1".into(),
+                path: "/path/to/emu1".into(),
+                args: "--arg1 --arg2".into(),
+            },
+            EmulatorEntry {
+                name: "emulator2".into(),
+                path: "/path/to/emu2".into(),
+                args: String::new(),
+            },
+        ];
         let cfg = Config {
             schema_version: 1,
             server_url: String::new(),
