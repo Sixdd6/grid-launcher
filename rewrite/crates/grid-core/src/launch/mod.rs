@@ -5,6 +5,7 @@
 pub mod profiles;
 pub mod rom;
 pub mod selection;
+pub mod template;
 
 /// Errors raised while resolving or running an emulated launch. Extended by
 /// later tasks in this module tree (spawn, sessions); today it carries only
