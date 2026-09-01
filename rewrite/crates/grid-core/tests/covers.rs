@@ -47,6 +47,36 @@ async fn ensure_fetches_once_then_hits_cache() {
     drop(mock); // expect(1) verified on drop: second call hit the disk cache
 }
 
+/// A miss that fails stays failed for the session: the second ensure() must
+/// replay the recorded error instead of hitting the server again.
+#[tokio::test]
+async fn ensure_caches_failures_for_the_session() {
+    let server = MockServer::start().await;
+    let mock = Mock::given(method("GET"))
+        .and(path("/assets/missing.png"))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount_as_scoped(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let cache = CoverCache::new(dir.path().to_path_buf());
+    let client = RommClient::new(
+        &server.uri(),
+        Credential::Token(SecretString::from("FAKE-TEST-TOKEN-not-real")),
+    )
+    .unwrap();
+
+    let first = cache.ensure(&client, 42, "/assets/missing.png").await;
+    let second = cache.ensure(&client, 42, "/assets/missing.png").await;
+    assert!(first.is_err());
+    assert!(second.is_err());
+    assert_eq!(
+        first.unwrap_err().to_string(),
+        second.unwrap_err().to_string()
+    );
+    drop(mock); // expect(1) verified on drop: the second call never left the process
+}
+
 /// Regression test for a lost-wakeup hang: 8 callers race for the same
 /// game_id while the server response is delayed, so at least one waiter's
 /// `.notified()` call and the owner's `notify_waiters()` are genuinely

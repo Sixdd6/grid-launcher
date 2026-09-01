@@ -29,6 +29,9 @@ fn sniff_extension(bytes: &[u8]) -> &'static str {
 pub struct CoverCache {
     dir: PathBuf,
     in_flight: Arc<Mutex<HashMap<String, Arc<tokio::sync::Notify>>>>,
+    /// Negative results, kept for the session only: a key that failed once is
+    /// not re-fetched, and the stored error is replayed to later callers.
+    failed: Arc<Mutex<HashMap<String, RommError>>>,
 }
 
 impl CoverCache {
@@ -36,6 +39,7 @@ impl CoverCache {
         Self {
             dir,
             in_flight: Arc::new(Mutex::new(HashMap::new())),
+            failed: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -50,7 +54,9 @@ impl CoverCache {
     }
 
     /// Fetch-on-miss with in-flight deduplication: concurrent calls for the
-    /// same key wait for the first fetch instead of re-downloading.
+    /// same key wait for the first fetch instead of re-downloading. A key that
+    /// failed earlier in this session returns the recorded error immediately,
+    /// without touching the network.
     pub async fn ensure(
         &self,
         client: &RommClient,
@@ -59,6 +65,9 @@ impl CoverCache {
     ) -> Result<PathBuf, RommError> {
         let key = cover_key(game_id);
         loop {
+            if let Some(e) = self.failed.lock().await.get(&key) {
+                return Err(e.clone());
+            }
             if let Some(p) = self.find_existing(&key) {
                 return Ok(p);
             }
@@ -87,6 +96,9 @@ impl CoverCache {
 
             // We own the fetch.
             let result = self.fetch_and_store(client, &key, cover_path).await;
+            if let Err(e) = &result {
+                self.failed.lock().await.insert(key.clone(), e.clone());
+            }
             let n = self.in_flight.lock().await.remove(&key);
             if let Some(n) = n {
                 n.notify_waiters();

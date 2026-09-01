@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fs::File;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
@@ -53,13 +55,21 @@ impl Config {
         }
     }
 
-    /// Atomic: write `<path>.tmp`, then rename over the target.
+    /// Atomic + durable: write `<path>.tmp`, fsync it, then rename over the
+    /// target.
     pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let tmp = path.with_extension("toml.tmp");
-        std::fs::write(&tmp, toml::to_string_pretty(self)?)?;
+        let text = toml::to_string_pretty(self)?;
+        // fsync the tmp file before renaming: a rename alone can land in the
+        // directory while the file's contents are still only in the page
+        // cache, so a crash would leave an empty/truncated config.
+        let mut file = File::create(&tmp)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
         std::fs::rename(&tmp, path)?;
         Ok(())
     }

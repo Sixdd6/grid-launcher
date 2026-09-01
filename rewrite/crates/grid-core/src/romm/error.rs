@@ -1,6 +1,6 @@
 /// Errors are user-presentable and MUST NEVER embed the request or its
 /// headers. Body excerpts are capped and come from the server response only.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum RommError {
     #[error("invalid server URL")]
     InvalidUrl,
