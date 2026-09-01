@@ -5,6 +5,7 @@
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -876,6 +877,79 @@ async fn retry_after_failure_dismisses_the_old_entry_and_starts_a_new_one() {
         .iter()
         .all(|e| e.id != failed_id));
     assert!(harness.library.join("SNES/retry/retry.sfc").is_file());
+}
+
+#[tokio::test]
+async fn a_panicking_notify_listener_fails_the_entry_without_wedging_the_queue() {
+    let harness = Harness::new().await;
+    // Replace the collector with a listener that panics exactly once, on the
+    // first snapshot carrying download progress — i.e. from inside the
+    // download task, via on_download_progress. The panicking task prints a
+    // backtrace line to stderr; that noise is expected.
+    let fired = Arc::new(AtomicBool::new(false));
+    let armed = fired.clone();
+    harness
+        .service
+        .set_notify(Arc::new(move |snap: DownloadsSnapshot| {
+            let progressing = snap.entries.iter().any(|e| e.downloaded_bytes > 0);
+            if progressing && !armed.swap(true, Ordering::SeqCst) {
+                panic!("listener blew up");
+            }
+        }));
+
+    let staging = tempfile::tempdir().unwrap();
+    let first = write_zip(&staging.path().join("boom.zip"), &[("boom.sfc", b"BOOM")]);
+    let second = write_zip(&staging.path().join("after.zip"), &[("after.sfc", b"OK")]);
+    harness
+        .mount_detail(
+            1,
+            detail_json(
+                1,
+                "Boom",
+                "SNES",
+                "boom.zip",
+                &[file_spec(11, "boom.zip", first.len())],
+            ),
+        )
+        .await;
+    harness
+        .mount_detail(
+            2,
+            detail_json(
+                2,
+                "After",
+                "SNES",
+                "after.zip",
+                &[file_spec(21, "after.zip", second.len())],
+            ),
+        )
+        .await;
+    // Long enough that the progress emission clears the 100 ms notify
+    // throttle, so the listener is reached from inside the download task.
+    harness.mount_content(1, "boom.zip", first, 300).await;
+    harness.mount_content(2, "after.zip", second, 0).await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 1)
+        .await
+        .unwrap();
+    let boom_id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(boom_id).await;
+    assert_eq!(entry.status, DownloadStatus::Failed);
+    assert!(!entry.error.is_empty());
+    assert!(fired.load(Ordering::SeqCst), "the listener never panicked");
+
+    // The download slot was freed, so the subsystem still works.
+    harness
+        .service
+        .install(harness.client.clone(), 2)
+        .await
+        .unwrap();
+    let after_id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(after_id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+    assert!(harness.library.join("SNES/after/after.sfc").is_file());
 }
 
 // --- uninstall --------------------------------------------------------------

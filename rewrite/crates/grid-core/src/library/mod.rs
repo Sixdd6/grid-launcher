@@ -378,18 +378,30 @@ impl InstallService {
 
     /// Admits a planned job: starts it, stashes it for a free slot, or drops
     /// it as a duplicate.
+    ///
+    /// The stash happens while the queue lock is still held. Releasing it
+    /// first would let a finishing download's [`Self::pump`] pop the brand
+    /// new id out of `waiting` before its job exists, fail the entry as lost
+    /// and leave the job stranded in `pending_jobs`.
     fn admit(self: &Arc<Self>, job: InstallJob) {
-        let admission = self.queue.lock().unwrap().admit(
-            job.rom_id,
-            &job.detail.name,
-            &job.detail.platform_name,
-        );
-        match admission {
-            Admission::Start(id) => self.spawn_download(id, job),
-            Admission::Queued(id) => {
-                self.pending_jobs.lock().unwrap().insert(id, job);
+        let (admitted, start) = {
+            let mut queue = self.queue.lock().unwrap();
+            match queue.admit(job.rom_id, &job.detail.name, &job.detail.platform_name) {
+                Admission::Start(id) => (true, Some((id, job))),
+                Admission::Queued(id) => {
+                    self.pending_jobs.lock().unwrap().insert(id, job);
+                    (true, None)
+                }
+                Admission::Duplicate => (false, None),
             }
-            Admission::Duplicate => return,
+        };
+        // Nothing below runs under the queue lock: `spawn_download` takes it
+        // again, and the listener must never see it held.
+        if !admitted {
+            return;
+        }
+        if let Some((id, job)) = start {
+            self.spawn_download(id, job);
         }
         self.notify_now();
     }
@@ -412,16 +424,42 @@ impl InstallService {
         }
         let service = self.clone();
         tokio::spawn(async move {
-            let result = {
-                let reporter = service.clone();
+            // The fallible half runs in its own task so a panic anywhere in
+            // it — including inside the caller's notify listener, reached
+            // through `on_download_progress` — comes back as a `JoinError`
+            // instead of leaving the download slot taken forever.
+            let reporter = service.clone();
+            let worker = tokio::spawn(async move {
                 let mut on_progress = move |downloaded, total, speed| {
                     reporter.on_download_progress(id, downloaded, total, speed);
                 };
-                download_targets(&job.client, &job.targets, &cancel, &mut on_progress).await
-            };
+                let result =
+                    download_targets(&job.client, &job.targets, &cancel, &mut on_progress).await;
+                (job, result)
+            });
+            let outcome = worker.await;
             service.cancel_flags.lock().unwrap().remove(&id);
-            service.finish_download(id, job, result).await;
+            match outcome {
+                Ok((job, result)) => service.finish_download(id, job, result).await,
+                Err(e) => service.fail_download(
+                    id,
+                    LibraryError::Extract(format!("the download did not finish: {e}")),
+                ),
+            }
         });
+    }
+
+    /// Fails `id` with no job in hand — the download task itself died, so
+    /// there is nothing left to finalize. Frees the download slot so the
+    /// queue keeps moving instead of wedging on a task that will never
+    /// report back.
+    fn fail_download(self: &Arc<Self>, id: u64, error: LibraryError) {
+        self.queue
+            .lock()
+            .unwrap()
+            .download_finished(id, Err(error), false);
+        self.pump();
+        self.notify_now();
     }
 
     /// Records the download outcome, starts finalizing when there is
@@ -436,6 +474,9 @@ impl InstallService {
         // doc 03 §1 step 4: a game that is already in the registry completes
         // straight away — the bytes are on disk, nothing needs installing.
         let skip_finalize = result.is_ok() && self.already_installed(&job.detail).await;
+        // A cancel that lands after the last chunk arrived is too late: the
+        // download succeeded, so `Cancelling` gives way to `Installing` here
+        // and the entry finishes. Extraction is not cancellable (doc 03 §1).
         let finalize = {
             let mut queue = self.queue.lock().unwrap();
             queue.download_finished(id, result, skip_finalize);
@@ -494,30 +535,41 @@ impl InstallService {
     }
 
     /// Starts the next ready job when both slots are free.
+    ///
+    /// Taking the job out of `pending_jobs` under the queue lock is what
+    /// makes the "no stashed plan" branch below unreachable: every id in
+    /// `waiting` had its job stashed inside the same critical section that
+    /// put it there. The lock ordering — queue first, `pending_jobs` second,
+    /// never the reverse — is shared with [`Self::admit`].
     fn pump(self: &Arc<Self>) {
         loop {
-            let next = self.queue.lock().unwrap().next_ready();
-            let Some(id) = next else {
-                return;
-            };
-            let job = self.pending_jobs.lock().unwrap().remove(&id);
-            match job {
-                Some(job) => {
-                    self.spawn_download(id, job);
+            let start = {
+                let mut queue = self.queue.lock().unwrap();
+                let Some(id) = queue.next_ready() else {
                     return;
+                };
+                match self.pending_jobs.lock().unwrap().remove(&id) {
+                    Some(job) => Some((id, job)),
+                    None => {
+                        // Defensive: a queued entry with no stashed plan can
+                        // never run. Fail it so the slot frees and the queue
+                        // keeps moving instead of wedging.
+                        queue.download_finished(
+                            id,
+                            Err(LibraryError::Extract(
+                                "the queued install was lost".to_string(),
+                            )),
+                            false,
+                        );
+                        None
+                    }
                 }
-                None => {
-                    // Defensive: a queued entry with no stashed plan can never
-                    // run. Fail it so the slot frees and the queue keeps
-                    // moving instead of wedging.
-                    self.queue.lock().unwrap().download_finished(
-                        id,
-                        Err(LibraryError::Extract(
-                            "the queued install was lost".to_string(),
-                        )),
-                        false,
-                    );
-                }
+            };
+            // `spawn_download` takes the queue lock itself, so it can only be
+            // called once the guard above has been released.
+            if let Some((id, job)) = start {
+                self.spawn_download(id, job);
+                return;
             }
         }
     }
