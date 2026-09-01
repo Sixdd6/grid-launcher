@@ -103,12 +103,12 @@
   onkeydown={toggleOnKey}
 >
   <span class="label">{footerLabel}</span>
-  <button class="emulators-btn" onclick={openEmulatorsClick} onkeydown={stopKeydownPropagation}>Emulators</button>
   {#if bar}
     <span class="bar-track" class:indeterminate={bar.indeterminate}>
       <span class="bar-fill" style={bar.indeterminate ? '' : `width: ${bar.pct}%`}></span>
     </span>
   {/if}
+  <button class="emulators-btn" onclick={openEmulatorsClick} onkeydown={stopKeydownPropagation}>Emulators</button>
 </footer>
 
 {#if open}
@@ -159,7 +159,6 @@
     box-sizing: border-box;
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 12px;
     padding: 0 16px;
     background: var(--bg);
@@ -176,6 +175,8 @@
   }
 
   .label {
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

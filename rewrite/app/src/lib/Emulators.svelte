@@ -6,6 +6,7 @@
   let emulators = $state<EmulatorEntry[]>([]);
   let listLoading = $state(true);
   let listError = $state<string | null>(null);
+  let deleteError = $state<string | null>(null);
 
   let platforms = $state<Platform[]>([]);
   let defaults = $state<LaunchDefaults | null>(null);
@@ -76,6 +77,7 @@
     formPath = '';
     formArgs = '';
     formError = null;
+    confirmingDelete = null;
   }
 
   function openEdit(entry: EmulatorEntry) {
@@ -84,6 +86,7 @@
     formPath = entry.path;
     formArgs = entry.args;
     formError = null;
+    confirmingDelete = null;
   }
 
   function closeForm() {
@@ -136,15 +139,17 @@
   async function handleDeleteClick(name: string) {
     if (confirmingDelete !== name) {
       confirmingDelete = name;
+      deleteError = null;
       return;
     }
+    deleteError = null;
     deletePending = name;
     try {
       await api.deleteEmulator(name);
       await refreshEmulators();
       await refreshDefaults();
     } catch (err) {
-      listError = errorMessage(err);
+      deleteError = errorMessage(err);
     } finally {
       deletePending = null;
       confirmingDelete = null;
@@ -202,30 +207,35 @@
         <p class="muted">Loading…</p>
       {:else if listError}
         <p class="error" role="alert">{listError}</p>
-      {:else if emulators.length === 0}
-        <p class="muted">No emulators configured.</p>
       {:else}
-        <ul class="emulator-list">
-          {#each emulators as e (e.name)}
-            <li class="emulator-row">
-              <div class="row-text">
-                <span class="name">{e.name}</span>
-                <span class="path" title={e.path}>{e.path}</span>
-                {#if e.args}<span class="args">{e.args}</span>{/if}
-              </div>
-              <div class="row-actions">
-                <button onclick={() => openEdit(e)}>Edit</button>
-                <button
-                  class:confirm={confirmingDelete === e.name}
-                  disabled={deletePending === e.name}
-                  onclick={() => handleDeleteClick(e.name)}
-                >
-                  {confirmingDelete === e.name ? 'Confirm delete' : 'Delete'}
-                </button>
-              </div>
-            </li>
-          {/each}
-        </ul>
+        {#if deleteError}
+          <p class="error" role="alert">{deleteError}</p>
+        {/if}
+        {#if emulators.length === 0}
+          <p class="muted">No emulators configured.</p>
+        {:else}
+          <ul class="emulator-list">
+            {#each emulators as e (e.name)}
+              <li class="emulator-row">
+                <div class="row-text">
+                  <span class="name">{e.name}</span>
+                  <span class="path" title={e.path}>{e.path}</span>
+                  {#if e.args}<span class="args">{e.args}</span>{/if}
+                </div>
+                <div class="row-actions">
+                  <button onclick={() => openEdit(e)}>Edit</button>
+                  <button
+                    class:confirm={confirmingDelete === e.name}
+                    disabled={deletePending === e.name}
+                    onclick={() => handleDeleteClick(e.name)}
+                  >
+                    {confirmingDelete === e.name ? 'Confirm delete' : 'Delete'}
+                  </button>
+                </div>
+              </li>
+            {/each}
+          </ul>
+        {/if}
       {/if}
     </section>
 
@@ -263,9 +273,11 @@
       {:else}
         <ul class="defaults-list">
           {#each platforms as p (p.id)}
+            {@const selectId = `default-emulator-${p.id}`}
             <li class="defaults-row">
-              <span class="platform-name">{p.name}</span>
+              <label class="platform-name" for={selectId}>{p.name}</label>
               <select
+                id={selectId}
                 value={defaultFor(p.name)}
                 onchange={(e) => handleDefaultChange(p.name, (e.currentTarget as HTMLSelectElement).value)}
               >
