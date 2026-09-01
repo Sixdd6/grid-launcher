@@ -12,7 +12,7 @@ Spec: `../docs/superpowers/specs/2026-08-31-rust-tauri-walking-skeleton-design.m
     cd app && npm install && npx tauri dev
 
 ## Test
-    cargo test --workspace              # Rust — 21 tests
+    cargo test --workspace              # Rust — 24 tests (grid-core 21, app_lib gamepad mapper 3)
     cd app && npm test                  # frontend focus model — 3 tests
     scripts/check_secret_hygiene.sh     # secret rules
 
