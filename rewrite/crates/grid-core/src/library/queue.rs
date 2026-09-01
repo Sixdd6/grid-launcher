@@ -140,7 +140,9 @@ impl QueueState {
         }
     }
 
-    /// Download task ended. Frees the download slot when it held `id`.
+    /// Download task ended. No-op unless `id` currently owns the download
+    /// slot (guards against a stale/duplicate completion call arriving
+    /// after the slot has already moved on). Frees the download slot.
     /// `Ok(())` with `skip_finalize` false → `Installing`, `finalize_active
     /// = Some(id)`. `Ok(())` with `skip_finalize` true (already installed)
     /// → `Completed` directly. `Err(LibraryError::Cancelled)` → `Cancelled`.
@@ -151,9 +153,10 @@ impl QueueState {
         result: Result<(), LibraryError>,
         skip_finalize: bool,
     ) {
-        if self.download_active == Some(id) {
-            self.download_active = None;
+        if self.download_active != Some(id) {
+            return;
         }
+        self.download_active = None;
 
         let Some(entry) = self.entry_mut(id) else {
             return;
@@ -177,15 +180,18 @@ impl QueueState {
         }
     }
 
-    /// Finalize task ended. Frees the finalize slot when it held `id`.
+    /// Finalize task ended. No-op unless `id` currently owns the finalize
+    /// slot (guards against a stale/duplicate completion call arriving
+    /// after the slot has already moved on). Frees the finalize slot.
     /// `Ok(())` → `Completed`; when `warning` is non-empty it is stored in
     /// `error` even though the entry completed. `Err(e)` → `Failed` with
     /// `e`'s `Display` text as `error`, with `warning` appended after a
     /// newline when non-empty.
     pub fn finalize_finished(&mut self, id: u64, result: Result<(), LibraryError>, warning: &str) {
-        if self.finalize_active == Some(id) {
-            self.finalize_active = None;
+        if self.finalize_active != Some(id) {
+            return;
         }
+        self.finalize_active = None;
 
         let Some(entry) = self.entry_mut(id) else {
             return;
@@ -247,8 +253,16 @@ impl QueueState {
 
     /// Removes the entry for `id` from the list (and from `waiting` if
     /// still present, so a dismissed queued entry is never started later).
-    /// Returns whether an entry was removed.
+    /// Refuses (returns `false`, leaves everything intact) when `id`
+    /// currently owns the download or finalize slot: dismissing it would
+    /// leave that slot pointing at a dead id, breaking duplicate detection
+    /// and wedging the queue. Callers only offer dismiss for
+    /// terminal entries, but this method is the trust boundary — it does
+    /// not rely on that convention.
     pub fn dismiss(&mut self, id: u64) -> bool {
+        if self.download_active == Some(id) || self.finalize_active == Some(id) {
+            return false;
+        }
         if let Some(pos) = self.waiting.iter().position(|&waiting_id| waiting_id == id) {
             self.waiting.remove(pos);
         }
@@ -361,6 +375,15 @@ mod tests {
         assert_eq!(state.admit(2, "Other", "SNES"), Admission::Duplicate);
     }
 
+    #[test]
+    fn duplicate_rom_id_in_finalize_active_is_rejected() {
+        let mut state = QueueState::default();
+        let id = admit_idle(&mut state, 1);
+        state.download_finished(id, Ok(()), false);
+        assert_eq!(state.entry(id).unwrap().status, DownloadStatus::Installing);
+        assert_eq!(state.admit(1, "Game", "SNES"), Admission::Duplicate);
+    }
+
     // --- download_finished ---------------------------------------------
 
     #[test]
@@ -426,6 +449,33 @@ mod tests {
             state.entry(waiter).unwrap().status,
             DownloadStatus::Downloading
         );
+    }
+
+    #[test]
+    fn stale_download_finished_on_a_completed_entry_is_a_no_op() {
+        let mut state = QueueState::default();
+        let first = admit_idle(&mut state, 1);
+        state.download_finished(first, Ok(()), false);
+        state.finalize_finished(first, Ok(()), "");
+        assert_eq!(
+            state.entry(first).unwrap().status,
+            DownloadStatus::Completed
+        );
+
+        // The download slot has moved on to a different entry.
+        let second = admit_idle(&mut state, 2);
+        assert_eq!(state.download_active, Some(second));
+
+        // A stale completion for the old id must not resurrect it, steal
+        // the finalize slot, or disturb the entry that now owns the
+        // download slot.
+        state.download_finished(first, Ok(()), false);
+        assert_eq!(
+            state.entry(first).unwrap().status,
+            DownloadStatus::Completed
+        );
+        assert_eq!(state.finalize_active, None);
+        assert_eq!(state.download_active, Some(second));
     }
 
     // --- finalize_finished ------------------------------------------------
@@ -499,6 +549,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn stale_finalize_finished_on_a_completed_entry_is_a_no_op() {
+        let mut state = QueueState::default();
+        let first = admit_idle(&mut state, 1);
+        state.download_finished(first, Ok(()), false);
+        state.finalize_finished(first, Ok(()), "");
+        assert_eq!(
+            state.entry(first).unwrap().status,
+            DownloadStatus::Completed
+        );
+        assert_eq!(state.entry(first).unwrap().error, "");
+
+        // A different entry now owns the finalize slot.
+        let second = admit_idle(&mut state, 2);
+        state.download_finished(second, Ok(()), false);
+        assert_eq!(state.finalize_active, Some(second));
+
+        // A stale finalize completion for the old id must not touch the
+        // already-completed entry or the slot now owned by `second`.
+        state.finalize_finished(first, Err(LibraryError::NoLaunchFile), "stale warning");
+        assert_eq!(
+            state.entry(first).unwrap().status,
+            DownloadStatus::Completed
+        );
+        assert_eq!(state.entry(first).unwrap().error, "");
+        assert_eq!(state.finalize_active, Some(second));
+    }
+
     // --- request_cancel -----------------------------------------------
 
     #[test]
@@ -567,6 +645,27 @@ mod tests {
         state.download_finished(first, Ok(()), true);
         // The dismissed id must never be picked up by next_ready.
         assert_eq!(state.next_ready(), None);
+    }
+
+    #[test]
+    fn dismiss_refuses_the_active_download_entry() {
+        let mut state = QueueState::default();
+        let id = admit_idle(&mut state, 1);
+        assert!(!state.dismiss(id));
+        let entry = state.entry(id).unwrap();
+        assert_eq!(entry.status, DownloadStatus::Downloading);
+        assert_eq!(state.download_active, Some(id));
+    }
+
+    #[test]
+    fn dismiss_refuses_the_finalize_active_entry() {
+        let mut state = QueueState::default();
+        let id = admit_idle(&mut state, 1);
+        state.download_finished(id, Ok(()), false);
+        assert!(!state.dismiss(id));
+        let entry = state.entry(id).unwrap();
+        assert_eq!(entry.status, DownloadStatus::Installing);
+        assert_eq!(state.finalize_active, Some(id));
     }
 
     // --- retryable --------------------------------------------------------
