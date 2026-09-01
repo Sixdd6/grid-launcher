@@ -30,6 +30,11 @@ relocations (seen on newer distros such as Fedora/Nobara). Work around it with:
 
     NO_STRIP=1 npx tauri build
 
+On some NVIDIA/Wayland stacks WebKitGTK's DMABUF renderer cannot allocate GBM
+buffers ("Failed to create GBM buffer ... Invalid argument"), which renders the
+window blank white. The app sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` at startup
+on Linux to avoid this; export the variable yourself (e.g. `=0`) to override.
+
 ## Secret handling
 Credentials live only in the OS keyring and in redacting in-memory types.
 They never appear in config files, logs, IPC payloads, or fixtures.
