@@ -29,6 +29,9 @@ const appEnv: Record<string, string> = {
   GRID_LAUNCHER_DATA_DIR: dataDir,
   // WebKitGTK's DMABUF renderer cannot allocate GBM buffers under Xvfb.
   WEBKIT_DISABLE_DMABUF_RENDERER: '1',
+  // Belt and braces with e2e.sh's own `unset WAYLAND_DISPLAY`: without this,
+  // GTK prefers the session's real Wayland compositor over Xvfb's DISPLAY.
+  GDK_BACKEND: 'x11',
   E2E_MOCK_URL: mockUrl,
   RUST_LOG: process.env.E2E_RUST_LOG ?? 'info',
 };
@@ -69,17 +72,24 @@ export const config: WebdriverIO.Config = {
   // so wdio must not start a second Xvfb of its own.
   autoXvfb: false,
 
-  logLevel: (process.env.E2E_LOG_LEVEL as Options.Testrunner['logLevel']) ?? 'warn',
+  // 'info', not 'warn': the tauri service forwards the app's backend and
+  // frontend logs into this stream, and at 'warn' none of them appear — which
+  // makes a failure dump that promises app logs deliver nothing.
+  logLevel: (process.env.E2E_LOG_LEVEL as Options.Testrunner['logLevel']) ?? 'info',
+  // e2e.sh points this at a per-stage directory and dumps its *.log files when
+  // a stage fails, so the driver/service side of a failure is recoverable too.
   outputDir: process.env.E2E_WDIO_LOG_DIR,
   bail: 0,
   waitforTimeout: 5_000,
   connectionRetryTimeout: 90_000,
   connectionRetryCount: 3,
 
-  // The app start is the flaky part (webview + embedded server under Xvfb).
-  // One retry turns a cold-start hiccup into a warning instead of a red run.
-  specFileRetries: 1,
-  specFileRetriesDeferred: false,
+  // No specFileRetries on purpose. A spec leaves the app and the data
+  // directory mutated, so retrying just the spec re-runs it against state the
+  // failed attempt already changed and reports a misleading second error
+  // (typically "the connect form never appeared", because the app is already
+  // connected). e2e.sh retries at the stage-group level instead, from a fresh
+  // data directory and a fresh mock server.
 
   framework: 'mocha',
   mochaOpts: {

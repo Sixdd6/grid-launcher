@@ -31,8 +31,20 @@ e2e-only build of the app, starts a mock RomM server, and runs the specs in
     E2E_SKIP_BUILD=1 scripts/e2e.sh # reuse the existing binary
     E2E_KEEP=1 scripts/e2e.sh       # keep the temp run directory
 
-Exit codes: 0 pass, 1 a stage failed, 2 a prerequisite is missing. A failing
-stage prints the wdio output, the mock server log, and the mock's request log.
+Exit codes: 0 pass, 1 a stage group failed, 2 a prerequisite is missing or the
+binary is not a stamped e2e build. A failing stage prints the app's own
+stdout/stderr, the wdio output, the mock server log, and the mock's request
+log.
+
+A failed stage group is reset (fresh data dir, fresh mock) and rerun once
+before it counts as failed. A failing group does not stop the run — later
+groups still execute and the script exits nonzero at the end, so one pass
+shows every group's result.
+
+`E2E_SKIP_BUILD=1` requires a build stamp written by a previous `e2e.sh`
+build, and refuses to run if the binary was rebuilt outside the script (a
+plain `cargo build -p app` produces the same path without the `e2e` feature,
+which otherwise fails opaquely).
 
 ### Prerequisites
 
@@ -47,9 +59,21 @@ the `e2e` cargo feature.
 Nothing outside a temp directory. Each stage gets its own
 `GRID_LAUNCHER_DATA_DIR`, so `~/.config/grid-launcher` is never read or
 written. The whole run happens inside `dbus-run-session` with a throwaway
-gnome-keyring whose files go to a redirected `XDG_DATA_HOME`, so the real
-login keyring is untouched. The app itself runs under `xvfb-run`, so no window
-appears.
+gnome-keyring whose files and control socket go to a redirected
+`XDG_DATA_HOME` and `XDG_RUNTIME_DIR`, so the real login keyring is untouched
+and no stray daemon can claim `/run/user/$UID/keyring`.
+
+The app runs under `xvfb-run` with `GDK_BACKEND=x11` and `WAYLAND_DISPLAY`
+unset. Both are load-bearing: GTK prefers Wayland when it can see the
+session's compositor socket, which would put the app window on your real
+desktop and ignore Xvfb entirely.
+
+An exit trap kills everything belonging to the run and removes the temp
+directory. It matches processes by the run directory in their environment
+rather than by process group, because D-Bus activates helpers
+(`xdg-desktop-portal-*`, `ksecretd`, `gnome-keyring-daemon`) that are children
+of the private bus and outlive `dbus-run-session`. A green run leaves no
+`/tmp/grid-e2e-*` behind; a failed run keeps one on purpose, for its logs.
 
 ### Coverage
 
