@@ -3,9 +3,12 @@ mod gamepad;
 
 use commands::AppState;
 use grid_core::config::Config;
+use grid_core::library::registry::Registry;
+use grid_core::library::InstallService;
 use grid_core::secrets::KeyringStore;
 use grid_core::session::SessionManager;
 use std::sync::Arc;
+use tauri::{Emitter, Manager};
 
 /// WebKitGTK's DMABUF renderer fails to allocate GBM buffers on some
 /// NVIDIA/Wayland stacks ("Failed to create GBM buffer ... Invalid argument"),
@@ -44,10 +47,27 @@ pub fn run() {
         cache_dir,
         Arc::new(KeyringStore::new()),
     );
+    let config_path = Config::default_path();
+    // Same directory as config.toml — never re-derive ProjectDirs separately.
+    let db_path = config_path
+        .parent()
+        .expect("config path has a parent directory")
+        .join("grid-launcher.db");
+    // A registry open failure must not crash startup: it is carried into
+    // AppState and surfaced to the UI the first time an install command runs.
+    let install = Registry::open(&db_path)
+        .map(|registry| InstallService::new(Arc::new(registry), config_path))
+        .map_err(|e| e.to_string());
     tauri::Builder::default()
-        .manage(AppState { session })
+        .manage(AppState { session, install })
         .setup(|app| {
             gamepad::spawn(app.handle().clone());
+            if let Ok(install) = &app.state::<AppState>().install {
+                let handle = app.handle().clone();
+                install.set_notify(Arc::new(move |snapshot| {
+                    let _ = handle.emit("downloads-changed", snapshot);
+                }));
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -57,6 +77,15 @@ pub fn run() {
             commands::list_platforms,
             commands::list_games,
             commands::ensure_cover,
+            commands::install_game,
+            commands::cancel_install,
+            commands::retry_install,
+            commands::dismiss_download,
+            commands::uninstall_game,
+            commands::list_downloads,
+            commands::list_installed,
+            commands::get_library_path,
+            commands::set_library_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
