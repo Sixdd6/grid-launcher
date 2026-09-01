@@ -1,3 +1,4 @@
+pub mod launch_select;
 pub mod paths;
 pub mod registry;
 
