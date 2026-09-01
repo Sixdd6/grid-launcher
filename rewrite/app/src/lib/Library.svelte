@@ -64,7 +64,8 @@
     display: grid;
     grid-template-columns: repeat(var(--columns), 1fr);
     gap: 16px;
-    padding: 24px;
+    /* Extra bottom padding keeps the last row clear of the fixed downloads footer. */
+    padding: 24px 24px 60px;
   }
   .card {
     aspect-ratio: 3 / 4;
