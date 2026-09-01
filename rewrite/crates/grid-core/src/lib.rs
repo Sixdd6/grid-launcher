@@ -2,3 +2,4 @@
 //! UI-agnostic — this crate must never depend on Tauri.
 
 pub mod config;
+pub mod secrets;
