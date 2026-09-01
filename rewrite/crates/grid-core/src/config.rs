@@ -64,8 +64,25 @@ impl Default for Config {
     }
 }
 
+/// Test/portable override: when `GRID_LAUNCHER_DATA_DIR` is set and
+/// non-empty, all app state (config.toml, grid-launcher.db, covers/) lives
+/// under it. Trims whitespace; unset, empty, or whitespace-only yields
+/// `None` so callers fall back to the platform `ProjectDirs` location.
+pub fn data_dir_override() -> Option<PathBuf> {
+    let value = std::env::var("GRID_LAUNCHER_DATA_DIR").ok()?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(trimmed))
+    }
+}
+
 impl Config {
     pub fn default_path() -> PathBuf {
+        if let Some(dir) = data_dir_override() {
+            return dir.join("config.toml");
+        }
         directories::ProjectDirs::from("io.github", "Sixdd6", "grid-launcher")
             .expect("home directory must exist")
             .config_dir()

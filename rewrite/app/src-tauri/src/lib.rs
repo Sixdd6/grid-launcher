@@ -39,10 +39,14 @@ pub fn run() {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
-    let cache_dir = directories::ProjectDirs::from("io.github", "Sixdd6", "grid-launcher")
-        .expect("home directory must exist")
-        .cache_dir()
-        .join("covers");
+    let cache_dir = grid_core::config::data_dir_override()
+        .map(|d| d.join("covers"))
+        .unwrap_or_else(|| {
+            directories::ProjectDirs::from("io.github", "Sixdd6", "grid-launcher")
+                .expect("home directory must exist")
+                .cache_dir()
+                .join("covers")
+        });
     let session = SessionManager::new(
         Config::default_path(),
         cache_dir,
