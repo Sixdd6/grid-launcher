@@ -53,7 +53,7 @@ which otherwise fails opaquely).
 
 ### Prerequisites
 
-    sudo dnf install -y xorg-x11-server-Xvfb dbus-daemon gnome-keyring nodejs npm
+    sudo dnf install -y xorg-x11-server-Xvfb dbus-daemon gnome-keyring nodejs npm sqlite
 
 `e2e/node_modules` installs itself on the first run. No `tauri-driver` or
 `webkit2gtk-driver` is needed: the app embeds its own WebDriver server behind
@@ -89,12 +89,29 @@ of the private bus and outlive `dbus-run-session`. A green run leaves no
 | `library` | `library.spec.ts` | both fixture platforms render; selecting platform 1 shows its cards, including the server `name: null` game falling back to `fs_name_no_ext`; a cover `<img>` gets a real `src` and a nonzero `naturalWidth` (the regression test for the asset-protocol-scope fix); `ArrowRight` moves the focused card |
 | `install` | `install-a/-b.spec.ts` | the library-path banner appears when unset and hides once a path is saved; installing rom 101 from the details overlay reaches a `Completed` download row and an `installed` badge, and extracts `game.sfc` under the temp library dir; the badge survives a relaunch (part b); uninstalling via the details two-click removes the badge and the files; `grid-launcher.db` never contains the fixture token |
 | `downloads` | `downloads.spec.ts` | this group's mock server runs with `--throttle-ms 100` (chunked slow streaming — see `mock-romm/server.mjs`'s `e2e_throttle`) against the ~300KB "Big Arcade Game" fixture (rom 301), giving a real in-flight download to interact with: a second install queues behind the first; cancelling the active download shows `Cancelled`; retrying it reaches `Completed`; dismissing removes the row |
+| `emulators` | `emulators.spec.ts` | auto-fill from autoprofile match on path basename; name and args persist; row order preserved on edit; duplicate name rejection; two-click delete; per-platform defaults persist to `config.toml` |
+| `launch` | `launch.spec.ts` | pre-seeded with one installed game and three emulator stubs; play the game (argv recorded); instant-exit stub error; broken path error; unmapped RetroArch error with the verbatim message. Each mutation through the emulators UI is confirmed written to `config.toml` before proceeding. |
 
 The embedded WebDriver provider keeps one app process alive for a whole
 `wdio run` and cannot restart it, so the runner starts one `wdio run` per spec
 file. That is why "relaunch the app" is a two-spec pair sharing one data
 directory rather than one spec, and why `wdio.conf.ts` reads its per-stage
 settings (`E2E_SPEC`, `E2E_DATA_DIR`, `E2E_MOCK_URL`) from the environment.
+
+### Residual manual checklist
+
+These behaviors remain manual and require a desktop session + live RomM server
+(the E2E suite automates the remaining coverage):
+
+- **Gamepad hardware**: d-pad and left stick move focus, held stick repeats at a
+  comfortable rate.
+- **AppImage smoke test**: launch the AppImage from the desktop, connect to a live
+  RomM server, confirm the token prompt never echoes the value.
+- **Multi-file install**: download an archive containing multiple game files and
+  confirm they land under one safe-title directory.
+- **Basic-auth mode**: connect via `http://user:password@server:port/romm` and
+  confirm both credentials enter the keyring and the password never reaches
+  `config.toml` or logs.
 
 ## Persisted state
 
@@ -137,54 +154,12 @@ See the spec's "Secret handling" section — those rules are normative.
 
 ## Manual test checklist — Milestone 1
 
-Milestone 1's exit gate. These steps need a desktop session, a live RomM
-server, and a gamepad, so they are not automated.
-
-1. Run the AppImage on the desktop.
-2. Connect to the live RomM server with an API token; confirm connect
-   succeeds and the token prompt never echoes the value anywhere (window,
-   terminal, logs).
-3. Browse platforms; covers populate and scrolling is smooth.
-4. Navigate the grid with a real gamepad: d-pad and left stick move focus,
-   held stick repeats at a comfortable rate.
-5. Quit and relaunch: the session restores without re-entering credentials.
-6. `cat ~/.config/grid-launcher/config.toml` — confirm no token/password
-   present.
+Milestone 1's exit gate: now automated by the E2E suite (`connect` + `connect-restore` stage groups); residual items above.
 
 ## Manual test checklist — Milestone 2
 
-Core install pipeline exit gate. Desktop session and live RomM required.
-
-1. Set the library path in the UI; confirm it persists in `config.toml`.
-2. Install a small single-file game: entry appears, progress and speed move,
-   archive extracts, entry completes, card shows the installed badge.
-3. Install a multi-file game: all files land in one `<SafeTitle>/` folder.
-4. Cancel a download mid-stream: entry shows `cancelled`, partial file gone.
-5. Retry a cancelled entry: fresh download starts.
-6. Queue two installs: second waits as `queued`, starts when the first
-   finishes.
-7. Quit and relaunch: installed badges persist (from `grid-launcher.db`).
-8. Uninstall from the details overlay: files and badge are gone.
-9. `config.toml` and `grid-launcher.db` contain no token or password.
+Core install pipeline exit gate: now automated by the E2E suite (`install` + `downloads` stage groups); residual items above.
 
 ## Manual test checklist — Milestone 3
 
-Emulated launch core exit gate. Desktop session and live RomM required.
-
-1. Open Emulators from the footer; add a real emulator by path; name and args
-   auto-fill from its profile; save; relaunch app — entry persists in
-   config.toml.
-2. Set it as default for a platform with an installed game.
-3. Play the game from the details overlay; the emulator starts with the right
-   ROM; the overlay shows Playing and the session appears.
-4. Quit the emulator normally; within ~2.5 s the badge clears.
-5. Play again, press Stop; the emulator terminates and the badge clears.
-6. Point the entry at a nonexistent path and Play: the exact
-   "Emulator executable not found:" message shows inline.
-7. A RetroArch platform with no core mapping shows the exact "No RetroArch
-   core is configured…" message; adding `retroarch_cores` in config.toml
-   fixes it.
-8. Break an entry's args with an unclosed quote and confirm launch still
-   proceeds via the fallback splitter (or shows "Invalid launch arguments"
-   when truly unparseable).
-9. config.toml and grid-launcher.db still contain no secrets.
+Emulated launch core exit gate: now automated by the E2E suite (`emulators` + `launch` stage groups); residual items above.

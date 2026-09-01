@@ -54,6 +54,10 @@ re-verify anchors after large refactors.
    rules a port will not inherit.
 9. **09** — TV mode, on top of everything above.
 
+## End-to-end testing
+
+The Rust rewrite includes an automated E2E harness in `rewrite/e2e/` that runs WebdriverIO specs against a real Tauri binary paired with a mock RomM server. See `rewrite/README.md#E2E-tests` for usage and coverage details.
+
 ## Notable defects in the reference implementation
 
 Recorded as open questions in the individual documents; collected here because a
