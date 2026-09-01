@@ -86,6 +86,25 @@ pub fn run() {
     builder
         .setup(|app| {
             gamepad::spawn(app.handle().clone());
+            // The static scope in tauri.conf.json only covers the default
+            // ProjectDirs cache location ($CACHE/grid-launcher/covers/**/*).
+            // When GRID_LAUNCHER_DATA_DIR is set (E2E harness, and any real
+            // portable-mode install), covers live under <data dir>/covers
+            // instead, which that static scope never grants — every cover
+            // request 404s with "asset protocol not configured to allow the
+            // path". Extend the scope at runtime to cover it too.
+            if let Some(dir) = grid_core::config::data_dir_override() {
+                let covers_dir = dir.join("covers");
+                if let Err(e) = app
+                    .asset_protocol_scope()
+                    .allow_directory(&covers_dir, true)
+                {
+                    tracing::warn!(
+                        "failed to extend asset protocol scope for {}: {e}",
+                        covers_dir.display()
+                    );
+                }
+            }
             let state = app.state::<AppState>();
             if let Ok(install) = &state.install {
                 let handle = app.handle().clone();
