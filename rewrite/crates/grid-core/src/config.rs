@@ -23,6 +23,8 @@ pub struct Config {
     pub server_url: String,
     #[serde(default)]
     pub username: String,
+    #[serde(default)]
+    pub library_path: String,
     /// Unknown keys survive load/save round trips for forward compatibility.
     #[serde(flatten)]
     pub extra: BTreeMap<String, toml::Value>,
@@ -34,6 +36,7 @@ impl Default for Config {
             schema_version: 1,
             server_url: String::new(),
             username: String::new(),
+            library_path: String::new(),
             extra: BTreeMap::new(),
         }
     }
@@ -87,6 +90,7 @@ mod tests {
             schema_version: 1,
             server_url: "https://romm.example".into(),
             username: "six".into(),
+            library_path: String::new(),
             extra: Default::default(),
         };
         cfg.save(&path).unwrap();
@@ -123,5 +127,42 @@ mod tests {
         Config::default().save(&path).unwrap();
         assert!(!dir.path().join("config.toml.tmp").exists());
         assert!(path.exists());
+    }
+
+    #[test]
+    fn library_path_defaults_to_empty() {
+        let cfg = Config::default();
+        assert_eq!(cfg.library_path, "");
+    }
+
+    #[test]
+    fn library_path_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config {
+            schema_version: 1,
+            server_url: "https://romm.example".into(),
+            username: "six".into(),
+            library_path: "/path/to/library".into(),
+            extra: Default::default(),
+        };
+        cfg.save(&path).unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.library_path, "/path/to/library");
+    }
+
+    #[test]
+    fn library_path_field_not_in_extra() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "schema_version = 1\nserver_url = \"s\"\nusername = \"u\"\nlibrary_path = \"/lib\"\nfuture_key = \"kept\"\n",
+        )
+        .unwrap();
+        let cfg = Config::load(&path).unwrap();
+        assert_eq!(cfg.library_path, "/lib");
+        assert!(!cfg.extra.contains_key("library_path"));
+        assert!(cfg.extra.contains_key("future_key"));
     }
 }
