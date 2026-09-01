@@ -19,8 +19,10 @@
 
   async function selectPlatform(id: number) {
     activePlatform = id;
+    const g = await api.listGames(id);
+    if (activePlatform !== id) return; // superseded by a newer selection
+    games = g;
     focusIndex = 0;
-    games = await api.listGames(id);
   }
 
   export function handleNav(action: NavDirection | 'accept' | 'back') {
