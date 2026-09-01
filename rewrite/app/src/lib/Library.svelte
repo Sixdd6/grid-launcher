@@ -100,14 +100,15 @@
 <svelte:window onkeydown={onKey} />
 
 {#if showLibraryBanner}
-  <div class="library-banner">
+  <div data-testid="library-path-banner" class="library-banner">
     <span>Set a library folder to install games.</span>
     <input
+      data-testid="library-path-input"
       bind:value={libraryPathInput}
       placeholder="/path/to/library"
       disabled={libraryPathSaving}
     />
-    <button disabled={libraryPathSaving || !libraryPathInput.trim()} onclick={saveLibraryPath}>
+    <button data-testid="library-path-save" disabled={libraryPathSaving || !libraryPathInput.trim()} onclick={saveLibraryPath}>
       {libraryPathSaving ? 'Saving…' : 'Save'}
     </button>
     {#if libraryPathError}<span class="banner-error" role="alert">{libraryPathError}</span>{/if}
@@ -116,16 +117,16 @@
 
 <nav class="platforms">
   {#each platforms as p (p.id)}
-    <button class:active={p.id === activePlatform} onclick={() => selectPlatform(p.id)}>{p.name}</button>
+    <button data-testid={`platform-btn-${p.id}`} class:active={p.id === activePlatform} onclick={() => selectPlatform(p.id)}>{p.name}</button>
   {/each}
 </nav>
 
 <div class="grid" bind:this={gridEl} style="--columns: {COLUMNS}">
   {#each games as game, i (game.id)}
-    <div class="card" class:focused={i === focusIndex} onclick={() => openDetails(game)} role="presentation">
+    <div data-testid={`game-card-${game.id}`} class="card" class:focused={i === focusIndex} onclick={() => openDetails(game)} role="presentation">
       <Cover {game} />
       {#if isInstalled(game, activePlatformName)}
-        <span class="badge">
+        <span data-testid={`installed-badge-${game.id}`} class="badge">
           <span class="dot"></span>
           Installed
         </span>

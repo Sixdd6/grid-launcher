@@ -17,17 +17,17 @@
   }}
 >
   <h1>Connect to RomM</h1>
-  <label>Server URL <input bind:value={serverUrl} placeholder="https://romm.example" required /></label>
+  <label>Server URL <input data-testid="connect-server-url" bind:value={serverUrl} placeholder="https://romm.example" required /></label>
   {#if !useToken}
-    <label>Username <input bind:value={username} autocomplete="username" required /></label>
+    <label>Username <input data-testid="connect-username" bind:value={username} autocomplete="username" required /></label>
   {/if}
   <label>
     {useToken ? 'API token' : 'Password'}
-    <input bind:value={secret} type="password" autocomplete="current-password" required />
+    <input data-testid="connect-secret" bind:value={secret} type="password" autocomplete="current-password" required />
   </label>
-  <label class="mode"><input type="checkbox" bind:checked={useToken} /> Use API token</label>
-  <button disabled={session.busy}>{session.busy ? 'Connecting…' : 'Connect'}</button>
-  {#if session.error}<p class="error" role="alert">{session.error}</p>{/if}
+  <label class="mode"><input data-testid="connect-use-token" type="checkbox" bind:checked={useToken} /> Use API token</label>
+  <button data-testid="connect-submit" disabled={session.busy}>{session.busy ? 'Connecting…' : 'Connect'}</button>
+  {#if session.error}<p data-testid="connect-error" class="error" role="alert">{session.error}</p>{/if}
 </form>
 
 <style>

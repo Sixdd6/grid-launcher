@@ -95,6 +95,7 @@
 </script>
 
 <footer
+  data-testid="downloads-footer"
   class="downloads-footer"
   role="button"
   tabindex="0"
@@ -102,41 +103,41 @@
   onclick={toggle}
   onkeydown={toggleOnKey}
 >
-  <span class="label">{footerLabel}</span>
+  <span data-testid="downloads-aggregate" class="label">{footerLabel}</span>
   {#if bar}
     <span class="bar-track" class:indeterminate={bar.indeterminate}>
       <span class="bar-fill" style={bar.indeterminate ? '' : `width: ${bar.pct}%`}></span>
     </span>
   {/if}
-  <button class="emulators-btn" onclick={openEmulatorsClick} onkeydown={stopKeydownPropagation}>Emulators</button>
+  <button data-testid="emulators-open" class="emulators-btn" onclick={openEmulatorsClick} onkeydown={stopKeydownPropagation}>Emulators</button>
 </footer>
 
 {#if open}
-  <div class="drawer" transition:slide={{ duration: 160 }}>
+  <div data-testid="downloads-drawer" class="drawer" transition:slide={{ duration: 160 }}>
     {#if downloads.entries.length === 0}
       <p class="empty">No downloads yet</p>
     {:else}
       {#each downloads.entries as e (e.id)}
         {@const action = actionFor(e.status)}
         {@const progress = rowProgress(e)}
-        <div class="row">
+        <div data-testid={`download-row-${e.id}`} class="row">
           <div class="row-main">
             <div class="row-text">
               <span class="title">{e.title}</span>
               <span class="platform">{e.platform}</span>
-              <span class="detail">{entryDetail(e)}</span>
+              <span data-testid={`download-detail-${e.id}`} class="detail">{entryDetail(e)}</span>
               {#if errors[e.id]}
                 <p class="row-error">{errors[e.id]}</p>
               {/if}
             </div>
             <div class="row-actions">
               {#if action === 'cancel'}
-                <button disabled={pending[e.id]} onclick={() => cancel(e.id)}>Cancel</button>
+                <button data-testid={`download-action-cancel-${e.id}`} disabled={pending[e.id]} onclick={() => cancel(e.id)}>Cancel</button>
               {:else if action === 'retry-dismiss'}
-                <button disabled={pending[e.id]} onclick={() => retry(e.id)}>Retry</button>
-                <button disabled={pending[e.id]} onclick={() => dismiss(e.id)}>Dismiss</button>
+                <button data-testid={`download-action-retry-${e.id}`} disabled={pending[e.id]} onclick={() => retry(e.id)}>Retry</button>
+                <button data-testid={`download-action-dismiss-${e.id}`} disabled={pending[e.id]} onclick={() => dismiss(e.id)}>Dismiss</button>
               {:else if action === 'dismiss'}
-                <button disabled={pending[e.id]} onclick={() => dismiss(e.id)}>Dismiss</button>
+                <button data-testid={`download-action-dismiss-${e.id}`} disabled={pending[e.id]} onclick={() => dismiss(e.id)}>Dismiss</button>
               {/if}
             </div>
           </div>

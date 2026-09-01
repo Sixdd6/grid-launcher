@@ -44,6 +44,10 @@
     return err instanceof Error ? err.message : String(err);
   }
 
+  function sanitizeName(name: string): string {
+    return name.toLowerCase().replace(/\s+/g, '-');
+  }
+
   async function refreshEmulators() {
     listLoading = true;
     try {
@@ -191,6 +195,7 @@
 
 <div class="backdrop" onclick={onBackdropClick} role="presentation">
   <div
+    data-testid="emulators-panel"
     class="panel"
     bind:this={panelEl}
     role="dialog"
@@ -205,7 +210,7 @@
     <section class="list-section">
       <div class="section-header">
         <h3>Installed emulators</h3>
-        <button class="add-btn" onclick={openAdd}>+ Add emulator</button>
+        <button data-testid="emulator-add" class="add-btn" onclick={openAdd}>+ Add emulator</button>
       </div>
 
       {#if listLoading}
@@ -221,15 +226,16 @@
         {:else}
           <ul class="emulator-list">
             {#each emulators as e (e.name)}
-              <li class="emulator-row">
+              <li data-testid={`emulator-row-${sanitizeName(e.name)}`} class="emulator-row">
                 <div class="row-text">
                   <span class="name">{e.name}</span>
                   <span class="path" title={e.path}>{e.path}</span>
                   {#if e.args}<span class="args">{e.args}</span>{/if}
                 </div>
                 <div class="row-actions">
-                  <button onclick={() => openEdit(e)}>Edit</button>
+                  <button data-testid={`emulator-edit-${sanitizeName(e.name)}`} onclick={() => openEdit(e)}>Edit</button>
                   <button
+                    data-testid={`emulator-delete-${sanitizeName(e.name)}`}
                     class:confirm={confirmingDelete === e.name}
                     disabled={deletePending === e.name}
                     onclick={() => handleDeleteClick(e.name)}
@@ -253,16 +259,16 @@
             saveForm();
           }}
         >
-          <label>Name <input bind:value={formName} required /></label>
+          <label>Name <input data-testid="emu-form-name" bind:value={formName} required /></label>
           <label>
             Executable path
-            <input bind:value={formPath} onblur={autoFillFromPath} onkeydown={onPathKeydown} />
+            <input data-testid="emu-form-path" bind:value={formPath} onblur={autoFillFromPath} onkeydown={onPathKeydown} />
           </label>
-          <label>Arguments <input bind:value={formArgs} /></label>
-          {#if formError}<p class="error" role="alert">{formError}</p>{/if}
+          <label>Arguments <input data-testid="emu-form-args" bind:value={formArgs} /></label>
+          {#if formError}<p data-testid="emu-form-error" class="error" role="alert">{formError}</p>{/if}
           <div class="form-actions">
-            <button type="submit" disabled={formPending}>{formPending ? 'Saving…' : 'Save'}</button>
-            <button type="button" onclick={closeForm} disabled={formPending}>Cancel</button>
+            <button data-testid="emu-form-save" type="submit" disabled={formPending}>{formPending ? 'Saving…' : 'Save'}</button>
+            <button data-testid="emu-form-cancel" type="button" onclick={closeForm} disabled={formPending}>Cancel</button>
           </div>
         </form>
       </section>
@@ -282,6 +288,7 @@
             <li class="defaults-row">
               <label class="platform-name" for={selectId}>{p.name}</label>
               <select
+                data-testid={`default-select-${p.id}`}
                 id={selectId}
                 value={defaultFor(p.name)}
                 onchange={(e) => handleDefaultChange(p.name, (e.currentTarget as HTMLSelectElement).value)}

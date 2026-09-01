@@ -113,6 +113,7 @@
 
 <div class="backdrop" onclick={onBackdropClick} role="presentation">
   <div
+    data-testid="details-panel"
     class="panel"
     bind:this={panelEl}
     role="dialog"
@@ -121,13 +122,13 @@
     tabindex="-1"
     onkeydown={onKey}
   >
-    <button class="close" onclick={onClose} aria-label="Close">×</button>
+    <button data-testid="details-close" class="close" onclick={onClose} aria-label="Close">×</button>
     <div class="cover">
       <Cover {game} />
     </div>
     <h2>{game.name}</h2>
     {#if liveSession}
-      <span class="chip">Playing</span>
+      <span data-testid="details-playing-chip" class="chip">Playing</span>
     {/if}
     <p class="platform">{platformName}</p>
 
@@ -135,14 +136,15 @@
       {#if liveEntry}
         <button disabled>Installing…</button>
       {:else if liveSession}
-        <button disabled={pending} onclick={handleStop}>
+        <button data-testid="details-stop" disabled={pending} onclick={handleStop}>
           {pendingAction === 'stop' ? 'Stopping…' : 'Stop'}
         </button>
       {:else if installedNow}
-        <button disabled={pending} onclick={handlePlay}>
+        <button data-testid="details-play" disabled={pending} onclick={handlePlay}>
           {pendingAction === 'play' ? 'Launching…' : 'Play'}
         </button>
         <button
+          data-testid="details-uninstall"
           class="secondary"
           class:confirm={confirmingUninstall}
           disabled={pending}
@@ -151,19 +153,19 @@
           {confirmingUninstall ? 'Confirm uninstall' : 'Uninstall'}
         </button>
       {:else}
-        <button disabled={pending} onclick={handleInstall}>
+        <button data-testid="details-install" disabled={pending} onclick={handleInstall}>
           {pendingAction === 'install' ? 'Installing…' : 'Install'}
         </button>
       {/if}
     </div>
 
     {#if error}
-      <p class="error" role="alert">{error}</p>
+      <p data-testid="details-error" class="error" role="alert">{error}</p>
     {/if}
     {#if sessions.lastWarning}
-      <p class="error warning" role="alert">
+      <p data-testid="details-warning" class="error warning" role="alert">
         {sessions.lastWarning}
-        <button class="dismiss" onclick={() => sessions.dismissWarning()} aria-label="Dismiss warning">×</button>
+        <button data-testid="details-warning-dismiss" class="dismiss" onclick={() => sessions.dismissWarning()} aria-label="Dismiss warning">×</button>
       </p>
     {/if}
   </div>
