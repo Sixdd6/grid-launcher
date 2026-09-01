@@ -61,6 +61,7 @@ appimage/grid-launcher.png
 rewrite/target/
 rewrite/app/node_modules/
 rewrite/app/dist/
+rewrite/e2e/node_modules/
 
 # E2E mock server debugging artifact, written by mock-romm's close()
 rewrite/e2e/last-run-requests.log

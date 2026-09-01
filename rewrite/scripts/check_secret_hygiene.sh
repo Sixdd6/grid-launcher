@@ -34,6 +34,9 @@ fi
 # the default (release) dependency tree, and it must be reachable when the
 # feature is explicitly enabled — otherwise the e2e harness is silently
 # broken. Run from the workspace root so `-p app` resolves either way.
+# This first check only holds while `app` defines no `[features] default`
+# key: if one is ever added and lists `e2e`, `cargo tree -p app` would enable
+# the feature and the check would fail loudly rather than pass wrongly.
 if cargo tree -p app --quiet 2>/dev/null | grep -qi wdio; then
   echo "wdio plugin found in the DEFAULT dependency tree of 'app' (no --features e2e)." >&2
   echo "The embedded WebDriver server must never ship in a release build." >&2

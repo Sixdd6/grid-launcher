@@ -1,0 +1,25 @@
+{
+  "name": "grid-launcher-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "WebdriverIO end-to-end harness for the GRID Launcher Rust rewrite.",
+  "scripts": {
+    "test": "wdio run wdio.conf.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:mock": "node --test mock-romm/server.test.mjs"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^24.13.3",
+    "@wdio/cli": "9.30.1",
+    "@wdio/local-runner": "9.30.1",
+    "@wdio/mocha-framework": "9.30.1",
+    "@wdio/spec-reporter": "9.30.1",
+    "@wdio/tauri-service": "1.3.0",
+    "expect-webdriverio": "^6.0.9",
+    "tsx": "^4.20.0",
+    "typescript": "~6.0.2",
+    "webdriverio": "9.30.0"
+  }
+}

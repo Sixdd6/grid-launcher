@@ -7,6 +7,7 @@ Spec: `../docs/superpowers/specs/2026-08-31-rust-tauri-walking-skeleton-design.m
 - `crates/grid-core` — UI-agnostic core: config, secrets (OS keyring only),
   RomM client, cover cache, session.
 - `app/` — Tauri 2 shell + Svelte 5 frontend. The Tauri package is named `app`.
+- `e2e/` — WebdriverIO end-to-end harness and the mock RomM server it runs against.
 
 ## Develop
     cd app && npm install && npx tauri dev
@@ -17,6 +18,51 @@ Spec: `../docs/superpowers/specs/2026-08-31-rust-tauri-walking-skeleton-design.m
     npx svelte-check                    # SvelteKit type check
     scripts/check_secret_hygiene.sh     # secret rules (unchanged)
     python -m unittest discover tests/  # Python reference suite — ~1624 tests
+    scripts/e2e.sh                      # end-to-end suite (see below)
+
+## E2E tests
+
+`scripts/e2e.sh` drives the real Tauri binary with WebdriverIO. It builds an
+e2e-only build of the app, starts a mock RomM server, and runs the specs in
+`e2e/specs/` against them.
+
+    scripts/e2e.sh                  # build, then run every stage
+    scripts/e2e.sh connect          # run one stage group
+    E2E_SKIP_BUILD=1 scripts/e2e.sh # reuse the existing binary
+    E2E_KEEP=1 scripts/e2e.sh       # keep the temp run directory
+
+Exit codes: 0 pass, 1 a stage failed, 2 a prerequisite is missing. A failing
+stage prints the wdio output, the mock server log, and the mock's request log.
+
+### Prerequisites
+
+    sudo dnf install -y xorg-x11-server-Xvfb dbus-daemon gnome-keyring nodejs npm
+
+`e2e/node_modules` installs itself on the first run. No `tauri-driver` or
+`webkit2gtk-driver` is needed: the app embeds its own WebDriver server behind
+the `e2e` cargo feature.
+
+### What it does to your machine
+
+Nothing outside a temp directory. Each stage gets its own
+`GRID_LAUNCHER_DATA_DIR`, so `~/.config/grid-launcher` is never read or
+written. The whole run happens inside `dbus-run-session` with a throwaway
+gnome-keyring whose files go to a redirected `XDG_DATA_HOME`, so the real
+login keyring is untouched. The app itself runs under `xvfb-run`, so no window
+appears.
+
+### Coverage
+
+| Stage group | Specs | Covers |
+| --- | --- | --- |
+| `connect` | `connect.spec.ts` | wrong token → "rejected the credentials"; fixture token → library; the token never reaches the DOM; `config.toml` holds server_url + username and no secret |
+| `connect-restore` | `connect-restore-a/-b.spec.ts` | connect, then relaunch the binary against the same data dir and keyring — the session restores with no credential re-entry |
+
+The embedded WebDriver provider keeps one app process alive for a whole
+`wdio run` and cannot restart it, so the runner starts one `wdio run` per spec
+file. That is why "relaunch the app" is a two-spec pair sharing one data
+directory rather than one spec, and why `wdio.conf.ts` reads its per-stage
+settings (`E2E_SPEC`, `E2E_DATA_DIR`, `E2E_MOCK_URL`) from the environment.
 
 ## Persisted state
 
