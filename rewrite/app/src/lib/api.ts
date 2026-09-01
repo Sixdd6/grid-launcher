@@ -32,6 +32,27 @@ export type DownloadEntry = {
 
 export type DownloadsSnapshot = { entries: DownloadEntry[] };
 
+export type GameSession = {
+  id: number;
+  rom_id: number;
+  title: string;
+  emulator_name: string;
+  started_at: number;
+  pid: number;
+};
+
+export type SessionsSnapshot = { sessions: GameSession[]; warning: string | null };
+
+export type EmulatorEntry = { name: string; path: string; args: string };
+
+export type ProfileSummary = { name: string; args: string };
+
+export type LaunchDefaults = {
+  default_emulators: Record<string, string>;
+  retroarch_cores: Record<string, string>;
+  launch_args: string;
+};
+
 export type InstalledGame = {
   title: string;
   platform: string;
@@ -73,4 +94,17 @@ export const api = {
   listInstalled: () => invoke<InstalledGame[]>('list_installed'),
   getLibraryPath: () => invoke<string>('get_library_path'),
   setLibraryPath: (path: string) => invoke<void>('set_library_path', { path }),
+  launchGame: (romId: number) => invoke<GameSession>('launch_game', { romId }),
+  stopGame: (sessionId: number) => invoke<void>('stop_game', { sessionId }),
+  listSessions: () => invoke<SessionsSnapshot>('list_sessions'),
+  listEmulators: () => invoke<EmulatorEntry[]>('list_emulators'),
+  saveEmulator: (originalName: string, entry: EmulatorEntry) =>
+    invoke<void>('save_emulator', { originalName, entry }),
+  deleteEmulator: (name: string) => invoke<void>('delete_emulator', { name }),
+  listProfiles: () => invoke<ProfileSummary[]>('list_profiles'),
+  matchProfile: (executablePath: string) =>
+    invoke<ProfileSummary | null>('match_profile', { executablePath }),
+  getLaunchDefaults: () => invoke<LaunchDefaults>('get_launch_defaults'),
+  setDefaultEmulator: (platform: string, name: string) =>
+    invoke<void>('set_default_emulator', { platform, name }),
 };
