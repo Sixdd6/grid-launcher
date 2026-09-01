@@ -33,7 +33,7 @@ use paths::{
     sanitize_component,
 };
 use queue::{Admission, CancelAction, DownloadStatus, DownloadsSnapshot, QueueState};
-use registry::{InstalledGame, Registry};
+use registry::{installed_match, InstalledGame, Registry};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LibraryError {
@@ -334,11 +334,14 @@ impl InstallService {
         let library = self.library_root()?;
         // `find` falls back to the (title, platform) identity when no row
         // carries the rom id; blank keys must not match a blank-titled row,
-        // so the rom id is confirmed on what comes back.
+        // and a row that fell back with a *different* rom_id must not be
+        // treated as this game's install, so `installed_match` is the final
+        // word on what comes back (a null-rom_id row is still accepted,
+        // matching the frontend's `matchesInstalled`).
         let record = self
             .registry
             .find(Some(rom_id), "", "")?
-            .filter(|found| found.rom_id == Some(rom_id))
+            .filter(|found| installed_match(found, rom_id))
             .ok_or_else(|| LibraryError::Registry("not installed".to_string()))?;
 
         let game_dir = record.multi_file_game_dir.trim();
@@ -495,6 +498,11 @@ impl InstallService {
     /// Registry lookup on the blocking pool. A lookup error is treated as
     /// "not installed": finalizing again is harmless, and the same error will
     /// surface from the upsert with a real message.
+    ///
+    /// `find`'s title/platform fallback can return a row for a different game
+    /// that merely shares a title and platform; `installed_match` is what
+    /// keeps that row from being reported as this rom_id's install (doc 03
+    /// identity rules; mirrored in the frontend's `matchesInstalled`).
     async fn already_installed(&self, detail: &RomDetail) -> bool {
         let registry = self.registry.clone();
         let rom_id = detail.id;
@@ -505,7 +513,7 @@ impl InstallService {
             .ok()
             .and_then(Result::ok)
             .flatten()
-            .is_some()
+            .is_some_and(|row| installed_match(&row, rom_id))
     }
 
     /// Starts the finalize task for `id`. Called exactly once by the task

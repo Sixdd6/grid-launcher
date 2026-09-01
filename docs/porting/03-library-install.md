@@ -1369,3 +1369,4 @@ question from the design spec, cited in
 4. **No registry field loss** (Deviations §4): SQLite schema persists every field (revision, languages, tags, companies, first_release_date) without normalizer drops.
 5. **Traversal guard everywhere** (Deviations §5): Absolute and `..` member paths rejected in all archive formats, not only firmware zips.
 6. **Flattening is not ported** (Deviations §6): `flatten_single_subdir` dead code in reference (no real caller); port omits it.
+7. **Details overlay is thinner than the spec** (milestone 2): the overlay has no metadata block and no Cancel button (cancel lives in the downloads drawer); deferred to a later milestone.

@@ -105,6 +105,24 @@ fn identity_key(value: &str) -> String {
     value.trim().to_lowercase()
 }
 
+/// Whether `row` — a hit from [`Registry::find`] — really is the install for
+/// `rom_id`. `find`'s title/platform fallback can hand back a row for a
+/// *different* game that merely shares a title and platform; this is the one
+/// place that rule is enforced, so every caller (already-installed check,
+/// uninstall, and the frontend's mirrored `matchesInstalled`) agrees:
+///
+/// - `row.rom_id` is `Some(other)` and `other != rom_id`: not a match, no
+///   identity rescue — a different game must never be reported as installed.
+/// - `row.rom_id` is `Some(rom_id)`: a match.
+/// - `row.rom_id` is `None`: the row predates rom-id tracking, so the
+///   title/platform identity `find` already matched on is accepted.
+pub fn installed_match(row: &InstalledGame, rom_id: i64) -> bool {
+    match row.rom_id {
+        Some(other) => other == rom_id,
+        None => true,
+    }
+}
+
 fn registry_err(e: rusqlite::Error) -> LibraryError {
     LibraryError::Registry(e.to_string())
 }

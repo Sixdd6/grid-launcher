@@ -639,6 +639,73 @@ async fn already_installed_rom_completes_without_finalizing() {
     assert_eq!(row.installed_at, 1);
 }
 
+#[tokio::test]
+async fn a_same_title_platform_row_with_a_different_rom_id_does_not_skip_finalize() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(
+        &staging.path().join("chrono.zip"),
+        &[("game.sfc", b"ROMDATA")],
+    );
+    // Same title/platform as the game being installed, but a different
+    // rom_id: `find`'s (title_key, platform_key) fallback would hand this
+    // row back for rom_id 1, but it must not be accepted as that install.
+    harness
+        .registry
+        .upsert(&InstalledGame {
+            title: "Chrono Trigger".to_string(),
+            platform: "SNES".to_string(),
+            rom_id: Some(999),
+            rom_file_name: "chrono.zip".to_string(),
+            archive_path: "/somewhere/chrono.zip".to_string(),
+            installed_at: 1,
+            ..Default::default()
+        })
+        .unwrap();
+
+    harness
+        .mount_detail(
+            1,
+            detail_json(
+                1,
+                "Chrono Trigger",
+                "SNES",
+                "chrono.zip",
+                &[file_spec(11, "chrono.zip", bytes.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(1, "chrono.zip", bytes, 0).await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 1)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    // Finalize actually ran: the archive was extracted, not left in place.
+    let archive = harness.library.join("SNES/chrono.zip");
+    let extracted_dir = harness.library.join("SNES/chrono");
+    assert!(
+        !archive.exists(),
+        "archive should be deleted after extract, not skipped as already-installed"
+    );
+    assert!(extracted_dir.join("game.sfc").is_file());
+
+    // The upsert replaced the (title_key, platform_key) identity row: one
+    // row remains, and it now carries the new rom_id.
+    let installed = harness.service.installed().unwrap();
+    assert_eq!(installed.len(), 1);
+    assert_eq!(installed[0].rom_id, Some(1));
+    assert_eq!(
+        installed[0].extracted_path,
+        extracted_dir.join("game.sfc").to_string_lossy()
+    );
+}
+
 // --- failure paths ----------------------------------------------------------
 
 #[tokio::test]
