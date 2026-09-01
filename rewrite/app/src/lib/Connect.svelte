@@ -10,13 +10,17 @@
   class="connect"
   onsubmit={(e) => {
     e.preventDefault();
-    connect(serverUrl, username, secret, useToken);
+    // Token auth identifies the account by itself; the username input only
+    // exists for Basic mode, so never send a stale one alongside a token.
+    connect(serverUrl, useToken ? '' : username, secret, useToken);
     secret = ''; // never keep the plain secret in frontend state
   }}
 >
   <h1>Connect to RomM</h1>
   <label>Server URL <input bind:value={serverUrl} placeholder="https://romm.example" required /></label>
-  <label>Username <input bind:value={username} autocomplete="username" required={!useToken} /></label>
+  {#if !useToken}
+    <label>Username <input bind:value={username} autocomplete="username" required /></label>
+  {/if}
   <label>
     {useToken ? 'API token' : 'Password'}
     <input bind:value={secret} type="password" autocomplete="current-password" required />

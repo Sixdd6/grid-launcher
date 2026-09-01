@@ -116,3 +116,111 @@ async fn disconnect_clears_credential() {
     use grid_core::secrets::SecretStore;
     assert!(store.load().unwrap().is_none());
 }
+
+#[tokio::test]
+async fn token_connect_rejects_mismatched_username_and_persists_nothing() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/users/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 1, "username": "six"
+        })))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(MemoryStore::default());
+    let mgr = SessionManager::new(
+        dir.path().join("config.toml"),
+        dir.path().join("covers"),
+        store.clone(),
+    );
+    let result = mgr
+        .connect(
+            server.uri(),
+            "wronguser".into(),
+            SecretString::from("FAKE-TEST-TOKEN-not-real"),
+            true,
+        )
+        .await;
+    let err = result.expect_err("mismatched username must be rejected");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("six") && msg.contains("wronguser"),
+        "unhelpful error: {msg}"
+    );
+    assert!(
+        mgr.client().is_none(),
+        "client must not be set after rejection"
+    );
+    assert!(
+        store.load().unwrap().is_none(),
+        "credential must not persist"
+    );
+    assert!(
+        !dir.path().join("config.toml").exists(),
+        "config must not persist after rejection"
+    );
+}
+
+#[tokio::test]
+async fn token_connect_without_username_adopts_server_account() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/users/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 1, "username": "six"
+        })))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let mgr = SessionManager::new(
+        dir.path().join("covers").with_file_name("config.toml"),
+        dir.path().join("covers"),
+        Arc::new(MemoryStore::default()),
+    );
+    let state = mgr
+        .connect(
+            server.uri(),
+            String::new(),
+            SecretString::from("FAKE-TEST-TOKEN-not-real"),
+            true,
+        )
+        .await
+        .unwrap();
+    assert_eq!(state.username, "six");
+    let cfg = grid_core::config::Config::load(&dir.path().join("config.toml")).unwrap();
+    assert_eq!(
+        cfg.username, "six",
+        "config must store the server-verified name"
+    );
+}
+
+#[tokio::test]
+async fn token_connect_accepts_case_insensitive_username_and_stores_server_casing() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/users/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 1, "username": "six"
+        })))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let mgr = SessionManager::new(
+        dir.path().join("config.toml"),
+        dir.path().join("covers"),
+        Arc::new(MemoryStore::default()),
+    );
+    let state = mgr
+        .connect(
+            server.uri(),
+            "SIX".into(),
+            SecretString::from("FAKE-TEST-TOKEN-not-real"),
+            true,
+        )
+        .await
+        .unwrap();
+    assert_eq!(state.username, "six");
+    let cfg = grid_core::config::Config::load(&dir.path().join("config.toml")).unwrap();
+    assert_eq!(cfg.username, "six");
+}

@@ -14,6 +14,8 @@ pub enum SessionError {
     Config(#[from] crate::config::ConfigError),
     #[error("secrets: {0}")]
     Secrets(#[from] SecretError),
+    #[error("the token belongs to account '{actual}', not '{entered}'")]
+    UsernameMismatch { entered: String, actual: String },
 }
 
 /// The only session shape that may cross the IPC boundary. No secrets.
@@ -73,9 +75,25 @@ impl SessionManager {
             }
         };
         let (client, state) = self.probe(&server_url, &username, cred.clone()).await?;
+        // Token auth never sends the username, so a typed one is only a claim.
+        // The server-reported account is the truth: a non-empty mismatching
+        // claim is rejected before anything persists, and the config stores
+        // the verified name, never the typed one.
+        if use_token {
+            let entered = username.trim();
+            if !entered.is_empty()
+                && !state.username.is_empty()
+                && !entered.eq_ignore_ascii_case(&state.username)
+            {
+                return Err(SessionError::UsernameMismatch {
+                    entered: entered.to_string(),
+                    actual: state.username.clone(),
+                });
+            }
+        }
         let mut cfg = Config::load(&self.config_path)?;
         cfg.server_url = server_url;
-        cfg.username = username;
+        cfg.username = state.username.clone();
         cfg.save(&self.config_path)?;
         self.secrets.save(&cred)?;
         *self.client.lock().unwrap() = Some(Arc::new(client));
