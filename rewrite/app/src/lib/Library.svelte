@@ -65,10 +65,13 @@
     grid-template-columns: repeat(var(--columns), 1fr);
     gap: 16px;
     padding: 24px;
-    content-visibility: auto;
   }
   .card {
     aspect-ratio: 3 / 4;
+    /* Off-screen cards skip layout/paint; the intrinsic size keeps the
+       scrollbar stable at the 3:4 cover ratio. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 200px 267px;
     border-radius: 8px;
     overflow: hidden;
     transform: scale(1);

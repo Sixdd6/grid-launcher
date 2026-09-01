@@ -16,7 +16,7 @@
 >
   <h1>Connect to RomM</h1>
   <label>Server URL <input bind:value={serverUrl} placeholder="https://romm.example" required /></label>
-  <label>Username <input bind:value={username} autocomplete="username" /></label>
+  <label>Username <input bind:value={username} autocomplete="username" required={!useToken} /></label>
   <label>
     {useToken ? 'API token' : 'Password'}
     <input bind:value={secret} type="password" autocomplete="current-password" required />
