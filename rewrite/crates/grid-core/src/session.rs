@@ -52,6 +52,11 @@ impl SessionManager {
     /// `use_token`: true = `secret` is an API token; false = it is the
     /// account password (HTTP basic). On success the config and credential
     /// are persisted; the plain secret is consumed and dropped here.
+    ///
+    /// `self.client` is set only after the probe AND both persistence steps
+    /// (config save, credential save) succeed — on any failure path it is
+    /// left untouched, so a caller who sees `connect()` return `Err` can
+    /// never observe `client()` reporting a live connection.
     pub async fn connect(
         &self,
         server_url: String,
@@ -67,14 +72,13 @@ impl SessionManager {
                 password: secret,
             }
         };
-        let state = self
-            .try_connect(&server_url, &username, cred.clone())
-            .await?;
+        let (client, state) = self.probe(&server_url, &username, cred.clone()).await?;
         let mut cfg = Config::load(&self.config_path)?;
         cfg.server_url = server_url;
         cfg.username = username;
         cfg.save(&self.config_path)?;
         self.secrets.save(&cred)?;
+        *self.client.lock().unwrap() = Some(Arc::new(client));
         Ok(state)
     }
 
@@ -86,22 +90,24 @@ impl SessionManager {
         let Some(cred) = self.secrets.load()? else {
             return Ok(None);
         };
-        Ok(Some(
-            self.try_connect(&cfg.server_url, &cfg.username, cred)
-                .await?,
-        ))
+        let (client, state) = self.probe(&cfg.server_url, &cfg.username, cred).await?;
+        *self.client.lock().unwrap() = Some(Arc::new(client));
+        Ok(Some(state))
     }
 
-    async fn try_connect(
+    /// Builds a client and probes the server. Does NOT touch `self.client` —
+    /// callers decide when (and whether) the probed client becomes the
+    /// manager's live connection, after any persistence they require has
+    /// succeeded.
+    async fn probe(
         &self,
         server_url: &str,
         username: &str,
         cred: Credential,
-    ) -> Result<SessionState, SessionError> {
+    ) -> Result<(RommClient, SessionState), SessionError> {
         let client = RommClient::new(server_url, cred)?;
         let user = client.connect().await?;
-        *self.client.lock().unwrap() = Some(Arc::new(client));
-        Ok(SessionState {
+        let state = SessionState {
             connected: true,
             username: if user.username.is_empty() {
                 username.to_string()
@@ -109,7 +115,8 @@ impl SessionManager {
                 user.username
             },
             server_url: server_url.to_string(),
-        })
+        };
+        Ok((client, state))
     }
 
     pub fn disconnect(&self) -> Result<(), SessionError> {
