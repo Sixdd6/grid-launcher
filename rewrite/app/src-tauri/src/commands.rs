@@ -279,7 +279,13 @@ pub fn match_profile(executable_path: String) -> Option<ProfileSummary> {
 /// [`save_emulator`]'s merge logic. Validates `entry.name`, removes the
 /// rename source (`original_name`, case-insensitive) if any, rejects a
 /// duplicate against what remains, repoints any `default_emulators` value
-/// that named the rename source, then appends `entry`.
+/// that named the rename source, then writes `entry` back.
+///
+/// Selection fallback picks the first config-order match, so an edit must
+/// not reorder the list: when `original_name` names an entry that is still
+/// present, `entry` replaces it at its original index. Only a genuine add
+/// (blank `original_name`, or one that names no current entry) appends at
+/// the end.
 fn apply_save_emulator(
     config: &mut Config,
     original_name: &str,
@@ -290,11 +296,16 @@ fn apply_save_emulator(
     }
 
     let original = original_name.trim();
+    let mut original_index = None;
     if !original.is_empty() {
         let folded = original.to_lowercase();
-        config
+        original_index = config
             .emulators
-            .retain(|e| e.name.trim().to_lowercase() != folded);
+            .iter()
+            .position(|e| e.name.trim().to_lowercase() == folded);
+        if let Some(idx) = original_index {
+            config.emulators.remove(idx);
+        }
     }
 
     let new_name_folded = entry.name.trim().to_lowercase();
@@ -318,7 +329,10 @@ fn apply_save_emulator(
         }
     }
 
-    config.emulators.push(entry);
+    match original_index {
+        Some(idx) => config.emulators.insert(idx, entry),
+        None => config.emulators.push(entry),
+    }
     Ok(())
 }
 
@@ -461,6 +475,29 @@ mod merge_tests {
         let mut config = config_with(&["Dolphin"], &[]);
         apply_save_emulator(&mut config, "Nonexistent", entry("PCSX2")).unwrap();
         assert_eq!(config.emulators, vec![entry("Dolphin"), entry("PCSX2")]);
+    }
+
+    /// Selection fallback is config-order-first, so editing an entry must not
+    /// move it — otherwise editing entry #1 silently changes which emulator
+    /// auto-launches.
+    #[test]
+    fn save_edit_first_entry_keeps_its_index_and_order() {
+        let mut config = config_with(&["Dolphin", "PCSX2", "Yuzu"], &[]);
+        apply_save_emulator(&mut config, "Dolphin", entry("Dolphin Updated")).unwrap();
+        assert_eq!(
+            config.emulators,
+            vec![entry("Dolphin Updated"), entry("PCSX2"), entry("Yuzu")]
+        );
+    }
+
+    #[test]
+    fn save_rename_in_place_keeps_position() {
+        let mut config = config_with(&["Dolphin", "PCSX2", "Yuzu"], &[]);
+        apply_save_emulator(&mut config, "PCSX2", entry("PCSX2 Renamed")).unwrap();
+        assert_eq!(
+            config.emulators,
+            vec![entry("Dolphin"), entry("PCSX2 Renamed"), entry("Yuzu")]
+        );
     }
 
     // --- apply_delete_emulator ------------------------------------------------

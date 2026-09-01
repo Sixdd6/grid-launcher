@@ -86,7 +86,18 @@ pub fn run() {
                 launch.set_notify(Arc::new(move |snapshot| {
                     let _ = handle.emit("sessions-changed", snapshot);
                 }));
-                launch.spawn_poll_loop();
+                // `.setup` runs on the main thread with no tokio runtime
+                // entered, but `spawn_poll_loop` calls `tokio::spawn`
+                // internally, which panics ("there is no reactor running")
+                // outside of one. Rule: any non-command Tauri code that
+                // reaches `tokio::spawn` must go through
+                // `tauri::async_runtime::spawn` (or otherwise run inside
+                // Tauri's async runtime) first, so the inner `tokio::spawn`
+                // inherits a valid context.
+                let launch_for_loop = launch.clone();
+                tauri::async_runtime::spawn(async move {
+                    launch_for_loop.spawn_poll_loop();
+                });
             }
             Ok(())
         })

@@ -12,9 +12,14 @@
   let defaults = $state<LaunchDefaults | null>(null);
   let defaultsError = $state<string | null>(null);
 
-  // 'new' for the add form, or the entry's current name while editing it —
-  // saveEmulator's originalName arg so a rename can find & replace itself.
-  let editing = $state<'new' | string | null>(null);
+  // Tagged rather than a bare string sentinel: a string-based 'new' marker
+  // would make an emulator literally named "new" impossible to edit (its
+  // name would collide with the add-mode sentinel and saveEmulator's
+  // originalName arg would come out blank, so the save gets rejected as a
+  // duplicate against itself). `name` is the entry's current name, used as
+  // saveEmulator's originalName so a rename can find & replace itself.
+  type Editing = { mode: 'add' } | { mode: 'edit'; name: string } | null;
+  let editing = $state<Editing>(null);
   let formName = $state('');
   let formPath = $state('');
   let formArgs = $state('');
@@ -72,7 +77,7 @@
   }
 
   function openAdd() {
-    editing = 'new';
+    editing = { mode: 'add' };
     formName = '';
     formPath = '';
     formArgs = '';
@@ -81,7 +86,7 @@
   }
 
   function openEdit(entry: EmulatorEntry) {
-    editing = entry.name;
+    editing = { mode: 'edit', name: entry.name };
     formName = entry.name;
     formPath = entry.path;
     formArgs = entry.args;
@@ -118,7 +123,7 @@
 
   async function saveForm() {
     if (editing === null) return;
-    const originalName = editing === 'new' ? '' : editing;
+    const originalName = editing.mode === 'add' ? '' : editing.name;
     // Backend stores the name as-given; trim client-side so a name typed
     // with stray whitespace doesn't get persisted verbatim.
     const entry: EmulatorEntry = { name: formName.trim(), path: formPath, args: formArgs };
@@ -241,7 +246,7 @@
 
     {#if editing !== null}
       <section class="form-section">
-        <h3>{editing === 'new' ? 'Add emulator' : 'Edit emulator'}</h3>
+        <h3>{editing?.mode === 'add' ? 'Add emulator' : 'Edit emulator'}</h3>
         <form
           onsubmit={(e) => {
             e.preventDefault();

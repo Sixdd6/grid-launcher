@@ -128,12 +128,15 @@ impl LaunchService {
         *self.notify.write().unwrap() = Some(f);
     }
 
-    /// The running games. `warning` is always `None` here — a warning only
-    /// ever reaches the listener, attached to the snapshot that reports the
-    /// early exit that produced it.
+    /// The running games, newest-first (mirrors [`crate::library::queue::QueueState::snapshot`]).
+    /// `warning` is always `None` here — a warning only ever reaches the
+    /// listener, attached to the snapshot that reports the early exit that
+    /// produced it.
     pub fn snapshot(&self) -> SessionsSnapshot {
+        let mut sessions = self.sessions.list();
+        sessions.reverse();
         SessionsSnapshot {
-            sessions: self.sessions.list(),
+            sessions,
             warning: None,
         }
     }

@@ -251,6 +251,29 @@ async fn stop_removes_the_session_within_the_poll_budget() {
 }
 
 #[tokio::test]
+async fn snapshot_lists_sessions_newest_first() {
+    // Mirrors QueueState::snapshot's newest-first convention (see
+    // crates/grid-core/src/library/queue.rs).
+    let h = Harness::new();
+    let exe = h.stub("sleeper", "sleep 30");
+    h.write_config(vec![entry("Stub", &exe, "%rom%")], &[("SNES", "Stub")]);
+    h.install_game(7, "Chrono", "SNES");
+    h.install_game(8, "Turok", "SNES");
+
+    let service = h.service();
+    let first = service.launch(7).await.unwrap();
+    let second = service.launch(8).await.unwrap();
+
+    let sessions = service.snapshot().sessions;
+    assert_eq!(sessions.len(), 2);
+    let ids: Vec<u64> = sessions.iter().map(|s| s.id).collect();
+    assert_eq!(ids, vec![second.id, first.id]);
+
+    service.stop(first.id);
+    service.stop(second.id);
+}
+
+#[tokio::test]
 async fn an_instant_exit_removes_the_session_and_warns() {
     let h = Harness::new();
     let exe = h.stub("quitter", "exit 3");
