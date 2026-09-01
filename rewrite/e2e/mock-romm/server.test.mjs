@@ -293,12 +293,27 @@ test("an explicit ?e2e_throttle=0 request is not throttled even with a server-wi
       (r) => r.json(),
     );
     const file = detail.files[0];
+    // Must exceed one chunk (like the other multi-chunk tests above) — a
+    // fetch() resolves as soon as headers arrive, not once the body is
+    // fully read, so a single-chunk body would let this pass even if the
+    // throttling logic were still broken. Reading the whole body below is
+    // what actually exercises the override.
+    assert.ok(file.file_size_bytes > 20 * 1024, "expected the big fixture to exceed one chunk");
     const start = Date.now();
-    await fetch(
+    const res = await fetch(
       `${handle.url}/api/roms/301/content/${encodeURIComponent(file.file_name)}?file_ids=${file.id}&e2e_throttle=0`,
       { headers: authHeader() },
     );
-    assert.ok(Date.now() - start < 1000, "e2e_throttle=0 should override the server-wide default");
+    const buf = Buffer.from(await res.arrayBuffer());
+    const elapsed = Date.now() - start;
+    assert.equal(buf.length, file.file_size_bytes);
+    // At the 5000ms server-wide default this fixture (~15 chunks) would take
+    // well over a minute; a threshold two orders of magnitude below that
+    // still leaves plenty of room for slow CI without masking a regression.
+    assert.ok(
+      elapsed < 1000,
+      `e2e_throttle=0 should override the server-wide default, took ${elapsed}ms`,
+    );
   } finally {
     await handle.close();
   }

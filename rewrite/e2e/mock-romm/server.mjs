@@ -335,9 +335,22 @@ function handleRequest(req, res, state) {
     const contentType = fileName.toLowerCase().endsWith(".zip")
       ? "application/zip"
       : "application/octet-stream";
-    const requestedThrottle = Number(requestUrl.searchParams.get("e2e_throttle"));
+    // Number(null) and Number("0") are both 0, so reading the param straight
+    // into Number() cannot tell "absent" from "explicit ?e2e_throttle=0" —
+    // the explicit-zero override then silently lost to defaultThrottleMs.
+    // Keep "absent" as null through the parse so it only falls back to the
+    // server-wide default when the caller genuinely supplied nothing.
+    const rawThrottle = requestUrl.searchParams.get("e2e_throttle");
+    let requestedThrottle = rawThrottle === null ? null : Number(rawThrottle);
+    if (requestedThrottle !== null && Number.isNaN(requestedThrottle)) {
+      requestedThrottle = null;
+    }
     const throttleMs =
-      requestedThrottle > 0 ? requestedThrottle : state.defaultThrottleMs > 0 ? state.defaultThrottleMs : 0;
+      requestedThrottle !== null
+        ? Math.max(0, requestedThrottle)
+        : state.defaultThrottleMs > 0
+          ? state.defaultThrottleMs
+          : 0;
     if (throttleMs > 0) {
       sendBufferThrottled(res, 200, contentType, bytes, throttleMs).catch(() => {
         // The client (or a test) closing the connection mid-download is an

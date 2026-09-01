@@ -21,7 +21,7 @@ if [ -d e2e ]; then
   scan_dirs+=(e2e)
 fi
 suspicious=$(grep -rnE "(Bearer|token|password)[\"': =]+[A-Za-z0-9+/_-]{30,}" \
-  "${scan_dirs[@]}" --include="*.rs" --include="*.ts" --include="*.svelte" --include="*.json" \
+  "${scan_dirs[@]}" --include="*.rs" --include="*.ts" --include="*.svelte" --include="*.json" --include="*.mjs" \
   | grep -v -e "FAKE-TEST-TOKEN-not-real" -e "FAKE-E2E-TOKEN-not-real" || true)
 if [ -n "$suspicious" ]; then
   echo "Possible real credential in committed code/fixtures:" >&2

@@ -13,7 +13,7 @@ Spec: `../docs/superpowers/specs/2026-08-31-rust-tauri-walking-skeleton-design.m
     cd app && npm install && npx tauri dev
 
 ## Test
-    cargo test --workspace              # Rust — 312 tests
+    cargo test --workspace              # Rust — 316 tests
     cd app && npm test                  # frontend — 53 tests
     npx svelte-check                    # SvelteKit type check
     scripts/check_secret_hygiene.sh     # secret rules (unchanged)

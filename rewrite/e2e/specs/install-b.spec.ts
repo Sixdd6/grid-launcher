@@ -29,6 +29,10 @@ describe('install (b): relaunch, badge persists, then uninstall', () => {
   });
 
   it('keeps the installed badge across a restart', async () => {
+    // The library path saved in part A must have persisted into config.toml
+    // and been restored — otherwise the banner from install-a would be back.
+    await expect($(testId('library-path-banner'))).not.toExist();
+
     await $(testId('platform-btn-1')).click();
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('installed-badge-101')).waitForExist({

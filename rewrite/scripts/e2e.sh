@@ -117,6 +117,20 @@ if [[ "${E2E_INNER:-}" != "1" ]]; then
       exit 2
     fi
   else
+    if [[ ! -d "$APP_DIR/node_modules" ]]; then
+      say "installing app dependencies"
+      # `npx tauri build` below resolves `tauri` from app/node_modules; with
+      # that directory missing (a fresh CI checkout) npx instead fetches
+      # whatever the npm registry's unscoped `tauri` package is — an
+      # unrelated, ancient v1 CLI — and the build fails confusingly far from
+      # its real cause. Install first, same as the e2e/ deps just above.
+      if [[ -f "$APP_DIR/package-lock.json" ]]; then
+        ( cd "$APP_DIR" && npm ci --no-audit --no-fund ) || die "npm ci failed"
+      else
+        ( cd "$APP_DIR" && npm install --no-audit --no-fund ) || die "npm install failed"
+      fi
+    fi
+
     say "building the e2e app binary"
     # The ONLY supported e2e build. The cargo feature and the merge config are
     # a pair and must never be used apart:
@@ -151,15 +165,30 @@ if [[ "${E2E_INNER:-}" != "1" ]]; then
   fi
 
   RUN_DIR="$(mktemp -d -t grid-e2e-XXXXXXXX)"
+  # Everything downstream — the teardown trap included — trusts RUN_DIR to be
+  # a specific, freshly created directory before it ever greps /proc or runs
+  # `rm -rf` on it. An empty or unexpected RUN_DIR (mktemp failing without a
+  # nonzero exit under `set -o pipefail`-less command substitution, or some
+  # future refactor) must be caught HERE, before the dbus-run-session re-exec
+  # installs the cleanup trap — not discovered later as a sweep that kills
+  # every readable /proc/*/environ matching an empty string, or an `rm -rf ""`
+  # that resolves relative to the caller's cwd.
+  if [[ -z "$RUN_DIR" || ! -d "$RUN_DIR" || "$RUN_DIR" != /tmp/grid-e2e-* ]]; then
+    printf 'e2e: mktemp did not produce a usable run directory (got: %q)\n' "${RUN_DIR:-}" >&2
+    exit 2
+  fi
   export E2E_RUN_DIR="$RUN_DIR"
   # gnome-keyring stores its keyring files under XDG_DATA_HOME, and its control
   # socket under XDG_RUNTIME_DIR. Redirecting BOTH into the run directory keeps
   # the throwaway "test"-password keyring out of ~/.local/share/keyrings and
   # keeps its socket out of /run/user/$UID, where a surviving daemon could
-  # otherwise hijack the real session's unlocks.
+  # otherwise hijack the real session's unlocks. XDG_CACHE_HOME is redirected
+  # too — WebKit writes its disk cache there, the last real-home write path
+  # left otherwise.
   export XDG_DATA_HOME="$RUN_DIR/xdg-data"
   export XDG_RUNTIME_DIR="$RUN_DIR/xdg-runtime"
-  mkdir -p "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR"
+  export XDG_CACHE_HOME="$RUN_DIR/xdg-cache"
+  mkdir -p "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR" "$XDG_CACHE_HOME"
   chmod 700 "$XDG_RUNTIME_DIR"
   export E2E_APP_BINARY="$APP_BINARY"
   export E2E_INNER=1
@@ -173,6 +202,19 @@ RUN_DIR="$E2E_RUN_DIR"
 LOG_DIR="$RUN_DIR/logs"
 mkdir -p "$LOG_DIR"
 mock_pid=""
+# Set by the INT/TERM handler below so cleanup() can force a nonzero exit
+# even when the interrupted command itself happened to leave $? at 0.
+signal_caught=""
+
+# The process sweep below matches by substring against every readable
+# /proc/*/environ on the system, and cleanup() runs `rm -rf "$RUN_DIR"` — an
+# empty or malformed RUN_DIR would turn the first into "kill every process
+# whose environment is readable" and the second into an accidental `rm -rf`
+# of an unintended path. Both must refuse to act unless RUN_DIR still looks
+# like the one mktemp created for this run.
+run_dir_is_safe() {
+  [[ -n "$RUN_DIR" && -d "$RUN_DIR" && "$RUN_DIR" == /tmp/grid-e2e-* ]]
+}
 
 # GTK picks its backend by probing: with WAYLAND_DISPLAY set it connects to
 # the session's real compositor through XDG_RUNTIME_DIR and ignores DISPLAY
@@ -200,6 +242,10 @@ protected_pids() {
 # run" — safer than a process-group kill, which misses them entirely.
 kill_run_processes() {
   local sig="$1" p protected
+  if ! run_dir_is_safe; then
+    printf 'e2e: refusing to sweep processes — RUN_DIR is not a valid e2e run directory (%q)\n' "${RUN_DIR:-}" >&2
+    return 1
+  fi
   protected="$(protected_pids)"
   for p in /proc/[0-9]*; do
     p="${p#/proc/}"
@@ -222,16 +268,30 @@ stop_mock() {
 cleanup() {
   local rc=$?
   trap - EXIT INT TERM
+  # An interrupted foreground command can still leave $? at 0 (e.g. the
+  # signal arrived between commands), which would otherwise report success
+  # for a run the user or CI killed on purpose.
+  if [[ -n "$signal_caught" && "$rc" == "0" ]]; then
+    case "$signal_caught" in
+      INT) rc=130 ;;
+      TERM) rc=143 ;;
+      *) rc=1 ;;
+    esac
+  fi
   stop_mock
-  kill_run_processes TERM
-  sleep 1
-  kill_run_processes KILL
-  sleep 1
+  if run_dir_is_safe; then
+    kill_run_processes TERM
+    sleep 1
+    kill_run_processes KILL
+    sleep 1
+  else
+    printf 'e2e: RUN_DIR (%q) failed validation — skipping the process sweep and directory removal\n' "${RUN_DIR:-}" >&2
+  fi
   if [[ "${E2E_KEEP:-}" == "1" ]]; then
     printf 'e2e: run directory kept at %s\n' "$RUN_DIR"
   elif (( rc != 0 )); then
     printf 'e2e: logs kept in %s\n' "$LOG_DIR" >&2
-  else
+  elif run_dir_is_safe; then
     # Retry: a helper that ignored SIGTERM can recreate its data directory
     # after the first rm, which is how stale run dirs used to pile up.
     local i
@@ -245,7 +305,13 @@ cleanup() {
   fi
   exit $rc
 }
-trap cleanup EXIT INT TERM
+on_signal() {
+  signal_caught="$1"
+  cleanup
+}
+trap cleanup EXIT
+trap 'on_signal INT' INT
+trap 'on_signal TERM' TERM
 
 say "unlocking a throwaway gnome-keyring"
 echo -n 'test' | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1 \
@@ -346,8 +412,12 @@ run_group_attempt() {
 
   local mock_args
   mock_args="$(mock_args_for_group "$name")"
+  # Append (>>), not overwrite (>): the seed script above already wrote into
+  # this same log file for a seeded group, and a plain `>` here would
+  # silently discard that seed output right before a failure dump goes
+  # looking for it.
   # shellcheck disable=SC2086 # mock_args is a small, script-controlled word list
-  ( cd "$E2E_DIR" && exec node mock-romm/server.mjs --port 0 $mock_args ) >"$attempt_mock_log" 2>&1 &
+  ( cd "$E2E_DIR" && exec node mock-romm/server.mjs --port 0 $mock_args ) >>"$attempt_mock_log" 2>&1 &
   mock_pid=$!
 
   local mock_url="" _

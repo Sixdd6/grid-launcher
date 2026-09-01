@@ -57,5 +57,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            rewrite/app/package-lock.json
+            rewrite/e2e/package-lock.json
       - name: End-to-end tests
         run: scripts/e2e.sh
