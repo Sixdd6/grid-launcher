@@ -165,6 +165,31 @@ fn extract_zip_entry_with_parent_dir_traversal_fails_and_deletes_dest() {
     }
 }
 
+#[test]
+fn extract_zip_entry_with_absolute_path_fails_and_deletes_dest() {
+    let dir = tempfile::tempdir().unwrap();
+    let archive = dir.path().join("evil-absolute.zip");
+    write_zip(&archive, &[("/etc/evil.txt", b"pwned" as &[u8])]);
+    let dest = dir.path().join("out");
+
+    let result = extract_archive(&archive, &dest, &mut |_, _| {});
+
+    assert!(!dest.exists());
+    match result {
+        Err(LibraryError::Extract(message)) => {
+            assert!(
+                message.contains("unsafe path"),
+                "unexpected message: {message}"
+            );
+            assert!(
+                message.contains("evil.txt"),
+                "unexpected message: {message}"
+            );
+        }
+        other => panic!("expected LibraryError::Extract, got {other:?}"),
+    }
+}
+
 // --- tar.gz / tar.xz ------------------------------------------------------------
 
 #[test]
@@ -222,6 +247,31 @@ fn extract_tar_entry_with_parent_dir_traversal_fails_and_deletes_dest() {
     }
 }
 
+#[test]
+fn extract_tar_entry_with_absolute_path_fails_and_deletes_dest() {
+    let dir = tempfile::tempdir().unwrap();
+    let archive = dir.path().join("evil-absolute.tar.gz");
+    write_tar_gz(&archive, &[("/etc/evil.txt", b"pwned" as &[u8])]);
+    let dest = dir.path().join("out");
+
+    let result = extract_archive(&archive, &dest, &mut |_, _| {});
+
+    assert!(!dest.exists());
+    match result {
+        Err(LibraryError::Extract(message)) => {
+            assert!(
+                message.contains("unsafe path"),
+                "unexpected message: {message}"
+            );
+            assert!(
+                message.contains("evil.txt"),
+                "unexpected message: {message}"
+            );
+        }
+        other => panic!("expected LibraryError::Extract, got {other:?}"),
+    }
+}
+
 // --- 7z --------------------------------------------------------------------
 
 #[test]
@@ -254,10 +304,78 @@ fn extract_7z_writes_files() {
 }
 
 #[test]
+fn extract_7z_reports_intermediate_progress_for_multi_entry_archive() {
+    let dir = tempfile::tempdir().unwrap();
+    let archive = dir.path().join("multi.7z");
+    write_7z(
+        &archive,
+        &[
+            ("first.txt", b"first entry content" as &[u8]),
+            (
+                "second.txt",
+                b"second entry content, deliberately a bit longer",
+            ),
+        ],
+    );
+    let dest = dir.path().join("out");
+
+    let mut calls: Vec<(u64, u64)> = Vec::new();
+    extract_archive(&archive, &dest, &mut |processed, total| {
+        calls.push((processed, total));
+    })
+    .unwrap();
+
+    assert!(
+        calls.len() > 2,
+        "expected an initial call plus one per entry, got {calls:?}"
+    );
+
+    let (last_processed, last_total) = *calls.last().unwrap();
+    assert_eq!(last_processed, last_total);
+    assert!(last_total > 0);
+
+    let mut prev_processed = 0u64;
+    for &(processed, total) in &calls {
+        assert!(
+            processed >= prev_processed,
+            "processed must not decrease: {calls:?}"
+        );
+        assert_eq!(total, last_total, "total must stay stable: {calls:?}");
+        prev_processed = processed;
+    }
+
+    assert!(
+        calls.iter().any(|&(processed, total)| processed < total),
+        "expected at least one intermediate (not-yet-complete) progress call, got {calls:?}"
+    );
+}
+
+#[test]
 fn extract_7z_entry_with_parent_dir_traversal_fails_and_deletes_dest() {
     let dir = tempfile::tempdir().unwrap();
     let archive = dir.path().join("evil.7z");
     write_7z(&archive, &[("../evil.txt", b"pwned" as &[u8])]);
+    let dest = dir.path().join("out");
+
+    let result = extract_archive(&archive, &dest, &mut |_, _| {});
+
+    assert!(!dest.exists());
+    match result {
+        Err(LibraryError::Extract(message)) => {
+            assert!(
+                message.contains("unsafe path"),
+                "unexpected message: {message}"
+            );
+        }
+        other => panic!("expected LibraryError::Extract, got {other:?}"),
+    }
+}
+
+#[test]
+fn extract_7z_entry_with_absolute_path_fails_and_deletes_dest() {
+    let dir = tempfile::tempdir().unwrap();
+    let archive = dir.path().join("evil-absolute.7z");
+    write_7z(&archive, &[("/etc/evil.txt", b"pwned" as &[u8])]);
     let dest = dir.path().join("out");
 
     let result = extract_archive(&archive, &dest, &mut |_, _| {});

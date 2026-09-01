@@ -136,6 +136,23 @@ fn unsafe_path_error(raw_name: &str) -> LibraryError {
     LibraryError::Extract(format!("archive contains an unsafe path: {raw_name}"))
 }
 
+/// Whether `raw_name` (the untrusted entry name, before any format-specific
+/// parsing), normalized `\` → `/`, is an absolute path.
+///
+/// None of `zip`'s `enclosed_name()` or `tar`'s `unpack_in` reject a
+/// *purely* absolute entry on their own: both silently strip the leading
+/// root and treat what remains as relative under the destination (zip only
+/// rejects a root/prefix component when it appears after a `..` has
+/// already popped the stack empty; tar's `unpack_in` explicitly documents
+/// leading `/`s as "just ignored, treated as empty components"). Our
+/// traversal policy treats an absolute path as unconditionally hostile, so
+/// every format checks the raw name for this explicitly, alongside
+/// whatever `..`-escape guard the format's own crate provides.
+fn is_absolute_entry_path(raw_name: &str) -> bool {
+    let normalized = raw_name.replace('\\', "/");
+    Path::new(&normalized).is_absolute()
+}
+
 // --- ZIP --------------------------------------------------------------------
 
 fn extract_zip(archive: &Path, dest: &Path, progress: ExtractProgress) -> Result<(), LibraryError> {
@@ -162,9 +179,14 @@ fn extract_zip(archive: &Path, dest: &Path, progress: ExtractProgress) -> Result
             .map_err(|e| LibraryError::Extract(format!("zip: {e}")))?;
         let raw_name = entry.name().to_string();
         // `enclosed_name()` treats both `/` and `\` as separators and
-        // rejects NUL bytes, absolute paths, and any path that would
-        // resolve above the extraction root, satisfying the backslash
-        // normalization + traversal guard in one call.
+        // rejects a path that would resolve above the extraction root
+        // (any `..` that pops the stack empty), satisfying the backslash
+        // normalization + `..`-escape guard in one call. It does NOT
+        // reject a purely absolute entry (it just strips the leading
+        // root), so that is checked explicitly first.
+        if is_absolute_entry_path(&raw_name) {
+            return Err(unsafe_path_error(&raw_name));
+        }
         let Some(relative) = entry.enclosed_name() else {
             return Err(unsafe_path_error(&raw_name));
         };
@@ -229,6 +251,14 @@ fn extract_tar(archive: &Path, dest: &Path, progress: ExtractProgress) -> Result
             .path()
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default();
+
+        // `unpack_in`'s own guard only rejects a `..` component; a purely
+        // absolute entry name is treated as "just ignored, empty
+        // components" and silently rebased under `dest`. Check the raw
+        // name explicitly before ever calling into it.
+        if is_absolute_entry_path(&display_name) {
+            return Err(unsafe_path_error(&display_name));
+        }
 
         let extracted = entry
             .unpack_in(dest)
@@ -308,6 +338,10 @@ fn extract_7z_pure(
             io::copy(content, &mut out_file)?;
             processed += entry.size();
         }
+        // Emit after every member (directory or file), mirroring the zip
+        // extractor: the last call here — for the archive's final entry —
+        // is what leaves the caller with processed == total.
+        progress(processed, total);
         Ok(true)
     });
 
@@ -318,19 +352,19 @@ fn extract_7z_pure(
     }
     result.map_err(|e| SevenZFailure::Other(format!("7z: {e}")))?;
 
-    progress(total, total);
     Ok(())
 }
 
 /// Whether a 7z entry's name (after normalizing `\` to `/`) is absolute or
 /// contains a `..` component.
 fn is_unsafe_7z_path(raw_name: &str) -> bool {
+    if is_absolute_entry_path(raw_name) {
+        return true;
+    }
     let normalized = raw_name.replace('\\', "/");
-    let path = Path::new(&normalized);
-    path.is_absolute()
-        || path
-            .components()
-            .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_)))
+    Path::new(&normalized)
+        .components()
+        .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_)))
 }
 
 /// Absolute paths searched (after `PATH`) for a system 7-Zip executable,
