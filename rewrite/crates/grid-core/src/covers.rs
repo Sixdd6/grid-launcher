@@ -62,20 +62,29 @@ impl CoverCache {
             if let Some(p) = self.find_existing(&key) {
                 return Ok(p);
             }
-            let notify = {
-                let mut map = self.in_flight.lock().await;
-                if let Some(existing) = map.get(&key) {
-                    // Someone else is fetching: wait, then re-check the disk.
-                    Some(existing.clone())
-                } else {
-                    map.insert(key.clone(), Arc::new(tokio::sync::Notify::new()));
-                    None
-                }
-            };
-            if let Some(n) = notify {
-                n.notified().await;
+
+            let mut map = self.in_flight.lock().await;
+            if let Some(existing) = map.get(&key).cloned() {
+                // Someone else is fetching: register interest in the
+                // notification while STILL holding the map lock. The owner
+                // must also acquire this same lock to remove the entry and
+                // call notify_waiters(), so `enable()` here happens-before
+                // any possible notification. Without this, the gap between
+                // dropping the lock and awaiting `.notified()` would let a
+                // fast owner's notify_waiters() race ahead of our
+                // registration; notify_waiters() stores no permit for late
+                // registrants, so a waiter that misses it hangs forever even
+                // though the file it's waiting for already exists on disk.
+                let notified = existing.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                drop(map);
+                notified.await;
                 continue;
             }
+            map.insert(key.clone(), Arc::new(tokio::sync::Notify::new()));
+            drop(map);
+
             // We own the fetch.
             let result = self.fetch_and_store(client, &key, cover_path).await;
             let n = self.in_flight.lock().await.remove(&key);
