@@ -114,6 +114,40 @@ pub struct GameSummary {
     pub cover_path: Option<String>,
 }
 
+/// Wire shape of a `SimpleRomSchema` entry. `name` is nullable server-side
+/// (unidentified/filesystem-only ROMs commonly have no matched name) — kept
+/// as `Option<String>` here rather than on the public `GameSummary` so the
+/// pinned public interface (`name: String`) never fails to decode a real
+/// library page. `fs_name_no_ext` is the fallback, mirroring the existing
+/// Python client (`grid_launcher/server/catalog.py:284`:
+/// `item.get("name") or item.get("fs_name_no_ext")`).
+#[derive(Deserialize)]
+struct RawGameSummary {
+    id: i64,
+    name: Option<String>,
+    #[serde(default)]
+    fs_name_no_ext: Option<String>,
+    platform_id: i64,
+    #[serde(rename = "path_cover_small")]
+    cover_path: Option<String>,
+}
+
+impl From<RawGameSummary> for GameSummary {
+    fn from(raw: RawGameSummary) -> Self {
+        let name = raw
+            .name
+            .filter(|n| !n.is_empty())
+            .or(raw.fs_name_no_ext)
+            .unwrap_or_default();
+        GameSummary {
+            id: raw.id,
+            name,
+            platform_id: raw.platform_id,
+            cover_path: raw.cover_path,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct Paged<T> {
     items: Vec<T>,
@@ -139,7 +173,7 @@ impl RommClient {
         let mut out = Vec::new();
         let mut offset = 0usize;
         loop {
-            let page: Paged<GameSummary> = self
+            let page: Paged<RawGameSummary> = self
                 .get_json(
                     "/api/roms",
                     &[
@@ -152,7 +186,7 @@ impl RommClient {
                 )
                 .await?;
             let n = page.items.len();
-            out.extend(page.items);
+            out.extend(page.items.into_iter().map(GameSummary::from));
             if n < PAGE_SIZE {
                 break;
             }
