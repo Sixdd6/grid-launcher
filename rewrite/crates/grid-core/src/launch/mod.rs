@@ -3,6 +3,7 @@
 //! `grid_launcher/ui/mixins/emulator_ui_mixin.py`.
 
 pub mod profiles;
+pub mod selection;
 
 /// Errors raised while resolving or running an emulated launch. Extended by
 /// later tasks in this module tree (spawn, sessions); today it carries only
