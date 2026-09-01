@@ -399,6 +399,17 @@ impl InstallService {
     fn spawn_download(self: &Arc<Self>, id: u64, job: InstallJob) {
         let cancel = Arc::new(AtomicBool::new(false));
         self.cancel_flags.lock().unwrap().insert(id, cancel.clone());
+        // A cancel that arrived after the entry took the download slot but
+        // before the flag above existed found nothing to flip. The
+        // `Cancelling` status it left behind is the record of it, so honour
+        // that here instead of downloading a file nobody wants.
+        let cancelled = matches!(
+            self.queue.lock().unwrap().entry(id).map(|e| e.status),
+            Some(DownloadStatus::Cancelling)
+        );
+        if cancelled {
+            cancel.store(true, Ordering::Relaxed);
+        }
         let service = self.clone();
         tokio::spawn(async move {
             let result = {
