@@ -51,6 +51,8 @@ STAGE_GROUPS=(
   "library:specs/library.spec.ts"
   "install:specs/install-a.spec.ts specs/install-b.spec.ts"
   "downloads:specs/downloads.spec.ts"
+  "emulators:specs/emulators.spec.ts"
+  "launch:specs/launch.spec.ts"
 )
 
 # Run only the named groups by passing them as arguments, e.g.
@@ -77,13 +79,18 @@ build_fingerprint() {
 # ---------------------------------------------------------------------------
 if [[ "${E2E_INNER:-}" != "1" ]]; then
   missing=()
-  for tool in xvfb-run dbus-run-session gnome-keyring-daemon node npm; do
+  # sqlite3 is the `launch` group's seed-script dependency (see
+  # seed_script_for_group / e2e/seed/launch-seed.mjs) — it writes
+  # grid-launcher.db directly, matching the schema in
+  # crates/grid-core/src/library/registry.rs, rather than going through the
+  # UI (Ruling A in task-7-brief.md).
+  for tool in xvfb-run dbus-run-session gnome-keyring-daemon node npm sqlite3; do
     command -v "$tool" >/dev/null 2>&1 || missing+=("$tool")
   done
   if (( ${#missing[@]} > 0 )); then
     printf 'e2e: missing prerequisite(s): %s\n' "${missing[*]}" >&2
     printf 'e2e: install them with:\n' >&2
-    printf '  sudo dnf install -y xorg-x11-server-Xvfb dbus-daemon gnome-keyring nodejs npm\n' >&2
+    printf '  sudo dnf install -y xorg-x11-server-Xvfb dbus-daemon gnome-keyring nodejs npm sqlite\n' >&2
     exit 2
   fi
 
@@ -297,6 +304,18 @@ mock_args_for_group() {
   esac
 }
 
+# The `launch` group's data dir is pre-seeded (Ruling A, task-7-brief.md):
+# config.toml, grid-launcher.db, the "installed" ROM file, and the emulator
+# stub scripts are all written by this Node script BEFORE the app starts, so
+# launch.spec.ts never has to install anything through the UI (Task 6
+# already covers that flow). Every other group starts from a bare data dir.
+seed_script_for_group() {
+  case "$1" in
+    launch) printf '%s' "$E2E_DIR/seed/launch-seed.mjs" ;;
+    *) printf '' ;;
+  esac
+}
+
 # Runs every spec of one group against a freshly created data dir and mock.
 # Sets attempt_failed_stage / attempt_failed_log / attempt_out_dir on failure.
 run_group_attempt() {
@@ -307,9 +326,23 @@ run_group_attempt() {
   attempt_out_dir=""
   mkdir -p "$data_dir"
 
+  # Set before the seed step (not just before the mock starts) so a seed
+  # failure still leaves dump_failure() something meaningful — not a stale
+  # log path left over from a previous group/attempt.
   attempt_mock_log="$LOG_DIR/$name-attempt-$attempt.mock.log"
   attempt_request_log="$E2E_DIR/last-run-requests.log"
-  rm -f "$attempt_request_log"
+  rm -f "$attempt_request_log" "$attempt_mock_log"
+
+  local seed_script
+  seed_script="$(seed_script_for_group "$name")"
+  if [[ -n "$seed_script" ]]; then
+    if ! node "$seed_script" "$data_dir" >"$attempt_mock_log" 2>&1; then
+      printf 'e2e: seed script failed for stage %s\n' "$name" >&2
+      tail -n 40 "$attempt_mock_log" >&2
+      attempt_failed_stage="$name (seed script)"
+      return 1
+    fi
+  fi
 
   local mock_args
   mock_args="$(mock_args_for_group "$name")"

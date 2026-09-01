@@ -204,7 +204,7 @@
     tabindex="-1"
     onkeydown={onKey}
   >
-    <button class="close" onclick={onClose} aria-label="Close">×</button>
+    <button data-testid="emulators-close" class="close" onclick={onClose} aria-label="Close">×</button>
     <h2>Emulators</h2>
 
     <section class="list-section">

@@ -53,3 +53,12 @@ export const INSTALL_TIMEOUT = 10_000;
  * wdio/WebDriver round-trip overhead without becoming a flaky spec.
  */
 export const THROTTLED_DOWNLOAD_TIMEOUT = 20_000;
+/**
+ * Upper bound for a session to disappear (the `details-playing-chip`
+ * clearing) after `stop_game` sends SIGTERM. The kill itself is immediate,
+ * but removing the session from the store only happens on the next reap:
+ * `LaunchService`'s background poll loop ticks every 2500ms in production
+ * (`POLL_INTERVAL`, launch/mod.rs) — this leaves comfortable margin on top
+ * of that one tick.
+ */
+export const REAP_TIMEOUT = 4_000;
