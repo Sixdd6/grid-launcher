@@ -1,6 +1,7 @@
 pub mod extract;
 pub mod launch_select;
 pub mod paths;
+pub mod queue;
 pub mod registry;
 
 #[derive(Debug, thiserror::Error)]
