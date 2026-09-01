@@ -74,10 +74,11 @@ describe('matchesInstalled', () => {
     expect(matchesInstalled(r, game({ id: 42, name: 'Chrono Trigger' }), 'SNES')).toBe(false);
   });
 
-  it('falls back to identity match even when rom_id is set but mismatched', () => {
-    // Per the matcher rule ("rom_id match first, else identity match"), a
-    // mismatched rom_id does not block the identity fallback.
+  it('does NOT fall back to identity when rom_id is set but mismatched, even if title/platform match', () => {
+    // The rom_id comparison is authoritative once the row has one (docs/porting/
+    // 03-library-install.md identity rules) — no identity rescue, otherwise a
+    // duplicate-title library would badge/uninstall the wrong game.
     const r = row({ rom_id: 7, title: 'Chrono Trigger', platform: 'SNES' });
-    expect(matchesInstalled(r, game({ id: 42, name: 'Chrono Trigger' }), 'SNES')).toBe(true);
+    expect(matchesInstalled(r, game({ id: 42, name: 'Chrono Trigger' }), 'SNES')).toBe(false);
   });
 });

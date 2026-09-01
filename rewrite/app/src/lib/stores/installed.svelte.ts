@@ -14,13 +14,17 @@ export async function refresh(): Promise<void> {
 }
 
 /**
- * Pure matcher (exported for unit tests): a registry row identifies the same
- * game as `game` on this platform if its rom_id matches, else if title and
- * platform match case/whitespace-insensitively (covers rows installed before
- * a rom_id was recorded, or roms re-linked on the server).
+ * Pure matcher (exported for unit tests). Per docs/porting/03-library-install.md's
+ * identity rules ("if both sides have a non-empty rom_id, compare rom ids;
+ * otherwise compare the identity key"): when the row has a rom_id, that
+ * comparison is authoritative — a mismatch means NOT installed, with no
+ * identity fallback (this is what prevents a wrong-game badge/uninstall in
+ * libraries with duplicate titles). The identity fallback (case/whitespace-
+ * insensitive title+platform) applies only when the row's rom_id is null
+ * (covers rows installed before a rom_id was recorded).
  */
 export function matchesInstalled(row: InstalledGame, game: GameSummary, platformName: string): boolean {
-  if (row.rom_id !== null && row.rom_id === game.id) return true;
+  if (row.rom_id !== null) return row.rom_id === game.id;
   return (
     row.title.trim().toLowerCase() === game.name.trim().toLowerCase() &&
     row.platform.trim().toLowerCase() === platformName.trim().toLowerCase()
