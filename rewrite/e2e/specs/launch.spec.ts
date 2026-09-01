@@ -200,9 +200,14 @@ describe('launch', () => {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'details-error never appeared for the unmapped RetroArch default',
     });
+    // The template layer's own validation error ("No RetroArch core is
+    // configured...") is wrapped by prepare_emulator_launch (spawn.rs) as
+    // "Invalid launch arguments: <e>" — pinned by spawn.rs's
+    // an_argument_failure_is_wrapped unit test. Assert the full wrapped
+    // string verbatim, not just the inner message.
     await expect($(testId('details-error'))).toHaveText(
-      'No RetroArch core is configured for this platform. Set one in Emulators > Defaults.',
-      { containing: true },
+      'Invalid launch arguments: No RetroArch core is configured for this platform. ' +
+        'Set one in Emulators > Defaults.',
     );
   });
 });
