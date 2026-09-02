@@ -14,7 +14,7 @@ Spec: `../docs/superpowers/specs/2026-08-31-rust-tauri-walking-skeleton-design.m
 
 ## Test
     cargo test --workspace              # Rust — 316 tests
-    cd app && npm test                  # frontend — 53 tests
+    cd app && npm test                  # frontend — 67 tests
     npx svelte-check                    # SvelteKit type check
     scripts/check_secret_hygiene.sh     # secret rules (unchanged)
     python -m unittest discover tests/  # Python reference suite — ~1624 tests

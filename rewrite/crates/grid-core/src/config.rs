@@ -276,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn emulator_entry_without_source_fields_serializes_byte_identically_to_before() {
+    fn emulator_entry_without_source_fields_writes_no_source_keys() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.toml");
         let cfg = Config {
