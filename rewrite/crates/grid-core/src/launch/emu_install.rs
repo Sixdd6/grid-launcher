@@ -6,6 +6,9 @@
 //! `launchable_emulator_file` (`grid_launcher/emulator/launch.py:27-28`).
 //! See `docs/porting/04-emulator-launch.md` §12.
 //!
+//! Deviation note: executable selection also accepts an extensionless file
+//! whose executable bit is set (unix only) — see [`launchable_installed_file`].
+//!
 //! Parity note: several catalog `source` blocks carry a `launch_executable`
 //! key. The Python reference never reads it — executable choice is only the
 //! scoring ported here — so this module never reads it either.
@@ -122,6 +125,49 @@ pub fn launchable_emulator_file(path: &Path) -> bool {
     )
 }
 
+/// Whether `name` (a bare file name) is an "extensionless executable": it
+/// carries no `.` at all, so `libfoo.so` (a suffix) and `.hidden` (a dot
+/// file) are both out, while `redream` and `pcsx2-qt` qualify.
+fn extensionless_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains('.')
+}
+
+/// Whether an already-extracted file is launchable, given its filesystem
+/// metadata: either [`launchable_emulator_file`]'s suffix rule (all
+/// platforms), or — unix only — an extensionless name whose executable bit
+/// is set.
+///
+/// DEVIATION from the reference, which is name-only
+/// (`launchable_emulator_file`, launch.py:27-28) and therefore can never
+/// install an emulator shipping a bare ELF binary (Redream). The metadata is
+/// only available where real paths are walked, so this predicate lives
+/// alongside [`collect_launchable_files`] and the name-only
+/// [`launchable_emulator_file`] keeps serving its other callers unchanged.
+/// See `docs/porting/04-emulator-launch.md` "Rust port deviations
+/// (milestone 4)".
+fn launchable_installed_file(path: &Path, meta: &fs::Metadata) -> bool {
+    if launchable_emulator_file(path) {
+        return true;
+    }
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    extensionless_name(&name) && has_executable_bit(meta)
+}
+
+#[cfg(unix)]
+fn has_executable_bit(meta: &fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    meta.permissions().mode() & 0o111 != 0
+}
+
+/// Windows has no executable bit; the suffix set is the whole rule there.
+#[cfg(not(unix))]
+fn has_executable_bit(_meta: &fs::Metadata) -> bool {
+    false
+}
+
 /// `title`, trimmed, casefolded, and split on runs of non-`[a-z0-9]`
 /// characters, keeping tokens longer than 2 characters
 /// (`select_emulator_executable_path`, autoconfig.py:26-27).
@@ -134,7 +180,7 @@ fn title_tokens(title_casefold: &str) -> Vec<String> {
 }
 
 /// Recursively collects every launchable file under `dir` (`rglob("*")`
-/// filtered by [`launchable_emulator_file`], autoconfig.py:59-62).
+/// filtered by [`launchable_installed_file`], autoconfig.py:59-62).
 /// Directory and file symlinks are followed, matching `rglob`; an unreadable
 /// directory contributes nothing rather than failing the walk.
 fn collect_launchable_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -145,7 +191,7 @@ fn collect_launchable_files(dir: &Path, out: &mut Vec<PathBuf>) {
         let path = entry.path();
         match fs::metadata(&path) {
             Ok(meta) if meta.is_dir() => collect_launchable_files(&path, out),
-            Ok(meta) if meta.is_file() && launchable_emulator_file(&path) => out.push(path),
+            Ok(meta) if meta.is_file() && launchable_installed_file(&path, &meta) => out.push(path),
             _ => {}
         }
     }
@@ -237,6 +283,14 @@ mod tests {
     fn touch(path: &Path) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, b"").unwrap();
+    }
+
+    /// [`touch`], then sets `mode` on the created file.
+    #[cfg(unix)]
+    fn touch_with_mode(path: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        touch(path);
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
     }
 
     // --- emulator_install_dir -------------------------------------------
@@ -460,6 +514,86 @@ mod tests {
 
         let picked = select_executable("Emu", &install_dir, &archive).unwrap();
         assert_eq!(picked, archive);
+    }
+
+    // --- select_executable: extensionless executable-bit files (unix) -------
+
+    #[cfg(unix)]
+    #[test]
+    fn select_executable_accepts_a_bare_executable_bit_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let install_dir = dir.path().join("install");
+        touch_with_mode(&install_dir.join("redream"), 0o755);
+        touch(&install_dir.join("readme.txt"));
+
+        let picked = select_executable(
+            "Redream (Sega Dreamcast)",
+            &install_dir,
+            &dir.path().join("archive.gz"),
+        )
+        .unwrap();
+        assert_eq!(picked, install_dir.join("redream"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn select_executable_rejects_an_extensionless_file_without_the_executable_bit() {
+        let dir = tempfile::tempdir().unwrap();
+        let install_dir = dir.path().join("install");
+        touch_with_mode(&install_dir.join("redream"), 0o644);
+
+        assert!(
+            select_executable("Redream", &install_dir, &dir.path().join("archive.gz")).is_none()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn select_executable_rejects_an_executable_shared_object() {
+        let dir = tempfile::tempdir().unwrap();
+        let install_dir = dir.path().join("install");
+        touch_with_mode(&install_dir.join("libredream.so"), 0o755);
+
+        assert!(
+            select_executable("Redream", &install_dir, &dir.path().join("archive.gz")).is_none()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn select_executable_rejects_a_hidden_executable_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let install_dir = dir.path().join("install");
+        touch_with_mode(&install_dir.join(".hidden"), 0o755);
+
+        assert!(select_executable("Emu", &install_dir, &dir.path().join("archive.gz")).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn select_executable_accepts_a_suffix_match_without_the_executable_bit() {
+        let dir = tempfile::tempdir().unwrap();
+        let install_dir = dir.path().join("install");
+        touch_with_mode(&install_dir.join("emu.sh"), 0o644);
+
+        let picked =
+            select_executable("Emu", &install_dir, &dir.path().join("archive.gz")).unwrap();
+        assert_eq!(picked, install_dir.join("emu.sh"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn select_executable_scores_an_extensionless_candidate_below_an_exe_on_a_tie() {
+        let dir = tempfile::tempdir().unwrap();
+        let install_dir = dir.path().join("install");
+        // Same token hits and same depth: the `.exe` preference still wins,
+        // because an extensionless candidate goes through the same tuple.
+        touch_with_mode(&install_dir.join("emu"), 0o755);
+        touch(&install_dir.join("emu.exe"));
+
+        let picked =
+            select_executable("Emu", &install_dir, &dir.path().join("archive.gz")).unwrap();
+        assert_eq!(picked, install_dir.join("emu.exe"));
     }
 
     #[test]

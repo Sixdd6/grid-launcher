@@ -47,6 +47,24 @@ fn write_zip(path: &Path, entries: &[(&str, &[u8])]) -> Vec<u8> {
     fs::read(path).unwrap()
 }
 
+/// Builds a gzipped tar at `path` from `(name, content, mode)` entries and
+/// returns its bytes.
+fn write_tar_gz(path: &Path, entries: &[(&str, &[u8], u32)]) -> Vec<u8> {
+    let file = fs::File::create(path).unwrap();
+    let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+    let mut builder = tar::Builder::new(encoder);
+    for &(name, content, mode) in entries {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(content.len() as u64);
+        header.set_mode(mode);
+        header.set_path(name).unwrap();
+        header.set_cksum();
+        builder.append(&header, content).unwrap();
+    }
+    builder.into_inner().unwrap().finish().unwrap();
+    fs::read(path).unwrap()
+}
+
 fn profile(name: &str, source: Value) -> EmulatorProfile {
     EmulatorProfile {
         name: name.to_string(),
@@ -545,6 +563,45 @@ async fn an_appimage_primary_is_kept_in_place_made_executable_and_recorded() {
         harness.config().emulators[0].path,
         appimage.to_string_lossy()
     );
+}
+
+// --- (g) extensionless executable-bit member ------------------------------------------
+
+/// A tar.gz whose only launchable member is a bare, executable-bit binary —
+/// the shape every native Linux emulator that ships an ELF (Redream) has.
+/// The install must select it, which also proves the extraction engine keeps
+/// the executable bit (without it the member is not launchable at all).
+#[cfg(unix)]
+#[tokio::test]
+async fn a_bare_executable_bit_member_is_selected_as_the_emulator() {
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_tar_gz(
+        &staging.path().join("widget.tar.gz"),
+        &[
+            ("redream", b"#!/bin/sh\n" as &[u8], 0o755),
+            ("README.txt", b"docs", 0o644),
+            // Executable, but a shared object — never launchable.
+            ("libredream.so", b"elf", 0o755),
+        ],
+    );
+
+    let harness = Harness::new(|uri| vec![profile("Redream", gitea_source(uri))]).await;
+    harness.mount_widget("redream-linux.tar.gz", bytes, 0).await;
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let install_dir = harness.install_dir("Redream-v1.0");
+    let exe = install_dir.join("redream");
+    assert!(exe.is_file(), "extracted tree missing: {}", exe.display());
+    assert_eq!(mode_of(&exe), 0o755);
+    assert_eq!(harness.config().emulators[0].path, exe.to_string_lossy());
 }
 
 // --- configured tag names the install directory ---------------------------------------

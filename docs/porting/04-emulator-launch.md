@@ -985,3 +985,10 @@ download, install) to Rust (grid-core):
     separator, or if they are not their own file name — before being joined to the install
     directory; the reference instead fails incidentally when `Path.with_name` raises
     `ValueError` on a separator-bearing name.
+12. Executable selection accepts, on unix, an extracted file whose name carries no `.` at
+    all and whose filesystem executable bit is set, alongside the reference's
+    `.exe/.bat/.cmd/.ps1/.sh/.AppImage` suffix set. Deliberate improvement: the reference's
+    name-only `launchable_emulator_file` can never install an emulator that ships a bare ELF
+    binary (the catalog's Redream tarball ships `redream`, with no extension). Dot files
+    (`.hidden`) and suffixed files (`libfoo.so`) never qualify, and windows keeps the
+    suffix-only rule.

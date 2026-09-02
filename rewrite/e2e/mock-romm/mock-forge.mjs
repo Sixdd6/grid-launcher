@@ -62,15 +62,13 @@ export const REDREAM_DOWNLOAD_URL = `https://redream.io/download/${REDREAM_ASSET
 export const REDREAM_DOWNLOAD_PATH = `/redream.io/download/${REDREAM_ASSET_NAME}`;
 
 /**
- * The `redream` tar.gz member name. Deliberately NOT the bare `redream` the
- * real tarball ships: `launchable_emulator_file`
- * (grid-core/src/launch/emu_install.rs, ported verbatim from
- * emulator/launch.py:27-28) only accepts .exe/.bat/.cmd/.ps1/.sh/.AppImage,
- * so a suffix-less binary is never picked as an emulator executable and the
- * install would fail on executable selection instead of exercising the
- * direct-scrape path this fixture exists for. See task-8-report.md.
+ * The `redream` tar.gz member name: the bare `redream` the real tarball
+ * ships, with no suffix. Selecting it exercises the executable-bit rule in
+ * `launchable_installed_file` (grid-core/src/launch/emu_install.rs) — an
+ * extracted file with no `.` in its name and its executable bit set is
+ * launchable on unix — which is why the member below is written 0755.
  */
-export const REDREAM_MEMBER_NAME = "redream.sh";
+export const REDREAM_MEMBER_NAME = "redream";
 
 /**
  * Env var the stub emulators append their argv to, one argument per line.

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -65,13 +65,13 @@ describe('emulator-catalog', () => {
   const pcsx2Path = () =>
     path.join(emulatorsDir(), `${PCSX2_NAME}-latest`, PCSX2_ASSET);
   /**
-   * The tar.gz member is `redream.sh`, not the bare `redream` the real
-   * tarball ships: `launchable_emulator_file` (grid-core
-   * launch/emu_install.rs, ported from emulator/launch.py:27-28) only
-   * accepts .exe/.bat/.cmd/.ps1/.sh/.AppImage, so a suffix-less binary is
-   * never selected as the emulator executable.
+   * The tar.gz member is the bare `redream` the real tarball ships. Picking
+   * it exercises `launchable_installed_file` (grid-core
+   * launch/emu_install.rs): on unix an extracted file with no `.` in its
+   * name and its executable bit set is launchable, alongside the reference's
+   * .exe/.bat/.cmd/.ps1/.sh/.AppImage suffix set.
    */
-  const redreamPath = () => path.join(emulatorsDir(), `${REDREAM_NAME}-nightly`, 'redream.sh');
+  const redreamPath = () => path.join(emulatorsDir(), `${REDREAM_NAME}-nightly`, 'redream');
 
   const argvFile = (): string => {
     const value = process.env.GRID_E2E_ARGV_FILE;
@@ -294,6 +294,9 @@ describe('emulator-catalog', () => {
     });
     expect(await $(testId(REDREAM_ROW)).getText()).toContain(redreamPath());
     expect(existsSync(redreamPath())).toBe(true);
+    // The recorded executable is the bare, executable-bit tar member: the
+    // extraction kept the bit, which is what made it selectable at all.
+    expect(statSync(redreamPath()).mode & 0o111).not.toBe(0);
     // The archive is deleted once its contents are merged in.
     expect(existsSync(path.join(emulatorsDir(), `${REDREAM_NAME}-nightly`, `${REDREAM_NAME}-nightly.gz`))).toBe(false);
     await closeEmulators();

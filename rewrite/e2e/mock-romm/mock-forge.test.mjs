@@ -125,6 +125,10 @@ test("serves a real gzipped tar with one 0755 member", async () => {
       header.subarray(offset, offset + length).toString("ascii").replace(/\0.*$/, "").trim();
 
     assert.equal(readField(0, 100), REDREAM_MEMBER_NAME);
+    // The member is the bare binary the real tarball ships. Both halves
+    // matter: emu_install.rs only accepts an extensionless file when its
+    // executable bit is set.
+    assert.ok(!REDREAM_MEMBER_NAME.includes("."), "the member must carry no suffix");
     assert.equal(parseInt(readField(100, 8), 8), 0o755);
     assert.equal(readField(156, 1), "0", "expected a regular-file typeflag");
     assert.equal(readField(257, 6), "ustar");

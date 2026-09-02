@@ -214,6 +214,38 @@ fn extract_tar_gz_writes_files() {
     );
 }
 
+/// The executable bit on a tar member has to survive extraction, or an
+/// emulator shipping a bare ELF binary can never be selected as launchable
+/// (`launchable_emulator_file`'s unix executable-bit rule, launch/emu_install.rs).
+#[cfg(unix)]
+#[test]
+fn extract_tar_gz_preserves_the_executable_bit() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let archive = dir.path().join("emu.tar.gz");
+    let file = fs::File::create(&archive).unwrap();
+    let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+    let mut builder = tar::Builder::new(encoder);
+    for (name, mode) in [("redream", 0o755u32), ("readme.txt", 0o644)] {
+        let content: &[u8] = b"body";
+        let mut header = tar::Header::new_gnu();
+        header.set_size(content.len() as u64);
+        header.set_mode(mode);
+        set_raw_name(&mut header, name);
+        header.set_cksum();
+        builder.append(&header, content).unwrap();
+    }
+    builder.into_inner().unwrap().finish().unwrap();
+    let dest = dir.path().join("out");
+
+    extract_archive(&archive, &dest, &mut |_, _| {}).unwrap();
+
+    let mode_of = |name: &str| fs::metadata(dest.join(name)).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode_of("redream"), 0o755);
+    assert_eq!(mode_of("readme.txt"), 0o644);
+}
+
 #[test]
 fn extract_tar_xz_writes_files() {
     let dir = tempfile::tempdir().unwrap();
