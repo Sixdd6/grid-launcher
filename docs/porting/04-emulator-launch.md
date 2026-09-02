@@ -953,3 +953,35 @@ Deliberate deviations from the reference when porting the launch module to Rust 
 5. The per-platform default picker lists all emulators rather than filtering by the supports-platform test; the test still gates automatic selection.
 6. Desktop UI gains a Stop button (reference desktop had none).
 7. No `_ensure_emulator_sync_settings` call before spawn (doc 05 deferred).
+
+## Rust port deviations (milestone 4)
+
+Deliberate deviations from the reference when porting emulator acquisition (catalog listing,
+download, install) to Rust (grid-core):
+
+1. Installed emulators are config entries only — never pseudo-rows in the installed-games
+   registry (the reference listed them as library items).
+2. Compat-tool profiles are excluded from the catalog entirely this milestone (reference
+   listed them in a separate dialog).
+3. Version checks deferred; `source_*` fields recorded now.
+4. Supplemental failures fail the install (visible) rather than partially succeeding.
+5. No firmware step after emulator install (firmware subsystem deferred).
+6. `launch_executable`, present in several catalog `source` blocks, is intentionally unread:
+   the reference never reads it either — executable choice is scoring-only — so the port
+   never reads it (parity with the reference, not a gap).
+7. Emulator archive extraction stages into a temporary `.extract-tmp` directory (supplemental
+   archives into `.supp-tmp-<n>`) that is merged into the install directory and removed,
+   rather than extracting in place.
+8. A missing launchable emulator executable after install is a visible failure ("No launchable
+   emulator executable was found after install") rather than a silently pathless entry.
+9. `merge_tree_into` resolves a file-vs-directory conflict at the destination by removing the
+   destination entry first, where the reference's `_merge_tree` raises on both conflict
+   shapes.
+10. Supplemental delete-failure warnings reuse one short form, "could not delete archive:
+    <path>", for both the game and the emulator-supplemental case; the reference uses two
+    distinct longer strings ("Extracted <title>, but could not delete archive:\n<error>" vs
+    "Applied supplemental emulator files, but could not delete archive:\n<error>").
+11. Remote asset file names are validated — rejected if empty, if they contain a path
+    separator, or if they are not their own file name — before being joined to the install
+    directory; the reference instead fails incidentally when `Path.with_name` raises
+    `ValueError` on a separator-bearing name.

@@ -24,7 +24,12 @@ Spec: `../docs/superpowers/specs/2026-08-31-rust-tauri-walking-skeleton-design.m
 
 `scripts/e2e.sh` drives the real Tauri binary with WebdriverIO. It builds an
 e2e-only build of the app, starts a mock RomM server, and runs the specs in
-`e2e/specs/` against them.
+`e2e/specs/` against them. The `emulator-catalog` group also starts a second
+mock, `e2e/mock-romm/mock-forge.mjs`, standing in for GitHub and a
+direct-download provider (redream.io); the app's `e2e` cargo feature reads
+`GRID_LAUNCHER_E2E_FORGE_BASE` and redirects forge requests to it at request
+time (`launch/forge.rs`'s `effective_url`) while keeping every other URL
+real, so the catalog's scrape regexes are exercised against genuine markup.
 
     scripts/e2e.sh                  # build, then run every stage
     scripts/e2e.sh connect          # run one stage group
@@ -91,6 +96,7 @@ of the private bus and outlive `dbus-run-session`. A green run leaves no
 | `downloads` | `downloads.spec.ts` | this group's mock server runs with `--throttle-ms 100` (chunked slow streaming — see `mock-romm/server.mjs`'s `e2e_throttle`) against the ~300KB "Big Arcade Game" fixture (rom 301), giving a real in-flight download to interact with: a second install queues behind the first; cancelling the active download shows `Cancelled`; retrying it reaches `Completed`; dismissing removes the row |
 | `emulators` | `emulators.spec.ts` | auto-fill from autoprofile match on path basename; name and args persist; row order preserved on edit; duplicate name rejection; two-click delete; per-platform defaults persist to `config.toml` |
 | `launch` | `launch.spec.ts` | pre-seeded with one installed game and three emulator stubs; play the game (argv recorded); instant-exit stub error; broken path error; unmapped RetroArch error with the verbatim message. Each mutation through the emulators UI is confirmed written to `config.toml` before proceeding. |
+| `emulator-catalog` | `emulator-catalog.spec.ts` | open the catalog tab, install a github-provider stub (`PCSX2`, an AppImage asset) and a direct-provider stub (`Redream`, scraped from an HTML download page and extracted from tar.gz) against `mock-forge.mjs`; both drawer rows reach `Completed`, land under `Emulators/<name>-<tag>/`, and the catalog marks them installed/disabled; PCSX2 is set as the PS2 default and launches the pre-seeded game (argv file assertion) |
 
 The embedded WebDriver provider keeps one app process alive for a whole
 `wdio run` and cannot restart it, so the runner starts one `wdio run` per spec
