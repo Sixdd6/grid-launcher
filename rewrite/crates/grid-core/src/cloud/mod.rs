@@ -4,6 +4,7 @@
 //! other `grid_launcher/library/cloud_*.py` modules (see
 //! `docs/porting/06-cloud-saves.md`).
 
+pub mod candidates;
 pub mod state;
 pub mod tokens;
 pub mod window;
