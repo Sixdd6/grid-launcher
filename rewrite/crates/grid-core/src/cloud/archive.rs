@@ -418,11 +418,23 @@ pub fn payload_is_zip(bytes: &[u8]) -> bool {
 }
 
 /// Whether `raw_name` (a raw, untrusted zip member name, `\` not yet
-/// normalized) is safe to extract: not absolute, and no component is
-/// empty, `.`, or `..`. Mirrors the traversal guard in
+/// normalized) is safe to extract: not absolute, and no component is `.`
+/// or `..`. Mirrors the traversal guard in
 /// `extract_zip_archive_bytes_to_directory`
 /// (`cloud_transfer.py:253-262`): `relative_path.is_absolute() or
 /// any(part in {"", ".", ".."} for part in relative_path.parts)`.
+///
+/// Python's check is against `PurePath(...).parts`, which — like this
+/// function — collapses runs of repeated separators before splitting into
+/// components: `PurePosixPath("a//b").parts == ("a", "b")`, not `("a", "",
+/// "b")`. So an empty segment produced only by a repeated `/` (`"a//b"`)
+/// is *not* itself treated as an unsafe `""` component here; it is
+/// filtered out before the `.`/`..` check, matching Python exactly. A
+/// name that is empty, or made of nothing but separators, is still
+/// rejected — by the `is_empty` check below (an all-slash name is already
+/// excluded earlier: it's either absolute, caught by `is_absolute`, or a
+/// trailing-slash directory entry, filtered by the caller before this
+/// function is ever reached).
 fn is_safe_member_name(normalized: &str) -> bool {
     if normalized.is_empty() {
         return false;
@@ -432,7 +444,43 @@ fn is_safe_member_name(normalized: &str) -> bool {
     }
     !normalized
         .split('/')
-        .any(|part| part.is_empty() || part == "." || part == "..")
+        .filter(|part| !part.is_empty())
+        .any(|part| part == "." || part == "..")
+}
+
+/// Resolves `relative` under `dest_root` the way Python's
+/// `Path.resolve(strict=False)` does when checked against
+/// `destination_root` (`cloud_transfer.py:253-262`, and the 7z path's
+/// `:198`): each path component that already exists on disk is
+/// symlink-resolved (via [`Path::canonicalize`]) as the walk descends into
+/// it; once a component is reached that doesn't exist yet, every
+/// remaining component is appended lexically, with no further resolution
+/// (nothing to resolve — it isn't there). `dest_root` must already be
+/// canonical (both call sites pass an already-canonicalized destination
+/// root).
+///
+/// This is what makes the zip-slip guard symlink-aware: a *lexical*
+/// `dest_root.join(relative)` + `starts_with(dest_root)` check (which this
+/// function replaces at both call sites) never notices a pre-existing
+/// symlink under `dest_root` — a symlinked save directory, common under
+/// Flatpak/portable installs — pointing outside it. Walking and resolving
+/// component-by-component catches that: the symlinked component
+/// canonicalizes to its real, out-of-root target, so the final path's
+/// `starts_with(dest_root)` check (still applied by the caller) correctly
+/// fails.
+fn resolve_under_root(dest_root: &Path, relative: &Path) -> io::Result<PathBuf> {
+    let mut resolved = dest_root.to_path_buf();
+    let mut still_existing = true;
+    for component in relative.components() {
+        let candidate = resolved.join(component);
+        if still_existing && candidate.exists() {
+            resolved = candidate.canonicalize()?;
+        } else {
+            still_existing = false;
+            resolved = candidate;
+        }
+    }
+    Ok(resolved)
 }
 
 /// Extracts a zip archive's bytes into `dest`, skipping members blocked by
@@ -494,9 +542,10 @@ pub fn extract_payload_zip(
             continue;
         }
 
-        let out_path = dest_root.join(relative);
+        let out_path = resolve_under_root(&dest_root, relative)
+            .map_err(|e| format!("failed to resolve extraction path: {e}"))?;
         if !out_path.starts_with(&dest_root) {
-            continue; // defense in depth; unreachable given the checks above
+            continue; // zip-slip guard: resolved path escapes dest_root (e.g. via a symlink)
         }
 
         if let Some(parent) = out_path.parent() {
@@ -531,14 +580,25 @@ fn run_system_7z_extract(archive: &Path, dest: &Path) -> Result<(), String> {
     }
 
     for command in candidates {
-        let ran = Command::new(&command)
+        let mut invocation = Command::new(&command);
+        invocation
             .arg("x")
             .arg(archive)
             .arg(format!("-o{}", dest.display()))
             .arg("-y")
             .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .output();
+            .stderr(Stdio::piped());
+        // Mirrors `subprocess.CREATE_NO_WINDOW` in `cloud_transfer.py`'s
+        // `_extract_zip_with_7z` (:159-160): suppresses the console window
+        // a spawned Windows process would otherwise briefly flash open.
+        // Same flag + precedent as `launch/mod.rs`'s `spawn_child`.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            invocation.creation_flags(CREATE_NO_WINDOW);
+        }
+        let ran = invocation.output();
         if let Ok(output) = ran {
             if output.status.success() {
                 return Ok(());
@@ -614,9 +674,10 @@ fn extract_with_system_7z(
         if ignore.blocks(relative) {
             continue;
         }
-        let out_path = dest_root.join(relative);
+        let out_path = resolve_under_root(dest_root, relative)
+            .map_err(|e| format!("failed to resolve extraction path: {e}"))?;
         if !out_path.starts_with(dest_root) {
-            continue; // defense in depth, re-applying the zip-slip check
+            continue; // zip-slip guard, re-applied after the 7z fallback extraction
         }
         if let Some(parent) = out_path.parent() {
             fs::create_dir_all(parent).map_err(|e| format!("failed to create directory: {e}"))?;
@@ -937,6 +998,28 @@ mod tests {
         assert!(!temp.path().join("escape.sav").exists());
     }
 
+    /// Fix-round regression: a *lexical* `dest_root.join(relative)` +
+    /// `starts_with` check does not notice a pre-existing symlink under
+    /// `dest` pointing outside it — a symlinked save directory, common
+    /// under Flatpak/portable installs. `resolve_under_root` must resolve
+    /// each existing path component (following the symlink) before the
+    /// containment check runs.
+    #[test]
+    #[cfg(unix)]
+    fn extract_rejects_zip_slip_through_a_pre_existing_symlink() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("dest");
+        fs::create_dir(&dest).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), dest.join("link")).unwrap();
+
+        let payload = build_zip_bytes(&[("link/escape.txt", b"pwned" as &[u8])]);
+        let extracted = extract_payload_zip(&payload, &dest, &IgnoreSets::default()).unwrap();
+
+        assert_eq!(extracted, 0);
+        assert!(!outside.path().join("escape.txt").exists());
+    }
+
     #[test]
     fn extract_writes_nested_members_and_counts_them() {
         let temp = tempfile::tempdir().unwrap();
@@ -955,6 +1038,24 @@ mod tests {
         assert_eq!(fs::read(dest.join("a.sav")).unwrap(), b"a");
         assert_eq!(fs::read(dest.join("nested/b.sav")).unwrap(), b"b");
         assert_eq!(fs::read(dest.join("nested/deeper/c.sav")).unwrap(), b"c");
+    }
+
+    /// Fix-round regression: Python's `PurePath(...).parts` collapses
+    /// runs of repeated separators (`PurePosixPath("a//b").parts == ("a",
+    /// "b")`), so `a//b.sav` is a perfectly safe, accepted member name —
+    /// it must not be rejected as though it contained an empty `""`
+    /// component.
+    #[test]
+    fn extract_accepts_member_names_with_repeated_separators() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("dest");
+        fs::create_dir(&dest).unwrap();
+
+        let payload = build_zip_bytes(&[("a//b.sav", b"ok" as &[u8])]);
+        let extracted = extract_payload_zip(&payload, &dest, &IgnoreSets::default()).unwrap();
+
+        assert_eq!(extracted, 1);
+        assert_eq!(fs::read(dest.join("a/b.sav")).unwrap(), b"ok");
     }
 
     #[test]

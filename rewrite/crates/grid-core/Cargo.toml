@@ -7,7 +7,7 @@ license.workspace = true
 [dependencies]
 base64 = "0.23.1"
 bzip2 = "0.6.1"
-chrono = "0.4.45"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 directories = "6.0.0"
 flate2 = "1.1.10"
 futures-util = "0.3.34"
