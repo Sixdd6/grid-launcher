@@ -461,12 +461,18 @@ pub fn file_candidates(
                 SaveType::Save => {
                     let name_lower = raw_name.to_lowercase();
                     let stem_compact = compact_alnum(&stem_of(&raw_name));
+                    // `cloud_sync.py:628-630`: the filename substring check
+                    // is UNGUARDED (an empty token, empty-string-contains-
+                    // everything, would match here); only the compacted-
+                    // stem check is guarded by `and token` (Python's
+                    // truthiness check on a non-blank token). Ported
+                    // exactly, asymmetry included — not "fixed" to guard
+                    // both.
                     let keep = explicit_file_root
                         || tokens.is_empty()
                         || tokens.iter().any(|t| {
-                            !t.is_empty()
-                                && (name_lower.contains(t.as_str())
-                                    || stem_compact.contains(t.as_str()))
+                            name_lower.contains(t.as_str())
+                                || (stem_compact.contains(t.as_str()) && !t.is_empty())
                         });
                     if keep {
                         save_candidates.push(candidate);
@@ -670,22 +676,32 @@ pub fn cemu_save_directories(
 
 /// PCSX2 save directories: immediate children of `dirs` containing at least
 /// one file (ANY file — unlike [`directory_candidates`], this existence
-/// check does not consult `ignore`, matching Python's
+/// check does not consult ignore sets, matching Python's
 /// `_pcsx2_save_directories_for_game`, which never filters its `rglob("*")`
 /// probe), matched against `serials` (already-normalized `[A-Z0-9]`-only
 /// PS2 serial tokens) by substring on the child's `[A-Z0-9]`-normalized
 /// name OR its normalized path relative to its parent — an empty `serials`
-/// accepts every child. Sorted by [`latest_mtime_under`] (WITH `ignore`,
-/// a deliberate deviation from Python's unfiltered
-/// `_latest_file_mtime_under_path(item)` sort call — see [`resolved_ignore_sets`]'s
-/// `_pcsx2_superblock` addition, whose whole purpose is to keep that file's
-/// own churn from winning "most recent") descending, deduped
-/// case-insensitively. `cloud_mixin.py:1147-1170`.
+/// accepts every child. Sorted by [`latest_mtime_under`] descending with NO
+/// ignore filtering, deduped case-insensitively.
+/// `cloud_mixin.py:1147-1170`'s `_pcsx2_save_directories_for_game`: its sort
+/// key is an unfiltered `self._latest_file_mtime_under_path(item)` (no
+/// `ignore_basenames`/`ignore_extensions` kwargs at all) — this is a PORTED
+/// QUIRK, not a bug fixed here. Concretely: a directory whose only file is
+/// `_pcsx2_superblock` and that file is newer than every other candidate's
+/// files STILL sorts first, exactly like Python.
+///
+/// The `_ignore` parameter is accepted for interface parity with the other
+/// scanners (and because [`resolved_ignore_sets`]'s `_pcsx2_superblock`
+/// addition is real and used elsewhere — by archive-write and extraction
+/// filtering in later tasks) but is intentionally UNUSED here; the leading
+/// underscore documents that this parameter is not wired to any filtering
+/// in this function.
 pub fn pcsx2_save_directories(
     dirs: &[PathBuf],
     serials: &BTreeSet<String>,
-    ignore: &IgnoreSets,
+    _ignore: &IgnoreSets,
 ) -> Vec<PathBuf> {
+    let no_ignore = IgnoreSets::default();
     let mut candidates: Vec<PathBuf> = Vec::new();
 
     for directory in dirs {
@@ -721,8 +737,9 @@ pub fn pcsx2_save_directories(
         }
     }
 
-    candidates
-        .sort_by(|a, b| latest_mtime_under(b, ignore).total_cmp(&latest_mtime_under(a, ignore)));
+    candidates.sort_by(|a, b| {
+        latest_mtime_under(b, &no_ignore).total_cmp(&latest_mtime_under(a, &no_ignore))
+    });
     dedupe_casefold(candidates)
 }
 
@@ -1081,19 +1098,20 @@ mod tests {
         touch_at(&unrelated_variant, 300.0);
         touch_at(&sequel_variant, 400.0);
 
-        let mut candidates = file_candidates(
+        let candidates = file_candidates(
             &[state_dir],
             &set(&["sonic the hedgehog", "sonicthehedgehog"]),
             SaveType::State,
             &IgnoreSets::default(),
             &[],
         );
-        candidates.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+        // mtime desc: SonicTheHedgehog.state.auto (200) before
+        // Sonic-The-Hedgehog.state2 (100).
         assert_eq!(
             names(&candidates),
             vec![
-                "Sonic-The-Hedgehog.state2".to_string(),
                 "SonicTheHedgehog.state.auto".to_string(),
+                "Sonic-The-Hedgehog.state2".to_string(),
             ]
         );
     }
@@ -1282,16 +1300,17 @@ mod tests {
     }
 
     #[test]
-    fn pcsx2_ignore_set_affects_sort_but_not_the_file_existence_check() {
+    fn pcsx2_sort_ignores_the_ignore_set_matching_python() {
+        // Pins `cloud_mixin.py:1166`'s literal behavior: the sort key is an
+        // UNFILTERED `_latest_file_mtime_under_path(item)` call (no
+        // ignore_basenames/ignore_extensions kwargs at all) — even with
+        // `_pcsx2_superblock` in the ignore set, a directory whose only
+        // (ignored) file is the newest thing on disk STILL sorts first.
+        // This is a ported quirk, not something to "fix" here.
         let dir = TempDir::new().unwrap();
         let root = dir.path().join("root");
         let only_superblock = root.join("only-superblock");
         let real_save = root.join("real-save");
-        // A directory containing ONLY an (ignored) superblock still passes
-        // the "at least one file" existence check (unlike
-        // `directory_candidates`, which requires a NON-blocked file) —
-        // that's the literal Python port. But the superblock's recent
-        // touch must not win the sort once it's in the ignore set.
         touch_at(&only_superblock.join("_pcsx2_superblock"), 900.0);
         touch_at(&real_save.join("save.dat"), 100.0);
 
@@ -1303,11 +1322,11 @@ mod tests {
         let candidates =
             pcsx2_save_directories(&[root], &BTreeSet::new(), &with_superblock_ignored);
         assert_eq!(candidates.len(), 2);
-        // real-save (mtime 100) now outranks only-superblock (whose only
-        // file is ignored, so its latest_mtime_under is 0.0).
+        // only-superblock (mtime 900, unfiltered) outranks real-save
+        // (mtime 100) despite its only file being in the ignore set.
         assert_eq!(
             names(&candidates),
-            vec!["real-save".to_string(), "only-superblock".to_string()]
+            vec!["only-superblock".to_string(), "real-save".to_string()]
         );
     }
 
