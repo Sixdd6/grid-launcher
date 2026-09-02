@@ -344,10 +344,11 @@ fn json_value_as_display_string(value: &Value) -> String {
 
 /// Scrapes `page_text` for a download URL matching `download_url_regex`
 /// (`_resolve_direct_source_download`, `workers.py:250-273`): href-order
-/// precedence first, then a whole-page regex search fallback. Returns `""`
-/// (never an error) when nothing matches — the caller turns that into the
-/// "did not resolve" error, matching the reference, which only raises once
-/// after both passes.
+/// precedence first, then a whole-page regex search fallback. An href that
+/// cannot be joined onto the page URL is skipped rather than failing the
+/// scrape. Returns `""` (never an error) when nothing matches — the caller
+/// turns that into the "did not resolve" error, matching the reference,
+/// which only raises once after both passes.
 fn scrape_download_url(
     page_text: &str,
     download_url_regex: &str,
@@ -367,9 +368,12 @@ fn scrape_download_url(
         if href.is_empty() {
             continue;
         }
-        let resolved = base
-            .join(href)
-            .map_err(|e| SourceError(format!("Invalid href '{href}' on page '{page_url}': {e}")))?;
+        // A malformed href is skipped, never fatal: Python's `urljoin`
+        // effectively never raises, so the reference walks past a broken
+        // decoy to the real link further down the page.
+        let Ok(resolved) = base.join(href) else {
+            continue;
+        };
         let resolved_str = resolved.to_string();
         if pattern.is_match(href) || pattern.is_match(&resolved_str) {
             return Ok(resolved_str);
@@ -783,6 +787,34 @@ mod tests {
             "https://cdn.example.com/build-linux.zip"
         );
         assert_eq!(resolved.asset_name, "build-linux.zip");
+    }
+
+    #[tokio::test]
+    async fn direct_scrape_skips_a_malformed_href_and_keeps_walking() {
+        let mock_server = MockServer::start().await;
+        // `https://[bad` has an unterminated IPv6 host, so `Url::join`
+        // rejects it. Python's urljoin never raises, so the reference walks
+        // past a decoy like this to the real link — and so must this.
+        let page = r#"
+            <a href="https://[bad">broken</a>
+            <a href="https://cdn.example.com/build-linux.zip">linux</a>
+        "#;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(page))
+            .mount(&mock_server)
+            .await;
+
+        let raw = json!({
+            "provider": "direct", "owner": "o", "repo": "r",
+            "page_url": mock_server.uri(),
+            "download_url_regex": "linux.*\\.zip$"
+        });
+        let client = ForgeClient::new().unwrap();
+        let resolved = client.resolve(&raw, "Thing").await.unwrap();
+        assert_eq!(
+            resolved.download_url,
+            "https://cdn.example.com/build-linux.zip"
+        );
     }
 
     #[tokio::test]
