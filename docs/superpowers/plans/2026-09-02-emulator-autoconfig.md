@@ -285,12 +285,17 @@ pub fn emulator_dir(path: &Path) -> Option<PathBuf>;
 - **`yaml_add_only_section`**: section regex `^([A-Za-z][^:\n]*):[ \t]*$` on
   the RAW line; name compared with `trim()` and CASE-SENSITIVELY (the only
   case-sensitive section compare in the file). Key regex `^  ([^:]+):` —
-  EXACTLY two leading spaces. Emitted line `format!("  {key}: {value}")`,
-  unquoted. Absent section appends `format!("{section}:")` using the
-  UNTRIMMED argument.
+  two leading spaces to match, and the captured group is recorded TRIMMED
+  (rpcs3.py:154's `group(1).strip()`), so a deeper-nested `    Key:` and a
+  padded `  Key :` both mark `Key` as seen. Under add-only that is the safe
+  direction — appending a duplicate mapping key would corrupt the YAML.
+  Emitted line `format!("  {key}: {value}")`, unquoted. Absent section
+  appends `format!("{section}:")` using the UNTRIMMED argument.
 - **`toml_add_only_section`**: key regex `^\s*([A-Za-z0-9_\-]+)\s*=`;
   records EVERY matched key in `seen_keys` (managed or not — this differs
-  from every other family); emitted line `format!("{key} = {value}")`.
+  from every other family), and records it UNTRIMMED (xemu.py:225 has no
+  `.strip()`; only the YAML writer trims); emitted line
+  `format!("{key} = {value}")`.
   Dotted names like `display.window` are matched as literal whole strings,
   never resolved as a path.
 - **`flat_cfg`**: no sections. Key regex `^\s*([A-Za-z0-9_]+)\s*=` on the
@@ -339,8 +344,9 @@ pub fn emulator_dir(path: &Path) -> Option<PathBuf>;
     `yaml_add_only_appends_missing_key_with_two_space_indent`
   - `yaml_section_compare_is_case_sensitive` — target `Audio`, file has
     `audio:` → a second `Audio:` section is appended
-  - `yaml_key_requires_exactly_two_space_indent` — a 4-space key is NOT
-    seen, so the desired key is appended
+  - `yaml_nested_or_padded_key_still_marks_desired_key_seen` — the captured
+    key is trimmed (rpcs3.py:154), so both `    Key: old` and `  Key : old`
+    mark `Key` seen and the file comes back unchanged
   - `toml_add_only_keeps_existing_value_and_allows_dashed_keys`
   - `toml_dotted_section_is_literal` — `[display.window]` desired does not
     match a `[display]` header

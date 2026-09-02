@@ -324,12 +324,17 @@ pub fn rpcs3_gui_section(
 /// case-sensitive section compare in this module. An absent section is
 /// appended using the UNTRIMMED `section` argument.
 ///
-/// Deviation from Python: rpcs3.py:154 records `group(1).strip()`, so a
-/// 4-space (nested) key whose trimmed name matches a desired key suppresses
-/// that key. Here the captured group is compared untrimmed, so only a key at
-/// exactly two spaces of indent counts as seen. No current call site
-/// ("Start games in fullscreen mode", "Master Volume") writes either form
-/// with stray spaces, so the two agree on every real config.yml.
+/// The key regex `^  ([^:]+):` needs two leading spaces to match, but its
+/// capture is recorded TRIMMED (rpcs3.py:154's `group(1).strip()`). So a
+/// deeper-nested `    Key: old` (the regex eats two spaces, the group keeps
+/// the rest) and a padded `  Key : old` both mark `Key` as seen. Under an
+/// add-only policy that is the safe direction: the setting is silently not
+/// applied, rather than a duplicate mapping key being appended to the
+/// section.
+///
+/// Note the asymmetry with [`toml_add_only_section`], which records its
+/// captured key UNTRIMMED (xemu.py:225 has no `.strip()`). Only the YAML
+/// writer trims.
 pub fn yaml_add_only_section(raw: &str, section: &str, desired: &Desired) -> (String, bool) {
     if desired.is_empty() {
         return (raw.to_string(), false);
@@ -368,7 +373,8 @@ pub fn yaml_add_only_section(raw: &str, section: &str, desired: &Desired) -> (St
 
         if in_target {
             if let Some(caps) = YAML_KEY_RE.captures(raw_line) {
-                seen_keys.insert(caps[1].to_string());
+                // Trimmed, per rpcs3.py:154 — see this function's doc comment.
+                seen_keys.insert(caps[1].trim().to_string());
             }
         }
 
@@ -812,12 +818,21 @@ mod tests {
         assert!(changed);
     }
 
+    /// rpcs3.py:154 records the captured key `.strip()`ped, so any line the
+    /// `^  ([^:]+):` regex matches marks the desired key seen — including a
+    /// deeper-nested key and one padded before the colon. Appending a second
+    /// `Key:` to the same mapping would corrupt the YAML, so add-only skips.
     #[test]
-    fn yaml_key_requires_exactly_two_space_indent() {
-        let (out, changed) =
-            yaml_add_only_section("Sec:\n    Key: old\n", "Sec", &desired![("Key", "new")]);
-        assert_eq!(out, "Sec:\n    Key: old\n  Key: new\n");
-        assert!(changed);
+    fn yaml_nested_or_padded_key_still_marks_desired_key_seen() {
+        let nested = "Sec:\n    Key: old\n";
+        let (out, changed) = yaml_add_only_section(nested, "Sec", &desired![("Key", "new")]);
+        assert_eq!(out, nested, "a 4-space key of the same name is seen");
+        assert!(!changed);
+
+        let padded = "Sec:\n  Key : old\n";
+        let (out, changed) = yaml_add_only_section(padded, "Sec", &desired![("Key", "new")]);
+        assert_eq!(out, padded, "a space before the colon is trimmed away");
+        assert!(!changed);
     }
 
     // --- toml_add_only_section ----------------------------------------------
