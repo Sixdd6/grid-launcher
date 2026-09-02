@@ -6,6 +6,8 @@
     type LaunchDefaults,
     type Platform,
     type ProfileSummary,
+    type RaFanOutRow,
+    type RaStatus,
   } from './api';
   import { downloads } from './stores/downloads.svelte';
   import {
@@ -14,6 +16,7 @@
     shouldAutoFillFromName,
   } from './emulators/catalog';
   import { NO_DEFAULT_VALUE, resolveDefaultEmulatorValue } from './emulators/defaults';
+  import { canSubmit, fanOutSummary, statusLabel } from './emulators/retroachievements';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -53,6 +56,18 @@
   let confirmingDelete = $state<string | null>(null);
   let deletePending = $state<string | null>(null);
 
+  // RetroAchievements block state (task-12-brief.md).
+  let raStatus = $state<RaStatus | null>(null);
+  let raUsername = $state('');
+  // The token field is write-only: it starts empty on every mount and is
+  // never bound to a value read back from the backend, which never returns
+  // the token in the first place (RaStatus carries only `token_present`).
+  let raToken = $state('');
+  let raError = $state<string | null>(null);
+  let raResultLine = $state<string | null>(null);
+  let raSavePending = $state(false);
+  let raClearPending = $state(false);
+
   // Install tab state.
   let catalog = $state<CatalogEntry[]>([]);
   let catalogLoading = $state(true);
@@ -83,6 +98,7 @@
     refreshEmulators();
     refreshPlatformsAndDefaults();
     refreshProfiles();
+    refreshRaStatus();
   });
 
   // Loads (or reloads) the catalog whenever the Install tab becomes the
@@ -300,6 +316,47 @@
     }
   }
 
+  async function refreshRaStatus() {
+    try {
+      raStatus = await api.getRetroachievementsStatus();
+      raUsername = raStatus.username;
+    } catch (err) {
+      raError = errorMessage(err);
+    }
+  }
+
+  async function handleRaSave() {
+    if (!canSubmit(raUsername, raToken)) return;
+    raError = null;
+    raResultLine = null;
+    raSavePending = true;
+    try {
+      const rows: RaFanOutRow[] = await api.setRetroachievementsCredentials(raUsername, raToken);
+      raToken = '';
+      raResultLine = fanOutSummary(rows);
+      await refreshRaStatus();
+    } catch (err) {
+      raError = errorMessage(err);
+    } finally {
+      raSavePending = false;
+    }
+  }
+
+  async function handleRaClear() {
+    raError = null;
+    raResultLine = null;
+    raClearPending = true;
+    try {
+      await api.clearRetroachievementsCredentials();
+      raToken = '';
+      await refreshRaStatus();
+    } catch (err) {
+      raError = errorMessage(err);
+    } finally {
+      raClearPending = false;
+    }
+  }
+
   function onKey(e: KeyboardEvent) {
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -502,6 +559,50 @@
         </ul>
       {/if}
     </section>
+
+    <section class="ra-section">
+      <h3>RetroAchievements</h3>
+      <p class="muted" data-testid="ra-status">{statusLabel(raStatus)}</p>
+      <form
+        onsubmit={(e) => {
+          e.preventDefault();
+          handleRaSave();
+        }}
+      >
+        <label>
+          Username
+          <input data-testid="ra-username" bind:value={raUsername} autocomplete="username" />
+        </label>
+        <label>
+          Token
+          <input
+            data-testid="ra-token"
+            type="password"
+            bind:value={raToken}
+            autocomplete="new-password"
+          />
+        </label>
+        {#if raError}<p data-testid="ra-error" class="error" role="alert">{raError}</p>{/if}
+        {#if raResultLine}<p class="hint">{raResultLine}</p>{/if}
+        <div class="form-actions">
+          <button
+            data-testid="ra-save"
+            type="submit"
+            disabled={raSavePending || !canSubmit(raUsername, raToken)}
+          >
+            {raSavePending ? 'Saving…' : 'Save'}
+          </button>
+          <button
+            data-testid="ra-clear"
+            type="button"
+            onclick={handleRaClear}
+            disabled={raClearPending}
+          >
+            {raClearPending ? 'Clearing…' : 'Clear'}
+          </button>
+        </div>
+      </form>
+    </section>
   </div>
 </div>
 
@@ -592,12 +693,41 @@
 
   .list-section,
   .form-section,
-  .defaults-section {
+  .defaults-section,
+  .ra-section {
     display: flex;
     flex-direction: column;
     gap: 8px;
     padding-top: 12px;
     border-top: 1px solid var(--border);
+  }
+
+  .ra-section form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .ra-section label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  .ra-section input {
+    font: inherit;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-h);
+  }
+
+  .ra-section input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
   }
 
   .list-section {

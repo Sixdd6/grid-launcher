@@ -67,6 +67,9 @@ export type EmulatorEntry = {
 
 export type ProfileSummary = { name: string; args: string };
 
+export type RaStatus = { username: string; token_present: boolean };
+export type RaFanOutRow = { emulator: string; changed: boolean };
+
 export type CatalogEntry = {
   name: string;
   source_id: string;
@@ -139,4 +142,8 @@ export const api = {
     invoke<void>('set_default_emulator', { platform, name }),
   listEmulatorCatalog: () => invoke<CatalogEntry[]>('list_emulator_catalog'),
   installEmulator: (sourceId: string) => invoke<void>('install_emulator', { sourceId }),
+  setRetroachievementsCredentials: (username: string, token: string) =>
+    invoke<RaFanOutRow[]>('set_retroachievements_credentials', { username, token }),
+  getRetroachievementsStatus: () => invoke<RaStatus>('get_retroachievements_status'),
+  clearRetroachievementsCredentials: () => invoke<void>('clear_retroachievements_credentials'),
 };

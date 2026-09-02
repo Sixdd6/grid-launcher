@@ -309,6 +309,56 @@ pub fn is_redream(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
     emulator_matches_tokens(entry, &["redream"], profiles)
 }
 
+/// Spec deviation D2 (RA-keys-only fan-out) — no direct Python counterpart:
+/// the RA-capable predicates, in dispatch order. DuckStation is
+/// deliberately NOT here even though it takes RetroAchievements-adjacent
+/// suppression keys: `ensure_duckstation_memory_card_settings` takes no
+/// credential parameters and writes only `[Cheevos]` suppression keys, never
+/// `Username`/`Token` — DuckStation encrypts its token per machine, so
+/// pre-filling is not possible (doc 05 open question, ruled: follow the
+/// code).
+pub fn ra_capable(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
+    is_retroarch(entry, profiles) || is_pcsx2(entry, profiles) || is_ppsspp(entry, profiles)
+}
+
+/// Spec deviation D2 (RA-keys-only fan-out) — no direct Python counterpart:
+/// `_on_ra_login_finished` (grid-launcher.py:2730-2754) re-runs the FULL
+/// `_ensure_emulator_sync_settings` for every registered emulator after a
+/// RetroAchievements login. Doing that here would re-apply every managed
+/// key (save directories, fullscreen, controller profiles, ...) just to
+/// deliver a credential pair, so this fan-out instead calls only the three
+/// narrow `ensure_ra_credentials` writers — one per [`ra_capable`] entry,
+/// in config order. `None` (from [`RaCredentials::usable`]) short-circuits
+/// to an empty vec before touching any entry: a blank pair writes nothing,
+/// matching every narrow writer's own gate.
+pub fn fan_out_ra_credentials(
+    config: &Config,
+    profiles: &[EmulatorProfile],
+    ra: &RaCredentials,
+) -> Vec<(String, bool)> {
+    let Some(ra) = ra.usable() else {
+        return Vec::new();
+    };
+
+    let mut rows = Vec::new();
+    for entry in &config.emulators {
+        let path = entry.path.trim();
+        if is_retroarch(entry, profiles) {
+            let result = retroarch::ensure_ra_credentials(path, ra);
+            rows.push((entry.name.clone(), result.changed));
+        }
+        if is_pcsx2(entry, profiles) {
+            let result = pcsx2::ensure_ra_credentials(path, ra);
+            rows.push((entry.name.clone(), result.changed));
+        }
+        if is_ppsspp(entry, profiles) {
+            let result = ppsspp::ensure_ra_credentials(path, ra);
+            rows.push((entry.name.clone(), result.changed));
+        }
+    }
+    rows
+}
+
 // --- layer 2 orchestration ------------------------------------------------------
 
 /// Everything [`sync_new_emulator`] needs that grid-core cannot derive from
@@ -1105,6 +1155,141 @@ mod tests {
             "D6: no [Folders] section:\n{ini}"
         );
         assert!(!ini.contains("Bios"), "D6: no Bios key:\n{ini}");
+    }
+
+    // --- D2: ra_capable / fan_out_ra_credentials -----------------------------
+
+    /// `RetroArch`/`PCSX2`/`PPSSPP`-named entries are RA-capable; DuckStation
+    /// (suppression keys only — no credential parameters, doc 05 open
+    /// question, ruled: follow the code) and Dolphin (not RA-aware at all)
+    /// are not.
+    #[test]
+    fn ra_capable_excludes_duckstation_and_dolphin() {
+        assert!(ra_capable(
+            &entry("RetroArch", "/opt/retroarch/retroarch"),
+            &[]
+        ));
+        assert!(ra_capable(
+            &entry("PCSX2", "/opt/pcsx2/pcsx2-qt.AppImage"),
+            &[]
+        ));
+        assert!(ra_capable(&entry("PPSSPP", "/opt/ppsspp/PPSSPPSDL"), &[]));
+
+        assert!(!ra_capable(
+            &entry("DuckStation", "/opt/duckstation/duckstation-qt.AppImage"),
+            &[]
+        ));
+        assert!(!ra_capable(
+            &entry("Dolphin", "/opt/dolphin/dolphin-emu"),
+            &[]
+        ));
+    }
+
+    /// A config with a RetroArch, a PCSX2 and a Dolphin entry, each with a
+    /// pre-existing config file carrying a sentinel unmanaged key: the
+    /// fan-out writes ONLY the RA credential keys into the two RA-capable
+    /// files, leaves every sentinel intact, and never touches the Dolphin
+    /// file (Dolphin is not RA-capable at all — it is not merely skipped for
+    /// blank credentials).
+    #[test]
+    fn fan_out_writes_only_the_ra_keys() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated(temp.path());
+
+        let ra_exe = temp.path().join("RetroArch").join("retroarch.exe");
+        touch(&ra_exe);
+        let ra_cfg = ra_exe.parent().unwrap().join("retroarch.cfg");
+        std::fs::write(&ra_cfg, "my_unmanaged_key = \"keep\"\n").unwrap();
+
+        let pcsx2_exe = temp.path().join("PCSX2").join("pcsx2-qt.AppImage");
+        touch(&pcsx2_exe);
+        let pcsx2_cfg = pcsx2_exe.parent().unwrap().join("inis").join("PCSX2.ini");
+        std::fs::create_dir_all(pcsx2_cfg.parent().unwrap()).unwrap();
+        std::fs::write(&pcsx2_cfg, "[UI]\nSentinelKey = keep\n").unwrap();
+
+        let dolphin_exe = temp.path().join("Dolphin").join("dolphin-emu");
+        touch(&dolphin_exe);
+        let dolphin_cfg = dolphin_exe.parent().unwrap().join("sentinel.ini");
+        std::fs::write(&dolphin_cfg, "[Sentinel]\nUnmanaged = keep\n").unwrap();
+        let dolphin_before = std::fs::read(&dolphin_cfg).unwrap();
+
+        let config = config_with(
+            temp.path(),
+            vec![
+                entry("RetroArch", ra_exe.to_str().unwrap()),
+                entry("PCSX2", pcsx2_exe.to_str().unwrap()),
+                entry("Dolphin", dolphin_exe.to_str().unwrap()),
+            ],
+        );
+
+        let ra = RaCredentials::new("retro_user", "FAKE-RA-TOKEN-not-real");
+        let rows = fan_out_ra_credentials(&config, &[], &ra);
+
+        assert_eq!(
+            rows,
+            vec![("RetroArch".to_string(), true), ("PCSX2".to_string(), true),]
+        );
+
+        let ra_text = std::fs::read_to_string(&ra_cfg).unwrap();
+        assert!(
+            ra_text.contains("my_unmanaged_key = \"keep\""),
+            "sentinel must survive: {ra_text}"
+        );
+        assert!(ra_text.contains("cheevos_username = \"retro_user\""));
+        assert!(ra_text.contains("cheevos_token = \"FAKE-RA-TOKEN-not-real\""));
+
+        let pcsx2_text = std::fs::read_to_string(&pcsx2_cfg).unwrap();
+        assert!(
+            pcsx2_text.contains("SentinelKey = keep"),
+            "sentinel must survive: {pcsx2_text}"
+        );
+        assert!(pcsx2_text.contains("[Achievements]"));
+        assert!(pcsx2_text.contains("Username = retro_user"));
+
+        assert_eq!(
+            std::fs::read(&dolphin_cfg).unwrap(),
+            dolphin_before,
+            "Dolphin is not RA-capable; its file must be byte-identical"
+        );
+    }
+
+    #[test]
+    fn fan_out_is_a_no_op_when_either_field_is_blank() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated(temp.path());
+
+        let exe = temp.path().join("RetroArch").join("retroarch.exe");
+        touch(&exe);
+        let config = config_with(temp.path(), vec![entry("RetroArch", exe.to_str().unwrap())]);
+
+        for ra in [
+            RaCredentials::new("retro_user", ""),
+            RaCredentials::new("", "FAKE-RA-TOKEN-not-real"),
+        ] {
+            let rows = fan_out_ra_credentials(&config, &[], &ra);
+            assert!(rows.is_empty(), "{rows:?}");
+        }
+        assert!(!exe.parent().unwrap().join("retroarch.cfg").exists());
+    }
+
+    #[test]
+    fn fan_out_reports_changed_false_on_a_second_run() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated(temp.path());
+
+        let exe = temp.path().join("RetroArch").join("retroarch.exe");
+        touch(&exe);
+        let config = config_with(temp.path(), vec![entry("RetroArch", exe.to_str().unwrap())]);
+        let ra = RaCredentials::new("retro_user", "FAKE-RA-TOKEN-not-real");
+
+        let first = fan_out_ra_credentials(&config, &[], &ra);
+        assert_eq!(first, vec![("RetroArch".to_string(), true)]);
+
+        let second = fan_out_ra_credentials(&config, &[], &ra);
+        assert_eq!(second, vec![("RetroArch".to_string(), false)]);
     }
 
     /// Spec deviation D7: no RPCS3 firmware download is triggered, so nothing

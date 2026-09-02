@@ -2,11 +2,12 @@ mod commands;
 mod gamepad;
 
 use commands::AppState;
+use grid_core::autoconfig::RaCredentials;
 use grid_core::config::Config;
 use grid_core::launch::LaunchService;
 use grid_core::library::registry::Registry;
 use grid_core::library::InstallService;
-use grid_core::secrets::KeyringStore;
+use grid_core::secrets::{KeyringStore, RaTokenStore};
 use grid_core::session::SessionManager;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
@@ -52,6 +53,9 @@ pub fn run() {
         cache_dir,
         Arc::new(KeyringStore::new()),
     );
+    // A SECOND, independent keyring item from the RomM credential above
+    // (secrets.rs): clearing one must never clear the other.
+    let ra_store: Arc<dyn RaTokenStore> = Arc::new(KeyringStore::new());
     let config_path = Config::default_path();
     // Same directory as config.toml — never re-derive ProjectDirs separately.
     let db_path = config_path
@@ -74,6 +78,7 @@ pub fn run() {
         session,
         install,
         launch,
+        ra_store,
     });
     // Embedded WebDriver automation server, gated behind the `e2e` cargo
     // feature so it never ships in a release build (see
@@ -110,6 +115,18 @@ pub fn run() {
                 let handle = app.handle().clone();
                 install.set_notify(Arc::new(move |snapshot| {
                     let _ = handle.emit("downloads-changed", snapshot);
+                }));
+                // Reads the keyring and the config so D1 (a newly installed
+                // or newly added emulator) picks up an existing
+                // RetroAchievements login automatically, with no separate
+                // wiring at either call site.
+                let ra_store = state.ra_store.clone();
+                install.set_ra_provider(Arc::new(move || {
+                    let token = ra_store.load().ok().flatten()?;
+                    let username = Config::load(&Config::default_path())
+                        .map(|c| c.retroachievements_username)
+                        .unwrap_or_default();
+                    Some(RaCredentials::new(username, token))
                 }));
             }
             if let Ok(launch) = &state.launch {
@@ -160,6 +177,9 @@ pub fn run() {
             commands::set_default_emulator,
             commands::list_emulator_catalog,
             commands::install_emulator,
+            commands::set_retroachievements_credentials,
+            commands::get_retroachievements_status,
+            commands::clear_retroachievements_credentials,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

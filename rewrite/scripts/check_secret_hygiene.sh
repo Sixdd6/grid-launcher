@@ -26,10 +26,30 @@ if [ -d e2e ]; then
 fi
 suspicious=$(grep -rnE "(Bearer|token|password)[\"': =]+[A-Za-z0-9+/_-]{30,}" \
   "${scan_dirs[@]}" --include="*.rs" --include="*.ts" --include="*.svelte" --include="*.json" --include="*.mjs" \
-  | grep -v -e "FAKE-TEST-TOKEN-not-real" -e "FAKE-E2E-TOKEN-not-real" || true)
+  | grep -v -e "FAKE-TEST-TOKEN-not-real" -e "FAKE-E2E-TOKEN-not-real" -e "FAKE-RA-TOKEN-not-real" || true)
 if [ -n "$suspicious" ]; then
   echo "Possible real credential in committed code/fixtures:" >&2
   echo "$suspicious" >&2
+  exit 1
+fi
+
+# The RetroAchievements token's keyring account name may appear only in
+# secrets.rs — the one file that opens that keyring item.
+ra_account_users=$(grep -rl "RA_ACCOUNT\|retroachievements-token" crates app/src-tauri/src app/src --include="*.rs" --include="*.ts" --include="*.svelte" || true)
+if [ -n "$ra_account_users" ] && [ "$ra_account_users" != "crates/grid-core/src/secrets.rs" ]; then
+  echo "RA_ACCOUNT/retroachievements-token referenced outside secrets.rs:" >&2
+  echo "$ra_account_users" >&2
+  exit 1
+fi
+
+# `Config` carries `retroachievements_username` only; the token has no config
+# key. A field literally named `retroachievements_token` would mean the
+# token is (or was meant to be) serialized to config.toml/an IPC payload
+# instead of living only in the keyring.
+ra_token_field=$(grep -rn "retroachievements_token" crates app/src-tauri/src app/src --include="*.rs" --include="*.ts" --include="*.svelte" | grep -v -e "^crates/grid-core/src/secrets.rs:" || true)
+if [ -n "$ra_token_field" ]; then
+  echo "A field literally named 'retroachievements_token' was found outside secrets.rs:" >&2
+  echo "$ra_token_field" >&2
   exit 1
 fi
 

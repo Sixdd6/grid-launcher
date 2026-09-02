@@ -27,6 +27,19 @@ pub trait SecretStore: Send + Sync {
 
 const SERVICE: &str = "grid-launcher";
 const ACCOUNT: &str = "romm-credential";
+/// A SECOND, independent keyring item under the same [`SERVICE`]: clearing
+/// the RomM credential (`ACCOUNT`) must never clear the RetroAchievements
+/// token, and vice versa — they are two accounts, not one shared slot.
+const RA_ACCOUNT: &str = "retroachievements-token";
+
+/// The RetroAchievements token's OS-keyring slot. A separate trait from
+/// [`SecretStore`] (rather than a third `Credential` variant) because it is
+/// a second, independent keyring item — see [`RA_ACCOUNT`].
+pub trait RaTokenStore: Send + Sync {
+    fn save(&self, token: &SecretString) -> Result<(), SecretError>;
+    fn load(&self) -> Result<Option<SecretString>, SecretError>;
+    fn clear(&self) -> Result<(), SecretError>;
+}
 
 /// Serialized form kept ONLY inside the OS keyring item.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -43,6 +56,9 @@ impl KeyringStore {
     }
     fn entry() -> Result<keyring::Entry, SecretError> {
         keyring::Entry::new(SERVICE, ACCOUNT).map_err(|e| SecretError::Keyring(e.to_string()))
+    }
+    fn ra_entry() -> Result<keyring::Entry, SecretError> {
+        keyring::Entry::new(SERVICE, RA_ACCOUNT).map_err(|e| SecretError::Keyring(e.to_string()))
     }
 }
 
@@ -95,20 +111,63 @@ impl SecretStore for KeyringStore {
     }
 }
 
-/// In-memory store for tests and for the Tauri layer's unit tests.
+impl RaTokenStore for KeyringStore {
+    fn save(&self, token: &SecretString) -> Result<(), SecretError> {
+        Self::ra_entry()?
+            .set_password(token.expose_secret())
+            .map_err(|e| SecretError::Keyring(e.to_string()))
+    }
+
+    fn load(&self) -> Result<Option<SecretString>, SecretError> {
+        match Self::ra_entry()?.get_password() {
+            Ok(token) => Ok(Some(SecretString::from(token))),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(SecretError::Keyring(e.to_string())),
+        }
+    }
+
+    fn clear(&self) -> Result<(), SecretError> {
+        match Self::ra_entry()?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(e) => Err(SecretError::Keyring(e.to_string())),
+        }
+    }
+}
+
+/// In-memory store for tests and for the Tauri layer's unit tests. The RA
+/// token lives in its own field — a second, independent slot mirroring the
+/// two real keyring items (see [`RA_ACCOUNT`]) — so clearing one credential
+/// here can never clear the other.
 #[derive(Default)]
-pub struct MemoryStore(std::sync::Mutex<Option<Credential>>);
+pub struct MemoryStore {
+    credential: std::sync::Mutex<Option<Credential>>,
+    ra_token: std::sync::Mutex<Option<SecretString>>,
+}
 
 impl SecretStore for MemoryStore {
     fn save(&self, cred: &Credential) -> Result<(), SecretError> {
-        *self.0.lock().unwrap() = Some(cred.clone());
+        *self.credential.lock().unwrap() = Some(cred.clone());
         Ok(())
     }
     fn load(&self) -> Result<Option<Credential>, SecretError> {
-        Ok(self.0.lock().unwrap().clone())
+        Ok(self.credential.lock().unwrap().clone())
     }
     fn clear(&self) -> Result<(), SecretError> {
-        *self.0.lock().unwrap() = None;
+        *self.credential.lock().unwrap() = None;
+        Ok(())
+    }
+}
+
+impl RaTokenStore for MemoryStore {
+    fn save(&self, token: &SecretString) -> Result<(), SecretError> {
+        *self.ra_token.lock().unwrap() = Some(token.clone());
+        Ok(())
+    }
+    fn load(&self) -> Result<Option<SecretString>, SecretError> {
+        Ok(self.ra_token.lock().unwrap().clone())
+    }
+    fn clear(&self) -> Result<(), SecretError> {
+        *self.ra_token.lock().unwrap() = None;
         Ok(())
     }
 }
@@ -128,17 +187,66 @@ mod tests {
     #[test]
     fn memory_store_round_trips() {
         let store = MemoryStore::default();
-        store
-            .save(&Credential::Basic {
+        SecretStore::save(
+            &store,
+            &Credential::Basic {
                 username: "six".into(),
                 password: SecretString::from("pw-FAKE"),
-            })
-            .unwrap();
-        match store.load().unwrap() {
+            },
+        )
+        .unwrap();
+        match SecretStore::load(&store).unwrap() {
             Some(Credential::Basic { username, .. }) => assert_eq!(username, "six"),
             other => panic!("wrong credential: {other:?}"),
         }
-        store.clear().unwrap();
-        assert!(store.load().unwrap().is_none());
+        SecretStore::clear(&store).unwrap();
+        assert!(SecretStore::load(&store).unwrap().is_none());
+    }
+
+    /// The RA token slot is a SECOND, independent keyring item: saving a
+    /// RomM credential and an RA token both leave both readable, and
+    /// clearing one must not clear the other.
+    #[test]
+    fn ra_token_store_round_trips_independently_of_the_romm_credential() {
+        let store = MemoryStore::default();
+        SecretStore::save(
+            &store,
+            &Credential::Basic {
+                username: "six".into(),
+                password: SecretString::from("pw-FAKE"),
+            },
+        )
+        .unwrap();
+        RaTokenStore::save(&store, &SecretString::from("FAKE-RA-TOKEN-not-real")).unwrap();
+
+        match SecretStore::load(&store).unwrap() {
+            Some(Credential::Basic { username, .. }) => assert_eq!(username, "six"),
+            other => panic!("wrong credential: {other:?}"),
+        }
+        assert_eq!(
+            RaTokenStore::load(&store)
+                .unwrap()
+                .map(|t| t.expose_secret().to_string()),
+            Some("FAKE-RA-TOKEN-not-real".to_string())
+        );
+
+        // Clearing the RomM credential must not touch the RA token.
+        SecretStore::clear(&store).unwrap();
+        assert!(SecretStore::load(&store).unwrap().is_none());
+        assert!(RaTokenStore::load(&store).unwrap().is_some());
+
+        // And vice versa: clearing the RA token must not touch the RomM
+        // credential.
+        SecretStore::save(
+            &store,
+            &Credential::Basic {
+                username: "six".into(),
+                password: SecretString::from("pw-FAKE"),
+            },
+        )
+        .unwrap();
+        RaTokenStore::clear(&store).unwrap();
+        assert!(RaTokenStore::load(&store).unwrap().is_none());
+        assert!(SecretStore::load(&store).unwrap().is_some());
     }
 }

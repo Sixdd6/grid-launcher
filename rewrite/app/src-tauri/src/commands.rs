@@ -1,4 +1,4 @@
-use grid_core::autoconfig::{self, entry as autoconfig_entry};
+use grid_core::autoconfig::{self, entry as autoconfig_entry, RaCredentials};
 use grid_core::config::{Config, EmulatorEntry};
 use grid_core::launch::catalog::{catalog_entries, mark_installed, CatalogEntry};
 use grid_core::launch::profiles::{
@@ -9,6 +9,7 @@ use grid_core::library::queue::DownloadsSnapshot;
 use grid_core::library::registry::InstalledGame;
 use grid_core::library::InstallService;
 use grid_core::romm::{GameSummary, Platform};
+use grid_core::secrets::RaTokenStore;
 use grid_core::session::{SessionManager, SessionState};
 use secrecy::SecretString;
 use serde::Serialize;
@@ -20,6 +21,9 @@ pub struct AppState {
     pub session: SessionManager,
     pub install: Result<Arc<InstallService>, String>,
     pub launch: Result<Arc<LaunchService>, String>,
+    /// The RetroAchievements token's keyring slot — a SECOND, independent
+    /// item from the RomM credential `state.session` holds (secrets.rs).
+    pub ra_store: Arc<dyn RaTokenStore>,
 }
 
 fn err(e: impl std::fmt::Display) -> String {
@@ -310,6 +314,119 @@ pub async fn get_launch_defaults() -> Result<LaunchDefaults, String> {
     })
     .await
     .map_err(|e| format!("get_launch_defaults did not finish: {e}"))?
+}
+
+// --- RetroAchievements credential commands ------------------------------------
+
+/// [`get_retroachievements_status`]'s return shape. `token_present` is a
+/// bare boolean — never the token, its length, or a prefix.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RaStatus {
+    pub username: String,
+    pub token_present: bool,
+}
+
+/// One [`autoconfig::fan_out_ra_credentials`] row, renamed for the IPC
+/// boundary (`emulator` rather than the tuple's positional field).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RaFanOutRow {
+    pub emulator: String,
+    pub changed: bool,
+}
+
+fn ra_fan_out_rows(rows: Vec<(String, bool)>) -> Vec<RaFanOutRow> {
+    rows.into_iter()
+        .map(|(emulator, changed)| RaFanOutRow { emulator, changed })
+        .collect()
+}
+
+/// Saves the RetroAchievements login, then fans it out to every registered
+/// RA-capable emulator's narrow credential writer (D2). The reference
+/// re-runs the FULL per-emulator sync for every emulator instead
+/// (`_on_ra_login_finished`, grid-launcher.py:2730-2754); this only ever
+/// touches the three credential keys, via
+/// [`autoconfig::fan_out_ra_credentials`].
+///
+/// `token` is checked for blankness (post-trim) on the plain argument and
+/// then wrapped in `SecretString` immediately — the plain `String` is never
+/// read again and is dropped at the end of this scope, matching `connect`.
+/// A blank token clears the keyring entry rather than storing an empty
+/// secret; either way the username is written to
+/// `Config.retroachievements_username` (plain, non-secret) before the
+/// fan-out runs, so `fan_out_ra_credentials`'s own `usable()` gate decides
+/// whether anything is actually written.
+#[tauri::command]
+pub async fn set_retroachievements_credentials(
+    state: State<'_, AppState>,
+    username: String,
+    token: String,
+) -> Result<Vec<RaFanOutRow>, String> {
+    let token_is_blank = token.trim().is_empty();
+    let token = SecretString::from(token);
+    let trimmed_username = username.trim().to_string();
+    let ra_store = state.ra_store.clone();
+
+    tokio::task::spawn_blocking(move || {
+        if token_is_blank {
+            ra_store.clear().map_err(err)?;
+        } else {
+            ra_store.save(&token).map_err(err)?;
+        }
+
+        let config_path = Config::default_path();
+        let mut config = Config::load(&config_path).map_err(err)?;
+        config.retroachievements_username = trimmed_username.clone();
+        config.save(&config_path).map_err(err)?;
+
+        let ra = RaCredentials::new(trimmed_username, token);
+        let rows = autoconfig::fan_out_ra_credentials(&config, load_profiles(), &ra);
+        Ok(ra_fan_out_rows(rows))
+    })
+    .await
+    .map_err(|e| format!("set_retroachievements_credentials did not finish: {e}"))?
+}
+
+/// The username from config and whether a token is stored — NEVER the
+/// token, its length, or a prefix.
+#[tauri::command]
+pub async fn get_retroachievements_status(state: State<'_, AppState>) -> Result<RaStatus, String> {
+    let ra_store = state.ra_store.clone();
+    tokio::task::spawn_blocking(move || {
+        let config = Config::load(&Config::default_path()).map_err(err)?;
+        let token_present = ra_store.load().map_err(err)?.is_some();
+        Ok(RaStatus {
+            username: config.retroachievements_username,
+            token_present,
+        })
+    })
+    .await
+    .map_err(|e| format!("get_retroachievements_status did not finish: {e}"))?
+}
+
+/// Clears the keyring entry and blanks `Config.retroachievements_username`.
+/// Writes NOTHING to any emulator config and scrubs NOTHING already written
+/// (parity with the reference's `_ra_clear_credentials`,
+/// grid-launcher.py:2757-2765 — doc 05's "credentials are written but never
+/// removed" open question, ruled: follow the code).
+#[tauri::command]
+pub async fn clear_retroachievements_credentials(state: State<'_, AppState>) -> Result<(), String> {
+    let ra_store = state.ra_store.clone();
+    tokio::task::spawn_blocking(move || {
+        ra_store.clear().map_err(err)?;
+        let config_path = Config::default_path();
+        let mut config = Config::load(&config_path).map_err(err)?;
+        apply_clear_retroachievements(&mut config);
+        config.save(&config_path).map_err(err)
+    })
+    .await
+    .map_err(|e| format!("clear_retroachievements_credentials did not finish: {e}"))?
+}
+
+/// [`clear_retroachievements_credentials`]'s config-mutation logic, pulled
+/// out so it is unit-testable without a keyring: blanks the username and
+/// touches nothing else — in particular no emulator config file.
+fn apply_clear_retroachievements(config: &mut Config) {
+    config.retroachievements_username = String::new();
 }
 
 // --- autoprofile commands ----------------------------------------------------
@@ -777,5 +894,59 @@ mod merge_tests {
         assert!(is_manual_add(&config, "Nonexistent"));
         assert!(!is_manual_add(&config, "Dolphin"));
         assert!(!is_manual_add(&config, "  dolphin  "));
+    }
+}
+
+#[cfg(test)]
+mod retroachievements_tests {
+    use super::*;
+
+    /// `RaStatus`'s whole point is that the token itself never crosses IPC —
+    /// only a presence boolean. Serialize a status built for a token that IS
+    /// present and assert the token text never appears in the JSON.
+    #[test]
+    fn ra_status_never_contains_the_token() {
+        let status = RaStatus {
+            username: "sixdd6".to_string(),
+            token_present: true,
+        };
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(!json.contains("FAKE-RA-TOKEN-not-real"));
+        assert!(!json.to_lowercase().contains("token_value"));
+        assert_eq!(json, r#"{"username":"sixdd6","token_present":true}"#);
+    }
+
+    /// [`apply_clear_retroachievements`] is the config-mutation half of
+    /// `clear_retroachievements_credentials`: it blanks the username and
+    /// touches nothing else. Proven here against a real emulator config
+    /// file's mtime, standing in for "no emulator file is written" — the
+    /// keyring clear itself is covered by
+    /// `secrets::tests::ra_token_store_round_trips_independently_of_the_romm_credential`.
+    #[test]
+    fn clear_blanks_the_username_and_writes_no_emulator_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let emulator_cfg = temp.path().join("retroarch.cfg");
+        std::fs::write(&emulator_cfg, "cheevos_username = \"sixdd6\"\n").unwrap();
+        let before = std::fs::metadata(&emulator_cfg)
+            .unwrap()
+            .modified()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let mut config = Config {
+            retroachievements_username: "sixdd6".to_string(),
+            ..Config::default()
+        };
+        apply_clear_retroachievements(&mut config);
+
+        assert_eq!(config.retroachievements_username, "");
+        let after = std::fs::metadata(&emulator_cfg)
+            .unwrap()
+            .modified()
+            .unwrap();
+        assert_eq!(
+            before, after,
+            "clear must never touch an emulator config file"
+        );
     }
 }
