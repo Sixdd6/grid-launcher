@@ -13,6 +13,7 @@ flate2 = "1.1.10"
 futures-util = "0.3.34"
 keyring = "4.2.0"
 liblzma = "0.4.8"
+mime_guess = "2.0.5"
 percent-encoding = "2.3.2"
 regex = "1.11.3"
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "json", "query", "stream", "multipart"] }

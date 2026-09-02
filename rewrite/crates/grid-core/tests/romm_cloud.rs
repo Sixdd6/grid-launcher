@@ -145,6 +145,89 @@ async fn upload_save_sends_query_and_multipart_shape() {
     assert!(!query.contains_key("slot"), "query: {query:?}");
 }
 
+// --- upload multipart: per-part Content-Type (fix round 1) ---------------
+
+#[tokio::test]
+async fn upload_save_multipart_parts_carry_a_guessed_content_type() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/saves"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&server)
+        .await;
+
+    let temp = tempfile::tempdir().unwrap();
+    let save_file = temp_payload(&temp, "Chrono Trigger.srm", b"save-bytes");
+    let screenshot_file = temp_payload(&temp, "Chrono Trigger.png", b"\x89PNG\r\n\x1a\n");
+    let client = client_for(&server).await;
+
+    client
+        .upload_save(
+            "42",
+            "Snes9x",
+            None,
+            &[
+                ("saveFile".to_string(), save_file),
+                ("screenshotFile".to_string(), screenshot_file),
+            ],
+        )
+        .await
+        .unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    let body = String::from_utf8_lossy(&requests[0].body);
+    // `.srm` has no recognised mime type, so it falls back to the generic
+    // octet stream — matching `mimetypes.guess_type` returning `None` for
+    // an unrecognised extension (`api.py:96`'s `or "application/octet-stream"`).
+    assert!(
+        body.contains("Content-Type: application/octet-stream"),
+        "body: {body}"
+    );
+    assert!(body.contains("Content-Type: image/png"), "body: {body}");
+}
+
+// --- upload multipart: missing payload path is skipped (fix round 1) -----
+
+#[tokio::test]
+async fn upload_save_skips_a_missing_payload_path_instead_of_failing() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/saves"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+        .mount(&server)
+        .await;
+
+    let temp = tempfile::tempdir().unwrap();
+    let save_file = temp_payload(&temp, "Chrono Trigger.srm", b"save-bytes");
+    let missing_screenshot = temp.path().join("does-not-exist.png");
+    let client = client_for(&server).await;
+
+    // The whole call still succeeds even though one payload path never
+    // existed — Python silently skips it (`api.py:93`) rather than
+    // aborting the upload.
+    client
+        .upload_save(
+            "42",
+            "Snes9x",
+            None,
+            &[
+                ("saveFile".to_string(), save_file),
+                ("screenshotFile".to_string(), missing_screenshot),
+            ],
+        )
+        .await
+        .unwrap();
+
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    let body = String::from_utf8_lossy(&requests[0].body);
+    assert!(body.contains("name=\"saveFile\""), "body: {body}");
+    assert!(
+        !body.contains("name=\"screenshotFile\""),
+        "the missing sidecar must never become a part: {body}"
+    );
+}
+
 // --- upload state: no slot, no overwrite ---------------------------------
 
 #[tokio::test]
@@ -367,4 +450,28 @@ async fn prune_blank_id_skipped_non_integer_failed() {
         delete_requests.is_empty(),
         "neither a blank nor a non-integer id should ever reach a delete request"
     );
+}
+
+// --- retention: refetch failure surfaces as a synthetic failed id
+// (fix round 1, controller ruling) --------------------------------------
+
+#[tokio::test]
+async fn prune_refetch_failure_returns_a_synthetic_failed_id() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/saves"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("db is down"))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server).await;
+    let (deleted, failed) = prune_server_save_records(&client, "42", "Redream", 1).await;
+
+    assert_eq!(deleted, 0);
+    assert_eq!(failed.len(), 1, "failed: {failed:?}");
+    assert!(!failed[0].is_empty(), "failed id text must not be blank");
+    // Token secrecy: the error text must never carry the credential this
+    // client authenticated with.
+    assert!(!failed[0].contains("Authorization"), "failed: {failed:?}");
+    assert!(!failed[0].contains("Bearer"), "failed: {failed:?}");
 }

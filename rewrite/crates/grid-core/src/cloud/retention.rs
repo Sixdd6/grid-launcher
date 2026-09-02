@@ -52,20 +52,21 @@ use super::restore::{
 ///    transport/auth error, records the id as failed and the loop
 ///    continues (:1759-1765).
 ///
-/// Returns `(deleted_count, failed_ids)`. A failure to refetch the record
-/// list itself (step 2) is treated as "nothing to prune" — `(0, vec![])`
-/// — rather than surfaced through this signature: Python's equivalent
-/// failure instead propagates as an exception out of
-/// `_prune_server_save_records` entirely, caught by ITS caller
-/// (`cloud_mixin.py:2634-2641`) and turned into a single synthetic
-/// failed-id entry containing the error text. That caller — the upload
-/// flow that decides whether to prune at all and reports the combined
-/// result to the user — is a future ops-layer task, out of scope here;
-/// this function's own fixed `(usize, Vec<String>)` signature (no
-/// `Result`) has no channel to carry a refetch error through to it, so
-/// this narrower behavior — deliberately conservative in the failure
-/// case — is a task-11 scoping decision, not a claim that Python treats a
-/// refetch failure as "nothing to prune".
+/// Returns `(deleted_count, failed_ids)`. Fix round 1 (controller ruling): a
+/// failure to refetch the record list itself (step 2) now returns
+/// `(0, vec![err.to_string()])` — one synthetic failed-id entry holding the
+/// error text, `deleted_count` staying `0`. This reproduces, INSIDE this
+/// function, what Python's CALLER does with the propagated exception
+/// (`cloud_mixin.py:2634-2641`: `except (...) as error:
+/// retention_failed_ids = [str(error)]`), since that caller — the upload
+/// flow that decides whether to prune at all — is a future ops-layer task
+/// not yet wired up in the port; folding its exception handling in here
+/// keeps the observable outcome identical regardless of which layer ends
+/// up doing it, which matters because a later task (Task 16) consumes this
+/// function's return value directly. `RommError`'s `Display` impl (see
+/// `romm/error.rs`) never embeds the request or its headers, so this text
+/// carries no secret — same guarantee the existing `Http`/`Decode`
+/// variants already give every other caller.
 pub async fn prune_server_save_records(
     client: &RommClient,
     rom_id: &str,
@@ -74,8 +75,9 @@ pub async fn prune_server_save_records(
 ) -> (usize, Vec<String>) {
     let keep = keep.max(1) as usize;
 
-    let Ok(payload) = client.saves_for_rom(rom_id).await else {
-        return (0, Vec::new());
+    let payload = match client.saves_for_rom(rom_id).await {
+        Ok(payload) => payload,
+        Err(err) => return (0, vec![err.to_string()]),
     };
     let records = server_records_from_payload(&payload);
 

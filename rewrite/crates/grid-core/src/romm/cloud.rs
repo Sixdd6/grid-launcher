@@ -58,9 +58,34 @@ fn encode_id(id: &str) -> String {
 /// up front — rather than streaming — mirrors the Python client's own
 /// `file_path.read_bytes()` and keeps this synchronous with no extra
 /// tokio `fs` feature.
+///
+/// Fix round 1: two corrections against `api.py:88-108`'s exact shape.
+///
+/// - Each part now carries a `Content-Type` guessed from the file name
+///   (`mime_guess::from_path(..).first_or_octet_stream()`), matching
+///   `mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"`
+///   (`api.py:96`) — `Part::bytes(..).file_name(..)` alone leaves the MIME
+///   type unset, which drops the `Content-Type:` line from the part
+///   entirely instead of falling back to `application/octet-stream`.
+/// - A payload path that doesn't exist or isn't a regular file is now
+///   silently SKIPPED (`path.is_file()`, which is false for both) rather
+///   than turned into an `Err` that aborts the whole upload — matching
+///   `api.py:93`'s `if not file_path.exists() or not file_path.is_file():
+///   continue`. This can leave `payload` fully skipped (e.g. a
+///   screenshot-only call whose sidecar vanished after being selected),
+///   in which case the resulting form has zero parts — Python's own
+///   `multipart_payload` allows the identical degenerate body (just the
+///   boundary markers, no part). An existing regular file that fails to
+///   READ (e.g. a permission error) is still an `Err`: Python's own guard
+///   only checks existence/regularity, not readability — a permission
+///   failure there propagates out of `file_path.read_bytes()` exactly
+///   like this function's `std::fs::read` error does here.
 fn build_multipart_form(payload: &[(String, PathBuf)]) -> Result<Form, RommError> {
     let mut form = Form::new();
     for (field, path) in payload {
+        if !path.is_file() {
+            continue;
+        }
         let bytes = std::fs::read(path)
             .map_err(|e| RommError::Connection(format!("failed to read upload payload: {e}")))?;
         let file_name = path
@@ -68,7 +93,11 @@ fn build_multipart_form(payload: &[(String, PathBuf)]) -> Result<Form, RommError
             .and_then(|n| n.to_str())
             .unwrap_or_default()
             .to_string();
-        let part = Part::bytes(bytes).file_name(file_name);
+        let mime = mime_guess::from_path(path).first_or_octet_stream();
+        let part = Part::bytes(bytes)
+            .file_name(file_name)
+            .mime_str(mime.as_ref())
+            .map_err(|e| RommError::Connection(format!("invalid upload content type: {e}")))?;
         form = form.part(field.clone(), part);
     }
     Ok(form)
