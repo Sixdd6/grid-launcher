@@ -9,6 +9,7 @@
   } from './api';
   import { downloads } from './stores/downloads.svelte';
   import { filterCatalogEntries, matchProfileByName } from './emulators/catalog';
+  import { NO_DEFAULT_VALUE, resolveDefaultEmulatorValue } from './emulators/defaults';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -273,15 +274,12 @@
   }
 
   function defaultFor(platformName: string): string {
-    if (!defaults) return '(none)';
-    const folded = platformName.toLowerCase();
-    const key = Object.keys(defaults.default_emulators).find((k) => k.toLowerCase() === folded);
-    return key ? defaults.default_emulators[key] : '(none)';
+    return resolveDefaultEmulatorValue(defaults, platformName, emulators);
   }
 
   async function handleDefaultChange(platformName: string, value: string) {
     try {
-      await api.setDefaultEmulator(platformName, value === '(none)' ? '' : value);
+      await api.setDefaultEmulator(platformName, value);
       await refreshDefaults();
     } catch (err) {
       defaultsError = errorMessage(err);
@@ -480,7 +478,7 @@
                 value={defaultFor(p.name)}
                 onchange={(e) => handleDefaultChange(p.name, (e.currentTarget as HTMLSelectElement).value)}
               >
-                <option value="(none)">(none)</option>
+                <option value={NO_DEFAULT_VALUE}>(none)</option>
                 {#each emulators as em (em.name)}
                   <option value={em.name}>{em.name}</option>
                 {/each}

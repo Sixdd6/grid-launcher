@@ -256,7 +256,11 @@ impl Registry {
 
     /// Looks up an installed game. When `rom_id` is `Some`, a row with a
     /// matching `rom_id` is tried first; if none matches (or `rom_id` is
-    /// `None`), falls back to the `(title_key, platform_key)` identity.
+    /// `None`), falls back to the `(title_key, platform_key)` identity —
+    /// except when `title.trim()` is empty, in which case the fallback is
+    /// skipped entirely and this returns `None`. A blank title has no real
+    /// identity to rescue by, so it must never match a blank-titled,
+    /// null-rom_id row.
     pub fn find(
         &self,
         rom_id: Option<i64>,
@@ -274,6 +278,10 @@ impl Registry {
             if found.is_some() {
                 return Ok(found);
             }
+        }
+
+        if title.trim().is_empty() {
+            return Ok(None);
         }
 
         let title_key = identity_key(title);

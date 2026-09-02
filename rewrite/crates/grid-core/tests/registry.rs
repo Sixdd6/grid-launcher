@@ -109,6 +109,22 @@ fn find_falls_back_to_identity_when_rom_id_is_unmatched() {
 }
 
 #[test]
+fn find_does_not_match_blank_title_query_to_a_blank_titled_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Registry::open(&dir.path().join("grid-launcher.db")).unwrap();
+    let mut game = sample("", "");
+    game.rom_id = None;
+    registry.upsert(&game).unwrap();
+
+    // rom_id 7 doesn't match this row's NULL rom_id, so `find` must not
+    // fall back to matching the blank (title_key, platform_key) identity —
+    // that fallback exists to rescue pre-rom-id rows by real identity, not
+    // to hand back an arbitrary blank-titled row for a blank query.
+    let found = registry.find(Some(7), "", "").unwrap();
+    assert!(found.is_none());
+}
+
+#[test]
 fn find_returns_none_when_nothing_matches() {
     let dir = tempfile::tempdir().unwrap();
     let registry = Registry::open(&dir.path().join("grid-launcher.db")).unwrap();

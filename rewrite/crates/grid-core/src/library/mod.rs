@@ -505,11 +505,12 @@ impl InstallService {
     pub fn uninstall(&self, rom_id: i64) -> Result<(), LibraryError> {
         let library = self.library_root()?;
         // `find` falls back to the (title, platform) identity when no row
-        // carries the rom id; blank keys must not match a blank-titled row,
-        // and a row that fell back with a *different* rom_id must not be
-        // treated as this game's install, so `installed_match` is the final
-        // word on what comes back (a null-rom_id row is still accepted,
-        // matching the frontend's `matchesInstalled`).
+        // carries the rom id, but never for this call: title and platform
+        // are passed blank, so `find` itself refuses the fallback and this
+        // only succeeds on a genuine rom_id match. `installed_match` then
+        // has the final word on what comes back — a null-rom_id row is
+        // still accepted (matching the frontend's `matchesInstalled`), but
+        // a row that carries a *different* rom_id is rejected.
         let record = self
             .registry
             .find(Some(rom_id), "", "")?

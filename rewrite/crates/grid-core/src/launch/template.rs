@@ -266,10 +266,10 @@ pub fn apply_placeholders(tokens: Vec<String>, ph: &Placeholders) -> Vec<String>
         let resolved = strip_wrapping_quotes(&resolved);
 
         if had_core_placeholder && core_missing {
-            if matches!(
-                resolved_args.last().map(String::as_str),
-                Some("-L") | Some("--libretro") | Some("--core")
-            ) {
+            if resolved_args
+                .last()
+                .is_some_and(|last| CORE_OPTION_TOKENS.contains(&last.as_str()))
+            {
                 resolved_args.pop();
             }
             continue;
