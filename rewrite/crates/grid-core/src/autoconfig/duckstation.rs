@@ -144,12 +144,15 @@ fn memory_card_settings(emulator_path: &str) -> MemoryCardSettings {
             let Some(eq_index) = raw_line.find('=') else {
                 continue;
             };
+            // Any `=` line under [MemoryCards] counts as parsed — even an
+            // empty-valued or unrecognized key — matching duckstation.py:174-180,
+            // which sets `parsed_any = True` before filtering on `and value`.
+            parsed_any = true;
             let key = raw_line[..eq_index].trim();
             let value = raw_line[eq_index + 1..].trim();
             if value.is_empty() {
                 continue;
             }
-            parsed_any = true;
             match key {
                 "Directory" => settings.directory = value.to_string(),
                 "Card1Type" => settings.card1_type = value.to_string(),
@@ -719,6 +722,53 @@ mod tests {
         );
         assert!(text.contains("OutputVolume = 80"));
         assert!(!text.contains("OutputVolume = 60"));
+    }
+
+    /// duckstation.py:174-180 sets `parsed_any = True` for ANY `=` line
+    /// found under `[MemoryCards]` — including an empty-valued or
+    /// unrecognized key — before filtering on `and value` for the field
+    /// assignment. So a candidate whose `[MemoryCards]` holds only a stray
+    /// empty-valued key still "wins": the scan stops there, `config_path`
+    /// is set to it, and the fallback defaults are reported (nothing
+    /// parseable set them) rather than falling through to read real values
+    /// out of a later candidate.
+    #[test]
+    fn duckstation_candidate_scan_counts_an_empty_valued_key_as_parsed() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (emulator_path, _, first_candidate) = setup_emulator(temp.path());
+        std::fs::write(&first_candidate, "[MemoryCards]\nSomeKey = \n").unwrap();
+
+        // A later candidate (home/Documents/DuckStation/settings.ini) with
+        // real, fully-populated values — must NOT be reached.
+        let second_candidate = paths::home_dir()
+            .unwrap()
+            .join("Documents")
+            .join("DuckStation")
+            .join("settings.ini");
+        std::fs::create_dir_all(second_candidate.parent().unwrap()).unwrap();
+        std::fs::write(
+            &second_candidate,
+            "[MemoryCards]\nDirectory = D:/RealMemcards\nCard1Type = PerGame\n",
+        )
+        .unwrap();
+
+        let settings = memory_card_settings(&emulator_path);
+
+        assert_eq!(
+            settings.config_path,
+            first_candidate.to_string_lossy().to_string(),
+            "the first candidate must win even though its only [MemoryCards] line is empty-valued"
+        );
+        assert_eq!(
+            settings.directory, "memcards",
+            "the fallback default, not the second candidate's real value"
+        );
+        assert_eq!(
+            settings.card1_type, "PerGameTitle",
+            "the fallback default, not the second candidate's real value"
+        );
     }
 
     #[test]
