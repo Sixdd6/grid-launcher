@@ -1400,7 +1400,7 @@ are relative to `rewrite/`.
 
 1. **Trigger policy.** `ensure_*` writers and entry autoconfig run only when a NEW emulator
    entry is created — catalog install
-   (`crates/grid-core/src/library/mod.rs:975` calls `sync_autoconfig`, itself calling
+   (`crates/grid-core/src/library/mod.rs:961` calls `sync_autoconfig`, itself calling
    `autoconfig::sync_new_emulator` at `crates/grid-core/src/library/mod.rs:995`) or manual add
    (`app/src-tauri/src/commands.rs:225`, `save_emulator`, on an ADD). Never on edits, launches
    or view refreshes — the reference's six call sites (launch, standalone launch, entry-dialog
@@ -1425,7 +1425,7 @@ are relative to `rewrite/`.
    computed from the RAW, unexpanded `emulator_path_text`
    (`grid_launcher/emulator/pcsx2.py:186`), so a `~`-prefixed
    path creates a literal `~` directory instead of resolving through `$HOME`. The port's fix is
-   `crates/grid-core/src/autoconfig/pcsx2.rs:8-14` (doc comment) and `:35-45`
+   `crates/grid-core/src/autoconfig/pcsx2.rs:8-14` (doc comment) and `:34-45`
    (`resolve_target`), pinned by
    `pcsx2_expands_a_tilde_path_and_creates_no_literal_tilde_directory`
    (`crates/grid-core/src/autoconfig/pcsx2.rs:440`).
@@ -1434,8 +1434,8 @@ are relative to `rewrite/`.
    `ensure_ppsspp_settings` and propagates out of the sync dispatch
    (`grid_launcher/ui/mixins/emulator_ui_mixin.py:388-439` does not catch it either — this is
    the inline `OPEN QUESTION` at line 1142 above, now ruled: fixed). The port wraps both reads
-   in `read_guarded` (`crates/grid-core/src/autoconfig/ppsspp.rs:57-64`, doc comment at
-   `:9-13`): an unreadable INI yields `changed=false` instead of propagating, exactly like
+   in `read_guarded` (`crates/grid-core/src/autoconfig/ppsspp.rs:60-65`, doc comment at
+   `:8-13`): an unreadable INI yields `changed=false` instead of propagating, exactly like
    every other writer's I/O failure.
 6. **PCSX2 `[Folders] Bios` is not written** (`crates/grid-core/src/autoconfig/pcsx2.rs:16`
    declares D6; the call site at `crates/grid-core/src/autoconfig/mod.rs:579` is a bare
@@ -1488,7 +1488,8 @@ are relative to `rewrite/`.
     entry before the sync runs (`crates/grid-core/src/library/mod.rs:960-961`).
     `auto_configure_emulator_settings` is retained reference-only — its own doc comment at
     `crates/grid-core/src/autoconfig/entry.rs:307-316` records this — exercised by its own
-    tests (`crates/grid-core/src/autoconfig/mod.rs:696`) and called from no production path.
+    tests (`crates/grid-core/src/autoconfig/entry.rs:682`) and called from no production
+    path.
     Site B (manual add, `app/src-tauri/src/commands.rs:225`) is exact Python parity, and it is
     what decides the design; at site A (catalog install) the two functions' outputs are
     equivalent, because the entry was just written from the same profile.
