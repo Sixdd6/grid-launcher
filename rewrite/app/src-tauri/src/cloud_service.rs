@@ -32,6 +32,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
+use crate::config_write::modify_config;
 use grid_core::cloud::native::normalize_manual_save_path;
 use grid_core::cloud::ops::native::manual_paths_key;
 use grid_core::cloud::ops::{self, CloudCaches, CloudContext, CloudMessage};
@@ -305,42 +306,14 @@ impl CloudService {
         let mut caches = self.caches.lock().await;
         let records =
             ops::fetch_cloud_records(&client, &ctx, &mut caches, &cloud_game, save_type).await?;
-
-        // Fix round 1, FIX 4: `restore_enabled_for_record` is pure but not
-        // cheap (it can walk `resolved_sync_dirs`), and many records in
-        // one list typically share the same emulator — memoize per THIS
-        // request, keyed like Python's own per-request cache
-        // (`(save_type, game_key, emulator name lowercased)`,
-        // `details_view_mixin.py:637-641`), rather than recomputing per
-        // row.
-        let key_prefix = format!("{}::{}", save_type.as_str(), game_key(&cloud_game));
-        let mut restore_enabled_memo: HashMap<String, (bool, String)> = HashMap::new();
-        let mut dtos = Vec::with_capacity(records.len());
-        for record in &records {
-            let emulator_field = record
-                .get("emulator")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .trim()
-                .to_lowercase();
-            let memo_key = format!("{key_prefix}::{emulator_field}");
-            let (restorable, tooltip) = match restore_enabled_memo.get(&memo_key) {
-                Some(cached) => cached.clone(),
-                None => {
-                    let computed = ops::restore_enabled_for_record(
-                        &ctx,
-                        &mut caches,
-                        &cloud_game,
-                        save_type,
-                        record,
-                    );
-                    restore_enabled_memo.insert(memo_key, computed.clone());
-                    computed
-                }
-            };
-            dtos.push(record_dto(record, inputs.now, restorable, tooltip));
-        }
-        Ok(dtos)
+        Ok(record_dtos(
+            &ctx,
+            &mut caches,
+            &cloud_game,
+            save_type,
+            inputs.now,
+            records,
+        ))
     }
 
     pub async fn upload(
@@ -533,15 +506,20 @@ impl CloudService {
         let config_path = config_path.to_path_buf();
         let cloud_game = cloud_game_from_input(&game);
         let key = manual_paths_key(&cloud_game);
-        let mut config = blocking_load_config(config_path.clone()).await?;
-        let mut paths = config
-            .native_manual_save_paths
-            .get(&key)
-            .cloned()
-            .unwrap_or_default();
-        mutate(&mut paths);
-        config.native_manual_save_paths.insert(key, paths);
-        blocking_save_config(config_path, config).await?;
+        tokio::task::spawn_blocking(move || {
+            modify_config(&config_path, |config| {
+                let mut paths = config
+                    .native_manual_save_paths
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or_default();
+                mutate(&mut paths);
+                config.native_manual_save_paths.insert(key, paths);
+                Ok(())
+            })
+        })
+        .await
+        .map_err(|e| format!("manual path save did not finish: {e}"))??;
         self.caches.lock().await.clear();
         Ok(())
     }
@@ -572,13 +550,18 @@ impl CloudService {
         settings: CloudSettingsDto,
     ) -> Result<(), String> {
         let config_path = config_path.to_path_buf();
-        let mut config = blocking_load_config(config_path.clone()).await?;
-        config.auto_cloud_save_download_on_launch = settings.download_on_launch;
-        config.auto_cloud_save_upload_on_exit = settings.upload_on_exit;
-        config.auto_cloud_save_skip_download_if_local_newer = settings.skip_if_local_newer;
-        config.auto_cloud_save_upload_delay_seconds = settings.upload_delay_seconds;
-        config.cloud_save_retention_limit = settings.retention_limit;
-        blocking_save_config(config_path, config).await?;
+        tokio::task::spawn_blocking(move || {
+            modify_config(&config_path, |config| {
+                config.auto_cloud_save_download_on_launch = settings.download_on_launch;
+                config.auto_cloud_save_upload_on_exit = settings.upload_on_exit;
+                config.auto_cloud_save_skip_download_if_local_newer = settings.skip_if_local_newer;
+                config.auto_cloud_save_upload_delay_seconds = settings.upload_delay_seconds;
+                config.cloud_save_retention_limit = settings.retention_limit;
+                Ok(())
+            })
+        })
+        .await
+        .map_err(|e| format!("cloud settings save did not finish: {e}"))??;
         self.caches.lock().await.clear();
         Ok(())
     }
@@ -827,9 +810,20 @@ impl CloudService {
         }
 
         let delay = clamped_upload_delay_seconds(&config);
-        if delay > 0 {
+        // Final-review fix wave: the plan below reads this game's sync
+        // entry out of `config`. After sleeping for up to a minute that
+        // snapshot can be stale — another session's stamp, a settings
+        // change, or a concurrent auto-upload may have landed meanwhile —
+        // so reload once here, before anything plans from it.
+        let config = if delay > 0 {
             tokio::time::sleep(Duration::from_secs(delay)).await;
-        }
+            match blocking_load_config(config_path.clone()).await {
+                Ok(fresh) => fresh,
+                Err(_) => return,
+            }
+        } else {
+            config
+        };
 
         let all_games: Vec<CloudGame> = installed.iter().map(cloud_game_from_installed).collect();
         let config_dir = config_path
@@ -1092,12 +1086,6 @@ async fn blocking_load_config(config_path: PathBuf) -> Result<Config, String> {
         .map_err(|e| format!("config load did not finish: {e}"))?
 }
 
-async fn blocking_save_config(config_path: PathBuf, config: Config) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || config.save(&config_path).map_err(err))
-        .await
-        .map_err(|e| format!("config save did not finish: {e}"))?
-}
-
 /// Reloads `config_path` fresh from disk, applies `update` under `key`,
 /// and saves — fix round 1, FIX 1: every sync-state persist that follows
 /// a nontrivial `.await` gap (a network call, a delay sleep) MUST reload
@@ -1108,6 +1096,13 @@ async fn blocking_save_config(config_path: PathBuf, config: Config) -> Result<()
 /// meantime — the exact bug this helper exists to make structurally hard
 /// to reintroduce. A blank `key` or a no-op `update` is a no-op (no
 /// load, no save), matching [`apply_sync_update`]'s own guard.
+///
+/// Final-review fix wave: the reload and the save are now ONE
+/// [`modify_config`] step. Reloading first was necessary but not
+/// sufficient — two auto-uploads (the D5 pool runs two at once) or an
+/// auto-upload and a UI save could still interleave between this
+/// reload and this save. `modify_config`'s process-wide lock closes
+/// that window.
 async fn reload_apply_and_save(
     config_path: &Path,
     key: &str,
@@ -1116,9 +1111,16 @@ async fn reload_apply_and_save(
     if key.is_empty() || update == SyncStateUpdate::default() {
         return Ok(());
     }
-    let mut config = blocking_load_config(config_path.to_path_buf()).await?;
-    apply_sync_update(&mut config, key, update);
-    blocking_save_config(config_path.to_path_buf(), config).await
+    let path = config_path.to_path_buf();
+    let key = key.to_string();
+    tokio::task::spawn_blocking(move || {
+        modify_config(&path, |config| {
+            apply_sync_update(config, &key, update);
+            Ok(())
+        })
+    })
+    .await
+    .map_err(|e| format!("config save did not finish: {e}"))?
 }
 
 // ---------------------------------------------------------------------
@@ -1290,6 +1292,54 @@ fn size_text_for_record(record: &Value) -> String {
     }
 }
 
+/// Order the server's records and turn them into row DTOs.
+///
+/// Final-review fix wave: the server returns them in ITS order; Python
+/// sorts newest-first before rendering
+/// (`sort_server_records_by_recency`, `details_view_mixin.py:884`), so
+/// this does the same — the panel must not depend on server ordering.
+///
+/// Fix round 1, FIX 4: `restore_enabled_for_record` is pure but not
+/// cheap (it can walk `resolved_sync_dirs`), and many records in one
+/// list typically share the same emulator — memoize per THIS request,
+/// keyed like Python's own per-request cache (`(save_type, game_key,
+/// emulator name lowercased)`, `details_view_mixin.py:637-641`), rather
+/// than recomputing per row.
+fn record_dtos(
+    ctx: &CloudContext,
+    caches: &mut CloudCaches,
+    game: &CloudGame,
+    save_type: SaveType,
+    now: f64,
+    mut records: Vec<Value>,
+) -> Vec<CloudRecordDto> {
+    cloud_restore::sort_server_records_by_recency(&mut records);
+
+    let key_prefix = format!("{}::{}", save_type.as_str(), game_key(game));
+    let mut restore_enabled_memo: HashMap<String, (bool, String)> = HashMap::new();
+    let mut dtos = Vec::with_capacity(records.len());
+    for record in &records {
+        let emulator_field = record
+            .get("emulator")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_lowercase();
+        let memo_key = format!("{key_prefix}::{emulator_field}");
+        let (restorable, tooltip) = match restore_enabled_memo.get(&memo_key) {
+            Some(cached) => cached.clone(),
+            None => {
+                let computed =
+                    ops::restore_enabled_for_record(ctx, caches, game, save_type, record);
+                restore_enabled_memo.insert(memo_key, computed.clone());
+                computed
+            }
+        };
+        dtos.push(record_dto(record, now, restorable, tooltip));
+    }
+    dtos
+}
+
 fn record_dto(record: &Value, now: f64, restorable: bool, tooltip: String) -> CloudRecordDto {
     let id = record_id_i64(record).unwrap_or(0);
     let file_name = record
@@ -1420,6 +1470,51 @@ mod tests {
         );
     }
 
+    /// Final-review fix wave: the server's own order must not reach the
+    /// panel — records render newest-first, as Python's
+    /// `sort_server_records_by_recency` does.
+    #[test]
+    fn record_dtos_sort_newest_first_regardless_of_server_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let inputs = Inputs {
+            config: Config::default(),
+            profiles: &[],
+            all_games: Vec::new(),
+            installed: Vec::new(),
+            config_dir: dir.path().to_path_buf(),
+            active_sessions: Vec::new(),
+            now: 1_800_000_000.0,
+        };
+        let pcgw: Vec<String> = Vec::new();
+        let ctx = inputs.context(&pcgw);
+        let mut caches = CloudCaches::default();
+        let game = CloudGame {
+            title: "Alpha".to_string(),
+            platform: "GameCube".to_string(),
+            rom_id: "1".to_string(),
+            ..Default::default()
+        };
+
+        // Server order: OLDER first.
+        let records = vec![
+            serde_json::json!({"id": 1, "updated_at": "2026-01-01T00:00:00Z"}),
+            serde_json::json!({"id": 2, "updated_at": "2026-06-01T00:00:00Z"}),
+        ];
+        let dtos = record_dtos(
+            &ctx,
+            &mut caches,
+            &game,
+            SaveType::Save,
+            inputs.now,
+            records,
+        );
+        assert_eq!(
+            dtos.iter().map(|d| d.id).collect::<Vec<_>>(),
+            vec![2, 1],
+            "the newer record must come first"
+        );
+    }
+
     /// Fix round 1, FIX 5: local time, no seconds, no zone suffix, and a
     /// fixed string for "no timestamp" — not the previous UTC-with-
     /// trailing-"UTC" rendering (which also returned `""` for `<= 0`).
@@ -1493,9 +1588,7 @@ mod tests {
             library_path: "initial".to_string(),
             ..Default::default()
         };
-        blocking_save_config(config_path.clone(), initial.clone())
-            .await
-            .unwrap();
+        initial.save(&config_path).unwrap();
 
         // This is the snapshot a caller might have captured BEFORE a
         // sleep/network gap — deliberately never reloaded before use
@@ -1507,9 +1600,7 @@ mod tests {
         // touches.
         let mut concurrent = blocking_load_config(config_path.clone()).await.unwrap();
         concurrent.library_path = "changed-during-the-gap".to_string();
-        blocking_save_config(config_path.clone(), concurrent)
-            .await
-            .unwrap();
+        concurrent.save(&config_path).unwrap();
 
         reload_apply_and_save(
             &config_path,

@@ -1,5 +1,6 @@
 mod cloud_service;
 mod commands;
+mod config_write;
 mod gamepad;
 
 use commands::AppState;

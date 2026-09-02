@@ -107,6 +107,9 @@ fn current_username() -> String {
 
 /// `pwd.getpwuid(os.getuid()).pw_name` — the real-user password-database
 /// fallback `getpass.getuser()` uses when no env var names a user.
+///
+/// `getuid`, not `geteuid`: Python reads the REAL uid, so a GRID started
+/// under `sudo`/setuid resolves the invoking user's name, not root's.
 #[cfg(unix)]
 fn passwd_fallback_username() -> Option<String> {
     // SAFETY: `getpwuid` returns either null or a pointer into a
@@ -114,7 +117,7 @@ fn passwd_fallback_username() -> Option<String> {
     // `String` immediately and the pointer is never retained or reused
     // across calls.
     unsafe {
-        let passwd = libc::getpwuid(libc::geteuid());
+        let passwd = libc::getpwuid(libc::getuid());
         if passwd.is_null() {
             return None;
         }

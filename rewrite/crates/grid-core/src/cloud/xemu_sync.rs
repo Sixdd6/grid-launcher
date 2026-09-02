@@ -28,8 +28,10 @@ use super::IgnoreSets;
 const QCOW2_MAGIC: [u8; 4] = [0x51, 0x46, 0x49, 0xFB];
 
 /// [`inject_xemu_save_archive`]'s D2 notice for a legacy whole-image
-/// record — byte-exact, user-facing (spec "xemu flow").
-const LEGACY_RECORD_NOTICE: &str = "This cloud save is a legacy whole-image xemu backup and cannot be restored by this version. Upload a new save to replace it.";
+/// record — byte-exact, user-facing (spec "xemu flow"). Public so the
+/// restore path can show it WITHOUT calling `inject_xemu_save_archive`
+/// just to harvest the error text.
+pub const LEGACY_RECORD_NOTICE: &str = "This cloud save is a legacy whole-image xemu backup and cannot be restored by this version. Upload a new save to replace it.";
 
 /// The outcome of sniffing a configured `hdd_path` for xemu cloud sync
 /// (spec "xemu flow", block reasons `xemu-image-not-raw` /
@@ -107,8 +109,31 @@ pub fn block_reason_for_status(status: &XemuImageStatus) -> Option<String> {
 /// `emulator_path`), via the milestone-5 xemu module's minimal reader.
 /// `None` when the file, section, or key is absent, or the value is
 /// blank.
+/// A RELATIVE `hdd_path` is resolved against xemu's own directory — see
+/// [`resolve_hdd_path`]. Every consumer here (classification, archive
+/// build, inject) therefore receives an absolute path.
 pub fn xemu_hdd_path_from_config(emulator_path: &str) -> Option<String> {
-    crate::autoconfig::xemu::hdd_path_from_config(emulator_path)
+    let raw = crate::autoconfig::xemu::hdd_path_from_config(emulator_path)?;
+    Some(resolve_hdd_path(emulator_path, &raw))
+}
+
+/// Resolve a `hdd_path` value read out of `xemu.toml`.
+///
+/// xemu reads that key relative to its OWN directory, so testing a
+/// relative value against GRID's process working directory (whatever the
+/// desktop launcher happened to set) would classify a perfectly good
+/// image as [`XemuImageStatus::Missing`]. An absolute value, and the case
+/// where the emulator directory cannot be resolved, are returned
+/// unchanged.
+fn resolve_hdd_path(emulator_path: &str, hdd_path: &str) -> String {
+    let trimmed = hdd_path.trim();
+    if trimmed.is_empty() || Path::new(trimmed).is_absolute() {
+        return trimmed.to_string();
+    }
+    match crate::autoconfig::xemu::resolve_emulator_dir(emulator_path) {
+        Some(dir) => dir.join(trimmed).to_string_lossy().into_owned(),
+        None => trimmed.to_string(),
+    }
 }
 
 /// Extract `E:/UDATA` and `E:/TDATA` from the raw image at `hdd_path` into
@@ -352,6 +377,27 @@ mod tests {
         assert_eq!(
             xemu_hdd_path_from_config(exe.to_str().unwrap()),
             Some(raw_path.to_string_lossy().to_string())
+        );
+    }
+
+    /// A relative `hdd_path` is xemu's own directory's business, never
+    /// GRID's working directory.
+    #[test]
+    fn a_relative_hdd_path_resolves_against_the_xemu_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("xemu");
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("xemu.exe");
+        std::fs::write(&exe, b"").unwrap();
+        std::fs::write(
+            dir.join("xemu.toml"),
+            "[sys.files]\nhdd_path = 'data/xbox_hdd.img'\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            xemu_hdd_path_from_config(exe.to_str().unwrap()),
+            Some(dir.join("data/xbox_hdd.img").to_string_lossy().into_owned())
         );
     }
 

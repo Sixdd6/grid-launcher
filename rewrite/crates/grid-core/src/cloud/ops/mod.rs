@@ -600,6 +600,11 @@ pub fn block_reason_for_game(
 
     let name = wrapper_emulator_name(ctx, entry, &game.platform);
     if save_type == SaveType::Save && is_xemu(ctx, &name, entry) {
+        // D11 first: it is the transient, immediately actionable one, and
+        // it must fire before anything opens the image.
+        if xemu_session_is_running(ctx, &name) {
+            return XEMU_RUNNING_REASON.to_string();
+        }
         let hdd_path = entry
             .and_then(|e| xemu_hdd_path_from_config(&e.path))
             .unwrap_or_default();
@@ -609,6 +614,34 @@ pub fn block_reason_for_game(
     }
 
     String::new()
+}
+
+/// D11 (doc 06): xemu save sync writes into the HDD image IN PLACE, which
+/// an image xemu still holds open can cross-link. Python replaced the
+/// whole file and had no such hazard, so this string has no Python
+/// original.
+const XEMU_RUNNING_REASON: &str = "xemu is running — close it before syncing its saves.";
+
+/// True when any active session resolves to the same emulator entry as
+/// `name` — the xemu the caller is about to write into.
+///
+/// The scratch [`CloudCaches`] is deliberate: this walks other games'
+/// entries, which have nothing to do with the caller's own cache keys,
+/// and the resolution it runs is pure config/profile work (no disk, no
+/// network), so a per-call memo costs nothing worth keeping.
+fn xemu_session_is_running(ctx: &CloudContext, name: &str) -> bool {
+    let name = name.trim();
+    if name.is_empty() {
+        return false;
+    }
+    let mut scratch = CloudCaches::default();
+    ctx.active_sessions.iter().any(|session| {
+        let (_, session_entry) =
+            resolved_cloud_emulator_pair(ctx, &mut scratch, &session.game, SaveType::Save);
+        let session_name =
+            wrapper_emulator_name(ctx, session_entry.as_ref(), &session.game.platform);
+        session_name.trim().eq_ignore_ascii_case(name)
+    })
 }
 
 /// `_cloud_sync_rom_id_for_game` (cloud_mixin.py:439-458). For saves a

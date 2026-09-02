@@ -14,6 +14,7 @@
     cloudRecordTitle,
     createRequestGuard,
     deleteConfirmText,
+    recordsStatusLine,
     restoreConfirmText,
     sharedScopeWarning,
     uploadButtonLabel,
@@ -306,6 +307,9 @@
               </div>
             </div>
           {/each}
+          <p data-testid="cloud-records-status" class="hint records-status">
+            {recordsStatusLine(records.length, saveType)}
+          </p>
         {/if}
       </div>
 
@@ -516,6 +520,10 @@
     background: var(--accent);
     color: #fff;
     cursor: pointer;
+  }
+
+  .records-status {
+    margin-top: 0.25rem;
   }
 
   .records {

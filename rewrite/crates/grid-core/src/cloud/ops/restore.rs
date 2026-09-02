@@ -32,6 +32,7 @@ use super::super::transfer::{
 };
 use super::super::xemu_sync::{
     archive_is_udata_tdata, inject_xemu_save_archive, xemu_hdd_path_from_config,
+    LEGACY_RECORD_NOTICE,
 };
 use super::super::{CloudGame, IgnoreSets, SaveType};
 use super::*;
@@ -463,17 +464,12 @@ async fn restore_xemu(
     }
 
     // D2: legacy-check everything before touching the image at all.
-    for payload in &payloads {
-        if !archive_is_udata_tdata(payload) {
-            let notice = inject_xemu_save_archive(&hdd, payload)
-                .err()
-                .unwrap_or_else(|| "This cloud save cannot be restored.".to_string());
-            return (
-                false,
-                vec![CloudMessage::info(notice)],
-                SyncStateUpdate::default(),
-            );
-        }
+    if payloads.iter().any(|p| !archive_is_udata_tdata(p)) {
+        return (
+            false,
+            vec![CloudMessage::info(LEGACY_RECORD_NOTICE)],
+            SyncStateUpdate::default(),
+        );
     }
 
     for payload in &payloads {

@@ -90,7 +90,7 @@ fn default_base_root_for(host: Host) -> PathBuf {
 /// `path.trim()` expanded, dir-or-parent — `None` for a blank path
 /// (xemu.py:246-249's `emulator_dir` local, which stays `None` for a blank
 /// or non-string `emulator_path_text`).
-fn resolve_emulator_dir(emulator_path: &str) -> Option<PathBuf> {
+pub(crate) fn resolve_emulator_dir(emulator_path: &str) -> Option<PathBuf> {
     let trimmed = emulator_path.trim();
     if trimmed.is_empty() {
         return None;

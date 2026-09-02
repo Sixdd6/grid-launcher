@@ -1074,6 +1074,48 @@ fn xemu_block_reasons_surface_through_block_reason_for_game() {
     );
 }
 
+/// D11: an in-place FATX write to an image xemu still holds open risks
+/// cross-linking, so a live xemu session blocks upload AND restore.
+#[test]
+fn a_running_xemu_session_blocks_syncing_its_saves() {
+    let root = TempDir::new().unwrap();
+    let entry = xemu_fixture(root.path(), true);
+    let mut config = config_with(entry.clone(), "Xbox");
+    config.emulators.push(entry_named("redream", ""));
+    config
+        .default_emulators
+        .insert("Dreamcast".to_string(), "redream".to_string());
+    let mut fx = Fixture::new(config);
+    let target = game("Halo", "Xbox", "7");
+
+    // Nothing running: the image is Ready, so nothing blocks.
+    assert_eq!(
+        block_reason_for_game(&fx.ctx(), &target, SaveType::Save, Some(&entry)),
+        ""
+    );
+
+    // A session for an unrelated, non-xemu game changes nothing.
+    fx.sessions.push(ActiveSessionRef {
+        game: game("Sonic", "Dreamcast", "12"),
+        started_at: 1_699_999_000.0,
+    });
+    assert_eq!(
+        block_reason_for_game(&fx.ctx(), &target, SaveType::Save, Some(&entry)),
+        ""
+    );
+
+    // A session for ANOTHER game that resolves to the same xemu entry
+    // blocks — the image is shared, not per-game.
+    fx.sessions.push(ActiveSessionRef {
+        game: game("Halo 2", "Xbox", "9"),
+        started_at: 1_699_999_500.0,
+    });
+    assert_eq!(
+        block_reason_for_game(&fx.ctx(), &target, SaveType::Save, Some(&entry)),
+        "xemu is running — close it before syncing its saves."
+    );
+}
+
 // --- native ------------------------------------------------------------
 
 /// Doc 06 "Upload — native games": the combined manifest archive, an

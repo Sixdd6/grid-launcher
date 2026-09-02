@@ -1,5 +1,6 @@
 pub mod cloud;
 
+use crate::config_write::modify_config;
 use grid_core::autoconfig::{self, entry as autoconfig_entry, RaCredentials};
 use grid_core::config::{Config, EmulatorEntry};
 use grid_core::launch::catalog::{catalog_entries, mark_installed, CatalogEntry};
@@ -211,10 +212,10 @@ pub async fn get_library_path() -> Result<String, String> {
 #[tauri::command]
 pub async fn set_library_path(path: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let config_path = Config::default_path();
-        let mut config = Config::load(&config_path).map_err(err)?;
-        config.library_path = path;
-        config.save(&config_path).map_err(err)
+        modify_config(&Config::default_path(), |config| {
+            config.library_path = path;
+            Ok(())
+        })
     })
     .await
     .map_err(|e| format!("set_library_path did not finish: {e}"))?
@@ -341,22 +342,24 @@ pub async fn save_emulator(
 
     tokio::task::spawn_blocking(move || {
         let config_path = Config::default_path();
-        let mut config = Config::load(&config_path).map_err(err)?;
         let profiles = load_profiles();
-
-        let is_add = is_manual_add(&config, &original_name);
-        let entry = manual_add_entry(entry, is_add, profiles);
-        // The name as it will be STORED, so the sync lookup matches exactly.
-        let saved_name = entry.name.clone();
-
-        apply_save_emulator(&mut config, &original_name, entry)?;
-        config.save(&config_path).map_err(err)?;
+        // The autoconfig sync below reads no config.json and can be slow
+        // (it writes emulator config files), so it runs AFTER the write
+        // lock is released, on the three values the closure hands back.
+        let (is_add, saved_name, library_path) = modify_config(&config_path, |config| {
+            let is_add = is_manual_add(config, &original_name);
+            let entry = manual_add_entry(entry, is_add, profiles);
+            // The name as it will be STORED, so the sync lookup matches exactly.
+            let saved_name = entry.name.clone();
+            apply_save_emulator(config, &original_name, entry)?;
+            Ok((is_add, saved_name, config.library_path.clone()))
+        })?;
 
         if is_add {
             let ctx = autoconfig::SyncContext {
                 config_path: &config_path,
                 platforms: &platforms,
-                ps3_library_path: autoconfig::ps3_library_path(&config.library_path),
+                ps3_library_path: autoconfig::ps3_library_path(&library_path),
                 ra,
                 profiles,
             };
@@ -379,10 +382,10 @@ pub async fn save_emulator(
 #[tauri::command]
 pub async fn delete_emulator(name: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let config_path = Config::default_path();
-        let mut config = Config::load(&config_path).map_err(err)?;
-        apply_delete_emulator(&mut config, &name);
-        config.save(&config_path).map_err(err)
+        modify_config(&Config::default_path(), |config| {
+            apply_delete_emulator(config, &name);
+            Ok(())
+        })
     })
     .await
     .map_err(|e| format!("delete_emulator did not finish: {e}"))?
@@ -391,10 +394,10 @@ pub async fn delete_emulator(name: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn set_default_emulator(platform: String, name: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let config_path = Config::default_path();
-        let mut config = Config::load(&config_path).map_err(err)?;
-        apply_set_default_emulator(&mut config, &platform, &name);
-        config.save(&config_path).map_err(err)
+        modify_config(&Config::default_path(), |config| {
+            apply_set_default_emulator(config, &platform, &name);
+            Ok(())
+        })
     })
     .await
     .map_err(|e| format!("set_default_emulator did not finish: {e}"))?
@@ -471,10 +474,12 @@ pub async fn set_retroachievements_credentials(
             ra_store.save(&token).map_err(err)?;
         }
 
-        let config_path = Config::default_path();
-        let mut config = Config::load(&config_path).map_err(err)?;
-        config.retroachievements_username = trimmed_username.clone();
-        config.save(&config_path).map_err(err)?;
+        // The fan-out writes emulator config files, never config.json, so
+        // it runs outside the write lock on the saved snapshot.
+        let config = modify_config(&Config::default_path(), |config| {
+            config.retroachievements_username = trimmed_username.clone();
+            Ok(config.clone())
+        })?;
 
         let ra = RaCredentials::new(trimmed_username, token);
         let rows = autoconfig::fan_out_ra_credentials(&config, load_profiles(), &ra);
@@ -511,10 +516,10 @@ pub async fn clear_retroachievements_credentials(state: State<'_, AppState>) -> 
     let ra_store = state.ra_store.clone();
     tokio::task::spawn_blocking(move || {
         ra_store.clear().map_err(err)?;
-        let config_path = Config::default_path();
-        let mut config = Config::load(&config_path).map_err(err)?;
-        apply_clear_retroachievements(&mut config);
-        config.save(&config_path).map_err(err)
+        modify_config(&Config::default_path(), |config| {
+            apply_clear_retroachievements(config);
+            Ok(())
+        })
     })
     .await
     .map_err(|e| format!("clear_retroachievements_credentials did not finish: {e}"))?

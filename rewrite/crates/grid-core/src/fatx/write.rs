@@ -18,6 +18,16 @@
 //! chains are freed, so a crash again leaks clusters rather than leaving a
 //! live entry pointing at reusable ones.
 //!
+//! **Overwriting an existing file obeys the same guarantee.** The new
+//! chain is allocated WITHOUT first freeing the old one, so phase 1 can
+//! never write over a cluster the on-disk entry and FAT still describe as
+//! the old file's. Until phase 3 flips the entry, the old file is intact
+//! and readable; the old chain is only handed back afterwards, by the
+//! second FAT commit described under Durability. The price is that an
+//! overwrite momentarily holds both chains at once — irrelevant at save
+//! file sizes, and out-of-space is still decided before any byte is
+//! written.
+//!
 //! # Durability
 //!
 //! Issuing the writes in that order is not enough. `Write::flush` on a
@@ -30,10 +40,11 @@
 //! - the FAT is **durable before** the directory entry is written,
 //! - on removal, the `0xE5` marks are **durable before** the chains are
 //!   freed,
-//! - and on an overwrite that shrinks a file, the surplus clusters stay
-//!   allocated in a first FAT commit, and are only freed by a second
-//!   commit after the new directory entry is durable — so no window exists
-//!   where a free cluster is still named by a live entry.
+//! - and on an overwrite, the old chain stays allocated in a first FAT
+//!   commit, and is only freed by a second commit after the new directory
+//!   entry is durable — so no window exists where a free cluster is still
+//!   named by a live entry, nor one where a live entry names clusters the
+//!   new data has already overwritten.
 //!
 //! `DurableWrite for File` calls `sync_data`. The default method is a
 //! no-op, which is what in-memory test stores want.
@@ -43,6 +54,27 @@
 //! [`FatxError::NoSpace`] drops that copy with the image untouched. So is
 //! every name check, so an unusable name can never orphan a committed
 //! cluster.
+//!
+//! # Names: the read/write asymmetry
+//!
+//! FATX names are single-byte, and this port only accepts the printable
+//! ASCII subset [`name_is_valid`] defines. The two directions treat a name
+//! outside it differently, on purpose:
+//!
+//! - **Reading** an image SKIPS such an entry:
+//!   `FatxPartition::read_tree` runs the same [`name_is_valid`] test and
+//!   `continue`s past a failure. An image written by a real Xbox or by
+//!   another tool may hold code-page names this port cannot render, and
+//!   one of them must never make the whole extraction fail.
+//! - **Writing** REFUSES it: an unusable host filename fails the write
+//!   with [`FatxError::InvalidName`], surfaced to the caller as
+//!   [`FatxError::PartialWrite`] carrying the count of files already
+//!   written. Silently dropping a file the user asked to restore would
+//!   lose data without saying so.
+//!
+//! The practical consequence: a round trip (read out, write back) can
+//! drop a non-ASCII-named file on the way out, and a restore payload
+//! carrying one fails loudly rather than skipping it.
 
 use std::collections::HashSet;
 use std::fs::File;
@@ -333,22 +365,27 @@ impl<S: Read + Write + Seek + DurableWrite> FatxPartition<S> {
             ));
         }
         let layout = self.dir_layout(dir_cluster)?;
-        if let Some((_, entry)) = layout.find(name) {
+        let existing = layout.find(name);
+        if let Some((_, entry)) = &existing {
             if !entry.is_dir {
                 return Err(FatxError::NotADirectory(
                     String::from_utf8_lossy(name).into_owned(),
                 ));
             }
-            if entry.first_cluster == 0 {
-                return Err(FatxError::CorruptChain);
+            if entry.first_cluster != 0 {
+                return Ok(entry.first_cluster);
             }
-            return Ok(entry.first_cluster);
+            // `first_cluster == 0` on a directory entry: the read path
+            // (`FatxPartition::entries_at`) treats that as an EMPTY
+            // directory rather than an error, so the write path adopts the
+            // same reading — give it a cluster and rewrite the entry in
+            // its own slot instead of failing the whole tree.
         }
 
         // Allocate against a scratch FAT, so out of space changes nothing.
         let mut fat = self.fat.clone();
         let own = fat.allocate(1)?[0];
-        let plan = self.plan_slot(&layout, &mut fat, None)?;
+        let plan = self.plan_slot(&layout, &mut fat, existing.as_ref().map(|(s, _)| *s))?;
 
         // 1. Data-area bytes: the new directory's cluster, and the parent's
         //    new cluster when it had to grow. Both are all-0xFF, so they
@@ -392,46 +429,32 @@ impl<S: Read + Write + Seek + DurableWrite> FatxPartition<S> {
         let cluster_size = self.geo.cluster_size as usize;
         let needed = data.len().div_ceil(cluster_size);
 
-        // Overwrite: free the old chain in the scratch FAT first, so the
-        // fresh allocation may reuse those clusters instead of needing
-        // twice the space.
-        // The old chain is freed unconditionally — `free_chain` reclaims
-        // what it can reach even when the chain is corrupt. `old_clusters`
-        // is only used to work out the surplus below, so a chain we cannot
-        // walk simply yields no surplus and one FAT commit.
+        // Overwrite: the old chain is NOT freed before the allocation.
+        // Freeing it first lets the fresh allocation hand back the very
+        // clusters the on-disk directory entry and FAT still describe as
+        // the old file's, so phase 1 would overwrite live data — and a
+        // crash between phase 1 and phase 3 would leave a live entry
+        // naming clusters that hold the new bytes. Every old cluster is
+        // therefore surplus, released by the second FAT commit once the
+        // new entry is durable. The cost is a momentary double allocation,
+        // which is nothing at save-file sizes.
         let old_first = match &existing {
             Some((_, entry)) => entry.first_cluster,
             None => 0,
         };
-        let old_clusters: Vec<u32> = if old_first == 0 {
-            Vec::new()
-        } else {
-            self.fat.chain(old_first).unwrap_or_default()
-        };
         let mut fat = self.fat.clone();
-        if old_first != 0 {
-            fat.free_chain(old_first);
-        }
         let chain = fat.allocate(needed)?;
         let plan = self.plan_slot(&layout, &mut fat, existing.as_ref().map(|(s, _)| *s))?;
 
-        // Clusters the old file held that the new one does not. They must
-        // stay allocated until the new directory entry is durable: freeing
-        // them earlier leaves a window where a free cluster is still named
-        // by the entry on disk, and a concurrent allocation could hand the
-        // same cluster to a second file.
-        let mut kept: HashSet<u32> = chain.iter().copied().collect();
-        if let SlotPlan::Grown(cluster) = plan {
-            kept.insert(cluster);
-        }
-        let surplus: Vec<u32> = old_clusters
-            .iter()
-            .copied()
-            .filter(|c| !kept.contains(c))
-            .collect();
-        let mut interim = fat.clone();
-        for cluster in &surplus {
-            interim.set_entry(*cluster, self.geo.end_of_chain())?;
+        // `interim` keeps the old chain exactly as it is; `freed` is the
+        // same FAT with the old chain given back. `free_chain` reclaims
+        // what it can reach even when the chain is corrupt, so an
+        // unwalkable old chain simply leaks its clusters rather than
+        // failing the write.
+        let interim = fat.clone();
+        let mut freed = fat;
+        if old_first != 0 {
+            freed.free_chain(old_first);
         }
 
         // 1. Data clusters, and the parent's new cluster if it grew.
@@ -444,18 +467,18 @@ impl<S: Read + Write + Seek + DurableWrite> FatxPartition<S> {
             self.fill_cluster(cluster, END_OF_DIRECTORY)?;
         }
         self.barrier()?;
-        // 2. The FAT, with the surplus still allocated, durable before the
-        //    entry names the new chain.
+        // 2. The FAT, with the old chain still allocated, durable before
+        //    the entry names the new chain.
         self.fat = interim;
         self.commit_fat()?;
         // 3. The directory entry.
         let first = chain.first().copied().unwrap_or(0);
         let entry = DirEntry::new_bytes(name, false, first, data.len() as u32);
         self.place_entry(&layout, plan, &entry)?;
-        // 4. Only now is it safe to give the surplus back.
-        if !surplus.is_empty() {
+        // 4. Only now is it safe to give the old chain back.
+        if old_first != 0 {
             self.barrier()?;
-            self.fat = fat;
+            self.fat = freed;
             self.commit_fat()?;
         }
         Ok(())
@@ -753,9 +776,9 @@ mod tests {
         let first_cluster = part.list_dir("UDATA").unwrap()[0].first_cluster;
         let slots_before = part.list_dir("UDATA").unwrap().len();
 
-        // Same name, same length: the old chain must be freed and a fresh
-        // one allocated, so the free-cluster count comes out identical and
-        // the directory gains no second entry.
+        // Same name, same length: a fresh chain is allocated and the old
+        // one freed afterwards, so the free-cluster count comes out
+        // identical and the directory gains no second entry.
         let src2 = tmp.path().join("src2");
         host_tree(&src2, &[("save.bin", pattern(10_000, 2))]);
         assert_eq!(part.write_tree("UDATA", &src2).unwrap(), 1);
@@ -768,8 +791,10 @@ mod tests {
         assert_eq!(listed.len(), slots_before, "the slot must be reused");
         assert_eq!(names(&listed), vec!["save.bin"]);
         assert_eq!(listed[0].size, 10_000);
-        // Freed first, allocated after, so the same clusters come back.
-        assert_eq!(listed[0].first_cluster, first_cluster);
+        // Allocated first, freed after, so the new chain CANNOT be the old
+        // one: until the entry flips, those clusters still hold the file
+        // the on-disk entry names.
+        assert_ne!(listed[0].first_cluster, first_cluster);
 
         let bytes = part.into_io().into_inner();
         let mut part = FatxPartition::from_io(Cursor::new(bytes), 0, PART_SIZE).expect("reopen");
@@ -1178,6 +1203,119 @@ mod tests {
             fs::read(dest.join("newfile.bin")).unwrap(),
             pattern(10_000, 9)
         );
+    }
+
+    #[test]
+    fn a_directory_entry_with_no_cluster_is_treated_as_empty_not_corrupt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let img = blank_image(tmp.path());
+        let src = tmp.path().join("src");
+        host_tree(&src, &[("deep/one.bin", vec![0x11; 8])]);
+        let mut part = open_mem(&img);
+        part.write_tree("UDATA", &src).unwrap();
+
+        // Blank out `deep`'s first_cluster field (entry bytes 44..48), the
+        // state the READ path already renders as an empty directory.
+        let (slot, geo) = {
+            let geo = *part.geometry();
+            let root = part.resolve_dir("UDATA").unwrap().unwrap();
+            let layout = part.dir_layout(root).unwrap();
+            (layout.find(b"deep").unwrap().0, geo)
+        };
+        let at = (geo.cluster_offset(slot.cluster).unwrap() + slot.offset as u64 + 44) as usize;
+        let mut bytes = part.into_io().into_inner();
+        bytes[at..at + 4].copy_from_slice(&0u32.to_le_bytes());
+
+        let mut part = FatxPartition::from_io(Cursor::new(bytes), 0, PART_SIZE).expect("reopen");
+        // The read path renders it as an empty directory: `deep` is
+        // created on the host, and it contributes no files.
+        let probe = tmp.path().join("probe");
+        assert_eq!(part.read_tree("UDATA", &probe).unwrap(), 0);
+        assert!(probe.join("deep").is_dir());
+
+        let more = tmp.path().join("more");
+        host_tree(&more, &[("deep/two.bin", vec![0x22; 8])]);
+        assert_eq!(part.write_tree("UDATA", &more).unwrap(), 1);
+        assert_eq!(
+            names(&part.list_dir("UDATA/deep").unwrap()),
+            vec!["two.bin"]
+        );
+    }
+
+    #[test]
+    fn overwrite_never_writes_over_the_old_chain_before_the_entry_flips() {
+        let tmp = tempfile::tempdir().unwrap();
+        let img = blank_image(tmp.path());
+        let mut part = open_mem(&img);
+        let first_pass = tmp.path().join("first");
+        host_tree(&first_pass, &[("save.bin", pattern(10_000, 1))]);
+        part.write_tree("UDATA", &first_pass).unwrap();
+        let geo = *part.geometry();
+        let old_chain = {
+            let first = part.list_dir("UDATA").unwrap()[0].first_cluster;
+            part.fat().chain(first).unwrap()
+        };
+        assert_eq!(old_chain.len(), 3);
+        let free_before = free_count(&part);
+        let bytes = part.into_io().into_inner();
+
+        // Same name, same length: the new data must go somewhere else
+        // entirely, because until the directory entry flips the on-disk
+        // entry and FAT still describe the OLD file at those clusters.
+        let second_pass = tmp.path().join("second");
+        host_tree(&second_pass, &[("save.bin", pattern(10_000, 2))]);
+        let mut part = FatxPartition::from_io(RecordingIo::new(bytes, &geo), 0, PART_SIZE)
+            .expect("open recording");
+        assert_eq!(part.write_tree("UDATA", &second_pass).unwrap(), 1);
+
+        let events = part.io().events.clone();
+        let old_ranges: Vec<Range<u64>> = old_chain
+            .iter()
+            .map(|c| {
+                let at = geo.cluster_offset(*c).unwrap();
+                at..at + geo.cluster_size
+            })
+            .collect();
+        let first_commit = events
+            .iter()
+            .position(|e| is_fat(e, &geo))
+            .expect("a FAT commit");
+        for event in &events[..first_commit] {
+            let Event::Write { at, len, .. } = event else {
+                continue;
+            };
+            for range in &old_ranges {
+                assert!(
+                    *at >= range.end || at + len <= range.start,
+                    "a data write at {at}..{} landed on the old chain ({range:?})",
+                    at + len
+                );
+            }
+        }
+
+        // ...and the first committed FAT still marks every old cluster
+        // allocated, so a crash right there leaves the old file intact.
+        let commits = part.io().fat_commits();
+        for cluster in &old_chain {
+            assert_ne!(
+                fat_entry(commits[0], &geo, *cluster),
+                0,
+                "old cluster {cluster} was freed before the new entry landed"
+            );
+        }
+
+        let bytes = part.into_io().inner.into_inner();
+        let mut part = FatxPartition::from_io(Cursor::new(bytes), 0, PART_SIZE).expect("reopen");
+        let listed = part.list_dir("UDATA").unwrap();
+        assert_eq!(names(&listed), vec!["save.bin"]);
+        assert_eq!(
+            free_count(&part),
+            free_before,
+            "the old chain must be freed by the second commit, not leaked"
+        );
+        let dest = tmp.path().join("out");
+        assert_eq!(part.read_tree("UDATA", &dest).unwrap(), 1);
+        assert_eq!(fs::read(dest.join("save.bin")).unwrap(), pattern(10_000, 2));
     }
 
     #[test]

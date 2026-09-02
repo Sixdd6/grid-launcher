@@ -62,6 +62,22 @@ export function cloudRecordSummary(record: CloudRecord, saveType: SaveType): str
   return parts.join(' • ');
 }
 
+/**
+ * The status line Python writes under the record list
+ * (`details_view_mixin.py:889`): `Showing {n} cloud {saves|states}.`
+ *
+ * Pluralization is Python's — the kind label is a fixed plural word
+ * ("saves"/"states"), so a single record still reads "Showing 1 cloud
+ * saves." Reproduced verbatim rather than corrected.
+ *
+ * Returns `''` when there are no records: Python renders the empty-state
+ * text there instead, which `CloudPanel` already has its own branch for.
+ */
+export function recordsStatusLine(count: number, saveType: SaveType): string {
+  if (count <= 0) return '';
+  return `Showing ${count} cloud ${saveType === 'save' ? 'saves' : 'states'}.`;
+}
+
 /** `_details_cloud_uploaded_text` composed into its row line (:738-739). */
 export function uploadedLine(record: CloudRecord): string {
   return `Uploaded ${record.absolute_time} (${record.relative_time})`;

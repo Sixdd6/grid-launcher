@@ -7,6 +7,7 @@ import {
   createRequestGuard,
   deleteConfirmText,
   isNativeExecutablePlatform,
+  recordsStatusLine,
   restoreConfirmText,
   sharedScopeWarning,
   syntheticCloudGame,
@@ -281,5 +282,22 @@ describe('createRequestGuard', () => {
     const stale = guard.next();
     guard.next(); // a newer fetch starts before the stale one resolves
     expect(guard.isCurrent(stale)).toBe(false);
+  });
+});
+
+describe('recordsStatusLine', () => {
+  it('names the record kind and count', () => {
+    expect(recordsStatusLine(3, 'save')).toBe('Showing 3 cloud saves.');
+    expect(recordsStatusLine(2, 'state')).toBe('Showing 2 cloud states.');
+  });
+
+  it('keeps the plural kind label for a single record, as Python does', () => {
+    expect(recordsStatusLine(1, 'save')).toBe('Showing 1 cloud saves.');
+    expect(recordsStatusLine(1, 'state')).toBe('Showing 1 cloud states.');
+  });
+
+  it('says nothing when there are no records', () => {
+    expect(recordsStatusLine(0, 'save')).toBe('');
+    expect(recordsStatusLine(-1, 'state')).toBe('');
   });
 });

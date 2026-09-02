@@ -1333,7 +1333,7 @@ porting cloud save/state sync (candidate discovery, upload/restore/retention, na
 xemu raw-disk sync, auto-sync triggers, and the desktop panel) to Rust (grid-core, the Tauri
 `cloud_service`/`commands/cloud.rs` layer, and the `app/src/lib/details/` panel). Rust paths
 are relative to `rewrite/`. D1-D3 (xemu raw-disk sync) were already declared by the xemu
-design task and are restated here for completeness; D4-D10 are new to this milestone's
+design task and are restated here for completeness; D4-D11 are new to this milestone's
 review.
 
 1. **D1 — xemu raw-disk sync replaces whole-image sync, with no fallback.** The reference
@@ -1413,6 +1413,24 @@ review.
     `ps3_id_tokens` (`crates/grid-core/src/cloud/tokens.rs:281-307`) reconstructs the missing
     method as "that one field, defensively re-normalized, as a single-element list, or empty
     when blank." Flagged as a discrepancy for human confirmation rather than silently assumed.
+
+11. **D11 — a running xemu blocks its own save sync.** Under D1 the port writes save data
+    into the xemu HDD image IN PLACE (`FatxPartition::write_tree`, reached from
+    `crates/grid-core/src/cloud/ops/restore.rs` and `.../cloud/xemu_sync.rs`), where the
+    reference replaced the whole image file. An in-place FATX write to an image xemu still
+    holds open can cross-link clusters and corrupt the filesystem — a hazard the reference's
+    whole-file replace did not have. `block_reason_for_game`
+    (`crates/grid-core/src/cloud/ops/mod.rs`) therefore returns a new, user-facing block
+    reason when any active session resolves to the same xemu emulator entry:
+
+    > `xemu is running — close it before syncing its saves.`
+
+    It gates BOTH upload and restore (it is an action block reason, not a panel-visibility
+    one — see the Ruling B split), applies to saves only (xemu has no state flow), and is
+    checked BEFORE the image-status reasons, since it is the transient, immediately
+    actionable one and must fire before anything opens the image. It has no Python original.
+    Auto-upload after exit is unaffected: that path passes no active sessions, because the
+    game's own session has already ended.
 
 ### Follow-the-code rulings (ported as-is)
 
