@@ -465,8 +465,9 @@ fn http_error(url: &str, err: reqwest::Error) -> SourceError {
 /// build (the `e2e` feature is off by default and never turned on for a
 /// shipped binary — see `scripts/check_secret_hygiene.sh`); under the `e2e`
 /// feature, `GRID_LAUNCHER_E2E_FORGE_BASE` (when set to a non-blank value)
-/// redirects every forge request to `<base>/<host>/<path>?<query>`, letting
-/// the E2E harness serve fixture files instead of hitting real forges.
+/// redirects every forge request to `<base>/<host>[:<port>]/<path>?<query>`
+/// — an explicit, non-default port is kept — letting the E2E harness serve
+/// fixture files instead of hitting real forges.
 ///
 /// Deliberately request-time only: metadata normalization and page
 /// scraping keep working with the *original* URLs, because the catalog's
@@ -478,7 +479,14 @@ fn effective_url(url: &str) -> String {
             let Ok(parsed) = url::Url::parse(url) else {
                 return url.to_string();
             };
-            let host = parsed.host_str().unwrap_or("");
+            // The full authority, not just the host: a fixture forge served
+            // on a non-default port would otherwise collapse onto the same
+            // segment as the same host on another port.
+            let mut host = parsed.host_str().unwrap_or("").to_string();
+            if let Some(port) = parsed.port() {
+                host.push(':');
+                host.push_str(&port.to_string());
+            }
             let mut suffix = parsed.path().to_string();
             if let Some(query) = parsed.query() {
                 suffix.push('?');
@@ -1090,6 +1098,17 @@ mod e2e_tests {
             effective,
             "http://127.0.0.1:9999/api.github.com/repos/o/r/releases?x=1&y=2"
         );
+    }
+
+    #[test]
+    fn keeps_the_port_in_the_mapped_path_segment() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _guard = EnvGuard::set("http://127.0.0.1:9999");
+
+        // A fixture forge on a non-default port must stay addressable: the
+        // segment is the full authority, host AND port.
+        let effective = effective_url("http://gitea.local:3000/x");
+        assert_eq!(effective, "http://127.0.0.1:9999/gitea.local:3000/x");
     }
 
     #[test]
