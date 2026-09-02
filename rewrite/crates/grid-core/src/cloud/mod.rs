@@ -111,11 +111,21 @@ fn file_mtime_secs(path: &Path) -> Option<f64> {
 /// Mirrors `cloud_mixin.py:1490-1532`'s `_latest_file_mtime_under_path`:
 /// if `dir` is itself a file, it is checked directly (blocked → `0.0`,
 /// else its own mtime); if it's a directory, walked recursively via plain
-/// `std::fs::read_dir` (following symlinks, like Python's `rglob`, since
-/// entries are re-classified with `Path::is_dir`/`is_file` rather than
-/// `DirEntry::file_type`), comparing only files, skipping blocked ones and
-/// any entry that can't be listed or stat'd — a walk/stat failure on one
-/// entry is never fatal to the rest.
+/// `std::fs::read_dir`, comparing only files, skipping blocked ones and any
+/// entry that can't be listed or stat'd — a walk/stat failure on one entry
+/// is never fatal to the rest.
+///
+/// The walk descends into a subdirectory only when `DirEntry::file_type`
+/// (which does NOT follow symlinks) itself reports `is_dir()` — a
+/// SYMLINKED directory is never recursed into. This matches Python's
+/// `Path.rglob("*")`, which likewise does not descend into symlinked
+/// subdirectories (avoiding both double-counted files reachable two ways
+/// and unbounded recursion on a symlink cycle). A symlink is still
+/// evaluated as a candidate FILE exactly like any other directory entry —
+/// `Path::is_file()` follows the symlink, so a symlink to a regular file is
+/// picked up (its target's mtime), while a symlink to a directory fails
+/// `is_file()` and is simply skipped, matching Python's
+/// `candidate.is_file()` gate ahead of `.stat()`.
 pub fn latest_mtime_under(dir: &Path, ignore: &IgnoreSets) -> f64 {
     if !dir.exists() {
         return 0.0;
@@ -138,7 +148,11 @@ pub fn latest_mtime_under(dir: &Path, ignore: &IgnoreSets) -> f64 {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() {
+            // A real (non-symlink) directory: descend. Anything else —
+            // a real file OR any symlink, whatever it targets — falls
+            // through to the file check below instead of being recursed
+            // into.
+            if entry.file_type().is_ok_and(|ft| ft.is_dir()) {
                 stack.push(path);
                 continue;
             }

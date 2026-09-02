@@ -487,6 +487,40 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn latest_mtime_under_does_not_descend_into_symlinked_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root");
+        fs::create_dir(&root).unwrap();
+
+        // A real file directly under root, older than the file hidden
+        // behind the symlinked directory below.
+        let direct = root.join("direct.sav");
+        touch_at(&direct, 100.0);
+
+        // A real subdirectory, elsewhere in the tempdir (outside `root`),
+        // containing a NEWER file, reached from `root` only via a
+        // directory symlink.
+        let real_target = dir.path().join("outside_target");
+        fs::create_dir(&real_target).unwrap();
+        let hidden_newer = real_target.join("hidden_newer.sav");
+        touch_at(&hidden_newer, 999.0);
+
+        let symlinked_dir = root.join("linked");
+        std::os::unix::fs::symlink(&real_target, &symlinked_dir).unwrap();
+
+        let ignore = ignore(&[], &[]);
+        let latest = latest_mtime_under(&root, &ignore);
+        assert_eq!(
+            latest, 100.0,
+            "the newer file (999.0) reachable only through a symlinked \
+             directory must not influence the result; only the direct \
+             file (100.0) counts, matching Python's rglob() which does \
+             not descend into symlinked subdirectories"
+        );
+    }
+
     #[test]
     fn latest_mtime_under_is_zero_for_a_missing_directory() {
         let ignore = ignore(&[], &[]);
