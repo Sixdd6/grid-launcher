@@ -8,6 +8,7 @@
 //! shared section-writer families live in [`writers`] and the path helpers
 //! every module's candidate list is built from live in [`paths`].
 
+pub mod cores;
 pub mod paths;
 pub mod writers;
 
