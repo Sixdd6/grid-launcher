@@ -232,11 +232,17 @@ pub struct SyncStateUpdate {
 /// `config.cloud_sync_state` (parity: Python's `_cloud_sync_state()`
 /// getter normalizes-and-overwrites on every read, so any update discards
 /// foreign junk on OTHER keys too — `details_view_mixin.py:361-384`). A
-/// blank `key` is a no-op (parity: `cloud_sync.py:100`). The caller is
-/// still responsible for persisting `config` to disk (`Config::save`) —
-/// this only updates the in-memory value.
+/// blank `key` is a no-op (parity: `cloud_sync.py:100`). An all-`None`
+/// `update` is also a no-op — no map read, no write, no phantom entry
+/// created for a previously-absent key (parity:
+/// `update_cloud_sync_state_for_game`'s `not updates` early return,
+/// `cloud_sync.py:100`; normalization keeps an entry that was explicitly
+/// set to all-zero, so unconditionally inserting a default entry here
+/// would persist a spurious permanent record). The caller is still
+/// responsible for persisting `config` to disk (`Config::save`) — this
+/// only updates the in-memory value.
 pub fn apply_sync_update(config: &mut Config, key: &str, update: SyncStateUpdate) {
-    if key.is_empty() {
+    if key.is_empty() || update == SyncStateUpdate::default() {
         return;
     }
 
@@ -637,6 +643,20 @@ mod tests {
             },
         );
         assert!(config.cloud_sync_state.is_empty());
+    }
+
+    #[test]
+    fn apply_sync_update_with_an_empty_update_creates_no_entry() {
+        let mut config = Config::default();
+        apply_sync_update(&mut config, "rom:new-game", SyncStateUpdate::default());
+        assert!(
+            config.cloud_sync_state.is_empty(),
+            "an all-None update must not fabricate a phantom entry for a previously-absent key"
+        );
+        assert_eq!(
+            sync_entry_for(&config, "rom:new-game"),
+            SyncStateEntry::default()
+        );
     }
 
     // -- auto_cloud_upload_plan --------------------------------------------
