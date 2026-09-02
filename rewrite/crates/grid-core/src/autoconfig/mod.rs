@@ -210,7 +210,14 @@ fn entry_matches_tokens(
 /// and [`matches_tokens_by_name`]: does any non-blank token, trimmed and
 /// case-folded, appear as a substring of `name` (also trimmed and
 /// case-folded)?
-fn name_matches_any_token_substring(name: &str, tokens: &[&str]) -> bool {
+///
+/// `pub(crate)` so `cloud::scope`'s name-only predicates
+/// (`is_xemu_emulator_name`, `is_redream_emulator_name`,
+/// `is_retroarch_emulator_name` — selection.py's `Callable[[str], bool]`
+/// callbacks, and `game_backend.py:33`'s standalone
+/// `is_retroarch_emulator_name` verbatim) can reuse this exact substring
+/// rule instead of duplicating it.
+pub(crate) fn name_matches_any_token_substring(name: &str, tokens: &[&str]) -> bool {
     let normalized_name = name.trim().to_lowercase();
     tokens.iter().any(|token| {
         let token = token.trim().to_lowercase();
