@@ -11,26 +11,10 @@
 //! contract.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::{paths, writers, EnsureResult};
-
-/// `Path.resolve(strict=False)` — Python's default, which succeeds even
-/// when the path does not exist. `std::fs::canonicalize` has no such mode,
-/// so this canonicalizes when the path exists and otherwise just
-/// absolute-ifies it against the current directory (or returns it
-/// untouched when even that fails), rather than erroring.
-fn resolve_best_effort(path: &Path) -> PathBuf {
-    if let Ok(canonical) = std::fs::canonicalize(path) {
-        return canonical;
-    }
-    if path.is_absolute() {
-        return path.to_path_buf();
-    }
-    std::env::current_dir()
-        .map(|cwd| cwd.join(path))
-        .unwrap_or_else(|_| path.to_path_buf())
-}
+use paths::resolve_best_effort;
 
 /// Forward-slash form with a guaranteed trailing `/` — `as_posix()` plus
 /// the manual "does it already end in `/`" guard every RPCS3 path string
@@ -372,6 +356,7 @@ pub fn update_games_yml(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn make_exe(temp: &Path) -> PathBuf {
         let exe = temp.join("rpcs3.exe");
@@ -620,6 +605,34 @@ mod tests {
         assert!(text.contains("\"/games/\": \""));
         assert!(text.contains(".vfs/dev_hdd0/"));
         assert!(text.contains(".vfs/games/"));
+    }
+
+    /// Exercises the shared `paths::resolve_best_effort` through
+    /// `ensure_vfs_settings`'s `library_path` resolution: `library` is
+    /// built with a literal `..` segment through a directory (`sub`) that
+    /// is never created, and neither `sub` nor the final `PS3 Library`
+    /// directory exists on disk. A `..`-blind resolver would leave the
+    /// literal `..` in the written path; the shared helper must collapse it
+    /// lexically before any existence check, matching Python's
+    /// `Path.resolve(strict=False)`.
+    #[test]
+    fn vfs_library_path_collapses_parent_dir_through_a_nonexistent_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let exe = make_exe(temp.path());
+        let library = temp.path().join("sub").join("..").join("PS3 Library");
+        let expected_library = resolve_best_effort(temp.path()).join("PS3 Library");
+
+        let result = ensure_vfs_settings(exe.to_str().unwrap(), library.to_str().unwrap());
+
+        assert!(result.changed);
+        let text = std::fs::read_to_string(result.config_path.unwrap()).unwrap();
+        assert!(!text.contains(".."), "{text}");
+        let expected_dev_hdd0 =
+            forward_slash_with_trailing_slash(&expected_library.join(".vfs").join("dev_hdd0"));
+        assert!(
+            text.contains(&format!("\"/dev_hdd0/\": \"{expected_dev_hdd0}\"")),
+            "{text}"
+        );
     }
 
     #[test]

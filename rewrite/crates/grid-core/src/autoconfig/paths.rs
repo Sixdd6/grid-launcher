@@ -108,6 +108,95 @@ pub fn emulator_dir(path: &Path) -> Option<PathBuf> {
     path.parent().map(Path::to_path_buf)
 }
 
+/// Collapse `.`/`..` components lexically — no filesystem access — the way
+/// `os.path.normpath` does: a `ParentDir` cancels the preceding `Normal`
+/// component when there is one; at the root (or with no root yet collected),
+/// a `ParentDir` is dropped rather than climbing above the root, matching
+/// Python's own clamping (`Path("/../../foo").resolve()` is `/foo`, not an
+/// error and not `/../foo`). `CurDir` is dropped outright. This never
+/// touches disk, so it collapses `..` through path segments that do not
+/// exist just as readily as ones that do — the property
+/// [`resolve_best_effort`] needs it for.
+fn lexically_normalize(path: &Path) -> PathBuf {
+    use std::path::Component;
+
+    let mut stack: Vec<Component> = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => match stack.last() {
+                Some(Component::Normal(_)) => {
+                    stack.pop();
+                }
+                Some(Component::RootDir) | Some(Component::Prefix(_)) => {
+                    // Clamp at root: already there, so ".." is a no-op.
+                }
+                None | Some(Component::ParentDir) => {
+                    // A relative path with no root collected yet (or one
+                    // that already starts with unresolved ".." segments):
+                    // keep the ".." rather than lose information — this
+                    // never happens for the absolute paths
+                    // `resolve_best_effort` normalizes, since those always
+                    // collect a `RootDir`/`Prefix` first.
+                    stack.push(component);
+                }
+                Some(Component::CurDir) => unreachable!("CurDir is never pushed onto the stack"),
+            },
+            other => stack.push(other),
+        }
+    }
+    stack.into_iter().collect()
+}
+
+/// `Path.resolve(strict=False)` — Python's default, which succeeds even
+/// when the path does not exist. Unlike `std::fs::canonicalize` (which
+/// requires the full path to exist), this: makes a relative `path` absolute
+/// against the current directory; lexically collapses `.`/`..` components
+/// via [`lexically_normalize`] — through path segments that do not exist,
+/// same as Python — clamping at the root rather than climbing above it;
+/// then resolves symlinks for whatever longest ancestor of the normalized
+/// path actually exists, rejoining the (already-normalized, so no further
+/// `..` to collapse) non-existent remainder untouched.
+///
+/// This is the one shared home for what used to be duplicated,
+/// trailing-slash-preserving, `..`-blind copies in `readers.rs` and
+/// `rpcs3.rs` — every `ensure_*`/`*_directory_settings` call site in this
+/// crate that ports a Python `.resolve()` call should go through this
+/// function instead of hand-rolling another one.
+pub(crate) fn resolve_best_effort(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    };
+
+    let normalized = lexically_normalize(&absolute);
+
+    if let Ok(canonical) = std::fs::canonicalize(&normalized) {
+        return canonical;
+    }
+
+    let mut existing = normalized.clone();
+    let mut remainder: Vec<std::ffi::OsString> = Vec::new();
+    while !existing.exists() {
+        let Some(name) = existing.file_name().map(|n| n.to_os_string()) else {
+            break;
+        };
+        remainder.push(name);
+        if !existing.pop() {
+            break;
+        }
+    }
+
+    let mut resolved = std::fs::canonicalize(&existing).unwrap_or(existing);
+    for part in remainder.into_iter().rev() {
+        resolved.push(part);
+    }
+    resolved
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,5 +260,61 @@ mod tests {
         // `env_dir()` reads a process env var; see `crate::test_env`.
         let _lock = crate::test_env::lock();
         assert_eq!(env_dir("GRID_AUTOCONFIG_TEST_UNSET_VAR"), None);
+    }
+
+    #[test]
+    fn resolve_best_effort_collapses_parent_dir_through_a_nonexistent_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        // "sub" is never created: a naive `Components`-collecting fallback
+        // (no lexical ".." collapse) would leave the literal ".." in place.
+        let candidate = temp.path().join("sub").join("..").join("other");
+
+        let resolved = resolve_best_effort(&candidate);
+
+        assert_eq!(resolved, resolve_best_effort(temp.path()).join("other"));
+        assert!(!resolved.to_string_lossy().contains(".."), "{resolved:?}");
+    }
+
+    #[test]
+    fn resolve_best_effort_clamps_a_leading_parent_dir_at_root() {
+        let resolved = resolve_best_effort(Path::new("/../../some/nonexistent/dir"));
+        assert_eq!(resolved, PathBuf::from("/some/nonexistent/dir"));
+    }
+
+    #[test]
+    fn resolve_best_effort_drops_a_trailing_slash_on_a_nonexistent_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let with_trailing_slash = PathBuf::from(format!(
+            "{}/",
+            temp.path().join("missing").to_string_lossy()
+        ));
+
+        let resolved = resolve_best_effort(&with_trailing_slash);
+
+        assert_eq!(resolved, resolve_best_effort(temp.path()).join("missing"));
+    }
+
+    #[test]
+    fn resolve_best_effort_makes_a_relative_path_absolute() {
+        let cwd = std::env::current_dir().unwrap();
+        let resolved = resolve_best_effort(Path::new("grid-launcher-test-relative/nonexistent"));
+        assert_eq!(
+            resolved,
+            resolve_best_effort(&cwd)
+                .join("grid-launcher-test-relative")
+                .join("nonexistent")
+        );
+    }
+
+    #[test]
+    fn resolve_best_effort_canonicalizes_an_existing_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("real");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        assert_eq!(
+            resolve_best_effort(&dir),
+            std::fs::canonicalize(&dir).unwrap()
+        );
     }
 }

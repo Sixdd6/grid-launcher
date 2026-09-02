@@ -108,34 +108,14 @@ static ENV_VAR_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// `\s+#` — RPCS3's "unquoted trailing comment" splitter (`rpcs3.py:78`).
 static COMMENT_SPLIT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+#").unwrap());
 
-/// `Path.resolve(strict=False)` — Python's default, which succeeds even
-/// when the path does not exist. `std::fs::canonicalize` has no such mode,
-/// so this canonicalizes when the path exists and otherwise just
-/// absolute-ifies it against the current directory (or returns it
-/// untouched when even that fails). Duplicated from `rpcs3::resolve_best_effort`
-/// (module-private there) — every emulator module that ports a `.resolve()`
-/// call carries its own copy, matching the project's established
-/// per-module duplication of `_unique_paths` and friends.
-fn resolve_best_effort(path: &Path) -> PathBuf {
-    if let Ok(canonical) = std::fs::canonicalize(path) {
-        return canonical;
-    }
-    // `path` does not exist (in whole or in part): fall back to a lexical
-    // normalization. Rebuilding through `Components` — rather than
-    // returning `path` verbatim — is load-bearing: `Path`'s own `Display`
-    // preserves a literal trailing slash in the underlying text even though
-    // `Components` (and therefore `file_name`/`parent`) already treats it
-    // as insignificant, so a caller comparing the stringified result (every
-    // caller in this module does) would otherwise see a spurious trailing
-    // `/` that Python's `Path.resolve(strict=False)` never produces.
-    let normalized: PathBuf = path.components().collect();
-    if normalized.is_absolute() {
-        return normalized;
-    }
-    std::env::current_dir()
-        .map(|cwd| cwd.join(&normalized))
-        .unwrap_or(normalized)
-}
+/// `Path.resolve(strict=False)` port — see `paths::resolve_best_effort`'s
+/// doc comment for the full contract (relative-to-absolute, lexical `..`/`.`
+/// collapse through nonexistent segments, root clamping, symlink resolution
+/// for whatever prefix exists). Used throughout this module via the
+/// re-export below rather than a local copy — this file and `rpcs3.rs`
+/// used to each carry their own, subtly different (and, in this file's
+/// case, `..`-blind) duplicate; both now share the one implementation.
+use paths::resolve_best_effort;
 
 /// `os.path.expandvars` (POSIX subset): replace `$VAR`/`${VAR}` references
 /// with the named environment variable's value, leaving an unset
@@ -1986,6 +1966,33 @@ mod tests {
             settings.dev_hdd0,
             resolve_best_effort(&dir.join("dev_hdd0")).to_string_lossy()
         );
+    }
+
+    /// A `..`-relative `/dev_hdd0/` value pointing at a directory that does
+    /// NOT exist anywhere on disk (unlike the pinned oracle test above,
+    /// which pre-creates it). A `..`-blind resolver would leave the literal
+    /// `..` in `settings.dev_hdd0`; `resolve_against`/`resolve_rpcs3_path`
+    /// must collapse it lexically before any existence check, matching
+    /// Python's `Path.resolve(strict=False)`.
+    #[test]
+    fn rpcs3_vfs_dev_hdd0_collapses_parent_dir_through_a_nonexistent_directory() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (exe, dir) = rpcs3_emulator(temp.path());
+        let config_dir = dir.join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("vfs.yml"),
+            "\"$(EmulatorDir)\": \"\"\n\"/dev_hdd0/\": \"../elsewhere/dev_hdd0/\"\n",
+        )
+        .unwrap();
+
+        let settings = rpcs3_directory_settings(&exe, &[]);
+
+        let expected = resolve_best_effort(&temp.path().join("elsewhere").join("dev_hdd0"));
+        assert_eq!(settings.dev_hdd0, expected.to_string_lossy());
+        assert!(!settings.dev_hdd0.contains(".."), "{}", settings.dev_hdd0);
     }
 
     #[test]
