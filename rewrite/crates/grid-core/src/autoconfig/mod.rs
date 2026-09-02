@@ -9,7 +9,9 @@
 //! every module's candidate list is built from live in [`paths`].
 
 pub mod cores;
+pub mod duckstation;
 pub mod paths;
+pub mod pcsx2;
 pub mod retroarch;
 pub mod rpcs3;
 pub mod writers;
