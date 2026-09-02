@@ -293,12 +293,18 @@ fn set_or_insert_element(root_span: &mut String, tag: &str, value: &str) -> bool
 /// back-to-back comments are captured separately. Used to keep the D11
 /// literal-substring scan below from mistaking a `<content>`/`</content>`
 /// string that only appears INSIDE a comment for the real root's tags.
-fn comment_ranges(text: &str) -> Vec<(usize, usize)> {
+///
+/// `pub(crate)` — `readers.rs`'s `cemu_mlc_path_from_xml` reuses this
+/// (alongside [`position_is_commented_out`]) so its own `<mlc_path>` scan
+/// gets the same comment-skipping guarantee this module's writer has,
+/// rather than maintaining a second, divergent copy.
+pub(crate) fn comment_ranges(text: &str) -> Vec<(usize, usize)> {
     let re = Regex::new(r"(?s)<!--.*?-->").expect("static regex is valid");
     re.find_iter(text).map(|m| (m.start(), m.end())).collect()
 }
 
-fn position_is_commented_out(pos: usize, comments: &[(usize, usize)]) -> bool {
+/// `pub(crate)` for the same reason as [`comment_ranges`].
+pub(crate) fn position_is_commented_out(pos: usize, comments: &[(usize, usize)]) -> bool {
     comments
         .iter()
         .any(|&(start, end)| pos >= start && pos < end)

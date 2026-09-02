@@ -1779,6 +1779,18 @@ fn azahar_user_root_candidates(path: &str) -> Vec<PathBuf> {
         );
     }
 
+    // Deliberate divergence from azahar.py:256-257 (`if emulator_dir:
+    // candidates.append(...)`). `Path()` has no `__bool__`/`__len__`
+    // override, so a bare `Path()` (what `emulator_dir` stays for a blank
+    // `path`) is ALWAYS truthy in Python — that `if` was clearly meant to
+    // mirror the `if str(emulator_dir):` guard a few lines above, but
+    // instead it unconditionally fires even for a blank path, silently
+    // appending an accidental CWD-relative candidate
+    // (`(Path('.') / "user").resolve()` == `<cwd>/user`). This port's
+    // `emulator_dir` is a genuinely empty `PathBuf` for a blank path, and
+    // this gate checks REAL emptiness, so no such candidate is ever
+    // produced — see `azahar_blank_path_does_not_probe_cwd` (tests below)
+    // and Task 13's deviation log.
     if !emulator_dir.as_os_str().is_empty() {
         candidates.push(resolve_best_effort(&emulator_dir.join("user")));
     }
@@ -1945,6 +1957,11 @@ fn eden_user_root_candidates(path: &str) -> Vec<PathBuf> {
         }
     }
 
+    // Deliberate divergence from eden.py:356-357 (the same `if
+    // emulator_dir:` always-truthy-`Path()` quirk `azahar_user_root_candidates`
+    // documents above) — see that comment and
+    // `eden_blank_path_does_not_probe_cwd` (tests below) for the full
+    // explanation and Task 13's deviation log.
     if !emulator_dir.as_os_str().is_empty() {
         candidates.push(resolve_best_effort(&emulator_dir.join("user")));
     }
@@ -2077,15 +2094,31 @@ pub struct CemuSettings {
     pub mlc_path: String,
 }
 
-/// The first `<mlc_path>...</mlc_path>` element's inner text in `raw_content`
-/// (D11-style regex substring scan, matching this crate's no-XML-crate
-/// deviation already established for the Cemu writer — see `cemu.rs`'s
-/// module doc comment). `None` when absent or blank once trimmed.
+/// **Reader-side deviation, distinct from D11** (D11 covers only the Cemu
+/// WRITER's `settings.xml` editing — the Python reader
+/// (`cemu_directory_settings`, cemu.py:361-384) actually uses a real
+/// `ET.fromstring(...)` parse with structural `node.findtext("mlc_path")`
+/// lookups, not a text scan. This crate still has no XML dependency, so
+/// this remains a regex substring scan rather than the structural parse the
+/// Python reader itself uses — flagged for Task 13's deviation log as its
+/// own entry, separate from D11.
+///
+/// The first `<mlc_path>...</mlc_path>` element's inner text in
+/// `raw_content`, SKIPPING any occurrence that falls inside an XML comment
+/// (`<!-- ... -->`) via [`cemu::comment_ranges`]/
+/// [`cemu::position_is_commented_out`] — the same helpers `cemu.rs`'s own
+/// writer-side `find_root_span` uses, reused here rather than duplicated,
+/// so a decoy `<mlc_path>` sitting inside a leading comment is never
+/// mistaken for the real one. `None` when no un-commented match exists, or
+/// its inner text is blank once trimmed.
 static CEMU_MLC_PATH_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"<mlc_path>([^<]*)</mlc_path>").unwrap());
 
 fn cemu_mlc_path_from_xml(raw_content: &str) -> Option<String> {
-    let caps = CEMU_MLC_PATH_RE.captures(raw_content)?;
+    let comments = cemu::comment_ranges(raw_content);
+    let caps = CEMU_MLC_PATH_RE
+        .captures_iter(raw_content)
+        .find(|caps| !cemu::position_is_commented_out(caps.get(0).unwrap().start(), &comments))?;
     let value = caps[1].trim();
     if value.is_empty() {
         None
@@ -2914,6 +2947,20 @@ pub fn xenia_directory_settings(path: &str, args: Args) -> XeniaSettings {
     if !storage_root.as_os_str().is_empty() {
         roots.push(storage_root.clone());
     }
+    // Deliberate divergence from xenia.py:397 (`for root in
+    // _unique_paths([candidate for candidate in (storage_root,
+    // emulator_dir) if str(candidate)])`). For a blank `path`,
+    // `_emulator_dir` returns `Path()`, and `str(Path())` is the
+    // NON-EMPTY string `"."` — so that Python list comprehension's `if
+    // str(candidate)` filter is truthy for a blank-path `emulator_dir`
+    // too, and it still ends up in `roots`, adding accidental
+    // CWD-relative config-file candidates (e.g. `<cwd>/xenia.config.toml`)
+    // that could spuriously match a file sitting in the process's working
+    // directory. This port's `emulator_dir` is a genuinely empty `PathBuf`
+    // for a blank path, and this gate checks REAL emptiness rather than a
+    // Python-style always-truthy stringification, so no CWD-relative root
+    // is ever added — see `xenia_blank_path_does_not_probe_cwd` (tests
+    // below) and Task 13's deviation log.
     if !emulator_dir.as_os_str().is_empty() {
         roots.push(emulator_dir.clone());
     }
@@ -4979,6 +5026,32 @@ mod tests {
         );
     }
 
+    /// Pins the deliberate divergence documented on
+    /// `azahar_user_root_candidates`'s final `emulator_dir` push: Python's
+    /// `if emulator_dir:` guard is always truthy (a bare `Path()` has no
+    /// `__bool__` override), so `azahar_user_root_candidates("")` in Python
+    /// still appends an accidental `<cwd>/user` candidate. This port's
+    /// blank-path gate is real, so no such candidate exists — every
+    /// candidate must come from the isolated home/XDG roots instead.
+    #[test]
+    fn azahar_blank_path_does_not_probe_cwd() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+
+        let candidates = azahar_user_root_candidates("");
+
+        let cwd_user = resolve_best_effort(&std::env::current_dir().unwrap().join("user"));
+        assert!(
+            !candidates.contains(&cwd_user),
+            "{candidates:?} must not contain a CWD-relative candidate"
+        );
+        assert!(
+            candidates.iter().all(|c| c.starts_with(temp.path())),
+            "every candidate must come from the isolated home/XDG roots: {candidates:?}"
+        );
+    }
+
     // ---------------------------------------------------------------
     // Eden
     // ---------------------------------------------------------------
@@ -5057,6 +5130,27 @@ mod tests {
         assert_eq!(overrides, vec![resolve_best_effort(&save_root)]);
     }
 
+    /// Same divergence as `azahar_blank_path_does_not_probe_cwd`, pinned
+    /// for Eden's own `eden_user_root_candidates`.
+    #[test]
+    fn eden_blank_path_does_not_probe_cwd() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+
+        let candidates = eden_user_root_candidates("");
+
+        let cwd_user = resolve_best_effort(&std::env::current_dir().unwrap().join("user"));
+        assert!(
+            !candidates.contains(&cwd_user),
+            "{candidates:?} must not contain a CWD-relative candidate"
+        );
+        assert!(
+            candidates.iter().all(|c| c.starts_with(temp.path())),
+            "every candidate must come from the isolated home/XDG roots: {candidates:?}"
+        );
+    }
+
     // ---------------------------------------------------------------
     // Cemu
     // ---------------------------------------------------------------
@@ -5118,6 +5212,19 @@ mod tests {
             r"C:\data\mlc\USR\SAVE"
         );
         assert_eq!(cemu_save_root_from_mlc_path("   "), "");
+    }
+
+    /// Regression test for the review-flagged gap: a decoy `<mlc_path>`
+    /// sitting inside a leading XML comment must never be mistaken for the
+    /// real one — `cemu_mlc_path_from_xml` must skip it via the shared
+    /// `cemu::comment_ranges`/`cemu::position_is_commented_out` helpers,
+    /// exactly like the writer's own `find_root_span` does.
+    #[test]
+    fn cemu_mlc_path_skips_a_decoy_inside_a_leading_comment() {
+        let content = "<!-- example: <mlc_path>/decoy</mlc_path> -->\
+                        <content><mlc_path>/real</mlc_path></content>";
+
+        assert_eq!(cemu_mlc_path_from_xml(content), Some("/real".to_string()));
     }
 
     // ---------------------------------------------------------------
@@ -5258,6 +5365,34 @@ mod tests {
                 &["--config".to_string(), "x".to_string()]
             ),
             Vec::<PathBuf>::new()
+        );
+    }
+
+    /// Pins the deliberate divergence documented on `xenia_directory_settings`'s
+    /// `roots.push(emulator_dir.clone())` gate: Python's `if str(candidate)`
+    /// filter is truthy even for a blank-path `emulator_dir` (`str(Path())`
+    /// is the non-empty string `"."`), so Python still probes CWD-relative
+    /// config candidates for a blank path. This port's gate checks REAL
+    /// emptiness, so `emulator_dir` never contributes a root, and a blank
+    /// path can never resolve to portable mode or an accidental config
+    /// match either.
+    #[test]
+    fn xenia_blank_path_does_not_probe_cwd() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+
+        assert_eq!(xenia_emulator_dir(""), PathBuf::new());
+        assert_eq!(xenia_emulator_dir("   "), PathBuf::new());
+
+        let settings = xenia_directory_settings("", &[]);
+        assert_eq!(
+            settings.config_path, "",
+            "no CWD-relative config file should ever spuriously match"
+        );
+        assert!(
+            !settings.portable,
+            "a blank path can never resolve to portable mode"
         );
     }
 
