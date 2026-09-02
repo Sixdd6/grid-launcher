@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # Fails if secret-handling rules are violated:
-# 1. expose_secret() outside the two permitted call sites.
+# 1. expose_secret() outside the permitted call sites.
 # 2. Anything resembling a real bearer token in committed test fixtures.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-allowed_files=("crates/grid-core/src/secrets.rs" "crates/grid-core/src/romm/mod.rs")
+allowed_files=("crates/grid-core/src/secrets.rs" "crates/grid-core/src/romm/mod.rs" "crates/grid-core/src/autoconfig/mod.rs")
+allowed_args=()
+for f in "${allowed_files[@]}"; do
+  allowed_args+=(-e "$f")
+done
 violations=$(grep -rn "expose_secret" crates app/src-tauri --include="*.rs" \
-  | grep -vF -e "${allowed_files[0]}" -e "${allowed_files[1]}" || true)
+  | grep -vF "${allowed_args[@]}" || true)
 if [ -n "$violations" ]; then
   echo "expose_secret() outside permitted call sites:" >&2
   echo "$violations" >&2

@@ -10,10 +10,49 @@
 
 pub mod cores;
 pub mod paths;
+pub mod retroarch;
 pub mod writers;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+
+use secrecy::{ExposeSecret, SecretString};
+
+/// RetroAchievements credentials as GRID holds them for the `ensure_*`
+/// writers that log RetroArch (and, later, other cores) into RetroAchievements.
+///
+/// Reaches its final form in a later milestone task; this task defines the
+/// shape the writers need: a plain username and a redacted token.
+/// `token()` is the ONLY `expose_secret()` call site outside
+/// `secrets.rs`/`romm/mod.rs` — `scripts/check_secret_hygiene.sh` allowlists
+/// this file for exactly that reason. `Debug` is derived rather than
+/// hand-written: `SecretString`'s own `Debug` impl already redacts, so the
+/// derive never leaks the token.
+#[derive(Debug, Clone)]
+pub struct RaCredentials {
+    username: String,
+    token: SecretString,
+}
+
+impl RaCredentials {
+    pub fn new(username: impl Into<String>, token: impl Into<SecretString>) -> Self {
+        Self {
+            username: username.into(),
+            token: token.into(),
+        }
+    }
+
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+
+    /// The token in the clear. Every call site must be a write straight to
+    /// disk (retroarch.cfg's `cheevos_token` line) or an equally narrow,
+    /// audited sink — never a log, an error, or an IPC payload.
+    pub fn token(&self) -> &str {
+        self.token.expose_secret()
+    }
+}
 
 /// Every `ensure_*` writer's return value.
 ///
@@ -101,6 +140,21 @@ mod tests {
         );
         let empty: writers::Desired = crate::desired![];
         assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn ra_credentials_debug_redacts_the_token() {
+        let ra = RaCredentials::new("sixdd6", "FAKE-TEST-TOKEN-not-real");
+        let debug = format!("{ra:?}");
+        assert!(!debug.contains("FAKE-TEST-TOKEN-not-real"), "leak: {debug}");
+        assert!(debug.contains("sixdd6"), "username should still print");
+    }
+
+    #[test]
+    fn ra_credentials_accessors_round_trip() {
+        let ra = RaCredentials::new("sixdd6", "FAKE-TEST-TOKEN-not-real");
+        assert_eq!(ra.username(), "sixdd6");
+        assert_eq!(ra.token(), "FAKE-TEST-TOKEN-not-real");
     }
 
     #[test]
