@@ -16,6 +16,8 @@
 //!   outgoing request itself is diverted, and only when the crate is built
 //!   with the `e2e` feature.
 
+use std::collections::HashMap;
+
 use regex::RegexBuilder;
 use serde_json::Value;
 
@@ -23,6 +25,8 @@ use super::source::{
     merge_platform_override, normalize_source, select_asset, select_release, str_field,
     SourceError, SourceMap, HOST_PLATFORM,
 };
+use crate::library::download::{FileTarget, ResponseProvider};
+use crate::library::LibraryError;
 
 /// A release/asset a [`ForgeClient`] resolved down to one downloadable file.
 /// `size` is the GitHub/Gitea asset's reported byte size, or `0` for a
@@ -231,6 +235,56 @@ impl ForgeClient {
             download_url,
             size: 0,
         })
+    }
+}
+
+// --- download provider ---------------------------------------------------------
+
+/// The forge-backed [`ResponseProvider`] the install pipeline downloads
+/// emulator archives through. `target.url_path` holds an ABSOLUTE URL (the
+/// asset's `browser_download_url`) and `target.query` is always empty —
+/// unlike the RomM provider, which resolves a path against a base URL.
+///
+/// Whether a given request needs the GitHub API headers is a property of the
+/// *download*, not of the client: one emulator install can pull its primary
+/// asset from GitHub and a supplemental from a Gitea host, or the other way
+/// round. That per-URL choice is therefore carried here, keyed by the URL
+/// [`FileTarget::url_path`] holds. A URL this map does not know is requested
+/// without the GitHub headers.
+///
+/// No `Authorization` header is ever sent: [`ForgeClient`] has no credential
+/// to send, and no RomM credential is ever handed to it.
+pub struct ForgeProvider<'a> {
+    client: &'a ForgeClient,
+    github_headers: HashMap<String, bool>,
+}
+
+impl<'a> ForgeProvider<'a> {
+    /// `github_headers` maps each target URL to whether that request needs
+    /// the GitHub API headers (true exactly when that download's provider
+    /// normalized to `github`).
+    pub fn new(
+        client: &'a ForgeClient,
+        github_headers: impl IntoIterator<Item = (String, bool)>,
+    ) -> Self {
+        Self {
+            client,
+            github_headers: github_headers.into_iter().collect(),
+        }
+    }
+}
+
+impl ResponseProvider for ForgeProvider<'_> {
+    async fn get(&self, target: &FileTarget) -> Result<reqwest::Response, LibraryError> {
+        let github = self
+            .github_headers
+            .get(&target.url_path)
+            .copied()
+            .unwrap_or(false);
+        self.client
+            .get(&target.url_path, github)
+            .await
+            .map_err(|e| LibraryError::Extract(e.0))
     }
 }
 
@@ -859,6 +913,83 @@ mod tests {
         );
         assert_eq!(resolved.asset_name, "widget-1.0.zip");
         assert_eq!(resolved.release_tag, "latest");
+    }
+
+    // --- ForgeProvider: per-download header choice ---------------------------
+
+    fn target(url: &str) -> FileTarget {
+        FileTarget {
+            url_path: url.to_string(),
+            query: Vec::new(),
+            dest: std::path::PathBuf::from("/dev/null"),
+            expected_size: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_sends_github_headers_only_for_the_urls_flagged_github() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("bytes"))
+            .mount(&mock_server)
+            .await;
+
+        let github_url = format!("{}/gh/asset.zip", mock_server.uri());
+        let gitea_url = format!("{}/gitea/asset.zip", mock_server.uri());
+        let client = ForgeClient::new().unwrap();
+        let provider = ForgeProvider::new(
+            &client,
+            [(github_url.clone(), true), (gitea_url.clone(), false)],
+        );
+
+        provider.get(&target(&github_url)).await.unwrap();
+        provider.get(&target(&gitea_url)).await.unwrap();
+        // A URL the map does not know defaults to no GitHub headers.
+        let unknown_url = format!("{}/other/asset.zip", mock_server.uri());
+        provider.get(&target(&unknown_url)).await.unwrap();
+
+        let received = mock_server.received_requests().await.unwrap();
+        assert_eq!(received.len(), 3);
+        for request in &received {
+            assert!(
+                request.headers.get("authorization").is_none(),
+                "the forge provider must never send Authorization"
+            );
+        }
+        assert_eq!(
+            received[0].headers.get("accept").unwrap(),
+            "application/vnd.github+json"
+        );
+        assert_eq!(
+            received[0].headers.get("x-github-api-version").unwrap(),
+            "2022-11-28"
+        );
+        for request in &received[1..] {
+            assert_ne!(
+                request.headers.get("accept").map(|v| v.to_str().unwrap()),
+                Some("application/vnd.github+json")
+            );
+            assert!(request.headers.get("x-github-api-version").is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_maps_a_forge_failure_to_a_library_error_with_the_source_text() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let url = format!("{}/gone.zip", mock_server.uri());
+        let client = ForgeClient::new().unwrap();
+        let provider = ForgeProvider::new(&client, [(url.clone(), false)]);
+        let err = provider.get(&target(&url)).await.unwrap_err();
+        let expected = client.get(&url, false).await.unwrap_err();
+        assert!(
+            matches!(&err, LibraryError::Extract(msg) if *msg == expected.0),
+            "unexpected error: {err}"
+        );
     }
 
     // --- select_release/select_asset plumbing sanity -------------------------

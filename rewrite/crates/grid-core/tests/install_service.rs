@@ -930,7 +930,7 @@ async fn retry_after_failure_dismisses_the_old_entry_and_starts_a_new_one() {
 
     harness
         .service
-        .retry(harness.client.clone(), failed_id)
+        .retry(Some(harness.client.clone()), failed_id)
         .await
         .unwrap();
     let new_id = harness.newest_entry_id();

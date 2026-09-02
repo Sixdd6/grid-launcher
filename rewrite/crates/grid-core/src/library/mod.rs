@@ -14,16 +14,21 @@ pub mod paths;
 pub mod queue;
 pub mod registry;
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
+use serde_json::Value;
 
-use crate::config::Config;
+use crate::config::{Config, EmulatorEntry};
+use crate::launch::forge::{ForgeClient, ForgeProvider, ResolvedDownload};
+use crate::launch::profiles::{load_profiles, EmulatorProfile};
+use crate::launch::{catalog, emu_install};
 use crate::romm::{RomDetail, RomFile, RommClient};
 use download::{download_targets, FileTarget, RommProvider};
 use extract::{extract_archive, should_extract};
@@ -72,6 +77,19 @@ const ARCHIVE_DELETE_PAUSE: Duration = Duration::from_millis(250);
 const METADATA_FILE_NAME: &str = "game.json";
 const NO_DOWNLOADABLE_FILE: &str = "the server lists no downloadable file for this game";
 
+/// The `platform` column an emulator entry shows in the downloads drawer.
+/// Emulators are config entries, never registry rows, so this is a label
+/// only — nothing looks a platform directory up from it.
+const EMULATOR_PLATFORM: &str = "Emulator";
+/// Where an emulator archive is extracted before its contents are merged
+/// into the install directory. A sibling of the archive inside the install
+/// directory, so the merge is a rename and never a cross-device copy; the
+/// extraction engine wipes its destination, which is why it cannot be the
+/// install directory itself (that would delete the downloaded supplementals
+/// sitting next to the archive).
+const EXTRACT_TMP_DIR: &str = ".extract-tmp";
+const NO_EMULATOR_EXECUTABLE: &str = "No launchable emulator executable was found after install";
+
 /// Everything outside the RFC 3986 unreserved set (`ALPHA / DIGIT / - . _ ~`)
 /// is percent-encoded. Applied to the file-name segment of a content URL so a
 /// name containing a space, `#`, `?` or `/` can never change the shape of the
@@ -106,6 +124,54 @@ struct InstallJob {
     /// The client the download runs on, carried on the job so a queued
     /// install can start after its caller has gone away.
     client: Arc<RommClient>,
+}
+
+/// Everything one admitted emulator acquisition needs. Unlike an
+/// [`InstallJob`], the download plan is NOT computed before admission: the
+/// forge round trips that resolve a release down to one asset happen inside
+/// the download task, so a resolution failure lands on the drawer row
+/// exactly like a download failure does (matching the reference, which
+/// resolves inside `InstallDownloadWorker.run`).
+struct EmulatorJob {
+    source_id: String,
+    profile_name: String,
+    profile_args: String,
+    /// The profile's RAW `source` block. Supplemental specs are read from
+    /// here, not from the normalized/merged map: `workers.py:128` reads
+    /// `self.source_metadata`, and each spec carries its own
+    /// `platform_overrides` that `_resolve_source_download` merges per-spec.
+    raw_source: Value,
+    /// The library root, already `~`-expanded by [`InstallService::library_root`].
+    library: PathBuf,
+    forge: Arc<ForgeClient>,
+    /// Filled in by the download task once the forge has resolved the
+    /// release; consumed by finalize.
+    resolved: Option<ResolvedPaths>,
+}
+
+/// What the download task resolved an [`EmulatorJob`] down to.
+struct ResolvedPaths {
+    install_dir: PathBuf,
+    /// The primary archive, inside `install_dir`.
+    archive: PathBuf,
+    /// Downloaded supplemental archives, siblings of `archive`.
+    supplementals: Vec<PathBuf>,
+    resolved: ResolvedDownload,
+}
+
+/// The two job kinds the queue drives. One `pending_jobs` map and one
+/// download/finalize pair serve both, so an emulator acquisition and a game
+/// install queue behind each other rather than racing for the same slot.
+enum JobPayload {
+    Game(InstallJob),
+    Emulator(EmulatorJob),
+}
+
+/// Whether a download from `provider` needs the GitHub API headers. Read
+/// per download, not per job: a GitHub primary can carry a Gitea or direct
+/// supplemental.
+fn needs_github_headers(provider: &str) -> bool {
+    provider == "github"
 }
 
 /// Whether the server lists `file` as something to download: a top-level
@@ -223,12 +289,39 @@ pub struct InstallService {
     cancel_flags: Mutex<HashMap<u64, Arc<AtomicBool>>>,
     /// Plans for entries that were admitted as `Queued` and are waiting for a
     /// free slot.
-    pending_jobs: Mutex<HashMap<u64, InstallJob>>,
+    pending_jobs: Mutex<HashMap<u64, JobPayload>>,
+    /// The autoprofile catalog emulator `source_id`s resolve against.
+    profiles: Cow<'static, [EmulatorProfile]>,
+    /// Built on the first emulator install and shared by every later one, so
+    /// all forge traffic goes through one connection pool. Deliberately not
+    /// built in [`Self::new`]: constructing it can fail, and a process that
+    /// never installs an emulator should never pay for it.
+    forge: OnceLock<Arc<ForgeClient>>,
     last_emit: Mutex<Instant>,
 }
 
 impl InstallService {
     pub fn new(registry: Arc<Registry>, config_path: PathBuf) -> Arc<Self> {
+        Self::build(registry, config_path, Cow::Borrowed(load_profiles()))
+    }
+
+    /// [`Self::new`], but resolving emulator `source_id`s against `profiles`
+    /// instead of the embedded autoprofile catalog. The integration tests use
+    /// this to point a profile's `source` block at a local server; production
+    /// code calls [`Self::new`].
+    pub fn with_profiles(
+        registry: Arc<Registry>,
+        config_path: PathBuf,
+        profiles: Vec<EmulatorProfile>,
+    ) -> Arc<Self> {
+        Self::build(registry, config_path, Cow::Owned(profiles))
+    }
+
+    fn build(
+        registry: Arc<Registry>,
+        config_path: PathBuf,
+        profiles: Cow<'static, [EmulatorProfile]>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             queue: Mutex::new(QueueState::default()),
             registry,
@@ -236,6 +329,8 @@ impl InstallService {
             notify: RwLock::new(None),
             cancel_flags: Mutex::new(HashMap::new()),
             pending_jobs: Mutex::new(HashMap::new()),
+            profiles,
+            forge: OnceLock::new(),
             last_emit: Mutex::new(Instant::now()),
         })
     }
@@ -271,7 +366,54 @@ impl InstallService {
         let library = self.library_root()?;
         let detail = client.rom_detail(rom_id).await?;
         let job = plan_install(&detail, &library, client)?;
-        self.admit(job);
+        let key = JobKey::Rom(job.rom_id);
+        let title = job.detail.name.clone();
+        let platform = job.detail.platform_name.clone();
+        self.admit(key, &title, &platform, JobPayload::Game(job));
+        Ok(())
+    }
+
+    /// Starts (or queues) an emulator acquisition for the catalog
+    /// `source_id` (`"{owner}/{repo}"`).
+    ///
+    /// `Err` is returned only for failures before admission: no library
+    /// path, or a `source_id` no catalog profile carries. Everything the
+    /// forge is involved in — resolving the release, picking the asset,
+    /// downloading, extracting — happens on the admitted entry, so those
+    /// failures show up on the drawer row. A `source_id` that is already
+    /// downloading, finalizing or queued is ignored silently.
+    ///
+    /// Nothing here touches the SQLite registry: an installed emulator is a
+    /// config entry only.
+    pub async fn install_emulator(self: &Arc<Self>, source_id: String) -> Result<(), LibraryError> {
+        let library = self.library_root()?;
+        fn unknown(source_id: &str) -> LibraryError {
+            LibraryError::Registry(format!("unknown emulator: {source_id}"))
+        }
+
+        let profile =
+            catalog::find_profile(&self.profiles, &source_id).ok_or_else(|| unknown(&source_id))?;
+        // `find_profile` only matches a profile whose `source` is an object
+        // carrying an owner and a repo, so this clone always succeeds; the
+        // fallback keeps that assumption from turning into a panic.
+        let raw_source = profile.source.clone().ok_or_else(|| unknown(&source_id))?;
+
+        let job = EmulatorJob {
+            source_id: source_id.clone(),
+            profile_name: profile.name.clone(),
+            profile_args: profile.args.clone(),
+            raw_source,
+            library,
+            forge: self.forge()?,
+            resolved: None,
+        };
+        let title = job.profile_name.clone();
+        self.admit(
+            JobKey::Emulator(source_id),
+            &title,
+            EMULATOR_PLATFORM,
+            JobPayload::Emulator(job),
+        );
         Ok(())
     }
 
@@ -295,22 +437,31 @@ impl InstallService {
     }
 
     /// Retries a failed or cancelled entry: the old entry is dismissed and a
-    /// fresh install starts for the same rom. Any other entry is ignored.
+    /// fresh install starts for the same rom or emulator. Any other entry is
+    /// ignored.
     ///
-    /// An `Emulator` key is a no-op for now — Task 6 wires up the emulator
-    /// retry path.
+    /// `client` is `None` when no RomM session is connected. An emulator
+    /// retry never needs one — the forge client is separate and
+    /// unauthenticated — so only a game retry fails with `"not connected"`,
+    /// and it fails BEFORE the entry is dismissed so the row survives for a
+    /// later attempt.
     pub async fn retry(
         self: &Arc<Self>,
-        client: Arc<RommClient>,
+        client: Option<Arc<RommClient>>,
         entry_id: u64,
     ) -> Result<(), LibraryError> {
         let retryable = self.queue.lock().unwrap().retryable(entry_id);
         match retryable {
             Some(JobKey::Rom(rom_id)) => {
+                let client =
+                    client.ok_or_else(|| LibraryError::Registry("not connected".to_string()))?;
                 self.dismiss(entry_id);
                 self.install(client, rom_id).await
             }
-            Some(JobKey::Emulator(_)) => Ok(()),
+            Some(JobKey::Emulator(source_id)) => {
+                self.dismiss(entry_id);
+                self.install_emulator(source_id).await
+            }
             None => Ok(()),
         }
     }
@@ -385,6 +536,18 @@ impl InstallService {
         Ok(paths::expand_home(&config.library_path))
     }
 
+    /// The shared forge client, built on first use. Separate from every RomM
+    /// client in the process and never given a credential.
+    fn forge(&self) -> Result<Arc<ForgeClient>, LibraryError> {
+        if let Some(client) = self.forge.get() {
+            return Ok(client.clone());
+        }
+        let built = Arc::new(ForgeClient::new().map_err(|e| LibraryError::Extract(e.0))?);
+        // A concurrent caller may have won the race; whichever client is
+        // stored is the one everybody uses.
+        Ok(self.forge.get_or_init(|| built).clone())
+    }
+
     /// Admits a planned job: starts it, stashes it for a free slot, or drops
     /// it as a duplicate.
     ///
@@ -392,17 +555,13 @@ impl InstallService {
     /// first would let a finishing download's [`Self::pump`] pop the brand
     /// new id out of `waiting` before its job exists, fail the entry as lost
     /// and leave the job stranded in `pending_jobs`.
-    fn admit(self: &Arc<Self>, job: InstallJob) {
+    fn admit(self: &Arc<Self>, key: JobKey, title: &str, platform: &str, payload: JobPayload) {
         let (admitted, start) = {
             let mut queue = self.queue.lock().unwrap();
-            match queue.admit(
-                JobKey::Rom(job.rom_id),
-                &job.detail.name,
-                &job.detail.platform_name,
-            ) {
-                Admission::Start(id) => (true, Some((id, job))),
+            match queue.admit(key, title, platform) {
+                Admission::Start(id) => (true, Some((id, payload))),
                 Admission::Queued(id) => {
-                    self.pending_jobs.lock().unwrap().insert(id, job);
+                    self.pending_jobs.lock().unwrap().insert(id, payload);
                     (true, None)
                 }
                 Admission::Duplicate => (false, None),
@@ -413,15 +572,15 @@ impl InstallService {
         if !admitted {
             return;
         }
-        if let Some((id, job)) = start {
-            self.spawn_download(id, job);
+        if let Some((id, payload)) = start {
+            self.spawn_download(id, payload);
         }
         self.notify_now();
     }
 
     /// Starts the download task for `id`, registering its cancellation flag
     /// before the task exists so an immediate `cancel` is never lost.
-    fn spawn_download(self: &Arc<Self>, id: u64, job: InstallJob) {
+    fn spawn_download(self: &Arc<Self>, id: u64, payload: JobPayload) {
         let cancel = Arc::new(AtomicBool::new(false));
         self.cancel_flags.lock().unwrap().insert(id, cancel.clone());
         // A cancel that arrived after the entry took the download slot but
@@ -443,22 +602,30 @@ impl InstallService {
             // instead of leaving the download slot taken forever.
             let reporter = service.clone();
             let worker = tokio::spawn(async move {
+                let mut payload = payload;
                 let mut on_progress = move |downloaded, total, speed| {
                     reporter.on_download_progress(id, downloaded, total, speed);
                 };
-                let result = download_targets(
-                    &RommProvider(&job.client),
-                    &job.targets,
-                    &cancel,
-                    &mut on_progress,
-                )
-                .await;
-                (job, result)
+                let result = match &mut payload {
+                    JobPayload::Game(job) => {
+                        download_targets(
+                            &RommProvider(&job.client),
+                            &job.targets,
+                            &cancel,
+                            &mut on_progress,
+                        )
+                        .await
+                    }
+                    JobPayload::Emulator(job) => {
+                        download_emulator(job, &cancel, &mut on_progress).await
+                    }
+                };
+                (payload, result)
             });
             let outcome = worker.await;
             service.cancel_flags.lock().unwrap().remove(&id);
             match outcome {
-                Ok((job, result)) => service.finish_download(id, job, result).await,
+                Ok((payload, result)) => service.finish_download(id, payload, result).await,
                 Err(e) => service.fail_download(
                     id,
                     LibraryError::Extract(format!("the download did not finish: {e}")),
@@ -486,12 +653,18 @@ impl InstallService {
     async fn finish_download(
         self: &Arc<Self>,
         id: u64,
-        job: InstallJob,
+        payload: JobPayload,
         result: Result<(), LibraryError>,
     ) {
         // doc 03 §1 step 4: a game that is already in the registry completes
         // straight away — the bytes are on disk, nothing needs installing.
-        let skip_finalize = result.is_ok() && self.already_installed(&job.detail).await;
+        // An emulator never short-circuits: the registry is games-only, so
+        // there is no "already installed" row to find, and the extract /
+        // config-write half still has to run.
+        let skip_finalize = match &payload {
+            JobPayload::Game(job) => result.is_ok() && self.already_installed(&job.detail).await,
+            JobPayload::Emulator(_) => false,
+        };
         // A cancel that lands after the last chunk arrived is too late: the
         // download succeeded, so `Cancelling` gives way to `Installing` here
         // and the entry finishes. Extraction is not cancellable (doc 03 §1).
@@ -504,7 +677,7 @@ impl InstallService {
             )
         };
         if finalize {
-            self.spawn_finalize(id, job);
+            self.spawn_finalize(id, payload);
         }
         self.pump();
         self.notify_now();
@@ -533,12 +706,12 @@ impl InstallService {
 
     /// Starts the finalize task for `id`. Called exactly once by the task
     /// that owns the finalize slot.
-    fn spawn_finalize(self: &Arc<Self>, id: u64, job: InstallJob) {
+    fn spawn_finalize(self: &Arc<Self>, id: u64, payload: JobPayload) {
         let service = self.clone();
         tokio::spawn(async move {
             let worker = service.clone();
             let (result, warning) =
-                match tokio::task::spawn_blocking(move || worker.finalize(id, &job)).await {
+                match tokio::task::spawn_blocking(move || worker.finalize(id, &payload)).await {
                     Ok(outcome) => outcome,
                     Err(e) => (
                         Err(LibraryError::Extract(format!(
@@ -572,7 +745,7 @@ impl InstallService {
                     return;
                 };
                 match self.pending_jobs.lock().unwrap().remove(&id) {
-                    Some(job) => Some((id, job)),
+                    Some(payload) => Some((id, payload)),
                     None => {
                         // Defensive: a queued entry with no stashed plan can
                         // never run. Fail it so the slot frees and the queue
@@ -590,8 +763,8 @@ impl InstallService {
             };
             // `spawn_download` takes the queue lock itself, so it can only be
             // called once the guard above has been released.
-            if let Some((id, job)) = start {
-                self.spawn_download(id, job);
+            if let Some((id, payload)) = start {
+                self.spawn_download(id, payload);
                 return;
             }
         }
@@ -601,9 +774,12 @@ impl InstallService {
     /// registry write and archive cleanup. Returns the outcome plus a
     /// warning string that is empty unless the install succeeded with a
     /// caveat.
-    fn finalize(&self, id: u64, job: &InstallJob) -> (Result<(), LibraryError>, String) {
+    fn finalize(&self, id: u64, payload: &JobPayload) -> (Result<(), LibraryError>, String) {
         let mut warning = String::new();
-        let result = self.finalize_inner(id, job, &mut warning);
+        let result = match payload {
+            JobPayload::Game(job) => self.finalize_inner(id, job, &mut warning),
+            JobPayload::Emulator(job) => self.finalize_emulator(id, job, &mut warning),
+        };
         (result, warning)
     }
 
@@ -663,6 +839,116 @@ impl InstallService {
         Ok(())
     }
 
+    /// The blocking half of finalizing an emulator: extraction into the
+    /// install directory, supplemental merges, executable selection, the
+    /// config entry, and archive cleanup. Ports the emulator half of the
+    /// reference's post-download install path (`install_mixin.py:690-780`,
+    /// `autoconfig.py:19-87`); nothing here writes to the SQLite registry.
+    fn finalize_emulator(
+        &self,
+        id: u64,
+        job: &EmulatorJob,
+        warning: &mut String,
+    ) -> Result<(), LibraryError> {
+        // Unreachable: the download task fills `resolved` in before it can
+        // succeed, and only a successful download reaches finalize.
+        let Some(paths) = job.resolved.as_ref() else {
+            return Err(LibraryError::Extract(
+                "the emulator download plan was lost".to_string(),
+            ));
+        };
+        let install_dir = paths.install_dir.as_path();
+        let archive = paths.archive.as_path();
+        let mut progress = |processed, total| self.on_install_progress(id, processed, total);
+        // Archives that have been superseded by their extracted contents.
+        // Anything left out of this list stays on disk: an AppImage IS the
+        // install, and a failure before this point must keep every archive so
+        // a retry skips the finished downloads (doc 03 invariant 5).
+        let mut extracted_archives: Vec<&Path> = Vec::new();
+
+        if should_extract(EMULATOR_PLATFORM, archive) {
+            let staging = install_dir.join(EXTRACT_TMP_DIR);
+            extract_archive(archive, &staging, &mut progress)?;
+            let merged = merge_tree_into(&staging, install_dir);
+            let _ = fs::remove_dir_all(&staging);
+            merged?;
+            extracted_archives.push(archive);
+        }
+
+        for (index, supplemental) in paths.supplementals.iter().enumerate() {
+            if !supplemental.is_file() {
+                continue;
+            }
+            // A supplemental that is not an archive (an AppImage, a firmware
+            // blob) is already where it belongs: a sibling of the primary.
+            if !should_extract(EMULATOR_PLATFORM, supplemental) {
+                continue;
+            }
+            // Numbered by position in the downloaded list, which is a
+            // scratch name only — the file names themselves carry the
+            // reference's spec index, assigned when the plan was built.
+            let staging = install_dir.join(format!(".supp-tmp-{}", index + 1));
+            extract_archive(supplemental, &staging, &mut progress)?;
+            let merged = merge_tree_into(&staging, install_dir);
+            let _ = fs::remove_dir_all(&staging);
+            merged?;
+            extracted_archives.push(supplemental);
+        }
+
+        let Some(exe) = emu_install::select_executable(&job.profile_name, install_dir, archive)
+        else {
+            return Err(LibraryError::Extract(NO_EMULATOR_EXECUTABLE.to_string()));
+        };
+        make_executable(&exe);
+
+        self.write_emulator_entry(job, &paths.resolved, &exe)?;
+
+        // Only after a successful config write, matching the game path.
+        for path in extracted_archives {
+            if !delete_with_retry(path) {
+                append_warning(
+                    warning,
+                    &format!("could not delete archive: {}", path.display()),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Writes (or replaces) `job`'s emulator entry in the config file.
+    ///
+    /// An existing entry with the same name is replaced AT ITS INDEX, so the
+    /// user's ordering survives a reinstall; the match is exact, mirroring
+    /// the `save_emulator` command's replace rule.
+    fn write_emulator_entry(
+        &self,
+        job: &EmulatorJob,
+        resolved: &ResolvedDownload,
+        exe: &Path,
+    ) -> Result<(), LibraryError> {
+        let mut config = Config::load(&self.config_path)?;
+        let entry = EmulatorEntry {
+            name: job.profile_name.clone(),
+            path: path_string(exe),
+            args: job.profile_args.clone(),
+            source_id: job.source_id.clone(),
+            source_provider: resolved.provider.clone(),
+            source_owner: resolved.owner.clone(),
+            source_repo: resolved.repo.clone(),
+            source_release_tag: resolved.release_tag.clone(),
+        };
+        match config
+            .emulators
+            .iter()
+            .position(|existing| existing.name == entry.name)
+        {
+            Some(index) => config.emulators[index] = entry,
+            None => config.emulators.push(entry),
+        }
+        config.save(&self.config_path)?;
+        Ok(())
+    }
+
     fn on_download_progress(&self, id: u64, downloaded: u64, total: u64, speed: f64) {
         self.queue
             .lock()
@@ -713,7 +999,164 @@ impl InstallService {
     }
 }
 
+// --- emulator download ------------------------------------------------------
+
+/// Resolves `job` against its forge and downloads the primary asset plus
+/// every supplemental, recording the resulting paths on `job` for finalize.
+///
+/// Ports `InstallDownloadWorker.run`'s resolve-then-download order
+/// (`workers.py:57-138`): the release lookups happen here, inside the
+/// download task, so a resolution failure ends up on the drawer row.
+async fn download_emulator(
+    job: &mut EmulatorJob,
+    cancel: &AtomicBool,
+    on_progress: &mut (dyn FnMut(u64, u64, f64) + Send),
+) -> Result<(), LibraryError> {
+    let forge = job.forge.clone();
+    let primary = forge
+        .resolve(&job.raw_source, &job.profile_name)
+        .await
+        .map_err(|e| LibraryError::Extract(e.0))?;
+    // A cancel that arrived while the forge was being queried must not turn
+    // into a download.
+    if cancel.load(Ordering::Relaxed) {
+        return Err(LibraryError::Cancelled);
+    }
+
+    let supplementals = resolve_supplementals(&forge, job).await?;
+
+    let archive_name = emu_install::archive_file_name(
+        &job.profile_name,
+        &primary.release_tag,
+        &primary.asset_name,
+    );
+    let stem = Path::new(&archive_name)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| archive_name.clone());
+    let install_dir = emu_install::emulator_install_dir(&job.library, &stem);
+    let archive = install_dir.join(&archive_name);
+
+    let mut targets = vec![FileTarget {
+        url_path: primary.download_url.clone(),
+        query: Vec::new(),
+        dest: archive.clone(),
+        expected_size: primary.size,
+    }];
+    let mut github_headers = vec![(
+        primary.download_url.clone(),
+        needs_github_headers(&primary.provider),
+    )];
+    let mut supplemental_paths = Vec::new();
+
+    for (index, supplemental) in &supplementals {
+        let dest = install_dir.join(emu_install::supplemental_file_name(
+            &archive,
+            *index,
+            &supplemental.asset_name,
+        ));
+        targets.push(FileTarget {
+            url_path: supplemental.download_url.clone(),
+            query: Vec::new(),
+            dest: dest.clone(),
+            expected_size: supplemental.size,
+        });
+        github_headers.push((
+            supplemental.download_url.clone(),
+            needs_github_headers(&supplemental.provider),
+        ));
+        supplemental_paths.push(dest);
+    }
+
+    job.resolved = Some(ResolvedPaths {
+        install_dir,
+        archive,
+        supplementals: supplemental_paths,
+        resolved: primary,
+    });
+
+    let provider = ForgeProvider::new(&forge, github_headers);
+    download_targets(&provider, &targets, cancel, on_progress).await
+}
+
+/// Resolves every `supplemental_downloads` entry of `job`'s RAW source,
+/// paired with its 1-based index (`_download_supplemental_archives`,
+/// workers.py:124-138).
+///
+/// The reference numbers the entries BEFORE skipping the unusable ones, so
+/// a skipped spec still consumes its index and the file names of the
+/// supplementals after it do not shift. A spec that resolves to no download
+/// URL is skipped; a spec that fails to resolve fails the whole install.
+async fn resolve_supplementals(
+    forge: &ForgeClient,
+    job: &EmulatorJob,
+) -> Result<Vec<(usize, ResolvedDownload)>, LibraryError> {
+    let Some(Value::Array(specs)) = job.raw_source.get("supplemental_downloads") else {
+        return Ok(Vec::new());
+    };
+    let mut resolved = Vec::new();
+    for (index, spec) in specs.iter().enumerate() {
+        if !spec.is_object() {
+            continue;
+        }
+        let supplemental = forge
+            .resolve(spec, &job.profile_name)
+            .await
+            .map_err(|e| LibraryError::Extract(e.0))?;
+        if supplemental.download_url.trim().is_empty() {
+            continue;
+        }
+        resolved.push((index + 1, supplemental));
+    }
+    Ok(resolved)
+}
+
 // --- record + filesystem helpers --------------------------------------------
+
+/// Appends `line` to `warning`, keeping any warning already there.
+fn append_warning(warning: &mut String, line: &str) {
+    if !warning.is_empty() {
+        warning.push('\n');
+    }
+    warning.push_str(line);
+}
+
+/// Merges every entry of `src` into `dest`: directories are created (and
+/// recursed into when they already exist), files overwrite their
+/// counterparts, and anything in `dest` the tree does not carry is left
+/// alone — the merge semantics of doc 03 / `_merge_tree`
+/// (`archive_preparation.py:258-267`).
+///
+/// Entries are MOVED rather than copied. `src` is always a staging directory
+/// inside `dest` that is deleted immediately afterwards, so a rename cannot
+/// cross a filesystem boundary and the result is identical to a copy with
+/// half the writes.
+fn merge_tree_into(src: &Path, dest: &Path) -> Result<(), LibraryError> {
+    fs::create_dir_all(dest)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dest.join(entry.file_name());
+        // `file_type` does not follow symlinks, so a symlink is moved as
+        // itself rather than being descended into.
+        let from_is_dir = entry.file_type()?.is_dir();
+
+        if from_is_dir && to.is_dir() {
+            merge_tree_into(&from, &to)?;
+            // Now empty; a failure to remove the husk is not worth failing
+            // the install for, and the whole staging tree is deleted next.
+            let _ = fs::remove_dir(&from);
+            continue;
+        }
+        if to.is_dir() {
+            remove_dir_tree(&to)?;
+        } else if to.exists() {
+            fs::remove_file(&to)?;
+        }
+        fs::rename(&from, &to)?;
+    }
+    Ok(())
+}
 
 fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()

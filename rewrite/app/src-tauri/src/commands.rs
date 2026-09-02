@@ -98,8 +98,12 @@ pub fn cancel_install(state: State<'_, AppState>, entry_id: u64) -> Result<(), S
 #[tauri::command]
 pub async fn retry_install(state: State<'_, AppState>, entry_id: u64) -> Result<(), String> {
     let install = state.install.as_ref().map_err(Clone::clone)?;
-    let client = state.session.client().ok_or("not connected")?;
-    install.retry(client, entry_id).await.map_err(err)
+    // `None` when no session is connected: an emulator retry does not need a
+    // RomM client, and `retry` reports "not connected" itself for a game row.
+    install
+        .retry(state.session.client(), entry_id)
+        .await
+        .map_err(err)
 }
 
 #[tauri::command]
