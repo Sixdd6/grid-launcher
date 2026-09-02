@@ -21,17 +21,14 @@ describe('statusLabel', () => {
     return { username, token_present: tokenPresent };
   }
 
-  it('renders the unset state when no token is stored', () => {
+  it('renders set and unset states', () => {
     expect(statusLabel(status('', false))).toBe('Not set');
-    expect(statusLabel(status('sixdd6', false))).toBe('Not set');
-  });
-
-  it('renders the set state with the username when a token is stored', () => {
+    expect(statusLabel(null)).toBe('Not set');
     expect(statusLabel(status('sixdd6', true))).toBe('Set for sixdd6');
   });
 
-  it('renders the unset state when there is no status yet', () => {
-    expect(statusLabel(null)).toBe('Not set');
+  it('a username with no stored token still renders unset', () => {
+    expect(statusLabel(status('sixdd6', false))).toBe('Not set');
   });
 });
 
@@ -40,16 +37,13 @@ describe('fanOutSummary', () => {
     return { emulator, changed };
   }
 
-  it('lists only the changed emulators, comma-joined', () => {
+  it('lists only changed emulators', () => {
     const rows = [row('RetroArch', true), row('PCSX2', false), row('PPSSPP', true)];
     expect(fanOutSummary(rows)).toBe('Updated: RetroArch, PPSSPP');
   });
 
-  it('reports no changes when nothing changed', () => {
+  it('reports no changes', () => {
     expect(fanOutSummary([row('RetroArch', false), row('PCSX2', false)])).toBe('No changes');
-  });
-
-  it('reports no changes for an empty row list', () => {
     expect(fanOutSummary([])).toBe('No changes');
   });
 });
