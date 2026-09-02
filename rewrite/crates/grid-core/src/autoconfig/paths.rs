@@ -131,9 +131,29 @@ fn is_symlink(candidate: &Path) -> bool {
 ///
 /// Every component:
 /// - `.` is dropped (`posixpath.py:454-456`).
+/// - A `Prefix` (Windows only — e.g. the `C:` in `C:\foo`) RESETS `path` to
+///   just that prefix, discarding anything accumulated before it — a new
+///   drive/UNC root always starts fresh.
+/// - `RootDir` PUSHES onto the current `path` rather than replacing it.
+///   `PathBuf::push`'s own documented Windows rule — "a path with a root
+///   but no prefix replaces everything except `self`'s prefix" — is exactly
+///   what preserves a drive letter a `Prefix` component just set
+///   (`C:` + push(`\`) = `C:\`, not `\`); on non-Windows targets there is no
+///   prefix concept, so pushing the (absolute) root simply replaces
+///   whatever was there, which is the same "reset to root" behavior this
+///   arm had before. Combining `RootDir` with `Prefix` into one
+///   replace-`path` arm — this function's ORIGINAL shape — silently
+///   dropped the drive letter whenever a `Prefix` was immediately followed
+///   by a `RootDir`, which `Path::components()` always does for an
+///   absolute Windows path; unreachable on the Linux/macOS builds this
+///   crate is tested on today (`Component::Prefix` is never parsed off a
+///   Unix path at all), but live logic in a `pub(crate)` helper this crate
+///   also ships for Windows.
 /// - `..` pops the last segment off `path` — whatever it currently is,
-///   symlink-resolved or plain — clamped at the root: popping past `/` is
-///   a no-op, never producing a literal `/../x` (`posixpath.py:457-465`).
+///   symlink-resolved or plain — clamped at the root (or, on Windows, the
+///   prefix+root): `path.parent()` of a bare root (`/`, or `C:\`) is
+///   `None`, so popping past it is a no-op, never producing a literal
+///   `/../x` or stripping a drive letter (`posixpath.py:457-465`).
 /// - A `Normal` name is checked via [`is_symlink`]: if it is NOT a
 ///   symlink — including when it does not exist at all, which gets
 ///   IDENTICAL treatment to an ordinary file/dir under `strict=False`,
@@ -142,14 +162,15 @@ fn is_symlink(candidate: &Path) -> bool {
 ///   themselves stat-checked against THIS (possibly still nonexistent)
 ///   prefix, exactly like CPython (`posixpath.py:466-475`). If it IS a
 ///   symlink, [`join_realpath`] recurses onto its target: an absolute
-///   target's own leading root component naturally resets `path` (handled
-///   by this same match arm, no special case needed — Rust's `Components`
-///   always yields a path's own `RootDir`/`Prefix` first); a relative one
-///   is walked starting from the CURRENT `path`, i.e. from the symlink's
-///   own containing directory (`posixpath.py:476-494`). `seen` records
-///   symlinks already entered on this call stack, so a cycle falls back to
-///   the raw, unresolved candidate instead of recursing forever, mirroring
-///   CPython's own non-strict loop guard (`posixpath.py:477-489`).
+///   target's own leading `Prefix`/`RootDir` components naturally reset
+///   `path` (handled by the two arms above, no special case needed —
+///   Rust's `Components` always yields a path's own prefix/root first); a
+///   relative one is walked starting from the CURRENT `path`, i.e. from
+///   the symlink's own containing directory (`posixpath.py:476-494`).
+///   `seen` records symlinks already entered on this call stack, so a
+///   cycle falls back to the raw, unresolved candidate instead of
+///   recursing forever, mirroring CPython's own non-strict loop guard
+///   (`posixpath.py:477-489`).
 fn join_realpath(
     mut path: PathBuf,
     rest: &Path,
@@ -158,8 +179,11 @@ fn join_realpath(
     for component in rest.components() {
         match component {
             Component::CurDir => {}
-            Component::RootDir | Component::Prefix(_) => {
+            Component::Prefix(_) => {
                 path = PathBuf::from(component.as_os_str());
+            }
+            Component::RootDir => {
+                path.push(component.as_os_str());
             }
             Component::ParentDir => {
                 if path.parent().is_some() {
@@ -426,5 +450,29 @@ mod tests {
             .join("nonexistent")
             .join("sibling");
         assert_eq!(resolved, expected);
+    }
+
+    /// A Windows drive prefix must survive the `RootDir` that always
+    /// follows it in an absolute path's `Components`, and a `..` must clamp
+    /// at the drive root rather than popping the prefix away.
+    ///
+    /// `#[cfg(windows)]`, not a platform-agnostic test: `Component::Prefix`
+    /// is parsed ONLY on Windows — `Path::new("C:\\foo").components()` on
+    /// Linux/macOS yields a single `Normal("C:\\foo")` component, never
+    /// `Prefix`+`RootDir`+`Normal("foo")` (there is no public way to
+    /// construct a `PrefixComponent` directly; the parser is the only
+    /// source of one, and it never fires off-Windows) — so this guard is
+    /// inherently untestable on the platforms this crate's CI runs on
+    /// today, and is gated here rather than faked with a synthetic
+    /// `Component` value.
+    #[test]
+    #[cfg(windows)]
+    fn resolve_best_effort_preserves_the_windows_drive_prefix() {
+        let resolved = resolve_best_effort(Path::new(r"C:\foo\..\bar"));
+        assert_eq!(resolved, PathBuf::from(r"C:\bar"));
+
+        // Root-clamp must stop at the drive root, not strip the prefix.
+        let clamped = resolve_best_effort(Path::new(r"C:\..\..\baz"));
+        assert_eq!(clamped, PathBuf::from(r"C:\baz"));
     }
 }
