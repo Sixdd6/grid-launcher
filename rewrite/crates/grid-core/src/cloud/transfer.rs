@@ -106,24 +106,23 @@ pub fn appended_image_sidecar_path(path: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Recursively lists every entry under `root`, tolerating a read failure
-/// on `root` itself (returns `None`, matching Python's `directory.rglob("*")`
-/// wrapped in `try/except OSError: continue`) but best-effort past that —
-/// a nested subdirectory that can't be listed is simply skipped rather than
-/// aborting the whole scan for its siblings.
+/// Recursively lists every entry under `root` — `None` if ANY `read_dir`
+/// call anywhere in the walk fails (the root itself, or any nested
+/// subdirectory, or a per-entry read error while iterating one), discarding
+/// whatever had already been collected. Mirrors Python's
+/// `list(directory.rglob("*"))` wrapped in exactly ONE `try/except
+/// OSError: continue` per TOP-LEVEL directory (`cloud_transfer.py:109-113`):
+/// an OSError anywhere in that directory's recursive walk — root or
+/// nested — discards that entire top-level directory's results, not just
+/// the failing subtree. There is no "keep the siblings" partial-success
+/// path here, unlike [`super::latest_mtime_under`]'s per-entry tolerance.
 fn walk_files_best_effort(root: &Path) -> Option<Vec<PathBuf>> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
-    let mut first = true;
     while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            if first {
-                return None;
-            }
-            continue;
-        };
-        first = false;
-        for entry in entries.flatten() {
+        let read_dir = std::fs::read_dir(&dir).ok()?;
+        for entry in read_dir {
+            let entry = entry.ok()?;
             let path = entry.path();
             if entry.file_type().is_ok_and(|ft| ft.is_dir()) {
                 stack.push(path.clone());
@@ -606,15 +605,25 @@ static PPSSPP_NAME_STRIP_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^A
 
 /// Every `*.ppst` file directly under each of `dirs` (non-recursive,
 /// case-sensitive extension match — Python's `directory.glob("*.ppst")`),
-/// whose uppercased name with every non-`[A-Z0-9]` character stripped
-/// CONTAINS at least one of `tokens` as a substring — or every `.ppst` file
-/// when `tokens` is empty. Each candidate's `"stateFile"` job carries a
-/// [`replaced_suffix_sidecar_path`] screenshot when one exists. Results are
-/// sorted NEWEST FIRST by mtime (missing/unstat-able treated as `0.0`),
-/// then deduped by lowercased path (first — i.e. newest — occurrence wins).
-/// Mirrors `ppsspp_state_upload_jobs` (`cloud_transfer.py:590-632`); never
-/// produces a temp archive.
-pub fn ppsspp_state_upload_jobs(dirs: &[PathBuf], tokens: &BTreeSet<String>) -> BuiltJobs {
+/// not blocked by `ignore` (basename OR extension — mirrors
+/// `cloud_transfer.py:608-609`'s pair of `blocked_basenames`/
+/// `blocked_extensions` checks on the PRIMARY state file, applied before
+/// the token match), whose uppercased name with every non-`[A-Z0-9]`
+/// character stripped CONTAINS at least one of `tokens` as a substring —
+/// or every non-blocked `.ppst` file when `tokens` is empty. Each
+/// candidate's `"stateFile"` job carries a [`replaced_suffix_sidecar_path`]
+/// screenshot when one exists (the screenshot sidecar itself is never
+/// ignore-checked — see that function's doc comment for why Python's own
+/// `blocked_basenames` there is dead code). Results are sorted NEWEST FIRST
+/// by mtime (missing/unstat-able treated as `0.0`), then deduped by
+/// lowercased path (first — i.e. newest — occurrence wins). Mirrors
+/// `ppsspp_state_upload_jobs` (`cloud_transfer.py:590-632`); never produces
+/// a temp archive.
+pub fn ppsspp_state_upload_jobs(
+    dirs: &[PathBuf],
+    tokens: &BTreeSet<String>,
+    ignore: &IgnoreSets,
+) -> BuiltJobs {
     let mut candidates: Vec<(PathBuf, Option<PathBuf>, f64)> = Vec::new();
 
     for dir in dirs {
@@ -634,6 +643,9 @@ pub fn ppsspp_state_upload_jobs(dirs: &[PathBuf], tokens: &BTreeSet<String>) -> 
                 .and_then(|e| e.to_str())
                 .is_some_and(|e| e == "ppst");
             if !is_ppst {
+                continue;
+            }
+            if ignore.blocks(&path) {
                 continue;
             }
             let name = path
@@ -689,16 +701,22 @@ pub fn ppsspp_state_upload_jobs(dirs: &[PathBuf], tokens: &BTreeSet<String>) -> 
 }
 
 /// One job per file in `files` (deduped/existence-filtered via the same
-/// rule as [`grouped_file_upload_jobs`]), each carrying a `"stateFile"`
-/// entry plus an [`appended_image_sidecar_path`] `"screenshotFile"` when
-/// one exists. Field name is hardcoded `"stateFile"`: this builder's only
-/// call site (`cloud_mixin.py:2578`) is inside the `save_type == "state"`
-/// branch. Mirrors `retroarch_state_upload_jobs`
+/// rule as [`grouped_file_upload_jobs`]), skipping any PRIMARY file blocked
+/// by `ignore` (basename OR extension — mirrors `cloud_transfer.py:654-656`'s
+/// pair of `blocked_basenames`/`blocked_extensions` checks). Each surviving
+/// file carries a `"stateFile"` entry plus an [`appended_image_sidecar_path`]
+/// `"screenshotFile"` when one exists (never ignore-checked itself, per
+/// that function's doc comment). Field name is hardcoded `"stateFile"`:
+/// this builder's only call site (`cloud_mixin.py:2578`) is inside the
+/// `save_type == "state"` branch. Mirrors `retroarch_state_upload_jobs`
 /// (`cloud_transfer.py:635-660`); never produces a temp archive.
-pub fn retroarch_state_upload_jobs(files: &[PathBuf]) -> BuiltJobs {
+pub fn retroarch_state_upload_jobs(files: &[PathBuf], ignore: &IgnoreSets) -> BuiltJobs {
     let selected = unique_existing_files(files);
     let mut jobs = Vec::new();
     for file in selected {
+        if ignore.blocks(&file) {
+            continue;
+        }
         let mut payload = vec![("stateFile".to_string(), file.clone())];
         if let Some(shot) = appended_image_sidecar_path(&file) {
             payload.push(("screenshotFile".to_string(), shot));
@@ -967,7 +985,7 @@ mod tests {
         fs::write(state_dir.join("Thumbs.db"), b"not-an-image").unwrap();
 
         let tokens: BTreeSet<String> = ["ULUS12345".to_string()].into_iter().collect();
-        let built = ppsspp_state_upload_jobs(&[state_dir], &tokens);
+        let built = ppsspp_state_upload_jobs(&[state_dir], &tokens, &no_ignore());
 
         assert_eq!(built.jobs.len(), 1);
         let job = &built.jobs[0];
@@ -991,7 +1009,7 @@ mod tests {
         fs::create_dir(&state_dir).unwrap();
         fs::write(state_dir.join("ANYTHING.ppst"), b"state").unwrap();
 
-        let built = ppsspp_state_upload_jobs(&[state_dir], &BTreeSet::new());
+        let built = ppsspp_state_upload_jobs(&[state_dir], &BTreeSet::new(), &no_ignore());
         assert_eq!(built.jobs.len(), 1);
     }
 
@@ -1003,7 +1021,7 @@ mod tests {
         fs::write(state_dir.join("ULUS99999.ppst"), b"state").unwrap();
 
         let tokens: BTreeSet<String> = ["ULUS12345".to_string()].into_iter().collect();
-        let built = ppsspp_state_upload_jobs(&[state_dir], &tokens);
+        let built = ppsspp_state_upload_jobs(&[state_dir], &tokens, &no_ignore());
         assert!(built.jobs.is_empty());
     }
 
@@ -1017,7 +1035,7 @@ mod tests {
         fs::write(nested.join("deep.ppst"), b"state").unwrap();
         fs::write(state_dir.join("top.ppst"), b"state").unwrap();
 
-        let built = ppsspp_state_upload_jobs(&[state_dir], &BTreeSet::new());
+        let built = ppsspp_state_upload_jobs(&[state_dir], &BTreeSet::new(), &no_ignore());
         assert_eq!(built.jobs.len(), 1);
         assert_eq!(built.jobs[0].display_name, "top.ppst");
     }
@@ -1034,10 +1052,32 @@ mod tests {
         touch_at(&older, 100.0);
         touch_at(&newer, 200.0);
 
-        let built = ppsspp_state_upload_jobs(&[dir_a, dir_b], &BTreeSet::new());
+        let built = ppsspp_state_upload_jobs(&[dir_a, dir_b], &BTreeSet::new(), &no_ignore());
         assert_eq!(built.jobs.len(), 2);
         assert_eq!(built.jobs[0].display_name, "NEW.ppst");
         assert_eq!(built.jobs[1].display_name, "OLD.ppst");
+    }
+
+    /// Fix-round addition: `ignore` blocks a PRIMARY `.ppst` state file by
+    /// extension, mirroring `cloud_transfer.py:608-609`'s
+    /// `blocked_extensions` check (Python applies this to the state file
+    /// itself, not just the screenshot sidecar).
+    #[test]
+    fn ppsspp_jobs_exclude_ignored_extension() {
+        let temp = tempfile::tempdir().unwrap();
+        let state_dir = temp.path().join("states");
+        fs::create_dir(&state_dir).unwrap();
+        fs::write(state_dir.join("BLOCKED.ppst"), b"state").unwrap();
+
+        let ignore = IgnoreSets {
+            basenames: BTreeSet::new(),
+            extensions: [".ppst".to_string()].into_iter().collect(),
+        };
+        let built = ppsspp_state_upload_jobs(&[state_dir], &BTreeSet::new(), &ignore);
+        assert!(
+            built.jobs.is_empty(),
+            "a state file with an ignored extension must never become a job"
+        );
     }
 
     // --- retroarch_state_upload_jobs ----------------------------------------
@@ -1052,7 +1092,7 @@ mod tests {
         fs::write(&state_file, b"state").unwrap();
         fs::write(&screenshot_file, b"").unwrap();
 
-        let built = retroarch_state_upload_jobs(std::slice::from_ref(&state_file));
+        let built = retroarch_state_upload_jobs(std::slice::from_ref(&state_file), &no_ignore());
         assert!(built.temp_archives.is_empty());
         assert_eq!(built.jobs.len(), 1);
         assert_eq!(
@@ -1073,7 +1113,7 @@ mod tests {
         let state_file = temp.path().join("game.state");
         fs::write(&state_file, b"state").unwrap();
 
-        let built = retroarch_state_upload_jobs(&[state_file]);
+        let built = retroarch_state_upload_jobs(&[state_file], &no_ignore());
         assert_eq!(built.jobs.len(), 1);
         assert_eq!(built.jobs[0].payload.len(), 1);
         assert_eq!(built.jobs[0].payload[0].0, "stateFile");
@@ -1093,7 +1133,7 @@ mod tests {
         fs::write(&state2, b"s2").unwrap();
         fs::write(&shot2, b"").unwrap();
 
-        let built = retroarch_state_upload_jobs(&[state1.clone(), state2.clone()]);
+        let built = retroarch_state_upload_jobs(&[state1.clone(), state2.clone()], &no_ignore());
         assert_eq!(built.jobs.len(), 2);
         assert_eq!(built.jobs[0].payload[0].1, state1);
         assert_eq!(built.jobs[0].payload[1].1, shot1);
@@ -1111,7 +1151,7 @@ mod tests {
         fs::write(&state_file, b"state").unwrap();
         fs::write(&non_image, b"metadata").unwrap();
 
-        let built = retroarch_state_upload_jobs(&[state_file]);
+        let built = retroarch_state_upload_jobs(&[state_file], &no_ignore());
         assert_eq!(built.jobs.len(), 1);
         assert_eq!(built.jobs[0].payload.len(), 1);
     }
@@ -1126,8 +1166,28 @@ mod tests {
         fs::write(&state_file, b"state").unwrap();
         fs::write(&screenshot_file, b"").unwrap();
 
-        let built = retroarch_state_upload_jobs(&[state_file]);
+        let built = retroarch_state_upload_jobs(&[state_file], &no_ignore());
         assert_eq!(built.jobs[0].payload[1].1, screenshot_file);
+    }
+
+    /// Fix-round addition: `ignore` blocks a PRIMARY state file by
+    /// extension, mirroring `cloud_transfer.py:654-656`'s
+    /// `blocked_extensions` check.
+    #[test]
+    fn retroarch_jobs_exclude_ignored_extension() {
+        let temp = tempfile::tempdir().unwrap();
+        let state_file = temp.path().join("game.state");
+        fs::write(&state_file, b"state").unwrap();
+
+        let ignore = IgnoreSets {
+            basenames: BTreeSet::new(),
+            extensions: [".state".to_string()].into_iter().collect(),
+        };
+        let built = retroarch_state_upload_jobs(&[state_file], &ignore);
+        assert!(
+            built.jobs.is_empty(),
+            "a state file with an ignored extension must never become a job"
+        );
     }
 
     // --- grouped_file_upload_jobs --------------------------------------------
@@ -1149,7 +1209,9 @@ mod tests {
 
         assert_eq!(built.jobs.len(), 1);
         let job = &built.jobs[0];
-        assert!(job.display_name.contains("Chrono Trigger"));
+        // Group order follows input order (`[save_file, rtc_file]`), so
+        // `group[0]` is `save_file`; its stem is the exact display name.
+        assert_eq!(job.display_name, "Chrono Trigger");
         let archive_path = &job.payload[0].1;
         assert_eq!(archive_path.extension().unwrap(), "zip");
 
@@ -1430,6 +1492,52 @@ mod tests {
         assert_eq!(
             session_screenshot_path(&[missing], Some((1_000.0, 9_000.0)), &no_ignore()),
             None
+        );
+    }
+
+    /// Fix-round addition: Python (`cloud_transfer.py:109-113`) wraps
+    /// `list(directory.rglob("*"))` in ONE `try/except OSError` per
+    /// TOP-LEVEL directory — a read failure anywhere in that directory's
+    /// recursive walk (root or nested) discards that entire top-level
+    /// directory's results, not just the failing subtree. `dir_a` here has
+    /// an in-window image directly under it AND an unreadable nested
+    /// subdirectory; the whole of `dir_a` must be dropped, so the result
+    /// comes only from the untouched `dir_b`.
+    #[test]
+    #[cfg(unix)]
+    fn screenshot_path_top_level_dir_discarded_on_nested_read_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let dir_a = temp.path().join("dir_a");
+        fs::create_dir(&dir_a).unwrap();
+        let doomed_image = dir_a.join("doomed.png");
+        touch_at(&doomed_image, 5_000.0);
+        let locked_sub = dir_a.join("locked");
+        fs::create_dir(&locked_sub).unwrap();
+        fs::set_permissions(&locked_sub, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let dir_b = temp.path().join("dir_b");
+        fs::create_dir(&dir_b).unwrap();
+        let winner = dir_b.join("winner.png");
+        touch_at(&winner, 6_000.0);
+
+        let result = session_screenshot_path(
+            &[dir_a.clone(), dir_b.clone()],
+            Some((1_000.0, 9_000.0)),
+            &no_ignore(),
+        );
+
+        // Restore permissions before any panicking assertion so the temp
+        // dir can always be cleaned up.
+        fs::set_permissions(&locked_sub, fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert_eq!(
+            result,
+            Some(winner),
+            "dir_a's entire result set (including the in-window doomed.png) \
+             must be discarded because of the unreadable nested directory; \
+             only dir_b's clean image can win"
         );
     }
 
