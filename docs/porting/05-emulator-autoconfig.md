@@ -1419,7 +1419,12 @@ are relative to `rewrite/`.
 3. **Defaults backfill** runs at the same two trigger points as (1), immediately after entry
    autoconfig — `entry::backfill_missing_defaults` is called once, from inside
    `sync_new_emulator` (`crates/grid-core/src/autoconfig/mod.rs:486`, `:534`) — not on every
-   emulator view refresh.
+   emulator view refresh. It also re-runs, across every registered entry, when the platform list
+   first arrives: `autoconfig::backfill_all_defaults` (`crates/grid-core/src/autoconfig/mod.rs:648`)
+   is called from the `list_platforms` command
+   (`app/src-tauri/src/commands.rs:71-115`) once the fetched list is non-empty, closing the gap
+   where an emulator added before the first successful platform fetch would otherwise get no
+   platform/core defaults until the next add or install.
 4. **`ensure_pcsx2_settings` uses the expanded, trimmed path throughout**
    (`expand_user(path.trim()).parent()`), fixing a reference bug: `emulator_dir` there is
    computed from the RAW, unexpanded `emulator_path_text`
@@ -1479,8 +1484,9 @@ are relative to `rewrite/`.
     `ignore_files`, `ignore_extensions` (`crates/grid-core/src/launch/profiles.rs:28-44`).
 14. **The assignable server-platform list reaches grid-core through
     `InstallService::set_known_platforms`** (`crates/grid-core/src/library/mod.rs:371`), fed
-    by the `list_platforms` command (`app/src-tauri/src/commands.rs:62-69`); with no connected
-    session the list is empty and the platform-defaults step is a no-op.
+    by the `list_platforms` command (`app/src-tauri/src/commands.rs:71-115`); with no connected
+    session the list is empty and the platform-defaults step is a no-op. See deviation 3 above
+    for the backfill re-run this same command now triggers once that list is non-empty.
 15. **`sync_new_emulator`'s entry-autoconfig step uses `apply_manual_emulator_profile_defaults`
     at BOTH D1 sites** (`crates/grid-core/src/autoconfig/mod.rs:509-516`): layer 1's
     `auto_configure_emulator_settings` rebuild path (`crates/grid-core/src/autoconfig/entry.rs:317`)

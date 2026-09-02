@@ -626,6 +626,48 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
     Ok(report)
 }
 
+/// The D3-only entry point: re-runs the defaults backfill
+/// ([`entry::backfill_missing_defaults`]) across every registered emulator,
+/// without the entry autoconfig layer or the `ensure_*` writers
+/// [`sync_new_emulator`] also runs.
+///
+/// D1's own backfill call only fires on a new-entry add or install
+/// (`sync_new_emulator`'s two call sites). An emulator added before the
+/// app's first successful platform fetch gets no platform/core defaults at
+/// that time, and — since nothing else re-triggers the backfill — stays
+/// that way until the NEXT add or install. Calling this once
+/// `list_platforms` has a non-empty list closes that gap: same backfill,
+/// same [`entry::DefaultsContext`] wiring `sync_new_emulator` builds, just
+/// run over every entry instead of one just-added one.
+///
+/// Idempotent and cheap to call on every `list_platforms` response —
+/// [`entry::backfill_missing_defaults`] itself no-ops once nothing is
+/// missing, so a steady state costs one config load and zero saves. Saves
+/// only when the backfill actually changed something; the returned `bool`
+/// reports that. The only `Err` is a config load or save failure.
+pub fn backfill_all_defaults(ctx: &SyncContext) -> Result<bool, ConfigError> {
+    let mut config = Config::load(ctx.config_path)?;
+
+    let snapshot = config.emulators.clone();
+    let compat = cores::compatibility_map();
+    let installed_cores = |platform: &str, emulator_name: &str| -> Vec<String> {
+        installed_cores_for_platform(platform, emulator_name, &snapshot, compat)
+    };
+    let is_retroarch_name = |name: &str| -> bool {
+        matches_tokens_by_name(name, &["retroarch"], &snapshot, ctx.profiles)
+    };
+    let defaults_ctx = entry::DefaultsContext {
+        platforms: ctx.platforms,
+        installed_cores: &installed_cores,
+        is_retroarch: &is_retroarch_name,
+    };
+    let changed = entry::backfill_missing_defaults(&mut config, ctx.profiles, &defaults_ctx);
+    if changed {
+        config.save(ctx.config_path)?;
+    }
+    Ok(changed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1155,6 +1197,85 @@ mod tests {
             "D6: no [Folders] section:\n{ini}"
         );
         assert!(!ini.contains("Bios"), "D6: no Bios key:\n{ini}");
+    }
+
+    // --- backfill_all_defaults ------------------------------------------------
+
+    /// The gap this fixes: an entry saved before any platform fetch has run
+    /// gets no platform/core defaults (`ctx.platforms` was `&[]` at save
+    /// time, so `sync_new_emulator`'s own backfill pass had nothing to
+    /// assign). A late-arriving platform list, fed through
+    /// `backfill_all_defaults` the way `list_platforms` now does, must fill
+    /// that gap without waiting for another add/install.
+    #[test]
+    fn backfill_all_defaults_fills_a_defaults_less_entry_given_a_late_platform_list() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated(temp.path());
+
+        // Saved with no platform list available — exactly what a
+        // `sync_new_emulator` call made before the first `list_platforms`
+        // response leaves behind.
+        let config = config_with(temp.path(), vec![entry("PCSX2", "pcsx2.AppImage")]);
+        let config_path = write_config(temp.path(), &config);
+
+        let mut pcsx2 = profile("PCSX2", &["pcsx2*"]);
+        pcsx2.all_platforms = true;
+        let profiles = vec![pcsx2];
+        let platforms = vec!["Sony PlayStation 2".to_string()];
+
+        let ctx = SyncContext {
+            config_path: &config_path,
+            platforms: &platforms,
+            ps3_library_path: String::new(),
+            ra: None,
+            profiles: &profiles,
+        };
+        let changed = backfill_all_defaults(&ctx).unwrap();
+        assert!(changed);
+
+        let saved = Config::load(&config_path).unwrap();
+        assert_eq!(
+            saved.default_emulators.get("Sony PlayStation 2"),
+            Some(&"PCSX2".to_string())
+        );
+    }
+
+    /// Once nothing is missing, a repeat call must no-op: no config rewrite,
+    /// `changed` false. Proven against the file's mtime, the same way
+    /// `clear_blanks_the_username_and_writes_no_emulator_file` proves "no
+    /// write happened" elsewhere in this crate.
+    #[test]
+    fn backfill_all_defaults_no_ops_once_nothing_is_missing() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated(temp.path());
+
+        let config = config_with(temp.path(), vec![entry("PCSX2", "pcsx2.AppImage")]);
+        let config_path = write_config(temp.path(), &config);
+
+        let mut pcsx2 = profile("PCSX2", &["pcsx2*"]);
+        pcsx2.all_platforms = true;
+        let profiles = vec![pcsx2];
+        let platforms = vec!["Sony PlayStation 2".to_string()];
+
+        let ctx = SyncContext {
+            config_path: &config_path,
+            platforms: &platforms,
+            ps3_library_path: String::new(),
+            ra: None,
+            profiles: &profiles,
+        };
+        assert!(backfill_all_defaults(&ctx).unwrap(), "first call must fill");
+
+        let before = std::fs::metadata(&config_path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let changed = backfill_all_defaults(&ctx).unwrap();
+        assert!(!changed, "nothing left to fill on the second call");
+
+        let after = std::fs::metadata(&config_path).unwrap().modified().unwrap();
+        assert_eq!(before, after, "a no-op backfill must not rewrite the file");
     }
 
     // --- D2: ra_capable / fan_out_ra_credentials -----------------------------

@@ -58,6 +58,15 @@ pub fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
     state.session.disconnect().map_err(err)
 }
 
+/// Whether a `list_platforms` response should re-run the defaults backfill:
+/// only when the assignable platform list is non-empty. An empty list means
+/// no session, or a server response `assignable_platforms` filtered down to
+/// nothing — either way the backfill would do no useful work, matching
+/// `sync_new_emulator`'s own no-op on an empty platform list.
+fn should_backfill_on_platform_list(assignable_platforms: &[String]) -> bool {
+    !assignable_platforms.is_empty()
+}
+
 #[tauri::command]
 pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>, String> {
     let client = state.session.client().ok_or("not connected")?;
@@ -66,7 +75,41 @@ pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>,
     // platform list the autoconfig defaults assignment writes against.
     if let Ok(install) = state.install.as_ref() {
         let names: Vec<String> = platforms.iter().map(|p| p.name.clone()).collect();
-        install.set_known_platforms(autoconfig_entry::assignable_platforms(&names));
+        let assignable = autoconfig_entry::assignable_platforms(&names);
+        install.set_known_platforms(assignable.clone());
+
+        // Self-heal for the gap D3's own trigger policy leaves: an emulator
+        // installed or added before the FIRST successful platform fetch got
+        // no platform/core defaults at that time, and nothing else re-runs
+        // the backfill until the next add/install. Now that a platform list
+        // has arrived, re-run it across every entry. Cheap and idempotent on
+        // every later call too — `backfill_all_defaults` no-ops once nothing
+        // is missing. Read out of `install` before the blocking hop: `State`
+        // is not `Send`.
+        if should_backfill_on_platform_list(&assignable) {
+            let config_path = Config::default_path();
+            let ra = install.ra_credentials();
+            let profiles = load_profiles();
+            let outcome = tokio::task::spawn_blocking(move || {
+                let ctx = autoconfig::SyncContext {
+                    config_path: &config_path,
+                    platforms: &assignable,
+                    ps3_library_path: String::new(),
+                    ra,
+                    profiles,
+                };
+                autoconfig::backfill_all_defaults(&ctx)
+            })
+            .await;
+            // Never fails the response — a load/save error or a panicked
+            // task is logged only, exactly like `save_emulator`'s own
+            // autoconfig warnings.
+            match outcome {
+                Ok(Ok(_changed)) => {}
+                Ok(Err(e)) => tracing::warn!("emulator defaults backfill: {e}"),
+                Err(e) => tracing::warn!("emulator defaults backfill did not finish: {e}"),
+            }
+        }
     }
     Ok(platforms)
 }
@@ -894,6 +937,12 @@ mod merge_tests {
         assert!(is_manual_add(&config, "Nonexistent"));
         assert!(!is_manual_add(&config, "Dolphin"));
         assert!(!is_manual_add(&config, "  dolphin  "));
+    }
+
+    #[test]
+    fn should_backfill_on_platform_list_needs_a_non_empty_assignable_list() {
+        assert!(!should_backfill_on_platform_list(&[]));
+        assert!(should_backfill_on_platform_list(&["SNES".to_string()]));
     }
 }
 
