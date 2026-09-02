@@ -49,15 +49,15 @@ fn catalog_provider_alias(provider: &str) -> &str {
     }
 }
 
-/// `source["provider"]`, falling back to `source["type"]` only when
-/// `provider` itself is absent (an explicit non-string or `null` at
-/// `provider` does NOT fall back — the same absence-only rule
-/// `source::normalize_source`'s provider read uses), trimmed, casefolded,
-/// then run through [`catalog_provider_alias`]. `""` when neither key holds
-/// a usable string.
+/// `source["provider"]`, trimmed, casefolded, then run through
+/// [`catalog_provider_alias`] (`_normalized_source_provider`,
+/// ui/emulators.py:155-165) — `""` when the key is missing or not a usable
+/// string. Deliberately reads ONLY `provider`: the reference this function
+/// ports has no `type` fallback (that belongs to
+/// `source::normalize_source`'s separate provider read, which this module
+/// does not share — see the module doc above).
 fn catalog_provider(source: &Map<String, Value>) -> String {
-    let raw = source.get("provider").or_else(|| source.get("type"));
-    let provider = match raw {
+    let provider = match source.get("provider") {
         Some(Value::String(s)) => s.trim().to_lowercase(),
         _ => String::new(),
     };
@@ -405,13 +405,20 @@ mod tests {
     }
 
     #[test]
-    fn provider_falls_back_to_type_key_when_provider_absent() {
+    fn provider_key_only_at_type_skips_row_no_fallback() {
+        // ui/emulators.py:194 reads only `source_value.get("provider", "")`
+        // — no `type` fallback (that belongs solely to
+        // `source::normalize_source`'s separate, unrelated provider read).
+        // An entry with only `type` set therefore resolves to an empty
+        // provider and is skipped, exactly like a `provider`-less,
+        // `type`-less entry (ui/emulators.py:194-196 `if not provider:
+        // continue`).
         let profiles = vec![profile(
             "Foo",
             false,
             Some(json!({"type": "github-release", "owner": "o", "repo": "r"})),
         )];
-        assert_eq!(catalog_entries(&profiles)[0].provider, "github");
+        assert!(catalog_entries(&profiles).is_empty());
     }
 
     #[test]
