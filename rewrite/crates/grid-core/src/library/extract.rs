@@ -155,6 +155,25 @@ fn is_absolute_entry_path(raw_name: &str) -> bool {
 
 // --- ZIP --------------------------------------------------------------------
 
+/// Masks a raw Unix mode value, as returned by `ZipFile::unix_mode()`, down
+/// to permission bits only.
+///
+/// SECURITY: never propagate setuid (`0o4000`), setgid (`0o2000`), or
+/// sticky (`0o1000`) bits recovered from an untrusted archive.
+///
+/// Extracted as its own pure function because `zip` 8.6.0's own writer
+/// already masks to `mode & 0o777` at write time
+/// (`SimpleFileOptions::unix_permissions`, see `write.rs:573-576` in the
+/// crate source) — a fixture built with this crate's writer can therefore
+/// never carry a real setuid/setgid/sticky bit, so this function's masking
+/// is unit-tested directly against raw values instead (the shape a
+/// genuinely hostile archive, or one written by a different tool, could
+/// contain).
+#[cfg(unix)]
+fn mask_zip_unix_mode(mode: u32) -> u32 {
+    mode & 0o777
+}
+
 fn extract_zip(archive: &Path, dest: &Path, progress: ExtractProgress) -> Result<(), LibraryError> {
     let file = fs::File::open(archive)
         .map_err(|e| LibraryError::Extract(format!("failed to open archive: {e}")))?;
@@ -205,6 +224,32 @@ fn extract_zip(archive: &Path, dest: &Path, progress: ExtractProgress) -> Result
             io::copy(&mut entry, &mut out_file)
                 .map_err(|e| LibraryError::Extract(format!("zip: {e}")))?;
             processed += entry.size();
+
+            // Preserve the stored Unix permission bits, when present.
+            // `ZipFile::unix_mode()` returns `None` only when the entry's
+            // external attributes are exactly zero; it is `Some(mode)` both
+            // for a genuine Unix-origin entry AND for a Dos-origin entry
+            // with nonzero (but unix-shaped-zero-high-word) attributes, in
+            // which case the crate itself *synthesizes* a mode from the
+            // MS-DOS directory/read-only attribute bits (`S_IFREG | 0o664`,
+            // stripped to `0o444` when the DOS read-only bit is set) — see
+            // `ZipFileData::unix_mode` in the `zip` crate. This crate does
+            // not expose the entry's creator system on read, so there is no
+            // way to apply modes for Unix-origin entries only; we accept
+            // the synthesized DOS-origin mode too, matching what `unzip`
+            // itself does (honoring DOS read-only is safe here: this
+            // engine's delete/overwrite paths tolerate a `0o444` file on
+            // unix — directory permissions, not file permissions, govern
+            // removal).
+            #[cfg(unix)]
+            if let Some(mode) = entry.unix_mode() {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(
+                    &out_path,
+                    fs::Permissions::from_mode(mask_zip_unix_mode(mode)),
+                )
+                .map_err(|e| LibraryError::Extract(format!("zip: {e}")))?;
+            }
         }
         progress(processed, total);
     }
@@ -298,6 +343,29 @@ fn extract_7z(archive: &Path, dest: &Path, progress: ExtractProgress) -> Result<
     }
 }
 
+/// Derives the Unix permission bits stored in a 7z entry's Windows
+/// attribute field, if any.
+///
+/// 7z stores Unix permissions by setting the `0x8000` "Unix extension" flag
+/// in the (32-bit) attribute field and packing the mode into its upper 16
+/// bits (`attrs >> 16`) — 7-Zip's own convention for round-tripping POSIX
+/// permissions through what is otherwise a Windows-attribute field. Returns
+/// `None` when the entry carries no Windows attributes at all, or when the
+/// `0x8000` flag is absent (a Windows-built archive with no Unix mode to
+/// recover).
+///
+/// SECURITY: the returned mode is always masked to `0o777`; callers must
+/// not apply setuid (`0o4000`), setgid (`0o2000`), or sticky (`0o1000`)
+/// bits recovered from an untrusted archive.
+#[cfg(unix)]
+fn unix_mode_from_7z_attributes(has_windows_attributes: bool, attrs: u32) -> Option<u32> {
+    if has_windows_attributes && attrs & 0x8000 != 0 {
+        Some((attrs >> 16) & 0o777)
+    } else {
+        None
+    }
+}
+
 fn extract_7z_pure(
     archive: &Path,
     dest: &Path,
@@ -337,6 +405,20 @@ fn extract_7z_pure(
             let mut out_file = fs::File::create(&out_path)?;
             io::copy(content, &mut out_file)?;
             processed += entry.size();
+
+            // Preserve the stored Unix permission bits, when present. 7z
+            // stores them in the Windows attribute field's upper 16 bits,
+            // gated by the 0x8000 "Unix extension" flag (see
+            // `unix_mode_from_7z_attributes`). SECURITY: mask to
+            // `mode & 0o777` only — never propagate setuid (0o4000), setgid
+            // (0o2000), or sticky (0o1000) bits from an untrusted archive.
+            #[cfg(unix)]
+            if let Some(mode) =
+                unix_mode_from_7z_attributes(entry.has_windows_attributes, entry.windows_attributes)
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&out_path, fs::Permissions::from_mode(mode))?;
+            }
         }
         // Emit after every member (directory or file), mirroring the zip
         // extractor: the last call here — for the archive's final entry —
@@ -449,6 +531,73 @@ mod tests {
     #[test]
     fn is_arcade_platform_false_for_non_arcade() {
         assert!(!is_arcade_platform("Sony PlayStation"));
+    }
+
+    // --- mask_zip_unix_mode -----------------------------------------------------
+
+    #[cfg(unix)]
+    #[test]
+    fn mask_zip_unix_mode_strips_setuid_setgid_sticky() {
+        // 0o104755 = S_IFREG (0o100000) | setuid (0o4000) | 0o755 — the raw
+        // shape `ZipFile::unix_mode()` would hand back for a genuine setuid
+        // regular file from some other zip tool (the `zip` crate's own
+        // writer can never produce one; see `mask_zip_unix_mode`'s doc
+        // comment). Also covers setgid and sticky.
+        assert_eq!(mask_zip_unix_mode(0o104755), 0o755);
+        assert_eq!(mask_zip_unix_mode(0o102755), 0o755);
+        assert_eq!(mask_zip_unix_mode(0o101755), 0o755);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mask_zip_unix_mode_preserves_permission_bits() {
+        assert_eq!(mask_zip_unix_mode(0o100644), 0o644);
+        assert_eq!(mask_zip_unix_mode(0o100755), 0o755);
+    }
+
+    // --- unix_mode_from_7z_attributes ------------------------------------------
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_mode_from_7z_attributes_recovers_masked_mode() {
+        // 0x8000 flag set, mode 0o755 in the upper 16 bits.
+        assert_eq!(
+            unix_mode_from_7z_attributes(true, 0x8000 | (0o755 << 16)),
+            Some(0o755)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_mode_from_7z_attributes_strips_setuid_setgid_sticky() {
+        assert_eq!(
+            unix_mode_from_7z_attributes(true, 0x8000 | (0o4755 << 16)),
+            Some(0o755)
+        );
+        assert_eq!(
+            unix_mode_from_7z_attributes(true, 0x8000 | (0o2755 << 16)),
+            Some(0o755)
+        );
+        assert_eq!(
+            unix_mode_from_7z_attributes(true, 0x8000 | (0o1755 << 16)),
+            Some(0o755)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_mode_from_7z_attributes_none_without_the_unix_flag() {
+        // Windows attributes present, but no 0x8000 Unix-extension flag.
+        assert_eq!(unix_mode_from_7z_attributes(true, 0x20), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_mode_from_7z_attributes_none_without_windows_attributes() {
+        assert_eq!(
+            unix_mode_from_7z_attributes(false, 0x8000 | (0o755 << 16)),
+            None
+        );
     }
 
     // --- should_extract -------------------------------------------------------

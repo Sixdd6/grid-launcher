@@ -282,6 +282,23 @@ fn zip_bytes(staging: &tempfile::TempDir, name: &str, entries: &[(&str, &[u8])])
     write_zip(&staging.path().join(name), entries)
 }
 
+/// Builds a zip archive at `path` from `(name, content, unix mode)` entries,
+/// stamping each entry's Unix permission bits via `unix_permissions`, and
+/// returns its bytes.
+fn write_zip_with_modes(path: &Path, entries: &[(&str, &[u8], u32)]) -> Vec<u8> {
+    let file = fs::File::create(path).unwrap();
+    let mut zip = zip::ZipWriter::new(file);
+    for &(name, content, mode) in entries {
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored)
+            .unix_permissions(mode);
+        zip.start_file(name, options).unwrap();
+        zip.write_all(content).unwrap();
+    }
+    zip.finish().unwrap();
+    fs::read(path).unwrap()
+}
+
 // --- (a) end-to-end -----------------------------------------------------------
 
 #[tokio::test]
@@ -587,6 +604,43 @@ async fn a_bare_executable_bit_member_is_selected_as_the_emulator() {
 
     let harness = Harness::new(|uri| vec![profile("Redream", gitea_source(uri))]).await;
     harness.mount_widget("redream-linux.tar.gz", bytes, 0).await;
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let install_dir = harness.install_dir("Redream-v1.0");
+    let exe = install_dir.join("redream");
+    assert!(exe.is_file(), "extracted tree missing: {}", exe.display());
+    assert_eq!(mode_of(&exe), 0o755);
+    assert_eq!(harness.config().emulators[0].path, exe.to_string_lossy());
+}
+
+/// A zip whose only launchable member is a bare, executable-bit binary —
+/// the zip counterpart of the tar.gz test above. The install must select
+/// it, which also proves the zip extractor keeps the stored Unix
+/// executable bit (without it the member is not launchable at all).
+#[cfg(unix)]
+#[tokio::test]
+async fn a_bare_executable_bit_zip_member_is_selected_as_the_emulator() {
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip_with_modes(
+        &staging.path().join("widget.zip"),
+        &[
+            ("redream", b"#!/bin/sh\n" as &[u8], 0o755),
+            ("README.txt", b"docs", 0o644),
+            // Executable, but a shared object — never launchable.
+            ("libredream.so", b"elf", 0o755),
+        ],
+    );
+
+    let harness = Harness::new(|uri| vec![profile("Redream", gitea_source(uri))]).await;
+    harness.mount_widget("redream-linux.zip", bytes, 0).await;
 
     harness
         .service

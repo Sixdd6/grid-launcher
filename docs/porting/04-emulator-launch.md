@@ -992,3 +992,29 @@ download, install) to Rust (grid-core):
     binary (the catalog's Redream tarball ships `redream`, with no extension). Dot files
     (`.hidden`) and suffixed files (`libfoo.so`) never qualify, and windows keeps the
     suffix-only rule.
+13. On unix, zip and 7z extraction now preserve every extracted member's stored Unix
+    permission bits (masked to `mode & 0o777`; setuid/setgid/sticky are never propagated),
+    not only the single file `launchable_emulator_file` selects. This is a strictly larger
+    improvement than "preserves what the reference sometimes preserved": the reference's
+    zip extraction drops permissions on *every* code path, full stop. `archive_preparation.py`
+    extracts most zip members via stdlib `ZipFile.extract()` — but CPython's
+    `ZipFile._extract_member` (verified directly, `/usr/lib64/python3.12/zipfile/__init__.py`
+    lines 1788-1839) never calls `chmod`, `os.chmod`, or touches `external_attr` anywhere in
+    that method; `external_attr` is a write-side-only field (set when *building* an archive,
+    e.g. `zinfo.external_attr = (st.st_mode & 0xFFFF) << 16` at line 590) that stdlib
+    `extract()`/`extractall()` never reads back on POSIX. Any entry whose name needs backslash
+    normalization is instead written with
+    `normalized_path.write_bytes(archive.read(member))`
+    (`grid_launcher/library/archive_preparation.py:633-637`), which is no different in this
+    respect — both branches produce umask-only permissions. 7z extraction has no explicit
+    permission handling either: it shells out to a system `7z`/`7za` binary or falls back to
+    `py7zr.SevenZipFile(...).extractall(...)`
+    (`grid_launcher/library/archive_preparation.py:441-442`), so whatever Unix attributes
+    survive there depend entirely on that external tool/library, not on code in this repo.
+    The reference's *only* source of zip-member executability, without exception, is a
+    separate, unconditional `os.chmod(extracted_file, 0o755)` on the one resolved launch file
+    after extraction (`grid_launcher/library/archive_preparation.py:1171-1175`) — it does not
+    depend on, and is not preceded by, any permission bits from extraction itself. The port's
+    extraction-time preservation is therefore a strict superset for zip: it is the only code
+    path (reference or port) that leaves *companion* files — helper scripts, other binaries in
+    the extracted tree, not just the one selected launch file — with a meaningful exec bit.
