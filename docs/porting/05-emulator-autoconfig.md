@@ -1139,8 +1139,8 @@ doc 06.
    `read_text` calls (grid_launcher/emulator/ppsspp.py:99, :156): an `OSError` or
    `UnicodeDecodeError` there propagates out of `ensure_ppsspp_settings`, and the dispatch in
    `_ensure_emulator_sync_settings` (grid_launcher/ui/mixins/emulator_ui_mixin.py:388-439)
-   does not catch it either. OPEN QUESTION: likely a bug — an unreadable PPSSPP ini crashes
-   the sync path; a port should decide whether to reproduce or guard it.
+   does not catch it either. RULED (milestone 5): a bug, fixed — see "Rust port deviations
+   (milestone 5)" deviation 5. The port guards both reads instead of reproducing the crash.
 4. **A failed write reports `changed=False`, not an error.** RetroArch and DuckStation
    return the pre-write settings dict with `changed=False`
    (grid_launcher/emulator/retroarch.py:348, grid_launcher/emulator/duckstation.py:380).
@@ -1269,65 +1269,97 @@ Flatpak-specific candidate paths are hardcoded for Azahar
   the four suppression keys, never `Username`/`Token`
   (grid_launcher/emulator/duckstation.py:198, grid_launcher/emulator/duckstation.py:363).
   Intended, or a regression? A port should follow the code.
+  **RULED (milestone 5): follow-the-code.** `ensure_duckstation_memory_card_settings`
+  (`crates/grid-core/src/autoconfig/duckstation.rs`) takes no credential parameters either,
+  and DuckStation is not RA-capable in this milestone's `ra_capable`
+  (`crates/grid-core/src/autoconfig/mod.rs:320-322`).
 - `OPEN QUESTION:` The same skill file states a "non-overwrite invariant" for all
   `_ensure_*_section_values` helpers
   (.claude/skills/emulator-autoconfig/SKILL.md:51). Only the RPCS3 YAML writer and the Xemu
   TOML writer are actually add-only (grid_launcher/emulator/rpcs3.py:152,
   grid_launcher/emulator/xemu.py:224); the seven INI writers overwrite. Which is the
-  intended contract?
+  intended contract? **RULED (milestone 5): the three write policies, as documented in the
+  Behavior section's policy table above, are the ported contract** —
+  `writers::ini_overwrite_section`, `writers::yaml_add_only_section`/
+  `writers::toml_add_only_section`, and the append-if-absent block writer
+  (`crates/grid-core/src/autoconfig/writers.rs`) implement exactly those three shapes; the
+  skill doc's blanket "non-overwrite invariant" claim was wrong.
 - `OPEN QUESTION:` `ensure_pcsx2_settings` computes `emulator_dir` from the *raw*
   `emulator_path_text` without `.expanduser()` or `.strip()`
   (grid_launcher/emulator/pcsx2.py:186), while the existence check two lines above uses the
   expanded path (grid_launcher/emulator/pcsx2.py:182). A `~`-prefixed path would create
   `portable.ini` and the INI under a literal `~` directory. Should the expanded path be
-  used?
+  used? **RULED (milestone 5): fixed** — see "Rust port deviations (milestone 5)" deviation 4.
 - `OPEN QUESTION:` `ensure_duckstation_memory_card_settings` parses existing settings from
   whichever candidate matched, but always writes `<emulator_dir>/settings.ini`
   (grid_launcher/emulator/duckstation.py:214, grid_launcher/emulator/duckstation.py:222).
   When a user's real config lives in `~/.config/duckstation`, its values are copied into a
   new portable file that then shadows the original. Intended migration, or a bug?
+  **RULED (milestone 5): follow-the-code**, reproduced as-is
+  (`crates/grid-core/src/autoconfig/duckstation.rs`) — not fixed this milestone.
 - `OPEN QUESTION:` `ensure_dolphin_settings` picks candidate index 0 unconditionally when a
   path is supplied (grid_launcher/emulator/dolphin.py:270), whereas
   `ensure_dolphin_skip_ipl` picks the first *existing* candidate
   (grid_launcher/emulator/dolphin.py:325). The two can therefore target different files for
-  the same emulator. Is the divergence deliberate?
+  the same emulator. Is the divergence deliberate? **RULED (milestone 5): follow-the-code**,
+  reproduced as-is — both functions keep the same target divergence in
+  `crates/grid-core/src/autoconfig/dolphin.rs`, not unified.
 - `OPEN QUESTION:` `ensure_rpcs3_settings` always writes into `<exe_dir>/portable/`, even
   when the installation is non-portable and `rpcs3_data_root_candidates` would prefer
   `$RPCS3_CONFIG_DIR` or `~/.config/rpcs3`
   (grid_launcher/emulator/rpcs3.py:542 vs grid_launcher/emulator/rpcs3.py:605). Writers and
-  readers can disagree about which data root is live.
+  readers can disagree about which data root is live. **RULED (milestone 5):
+  follow-the-code**, reproduced as-is — the always-portable write target is kept in
+  `crates/grid-core/src/autoconfig/rpcs3.rs`.
 - `OPEN QUESTION:` In `ensure_xemu_settings`, the `misc` section result is assigned to
   `changed` (shadowing the general-section result) before being re-ORed with `gen_changed`
   (grid_launcher/emulator/xemu.py:264). The outcome is correct today but the pattern is
-  fragile; is a single accumulator intended?
+  fragile; is a single accumulator intended? **RULED (milestone 5): yes, a single
+  accumulator** — `xemu::ensure_settings` (`crates/grid-core/src/autoconfig/xemu.rs`) folds
+  every section's `changed` bit into one running `bool` via the same `apply_section`-style
+  pattern used throughout `writers.rs` callers, rather than reproducing the shadow-then-re-OR
+  pattern.
 - `OPEN QUESTION:` `ensure_retroarch_save_location_settings` rebinds the `username`
   parameter from the RomM nickname to the RetroAchievements username mid-function
   (grid_launcher/emulator/retroarch.py:287 vs grid_launcher/emulator/retroarch.py:294).
-  A port should keep two distinct variables; is the rebinding intentional?
+  A port should keep two distinct variables; is the rebinding intentional? **RULED
+  (milestone 5): yes, two distinct variables** — `retroarch::ensure_settings`
+  (`crates/grid-core/src/autoconfig/retroarch.rs`) takes the RomM username and RA credentials
+  as separate parameters and never rebinds one to the other.
 - `OPEN QUESTION:` `_ensure_emulator_sync_settings` caches on `name::path` only. If a
   file is externally modified without a config save, the launcher will not rewrite it for
   the rest of the session (grid_launcher/ui/mixins/emulator_ui_mixin.py:379,
-  grid-launcher.py:3150). Is a stronger invalidation key (e.g. file mtime) wanted?
+  grid-launcher.py:3150). Is a stronger invalidation key (e.g. file mtime) wanted? **RULED
+  (milestone 5): mooted.** Deviation 1 removes the session cache entirely — writers now run
+  once per new entry only, so there is nothing left to invalidate
+  (`crates/grid-core/src/autoconfig/mod.rs:479`).
 - `OPEN QUESTION:` RetroAchievements credentials are written but never removed. Clearing
   both config fields stops future writes but leaves `cheevos_username`/`cheevos_token`,
   `[Achievements] Username/Token`, and `ppsspp_retroachievements.dat` in place
   (grid_launcher/emulator/retroarch.py:296, grid_launcher/emulator/ppsspp.py:155). Should
-  clearing credentials actively scrub them?
+  clearing credentials actively scrub them? **RULED (milestone 5): no-scrub-on-clear.** The
+  port's narrow `ensure_*_ra_credentials` writers only ever ADD the RA keys when both fields
+  are non-blank; `fan_out_ra_credentials` (`crates/grid-core/src/autoconfig/mod.rs:334-341`)
+  short-circuits to an empty result on a blank pair and writes (and scrubs) nothing —
+  matching the reference's behavior deliberately, not left open.
 - `OPEN QUESTION:` `retroarch_cores_for_platform` returns the hardcoded
   `["fbneo", "mame2003_plus"]` when the compatibility map is empty
   (grid_launcher/emulator/retroarch.py:468), but `[]` when the map is populated and nothing
   matches (grid_launcher/emulator/retroarch.py:478). Is the arcade-biased fallback still
-  desired for a missing core list?
+  desired for a missing core list? **RULED (milestone 5): follow-the-code**, reproduced
+  as-is in `crates/grid-core/src/autoconfig/retroarch.rs`.
 - `OPEN QUESTION:` `ensure_eden_settings` returns `config_path` as a `Path`
   (grid_launcher/emulator/eden.py:280) and `ensure_pcsx2_settings` returns it as a `Path`
   too (grid_launcher/emulator/pcsx2.py:380), while all the others return `str`
   (grid_launcher/emulator/azahar.py:216, grid_launcher/emulator/xemu.py:325). What is the
-  intended return type for a port with a static type system?
+  intended return type for a port with a static type system? **RULED (milestone 5):
+  `EnsureResult`** — see "Rust port deviations (milestone 5)" deviation 8.
 - `OPEN QUESTION:` No autoprofile ships for Dolphin, MAME, Flycast or Vita3K's siblings
   even though dedicated modules exist for them (`emulator-autoprofiles.json` contains 21
   profiles, none named Dolphin or MAME). Those emulators can therefore only be added
   manually, and are matched by the substring fallback in `_emulator_matches_tokens`
-  (grid_launcher/ui/mixins/cloud_mixin.py:1362). Is this intentional?
+  (grid_launcher/ui/mixins/cloud_mixin.py:1362). Is this intentional? Still open — this
+  milestone does not add or remove autoprofiles.
 
 ## Source map
 
@@ -1359,3 +1391,174 @@ Flatpak-specific candidate paths are hardcoded for Azahar
 | emulator-autoprofiles.json | 21 shipped profiles driving entry autoconfig and platform defaults |
 | retroarch-core-list.json | 233 core entries: platforms, capability flags, firmware/config/saves metadata |
 | romm-platform-cores.json | 75 RomM platform slugs → preferred core id lists |
+
+## Rust port deviations (milestone 5)
+
+Deliberate deviations from the reference when porting emulator autoconfig (settings writers,
+entry/defaults autoconfig, RetroAchievements credential fan-out) to Rust (grid-core). Rust paths
+are relative to `rewrite/`.
+
+1. **Trigger policy.** `ensure_*` writers and entry autoconfig run only when a NEW emulator
+   entry is created — catalog install
+   (`crates/grid-core/src/library/mod.rs:975` calls `sync_autoconfig`, itself calling
+   `autoconfig::sync_new_emulator` at `crates/grid-core/src/library/mod.rs:995`) or manual add
+   (`app/src-tauri/src/commands.rs:225`, `save_emulator`, on an ADD). Never on edits, launches
+   or view refreshes — the reference's six call sites (launch, standalone launch, entry-dialog
+   save, cloud-sync directory resolution, post-RA-login for every registered emulator, and
+   post-entry-autoconfig) collapse to these two. The `name::path` session cache
+   (`grid_launcher/ui/mixins/emulator_ui_mixin.py:379`) is gone —
+   `crates/grid-core/src/autoconfig/mod.rs:479` notes there is nothing left to deduplicate once
+   the writers only ever run once per entry, which also moots the "stronger invalidation"
+   open question.
+2. **RA credential fan-out.** Saving credentials runs a dedicated narrow writer per RA-capable
+   module — `ensure_*_ra_credentials`, dispatched by `fan_out_ra_credentials`
+   (`crates/grid-core/src/autoconfig/mod.rs:334`) — that touches only the RA keys
+   (`retroarch::ensure_ra_credentials`, `pcsx2::ensure_ra_credentials`,
+   `ppsspp::ensure_ra_credentials`). Clearing still writes nothing and scrubs nothing (see
+   ruling on the no-scrub-on-clear open question below).
+3. **Defaults backfill** runs at the same two trigger points as (1), immediately after entry
+   autoconfig — `entry::backfill_missing_defaults` is called once, from inside
+   `sync_new_emulator` (`crates/grid-core/src/autoconfig/mod.rs:486`, `:534`) — not on every
+   emulator view refresh.
+4. **`ensure_pcsx2_settings` uses the expanded, trimmed path throughout**
+   (`expand_user(path.trim()).parent()`), fixing a reference bug: `emulator_dir` there is
+   computed from the RAW, unexpanded `emulator_path_text`
+   (`grid_launcher/emulator/pcsx2.py:186`), so a `~`-prefixed
+   path creates a literal `~` directory instead of resolving through `$HOME`. The port's fix is
+   `crates/grid-core/src/autoconfig/pcsx2.rs:8-14` (doc comment) and `:35-45`
+   (`resolve_target`), pinned by
+   `pcsx2_expands_a_tilde_path_and_creates_no_literal_tilde_directory`
+   (`crates/grid-core/src/autoconfig/pcsx2.rs:440`).
+5. **PPSSPP's two unprotected reads are guarded.** `ppsspp.py:99` and `ppsspp.py:156` read with
+   no `try`/`except` at all, so an unreadable existing `PPSSPP.INI` or `.dat` file crashes
+   `ensure_ppsspp_settings` and propagates out of the sync dispatch
+   (`grid_launcher/ui/mixins/emulator_ui_mixin.py:388-439` does not catch it either — this is
+   the inline `OPEN QUESTION` at line 1142 above, now ruled: fixed). The port wraps both reads
+   in `read_guarded` (`crates/grid-core/src/autoconfig/ppsspp.rs:57-64`, doc comment at
+   `:9-13`): an unreadable INI yields `changed=false` instead of propagating, exactly like
+   every other writer's I/O failure.
+6. **PCSX2 `[Folders] Bios` is not written** (`crates/grid-core/src/autoconfig/pcsx2.rs:16`
+   declares D6; the call site at `crates/grid-core/src/autoconfig/mod.rs:579` is a bare
+   comment, no code) — the firmware subsystem is deferred to its own milestone, which also
+   owns closing this.
+7. **The RPCS3 background firmware download** (`PS3UPDAT.PUP` fetch and the `--installfw`
+   spawn, `grid_launcher/emulator/rpcs3.py:365` `trigger_rpcs3_firmware_install`) **is out**,
+   same deferral (`crates/grid-core/src/autoconfig/mod.rs:597`).
+8. **Every `ensure_*` returns one `EnsureResult { changed, config_path, extras }`**
+   (`crates/grid-core/src/autoconfig/mod.rs:93-110`); the reference's `str`-vs-`Path`-vs-`dict`
+   mix (`grid_launcher/emulator/eden.py:280`, `grid_launcher/emulator/pcsx2.py:380` return
+   `Path`; `grid_launcher/emulator/azahar.py:216`, `grid_launcher/emulator/xemu.py:325` return
+   `str`) was a dynamic-typing artifact, not a behavior difference.
+9. **`apply_xenia_content_without_ui`** (the STFS content installer, `xenia.py:36`) **is out of
+   scope**: this milestone ports Xenia's readers only. `copy_ps3_custom_config_to_emulator`
+   (`rpcs3.py:746`) and `trigger_rpcs3_firmware_install` (`rpcs3.py:365`) are likewise unported
+   — none of the three has any Rust counterpart anywhere under `crates/grid-core/src`.
+10. **The readers are ported and unit-tested but have no caller yet.** `readers.rs` (5890
+    lines) is declared at `crates/grid-core/src/autoconfig/mod.rs:21` and used only by its own
+    `#[cfg(test)]` module; no other file in the crate imports `autoconfig::readers`. Milestone
+    6 (cloud saves) is their consumer.
+11. **Cemu's `settings.xml` edit is byte-preserving** (targeted text replacement, doc comment
+    at `crates/grid-core/src/autoconfig/cemu.rs:9-18`) rather than an XML reserialization —
+    the reference uses `xml.etree.ElementTree`, whose reserialization normalizes whitespace.
+    This is a strictly stronger form of the reference's "everything else is preserved"
+    guarantee (pinned by the byte-for-byte-untouched test at
+    `crates/grid-core/src/autoconfig/cemu.rs:650`) and avoids adding an XML dependency for six
+    element writes.
+12. **Entry autoconfig preserves an existing entry's `source_id`, `source_provider`,
+    `source_owner`, `source_repo` and `source_release_tag`**
+    (`crates/grid-core/src/autoconfig/entry.rs:400-404`, inside
+    `auto_configure_emulator_settings`; doc comment at `:302-305` names this D12); the
+    reference rebuilds the entry with eight keys (`autoconfig.py:524-554`) and has no
+    equivalent of these install-provenance fields.
+13. **`Config` reuses the existing `retroarch_cores` map for core defaults**
+    (`crates/grid-core/src/config.rs:77`; the reference's `default_retroarch_cores`); no
+    second map was added. `EmulatorEntry` gains `save_strategy`, `ignore_files`,
+    `ignore_extensions`, `save_paths`, and `state_paths`
+    (`crates/grid-core/src/config.rs:34-48`), and `EmulatorProfile` gains the five autoprofile
+    fields that feed them — `save_strategy`, `save_directories`, `state_directories`,
+    `ignore_files`, `ignore_extensions` (`crates/grid-core/src/launch/profiles.rs:28-44`).
+14. **The assignable server-platform list reaches grid-core through
+    `InstallService::set_known_platforms`** (`crates/grid-core/src/library/mod.rs:371`), fed
+    by the `list_platforms` command (`app/src-tauri/src/commands.rs:62-69`); with no connected
+    session the list is empty and the platform-defaults step is a no-op.
+15. **`sync_new_emulator`'s entry-autoconfig step uses `apply_manual_emulator_profile_defaults`
+    at BOTH D1 sites** (`crates/grid-core/src/autoconfig/mod.rs:509-516`): layer 1's
+    `auto_configure_emulator_settings` rebuild path (`crates/grid-core/src/autoconfig/entry.rs:317`)
+    is unreachable in the rewrite because `finalize_emulator` already writes the profile-named
+    entry before the sync runs (`crates/grid-core/src/library/mod.rs:960-961`).
+    `auto_configure_emulator_settings` is retained reference-only — its own doc comment at
+    `crates/grid-core/src/autoconfig/entry.rs:307-316` records this — exercised by its own
+    tests (`crates/grid-core/src/autoconfig/mod.rs:696`) and called from no production path.
+    Site B (manual add, `app/src-tauri/src/commands.rs:225`) is exact Python parity, and it is
+    what decides the design; at site A (catalog install) the two functions' outputs are
+    equivalent, because the entry was just written from the same profile.
+    Field nuance: a blank-`args` profile leaves the entry's `args` blank instead of writing
+    `"%rom%"`. Three catalog profiles have blank `args` in `emulator-autoprofiles.json`
+    (`ShadPS4 Qt Launcher`, `GE-Proton`, `Proton-CachyOS`), of which only the first is
+    reachable — `profile_for_entry` (`crates/grid-core/src/launch/profiles.rs:243-259`) skips
+    compat-tool profiles outright (`:257-259`). The difference is launch-identical:
+    `template::build_args` (`crates/grid-core/src/launch/template.rs:334-344`) substitutes
+    `"%rom%"` for a blank `entry_args` at launch time (`launch.py:150`), and this is pinned by
+    `build_args_blank_entry_defaults_to_rom_and_appends_global`
+    (`crates/grid-core/src/launch/template.rs:578`).
+
+### Additional deviations noted during review
+
+16. **The Cemu `mlc_path` reader is a comment-aware but non-structural regex scan**, not the
+    Python reader's structural `ET.fromstring(...)` parse. `cemu_directory_settings`
+    (`grid_launcher/emulator/cemu.py:361-384`) genuinely parses XML with
+    `node.findtext("mlc_path")`; the port has no XML dependency, so
+    `cemu_mlc_path_from_xml` (`crates/grid-core/src/autoconfig/readers.rs:2117-2128`) instead
+    regex-scans for `<mlc_path>...</mlc_path>`, skipping any match that falls inside an XML
+    comment via the same `cemu::comment_ranges`/`position_is_commented_out` helpers the D11
+    writer uses. Documented as its own deviation, separate from D11, in the doc comment at
+    `crates/grid-core/src/autoconfig/readers.rs:2097-2104`.
+17. **Azahar, Eden and Xenia's blank-path gates are real emptiness checks**, deliberately
+    diverging from the reference's accidental CWD probing. In each Python reader, an
+    `if emulator_dir:` guard (Azahar `azahar.py:256-257`, Eden `eden.py:356-357`) is always
+    truthy
+    because a bare `Path()` has no `__bool__` override, and Xenia's `if str(candidate)`
+    (`xenia.py:397`) is always truthy because `str(Path())` is the non-empty string `"."` — so
+    all three unconditionally append an accidental CWD-relative candidate
+    (`<cwd>/user` or `<cwd>/xenia.config.toml`) even for a blank emulator path. The port's
+    `emulator_dir` is a genuinely empty `PathBuf` for a blank path, so the equivalent gates
+    (`!emulator_dir.as_os_str().is_empty()` at
+    `crates/grid-core/src/autoconfig/readers.rs:1794` (Azahar), `:1965` (Eden), `:2964`
+    (Xenia)) never fire for a blank path and no CWD-relative candidate is ever produced.
+    Deliberate, tested
+    (`azahar_blank_path_does_not_probe_cwd`, `eden_blank_path_does_not_probe_cwd`,
+    `xenia_blank_path_does_not_probe_cwd`), and doc-commented at each gate.
+18. **A frontend `saveForm` bug from milestone 4 is fixed in passing.** The edit-save path in
+    `app/src/lib/Emulators.svelte` used to build the saved entry from only `name`, `path` and
+    `args`, dropping every other field — including the milestone-4 `source_*` provenance —
+    on every edit-save. `saveForm` (`app/src/lib/Emulators.svelte:266-271`) now spreads
+    `editing.entry` (the original row) first, so an edit-save preserves `source_*` and the
+    milestone-5 `save_strategy`/`ignore_files`/`ignore_extensions`/`save_paths`/`state_paths`
+    fields. Fixed in `0a74022` ("rewrite: entry autoconfig, platform and core defaults,
+    defaults backfill").
+19. **`Config.retroachievements_username` always serializes**, with no
+    `skip_serializing_if` (`crates/grid-core/src/config.rs:80-84`), unlike the `source_*` and
+    autoprofile fields on `EmulatorEntry`, which all use
+    `skip_serializing_if = "String::is_empty"` so a config written before they existed
+    round-trips byte-identically. The byte-identical round-trip claims in this doc and its
+    tests are scoped to those ENTRY fields, not to the whole config file: a config with no
+    `retroachievements_username` key gains one (`retroachievements_username = ""`) the first
+    time grid-core saves it.
+20. **The RetroAchievements token is never written to grid config.** The Python reference
+    keeps a live in-memory copy on `self.config["retroachievements_token"]`
+    (`grid-launcher.py:2743`), scrubbed to `""` only at serialization time
+    (`grid_launcher/core/config.py:256`, `serialized_config`) — so the on-disk file never
+    holds it, but the live config dict does. The rewrite's `Config` struct
+    (`crates/grid-core/src/config.rs`) has no such field at all: the token lives only in the
+    OS keyring, behind the `RaTokenStore` trait's own account
+    (`crates/grid-core/src/secrets.rs:35-38`), and reaches the writers as
+    `RaCredentials::token()` (`crates/grid-core/src/autoconfig/mod.rs:67`) — never through the
+    config struct or file, even transiently. Deliberate security improvement.
+21. **`yaml_add_only_section` trims its captured key; `toml_add_only_section` does not.**
+    `yaml_add_only_section` records a matched key `.trim()`med
+    (`crates/grid-core/src/autoconfig/writers.rs:328`, `:376-377`), matching
+    `rpcs3.py:154`'s `group(1).strip()` — ruled in Task 1. `toml_add_only_section` records
+    every matched key UNTRIMMED (`crates/grid-core/src/autoconfig/writers.rs:335-337`),
+    matching `xemu.py:225`, which has no `.strip()`. The asymmetry between the two add-only
+    writers is deliberate parity with two different reference bugs, not a port inconsistency.
+

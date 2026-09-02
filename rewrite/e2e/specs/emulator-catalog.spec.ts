@@ -51,6 +51,13 @@ const EMULATOR_INSTALL_TIMEOUT = 15_000;
  * and one installed game (rom 401, "Gran Turismo 3" on "Sony PlayStation 2",
  * from e2e/fixtures-emulator-catalog) so the freshly installed PCSX2 can be
  * made that platform's default and actually launched.
+ *
+ * The group also covers post-install autoconfig (doc 05 milestone-5
+ * deviations, D1): right after the PCSX2 install lands, `sync_new_emulator`
+ * runs against the freshly installed entry, which for PCSX2 means
+ * `pcsx2::ensure_settings` (grid-core `autoconfig/pcsx2.rs`) creates an
+ * empty `portable.ini` next to the AppImage and writes the managed keys
+ * into `inis/PCSX2.ini` beside it.
  */
 describe('emulator-catalog', () => {
   const PLATFORM = 'Sony PlayStation 2';
@@ -64,6 +71,8 @@ describe('emulator-catalog', () => {
   const emulatorsDir = () => path.join(dataDir(), 'library', 'Emulators');
   const pcsx2Path = () =>
     path.join(emulatorsDir(), `${PCSX2_NAME}-latest`, PCSX2_ASSET);
+  /** D1: the sync runs right after install, so this is the AppImage's parent. */
+  const pcsx2Dir = () => path.dirname(pcsx2Path());
   /**
    * The tar.gz member is the bare `redream` the real tarball ships. Picking
    * it exercises `launchable_installed_file` (grid-core
@@ -232,6 +241,36 @@ describe('emulator-catalog', () => {
     expect(rowText).toContain(PCSX2_NAME);
     expect(rowText).toContain(pcsx2Path());
     expect(rowText).toContain('-portable -fullscreen -batch "%rom%"');
+  });
+
+  it('autoconfigures the freshly installed PCSX2 (portable.ini + managed PCSX2.ini keys)', async () => {
+    await browser.waitUntil(() => existsSync(path.join(pcsx2Dir(), 'portable.ini')), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'autoconfig never created PCSX2 portable.ini after install',
+    });
+    await browser.waitUntil(() => existsSync(path.join(pcsx2Dir(), 'inis', 'PCSX2.ini')), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'autoconfig never created PCSX2 inis/PCSX2.ini after install',
+    });
+
+    const ini = readFileSync(path.join(pcsx2Dir(), 'inis', 'PCSX2.ini'), 'utf-8');
+    expect(ini).toContain('[UI]');
+    expect(ini).toContain('SetupWizardIncomplete = false');
+    expect(ini).toContain('SettingsVersion = 1');
+    expect(ini).toContain('InhibitScreensaver = true');
+    expect(ini).toContain('[AutoUpdater]');
+    expect(ini).toContain('CheckAtStartup = false');
+    expect(ini).toContain('[EmuCore]');
+    expect(ini).toContain('EnableDiscordPresence = false');
+    expect(ini).toContain('[EmuCore/GS]');
+    expect(ini).toContain('pcrtc_antiblur = true');
+    expect(ini).toContain('StartFullscreen = true');
+
+    // No RA credentials are configured in this E2E run (gates the whole
+    // [Achievements] block off), and D6 dropped the [Folders] Bios write
+    // entirely — the firmware subsystem is a later milestone's job.
+    expect(ini).not.toContain('[Achievements]');
+    expect(ini).not.toContain('Bios');
   });
 
   it('plays the seeded PS2 game with the installed PCSX2 as the platform default', async () => {
