@@ -102,10 +102,23 @@ impl Superblock {
 }
 
 /// Derived on-disk layout of a FATX partition.
+///
+/// Two cluster counts, and they mean different things:
+///
+/// - `cluster_count` sizes the FAT. It is `partition_size / cluster_size`,
+///   the documented rule, and it is what selects FAT16X vs FAT32X.
+/// - `usable_clusters` is how many clusters actually have bytes behind
+///   them once the superblock and the FAT are subtracted. It is always
+///   smaller, and it is the bound for cluster addressing and allocation.
+///
+/// The FAT therefore has a few trailing entries that address nothing; a
+/// real formatter leaves them free and so do we. Bounds checks use
+/// `usable_clusters`, never `cluster_count`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Geometry {
     pub cluster_size: u64,
     pub cluster_count: u64,
+    pub usable_clusters: u64,
     pub fat_offset: u64,
     pub fat_size: u64,
     pub data_offset: u64,
@@ -125,11 +138,20 @@ impl Geometry {
     /// Byte offset of a data cluster inside the partition. Clusters are
     /// numbered from 1 (entry 0 of the FAT is reserved), so cluster N lives
     /// at `data_offset + (N - 1) * cluster_size`.
+    ///
+    /// Bounded by `usable_clusters`: the last few FAT entries address
+    /// bytes the partition does not have, and asking for them is
+    /// [`FatxError::BadCluster`], never a read past the end.
     pub fn cluster_offset(&self, cluster: u32) -> Result<u64, FatxError> {
-        if cluster < 1 || u64::from(cluster) > self.cluster_count {
+        if cluster < 1 || u64::from(cluster) > self.usable_clusters {
             return Err(FatxError::BadCluster(cluster));
         }
         Ok(self.data_offset + (u64::from(cluster) - 1) * self.cluster_size)
+    }
+
+    /// Bytes of the partition the data area occupies.
+    pub fn data_size(&self) -> u64 {
+        self.usable_clusters * self.cluster_size
     }
 
     /// Smallest FAT value that ends a chain, for this FAT width.
@@ -151,11 +173,17 @@ impl Geometry {
     }
 }
 
+/// Size of the FAT for `cluster_count` clusters, and whether it is FAT32X.
+///
+/// One entry per cluster **plus the reserved entry 0**, padded up to a
+/// 0x1000 boundary so the data area stays page aligned. See the
+/// "oracle checklist" in [`super::dir`]: the `+ 1` is the brief's rule and
+/// differs from a plain `cluster_count` entries only when
+/// `cluster_count * width` is already an exact multiple of 0x1000, in which
+/// case it costs one more page.
 fn fat_size_for(cluster_count: u64) -> (bool, u64) {
     let fat32 = cluster_count >= FAT16X_CLUSTER_LIMIT;
     let entry = if fat32 { 4 } else { 2 };
-    // One entry per cluster plus the reserved entry 0, padded out to a
-    // 0x1000 boundary so the data area stays page aligned.
     let raw = (cluster_count + 1) * entry;
     (
         fat32,
@@ -166,48 +194,42 @@ fn fat_size_for(cluster_count: u64) -> (bool, u64) {
 /// Derive the layout of a partition of `partition_size` bytes described by
 /// `sb`.
 ///
-/// The FAT size depends on the cluster count and the cluster count depends
-/// on the FAT size, so this iterates to a fixed point (a handful of steps;
-/// the loop is capped and always yields a layout that fits).
+/// Straight from the documented rule, in one pass and no iteration: the
+/// cluster count is the partition size divided by the cluster size, the FAT
+/// width follows from that count, and the data area is whatever is left
+/// after the superblock and the FAT.
 pub fn geometry(partition_size: u64, sb: &Superblock) -> Result<Geometry, FatxError> {
     let cluster_size = u64::from(sb.sectors_per_cluster) * SECTOR_SIZE;
-    if partition_size <= FATX_SUPERBLOCK_SIZE + cluster_size {
+    let fat_offset = FATX_SUPERBLOCK_SIZE;
+    if partition_size <= fat_offset + cluster_size {
         return Err(FatxError::PartitionTooSmall);
     }
-    let fat_offset = FATX_SUPERBLOCK_SIZE;
-    let mut cluster_count = (partition_size - fat_offset) / cluster_size;
-    for _ in 0..64 {
-        let (_, fat_size) = fat_size_for(cluster_count);
-        let available = partition_size.saturating_sub(fat_offset + fat_size) / cluster_size;
-        if available == cluster_count || available == 0 {
-            break;
-        }
-        cluster_count = available;
+    let cluster_count = partition_size / cluster_size;
+    let (fat32, fat_size) = fat_size_for(cluster_count);
+    let data_offset = fat_offset + fat_size;
+    if partition_size <= data_offset {
+        return Err(FatxError::PartitionTooSmall);
     }
-    // Shrink until the chosen FAT plus the data area genuinely fit.
-    loop {
-        if cluster_count == 0 {
-            return Err(FatxError::PartitionTooSmall);
-        }
-        let (fat32, fat_size) = fat_size_for(cluster_count);
-        let data_offset = fat_offset + fat_size;
-        if data_offset + cluster_count * cluster_size <= partition_size {
-            return Ok(Geometry {
-                cluster_size,
-                cluster_count,
-                fat_offset,
-                fat_size,
-                data_offset,
-                fat32,
-            });
-        }
-        cluster_count -= 1;
+    let usable_clusters = (partition_size - data_offset) / cluster_size;
+    if usable_clusters == 0 {
+        return Err(FatxError::PartitionTooSmall);
     }
+    Ok(Geometry {
+        cluster_size,
+        cluster_count,
+        usable_clusters,
+        fat_offset,
+        fat_size,
+        data_offset,
+        fat32,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const GIB: u64 = 1024 * 1024 * 1024;
 
     fn sb_bytes(sig: &[u8; 4], spc: u32) -> Vec<u8> {
         let mut b = vec![0u8; FATX_SUPERBLOCK_SIZE as usize];
@@ -216,6 +238,14 @@ mod tests {
         b[8..12].copy_from_slice(&spc.to_le_bytes());
         b[12..16].copy_from_slice(&1u32.to_le_bytes());
         b
+    }
+
+    fn sb(spc: u32) -> Superblock {
+        Superblock {
+            volume_id: 1,
+            sectors_per_cluster: spc,
+            root_dir_first_cluster: 1,
+        }
     }
 
     #[test]
@@ -249,55 +279,68 @@ mod tests {
 
     #[test]
     fn geometry_selects_fat16x_below_the_threshold_and_fat32x_above() {
-        let sb = Superblock {
-            volume_id: 1,
-            sectors_per_cluster: 32, // 16 KiB clusters
-            root_dir_first_cluster: 1,
-        };
-        let cluster = 32 * SECTOR_SIZE;
+        let cluster = 32 * SECTOR_SIZE; // 16 KiB
 
-        // Sized so that just under 0xFFF0 clusters fit.
-        let small = FATX_SUPERBLOCK_SIZE + 0x2_0000 + (FAT16X_CLUSTER_LIMIT - 1) * cluster;
-        let g = geometry(small, &sb).expect("geometry");
-        assert!(
-            g.cluster_count < FAT16X_CLUSTER_LIMIT,
-            "{}",
-            g.cluster_count
-        );
+        // The cluster count is the partition size divided by the cluster
+        // size, so these two sizes sit either side of the 0xFFF0 threshold
+        // by construction.
+        let g = geometry((FAT16X_CLUSTER_LIMIT - 1) * cluster, &sb(32)).expect("geometry");
+        assert_eq!(g.cluster_count, FAT16X_CLUSTER_LIMIT - 1);
         assert!(!g.fat32);
         assert_eq!(g.fat_entry_size(), 2);
+        assert_eq!(g.end_of_chain_min(), FAT16X_END_MIN);
 
-        // Sized so that at least 0xFFF0 clusters fit.
-        let big = FATX_SUPERBLOCK_SIZE + 0x4_0000 + FAT16X_CLUSTER_LIMIT * cluster;
-        let g = geometry(big, &sb).expect("geometry");
-        assert!(
-            g.cluster_count >= FAT16X_CLUSTER_LIMIT,
-            "{}",
-            g.cluster_count
-        );
+        let g = geometry(FAT16X_CLUSTER_LIMIT * cluster, &sb(32)).expect("geometry");
+        assert_eq!(g.cluster_count, FAT16X_CLUSTER_LIMIT);
         assert!(g.fat32);
         assert_eq!(g.fat_entry_size(), 4);
+        assert_eq!(g.end_of_chain_min(), FAT32X_END_MIN);
 
-        // The retail E: partition is a FAT32X volume with 16 KiB clusters.
-        let g = geometry(RETAIL_PARTITION_E_SIZE, &sb).expect("geometry");
+        // 512-byte clusters cross the threshold in a 33 MiB partition, which
+        // is what the cheap FAT32X test fixture uses.
+        let g = geometry(33 * 1024 * 1024, &sb(1)).expect("geometry");
+        assert!(g.fat32, "cluster_count {}", g.cluster_count);
+    }
+
+    #[test]
+    fn geometry_pins_known_layouts() {
+        // 1 GiB at 16 KiB clusters: 65536 clusters, over the threshold.
+        //
+        // fat_size is (65536 + 1) entries x 4 bytes = 262148, rounded up to
+        // 0x41000, so data_offset is 0x42000. Under a FAT of exactly
+        // cluster_count entries it would be 0x41000 instead: 1 GiB is one of
+        // the sizes where `cluster_count * width` is already page aligned and
+        // the reserved entry 0 costs a whole extra page. That is oracle
+        // checklist item 2 in `super::dir` — if pyfatx says otherwise, the
+        // `+ 1` in `fat_size_for` is the single line to change.
+        let g = geometry(GIB, &sb(32)).expect("geometry");
         assert!(g.fat32);
-        assert!(g.data_offset + g.cluster_count * g.cluster_size <= RETAIL_PARTITION_E_SIZE);
+        assert_eq!(g.cluster_count, 65_536);
+        assert_eq!(g.fat_size, 0x41000);
+        assert_eq!(g.data_offset, 0x42000);
+        assert_eq!(g.usable_clusters, 65_519);
+
+        // The retail E: partition. Here the two rules agree: 313280 x 4 is
+        // not page aligned, so the reserved entry rounds into the same page.
+        let g = geometry(RETAIL_PARTITION_E_SIZE, &sb(32)).expect("geometry");
+        assert!(g.fat32);
+        assert_eq!(g.cluster_count, 313_280);
+        assert_eq!(g.fat_size, 0x132000);
+        assert_eq!(g.data_offset, 0x133000);
+        assert_eq!(g.usable_clusters, 313_203);
     }
 
     #[test]
     fn geometry_rounds_fat_size_to_a_page_boundary() {
-        let sb = Superblock {
-            volume_id: 1,
-            sectors_per_cluster: 32,
-            root_dir_first_cluster: 1,
-        };
-        for size in [
-            8u64 * 1024 * 1024,
-            64 * 1024 * 1024,
-            1024 * 1024 * 1024,
-            RETAIL_PARTITION_E_SIZE,
+        for (size, spc) in [
+            (8u64 * 1024 * 1024, 8u32),
+            (33 * 1024 * 1024, 1),
+            (64 * 1024 * 1024, 32),
+            (GIB, 32),
+            (RETAIL_PARTITION_E_SIZE, 32),
         ] {
-            let g = geometry(size, &sb).expect("geometry");
+            let g = geometry(size, &sb(spc)).expect("geometry");
+            assert_eq!(g.cluster_count, size / g.cluster_size);
             assert_eq!(g.fat_offset, FATX_SUPERBLOCK_SIZE);
             assert_eq!(
                 g.fat_size % FATX_SUPERBLOCK_SIZE,
@@ -311,15 +354,28 @@ mod tests {
                 raw.div_ceil(FATX_SUPERBLOCK_SIZE) * FATX_SUPERBLOCK_SIZE
             );
             assert_eq!(g.data_offset, g.fat_offset + g.fat_size);
-            assert!(g.data_offset + g.cluster_count * g.cluster_size <= size);
-            // Cluster numbering starts at 1.
+            // The data area fits, and it is what usable_clusters counts.
+            assert!(g.data_offset + g.data_size() <= size);
+            assert_eq!(g.usable_clusters, (size - g.data_offset) / g.cluster_size);
+            assert!(g.usable_clusters < g.cluster_count);
+            // Cluster numbering starts at 1, and stops at usable_clusters.
             assert_eq!(g.cluster_offset(1).unwrap(), g.data_offset);
             assert_eq!(g.cluster_offset(2).unwrap(), g.data_offset + g.cluster_size);
             assert!(g.cluster_offset(0).is_err());
+            let last = g.usable_clusters as u32;
+            assert!(g.cluster_offset(last).is_ok());
+            assert!(g.cluster_offset(last + 1).is_err());
         }
         // A partition that cannot hold a single cluster is rejected.
         assert!(matches!(
-            geometry(0x2000, &sb),
+            geometry(0x2000, &sb(32)),
+            Err(FatxError::PartitionTooSmall)
+        ));
+        // Nor one where the superblock plus the FAT leave no room for even
+        // one whole cluster (8500 bytes, 512-byte clusters: data starts at
+        // 0x2000 and only 308 bytes follow it).
+        assert!(matches!(
+            geometry(8500, &sb(1)),
             Err(FatxError::PartitionTooSmall)
         ));
     }

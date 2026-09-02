@@ -12,7 +12,9 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use super::dir::{parse_dir_cluster, DirEntry, DIR_ENTRY_SIZE, END_OF_DIRECTORY};
+use super::dir::{
+    name_is_valid, names_equal, parse_dir_cluster, DirEntry, DIR_ENTRY_SIZE, END_OF_DIRECTORY,
+};
 use super::fat::Fat;
 use super::layout::{geometry, Geometry, Superblock, FATX_SUPERBLOCK_SIZE};
 use super::FatxError;
@@ -55,6 +57,35 @@ fn split_path(path: &str) -> Vec<&str> {
         .collect()
 }
 
+/// Superblock and FAT/data bounds check shared by `open` and `validate`:
+/// the image must actually contain the superblock, the whole FAT and the
+/// whole data area, and the root directory must be an addressable cluster.
+fn check_bounds(
+    file_len: u64,
+    base: u64,
+    geo: &Geometry,
+    sb: &Superblock,
+) -> Result<(), FatxError> {
+    let fat_end = base + geo.fat_offset + geo.fat_size;
+    if file_len < fat_end {
+        return Err(FatxError::Truncated {
+            needed: fat_end,
+            actual: file_len,
+        });
+    }
+    let data_end = base + geo.data_offset + geo.data_size();
+    if file_len < data_end {
+        return Err(FatxError::Truncated {
+            needed: data_end,
+            actual: file_len,
+        });
+    }
+    if sb.root_dir_first_cluster < 1 || u64::from(sb.root_dir_first_cluster) > geo.usable_clusters {
+        return Err(FatxError::BadCluster(sb.root_dir_first_cluster));
+    }
+    Ok(())
+}
+
 impl FatxPartition {
     /// Open the partition of `partition_size` bytes that starts at
     /// `base_offset`. Validates the superblock and that the image really
@@ -64,17 +95,7 @@ impl FatxPartition {
         let file_len = file.metadata()?.len();
         let sb = read_superblock(&mut file, base_offset, file_len)?;
         let geo = geometry(partition_size, &sb)?;
-        let needed = base_offset + geo.fat_offset + geo.fat_size;
-        if file_len < needed {
-            return Err(FatxError::Truncated {
-                needed,
-                actual: file_len,
-            });
-        }
-        if sb.root_dir_first_cluster < 1 || u64::from(sb.root_dir_first_cluster) > geo.cluster_count
-        {
-            return Err(FatxError::BadCluster(sb.root_dir_first_cluster));
-        }
+        check_bounds(file_len, base_offset, &geo, &sb)?;
         let fat = Fat::read(&mut file, &geo, base_offset)?;
         Ok(Self {
             file,
@@ -85,40 +106,30 @@ impl FatxPartition {
         })
     }
 
-    /// Read-only superblock and FAT-bounds check, with the partition size
-    /// taken as "everything from `base_offset` to the end of the file".
+    /// Read-only superblock and FAT-bounds check for the partition of
+    /// `partition_size` bytes at `base_offset`.
     ///
-    /// This is the backend of the xemu image sniffer: it never reads the
-    /// FAT itself, so it stays cheap on a multi-gigabyte image.
-    pub fn validate(path: &Path, base_offset: u64) -> Result<(), FatxError> {
+    /// This is the backend of the xemu image sniffer. It never reads the
+    /// FAT itself, so it stays cheap on a multi-gigabyte image, and the
+    /// caller passes the size it expects — for a retail image that is
+    /// [`super::layout::RETAIL_PARTITION_E_SIZE`] — so a truncated image is
+    /// caught here rather than silently read as a smaller filesystem.
+    pub fn validate(path: &Path, base_offset: u64, partition_size: u64) -> Result<(), FatxError> {
         let mut file = File::open(path)?;
         let file_len = file.metadata()?.len();
         let sb = read_superblock(&mut file, base_offset, file_len)?;
-        let partition_size = file_len - base_offset;
         let geo = geometry(partition_size, &sb)?;
-        let needed = base_offset + geo.fat_offset + geo.fat_size;
-        if file_len < needed {
-            return Err(FatxError::Truncated {
-                needed,
-                actual: file_len,
-            });
-        }
-        if base_offset + geo.data_offset + geo.cluster_count * geo.cluster_size > file_len {
-            return Err(FatxError::Truncated {
-                needed: base_offset + geo.data_offset + geo.cluster_count * geo.cluster_size,
-                actual: file_len,
-            });
-        }
-        if sb.root_dir_first_cluster < 1 || u64::from(sb.root_dir_first_cluster) > geo.cluster_count
-        {
-            return Err(FatxError::BadCluster(sb.root_dir_first_cluster));
-        }
-        Ok(())
+        check_bounds(file_len, base_offset, &geo, &sb)
     }
 
     /// Derived layout of the open partition.
     pub fn geometry(&self) -> &Geometry {
         &self.geo
+    }
+
+    /// The partition's FAT, as read at open time.
+    pub fn fat(&self) -> &Fat {
+        &self.fat
     }
 
     fn read_cluster(&mut self, cluster: u32) -> Result<Vec<u8>, FatxError> {
@@ -154,7 +165,7 @@ impl FatxPartition {
             let found = self
                 .entries_at(cluster)?
                 .into_iter()
-                .find(|e| super::dir::names_equal(&e.name, component));
+                .find(|e| names_equal(&e.name, component.as_bytes()));
             match found {
                 Some(e) if e.is_dir => cluster = e.first_cluster,
                 _ => return Ok(None),
@@ -179,9 +190,14 @@ impl FatxPartition {
         if size == 0 || first_cluster == 0 {
             return Ok(Vec::new());
         }
-        let mut out = Vec::with_capacity(size as usize);
+        let chain = self.fat.chain(first_cluster)?;
+        // Cap the reservation by what the chain can actually hold, so a
+        // corrupt 4 GB size field on a two-cluster file cannot make us ask
+        // the allocator for 4 GB.
+        let reachable = (chain.len() as u64).saturating_mul(self.geo.cluster_size);
+        let mut out = Vec::with_capacity(u64::from(size).min(reachable) as usize);
         let mut left = size as usize;
-        for cluster in self.fat.chain(first_cluster)? {
+        for cluster in chain {
             if left == 0 {
                 break;
             }
@@ -212,10 +228,12 @@ impl FatxPartition {
         let mut queue: Vec<(u32, PathBuf)> = vec![(root, dest.to_path_buf())];
         while let Some((cluster, here)) = queue.pop() {
             for entry in self.entries_at(cluster)? {
-                if entry.name == "." || entry.name == ".." || entry.name.contains(['/', '\\']) {
+                // A name that is not a single safe path component (a
+                // separator, a `:`, `.`, `..`) must never reach `join`.
+                if !name_is_valid(&entry.name) {
                     continue;
                 }
-                let target = here.join(&entry.name);
+                let target = here.join(entry.display_name().as_ref());
                 if entry.is_dir {
                     std::fs::create_dir_all(&target)?;
                     // A directory entry that points back at an ancestor
@@ -238,10 +256,18 @@ impl FatxPartition {
 mod tests {
     use super::*;
     use crate::fatx::builder::FatxImageBuilder;
+    use crate::fatx::layout::FAT32X_END_MIN;
     use crate::fatx::FatxError;
     use std::fs;
 
     const PART_SIZE: u64 = 8 * 1024 * 1024;
+    /// 512-byte clusters put this partition over the 0xFFF0-cluster
+    /// threshold, so it formats as FAT32X while staying a cheap sparse file.
+    const FAT32X_PART_SIZE: u64 = 33 * 1024 * 1024;
+
+    fn big_file() -> Vec<u8> {
+        (0..10_000u32).map(|i| (i % 251) as u8).collect()
+    }
 
     fn sample_image(dir: &Path) -> std::path::PathBuf {
         let img = dir.join("xbox_hdd.img");
@@ -249,29 +275,29 @@ mod tests {
         b.add_dir("UDATA/4541000d/00000001");
         b.add_file("UDATA/4541000d/00000001/savedata.bin", vec![0xA5; 100]);
         // Spans several clusters so the FAT chain is exercised.
-        b.add_file(
-            "UDATA/4541000d/00000001/savemeta.xbx",
-            (0..10_000u32).map(|i| (i % 251) as u8).collect(),
-        );
+        b.add_file("UDATA/4541000d/00000001/savemeta.xbx", big_file());
         b.add_file("UDATA/notes.txt", b"hello xbox".to_vec());
         b.add_dir("TDATA/4541000d");
         b.write_to(&img).expect("build image");
         img
     }
 
+    fn names(entries: &[DirEntry]) -> Vec<String> {
+        entries
+            .iter()
+            .map(|e| e.display_name().into_owned())
+            .collect()
+    }
+
     #[test]
     fn builder_roundtrip_read_tree_extracts_placed_files() {
         let tmp = tempfile::tempdir().unwrap();
         let img = sample_image(tmp.path());
-        FatxPartition::validate(&img, 0).expect("validate");
+        FatxPartition::validate(&img, 0, PART_SIZE).expect("validate");
 
         let mut part = FatxPartition::open(&img, 0, PART_SIZE).expect("open");
-        let root: Vec<String> = part
-            .list_dir("")
-            .unwrap()
-            .into_iter()
-            .map(|e| e.name)
-            .collect();
+        assert!(!part.geometry().fat32, "8 MiB / 4 KiB is a FAT16X volume");
+        let root = names(&part.list_dir("").unwrap());
         assert!(root.contains(&"UDATA".to_string()), "{root:?}");
         assert!(root.contains(&"TDATA".to_string()), "{root:?}");
 
@@ -283,12 +309,82 @@ mod tests {
             fs::read(dest.join("4541000d/00000001/savedata.bin")).unwrap(),
             vec![0xA5u8; 100]
         );
-        let expected: Vec<u8> = (0..10_000u32).map(|i| (i % 251) as u8).collect();
         assert_eq!(
             fs::read(dest.join("4541000d/00000001/savemeta.xbx")).unwrap(),
-            expected
+            big_file()
         );
         assert_eq!(fs::read(dest.join("notes.txt")).unwrap(), b"hello xbox");
+    }
+
+    #[test]
+    fn fat32x_images_roundtrip_through_the_four_byte_fat() {
+        let tmp = tempfile::tempdir().unwrap();
+        let img = tmp.path().join("fat32x.img");
+        let spanning: Vec<u8> = (0..1500u32).map(|i| (i % 97) as u8).collect();
+        let mut b = FatxImageBuilder::new(FAT32X_PART_SIZE).with_cluster_size(512);
+        b.add_file("UDATA/small.bin", vec![0x7E; 40]);
+        b.add_file("UDATA/spanning.bin", spanning.clone());
+        b.write_to(&img).expect("build FAT32X image");
+
+        FatxPartition::validate(&img, 0, FAT32X_PART_SIZE).expect("validate");
+        let mut part = FatxPartition::open(&img, 0, FAT32X_PART_SIZE).expect("open");
+        let geo = *part.geometry();
+        assert!(geo.fat32, "cluster_count {}", geo.cluster_count);
+        assert_eq!(geo.fat_entry_size(), 4);
+
+        let listed = part.list_dir("UDATA").unwrap();
+        assert_eq!(names(&listed), vec!["small.bin", "spanning.bin"]);
+
+        // A one-cluster file ends with the 32-bit end-of-chain marker, and a
+        // 1500-byte file needs three 512-byte clusters.
+        let small = listed.iter().find(|e| e.name == b"small.bin").unwrap();
+        assert!(part.fat().entry(small.first_cluster).unwrap() >= FAT32X_END_MIN);
+        let big = listed.iter().find(|e| e.name == b"spanning.bin").unwrap();
+        assert_eq!(part.fat().chain(big.first_cluster).unwrap().len(), 3);
+
+        let dest = tmp.path().join("out");
+        assert_eq!(part.read_tree("UDATA", &dest).unwrap(), 2);
+        assert_eq!(fs::read(dest.join("small.bin")).unwrap(), vec![0x7E; 40]);
+        assert_eq!(fs::read(dest.join("spanning.bin")).unwrap(), spanning);
+    }
+
+    #[test]
+    fn directories_spanning_several_clusters_list_every_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let img = tmp.path().join("wide.img");
+        // 4096-byte clusters hold 64 slots, so 100 entries need two.
+        let mut b = FatxImageBuilder::new(PART_SIZE).with_cluster_size(4096);
+        for i in 0..100 {
+            b.add_file(&format!("UDATA/save{i:03}.bin"), vec![i as u8; 8]);
+        }
+        b.write_to(&img).expect("build image");
+
+        let mut part = FatxPartition::open(&img, 0, PART_SIZE).expect("open");
+        let listed = part.list_dir("UDATA").unwrap();
+        assert_eq!(listed.len(), 100);
+        assert_eq!(part.fat().chain(listed[0].first_cluster).unwrap().len(), 1);
+        let udata = part
+            .list_dir("")
+            .unwrap()
+            .into_iter()
+            .find(|e| e.name == b"UDATA")
+            .unwrap();
+        assert_eq!(
+            part.fat().chain(udata.first_cluster).unwrap().len(),
+            2,
+            "the directory itself must span two clusters"
+        );
+        // The last entry is on the second cluster.
+        assert_eq!(names(&listed)[99], "save099.bin");
+
+        let dest = tmp.path().join("out");
+        assert_eq!(part.read_tree("UDATA", &dest).unwrap(), 100);
+        for i in 0..100 {
+            assert_eq!(
+                fs::read(dest.join(format!("save{i:03}.bin"))).unwrap(),
+                vec![i as u8; 8]
+            );
+        }
     }
 
     #[test]
@@ -314,8 +410,7 @@ mod tests {
         let mut part = FatxPartition::open(&img, 0, PART_SIZE).expect("open");
 
         let listed = part.list_dir("udata/4541000D").unwrap();
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].name, "00000001");
+        assert_eq!(names(&listed), vec!["00000001"]);
 
         let dest = tmp.path().join("out");
         assert_eq!(part.read_tree("UdAtA", &dest).unwrap(), 3);
@@ -325,32 +420,61 @@ mod tests {
     fn validate_rejects_truncated_images() {
         let tmp = tempfile::tempdir().unwrap();
         let img = sample_image(tmp.path());
-        FatxPartition::validate(&img, 0).expect("intact image validates");
+        FatxPartition::validate(&img, 0, PART_SIZE).expect("intact image validates");
 
         // Shorter than the superblock.
         let short = tmp.path().join("short.img");
         fs::write(&short, [0u8; 16]).unwrap();
-        assert!(FatxPartition::validate(&short, 0).is_err());
+        assert!(FatxPartition::validate(&short, 0, PART_SIZE).is_err());
 
-        // Superblock present, but the file cannot hold the FAT plus a cluster.
+        // Half an image: the superblock and most of the FAT are there, so
+        // only the declared partition size catches this.
+        let half = tmp.path().join("half.img");
+        fs::copy(&img, &half).unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&half)
+            .unwrap()
+            .set_len(PART_SIZE / 2)
+            .unwrap();
+        assert!(matches!(
+            FatxPartition::open(&half, 0, PART_SIZE),
+            Err(FatxError::Truncated { .. })
+        ));
+        let err = FatxPartition::validate(&half, 0, PART_SIZE).unwrap_err();
+        match err {
+            FatxError::Truncated { needed, actual } => {
+                assert_eq!(needed, PART_SIZE);
+                assert_eq!(actual, PART_SIZE / 2);
+            }
+            other => panic!("expected Truncated, got {other:?}"),
+        }
+
+        // Cut back to just past the superblock: now even the FAT is missing.
         let cut = tmp.path().join("cut.img");
         fs::copy(&img, &cut).unwrap();
-        let f = fs::OpenOptions::new().write(true).open(&cut).unwrap();
-        f.set_len(0x1500).unwrap();
-        drop(f);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&cut)
+            .unwrap()
+            .set_len(0x1500)
+            .unwrap();
         assert!(matches!(
-            FatxPartition::validate(&cut, 0),
-            Err(FatxError::PartitionTooSmall) | Err(FatxError::Truncated { .. })
+            FatxPartition::validate(&cut, 0, PART_SIZE),
+            Err(FatxError::Truncated { .. })
         ));
-
-        // open() with the declared partition size rejects a file that is
-        // shorter than fat_offset + fat_size.
         assert!(matches!(
             FatxPartition::open(&cut, 0, PART_SIZE),
             Err(FatxError::Truncated { .. })
         ));
 
+        // A partition size too small to hold anything is its own error.
+        assert!(matches!(
+            FatxPartition::validate(&img, 0, 0x2000),
+            Err(FatxError::PartitionTooSmall)
+        ));
+
         // A base offset past the end of the file is not a FATX partition.
-        assert!(FatxPartition::validate(&img, PART_SIZE * 4).is_err());
+        assert!(FatxPartition::validate(&img, PART_SIZE * 4, PART_SIZE).is_err());
     }
 }

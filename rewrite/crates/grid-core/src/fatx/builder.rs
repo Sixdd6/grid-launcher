@@ -193,7 +193,7 @@ fn place_dir(
     let mut table = Vec::with_capacity(node.children.len() * DIR_ENTRY_SIZE);
     let stamp = pack_timestamp(2024, 1, 1, 0, 0, 0);
     for child in &node.children {
-        if !name_is_valid(&child.name) {
+        if !name_is_valid(child.name.as_bytes()) {
             return Err(FatxError::InvalidName(child.name.clone()));
         }
         let (child_first, size) = if child.is_dir {
@@ -201,13 +201,8 @@ fn place_dir(
         } else {
             (place_file(child, fat, geo, out)?, child.data.len() as u32)
         };
-        let entry = DirEntry {
-            name: child.name.clone(),
-            is_dir: child.is_dir,
-            first_cluster: child_first,
-            size,
-        };
-        table.extend_from_slice(&encode_dir_entry(&entry, stamp));
+        let entry = DirEntry::new(&child.name, child.is_dir, child_first, size);
+        table.extend_from_slice(&encode_dir_entry(&entry, stamp)?);
     }
     if table.len() as u64 > clusters.len() as u64 * geo.cluster_size {
         return Err(FatxError::DirectoryFull);

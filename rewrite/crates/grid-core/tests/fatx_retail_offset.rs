@@ -5,7 +5,8 @@ use std::fs;
 
 use grid_core::fatx::builder::FatxImageBuilder;
 use grid_core::fatx::image::FatxPartition;
-use grid_core::fatx::layout::RETAIL_PARTITION_E_OFFSET;
+use grid_core::fatx::layout::{RETAIL_PARTITION_E_OFFSET, RETAIL_PARTITION_E_SIZE};
+use grid_core::fatx::FatxError;
 
 #[test]
 fn retail_offset_integration() {
@@ -39,7 +40,16 @@ fn retail_offset_integration() {
         );
     }
 
-    FatxPartition::validate(&img, RETAIL_PARTITION_E_OFFSET).expect("validate at retail offset");
+    FatxPartition::validate(&img, RETAIL_PARTITION_E_OFFSET, part_size)
+        .expect("validate at retail offset");
+
+    // The sniffer passes the size it expects. Asking for a full retail E:
+    // partition from a 16 MiB one reports the shortfall instead of reading
+    // a smaller filesystem by accident.
+    assert!(matches!(
+        FatxPartition::validate(&img, RETAIL_PARTITION_E_OFFSET, RETAIL_PARTITION_E_SIZE),
+        Err(FatxError::Truncated { .. })
+    ));
 
     let mut part =
         FatxPartition::open(&img, RETAIL_PARTITION_E_OFFSET, part_size).expect("open at offset");
@@ -55,6 +65,7 @@ fn retail_offset_integration() {
         b"cfg"
     );
 
-    // The region before the partition is untouched (and stays a hole).
-    assert!(!FatxPartition::validate(&img, 0).is_ok());
+    // The region before the partition is untouched (and stays a hole), so
+    // there is no superblock at offset 0.
+    assert!(FatxPartition::validate(&img, 0, part_size).is_err());
 }

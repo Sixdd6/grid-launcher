@@ -19,6 +19,10 @@ use super::FatxError;
 pub struct Fat {
     entries: Vec<u32>,
     fat32: bool,
+    /// Highest cluster number that has bytes behind it. The FAT is sized
+    /// from `cluster_count`, which runs a little past the end of the data
+    /// area, so allocation and chain walking stop here instead.
+    usable: u32,
     end_min: u32,
     end_value: u32,
 }
@@ -31,6 +35,7 @@ impl Fat {
         Self {
             entries,
             fat32: geo.fat32,
+            usable: geo.usable_clusters.min(u64::from(u32::MAX)) as u32,
             end_min: geo.end_of_chain_min(),
             end_value: geo.end_of_chain(),
         }
@@ -55,6 +60,7 @@ impl Fat {
         Ok(Self {
             entries,
             fat32: geo.fat32,
+            usable: geo.usable_clusters.min(u64::from(u32::MAX)) as u32,
             end_min: geo.end_of_chain_min(),
             end_value: geo.end_of_chain(),
         })
@@ -63,6 +69,11 @@ impl Fat {
     /// Number of FAT entries, including the reserved entry 0.
     pub fn len(&self) -> usize {
         self.entries.len()
+    }
+
+    /// Highest addressable cluster number.
+    pub fn usable_clusters(&self) -> u32 {
+        self.usable
     }
 
     pub fn is_empty(&self) -> bool {
@@ -90,10 +101,11 @@ impl Fat {
     /// Walk the cluster chain that starts at `first`.
     ///
     /// A repeated cluster, a free entry inside the chain, or a next-cluster
-    /// value outside the FAT is [`FatxError::CorruptChain`]; the visited set
-    /// means a cyclic FAT errors instead of looping forever.
+    /// value past the last usable cluster is [`FatxError::CorruptChain`];
+    /// the visited set means a cyclic FAT errors instead of looping
+    /// forever.
     pub fn chain(&self, first: u32) -> Result<Vec<u32>, FatxError> {
-        if first == 0 || first as usize >= self.entries.len() {
+        if first == 0 || first > self.usable {
             return Err(FatxError::BadCluster(first));
         }
         let mut out = Vec::new();
@@ -112,18 +124,20 @@ impl Fat {
             if self.is_end(next) {
                 return Ok(out);
             }
-            if next == 0 || next as usize >= self.entries.len() {
+            if next == 0 || next > self.usable {
                 return Err(FatxError::CorruptChain);
             }
             cur = next;
         }
     }
 
-    /// Every free cluster number, ascending.
+    /// Every free, addressable cluster number, ascending. Entries past
+    /// `usable_clusters` are never handed out: they address nothing.
     pub fn free_clusters(&self) -> impl Iterator<Item = u32> + '_ {
         self.entries
             .iter()
             .enumerate()
+            .take(self.usable as usize + 1)
             .skip(1)
             .filter(|(_, v)| **v == 0)
             .map(|(i, _)| i as u32)
