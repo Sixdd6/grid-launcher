@@ -7,6 +7,18 @@ use std::collections::VecDeque;
 
 use super::LibraryError;
 
+/// Identifies what one queued job is for. Two admissions with an equal key
+/// dedupe against each other; two admissions with unequal keys — including a
+/// `Rom` and an `Emulator` — never collide, regardless of the numbers or
+/// strings inside them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JobKey {
+    /// A RomM game install, keyed by `rom_id`.
+    Rom(i64),
+    /// An emulator acquisition, keyed by the source's `source_id`.
+    Emulator(String),
+}
+
 /// Lifecycle state of one [`DownloadEntry`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -24,7 +36,13 @@ pub enum DownloadStatus {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DownloadEntry {
     pub id: u64,
+    /// `"game"` for a `JobKey::Rom` entry, `"emulator"` for a
+    /// `JobKey::Emulator` one.
+    pub job: &'static str,
+    /// The rom id for a `"game"` entry; `0` for an `"emulator"` entry.
     pub rom_id: i64,
+    /// The source id for an `"emulator"` entry; empty for a `"game"` entry.
+    pub source_id: String,
     pub title: String,
     pub platform: String,
     pub status: DownloadStatus,
@@ -34,6 +52,11 @@ pub struct DownloadEntry {
     pub install_processed_bytes: u64,
     pub install_total_bytes: u64,
     pub error: String,
+    /// The admission key this entry was created from. Kept for dedupe and
+    /// `retryable`; the public `job`/`rom_id`/`source_id` fields above are
+    /// derived from it once, at insertion.
+    #[serde(skip)]
+    key: JobKey,
 }
 
 /// The full entry list, newest first (reverse of insertion order).
@@ -81,13 +104,13 @@ pub struct QueueState {
 }
 
 impl QueueState {
-    /// Admits a new install for `rom_id`. Duplicate check (same `rom_id`
-    /// already active in either slot's entry, or waiting) happens first and
-    /// creates nothing. Otherwise creates the entry: `Downloading` and
-    /// takes the download slot when both slots are free, else `Queued` and
-    /// appended to `waiting`.
-    pub fn admit(&mut self, rom_id: i64, title: &str, platform: &str) -> Admission {
-        if self.has_pending(rom_id) {
+    /// Admits a new job for `key`. Duplicate check (an equal `key` already
+    /// active in either slot's entry, or waiting) happens first and creates
+    /// nothing. Otherwise creates the entry: `Downloading` and takes the
+    /// download slot when both slots are free, else `Queued` and appended to
+    /// `waiting`.
+    pub fn admit(&mut self, key: JobKey, title: &str, platform: &str) -> Admission {
+        if self.has_pending(&key) {
             return Admission::Duplicate;
         }
 
@@ -98,9 +121,15 @@ impl QueueState {
         } else {
             DownloadStatus::Queued
         };
+        let (job, rom_id, source_id) = match &key {
+            JobKey::Rom(rom_id) => ("game", *rom_id, String::new()),
+            JobKey::Emulator(source_id) => ("emulator", 0, source_id.clone()),
+        };
         self.entries.push(DownloadEntry {
             id,
+            job,
             rom_id,
+            source_id,
             title: title.to_string(),
             platform: platform.to_string(),
             status,
@@ -110,6 +139,7 @@ impl QueueState {
             install_processed_bytes: 0,
             install_total_bytes: 0,
             error: String::new(),
+            key,
         });
 
         if both_free {
@@ -274,12 +304,12 @@ impl QueueState {
         }
     }
 
-    /// `Some(rom_id)` when `id`'s entry is `Failed` or `Cancelled`; `None`
+    /// `Some(key)` when `id`'s entry is `Failed` or `Cancelled`; `None`
     /// otherwise (including when `id` is unknown).
-    pub fn retryable(&self, id: u64) -> Option<i64> {
+    pub fn retryable(&self, id: u64) -> Option<JobKey> {
         let entry = self.entry(id)?;
         match entry.status {
-            DownloadStatus::Failed | DownloadStatus::Cancelled => Some(entry.rom_id),
+            DownloadStatus::Failed | DownloadStatus::Cancelled => Some(entry.key.clone()),
             _ => None,
         }
     }
@@ -300,19 +330,19 @@ impl QueueState {
         self.entries.iter_mut().find(|entry| entry.id == id)
     }
 
-    /// Whether `rom_id` is already active (download or finalize slot) or
+    /// Whether `key` is already active (download or finalize slot) or
     /// sitting in `waiting`.
-    fn has_pending(&self, rom_id: i64) -> bool {
+    fn has_pending(&self, key: &JobKey) -> bool {
         let active = [self.download_active, self.finalize_active]
             .into_iter()
             .flatten()
-            .any(|id| self.entry(id).is_some_and(|entry| entry.rom_id == rom_id));
+            .any(|id| self.entry(id).is_some_and(|entry| &entry.key == key));
         if active {
             return true;
         }
         self.waiting
             .iter()
-            .any(|&id| self.entry(id).is_some_and(|entry| entry.rom_id == rom_id))
+            .any(|&id| self.entry(id).is_some_and(|entry| &entry.key == key))
     }
 
     fn alloc_id(&mut self) -> u64 {
@@ -326,7 +356,7 @@ mod tests {
     use super::*;
 
     fn admit_idle(state: &mut QueueState, rom_id: i64) -> u64 {
-        match state.admit(rom_id, "Title", "Platform") {
+        match state.admit(JobKey::Rom(rom_id), "Title", "Platform") {
             Admission::Start(id) => id,
             other => panic!("expected Start, got {other:?}"),
         }
@@ -337,22 +367,97 @@ mod tests {
     #[test]
     fn admit_on_idle_starts_downloading() {
         let mut state = QueueState::default();
-        let admission = state.admit(1, "Game", "SNES");
+        let admission = state.admit(JobKey::Rom(1), "Game", "SNES");
         let Admission::Start(id) = admission else {
             panic!("expected Start, got {admission:?}");
         };
         let entry = state.entry(id).unwrap();
         assert_eq!(entry.status, DownloadStatus::Downloading);
+        assert_eq!(entry.job, "game");
         assert_eq!(entry.rom_id, 1);
+        assert_eq!(entry.source_id, "");
         assert_eq!(entry.title, "Game");
         assert_eq!(entry.platform, "SNES");
+    }
+
+    #[test]
+    fn admit_emulator_on_idle_starts_downloading_with_job_and_source_id() {
+        let mut state = QueueState::default();
+        let admission = state.admit(
+            JobKey::Emulator("retroarch/win-x64".to_string()),
+            "RetroArch",
+            "",
+        );
+        let Admission::Start(id) = admission else {
+            panic!("expected Start, got {admission:?}");
+        };
+        let entry = state.entry(id).unwrap();
+        assert_eq!(entry.status, DownloadStatus::Downloading);
+        assert_eq!(entry.job, "emulator");
+        assert_eq!(entry.rom_id, 0);
+        assert_eq!(entry.source_id, "retroarch/win-x64");
+        assert_eq!(entry.title, "RetroArch");
+    }
+
+    #[test]
+    fn duplicate_emulator_same_source_id_is_rejected() {
+        let mut state = QueueState::default();
+        state.admit(
+            JobKey::Emulator("retroarch/win-x64".to_string()),
+            "RetroArch",
+            "",
+        );
+        assert_eq!(
+            state.admit(
+                JobKey::Emulator("retroarch/win-x64".to_string()),
+                "RetroArch",
+                ""
+            ),
+            Admission::Duplicate
+        );
+    }
+
+    #[test]
+    fn different_source_id_for_emulator_queues_independently() {
+        let mut state = QueueState::default();
+        state.admit(
+            JobKey::Emulator("retroarch/win-x64".to_string()),
+            "RetroArch",
+            "",
+        );
+        let admission = state.admit(
+            JobKey::Emulator("retroarch/linux-x64".to_string()),
+            "RetroArch",
+            "",
+        );
+        let Admission::Queued(id) = admission else {
+            panic!("expected Queued, got {admission:?}");
+        };
+        assert_eq!(state.entry(id).unwrap().source_id, "retroarch/linux-x64");
+    }
+
+    #[test]
+    fn rom_5_and_emulator_x_y_are_independent_keys() {
+        let mut state = QueueState::default();
+        let rom_admission = state.admit(JobKey::Rom(5), "Game", "SNES");
+        let Admission::Start(_) = rom_admission else {
+            panic!("expected Start, got {rom_admission:?}");
+        };
+        // The download slot is now taken by the rom job, so an unrelated
+        // emulator key must queue rather than being rejected as a
+        // duplicate — the two `JobKey` variants never collide.
+        let emu_admission = state.admit(JobKey::Emulator("x/y".to_string()), "Emu", "");
+        let Admission::Queued(id) = emu_admission else {
+            panic!("expected Queued, got {emu_admission:?}");
+        };
+        assert_eq!(state.entry(id).unwrap().source_id, "x/y");
     }
 
     #[test]
     fn admit_while_busy_queues() {
         let mut state = QueueState::default();
         admit_idle(&mut state, 1);
-        let admission = state.admit(2, "Other", "SNES");
+        let admission = state.admit(JobKey::Rom(2), "Other", "SNES");
         let Admission::Queued(id) = admission else {
             panic!("expected Queued, got {admission:?}");
         };
@@ -364,15 +469,21 @@ mod tests {
     fn duplicate_rom_id_active_is_rejected() {
         let mut state = QueueState::default();
         admit_idle(&mut state, 1);
-        assert_eq!(state.admit(1, "Game", "SNES"), Admission::Duplicate);
+        assert_eq!(
+            state.admit(JobKey::Rom(1), "Game", "SNES"),
+            Admission::Duplicate
+        );
     }
 
     #[test]
     fn duplicate_rom_id_queued_is_rejected() {
         let mut state = QueueState::default();
         admit_idle(&mut state, 1);
-        state.admit(2, "Other", "SNES");
-        assert_eq!(state.admit(2, "Other", "SNES"), Admission::Duplicate);
+        state.admit(JobKey::Rom(2), "Other", "SNES");
+        assert_eq!(
+            state.admit(JobKey::Rom(2), "Other", "SNES"),
+            Admission::Duplicate
+        );
     }
 
     #[test]
@@ -381,7 +492,10 @@ mod tests {
         let id = admit_idle(&mut state, 1);
         state.download_finished(id, Ok(()), false);
         assert_eq!(state.entry(id).unwrap().status, DownloadStatus::Installing);
-        assert_eq!(state.admit(1, "Game", "SNES"), Admission::Duplicate);
+        assert_eq!(
+            state.admit(JobKey::Rom(1), "Game", "SNES"),
+            Admission::Duplicate
+        );
     }
 
     // --- download_finished ---------------------------------------------
@@ -400,7 +514,7 @@ mod tests {
     fn download_ok_frees_download_slot_so_next_ready_can_start_a_waiter() {
         let mut state = QueueState::default();
         let first = admit_idle(&mut state, 1);
-        let second = match state.admit(2, "Other", "SNES") {
+        let second = match state.admit(JobKey::Rom(2), "Other", "SNES") {
             Admission::Queued(id) => id,
             other => panic!("expected Queued, got {other:?}"),
         };
@@ -436,7 +550,7 @@ mod tests {
     fn download_ok_skip_finalize_completes_directly_and_frees_both_slots() {
         let mut state = QueueState::default();
         let id = admit_idle(&mut state, 1);
-        let waiter = match state.admit(2, "Other", "SNES") {
+        let waiter = match state.admit(JobKey::Rom(2), "Other", "SNES") {
             Admission::Queued(id) => id,
             other => panic!("expected Queued, got {other:?}"),
         };
@@ -484,11 +598,11 @@ mod tests {
     fn finalize_ok_completes_and_next_ready_pops_fifo() {
         let mut state = QueueState::default();
         let first = admit_idle(&mut state, 1);
-        let second = match state.admit(2, "Second", "SNES") {
+        let second = match state.admit(JobKey::Rom(2), "Second", "SNES") {
             Admission::Queued(id) => id,
             other => panic!("expected Queued, got {other:?}"),
         };
-        let third = match state.admit(3, "Third", "SNES") {
+        let third = match state.admit(JobKey::Rom(3), "Third", "SNES") {
             Admission::Queued(id) => id,
             other => panic!("expected Queued, got {other:?}"),
         };
@@ -583,7 +697,7 @@ mod tests {
     fn cancel_queued_removes_from_waiting_with_exact_error() {
         let mut state = QueueState::default();
         admit_idle(&mut state, 1);
-        let waiter = match state.admit(2, "Other", "SNES") {
+        let waiter = match state.admit(JobKey::Rom(2), "Other", "SNES") {
             Admission::Queued(id) => id,
             other => panic!("expected Queued, got {other:?}"),
         };
@@ -637,7 +751,7 @@ mod tests {
     fn dismiss_queued_entry_removes_it_from_waiting_so_it_never_starts() {
         let mut state = QueueState::default();
         let first = admit_idle(&mut state, 1);
-        let waiter = match state.admit(2, "Other", "SNES") {
+        let waiter = match state.admit(JobKey::Rom(2), "Other", "SNES") {
             Admission::Queued(id) => id,
             other => panic!("expected Queued, got {other:?}"),
         };
@@ -675,12 +789,12 @@ mod tests {
         let mut state = QueueState::default();
         let failed = admit_idle(&mut state, 1);
         state.download_finished(failed, Err(LibraryError::NoLaunchFile), false);
-        assert_eq!(state.retryable(failed), Some(1));
+        assert_eq!(state.retryable(failed), Some(JobKey::Rom(1)));
 
         let mut state2 = QueueState::default();
         let cancelled = admit_idle(&mut state2, 2);
         state2.download_finished(cancelled, Err(LibraryError::Cancelled), false);
-        assert_eq!(state2.retryable(cancelled), Some(2));
+        assert_eq!(state2.retryable(cancelled), Some(JobKey::Rom(2)));
 
         let mut state3 = QueueState::default();
         let active = admit_idle(&mut state3, 3);
@@ -693,23 +807,80 @@ mod tests {
         assert_eq!(state.retryable(999), None);
     }
 
+    #[test]
+    fn retryable_returns_emulator_key_for_a_failed_emulator_job() {
+        let mut state = QueueState::default();
+        let admission = state.admit(
+            JobKey::Emulator("retroarch/win-x64".to_string()),
+            "RetroArch",
+            "",
+        );
+        let Admission::Start(id) = admission else {
+            panic!("expected Start, got {admission:?}");
+        };
+        state.download_finished(id, Err(LibraryError::NoLaunchFile), false);
+        assert_eq!(
+            state.retryable(id),
+            Some(JobKey::Emulator("retroarch/win-x64".to_string()))
+        );
+    }
+
     // --- snapshot --------------------------------------------------------
 
     #[test]
     fn snapshot_lists_entries_newest_first() {
         let mut state = QueueState::default();
         let first = admit_idle(&mut state, 1);
-        let second = match state.admit(2, "Second", "SNES") {
+        let second = match state.admit(JobKey::Rom(2), "Second", "SNES") {
             Admission::Queued(id) => id,
             other => panic!("expected Queued, got {other:?}"),
         };
-        let third = match state.admit(3, "Third", "SNES") {
+        let third = match state.admit(JobKey::Rom(3), "Third", "SNES") {
             Admission::Queued(id) => id,
             other => panic!("expected Queued, got {other:?}"),
         };
 
         let ids: Vec<u64> = state.snapshot().entries.iter().map(|e| e.id).collect();
         assert_eq!(ids, vec![third, second, first]);
+    }
+
+    #[test]
+    fn snapshot_exposes_job_and_source_id_for_both_kinds() {
+        let mut state = QueueState::default();
+        admit_idle(&mut state, 1);
+        state.admit(
+            JobKey::Emulator("retroarch/win-x64".to_string()),
+            "RetroArch",
+            "",
+        );
+
+        let entries = state.snapshot().entries;
+        let emulator_entry = entries.iter().find(|e| e.job == "emulator").unwrap();
+        assert_eq!(emulator_entry.source_id, "retroarch/win-x64");
+        assert_eq!(emulator_entry.rom_id, 0);
+        let game_entry = entries.iter().find(|e| e.job == "game").unwrap();
+        assert_eq!(game_entry.rom_id, 1);
+        assert_eq!(game_entry.source_id, "");
+    }
+
+    #[test]
+    fn snapshot_serializes_job_as_the_expected_string() {
+        let mut state = QueueState::default();
+        admit_idle(&mut state, 1);
+        state.admit(
+            JobKey::Emulator("retroarch/win-x64".to_string()),
+            "RetroArch",
+            "",
+        );
+
+        let json = serde_json::to_value(state.snapshot()).unwrap();
+        let jobs: Vec<&str> = json["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["job"].as_str().unwrap())
+            .collect();
+        assert_eq!(jobs, vec!["emulator", "game"]);
     }
 
     // --- progress setters -------------------------------------------------
@@ -754,13 +925,13 @@ mod tests {
         let mut state = QueueState::default();
         let first = admit_idle(&mut state, 1);
         assert_eq!(first, 1);
-        let second = match state.admit(2, "Other", "SNES") {
+        let second = match state.admit(JobKey::Rom(2), "Other", "SNES") {
             Admission::Queued(id) => id,
             other => panic!("expected Queued, got {other:?}"),
         };
         assert_eq!(second, 2);
         state.dismiss(second);
-        let third = match state.admit(3, "Third", "SNES") {
+        let third = match state.admit(JobKey::Rom(3), "Third", "SNES") {
             Admission::Queued(id) => id,
             other => panic!("expected Queued, got {other:?}"),
         };

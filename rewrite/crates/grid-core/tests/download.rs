@@ -1,7 +1,7 @@
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use grid_core::library::download::{download_targets, FileTarget};
+use grid_core::library::download::{download_targets, FileTarget, ResponseProvider, RommProvider};
 use grid_core::library::LibraryError;
 use grid_core::romm::{RommClient, RommError};
 use grid_core::secrets::Credential;
@@ -39,7 +39,7 @@ async fn single_target_downloads_and_reports_final_progress() {
         last = Some((d, t, s));
     };
 
-    download_targets(&client, &targets, &cancel, &mut on_progress)
+    download_targets(&RommProvider(&client), &targets, &cancel, &mut on_progress)
         .await
         .unwrap();
 
@@ -89,7 +89,7 @@ async fn multi_target_accumulates_progress_and_both_land() {
         last = (d, t, s);
     };
 
-    download_targets(&client, &targets, &cancel, &mut on_progress)
+    download_targets(&RommProvider(&client), &targets, &cancel, &mut on_progress)
         .await
         .unwrap();
 
@@ -147,7 +147,7 @@ async fn cancellation_deletes_in_flight_partial_and_keeps_completed() {
         }
     };
 
-    let err = download_targets(&client, &targets, &cancel, &mut on_progress)
+    let err = download_targets(&RommProvider(&client), &targets, &cancel, &mut on_progress)
         .await
         .unwrap_err();
 
@@ -179,7 +179,7 @@ async fn http_error_maps_to_romm_http_and_leaves_no_partial() {
     let cancel = AtomicBool::new(false);
     let mut on_progress = |_: u64, _: u64, _: f64| {};
 
-    let err = download_targets(&client, &targets, &cancel, &mut on_progress)
+    let err = download_targets(&RommProvider(&client), &targets, &cancel, &mut on_progress)
         .await
         .unwrap_err();
 
@@ -216,11 +216,67 @@ async fn pre_existing_dest_with_matching_size_is_not_re_requested() {
         last = (d, t, s);
     };
 
-    download_targets(&client, &targets, &cancel, &mut on_progress)
+    download_targets(&RommProvider(&client), &targets, &cancel, &mut on_progress)
         .await
         .unwrap();
 
     assert_eq!(fs::read(&dest).unwrap(), content);
     assert_eq!(last.0, content.len() as u64);
     drop(mock); // expect(0) verified on drop: no request was ever made
+}
+
+// --- provider-generic ---------------------------------------------------
+
+/// A minimal `ResponseProvider` with no `RommClient` involved at all: it
+/// sends no Authorization header and treats `url_path` as an absolute URL —
+/// exactly how the forge provider (Task 6) will use `FileTarget`. Proves
+/// `download_targets` depends only on the `ResponseProvider` trait, not on
+/// `RommClient`.
+struct PlainProvider(reqwest::Client);
+
+impl ResponseProvider for PlainProvider {
+    async fn get(&self, target: &FileTarget) -> Result<reqwest::Response, LibraryError> {
+        self.0
+            .get(&target.url_path)
+            .send()
+            .await
+            .map_err(|e| RommError::Connection(e.without_url().to_string()).into())
+    }
+}
+
+#[tokio::test]
+async fn download_targets_is_provider_generic() {
+    let server = MockServer::start().await;
+    let body = b"forge-style bytes, no auth header".to_vec();
+    Mock::given(method("GET"))
+        .and(path("/plain"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(body.clone()))
+        .mount(&server)
+        .await;
+    let provider = PlainProvider(reqwest::Client::new());
+    let dir = tempfile::tempdir().unwrap();
+    let dest = dir.path().join("plain.bin");
+    let targets = vec![FileTarget {
+        url_path: format!("{}/plain", server.uri()),
+        query: vec![],
+        dest: dest.clone(),
+        expected_size: body.len() as i64,
+    }];
+    let cancel = AtomicBool::new(false);
+    let mut on_progress = |_: u64, _: u64, _: f64| {};
+
+    download_targets(&provider, &targets, &cancel, &mut on_progress)
+        .await
+        .unwrap();
+
+    assert_eq!(fs::read(&dest).unwrap(), body);
+    let requests = server
+        .received_requests()
+        .await
+        .expect("wiremock records requests by default");
+    assert_eq!(requests.len(), 1);
+    assert!(
+        !requests[0].headers.contains_key("authorization"),
+        "a forge-shaped request must never carry an Authorization header"
+    );
 }

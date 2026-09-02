@@ -25,14 +25,14 @@ use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 
 use crate::config::Config;
 use crate::romm::{RomDetail, RomFile, RommClient};
-use download::{download_targets, FileTarget};
+use download::{download_targets, FileTarget, RommProvider};
 use extract::{extract_archive, should_extract};
 use launch_select::select_launch_file;
 use paths::{
     archive_name, candidate_archives, candidate_extracted_dirs, extraction_dir, platform_dir,
     sanitize_component,
 };
-use queue::{Admission, CancelAction, DownloadStatus, DownloadsSnapshot, QueueState};
+use queue::{Admission, CancelAction, DownloadStatus, DownloadsSnapshot, JobKey, QueueState};
 use registry::{installed_match, InstalledGame, Registry};
 
 #[derive(Debug, thiserror::Error)]
@@ -296,17 +296,23 @@ impl InstallService {
 
     /// Retries a failed or cancelled entry: the old entry is dismissed and a
     /// fresh install starts for the same rom. Any other entry is ignored.
+    ///
+    /// An `Emulator` key is a no-op for now — Task 6 wires up the emulator
+    /// retry path.
     pub async fn retry(
         self: &Arc<Self>,
         client: Arc<RommClient>,
         entry_id: u64,
     ) -> Result<(), LibraryError> {
         let retryable = self.queue.lock().unwrap().retryable(entry_id);
-        let Some(rom_id) = retryable else {
-            return Ok(());
-        };
-        self.dismiss(entry_id);
-        self.install(client, rom_id).await
+        match retryable {
+            Some(JobKey::Rom(rom_id)) => {
+                self.dismiss(entry_id);
+                self.install(client, rom_id).await
+            }
+            Some(JobKey::Emulator(_)) => Ok(()),
+            None => Ok(()),
+        }
     }
 
     /// Removes `entry_id` from the list. An entry that still owns the
@@ -389,7 +395,11 @@ impl InstallService {
     fn admit(self: &Arc<Self>, job: InstallJob) {
         let (admitted, start) = {
             let mut queue = self.queue.lock().unwrap();
-            match queue.admit(job.rom_id, &job.detail.name, &job.detail.platform_name) {
+            match queue.admit(
+                JobKey::Rom(job.rom_id),
+                &job.detail.name,
+                &job.detail.platform_name,
+            ) {
                 Admission::Start(id) => (true, Some((id, job))),
                 Admission::Queued(id) => {
                     self.pending_jobs.lock().unwrap().insert(id, job);
@@ -436,8 +446,13 @@ impl InstallService {
                 let mut on_progress = move |downloaded, total, speed| {
                     reporter.on_download_progress(id, downloaded, total, speed);
                 };
-                let result =
-                    download_targets(&job.client, &job.targets, &cancel, &mut on_progress).await;
+                let result = download_targets(
+                    &RommProvider(&job.client),
+                    &job.targets,
+                    &cancel,
+                    &mut on_progress,
+                )
+                .await;
                 (job, result)
             });
             let outcome = worker.await;

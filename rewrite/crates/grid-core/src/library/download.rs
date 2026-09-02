@@ -28,6 +28,33 @@ pub struct FileTarget {
 /// one after the last target completes.
 const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
+/// A source `download_targets` can pull bytes from: a RomM server today, a
+/// forge host (Task 6) tomorrow. NO Authorization header travels to a forge
+/// host — only [`RommProvider`] attaches one, and it does so exclusively for
+/// requests aimed at the RomM server that issued the credential.
+pub trait ResponseProvider: Sync {
+    fn get(
+        &self,
+        target: &FileTarget,
+    ) -> impl std::future::Future<Output = Result<reqwest::Response, LibraryError>> + Send;
+}
+
+/// The RomM-backed [`ResponseProvider`]: `target.url_path` is a path relative
+/// to the client's base URL, with `target.query` sent as query parameters —
+/// today's behavior, unchanged.
+pub struct RommProvider<'a>(pub &'a RommClient);
+
+impl ResponseProvider for RommProvider<'_> {
+    async fn get(&self, target: &FileTarget) -> Result<reqwest::Response, LibraryError> {
+        let query: Vec<(&str, String)> = target
+            .query
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.clone()))
+            .collect();
+        Ok(self.0.get_response(&target.url_path, &query).await?)
+    }
+}
+
 /// Downloads every target in order. Progress is cumulative across targets:
 /// `(downloaded, total, avg_speed_bps)` at most every 100 ms plus a final
 /// emit. `total` = sum of `expected_size` when every target's is known
@@ -39,8 +66,8 @@ const PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 /// in place. A target whose `dest` already exists with size ==
 /// `expected_size` (> 0) is skipped without an HTTP request; its bytes
 /// count toward cumulative progress immediately.
-pub async fn download_targets(
-    client: &RommClient,
+pub async fn download_targets<P: ResponseProvider>(
+    provider: &P,
     targets: &[FileTarget],
     cancel: &AtomicBool,
     on_progress: &mut (dyn FnMut(u64, u64, f64) + Send),
@@ -68,7 +95,7 @@ pub async fn download_targets(
         }
 
         if let Err(err) = download_one_target(
-            client,
+            provider,
             target,
             cancel,
             &mut total,
@@ -94,8 +121,8 @@ pub async fn download_targets(
 /// responsibility (`download_targets` does it once, uniformly, for every
 /// failure path here).
 #[allow(clippy::too_many_arguments)]
-async fn download_one_target(
-    client: &RommClient,
+async fn download_one_target<P: ResponseProvider>(
+    provider: &P,
     target: &FileTarget,
     cancel: &AtomicBool,
     total: &mut u64,
@@ -109,12 +136,7 @@ async fn download_one_target(
         fs::create_dir_all(parent)?;
     }
 
-    let query: Vec<(&str, String)> = target
-        .query
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.clone()))
-        .collect();
-    let resp = client.get_response(&target.url_path, &query).await?;
+    let resp = provider.get(target).await?;
     if single_unknown {
         *total = resp.content_length().unwrap_or(0);
     }
