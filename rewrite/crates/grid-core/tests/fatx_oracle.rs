@@ -28,7 +28,8 @@
 //! passing test otherwise.
 
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use grid_core::fatx::builder::FatxImageBuilder;
 use grid_core::fatx::image::FatxPartition;
@@ -249,12 +250,20 @@ struct Oracle {
     _tmp: tempfile::TempDir,
 }
 
+/// How long the helper gets before it is killed. Extracting a few files
+/// takes well under a second; anything near this is hung.
+const HELPER_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// `Some(oracle)` when a python3 with an importable `fatx` is on PATH.
+/// Every way out of here says why, so a skip is never silent.
 fn probe() -> Option<Oracle> {
-    let python = Command::new("python3")
-        .args(["-c", "import fatx"])
-        .output()
-        .ok()?;
+    let python = match Command::new("python3").args(["-c", "import fatx"]).output() {
+        Ok(output) => output,
+        Err(err) => {
+            println!("FATX ORACLE SKIPPED: could not run `python3`: {err}");
+            return None;
+        }
+    };
     if !python.status.success() {
         let why = String::from_utf8_lossy(&python.stderr);
         println!(
@@ -264,9 +273,18 @@ fn probe() -> Option<Oracle> {
         );
         return None;
     }
-    let tmp = tempfile::tempdir().ok()?;
+    let tmp = match tempfile::tempdir() {
+        Ok(dir) => dir,
+        Err(err) => {
+            println!("FATX ORACLE SKIPPED: could not make a temp dir: {err}");
+            return None;
+        }
+    };
     let script = tmp.path().join("oracle.py");
-    std::fs::write(&script, HELPER).ok()?;
+    if let Err(err) = std::fs::write(&script, HELPER) {
+        println!("FATX ORACLE SKIPPED: could not write the helper script: {err}");
+        return None;
+    }
     Some(Oracle { script, _tmp: tmp })
 }
 
@@ -280,22 +298,68 @@ fn run(
     size: u64,
     mode: &str,
 ) -> Option<serde_json::Value> {
-    let out = Command::new("python3")
+    // The helper's output goes to files, not pipes: one JSON line can carry
+    // tens of kilobytes of hex, which would fill a pipe buffer and deadlock
+    // a child we are not draining while we wait on the deadline.
+    let out_path = oracle.script.with_extension(format!("{mode}.out"));
+    let err_path = oracle.script.with_extension(format!("{mode}.err"));
+    let (Ok(out_file), Ok(err_file)) = (
+        std::fs::File::create(&out_path),
+        std::fs::File::create(&err_path),
+    ) else {
+        println!("FATX ORACLE SKIPPED ({mode}): could not create the helper output files.");
+        return None;
+    };
+    let mut child = match Command::new("python3")
         .arg(&oracle.script)
         .arg(image)
         .arg(dest)
         .arg(offset.to_string())
         .arg(size.to_string())
         .arg(mode)
-        .output()
-        .expect("run the pyfatx helper");
-    let stdout = String::from_utf8_lossy(&out.stdout);
+        .stdout(Stdio::from(out_file))
+        .stderr(Stdio::from(err_file))
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(err) => {
+            println!("FATX ORACLE SKIPPED ({mode}): could not spawn the helper: {err}");
+            return None;
+        }
+    };
+
+    let deadline = Instant::now() + HELPER_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {}
+            Err(err) => {
+                println!("FATX ORACLE SKIPPED ({mode}): waiting on the helper failed: {err}");
+                let _ = child.kill();
+                return None;
+            }
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            println!(
+                "FATX ORACLE SKIPPED ({mode}): the helper did not finish within {}s and was \
+                 killed.",
+                HELPER_TIMEOUT.as_secs()
+            );
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    let stdout = std::fs::read_to_string(&out_path).unwrap_or_default();
+    let stderr = std::fs::read_to_string(&err_path).unwrap_or_default();
     let line = stdout.lines().find_map(|l| l.strip_prefix("ORACLE_JSON "));
     let Some(line) = line else {
         println!(
             "FATX ORACLE SKIPPED ({mode}): the helper produced no result.\n  stdout: {}\n  stderr: {}",
             stdout.trim(),
-            String::from_utf8_lossy(&out.stderr).trim()
+            stderr.trim()
         );
         return None;
     };

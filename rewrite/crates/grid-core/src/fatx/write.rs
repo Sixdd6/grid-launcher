@@ -18,12 +18,35 @@
 //! chains are freed, so a crash again leaks clusters rather than leaving a
 //! live entry pointing at reusable ones.
 //!
+//! # Durability
+//!
+//! Issuing the writes in that order is not enough. `Write::flush` on a
+//! `File` is a no-op in std, and the kernel is free to write back dirty
+//! pages in any order, so a power cut could still land the directory entry
+//! before the FAT — exactly the state the ordering rule exists to prevent.
+//! Every phase boundary is therefore a real barrier, [`DurableWrite`]:
+//!
+//! - the data clusters are **durable before** the FAT is written,
+//! - the FAT is **durable before** the directory entry is written,
+//! - on removal, the `0xE5` marks are **durable before** the chains are
+//!   freed,
+//! - and on an overwrite that shrinks a file, the surplus clusters stay
+//!   allocated in a first FAT commit, and are only freed by a second
+//!   commit after the new directory entry is durable — so no window exists
+//!   where a free cluster is still named by a live entry.
+//!
+//! `DurableWrite for File` calls `sync_data`. The default method is a
+//! no-op, which is what in-memory test stores want.
+//!
 //! Out of space is decided before any byte is written: the allocation runs
 //! against a scratch copy of the in-memory FAT, and a
-//! [`FatxError::NoSpace`] drops that copy with the image untouched.
+//! [`FatxError::NoSpace`] drops that copy with the image untouched. So is
+//! every name check, so an unusable name can never orphan a committed
+//! cluster.
 
 use std::collections::HashSet;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::fs::File;
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use chrono::{Datelike, Local, Timelike};
@@ -36,6 +59,32 @@ use super::fat::Fat;
 use super::image::{check_bounds, read_superblock, split_path, FatxPartition};
 use super::layout::geometry;
 use super::FatxError;
+
+/// A backing store that can make its writes durable.
+///
+/// The write path orders its phases with this, not with `Write::flush`:
+/// `flush` on a `File` is a no-op in std, so on its own it guarantees
+/// nothing about what reaches the platter first. The default `barrier` is
+/// a no-op, which is correct for an in-memory store — there is no
+/// write-back to order.
+pub trait DurableWrite {
+    /// Return once every byte written so far is durable.
+    fn barrier(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl DurableWrite for File {
+    /// `sync_data` rather than `sync_all`: the image's own metadata (its
+    /// length, its timestamps) does not order anything inside it, and
+    /// skipping it saves a second seek per phase.
+    fn barrier(&mut self) -> std::io::Result<()> {
+        self.sync_data()
+    }
+}
+
+/// In-memory stores have no write-back to order.
+impl<T> DurableWrite for Cursor<T> {}
 
 /// How deep a tree either direction will walk. Save data nests a few
 /// levels; anything past this is a pathological host tree or a crafted
@@ -107,7 +156,7 @@ impl SlotPlan {
     }
 }
 
-impl<S: Read + Write + Seek> FatxPartition<S> {
+impl<S: Read + Write + Seek + DurableWrite> FatxPartition<S> {
     /// Inject the contents of the local directory `src` into `dir_path`,
     /// the mirror image of [`FatxPartition::read_tree`].
     ///
@@ -124,13 +173,32 @@ impl<S: Read + Write + Seek> FatxPartition<S> {
     /// file or an entry pointing at clusters the FAT does not own.
     pub fn write_tree(&mut self, dir_path: &str, src: &Path) -> Result<usize, FatxError> {
         self.revalidate()?;
+        // Every component is checked before anything is allocated, so an
+        // unusable destination path cannot commit a cluster and then fail.
+        let components = split_path(dir_path);
+        for component in &components {
+            if !name_is_valid(component.as_bytes()) {
+                return Err(FatxError::InvalidName((*component).to_string()));
+            }
+        }
         let mut cluster = self.root_cluster;
-        for component in split_path(dir_path) {
+        for component in &components {
             cluster = self.ensure_dir(cluster, component.as_bytes())?;
         }
-        let written = self.write_dir_contents(cluster, src, 0)?;
-        self.io.flush()?;
-        Ok(written)
+        let mut written = 0usize;
+        match self.write_dir_contents(cluster, src, 0, &mut written) {
+            Ok(()) => {
+                self.io.flush()?;
+                Ok(written)
+            }
+            // The files already written are durable and readable. Say how
+            // many, so a caller is not left guessing what landed.
+            Err(source) if written > 0 => Err(FatxError::PartialWrite {
+                written,
+                source: Box::new(source),
+            }),
+            Err(source) => Err(source),
+        }
     }
 
     /// Remove `dir_path` — a directory and everything under it, or a single
@@ -174,10 +242,13 @@ impl<S: Read + Write + Seek> FatxPartition<S> {
         for doomed in slots {
             self.mark_deleted(doomed)?;
         }
+        // Durable before a single cluster is handed back, so no free
+        // cluster is ever still named by a live entry.
+        self.barrier()?;
         for first in chains {
             self.fat.free_chain(first);
         }
-        self.flush_fat()?;
+        self.commit_fat()?;
         self.io.flush()?;
         Ok(())
     }
@@ -185,6 +256,13 @@ impl<S: Read + Write + Seek> FatxPartition<S> {
     /// Re-run the open-time checks against the live image: signature,
     /// geometry, that the image still holds the whole FAT and data area,
     /// and that no FAT entry points outside the data area.
+    ///
+    /// The superblock and the bounds are re-read from the store, but the
+    /// FAT check is against the **cached** copy this partition holds — the
+    /// copy every write is derived from, and the one that would corrupt the
+    /// image if it were wrong. It is not a re-read of the on-disk FAT, so
+    /// it does not detect another writer changing the image underneath us;
+    /// nothing in this crate opens the same image twice for writing.
     fn revalidate(&mut self) -> Result<(), FatxError> {
         let len = self.io.seek(SeekFrom::End(0))?;
         let sb = read_superblock(&mut self.io, self.base, len)?;
@@ -203,7 +281,8 @@ impl<S: Read + Write + Seek> FatxPartition<S> {
         dir_cluster: u32,
         src: &Path,
         depth: usize,
-    ) -> Result<usize, FatxError> {
+        written: &mut usize,
+    ) -> Result<(), FatxError> {
         if depth >= MAX_DEPTH {
             return Err(FatxError::TooDeep(MAX_DEPTH));
         }
@@ -224,7 +303,6 @@ impl<S: Read + Write + Seek> FatxPartition<S> {
         // out the same way.
         children.sort();
 
-        let mut written = 0usize;
         for (name, is_dir) in children {
             let bytes = name.as_encoded_bytes().to_vec();
             if !name_is_valid(&bytes) {
@@ -233,19 +311,27 @@ impl<S: Read + Write + Seek> FatxPartition<S> {
             let path = src.join(&name);
             if is_dir {
                 let child = self.ensure_dir(dir_cluster, &bytes)?;
-                written += self.write_dir_contents(child, &path, depth + 1)?;
+                self.write_dir_contents(child, &path, depth + 1, written)?;
             } else {
                 let data = std::fs::read(&path)?;
                 self.write_file(dir_cluster, &bytes, &data)?;
-                written += 1;
+                *written += 1;
             }
         }
-        Ok(written)
+        Ok(())
     }
 
     /// Look up `name` in the directory at `dir_cluster`, creating it as a
     /// directory when it is missing. Returns its first cluster.
     fn ensure_dir(&mut self, dir_cluster: u32, name: &[u8]) -> Result<u32, FatxError> {
+        // Before anything is allocated: an unusable name that only
+        // `encode_dir_entry` caught would already have committed a cluster
+        // to the FAT that nothing then names.
+        if !name_is_valid(name) {
+            return Err(FatxError::InvalidName(
+                String::from_utf8_lossy(name).into_owned(),
+            ));
+        }
         let layout = self.dir_layout(dir_cluster)?;
         if let Some((_, entry)) = layout.find(name) {
             if !entry.is_dir {
@@ -271,9 +357,10 @@ impl<S: Read + Write + Seek> FatxPartition<S> {
         if let SlotPlan::Grown(cluster) = plan {
             self.fill_cluster(cluster, END_OF_DIRECTORY)?;
         }
-        // 2. The FAT.
+        self.barrier()?;
+        // 2. The FAT, durable before anything names these clusters.
         self.fat = fat;
-        self.flush_fat()?;
+        self.commit_fat()?;
         // 3. The directory entry.
         self.place_entry(&layout, plan, &DirEntry::new_bytes(name, true, own, 0))?;
         Ok(own)
@@ -288,7 +375,9 @@ impl<S: Read + Write + Seek> FatxPartition<S> {
             ));
         }
         if data.len() > u32::MAX as usize {
-            return Err(FatxError::NoSpace);
+            // A FATX size field is 32 bits; this is the file's fault, not
+            // the volume's, so it is not NoSpace.
+            return Err(FatxError::FileTooLarge(data.len() as u64));
         }
         let layout = self.dir_layout(dir_cluster)?;
         let existing = layout.find(name);
@@ -306,14 +395,44 @@ impl<S: Read + Write + Seek> FatxPartition<S> {
         // Overwrite: free the old chain in the scratch FAT first, so the
         // fresh allocation may reuse those clusters instead of needing
         // twice the space.
+        // The old chain is freed unconditionally — `free_chain` reclaims
+        // what it can reach even when the chain is corrupt. `old_clusters`
+        // is only used to work out the surplus below, so a chain we cannot
+        // walk simply yields no surplus and one FAT commit.
+        let old_first = match &existing {
+            Some((_, entry)) => entry.first_cluster,
+            None => 0,
+        };
+        let old_clusters: Vec<u32> = if old_first == 0 {
+            Vec::new()
+        } else {
+            self.fat.chain(old_first).unwrap_or_default()
+        };
         let mut fat = self.fat.clone();
-        if let Some((_, entry)) = &existing {
-            if entry.first_cluster != 0 {
-                fat.free_chain(entry.first_cluster);
-            }
+        if old_first != 0 {
+            fat.free_chain(old_first);
         }
         let chain = fat.allocate(needed)?;
         let plan = self.plan_slot(&layout, &mut fat, existing.as_ref().map(|(s, _)| *s))?;
+
+        // Clusters the old file held that the new one does not. They must
+        // stay allocated until the new directory entry is durable: freeing
+        // them earlier leaves a window where a free cluster is still named
+        // by the entry on disk, and a concurrent allocation could hand the
+        // same cluster to a second file.
+        let mut kept: HashSet<u32> = chain.iter().copied().collect();
+        if let SlotPlan::Grown(cluster) = plan {
+            kept.insert(cluster);
+        }
+        let surplus: Vec<u32> = old_clusters
+            .iter()
+            .copied()
+            .filter(|c| !kept.contains(c))
+            .collect();
+        let mut interim = fat.clone();
+        for cluster in &surplus {
+            interim.set_entry(*cluster, self.geo.end_of_chain())?;
+        }
 
         // 1. Data clusters, and the parent's new cluster if it grew.
         for (index, cluster) in chain.iter().enumerate() {
@@ -324,13 +443,22 @@ impl<S: Read + Write + Seek> FatxPartition<S> {
         if let SlotPlan::Grown(cluster) = plan {
             self.fill_cluster(cluster, END_OF_DIRECTORY)?;
         }
-        // 2. The FAT.
-        self.fat = fat;
-        self.flush_fat()?;
+        self.barrier()?;
+        // 2. The FAT, with the surplus still allocated, durable before the
+        //    entry names the new chain.
+        self.fat = interim;
+        self.commit_fat()?;
         // 3. The directory entry.
         let first = chain.first().copied().unwrap_or(0);
         let entry = DirEntry::new_bytes(name, false, first, data.len() as u32);
-        self.place_entry(&layout, plan, &entry)
+        self.place_entry(&layout, plan, &entry)?;
+        // 4. Only now is it safe to give the surplus back.
+        if !surplus.is_empty() {
+            self.barrier()?;
+            self.fat = fat;
+            self.commit_fat()?;
+        }
+        Ok(())
     }
 
     /// Decide which slot a new or updated entry goes in, growing the
@@ -490,8 +618,18 @@ impl<S: Read + Write + Seek> FatxPartition<S> {
         self.write_cluster(cluster, &[], fill)
     }
 
-    fn flush_fat(&mut self) -> Result<(), FatxError> {
-        self.fat.write(&mut self.io, &self.geo, self.base)
+    /// Write the FAT out and wait for it to be durable. Every phase
+    /// boundary in this module goes through here or through
+    /// [`FatxPartition::barrier`].
+    fn commit_fat(&mut self) -> Result<(), FatxError> {
+        self.fat.write(&mut self.io, &self.geo, self.base)?;
+        self.barrier()
+    }
+
+    /// Return once everything written so far is durable.
+    fn barrier(&mut self) -> Result<(), FatxError> {
+        self.io.barrier()?;
+        Ok(())
     }
 }
 
@@ -500,8 +638,9 @@ mod tests {
     use super::*;
     use crate::fatx::builder::FatxImageBuilder;
     use crate::fatx::dir::DirEntry;
+    use crate::fatx::layout::Geometry as Geo;
     use std::fs;
-    use std::io::{Cursor, SeekFrom};
+    use std::io::SeekFrom;
     use std::ops::Range;
     use std::path::PathBuf;
 
@@ -878,6 +1017,288 @@ mod tests {
         assert_eq!(names(&part.list_dir("UDATA").unwrap()), vec!["d0"]);
     }
 
+    /// One thing the write path did to the store, in order.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum Event {
+        /// A write starting at this partition offset. `fat` carries the
+        /// bytes when the write landed in the FAT, so a test can read the
+        /// entries as they were committed.
+        Write {
+            at: u64,
+            len: u64,
+            fat: Option<Vec<u8>>,
+        },
+        Barrier,
+    }
+
+    /// Backing store that records the sequence of writes and barriers, so a
+    /// test can assert what was made durable before what.
+    #[derive(Debug)]
+    struct RecordingIo {
+        inner: Cursor<Vec<u8>>,
+        fat_range: Range<u64>,
+        events: Vec<Event>,
+    }
+
+    impl RecordingIo {
+        fn new(bytes: Vec<u8>, geo: &Geo) -> Self {
+            Self {
+                inner: Cursor::new(bytes),
+                fat_range: geo.fat_offset..geo.data_offset,
+                events: Vec::new(),
+            }
+        }
+
+        /// Every FAT image committed, oldest first.
+        fn fat_commits(&self) -> Vec<&Vec<u8>> {
+            self.events
+                .iter()
+                .filter_map(|e| match e {
+                    Event::Write {
+                        fat: Some(bytes), ..
+                    } => Some(bytes),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    impl Read for RecordingIo {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.inner.read(buf)
+        }
+    }
+
+    impl Seek for RecordingIo {
+        fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+            self.inner.seek(pos)
+        }
+    }
+
+    impl Write for RecordingIo {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let at = self.inner.position();
+            let n = self.inner.write(buf)?;
+            let fat = if self.fat_range.contains(&at) {
+                Some(buf[..n].to_vec())
+            } else {
+                None
+            };
+            self.events.push(Event::Write {
+                at,
+                len: n as u64,
+                fat,
+            });
+            Ok(n)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.inner.flush()
+        }
+    }
+
+    impl DurableWrite for RecordingIo {
+        fn barrier(&mut self) -> std::io::Result<()> {
+            self.events.push(Event::Barrier);
+            Ok(())
+        }
+    }
+
+    fn is_fat(event: &Event, geo: &Geo) -> bool {
+        matches!(event, Event::Write { at, .. } if (geo.fat_offset..geo.data_offset).contains(at))
+    }
+
+    fn is_data(event: &Event, geo: &Geo) -> bool {
+        matches!(event, Event::Write { at, .. } if *at >= geo.data_offset)
+    }
+
+    /// Read one FAT entry out of a committed FAT image.
+    fn fat_entry(image: &[u8], geo: &Geo, cluster: u32) -> u32 {
+        let width = geo.fat_entry_size() as usize;
+        let at = cluster as usize * width;
+        if width == 4 {
+            u32::from_le_bytes([image[at], image[at + 1], image[at + 2], image[at + 3]])
+        } else {
+            u32::from(u16::from_le_bytes([image[at], image[at + 1]]))
+        }
+    }
+
+    #[test]
+    fn barriers_separate_data_fat_and_direntry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let img = blank_image(tmp.path());
+        // Get UDATA in place with an ordinary write, so the recorded run is
+        // one file and nothing else.
+        let mut part = open_mem(&img);
+        let setup = tmp.path().join("setup");
+        host_tree(&setup, &[("existing.bin", vec![0x11; 32])]);
+        part.write_tree("UDATA", &setup).unwrap();
+        let geo = *part.geometry();
+        let bytes = part.into_io().into_inner();
+
+        let src = tmp.path().join("src");
+        host_tree(&src, &[("newfile.bin", pattern(10_000, 9))]);
+        let mut part = FatxPartition::from_io(RecordingIo::new(bytes, &geo), 0, PART_SIZE)
+            .expect("open recording");
+        assert_eq!(part.write_tree("UDATA", &src).unwrap(), 1);
+        let events = part.io().events.clone();
+
+        // Exactly one FAT commit for a file with no surplus to release.
+        let fat_at: Vec<usize> = (0..events.len())
+            .filter(|i| is_fat(&events[*i], &geo))
+            .collect();
+        assert_eq!(fat_at.len(), 1, "one FAT commit expected: {events:?}");
+        let fat_at = fat_at[0];
+
+        // The data clusters are durable before the FAT is written.
+        let last_data = (0..fat_at)
+            .rev()
+            .find(|i| is_data(&events[*i], &geo))
+            .expect("a data write before the FAT");
+        assert!(
+            events[last_data..fat_at].contains(&Event::Barrier),
+            "no barrier between the last data write and the FAT write: {events:?}"
+        );
+
+        // The FAT is durable before the directory entry is written.
+        let dirent = (fat_at + 1..events.len())
+            .find(|i| is_data(&events[*i], &geo))
+            .expect("the directory entry write");
+        assert!(
+            events[fat_at..dirent].contains(&Event::Barrier),
+            "no barrier between the FAT write and the directory entry: {events:?}"
+        );
+
+        // And the image is still correct.
+        let bytes = part.into_io().inner.into_inner();
+        let mut part = FatxPartition::from_io(Cursor::new(bytes), 0, PART_SIZE).expect("reopen");
+        let dest = tmp.path().join("out");
+        assert_eq!(part.read_tree("UDATA", &dest).unwrap(), 2);
+        assert_eq!(
+            fs::read(dest.join("newfile.bin")).unwrap(),
+            pattern(10_000, 9)
+        );
+    }
+
+    #[test]
+    fn overwrite_to_smaller_keeps_surplus_allocated_until_the_entry_lands() {
+        let tmp = tempfile::tempdir().unwrap();
+        let img = blank_image(tmp.path());
+        let mut part = open_mem(&img);
+        let big = tmp.path().join("big");
+        host_tree(&big, &[("save.bin", pattern(10_000, 1))]);
+        part.write_tree("UDATA", &big).unwrap();
+        let geo = *part.geometry();
+        let chain = {
+            let first = part.list_dir("UDATA").unwrap()[0].first_cluster;
+            part.fat().chain(first).unwrap()
+        };
+        assert_eq!(chain.len(), 3);
+        let surplus = vec![chain[1], chain[2]];
+        let bytes = part.into_io().into_inner();
+
+        // Overwrite with a single-cluster file: two clusters become surplus.
+        let small = tmp.path().join("small");
+        host_tree(&small, &[("save.bin", vec![0x42; 100])]);
+        let mut part = FatxPartition::from_io(RecordingIo::new(bytes, &geo), 0, PART_SIZE)
+            .expect("open recording");
+        assert_eq!(part.write_tree("UDATA", &small).unwrap(), 1);
+
+        let events = part.io().events.clone();
+        let commits = part.io().fat_commits();
+        assert_eq!(
+            commits.len(),
+            2,
+            "shrinking needs two FAT commits, got {}",
+            commits.len()
+        );
+        for cluster in &surplus {
+            assert_ne!(
+                fat_entry(commits[0], &geo, *cluster),
+                0,
+                "cluster {cluster} was freed before the new entry landed"
+            );
+            assert_eq!(
+                fat_entry(commits[1], &geo, *cluster),
+                0,
+                "cluster {cluster} was never freed"
+            );
+        }
+        // The entry write sits between the two commits, each fenced.
+        let fat_at: Vec<usize> = (0..events.len())
+            .filter(|i| is_fat(&events[*i], &geo))
+            .collect();
+        let dirent = (fat_at[0] + 1..fat_at[1])
+            .find(|i| is_data(&events[*i], &geo))
+            .expect("the directory entry between the two FAT commits");
+        assert!(events[fat_at[0]..dirent].contains(&Event::Barrier));
+        assert!(events[dirent..fat_at[1]].contains(&Event::Barrier));
+
+        let bytes = part.into_io().inner.into_inner();
+        let mut part = FatxPartition::from_io(Cursor::new(bytes), 0, PART_SIZE).expect("reopen");
+        let listed = part.list_dir("UDATA").unwrap();
+        assert_eq!(listed[0].size, 100);
+        let dest = tmp.path().join("out");
+        assert_eq!(part.read_tree("UDATA", &dest).unwrap(), 1);
+        assert_eq!(fs::read(dest.join("save.bin")).unwrap(), vec![0x42u8; 100]);
+    }
+
+    #[test]
+    fn an_invalid_dir_path_component_allocates_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let img = blank_image(tmp.path());
+        let src = tmp.path().join("src");
+        host_tree(&src, &[("ok.bin", vec![0x33; 16])]);
+
+        let mut part = open_mem(&img);
+        let before = part.io().get_ref().clone();
+        let err = part
+            .write_tree("UDATA/bad\u{ff}name", &src)
+            .expect_err("an unusable path component must be refused");
+        assert!(matches!(err, FatxError::InvalidName(_)), "got {err:?}");
+        assert_eq!(
+            part.io().get_ref(),
+            &before,
+            "the image must be byte-identical after a refused path"
+        );
+        assert!(part.list_dir("").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_bad_name_reports_the_files_already_written() {
+        let tmp = tempfile::tempdir().unwrap();
+        let img = blank_image(tmp.path());
+        // Sorted order puts the good files first, so the failure lands with
+        // progress already made.
+        let src = tmp.path().join("src");
+        host_tree(
+            &src,
+            &[
+                ("aaa.bin", vec![0x01; 10]),
+                ("bbb.bin", vec![0x02; 10]),
+                ("zz\u{ff}bad.bin", vec![0x03; 10]),
+            ],
+        );
+
+        let mut part = open_mem(&img);
+        let err = part.write_tree("UDATA", &src).expect_err("bad name");
+        match err {
+            FatxError::PartialWrite { written, source } => {
+                assert_eq!(written, 2, "the two good files landed");
+                assert!(matches!(*source, FatxError::InvalidName(_)), "{source:?}");
+            }
+            other => panic!("expected PartialWrite, got {other:?}"),
+        }
+
+        // And what it says landed really did.
+        let bytes = part.into_io().into_inner();
+        let mut part = FatxPartition::from_io(Cursor::new(bytes), 0, PART_SIZE).expect("reopen");
+        let dest = tmp.path().join("out");
+        assert_eq!(part.read_tree("UDATA", &dest).unwrap(), 2);
+        assert_eq!(fs::read(dest.join("aaa.bin")).unwrap(), vec![0x01u8; 10]);
+        assert_eq!(fs::read(dest.join("bbb.bin")).unwrap(), vec![0x02u8; 10]);
+    }
+
     /// Backing store that lets every write through until one lands inside
     /// the FAT, then fails every write after it — a crash between the FAT
     /// update and the directory entry.
@@ -899,6 +1320,8 @@ mod tests {
             self.inner.seek(pos)
         }
     }
+
+    impl DurableWrite for FailAfterFatWrite {}
 
     impl Write for FailAfterFatWrite {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {

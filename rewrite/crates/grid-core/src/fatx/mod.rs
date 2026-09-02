@@ -24,13 +24,16 @@
 //! - [`dir`] — 64-byte directory entries
 //! - [`image`] — [`image::FatxPartition`], the read path over a raw image
 //! - [`builder`] — test-support image generator (see its module docs)
-//! - [`write`] — the write path: `write_tree` / `remove_tree`
+//! - `write` — the write path: `write_tree` / `remove_tree`, and the
+//!   [`DurableWrite`] barrier they order their phases with
 pub mod builder;
 pub mod dir;
 pub mod fat;
 pub mod image;
 pub mod layout;
-pub mod write;
+mod write;
+
+pub use write::DurableWrite;
 
 use thiserror::Error;
 
@@ -64,4 +67,11 @@ pub enum FatxError {
     GeometryChanged,
     #[error("directory nesting deeper than {0} levels")]
     TooDeep(usize),
+    #[error("file is {0} bytes, too large for a FATX directory entry")]
+    FileTooLarge(u64),
+    #[error("wrote {written} file(s), then failed: {source}")]
+    PartialWrite {
+        written: usize,
+        source: Box<FatxError>,
+    },
 }
