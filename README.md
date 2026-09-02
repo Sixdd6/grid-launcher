@@ -53,6 +53,16 @@ Please be aware that this application is created using AI tools/coding, if this 
 - Windows: Emulators can be installed manually or automatically on Windows builds with automated download and setup, firmware will be pulled from your server as well and placed in the default directory for the emulator.
 - Linux: Auto-download and setup is supported for emulators distributed as AppImages or native binaries. Flatpak emulators are not supported — GRID Launcher will not install or detect them, so point it at the flatpak wrapper and configure the paths yourself if you use one.
 
+### xemu cloud saves
+
+Cloud save sync for xemu reads the Xbox HDD image directly, which requires a raw image (`xbox_hdd.img`) rather than the qcow2 format xemu ships by default. Games launch fine either way — only cloud sync needs raw. Convert your image once with:
+
+```
+qemu-img convert -O raw xbox_hdd.qcow2 xbox_hdd.img
+```
+
+Place the `.img` alongside your other xemu BIOS files (it is preferred over a `.qcow2` when both exist). Run the conversion on an ext4/NTFS/APFS drive — the raw file stays sparse there, but occupies its full ~8 GB on exFAT/FAT32.
+
 ## Third-Party Software
 
 This project bundles the following third-party software or assets:
