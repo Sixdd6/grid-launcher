@@ -43,10 +43,10 @@ static HEX16_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[0-9A-F]{16}").
 static HEX_PAIR_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"([0-9A-F]{8})[^0-9A-F]+([0-9A-F]{8})").unwrap());
 
-/// `cloud_mixin.py:1406`'s PS2 serial pattern (dotted or plain form).
+/// `cloud_mixin.py:1408`'s PS2 serial pattern (dotted or plain form).
 static PS2_SERIAL_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[A-Z]{4}[-_ ]?\d{3}\.\d{2}|[A-Z]{4}[-_ ]?\d{5}").unwrap());
-/// `cloud_mixin.py:1424`'s PSP id pattern.
+/// `cloud_mixin.py:1421`'s PSP id pattern.
 static PSP_ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Z]{4}[-_ ]?\d{5}").unwrap());
 
 /// `cloud_mixin.py:1341`'s numbered-slot `.sav` acceptance pattern.
@@ -529,25 +529,59 @@ mod tests {
 
     #[test]
     fn base_variants_strip_duckstation_naming() {
-        let slot_variants = state_candidate_base_variants("SCUS-94900_1.sav");
-        let resume_variants = state_candidate_base_variants("SCUS-94900_resume.sav");
-        let dot_slot_variants = state_candidate_base_variants("GameName.0.sav");
-
-        assert!(slot_variants.iter().any(|v| v == "scus-94900"));
-        assert!(resume_variants.iter().any(|v| v == "scus-94900"));
-        assert!(dot_slot_variants.iter().any(|v| v == "gamename"));
+        // Exact sets, hand-verified against the real Python
+        // `_state_candidate_base_variants` (run standalone against these
+        // same names) rather than membership checks, so a spurious extra
+        // variant would fail the test.
+        assert_eq!(
+            state_candidate_base_variants("SCUS-94900_1.sav"),
+            vec![
+                "scus-94900".to_string(),
+                "scus-94900_1".to_string(),
+                "scus-94900_1.sav".to_string(),
+            ]
+        );
+        assert_eq!(
+            state_candidate_base_variants("SCUS-94900_resume.sav"),
+            vec![
+                "scus-94900".to_string(),
+                "scus-94900_resume".to_string(),
+                "scus-94900_resume.sav".to_string(),
+            ]
+        );
+        assert_eq!(
+            state_candidate_base_variants("GameName.0.sav"),
+            vec![
+                "gamename".to_string(),
+                "gamename.0".to_string(),
+                "gamename.0.sav".to_string(),
+            ]
+        );
     }
 
     #[test]
     fn base_variants_strip_pcsx2_p2s_naming() {
-        let full_variants = state_candidate_base_variants("SLUS-12345 (00000000).00.p2s");
-        assert!(full_variants.iter().any(|v| v == "slus-12345"));
-
-        let no_crc_variants = state_candidate_base_variants("SLUS-12345.01.p2s");
-        assert!(no_crc_variants.iter().any(|v| v == "slus-12345"));
-
-        let bare_variants = state_candidate_base_variants("game.p2s");
-        assert!(bare_variants.iter().any(|v| v == "game"));
+        assert_eq!(
+            state_candidate_base_variants("SLUS-12345 (00000000).00.p2s"),
+            vec![
+                "slus-12345".to_string(),
+                "slus-12345 (00000000)".to_string(),
+                "slus-12345 (00000000).00".to_string(),
+                "slus-12345 (00000000).00.p2s".to_string(),
+            ]
+        );
+        assert_eq!(
+            state_candidate_base_variants("SLUS-12345.01.p2s"),
+            vec![
+                "slus-12345".to_string(),
+                "slus-12345.01".to_string(),
+                "slus-12345.01.p2s".to_string(),
+            ]
+        );
+        assert_eq!(
+            state_candidate_base_variants("game.p2s"),
+            vec!["game".to_string(), "game.p2s".to_string()]
+        );
     }
 
     #[test]
@@ -608,10 +642,22 @@ mod tests {
         // possessive-stripped variant drops BOTH the apostrophe and the
         // "s" (the pattern is `[’']s\b`, matched and removed whole), so
         // the stripped variant is "luigi mansion", not "luigis mansion".
-        assert!(tokens.contains("luigi's mansion"));
-        assert!(tokens.contains("luigi mansion"));
-        assert!(tokens.contains("luigismansion"));
-        assert!(tokens.contains("luigimansion"));
+        // Exact set (not membership) — hand-verified by running the real
+        // Python `_game_save_match_tokens` standalone against a game dict
+        // with only `title` set (every other field blank, matching
+        // `CloudGame::default()`), so a spurious extra token would fail.
+        assert_eq!(
+            tokens,
+            [
+                "luigi's mansion",
+                "luigi mansion",
+                "luigismansion",
+                "luigimansion",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect::<BTreeSet<String>>()
+        );
     }
 
     #[test]
@@ -624,22 +670,25 @@ mod tests {
 
     #[test]
     fn nintendo_variants_add_hex_forms() {
+        // Exact sets, hand-verified by running the real Python
+        // `add_nintendo_id_variants` closure standalone against each input.
         let mut tokens = BTreeSet::new();
         add_nintendo_id_variants("GALE01", &mut tokens);
-        assert!(tokens.contains("gale"));
-        assert!(tokens.contains("47414c45"));
+        assert_eq!(tokens, set(&["gale", "47414c45"]));
 
         let mut hex16_tokens = BTreeSet::new();
         add_nintendo_id_variants("0004000000123456", &mut hex16_tokens);
-        assert!(hex16_tokens.contains("0004000000123456"));
-        assert!(hex16_tokens.contains("00040000"));
-        assert!(hex16_tokens.contains("00123456"));
+        assert_eq!(
+            hex16_tokens,
+            set(&["0004000000123456", "00040000", "00123456"])
+        );
 
         let mut pair_tokens = BTreeSet::new();
         add_nintendo_id_variants("00050000-12345678", &mut pair_tokens);
-        assert!(pair_tokens.contains("00050000"));
-        assert!(pair_tokens.contains("12345678"));
-        assert!(pair_tokens.contains("0005000012345678"));
+        assert_eq!(
+            pair_tokens,
+            set(&["00050000", "12345678", "0005000012345678"])
+        );
     }
 
     #[test]
