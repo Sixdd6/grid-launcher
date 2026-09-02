@@ -82,9 +82,58 @@ pub struct Config {
     /// OS keyring only (see `secrets.rs`) and never in this struct.
     #[serde(default)]
     pub retroachievements_username: String,
+    /// Whether cloud save/state restore runs automatically before launch.
+    /// `grid-launcher.py:2212`.
+    #[serde(default = "default_true")]
+    pub auto_cloud_save_download_on_launch: bool,
+    /// Whether an auto upload is scheduled after a session ends.
+    /// `grid-launcher.py:2215`.
+    #[serde(default = "default_true")]
+    pub auto_cloud_save_upload_on_exit: bool,
+    /// Whether the pre-launch save restore skips downloading when the local
+    /// copy is already newer than the server's. `grid-launcher.py:2218`.
+    #[serde(default = "default_true")]
+    pub auto_cloud_save_skip_download_if_local_newer: bool,
+    /// Seconds to wait after a session ends before the auto upload runs;
+    /// `0` means immediate. Read sites clamp this to `0..=60`
+    /// (`grid-launcher.py:2221`'s `max(0, min(value, 60))`) — the stored
+    /// value itself is not clamped on write.
+    #[serde(default = "default_upload_delay_seconds")]
+    pub auto_cloud_save_upload_delay_seconds: u64,
+    /// How many server save records `cloud::retention` keeps per game
+    /// (saves only; states are never pruned). Deviation D7 (doc 06 /
+    /// `2026-09-02-cloud-saves-design.md`): Python hardcodes this to `3`
+    /// (`grid-launcher.py:2224`); the rewrite makes it a config key with
+    /// the same default. Read sites clamp to a minimum of `1`.
+    #[serde(default = "default_retention_limit")]
+    pub cloud_save_retention_limit: u32,
+    /// Raw per-game cloud sync state, keyed by `cloud::state::game_key`.
+    /// Stored as an untyped TOML table (not `SyncStateEntry`s) so foreign/
+    /// future keys and mistyped fields round-trip byte-for-byte through a
+    /// plain load/save; `cloud::state::normalize_sync_state` is the
+    /// tolerant read-side view. See doc 06 "Sync state entry".
+    #[serde(default)]
+    pub cloud_sync_state: toml::value::Table,
+    /// User-entered native (non-emulator) save directories, keyed by the
+    /// same cache key scheme as `_pcgw_paths_cache`'s `"<key>__manual"`
+    /// entries. `grid-launcher.py:434`.
+    #[serde(default)]
+    pub native_manual_save_paths: BTreeMap<String, Vec<String>>,
     /// Unknown keys survive load/save round trips for forward compatibility.
     #[serde(flatten)]
     pub extra: BTreeMap<String, toml::Value>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_upload_delay_seconds() -> u64 {
+    3
+}
+
+fn default_retention_limit() -> u32 {
+    3
 }
 
 impl Default for Config {
@@ -99,6 +148,13 @@ impl Default for Config {
             retroarch_cores: BTreeMap::new(),
             launch_args: String::new(),
             retroachievements_username: String::new(),
+            auto_cloud_save_download_on_launch: true,
+            auto_cloud_save_upload_on_exit: true,
+            auto_cloud_save_skip_download_if_local_newer: true,
+            auto_cloud_save_upload_delay_seconds: 3,
+            cloud_save_retention_limit: 3,
+            cloud_sync_state: toml::value::Table::new(),
+            native_manual_save_paths: BTreeMap::new(),
             extra: BTreeMap::new(),
         }
     }
@@ -179,6 +235,7 @@ mod tests {
             launch_args: String::new(),
             retroachievements_username: String::new(),
             extra: Default::default(),
+            ..Default::default()
         };
         cfg.save(&path).unwrap();
         assert_eq!(Config::load(&path).unwrap(), cfg);
@@ -237,6 +294,7 @@ mod tests {
             launch_args: String::new(),
             retroachievements_username: String::new(),
             extra: Default::default(),
+            ..Default::default()
         };
         cfg.save(&path).unwrap();
         let loaded = Config::load(&path).unwrap();
@@ -287,6 +345,7 @@ mod tests {
             launch_args: String::new(),
             retroachievements_username: String::new(),
             extra: BTreeMap::new(),
+            ..Default::default()
         };
         cfg.save(&path).unwrap();
         let loaded = Config::load(&path).unwrap();
@@ -319,6 +378,7 @@ mod tests {
             launch_args: String::new(),
             retroachievements_username: String::new(),
             extra: BTreeMap::new(),
+            ..Default::default()
         };
         cfg.save(&path).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
@@ -354,6 +414,7 @@ mod tests {
             launch_args: String::new(),
             retroachievements_username: String::new(),
             extra: BTreeMap::new(),
+            ..Default::default()
         };
         cfg.save(&path).unwrap();
         let loaded = Config::load(&path).unwrap();
@@ -408,6 +469,10 @@ mod tests {
         };
         cfg.save(&path).unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
+        // Match the field as a TOML key assignment (`"\n<key> ="`), not a
+        // bare substring: `native_manual_save_paths` (added alongside the
+        // other new Config-level fields) legitimately contains "save_paths"
+        // as a substring, which a bare `contains` would false-positive on.
         for key in [
             "save_strategy",
             "ignore_files",
@@ -415,7 +480,8 @@ mod tests {
             "save_paths",
             "state_paths",
         ] {
-            assert!(!written.contains(key), "unexpected {key} in {written}");
+            let needle = format!("\n{key} =");
+            assert!(!written.contains(&needle), "unexpected {key} in {written}");
         }
     }
 
@@ -465,6 +531,7 @@ mod tests {
             launch_args: String::new(),
             retroachievements_username: String::new(),
             extra: BTreeMap::new(),
+            ..Default::default()
         };
         cfg.save(&path).unwrap();
         let loaded = Config::load(&path).unwrap();
@@ -496,6 +563,7 @@ mod tests {
             launch_args: String::new(),
             retroachievements_username: String::new(),
             extra: BTreeMap::new(),
+            ..Default::default()
         };
         cfg.save(&path).unwrap();
         let loaded = Config::load(&path).unwrap();
@@ -524,6 +592,7 @@ mod tests {
             launch_args: "--fullscreen --no-menu".into(),
             retroachievements_username: String::new(),
             extra: BTreeMap::new(),
+            ..Default::default()
         };
         cfg.save(&path).unwrap();
         let loaded = Config::load(&path).unwrap();
@@ -545,5 +614,75 @@ mod tests {
         assert!(!cfg.extra.contains_key("retroarch_cores"));
         assert!(!cfg.extra.contains_key("launch_args"));
         assert!(cfg.extra.contains_key("future_key"));
+    }
+
+    #[test]
+    fn config_defaults_for_the_seven_new_fields() {
+        let cfg = Config::default();
+        assert!(cfg.auto_cloud_save_download_on_launch);
+        assert!(cfg.auto_cloud_save_upload_on_exit);
+        assert!(cfg.auto_cloud_save_skip_download_if_local_newer);
+        assert_eq!(cfg.auto_cloud_save_upload_delay_seconds, 3);
+        assert_eq!(cfg.cloud_save_retention_limit, 3);
+        assert!(cfg.cloud_sync_state.is_empty());
+        assert!(cfg.native_manual_save_paths.is_empty());
+    }
+
+    #[test]
+    fn seven_new_fields_round_trip_and_preserve_unknown_cloud_sync_state_junk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut native_manual_save_paths = BTreeMap::new();
+        native_manual_save_paths.insert(
+            "Chrono Trigger__manual".to_string(),
+            vec!["/mnt/saves/ct".to_string()],
+        );
+        let cfg = Config {
+            auto_cloud_save_download_on_launch: false,
+            auto_cloud_save_upload_on_exit: false,
+            auto_cloud_save_skip_download_if_local_newer: false,
+            auto_cloud_save_upload_delay_seconds: 45,
+            cloud_save_retention_limit: 7,
+            native_manual_save_paths,
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+
+        // Simulate foreign/future junk landing in cloud_sync_state between
+        // saves: an entry with an extra unknown key alongside known ones,
+        // and a wrong-typed field. A plain load/save round trip must
+        // preserve it byte-for-byte — only `normalize_sync_state` (a
+        // read-side transform, not part of Config::load/save) is tolerant.
+        let mut text = std::fs::read_to_string(&path).unwrap();
+        text.push_str(
+            "\n[cloud_sync_state.\"rom:abc\"]\nlast_downloaded_save_id = \"srv-1\"\nfrom_the_future = \"kept\"\nlast_server_timestamp = \"not-a-number\"\n",
+        );
+        std::fs::write(&path, &text).unwrap();
+
+        let loaded = Config::load(&path).unwrap();
+        assert!(!loaded.auto_cloud_save_download_on_launch);
+        assert!(!loaded.auto_cloud_save_upload_on_exit);
+        assert!(!loaded.auto_cloud_save_skip_download_if_local_newer);
+        assert_eq!(loaded.auto_cloud_save_upload_delay_seconds, 45);
+        assert_eq!(loaded.cloud_save_retention_limit, 7);
+        assert_eq!(
+            loaded
+                .native_manual_save_paths
+                .get("Chrono Trigger__manual")
+                .map(|v| v.as_slice()),
+            Some(["/mnt/saves/ct".to_string()].as_slice())
+        );
+
+        loaded.save(&path).unwrap();
+        let rewritten = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            rewritten.contains("from_the_future"),
+            "unknown field in a sync-state entry round-trips"
+        );
+        assert!(
+            rewritten.contains("not-a-number"),
+            "wrong-typed field round-trips raw, unnormalized"
+        );
+        assert!(!loaded.extra.contains_key("cloud_sync_state"));
     }
 }
