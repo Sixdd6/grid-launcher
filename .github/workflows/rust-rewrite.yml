@@ -1,10 +1,10 @@
 name: Rust rewrite
 
+# Disabled until the rewrite reaches full parity with the Python version
+# (user decision, 2026-09-02): manual dispatch only. When parity lands, the
+# Python build workflows retire and this becomes the release pipeline.
 on:
-  push:
-    paths: ['rewrite/**', '.github/workflows/rust-rewrite.yml']
-  pull_request:
-    paths: ['rewrite/**', '.github/workflows/rust-rewrite.yml']
+  workflow_dispatch:
 
 jobs:
   check:
