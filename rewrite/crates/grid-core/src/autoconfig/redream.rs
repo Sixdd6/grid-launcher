@@ -106,9 +106,30 @@ pub fn data_root_candidates(emulator_path: &str) -> Vec<PathBuf> {
     paths::dedupe_casefold(candidates)
 }
 
+/// `redream_directory_settings`'s candidate-selection rule
+/// (redream.py:81-107), pulled out as a pure function over an
+/// already-built candidate list: the first candidate whose `redream.cfg`
+/// already exists, or whose directory itself already exists; when NONE of
+/// them exist on disk, the very FIRST candidate in the list (not merely
+/// "some" fallback — redream.py:105-106's `if not defaults["data_root"]:
+/// defaults = settings` only ever fires on the loop's first iteration, so
+/// it always captures candidate zero specifically). `None` for an empty
+/// list.
+fn select_data_root(candidates: &[PathBuf]) -> Option<PathBuf> {
+    for candidate in candidates {
+        if candidate.exists() || candidate.join("redream.cfg").exists() {
+            return Some(candidate.clone());
+        }
+    }
+    candidates.first().cloned()
+}
+
 /// `ensure_redream_settings` (redream.py:154-204). Resolves `config_path`
-/// as `<first data root candidate>/redream.cfg`; no candidates (a blank
-/// `emulator_path`) yields [`EnsureResult::unchanged`].
+/// as `<selected data root>/redream.cfg`, where the data root is chosen by
+/// [`select_data_root`] over [`data_root_candidates`] — the first EXISTING
+/// candidate, falling back to the first candidate only when none exist. No
+/// candidates at all (a blank `emulator_path`) yields
+/// [`EnsureResult::unchanged`].
 ///
 /// Parses `key=value` lines with no comment or section handling, splitting
 /// each on the FIRST `=` and trimming both halves. Managed keys:
@@ -124,7 +145,8 @@ pub fn data_root_candidates(emulator_path: &str) -> Vec<PathBuf> {
 /// error (reading the existing file, creating the parent, or writing)
 /// yields [`EnsureResult::unchanged`].
 pub fn ensure_settings(emulator_path: &str) -> EnsureResult {
-    let Some(data_root) = data_root_candidates(emulator_path).into_iter().next() else {
+    let candidates = data_root_candidates(emulator_path);
+    let Some(data_root) = select_data_root(&candidates) else {
         return EnsureResult::unchanged();
     };
     let config_path = data_root.join("redream.cfg");
@@ -282,8 +304,46 @@ mod tests {
 
     #[test]
     fn redream_blank_path_is_unchanged() {
+        // A blank path still routes through `default_user_root()`, which
+        // reads `$HOME`/`$XDG_DATA_HOME` — isolate them like every sibling
+        // module's env-touching test (crate::test_env's crate-wide lock).
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = crate::test_env::EnvGuard::set(&[
+            ("HOME", Some(temp.path().to_str().unwrap())),
+            ("XDG_DATA_HOME", None),
+        ]);
+
         let result = ensure_settings("");
+
         assert!(!result.changed);
         assert_eq!(result.config_path, None);
+    }
+
+    // --- select_data_root ---------------------------------------------------
+
+    #[test]
+    fn redream_targets_the_first_existing_candidate_not_just_the_first() {
+        let temp = tempfile::tempdir().unwrap();
+        let candidate1 = temp.path().join("candidate1"); // never created
+        let candidate2 = temp.path().join("candidate2");
+        std::fs::create_dir_all(&candidate2).unwrap();
+        let candidates = vec![candidate1.clone(), candidate2.clone()];
+
+        assert_eq!(
+            select_data_root(&candidates),
+            Some(candidate2),
+            "candidate 1 is absent, candidate 2 is an existing dir — candidate 2 must win"
+        );
+
+        // Neither candidate exists on disk any more: falls back to the
+        // very first candidate in the list.
+        std::fs::remove_dir_all(temp.path().join("candidate2")).unwrap();
+        assert_eq!(select_data_root(&candidates), Some(candidate1));
+    }
+
+    #[test]
+    fn redream_select_data_root_is_none_for_an_empty_list() {
+        assert_eq!(select_data_root(&[]), None);
     }
 }

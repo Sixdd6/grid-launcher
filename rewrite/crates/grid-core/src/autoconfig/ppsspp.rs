@@ -125,10 +125,14 @@ fn achievements_section(ra_user: &str, ra_token: &str) -> writers::Desired {
 
 /// Runs every `(section, desired)` pair through
 /// [`writers::ini_overwrite_section`] in order, writing the INI back only
-/// when something changed. `Some(changed)` when the pre-existing INI could
-/// be read (`changed` may still be `false` — a write failure is swallowed,
-/// ppsspp.py:149-152); `None` when the pre-existing INI could not be read
-/// at all (D5).
+/// when something changed. `Some(changed)` on full success — the
+/// pre-existing INI could be read AND, if a write was needed, it succeeded
+/// (`changed` may legitimately be `false` when no write was needed at all).
+/// `None` on ANY failure: the pre-existing INI could not be read (D5), or a
+/// needed write failed (parent-dir creation or the write itself). The
+/// caller treats `None` exactly like [`EnsureResult`]'s documented bail-out
+/// — no `config_path` is reported for a target this function could not
+/// fully process.
 fn write_ini_sections(ini_path: &Path, sections: &[(&str, writers::Desired)]) -> Option<bool> {
     let mut content = read_guarded(ini_path)?;
     let mut any_changed = false;
@@ -138,24 +142,30 @@ fn write_ini_sections(ini_path: &Path, sections: &[(&str, writers::Desired)]) ->
         content = new_content;
         any_changed = any_changed || section_changed;
     }
-    if any_changed && write_text_creating_parent(ini_path, &content).is_ok() {
-        return Some(true);
+    if !any_changed {
+        return Some(false);
     }
-    Some(false)
+    if write_text_creating_parent(ini_path, &content).is_err() {
+        return None;
+    }
+    Some(true)
 }
 
 /// Writes the RA token `.dat` file when its trimmed contents differ from
 /// `token` (ppsspp.py:155-162), D5-guarded. Content is the bare trimmed
-/// token with **no trailing newline**. Returns whether the write happened;
-/// a pre-existing unreadable `.dat` or a write failure is swallowed.
-fn write_ra_token_dat(dat_path: &Path, token: &str) -> bool {
-    let Some(existing) = read_guarded(dat_path) else {
-        return false;
-    };
+/// token with **no trailing newline**. `Some(changed)` on full success (a
+/// pre-existing unreadable `.dat` is one of the two D5 guard sites — that
+/// and a write failure both yield `None`, so the caller can withhold
+/// `extras["ra_token_path"]` for a target it never actually reached).
+fn write_ra_token_dat(dat_path: &Path, token: &str) -> Option<bool> {
+    let existing = read_guarded(dat_path)?;
     if existing.trim() == token {
-        return false;
+        return Some(false);
     }
-    write_text_creating_parent(dat_path, token).is_ok()
+    if write_text_creating_parent(dat_path, token).is_err() {
+        return None;
+    }
+    Some(true)
 }
 
 /// `ensure_ppsspp_settings` (ppsspp.py:75-166). Blank path (after `.trim()`)
@@ -165,9 +175,13 @@ fn write_ra_token_dat(dat_path: &Path, token: &str) -> bool {
 /// overwrite the four base sections plus, only when BOTH `ra` fields are
 /// non-blank after trimming, an `[Achievements]` section, then — again only
 /// with both RA fields non-blank — the `ppsspp_retroachievements.dat` token
-/// file. `config_path` is always the INI path;
-/// `extras["ra_token_path"]` is set whenever both RA fields are present,
-/// independent of whether either write actually happened.
+/// file. `config_path` is the INI path ONLY when [`write_ini_sections`]
+/// fully succeeded (D5's unreadable-INI guard and a genuine write failure
+/// both leave it `None`, matching [`EnsureResult`]'s documented contract);
+/// `extras["ra_token_path"]` is set ONLY when [`write_ra_token_dat`] fully
+/// succeeded for a present RA pair. `changed` still reflects every write
+/// that actually happened (e.g. `installed.txt`'s deletion), independent of
+/// whether the INI or dat portions failed.
 pub fn ensure_settings(emulator_path: &str, ra: Option<&RaCredentials>) -> EnsureResult {
     let Some(emulator_dir) = resolve_emulator_dir(emulator_path) else {
         return EnsureResult::unchanged();
@@ -191,8 +205,10 @@ pub fn ensure_settings(emulator_path: &str, ra: Option<&RaCredentials>) -> Ensur
         sections.push(("Achievements", achievements_section(&ra_user, &ra_token)));
     }
 
+    let mut config_path = None;
     if let Some(ini_changed) = write_ini_sections(&ini_path, &sections) {
         changed |= ini_changed;
+        config_path = Some(ini_path.clone());
     }
 
     let mut extras = BTreeMap::new();
@@ -202,13 +218,15 @@ pub fn ensure_settings(emulator_path: &str, ra: Option<&RaCredentials>) -> Ensur
             .map(Path::to_path_buf)
             .unwrap_or_else(|| emulator_dir.clone())
             .join("ppsspp_retroachievements.dat");
-        changed |= write_ra_token_dat(&dat_path, &ra_token);
-        extras.insert("ra_token_path".to_string(), dat_path);
+        if let Some(dat_changed) = write_ra_token_dat(&dat_path, &ra_token) {
+            changed |= dat_changed;
+            extras.insert("ra_token_path".to_string(), dat_path);
+        }
     }
 
     EnsureResult {
         changed,
-        config_path: Some(ini_path),
+        config_path,
         extras,
     }
 }
@@ -217,7 +235,9 @@ pub fn ensure_settings(emulator_path: &str, ra: Option<&RaCredentials>) -> Ensur
 /// never `installed.txt`, never `[General]`/`[Graphics]`/`[Sound]`/`[Theme]`.
 /// A no-op ([`EnsureResult::unchanged`]) when either RA field is blank after
 /// trimming, checked before any path resolution, and again for a blank
-/// `emulator_path`.
+/// `emulator_path`. Like [`ensure_settings`], `config_path` and
+/// `extras["ra_token_path"]` are populated only when their respective write
+/// fully succeeded.
 pub fn ensure_ra_credentials(emulator_path: &str, ra: &RaCredentials) -> EnsureResult {
     let ra_user = ra.username().trim().to_string();
     let ra_token = ra.token().trim().to_string();
@@ -231,10 +251,12 @@ pub fn ensure_ra_credentials(emulator_path: &str, ra: &RaCredentials) -> EnsureR
 
     let ini_path = ini_path(&emulator_dir);
     let mut changed = false;
+    let mut config_path = None;
 
     let sections = vec![("Achievements", achievements_section(&ra_user, &ra_token))];
     if let Some(ini_changed) = write_ini_sections(&ini_path, &sections) {
         changed |= ini_changed;
+        config_path = Some(ini_path.clone());
     }
 
     let dat_path = ini_path
@@ -242,9 +264,17 @@ pub fn ensure_ra_credentials(emulator_path: &str, ra: &RaCredentials) -> EnsureR
         .map(Path::to_path_buf)
         .unwrap_or_else(|| emulator_dir.clone())
         .join("ppsspp_retroachievements.dat");
-    changed |= write_ra_token_dat(&dat_path, &ra_token);
+    let mut extras = BTreeMap::new();
+    if let Some(dat_changed) = write_ra_token_dat(&dat_path, &ra_token) {
+        changed |= dat_changed;
+        extras.insert("ra_token_path".to_string(), dat_path);
+    }
 
-    EnsureResult::at(ini_path, changed).with_extra("ra_token_path", dat_path)
+    EnsureResult {
+        changed,
+        config_path,
+        extras,
+    }
 }
 
 #[cfg(test)]
@@ -408,6 +438,75 @@ mod tests {
 
         let result = result.expect("must not panic on an unreadable ini");
         assert!(!result.changed);
+        assert_eq!(
+            result.config_path, None,
+            "an unreadable ini is a bail-out: no config_path is reported"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ppsspp_ini_write_failure_yields_no_config_path() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+        // The ini does not exist yet, but its parent directory is
+        // read-only, so the (needed, since the file is missing) write
+        // fails — this must NOT report a config_path even though the read
+        // side (the file doesn't exist yet) succeeded fine.
+        let system_dir = ini_path_for(&dir).parent().unwrap().to_path_buf();
+        std::fs::create_dir_all(&system_dir).unwrap();
+        std::fs::set_permissions(&system_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        let result = std::panic::catch_unwind(|| ensure_settings(exe.to_str().unwrap(), None));
+
+        std::fs::set_permissions(&system_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let result = result.expect("must not panic on a write failure");
+        assert!(
+            !result.changed,
+            "the write never happened, so it cannot count as a change"
+        );
+        assert_eq!(
+            result.config_path, None,
+            "a write failure is a bail-out: no config_path is reported"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ppsspp_dat_write_failure_yields_no_extra_and_does_not_crash() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+        let ra = RaCredentials::new("psp_user", "psp_tok");
+
+        // First call establishes a correct ini and a correct dat file.
+        let first = ensure_settings(exe.to_str().unwrap(), Some(&ra));
+        assert!(first.extras.contains_key("ra_token_path"));
+
+        // Put stale content in the dat file so a write is attempted this
+        // time, then strip write permission from the FILE itself (not the
+        // directory — the file already exists, so only the file's own mode
+        // bits gate truncate-and-write).
+        let dat_path = dat_path_for(&dir);
+        std::fs::write(&dat_path, "stale").unwrap();
+        std::fs::set_permissions(&dat_path, std::fs::Permissions::from_mode(0o444)).unwrap();
+
+        let result = std::panic::catch_unwind(|| ensure_settings(exe.to_str().unwrap(), Some(&ra)));
+
+        std::fs::set_permissions(&dat_path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let result = result.expect("must not panic on a dat write failure");
+        assert!(
+            !result.extras.contains_key("ra_token_path"),
+            "the dat write failed, so its extra must not be reported"
+        );
+        // The ini portion still succeeds independently (it needs no
+        // changes on this second call), so config_path is still reported.
+        assert_eq!(result.config_path, Some(ini_path_for(&dir)));
     }
 
     #[test]
@@ -442,6 +541,27 @@ mod tests {
         assert!(!text.contains("[Graphics]"));
         assert!(!text.contains("[Sound]"));
         assert!(!text.contains("[Theme]"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ppsspp_ensure_ra_credentials_unreadable_ini_yields_no_config_path() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+        let ini = ini_path_for(&dir);
+        std::fs::create_dir_all(ini.parent().unwrap()).unwrap();
+        std::fs::write(&ini, "[Achievements]\nAchievementsEnable = False\n").unwrap();
+        std::fs::set_permissions(&ini, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let ra = RaCredentials::new("psp_user", "psp_tok");
+
+        let result = std::panic::catch_unwind(|| ensure_ra_credentials(exe.to_str().unwrap(), &ra));
+
+        std::fs::set_permissions(&ini, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let result = result.expect("must not panic on an unreadable ini");
+        assert_eq!(result.config_path, None);
     }
 
     #[test]

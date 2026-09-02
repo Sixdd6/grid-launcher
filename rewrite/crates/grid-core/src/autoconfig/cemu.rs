@@ -289,22 +289,61 @@ fn set_or_insert_element(root_span: &mut String, tag: &str, value: &str) -> bool
     true
 }
 
-/// D11: locate the `<content>...</content>` root by the FIRST `<content>`
-/// open tag and the LAST `</content>` close tag in the raw text, apply the
-/// six forced elements in order, and return the (possibly edited) root span
-/// plus whether anything changed. `None` on any parse failure: empty (after
-/// trim) content, no `<content>` tag, or a close tag that doesn't follow the
-/// open tag — cemu.py:308-312's `root is None` / `ET.ParseError` branch.
+/// Byte ranges of every `<!-- ... -->` XML comment in `text`, non-greedy so
+/// back-to-back comments are captured separately. Used to keep the D11
+/// literal-substring scan below from mistaking a `<content>`/`</content>`
+/// string that only appears INSIDE a comment for the real root's tags.
+fn comment_ranges(text: &str) -> Vec<(usize, usize)> {
+    let re = Regex::new(r"(?s)<!--.*?-->").expect("static regex is valid");
+    re.find_iter(text).map(|m| (m.start(), m.end())).collect()
+}
+
+fn position_is_commented_out(pos: usize, comments: &[(usize, usize)]) -> bool {
+    comments
+        .iter()
+        .any(|&(start, end)| pos >= start && pos < end)
+}
+
+/// Locate the `<content>...</content>` root's byte span: the FIRST
+/// `<content>` open tag and the LAST `</content>` close tag in the raw
+/// text, each SKIPPING any occurrence that falls inside an XML comment
+/// (`<!-- ... -->`) — a comment elsewhere in the file (commonly right
+/// before the root) can otherwise contain a literal `<content>`/`</content>`
+/// that this substring scan would mistake for the real root, corrupting the
+/// rewritten file. Returns the `(open_start, close_end)` byte range, or
+/// `None` when no un-commented `<content>` tag exists, no un-commented
+/// `</content>` tag exists, or the close precedes the open.
+fn find_root_span(content: &str) -> Option<(usize, usize)> {
+    let comments = comment_ranges(content);
+
+    let open_pos = content
+        .match_indices("<content>")
+        .map(|(idx, _)| idx)
+        .find(|&idx| !position_is_commented_out(idx, &comments))?;
+
+    let close_pos = content
+        .match_indices(CONTENT_CLOSE)
+        .map(|(idx, _)| idx)
+        .filter(|&idx| !position_is_commented_out(idx, &comments))
+        .last()?;
+
+    if close_pos < open_pos {
+        return None;
+    }
+    Some((open_pos, close_pos + CONTENT_CLOSE.len()))
+}
+
+/// D11: locate the `<content>...</content>` root via [`find_root_span`],
+/// apply the six forced elements in order, and return the (possibly
+/// edited) root span plus whether anything changed. `None` on any parse
+/// failure: empty (after trim) content, no un-commented `<content>` tag, or
+/// a close tag that doesn't follow the open tag — cemu.py:308-312's
+/// `root is None` / `ET.ParseError` branch.
 fn apply_forced_elements(content: &str) -> Option<(String, bool)> {
     if content.trim().is_empty() {
         return None;
     }
-    let open_pos = content.find("<content>")?;
-    let close_pos = content.rfind(CONTENT_CLOSE)?;
-    if close_pos < open_pos {
-        return None;
-    }
-    let close_end = close_pos + CONTENT_CLOSE.len();
+    let (open_pos, close_end) = find_root_span(content)?;
 
     let mut root_span = content[open_pos..close_end].to_string();
     let mut changed = false;
@@ -575,6 +614,84 @@ mod tests {
 
         assert!(!result.changed);
         assert_eq!(result.config_path, None);
+    }
+
+    // --- comment-aware root-span scan (a decoy `<content>` inside a
+    // pre-root comment must never be mistaken for the real root) ----------
+
+    /// Pins the actual bug location: [`find_root_span`] must skip the
+    /// `<content>`/`</content>` literals sitting inside the leading
+    /// comment and land on the real root that follows it.
+    #[test]
+    fn cemu_root_span_skips_a_content_literal_inside_a_leading_comment() {
+        let content = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- example: <content>fake</content> -->\n<content>\n<use_discord_presence>false</use_discord_presence>\n</content>\n";
+
+        let (open, close_end) = find_root_span(content).expect("a real root exists");
+        let span = &content[open..close_end];
+
+        assert!(
+            span.starts_with("<content>\n<use_discord_presence>"),
+            "must land on the real root, not the decoy inside the comment: {span}"
+        );
+        assert!(
+            !span.contains("fake") && !span.contains("-->"),
+            "the comment's decoy tags must not leak into the root span: {span}"
+        );
+    }
+
+    /// End-to-end: nothing needs to change, so [`ensure_settings`] never
+    /// writes at all — the whole file, decoy comment included, must stay
+    /// byte-for-byte untouched. Before the D11 comment-aware fix, the
+    /// buggy scan would still misidentify the root and could report a
+    /// spurious change.
+    #[test]
+    fn cemu_no_op_with_a_content_literal_inside_a_leading_comment_preserves_the_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+        let body = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- example: <content>fake</content> -->\n<content>\n<use_discord_presence>false</use_discord_presence>\n<check_update>false</check_update>\n<receive_untested_updates>false</receive_untested_updates>\n<gp_download>true</gp_download>\n<fullscreen>false</fullscreen>\n<window_maximized>true</window_maximized>\n</content>\n";
+        let target = write_settings(&dir, body);
+
+        let result = ensure_settings(exe.to_str().unwrap());
+
+        assert!(!result.changed);
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            body,
+            "the comment must be preserved byte-for-byte: no write ever happens"
+        );
+    }
+
+    /// End-to-end: a real edit IS needed, so a write does happen. The
+    /// output must be well-formed — exactly one real `<content>` open and
+    /// one `</content>` close — and the forced element must be correctly
+    /// updated, not corrupted by the decoy comment.
+    #[test]
+    fn cemu_edits_correctly_despite_a_content_literal_in_a_leading_comment() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+        let body = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- example: <content>fake</content> -->\n<content>\n<use_discord_presence>true</use_discord_presence>\n<check_update>false</check_update>\n<receive_untested_updates>false</receive_untested_updates>\n<gp_download>true</gp_download>\n<fullscreen>false</fullscreen>\n<window_maximized>true</window_maximized>\n</content>\n";
+        let target = write_settings(&dir, body);
+
+        let result = ensure_settings(exe.to_str().unwrap());
+
+        assert!(result.changed);
+        let text = std::fs::read_to_string(&target).unwrap();
+        assert_eq!(
+            text.matches("<content>").count(),
+            1,
+            "exactly one real root open tag: {text}"
+        );
+        assert_eq!(
+            text.matches("</content>").count(),
+            1,
+            "exactly one real root close tag: {text}"
+        );
+        assert!(!text.contains("-->"), "no stray comment terminator: {text}");
+        assert!(
+            !text.contains("fake"),
+            "the decoy text must not leak: {text}"
+        );
+        assert!(text.contains("<use_discord_presence>false</use_discord_presence>"));
     }
 
     // --- ensure_controller_config -------------------------------------------
