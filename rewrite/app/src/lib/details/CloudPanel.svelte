@@ -268,6 +268,49 @@
 
     {#if !recordsBlocked}
       {#if nativeSave}
+        <h4 data-testid="cloud-native-saves-label" class="section-label">Cloud Saves</h4>
+      {/if}
+
+      <div class="records">
+        {#if recordsLoading}
+          <p data-testid="cloud-loading" class="hint">Loading cloud {kindLabel}…</p>
+        {:else if recordsError}
+          <p data-testid="cloud-records-error" class="error" role="alert">Could not load cloud {kindLabel}: {recordsError}</p>
+        {:else if records.length === 0}
+          <p data-testid="cloud-empty" class="hint">No cloud {kindLabel} were found for this game yet.</p>
+        {:else}
+          {#each records as record (record.id)}
+            <div data-testid={`cloud-record-${record.id}`} class="record">
+              <div class="record-info">
+                <p class="record-title">{cloudRecordTitle(record, saveType)}</p>
+                <p class="record-summary">{cloudRecordSummary(record, saveType)}</p>
+                <p class="record-time">{uploadedLine(record)}</p>
+              </div>
+              <div class="record-actions">
+                <button
+                  data-testid={`cloud-restore-${record.id}`}
+                  disabled={!record.restorable || actionPendingId === record.id}
+                  title={record.restore_tooltip ?? ''}
+                  onclick={() => requestRestore(record)}
+                >
+                  Restore
+                </button>
+                <button
+                  data-testid={`cloud-delete-${record.id}`}
+                  class="danger"
+                  disabled={actionPendingId === record.id}
+                  onclick={() => requestDelete(record)}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          {/each}
+        {/if}
+      </div>
+
+      {#if nativeSave}
+        <hr data-testid="cloud-native-separator" class="native-separator" />
         <div class="native-paths">
           <h4>Save Locations</h4>
           {#if nativePathsLoading}
@@ -315,44 +358,6 @@
           {#if manualPathError}<p class="error" role="alert">{manualPathError}</p>{/if}
         </div>
       {/if}
-
-      <div class="records">
-        {#if recordsLoading}
-          <p data-testid="cloud-loading" class="hint">Loading cloud {kindLabel}…</p>
-        {:else if recordsError}
-          <p data-testid="cloud-records-error" class="error" role="alert">Could not load cloud {kindLabel}: {recordsError}</p>
-        {:else if records.length === 0}
-          <p data-testid="cloud-empty" class="hint">No cloud {kindLabel} were found for this game yet.</p>
-        {:else}
-          {#each records as record (record.id)}
-            <div data-testid={`cloud-record-${record.id}`} class="record">
-              <div class="record-info">
-                <p class="record-title">{cloudRecordTitle(record, saveType)}</p>
-                <p class="record-summary">{cloudRecordSummary(record, saveType)}</p>
-                <p class="record-time">{uploadedLine(record)}</p>
-              </div>
-              <div class="record-actions">
-                <button
-                  data-testid={`cloud-restore-${record.id}`}
-                  disabled={!record.restorable || actionPendingId === record.id}
-                  title={record.restore_tooltip ?? ''}
-                  onclick={() => requestRestore(record)}
-                >
-                  Restore
-                </button>
-                <button
-                  data-testid={`cloud-delete-${record.id}`}
-                  class="danger"
-                  disabled={actionPendingId === record.id}
-                  onclick={() => requestDelete(record)}
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-          {/each}
-        {/if}
-      </div>
     {/if}
   {/if}
 
@@ -438,10 +443,19 @@
     color: #e5a53a;
   }
 
-  .native-paths h4 {
+  .native-paths h4,
+  .section-label {
     margin: 0 0 4px;
     font-size: 14px;
+    font-weight: 700;
     color: var(--text-h);
+  }
+
+  .native-separator {
+    width: 100%;
+    margin: 4px 0;
+    border: none;
+    border-top: 1px solid var(--border);
   }
 
   .path-list {
