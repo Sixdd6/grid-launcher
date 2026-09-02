@@ -6,6 +6,7 @@
 
 pub mod archive;
 pub mod candidates;
+pub mod restore;
 pub mod scope;
 pub mod state;
 pub mod tokens;
