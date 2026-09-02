@@ -54,7 +54,8 @@ Python source cited by doc 05 wins. Reference code lives under
   `PPSSPP.INI` `[Achievements] AchievementsToken`, and
   `ppsspp_retroachievements.dat`). `expose_secret()` is called in exactly
   ONE new place, `autoconfig/mod.rs`, which is added to the
-  `check_secret_hygiene.sh` allowlist in Task 12 — nowhere else.
+  `check_secret_hygiene.sh` allowlist in Task 3 — the task that introduces
+  the call site, so its own gate passes — nowhere else.
   `get_retroachievements_status` returns a boolean, never the token.
 - **Every task ends green**, run from `rewrite/`:
   - `cargo test -p grid-core`
@@ -633,12 +634,15 @@ pub fn ensure_settings(
 pub fn ensure_ra_credentials(emulator_path: &str, ra: &crate::autoconfig::RaCredentials) -> EnsureResult;
 ```
 
-`RaCredentials` is defined in Task 12 but declared here as an opaque type
-with two accessors, `username(&self) -> &str` and
-`token(&self) -> &str` (the second is the ONLY place the secret is
-exposed, inside `autoconfig/mod.rs`). Until Task 12 lands, define it in
-`mod.rs` as a plain `{ username: String, token: SecretString }` with those
-two accessors and construct it from plain strings in tests.
+`RaCredentials` reaches its final form in Task 11, but THIS task defines it
+in `mod.rs` as `{ username: String, token: secrecy::SecretString }` with
+two accessors, `username(&self) -> &str` and `token(&self) -> &str` (the
+second is the ONLY place the secret is exposed, inside `autoconfig/mod.rs`),
+and constructs it from plain strings in tests. Because `token()` calls
+`expose_secret()`, THIS task also adds `autoconfig/mod.rs` to the
+`check_secret_hygiene.sh` allowlist — otherwise this task's own hygiene
+gate fails. Add `rewrite/scripts/check_secret_hygiene.sh` to this task's
+Modify list.
 
 **Pinned rules:**
 
