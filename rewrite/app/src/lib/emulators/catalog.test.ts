@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ProfileSummary } from '../api';
-import { matchProfileByName } from './catalog';
+import { matchProfileByName, shouldAutoFillFromName } from './catalog';
 
 function profile(name: string, args = ''): ProfileSummary {
   return { name, args };
@@ -40,5 +40,25 @@ describe('matchProfileByName', () => {
 
   it('an empty profile list always returns null', () => {
     expect(matchProfileByName('Dolphin', [])).toBeNull();
+  });
+});
+
+describe('shouldAutoFillFromName', () => {
+  it('runs in add mode while path and args are both blank', () => {
+    expect(shouldAutoFillFromName('add', '', '')).toBe(true);
+    expect(shouldAutoFillFromName('add', '   ', '  ')).toBe(true);
+  });
+
+  it('never runs in edit mode, even with a blank path and args', () => {
+    expect(shouldAutoFillFromName('edit', '', '')).toBe(false);
+  });
+
+  it('never runs with no form open', () => {
+    expect(shouldAutoFillFromName(null, '', '')).toBe(false);
+  });
+
+  it('does not clobber an already-filled path or args', () => {
+    expect(shouldAutoFillFromName('add', '/usr/bin/emu', '')).toBe(false);
+    expect(shouldAutoFillFromName('add', '', '-f %rom%')).toBe(false);
   });
 });

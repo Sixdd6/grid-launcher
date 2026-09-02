@@ -25,6 +25,21 @@ export function matchProfileByName(
 }
 
 /**
+ * Whether the manual tab's name-based auto-fill may run for the form as it
+ * stands. Add mode only — the flow is scoped to the Add form's Manual tab,
+ * so renaming an existing entry whose path and args happen to be blank must
+ * not rewrite its args — and only while path and args are both still empty,
+ * so it never clobbers a typed or path-derived value.
+ */
+export function shouldAutoFillFromName(
+  mode: 'add' | 'edit' | null,
+  path: string,
+  args: string
+): boolean {
+  return mode === 'add' && path.trim() === '' && args.trim() === '';
+}
+
+/**
  * Install tab search: AND-of-whitespace-tokens over casefolded name +
  * source_id (the reference's filter semantics, `filter_source_download_emulator_entries`,
  * ui/emulators.py:235-292, narrowed to the two fields the catalog row shows).

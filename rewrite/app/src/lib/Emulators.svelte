@@ -8,7 +8,11 @@
     type ProfileSummary,
   } from './api';
   import { downloads } from './stores/downloads.svelte';
-  import { filterCatalogEntries, matchProfileByName } from './emulators/catalog';
+  import {
+    filterCatalogEntries,
+    matchProfileByName,
+    shouldAutoFillFromName,
+  } from './emulators/catalog';
   import { NO_DEFAULT_VALUE, resolveDefaultEmulatorValue } from './emulators/defaults';
 
   let { onClose }: { onClose: () => void } = $props();
@@ -211,11 +215,13 @@
     }
   }
 
-  // Manual-add auto-fill from the typed NAME (task-7-brief.md): only when
-  // path and args are both still empty, so it never clobbers a manually
-  // typed or path-derived value. Fires on blur/change of the name field.
+  // Manual-add auto-fill from the typed NAME (task-7-brief.md): add mode
+  // only, and only when path and args are both still empty, so it never
+  // clobbers a manually typed or path-derived value and never touches an
+  // entry being edited. Fires on blur/change of the name field, which the
+  // edit form shares.
   function autoFillFromName() {
-    if (formPath.trim() !== '' || formArgs.trim() !== '') {
+    if (!shouldAutoFillFromName(editing?.mode ?? null, formPath, formArgs)) {
       autofillMatch = null;
       return;
     }
