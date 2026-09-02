@@ -914,3 +914,75 @@ async fn retrying_an_unknown_entry_is_a_no_op() {
     let harness = Harness::new(|_| Vec::new()).await;
     assert!(harness.service.retry(None, 999).await.is_ok());
 }
+
+// --- (i) autoconfig at the catalog-install call site (D1) -----------------------------
+
+/// The catalog install is D1 call site A: after the config entry is written,
+/// `autoconfig::sync_new_emulator` runs for it. A PCSX2 AppImage install must
+/// come out with `portable.ini` sitting next to the installed executable.
+#[tokio::test]
+async fn emulator_install_runs_autoconfig_after_writing_the_entry() {
+    let harness = Harness::new(|uri| vec![profile("PCSX2", gitea_source(uri))]).await;
+    harness
+        .mount_widget("pcsx2-x86_64.AppImage", b"APPIMAGE-BYTES".to_vec(), 0)
+        .await;
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+    assert_eq!(entry.error, "", "a clean autoconfig adds no warning");
+
+    let install_dir = harness.install_dir("PCSX2-v1.0");
+    assert!(
+        install_dir.join("portable.ini").is_file(),
+        "autoconfig must have run next to the installed executable"
+    );
+    assert!(install_dir.join("inis").join("PCSX2.ini").is_file());
+}
+
+/// An autoconfig failure is a warning on a Completed row, never a failed
+/// install. `inis` arrives from the archive as a plain FILE, so PCSX2's
+/// `create_dir_all(<dir>/inis)` cannot succeed and the writer reaches nothing.
+#[tokio::test]
+async fn autoconfig_failure_leaves_the_install_completed_with_a_warning() {
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = zip_bytes(
+        &staging,
+        "widget.zip",
+        &[
+            ("pcsx2.AppImage", b"APPIMAGE-BYTES"),
+            ("inis", b"not a directory"),
+        ],
+    );
+
+    let harness = Harness::new(|uri| vec![profile("PCSX2", gitea_source(uri))]).await;
+    harness.mount_widget("pcsx2-linux.zip", bytes, 0).await;
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+
+    assert_eq!(
+        entry.status,
+        DownloadStatus::Completed,
+        "autoconfig never fails an install: {}",
+        entry.error
+    );
+    assert!(
+        entry.error.contains("PCSX2"),
+        "the warning names the emulator: {:?}",
+        entry.error
+    );
+    // The entry itself was still written.
+    assert_eq!(harness.config().emulators.len(), 1);
+    assert_eq!(harness.config().emulators[0].name, "PCSX2");
+}

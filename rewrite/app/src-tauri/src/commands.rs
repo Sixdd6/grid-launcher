@@ -1,6 +1,9 @@
+use grid_core::autoconfig::{self, entry as autoconfig_entry};
 use grid_core::config::{Config, EmulatorEntry};
 use grid_core::launch::catalog::{catalog_entries, mark_installed, CatalogEntry};
-use grid_core::launch::profiles::{load_profiles, profile_for_entry, visible_profiles};
+use grid_core::launch::profiles::{
+    load_profiles, profile_for_entry, visible_profiles, EmulatorProfile,
+};
 use grid_core::launch::{GameSession, LaunchService, SessionsSnapshot};
 use grid_core::library::queue::DownloadsSnapshot;
 use grid_core::library::registry::InstalledGame;
@@ -54,7 +57,14 @@ pub fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>, String> {
     let client = state.session.client().ok_or("not connected")?;
-    client.platforms().await.map_err(err)
+    let platforms = client.platforms().await.map_err(err)?;
+    // grid-core holds no session, so this fetch is the only way it learns the
+    // platform list the autoconfig defaults assignment writes against.
+    if let Ok(install) = state.install.as_ref() {
+        let names: Vec<String> = platforms.iter().map(|p| p.name.clone()).collect();
+        install.set_known_platforms(autoconfig_entry::assignable_platforms(&names));
+    }
+    Ok(platforms)
 }
 
 #[tauri::command]
@@ -208,13 +218,57 @@ pub async fn list_emulators() -> Result<Vec<EmulatorEntry>, String> {
     .map_err(|e| format!("list_emulators did not finish: {e}"))?
 }
 
+/// D1 call site B. An ADD (a blank `original_name`, or one naming no current
+/// entry) gets the matched profile's defaults applied before the merge and a
+/// full autoconfig sync after the save; an EDIT gets neither. The command's
+/// `Result` is unchanged either way — a sync warning is logged and the
+/// command still returns `Ok`.
 #[tauri::command]
-pub async fn save_emulator(original_name: String, entry: EmulatorEntry) -> Result<(), String> {
+pub async fn save_emulator(
+    state: State<'_, AppState>,
+    original_name: String,
+    entry: EmulatorEntry,
+) -> Result<(), String> {
+    // Read out of the install service before the blocking hop: `State` is not
+    // `Send`. An install service that failed to build simply contributes no
+    // platforms and no credentials.
+    let (platforms, ra) = match state.install.as_ref() {
+        Ok(install) => (install.known_platforms(), install.ra_credentials()),
+        Err(_) => (Vec::new(), None),
+    };
+
     tokio::task::spawn_blocking(move || {
         let config_path = Config::default_path();
         let mut config = Config::load(&config_path).map_err(err)?;
+        let profiles = load_profiles();
+
+        let is_add = is_manual_add(&config, &original_name);
+        let entry = manual_add_entry(entry, is_add, profiles);
+        // The name as it will be STORED, so the sync lookup matches exactly.
+        let saved_name = entry.name.clone();
+
         apply_save_emulator(&mut config, &original_name, entry)?;
-        config.save(&config_path).map_err(err)
+        config.save(&config_path).map_err(err)?;
+
+        if is_add {
+            let ctx = autoconfig::SyncContext {
+                config_path: &config_path,
+                platforms: &platforms,
+                ps3_library_path: autoconfig::ps3_library_path(&config.library_path),
+                ra,
+                profiles,
+            };
+            // Warnings name emulators and file paths only — never a secret.
+            match autoconfig::sync_new_emulator(&saved_name, &ctx) {
+                Ok(report) => {
+                    for warning in report.warnings {
+                        tracing::warn!("emulator autoconfig: {warning}");
+                    }
+                }
+                Err(e) => tracing::warn!("emulator autoconfig: {e}"),
+            }
+        }
+        Ok(())
     })
     .await
     .map_err(|e| format!("save_emulator did not finish: {e}"))?
@@ -360,6 +414,39 @@ fn apply_save_emulator(
         None => config.emulators.push(entry),
     }
     Ok(())
+}
+
+/// Whether this `save_emulator` call is an ADD rather than an edit: a blank
+/// `original_name`, or one that names no current entry. Only an add runs the
+/// profile defaults and the autoconfig sync (D1).
+fn is_manual_add(config: &Config, original_name: &str) -> bool {
+    let original = original_name.trim();
+    if original.is_empty() {
+        return true;
+    }
+    let folded = original.to_lowercase();
+    !config
+        .emulators
+        .iter()
+        .any(|e| e.name.trim().to_lowercase() == folded)
+}
+
+/// The hand-typed-entry half of layer 1
+/// (`apply_manual_emulator_profile_defaults`, autoconfig.py:228): blank
+/// fields take the matched profile's values and `path` is never touched. An
+/// edit, or an entry no profile matches, passes through unchanged.
+fn manual_add_entry(
+    entry: EmulatorEntry,
+    is_add: bool,
+    profiles: &[EmulatorProfile],
+) -> EmulatorEntry {
+    if !is_add {
+        return entry;
+    }
+    match profile_for_entry(&entry.name, &entry.path, profiles) {
+        Some(profile) => autoconfig_entry::apply_manual_emulator_profile_defaults(&entry, profile),
+        None => entry,
+    }
 }
 
 /// [`delete_emulator`]'s merge logic: drops `name` (case-insensitive) from
@@ -626,5 +713,69 @@ mod merge_tests {
             config.default_emulators.get("Wii").map(String::as_str),
             Some("Dolphin")
         );
+    }
+
+    // --- manual-add profile defaults (D1) --------------------------------------
+
+    fn pcsx2_profile() -> EmulatorProfile {
+        EmulatorProfile {
+            name: "PCSX2".to_string(),
+            match_tokens: vec!["pcsx2*".to_string()],
+            args: "-batch %rom%".to_string(),
+            save_strategy: "folder".to_string(),
+            save_directories: vec!["~/pcsx2/memcards".to_string()],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn manual_add_applies_profile_defaults_but_an_edit_does_not() {
+        let profiles = vec![pcsx2_profile()];
+        let typed = EmulatorEntry {
+            name: "PCSX2".to_string(),
+            path: "/opt/pcsx2/pcsx2.AppImage".to_string(),
+            ..Default::default()
+        };
+
+        let added = manual_add_entry(typed.clone(), true, &profiles);
+        assert_eq!(added.args, "-batch %rom%");
+        assert_eq!(added.save_paths, "~/pcsx2/memcards");
+        assert_eq!(added.save_strategy, "folder");
+
+        let edited = manual_add_entry(typed.clone(), false, &profiles);
+        assert_eq!(edited, typed, "an edit must pass through untouched (D1)");
+
+        // No matching profile: the add passes through unchanged too.
+        let unmatched = manual_add_entry(typed.clone(), true, &[]);
+        assert_eq!(unmatched, typed);
+    }
+
+    #[test]
+    fn manual_add_never_overwrites_the_typed_path() {
+        let mut profiles = vec![pcsx2_profile()];
+        profiles[0].args = "--other %rom%".to_string();
+        let typed = EmulatorEntry {
+            name: "PCSX2".to_string(),
+            path: "/home/me/my own build/pcsx2".to_string(),
+            args: "%rom%".to_string(),
+            ..Default::default()
+        };
+
+        let added = manual_add_entry(typed.clone(), true, &profiles);
+        assert_eq!(
+            added.path, "/home/me/my own build/pcsx2",
+            "autoconfig.py:228 never touches `path`"
+        );
+        assert_eq!(added.args, "--other %rom%", "a bare %rom% IS replaced");
+    }
+
+    #[test]
+    fn is_manual_add_is_true_for_a_blank_or_unknown_original_name() {
+        let config = config_with(&["Dolphin"], &[]);
+        assert!(is_manual_add(&config, ""));
+        assert!(is_manual_add(&config, "   "));
+        assert!(is_manual_add(&config, "Nonexistent"));
+        assert!(!is_manual_add(&config, "Dolphin"));
+        assert!(!is_manual_add(&config, "  dolphin  "));
     }
 }

@@ -25,6 +25,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use serde_json::Value;
 
+use crate::autoconfig::{self, RaCredentials};
 use crate::config::{Config, EmulatorEntry};
 use crate::launch::forge::{ForgeClient, ForgeProvider, ResolvedDownload};
 use crate::launch::profiles::{load_profiles, EmulatorProfile};
@@ -286,6 +287,10 @@ fn plan_install(
 
 type Listener = Arc<dyn Fn(DownloadsSnapshot) + Send + Sync>;
 
+/// Supplies the RetroAchievements pair to the autoconfig hook. grid-core
+/// never reads the keyring itself, so the app installs this.
+pub type RaProvider = Arc<dyn Fn() -> Option<RaCredentials> + Send + Sync>;
+
 /// Owns the install queue and drives one download task and one finalize task
 /// at a time. Every method takes `&self`; the async entry points take
 /// `&Arc<Self>` because they spawn tasks that outlive the call.
@@ -308,6 +313,13 @@ pub struct InstallService {
     /// never installs an emulator should never pay for it.
     forge: OnceLock<Arc<ForgeClient>>,
     last_emit: Mutex<Instant>,
+    /// The assignable server platform names the last successful
+    /// `list_platforms` saw — the only way grid-core learns the platform
+    /// list, since it holds no session of its own.
+    known_platforms: RwLock<Vec<String>>,
+    /// `None` until the app installs one; autoconfig then writes no
+    /// RetroAchievements credentials.
+    ra_provider: RwLock<Option<RaProvider>>,
 }
 
 impl InstallService {
@@ -342,6 +354,8 @@ impl InstallService {
             profiles,
             forge: OnceLock::new(),
             last_emit: Mutex::new(Instant::now()),
+            known_platforms: RwLock::new(Vec::new()),
+            ra_provider: RwLock::new(None),
         })
     }
 
@@ -349,6 +363,32 @@ impl InstallService {
     /// layer; a second call replaces the first.
     pub fn set_notify(&self, f: Listener) {
         *self.notify.write().unwrap() = Some(f);
+    }
+
+    /// Records the assignable server platform names the app just fetched.
+    /// Callers pass the list already run through
+    /// [`autoconfig::entry::assignable_platforms`].
+    pub fn set_known_platforms(&self, platforms: Vec<String>) {
+        *self.known_platforms.write().unwrap() = platforms;
+    }
+
+    /// The platform names [`Self::set_known_platforms`] last recorded; empty
+    /// until the app has fetched them once.
+    pub fn known_platforms(&self) -> Vec<String> {
+        self.known_platforms.read().unwrap().clone()
+    }
+
+    /// Installs the RetroAchievements credential source the autoconfig hook
+    /// reads. A second call replaces the first.
+    pub fn set_ra_provider(&self, f: RaProvider) {
+        *self.ra_provider.write().unwrap() = Some(f);
+    }
+
+    /// The current RetroAchievements pair, or `None` when no provider is
+    /// installed or the user has no login.
+    pub fn ra_credentials(&self) -> Option<RaCredentials> {
+        let provider = self.ra_provider.read().unwrap();
+        provider.as_ref().and_then(|f| f())
     }
 
     /// The current entry list, newest first.
@@ -918,6 +958,7 @@ impl InstallService {
         make_executable(&exe);
 
         self.write_emulator_entry(job, &paths.resolved, &exe)?;
+        self.sync_autoconfig(&job.profile_name, warning);
 
         // Only after a successful config write, matching the game path.
         for path in extracted_archives {
@@ -929,6 +970,36 @@ impl InstallService {
             }
         }
         Ok(())
+    }
+
+    /// D1 call site A: runs [`autoconfig::sync_new_emulator`] for the entry
+    /// the install just wrote, before the archive cleanup.
+    ///
+    /// Autoconfig NEVER fails an install. A config error, or any writer that
+    /// reached nothing, appends ONE line to the finalize warning — exactly
+    /// like a failed archive delete — and the install still reports
+    /// `Completed`. No credential can appear in that line: the report names
+    /// emulators and writers only.
+    fn sync_autoconfig(&self, entry_name: &str, warning: &mut String) {
+        let library_path = Config::load(&self.config_path)
+            .map(|config| config.library_path)
+            .unwrap_or_default();
+        let platforms = self.known_platforms();
+        let ctx = autoconfig::SyncContext {
+            config_path: &self.config_path,
+            platforms: &platforms,
+            ps3_library_path: autoconfig::ps3_library_path(&library_path),
+            ra: self.ra_credentials(),
+            profiles: &self.profiles,
+        };
+        match autoconfig::sync_new_emulator(entry_name, &ctx) {
+            Ok(report) if !report.warnings.is_empty() => append_warning(
+                warning,
+                &format!("emulator autoconfig: {}", report.warnings.join("; ")),
+            ),
+            Ok(_) => {}
+            Err(e) => append_warning(warning, &format!("emulator autoconfig: {e}")),
+        }
     }
 
     /// Writes (or replaces) `job`'s emulator entry in the config file.
@@ -1538,5 +1609,27 @@ mod tests {
         fs::write(&path, b"bytes").unwrap();
         assert!(delete_with_retry(&path));
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn known_platforms_defaults_to_empty_and_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = Arc::new(Registry::open(&dir.path().join("registry.db")).unwrap());
+        let service =
+            InstallService::with_profiles(registry, dir.path().join("config.toml"), Vec::new());
+
+        assert!(
+            service.known_platforms().is_empty(),
+            "grid-core has no session of its own, so the list starts empty"
+        );
+
+        service.set_known_platforms(vec!["SNES".to_string(), "Sony PlayStation 2".to_string()]);
+        assert_eq!(
+            service.known_platforms(),
+            vec!["SNES".to_string(), "Sony PlayStation 2".to_string()]
+        );
+
+        service.set_known_platforms(Vec::new());
+        assert!(service.known_platforms().is_empty());
     }
 }
