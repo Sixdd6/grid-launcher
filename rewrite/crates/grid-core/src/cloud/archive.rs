@@ -399,6 +399,77 @@ fn write_native_save_dirs_archive(
     Ok(total_files)
 }
 
+// --- zip_dirs_with_prefixes ----------------------------------------------
+
+/// Zips each `(prefix, dir)` pair into one fresh temp archive (named via
+/// [`temp_archive_path`]), each directory's files under a
+/// `"<prefix>/<path relative to dir, posix-separated>"` member name.
+///
+/// Written for the xemu raw-disk bridge (`cloud::xemu_sync`, spec "xemu
+/// flow"), which extracts `E:/UDATA` and `E:/TDATA` into a scratch
+/// directory via [`crate::fatx::image::FatxPartition::read_tree`] and
+/// archives both trees as one record; there is no Python original — the
+/// whole-image upload it replaces (deviation D1) never built a zip this
+/// way.
+///
+/// A `dir` that does not exist contributes nothing and is not an error:
+/// `read_tree` leaves an absent FATX directory's destination untouched, so
+/// a real image with only one of `UDATA`/`TDATA` populated is the common
+/// case, not a failure. Returns the total files written across every
+/// prefix.
+///
+/// On any I/O failure — walking a `dir`, opening a source file, or writing
+/// an entry — the partial archive is unlinked and the error propagated,
+/// matching every other writer in this module.
+pub fn zip_dirs_with_prefixes(
+    dirs: &[(&str, &Path)],
+    ignore: &IgnoreSets,
+    title: &str,
+) -> io::Result<(PathBuf, usize)> {
+    let archive_path = temp_archive_path(title);
+
+    match write_prefixed_dirs_archive(&archive_path, dirs, ignore) {
+        Ok(total_files) => Ok((archive_path, total_files)),
+        Err(err) => {
+            unlink_best_effort(&archive_path);
+            Err(err)
+        }
+    }
+}
+
+fn write_prefixed_dirs_archive(
+    archive_path: &Path,
+    dirs: &[(&str, &Path)],
+    ignore: &IgnoreSets,
+) -> io::Result<usize> {
+    let file = fs::File::create(archive_path)?;
+    let mut writer = ZipWriter::new(file);
+    let mut total_files = 0usize;
+
+    for (prefix, dir) in dirs {
+        if !dir.is_dir() {
+            continue;
+        }
+        for candidate in walk_all_entries(dir)? {
+            if !candidate.is_file() {
+                continue;
+            }
+            if ignore.blocks(&candidate) {
+                continue;
+            }
+            let relative = candidate
+                .strip_prefix(dir)
+                .expect("walk_all_entries always yields paths under root");
+            let member_name = format!("{prefix}/{}", to_posix_member(relative));
+            write_file_entry(&mut writer, &candidate, &member_name)?;
+            total_files += 1;
+        }
+    }
+
+    writer.finish().map_err(zip_err_to_io)?;
+    Ok(total_files)
+}
+
 // --- payload sniff + extraction --------------------------------------------
 
 /// Whether `bytes` starts with the zip local-file-header magic `"PK"`.

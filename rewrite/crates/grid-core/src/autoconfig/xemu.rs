@@ -15,15 +15,33 @@
 //! scope (`changed = changed or display_changed`, etc.) — so the net effect
 //! is one accumulator OR-folded across all eight calls, which is what
 //! [`ensure_settings`] implements directly with a single `bool`.
+//!
+//! **Deviation D3** (`docs/superpowers/specs/2026-09-02-cloud-saves-design.md`,
+//! "Deviations"): the milestone 5 required-BIOS probe and `hdd_path`
+//! default are amended so a raw HDD image is first-class here too. The
+//! probe's HDD slot ([`missing_bios_files`]) is satisfied by either
+//! `xbox_hdd.img` or `xbox_hdd.qcow2`; the `sys.files.hdd_path` default
+//! ([`sections`]) points at `xbox_hdd.img` when that file already exists
+//! in the base dir, else `xbox_hdd.qcow2` — add-only semantics are
+//! unchanged, so an already-set `hdd_path` is never touched either way.
+//! GRID still ships no qcow2 decoder or conversion (D1); this only makes
+//! an already-raw setup easier to land on by default.
 
 use std::path::PathBuf;
 
 use super::{paths, writers, EnsureResult};
 
-/// The three files [`missing_bios_files`] checks for, in order.
-/// `eeprom.bin` is deliberately NOT in this list even though
+/// The two BIOS files [`missing_bios_files`] checks for unconditionally,
+/// in order. `eeprom.bin` is deliberately NOT in this list even though
 /// [`ensure_settings`] writes an `eeprom_path` (xemu.py:330).
-const REQUIRED_BIOS_FILES: [&str; 3] = ["mcpx_1.0.bin", "complex_4627.bin", "xbox_hdd.qcow2"];
+const REQUIRED_BIOS_FILES: [&str; 2] = ["mcpx_1.0.bin", "complex_4627.bin"];
+
+/// D3: the HDD slot in [`missing_bios_files`] is satisfied by either of
+/// these — a raw image or a qcow2 — checked in this order so
+/// [`hdd_default_path`] and the probe agree on which file "counts" first.
+/// When neither is present, the probe reports `xbox_hdd.img`: the file
+/// cloud sync actually needs, since GRID converts nothing itself (D1).
+const HDD_IMAGE_CANDIDATES: [&str; 2] = ["xbox_hdd.img", "xbox_hdd.qcow2"];
 
 enum Host {
     Windows,
@@ -81,9 +99,23 @@ fn resolve_emulator_dir(emulator_path: &str) -> Option<PathBuf> {
     paths::emulator_dir(&expanded)
 }
 
+/// D3: `<base_dir>/xbox_hdd.img` when that file already exists there,
+/// else `<base_dir>/xbox_hdd.qcow2` — the `sys.files.hdd_path` default
+/// [`sections`] writes when the key is absent (add-only: an existing key
+/// is left alone regardless of which image, if either, actually exists).
+fn hdd_default_path(base_dir: &std::path::Path) -> PathBuf {
+    let img = base_dir.join("xbox_hdd.img");
+    if img.exists() {
+        img
+    } else {
+        base_dir.join("xbox_hdd.qcow2")
+    }
+}
+
 /// The eight `(section, desired)` pairs, in the pinned order
 /// (xemu.py:257-315). `base_dir` backs the four `[sys.files]` paths, each
-/// wrapped in single quotes with no escaping.
+/// wrapped in single quotes with no escaping. `hdd_path`'s default is
+/// [`hdd_default_path`] (D3).
 fn sections(base_dir: &std::path::Path) -> Vec<(&'static str, writers::Desired)> {
     vec![
         ("general", crate::desired![("show_welcome", "false")]),
@@ -112,7 +144,7 @@ fn sections(base_dir: &std::path::Path) -> Vec<(&'static str, writers::Desired)>
                 ),
                 (
                     "hdd_path",
-                    format!("'{}'", base_dir.join("xbox_hdd.qcow2").display())
+                    format!("'{}'", hdd_default_path(base_dir).display())
                 ),
                 (
                     "eeprom_path",
@@ -175,16 +207,91 @@ pub fn ensure_settings(emulator_path: &str) -> EnsureResult {
     EnsureResult::at(config_path, changed)
 }
 
-/// `xemu_missing_bios_files` (xemu.py:329-336): the subset of
-/// [`REQUIRED_BIOS_FILES`] that does not exist under the base directory —
-/// the resolved `emulator_dir` when `emulator_path` is non-blank, else
-/// [`default_base_root`]. `eeprom.bin` is never checked.
+/// Minimal reader for the xemu cloud-sync bridge (`cloud::xemu_sync`,
+/// spec "xemu flow"): resolves the same `xemu.toml` target
+/// [`ensure_settings`] writes to (`resolve_emulator_dir(emulator_path)`,
+/// else [`default_base_root`]) and reads `[sys.files]`'s `hdd_path` back
+/// out, stripped of the single-quote wrapper [`sections`] writes it with.
+///
+/// `None` when the file cannot be read, has no `[sys.files]` section, or
+/// that section has no non-blank `hdd_path`. There is no full TOML parse
+/// here — see [`hdd_path_from_toml`]'s doc comment for the deliberately
+/// narrow section match this gets away with.
+pub fn hdd_path_from_config(emulator_path: &str) -> Option<String> {
+    let config_path = match resolve_emulator_dir(emulator_path) {
+        Some(dir) => dir.join("xemu.toml"),
+        None => default_base_root().join("xemu.toml"),
+    };
+    let content = std::fs::read_to_string(&config_path).ok()?;
+    hdd_path_from_toml(&content)
+}
+
+/// Scans `content` line by line for `[sys.files]`'s `hdd_path` value.
+/// Section matching is an exact, trimmed `"[sys.files]"` — none of the
+/// dotted/quoted header variants real TOML also allows (`[sys."files"]`,
+/// nested `[sys.files.sub]` headers written after it, etc.) are
+/// recognized, since [`sections`] — the only writer this file's `hdd_path`
+/// realistically comes from — never produces them.
+fn hdd_path_from_toml(content: &str) -> Option<String> {
+    let mut in_sys_files = false;
+    for raw_line in content.lines() {
+        let trimmed = raw_line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_sys_files = trimmed == "[sys.files]";
+            continue;
+        }
+        if !in_sys_files {
+            continue;
+        }
+        let Some(eq_index) = trimmed.find('=') else {
+            continue;
+        };
+        if trimmed[..eq_index].trim() != "hdd_path" {
+            continue;
+        }
+        let value = strip_matching_quotes(trimmed[eq_index + 1..].trim());
+        return if value.is_empty() {
+            None
+        } else {
+            Some(value.to_string())
+        };
+    }
+    None
+}
+
+/// Strips one layer of matching quotes: single (as [`sections`] always
+/// writes) or double (tolerated for a hand-edited file). Unquoted or
+/// mismatched-quote input passes through unchanged.
+fn strip_matching_quotes(value: &str) -> &str {
+    let bytes = value.as_bytes();
+    if bytes.len() >= 2 {
+        let (first, last) = (bytes[0], bytes[bytes.len() - 1]);
+        if (first == b'\'' && last == b'\'') || (first == b'"' && last == b'"') {
+            return &value[1..value.len() - 1];
+        }
+    }
+    value
+}
+
+/// `xemu_missing_bios_files` (xemu.py:329-336), amended by D3: the subset
+/// of [`REQUIRED_BIOS_FILES`] that does not exist under the base
+/// directory — the resolved `emulator_dir` when `emulator_path` is
+/// non-blank, else [`default_base_root`] — plus, when NEITHER of
+/// [`HDD_IMAGE_CANDIDATES`] exists there, `"xbox_hdd.img"` appended for
+/// the HDD slot. `eeprom.bin` is never checked.
 pub fn missing_bios_files(emulator_path: &str) -> Vec<&'static str> {
     let base_dir = resolve_emulator_dir(emulator_path).unwrap_or_else(default_base_root);
-    REQUIRED_BIOS_FILES
+    let mut missing: Vec<&'static str> = REQUIRED_BIOS_FILES
         .into_iter()
         .filter(|name| !base_dir.join(name).exists())
-        .collect()
+        .collect();
+    if !HDD_IMAGE_CANDIDATES
+        .iter()
+        .any(|name| base_dir.join(name).exists())
+    {
+        missing.push("xbox_hdd.img");
+    }
+    missing
 }
 
 #[cfg(test)]
@@ -343,7 +450,7 @@ mod tests {
         let all_absent = missing_bios_files(exe.to_str().unwrap());
         assert!(all_absent.contains(&"mcpx_1.0.bin"));
         assert!(all_absent.contains(&"complex_4627.bin"));
-        assert!(all_absent.contains(&"xbox_hdd.qcow2"));
+        assert!(all_absent.contains(&"xbox_hdd.img"));
         assert!(!all_absent.contains(&"eeprom.bin"));
 
         for name in ["mcpx_1.0.bin", "complex_4627.bin", "xbox_hdd.qcow2"] {
@@ -351,6 +458,83 @@ mod tests {
         }
         let all_present = missing_bios_files(exe.to_str().unwrap());
         assert!(all_present.is_empty());
+    }
+
+    // --- D3: hdd-either probe / default ------------------------------------
+
+    #[test]
+    fn probe_accepts_img_or_qcow2_for_the_hdd_slot() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+
+        // Neither present: the HDD slot is missing, reported as the raw name.
+        let missing = missing_bios_files(exe.to_str().unwrap());
+        assert!(missing.contains(&"xbox_hdd.img"));
+        assert!(!missing.contains(&"xbox_hdd.qcow2"));
+
+        // Only the raw image: the slot is satisfied.
+        std::fs::write(dir.join("xbox_hdd.img"), b"").unwrap();
+        let with_img = missing_bios_files(exe.to_str().unwrap());
+        assert!(!with_img.contains(&"xbox_hdd.img"));
+        assert!(!with_img.contains(&"xbox_hdd.qcow2"));
+        std::fs::remove_file(dir.join("xbox_hdd.img")).unwrap();
+
+        // Only the qcow2: also satisfied.
+        std::fs::write(dir.join("xbox_hdd.qcow2"), b"").unwrap();
+        let with_qcow2 = missing_bios_files(exe.to_str().unwrap());
+        assert!(!with_qcow2.contains(&"xbox_hdd.img"));
+        assert!(!with_qcow2.contains(&"xbox_hdd.qcow2"));
+    }
+
+    #[test]
+    fn hdd_path_default_prefers_an_existing_img() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+
+        // Both present: the default prefers the raw image.
+        std::fs::write(dir.join("xbox_hdd.img"), b"").unwrap();
+        std::fs::write(dir.join("xbox_hdd.qcow2"), b"").unwrap();
+        ensure_settings(exe.to_str().unwrap());
+        let text = std::fs::read_to_string(dir.join("xemu.toml")).unwrap();
+        let expected = format!("'{}'", dir.join("xbox_hdd.img").display());
+        assert!(
+            text.contains(&format!("hdd_path = {expected}")),
+            "expected {expected:?} in {text}"
+        );
+    }
+
+    #[test]
+    fn hdd_path_default_falls_back_to_qcow2_when_no_img_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+
+        ensure_settings(exe.to_str().unwrap());
+        let text = std::fs::read_to_string(dir.join("xemu.toml")).unwrap();
+        let expected = format!("'{}'", dir.join("xbox_hdd.qcow2").display());
+        assert!(
+            text.contains(&format!("hdd_path = {expected}")),
+            "expected {expected:?} in {text}"
+        );
+    }
+
+    #[test]
+    fn existing_hdd_path_key_is_never_touched() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+        std::fs::write(dir.join("xbox_hdd.img"), b"").unwrap();
+        std::fs::write(
+            dir.join("xemu.toml"),
+            "[sys.files]\nhdd_path = 'somewhere/custom.raw'\n",
+        )
+        .unwrap();
+
+        ensure_settings(exe.to_str().unwrap());
+
+        let text = std::fs::read_to_string(dir.join("xemu.toml")).unwrap();
+        assert!(
+            text.contains("hdd_path = 'somewhere/custom.raw'"),
+            "an existing hdd_path must survive untouched: {text}"
+        );
     }
 
     // --- default_base_root --------------------------------------------------

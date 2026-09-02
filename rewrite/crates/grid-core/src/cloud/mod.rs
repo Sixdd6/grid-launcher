@@ -15,6 +15,7 @@ pub mod state;
 pub mod tokens;
 pub mod transfer;
 pub mod window;
+pub mod xemu_sync;
 
 use std::collections::BTreeSet;
 use std::path::Path;
