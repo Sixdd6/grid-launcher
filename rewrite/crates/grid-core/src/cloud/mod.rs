@@ -9,6 +9,7 @@ pub mod candidates;
 pub mod scope;
 pub mod state;
 pub mod tokens;
+pub mod transfer;
 pub mod window;
 
 use std::collections::BTreeSet;

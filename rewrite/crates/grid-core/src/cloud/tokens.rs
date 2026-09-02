@@ -18,14 +18,8 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+use super::transfer::SUPPORTED_IMAGE_EXTENSIONS;
 use super::CloudGame;
-
-/// Image extensions state-file detection rejects before any other rule.
-/// `cloud_transfer.py:25-31`'s `SUPPORTED_IMAGE_EXTENSIONS`, duplicated here
-/// per this task's brief: that constant is not yet ported to `grid-core`
-/// (it lands in a later task), so this module carries its own private copy
-/// rather than depend on it or invent a new shared name early.
-const REJECTED_IMAGE_EXTENSIONS: &[&str] = &[".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"];
 
 static NON_ALNUM_LOWER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^a-z0-9]+").unwrap());
 static NON_ALNUM_UPPER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^A-Z0-9]+").unwrap());
@@ -366,7 +360,7 @@ pub fn is_state_file_candidate(path: &Path) -> bool {
         .to_lowercase();
     let (_, suffix) = split_suffix(&raw_name);
 
-    if REJECTED_IMAGE_EXTENSIONS.contains(&suffix.as_str()) {
+    if SUPPORTED_IMAGE_EXTENSIONS.contains(&suffix.as_str()) {
         return false;
     }
     if matches!(
