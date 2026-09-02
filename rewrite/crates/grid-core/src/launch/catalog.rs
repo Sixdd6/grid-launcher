@@ -241,6 +241,7 @@ mod tests {
             platform_keywords: vec![],
             is_compat_tool: compat,
             source,
+            ..Default::default()
         }
     }
 

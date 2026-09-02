@@ -45,7 +45,25 @@ export type GameSession = {
 
 export type SessionsSnapshot = { sessions: GameSession[]; warning: string | null };
 
-export type EmulatorEntry = { name: string; path: string; args: string };
+/// The backend carries more per-entry state than the form edits: the
+/// `source_*` install provenance and the five layer-1 autoconfig fields.
+/// They are optional here and passed straight back through `saveEmulator`,
+/// so editing an entry never drops them.
+export type EmulatorEntry = {
+  name: string;
+  path: string;
+  args: string;
+  source_id?: string;
+  source_provider?: string;
+  source_owner?: string;
+  source_repo?: string;
+  source_release_tag?: string;
+  save_strategy?: string;
+  ignore_files?: string;
+  ignore_extensions?: string;
+  save_paths?: string;
+  state_paths?: string;
+};
 
 export type ProfileSummary = { name: string; args: string };
 

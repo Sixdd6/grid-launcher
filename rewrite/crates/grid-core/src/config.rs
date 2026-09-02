@@ -31,6 +31,21 @@ pub struct EmulatorEntry {
     pub source_repo: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub source_release_tag: String,
+    /// The five fields below are written by `autoconfig::entry`'s layer-1
+    /// pass (autoconfig.py:524-554) and read by the cloud-save code. They
+    /// follow the `source_*` serde pattern — defaulted on load, omitted on
+    /// save when blank — so a config written before they existed round-trips
+    /// byte-identically.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub save_strategy: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ignore_files: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub ignore_extensions: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub save_paths: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub state_paths: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -62,6 +77,11 @@ pub struct Config {
     pub retroarch_cores: BTreeMap<String, String>,
     #[serde(default)]
     pub launch_args: String,
+    /// The RetroAchievements account name the `ensure_*` writers log the
+    /// emulator in with. Plain, non-secret: the matching token lives in the
+    /// OS keyring only (see `secrets.rs`) and never in this struct.
+    #[serde(default)]
+    pub retroachievements_username: String,
     /// Unknown keys survive load/save round trips for forward compatibility.
     #[serde(flatten)]
     pub extra: BTreeMap<String, toml::Value>,
@@ -78,6 +98,7 @@ impl Default for Config {
             default_emulators: BTreeMap::new(),
             retroarch_cores: BTreeMap::new(),
             launch_args: String::new(),
+            retroachievements_username: String::new(),
             extra: BTreeMap::new(),
         }
     }
@@ -156,6 +177,7 @@ mod tests {
             default_emulators: BTreeMap::new(),
             retroarch_cores: BTreeMap::new(),
             launch_args: String::new(),
+            retroachievements_username: String::new(),
             extra: Default::default(),
         };
         cfg.save(&path).unwrap();
@@ -213,6 +235,7 @@ mod tests {
             default_emulators: BTreeMap::new(),
             retroarch_cores: BTreeMap::new(),
             launch_args: String::new(),
+            retroachievements_username: String::new(),
             extra: Default::default(),
         };
         cfg.save(&path).unwrap();
@@ -262,6 +285,7 @@ mod tests {
             default_emulators: BTreeMap::new(),
             retroarch_cores: BTreeMap::new(),
             launch_args: String::new(),
+            retroachievements_username: String::new(),
             extra: BTreeMap::new(),
         };
         cfg.save(&path).unwrap();
@@ -293,6 +317,7 @@ mod tests {
             default_emulators: BTreeMap::new(),
             retroarch_cores: BTreeMap::new(),
             launch_args: String::new(),
+            retroachievements_username: String::new(),
             extra: BTreeMap::new(),
         };
         cfg.save(&path).unwrap();
@@ -322,10 +347,12 @@ mod tests {
                 source_owner: "PCSX2".into(),
                 source_repo: "pcsx2".into(),
                 source_release_tag: "v2.1.0".into(),
+                ..Default::default()
             }],
             default_emulators: BTreeMap::new(),
             retroarch_cores: BTreeMap::new(),
             launch_args: String::new(),
+            retroachievements_username: String::new(),
             extra: BTreeMap::new(),
         };
         cfg.save(&path).unwrap();
@@ -336,6 +363,74 @@ mod tests {
         assert_eq!(entry.source_owner, "PCSX2");
         assert_eq!(entry.source_repo, "pcsx2");
         assert_eq!(entry.source_release_tag, "v2.1.0");
+    }
+
+    #[test]
+    fn config_round_trips_the_five_new_emulator_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config {
+            emulators: vec![EmulatorEntry {
+                name: "RetroArch".into(),
+                path: "/x/retroarch".into(),
+                args: "-L %core% %rom%".into(),
+                save_strategy: "folder".into(),
+                ignore_files: "thumbs.db".into(),
+                ignore_extensions: ".jpg;\n.png".into(),
+                save_paths: "~/saves;\n~/more".into(),
+                state_paths: "~/states".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let loaded = Config::load(&path).unwrap();
+        let entry = &loaded.emulators[0];
+        assert_eq!(entry.save_strategy, "folder");
+        assert_eq!(entry.ignore_files, "thumbs.db");
+        assert_eq!(entry.ignore_extensions, ".jpg;\n.png");
+        assert_eq!(entry.save_paths, "~/saves;\n~/more");
+        assert_eq!(entry.state_paths, "~/states");
+    }
+
+    #[test]
+    fn config_without_the_new_fields_writes_no_new_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config {
+            emulators: vec![EmulatorEntry {
+                name: "emulator1".into(),
+                path: "/path/to/emu1".into(),
+                args: "--arg1".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        for key in [
+            "save_strategy",
+            "ignore_files",
+            "ignore_extensions",
+            "save_paths",
+            "state_paths",
+        ] {
+            assert!(!written.contains(key), "unexpected {key} in {written}");
+        }
+    }
+
+    #[test]
+    fn config_round_trips_retroachievements_username() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config {
+            retroachievements_username: "sixdd6".into(),
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.retroachievements_username, "sixdd6");
+        assert!(!loaded.extra.contains_key("retroachievements_username"));
     }
 
     #[test]
@@ -368,6 +463,7 @@ mod tests {
             default_emulators,
             retroarch_cores: BTreeMap::new(),
             launch_args: String::new(),
+            retroachievements_username: String::new(),
             extra: BTreeMap::new(),
         };
         cfg.save(&path).unwrap();
@@ -398,6 +494,7 @@ mod tests {
             default_emulators: BTreeMap::new(),
             retroarch_cores,
             launch_args: String::new(),
+            retroachievements_username: String::new(),
             extra: BTreeMap::new(),
         };
         cfg.save(&path).unwrap();
@@ -425,6 +522,7 @@ mod tests {
             default_emulators: BTreeMap::new(),
             retroarch_cores: BTreeMap::new(),
             launch_args: "--fullscreen --no-menu".into(),
+            retroachievements_username: String::new(),
             extra: BTreeMap::new(),
         };
         cfg.save(&path).unwrap();

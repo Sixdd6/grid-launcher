@@ -34,7 +34,10 @@
   // originalName arg would come out blank, so the save gets rejected as a
   // duplicate against itself). `name` is the entry's current name, used as
   // saveEmulator's originalName so a rename can find & replace itself.
-  type Editing = { mode: 'add' } | { mode: 'edit'; name: string } | null;
+  // `entry` is the row being edited, kept whole so the fields the form does
+  // not show (install provenance, autoconfig save/ignore paths) are written
+  // back untouched instead of being dropped on save.
+  type Editing = { mode: 'add' } | { mode: 'edit'; name: string; entry: EmulatorEntry } | null;
   let editing = $state<Editing>(null);
   // Only meaningful while editing.mode === 'add' — edit mode always shows
   // the manual form directly (there is no "install this again" flow for an
@@ -167,7 +170,7 @@
   }
 
   function openEdit(entry: EmulatorEntry) {
-    editing = { mode: 'edit', name: entry.name };
+    editing = { mode: 'edit', name: entry.name, entry };
     formName = entry.name;
     formPath = entry.path;
     formArgs = entry.args;
@@ -244,7 +247,12 @@
     const originalName = editing.mode === 'add' ? '' : editing.name;
     // Backend stores the name as-given; trim client-side so a name typed
     // with stray whitespace doesn't get persisted verbatim.
-    const entry: EmulatorEntry = { name: formName.trim(), path: formPath, args: formArgs };
+    const entry: EmulatorEntry = {
+      ...(editing.mode === 'edit' ? editing.entry : {}),
+      name: formName.trim(),
+      path: formPath,
+      args: formArgs,
+    };
     formError = null;
     formPending = true;
     try {

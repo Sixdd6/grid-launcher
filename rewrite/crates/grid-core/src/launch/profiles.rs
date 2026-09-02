@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 
 /// One entry from `emulator-autoprofiles.json`, normalized at load time.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct EmulatorProfile {
     pub name: String,
     pub match_tokens: Vec<String>,
@@ -25,6 +25,23 @@ pub struct EmulatorProfile {
     /// payloads must not change shape.
     #[serde(skip_serializing)]
     pub source: Option<serde_json::Value>,
+    /// The catalog's raw save-strategy alias, normalized on use by
+    /// `autoconfig::entry::normalize_save_strategy` rather than at load time
+    /// (autoconfig.py:497 normalizes at the call site).
+    #[serde(skip_serializing)]
+    pub save_strategy: String,
+    /// The four cloud-save list fields `autoconfig::entry` flattens into an
+    /// `EmulatorEntry`'s `save_paths`, `state_paths`, `ignore_files` and
+    /// `ignore_extensions` strings. Like `source`, all five carry
+    /// `skip_serializing` so the IPC profile payload keeps its shape.
+    #[serde(skip_serializing)]
+    pub save_directories: Vec<String>,
+    #[serde(skip_serializing)]
+    pub state_directories: Vec<String>,
+    #[serde(skip_serializing)]
+    pub ignore_files: Vec<String>,
+    #[serde(skip_serializing)]
+    pub ignore_extensions: Vec<String>,
 }
 
 /// Emulator autoprofile slugs that ship a Windows-only build and therefore
@@ -44,9 +61,8 @@ const AUTOPROFILES_JSON: &str = include_str!(concat!(
 static PROFILES: OnceLock<Vec<EmulatorProfile>> = OnceLock::new();
 
 /// The subset of an autoprofile JSON entry's fields this crate reads.
-/// Fields the catalog carries but this crate does not use (`source`,
-/// `save_strategy`, `save_directories`, ...) are ignored by serde rather
-/// than rejected.
+/// Fields the catalog carries but this crate does not use are ignored by
+/// serde rather than rejected.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 struct RawProfile {
     #[serde(default)]
@@ -63,6 +79,16 @@ struct RawProfile {
     is_compat_tool: bool,
     #[serde(default)]
     source: Option<serde_json::Value>,
+    #[serde(default)]
+    save_strategy: String,
+    #[serde(default)]
+    save_directories: Vec<String>,
+    #[serde(default)]
+    state_directories: Vec<String>,
+    #[serde(default)]
+    ignore_files: Vec<String>,
+    #[serde(default)]
+    ignore_extensions: Vec<String>,
 }
 
 /// The parsed, normalized autoprofile catalog, embedded at build time and
@@ -123,7 +149,24 @@ fn normalize_one(raw: RawProfile) -> Option<EmulatorProfile> {
         platform_keywords,
         is_compat_tool: raw.is_compat_tool,
         source: raw.source,
+        save_strategy: raw.save_strategy,
+        save_directories: trimmed_non_blank(&raw.save_directories),
+        state_directories: trimmed_non_blank(&raw.state_directories),
+        ignore_files: trimmed_non_blank(&raw.ignore_files),
+        ignore_extensions: trimmed_non_blank(&raw.ignore_extensions),
     })
+}
+
+/// Each item trimmed, blank items dropped — the shape every cloud-save list
+/// field is stored in (the `.strip()`/truthiness filter Python applies when
+/// it flattens one, autoconfig.py:106).
+fn trimmed_non_blank(items: &[String]) -> Vec<String> {
+    items
+        .iter()
+        .map(|item| item.trim())
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// Splits `raw` on the last `/` or `\`, whichever comes later, regardless
@@ -446,7 +489,7 @@ mod tests {
             all_platforms: false,
             platform_keywords: vec![],
             is_compat_tool: compat,
-            source: None,
+            ..Default::default()
         }
     }
 
@@ -617,7 +660,7 @@ mod tests {
             all_platforms: false,
             platform_keywords: keywords.iter().map(|k| k.to_string()).collect(),
             is_compat_tool: compat,
-            source: None,
+            ..Default::default()
         }
     }
 
@@ -662,6 +705,56 @@ mod tests {
     fn normalize_source_defaults_to_none_when_absent() {
         let profile = normalize_one(raw("Name", &["x.exe"], "", false, &[])).unwrap();
         assert_eq!(profile.source, None);
+    }
+
+    #[test]
+    fn profile_normalization_keeps_the_five_new_autoprofile_fields() {
+        let mut entry = raw("Name", &["x.exe"], "", false, &[]);
+        entry.save_strategy = "  Single-File  ".to_string();
+        entry.save_directories = vec!["  ~/saves ".into(), "".into(), "   ".into()];
+        entry.state_directories = vec![" ~/states ".into()];
+        entry.ignore_files = vec![" thumbs.db ".into(), "  ".into()];
+        entry.ignore_extensions = vec![" .jpg ".into()];
+
+        let profile = normalize_one(entry).unwrap();
+        // save_strategy is copied RAW: autoconfig.py:497 normalizes it at
+        // the call site, not at load time.
+        assert_eq!(profile.save_strategy, "  Single-File  ");
+        assert_eq!(profile.save_directories, vec!["~/saves".to_string()]);
+        assert_eq!(profile.state_directories, vec!["~/states".to_string()]);
+        assert_eq!(profile.ignore_files, vec!["thumbs.db".to_string()]);
+        assert_eq!(profile.ignore_extensions, vec![".jpg".to_string()]);
+    }
+
+    #[test]
+    fn profile_summary_serialization_is_unchanged() {
+        let mut entry = raw("Name", &["x.exe"], "-L %core%", false, &["PlayStation 2"]);
+        entry.save_strategy = "folder".to_string();
+        entry.save_directories = vec!["~/saves".into()];
+        entry.state_directories = vec!["~/states".into()];
+        entry.ignore_files = vec!["thumbs.db".into()];
+        entry.ignore_extensions = vec![".jpg".into()];
+        entry.source = Some(serde_json::json!({"provider": "github"}));
+
+        let profile = normalize_one(entry).unwrap();
+        let json = serde_json::to_value(&profile).unwrap();
+        let keys: Vec<&str> = json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            vec![
+                "name",
+                "match_tokens",
+                "args",
+                "all_platforms",
+                "platform_keywords",
+                "is_compat_tool",
+            ]
+        );
     }
 
     #[test]

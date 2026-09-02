@@ -14,6 +14,7 @@ pub mod cores;
 pub mod dolphin;
 pub mod duckstation;
 pub mod eden;
+pub mod entry;
 pub mod paths;
 pub mod pcsx2;
 pub mod ppsspp;

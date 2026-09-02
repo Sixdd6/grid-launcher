@@ -198,7 +198,7 @@ mod tests {
             all_platforms,
             platform_keywords: keywords.iter().map(|k| k.to_string()).collect(),
             is_compat_tool: false,
-            source: None,
+            ..Default::default()
         }
     }
 

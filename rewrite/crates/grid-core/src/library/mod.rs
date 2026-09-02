@@ -955,6 +955,9 @@ impl InstallService {
             // recorded as `latest` so the entry keeps meaning "track the
             // newest release" (emulator_ui_mixin.py:1168-1175).
             source_release_tag: job.configured_tag.clone(),
+            // The layer-1 autoconfig fields are not this writer's concern:
+            // `autoconfig::entry` fills them on the next configure pass.
+            ..Default::default()
         };
         match config
             .emulators

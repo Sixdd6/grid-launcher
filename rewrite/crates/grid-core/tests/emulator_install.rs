@@ -74,6 +74,7 @@ fn profile(name: &str, source: Value) -> EmulatorProfile {
         platform_keywords: Vec::new(),
         is_compat_tool: false,
         source: Some(source),
+        ..Default::default()
     }
 }
 
