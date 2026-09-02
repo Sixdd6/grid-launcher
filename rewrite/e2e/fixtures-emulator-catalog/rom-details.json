@@ -1,0 +1,31 @@
+{
+  "401": {
+    "id": 401,
+    "name": "Gran Turismo 3",
+    "fs_name_no_ext": "Gran Turismo 3",
+    "platform_id": 1,
+    "platform_display_name": "Sony PlayStation 2",
+    "fs_name": "Gran Turismo 3.zip",
+    "summary": "A racing game, pre-seeded as already installed.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 4011,
+        "file_name": "Gran Turismo 3.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": {
+      "average_rating": 9.0,
+      "genres": ["Racing"],
+      "companies": ["Polyphony Digital"],
+      "first_release_date": 991353600
+    }
+  }
+}

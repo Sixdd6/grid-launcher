@@ -53,6 +53,7 @@ STAGE_GROUPS=(
   "downloads:specs/downloads.spec.ts"
   "emulators:specs/emulators.spec.ts"
   "launch:specs/launch.spec.ts"
+  "emulator-catalog:specs/emulator-catalog.spec.ts"
 )
 
 # Run only the named groups by passing them as arguments, e.g.
@@ -202,6 +203,7 @@ RUN_DIR="$E2E_RUN_DIR"
 LOG_DIR="$RUN_DIR/logs"
 mkdir -p "$LOG_DIR"
 mock_pid=""
+forge_pid=""
 # Set by the INT/TERM handler below so cleanup() can force a nonzero exit
 # even when the interrupted command itself happened to leave $? at 0.
 signal_caught=""
@@ -265,6 +267,13 @@ stop_mock() {
   mock_pid=""
 }
 
+stop_forge() {
+  [[ -n "$forge_pid" ]] || return 0
+  kill -TERM "$forge_pid" 2>/dev/null
+  wait "$forge_pid" 2>/dev/null
+  forge_pid=""
+}
+
 cleanup() {
   local rc=$?
   trap - EXIT INT TERM
@@ -279,6 +288,7 @@ cleanup() {
     esac
   fi
   stop_mock
+  stop_forge
   if run_dir_is_safe; then
     kill_run_processes TERM
     sleep 1
@@ -330,6 +340,7 @@ group_matches() {
 
 dump_failure() {
   local stage="$1" wdio_log="$2" mock_log="$3" request_log="$4" wdio_out_dir="$5"
+  local forge_log="${6:-}" forge_request_log="${7:-}"
   printf '\n---- FAILURE: stage %s ----\n' "$stage" >&2
   printf '\n-- wdio output (last 150 lines)\n' >&2
   tail -n 150 "$wdio_log" >&2 2>/dev/null || printf '(no wdio log)\n' >&2
@@ -355,6 +366,17 @@ dump_failure() {
   tail -n 40 "$mock_log" >&2 2>/dev/null || printf '(no mock log)\n' >&2
   printf '\n-- mock request log\n' >&2
   if [[ -s "$request_log" ]]; then cat "$request_log" >&2; else printf '(no requests recorded)\n' >&2; fi
+  # Only the groups that run a mock forge (group_needs_forge) have these.
+  if [[ -n "$forge_log" ]]; then
+    printf '\n-- mock forge stderr/stdout (last 40 lines)\n' >&2
+    tail -n 40 "$forge_log" >&2 2>/dev/null || printf '(no forge log)\n' >&2
+    printf '\n-- mock forge request log\n' >&2
+    if [[ -s "$forge_request_log" ]]; then
+      cat "$forge_request_log" >&2
+    else
+      printf '(no forge requests recorded)\n' >&2
+    fi
+  fi
   printf '\n---- end failure dump for %s ----\n\n' "$stage" >&2
 }
 
@@ -366,8 +388,21 @@ dump_failure() {
 mock_args_for_group() {
   case "$1" in
     downloads) printf -- '--throttle-ms 100' ;;
+    # A fixture set of its own, with the "Sony PlayStation 2" platform the
+    # catalog spec needs (PCSX2's platform_keywords match it). Kept separate
+    # from e2e/fixtures so the shared set — and every assertion the other
+    # groups and mock-romm/server.test.mjs make about it — stays untouched.
+    emulator-catalog) printf -- '--fixtures-dir fixtures-emulator-catalog' ;;
     *) printf '' ;;
   esac
+}
+
+# Stage groups that need the mock forge (mock-romm/mock-forge.mjs): the app,
+# built with the `e2e` cargo feature, redirects every forge request to
+# $GRID_LAUNCHER_E2E_FORGE_BASE (launch/forge.rs `effective_url`), so an
+# emulator install can resolve and download without touching github.com.
+group_needs_forge() {
+  [[ "$1" == "emulator-catalog" ]]
 }
 
 # The `launch` group's data dir is pre-seeded (Ruling A, task-7-brief.md):
@@ -378,6 +413,7 @@ mock_args_for_group() {
 seed_script_for_group() {
   case "$1" in
     launch) printf '%s' "$E2E_DIR/seed/launch-seed.mjs" ;;
+    emulator-catalog) printf '%s' "$E2E_DIR/seed/emulator-catalog-seed.mjs" ;;
     *) printf '' ;;
   esac
 }
@@ -398,6 +434,9 @@ run_group_attempt() {
   attempt_mock_log="$LOG_DIR/$name-attempt-$attempt.mock.log"
   attempt_request_log="$E2E_DIR/last-run-requests.log"
   rm -f "$attempt_request_log" "$attempt_mock_log"
+  # Empty for a group that runs no forge; dump_failure() skips its section.
+  attempt_forge_log=""
+  attempt_forge_request_log=""
 
   local seed_script
   seed_script="$(seed_script_for_group "$name")"
@@ -436,6 +475,36 @@ run_group_attempt() {
   fi
   printf 'e2e: mock RomM at %s, data dir %s\n' "$mock_url" "$data_dir"
 
+  # The mock forge, for the groups that install emulators. Same lifecycle as
+  # the mock RomM above: started per attempt, its URL scraped off stdout, and
+  # stopped at the end of the attempt. It also inherits E2E_RUN_DIR, so the
+  # teardown trap's run-directory process sweep covers it even if this script
+  # dies before stop_forge().
+  local forge_url=""
+  if group_needs_forge "$name"; then
+    attempt_forge_log="$LOG_DIR/$name-attempt-$attempt.forge.log"
+    attempt_forge_request_log="$E2E_DIR/last-run-forge-requests.log"
+    rm -f "$attempt_forge_log" "$attempt_forge_request_log"
+    ( cd "$E2E_DIR" && exec node mock-romm/mock-forge.mjs --port 0 ) >"$attempt_forge_log" 2>&1 &
+    forge_pid=$!
+
+    for _ in $(seq 1 100); do
+      forge_url="$(sed -n 's/^MOCK_FORGE_URL=\(http[^ ]*\).*/\1/p' "$attempt_forge_log" 2>/dev/null | head -n1)"
+      [[ -n "$forge_url" ]] && break
+      kill -0 "$forge_pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    if [[ -z "$forge_url" ]]; then
+      printf 'e2e: mock forge did not report a URL\n' >&2
+      tail -n 40 "$attempt_forge_log" >&2
+      stop_forge
+      stop_mock
+      attempt_failed_stage="$name (mock forge)"
+      return 1
+    fi
+    printf 'e2e: mock forge at %s\n' "$forge_url"
+  fi
+
   local spec stage wdio_log out_dir rc
   for spec in $specs; do
     stage="$name/$(basename "$spec")"
@@ -449,6 +518,13 @@ run_group_attempt() {
       export E2E_MOCK_URL="$mock_url"
       export E2E_STAGE="$stage"
       export E2E_WDIO_LOG_DIR="$out_dir"
+      if [[ -n "$forge_url" ]]; then
+        # wdio.conf.ts forwards both into the app process: the first is what
+        # launch/forge.rs's e2e redirect reads, the second is where the
+        # installed stub emulators record their argv.
+        export E2E_FORGE_URL="$forge_url"
+        export GRID_E2E_ARGV_FILE="$data_dir/emulator-argv.log"
+      fi
       exec xvfb-run -a npx wdio run wdio.conf.ts
     ) 2>&1 | tee "$wdio_log"
     rc="${PIPESTATUS[0]}"
@@ -463,7 +539,10 @@ run_group_attempt() {
   # The mock writes its request log from close(), so it has to be stopped
   # before any dump — otherwise every failure report says "no requests".
   stop_mock
+  stop_forge
   [[ -f "$attempt_request_log" ]] && cp "$attempt_request_log" "$LOG_DIR/$name-attempt-$attempt.requests.log"
+  [[ -n "$attempt_forge_request_log" && -f "$attempt_forge_request_log" ]] &&
+    cp "$attempt_forge_request_log" "$LOG_DIR/$name-attempt-$attempt.forge-requests.log"
   [[ -z "$attempt_failed_stage" ]]
 }
 
@@ -486,7 +565,7 @@ for group in "${STAGE_GROUPS[@]}"; do
       continue
     fi
     dump_failure "$attempt_failed_stage" "$attempt_failed_log" "$attempt_mock_log" \
-      "$attempt_request_log" "$attempt_out_dir"
+      "$attempt_request_log" "$attempt_out_dir" "$attempt_forge_log" "$attempt_forge_request_log"
     failed_groups+=("$name (at $attempt_failed_stage)")
     break
   done

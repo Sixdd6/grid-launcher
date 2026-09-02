@@ -63,5 +63,7 @@ rewrite/app/node_modules/
 rewrite/app/dist/
 rewrite/e2e/node_modules/
 
-# E2E mock server debugging artifact, written by mock-romm's close()
+# E2E mock server debugging artifacts: written by mock-romm's close(), and
+# appended live by mock-forge as requests arrive
 rewrite/e2e/last-run-requests.log
+rewrite/e2e/last-run-forge-requests.log

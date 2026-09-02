@@ -7,7 +7,7 @@
   "scripts": {
     "test": "wdio run wdio.conf.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test:mock": "node --test mock-romm/server.test.mjs"
+    "test:mock": "node --test mock-romm/server.test.mjs mock-romm/mock-forge.test.mjs"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

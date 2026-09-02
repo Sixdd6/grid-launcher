@@ -34,6 +34,16 @@ const appEnv: Record<string, string> = {
   GDK_BACKEND: 'x11',
   E2E_MOCK_URL: mockUrl,
   RUST_LOG: process.env.E2E_RUST_LOG ?? 'info',
+  // Only the stage groups that run a mock forge set these (e2e.sh's
+  // group_needs_forge). GRID_LAUNCHER_E2E_FORGE_BASE is what the app's `e2e`
+  // build redirects forge requests to (grid-core launch/forge.rs); the app's
+  // spawned emulators inherit GRID_E2E_ARGV_FILE and record their argv there.
+  ...(process.env.E2E_FORGE_URL
+    ? { GRID_LAUNCHER_E2E_FORGE_BASE: process.env.E2E_FORGE_URL }
+    : {}),
+  ...(process.env.GRID_E2E_ARGV_FILE
+    ? { GRID_E2E_ARGV_FILE: process.env.GRID_E2E_ARGV_FILE }
+    : {}),
 };
 
 export const config: WebdriverIO.Config = {

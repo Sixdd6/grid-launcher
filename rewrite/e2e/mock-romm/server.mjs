@@ -21,112 +21,26 @@
 //   // handle.port, handle.url, handle.requestLog, await handle.close()
 //
 // Standalone:
-//   node server.mjs --port 8931 [--throttle-ms 100]
+//   node server.mjs --port 8931 [--throttle-ms 100] [--fixtures-dir ../fixtures-x]
+//
+// `--fixtures-dir` exposes the library API's existing `fixturesDir` option on
+// the command line (relative paths resolve against the process's working
+// directory, which e2e.sh sets to rewrite/e2e). The `emulator-catalog` stage
+// group uses it for a fixture set with a "Sony PlayStation 2" platform, so
+// the shared fixtures — and every assertion the other groups make about
+// them — stay exactly as they are.
 
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFile, writeFile } from "node:fs/promises";
 
+import { buildZip } from "./archives.mjs";
+
 export const FAKE_TOKEN = "FAKE-E2E-TOKEN-not-real";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_FIXTURES_DIR = path.join(__dirname, "../fixtures");
-
-// --- CRC32 (used by the stored-entry zip writer below) ---------------------
-
-const CRC_TABLE = buildCrcTable();
-
-function buildCrcTable() {
-  const table = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) {
-      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    }
-    table[n] = c >>> 0;
-  }
-  return table;
-}
-
-function crc32(buf) {
-  let crc = 0xffffffff;
-  for (let i = 0; i < buf.length; i++) {
-    crc = CRC_TABLE[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-// --- minimal stored-entry (uncompressed) ZIP writer -------------------------
-
-/**
- * Builds a spec-valid ZIP archive from `entries` (`{name, data: Buffer}[]`).
- * Every entry is stored (compression method 0), so no compression code is
- * needed — the archive is still a real ZIP that any conformant reader
- * (including the Rust `zip` crate) can extract.
- */
-function buildZip(entries) {
-  const localChunks = [];
-  const centralChunks = [];
-  let offset = 0;
-  const DOS_DATE_1980_01_01 = 0x0021;
-
-  for (const { name, data } of entries) {
-    const nameBuf = Buffer.from(name, "utf8");
-    const crc = crc32(data);
-
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0); // local file header signature
-    local.writeUInt16LE(20, 4); // version needed to extract
-    local.writeUInt16LE(0, 6); // general purpose bit flag
-    local.writeUInt16LE(0, 8); // compression method: stored
-    local.writeUInt16LE(0, 10); // last mod file time
-    local.writeUInt16LE(DOS_DATE_1980_01_01, 12); // last mod file date
-    local.writeUInt32LE(crc, 14);
-    local.writeUInt32LE(data.length, 18); // compressed size
-    local.writeUInt32LE(data.length, 22); // uncompressed size
-    local.writeUInt16LE(nameBuf.length, 26);
-    local.writeUInt16LE(0, 28); // extra field length
-    localChunks.push(local, nameBuf, data);
-
-    const central = Buffer.alloc(46);
-    central.writeUInt32LE(0x02014b50, 0); // central file header signature
-    central.writeUInt16LE(20, 4); // version made by
-    central.writeUInt16LE(20, 6); // version needed to extract
-    central.writeUInt16LE(0, 8);
-    central.writeUInt16LE(0, 10);
-    central.writeUInt16LE(0, 12);
-    central.writeUInt16LE(DOS_DATE_1980_01_01, 14);
-    central.writeUInt32LE(crc, 16);
-    central.writeUInt32LE(data.length, 20);
-    central.writeUInt32LE(data.length, 24);
-    central.writeUInt16LE(nameBuf.length, 28);
-    central.writeUInt16LE(0, 30); // extra field length
-    central.writeUInt16LE(0, 32); // file comment length
-    central.writeUInt16LE(0, 34); // disk number start
-    central.writeUInt16LE(0, 36); // internal file attributes
-    central.writeUInt32LE(0, 38); // external file attributes
-    central.writeUInt32LE(offset, 42); // relative offset of local header
-    centralChunks.push(central, nameBuf);
-
-    offset += local.length + nameBuf.length + data.length;
-  }
-
-  const centralDirStart = offset;
-  const centralDir = Buffer.concat(centralChunks);
-
-  const eocd = Buffer.alloc(22);
-  eocd.writeUInt32LE(0x06054b50, 0); // end of central dir signature
-  eocd.writeUInt16LE(0, 4); // number of this disk
-  eocd.writeUInt16LE(0, 6); // disk with the start of the central directory
-  eocd.writeUInt16LE(entries.length, 8); // entries on this disk
-  eocd.writeUInt16LE(entries.length, 10); // total entries
-  eocd.writeUInt32LE(centralDir.length, 12); // size of central directory
-  eocd.writeUInt32LE(centralDirStart, 16); // offset of central directory
-  eocd.writeUInt16LE(0, 20); // comment length
-
-  return Buffer.concat([...localChunks, centralDir, eocd]);
-}
 
 // --- deterministic dummy content --------------------------------------------
 
@@ -434,6 +348,7 @@ if (isMainModule()) {
   const args = process.argv.slice(2);
   let port = 0;
   let defaultThrottleMs = 0;
+  let fixturesDir = DEFAULT_FIXTURES_DIR;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port" && args[i + 1]) {
       port = Number(args[i + 1]);
@@ -441,10 +356,13 @@ if (isMainModule()) {
     } else if (args[i] === "--throttle-ms" && args[i + 1]) {
       defaultThrottleMs = Number(args[i + 1]);
       i++;
+    } else if (args[i] === "--fixtures-dir" && args[i + 1]) {
+      fixturesDir = path.resolve(args[i + 1]);
+      i++;
     }
   }
 
-  const handle = await startMockRomm({ port, defaultThrottleMs });
+  const handle = await startMockRomm({ port, defaultThrottleMs, fixturesDir });
   console.log(`mock RomM server listening at ${handle.url}`);
 
   const shutdown = async () => {
