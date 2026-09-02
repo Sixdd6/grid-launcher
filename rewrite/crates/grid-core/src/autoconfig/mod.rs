@@ -17,6 +17,7 @@ pub mod eden;
 pub mod paths;
 pub mod pcsx2;
 pub mod ppsspp;
+pub mod readers;
 pub mod redream;
 pub mod retroarch;
 pub mod rpcs3;
