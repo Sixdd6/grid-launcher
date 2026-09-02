@@ -392,7 +392,7 @@ mod merge_tests {
             name: name.to_string(),
             path: "/x/emu".to_string(),
             args: String::new(),
-            source_id: String::new(),
+            ..Default::default()
         }
     }
 

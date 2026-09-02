@@ -148,7 +148,7 @@ fn entry(name: &str, path: &Path, args: &str) -> EmulatorEntry {
         name: name.to_string(),
         path: path.to_string_lossy().into_owned(),
         args: args.to_string(),
-        source_id: String::new(),
+        ..Default::default()
     }
 }
 

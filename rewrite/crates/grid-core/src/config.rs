@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct EmulatorEntry {
     #[serde(default)]
     pub name: String,
@@ -18,6 +18,19 @@ pub struct EmulatorEntry {
     /// and for entries installed before this field existed.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub source_id: String,
+    /// The remaining source-catalog fields below are set together with
+    /// `source_id` when an entry is installed from the catalog; all are
+    /// blank for hand-added entries. Kept as plain strings, matching
+    /// `source_id`, rather than the richer `SourceMap` — this is a record
+    /// of what was installed, not something `launch::source` re-resolves.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source_provider: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source_owner: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source_repo: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source_release_tag: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -231,13 +244,13 @@ mod tests {
                 name: "emulator1".into(),
                 path: "/path/to/emu1".into(),
                 args: "--arg1 --arg2".into(),
-                source_id: String::new(),
+                ..Default::default()
             },
             EmulatorEntry {
                 name: "emulator2".into(),
                 path: "/path/to/emu2".into(),
                 args: String::new(),
-                source_id: String::new(),
+                ..Default::default()
             },
         ];
         let cfg = Config {
@@ -260,6 +273,69 @@ mod tests {
         assert_eq!(loaded.emulators[1].name, "emulator2");
         assert_eq!(loaded.emulators[1].path, "/path/to/emu2");
         assert_eq!(loaded.emulators[1].args, "");
+    }
+
+    #[test]
+    fn emulator_entry_without_source_fields_serializes_byte_identically_to_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config {
+            schema_version: 1,
+            server_url: String::new(),
+            username: String::new(),
+            library_path: String::new(),
+            emulators: vec![EmulatorEntry {
+                name: "emulator1".into(),
+                path: "/path/to/emu1".into(),
+                args: "--arg1 --arg2".into(),
+                ..Default::default()
+            }],
+            default_emulators: BTreeMap::new(),
+            retroarch_cores: BTreeMap::new(),
+            launch_args: String::new(),
+            extra: BTreeMap::new(),
+        };
+        cfg.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("source_id"));
+        assert!(!written.contains("source_provider"));
+        assert!(!written.contains("source_owner"));
+        assert!(!written.contains("source_repo"));
+        assert!(!written.contains("source_release_tag"));
+    }
+
+    #[test]
+    fn emulator_entry_source_fields_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config {
+            schema_version: 1,
+            server_url: String::new(),
+            username: String::new(),
+            library_path: String::new(),
+            emulators: vec![EmulatorEntry {
+                name: "PCSX2".into(),
+                path: "/path/to/pcsx2".into(),
+                args: String::new(),
+                source_id: "PCSX2/pcsx2".into(),
+                source_provider: "github".into(),
+                source_owner: "PCSX2".into(),
+                source_repo: "pcsx2".into(),
+                source_release_tag: "v2.1.0".into(),
+            }],
+            default_emulators: BTreeMap::new(),
+            retroarch_cores: BTreeMap::new(),
+            launch_args: String::new(),
+            extra: BTreeMap::new(),
+        };
+        cfg.save(&path).unwrap();
+        let loaded = Config::load(&path).unwrap();
+        let entry = &loaded.emulators[0];
+        assert_eq!(entry.source_id, "PCSX2/pcsx2");
+        assert_eq!(entry.source_provider, "github");
+        assert_eq!(entry.source_owner, "PCSX2");
+        assert_eq!(entry.source_repo, "pcsx2");
+        assert_eq!(entry.source_release_tag, "v2.1.0");
     }
 
     #[test]

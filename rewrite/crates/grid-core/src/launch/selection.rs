@@ -170,7 +170,7 @@ mod tests {
             name: name.to_string(),
             path: path.to_string(),
             args: String::new(),
-            source_id: String::new(),
+            ..Default::default()
         }
     }
 

@@ -243,6 +243,7 @@ mod tests {
             path: String::new(),
             args: String::new(),
             source_id: source_id.to_string(),
+            ..Default::default()
         }
     }
 
