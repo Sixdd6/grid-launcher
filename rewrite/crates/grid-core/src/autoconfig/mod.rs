@@ -8,8 +8,11 @@
 //! shared section-writer families live in [`writers`] and the path helpers
 //! every module's candidate list is built from live in [`paths`].
 
+pub mod azahar;
 pub mod cores;
+pub mod dolphin;
 pub mod duckstation;
+pub mod eden;
 pub mod paths;
 pub mod pcsx2;
 pub mod retroarch;
