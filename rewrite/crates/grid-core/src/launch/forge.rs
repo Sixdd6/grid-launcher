@@ -482,17 +482,17 @@ fn effective_url(url: &str) -> String {
             // The full authority, not just the host: a fixture forge served
             // on a non-default port would otherwise collapse onto the same
             // segment as the same host on another port.
-            let mut host = parsed.host_str().unwrap_or("").to_string();
+            let mut authority = parsed.host_str().unwrap_or("").to_string();
             if let Some(port) = parsed.port() {
-                host.push(':');
-                host.push_str(&port.to_string());
+                authority.push(':');
+                authority.push_str(&port.to_string());
             }
             let mut suffix = parsed.path().to_string();
             if let Some(query) = parsed.query() {
                 suffix.push('?');
                 suffix.push_str(query);
             }
-            format!("{}/{host}{suffix}", base.trim().trim_end_matches('/'))
+            format!("{}/{authority}{suffix}", base.trim().trim_end_matches('/'))
         }
         _ => url.to_string(),
     }
