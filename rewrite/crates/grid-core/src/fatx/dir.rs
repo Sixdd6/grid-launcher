@@ -25,7 +25,14 @@
 //!
 //! Three details the public documentation does not settle. Each is isolated
 //! to one place so a `pyfatx` oracle run on a generated image can decide it
-//! empirically, and each is a one-line change:
+//! empirically, and each is a one-line change.
+//!
+//! The oracle lives in `tests/fatx_oracle.rs`. It self-skips when `python3
+//! -c "import fatx"` fails, which is the state it was left in: pyfatx
+//! could not be installed on the development machine (its build needs
+//! CMake), so **none of the three has been settled empirically yet**. The
+//! values below remain the reasoned defaults from the format docs.
+//!
 //!
 //! 1. **Timestamp epoch.** xboxdevwiki and Wikipedia say the original-Xbox
 //!    FATX epoch is the year 2000; the Free60 page documents the MS-DOS
@@ -77,6 +84,16 @@ impl DirEntry {
     pub fn new(name: &str, is_dir: bool, first_cluster: u32, size: u32) -> Self {
         Self {
             name: name.as_bytes().to_vec(),
+            is_dir,
+            first_cluster,
+            size,
+        }
+    }
+
+    /// Build an entry from raw on-disk name bytes.
+    pub fn new_bytes(name: &[u8], is_dir: bool, first_cluster: u32, size: u32) -> Self {
+        Self {
+            name: name.to_vec(),
             is_dir,
             first_cluster,
             size,

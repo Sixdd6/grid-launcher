@@ -164,10 +164,14 @@ impl Fat {
 
     /// Mark every cluster of a chain free. A corrupt or cyclic chain frees
     /// what it can reach and stops; it never loops.
+    ///
+    /// Bounded by `usable_clusters`, not by the FAT length: the trailing
+    /// entries address no bytes, so a chain that runs into them stops here
+    /// rather than handing those entries back to the allocator.
     pub fn free_chain(&mut self, first: u32) {
         let mut seen: HashSet<u32> = HashSet::new();
         let mut cur = first;
-        while cur != 0 && (cur as usize) < self.entries.len() && seen.insert(cur) {
+        while cur != 0 && cur <= self.usable && seen.insert(cur) {
             let next = self.entries[cur as usize];
             self.entries[cur as usize] = 0;
             if self.is_end(next) {
@@ -175,6 +179,18 @@ impl Fat {
             }
             cur = next;
         }
+    }
+
+    /// Every entry either free, end-of-chain, or a cluster that has bytes
+    /// behind it. This is the FAT-bounds re-check the write path runs
+    /// before it touches the image.
+    pub fn check_bounds(&self) -> Result<(), FatxError> {
+        for value in self.entries.iter().skip(1) {
+            if *value != 0 && !self.is_end(*value) && *value > self.usable {
+                return Err(FatxError::CorruptChain);
+            }
+        }
+        Ok(())
     }
 
     /// Write the FAT back out at `base + geo.fat_offset`, padded with zeroes
@@ -237,5 +253,42 @@ mod tests {
         fat.set_entry(2, 3).unwrap();
         fat.set_entry(3, 0xFFFF_FFFF).unwrap();
         assert_eq!(fat.chain(1).unwrap(), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn free_chain_stops_at_the_last_usable_cluster() {
+        let g = geo();
+        let mut fat = Fat::format(&g);
+        // The FAT is sized from cluster_count, which runs past the data
+        // area, so entries above usable_clusters address nothing.
+        assert!(g.usable_clusters < g.cluster_count);
+        let last = g.usable_clusters as u32;
+        let past = last + 1;
+        assert!((past as usize) < fat.len(), "the trailing entries exist");
+
+        // A chain that runs off the end of the data area must stop rather
+        // than free entries that address nothing.
+        fat.set_entry(2, last).unwrap();
+        fat.set_entry(last, past).unwrap();
+        fat.set_entry(past, 0xFFFF_FFFF).unwrap();
+        fat.free_chain(2);
+        assert_eq!(fat.entry(2), Some(0));
+        assert_eq!(fat.entry(last), Some(0));
+        assert_eq!(
+            fat.entry(past),
+            Some(0xFFFF_FFFF),
+            "entries past usable_clusters must be left alone"
+        );
+
+        // A normal chain is still fully freed.
+        let mut fat = Fat::format(&g);
+        let picked = fat.allocate(3).unwrap();
+        for c in &picked {
+            assert_ne!(fat.entry(*c), Some(0));
+        }
+        fat.free_chain(picked[0]);
+        for c in &picked {
+            assert_eq!(fat.entry(*c), Some(0));
+        }
     }
 }

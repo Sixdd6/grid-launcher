@@ -2,8 +2,8 @@
 //! hard disk, and therefore inside a raw xemu HDD image.
 //!
 //! Scope of this module: the `E:` (data) partition of a standard retail
-//! layout, read side. It exists so cloud save sync can pull `E:/UDATA` and
-//! `E:/TDATA` out of a raw image and put them back.
+//! layout, both directions. It exists so cloud save sync can pull
+//! `E:/UDATA` and `E:/TDATA` out of a raw image and put them back.
 //!
 //! **Clean room.** Every structure here comes from public format
 //! descriptions and from first principles. No FATX implementation source
@@ -24,11 +24,13 @@
 //! - [`dir`] — 64-byte directory entries
 //! - [`image`] — [`image::FatxPartition`], the read path over a raw image
 //! - [`builder`] — test-support image generator (see its module docs)
+//! - [`write`] — the write path: `write_tree` / `remove_tree`
 pub mod builder;
 pub mod dir;
 pub mod fat;
 pub mod image;
 pub mod layout;
+pub mod write;
 
 use thiserror::Error;
 
@@ -56,4 +58,10 @@ pub enum FatxError {
     NoSpace,
     #[error("{0:?} is not a directory")]
     NotADirectory(String),
+    #[error("{0:?} already exists as a file")]
+    NotAFile(String),
+    #[error("partition geometry changed since it was opened")]
+    GeometryChanged,
+    #[error("directory nesting deeper than {0} levels")]
+    TooDeep(usize),
 }

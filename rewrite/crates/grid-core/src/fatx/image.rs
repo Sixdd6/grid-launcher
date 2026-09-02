@@ -5,10 +5,15 @@
 //! what the builder makes for tests) and a full retail HDD image, where the
 //! `E:` partition starts at [`super::layout::RETAIL_PARTITION_E_OFFSET`].
 //!
-//! This module is read-only; the write path lands in a later task.
+//! The backing store is a type parameter so the same code serves a real
+//! `File` and, in tests, an in-memory cursor or a wrapper that fails writes
+//! at a chosen point. It defaults to `File`, so `FatxPartition` still names
+//! the file-backed partition everywhere else.
+//!
+//! The read path lives here; the write algorithms live in [`super::write`].
 
 use std::collections::HashSet;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -19,17 +24,24 @@ use super::fat::Fat;
 use super::layout::{geometry, Geometry, Superblock, FATX_SUPERBLOCK_SIZE};
 use super::FatxError;
 
-/// An opened FATX partition.
+/// An opened FATX partition over the backing store `S`.
 #[derive(Debug)]
-pub struct FatxPartition {
-    file: File,
-    base: u64,
-    geo: Geometry,
-    fat: Fat,
-    root_cluster: u32,
+pub struct FatxPartition<S = File> {
+    pub(super) io: S,
+    pub(super) base: u64,
+    /// Size the partition was opened with, kept so the write path can
+    /// re-derive the geometry and re-check it before it touches anything.
+    pub(super) partition_size: u64,
+    pub(super) geo: Geometry,
+    pub(super) fat: Fat,
+    pub(super) root_cluster: u32,
 }
 
-fn read_superblock(file: &mut File, base: u64, file_len: u64) -> Result<Superblock, FatxError> {
+pub(super) fn read_superblock(
+    file: &mut (impl Read + Seek),
+    base: u64,
+    file_len: u64,
+) -> Result<Superblock, FatxError> {
     if file_len < base + 16 {
         return Err(FatxError::Truncated {
             needed: base + 16,
@@ -45,13 +57,13 @@ fn read_superblock(file: &mut File, base: u64, file_len: u64) -> Result<Superblo
 
 /// True when this directory cluster holds an end-of-directory marker, so no
 /// further cluster of the chain carries entries.
-fn cluster_terminated(bytes: &[u8]) -> bool {
+pub(super) fn cluster_terminated(bytes: &[u8]) -> bool {
     bytes
         .chunks_exact(DIR_ENTRY_SIZE)
         .any(|slot| slot[0] == END_OF_DIRECTORY || slot[0] == 0)
 }
 
-fn split_path(path: &str) -> Vec<&str> {
+pub(super) fn split_path(path: &str) -> Vec<&str> {
     path.split(['/', '\\'])
         .filter(|p| !p.is_empty() && *p != ".")
         .collect()
@@ -60,7 +72,7 @@ fn split_path(path: &str) -> Vec<&str> {
 /// Superblock and FAT/data bounds check shared by `open` and `validate`:
 /// the image must actually contain the superblock, the whole FAT and the
 /// whole data area, and the root directory must be an addressable cluster.
-fn check_bounds(
+pub(super) fn check_bounds(
     file_len: u64,
     base: u64,
     geo: &Geometry,
@@ -86,24 +98,20 @@ fn check_bounds(
     Ok(())
 }
 
-impl FatxPartition {
+impl FatxPartition<File> {
     /// Open the partition of `partition_size` bytes that starts at
-    /// `base_offset`. Validates the superblock and that the image really
-    /// holds the superblock and the whole FAT.
+    /// `base_offset` for reading. Validates the superblock and that the
+    /// image really holds the superblock and the whole FAT.
     pub fn open(path: &Path, base_offset: u64, partition_size: u64) -> Result<Self, FatxError> {
-        let mut file = File::open(path)?;
-        let file_len = file.metadata()?.len();
-        let sb = read_superblock(&mut file, base_offset, file_len)?;
-        let geo = geometry(partition_size, &sb)?;
-        check_bounds(file_len, base_offset, &geo, &sb)?;
-        let fat = Fat::read(&mut file, &geo, base_offset)?;
-        Ok(Self {
-            file,
-            base: base_offset,
-            geo,
-            fat,
-            root_cluster: sb.root_dir_first_cluster,
-        })
+        Self::from_io(File::open(path)?, base_offset, partition_size)
+    }
+
+    /// Same as [`FatxPartition::open`], but the file is opened for reading
+    /// AND writing, which is what [`FatxPartition::write_tree`] and
+    /// [`FatxPartition::remove_tree`] need.
+    pub fn open_rw(path: &Path, base_offset: u64, partition_size: u64) -> Result<Self, FatxError> {
+        let file = OpenOptions::new().read(true).write(true).open(path)?;
+        Self::from_io(file, base_offset, partition_size)
     }
 
     /// Read-only superblock and FAT-bounds check for the partition of
@@ -121,6 +129,43 @@ impl FatxPartition {
         let geo = geometry(partition_size, &sb)?;
         check_bounds(file_len, base_offset, &geo, &sb)
     }
+}
+
+impl<S: Read + Seek> FatxPartition<S> {
+    /// Open a partition over any seekable backing store. The store's length
+    /// is taken by seeking to its end, so the same bounds checks as
+    /// [`FatxPartition::open`] apply.
+    pub fn from_io(mut io: S, base_offset: u64, partition_size: u64) -> Result<Self, FatxError> {
+        let len = io.seek(SeekFrom::End(0))?;
+        let sb = read_superblock(&mut io, base_offset, len)?;
+        let geo = geometry(partition_size, &sb)?;
+        check_bounds(len, base_offset, &geo, &sb)?;
+        let fat = Fat::read(&mut io, &geo, base_offset)?;
+        Ok(Self {
+            io,
+            base: base_offset,
+            partition_size,
+            geo,
+            fat,
+            root_cluster: sb.root_dir_first_cluster,
+        })
+    }
+
+    /// Give the backing store back. Tests use it to inspect the bytes a
+    /// failed write left behind.
+    pub fn into_io(self) -> S {
+        self.io
+    }
+
+    /// Borrow the backing store.
+    pub fn io(&self) -> &S {
+        &self.io
+    }
+
+    /// First cluster of the root directory.
+    pub fn root_cluster(&self) -> u32 {
+        self.root_cluster
+    }
 
     /// Derived layout of the open partition.
     pub fn geometry(&self) -> &Geometry {
@@ -132,15 +177,15 @@ impl FatxPartition {
         &self.fat
     }
 
-    fn read_cluster(&mut self, cluster: u32) -> Result<Vec<u8>, FatxError> {
+    pub(super) fn read_cluster(&mut self, cluster: u32) -> Result<Vec<u8>, FatxError> {
         let offset = self.geo.cluster_offset(cluster)?;
         let mut buf = vec![0u8; self.geo.cluster_size as usize];
-        self.file.seek(SeekFrom::Start(self.base + offset))?;
-        self.file.read_exact(&mut buf)?;
+        self.io.seek(SeekFrom::Start(self.base + offset))?;
+        self.io.read_exact(&mut buf)?;
         Ok(buf)
     }
 
-    fn entries_at(&mut self, first_cluster: u32) -> Result<Vec<DirEntry>, FatxError> {
+    pub(super) fn entries_at(&mut self, first_cluster: u32) -> Result<Vec<DirEntry>, FatxError> {
         if first_cluster == 0 {
             return Ok(Vec::new());
         }
@@ -159,7 +204,7 @@ impl FatxPartition {
     /// Resolve a slash-separated directory path to its first cluster.
     /// `Ok(None)` means "no such directory" — including a path component
     /// that names a file.
-    fn resolve_dir(&mut self, dir_path: &str) -> Result<Option<u32>, FatxError> {
+    pub(super) fn resolve_dir(&mut self, dir_path: &str) -> Result<Option<u32>, FatxError> {
         let mut cluster = self.root_cluster;
         for component in split_path(dir_path) {
             let found = self

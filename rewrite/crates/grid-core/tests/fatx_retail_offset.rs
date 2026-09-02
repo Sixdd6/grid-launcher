@@ -69,3 +69,75 @@ fn retail_offset_integration() {
     // there is no superblock at offset 0.
     assert!(FatxPartition::validate(&img, 0, part_size).is_err());
 }
+
+/// The write path at the retail offset: put a tree back, take it out
+/// again, and leave the 2.8 GB before the partition a hole.
+#[test]
+fn retail_offset_write_roundtrip() {
+    let tmp = tempfile::tempdir().unwrap();
+    let img = tmp.path().join("xbox_hdd.img");
+    let part_size = 16 * 1024 * 1024;
+    FatxImageBuilder::new(part_size)
+        .with_base_offset(RETAIL_PARTITION_E_OFFSET)
+        .with_cluster_size(16384)
+        .write_to(&img)
+        .expect("build sparse retail image");
+
+    let big: Vec<u8> = (0..40_000u32).map(|i| (i % 251) as u8).collect();
+    let src = tmp.path().join("src");
+    for (rel, data) in [
+        ("4d530064/00000001/saveimage.xbx", big.clone()),
+        ("4d530064/00000001/savemeta.xbx", b"meta".to_vec()),
+        ("notes.txt", b"hello xbox".to_vec()),
+    ] {
+        let target = src.join(rel);
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(target, data).unwrap();
+    }
+
+    let mut part = FatxPartition::open_rw(&img, RETAIL_PARTITION_E_OFFSET, part_size)
+        .expect("open for writing at the retail offset");
+    assert_eq!(part.write_tree("UDATA", &src).expect("write_tree"), 3);
+    assert_eq!(part.write_tree("TDATA", &src).expect("write_tree"), 3);
+    drop(part);
+
+    // Nothing before the partition was touched.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let allocated = fs::metadata(&img).unwrap().blocks() * 512;
+        assert!(
+            allocated < 64 * 1024 * 1024,
+            "image is not sparse after writing: {allocated} bytes allocated"
+        );
+    }
+    assert!(FatxPartition::validate(&img, 0, part_size).is_err());
+
+    FatxPartition::validate(&img, RETAIL_PARTITION_E_OFFSET, part_size)
+        .expect("still a valid partition after writing");
+    let mut part = FatxPartition::open(&img, RETAIL_PARTITION_E_OFFSET, part_size).expect("reopen");
+    let dest = tmp.path().join("out");
+    assert_eq!(part.read_tree("UDATA", &dest).unwrap(), 3);
+    assert_eq!(
+        fs::read(dest.join("4d530064/00000001/saveimage.xbx")).unwrap(),
+        big
+    );
+    assert_eq!(fs::read(dest.join("notes.txt")).unwrap(), b"hello xbox");
+
+    // And removal gives every cluster back.
+    let mut part = FatxPartition::open_rw(&img, RETAIL_PARTITION_E_OFFSET, part_size)
+        .expect("open for removal");
+    let before = part.fat().free_clusters().count();
+    part.remove_tree("UDATA").expect("remove_tree");
+    part.remove_tree("TDATA").expect("remove_tree");
+    assert!(part.fat().free_clusters().count() > before);
+    drop(part);
+
+    let mut part = FatxPartition::open(&img, RETAIL_PARTITION_E_OFFSET, part_size)
+        .expect("reopen after remove");
+    assert!(part.list_dir("").unwrap().is_empty());
+    assert_eq!(
+        part.read_tree("UDATA", &tmp.path().join("out2")).unwrap(),
+        0
+    );
+}
