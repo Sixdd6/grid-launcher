@@ -54,6 +54,7 @@ STAGE_GROUPS=(
   "emulators:specs/emulators.spec.ts"
   "launch:specs/launch.spec.ts"
   "emulator-catalog:specs/emulator-catalog.spec.ts"
+  "cloud-saves:specs/cloud-saves.spec.ts"
 )
 
 # Run only the named groups by passing them as arguments, e.g.
@@ -393,6 +394,11 @@ mock_args_for_group() {
     # from e2e/fixtures so the shared set — and every assertion the other
     # groups and mock-romm/server.test.mjs make about it — stays untouched.
     emulator-catalog) printf -- '--fixtures-dir fixtures-emulator-catalog' ;;
+    # A fixture set with three installed games and seeded server save
+    # records (e2e/fixtures-cloud-saves/saves.json) the default set has no
+    # equivalent for. Kept separate for the same reason as
+    # fixtures-emulator-catalog above.
+    cloud-saves) printf -- '--fixtures-dir fixtures-cloud-saves' ;;
     *) printf '' ;;
   esac
 }
@@ -414,6 +420,7 @@ seed_script_for_group() {
   case "$1" in
     launch) printf '%s' "$E2E_DIR/seed/launch-seed.mjs" ;;
     emulator-catalog) printf '%s' "$E2E_DIR/seed/emulator-catalog-seed.mjs" ;;
+    cloud-saves) printf '%s' "$E2E_DIR/seed/cloud-saves-seed.mjs" ;;
     *) printf '' ;;
   esac
 }

@@ -1,0 +1,59 @@
+{
+  "601": {
+    "id": 601,
+    "name": "SaveSyncManual",
+    "fs_name_no_ext": "SaveSyncManual",
+    "platform_id": 1,
+    "platform_display_name": "Super Nintendo Entertainment System",
+    "fs_name": "SaveSyncManual.zip",
+    "summary": "Cloud-saves E2E fixture: manual upload.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      { "id": 6001, "file_name": "SaveSyncManual.zip", "file_size_bytes": 0, "is_top_level": true }
+    ],
+    "metadatum": null
+  },
+  "602": {
+    "id": 602,
+    "name": "SaveSyncLaunch",
+    "fs_name_no_ext": "SaveSyncLaunch",
+    "platform_id": 1,
+    "platform_display_name": "Super Nintendo Entertainment System",
+    "fs_name": "SaveSyncLaunch.zip",
+    "summary": "Cloud-saves E2E fixture: auto-download-on-launch and auto-upload-on-exit.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      { "id": 6002, "file_name": "SaveSyncLaunch.zip", "file_size_bytes": 0, "is_top_level": true }
+    ],
+    "metadatum": null
+  },
+  "603": {
+    "id": 603,
+    "name": "SaveSyncRetention",
+    "fs_name_no_ext": "SaveSyncRetention",
+    "platform_id": 1,
+    "platform_display_name": "Super Nintendo Entertainment System",
+    "fs_name": "SaveSyncRetention.zip",
+    "summary": "Cloud-saves E2E fixture: retention pruning.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      { "id": 6003, "file_name": "SaveSyncRetention.zip", "file_size_bytes": 0, "is_top_level": true }
+    ],
+    "metadatum": null
+  }
+}

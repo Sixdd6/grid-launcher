@@ -1,0 +1,46 @@
+{
+  "602": [
+    {
+      "id": 7001,
+      "emulator": "TestEmu",
+      "file_name": "savesynclaunch.sav",
+      "slot": null,
+      "updated_at": "2026-01-05T10:00:00Z",
+      "content": "cloud-downloaded-save-bytes"
+    }
+  ],
+  "603": [
+    {
+      "id": 9001,
+      "emulator": "TestEmu",
+      "file_name": "savesyncretention.sav",
+      "slot": null,
+      "updated_at": "2026-01-04T13:00:00Z",
+      "content": "retention record 1"
+    },
+    {
+      "id": 9002,
+      "emulator": "TestEmu",
+      "file_name": "savesyncretention.sav",
+      "slot": null,
+      "updated_at": "2026-01-04T12:00:00Z",
+      "content": "retention record 2"
+    },
+    {
+      "id": 9003,
+      "emulator": "TestEmu",
+      "file_name": "savesyncretention.sav",
+      "slot": null,
+      "updated_at": "2026-01-04T11:00:00Z",
+      "content": "retention record 3"
+    },
+    {
+      "id": 9004,
+      "emulator": "TestEmu",
+      "file_name": "savesyncretention.sav",
+      "slot": null,
+      "updated_at": "2026-01-04T10:00:00Z",
+      "content": "retention record 4"
+    }
+  ]
+}

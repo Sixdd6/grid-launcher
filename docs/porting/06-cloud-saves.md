@@ -688,8 +688,12 @@ extension, so screenshot assets returned by the server are never treated as stat
   Shell Documents folder and the game's `native_wineprefix`
   (grid_launcher/ui/mixins/cloud_mixin.py:2142).
 - Fetches records with `_latest_server_save_records_for_game(game, rom_id, "", {})` — an
-  empty emulator name, so the per-slot selection applies over all records
-  (grid_launcher/ui/mixins/cloud_mixin.py:2154).
+  empty emulator name, so `cloud_save_scope_for_game` resolves to `per-game` and exactly the
+  single LATEST record is restored, not one per slot
+  (grid_launcher/ui/mixins/cloud_mixin.py:2154). RULED (milestone 6): the Rust port follows
+  the code, not this section's old "per-slot" prose (now fixed) — see "Rust port deviations
+  (milestone 6)", follow-the-code rulings, and
+  `crates/grid-core/src/cloud/ops/native.rs:184-188`.
 - Branches on each record's `emulator` field
   (grid_launcher/ui/mixins/cloud_mixin.py:2176):
   - `native_multi_dir`: read `_grid_launcher_dirs.json` from the archive (a missing or
@@ -978,7 +982,10 @@ Rows render title (`file_name`, else `Cloud Save|State #<id>`), a summary line
 The range tuple at grid_launcher/library/cloud_restore.py:39-48 is ordered largest threshold
 first, so the `minute` entry is unreachable and `N minutes ago` is never emitted above 90 s.
 OPEN QUESTION: this is almost certainly a bug (the intended buckets were minutes then hours);
-a port must decide whether to reproduce it or fix it and diverge.
+a port must decide whether to reproduce it or fix it and diverge. RULED (milestone 6): ported
+as-is, bug included — `crates/grid-core/src/cloud/restore.rs:321-345`'s
+`relative_timestamp_text` reproduces the exact bucket ranges and the 120-second-renders-"1
+hour ago" behavior; see "Rust port deviations (milestone 6)", follow-the-code rulings.
 
 Restore and Delete each show a confirmation dialog; the shared-scope notice is appended as a
 `Warning:` paragraph when the scope is shared
@@ -1208,63 +1215,94 @@ Related coverage outside the cloud files: `tests/test_flycast_vmu.py` pins
   but is defined nowhere in the repository, and `AttributeError` is not caught by the
   surrounding handler. Should a port implement absolute-URL state/screenshot downloads with
   bearer auth, or drop that branch and always treat candidates as server-relative?
+  **RULED (milestone 6): dropped — see "Rust port deviations (milestone 6)" D4.**
 - `OPEN QUESTION:` The retention limit is the hard-coded constant `3`
   (grid-launcher.py:2224) with no config key and no UI. Is it intended to become
   user-configurable, and should a port expose it?
+  **RULED (milestone 6): made configurable — see "Rust port deviations (milestone 6)" D7.**
 - `OPEN QUESTION:` Retention pruning never runs for states, so state records accumulate
   without bound. Intended, or an omission?
+  **RULED (milestone 6): ported as-is, unbounded — see "Rust port deviations (milestone 6)"
+  D7 and the follow-the-code rulings.**
 - `OPEN QUESTION:` `partition_active_game_sessions` silently drops any session whose
   `process` lacks a callable `poll` (grid_launcher/library/cloud_sync.py:121) — it appears in
   neither the remaining nor the finished list, so no auto upload ever fires for it. Should a
   port treat such a session as finished instead?
+  **RULED (milestone 6): moot by construction, and if it ever mattered, finished — see "Rust
+  port deviations (milestone 6)" D8.**
 - `OPEN QUESTION:` `_ppsspp_save_directories_for_game`
   (grid_launcher/ui/mixins/cloud_mixin.py:1427) sorts by the directory's own mtime and never
   applies the ignore sets, unlike every other folder scanner which sorts by the newest file
   beneath and honours the ignore sets. Deliberate, or should it be unified?
+  **RULED (milestone 6): ported as-is — see "Rust port deviations (milestone 6)",
+  follow-the-code rulings.**
 - `OPEN QUESTION:` `_rpcs3_save_directories_for_game` sorts by configured-directory index
   before mtime (grid_launcher/ui/mixins/cloud_mixin.py:1192), so a stale save in an earlier
   directory outranks a newer one in a later directory. Is directory precedence intended to
   dominate recency here?
+  **RULED (milestone 6): ported as-is — see "Rust port deviations (milestone 6)",
+  follow-the-code rulings. The same function's `self._ps3_game_ids_for_game(game)` call
+  (cloud_mixin.py:1178) is ALSO undefined anywhere in the repository — a second,
+  independent latent defect in this one method. See D10.**
 - `OPEN QUESTION:` `_cloud_save_block_reason_for_game` only computes RetroArch core flags
   when a default core is configured for the platform, while `_cloud_save_scope_for_game`
   additionally falls back to `retroarch_core_flags_for_platform`
   (grid_launcher/ui/mixins/cloud_mixin.py:116 vs grid_launcher/ui/mixins/cloud_mixin.py:162).
   A game can therefore be treated as `shared-slotted` for scope purposes while the
   `supports_saves` block check never runs. Should the two use the same fallback?
+  **RULED (milestone 6): ported as-is, asymmetry included — see "Rust port deviations
+  (milestone 6)", follow-the-code rulings.**
 - `OPEN QUESTION:` The known-latest short circuit is skipped for shared save scopes
   (grid_launcher/ui/mixins/cloud_mixin.py:2001), so shared xemu/Redream/VMU saves are
   re-downloaded on every launch even when nothing changed. Is that the intent?
+  **RULED (milestone 6): ported as-is — see "Rust port deviations (milestone 6)",
+  follow-the-code rulings.**
 - `OPEN QUESTION:` `_cloud_emulator_entry_cache` is keyed on
   `"<title>::<platform>::<save_type>"` (grid_launcher/ui/mixins/cloud_mixin.py:191), which
   omits the ROM id. Two games with the same title and platform but different ROM ids share a
   cache entry. Acceptable, or should the key use the identity function?
+  **RULED (milestone 6): ported as-is — see "Rust port deviations (milestone 6)",
+  follow-the-code rulings.**
 - `OPEN QUESTION:` `_shared_cloud_sync_owner_game` identifies the "owner" by searching for
   the literal substrings `xemu` / `redream` in a game's title, platform, description, and ROM
   filename (grid_launcher/ui/mixins/cloud_mixin.py:392). Is a substring match on free text
   the intended contract, or should this key off an explicit field?
+  **RULED (milestone 6): ported as-is, gated on the `Emulators` platform — see "Rust port
+  deviations (milestone 6)", follow-the-code rulings. The install-path last resort
+  (`_matching_installed_emulator_games`) this function also falls back to is deferred — see
+  "Other recorded deviations and gaps".**
 - `OPEN QUESTION:` `filter_upload_jobs_by_session_window` accepts a job when **any** payload
   path is in-window (grid_launcher/library/cloud_transfer.py:677). A stale state file with a
   freshly written screenshot sidecar therefore uploads. Should the state file itself be
   required to be in-window?
+  **RULED (milestone 6): ported as-is — see "Rust port deviations (milestone 6)",
+  follow-the-code rulings.**
 - `OPEN QUESTION:` The TV backend's `restoreSlot` always downloads from
   `/api/saves/{id}/content` even when `save_type == "state"`
   (grid_launcher/tv/bridge/cloud_backend.py:221), and passes a synthetic record whose
   `file_name` is the game's display name. Is state restore expected to work in TV mode at
   all, or should the UI hide it?
+  **DEFERRED (milestone 6): TV-mode cloud saves are out of scope for this milestone — see
+  "Rust port deviations (milestone 6)", "Other recorded deviations and gaps", and doc 09.**
 - `OPEN QUESTION:` The TV upload always sends the `saveFile` multipart field, even when
   posting to `/api/states` (grid_launcher/tv/bridge/cloud_helpers.py:297), which the OpenAPI
   schema declares requires `stateFile`. Is TV state upload expected to work?
+  **DEFERRED (milestone 6): see the note on the previous question.**
 - `OPEN QUESTION:` `perform_tv_save_upload` reads the whole candidate into memory and
   discards the result before uploading (grid_launcher/tv/bridge/cloud_helpers.py:292),
   apparently as an existence/readability probe. Should a port keep that probe or drop it?
+  **DEFERRED (milestone 6): see the note two questions up.**
 - `OPEN QUESTION:` There is no cap on concurrent auto-upload threads and no per-game
   de-duplication (grid_launcher/ui/mixins/cloud_mixin.py:2950). Rapid launch/exit cycles can
   overlap uploads for the same game. Should a port serialise them?
+  **RULED (milestone 6): yes — see "Rust port deviations (milestone 6)" D5.**
 - `OPEN QUESTION:` A failed restore in the multi-record (shared-slotted) loop aborts after
   earlier records were already written to disk
   (grid_launcher/ui/mixins/cloud_mixin.py:2092), leaving a partially restored slot set. Is
   partial application acceptable, or should a port stage to a temp directory and commit
   atomically?
+  **RULED (milestone 6): stage and commit-on-all-success — see "Rust port deviations
+  (milestone 6)" D6.**
 
 ## Source map
 
@@ -1287,3 +1325,227 @@ Related coverage outside the cloud files: `tests/test_flycast_vmu.py` pins
 | grid_launcher/tv/bridge/game_backend.py | Calls `_TvAutoRestoreWorker` before launch and defers the spawn until it finishes |
 | grid-launcher.py | Config accessors (`auto_cloud_save_*`, retention constant), ignore-set and save-strategy wrappers, `_session_window_for_state_upload`, session poll timer, cache invalidation on config save, API client wrappers |
 | openapi.json | Contract for `/api/saves`, `/api/states`, their `/content`, `/delete`, and the `SaveSchema` / `StateSchema` / `ScreenshotSchema` record shapes |
+
+## Rust port deviations (milestone 6)
+
+Deliberate deviations, and rulings on ambiguous or defective reference behavior, made while
+porting cloud save/state sync (candidate discovery, upload/restore/retention, native saves,
+xemu raw-disk sync, auto-sync triggers, and the desktop panel) to Rust (grid-core, the Tauri
+`cloud_service`/`commands/cloud.rs` layer, and the `app/src/lib/details/` panel). Rust paths
+are relative to `rewrite/`. D1-D3 (xemu raw-disk sync) were already declared by the xemu
+design task and are restated here for completeness; D4-D10 are new to this milestone's
+review.
+
+1. **D1 — xemu raw-disk sync replaces whole-image sync, with no fallback.** The reference
+   synced the whole `xbox_hdd.qcow2`/`.img` file as one archive; the rewrite ships no qcow2
+   decoder and instead reads/writes the `E:` (data) FATX partition directly inside a raw HDD
+   image (`crates/grid-core/src/cloud/xemu_sync.rs:1-13`). A configured image that isn't
+   usable for this blocks the save panel's actions with one of three reasons —
+   `xemu-image-not-raw`, `xemu-image-unsupported-layout`, `xemu-image-missing` — computed by
+   `classify_hdd_image`/`block_reason_for_status`
+   (`crates/grid-core/src/cloud/xemu_sync.rs:34-101`).
+2. **D2 — legacy whole-image records are skipped with a notice, but still count toward
+   retention.** A server record from the old whole-image sync cannot be restored by the
+   raw-disk path; `inject_xemu_save_archive` reports the fixed notice `LEGACY_RECORD_NOTICE`
+   (`crates/grid-core/src/cloud/xemu_sync.rs:30-32`) rather than attempting it, but the record
+   itself is not specially excluded from `prune_server_save_records`'s count — it can still be
+   the one a retention prune deletes.
+3. **D3 — autoconfig accepts `xbox_hdd.img`, preferred over `.qcow2`.** The BIOS/firmware
+   probe and the `sys.files.hdd_path` default both treat `xbox_hdd.img` as satisfying the HDD
+   slot when it exists, falling back to `xbox_hdd.qcow2` only when neither is present
+   (`crates/grid-core/src/autoconfig/xemu.rs:19-44`, `:102-118`, `:276-292`) — add-only
+   semantics never downgrade an existing qcow2 setup.
+4. **D4 — the `_authorized_headers` branch is dropped; absolute candidates are skipped.**
+   `self._authorized_headers()` is called twice in the reference (a state/screenshot download
+   helper) but defined nowhere in the repository — a live `AttributeError` the moment an
+   absolute-URL download candidate is actually reached. The port has no equivalent method to
+   port: `RommClient::get_relative_bytes` rejects an `http(s)://` candidate outright with
+   `Err(RommError::InvalidUrl)` rather than fetching it
+   (`crates/grid-core/src/romm/cloud.rs:136-164`), so only server-relative candidates are ever
+   downloaded.
+5. **D5 — auto uploads are serialized per game, with a pool cap of 2, coalesced when already
+   in flight.** `AutoUploadPool` (`app/src-tauri/src/cloud_service.rs:58-124`,
+   `MAX_CONCURRENT_AUTO_UPLOADS = 2`) tracks one in-flight key per game; a second exit for the
+   SAME game while its upload is still running is coalesced into the first rather than
+   starting a second, while two DIFFERENT games' auto uploads run concurrently up to the
+   semaphore's cap of 2. The reference has no cap and no de-duplication at all
+   (`cloud_mixin.py:2950`).
+6. **D6 — shared-slotted restores are staged in a temp directory and committed only when
+   every record downloaded and unpacked successfully.** `place_staged`
+   (`crates/grid-core/src/cloud/ops/restore.rs:353-419`) downloads and unpacks EVERY record
+   into a staging temp directory first; only once all succeed are the staged trees copied into
+   place. The commit-phase copy itself is a plain per-file `copy_tree`, not an atomic rename —
+   so a crash mid-commit can still leave a partially-applied slot set, though the plain
+   download/unpack failure the reference left exposed no longer can.
+7. **D7 — `cloud_save_retention_limit` is a config key (default 3, minimum 1); states are
+   still never pruned.** The reference hardcodes the retention limit to the literal `3`
+   (`grid-launcher.py:2224`); the port exposes it as `Config::cloud_save_retention_limit`
+   (`crates/grid-core/src/config.rs:101-109`, default 3), editable from the Emulators panel's
+   Cloud Saves settings block (`app/src/lib/Emulators.svelte`,
+   `cloud-settings-retention-limit`). Every read site clamps to a minimum of 1 (`.max(1)`,
+   `crates/grid-core/src/cloud/retention.rs:76`,
+   `crates/grid-core/src/cloud/ops/upload.rs:200-201`). Retention pruning still runs for saves
+   only — the reference never prunes state records either, and the port does not add that.
+8. **D8 — an unpollable session would count as finished; the Rust session store always
+   polls.** `partition_active_game_sessions` silently drops a session whose `process` has no
+   callable `poll` from BOTH the running and finished lists (`cloud_sync.py:121`), so no auto
+   upload ever fires for it. The Rust `LaunchService`/`SessionManager` session model has no
+   such degenerate state — every tracked session always owns a real child-process handle it
+   can poll — so this branch has no equivalent to port; see the design note at
+   `crates/grid-core/src/cloud/window.rs:1-10`. Were a session ever unrepresentable, the
+   port's shape naturally treats "cannot be tracked further" as "finished", not "silently
+   forgotten".
+9. **D9 — four credential-bearing basenames are always-ignored, on both the archive-write and
+   scan sides.** `retroarch.cfg`, `pcsx2.ini`, `ppsspp.ini`, `ppsspp_retroachievements.dat`
+   are added to `DEFAULT_IGNORE_BASENAMES` (`crates/grid-core/src/cloud/candidates.rs:47-60`)
+   — absent from the reference's `DEFAULT_CLOUD_SYNC_IGNORE_BASENAMES`
+   (`cloud_transfer.py:19-24`). Token secrecy outranks parity here (standing project rule): a
+   save path pointed at an emulator's own config root must never upload a file that can hold a
+   RetroAchievements or session token, whether it is picked up by a directory-archive scan or
+   excluded explicitly when building an upload archive.
+10. **D10 — `_ps3_game_ids_for_game` is undefined; PS3 ids are reconstructed from
+    `ps3_game_id`.** `_rpcs3_save_directories_for_game` calls
+    `self._ps3_game_ids_for_game(game)` (`cloud_mixin.py:1178`) — a method defined nowhere in
+    the repository, and not caught by any surrounding handler, so RPCS3 save-directory
+    scanning would crash the moment it actually ran; no test exercises it either. The only
+    PS3-id data `CloudGame` carries is `ps3_game_id`, already produced in the exact normalized
+    form (`^[A-Z]{4}\d{5}$`, no separators) the call site's substring match needs, so
+    `ps3_id_tokens` (`crates/grid-core/src/cloud/tokens.rs:281-307`) reconstructs the missing
+    method as "that one field, defensively re-normalized, as a single-element list, or empty
+    when blank." Flagged as a discrepancy for human confirmation rather than silently assumed.
+
+### Follow-the-code rulings (ported as-is)
+
+Where the reference's own behavior conflicts with this doc's prose, or is internally
+inconsistent, the port follows the CODE. None of the following is a bug the port introduces,
+and none of them is fixed:
+
+- **PPSSPP scanner: own-mtime sort, no ignore-set filtering.** `ppsspp_save_directories`
+  (`crates/grid-core/src/cloud/candidates.rs:794-830`) sorts candidate directories by their
+  OWN mtime and applies no ignore set at all — unlike every other folder scanner, which sorts
+  by the newest file beneath and honours the ignore sets.
+- **RPCS3 scanner: directory index before recency.** `rpcs3_save_directories`
+  (`crates/grid-core/src/cloud/candidates.rs:756-793`) sorts by configured-directory index
+  FIRST, then recency — a stale save in an earlier configured directory outranks a newer one
+  in a later directory.
+- **Block-vs-scope RetroArch core-flags fallback asymmetry.** `block_reason_flags`
+  (`crates/grid-core/src/cloud/ops/mod.rs:454-469`) computes core flags ONLY when a default
+  core is configured for the platform, with no `core_flags_for_platform` fallback — unlike
+  `cloud_save_scope`'s own resolution, which does fall back. A game can be treated as
+  `shared-slotted` for scope purposes while the `supports_saves` block check never runs.
+- **Shared-scope re-download.** The known-latest short circuit
+  (`crates/grid-core/src/cloud/ops/restore.rs`, pinned by the
+  `known_latest_skip_only_for_per_game_scope` test at
+  `crates/grid-core/src/cloud/ops/tests.rs:514`) applies to `per-game` scope ONLY — shared
+  xemu/Redream/VMU saves are re-downloaded on every auto-restore even when nothing changed
+  server-side.
+- **Cache key without ROM id.** `CloudCaches`'s sync-dir and emulator-entry memoization keys
+  on `(title, platform, save_type)` (`crates/grid-core/src/cloud/ops/mod.rs:129-137`,
+  `resolved_cloud_emulator_pair` at `:316`) — two games with the same title and platform but
+  different ROM ids share a cache entry.
+- **Substring owner match, gated on the `Emulators` platform.** `shared_sync_owner`
+  (`crates/grid-core/src/cloud/scope.rs:221`) and its caller `shared_cloud_sync_owner`
+  (`crates/grid-core/src/cloud/ops/mod.rs:645-661`) identify a shared-sync "owner" game by a
+  plain substring search for `xemu`/`redream` across title, platform, description and ROM
+  filename — free-text matching, not an explicit field — restricted to games on the literal
+  `Emulators` platform, matching the reference's own first gate.
+- **Any-payload-path-in-window jobs.** `filter_upload_jobs_by_session_window`
+  (`crates/grid-core/src/cloud/transfer.rs:752-800`) accepts a job when ANY of its payload
+  paths is inside the session mtime window — a stale state file with a freshly-written
+  screenshot sidecar still uploads.
+- **States are unpruned.** (See D7.) `upload_cloud_files_for_game` only calls
+  `prune_server_save_records` for `SaveType::Save`
+  (`crates/grid-core/src/cloud/ops/upload.rs:200-205`) — never for states, matching the
+  reference exactly.
+- **`relative_timestamp_text` bucket bug, ported as-is.**
+  `crates/grid-core/src/cloud/restore.rs:321-345` reproduces the reference's
+  threshold-ordering bug verbatim: the range table is ordered largest-threshold-first, so the
+  "minute" bucket is unreachable above 90 seconds and 120 seconds elapsed renders `"1 hour
+  ago"`.
+- **PCSX2 scanner's sort key is UNFILTERED by ignore sets.** `pcsx2_save_directories`
+  (`crates/grid-core/src/cloud/candidates.rs:699-704`) accepts an `IgnoreSets` parameter but
+  builds its sort key against a fresh `IgnoreSets::default()` instead — a directory whose only
+  contents match the ignore set can still outrank one with real, older save data, because the
+  sort key never sees the caller's ignore set.
+- **The empty-token guard asymmetry in save matching.** `state_candidate_matches_tokens`
+  (`crates/grid-core/src/cloud/tokens.rs:426-450`) treats an EMPTY token set as "matches
+  everything" — deliberate (a game with no derivable id tokens must not be excluded from every
+  candidate), ported exactly as the reference computes it.
+- **Zero-job state uploads still emit "Uploaded 0 save states."** `upload_completion_message`
+  (`crates/grid-core/src/cloud/transfer.rs:850-908`) reports the literal `"Uploaded 0 save
+  states."` (or `"...save files."`) for a save type whose job list came back empty, rather
+  than a distinct "nothing to upload" message — matching the reference's own general-branch
+  text.
+- **Native restore selects the single latest record.** A blank emulator name resolves
+  `cloud_save_scope` to `per-game`, so `restore_native_cloud_save_for_game`
+  (`crates/grid-core/src/cloud/ops/native.rs:184-205`) restores exactly ONE record — the
+  latest — never one per slot. This doc's "Restore — native games" section previously said
+  "per-slot"; that sentence is now fixed in place to match the code.
+
+### Other recorded deviations and gaps
+
+- **`cloud_sync_state`'s debug `failed=` segment is a plain comma-joined list, not Python's
+  list-`repr`.** `summarize_auto_cloud_upload_result`'s debug segment
+  (`crates/grid-core/src/cloud/state.rs:358-406`) renders `"failed=<first 3 joined by ','>"`
+  — no brackets, no quotes — where the reference's f-string embeds the actual Python `list`
+  (`"failed=['a.sav', 'b.sav']"`). Debug-only text; nothing user-facing depends on the exact
+  punctuation.
+- **`_ensure_emulator_sync_settings` is NOT invoked during cloud directory resolution.**
+  `resolved_sync_dirs`/`resolved_sync_directory_paths`
+  (`crates/grid-core/src/cloud/dirs.rs:51`, `:353-358`) deliberately omit the reference's
+  `_ensure_emulator_sync_settings` call (`cloud_mixin.py:646`) — milestone 5's D1 restricts
+  every `ensure_*` writer to running only for a NEWLY created emulator entry, and directory
+  resolution for an existing entry is not that trigger.
+- **`resolve_native_save_dir` expands `%VAR%` unconditionally.**
+  `crates/grid-core/src/cloud/native.rs:19-58` substitutes `%VAR%`-syntax environment
+  references on every host, not just Windows — the reference's real `os.path.expandvars` only
+  understands `%VAR%` on Windows and leaves that text untouched on POSIX (where it expands
+  only `$VAR`/`${VAR}`). The port's own pinned oracle tests require `%VAR%` to resolve
+  everywhere; on Linux this is inert in practice, since the values it substitutes are Windows
+  environment variable names.
+- **`CloudGame.title_id` / `base_title_id` / `ps3_game_id` are blank until the registry
+  carries them.** `cloud_game_from_installed`
+  (`app/src-tauri/src/cloud_service.rs:1155-1167`) leaves all three fields empty — the
+  `installed_games` registry has no columns for them yet. RPCS3 and Cemu scanners, whose
+  token sets are built from these fields, therefore match EVERY candidate directory (an empty
+  token set matches everything — see the follow-the-code ruling above) rather than narrowing
+  by id, until a future milestone adds the columns and populates them.
+- **The shared-owner install-path last resort is deferred.** The reference's
+  `_shared_cloud_sync_owner_game` falls back to `_matching_installed_emulator_games`
+  (`install_mixin.py:1106` -> `install_registry.py:65`) when no title/description/filename
+  substring match is found; the port's `shared_cloud_sync_owner`
+  (`crates/grid-core/src/cloud/ops/mod.rs:645-661`) has no equivalent fallback yet — it needs
+  `candidate_archive_paths_for_game`/`candidate_extracted_paths_for_game`/
+  `candidate_extracted_dirs_for_game`, none built by this milestone.
+- **The PPSSPP and RetroArch state job builders take the already-resolved ignore sets.**
+  `ppsspp_state_upload_jobs` (`crates/grid-core/src/cloud/transfer.rs:622`) and
+  `retroarch_state_upload_jobs` (`crates/grid-core/src/cloud/transfer.rs:713`) both receive an
+  `&IgnoreSets` parameter and apply it, matching the reference, which resolves and applies
+  ignore sets identically for both.
+- **The xemu image status gates actions and panel text, but not panel visibility.**
+  `details_cloud_mode_supported`'s compatibility gate deliberately checks only the BASE block
+  reason, not the xemu HDD-image reason (`crates/grid-core/src/cloud/ops/mod.rs:1009-1013`) —
+  an unusable xemu image must not hide the Manage Saves panel outright, or the user could
+  never see the guidance text explaining why.
+- **`_split_template_args` tracks only `{{}}` nesting.** `split_template_args`
+  (`crates/grid-core/src/pcgw.rs:187-230`) respects nested `{{...}}` templates when splitting
+  a PCGamingWiki wikitext template's `|`-separated arguments, but does not additionally track
+  `[[...]]` link nesting — ported exactly as the reference's own splitter behaves.
+- **PCSX2's `_pcsx2_superblock` stays in the ignore set for archive filtering.**
+  `resolved_ignore_sets` adds the literal basename `_pcsx2_superblock` to the SAVE ignore set
+  only for a resolved PCSX2 emulator (`crates/grid-core/src/cloud/candidates.rs:249-291`) — it
+  is a directory marker file PCSX2 itself writes, not real save data, and must never be
+  treated as the "newest" file when picking a save directory or included in an upload
+  archive.
+- **The `Fat` empirical oracle (`pyfatx`) was never run.**
+  `crates/grid-core/src/fatx/dir.rs:27-31` and `crates/grid-core/src/fatx/layout.rs:314`
+  record that the intended cross-check against a real `pyfatx`-produced image never happened
+  (the tool fails to import in this environment) — the epoch-1980 timestamp base, the
+  `cluster_count + 1` reserved-FAT-entry convention, and date-then-time field order all remain
+  documented defaults rather than empirically confirmed values.
+- **TV-mode cloud save variants are deferred, together with doc 09.** The `## TV-mode
+  variants` section above, and the three TV-bridge open questions immediately preceding this
+  section in "Open questions" (`restoreSlot`'s always-content-endpoint download, the TV
+  upload's always-`saveFile` field, `perform_tv_save_upload`'s read-and-discard probe), have
+  no Rust TV-mode counterpart in this milestone — TV mode itself has not been ported yet (doc
+  09).

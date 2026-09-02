@@ -9,6 +9,25 @@
 //   GET  /api/roms/:id/content/:file_name?file_ids=[&e2e_throttle=<ms-per-chunk>]
 //   GET  /assets/romm/resources/roms/:id/cover/small.png
 //
+// Cloud save/state sync (grid-core/src/romm/cloud.rs), used by the
+// `cloud-saves` stage group:
+//   GET  /api/saves?rom_id=            (canned records, from saves.json)
+//   GET  /api/saves/:id/content        (raw bytes for one canned record)
+//   POST /api/saves                    (multipart upload — captured)
+//   POST /api/saves/delete             ({"saves": [id, ...]})
+//   GET  /api/states?rom_id=           (always [] — no group needs seeded
+//                                        state records; states are queried
+//                                        as a side effect of the save-type
+//                                        auto-restore/auto-upload flows)
+//
+// `GET /__e2e__/requests` (outside `/api/`, no auth) returns the live
+// request log as JSON so a spec can assert on what the mock received
+// (query params, parsed multipart parts, JSON bodies) WHILE the mock is
+// still running — the mock is a separate process from the wdio spec
+// (scripts/e2e.sh's run_group_attempt), so the in-memory `requestLog`
+// array plumbed through `startMockRomm`'s return value is only reachable
+// by mock-romm/server.test.mjs's in-process tests, not by an E2E spec.
+//
 // The content endpoint's `e2e_throttle` query param (or the `defaultThrottleMs`
 // / `--throttle-ms` server-wide default, used by e2e.sh for the `downloads`
 // stage group) makes it stream the response in fixed-size chunks with a delay
@@ -89,12 +108,42 @@ function contentForFile(fileName, content) {
 
 // --- fixture loading ---------------------------------------------------------
 
+/**
+ * `saves.json` is optional — only `fixtures-cloud-saves/` has one. Each key
+ * is a rom id (string); each value is an array of canned save records with
+ * an extra `content` field (plain utf8 text) holding the bytes
+ * `GET /api/saves/:id/content` serves for that record. `content` is
+ * stripped from the record before it is ever sent to a client — the real
+ * `GET /api/saves?rom_id=` response never inlines file bytes.
+ */
+async function loadSaveFixtures(fixturesDir) {
+  try {
+    const raw = await readFile(path.join(fixturesDir, "saves.json"), "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
 async function loadFixtures(fixturesDir) {
-  const [platforms, romsByPlatform, romDetails] = await Promise.all([
+  const [platforms, romsByPlatform, romDetails, savesByRom] = await Promise.all([
     readFile(path.join(fixturesDir, "platforms.json"), "utf8").then(JSON.parse),
     readFile(path.join(fixturesDir, "roms.json"), "utf8").then(JSON.parse),
     readFile(path.join(fixturesDir, "rom-details.json"), "utf8").then(JSON.parse),
+    loadSaveFixtures(fixturesDir),
   ]);
+
+  const saveContentById = new Map();
+  const saveRecordsByRom = {};
+  for (const [romId, records] of Object.entries(savesByRom)) {
+    saveRecordsByRom[romId] = records.map((record) => {
+      const { content, ...rest } = record;
+      if (content !== undefined) {
+        saveContentById.set(String(record.id), Buffer.from(content, "utf8"));
+      }
+      return rest;
+    });
+  }
 
   const content = buildContentFixtures();
 
@@ -113,7 +162,15 @@ async function loadFixtures(fixturesDir) {
     detail.fs_size_bytes = total;
   }
 
-  return { platforms, romsByPlatform, romDetails, contentByKey, pngBytes: content.pngBytes };
+  return {
+    platforms,
+    romsByPlatform,
+    romDetails,
+    contentByKey,
+    pngBytes: content.pngBytes,
+    saveRecordsByRom,
+    saveContentById,
+  };
 }
 
 // --- HTTP helpers ------------------------------------------------------------
@@ -175,12 +232,87 @@ async function sendBufferThrottled(res, status, contentType, buf, chunkMs) {
 const COVER_PATH_RE = /^\/assets\/romm\/resources\/roms\/\d+\/cover\/small\.png$/;
 const ROM_ID_RE = /^\/api\/roms\/(\d+)$/;
 const ROM_CONTENT_RE = /^\/api\/roms\/(\d+)\/content\/(.+)$/;
+const SAVE_CONTENT_RE = /^\/api\/saves\/([^/]+)\/content$/;
 
-function handleRequest(req, res, state) {
+/** Buffers a request body fully. Small fixture payloads only — no streaming. */
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+/**
+ * Minimal `multipart/form-data` parser for the cloud-saves E2E group's
+ * `POST /api/saves` capture — plain node:http, no npm dependency. Handles
+ * exactly the shape `reqwest::multipart::Form` produces
+ * (grid-core/src/romm/cloud.rs's `build_multipart_form`): one or more parts,
+ * each `Content-Disposition: form-data; name="..."; filename="..."` plus a
+ * `Content-Type:` line, separated by `--<boundary>` markers and terminated
+ * by `--<boundary>--`. Returns `[]` when `contentType` carries no boundary
+ * (not multipart, or an empty body).
+ */
+function parseMultipart(buffer, contentType) {
+  const boundaryMatch = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentType ?? "");
+  if (!boundaryMatch) return [];
+  const boundary = boundaryMatch[1] ?? boundaryMatch[2];
+  const marker = Buffer.from(`--${boundary}`);
+
+  const parts = [];
+  let cursor = buffer.indexOf(marker);
+  while (cursor !== -1) {
+    const next = buffer.indexOf(marker, cursor + marker.length);
+    if (next === -1) break;
+
+    let segment = buffer.subarray(cursor + marker.length, next);
+    if (segment.subarray(0, 2).toString("latin1") === "\r\n") segment = segment.subarray(2);
+    if (segment.subarray(-2).toString("latin1") === "\r\n") segment = segment.subarray(0, -2);
+
+    const headerEnd = segment.indexOf("\r\n\r\n");
+    if (headerEnd !== -1) {
+      const headerText = segment.subarray(0, headerEnd).toString("utf8");
+      const body = segment.subarray(headerEnd + 4);
+      const nameMatch = /name="([^"]*)"/i.exec(headerText);
+      const filenameMatch = /filename="([^"]*)"/i.exec(headerText);
+      const contentTypeMatch = /Content-Type:\s*([^\r\n]+)/i.exec(headerText);
+      parts.push({
+        name: nameMatch ? nameMatch[1] : "",
+        filename: filenameMatch ? filenameMatch[1] : undefined,
+        contentType: contentTypeMatch ? contentTypeMatch[1].trim() : undefined,
+        size: body.length,
+        // Fixture payloads in this group are small text files — decoding
+        // as utf8 unconditionally is fine for what these specs assert on.
+        text: body.toString("utf8"),
+      });
+    }
+    cursor = next;
+  }
+  return parts;
+}
+
+async function handleRequest(req, res, state) {
   const requestUrl = new URL(req.url, "http://127.0.0.1");
   const pathname = decodeURIComponent(requestUrl.pathname);
 
-  state.requestLog.push({ method: req.method, path: req.url });
+  // Live introspection for the cloud-saves E2E group: the mock runs as a
+  // separate process from the wdio spec (scripts/e2e.sh's
+  // run_group_attempt), so this is the only way a spec can see what the
+  // mock received WHILE it is still running, rather than only after
+  // close() writes last-run-requests.log. Outside /api/, no auth — mirrors
+  // the cover asset's own bypass just below.
+  if (req.method === "GET" && pathname === "/__e2e__/requests") {
+    sendJson(res, 200, state.requestLog);
+    return;
+  }
+
+  const logEntry = { method: req.method, path: req.url };
+  state.requestLog.push(logEntry);
+  let body = Buffer.alloc(0);
+  if (req.method === "POST") {
+    body = await readBody(req);
+  }
 
   // Static-style cover asset: not under /api, no auth required — mirrors
   // RomM serving cover images directly off disk.
@@ -276,6 +408,52 @@ function handleRequest(req, res, state) {
     return;
   }
 
+  // --- cloud saves (grid-core/src/romm/cloud.rs) --------------------------
+
+  if (req.method === "GET" && pathname === "/api/saves") {
+    const romId = requestUrl.searchParams.get("rom_id") ?? "";
+    logEntry.query = { rom_id: romId };
+    sendJson(res, 200, state.saveRecordsByRom[romId] ?? []);
+    return;
+  }
+
+  const saveContentMatch = pathname.match(SAVE_CONTENT_RE);
+  if (req.method === "GET" && saveContentMatch) {
+    const bytes = state.saveContentById.get(saveContentMatch[1]);
+    if (!bytes) {
+      sendJson(res, 404, { detail: "save content not found" });
+      return;
+    }
+    sendBuffer(res, 200, "application/octet-stream", bytes);
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/saves") {
+    logEntry.query = Object.fromEntries(requestUrl.searchParams.entries());
+    logEntry.multipart = parseMultipart(body, req.headers["content-type"]);
+    sendJson(res, 200, {});
+    return;
+  }
+
+  if (req.method === "POST" && pathname === "/api/saves/delete") {
+    try {
+      logEntry.bodyJson = JSON.parse(body.toString("utf8"));
+    } catch {
+      logEntry.bodyJson = null;
+    }
+    sendJson(res, 200, {});
+    return;
+  }
+
+  // States: no stage group seeds records, but the save-type auto-restore
+  // and auto-upload flows always probe the state side too (grid-core
+  // resolves save/state independently) — an empty list keeps that probe
+  // harmless rather than a stray 404 in the mock log.
+  if (req.method === "GET" && pathname === "/api/states") {
+    sendJson(res, 200, []);
+    return;
+  }
+
   sendJson(res, 404, { detail: "not found" });
 }
 
@@ -300,7 +478,11 @@ export async function startMockRomm({
   // the live app needing to add the query param itself.
   state.defaultThrottleMs = defaultThrottleMs;
 
-  const server = http.createServer((req, res) => handleRequest(req, res, state));
+  const server = http.createServer((req, res) => {
+    handleRequest(req, res, state).catch((err) => {
+      if (!res.headersSent) sendJson(res, 500, { detail: String(err) });
+    });
+  });
 
   await new Promise((resolve, reject) => {
     server.once("error", reject);
