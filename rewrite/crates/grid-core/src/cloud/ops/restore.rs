@@ -353,6 +353,16 @@ async fn place_directly(
 /// D6: download and unpack EVERY record into a staging temp directory
 /// first; only when all succeed are the staged trees moved into place. A
 /// failure before the commit leaves local files untouched.
+///
+/// **Boundary of the guarantee:** atomicity covers everything up to the
+/// commit — every download, every unpack, and every target decision. The
+/// commit itself is a plain per-file [`copy_tree`], not an atomic
+/// rename-into-place, so an I/O failure DURING the commit (a full disk, a
+/// revoked permission) can still leave some slots updated and others not.
+/// Making that step atomic too would need a same-filesystem staging
+/// directory plus a rename per file, which the temp-dir staging this
+/// deviation specifies does not give. D6's stated goal — that a failed
+/// DOWNLOAD never half-writes the slot set — holds.
 async fn place_staged(
     client: &RommClient,
     plan: &RestorePlan<'_>,

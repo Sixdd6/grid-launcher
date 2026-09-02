@@ -558,12 +558,17 @@ pub fn scope_for_game(
     scope_for(ctx, &name, entry, &game.platform, save_type)
 }
 
-/// `_cloud_save_block_reason_for_game` (cloud_mixin.py:96-133), PLUS the
-/// xemu raw-image block reasons (spec "xemu flow"): when the resolved
-/// emulator is xemu and `save_type == Save`, the configured `hdd_path` is
-/// classified and its reason, if any, returned. The pure block reason
-/// wins when both fire.
-pub fn block_reason_for_game(
+/// `_cloud_save_block_reason_for_game` (cloud_mixin.py:96-133) EXACTLY —
+/// no xemu image reasons. This is the compatibility gate
+/// `details_cloud_mode_supported` consults (cloud_mixin.py:353): whether
+/// the emulator/core can do cloud saves at all, which is a property of
+/// the emulator, not of today's HDD image.
+///
+/// Fix round 1 (controller ruling): keeping the two separate is what
+/// stops a qcow2 `hdd_path` from HIDING the cloud panel outright. The
+/// panel must still appear so the user can read the conversion guidance
+/// [`block_reason_for_game`] returns.
+pub fn base_block_reason_for_game(
     ctx: &CloudContext,
     game: &CloudGame,
     save_type: SaveType,
@@ -571,11 +576,29 @@ pub fn block_reason_for_game(
 ) -> String {
     let name = wrapper_emulator_name(ctx, entry, &game.platform);
     let flags = block_reason_flags(ctx, &name, entry, &game.platform);
-    let reason = cloud_save_block_reason(&game.platform, save_type, &name, flags.as_ref());
+    cloud_save_block_reason(&game.platform, save_type, &name, flags.as_ref())
+}
+
+/// [`base_block_reason_for_game`] PLUS the xemu raw-image block reasons
+/// (spec "xemu flow"): when the resolved emulator is xemu and `save_type
+/// == Save`, the configured `hdd_path` is classified and its reason, if
+/// any, returned. The base reason wins when both fire.
+///
+/// This is the gate for the ACTIONS — upload, restore, and the panel's
+/// Upload button/refusal text — not for whether the panel exists; see
+/// [`base_block_reason_for_game`].
+pub fn block_reason_for_game(
+    ctx: &CloudContext,
+    game: &CloudGame,
+    save_type: SaveType,
+    entry: Option<&EmulatorEntry>,
+) -> String {
+    let reason = base_block_reason_for_game(ctx, game, save_type, entry);
     if !reason.is_empty() {
         return reason;
     }
 
+    let name = wrapper_emulator_name(ctx, entry, &game.platform);
     if save_type == SaveType::Save && is_xemu(ctx, &name, entry) {
         let hdd_path = entry
             .and_then(|e| xemu_hdd_path_from_config(&e.path))
@@ -620,10 +643,21 @@ fn cloud_sync_rom_id_with(
 }
 
 /// `_shared_cloud_sync_owner_game` (cloud_mixin.py:398-437), minus the
-/// "scan the emulator install directory" last resort — that reads the
-/// installed-games registry off `self`, which this layer does not carry
-/// (recorded in the task report). `ctx.all_games` is the registry +
-/// server-cache pool Python walks first.
+/// `_matching_installed_emulator_games` last resort
+/// (install_mixin.py:1106 -> install_registry.py:65).
+///
+/// Fix round 1 — the real blocker, corrected: that last resort scans the
+/// SAME pool this function already walks (`self.library_games`, i.e.
+/// `ctx.all_games`); what it does differently is match by INSTALL PATH
+/// rather than by free text — it looks for the library game whose own
+/// archive/extracted files ARE the emulator binary at `entry.path`, via
+/// `candidate_archive_paths_for_game` /
+/// `candidate_extracted_paths_for_game` /
+/// `candidate_extracted_dirs_for_game`. Those three install-path
+/// derivations are not ported into this crate, so the fallback cannot be
+/// expressed here yet. It only matters when no `Emulators`-platform row
+/// matches the emulator by free text but one is installed AS that
+/// emulator.
 fn shared_cloud_sync_owner<'a>(
     ctx: &'a CloudContext,
     game: &CloudGame,
@@ -972,7 +1006,9 @@ pub fn details_cloud_mode_supported(
     if save_type == SaveType::State && (emulators_platform || is_rpcs3(ctx, &name, Some(&entry))) {
         return false;
     }
-    if !block_reason_for_game(ctx, game, save_type, Some(&entry)).is_empty() {
+    // The BASE reason only (fix round 1): an xemu image problem must not
+    // hide the panel — the user needs it to read the guidance.
+    if !base_block_reason_for_game(ctx, game, save_type, Some(&entry)).is_empty() {
         return false;
     }
 

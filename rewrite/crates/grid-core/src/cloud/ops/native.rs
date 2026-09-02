@@ -37,7 +37,12 @@ const NO_NATIVE_CLOUD_SAVE: &str = "No cloud save found on the server for this g
 /// (`details_view_mixin.py:152-153`, the trimmed title) plus the
 /// `"__manual"` suffix the manual list is stored under
 /// (`details_view_mixin.py`'s `manual_key`).
-fn manual_paths_key(game: &CloudGame) -> String {
+///
+/// `pub`, not `pub(crate)`: the app layer's `native_add_manual_save_path` /
+/// `native_remove_manual_save_path` commands (task 17) write into
+/// `config.native_manual_save_paths` under this exact key and must use the
+/// same derivation this module reads with, rather than recomputing it.
+pub fn manual_paths_key(game: &CloudGame) -> String {
     format!("{}__manual", game.title.trim())
 }
 
@@ -138,15 +143,13 @@ pub async fn upload_native_saves_for_game(
         total: 1,
         failed: failed.clone(),
     };
-    let mut messages = Vec::new();
-    if let Some((text, severity)) = upload_completion_message(
+    let (text, severity) = upload_completion_message(
         &outcome,
         SaveType::Save,
         retention_failed.len(),
         retention_limit,
-    ) {
-        messages.push(CloudMessage { text, severity });
-    }
+    );
+    let messages = vec![CloudMessage { text, severity }];
 
     // 8. The total is always 1.
     UploadReport {

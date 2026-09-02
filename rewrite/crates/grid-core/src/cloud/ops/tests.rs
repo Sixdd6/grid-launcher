@@ -1307,9 +1307,24 @@ fn details_cloud_mode_supported_gate_table() {
         true
     ));
 
-    // `save` on the Emulators platform with per-game scope -> false;
+    // `save` on the Emulators platform with per-game scope -> false.
+    // "Dolphin" is per-game, and the game's text names no shared-sync
+    // emulator, so the shared-token scan finds nothing either.
+    let emu_game = game("Dolphin package", "Emulators", "7");
+    let mut caches = CloudCaches::default();
+    assert_eq!(
+        scope_for_game(&ctx, &emu_game, SaveType::Save, fx.config.emulators.first()),
+        SaveScope::PerGame
+    );
+    assert!(!details_cloud_mode_supported(
+        &ctx,
+        &mut caches,
+        &emu_game,
+        SaveType::Save,
+        true
+    ));
+
     // `state` on the Emulators platform -> false.
-    let emu_game = game("xemu package", "Emulators", "7");
     let mut caches = CloudCaches::default();
     assert!(!details_cloud_mode_supported(
         &ctx,
@@ -1483,6 +1498,119 @@ fn shared_owner_rom_id_applies_to_saves_only() {
         cloud_sync_rom_id(&fx.ctx(), &mut caches, &target, SaveType::State),
         Some("7".to_string())
     );
+}
+
+/// Fix round 1 (FIX 1, ruling: Python wins): the generic state branch
+/// guards only on "no candidates" (`cloud_mixin.py:2565`), so a run that
+/// builds zero jobs must still fall through to the completion table and
+/// report `"Uploaded 0 save states."` — never the "no matching states"
+/// info, and never silence.
+///
+/// The ops layer forwards `upload_completion_message`'s result
+/// unconditionally: the two assertions below pin the message for a
+/// zero-attempt outcome and the absence of any ops-side guard around it.
+///
+/// NOTE on reachability, found while writing this test: with the guard
+/// removed, no public-API input can currently produce a zero-job state
+/// run. Candidate discovery (`file_candidates`) and both state job
+/// builders (`retroarch_state_upload_jobs`,
+/// `grouped_file_upload_jobs`) apply the SAME ignore sets and the same
+/// `is_file()` existence filter — in Python too (`cloud_mixin.py:2568`
+/// re-uses the discovery sets verbatim) — so non-empty candidates always
+/// yield at least one job. The guard removal is therefore defensive as
+/// well as correct: it makes the port match Python's shape at a seam
+/// neither codebase can reach today, instead of hard-coding an
+/// assumption that could silently swallow a future builder's empty
+/// result.
+#[tokio::test]
+async fn zero_job_state_upload_still_reports_uploaded_zero() {
+    // The exact string the ruling names, straight off the seam ops uses.
+    assert_eq!(
+        crate::cloud::transfer::upload_completion_message(
+            &crate::cloud::transfer::UploadOutcome::default(),
+            SaveType::State,
+            0,
+            3,
+        ),
+        ("Uploaded 0 save states.".to_string(), MessageSeverity::Info)
+    );
+
+    // And ops forwards that table's output with no guard of its own: a
+    // real state run reports the completion message, not a "no matching"
+    // info, for every non-empty candidate set.
+    let server = MockServer::start().await;
+    mock_ok(&server, "POST", "/api/states", json!({})).await;
+    let client = client_for(&server);
+
+    let states = TempDir::new().unwrap();
+    write_file(&states.path().join("metroid.state"), b"s");
+    let mut entry = entry_named("Nestopia", "");
+    entry.state_paths = states.path().to_str().unwrap().to_string();
+    let fx = Fixture::new(config_with(entry, "NES"));
+    let mut caches = CloudCaches::default();
+
+    let report = upload_cloud_files_for_game(
+        &client,
+        &fx.ctx(),
+        &mut caches,
+        &game("Metroid", "NES", "7"),
+        SaveType::State,
+    )
+    .await;
+    assert_eq!((report.uploaded, report.total), (1, 1));
+    assert_eq!(texts(&report.messages), vec!["Uploaded 1 save states."]);
+    assert_eq!(report.messages[0].severity, MessageSeverity::Info);
+}
+
+/// Fix round 1 (FIX 2): an xemu image problem blocks the ACTION but must
+/// not hide the panel — `details_cloud_mode_supported` consults the BASE
+/// reason, `block_reason_for_game` adds the image guidance.
+#[test]
+fn xemu_image_status_blocks_the_action_but_not_the_panel() {
+    let root = TempDir::new().unwrap();
+    let exe_dir = root.path().join("bin");
+    fs::create_dir_all(&exe_dir).unwrap();
+    let exe = exe_dir.join("xemu");
+    fs::write(&exe, b"").unwrap();
+
+    // A qcow2 image: NotRaw.
+    let qcow = root.path().join("xbox_hdd.qcow2");
+    fs::write(&qcow, [0x51, 0x46, 0x49, 0xFB, 0, 0, 0, 0]).unwrap();
+    fs::write(
+        exe_dir.join("xemu.toml"),
+        format!("[sys.files]\nhdd_path = '{}'\n", qcow.display()),
+    )
+    .unwrap();
+
+    let entry = EmulatorEntry {
+        name: "xemu".to_string(),
+        path: exe.to_string_lossy().into_owned(),
+        save_paths: root.path().to_string_lossy().into_owned(),
+        ..Default::default()
+    };
+    let fx = Fixture::new(config_with(entry.clone(), "Xbox"));
+    let ctx = fx.ctx();
+    let target = game("Halo", "Xbox", "7");
+
+    // The action gate carries the conversion guidance ...
+    assert_eq!(
+        block_reason_for_game(&ctx, &target, SaveType::Save, Some(&entry)),
+        "xemu cloud sync needs a raw HDD image (xbox_hdd.img). Convert your qcow2 once with: qemu-img convert -O raw xbox_hdd.qcow2 xbox_hdd.img"
+    );
+    // ... while the base reason stays empty ...
+    assert_eq!(
+        base_block_reason_for_game(&ctx, &target, SaveType::Save, Some(&entry)),
+        ""
+    );
+    // ... so the panel still shows, and the user can read the guidance.
+    let mut caches = CloudCaches::default();
+    assert!(details_cloud_mode_supported(
+        &ctx,
+        &mut caches,
+        &target,
+        SaveType::Save,
+        true
+    ));
 }
 
 fn record_id_for_tests(record: &Value) -> String {

@@ -24,7 +24,7 @@ use super::super::transfer::{
     UploadJob, UploadOutcome,
 };
 use super::super::xemu_sync::{build_xemu_save_archive, xemu_hdd_path_from_config};
-use super::super::{CloudGame, SaveType};
+use super::super::{CloudGame, IgnoreSets, SaveType};
 use super::*;
 
 /// `vmu([0-3])` — the slot regex `_cloud_save_slot_for_upload_job` runs
@@ -170,7 +170,7 @@ pub async fn upload_cloud_files_for_game(
         Err(message) => return UploadReport::stop(message),
     };
 
-    attach_screenshot_fallback(ctx, game, &entry, &name, save_type, &mut jobs);
+    attach_screenshot_fallback(ctx, game, &entry, &mut jobs);
 
     // Execution: one POST per job, per-job error isolation.
     let mut uploaded = 0usize;
@@ -209,12 +209,9 @@ pub async fn upload_cloud_files_for_game(
         total: jobs.len(),
         failed: failed.clone(),
     };
-    let mut messages: Vec<CloudMessage> = Vec::new();
-    if let Some((text, severity)) =
-        upload_completion_message(&outcome, save_type, retention_failed.len(), retention_limit)
-    {
-        messages.push(CloudMessage { text, severity });
-    }
+    let (text, severity) =
+        upload_completion_message(&outcome, save_type, retention_failed.len(), retention_limit);
+    let messages = vec![CloudMessage { text, severity }];
 
     UploadReport {
         uploaded,
@@ -355,12 +352,16 @@ pub(super) fn shared_single_display_name(name: &str) -> String {
 /// The screenshot fallback (cloud_mixin.py:2597-2604): the newest
 /// in-window supported image from the profile's screenshot directories is
 /// attached to EVERY job that does not already carry one.
+///
+/// Fix round 1 (ruling: Python wins): the scan uses
+/// [`IgnoreSets::default`], NOT the emulator's resolved ignore sets —
+/// `cloud_mixin.py:2600` calls `session_screenshot_path(screenshot_dirs,
+/// session_win)` with no blocked names at all, so a configured
+/// `ignore_files` entry must not narrow the screenshot search.
 fn attach_screenshot_fallback(
     ctx: &CloudContext,
     game: &CloudGame,
     entry: &EmulatorEntry,
-    name: &str,
-    save_type: SaveType,
     jobs: &mut [UploadJob],
 ) {
     let profile = profile_for(ctx, entry);
@@ -370,9 +371,11 @@ fn attach_screenshot_fallback(
     if screenshot_dirs.is_empty() {
         return;
     }
-    let ignore = ignore_for(ctx, entry, name, save_type);
-    let Some(shot) = session_screenshot_path(&screenshot_dirs, window_for(ctx, game), &ignore)
-    else {
+    let Some(shot) = session_screenshot_path(
+        &screenshot_dirs,
+        window_for(ctx, game),
+        &IgnoreSets::default(),
+    ) else {
         return;
     };
     for job in jobs.iter_mut() {

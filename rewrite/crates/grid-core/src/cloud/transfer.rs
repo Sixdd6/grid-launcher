@@ -830,8 +830,7 @@ pub enum MessageSeverity {
 }
 
 /// The user-facing completion message for one upload run, and its
-/// severity — `None` only when there is nothing to report at all (no
-/// attempts, no successes, no failures). Mirrors `upload_completion_message`
+/// severity. Mirrors `upload_completion_message`
 /// (`cloud_upload.py:37-60`)'s four-row table, in priority order:
 ///
 /// 1. every attempted job failed (`failed` non-empty, `uploaded == 0`):
@@ -846,23 +845,26 @@ pub enum MessageSeverity {
 /// `<kind>` is [`uploaded_kind_label`] (singular/plural is baked into that
 /// label itself, matching Python — there is no further pluralization
 /// logic on the count `N`).
+///
+/// There is NO "nothing to report" escape hatch: a run that attempted
+/// zero jobs still reports `"Uploaded 0 <kind>."`. Python's own
+/// `upload_completion_message` has no such guard either, and its generic
+/// state branch (`cloud_mixin.py:2565`) guards only on `if not files` —
+/// so non-empty candidates that build zero jobs fall straight through to
+/// this table. Fix round 1 removed the guard this port had added.
 pub fn upload_completion_message(
     outcome: &UploadOutcome,
     save_type: SaveType,
     retention_failed: usize,
     retention_limit: u32,
-) -> Option<(String, MessageSeverity)> {
-    if outcome.total == 0 && outcome.uploaded == 0 && outcome.failed.is_empty() {
-        return None;
-    }
-
+) -> (String, MessageSeverity) {
     let kind_label = uploaded_kind_label(save_type);
 
     if !outcome.failed.is_empty() && outcome.uploaded == 0 {
-        return Some((
+        return (
             "Cloud upload failed for all matching files.".to_string(),
             MessageSeverity::Warning,
-        ));
+        );
     }
 
     if !outcome.failed.is_empty() {
@@ -873,29 +875,29 @@ pub fn upload_completion_message(
             .cloned()
             .collect::<Vec<_>>()
             .join(", ");
-        return Some((
+        return (
             format!(
                 "Uploaded {} {kind_label}. Failed: {joined}",
                 outcome.uploaded
             ),
             MessageSeverity::Warning,
-        ));
+        );
     }
 
     if retention_failed > 0 {
-        return Some((
+        return (
             format!(
                 "Uploaded {} {kind_label}. Could not remove {retention_failed} older cloud saves for retention limit {retention_limit}.",
                 outcome.uploaded
             ),
             MessageSeverity::Warning,
-        ));
+        );
     }
 
-    Some((
+    (
         format!("Uploaded {} {kind_label}.", outcome.uploaded),
         MessageSeverity::Info,
-    ))
+    )
 }
 
 /// The general "nothing to upload" message for `save_type` — the PPSSPP
@@ -1701,10 +1703,10 @@ mod tests {
         };
         assert_eq!(
             upload_completion_message(&outcome, SaveType::Save, 0, 5),
-            Some((
+            (
                 "Cloud upload failed for all matching files.".to_string(),
                 MessageSeverity::Warning
-            ))
+            )
         );
 
         // Row 2: some failed, first 5 names joined.
@@ -1722,10 +1724,10 @@ mod tests {
         };
         assert_eq!(
             upload_completion_message(&outcome, SaveType::Save, 0, 5),
-            Some((
+            (
                 "Uploaded 3 save files. Failed: a.sav, b.sav, c.sav, d.sav, e.sav".to_string(),
                 MessageSeverity::Warning
-            ))
+            )
         );
 
         // Row 3: all succeeded, retention pruning partially failed.
@@ -1736,11 +1738,11 @@ mod tests {
         };
         assert_eq!(
             upload_completion_message(&outcome, SaveType::State, 2, 5),
-            Some((
+            (
                 "Uploaded 4 save states. Could not remove 2 older cloud saves for retention limit 5."
                     .to_string(),
                 MessageSeverity::Warning
-            ))
+            )
         );
 
         // Row 4: clean success.
@@ -1751,7 +1753,19 @@ mod tests {
         };
         assert_eq!(
             upload_completion_message(&outcome, SaveType::State, 0, 5),
-            Some(("Uploaded 4 save states.".to_string(), MessageSeverity::Info))
+            ("Uploaded 4 save states.".to_string(), MessageSeverity::Info)
+        );
+
+        // Fix round 1: a run that attempted nothing still reports, matching
+        // Python's guard-free `upload_completion_message`.
+        let outcome = UploadOutcome::default();
+        assert_eq!(
+            upload_completion_message(&outcome, SaveType::State, 0, 5),
+            ("Uploaded 0 save states.".to_string(), MessageSeverity::Info)
+        );
+        assert_eq!(
+            upload_completion_message(&outcome, SaveType::Save, 0, 5),
+            ("Uploaded 0 save files.".to_string(), MessageSeverity::Info)
         );
     }
 
