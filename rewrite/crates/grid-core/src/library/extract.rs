@@ -473,7 +473,10 @@ fn find_system_7z() -> Option<PathBuf> {
         .find(|path| path.is_file())
 }
 
-fn which_on_path(name: &str) -> Option<PathBuf> {
+/// `pub(crate)`: reused by `cloud::archive`'s system-7z fallback so it can
+/// probe `PATH` for `7z`/`7za`/`7zz` in Python's exact order
+/// (`cloud_transfer.py:150-165`) without duplicating this lookup.
+pub(crate) fn which_on_path(name: &str) -> Option<PathBuf> {
     let path_var = std::env::var_os("PATH")?;
     std::env::split_paths(&path_var)
         .map(|dir| dir.join(name))
