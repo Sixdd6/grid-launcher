@@ -397,53 +397,7 @@ pub fn ensure_ra_credentials(emulator_path: &str, ra: &RaCredentials) -> EnsureR
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    /// Serializes access to `XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`HOME` across
-    /// every test in this module — they are process-global, so two tests
-    /// mutating them concurrently would race (and, per `std::env::set_var`'s
-    /// safety contract, that race is UB, not just flakiness). Every test
-    /// here takes this lock, even ones that do not override the variables
-    /// themselves, because `config_path_candidates` always reads them.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    /// Sets each `(var, value)` pair — `None` removes the variable — for
-    /// the guard's lifetime and restores whatever preceded it on drop, so a
-    /// panic mid-test can never leak an override into another test. Callers
-    /// must hold `ENV_LOCK` for the guard's whole lifetime.
-    struct EnvGuard {
-        previous: Vec<(&'static str, Option<String>)>,
-    }
-
-    impl EnvGuard {
-        fn set(pairs: &[(&'static str, Option<&str>)]) -> Self {
-            let previous = pairs
-                .iter()
-                .map(|&(var, _)| (var, std::env::var(var).ok()))
-                .collect();
-            for &(var, value) in pairs {
-                match value {
-                    // SAFETY: `ENV_LOCK` is held for the guard's entire
-                    // lifetime by every caller in this module.
-                    Some(v) => unsafe { std::env::set_var(var, v) },
-                    None => unsafe { std::env::remove_var(var) },
-                }
-            }
-            Self { previous }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            for (var, value) in &self.previous {
-                match value {
-                    // SAFETY: see `EnvGuard::set` above.
-                    Some(v) => unsafe { std::env::set_var(var, v) },
-                    None => unsafe { std::env::remove_var(var) },
-                }
-            }
-        }
-    }
+    use crate::test_env::EnvGuard;
 
     /// `XDG_CONFIG_HOME`/`XDG_DATA_HOME`/`HOME` all pointed at `dir`, mirroring
     /// `tests/test_retroarch_config.py`'s `_isolated_env`.
@@ -471,7 +425,7 @@ mod tests {
 
     #[test]
     fn candidates_use_parent_for_a_file_path_and_self_for_a_directory() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
 
@@ -489,7 +443,7 @@ mod tests {
 
     #[test]
     fn candidates_use_parent_for_a_nonexistent_suffixed_path() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
 
@@ -503,7 +457,7 @@ mod tests {
 
     #[test]
     fn candidates_are_deduped_case_insensitively() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let temp_path = temp.path();
         let xdg_data = temp_path.join("other");
@@ -544,7 +498,7 @@ mod tests {
 
     #[test]
     fn directory_settings_strips_one_quote_pair() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
         let (emulator_path, config_path) = setup_emulator(temp.path());
@@ -562,7 +516,7 @@ mod tests {
 
     #[test]
     fn directory_settings_treats_default_as_unset() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
         let (emulator_path, config_path) = setup_emulator(temp.path());
@@ -580,7 +534,7 @@ mod tests {
 
     #[test]
     fn directory_settings_parses_the_six_booleans() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
         let (emulator_path, config_path) = setup_emulator(temp.path());
@@ -609,7 +563,7 @@ mod tests {
 
     #[test]
     fn directory_settings_skips_a_candidate_with_no_parseable_line() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
         let (emulator_path, config_path) = setup_emulator(temp.path());
@@ -637,7 +591,7 @@ mod tests {
 
     #[test]
     fn ensure_writes_defaults_and_disables_all_six_sort_flags() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
         let (emulator_path, config_path) = setup_emulator(temp.path());
@@ -676,7 +630,7 @@ mod tests {
 
     #[test]
     fn ensure_preserves_explicit_directories() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
         let (emulator_path, config_path) = setup_emulator(temp.path());
@@ -707,7 +661,7 @@ mod tests {
 
     #[test]
     fn ensure_preserves_an_existing_audio_volume_line_verbatim() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
         let (emulator_path, config_path) = setup_emulator(temp.path());
@@ -726,7 +680,7 @@ mod tests {
 
     #[test]
     fn ensure_writes_fullscreen_and_ra_credentials_when_enabled() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
         let (emulator_path, config_path) = setup_emulator(temp.path());
@@ -750,7 +704,7 @@ mod tests {
 
     #[test]
     fn ensure_omits_video_fullscreen_when_disabled() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
         let (emulator_path, config_path) = setup_emulator(temp.path());
@@ -767,7 +721,7 @@ mod tests {
 
     #[test]
     fn ensure_writes_the_four_cheevos_suppression_keys_unconditionally() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
         let (emulator_path, config_path) = setup_emulator(temp.path());
@@ -785,7 +739,7 @@ mod tests {
 
     #[test]
     fn ensure_skips_ra_keys_when_only_the_username_is_set() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
         let (emulator_path, config_path) = setup_emulator(temp.path());
@@ -802,7 +756,7 @@ mod tests {
 
     #[test]
     fn ensure_writes_netplay_nickname_from_the_romm_username_not_the_ra_one() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
         let (emulator_path, config_path) = setup_emulator(temp.path());
@@ -825,7 +779,7 @@ mod tests {
 
     #[test]
     fn ensure_is_idempotent_on_a_second_run() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
         let (emulator_path, config_path) = setup_emulator(temp.path());
@@ -849,7 +803,7 @@ mod tests {
 
     #[test]
     fn ensure_ra_credentials_touches_only_the_three_cheevos_keys() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
         let (emulator_path, config_path) = setup_emulator(temp.path());

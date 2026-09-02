@@ -1044,54 +1044,17 @@ mod tests {
 #[cfg(all(test, feature = "e2e"))]
 mod e2e_tests {
     use super::*;
-    use std::sync::Mutex;
+    use crate::test_env::EnvGuard;
 
-    /// Serializes access to `GRID_LAUNCHER_E2E_FORGE_BASE` across tests in
-    /// this module — the variable is process-global, so two tests mutating
-    /// it concurrently would race.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
+    /// `GRID_LAUNCHER_E2E_FORGE_BASE` is process-global like every other env
+    /// var these tests could race on, so it goes through the crate-wide
+    /// `crate::test_env` lock rather than a module-local one — see there.
     const VAR: &str = "GRID_LAUNCHER_E2E_FORGE_BASE";
-
-    /// Sets `GRID_LAUNCHER_E2E_FORGE_BASE` for the lifetime of this guard
-    /// and restores whatever value (or absence) preceded it on drop, so a
-    /// panic mid-test can never leak the override into any other test.
-    struct EnvGuard {
-        previous: Option<String>,
-    }
-
-    impl EnvGuard {
-        fn set(value: &str) -> Self {
-            let previous = std::env::var(VAR).ok();
-            // SAFETY: `ENV_LOCK` is held for the lifetime of every `EnvGuard`
-            // in this module (constructed only inside a `_lock` scope below),
-            // so no other thread in this test binary observes a torn value.
-            unsafe { std::env::set_var(VAR, value) };
-            Self { previous }
-        }
-
-        fn unset() -> Self {
-            let previous = std::env::var(VAR).ok();
-            // SAFETY: see `set` above.
-            unsafe { std::env::remove_var(VAR) };
-            Self { previous }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            // SAFETY: see `EnvGuard::set` above.
-            match &self.previous {
-                Some(v) => unsafe { std::env::set_var(VAR, v) },
-                None => unsafe { std::env::remove_var(VAR) },
-            }
-        }
-    }
 
     #[test]
     fn maps_host_path_and_query_under_the_configured_base() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        let _guard = EnvGuard::set("http://127.0.0.1:9999");
+        let _lock = crate::test_env::lock();
+        let _guard = EnvGuard::set(&[(VAR, Some("http://127.0.0.1:9999"))]);
 
         let effective = effective_url("https://api.github.com/repos/o/r/releases?x=1&y=2");
         assert_eq!(
@@ -1102,8 +1065,8 @@ mod e2e_tests {
 
     #[test]
     fn keeps_the_port_in_the_mapped_path_segment() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        let _guard = EnvGuard::set("http://127.0.0.1:9999");
+        let _lock = crate::test_env::lock();
+        let _guard = EnvGuard::set(&[(VAR, Some("http://127.0.0.1:9999"))]);
 
         // A fixture forge on a non-default port must stay addressable: the
         // segment is the full authority, host AND port.
@@ -1113,8 +1076,8 @@ mod e2e_tests {
 
     #[test]
     fn strips_a_trailing_slash_on_the_configured_base() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        let _guard = EnvGuard::set("http://127.0.0.1:9999/");
+        let _lock = crate::test_env::lock();
+        let _guard = EnvGuard::set(&[(VAR, Some("http://127.0.0.1:9999/"))]);
 
         let effective = effective_url("https://api.github.com/repos/o/r/releases");
         assert_eq!(
@@ -1125,8 +1088,8 @@ mod e2e_tests {
 
     #[test]
     fn empty_env_var_is_a_passthrough() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        let _guard = EnvGuard::set("   ");
+        let _lock = crate::test_env::lock();
+        let _guard = EnvGuard::set(&[(VAR, Some("   "))]);
 
         let url = "https://api.github.com/repos/o/r/releases";
         assert_eq!(effective_url(url), url);
@@ -1134,8 +1097,8 @@ mod e2e_tests {
 
     #[test]
     fn unset_env_var_is_a_passthrough() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        let _guard = EnvGuard::unset();
+        let _lock = crate::test_env::lock();
+        let _guard = EnvGuard::set(&[(VAR, None)]);
 
         let url = "https://api.github.com/repos/o/r/releases";
         assert_eq!(effective_url(url), url);

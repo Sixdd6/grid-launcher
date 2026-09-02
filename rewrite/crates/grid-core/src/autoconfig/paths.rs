@@ -148,6 +148,9 @@ mod tests {
 
     #[test]
     fn expand_user_only_touches_a_leading_tilde() {
+        // `home_dir()` reads `$HOME`, which races with any test elsewhere in
+        // the crate that mutates it — see `crate::test_env`.
+        let _lock = crate::test_env::lock();
         let home = home_dir().expect("this test needs a home directory");
         assert_eq!(expand_user("~"), home);
         assert_eq!(expand_user("~/.config/eden"), home.join(".config/eden"));
@@ -165,6 +168,8 @@ mod tests {
 
     #[test]
     fn env_dir_rejects_unset_and_blank_values() {
+        // `env_dir()` reads a process env var; see `crate::test_env`.
+        let _lock = crate::test_env::lock();
         assert_eq!(env_dir("GRID_AUTOCONFIG_TEST_UNSET_VAR"), None);
     }
 }
