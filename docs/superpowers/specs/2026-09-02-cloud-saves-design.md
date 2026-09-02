@@ -24,8 +24,10 @@ In scope:
 - Auto-sync triggers: restore-on-launch, upload-after-exit, the session poll.
 - Desktop cloud UI: Details-view cloud panel, record rows, manual
   upload/download/delete, restore confirmations, native path list.
-- xemu raw-disk subsystem: clean-room FATX reader/writer, one-time qcow2→raw
-  conversion with user consent, save inject/extract around sessions.
+- xemu raw-disk subsystem: clean-room FATX reader/writer over raw HDD
+  images, save inject/extract around sessions. No qcow2 support of any
+  kind — no decoder, no conversion, no qemu-img (user decision,
+  2026-09-02); a qcow2 image is a block reason with migration guidance.
 - Opening cleanup carried from milestone 5: deduplicate `apply_section` /
   `SECTION_RE` in `autoconfig/writers.rs`, hoist the Cemu regex recompile,
   and remove the substring fallback duplication flagged in the M5 final
@@ -81,7 +83,8 @@ New module `crates/grid-core/src/cloud/`, pure logic first, IO at the edges:
 - `scope.rs` — `cloud_save_scope_for_game`, `cloud_save_block_reason_for_game`,
   shared-owner resolution, cloud emulator resolution and cache.
 - `xemu_sync.rs` — bridges the FATX module into the engine: image resolution
-  from `xemu.toml`, conversion state machine, archive build from `E:` trees,
+  from `xemu.toml`, image sniffing and block classification, archive build
+  from `E:` trees,
   inject-on-restore.
 
 ### grid-core: `fatx/` module (clean-room)
@@ -122,22 +125,20 @@ not taint the clean-room implementation; its source stays unread.
 
 Resolution: read `sys.files.hdd_path` from `xemu.toml` (milestone 5 reader).
 
-Conversion (one-time, per image):
+Raw images only — no qcow2 handling (user decision, 2026-09-02). GRID ships
+no conversion machinery: no qcow2 decoder, no qemu-img dependency. The image
+is sniffed once per resolution: a valid E: FATX superblock → sync ready;
+the qcow2 magic (`QFI\xfb`, a 4-byte check) → blocked with reason
+`xemu-image-not-raw`, whose panel text tells the user to supply a raw HDD
+image (and names the `qemu-img convert -O raw` one-liner for anyone
+migrating an existing qcow2 by hand). Users who point `hdd_path` at a raw
+image get sync with zero setup; the add-only TOML writer never overwrites a
+user-set `hdd_path`, so that choice survives autoconfig.
 
-1. Sniff the image. Raw with a valid E: FATX superblock → ready. qcow2 magic
-   (`QFI\xfb`) → sync blocked with reason `xemu-image-not-raw` until the user
-   converts.
-2. The cloud panel offers "Convert xemu disk image for cloud sync" when
-   blocked on `xemu-image-not-raw`. The consent dialog states: xemu must not
-   be running, QEMU snapshots inside the image are lost, and the original
-   qcow2 is deleted after a verified conversion.
-3. On consent: require `qemu-img` on PATH (missing → error, block reason
-   `qemu-img-missing`); run `qemu-img convert -O raw` to a sibling `.raw`
-   file; validate the E: superblock and FAT bounds on the output; update
-   `sys.files.hdd_path` in `xemu.toml` to the raw file; delete the original
-   qcow2. No `.backup` copy is kept (user decision, 2026-09-02).
-   Verification failure keeps the qcow2, deletes the partial raw file, and
-   reports the error.
+So that a raw setup is first-class in autoconfig too: the required-BIOS
+probe and the `hdd_path` default accept `xbox_hdd.img` alongside
+`xbox_hdd.qcow2`, preferring `.img` when both exist (deviation D3 — a small
+amendment to the milestone 5 xemu module).
 
 Upload (after an xemu session ends, and on manual upload): open the raw
 image read-only, extract `E:/UDATA` and `E:/TDATA` into a temp directory,
@@ -156,24 +157,24 @@ write ordering allows and surface an error; they never fall back to image
 replacement.
 
 Blocked states for xemu (extending doc 06's block reasons):
-`xemu-image-not-raw`, `qemu-img-missing` (only after consent, during
-conversion), `xemu-image-unsupported-layout` (raw but E: superblock invalid),
+`xemu-image-not-raw` (qcow2 or otherwise not raw FATX),
+`xemu-image-unsupported-layout` (raw but E: superblock invalid),
 `xemu-image-missing` (hdd_path unset or file absent).
 
 ### App layer
 
 - Tauri commands in `app/src-tauri/src/commands.rs`: cloud record listing
   (async worker parity with `DetailsCloudRecordsWorker`), manual
-  upload/restore/delete, block-reason/scope queries for the panel, xemu
-  conversion consent action, auto-sync settings passthrough.
+  upload/restore/delete, block-reason/scope queries for the panel,
+  auto-sync settings passthrough.
 - Session poll: the existing session tracking gains the 2500 ms poll timer
   parity behavior; finished sessions trigger the auto-upload path after the
   3 s upload-on-exit delay; launches trigger auto-restore first (doc 06
   "Auto-sync triggers").
 - Svelte: cloud panel in `Details.svelte` (records list with size/relative
   time, restore/delete with confirmation, manual upload, native path list),
-  conversion consent dialog, auto-sync toggles where the Python settings
-  expose them.
+  block-reason display with the xemu migration guidance, auto-sync toggles
+  where the Python settings expose them.
 
 ## Deviations (numbered; recorded in doc 06 on merge)
 
@@ -184,9 +185,12 @@ conversion), `xemu-image-unsupported-layout` (raw but E: superblock invalid),
 - **D2 — legacy xemu records are not restored.** Whole-image records from
   the Python app are recognized and skipped with a notice. They still count
   toward retention pruning, so new-format uploads age them out.
-- **D3 — conversion deletes the original qcow2 after verification.** No
-  `.backup` is kept (user decision, 2026-09-02). The delete happens only
-  after the raw output's E: superblock and FAT bounds validate.
+- **D3 — autoconfig accepts a raw HDD image.** The milestone 5 xemu
+  required-BIOS probe and `hdd_path` default gain `xbox_hdd.img` alongside
+  `xbox_hdd.qcow2`, preferring `.img` when both exist. GRID itself handles
+  raw images only: no qcow2 decoder, no conversion, no qemu-img dependency
+  (user decision, 2026-09-02) — a qcow2 `hdd_path` is the
+  `xemu-image-not-raw` block, whose text carries manual migration guidance.
 - **D4 — the undefined `_authorized_headers` branch is dropped.** Python
   calls a method that does not exist when a state/screenshot candidate is an
   absolute URL (doc 06 open question 1). The port always treats candidates
@@ -257,8 +261,8 @@ credential config files written by milestone 5).
   invalid-superblock and truncated-image rejection, orphaned-cluster crash
   ordering. Optional oracle test shells out to `pyfatx` on our generated
   images, skipped when not installed.
-- Conversion: qcow2 sniffing unit tests; the convert flow integration test
-  runs only where `qemu-img` exists (skip note otherwise).
+- Image sniffing: unit tests for the raw-vs-qcow2-vs-invalid classification
+  (magic bytes + superblock validation) driving the block reasons.
 - Transfer: wiremock integration tests for the save/state endpoints, upload
   multipart shapes, retention delete calls, and download restore paths.
 - E2E: a `cloud-saves` group in the existing harness — mock RomM serves
