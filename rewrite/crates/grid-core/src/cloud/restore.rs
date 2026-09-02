@@ -33,8 +33,10 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
-use chrono::{Local, NaiveDateTime, TimeZone};
+use chrono::{FixedOffset, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Weekday};
+use regex::Regex;
 use serde_json::Value;
 
 use super::archive::{extract_payload_zip, payload_is_zip};
@@ -44,69 +46,236 @@ use super::IgnoreSets;
 // Timestamps
 // ---------------------------------------------------------------------
 
-/// Parses `text` (already `Z`-rewritten by the caller) the way Python's
-/// `datetime.fromisoformat(text).timestamp()` does for the ISO-8601 shapes
-/// RomM's `updated_at`/`created_at` fields actually use: an offset-aware
-/// `YYYY-MM-DDTHH:MM:SS[.ffffff]<offset>` form, and a naive
-/// `YYYY-MM-DDTHH:MM:SS[.ffffff]` / `YYYY-MM-DD` form with no offset.
+/// Parses `text` (already `Z`-rewritten by the caller) the way Python
+/// 3.12's `datetime.fromisoformat(text).timestamp()` does. Fix-round
+/// broadening (task review, round 1): the earlier version of this function
+/// only accepted a narrow, `T`-separated, colon-delimited subset. Verified
+/// against real Python 3.12, `fromisoformat` accepts substantially more,
+/// and all of the following are now covered:
+///
+/// - calendar dates, extended (`2026-04-08`) or basic (`20260408`);
+/// - ISO week dates, extended or basic, with or without a weekday
+///   (`2026-W15-3`, `2026-W153`, `2026-W15` — the last defaults to
+///   Monday, matching `date.fromisocalendar`'s own default);
+/// - ANY single character as the date/time separator, not just `T` (this
+///   mirrors CPython's C implementation, which just consumes whatever
+///   character sits at that position — verified with `"2026-04-08
+///   10:00:00Z"`, a space separator, matching the `T` form exactly);
+/// - reduced-precision times: bare `HH`, `HH:MM`, as well as the full
+///   `HH:MM:SS`, in both extended (colon) and basic (no colon) form;
+/// - fractional seconds of any digit count — Python (and this port)
+///   truncates to microsecond precision (6 digits), not nanosecond, and
+///   not rounded (verified: `.1234567890` truncates to `.123456`, not
+///   `.123457`);
+/// - an offset with or without a colon, down to hour-only precision:
+///   `+00:00`, `+0000`, `+00`, plus `Z` (rewritten to `+00:00` by the
+///   caller before this function ever runs).
 ///
 /// **Naive vs aware, read carefully:** Python's `datetime.timestamp()` on
-/// an AWARE datetime converts directly using its own offset — timezone-
-/// independent. On a NAIVE datetime (no offset present in the text — the
-/// case Python takes when `Z` was absent to begin with, since the `Z`
-/// rewrite is what manufactures an offset), `.timestamp()` assumes the
-/// naive value is already expressed in the *platform's local timezone*
-/// and converts from there. This function reproduces exactly that split:
-/// aware text is parsed and converted with its own offset;
-/// offset-less text is parsed as a [`chrono::NaiveDateTime`] and
-/// interpreted via [`chrono::Local`], not UTC. Getting this wrong (e.g.
-/// always assuming UTC) would silently skew every naive timestamp by the
-/// host's UTC offset.
+/// an AWARE datetime (any of the offset forms above) converts directly
+/// using its own offset — timezone-independent. On a NAIVE datetime (no
+/// offset in the text), `.timestamp()` assumes the naive value is already
+/// expressed in the *platform's local timezone* and converts from there.
+/// This function reproduces exactly that split: [`parse_iso_components`]
+/// returns the offset separately from the naive wall-clock value, and only
+/// the naive branch goes through [`local_from_naive`] (via
+/// [`chrono::Local`], never UTC). Getting this wrong (e.g. always assuming
+/// UTC) would silently skew every naive timestamp by the host's UTC
+/// offset.
 ///
-/// This is a documented, deliberately-scoped subset of what Python 3.11+'s
-/// `fromisoformat` actually accepts (which is close to the full ISO-8601:2004
-/// grammar — arbitrary single-character date/time separators, basic
-/// `YYYYMMDD` dates, `±HH`/`±HHMM` offsets, week dates, etc.). Real RomM
-/// timestamps only ever use the `T`-separated extended form covered here;
-/// anything outside that returns `None`, matching Python's fall-through to
-/// the next field / `0.0` on a `ValueError`.
+/// Ordinal dates (`YYYY-DDD`) and leap seconds are NOT part of Python's
+/// `fromisoformat` grammar either, so their absence here isn't a gap.
 fn parse_iso_like_python(text: &str) -> Option<f64> {
-    // Offset-aware forms: RFC3339 covers "...SS[.ffffff]+HH:MM" (and "Z",
-    // though the caller has already rewritten that to "+00:00" before this
-    // function ever sees it).
-    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(text) {
-        return Some(dt.timestamp() as f64 + f64::from(dt.timestamp_subsec_nanos()) / 1e9);
-    }
-    for fmt in ["%Y-%m-%dT%H:%M:%S%.f%:z", "%Y-%m-%dT%H:%M:%S%:z"] {
-        if let Ok(dt) = chrono::DateTime::parse_from_str(text, fmt) {
-            return Some(dt.timestamp() as f64 + f64::from(dt.timestamp_subsec_nanos()) / 1e9);
+    let (naive, offset_seconds) = parse_iso_components(text)?;
+    match offset_seconds {
+        Some(offset) => {
+            let fixed = FixedOffset::east_opt(offset)?;
+            let dt = fixed.from_local_datetime(&naive).single()?;
+            Some(dt.timestamp() as f64 + f64::from(dt.timestamp_subsec_nanos()) / 1e9)
         }
+        None => {
+            let local_dt = local_from_naive(naive)?;
+            Some(local_dt.timestamp() as f64 + f64::from(local_dt.timestamp_subsec_nanos()) / 1e9)
+        }
+    }
+}
+
+/// The date-part grammar `fromisoformat` accepts: extended/basic calendar
+/// date, or extended/basic ISO week date with an optional weekday. `rest`
+/// captures everything after the date (empty when the string is
+/// date-only). Distinct group names per alternative (`month`/`month2`,
+/// `week`/`week2`, `wd`/`wd2`) avoid relying on the `regex` crate's
+/// duplicate-named-group support in alternation.
+static DATE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?x)
+        ^(?P<year>\d{4})
+        (?:
+            -(?P<month>\d{2})-(?P<day>\d{2})
+          | (?P<month2>\d{2})(?P<day2>\d{2})
+          | -W(?P<week>\d{2})(?:-(?P<wd>[1-7]))?
+          | W(?P<week2>\d{2})(?P<wd2>[1-7])?
+        )
+        (?P<rest>.*)$
+        ",
+    )
+    .expect("static date regex is valid")
+});
+
+/// A trailing offset: `Z` (handled separately by the caller before this
+/// regex ever runs) or a sign, 2-digit hour, and optional colon-or-not
+/// minute/second (with an optional, ignored, sub-second fraction on the
+/// offset seconds — real RomM data never has one, but real Python accepts
+/// it). Matched at the END of the remaining time string; whatever is
+/// consumed by this match is stripped off before the clock digits are
+/// parsed.
+static OFFSET_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?x)
+        (?P<sign>[+-])(?P<oh>\d{2})
+        (?: :? (?P<om>\d{2})
+            (?: :? (?P<os>\d{2}) (?:[.,]\d+)? )?
+        )?
+        $
+        ",
+    )
+    .expect("static offset regex is valid")
+});
+
+/// Splits `s` (already separator-stripped) into `(digits_and_fraction,
+/// offset_seconds)`, where `offset_seconds` is `None` when there's no
+/// trailing offset in `s` at all.
+fn split_off_offset(s: &str) -> (&str, Option<i32>) {
+    let Some(caps) = OFFSET_RE.captures(s) else {
+        return (s, None);
+    };
+    let whole = caps.get(0).expect("group 0 always matches");
+    let time_part = &s[..whole.start()];
+    let sign = if &caps["sign"] == "-" { -1 } else { 1 };
+    let hours: i32 = caps["oh"].parse().unwrap_or(0);
+    let minutes: i32 = caps
+        .name("om")
+        .and_then(|m| m.as_str().parse().ok())
+        .unwrap_or(0);
+    let seconds: i32 = caps
+        .name("os")
+        .and_then(|m| m.as_str().parse().ok())
+        .unwrap_or(0);
+    (
+        time_part,
+        Some(sign * (hours * 3_600 + minutes * 60 + seconds)),
+    )
+}
+
+/// Splits `s` on the first `.` or `,` (both are valid ISO-8601 fractional
+/// separators; Python accepts either), returning `(clock_part,
+/// fraction_digits)`.
+fn split_off_fraction(s: &str) -> (&str, Option<&str>) {
+    match s.find(['.', ',']) {
+        Some(pos) => (&s[..pos], Some(&s[pos + 1..])),
+        None => (s, None),
+    }
+}
+
+/// Fractional-second digits (any count) truncated — NOT rounded — to
+/// microsecond precision (6 digits), right-padded with zeros when
+/// shorter. `None` for `frac` renders `0`. Matches Python's own
+/// microsecond truncation: `.1234567890` (10 digits) becomes `.123456`,
+/// verified against a real interpreter, not `.123457`.
+fn parse_fraction_micros(frac: Option<&str>) -> Option<u32> {
+    let Some(frac) = frac else {
+        return Some(0);
+    };
+    if frac.is_empty() || !frac.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let mut digits = frac.to_string();
+    if digits.len() > 6 {
+        digits.truncate(6);
+    } else {
+        while digits.len() < 6 {
+            digits.push('0');
+        }
+    }
+    digits.parse::<u32>().ok()
+}
+
+/// ISO weekday number (1 = Monday .. 7 = Sunday) to [`chrono::Weekday`].
+fn iso_weekday(n: u32) -> Option<Weekday> {
+    match n {
+        1 => Some(Weekday::Mon),
+        2 => Some(Weekday::Tue),
+        3 => Some(Weekday::Wed),
+        4 => Some(Weekday::Thu),
+        5 => Some(Weekday::Fri),
+        6 => Some(Weekday::Sat),
+        7 => Some(Weekday::Sun),
+        _ => None,
+    }
+}
+
+/// The full `fromisoformat`-shaped parse: date (calendar or ISO week form)
+/// plus an optional separator-prefixed time and offset. Returns the naive
+/// wall-clock value together with the offset in seconds, when one was
+/// present — see [`parse_iso_like_python`] for how the two are combined.
+fn parse_iso_components(text: &str) -> Option<(NaiveDateTime, Option<i32>)> {
+    let caps = DATE_RE.captures(text)?;
+    let year: i32 = caps["year"].parse().ok()?;
+
+    let date = if let (Some(m), Some(d)) = (
+        caps.name("month").or_else(|| caps.name("month2")),
+        caps.name("day").or_else(|| caps.name("day2")),
+    ) {
+        let month: u32 = m.as_str().parse().ok()?;
+        let day: u32 = d.as_str().parse().ok()?;
+        NaiveDate::from_ymd_opt(year, month, day)?
+    } else {
+        let week_m = caps.name("week").or_else(|| caps.name("week2"))?;
+        let week: u32 = week_m.as_str().parse().ok()?;
+        let weekday_num: u32 = caps
+            .name("wd")
+            .or_else(|| caps.name("wd2"))
+            .and_then(|m| m.as_str().parse().ok())
+            .unwrap_or(1); // Python: a dayless week date defaults to Monday.
+        NaiveDate::from_isoywd_opt(year, week, iso_weekday(weekday_num)?)?
+    };
+
+    let rest = caps.name("rest").map_or("", |m| m.as_str());
+    if rest.is_empty() {
+        return Some((date.and_hms_opt(0, 0, 0)?, None));
     }
 
-    // Naive forms: interpret in the platform's LOCAL timezone (see the
-    // doc comment above), not UTC.
-    for fmt in [
-        "%Y-%m-%dT%H:%M:%S%.f",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M",
-    ] {
-        if let Ok(ndt) = NaiveDateTime::parse_from_str(text, fmt) {
-            if let Some(local_dt) = local_from_naive(ndt) {
-                return Some(
-                    local_dt.timestamp() as f64
-                        + f64::from(local_dt.timestamp_subsec_nanos()) / 1e9,
-                );
-            }
-        }
+    // `rest` is a single separator character (any character at all — see
+    // this function's doc comment) followed by the time (and optional
+    // offset). A bare separator with nothing after it is malformed.
+    let mut chars = rest.chars();
+    chars.next()?;
+    let time_and_offset = chars.as_str();
+    if time_and_offset.is_empty() {
+        return None;
     }
-    if let Ok(date) = chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d") {
-        if let Some(ndt) = date.and_hms_opt(0, 0, 0) {
-            if let Some(local_dt) = local_from_naive(ndt) {
-                return Some(local_dt.timestamp() as f64);
-            }
-        }
+
+    let (time_str, offset_seconds) = split_off_offset(time_and_offset);
+    let (clock_str, frac_str) = split_off_fraction(time_str);
+    if !clock_str.chars().all(|c| c.is_ascii_digit() || c == ':') {
+        // A stray non-digit, non-colon character in the clock portion —
+        // not a shape `fromisoformat` accepts.
+        return None;
     }
-    None
+    let digits: String = clock_str.chars().filter(char::is_ascii_digit).collect();
+    let (hour, minute, second): (u32, u32, u32) = match digits.len() {
+        2 => (digits[0..2].parse().ok()?, 0, 0),
+        4 => (digits[0..2].parse().ok()?, digits[2..4].parse().ok()?, 0),
+        6 => (
+            digits[0..2].parse().ok()?,
+            digits[2..4].parse().ok()?,
+            digits[4..6].parse().ok()?,
+        ),
+        _ => return None,
+    };
+    let micros = parse_fraction_micros(frac_str)?;
+    let naive_time = NaiveTime::from_hms_micro_opt(hour, minute, second, micros)?;
+    Some((NaiveDateTime::new(date, naive_time), offset_seconds))
 }
 
 /// Interprets a naive datetime as platform-local wall-clock time, the same
@@ -269,6 +438,11 @@ fn id_rank(record: &Value) -> i64 {
             }
         }
         Some(Value::String(s)) => s.trim().parse::<i64>().unwrap_or(0),
+        // Python: `bool` is an `int` subclass, so `int(True) == 1` /
+        // `int(False) == 0` — matches `stringify_id`'s own `Bool` handling
+        // above, kept consistent here.
+        Some(Value::Bool(true)) => 1,
+        Some(Value::Bool(false)) => 0,
         _ => 0,
     }
 }
@@ -643,6 +817,81 @@ mod tests {
         assert_eq!(record_timestamp(&record), expected);
     }
 
+    /// Fix round 1: table test proving the broadened grammar. Every AWARE
+    /// variant below must resolve to the exact same instant as the
+    /// canonical `"2026-04-08T10:00:00+00:00"` form — each pairing was
+    /// cross-checked against a real Python 3.12
+    /// `datetime.fromisoformat(...).timestamp()` call before being added
+    /// here (see the task's fix report for the transcript).
+    #[test]
+    fn parse_iso_like_python_accepts_full_fromisoformat_grammar() {
+        // `parse_iso_like_python`'s own contract (see its doc comment) is
+        // that `Z` has ALREADY been rewritten to `+00:00` by the caller
+        // (`record_timestamp` does this per field, mirroring Python's own
+        // `cloud_restore.py:21-22`) — so this helper applies that same
+        // rewrite before exercising the parser directly, matching the
+        // real call path instead of bypassing it.
+        fn rewrite_z(text: &str) -> String {
+            match text.strip_suffix('Z') {
+                Some(stripped) => format!("{stripped}+00:00"),
+                None => text.to_string(),
+            }
+        }
+
+        let canonical = parse_iso_like_python("2026-04-08T10:00:00+00:00").unwrap();
+
+        let aware_variants = [
+            "2026-04-08T10:00:00Z",
+            "2026-04-08T10:00:00+0000",
+            "2026-04-08T10:00:00+00",
+            "2026-04-08 10:00:00+00:00",  // space separator, not just T
+            "2026-04-08\t10:00:00+00:00", // ANY single character separator
+            "20260408T100000+0000",       // basic date + basic time
+            "20260408T100000Z",
+            "2026-W15-3T10:00:00+00:00", // ISO week date with weekday (2026-04-08 is ISO week 15, weekday 3)
+            "2026W153T100000+0000",      // fully basic week date + basic time (no dashes anywhere)
+        ];
+        for variant in aware_variants {
+            let parsed = parse_iso_like_python(&rewrite_z(variant));
+            assert_eq!(parsed, Some(canonical), "variant: {variant:?}");
+        }
+
+        // Fractional seconds beyond microsecond precision are TRUNCATED
+        // (not rounded), matching Python exactly: `.1234567890` (10
+        // digits) becomes `.123456`, verified against a real interpreter.
+        let with_micros = parse_iso_like_python("2026-04-08T10:00:00.123456+00:00").unwrap();
+        let with_long_fraction =
+            parse_iso_like_python("2026-04-08T10:00:00.1234567890+00:00").unwrap();
+        assert_eq!(with_long_fraction, with_micros);
+        assert!((with_micros - canonical - 0.123_456).abs() < 1e-6);
+
+        // Naive reduced-precision forms: no offset, so these resolve via
+        // LOCAL time (see this function's doc comment) — compare against
+        // each other rather than a hardcoded UTC-based epoch, so the test
+        // is correct regardless of the host's timezone.
+        let naive_hour_only = parse_iso_like_python("2026-04-08T10").unwrap();
+        let naive_hour_minute = parse_iso_like_python("2026-04-08T10:00").unwrap();
+        let naive_full = parse_iso_like_python("2026-04-08T10:00:00").unwrap();
+        assert_eq!(naive_hour_only, naive_hour_minute);
+        assert_eq!(naive_hour_minute, naive_full);
+
+        // Date-only forms (calendar, basic, and dayless week date) are
+        // naive midnight — basic/extended calendar agree with each other,
+        // and the dayless week date is a DIFFERENT (earlier) instant,
+        // since it defaults to the Monday of that week rather than the
+        // Wednesday the other two name.
+        let date_only_extended = parse_iso_like_python("2026-04-08").unwrap();
+        let date_only_basic = parse_iso_like_python("20260408").unwrap();
+        let week_date_no_day = parse_iso_like_python("2026-W15").unwrap();
+        assert_eq!(date_only_extended, date_only_basic);
+        assert!(week_date_no_day < date_only_extended);
+
+        // Malformed input still yields `None`, matching Python's
+        // `ValueError` -> fall-through-to-`0.0` path.
+        assert_eq!(parse_iso_like_python("not-a-date"), None);
+        assert_eq!(parse_iso_like_python("2026-13-40"), None);
+    }
+
     // --- relative_timestamp_text (test_cloud_restore.py:21) ----------
 
     #[test]
@@ -695,6 +944,26 @@ mod tests {
 
         let ids: Vec<&str> = records.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert_eq!(ids, vec!["9", "4", "2"]);
+    }
+
+    /// Fix round 1 (minor): a JSON boolean `id` must rank the way Python's
+    /// `int(record.get("id", 0))` ranks it — `bool` is an `int` subclass,
+    /// so `int(True) == 1` outranks `int(False) == 0` at equal
+    /// timestamps, matching `stringify_id`'s own `Bool` handling.
+    #[test]
+    fn sort_server_records_by_recency_ranks_bool_ids_like_python_int() {
+        let mut records = vec![
+            json!({"id": false, "name": "false-id", "updated_at": "2026-04-08T10:00:00Z"}),
+            json!({"id": true, "name": "true-id", "updated_at": "2026-04-08T10:00:00Z"}),
+        ];
+
+        sort_server_records_by_recency(&mut records);
+
+        let names: Vec<&str> = records
+            .iter()
+            .map(|r| r["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["true-id", "false-id"]);
     }
 
     // --- latest_server_records_by_slot (test_cloud_restore.py:39) ----
