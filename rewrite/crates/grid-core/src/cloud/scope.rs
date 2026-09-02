@@ -16,11 +16,26 @@
 //! entirely). The only standalone one-argument version in the Python tree
 //! is `is_retroarch_emulator_name` (`grid_launcher/tv/bridge/game_backend.py:33`):
 //! `"retroarch" in emulator_name.strip().casefold()`. This module ports that
-//! verbatim and extends the same substring rule to xemu/redream (the natural
-//! name-only reduction of `_is_xemu_emulator_name`/`_is_redream_emulator_name`
-//! with no configured entry to look up), reusing
-//! `autoconfig::name_matches_any_token_substring` rather than duplicating the
-//! substring logic three times.
+//! verbatim and extends the same substring rule to xemu/redream.
+//!
+//! Note this is NOT the full behavior of `_is_xemu_emulator_name`/
+//! `_is_redream_emulator_name`: those (`_emulator_matches_tokens`,
+//! cloud_mixin.py:1349-1363) still resolve `_emulator_entry_by_name(name)`
+//! and try an entry-and-profile-aware match FIRST, only falling back to the
+//! bare substring test when no configured entry matches. That entry-aware
+//! path is unreachable at this pure layer by design — these functions take
+//! `fn(&str) -> bool` with no config access at all, per this task's pinned
+//! signatures. A configured entry's aliases (e.g. an emulator literally
+//! named "My Flycast Build" with an autoprofile `match_tokens` including
+//! `"redream"`) could still widen the match beyond plain substring — that
+//! widening, if ever needed, belongs at the `ops` layer, which has the
+//! config and can call `autoconfig::is_xemu`/`is_redream`/`is_retroarch`
+//! directly instead of these name-only reductions.
+//!
+//! `is_xemu_emulator_name`/`is_redream_emulator_name`/
+//! `is_retroarch_emulator_name` all reuse
+//! `autoconfig::name_matches_any_token_substring` rather than duplicating
+//! the substring logic three times.
 
 use crate::autoconfig::cores::CoreFlags;
 use crate::autoconfig::name_matches_any_token_substring;
@@ -52,6 +67,15 @@ impl SaveScope {
 /// module's other pure functions.
 pub fn is_native_executable_platform(platform: &str) -> bool {
     platform.trim().to_lowercase().starts_with("windows")
+}
+
+/// `is_emulators_platform` (selection.py:138-142): trimmed, case-folded
+/// `platform` equal to the literal `"emulators"`. Ported for
+/// [`shared_sync_owner`]'s platform gate; later tasks (the sync-directory
+/// resolution and cloud-emulator-resolution wrappers, doc 06 "Emulator
+/// resolution for cloud operations") need the same predicate.
+pub fn is_emulators_platform(platform: &str) -> bool {
+    platform.trim().to_lowercase() == "emulators"
 }
 
 /// `_is_xemu_emulator_name` (cloud_mixin.py:1389) reduced to its name-only
@@ -171,20 +195,21 @@ pub fn cloud_save_block_reason(
 
 /// `_emulator_game_matches_shared_sync` + `_shared_cloud_sync_owner_game`'s
 /// candidate scan (cloud_mixin.py:376-421), reduced to a pure substring +
-/// rom-id search: the first `game` in `games` whose
+/// rom-id search: the first `game` in `games` that is on the `Emulators`
+/// platform ([`is_emulators_platform`], the reference's FIRST gate — line
+/// 380: `if not self._is_emulators_platform(game): return False`) AND whose
 /// `title`/`platform`/`description`/`rom_file_name` fields, each trimmed,
 /// joined with a single space, and lowercased, contain `token`
 /// (case-insensitively), AND which has a non-blank `rom_id`.
 ///
 /// `token` is the caller's pre-selected match word ("xemu" or "redream" —
 /// selection is by [`cloud_save_scope`]'s branch, which this function does
-/// not recompute). The Python original also gates each candidate on
-/// `_is_emulators_platform(game)` before the substring test and de-duplicates
-/// candidates by a game key before scanning for a resolvable rom id; neither
-/// changes which game is returned FIRST for a token search over an
-/// already-appropriate `games` slice, so both are the caller's
-/// responsibility (`ops.rs`) rather than this pure function's — this task's
-/// brief pins the search itself, not the platform pre-filter.
+/// not recompute). The Python original also de-duplicates candidates by a
+/// game key before scanning for a resolvable rom id; that never changes
+/// which game is returned FIRST for a token search over an
+/// already-appropriate `games` slice, so it is the caller's responsibility
+/// (`ops.rs`), not this pure function's — this task's brief pins the search
+/// itself, not the de-dup bookkeeping.
 ///
 /// One reference quirk preserved for documentation, though it can never
 /// change behavior here: Python's `" ".join(...)` over the fixed four-field
@@ -200,6 +225,9 @@ pub fn shared_sync_owner<'a>(token: &str, games: &'a [CloudGame]) -> Option<&'a 
     }
 
     games.iter().find(|game| {
+        if !is_emulators_platform(&game.platform) {
+            return false;
+        }
         if game.rom_id.is_empty() {
             return false;
         }
@@ -367,15 +395,18 @@ mod tests {
     fn shared_owner_requires_a_rom_id_and_matches_substrings_case_insensitively() {
         let no_rom_id = CloudGame {
             title: "Some xemu game".to_string(),
+            platform: "Emulators".to_string(),
             rom_id: "".to_string(),
             ..Default::default()
         };
         let wrong_word = CloudGame {
             title: "Nothing relevant here".to_string(),
+            platform: "Emulators".to_string(),
             rom_id: "7".to_string(),
             ..Default::default()
         };
         let matches_via_description = CloudGame {
+            platform: "Emulators".to_string(),
             description: "Runs great under XEMU".to_string(),
             rom_id: "42".to_string(),
             ..Default::default()
@@ -388,5 +419,51 @@ mod tests {
 
         // No match at all.
         assert_eq!(shared_sync_owner("redream", &games), None);
+    }
+
+    #[test]
+    fn shared_owner_requires_the_emulators_platform() {
+        // Same title/rom_id, only the platform differs.
+        let on_n64 = CloudGame {
+            title: "Plays great in xemu".to_string(),
+            platform: "Nintendo 64".to_string(),
+            rom_id: "9".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            shared_sync_owner("xemu", std::slice::from_ref(&on_n64)),
+            None,
+            "a matching title/rom_id on a non-Emulators platform must not be an owner"
+        );
+
+        let on_emulators = CloudGame {
+            platform: "Emulators".to_string(),
+            ..on_n64.clone()
+        };
+        assert_eq!(
+            shared_sync_owner("xemu", std::slice::from_ref(&on_emulators)),
+            Some(&on_emulators),
+            "the identical game IS an owner once its platform is literally Emulators"
+        );
+
+        // The platform match is trimmed and case-folded, same as
+        // is_native_executable_platform's rule.
+        let padded_case = CloudGame {
+            platform: "  EMULATORS  ".to_string(),
+            ..on_n64
+        };
+        assert_eq!(
+            shared_sync_owner("xemu", std::slice::from_ref(&padded_case)),
+            Some(&padded_case)
+        );
+    }
+
+    #[test]
+    fn is_emulators_platform_trims_and_casefolds() {
+        assert!(is_emulators_platform("Emulators"));
+        assert!(is_emulators_platform("  emulators  "));
+        assert!(is_emulators_platform("EMULATORS"));
+        assert!(!is_emulators_platform("Nintendo 64"));
+        assert!(!is_emulators_platform(""));
     }
 }
