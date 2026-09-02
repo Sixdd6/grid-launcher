@@ -6,6 +6,7 @@
 
 pub mod archive;
 pub mod candidates;
+pub mod dirs;
 pub mod native;
 pub mod restore;
 pub mod retention;

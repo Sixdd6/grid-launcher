@@ -32,8 +32,9 @@ pub struct EmulatorProfile {
     pub save_strategy: String,
     /// The four cloud-save list fields `autoconfig::entry` flattens into an
     /// `EmulatorEntry`'s `save_paths`, `state_paths`, `ignore_files` and
-    /// `ignore_extensions` strings. Like `source`, all five carry
-    /// `skip_serializing` so the IPC profile payload keeps its shape.
+    /// `ignore_extensions` strings. Like `source`, all six (including
+    /// `screenshot_directories` below) carry `skip_serializing` so the IPC
+    /// profile payload keeps its shape.
     #[serde(skip_serializing)]
     pub save_directories: Vec<String>,
     #[serde(skip_serializing)]
@@ -42,6 +43,13 @@ pub struct EmulatorProfile {
     pub ignore_files: Vec<String>,
     #[serde(skip_serializing)]
     pub ignore_extensions: Vec<String>,
+    /// `screenshot_directories` (cloud_mixin.py:987): the autoprofile's
+    /// screenshot directory list. Unlike `save_directories`/
+    /// `state_directories`, there is no per-entry override for this one —
+    /// `cloud::dirs::resolved_screenshot_directories` reads it directly,
+    /// with no `EmulatorEntry` field to win over it first.
+    #[serde(skip_serializing)]
+    pub screenshot_directories: Vec<String>,
 }
 
 /// Emulator autoprofile slugs that ship a Windows-only build and therefore
@@ -89,6 +97,8 @@ struct RawProfile {
     ignore_files: Vec<String>,
     #[serde(default)]
     ignore_extensions: Vec<String>,
+    #[serde(default)]
+    screenshot_directories: Vec<String>,
 }
 
 /// The parsed, normalized autoprofile catalog, embedded at build time and
@@ -154,6 +164,7 @@ fn normalize_one(raw: RawProfile) -> Option<EmulatorProfile> {
         state_directories: trimmed_non_blank(&raw.state_directories),
         ignore_files: trimmed_non_blank(&raw.ignore_files),
         ignore_extensions: trimmed_non_blank(&raw.ignore_extensions),
+        screenshot_directories: trimmed_non_blank(&raw.screenshot_directories),
     })
 }
 
@@ -708,13 +719,14 @@ mod tests {
     }
 
     #[test]
-    fn profile_normalization_keeps_the_five_new_autoprofile_fields() {
+    fn profile_normalization_keeps_the_six_new_autoprofile_fields() {
         let mut entry = raw("Name", &["x.exe"], "", false, &[]);
         entry.save_strategy = "  Single-File  ".to_string();
         entry.save_directories = vec!["  ~/saves ".into(), "".into(), "   ".into()];
         entry.state_directories = vec![" ~/states ".into()];
         entry.ignore_files = vec![" thumbs.db ".into(), "  ".into()];
         entry.ignore_extensions = vec![" .jpg ".into()];
+        entry.screenshot_directories = vec![" ~/screenshots ".into(), "".into()];
 
         let profile = normalize_one(entry).unwrap();
         // save_strategy is copied RAW: autoconfig.py:497 normalizes it at
@@ -724,6 +736,10 @@ mod tests {
         assert_eq!(profile.state_directories, vec!["~/states".to_string()]);
         assert_eq!(profile.ignore_files, vec!["thumbs.db".to_string()]);
         assert_eq!(profile.ignore_extensions, vec![".jpg".to_string()]);
+        assert_eq!(
+            profile.screenshot_directories,
+            vec!["~/screenshots".to_string()]
+        );
     }
 
     #[test]
@@ -734,6 +750,7 @@ mod tests {
         entry.state_directories = vec!["~/states".into()];
         entry.ignore_files = vec!["thumbs.db".into()];
         entry.ignore_extensions = vec![".jpg".into()];
+        entry.screenshot_directories = vec!["~/screenshots".into()];
         entry.source = Some(serde_json::json!({"provider": "github"}));
 
         let profile = normalize_one(entry).unwrap();
