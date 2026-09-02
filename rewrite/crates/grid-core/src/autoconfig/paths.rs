@@ -1,0 +1,170 @@
+//! Path helpers shared by every `ensure_*` writer: the home/XDG roots the
+//! config candidate lists are built from, `~` expansion, case-insensitive
+//! candidate deduplication, and the "directory that holds the executable"
+//! rule.
+//!
+//! Ports `grid_launcher/core/path.py:33-44` plus the `Path.expanduser()` and
+//! `emulator_path if emulator_path.is_dir() else emulator_path.parent`
+//! idioms repeated across `grid_launcher/emulator/*.py` (for example
+//! `grid_launcher/emulator/cemu.py:340`).
+
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+/// The user's home directory, or `None` when it cannot be determined.
+///
+/// `directories::UserDirs` first (which is `$HOME` on unix and the Windows
+/// known-folder API on Windows), then a direct `$HOME` read as a fallback so
+/// a test can point the whole helper family at a temporary directory.
+pub fn home_dir() -> Option<PathBuf> {
+    if let Some(user_dirs) = directories::UserDirs::new() {
+        return Some(user_dirs.home_dir().to_path_buf());
+    }
+    let raw = std::env::var("HOME").ok()?;
+    let trimmed = raw.trim();
+    (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
+}
+
+/// `$XDG_CONFIG_HOME`, else `~/.config` (`core/path.py:33`).
+///
+/// With no home directory at all, the fallback degrades to the relative
+/// `.config` — Python would raise `RuntimeError` there; a candidate path
+/// that simply never exists is the kinder failure for a candidate list.
+pub fn xdg_config_home() -> PathBuf {
+    env_dir("XDG_CONFIG_HOME").unwrap_or_else(|| {
+        home_dir()
+            .unwrap_or_else(|| PathBuf::from(""))
+            .join(".config")
+    })
+}
+
+/// `$XDG_DATA_HOME`, else `~/.local/share` (`core/path.py:40`).
+pub fn xdg_data_home() -> PathBuf {
+    env_dir("XDG_DATA_HOME").unwrap_or_else(|| {
+        home_dir()
+            .unwrap_or_else(|| PathBuf::from(""))
+            .join(".local")
+            .join("share")
+    })
+}
+
+/// The directory named by environment variable `var`: `Some` only when the
+/// variable is set and non-blank once trimmed, with a leading `~` expanded.
+///
+/// Python's call sites are a mix of `if value:` (`core/path.py:34`) and
+/// `.strip()` (`core/path.py:54`); trimming everywhere is the stricter of
+/// the two and only differs for a whitespace-only value, which can never
+/// name a real directory.
+pub fn env_dir(var: &str) -> Option<PathBuf> {
+    let raw = std::env::var(var).ok()?;
+    let trimmed = raw.trim();
+    (!trimmed.is_empty()).then(|| expand_user(trimmed))
+}
+
+/// Expand a leading `~` — `~` alone or `~/rest` — to the user's home
+/// directory, like `Path.expanduser()`.
+///
+/// `~user/...` is NOT expanded (Python resolves it through the password
+/// database); with no home directory, the text is returned untouched, which
+/// is also what `Path.expanduser()` does before it raises.
+pub fn expand_user(text: &str) -> PathBuf {
+    if text == "~" {
+        if let Some(home) = home_dir() {
+            return home;
+        }
+    } else if let Some(rest) = text.strip_prefix("~/") {
+        if let Some(home) = home_dir() {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(text)
+}
+
+/// Deduplicate a candidate list case-insensitively, keeping the first
+/// occurrence of each path and the overall order.
+///
+/// The key is `to_string_lossy().to_lowercase()` — no `resolve()` — so this
+/// only collapses paths that are literally the same text modulo case, the
+/// way the emulator modules build their candidate lists.
+pub fn dedupe_casefold(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen: HashSet<String> = HashSet::new();
+    paths
+        .into_iter()
+        .filter(|path| seen.insert(path.to_string_lossy().to_lowercase()))
+        .collect()
+}
+
+/// The directory an emulator's config lives beside: `path` itself when it is
+/// an existing directory, else `path`'s parent.
+///
+/// Shared by duckstation/dolphin/azahar/eden/cemu/ppsspp/xemu/redream. A
+/// path that does not exist counts as a file, so a not-yet-installed
+/// emulator still resolves to its install directory. `None` when there is no
+/// parent at all (a filesystem root, or an empty path).
+pub fn emulator_dir(path: &Path) -> Option<PathBuf> {
+    if path.is_dir() {
+        return Some(path.to_path_buf());
+    }
+    path.parent().map(Path::to_path_buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dedupe_casefold_keeps_first_occurrence() {
+        let deduped = dedupe_casefold(vec![
+            PathBuf::from("/Games/RetroArch"),
+            PathBuf::from("/games/retroarch"),
+            PathBuf::from("/games/Dolphin"),
+            PathBuf::from("/Games/RetroArch"),
+        ]);
+        assert_eq!(
+            deduped,
+            vec![
+                PathBuf::from("/Games/RetroArch"),
+                PathBuf::from("/games/Dolphin"),
+            ]
+        );
+    }
+
+    #[test]
+    fn emulator_dir_uses_parent_for_a_file_and_self_for_a_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("RetroArch");
+        std::fs::create_dir(&dir).unwrap();
+        let file = dir.join("retroarch");
+        std::fs::write(&file, b"").unwrap();
+
+        assert_eq!(emulator_dir(&dir), Some(dir.clone()));
+        assert_eq!(emulator_dir(&file), Some(dir.clone()));
+        assert_eq!(
+            emulator_dir(&dir.join("missing").join("emulator")),
+            Some(dir.join("missing")),
+            "a path that does not exist is treated as a file"
+        );
+    }
+
+    #[test]
+    fn expand_user_only_touches_a_leading_tilde() {
+        let home = home_dir().expect("this test needs a home directory");
+        assert_eq!(expand_user("~"), home);
+        assert_eq!(expand_user("~/.config/eden"), home.join(".config/eden"));
+        assert_eq!(
+            expand_user("/opt/~/games"),
+            PathBuf::from("/opt/~/games"),
+            "a tilde that is not leading is literal"
+        );
+        assert_eq!(
+            expand_user("~root/games"),
+            PathBuf::from("~root/games"),
+            "another user's home is not resolved"
+        );
+    }
+
+    #[test]
+    fn env_dir_rejects_unset_and_blank_values() {
+        assert_eq!(env_dir("GRID_AUTOCONFIG_TEST_UNSET_VAR"), None);
+    }
+}
