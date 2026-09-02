@@ -435,7 +435,7 @@ pub fn payload_is_zip(bytes: &[u8]) -> bool {
 /// excluded earlier: it's either absolute, caught by `is_absolute`, or a
 /// trailing-slash directory entry, filtered by the caller before this
 /// function is ever reached).
-fn is_safe_member_name(normalized: &str) -> bool {
+pub(crate) fn is_safe_member_name(normalized: &str) -> bool {
     if normalized.is_empty() {
         return false;
     }
@@ -468,7 +468,7 @@ fn is_safe_member_name(normalized: &str) -> bool {
 /// canonicalizes to its real, out-of-root target, so the final path's
 /// `starts_with(dest_root)` check (still applied by the caller) correctly
 /// fails.
-fn resolve_under_root(dest_root: &Path, relative: &Path) -> io::Result<PathBuf> {
+pub(crate) fn resolve_under_root(dest_root: &Path, relative: &Path) -> io::Result<PathBuf> {
     let mut resolved = dest_root.to_path_buf();
     let mut still_existing = true;
     for component in relative.components() {
