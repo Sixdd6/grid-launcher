@@ -9,15 +9,19 @@
 //! every module's candidate list is built from live in [`paths`].
 
 pub mod azahar;
+pub mod cemu;
 pub mod cores;
 pub mod dolphin;
 pub mod duckstation;
 pub mod eden;
 pub mod paths;
 pub mod pcsx2;
+pub mod ppsspp;
+pub mod redream;
 pub mod retroarch;
 pub mod rpcs3;
 pub mod writers;
+pub mod xemu;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
