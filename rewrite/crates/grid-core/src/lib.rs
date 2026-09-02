@@ -5,6 +5,7 @@ pub mod autoconfig;
 pub mod cloud;
 pub mod config;
 pub mod covers;
+pub mod fatx;
 pub mod launch;
 pub mod library;
 pub mod romm;
