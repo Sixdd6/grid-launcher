@@ -52,8 +52,11 @@ pub struct GameFacts {
 /// The reference passes these as keyword-only callables
 /// (autoconfig.py:353-360); this struct is the same seam.
 pub struct DefaultsContext<'a> {
-    /// Assignable server platform names, already run through
-    /// [`assignable_platforms`].
+    /// Server platform names. Callers should pass the list already run
+    /// through [`assignable_platforms`], but need not: the assignment applies
+    /// that filter itself (defense in depth — the filter is idempotent, so a
+    /// pre-filtered list is unaffected and a raw one cannot leak a Windows or
+    /// `Emulators` default through).
     pub platforms: &'a [String],
     /// `(platform, emulator_name) -> installed compatible core ids`
     /// (`_installed_retroarch_cores_for_platform`). Production passes a
@@ -177,22 +180,30 @@ pub fn assignable_platforms(platforms: &[String]) -> Vec<String> {
 /// only, to those with at least one INSTALLED compatible core — otherwise
 /// the keyword-matched ones, which a Dolphin profile's non-empty
 /// variant-platform list replaces outright.
+///
+/// [`assignable_platforms`] is applied here rather than trusted from the
+/// caller. The reference gets it for free — `default_assignable_server_platforms`
+/// is the only way to reach the list (selection.py:157) — so a caller that
+/// passed the raw server platforms would silently write defaults for Windows
+/// and the Emulators shelf with no test failing. The filter is idempotent, so
+/// a correctly pre-filtered caller is unaffected.
 fn target_platforms(
     game: Option<&GameFacts>,
     emulator_name: &str,
     profile: &EmulatorProfile,
     ctx: &DefaultsContext,
 ) -> Vec<String> {
+    let assignable = assignable_platforms(ctx.platforms);
+
     if profile.all_platforms {
-        let mut targets = ctx.platforms.to_vec();
+        let mut targets = assignable;
         if (ctx.is_retroarch)(emulator_name) {
             targets.retain(|platform| !(ctx.installed_cores)(platform, emulator_name).is_empty());
         }
         return targets;
     }
 
-    let mut targets: Vec<String> = ctx
-        .platforms
+    let mut targets: Vec<String> = assignable
         .iter()
         .filter(|platform| platform_matches_keywords(platform, &profile.platform_keywords))
         .cloned()
@@ -201,7 +212,7 @@ fn target_platforms(
     if let Some(game) = game {
         if profile.name.trim().to_lowercase() == "dolphin" {
             let variant = dolphin_variant_label(&game.title, &game.platform, &game.rom_file_name);
-            let variant_platforms = dolphin_target_platforms(&variant, ctx.platforms);
+            let variant_platforms = dolphin_target_platforms(&variant, &assignable);
             if !variant_platforms.is_empty() {
                 targets = variant_platforms;
             }
@@ -645,6 +656,18 @@ mod tests {
         );
     }
 
+    #[test]
+    fn assignable_platforms_keeps_a_survivor_untrimmed() {
+        // The trim is only for the comparison; a surviving platform keeps
+        // its original spelling, because that string is the map key the
+        // defaults are written under (selection.py:159-164).
+        let platforms = strings(&["  Nintendo 64  ", "  Windows  "]);
+        assert_eq!(
+            assignable_platforms(&platforms),
+            strings(&["  Nintendo 64  "])
+        );
+    }
+
     // --- auto_configure_emulator_settings -----------------------------------
 
     /// Runs layer 1 with no server platforms, so only the entry list moves.
@@ -1024,6 +1047,48 @@ mod tests {
                 ("Super Nintendo", "bsnes"),
             ])
         );
+    }
+
+    #[test]
+    fn assign_defaults_filters_unassignable_platforms_it_is_handed() {
+        // Defense in depth: `DefaultsContext::platforms` is meant to arrive
+        // pre-filtered, but a caller passing the raw server list must not
+        // silently write defaults for Windows or the Emulators shelf.
+        let raw = strings(&["Windows 11", "Emulators", "Nintendo 64", "Super Nintendo"]);
+
+        // all_platforms path.
+        let every_platform = EmulatorProfile {
+            name: "MAME".into(),
+            args: "%rom%".into(),
+            all_platforms: true,
+            ..Default::default()
+        };
+        let (defaults, _) = assign(
+            None,
+            "MAME",
+            &every_platform,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &raw,
+            &no_cores,
+        );
+        assert_eq!(
+            defaults,
+            map(&[("Nintendo 64", "MAME"), ("Super Nintendo", "MAME")])
+        );
+
+        // Keyword path: a keyword that would otherwise match "Windows 11".
+        let by_keyword = keyword_profile("Some Emulator", &["windows 11", "nintendo 64"]);
+        let (defaults, _) = assign(
+            None,
+            "Some Emulator",
+            &by_keyword,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &raw,
+            &no_cores,
+        );
+        assert_eq!(defaults, map(&[("Nintendo 64", "Some Emulator")]));
     }
 
     #[test]
