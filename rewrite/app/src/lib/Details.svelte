@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { api, type DownloadStatus, type GameSummary } from './api';
+  import { api, type CloudPanelInfo, type DownloadStatus, type GameSummary } from './api';
   import { downloads } from './stores/downloads.svelte';
-  import { isInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
+  import { isInstalled, installed, matchesInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
   import { sessions } from './stores/sessions.svelte';
   import Cover from './Cover.svelte';
+  import CloudPanel from './details/CloudPanel.svelte';
+  import { cloudButtonLabel, isNativeExecutablePlatform, syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
 
   let {
     game,
@@ -33,9 +35,41 @@
   let installedNow = $derived(isInstalled(game, platformName));
   let liveSession = $derived(sessions.sessionFor(game.id));
 
+  // Cloud saves/states (task-19-brief.md). `cloudGame` is the InstalledGame
+  // registry row when one exists, else a synthetic stand-in built from the
+  // GameSummary — the cloud commands resolve "installed" themselves by
+  // identity match (cloud_service.rs's `panel_info`), so a non-installed
+  // shared-scope game (e.g. an entry on the synthetic `Emulators` platform)
+  // can still open its panel.
+  let installedRow = $derived(installed.list.find((row) => matchesInstalled(row, game, platformName)) ?? null);
+  let cloudGame = $derived(installedRow ?? syntheticCloudGame(game, platformName));
+  let isNative = $derived(isNativeExecutablePlatform(platformName));
+
+  let cloudMode = $state<CloudMode>('overview');
+  let savePanelInfo = $state<CloudPanelInfo | null>(null);
+  let statePanelInfo = $state<CloudPanelInfo | null>(null);
+  let cloudPanelInfoError = $state<string | null>(null);
+
+  let activeCloudPanelInfo = $derived(cloudMode === 'save' ? savePanelInfo : cloudMode === 'state' ? statePanelInfo : null);
+
   $effect(() => {
     panelEl?.focus();
   });
+
+  $effect(() => {
+    api
+      .cloudPanelInfo(cloudGame, 'save')
+      .then((info) => (savePanelInfo = info))
+      .catch((err) => (cloudPanelInfoError = errorMessage(err)));
+    api
+      .cloudPanelInfo(cloudGame, 'state')
+      .then((info) => (statePanelInfo = info))
+      .catch((err) => (cloudPanelInfoError = errorMessage(err)));
+  });
+
+  function handleCloudToggle(saveType: 'save' | 'state') {
+    cloudMode = toggleCloudMode(cloudMode, saveType);
+  }
 
   function errorMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
@@ -115,6 +149,7 @@
   <div
     data-testid="details-panel"
     class="panel"
+    class:wide={cloudMode !== 'overview'}
     bind:this={panelEl}
     role="dialog"
     aria-modal="true"
@@ -159,6 +194,44 @@
       {/if}
     </div>
 
+    {#if savePanelInfo?.supported || statePanelInfo?.supported}
+      <div class="cloud-toggle">
+        {#if savePanelInfo?.supported}
+          <button
+            data-testid="details-cloud-save-toggle"
+            class:active={cloudMode === 'save'}
+            onclick={() => handleCloudToggle('save')}
+          >
+            {cloudButtonLabel('save', savePanelInfo.scope)}
+          </button>
+        {/if}
+        {#if statePanelInfo?.supported}
+          <button
+            data-testid="details-cloud-state-toggle"
+            class:active={cloudMode === 'state'}
+            onclick={() => handleCloudToggle('state')}
+          >
+            {cloudButtonLabel('state', statePanelInfo.scope)}
+          </button>
+        {/if}
+      </div>
+    {/if}
+
+    {#if cloudPanelInfoError}
+      <p data-testid="cloud-panel-info-error" class="error" role="alert">{cloudPanelInfoError}</p>
+    {/if}
+
+    {#if cloudMode !== 'overview' && activeCloudPanelInfo}
+      <CloudPanel
+        game={cloudGame}
+        gameTitle={game.name}
+        saveType={cloudMode}
+        panelInfo={activeCloudPanelInfo}
+        {isNative}
+        onBack={() => (cloudMode = 'overview')}
+      />
+    {/if}
+
     {#if error}
       <p data-testid="details-error" class="error" role="alert">{error}</p>
     {/if}
@@ -187,6 +260,7 @@
     max-height: calc(100vh - 48px);
     overflow-y: auto;
     box-sizing: border-box;
+    transition: width 0.15s ease;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -201,6 +275,11 @@
   .panel:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
+  }
+
+  .panel.wide {
+    width: min(480px, calc(100vw - 48px));
+    align-items: stretch;
   }
 
   .close {
@@ -294,6 +373,30 @@
     background: transparent;
     color: #e5484d;
     border-color: #e5484d;
+  }
+
+  .cloud-toggle {
+    margin-top: 4px;
+    width: 100%;
+    display: flex;
+    gap: 8px;
+  }
+
+  .cloud-toggle button {
+    flex: 1;
+    font: inherit;
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    cursor: pointer;
+  }
+
+  .cloud-toggle button.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
   }
 
   .action button:disabled {

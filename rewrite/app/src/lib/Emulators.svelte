@@ -2,6 +2,7 @@
   import {
     api,
     type CatalogEntry,
+    type CloudSettings,
     type EmulatorEntry,
     type LaunchDefaults,
     type Platform,
@@ -68,6 +69,15 @@
   let raSavePending = $state(false);
   let raClearPending = $state(false);
 
+  // Cloud saves settings block (task-19-brief.md). Lives here rather than
+  // Connect.svelte (which only renders pre-login) — this is where the
+  // app's other per-device settings (RetroAchievements, above) already
+  // live.
+  let cloudSettings = $state<CloudSettings | null>(null);
+  let cloudSettingsError = $state<string | null>(null);
+  let cloudSettingsSavedLine = $state<string | null>(null);
+  let cloudSettingsPending = $state(false);
+
   // Install tab state.
   let catalog = $state<CatalogEntry[]>([]);
   let catalogLoading = $state(true);
@@ -99,6 +109,7 @@
     refreshPlatformsAndDefaults();
     refreshProfiles();
     refreshRaStatus();
+    refreshCloudSettings();
   });
 
   // Loads (or reloads) the catalog whenever the Install tab becomes the
@@ -357,6 +368,31 @@
     }
   }
 
+  async function refreshCloudSettings() {
+    try {
+      cloudSettings = await api.cloudSettings();
+      cloudSettingsError = null;
+    } catch (err) {
+      cloudSettingsError = errorMessage(err);
+    }
+  }
+
+  async function handleCloudSettingsSave() {
+    if (!cloudSettings) return;
+    cloudSettingsError = null;
+    cloudSettingsSavedLine = null;
+    cloudSettingsPending = true;
+    try {
+      await api.setCloudSettings(cloudSettings);
+      cloudSettingsSavedLine = 'Saved.';
+      await refreshCloudSettings();
+    } catch (err) {
+      cloudSettingsError = errorMessage(err);
+    } finally {
+      cloudSettingsPending = false;
+    }
+  }
+
   function onKey(e: KeyboardEvent) {
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -603,6 +639,73 @@
         </div>
       </form>
     </section>
+
+    <section class="cloud-settings-section">
+      <h3>Cloud Saves</h3>
+      {#if cloudSettings}
+        <form
+          onsubmit={(e) => {
+            e.preventDefault();
+            handleCloudSettingsSave();
+          }}
+        >
+          <label class="checkbox">
+            <input
+              data-testid="cloud-settings-download-on-launch"
+              type="checkbox"
+              bind:checked={cloudSettings.download_on_launch}
+            />
+            Restore cloud saves before launch
+          </label>
+          <label class="checkbox">
+            <input
+              data-testid="cloud-settings-upload-on-exit"
+              type="checkbox"
+              bind:checked={cloudSettings.upload_on_exit}
+            />
+            Upload cloud saves after exit
+          </label>
+          <label class="checkbox">
+            <input
+              data-testid="cloud-settings-skip-if-local-newer"
+              type="checkbox"
+              bind:checked={cloudSettings.skip_if_local_newer}
+            />
+            Skip download when the local save is newer
+          </label>
+          <label>
+            Upload delay (seconds)
+            <input
+              data-testid="cloud-settings-upload-delay"
+              type="number"
+              min="0"
+              max="60"
+              bind:value={cloudSettings.upload_delay_seconds}
+            />
+          </label>
+          <label>
+            Save retention limit
+            <input
+              data-testid="cloud-settings-retention-limit"
+              type="number"
+              min="1"
+              bind:value={cloudSettings.retention_limit}
+            />
+          </label>
+          {#if cloudSettingsError}<p data-testid="cloud-settings-error" class="error" role="alert">{cloudSettingsError}</p>{/if}
+          {#if cloudSettingsSavedLine}<p class="hint">{cloudSettingsSavedLine}</p>{/if}
+          <div class="form-actions">
+            <button data-testid="cloud-settings-save" type="submit" disabled={cloudSettingsPending}>
+              {cloudSettingsPending ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        </form>
+      {:else if cloudSettingsError}
+        <p data-testid="cloud-settings-error" class="error" role="alert">{cloudSettingsError}</p>
+      {:else}
+        <p class="muted">Loading…</p>
+      {/if}
+    </section>
   </div>
 </div>
 
@@ -694,7 +797,8 @@
   .list-section,
   .form-section,
   .defaults-section,
-  .ra-section {
+  .ra-section,
+  .cloud-settings-section {
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -702,13 +806,15 @@
     border-top: 1px solid var(--border);
   }
 
-  .ra-section form {
+  .ra-section form,
+  .cloud-settings-section form {
     display: flex;
     flex-direction: column;
     gap: 12px;
   }
 
-  .ra-section label {
+  .ra-section label,
+  .cloud-settings-section label {
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -716,7 +822,14 @@
     color: var(--text);
   }
 
-  .ra-section input {
+  .cloud-settings-section label.checkbox {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .ra-section input,
+  .cloud-settings-section input {
     font: inherit;
     padding: 8px 10px;
     border-radius: 6px;
@@ -725,7 +838,17 @@
     color: var(--text-h);
   }
 
-  .ra-section input:focus-visible {
+  .cloud-settings-section input[type='checkbox'] {
+    width: auto;
+    padding: 0;
+  }
+
+  .cloud-settings-section input[type='number'] {
+    width: 100px;
+  }
+
+  .ra-section input:focus-visible,
+  .cloud-settings-section input:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
   }
