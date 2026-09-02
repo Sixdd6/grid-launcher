@@ -18,6 +18,7 @@
 //! than `ElementTree`'s reserialize-the-whole-tree behavior, not weaker.
 
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use regex::Regex;
 
@@ -266,12 +267,22 @@ fn element_regex(tag: &str) -> Regex {
     Regex::new(&format!(r"<{tag}>([^<]*)</{tag}>")).expect("static tag names are valid regex")
 }
 
+/// One `<tag>...</tag>` regex per [`FORCED_ELEMENTS`] entry, in the same
+/// order, compiled once and reused across every [`apply_forced_elements`]
+/// call instead of being rebuilt on each of the six tags on every
+/// `ensure_settings` call.
+static FORCED_ELEMENT_REGEXES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    FORCED_ELEMENTS
+        .iter()
+        .map(|(tag, _)| element_regex(tag))
+        .collect()
+});
+
 /// Rewrite `<tag>...</tag>`'s inner text to `value` inside `root_span` when
 /// it differs, or append `<tag>value</tag>` right before the root span's own
 /// closing `</content>` when the tag is absent. Returns whether a change was
-/// made.
-fn set_or_insert_element(root_span: &mut String, tag: &str, value: &str) -> bool {
-    let re = element_regex(tag);
+/// made. `re` is `tag`'s precompiled regex from [`FORCED_ELEMENT_REGEXES`].
+fn set_or_insert_element(root_span: &mut String, tag: &str, value: &str, re: &Regex) -> bool {
     if let Some(caps) = re.captures(root_span.as_str()) {
         let whole = caps.get(0).unwrap();
         if &caps[1] == value {
@@ -298,9 +309,14 @@ fn set_or_insert_element(root_span: &mut String, tag: &str, value: &str) -> bool
 /// (alongside [`position_is_commented_out`]) so its own `<mlc_path>` scan
 /// gets the same comment-skipping guarantee this module's writer has,
 /// rather than maintaining a second, divergent copy.
+static COMMENT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<!--.*?-->").expect("static regex is valid"));
+
 pub(crate) fn comment_ranges(text: &str) -> Vec<(usize, usize)> {
-    let re = Regex::new(r"(?s)<!--.*?-->").expect("static regex is valid");
-    re.find_iter(text).map(|m| (m.start(), m.end())).collect()
+    COMMENT_RE
+        .find_iter(text)
+        .map(|m| (m.start(), m.end()))
+        .collect()
 }
 
 /// `pub(crate)` for the same reason as [`comment_ranges`].
@@ -353,8 +369,8 @@ fn apply_forced_elements(content: &str) -> Option<(String, bool)> {
 
     let mut root_span = content[open_pos..close_end].to_string();
     let mut changed = false;
-    for (tag, value) in FORCED_ELEMENTS {
-        changed |= set_or_insert_element(&mut root_span, tag, value);
+    for ((tag, value), re) in FORCED_ELEMENTS.iter().zip(FORCED_ELEMENT_REGEXES.iter()) {
+        changed |= set_or_insert_element(&mut root_span, tag, value, re);
     }
 
     Some((root_span, changed))

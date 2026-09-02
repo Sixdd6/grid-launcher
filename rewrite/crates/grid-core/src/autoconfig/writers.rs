@@ -316,6 +316,93 @@ pub fn rpcs3_gui_section(
     ini_core(raw, section, desired, &NARROW_KEY_RE, annotations)
 }
 
+/// The walk shared by the add-only section families ([`yaml_add_only_section`]
+/// and [`toml_add_only_section`]): scan `raw` line by line, tracking whether
+/// the current line is inside the target section; on each section header,
+/// flush any still-missing desired keys into the section that is ending and
+/// decide (via `is_target_header`) whether the new one is the target; inside
+/// the target section, record a key as seen (via `extract_key`) whenever
+/// `key_re` matches; and once EOF is reached, either flush the trailing
+/// section or, if the target section was never found, append a whole new one
+/// using `render_header` and `render_kv`.
+///
+/// `header_re` is applied to `header_source(raw_line)` (Python's
+/// `raw_line.strip()` for TOML, the untrimmed line for YAML) so each family
+/// keeps its own section-header matching surface; `is_target_header` receives
+/// the header regex's TRIMMED first capture group and decides the
+/// case-(in)sensitivity of the section compare.
+#[allow(clippy::too_many_arguments)]
+fn add_only_walk(
+    raw: &str,
+    section: &str,
+    desired: &Desired,
+    header_re: &Regex,
+    header_source: impl Fn(&str) -> &str,
+    is_target_header: impl Fn(&str) -> bool,
+    key_re: &Regex,
+    extract_key: impl Fn(&regex::Captures) -> String,
+    render_kv: impl Fn(&str, &str) -> String,
+    render_header: impl Fn(&str) -> String,
+) -> (String, bool) {
+    if desired.is_empty() {
+        return (raw.to_string(), false);
+    }
+
+    let mut out: Vec<String> = Vec::new();
+    let mut changed = false;
+    let mut in_target = false;
+    let mut section_found = false;
+    let mut seen_keys: HashSet<String> = HashSet::new();
+
+    let flush = |out: &mut Vec<String>, seen_keys: &mut HashSet<String>, changed: &mut bool| {
+        for (key, value) in desired {
+            if seen_keys.contains(key) {
+                continue;
+            }
+            out.push(render_kv(key, value));
+            seen_keys.insert(key.clone());
+            *changed = true;
+        }
+    };
+
+    for raw_line in raw.lines() {
+        if let Some(caps) = header_re.captures(header_source(raw_line)) {
+            if in_target {
+                flush(&mut out, &mut seen_keys, &mut changed);
+            }
+            in_target = is_target_header(caps[1].trim());
+            if in_target {
+                section_found = true;
+            }
+            out.push(raw_line.to_string());
+            continue;
+        }
+
+        if in_target {
+            if let Some(caps) = key_re.captures(raw_line) {
+                seen_keys.insert(extract_key(&caps));
+            }
+        }
+
+        out.push(raw_line.to_string());
+    }
+
+    if in_target {
+        flush(&mut out, &mut seen_keys, &mut changed);
+    }
+
+    if !section_found {
+        push_separator(&mut out);
+        out.push(render_header(section));
+        for (key, value) in desired {
+            out.push(render_kv(key, value));
+        }
+        changed = true;
+    }
+
+    (normalize(out), changed)
+}
+
 /// Add-only, 2-space-indented YAML sections (rpcs3.py:113-169). An existing
 /// key is recorded as seen and its line is emitted verbatim; only missing
 /// keys are appended, unquoted, as `  key: value`.
@@ -336,65 +423,20 @@ pub fn rpcs3_gui_section(
 /// captured key UNTRIMMED (xemu.py:225 has no `.strip()`). Only the YAML
 /// writer trims.
 pub fn yaml_add_only_section(raw: &str, section: &str, desired: &Desired) -> (String, bool) {
-    if desired.is_empty() {
-        return (raw.to_string(), false);
-    }
-
     let target = section.trim();
-    let mut out: Vec<String> = Vec::new();
-    let mut changed = false;
-    let mut in_target = false;
-    let mut section_found = false;
-    let mut seen_keys: HashSet<String> = HashSet::new();
-
-    let flush = |out: &mut Vec<String>, seen_keys: &mut HashSet<String>, changed: &mut bool| {
-        for (key, value) in desired {
-            if seen_keys.contains(key) {
-                continue;
-            }
-            out.push(format!("  {key}: {value}"));
-            seen_keys.insert(key.clone());
-            *changed = true;
-        }
-    };
-
-    for raw_line in raw.lines() {
-        if let Some(caps) = YAML_SECTION_RE.captures(raw_line) {
-            if in_target {
-                flush(&mut out, &mut seen_keys, &mut changed);
-            }
-            in_target = caps[1].trim() == target;
-            if in_target {
-                section_found = true;
-            }
-            out.push(raw_line.to_string());
-            continue;
-        }
-
-        if in_target {
-            if let Some(caps) = YAML_KEY_RE.captures(raw_line) {
-                // Trimmed, per rpcs3.py:154 — see this function's doc comment.
-                seen_keys.insert(caps[1].trim().to_string());
-            }
-        }
-
-        out.push(raw_line.to_string());
-    }
-
-    if in_target {
-        flush(&mut out, &mut seen_keys, &mut changed);
-    }
-
-    if !section_found {
-        push_separator(&mut out);
-        out.push(format!("{section}:"));
-        for (key, value) in desired {
-            out.push(format!("  {key}: {value}"));
-        }
-        changed = true;
-    }
-
-    (normalize(out), changed)
+    add_only_walk(
+        raw,
+        section,
+        desired,
+        &YAML_SECTION_RE,
+        |line| line,
+        |header| header == target,
+        &YAML_KEY_RE,
+        // Trimmed, per rpcs3.py:154 — see this function's doc comment.
+        |caps| caps[1].trim().to_string(),
+        |key, value| format!("  {key}: {value}"),
+        |section| format!("{section}:"),
+    )
 }
 
 /// Add-only TOML sections (xemu.py:184-240). The key charset allows `-`, and
@@ -404,66 +446,19 @@ pub fn yaml_add_only_section(raw: &str, section: &str, desired: &Desired) -> (St
 /// Dotted section names like `display.window` are matched as literal whole
 /// strings and are never resolved as a path into a `[display]` table.
 pub fn toml_add_only_section(raw: &str, section: &str, desired: &Desired) -> (String, bool) {
-    if desired.is_empty() {
-        return (raw.to_string(), false);
-    }
-
     let target = section.to_lowercase();
-    let mut out: Vec<String> = Vec::new();
-    let mut changed = false;
-    let mut in_target = false;
-    let mut section_found = false;
-    let mut seen_keys: HashSet<String> = HashSet::new();
-
-    let flush = |out: &mut Vec<String>, seen_keys: &mut HashSet<String>, changed: &mut bool| {
-        for (key, value) in desired {
-            if seen_keys.contains(key) {
-                continue;
-            }
-            out.push(format!("{key} = {value}"));
-            seen_keys.insert(key.clone());
-            *changed = true;
-        }
-    };
-
-    for raw_line in raw.lines() {
-        let stripped = raw_line.trim();
-
-        if let Some(caps) = SECTION_RE.captures(stripped) {
-            if in_target {
-                flush(&mut out, &mut seen_keys, &mut changed);
-            }
-            in_target = caps[1].trim().to_lowercase() == target;
-            if in_target {
-                section_found = true;
-            }
-            out.push(raw_line.to_string());
-            continue;
-        }
-
-        if in_target {
-            if let Some(caps) = TOML_KEY_RE.captures(raw_line) {
-                seen_keys.insert(caps[1].to_string());
-            }
-        }
-
-        out.push(raw_line.to_string());
-    }
-
-    if in_target {
-        flush(&mut out, &mut seen_keys, &mut changed);
-    }
-
-    if !section_found {
-        push_separator(&mut out);
-        out.push(format!("[{section}]"));
-        for (key, value) in desired {
-            out.push(format!("{key} = {value}"));
-        }
-        changed = true;
-    }
-
-    (normalize(out), changed)
+    add_only_walk(
+        raw,
+        section,
+        desired,
+        &SECTION_RE,
+        |line| line.trim(),
+        |header| header.to_lowercase() == target,
+        &TOML_KEY_RE,
+        |caps| caps[1].to_string(),
+        |key, value| format!("{key} = {value}"),
+        |section| format!("[{section}]"),
+    )
 }
 
 /// The flat `key = "value"` writer RetroArch's sectionless config needs

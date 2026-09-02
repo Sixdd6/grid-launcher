@@ -206,6 +206,18 @@ fn entry_matches_tokens(
     })
 }
 
+/// The lowercased-substring fallback shared by [`emulator_matches_tokens`]
+/// and [`matches_tokens_by_name`]: does any non-blank token, trimmed and
+/// case-folded, appear as a substring of `name` (also trimmed and
+/// case-folded)?
+fn name_matches_any_token_substring(name: &str, tokens: &[&str]) -> bool {
+    let normalized_name = name.trim().to_lowercase();
+    tokens.iter().any(|token| {
+        let token = token.trim().to_lowercase();
+        !token.is_empty() && normalized_name.contains(&token)
+    })
+}
+
 /// `_emulator_matches_tokens` (cloud_mixin.py:1349-1363): autoprofile token
 /// matching on the entry first, then a plain case-folded SUBSTRING test of
 /// each token against the entry NAME. So an entry literally named
@@ -215,14 +227,8 @@ pub fn emulator_matches_tokens(
     tokens: &[&str],
     profiles: &[EmulatorProfile],
 ) -> bool {
-    if entry_matches_tokens(entry, tokens, profiles) {
-        return true;
-    }
-    let normalized_name = entry.name.trim().to_lowercase();
-    tokens.iter().any(|token| {
-        let token = token.trim().to_lowercase();
-        !token.is_empty() && normalized_name.contains(&token)
-    })
+    entry_matches_tokens(entry, tokens, profiles)
+        || name_matches_any_token_substring(&entry.name, tokens)
 }
 
 /// The name-only form the defaults assignment needs
@@ -241,11 +247,7 @@ fn matches_tokens_by_name(
             return true;
         }
     }
-    let normalized_name = name.trim().to_lowercase();
-    tokens.iter().any(|token| {
-        let token = token.trim().to_lowercase();
-        !token.is_empty() && normalized_name.contains(&token)
-    })
+    name_matches_any_token_substring(name, tokens)
 }
 
 /// `_is_retroarch_emulator_name` (emulator_ui_mixin.py:1916).
