@@ -8,8 +8,8 @@
 //! idioms repeated across `grid_launcher/emulator/*.py` (for example
 //! `grid_launcher/emulator/cemu.py:340`).
 
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::collections::{HashMap, HashSet};
+use std::path::{Component, Path, PathBuf};
 
 /// The user's home directory, or `None` when it cannot be determined.
 ///
@@ -108,61 +108,114 @@ pub fn emulator_dir(path: &Path) -> Option<PathBuf> {
     path.parent().map(Path::to_path_buf)
 }
 
-/// Collapse `.`/`..` components lexically — no filesystem access — the way
-/// `os.path.normpath` does: a `ParentDir` cancels the preceding `Normal`
-/// component when there is one; at the root (or with no root yet collected),
-/// a `ParentDir` is dropped rather than climbing above the root, matching
-/// Python's own clamping (`Path("/../../foo").resolve()` is `/foo`, not an
-/// error and not `/../foo`). `CurDir` is dropped outright. This never
-/// touches disk, so it collapses `..` through path segments that do not
-/// exist just as readily as ones that do — the property
-/// [`resolve_best_effort`] needs it for.
-fn lexically_normalize(path: &Path) -> PathBuf {
-    use std::path::Component;
+/// `lstat`-equivalent symlink check for [`join_realpath`]: any failure to
+/// stat `candidate` — not only "does not exist" — is treated as "not a
+/// symlink", mirroring CPython's broad `except OSError: is_link = False`
+/// (`posixpath.py:467-472`, `strict=False`'s `ignored_error = OSError`).
+fn is_symlink(candidate: &Path) -> bool {
+    std::fs::symlink_metadata(candidate)
+        .map(|meta| meta.file_type().is_symlink())
+        .unwrap_or(false)
+}
 
-    let mut stack: Vec<Component> = Vec::new();
-    for component in path.components() {
+/// Port of CPython's `posixpath._joinrealpath` (`strict=False` case only —
+/// the engine behind `os.path.realpath`, which `pathlib.Path.resolve()`
+/// calls under the hood) — walk `rest`'s components onto `path` one at a
+/// time, resolving symlinks PROGRESSIVELY against the path as built so far,
+/// not against a lexically-pre-normalized string. This distinction is
+/// observable: given a symlink `dirB/linktoreal -> dirA/realdir`, resolving
+/// `dirB/linktoreal/../sibling` must land on `dirA/sibling` (the `..`
+/// cancels `realdir`, the symlink's TARGET) — a lexical-first pass that
+/// collapses `..` before ever looking at the filesystem would instead
+/// cancel `linktoreal` itself and land on the wrong `dirB/sibling`.
+///
+/// Every component:
+/// - `.` is dropped (`posixpath.py:454-456`).
+/// - `..` pops the last segment off `path` — whatever it currently is,
+///   symlink-resolved or plain — clamped at the root: popping past `/` is
+///   a no-op, never producing a literal `/../x` (`posixpath.py:457-465`).
+/// - A `Normal` name is checked via [`is_symlink`]: if it is NOT a
+///   symlink — including when it does not exist at all, which gets
+///   IDENTICAL treatment to an ordinary file/dir under `strict=False`,
+///   since a failed stat also just means "not a symlink" — it is appended
+///   as plain text with no further resolution, and later components are
+///   themselves stat-checked against THIS (possibly still nonexistent)
+///   prefix, exactly like CPython (`posixpath.py:466-475`). If it IS a
+///   symlink, [`join_realpath`] recurses onto its target: an absolute
+///   target's own leading root component naturally resets `path` (handled
+///   by this same match arm, no special case needed — Rust's `Components`
+///   always yields a path's own `RootDir`/`Prefix` first); a relative one
+///   is walked starting from the CURRENT `path`, i.e. from the symlink's
+///   own containing directory (`posixpath.py:476-494`). `seen` records
+///   symlinks already entered on this call stack, so a cycle falls back to
+///   the raw, unresolved candidate instead of recursing forever, mirroring
+///   CPython's own non-strict loop guard (`posixpath.py:477-489`).
+fn join_realpath(
+    mut path: PathBuf,
+    rest: &Path,
+    seen: &mut HashMap<PathBuf, Option<PathBuf>>,
+) -> PathBuf {
+    for component in rest.components() {
         match component {
             Component::CurDir => {}
-            Component::ParentDir => match stack.last() {
-                Some(Component::Normal(_)) => {
-                    stack.pop();
+            Component::RootDir | Component::Prefix(_) => {
+                path = PathBuf::from(component.as_os_str());
+            }
+            Component::ParentDir => {
+                if path.parent().is_some() {
+                    path.pop();
                 }
-                Some(Component::RootDir) | Some(Component::Prefix(_)) => {
-                    // Clamp at root: already there, so ".." is a no-op.
+                // else: already at (or above) the root — clamp, no-op.
+            }
+            Component::Normal(name) => {
+                let candidate = path.join(name);
+                if !is_symlink(&candidate) {
+                    path = candidate;
+                    continue;
                 }
-                None | Some(Component::ParentDir) => {
-                    // A relative path with no root collected yet (or one
-                    // that already starts with unresolved ".." segments):
-                    // keep the ".." rather than lose information — this
-                    // never happens for the absolute paths
-                    // `resolve_best_effort` normalizes, since those always
-                    // collect a `RootDir`/`Prefix` first.
-                    stack.push(component);
+                match seen.get(&candidate) {
+                    Some(Some(resolved)) => path = resolved.clone(),
+                    Some(None) => {
+                        // Loop: this symlink is still being resolved
+                        // higher up the call stack. Non-strict CPython
+                        // falls back to the raw candidate rather than
+                        // recursing forever.
+                        path = candidate;
+                    }
+                    None => {
+                        seen.insert(candidate.clone(), None);
+                        let resolved = match std::fs::read_link(&candidate) {
+                            Ok(target) => join_realpath(path.clone(), &target, seen),
+                            // A symlink we just confirmed via `lstat` but
+                            // can no longer `readlink` (e.g. a race):
+                            // fall back to the raw candidate rather than
+                            // erroring.
+                            Err(_) => candidate.clone(),
+                        };
+                        seen.insert(candidate, Some(resolved.clone()));
+                        path = resolved;
+                    }
                 }
-                Some(Component::CurDir) => unreachable!("CurDir is never pushed onto the stack"),
-            },
-            other => stack.push(other),
+            }
         }
     }
-    stack.into_iter().collect()
+    path
 }
 
 /// `Path.resolve(strict=False)` — Python's default, which succeeds even
-/// when the path does not exist. Unlike `std::fs::canonicalize` (which
-/// requires the full path to exist), this: makes a relative `path` absolute
-/// against the current directory; lexically collapses `.`/`..` components
-/// via [`lexically_normalize`] — through path segments that do not exist,
-/// same as Python — clamping at the root rather than climbing above it;
-/// then resolves symlinks for whatever longest ancestor of the normalized
-/// path actually exists, rejoining the (already-normalized, so no further
-/// `..` to collapse) non-existent remainder untouched.
+/// when the path does not exist. Makes a relative `path` absolute against
+/// the current directory, then walks it via [`join_realpath`], which
+/// resolves symlinks progressively and collapses `.`/`..` against
+/// whatever has been resolved so far — see that function's doc comment for
+/// why "collapse `..` lexically first, canonicalize second" (this
+/// function's own previous implementation) is NOT equivalent and gives the
+/// wrong answer whenever a `..` crosses a symlink boundary.
 ///
-/// This is the one shared home for what used to be duplicated,
-/// trailing-slash-preserving, `..`-blind copies in `readers.rs` and
-/// `rpcs3.rs` — every `ensure_*`/`*_directory_settings` call site in this
-/// crate that ports a Python `.resolve()` call should go through this
-/// function instead of hand-rolling another one.
+/// This is the one shared home for what used to be duplicated, divergent
+/// copies in `readers.rs` and `rpcs3.rs` — every `ensure_*`/
+/// `*_directory_settings` call site in this crate that ports a Python
+/// `.resolve()` call should go through this function instead of
+/// hand-rolling another one.
 pub(crate) fn resolve_best_effort(path: &Path) -> PathBuf {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
@@ -172,29 +225,8 @@ pub(crate) fn resolve_best_effort(path: &Path) -> PathBuf {
             .unwrap_or_else(|_| path.to_path_buf())
     };
 
-    let normalized = lexically_normalize(&absolute);
-
-    if let Ok(canonical) = std::fs::canonicalize(&normalized) {
-        return canonical;
-    }
-
-    let mut existing = normalized.clone();
-    let mut remainder: Vec<std::ffi::OsString> = Vec::new();
-    while !existing.exists() {
-        let Some(name) = existing.file_name().map(|n| n.to_os_string()) else {
-            break;
-        };
-        remainder.push(name);
-        if !existing.pop() {
-            break;
-        }
-    }
-
-    let mut resolved = std::fs::canonicalize(&existing).unwrap_or(existing);
-    for part in remainder.into_iter().rev() {
-        resolved.push(part);
-    }
-    resolved
+    let mut seen: HashMap<PathBuf, Option<PathBuf>> = HashMap::new();
+    join_realpath(PathBuf::new(), &absolute, &mut seen)
 }
 
 #[cfg(test)]
@@ -316,5 +348,83 @@ mod tests {
             resolve_best_effort(&dir),
             std::fs::canonicalize(&dir).unwrap()
         );
+    }
+
+    /// Reproduces, byte-for-byte, the scenario CPython 3.12 was checked
+    /// against for this fix:
+    ///
+    /// ```text
+    /// $ mkdir -p /tmp/resolve_test/t/dirA/realdir /tmp/resolve_test/t/dirB
+    /// $ ln -s /tmp/resolve_test/t/dirA/realdir /tmp/resolve_test/t/dirB/linktoreal
+    /// $ python3 -c "from pathlib import Path; \
+    ///     print(Path('/tmp/resolve_test/t/dirB/linktoreal/../sibling').resolve(strict=False))"
+    /// /tmp/resolve_test/t/dirA/sibling
+    /// ```
+    ///
+    /// `sibling` is never created. A "collapse `..` lexically first, THEN
+    /// canonicalize" implementation gets this wrong: it would cancel
+    /// `linktoreal` itself (the LAST PATH SEGMENT, lexically) and land on
+    /// `dirB/sibling` — the symlink is never even consulted. The correct,
+    /// progressive answer resolves `linktoreal` to `dirA/realdir` FIRST,
+    /// and only then applies `..` against that resolved location, landing
+    /// on `dirA/sibling`.
+    #[test]
+    #[cfg(unix)]
+    fn resolve_best_effort_applies_parent_dir_against_the_symlink_target_not_the_link_itself() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir_a = temp.path().join("dirA");
+        let real_dir = dir_a.join("realdir");
+        let dir_b = temp.path().join("dirB");
+        std::fs::create_dir_all(&real_dir).unwrap();
+        std::fs::create_dir_all(&dir_b).unwrap();
+        let link = dir_b.join("linktoreal");
+        std::os::unix::fs::symlink(&real_dir, &link).unwrap();
+
+        let candidate = link.join("..").join("sibling");
+        let resolved = resolve_best_effort(&candidate);
+
+        let expected = resolve_best_effort(&dir_a).join("sibling");
+        assert_eq!(
+            resolved, expected,
+            "must resolve against the symlink's TARGET directory (dirA), \
+             not the link's own containing directory (dirB)"
+        );
+        assert!(
+            !resolved.starts_with(&dir_b),
+            "landing under dirB means the `..` was applied to the link \
+             itself instead of its resolved target: {resolved:?}"
+        );
+    }
+
+    /// A `..` following a chain of components that never resolve to
+    /// anything on disk (the parent, `nonexistent`, does not exist either)
+    /// stays purely lexical for that whole unresolved tail — cross-checked
+    /// against real CPython 3.12:
+    ///
+    /// ```text
+    /// $ python3 -c "from pathlib import Path; \
+    ///     print(Path('/tmp/resolve_test/t/nonexistent/deeper/../sibling').resolve(strict=False))"
+    /// /tmp/resolve_test/t/nonexistent/sibling
+    /// ```
+    ///
+    /// i.e. `deeper` is popped back off to leave `nonexistent`, and neither
+    /// segment is ever `lstat`-resolved as anything other than "not a
+    /// symlink" (a failed stat gets that same answer).
+    #[test]
+    fn resolve_best_effort_pops_lexically_through_a_wholly_nonexistent_tail() {
+        let temp = tempfile::tempdir().unwrap();
+        let candidate = temp
+            .path()
+            .join("nonexistent")
+            .join("deeper")
+            .join("..")
+            .join("sibling");
+
+        let resolved = resolve_best_effort(&candidate);
+
+        let expected = resolve_best_effort(temp.path())
+            .join("nonexistent")
+            .join("sibling");
+        assert_eq!(resolved, expected);
     }
 }
