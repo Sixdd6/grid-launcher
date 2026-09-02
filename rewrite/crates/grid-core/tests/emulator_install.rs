@@ -174,12 +174,28 @@ impl Harness {
     }
 
     /// Mounts the `acme/widget` release plus its asset bytes at
-    /// `/dl/<asset_name>`.
+    /// `/dl/<asset_name>`. The release reports `tag_name` `"v1.0"` — the
+    /// same tag the source block configures.
     async fn mount_widget(&self, asset_name: &str, body: Vec<u8>, delay_ms: u64) {
+        self.mount_widget_at(WIDGET_RELEASE, "v1.0", asset_name, body, delay_ms)
+            .await;
+    }
+
+    /// [`Self::mount_widget`] with the release endpoint and the tag the
+    /// release RESOLVES to spelled out, so a test can make the resolved tag
+    /// differ from the configured one.
+    async fn mount_widget_at(
+        &self,
+        endpoint: &str,
+        resolved_tag: &str,
+        asset_name: &str,
+        body: Vec<u8>,
+        delay_ms: u64,
+    ) {
         let url = format!("{}/dl/{asset_name}", self.uri());
         self.mount_json(
-            WIDGET_RELEASE,
-            release_json("v1.0", asset_name, &url, body.len()),
+            endpoint,
+            release_json(resolved_tag, asset_name, &url, body.len()),
         )
         .await;
         self.mount_bytes(&format!("/dl/{asset_name}"), body, delay_ms)
@@ -263,6 +279,9 @@ async fn zip_install_extracts_writes_config_entry_and_deletes_the_archive() {
     );
 
     let harness = Harness::new(|uri| vec![profile("Test Emu", gitea_source(uri))]).await;
+    // An explicitly pinned tag must match what the release reports, so the
+    // configured and resolved tags can only differ under a `latest` pin —
+    // see `a_latest_pinned_source_reuses_one_install_directory_across_releases`.
     harness.mount_widget("widget-linux.zip", bytes, 0).await;
 
     harness
@@ -510,16 +529,137 @@ async fn an_appimage_primary_is_kept_in_place_made_executable_and_recorded() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
+    // The asset name renames the FILE, never the directory: the install dir
+    // is still <profile name>-<configured tag> (install_mixin.py:1444).
     let appimage = harness
-        .install_dir("TestEmu-x86_64")
+        .install_dir("Test Emu-v1.0")
         .join("TestEmu-x86_64.AppImage");
     assert!(appimage.is_file(), "the AppImage is the install; keep it");
+    assert!(
+        !harness.install_dir("TestEmu-x86_64").exists(),
+        "the install directory must not be named from the asset"
+    );
     #[cfg(unix)]
     assert_eq!(mode_of(&appimage), 0o755);
     assert_eq!(
         harness.config().emulators[0].path,
         appimage.to_string_lossy()
     );
+}
+
+// --- configured tag names the install directory ---------------------------------------
+
+#[tokio::test]
+async fn a_latest_pinned_source_reuses_one_install_directory_across_releases() {
+    let staging = tempfile::tempdir().unwrap();
+    let first = zip_bytes(&staging, "first.zip", &[("bin/testemu.sh", b"FIRST")]);
+    let second = zip_bytes(&staging, "second.zip", &[("bin/testemu.sh", b"SECOND")]);
+
+    let harness = Harness::new(|uri| {
+        let mut source = gitea_source(uri);
+        source["release_tag"] = json!("latest");
+        vec![profile("Test Emu", source)]
+    })
+    .await;
+    // Two consecutive releases under the same `latest` pin.
+    harness
+        .mount_widget_at(
+            "/api/v1/repos/acme/widget/releases/latest",
+            "v3.2.1",
+            "widget-v3.2.1.zip",
+            first,
+            0,
+        )
+        .await;
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let install_dir = harness.install_dir("Test Emu-latest");
+    assert!(
+        install_dir.join("bin/testemu.sh").is_file(),
+        "a 'latest' pin installs into one stable directory, not one per resolved tag"
+    );
+    assert!(!harness.install_dir("Test Emu-v3.2.1").exists());
+    assert_eq!(
+        harness.config().emulators[0].source_release_tag,
+        "latest",
+        "the configured pin is recorded so the entry keeps tracking the newest release"
+    );
+
+    // The next release reinstalls over the same directory instead of leaving
+    // the old one behind.
+    harness.server.reset().await;
+    harness
+        .mount_widget_at(
+            "/api/v1/repos/acme/widget/releases/latest",
+            "v4.0.0",
+            "widget-v4.0.0.zip",
+            second,
+            0,
+        )
+        .await;
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    assert_eq!(
+        fs::read(install_dir.join("bin/testemu.sh")).unwrap(),
+        b"SECOND"
+    );
+    let dirs: Vec<String> = fs::read_dir(harness.library.join("Emulators"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(dirs, vec!["Test Emu-latest".to_string()]);
+    assert_eq!(harness.config().emulators.len(), 1);
+}
+
+// --- hostile asset names ----------------------------------------------------------------
+
+#[tokio::test]
+async fn an_asset_name_that_is_not_a_plain_file_name_fails_before_anything_is_written() {
+    let harness = Harness::new(|uri| vec![profile("Test Emu", gitea_source(uri))]).await;
+    // An AppImage asset name is copied through verbatim by the naming
+    // helper, so a separator in it would escape the install directory.
+    harness
+        .mount_widget("../../evil.AppImage", b"PWNED".to_vec(), 0)
+        .await;
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+
+    assert_eq!(entry.status, DownloadStatus::Failed);
+    assert_eq!(
+        entry.error,
+        "Refusing to install release asset '../../evil.AppImage': it does not name a plain file."
+    );
+    assert!(
+        !harness.library.join("evil.AppImage").exists(),
+        "the escaped path must never be written"
+    );
+    assert!(
+        !harness.library.join("Emulators").exists(),
+        "the name is rejected before any request goes out"
+    );
+    assert!(harness.config().emulators.is_empty());
 }
 
 // --- (g) replace in place -----------------------------------------------------------

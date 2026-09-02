@@ -136,6 +136,16 @@ struct EmulatorJob {
     source_id: String,
     profile_name: String,
     profile_args: String,
+    /// The tag the catalog source block CONFIGURES
+    /// ([`catalog::configured_tag`]) — `"latest"` when it pins nothing.
+    ///
+    /// This, not the tag the release resolves to, names the install
+    /// directory and is recorded as `source_release_tag`
+    /// (install_mixin.py:1444, emulator_ui_mixin.py:1168-1190). A
+    /// `latest`-pinned emulator therefore reinstalls over one stable
+    /// `<name>-latest` directory instead of leaving one directory per
+    /// release behind.
+    configured_tag: String,
     /// The profile's RAW `source` block. Supplemental specs are read from
     /// here, not from the normalized/merged map: `workers.py:128` reads
     /// `self.source_metadata`, and each spec carries its own
@@ -397,11 +407,16 @@ impl InstallService {
         // carrying an owner and a repo, so this clone always succeeds; the
         // fallback keeps that assumption from turning into a panic.
         let raw_source = profile.source.clone().ok_or_else(|| unknown(&source_id))?;
+        let configured_tag = raw_source
+            .as_object()
+            .map(catalog::configured_tag)
+            .unwrap_or_else(|| "latest".to_string());
 
         let job = EmulatorJob {
             source_id: source_id.clone(),
             profile_name: profile.name.clone(),
             profile_args: profile.args.clone(),
+            configured_tag,
             raw_source,
             library,
             forge: self.forge()?,
@@ -935,7 +950,10 @@ impl InstallService {
             source_provider: resolved.provider.clone(),
             source_owner: resolved.owner.clone(),
             source_repo: resolved.repo.clone(),
-            source_release_tag: resolved.release_tag.clone(),
+            // The CONFIGURED tag, not the resolved one — a `latest` pin is
+            // recorded as `latest` so the entry keeps meaning "track the
+            // newest release" (emulator_ui_mixin.py:1168-1175).
+            source_release_tag: job.configured_tag.clone(),
         };
         match config
             .emulators
@@ -1025,17 +1043,26 @@ async fn download_emulator(
 
     let supplementals = resolve_supplementals(&forge, job).await?;
 
-    let archive_name = emu_install::archive_file_name(
-        &job.profile_name,
-        &primary.release_tag,
-        &primary.asset_name,
-    );
-    let stem = Path::new(&archive_name)
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| archive_name.clone());
+    // The install directory is named from the profile name and the
+    // CONFIGURED tag, fixed before the asset is known — `_archive_name_override`
+    // with no asset suffix applied, then its stem (emulator_ui_mixin.py:1186-1190
+    // + install_mixin.py:1444). The asset-suffix rewrite below renames only
+    // the file INSIDE that already-fixed directory.
+    let dir_name = emu_install::archive_file_name(&job.profile_name, &job.configured_tag, "");
+    let stem = file_stem_of(&dir_name);
     let install_dir = emu_install::emulator_install_dir(&job.library, &stem);
-    let archive = install_dir.join(&archive_name);
+
+    let archive_name =
+        emu_install::archive_file_name(&job.profile_name, &job.configured_tag, &primary.asset_name);
+    let archive = install_dir.join(safe_file_name(&archive_name, &primary.asset_name)?);
+
+    // Every destination name is validated before ANY request goes out, so a
+    // hostile asset name cannot write a byte anywhere.
+    let mut supplemental_paths = Vec::new();
+    for (index, supplemental) in &supplementals {
+        let name = emu_install::supplemental_file_name(&archive, *index, &supplemental.asset_name);
+        supplemental_paths.push(install_dir.join(safe_file_name(&name, &supplemental.asset_name)?));
+    }
 
     let mut targets = vec![FileTarget {
         url_path: primary.download_url.clone(),
@@ -1047,14 +1074,8 @@ async fn download_emulator(
         primary.download_url.clone(),
         needs_github_headers(&primary.provider),
     )];
-    let mut supplemental_paths = Vec::new();
 
-    for (index, supplemental) in &supplementals {
-        let dest = install_dir.join(emu_install::supplemental_file_name(
-            &archive,
-            *index,
-            &supplemental.asset_name,
-        ));
+    for ((_, supplemental), dest) in supplementals.iter().zip(&supplemental_paths) {
         targets.push(FileTarget {
             url_path: supplemental.download_url.clone(),
             query: Vec::new(),
@@ -1065,7 +1086,6 @@ async fn download_emulator(
             supplemental.download_url.clone(),
             needs_github_headers(&supplemental.provider),
         ));
-        supplemental_paths.push(dest);
     }
 
     job.resolved = Some(ResolvedPaths {
@@ -1109,6 +1129,42 @@ async fn resolve_supplementals(
         resolved.push((index + 1, supplemental));
     }
     Ok(resolved)
+}
+
+/// `name`'s file stem, or the whole name when it has none.
+fn file_stem_of(name: &str) -> String {
+    Path::new(name)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| name.to_string())
+}
+
+/// Returns `name` when it is a single, ordinary file name, and an error
+/// naming the offending asset otherwise.
+///
+/// The naming helpers copy a release asset's own name into the result (whole
+/// for an AppImage, its suffix otherwise), and that name is remote data: it
+/// comes from a release payload served by whatever host a `gitea` or
+/// `direct` source's `base_url`/`page_url` points at. Joining `../../x` onto
+/// the install directory would write outside the library, so it is rejected
+/// here, in the wiring, before the path is built.
+///
+/// The reference gets this for free — `Path.with_name`/`with_suffix` raise
+/// `ValueError` on a name containing a separator (workers.py:147-163) — so
+/// failing the job is also the reference's behavior. Both separators are
+/// rejected on every platform: a config written on one OS is read on the
+/// other.
+fn safe_file_name<'a>(name: &'a str, asset_name: &str) -> Result<&'a str, LibraryError> {
+    let is_plain_component = !name.is_empty()
+        && !name.contains('/')
+        && !name.contains('\\')
+        && Path::new(name).file_name().is_some_and(|only| only == name);
+    if is_plain_component {
+        return Ok(name);
+    }
+    Err(LibraryError::Extract(format!(
+        "Refusing to install release asset '{asset_name}': it does not name a plain file."
+    )))
 }
 
 // --- record + filesystem helpers --------------------------------------------
@@ -1421,6 +1477,48 @@ mod tests {
         assert!(is_appimage(Path::new("/x/Game.AppImage")));
         assert!(is_appimage(Path::new("/x/game.appimage")));
         assert!(!is_appimage(Path::new("/x/game.zip")));
+    }
+
+    #[test]
+    fn safe_file_name_accepts_a_plain_component() {
+        for name in [
+            "Test Emu-v1.0.zip",
+            "eden-linux.AppImage",
+            ".hidden",
+            "no-extension",
+            "spaced out name.zip",
+        ] {
+            assert_eq!(safe_file_name(name, "asset").unwrap(), name);
+        }
+    }
+
+    #[test]
+    fn safe_file_name_rejects_anything_that_is_not_one_file_name() {
+        for name in [
+            "../../evil.AppImage",
+            "../evil.zip",
+            "a/b.zip",
+            "/abs.zip",
+            "dir/",
+            "a\\b.zip",
+            "..",
+            ".",
+            "",
+        ] {
+            let Err(err) = safe_file_name(name, "hostile-asset") else {
+                panic!("expected {name:?} to be rejected");
+            };
+            assert_eq!(
+                err.to_string(),
+                "Refusing to install release asset 'hostile-asset': it does not name a plain file."
+            );
+        }
+    }
+
+    #[test]
+    fn file_stem_of_drops_only_the_last_extension() {
+        assert_eq!(file_stem_of("Test Emu-v1.0.zip"), "Test Emu-v1.0");
+        assert_eq!(file_stem_of("no-extension"), "no-extension");
     }
 
     #[test]

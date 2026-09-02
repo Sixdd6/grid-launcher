@@ -77,10 +77,17 @@ fn catalog_repo(source: &Map<String, Value>) -> String {
     }
 }
 
-/// This listing's own tag chain, `release_tag` first (ui/emulators.py:206 —
-/// deliberately a different order from `source::normalize_source`'s
-/// `tag`-first chain; see the module doc above).
-fn catalog_tag(source: &Map<String, Value>) -> String {
+/// The tag a raw `source` block CONFIGURES: `release_tag` first, then `tag`,
+/// then `version`, else `"latest"` (ui/emulators.py:206 — deliberately a
+/// different order from `source::normalize_source`'s `tag`-first chain; see
+/// the module doc above).
+///
+/// This is NOT the tag a release resolves to. The install pipeline names an
+/// emulator's install directory and records `source_release_tag` from the
+/// configured tag (emulator_ui_mixin.py:1168-1175, install_mixin.py:1444),
+/// so a `latest`-pinned emulator keeps one stable `<name>-latest` directory
+/// across releases instead of leaking one directory per resolved tag.
+pub fn configured_tag(source: &Map<String, Value>) -> String {
     for key in ["release_tag", "tag", "version"] {
         if let Some(Value::String(s)) = source.get(key) {
             let trimmed = s.trim();
@@ -135,7 +142,7 @@ fn catalog_row(profile: &EmulatorProfile) -> Option<CatalogEntry> {
         return None;
     }
 
-    let tag = catalog_tag(source);
+    let tag = configured_tag(source);
 
     Some(CatalogEntry {
         name: name.to_string(),
