@@ -24,6 +24,7 @@ log = "0.4"
 tauri = { version = "2.11.3", features = ["protocol-asset"] }
 tauri-plugin-log = "2"
 grid-core = { path = "../../crates/grid-core" }
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls"] }
 directories = "6.0.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

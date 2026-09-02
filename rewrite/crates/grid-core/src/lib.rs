@@ -8,6 +8,7 @@ pub mod covers;
 pub mod fatx;
 pub mod launch;
 pub mod library;
+pub mod pcgw;
 pub mod romm;
 pub mod secrets;
 pub mod session;

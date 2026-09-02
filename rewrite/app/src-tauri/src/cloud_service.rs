@@ -27,7 +27,7 @@
 //! guarantee that its `Display` is credential-free (see `commands::err`'s
 //! doc comment). No header, token, or secret is ever logged.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
@@ -134,10 +134,20 @@ impl AutoUploadPool {
 /// `RommClient`: the memoized emulator-entry/sync-directory caches
 /// [`CloudCaches`] owns (behind a `tokio` mutex so an `ops` call's
 /// internal `.await`s can hold it without blocking a whole OS thread —
-/// see [`Self::caches`]) and the D5 [`AutoUploadPool`].
+/// see [`Self::caches`]), the D5 [`AutoUploadPool`], and Task 18's
+/// PCGamingWiki client + per-title path cache (see [`Self::native_save_paths`]
+/// / [`Self::cached_pcgw_paths`]).
 pub struct CloudService {
     caches: AsyncMutex<CloudCaches>,
     pool: AutoUploadPool,
+    /// Plain `reqwest::Client` (never `RommClient` — different host, and
+    /// the RomM token must never reach PCGamingWiki); built once by
+    /// `grid_core::pcgw::build_http_client`.
+    pcgw_client: reqwest::Client,
+    /// `title.trim() -> Vec<String>` for the process lifetime, matching
+    /// Python's `_pcgw_paths_cache` (`details_view_mixin.py`'s
+    /// `_pcgw_cache_key`, `:152-153`).
+    pcgw_cache: StdMutex<HashMap<String, Vec<String>>>,
 }
 
 impl CloudService {
@@ -145,7 +155,48 @@ impl CloudService {
         Arc::new(Self {
             caches: AsyncMutex::new(CloudCaches::default()),
             pool: AutoUploadPool::new(MAX_CONCURRENT_AUTO_UPLOADS),
+            pcgw_client: grid_core::pcgw::build_http_client(),
+            pcgw_cache: StdMutex::new(HashMap::new()),
         })
+    }
+
+    // -- PCGamingWiki save-location cache (Task 18) ----------------------
+
+    /// `_pcgw_cache_key` + `_pcgw_paths_for_game` + `_start_pcgw_lookup_for_game`
+    /// (`details_view_mixin.py:152-182`): the ONLY place that ever triggers
+    /// a PCGamingWiki network fetch. A cache hit returns immediately; a
+    /// miss fetches, caches the result (success OR failure — a failure
+    /// caches an empty list, matching `_on_pcgw_paths_loaded` storing
+    /// `bundle.get("paths", [])`, which is `[]` on the worker's caught
+    /// exception path), and returns it. Called only from
+    /// [`Self::native_save_paths`] — the command behind the native-save
+    /// panel, matching `_refresh_native_save_panel`'s the only call site of
+    /// `_start_pcgw_lookup_for_game` (`:1166`).
+    async fn pcgw_paths_for_title(&self, title: &str) -> Vec<String> {
+        let key = title.trim().to_string();
+        if let Some(cached) = self.pcgw_cache.lock().unwrap().get(&key).cloned() {
+            return cached;
+        }
+        let fetched = grid_core::pcgw::fetch_windows_save_paths(&self.pcgw_client, &key)
+            .await
+            .unwrap_or_default();
+        self.pcgw_cache.lock().unwrap().insert(key, fetched.clone());
+        fetched
+    }
+
+    /// `_pcgw_paths_for_game(game) or []` (`cloud_mixin.py:2136`, `:2687`):
+    /// a CACHE-ONLY read — never triggers a fetch. Every `ops` call site
+    /// that builds a `CloudContext` (panel info, records, upload, restore,
+    /// the auto-restore/auto-upload triggers) reads through here, exactly
+    /// like Python's upload/restore helpers read `self._pcgw_paths_cache`
+    /// directly rather than kicking off their own worker.
+    fn cached_pcgw_paths(&self, title: &str) -> Vec<String> {
+        self.pcgw_cache
+            .lock()
+            .unwrap()
+            .get(title.trim())
+            .cloned()
+            .unwrap_or_default()
     }
 
     // -- context building -------------------------------------------------
@@ -192,7 +243,8 @@ impl CloudService {
             .all_games
             .iter()
             .any(|g| games_match_identity(g, &cloud_game));
-        let ctx = inputs.context();
+        let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
+        let ctx = inputs.context(&pcgw_paths);
         let mut caches = self.caches.lock().await;
         let entry = ops::resolved_cloud_emulator_entry(&ctx, &mut caches, &cloud_game, save_type);
         let supported =
@@ -218,7 +270,8 @@ impl CloudService {
         let client = session.client().ok_or("not connected")?;
         let inputs = Self::load_inputs(config_path, install, launch).await?;
         let cloud_game = cloud_game_from_input(&game);
-        let ctx = inputs.context();
+        let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
+        let ctx = inputs.context(&pcgw_paths);
         let mut caches = self.caches.lock().await;
         let records =
             ops::fetch_cloud_records(&client, &ctx, &mut caches, &cloud_game, save_type).await?;
@@ -240,7 +293,8 @@ impl CloudService {
         let client = session.client().ok_or("not connected")?;
         let inputs = Self::load_inputs(config_path, install, launch).await?;
         let cloud_game = cloud_game_from_input(&game);
-        let ctx = inputs.context();
+        let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
+        let ctx = inputs.context(&pcgw_paths);
         let mut caches = self.caches.lock().await;
         let report = ops::upload::upload_cloud_files_for_game(
             &client,
@@ -274,7 +328,8 @@ impl CloudService {
         let client = session.client().ok_or("not connected")?;
         let inputs = Self::load_inputs(config_path, install, launch).await?;
         let cloud_game = cloud_game_from_input(&game);
-        let ctx = inputs.context();
+        let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
+        let ctx = inputs.context(&pcgw_paths);
         let mut caches = self.caches.lock().await;
 
         let selected: Option<Value> = match record_id {
@@ -356,12 +411,12 @@ impl CloudService {
             .get(&key)
             .cloned()
             .unwrap_or_default();
-        // PCGW paths are Task 18's cache (fetch/wiring not landed yet); an
-        // empty list here is the documented gap, not a bug.
-        Ok(NativeSavePathsDto {
-            pcgw: Vec::new(),
-            manual,
-        })
+        // The only call site that ever fetches: see `pcgw_paths_for_title`'s
+        // doc comment. A fetch failure degrades to an empty list here (via
+        // that method's own `unwrap_or_default`) — never an error, so the
+        // panel still allows manual paths.
+        let pcgw = self.pcgw_paths_for_title(&cloud_game.title).await;
+        Ok(NativeSavePathsDto { pcgw, manual })
     }
 
     pub async fn native_add_manual_save_path(
@@ -481,7 +536,8 @@ impl CloudService {
 
         let cloud_game = cloud_game_from_installed(installed_game);
         let skip_if_local_newer = inputs.config.auto_cloud_save_skip_download_if_local_newer;
-        let ctx = inputs.context();
+        let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
+        let ctx = inputs.context(&pcgw_paths);
         let mut caches = self.caches.lock().await;
         let mut combined = SyncStateUpdate::default();
 
@@ -559,7 +615,8 @@ impl CloudService {
             }
         };
         let cloud_game = cloud_game_from_installed(installed_game);
-        let ctx = inputs.context();
+        let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
+        let ctx = inputs.context(&pcgw_paths);
         let mut caches = self.caches.lock().await;
         let save_entry =
             ops::resolved_cloud_emulator_entry(&ctx, &mut caches, &cloud_game, SaveType::Save);
@@ -738,6 +795,7 @@ impl CloudService {
         key: String,
     ) {
         let now = unix_now_f64();
+        let pcgw_paths = self.cached_pcgw_paths(&game.title);
         let ctx = CloudContext {
             config: &config,
             profiles: load_profiles(),
@@ -752,7 +810,7 @@ impl CloudService {
             // window applies to its own upload plan.
             active_sessions: &[],
             now,
-            pcgw_paths: &[],
+            pcgw_paths: &pcgw_paths,
             wine_prefix: None,
         };
 
@@ -846,7 +904,11 @@ struct Inputs {
 }
 
 impl Inputs {
-    fn context(&self) -> CloudContext<'_> {
+    /// `pcgw_paths` is threaded in by the caller (Task 18: [`CloudService::cached_pcgw_paths`],
+    /// a cache-only read keyed on the specific game's title — `Inputs`
+    /// itself is built once per command with no single game in view, so it
+    /// cannot resolve this on its own).
+    fn context<'a>(&'a self, pcgw_paths: &'a [String]) -> CloudContext<'a> {
         CloudContext {
             config: &self.config,
             profiles: self.profiles,
@@ -859,7 +921,7 @@ impl Inputs {
             },
             active_sessions: &self.active_sessions,
             now: self.now,
-            pcgw_paths: &[],
+            pcgw_paths,
             wine_prefix: None,
         }
     }

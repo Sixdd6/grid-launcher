@@ -84,6 +84,7 @@ dependencies = [
  "gilrs",
  "grid-core",
  "log",
+ "reqwest",
  "secrecy",
  "serde",
  "serde_json",
