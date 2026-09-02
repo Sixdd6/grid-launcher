@@ -1616,3 +1616,125 @@ fn xemu_image_status_blocks_the_action_but_not_the_panel() {
 fn record_id_for_tests(record: &Value) -> String {
     crate::cloud::restore::stringify_id(record.get("id").unwrap_or(&Value::Null))
 }
+
+// ---------------------------------------------------------------------
+// restore_enabled_for_record (fix round 1, FIX 4)
+// ---------------------------------------------------------------------
+
+fn record_with_emulator(emulator: &str) -> Value {
+    json!({"id": 1, "emulator": emulator, "file_name": "save.srm"})
+}
+
+#[test]
+fn restore_enabled_native_multi_dir_is_always_enabled_with_no_lookup() {
+    // No emulators configured at all: any other record would fail every
+    // later gate, but `native_multi_dir` short-circuits before any of
+    // them run (tests/test_details_cloud_native_panel.py:100).
+    let fx = Fixture::new(Config::default());
+    let mut caches = CloudCaches::default();
+    let target = game("Alpha", "Windows", "7");
+    let record = record_with_emulator("native_multi_dir");
+
+    let (enabled, text) =
+        restore_enabled_for_record(&fx.ctx(), &mut caches, &target, SaveType::Save, &record);
+    assert!(enabled);
+    assert_eq!(text, "");
+}
+
+#[test]
+fn restore_enabled_refuses_on_the_compatibility_block_reason() {
+    // A native-executable platform's own block reason fires regardless
+    // of the record's named emulator.
+    let fx = Fixture::new(Config::default());
+    let mut caches = CloudCaches::default();
+    let target = game("Alpha", "Windows", "7");
+    let record = record_with_emulator("Dolphin");
+
+    let (enabled, text) =
+        restore_enabled_for_record(&fx.ctx(), &mut caches, &target, SaveType::Save, &record);
+    assert!(!enabled);
+    assert_eq!(
+        text,
+        "Cloud save management is only available for emulator-based games."
+    );
+}
+
+#[test]
+fn restore_enabled_refuses_rpcs3_state_restore() {
+    let fx = Fixture::new(Config::default());
+    let mut caches = CloudCaches::default();
+    let target = game("Demon's Souls", "PS3", "7");
+    let record = record_with_emulator("RPCS3");
+
+    let (enabled, text) =
+        restore_enabled_for_record(&fx.ctx(), &mut caches, &target, SaveType::State, &record);
+    assert!(!enabled);
+    assert_eq!(text, "RPCS3 savestate restore is not supported yet.");
+}
+
+#[test]
+fn restore_enabled_refuses_an_unconfigured_record_emulator() {
+    let fx = Fixture::new(Config::default());
+    let mut caches = CloudCaches::default();
+    let target = game("Chrono Trigger", "SNES", "7");
+    let record = record_with_emulator("SomeUnknownEmu");
+
+    let (enabled, text) =
+        restore_enabled_for_record(&fx.ctx(), &mut caches, &target, SaveType::Save, &record);
+    assert!(!enabled);
+    assert_eq!(
+        text,
+        "Configure emulator 'SomeUnknownEmu' in Emulators to restore this entry."
+    );
+}
+
+#[test]
+fn restore_enabled_refuses_when_no_default_emulator_is_configured() {
+    let fx = Fixture::new(Config::default());
+    let mut caches = CloudCaches::default();
+    let target = game("Chrono Trigger", "SNES", "7");
+    // Blank emulator field: falls back to the (nonexistent) platform
+    // default.
+    let record = record_with_emulator("");
+
+    let (enabled, text) =
+        restore_enabled_for_record(&fx.ctx(), &mut caches, &target, SaveType::Save, &record);
+    assert!(!enabled);
+    assert_eq!(text, "No default emulator is configured for this platform.");
+}
+
+#[test]
+fn restore_enabled_refuses_when_the_emulator_has_no_configured_directories() {
+    let entry = entry_named("Dolphin", "");
+    let fx = Fixture::new(config_with(entry, "GameCube"));
+    let mut caches = CloudCaches::default();
+    let target = game("Zelda", "GameCube", "7");
+    let record = record_with_emulator("Dolphin");
+
+    let (enabled, text) =
+        restore_enabled_for_record(&fx.ctx(), &mut caches, &target, SaveType::Save, &record);
+    assert!(!enabled);
+    assert_eq!(
+        text,
+        "No configured save directories were found for emulator 'Dolphin'."
+    );
+}
+
+#[test]
+fn restore_enabled_true_with_the_shared_scope_notice_as_tooltip() {
+    let saves = TempDir::new().unwrap();
+    let entry = entry_named("xemu", saves.path().to_str().unwrap());
+    let fx = Fixture::new(config_with(entry, "Xbox"));
+    let mut caches = CloudCaches::default();
+    let target = game("Halo", "Xbox", "7");
+    // Blank emulator field: resolves to the configured default (xemu).
+    let record = record_with_emulator("");
+
+    let (enabled, text) =
+        restore_enabled_for_record(&fx.ctx(), &mut caches, &target, SaveType::Save, &record);
+    assert!(enabled);
+    assert_eq!(
+        text,
+        "These cloud saves are shared xemu media. Restoring or deleting one affects every game using this emulator."
+    );
+}

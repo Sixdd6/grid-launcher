@@ -100,14 +100,17 @@ impl AutoUploadPool {
     /// spawns `task`) when a trigger for `key` is already in flight;
     /// otherwise spawns it on tokio, gated by the pool's semaphore, and
     /// returns `true`. `key` leaves the in-flight set the moment `task`
-    /// finishes, so a later trigger for the same game runs again.
+    /// finishes OR panics (fix round 1, FIX 3: a [`RemoveOnDrop`] guard,
+    /// not a plain post-await removal, so a panicking `task` can never
+    /// leak its key forever), so a later trigger for the same game runs
+    /// again either way.
     pub fn trigger<F, Fut>(&self, key: String, task: F) -> bool
     where
         F: FnOnce() -> Fut + Send + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
     {
         {
-            let mut inflight = self.inflight.lock().unwrap();
+            let mut inflight = lock_tolerant(&self.inflight);
             if !inflight.insert(key.clone()) {
                 return false;
             }
@@ -119,11 +122,38 @@ impl AutoUploadPool {
                 .acquire_owned()
                 .await
                 .expect("the pool's semaphore is never closed");
+            // Removed on drop — including an unwind from a panicking
+            // `task`, not only the ordinary post-await path — so a
+            // panic can never leave `key` permanently un-retriggerable.
+            let _guard = RemoveOnDrop { inflight, key };
             task().await;
-            inflight.lock().unwrap().remove(&key);
         });
         true
     }
+}
+
+/// Removes `key` from `inflight` when dropped, panic-unwind included.
+/// Fix round 1, FIX 3.
+struct RemoveOnDrop {
+    inflight: Arc<StdMutex<HashSet<String>>>,
+    key: String,
+}
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        lock_tolerant(&self.inflight).remove(&self.key);
+    }
+}
+
+/// `Mutex::lock` that tolerates poisoning: a panic while `task` (or any
+/// other holder) held the lock must not permanently break every later
+/// trigger — fix round 1, FIX 3. The set this guards is plain data with
+/// no invariant a partial mutation could violate, so recovering the
+/// (possibly stale, never corrupt) inner value is safe.
+fn lock_tolerant<T>(mutex: &StdMutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 // ---------------------------------------------------------------------
@@ -275,10 +305,42 @@ impl CloudService {
         let mut caches = self.caches.lock().await;
         let records =
             ops::fetch_cloud_records(&client, &ctx, &mut caches, &cloud_game, save_type).await?;
-        Ok(records
-            .iter()
-            .map(|record| record_dto(record, inputs.now))
-            .collect())
+
+        // Fix round 1, FIX 4: `restore_enabled_for_record` is pure but not
+        // cheap (it can walk `resolved_sync_dirs`), and many records in
+        // one list typically share the same emulator — memoize per THIS
+        // request, keyed like Python's own per-request cache
+        // (`(save_type, game_key, emulator name lowercased)`,
+        // `details_view_mixin.py:637-641`), rather than recomputing per
+        // row.
+        let key_prefix = format!("{}::{}", save_type.as_str(), game_key(&cloud_game));
+        let mut restore_enabled_memo: HashMap<String, (bool, String)> = HashMap::new();
+        let mut dtos = Vec::with_capacity(records.len());
+        for record in &records {
+            let emulator_field = record
+                .get("emulator")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim()
+                .to_lowercase();
+            let memo_key = format!("{key_prefix}::{emulator_field}");
+            let (restorable, tooltip) = match restore_enabled_memo.get(&memo_key) {
+                Some(cached) => cached.clone(),
+                None => {
+                    let computed = ops::restore_enabled_for_record(
+                        &ctx,
+                        &mut caches,
+                        &cloud_game,
+                        save_type,
+                        record,
+                    );
+                    restore_enabled_memo.insert(memo_key, computed.clone());
+                    computed
+                }
+            };
+            dtos.push(record_dto(record, inputs.now, restorable, tooltip));
+        }
+        Ok(dtos)
     }
 
     pub async fn upload(
@@ -293,6 +355,21 @@ impl CloudService {
         let client = session.client().ok_or("not connected")?;
         let inputs = Self::load_inputs(config_path, install, launch).await?;
         let cloud_game = cloud_game_from_input(&game);
+        // `_perform_upload_saves_action` / `_perform_upload_states_action`
+        // (cloud_mixin.py:2780-2797, doc 06 "Manual actions"): a no-op —
+        // no dialog, no upload attempt — when the game isn't installed.
+        if !inputs
+            .all_games
+            .iter()
+            .any(|g| games_match_identity(g, &cloud_game))
+        {
+            return Ok(UploadReportDto {
+                uploaded: 0,
+                total: 0,
+                failed: Vec::new(),
+                messages: Vec::new(),
+            });
+        }
         let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
         let ctx = inputs.context(&pcgw_paths);
         let mut caches = self.caches.lock().await;
@@ -372,11 +449,12 @@ impl CloudService {
             }
         };
 
+        // Fix round 1, FIX 1: reload immediately before saving — `inputs`
+        // was captured before the fetch/restore network calls above, so
+        // saving from it would clobber a concurrent write.
         let key = game_key(&cloud_game);
         if !key.is_empty() && update != SyncStateUpdate::default() {
-            let mut config = inputs.config.clone();
-            apply_sync_update(&mut config, &key, update);
-            blocking_save_config(config_path.to_path_buf(), config).await?;
+            reload_apply_and_save(config_path, &key, update).await?;
             caches.clear();
         }
 
@@ -578,11 +656,12 @@ impl CloudService {
             merge_update(&mut combined, update);
         }
 
+        // Fix round 1, FIX 1: reload immediately before saving — the two
+        // restore calls above are network round trips; `inputs.config`
+        // was captured before them.
         let key = game_key(&cloud_game);
         if !key.is_empty() && combined != SyncStateUpdate::default() {
-            let mut config = inputs.config.clone();
-            apply_sync_update(&mut config, &key, combined);
-            if let Err(e) = blocking_save_config(config_path.to_path_buf(), config).await {
+            if let Err(e) = reload_apply_and_save(config_path, &key, combined).await {
                 tracing::debug!("cloud auto-restore: config save failed: {e}");
             } else {
                 caches.clear();
@@ -634,17 +713,22 @@ impl CloudService {
         if key.is_empty() {
             return;
         }
-        let mut config = inputs.config.clone();
-        apply_sync_update(
-            &mut config,
+        // Fix round 1, FIX 1: same reload-before-save discipline as every
+        // other sync-state persist here, for consistency (this call site
+        // has no network gap today, but nothing stops one being added
+        // later without anyone noticing the staleness risk it would
+        // reintroduce).
+        if let Err(e) = reload_apply_and_save(
+            config_path,
             &key,
             SyncStateUpdate {
                 last_session_started_at: Some(started_at),
                 last_session_ended_at: Some(0.0),
                 ..Default::default()
             },
-        );
-        if let Err(e) = blocking_save_config(config_path.to_path_buf(), config).await {
+        )
+        .await
+        {
             tracing::debug!("cloud session registration: config save failed: {e}");
         } else {
             caches.clear();
@@ -712,25 +796,20 @@ impl CloudService {
         // when positive (parity: `session_cloud_sync_updates`,
         // cloud_sync.py:139-151).
         if session.started_at > 0 && !key.is_empty() {
-            match blocking_load_config(config_path.clone()).await {
-                Ok(mut config) => {
-                    apply_sync_update(
-                        &mut config,
-                        &key,
-                        SyncStateUpdate {
-                            last_session_started_at: Some(session.started_at as f64),
-                            last_session_ended_at: Some(ended_at),
-                            ..Default::default()
-                        },
-                    );
-                    match blocking_save_config(config_path.clone(), config).await {
-                        Ok(()) => self.caches.lock().await.clear(),
-                        Err(e) => {
-                            tracing::debug!("cloud session-finished: config save failed: {e}")
-                        }
-                    }
-                }
-                Err(e) => tracing::debug!("cloud session-finished: config load failed: {e}"),
+            if let Err(e) = reload_apply_and_save(
+                &config_path,
+                &key,
+                SyncStateUpdate {
+                    last_session_started_at: Some(session.started_at as f64),
+                    last_session_ended_at: Some(ended_at),
+                    ..Default::default()
+                },
+            )
+            .await
+            {
+                tracing::debug!("cloud session-finished: config save failed: {e}");
+            } else {
+                self.caches.lock().await.clear();
             }
         }
 
@@ -783,6 +862,19 @@ impl CloudService {
     /// `auto_restore_before_launch` for why this port merges rather than
     /// writing once per type as Python's two separate restore calls do —
     /// same reasoning, one fewer stale-base race).
+    ///
+    /// Fix round 1, FIX 2: uses its OWN local [`CloudCaches`] rather than
+    /// `self.caches` — an auto-upload's resolution + network POST(s) can
+    /// run for a while, and holding the app-wide cache mutex for that
+    /// whole span would (a) serialize the D5 pool's cap-2 concurrency
+    /// down to effectively 1 (two auto-uploads would queue behind the
+    /// SAME lock even though the pool's semaphore allows both to run),
+    /// and (b) make a manual "Play"/panel action queue behind an
+    /// in-flight auto-upload for an unrelated game. A fresh cache per run
+    /// is cheap and correct — parity note: Python's own caches are
+    /// cleared on every config save anyway (`CloudCaches::clear`'s doc
+    /// comment), so per-run freshness costs nothing this port didn't
+    /// already accept elsewhere.
     #[allow(clippy::too_many_arguments)]
     async fn run_auto_upload(
         self: Arc<Self>,
@@ -814,7 +906,7 @@ impl CloudService {
             wine_prefix: None,
         };
 
-        let mut caches = self.caches.lock().await;
+        let mut caches = CloudCaches::default();
 
         let save_entry =
             ops::resolved_cloud_emulator_entry(&ctx, &mut caches, &game, SaveType::Save);
@@ -876,14 +968,16 @@ impl CloudService {
             tracing::debug!("cloud auto-upload ({key}): {}", debug_segments.join(" "));
         }
 
-        if update != SyncStateUpdate::default() {
-            let mut fresh_config = config;
-            apply_sync_update(&mut fresh_config, &key, update);
-            if let Err(e) = blocking_save_config(config_path, fresh_config).await {
-                tracing::debug!("cloud auto-upload: config save failed: {e}");
-            } else {
-                caches.clear();
-            }
+        // Fix round 1, FIX 1: reload fresh from disk immediately before
+        // applying — `config` was captured before the (up to 60 s) delay
+        // sleep AND before every network call this function just made;
+        // saving from that stale snapshot would silently clobber
+        // whatever another session's stamp, a settings change, or a
+        // concurrent auto-upload for a different game wrote to disk in
+        // the meantime. Mirrors `handle_session_finished`'s own
+        // reload-then-apply-then-save pattern for its session-end stamp.
+        if let Err(e) = reload_apply_and_save(&config_path, &key, update).await {
+            tracing::debug!("cloud auto-upload: config save failed: {e}");
         }
     }
 }
@@ -1004,6 +1098,29 @@ async fn blocking_save_config(config_path: PathBuf, config: Config) -> Result<()
         .map_err(|e| format!("config save did not finish: {e}"))?
 }
 
+/// Reloads `config_path` fresh from disk, applies `update` under `key`,
+/// and saves — fix round 1, FIX 1: every sync-state persist that follows
+/// a nontrivial `.await` gap (a network call, a delay sleep) MUST reload
+/// immediately before applying, never reuse a `Config` snapshot taken
+/// before that gap. A stale snapshot's save would silently overwrite
+/// whatever anything else (another session's stamp, a settings change, a
+/// concurrent auto-upload for a different game) wrote to disk in the
+/// meantime — the exact bug this helper exists to make structurally hard
+/// to reintroduce. A blank `key` or a no-op `update` is a no-op (no
+/// load, no save), matching [`apply_sync_update`]'s own guard.
+async fn reload_apply_and_save(
+    config_path: &Path,
+    key: &str,
+    update: SyncStateUpdate,
+) -> Result<(), String> {
+    if key.is_empty() || update == SyncStateUpdate::default() {
+        return Ok(());
+    }
+    let mut config = blocking_load_config(config_path.to_path_buf()).await?;
+    apply_sync_update(&mut config, key, update);
+    blocking_save_config(config_path.to_path_buf(), config).await
+}
+
 // ---------------------------------------------------------------------
 // CloudGame construction (rulings: id fields blank — data gap, recorded)
 // ---------------------------------------------------------------------
@@ -1104,7 +1221,11 @@ pub struct CloudRecordDto {
     pub absolute_time: String,
     pub relative_time: String,
     pub restorable: bool,
-    pub disabled_reason: Option<String>,
+    /// The `restore_tooltip` Python's `_details_cloud_restore_enabled`
+    /// pairs with the Restore button's enabled state either way — a
+    /// refusal reason when `restorable` is `false`, or the shared-scope
+    /// notice (possibly absent) when it's `true`. Fix round 1, FIX 4.
+    pub restore_tooltip: Option<String>,
 }
 
 fn record_id_i64(record: &Value) -> Option<i64> {
@@ -1136,7 +1257,40 @@ fn format_size(size_bytes: f64) -> String {
     }
 }
 
-fn record_dto(record: &Value, now: f64) -> CloudRecordDto {
+/// Any JSON scalar, stringified — `str(value)` for the one Python field
+/// (`slot`) that can arrive as either a string or a number.
+fn stringify_json_scalar(value: &Value) -> Option<String> {
+    let text = match value {
+        Value::String(s) => s.trim().to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        _ => return None,
+    };
+    (!text.is_empty()).then_some(text)
+}
+
+/// `size_value = record.get("file_size_bytes", 0)` / `format_size(int(
+/// size_value))` except `TypeError`/`ValueError` -> `"Unknown size"`
+/// (`details_view_mixin.py:725-729`, fold-in: reads ONLY
+/// `file_size_bytes` — no `"size"` fallback). An ABSENT key defaults to
+/// Python's literal `0` (`"0 B"`); a PRESENT but non-numeric value is
+/// what actually produces `"Unknown size"`.
+fn size_text_for_record(record: &Value) -> String {
+    match record.get("file_size_bytes") {
+        None => format_size(0.0),
+        Some(Value::Number(n)) => match n.as_f64() {
+            Some(v) => format_size(v),
+            None => "Unknown size".to_string(),
+        },
+        Some(Value::String(s)) => match s.trim().parse::<f64>() {
+            Ok(v) => format_size(v),
+            Err(_) => "Unknown size".to_string(),
+        },
+        Some(_) => "Unknown size".to_string(),
+    }
+}
+
+fn record_dto(record: &Value, now: f64, restorable: bool, tooltip: String) -> CloudRecordDto {
     let id = record_id_i64(record).unwrap_or(0);
     let file_name = record
         .get("file_name")
@@ -1148,42 +1302,37 @@ fn record_dto(record: &Value, now: f64) -> CloudRecordDto {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    let slot = record
-        .get("slot")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    let size_bytes = record
-        .get("size")
-        .and_then(Value::as_i64)
-        .or_else(|| record.get("file_size_bytes").and_then(Value::as_i64))
-        .unwrap_or(0) as f64;
+    let slot = record.get("slot").and_then(stringify_json_scalar);
     let timestamp = cloud_restore::record_timestamp(record);
-    let restorable = id != 0;
-    let disabled_reason = if restorable {
-        None
-    } else {
-        Some("Missing record id.".to_string())
-    };
     CloudRecordDto {
         id,
         file_name,
         emulator,
         slot,
-        size_text: format_size(size_bytes),
+        size_text: size_text_for_record(record),
         absolute_time: absolute_time_text(timestamp),
         relative_time: cloud_restore::relative_timestamp_text(timestamp, now),
         restorable,
-        disabled_reason,
+        restore_tooltip: (!tooltip.trim().is_empty()).then_some(tooltip),
     }
 }
 
+/// `_details_cloud_uploaded_text` (`details_view_mixin.py:619-625`): LOCAL
+/// time, `"%Y-%m-%d %H:%M"` (no seconds, no zone suffix — `strftime`'s
+/// own text carries no "UTC"/offset marker either), and the fixed
+/// `"Unknown upload time"` string for a non-positive timestamp. Fix
+/// round 1, FIX 5: this port previously rendered UTC with a trailing
+/// "UTC" and an empty string for the unknown case — both wrong.
 fn absolute_time_text(timestamp: f64) -> String {
     if timestamp <= 0.0 {
-        return String::new();
+        return "Unknown upload time".to_string();
     }
     match chrono::DateTime::from_timestamp(timestamp as i64, 0) {
-        Some(dt) => dt.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
-        None => String::new(),
+        Some(utc) => {
+            let local: chrono::DateTime<chrono::Local> = utc.into();
+            local.format("%Y-%m-%d %H:%M").to_string()
+        }
+        None => "Unknown upload time".to_string(),
     }
 }
 
@@ -1268,6 +1417,297 @@ mod tests {
         assert_eq!(
             format_size(1024.0 * 1024.0 * 1024.0 * 1024.0 * 1024.0),
             "1024.0 TB"
+        );
+    }
+
+    /// Fix round 1, FIX 5: local time, no seconds, no zone suffix, and a
+    /// fixed string for "no timestamp" — not the previous UTC-with-
+    /// trailing-"UTC" rendering (which also returned `""` for `<= 0`).
+    #[test]
+    fn absolute_time_text_matches_python_local_time_format() {
+        assert_eq!(absolute_time_text(0.0), "Unknown upload time");
+        assert_eq!(absolute_time_text(-5.0), "Unknown upload time");
+        let text = absolute_time_text(1_700_000_000.0);
+        assert!(
+            !text.contains("UTC"),
+            "must not carry a zone suffix: {text}"
+        );
+        assert!(!text.is_empty());
+        // "%Y-%m-%d %H:%M" is exactly 16 characters (no seconds).
+        assert_eq!(text.len(), 16, "expected no seconds in: {text}");
+    }
+
+    /// Fix round 1, fold-in: reads ONLY `file_size_bytes` (no `"size"`
+    /// fallback), defaults an ABSENT key to Python's literal `0`
+    /// (`"0 B"`), and reports `"Unknown size"` only for a value that is
+    /// actually present but non-numeric.
+    #[test]
+    fn size_text_for_record_reads_only_file_size_bytes() {
+        assert_eq!(
+            size_text_for_record(&serde_json::json!({"size": 999999})),
+            "0 B",
+            "the legacy `size` field must be ignored entirely"
+        );
+        assert_eq!(size_text_for_record(&serde_json::json!({})), "0 B");
+        assert_eq!(
+            size_text_for_record(&serde_json::json!({"file_size_bytes": 2048})),
+            "2.0 KB"
+        );
+        assert_eq!(
+            size_text_for_record(&serde_json::json!({"file_size_bytes": "not-a-number"})),
+            "Unknown size"
+        );
+        assert_eq!(
+            size_text_for_record(&serde_json::json!({"file_size_bytes": null})),
+            "Unknown size"
+        );
+    }
+
+    #[test]
+    fn stringify_json_scalar_handles_numeric_and_string_slots() {
+        assert_eq!(
+            stringify_json_scalar(&serde_json::json!(2)),
+            Some("2".to_string())
+        );
+        assert_eq!(
+            stringify_json_scalar(&serde_json::json!("vmu1")),
+            Some("vmu1".to_string())
+        );
+        assert_eq!(stringify_json_scalar(&serde_json::json!("")), None);
+        assert_eq!(stringify_json_scalar(&serde_json::Value::Null), None);
+    }
+
+    /// Fix round 1, FIX 1: the exact regression this fix closes. A
+    /// literal reproduction of `run_auto_upload`'s old bug — capture a
+    /// `Config` snapshot, let something else mutate a DIFFERENT field on
+    /// disk (standing in for "another session's stamp" / "a settings
+    /// change" during the up-to-60s sleep or the upload's network
+    /// calls), then persist through `reload_apply_and_save` rather than
+    /// the stale snapshot. The concurrent mutation must survive.
+    #[tokio::test]
+    async fn reload_apply_and_save_reloads_immediately_before_saving() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        let initial = Config {
+            library_path: "initial".to_string(),
+            ..Default::default()
+        };
+        blocking_save_config(config_path.clone(), initial.clone())
+            .await
+            .unwrap();
+
+        // This is the snapshot a caller might have captured BEFORE a
+        // sleep/network gap — deliberately never reloaded before use
+        // below, to prove the helper doesn't need (or accept) it.
+        let _stale_snapshot = initial;
+
+        // Something else mutates the on-disk config while our caller was
+        // "asleep" — a field `reload_apply_and_save`'s own update never
+        // touches.
+        let mut concurrent = blocking_load_config(config_path.clone()).await.unwrap();
+        concurrent.library_path = "changed-during-the-gap".to_string();
+        blocking_save_config(config_path.clone(), concurrent)
+            .await
+            .unwrap();
+
+        reload_apply_and_save(
+            &config_path,
+            "rom:1",
+            SyncStateUpdate {
+                last_uploaded_at: Some("2026-09-02T00:00:00Z".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let final_config = blocking_load_config(config_path.clone()).await.unwrap();
+        assert_eq!(
+            final_config.library_path, "changed-during-the-gap",
+            "the concurrent mutation must survive the later save"
+        );
+        assert_eq!(
+            sync_entry_for(&final_config, "rom:1").last_uploaded_at,
+            "2026-09-02T00:00:00Z",
+            "the caller's own update must still land"
+        );
+    }
+
+    #[tokio::test]
+    async fn reload_apply_and_save_is_a_noop_for_a_blank_key_or_empty_update() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        // No file exists yet — a no-op must never try to load/save it.
+        reload_apply_and_save(&config_path, "", SyncStateUpdate::default())
+            .await
+            .unwrap();
+        reload_apply_and_save(&config_path, "rom:1", SyncStateUpdate::default())
+            .await
+            .unwrap();
+        assert!(!config_path.exists());
+    }
+
+    /// Fix round 1, FIX 3: a panicking task must not leak its in-flight
+    /// key forever, and must not poison `inflight` for every later
+    /// trigger either.
+    #[tokio::test]
+    async fn a_panicking_task_still_leaves_the_key_re_triggerable() {
+        let pool = AutoUploadPool::new(2);
+        let accepted = pool.trigger("game-x".to_string(), || async move {
+            panic!("boom — simulated task failure");
+        });
+        assert!(accepted);
+
+        // Give the spawned task time to panic and unwind (dropping its
+        // `RemoveOnDrop` guard).
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let ran = Arc::new(AtomicUsize::new(0));
+        let ran2 = ran.clone();
+        let accepted_again = pool.trigger("game-x".to_string(), move || async move {
+            ran2.fetch_add(1, Ordering::SeqCst);
+        });
+        assert!(
+            accepted_again,
+            "a panicked task must not leak its in-flight key forever, \
+             nor poison the lock for every later trigger"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(ran.load(Ordering::SeqCst), 1);
+    }
+
+    /// Fix round 1, FIX 2: `run_auto_upload` must not serialize on the
+    /// app-wide `self.caches` lock — two uploads for different games,
+    /// each blocked on a slow (mocked) upload POST, must overlap rather
+    /// than queue behind each other. Proven two ways: total wall time
+    /// stays close to ONE mock delay (not two, which serialization would
+    /// produce), and the mock server actually received both POSTs.
+    #[tokio::test]
+    async fn two_auto_uploads_for_different_games_run_concurrently() {
+        use wiremock::matchers::{method, path as wm_path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        const DELAY: Duration = Duration::from_millis(200);
+        Mock::given(method("POST"))
+            .and(wm_path("/api/saves"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(DELAY)
+                    .set_body_json(serde_json::json!({})),
+            )
+            .mount(&server)
+            .await;
+        // Retention refetch after a successful upload: empty, so pruning
+        // finds nothing to delete and issues no further request.
+        Mock::given(method("GET"))
+            .and(wm_path("/api/saves"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .mount(&server)
+            .await;
+
+        let client = Arc::new(
+            RommClient::new(
+                &server.uri(),
+                grid_core::secrets::Credential::Token(secrecy::SecretString::from(
+                    "FAKE-TEST-TOKEN-not-real",
+                )),
+            )
+            .unwrap(),
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        let saves_a = dir.path().join("saves_a");
+        let saves_b = dir.path().join("saves_b");
+        std::fs::create_dir_all(&saves_a).unwrap();
+        std::fs::create_dir_all(&saves_b).unwrap();
+        std::fs::write(saves_a.join("alpha.srm"), b"a").unwrap();
+        std::fs::write(saves_b.join("beta.srm"), b"b").unwrap();
+
+        let entry_a = grid_core::config::EmulatorEntry {
+            name: "DolphinA".to_string(),
+            path: String::new(),
+            args: "%rom%".to_string(),
+            save_paths: saves_a.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let entry_b = grid_core::config::EmulatorEntry {
+            name: "DolphinB".to_string(),
+            path: String::new(),
+            args: "%rom%".to_string(),
+            save_paths: saves_b.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+
+        let mut config = Config::default();
+        config
+            .default_emulators
+            .insert("GameCube".to_string(), "DolphinA".to_string());
+        config
+            .default_emulators
+            .insert("Wii".to_string(), "DolphinB".to_string());
+        config.emulators = vec![entry_a, entry_b];
+        config.save(&config_path).unwrap();
+
+        let game_a = CloudGame {
+            title: "Alpha".to_string(),
+            platform: "GameCube".to_string(),
+            rom_id: "1".to_string(),
+            ..Default::default()
+        };
+        let game_b = CloudGame {
+            title: "Beta".to_string(),
+            platform: "Wii".to_string(),
+            rom_id: "2".to_string(),
+            ..Default::default()
+        };
+        let all_games = vec![game_a.clone(), game_b.clone()];
+        let config_dir = dir.path().to_path_buf();
+
+        let cloud = CloudService::new();
+
+        let start = std::time::Instant::now();
+        let a = cloud.clone().run_auto_upload(
+            client.clone(),
+            game_a.clone(),
+            all_games.clone(),
+            config.clone(),
+            config_dir.clone(),
+            config_path.clone(),
+            game_key(&game_a),
+        );
+        let b = cloud.clone().run_auto_upload(
+            client.clone(),
+            game_b.clone(),
+            all_games,
+            config.clone(),
+            config_dir,
+            config_path,
+            game_key(&game_b),
+        );
+        tokio::join!(a, b);
+        let elapsed = start.elapsed();
+
+        let saves_posts = server
+            .received_requests()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.method == wiremock::http::Method::POST && r.url.path() == "/api/saves")
+            .count();
+        assert_eq!(
+            saves_posts, 2,
+            "both games' uploads must have actually reached the network"
+        );
+
+        // Serialized (the old shared-lock behavior), this would take
+        // roughly 2x DELAY; overlapping, it stays close to one.
+        assert!(
+            elapsed < DELAY * 2 - Duration::from_millis(50),
+            "expected the two auto-uploads to overlap, took {elapsed:?} for a {DELAY:?} mock delay"
         );
     }
 

@@ -130,7 +130,10 @@ export type CloudRecord = {
   absolute_time: string;
   relative_time: string;
   restorable: boolean;
-  disabled_reason: string | null;
+  // Paired with `restorable` either way (fix round 1, FIX 4): a refusal
+  // reason when `false`, or the shared-scope notice (possibly absent)
+  // when `true` — set it as the Restore button's tooltip in both cases.
+  restore_tooltip: string | null;
 };
 
 export type UploadReport = {

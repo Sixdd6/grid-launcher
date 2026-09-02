@@ -1017,6 +1017,156 @@ pub fn details_cloud_mode_supported(
 }
 
 // ---------------------------------------------------------------------
+// Per-record restore-enabled gate (manual "Restore" button)
+// ---------------------------------------------------------------------
+
+/// `_details_cloud_restore_enabled` (`details_view_mixin.py:628-703`):
+/// for ONE server record and save type, whether the manual "Restore"
+/// button should be enabled, and the text to pair with it either way —
+/// a refusal reason when disabled, or the shared-scope notice (possibly
+/// empty) as a tooltip when enabled. Pure and deterministic for a given
+/// `(ctx, game, save_type, record)`. Python memoizes this per UI
+/// request, keyed `(save_type, game key, emulator name lowercased)` —
+/// that memoization is the CALLER's job (this crate has no
+/// request-lifetime object to hang it on); this function is the pure
+/// computation the cache would store.
+pub fn restore_enabled_for_record(
+    ctx: &CloudContext,
+    caches: &mut CloudCaches,
+    game: &CloudGame,
+    save_type: SaveType,
+    record: &Value,
+) -> (bool, String) {
+    let record_emulator = record_str(record, "emulator");
+    // Native multi-directory saves carry no per-emulator compatibility
+    // question at all (`tests/test_details_cloud_native_panel.py:100`).
+    if record_emulator == "native_multi_dir" {
+        return (true, String::new());
+    }
+
+    let (resolved_name, resolved_entry) =
+        resolved_cloud_emulator_pair(ctx, caches, game, save_type);
+    let compatibility_name = if record_emulator.is_empty() {
+        resolved_name.clone()
+    } else {
+        record_emulator.clone()
+    };
+    let record_entry = if record_emulator.is_empty() {
+        None
+    } else {
+        emulator_entry_by_name(&ctx.config.emulators, &record_emulator).cloned()
+    };
+    let compatibility_entry = record_entry.clone().or_else(|| resolved_entry.clone());
+
+    // `_cloud_save_block_reason_for_game`'s OWN name resolution, ported
+    // directly rather than going through the public `block_reason_for_game`
+    // wrapper: that wrapper's `wrapper_emulator_name` derives the name
+    // FROM the entry, but this call site needs the opposite — a record
+    // naming an emulator that isn't configured locally still runs the
+    // platform/xemu/redream checks against the record's RAW name, even
+    // though the ENTRY it is paired with here is the resolved default's.
+    let flags = block_reason_flags(
+        ctx,
+        &compatibility_name,
+        compatibility_entry.as_ref(),
+        &game.platform,
+    );
+    let compatibility_reason = cloud_save_block_reason(
+        &game.platform,
+        save_type,
+        &compatibility_name,
+        flags.as_ref(),
+    );
+    if !compatibility_reason.is_empty() {
+        return (false, compatibility_reason);
+    }
+
+    let shared_notice = scope_notice_for_game(
+        ctx,
+        game,
+        save_type,
+        &compatibility_name,
+        compatibility_entry.as_ref(),
+    );
+
+    if save_type == SaveType::State
+        && !record_emulator.is_empty()
+        && is_rpcs3(ctx, &record_emulator, record_entry.as_ref())
+    {
+        return (
+            false,
+            "RPCS3 savestate restore is not supported yet.".to_string(),
+        );
+    }
+
+    let mut emulator_name = record_emulator.clone();
+    let mut emulator_entry = record_entry;
+    if !record_emulator.is_empty() && emulator_entry.is_none() {
+        return (
+            false,
+            format!("Configure emulator '{record_emulator}' in Emulators to restore this entry."),
+        );
+    }
+    if emulator_entry.is_none() {
+        emulator_name = resolved_name;
+        emulator_entry = resolved_entry;
+        if emulator_entry.is_none() {
+            return (
+                false,
+                "No default emulator is configured for this platform.".to_string(),
+            );
+        }
+    }
+
+    let entry = emulator_entry.expect("checked immediately above");
+    let (directories, _) = resolved_sync_dirs(ctx, caches, &entry, path_key_for(save_type));
+    if directories.is_empty() {
+        return (
+            false,
+            format!(
+                "No configured {} directories were found for emulator '{}'.",
+                kind_label(save_type),
+                emulator_name
+            ),
+        );
+    }
+
+    (true, shared_notice)
+}
+
+/// `_details_cloud_scope_notice` (`cloud_mixin.py:255-291`), specialized
+/// to the `(name, entry)` pair [`restore_enabled_for_record`] already
+/// resolved (Python's own blank-name/blank-entry re-resolution branch
+/// never triggers from that call site, since it always passes a
+/// non-blank pair through). States never carry a notice.
+fn scope_notice_for_game(
+    ctx: &CloudContext,
+    game: &CloudGame,
+    save_type: SaveType,
+    name: &str,
+    entry: Option<&EmulatorEntry>,
+) -> String {
+    if save_type != SaveType::Save || entry.is_none() {
+        return String::new();
+    }
+    let scope = scope_for(ctx, name, entry, &game.platform, save_type);
+    let label = if name.trim().is_empty() {
+        "this emulator"
+    } else {
+        name.trim()
+    };
+    match scope {
+        SaveScope::SharedSingle => format!(
+            "These cloud saves are shared {label} media. Restoring or deleting one affects every game using this emulator."
+        ),
+        SaveScope::SharedSlotted => format!(
+            "These cloud saves are shared {label} memory-card backups. Deleting one removes the backup for every game using that emulator slot."
+        ),
+        SaveScope::PerGame => String::new(),
+    }
+}
+
+// ---------------------------------------------------------------------
 // Shared message strings
 // ---------------------------------------------------------------------
 
