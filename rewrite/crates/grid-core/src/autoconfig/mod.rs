@@ -11,6 +11,7 @@
 pub mod cores;
 pub mod paths;
 pub mod retroarch;
+pub mod rpcs3;
 pub mod writers;
 
 use std::collections::BTreeMap;
