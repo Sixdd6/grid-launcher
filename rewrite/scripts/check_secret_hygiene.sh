@@ -50,4 +50,31 @@ if ! cargo tree -p app --features e2e --quiet 2>/dev/null | grep -qi wdio; then
   exit 1
 fi
 
+# The `e2e` cargo feature on grid-core enables a request-time forge-URL
+# redirect (GRID_LAUNCHER_E2E_FORGE_BASE, launch/forge.rs) used only by the
+# E2E harness to point emulator downloads at a local fixture server. It must
+# never be reachable from a default (release) build, and the env var it reads
+# must be read nowhere else, so a release binary can never be pointed at an
+# attacker-controlled host via that variable.
+grid_core_default_features=$(cargo tree -p app --format "{p} [{f}]" --quiet 2>/dev/null | grep -i "grid-core v")
+if echo "$grid_core_default_features" | grep -q '\[e2e\]\|,e2e\|e2e,'; then
+  echo "grid-core feature \"e2e\" found in the DEFAULT dependency tree of 'app' (no --features e2e)." >&2
+  echo "The forge request-time redirect must never be reachable in a release build." >&2
+  echo "Check the [features] e2e = [...] wiring in app/src-tauri/Cargo.toml." >&2
+  exit 1
+fi
+grid_core_e2e_features=$(cargo tree -p app --features e2e --format "{p} [{f}]" --quiet 2>/dev/null | grep -i "grid-core v")
+if ! echo "$grid_core_e2e_features" | grep -q '\[e2e\]\|,e2e\|e2e,'; then
+  echo "grid-core feature \"e2e\" NOT found in 'app' with --features e2e enabled." >&2
+  echo "Check the [features] e2e = [...] wiring in app/src-tauri/Cargo.toml." >&2
+  exit 1
+fi
+
+env_var_users=$(grep -rl "GRID_LAUNCHER_E2E_FORGE_BASE" crates app/src-tauri/src --include="*.rs" || true)
+if [ -n "$env_var_users" ] && [ "$env_var_users" != "crates/grid-core/src/launch/forge.rs" ]; then
+  echo "GRID_LAUNCHER_E2E_FORGE_BASE referenced outside launch/forge.rs:" >&2
+  echo "$env_var_users" >&2
+  exit 1
+fi
+
 echo "secret hygiene OK"

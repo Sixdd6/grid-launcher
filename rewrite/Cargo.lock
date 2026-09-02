@@ -1890,6 +1890,7 @@ dependencies = [
  "libc",
  "liblzma",
  "percent-encoding",
+ "regex",
  "reqwest",
  "rusqlite",
  "secrecy",

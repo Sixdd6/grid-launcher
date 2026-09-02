@@ -2,6 +2,7 @@
 //! behavior this module tree ports from `grid_launcher/emulator/` and
 //! `grid_launcher/ui/mixins/emulator_ui_mixin.py`.
 
+pub mod forge;
 pub mod profiles;
 pub mod rom;
 pub mod selection;
