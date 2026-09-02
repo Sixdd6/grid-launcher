@@ -2,6 +2,7 @@
 //! behavior this module tree ports from `grid_launcher/emulator/` and
 //! `grid_launcher/ui/mixins/emulator_ui_mixin.py`.
 
+pub mod catalog;
 pub mod forge;
 pub mod profiles;
 pub mod rom;
@@ -526,6 +527,7 @@ mod tests {
             name: "RetroArch".to_string(),
             path: "/x/whatever".to_string(),
             args: String::new(),
+            source_id: String::new(),
         };
         assert!(entry_is_retroarch(&by_entry_name, profiles));
 
@@ -533,6 +535,7 @@ mod tests {
             name: "Dolphin".to_string(),
             path: "/x/dolphin-emu".to_string(),
             args: String::new(),
+            source_id: String::new(),
         };
         assert!(!entry_is_retroarch(&unrelated, profiles));
     }

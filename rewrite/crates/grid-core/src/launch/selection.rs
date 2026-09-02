@@ -170,6 +170,7 @@ mod tests {
             name: name.to_string(),
             path: path.to_string(),
             args: String::new(),
+            source_id: String::new(),
         }
     }
 
@@ -197,6 +198,7 @@ mod tests {
             all_platforms,
             platform_keywords: keywords.iter().map(|k| k.to_string()).collect(),
             is_compat_tool: false,
+            source: None,
         }
     }
 

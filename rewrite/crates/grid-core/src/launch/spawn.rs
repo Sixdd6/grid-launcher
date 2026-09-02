@@ -127,6 +127,7 @@ mod tests {
             name: "Stub".to_string(),
             path: path.to_string(),
             args: args.to_string(),
+            source_id: String::new(),
         }
     }
 

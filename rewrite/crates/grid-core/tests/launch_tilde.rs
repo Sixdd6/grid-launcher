@@ -53,6 +53,7 @@ async fn a_tilde_rom_path_reaches_the_emulator_expanded() {
             name: "Stub".to_string(),
             path: exe.to_string_lossy().into_owned(),
             args: "%rom%".to_string(),
+            source_id: String::new(),
         }],
         default_emulators: [("SNES".to_string(), "Stub".to_string())]
             .into_iter()

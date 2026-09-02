@@ -12,6 +12,12 @@ pub struct EmulatorEntry {
     pub path: String,
     #[serde(default)]
     pub args: String,
+    /// The catalog `"{owner}/{repo}"` this entry was installed from, when
+    /// it was installed from the catalog rather than added by hand — read
+    /// by `launch::catalog::mark_installed`. Blank for hand-added entries
+    /// and for entries installed before this field existed.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source_id: String,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -225,11 +231,13 @@ mod tests {
                 name: "emulator1".into(),
                 path: "/path/to/emu1".into(),
                 args: "--arg1 --arg2".into(),
+                source_id: String::new(),
             },
             EmulatorEntry {
                 name: "emulator2".into(),
                 path: "/path/to/emu2".into(),
                 args: String::new(),
+                source_id: String::new(),
             },
         ];
         let cfg = Config {

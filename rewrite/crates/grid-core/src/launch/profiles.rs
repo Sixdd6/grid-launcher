@@ -19,6 +19,12 @@ pub struct EmulatorProfile {
     pub all_platforms: bool,
     pub platform_keywords: Vec<String>,
     pub is_compat_tool: bool,
+    /// The catalog entry's raw `source` block, copied through untouched by
+    /// [`normalize_one`] — read by `launch::catalog` to build the "install
+    /// from catalog" listing. Never sent over IPC: existing auto-fill
+    /// payloads must not change shape.
+    #[serde(skip_serializing)]
+    pub source: Option<serde_json::Value>,
 }
 
 /// Emulator autoprofile slugs that ship a Windows-only build and therefore
@@ -55,6 +61,8 @@ struct RawProfile {
     platform_keywords: Vec<String>,
     #[serde(default)]
     is_compat_tool: bool,
+    #[serde(default)]
+    source: Option<serde_json::Value>,
 }
 
 /// The parsed, normalized autoprofile catalog, embedded at build time and
@@ -114,6 +122,7 @@ fn normalize_one(raw: RawProfile) -> Option<EmulatorProfile> {
         all_platforms: raw.all_platforms,
         platform_keywords,
         is_compat_tool: raw.is_compat_tool,
+        source: raw.source,
     })
 }
 
@@ -437,6 +446,7 @@ mod tests {
             all_platforms: false,
             platform_keywords: vec![],
             is_compat_tool: compat,
+            source: None,
         }
     }
 
@@ -462,6 +472,18 @@ mod tests {
                 assert_eq!(token, &token.to_lowercase());
             }
         }
+    }
+
+    #[test]
+    fn embedded_profiles_carry_source_when_present_and_none_when_absent() {
+        let profiles = load_profiles();
+        let pico8 = profiles.iter().find(|p| p.name == "Pico-8").unwrap();
+        assert_eq!(pico8.source, None);
+        let pcsx2 = profiles
+            .iter()
+            .find(|p| p.name == "PCSX2 (Playstation 2)")
+            .unwrap();
+        assert!(pcsx2.source.as_ref().unwrap().is_object());
     }
 
     #[test]
@@ -595,6 +617,7 @@ mod tests {
             all_platforms: false,
             platform_keywords: keywords.iter().map(|k| k.to_string()).collect(),
             is_compat_tool: compat,
+            source: None,
         }
     }
 
@@ -624,6 +647,21 @@ mod tests {
         let profile =
             normalize_one(raw("Name", &["x.exe"], " -L \"%core%\" ", false, &[])).unwrap();
         assert_eq!(profile.args, "-L \"%core%\"");
+    }
+
+    #[test]
+    fn normalize_copies_source_through_untouched() {
+        let mut entry = raw("Name", &["x.exe"], "", false, &[]);
+        entry.source = Some(serde_json::json!({"provider": "github", "owner": "o", "repo": "r"}));
+        let expected = entry.source.clone();
+        let profile = normalize_one(entry).unwrap();
+        assert_eq!(profile.source, expected);
+    }
+
+    #[test]
+    fn normalize_source_defaults_to_none_when_absent() {
+        let profile = normalize_one(raw("Name", &["x.exe"], "", false, &[])).unwrap();
+        assert_eq!(profile.source, None);
     }
 
     #[test]
