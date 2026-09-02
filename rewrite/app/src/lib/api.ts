@@ -109,6 +109,49 @@ export type InstalledGame = {
   installed_at: number;
 };
 
+// Cloud save/state sync (rewrite/app/src-tauri/src/cloud_service.rs,
+// rewrite/app/src-tauri/src/commands/cloud.rs). `game` for every cloud
+// call below is any `InstalledGame`-shaped object — the Rust command
+// only reads title/platform/rom_id/rom_file_name/archive_path/
+// extracted_path/description and ignores the rest.
+export type SaveType = 'save' | 'state';
+export type SaveScope = 'per_game' | 'shared_single' | 'shared_slotted';
+
+export type CloudPanelInfo = { supported: boolean; block_reason: string; scope: SaveScope };
+
+export type CloudMessage = { text: string; severity: 'info' | 'warning' };
+
+export type CloudRecord = {
+  id: number;
+  file_name: string;
+  emulator: string;
+  slot: string | null;
+  size_text: string;
+  absolute_time: string;
+  relative_time: string;
+  restorable: boolean;
+  disabled_reason: string | null;
+};
+
+export type UploadReport = {
+  uploaded: number;
+  total: number;
+  failed: string[];
+  messages: CloudMessage[];
+};
+
+export type RestoreReport = { ok: boolean; messages: CloudMessage[] };
+
+export type NativeSavePaths = { pcgw: string[]; manual: string[] };
+
+export type CloudSettings = {
+  download_on_launch: boolean;
+  upload_on_exit: boolean;
+  skip_if_local_newer: boolean;
+  upload_delay_seconds: number;
+  retention_limit: number;
+};
+
 export const api = {
   connect: (serverUrl: string, username: string, secret: string, useToken: boolean) =>
     invoke<SessionState>('connect', { serverUrl, username, secret, useToken }),
@@ -146,4 +189,21 @@ export const api = {
     invoke<RaFanOutRow[]>('set_retroachievements_credentials', { username, token }),
   getRetroachievementsStatus: () => invoke<RaStatus>('get_retroachievements_status'),
   clearRetroachievementsCredentials: () => invoke<void>('clear_retroachievements_credentials'),
+  cloudPanelInfo: (game: InstalledGame, saveType: SaveType) =>
+    invoke<CloudPanelInfo>('cloud_panel_info', { game, saveType }),
+  cloudRecords: (game: InstalledGame, saveType: SaveType) =>
+    invoke<CloudRecord[]>('cloud_records', { game, saveType }),
+  cloudUpload: (game: InstalledGame, saveType: SaveType) =>
+    invoke<UploadReport>('cloud_upload', { game, saveType }),
+  cloudRestore: (game: InstalledGame, saveType: SaveType, recordId: string | null) =>
+    invoke<RestoreReport>('cloud_restore', { game, saveType, recordId }),
+  cloudDelete: (saveType: SaveType, recordId: number) =>
+    invoke<void>('cloud_delete', { saveType, recordId }),
+  nativeSavePaths: (game: InstalledGame) => invoke<NativeSavePaths>('native_save_paths', { game }),
+  nativeAddManualSavePath: (game: InstalledGame, path: string) =>
+    invoke<void>('native_add_manual_save_path', { game, path }),
+  nativeRemoveManualSavePath: (game: InstalledGame, path: string) =>
+    invoke<void>('native_remove_manual_save_path', { game, path }),
+  cloudSettings: () => invoke<CloudSettings>('cloud_settings'),
+  setCloudSettings: (settings: CloudSettings) => invoke<void>('set_cloud_settings', { settings }),
 };

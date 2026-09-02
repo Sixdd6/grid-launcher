@@ -61,6 +61,9 @@ const POLL_INTERVAL: Duration = Duration::from_millis(2500);
 const EARLY_EXIT_DELAY: Duration = Duration::from_millis(500);
 
 type Listener = Arc<dyn Fn(SessionsSnapshot) + Send + Sync>;
+/// Fired once per reaped session, after that reap's snapshot emit(s), with
+/// no lock held — see [`LaunchService::set_session_finished_hook`].
+type SessionFinishedHook = Arc<dyn Fn(GameSession) + Send + Sync>;
 
 /// Owns the running-game sessions: resolves a launch, spawns the emulator,
 /// tracks the child, and reaps it when it exits.
@@ -73,6 +76,11 @@ pub struct LaunchService {
     registry: Arc<Registry>,
     config_path: PathBuf,
     notify: RwLock<Option<Listener>>,
+    /// The cloud auto-upload trigger — installed once by the app layer
+    /// (`CloudService`), which has no place in grid-core (it needs a
+    /// `RommClient`, config, and the cloud `ops` layer). `None` in every
+    /// grid-core test that does not opt in.
+    session_finished_hook: RwLock<Option<SessionFinishedHook>>,
     next_id: AtomicU64,
     /// Guards [`Self::spawn_poll_loop`] so at most one loop ever runs.
     poll_started: AtomicBool,
@@ -118,6 +126,7 @@ impl LaunchService {
             registry,
             config_path,
             notify: RwLock::new(None),
+            session_finished_hook: RwLock::new(None),
             next_id: AtomicU64::new(1),
             poll_started: AtomicBool::new(false),
             poll_interval,
@@ -130,6 +139,14 @@ impl LaunchService {
     /// layer; a second call replaces the first.
     pub fn set_notify(&self, f: Listener) {
         *self.notify.write().unwrap() = Some(f);
+    }
+
+    /// Installs the cloud auto-upload trigger. Called once by the app
+    /// layer; a second call replaces the first. Fired from the poll loop
+    /// for each session the reaper removes — AFTER that reap's snapshot
+    /// emit(s), with no lock held (see [`Self::reap_and_notify`]).
+    pub fn set_session_finished_hook(&self, f: SessionFinishedHook) {
+        *self.session_finished_hook.write().unwrap() = Some(f);
     }
 
     /// The running games, newest-first (mirrors [`crate::library::queue::QueueState::snapshot`]).
@@ -311,7 +328,9 @@ impl LaunchService {
     /// Reaps, then tells the listener what happened: one warning snapshot per
     /// session that died inside its early-exit window, or a single plain
     /// snapshot when sessions went away with nothing to report. Emits nothing
-    /// when the store did not change.
+    /// when the store did not change. Once every snapshot for this reap has
+    /// been emitted, fires the session-finished hook (if any) once per
+    /// reaped session, with no lock held.
     ///
     /// A warning gets its own snapshot because `SessionsSnapshot` carries at
     /// most one message; two games failing in the same tick is rare, and
@@ -325,25 +344,35 @@ impl LaunchService {
             let mut watch = self.early_exit_watch.lock().unwrap();
             exited
                 .iter()
-                .filter_map(|(id, status)| {
+                .filter_map(|(session, status)| {
                     watch
-                        .remove(id)
+                        .remove(&session.id)
                         .map(|command| early_exit_message(*status, &command))
                 })
                 .collect()
         };
         if warnings.is_empty() {
             self.emit(None);
-            return;
+        } else {
+            for warning in warnings {
+                self.emit(Some(warning));
+            }
         }
-        for warning in warnings {
-            self.emit(Some(warning));
+
+        // The hook, like `notify`, is read (and its Arc cloned) with the
+        // lock released before it is called — the callback is arbitrary app
+        // code and must never be able to block a later reap.
+        let hook = self.session_finished_hook.read().unwrap().clone();
+        if let Some(hook) = hook {
+            for (session, _status) in exited {
+                hook(session);
+            }
         }
     }
 
     /// Reaps under the reap gate. Never notifies: [`Self::reap_and_notify`]
     /// decides what the listener hears, always with no lock held.
-    fn reap_exited(&self) -> Vec<(u64, Option<ExitStatus>)> {
+    fn reap_exited(&self) -> Vec<(GameSession, Option<ExitStatus>)> {
         let _gate = self.reap_gate.lock().unwrap();
         self.sessions.reap()
     }

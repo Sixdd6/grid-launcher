@@ -414,6 +414,68 @@ async fn a_running_poll_loop_does_not_swallow_the_early_exit_warning() {
 }
 
 #[tokio::test]
+async fn the_session_finished_hook_fires_once_per_reaped_session_after_the_snapshot() {
+    // The cloud auto-upload trigger (installed by the app layer) must see
+    // every reaped session exactly once, with the full `GameSession` record
+    // — and only after that reap's snapshot(s) already reached the notify
+    // listener (order asserted via a single shared log both callbacks
+    // append to).
+    let h = Harness::new();
+    let exe = h.stub("quitter", "exit 3");
+    h.write_config(vec![entry("Stub", &exe, "%rom%")], &[("SNES", "Stub")]);
+    h.install_game(7, "Chrono", "SNES");
+
+    let service = h.service();
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum Event {
+        Snapshot,
+        Hook(u64, i64, String),
+    }
+    let log: Arc<Mutex<Vec<Event>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let notify_log = log.clone();
+    service.set_notify(Arc::new(move |_snapshot| {
+        notify_log.lock().unwrap().push(Event::Snapshot);
+    }));
+
+    let hook_log = log.clone();
+    service.set_session_finished_hook(Arc::new(move |session| {
+        hook_log
+            .lock()
+            .unwrap()
+            .push(Event::Hook(session.id, session.rom_id, session.title));
+    }));
+
+    // No poll loop: the 500 ms early-exit check alone must reap, notify,
+    // and then fire the hook.
+    let session = service.launch(7).await.unwrap();
+
+    let fired = wait_until(|| {
+        log.lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, Event::Hook(..)))
+    })
+    .await;
+    assert!(fired, "the session-finished hook never fired");
+
+    let events = log.lock().unwrap().clone();
+    // Two snapshots precede the hook: `launch()`'s own registration emit,
+    // then the early-exit check's warning emit — the hook must come after
+    // BOTH, and must fire exactly once.
+    assert_eq!(
+        events,
+        vec![
+            Event::Snapshot,
+            Event::Snapshot,
+            Event::Hook(session.id, 7, "Chrono".to_string()),
+        ],
+        "the hook must fire exactly once, after the snapshot emit(s): {events:?}"
+    );
+}
+
+#[tokio::test]
 async fn a_second_launch_of_the_same_rom_is_already_running() {
     let h = Harness::new();
     let exe = h.stub("sleeper", "sleep 30");

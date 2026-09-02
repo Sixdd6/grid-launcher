@@ -1,3 +1,5 @@
+pub mod cloud;
+
 use grid_core::autoconfig::{self, entry as autoconfig_entry, RaCredentials};
 use grid_core::config::{Config, EmulatorEntry};
 use grid_core::launch::catalog::{catalog_entries, mark_installed, CatalogEntry};
@@ -18,15 +20,18 @@ use std::sync::Arc;
 use tauri::State;
 
 pub struct AppState {
-    pub session: SessionManager,
+    pub session: Arc<SessionManager>,
     pub install: Result<Arc<InstallService>, String>,
     pub launch: Result<Arc<LaunchService>, String>,
     /// The RetroAchievements token's keyring slot — a SECOND, independent
     /// item from the RomM credential `state.session` holds (secrets.rs).
     pub ra_store: Arc<dyn RaTokenStore>,
+    /// Cloud save/state sync: the emulator-entry/sync-dir caches and the
+    /// D5 auto-upload pool. See `cloud_service.rs` and `commands/cloud.rs`.
+    pub cloud: Arc<crate::cloud_service::CloudService>,
 }
 
-fn err(e: impl std::fmt::Display) -> String {
+pub(crate) fn err(e: impl std::fmt::Display) -> String {
     // RommError/SessionError Display are credential-free by construction.
     e.to_string()
 }
@@ -234,10 +239,60 @@ pub struct LaunchDefaults {
 
 // --- launch/session commands -------------------------------------------------
 
+/// The installed row for `rom_id`, off the blocking pool — shared by the
+/// two cloud auto-triggers `launch_game` runs around the actual launch.
+async fn installed_game_by_rom_id(
+    install: &Arc<InstallService>,
+    rom_id: i64,
+) -> Result<Option<InstalledGame>, String> {
+    let install = install.clone();
+    let games = tokio::task::spawn_blocking(move || install.installed().map_err(err))
+        .await
+        .map_err(|e| format!("registry lookup did not finish: {e}"))??;
+    Ok(games.into_iter().find(|g| g.rom_id == Some(rom_id)))
+}
+
 #[tauri::command]
 pub async fn launch_game(state: State<'_, AppState>, rom_id: i64) -> Result<GameSession, String> {
-    let launch = state.launch.as_ref().map_err(Clone::clone)?;
-    launch.launch(rom_id).await.map_err(err)
+    let launch = state.launch.as_ref().map_err(Clone::clone)?.clone();
+    let install = state.install.as_ref().map_err(Clone::clone)?.clone();
+    let config_path = Config::default_path();
+
+    // Auto-restore before launch (parity: details_view_mixin.py:1497,
+    // `_auto_sync_before_launch`), BEFORE the process spawns. A lookup or
+    // restore failure never blocks the launch — errors are swallowed here
+    // (and only debug-logged inside `auto_restore_before_launch`).
+    if let Ok(Some(installed_game)) = installed_game_by_rom_id(&install, rom_id).await {
+        state
+            .cloud
+            .auto_restore_before_launch(
+                &state.session,
+                install.clone(),
+                launch.clone(),
+                &config_path,
+                &installed_game,
+            )
+            .await;
+    }
+
+    let session = launch.launch(rom_id).await.map_err(err)?;
+
+    // Session registration parity (cloud_mixin.py:2818-2842): stamp the
+    // cloud sync-state session markers at spawn.
+    if let Ok(Some(installed_game)) = installed_game_by_rom_id(&install, rom_id).await {
+        state
+            .cloud
+            .stamp_session_started(
+                install,
+                launch,
+                &config_path,
+                &installed_game,
+                session.started_at as f64,
+            )
+            .await;
+    }
+
+    Ok(session)
 }
 
 #[tauri::command]

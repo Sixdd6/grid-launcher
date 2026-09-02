@@ -1,3 +1,4 @@
+mod cloud_service;
 mod commands;
 mod gamepad;
 
@@ -48,11 +49,12 @@ pub fn run() {
                 .cache_dir()
                 .join("covers")
         });
-    let session = SessionManager::new(
+    let session = Arc::new(SessionManager::new(
         Config::default_path(),
         cache_dir,
         Arc::new(KeyringStore::new()),
-    );
+    ));
+    let cloud = cloud_service::CloudService::new();
     // A SECOND, independent keyring item from the RomM credential above
     // (secrets.rs): clearing one must never clear the other.
     let ra_store: Arc<dyn RaTokenStore> = Arc::new(KeyringStore::new());
@@ -79,6 +81,7 @@ pub fn run() {
         install,
         launch,
         ra_store,
+        cloud,
     });
     // Embedded WebDriver automation server, gated behind the `e2e` cargo
     // feature so it never ships in a release build (see
@@ -134,6 +137,17 @@ pub fn run() {
                 launch.set_notify(Arc::new(move |snapshot| {
                     let _ = handle.emit("sessions-changed", snapshot);
                 }));
+                // Cloud auto-upload trigger: fires per reaped session,
+                // after the notify emit above, with no lock held (see
+                // `CloudService::install_session_finished_hook`).
+                if let Ok(install) = &state.install {
+                    state.cloud.install_session_finished_hook(
+                        launch,
+                        state.session.clone(),
+                        install.clone(),
+                        Config::default_path(),
+                    );
+                }
                 // `.setup` runs on the main thread with no tokio runtime
                 // entered, but `spawn_poll_loop` calls `tokio::spawn`
                 // internally, which panics ("there is no reactor running")
@@ -180,6 +194,16 @@ pub fn run() {
             commands::set_retroachievements_credentials,
             commands::get_retroachievements_status,
             commands::clear_retroachievements_credentials,
+            commands::cloud::cloud_panel_info,
+            commands::cloud::cloud_records,
+            commands::cloud::cloud_upload,
+            commands::cloud::cloud_restore,
+            commands::cloud::cloud_delete,
+            commands::cloud::native_save_paths,
+            commands::cloud::native_add_manual_save_path,
+            commands::cloud::native_remove_manual_save_path,
+            commands::cloud::cloud_settings,
+            commands::cloud::set_cloud_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

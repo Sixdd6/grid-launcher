@@ -25,7 +25,15 @@ use std::path::Path;
 /// this as the plain strings `"save"` / `"state"`; the port uses an enum so
 /// call sites are exhaustively checked, with `as_str()` for the two spots
 /// that still need the wire string (debug segments, RomM endpoints).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+///
+/// `Serialize`/`Deserialize` (task 17): this type crosses the Tauri IPC
+/// boundary as a `cloud_panel_info`/`cloud_records`/etc. command
+/// argument — `snake_case` gives the exact `"save"`/`"state"` wire values
+/// [`SaveType::as_str`] already produces, so the two never drift.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum SaveType {
     Save,
     State,

@@ -104,7 +104,12 @@ impl SessionStore {
     /// already reaped — and the `wait` returns immediately; it is done off
     /// the lock so that even a pathological blocking `wait` cannot stall
     /// every other session.
-    pub(crate) fn reap(&self) -> Vec<(u64, Option<ExitStatus>)> {
+    ///
+    /// Carries the full [`GameSession`] record (not just its id): the
+    /// session-finished hook `LaunchService` fires per reaped session needs
+    /// `rom_id`/`title`/`started_at` to build the cloud auto-upload trigger,
+    /// and once an entry is removed here that data is gone.
+    pub(crate) fn reap(&self) -> Vec<(GameSession, Option<ExitStatus>)> {
         let mut exited = Vec::new();
         let mut unusable: Vec<Child> = Vec::new();
         {
@@ -115,10 +120,10 @@ impl SessionStore {
             // preserved: survivors are pushed back in the order they came.
             for mut entry in entries.drain(..) {
                 match entry.child.try_wait() {
-                    Ok(Some(status)) => exited.push((entry.info.id, Some(status))),
+                    Ok(Some(status)) => exited.push((entry.info.clone(), Some(status))),
                     Ok(None) => kept.push(entry),
                     Err(_) => {
-                        exited.push((entry.info.id, None));
+                        exited.push((entry.info.clone(), None));
                         unusable.push(entry.child);
                     }
                 }
@@ -257,7 +262,7 @@ mod tests {
         // One removal reported, with a status — the "store changed" and
         // "status available" halves of the result are both present.
         assert_eq!(exited.len(), 1);
-        assert_eq!(exited[0].0, 2);
+        assert_eq!(exited[0].0.id, 2);
         assert_eq!(exited[0].1.map(|status| status.code()), Some(Some(7)));
         assert_eq!(store.list().len(), 1);
         assert_eq!(store.list()[0].id, 1);
