@@ -1,3 +1,4 @@
+mod cloud;
 mod error;
 pub use error::RommError;
 
@@ -116,6 +117,15 @@ impl RommClient {
             .await
             .map_err(|e| RommError::Connection(e.without_url().to_string()))?;
         let status = resp.status();
+        // Task 11 fix: this used to skip the 401/403 -> Unauthorized mapping
+        // that `get_response` applies, so a save/cover download against an
+        // expired token surfaced as a generic `Http{401,..}` instead of the
+        // dedicated auth error every other client method returns. Bytes
+        // endpoints (save content, relative download candidates, covers)
+        // now match that mapping exactly.
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            return Err(RommError::Unauthorized);
+        }
         if !status.is_success() {
             return Err(RommError::Http {
                 status: status.as_u16(),

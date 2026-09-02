@@ -377,7 +377,7 @@ pub fn relative_timestamp_text(timestamp: f64, now: f64) -> String {
 /// own `Display` (matches `str(int)` for the integer ids RomM actually
 /// sends). `null`/bool/array/object ids are not expected in practice;
 /// they're given a best-effort rendering rather than a panic.
-fn stringify_id(value: &Value) -> String {
+pub(crate) fn stringify_id(value: &Value) -> String {
     match value {
         Value::String(s) => s.clone(),
         Value::Number(n) => n.to_string(),
@@ -423,7 +423,14 @@ pub fn server_records_from_payload(payload: &Value) -> Vec<Value> {
 /// type). Distinct from [`stringify_id`] above — this reads the RAW `id`
 /// value again (not the deduped string form), matching Python's own
 /// re-read inside the sort key.
-fn id_rank(record: &Value) -> i64 {
+///
+/// `pub(crate)`: also the sort-key id source for
+/// `cloud::retention::prune_server_save_records`, which uses the identical
+/// `(timestamp, numeric id)` descending sort as
+/// [`sort_server_records_by_recency`] (`cloud_mixin.py:1701`'s own
+/// `matching_records.sort(key=lambda item: (self._save_record_timestamp(item),
+/// _id_rank(item)), reverse=True)`), reused here rather than duplicated.
+pub(crate) fn id_rank(record: &Value) -> i64 {
     match record.get("id") {
         None => 0,
         Some(Value::Number(n)) => {
@@ -537,7 +544,11 @@ pub fn latest_server_record<'a>(records: &'a [Value], emulator_name: &str) -> Op
 /// casefolded; else, when that's blank, the file-stem of `file_name`
 /// (only when `file_name` is a non-blank string), trimmed + casefolded;
 /// else the literal `"__default__"`.
-fn slot_dedupe_key(record: &Value) -> String {
+///
+/// `pub(crate)`: `cloud_mixin.py:1706-1719`'s retention grouping key is the
+/// exact same rule verbatim, so `cloud::retention::prune_server_save_records`
+/// reuses this rather than duplicating it.
+pub(crate) fn slot_dedupe_key(record: &Value) -> String {
     let slot_key = record
         .get("slot")
         .and_then(Value::as_str)

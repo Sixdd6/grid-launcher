@@ -8,6 +8,7 @@ pub mod archive;
 pub mod candidates;
 pub mod native;
 pub mod restore;
+pub mod retention;
 pub mod scope;
 pub mod state;
 pub mod tokens;
