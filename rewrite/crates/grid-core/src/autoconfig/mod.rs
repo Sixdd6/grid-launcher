@@ -385,25 +385,39 @@ fn installed_cores_for_platform(
         .collect()
 }
 
-/// Fold one writer's outcome into `report`. A writer that names a file it
-/// changed is recorded in `wrote`; one that reached no file at all
-/// (`config_path == None` with `changed == false` — [`EnsureResult`]'s
-/// documented bail-out) becomes a warning naming the emulator and the
-/// writer. Nothing here aborts the remaining writers.
+/// Fold one writer's outcome into `report`.
+///
+/// A writer REACHED its target when it names any file at all — `config_path`,
+/// or, for a writer whose only target is a secondary file, an `extras` path.
+/// [`cemu::ensure_controller_config`] is the one such writer: it always
+/// reports `config_path = None` and names `extras["profile_path"]` instead,
+/// so on its healthy idempotent branch (the profile already exists, nothing
+/// to write) it returns `changed = false` with `config_path = None`. Testing
+/// `config_path` alone would misread that as a failure.
+///
+/// So only a writer that named NOTHING and changed nothing bailed out; that
+/// becomes a warning naming the emulator and the writer. Anything a writer
+/// actually changed is recorded in `wrote`, falling back to the `extras`
+/// paths when there is no primary. Nothing here aborts the remaining writers.
 fn record(report: &mut SyncReport, emulator: &str, writer: &str, result: EnsureResult) {
+    let named_a_file = result.config_path.is_some() || !result.extras.is_empty();
+    if !named_a_file && !result.changed {
+        report
+            .warnings
+            .push(format!("could not configure {emulator} ({writer})"));
+        return;
+    }
+    if !result.changed {
+        return;
+    }
     match result.config_path {
-        Some(path) => {
-            if result.changed {
-                report.wrote.push(path.to_string_lossy().into_owned());
-            }
-        }
-        None => {
-            if !result.changed {
-                report
-                    .warnings
-                    .push(format!("could not configure {emulator} ({writer})"));
-            }
-        }
+        Some(path) => report.wrote.push(path.to_string_lossy().into_owned()),
+        None => report.wrote.extend(
+            result
+                .extras
+                .values()
+                .map(|path| path.to_string_lossy().into_owned()),
+        ),
     }
 }
 
@@ -978,6 +992,81 @@ mod tests {
         assert!(
             text.contains("PlayStation 3"),
             "the PS3 library path must reach vfs.yml:\n{text}"
+        );
+    }
+
+    /// `cemu::ensure_controller_config` always reports `config_path = None`
+    /// and names `extras["profile_path"]` instead, so its healthy idempotent
+    /// branch — an existing `controller0.xml`, nothing to write — returns
+    /// `changed = false` with no `config_path`. That is a success, not a
+    /// bail-out, and must never reach `report.warnings`.
+    #[test]
+    fn an_existing_cemu_controller_profile_is_not_reported_as_a_failure() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated(temp.path());
+
+        let exe = temp.path().join("Cemu").join("cemu.AppImage");
+        touch(&exe);
+        let profile_path = exe
+            .parent()
+            .unwrap()
+            .join("portable")
+            .join("controllerProfiles")
+            .join("controller0.xml");
+        touch(&profile_path);
+
+        let config = config_with(temp.path(), vec![entry("Cemu", exe.to_str().unwrap())]);
+        let config_path = write_config(temp.path(), &config);
+
+        let ctx = SyncContext {
+            config_path: &config_path,
+            platforms: &[],
+            ps3_library_path: String::new(),
+            ra: None,
+            profiles: &[],
+        };
+        let report = sync_new_emulator("Cemu", &ctx).unwrap();
+
+        assert!(
+            !report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("cemu controller")),
+            "the idempotent branch is a success: {:?}",
+            report.warnings
+        );
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    }
+
+    /// The other half of the same fix: a controller profile this run actually
+    /// wrote is recorded in `wrote` through its `extras` path, which the
+    /// `config_path`-only reading dropped on the floor.
+    #[test]
+    fn a_written_cemu_controller_profile_is_recorded_from_its_extras_path() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated(temp.path());
+
+        let exe = temp.path().join("Cemu").join("cemu.AppImage");
+        touch(&exe);
+        let config = config_with(temp.path(), vec![entry("Cemu", exe.to_str().unwrap())]);
+        let config_path = write_config(temp.path(), &config);
+
+        let ctx = SyncContext {
+            config_path: &config_path,
+            platforms: &[],
+            ps3_library_path: String::new(),
+            ra: None,
+            profiles: &[],
+        };
+        let report = sync_new_emulator("Cemu", &ctx).unwrap();
+
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+        assert!(
+            report.wrote.iter().any(|p| p.ends_with("controller0.xml")),
+            "the freshly written controller profile must be recorded: {:?}",
+            report.wrote
         );
     }
 

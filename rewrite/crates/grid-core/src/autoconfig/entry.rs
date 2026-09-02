@@ -303,6 +303,17 @@ pub fn assign_profile_platform_defaults(
 /// anything else the entry carried. This port preserves the five `source_*`
 /// fields — the rewrite's own install provenance, which the reference has no
 /// equivalent for.
+///
+/// Deviation D15 — **reference-only: this function has NO production
+/// caller.** Both D1 trigger points reach layer 1 through
+/// [`apply_manual_emulator_profile_defaults`] instead
+/// (`super::sync_new_emulator`): the manual-add site is exact Python parity
+/// for that function, and at the catalog-install site this rebuild path is
+/// unreachable because `library::InstallService::finalize_emulator` has
+/// already written the profile-named entry by the time the sync runs, which
+/// makes the two functions' outputs equivalent there. Kept, and kept tested,
+/// as the faithful port of `auto_configure_emulator_settings`
+/// (autoconfig.py:472); delete it only together with D15.
 pub fn auto_configure_emulator_settings(
     game: Option<&GameFacts>,
     executable_path: &str,

@@ -2395,6 +2395,22 @@ milestone-3/4 sections:
     `InstallService::set_known_platforms`, fed by the `list_platforms`
     command; with no connected session the list is empty and the
     platform-defaults step is a no-op.
+15. `sync_new_emulator`'s entry-autoconfig step uses
+    `apply_manual_emulator_profile_defaults` at BOTH D1 sites; layer 1's
+    `auto_configure_emulator_settings` rebuild path is unreachable in the
+    rewrite because `finalize_emulator` already writes the profile-named
+    entry before the sync runs. `auto_configure_emulator_settings` is
+    retained reference-only, exercised by its own tests and called from no
+    production path. Site B (manual add) is exact Python parity, and it is
+    what decides the design; at site A the two functions' outputs are
+    equivalent, because the entry was just written from the same profile.
+    Field nuance: a blank-`args` profile leaves the entry's `args` blank
+    instead of writing `"%rom%"`. Three catalog profiles have blank `args`
+    (`ShadPS4 Qt Launcher`, `GE-Proton`, `Proton-CachyOS`), of which only
+    the first is reachable — `profile_for_entry` skips compat-tool profiles
+    outright. The difference is launch-identical: `template::build_args`
+    substitutes `"%rom%"` for a blank `entry_args` at launch time
+    (launch.py:150).
 
 Also update doc 05's "Open questions" section: mark each question this
 milestone rules on with its ruling (follow-the-code for DuckStation RA,
