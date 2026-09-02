@@ -89,6 +89,9 @@ describe('emulators', () => {
 
   it('auto-fills name and args from a profile-matching path, then saves the row', async () => {
     await $(testId('emulator-add')).click();
+    // Add now opens on the Install tab (task-7-brief.md); the manual form
+    // this spec drives lives under the Manual tab.
+    await $(testId('emu-add-tab-manual')).click();
     await $(testId('emu-form-name')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await expect($(testId('emu-form-name'))).toHaveValue('');
     await expect($(testId('emu-form-args'))).toHaveValue('');
@@ -114,6 +117,7 @@ describe('emulators', () => {
 
   it('adds a second emulator and keeps row order when editing the first', async () => {
     await $(testId('emulator-add')).click();
+    await $(testId('emu-add-tab-manual')).click();
     await $(testId('emu-form-name')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     // Name typed first so autoFillFromPath's "both blank" guard skips it —
     // this path matches no profile anyway.
@@ -145,6 +149,7 @@ describe('emulators', () => {
 
   it('rejects saving a duplicate name with the verbatim error', async () => {
     await $(testId('emulator-add')).click();
+    await $(testId('emu-add-tab-manual')).click();
     await $(testId('emu-form-name')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('emu-form-name')).setValue('AAA Manual Emulator');
     await $(testId('emu-form-path')).setValue('/nonexistent/dup');

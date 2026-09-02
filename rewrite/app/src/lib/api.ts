@@ -18,7 +18,9 @@ export type DownloadStatus =
 
 export type DownloadEntry = {
   id: number;
+  job: 'game' | 'emulator';
   rom_id: number;
+  source_id: string;
   title: string;
   platform: string;
   status: DownloadStatus;
@@ -46,6 +48,16 @@ export type SessionsSnapshot = { sessions: GameSession[]; warning: string | null
 export type EmulatorEntry = { name: string; path: string; args: string };
 
 export type ProfileSummary = { name: string; args: string };
+
+export type CatalogEntry = {
+  name: string;
+  source_id: string;
+  provider: string;
+  owner: string;
+  repo: string;
+  tag: string;
+  installed: boolean;
+};
 
 export type LaunchDefaults = {
   default_emulators: Record<string, string>;
@@ -107,4 +119,6 @@ export const api = {
   getLaunchDefaults: () => invoke<LaunchDefaults>('get_launch_defaults'),
   setDefaultEmulator: (platform: string, name: string) =>
     invoke<void>('set_default_emulator', { platform, name }),
+  listEmulatorCatalog: () => invoke<CatalogEntry[]>('list_emulator_catalog'),
+  installEmulator: (sourceId: string) => invoke<void>('install_emulator', { sourceId }),
 };

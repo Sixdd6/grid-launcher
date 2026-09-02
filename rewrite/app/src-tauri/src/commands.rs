@@ -1,4 +1,5 @@
 use grid_core::config::{Config, EmulatorEntry};
+use grid_core::launch::catalog::{catalog_entries, mark_installed, CatalogEntry};
 use grid_core::launch::profiles::{load_profiles, profile_for_entry, visible_profiles};
 use grid_core::launch::{GameSession, LaunchService, SessionsSnapshot};
 use grid_core::library::queue::DownloadsSnapshot;
@@ -276,6 +277,27 @@ pub fn match_profile(executable_path: String) -> Option<ProfileSummary> {
         name: p.name.clone(),
         args: p.args.clone(),
     })
+}
+
+// --- emulator catalog commands ------------------------------------------------
+
+/// The "install from catalog" listing, freshly marked against the config on
+/// disk. Also surfaces an install-service construction failure early (the
+/// same error `install_emulator` would return on click) so the panel's
+/// error line can show it before the user ever presses Install.
+#[tauri::command]
+pub fn list_emulator_catalog(state: State<'_, AppState>) -> Result<Vec<CatalogEntry>, String> {
+    state.install.as_ref().map_err(Clone::clone)?;
+    let config = Config::load(&Config::default_path()).map_err(err)?;
+    let mut entries = catalog_entries(load_profiles());
+    mark_installed(&mut entries, &config);
+    Ok(entries)
+}
+
+#[tauri::command]
+pub async fn install_emulator(state: State<'_, AppState>, source_id: String) -> Result<(), String> {
+    let install = state.install.as_ref().map_err(Clone::clone)?;
+    install.install_emulator(source_id).await.map_err(err)
 }
 
 // --- pure config-merge helpers (unit-tested below) ---------------------------

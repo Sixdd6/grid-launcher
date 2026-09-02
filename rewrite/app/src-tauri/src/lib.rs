@@ -158,6 +158,8 @@ pub fn run() {
             commands::match_profile,
             commands::get_launch_defaults,
             commands::set_default_emulator,
+            commands::list_emulator_catalog,
+            commands::install_emulator,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

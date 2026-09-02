@@ -5,7 +5,9 @@ import { actionFor, aggregate, entryDetail, formatSize, percent } from './format
 function entry(overrides: Partial<DownloadEntry>): DownloadEntry {
   return {
     id: 1,
+    job: 'game',
     rom_id: 1,
+    source_id: '',
     title: 'Game',
     platform: 'Platform',
     status: 'queued',

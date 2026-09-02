@@ -1,5 +1,14 @@
 <script lang="ts">
-  import { api, type EmulatorEntry, type LaunchDefaults, type Platform } from './api';
+  import {
+    api,
+    type CatalogEntry,
+    type EmulatorEntry,
+    type LaunchDefaults,
+    type Platform,
+    type ProfileSummary,
+  } from './api';
+  import { downloads } from './stores/downloads.svelte';
+  import { filterCatalogEntries, matchProfileByName } from './emulators/catalog';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -12,6 +21,8 @@
   let defaults = $state<LaunchDefaults | null>(null);
   let defaultsError = $state<string | null>(null);
 
+  let profiles = $state<ProfileSummary[]>([]);
+
   // Tagged rather than a bare string sentinel: a string-based 'new' marker
   // would make an emulator literally named "new" impossible to edit (its
   // name would collide with the add-mode sentinel and saveEmulator's
@@ -20,14 +31,39 @@
   // saveEmulator's originalName so a rename can find & replace itself.
   type Editing = { mode: 'add' } | { mode: 'edit'; name: string } | null;
   let editing = $state<Editing>(null);
+  // Only meaningful while editing.mode === 'add' — edit mode always shows
+  // the manual form directly (there is no "install this again" flow for an
+  // already-configured entry).
+  let addTab = $state<'install' | 'manual'>('install');
   let formName = $state('');
   let formPath = $state('');
   let formArgs = $state('');
   let formError = $state<string | null>(null);
   let formPending = $state(false);
+  let autofillMatch = $state<ProfileSummary | null>(null);
 
   let confirmingDelete = $state<string | null>(null);
   let deletePending = $state<string | null>(null);
+
+  // Install tab state.
+  let catalog = $state<CatalogEntry[]>([]);
+  let catalogLoading = $state(true);
+  let catalogError = $state<string | null>(null);
+  let catalogSearch = $state('');
+  let installingSourceIds = $state<Set<string>>(new Set());
+  let filteredCatalog = $derived(filterCatalogEntries(catalogSearch, catalog));
+
+  // Signature of every emulator-job download that has reached a terminal
+  // status — read inside the effect below so a fresh terminal entry (an
+  // install completing, failing, or getting cancelled) triggers a catalog
+  // re-fetch. Approximate on purpose (task-7-brief.md): any terminal
+  // emulator entry is enough of a signal, not just the one just installed.
+  let emulatorTerminalSignature = $derived(
+    downloads.entries
+      .filter((e) => e.job === 'emulator' && ['completed', 'failed', 'cancelled'].includes(e.status))
+      .map((e) => `${e.id}:${e.status}`)
+      .join(',')
+  );
 
   let panelEl = $state<HTMLElement | null>(null);
 
@@ -38,6 +74,18 @@
   $effect(() => {
     refreshEmulators();
     refreshPlatformsAndDefaults();
+    refreshProfiles();
+  });
+
+  // Loads (or reloads) the catalog whenever the Install tab becomes the
+  // visible tab, and again whenever an emulator download reaches a terminal
+  // status while it is visible.
+  $effect(() => {
+    const signature = emulatorTerminalSignature;
+    void signature;
+    if (editing?.mode === 'add' && addTab === 'install') {
+      refreshCatalog();
+    }
   });
 
   function errorMessage(err: unknown): string {
@@ -80,12 +128,36 @@
     }
   }
 
+  async function refreshProfiles() {
+    try {
+      profiles = await api.listProfiles();
+    } catch {
+      // Best-effort only — both auto-fills just won't find a match.
+    }
+  }
+
+  async function refreshCatalog() {
+    catalogLoading = true;
+    try {
+      catalog = await api.listEmulatorCatalog();
+      catalogError = null;
+    } catch (err) {
+      catalogError = errorMessage(err);
+    } finally {
+      catalogLoading = false;
+    }
+  }
+
   function openAdd() {
     editing = { mode: 'add' };
+    addTab = 'install';
     formName = '';
     formPath = '';
     formArgs = '';
     formError = null;
+    catalogError = null;
+    catalogSearch = '';
+    autofillMatch = null;
     confirmingDelete = null;
   }
 
@@ -95,12 +167,32 @@
     formPath = entry.path;
     formArgs = entry.args;
     formError = null;
+    autofillMatch = null;
     confirmingDelete = null;
   }
 
   function closeForm() {
     editing = null;
     formError = null;
+    autofillMatch = null;
+  }
+
+  async function handleInstallClick(sourceId: string) {
+    catalogError = null;
+    installingSourceIds = new Set(installingSourceIds).add(sourceId);
+    try {
+      await api.installEmulator(sourceId);
+    } catch (err) {
+      catalogError = errorMessage(err);
+    } finally {
+      const next = new Set(installingSourceIds);
+      next.delete(sourceId);
+      installingSourceIds = next;
+    }
+  }
+
+  function testKeyFor(sourceId: string): string {
+    return sourceId.replaceAll('/', '-');
   }
 
   async function autoFillFromPath() {
@@ -115,6 +207,21 @@
       }
     } catch {
       // Best-effort autofill only — leave the form as typed on failure.
+    }
+  }
+
+  // Manual-add auto-fill from the typed NAME (task-7-brief.md): only when
+  // path and args are both still empty, so it never clobbers a manually
+  // typed or path-derived value. Fires on blur/change of the name field.
+  function autoFillFromName() {
+    if (formPath.trim() !== '' || formArgs.trim() !== '') {
+      autofillMatch = null;
+      return;
+    }
+    const match = matchProfileByName(formName, profiles);
+    autofillMatch = match;
+    if (match) {
+      formArgs = match.args;
     }
   }
 
@@ -252,25 +359,105 @@
 
     {#if editing !== null}
       <section class="form-section">
-        <h3>{editing?.mode === 'add' ? 'Add emulator' : 'Edit emulator'}</h3>
-        <form
-          onsubmit={(e) => {
-            e.preventDefault();
-            saveForm();
-          }}
-        >
-          <label>Name <input data-testid="emu-form-name" bind:value={formName} required /></label>
-          <label>
-            Executable path
-            <input data-testid="emu-form-path" bind:value={formPath} onblur={autoFillFromPath} onkeydown={onPathKeydown} />
-          </label>
-          <label>Arguments <input data-testid="emu-form-args" bind:value={formArgs} /></label>
-          {#if formError}<p data-testid="emu-form-error" class="error" role="alert">{formError}</p>{/if}
-          <div class="form-actions">
-            <button data-testid="emu-form-save" type="submit" disabled={formPending}>{formPending ? 'Saving…' : 'Save'}</button>
-            <button data-testid="emu-form-cancel" type="button" onclick={closeForm} disabled={formPending}>Cancel</button>
+        <h3>{editing.mode === 'add' ? 'Add emulator' : 'Edit emulator'}</h3>
+
+        {#if editing.mode === 'add'}
+          <div class="tabs" role="tablist">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={addTab === 'install'}
+              class:active={addTab === 'install'}
+              data-testid="emu-add-tab-install"
+              onclick={() => (addTab = 'install')}
+            >
+              Install
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={addTab === 'manual'}
+              class:active={addTab === 'manual'}
+              data-testid="emu-add-tab-manual"
+              onclick={() => (addTab = 'manual')}
+            >
+              Manual
+            </button>
           </div>
-        </form>
+        {/if}
+
+        {#if editing.mode === 'add' && addTab === 'install'}
+          <div class="catalog-tab">
+            <input
+              data-testid="emu-catalog-search"
+              class="catalog-search"
+              type="search"
+              placeholder="Search emulators…"
+              bind:value={catalogSearch}
+              aria-label="Search emulators"
+            />
+            {#if catalogError}<p class="error" role="alert">{catalogError}</p>{/if}
+            {#if catalogLoading}
+              <p class="muted">Loading…</p>
+            {:else if filteredCatalog.length === 0}
+              <p class="muted">No emulators found.</p>
+            {:else}
+              <ul class="catalog-list">
+                {#each filteredCatalog as entry (entry.source_id)}
+                  {@const testKey = testKeyFor(entry.source_id)}
+                  <li class="catalog-row">
+                    <div class="row-text">
+                      <span class="name">{entry.name}</span>
+                      <span class="meta">{entry.provider} • {entry.tag}</span>
+                    </div>
+                    {#if entry.installed}
+                      <button data-testid={`emu-catalog-installed-${testKey}`} disabled>Installed</button>
+                    {:else}
+                      <button
+                        data-testid={`emu-catalog-install-${testKey}`}
+                        disabled={installingSourceIds.has(entry.source_id)}
+                        onclick={() => handleInstallClick(entry.source_id)}
+                      >
+                        {installingSourceIds.has(entry.source_id) ? 'Installing…' : 'Install'}
+                      </button>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
+        {:else}
+          <form
+            onsubmit={(e) => {
+              e.preventDefault();
+              saveForm();
+            }}
+          >
+            <label>
+              Name
+              <input
+                data-testid="emu-form-name"
+                bind:value={formName}
+                onblur={autoFillFromName}
+                oninput={autoFillFromName}
+                required
+              />
+            </label>
+            {#if autofillMatch}
+              <p data-testid="emu-autofill-hint" class="hint">Matched profile: {autofillMatch.name}</p>
+            {/if}
+            <label>
+              Executable path
+              <input data-testid="emu-form-path" bind:value={formPath} onblur={autoFillFromPath} onkeydown={onPathKeydown} />
+            </label>
+            <label>Arguments <input data-testid="emu-form-args" bind:value={formArgs} /></label>
+            {#if formError}<p data-testid="emu-form-error" class="error" role="alert">{formError}</p>{/if}
+            <div class="form-actions">
+              <button data-testid="emu-form-save" type="submit" disabled={formPending}>{formPending ? 'Saving…' : 'Save'}</button>
+              <button data-testid="emu-form-cancel" type="button" onclick={closeForm} disabled={formPending}>Cancel</button>
+            </div>
+          </form>
+        {/if}
       </section>
     {/if}
 
@@ -529,6 +716,99 @@
   .form-section input:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 1px;
+  }
+
+  .hint {
+    margin: -4px 0 0;
+    font-size: 12px;
+    color: var(--text);
+    opacity: 0.8;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 4px;
+  }
+
+  .tabs button {
+    font: inherit;
+    font-size: 13px;
+    padding: 6px 12px;
+    border-radius: 6px 6px 0 0;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .tabs button.active {
+    background: var(--border);
+    color: var(--text-h);
+  }
+
+  .catalog-tab {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .catalog-search {
+    font: inherit;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-h);
+  }
+
+  .catalog-search:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  .catalog-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+
+  .catalog-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--border);
+  }
+
+  .catalog-row .meta {
+    color: var(--text);
+    font-size: 12px;
+  }
+
+  .catalog-row button {
+    flex: none;
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .catalog-row button:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
 
   .form-actions {
