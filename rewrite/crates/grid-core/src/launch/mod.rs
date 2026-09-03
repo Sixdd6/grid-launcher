@@ -22,6 +22,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::config::{Config, EmulatorEntry};
 use crate::library::paths::expand_home;
+use crate::library::platforms::is_native_platform;
 use crate::library::registry::{installed_match, InstalledGame, Registry};
 
 use profiles::{load_profiles, profile_for_entry};
@@ -416,13 +417,6 @@ struct LaunchPlan {
     working_dir: PathBuf,
 }
 
-/// A game is "native" when its platform, trimmed and casefolded, starts with
-/// `windows` (`is_native_executable_platform`, selection.py:145). This is the
-/// *server* platform name, not the host OS.
-fn is_native_platform(platform: &str) -> bool {
-    platform.trim().to_lowercase().starts_with("windows")
-}
-
 /// Whether `name` should be treated as a RetroArch build (doc 04 §2): the
 /// name contains "retroarch", case-insensitively.
 fn is_retroarch_name(name: &str) -> bool {
@@ -533,15 +527,6 @@ fn unix_now() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn native_platform_matches_every_windows_spelling() {
-        assert!(is_native_platform("Windows"));
-        assert!(is_native_platform("  windows  "));
-        assert!(is_native_platform("Windows 3.x"));
-        assert!(!is_native_platform("Nintendo Wii"));
-        assert!(!is_native_platform(""));
-    }
 
     #[test]
     fn retroarch_name_detection_ignores_case_and_matches_substrings() {

@@ -7,10 +7,12 @@
 //! ("InstallService", "Data flow for one install") and
 //! `docs/porting/03-library-install.md` for the behavior this mirrors.
 
+pub mod content;
 pub mod download;
 pub mod extract;
 pub mod launch_select;
 pub mod paths;
+pub mod platforms;
 pub mod queue;
 pub mod registry;
 
@@ -195,6 +197,7 @@ fn is_download_candidate(file: &RomFile) -> bool {
         && file.file_name != METADATA_FILE_NAME
         && !file.file_name.contains('/')
         && !file.file_name.contains('\\')
+        && content::is_game_category(&file.category)
 }
 
 fn content_target(rom_id: i64, file: &RomFile, dest: PathBuf, expected_size: i64) -> FileTarget {
@@ -1467,6 +1470,7 @@ mod tests {
             file_name: file_name.to_string(),
             file_size_bytes: 10,
             is_top_level: top_level,
+            category: String::new(),
         }
     }
 

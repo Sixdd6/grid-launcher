@@ -292,6 +292,20 @@ pub struct RomFile {
     pub file_size_bytes: i64,
     #[serde(default)]
     pub is_top_level: bool,
+    /// RomM's file category (e.g. "update", "dlc"); blank for an ordinary
+    /// game file. The server sends `null` for no category.
+    #[serde(default, deserialize_with = "null_to_empty")]
+    pub category: String,
+}
+
+/// Deserializes a nullable string field as an empty string when absent or
+/// `null`, rather than failing or requiring `Option<String>` at every call
+/// site.
+fn null_to_empty<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

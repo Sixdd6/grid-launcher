@@ -45,6 +45,7 @@ struct FileSpec {
     file_name: String,
     size: i64,
     top_level: bool,
+    category: Option<String>,
 }
 
 fn file_spec(id: i64, file_name: &str, size: usize) -> FileSpec {
@@ -53,6 +54,16 @@ fn file_spec(id: i64, file_name: &str, size: usize) -> FileSpec {
         file_name: file_name.to_string(),
         size: size as i64,
         top_level: true,
+        category: None,
+    }
+}
+
+/// Like [`file_spec`], but with an explicit RomM file `category` (e.g.
+/// `"update"`, `"dlc"`) instead of the default `null`.
+fn file_spec_with_category(id: i64, file_name: &str, size: usize, category: &str) -> FileSpec {
+    FileSpec {
+        category: Some(category.to_string()),
+        ..file_spec(id, file_name, size)
     }
 }
 
@@ -71,6 +82,7 @@ fn detail_json(
                 "file_name": f.file_name,
                 "file_size_bytes": f.size,
                 "is_top_level": f.top_level,
+                "category": f.category,
             })
         })
         .collect();
@@ -352,6 +364,62 @@ async fn arcade_zip_is_not_extracted_and_keeps_archive_path() {
     assert_eq!(row.extracted_dir, "");
 }
 
+// --- content categories (D12) ------------------------------------------------
+
+#[tokio::test]
+async fn update_category_file_is_excluded_and_never_requested() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(
+        &staging.path().join("game.zip"),
+        &[("game.sfc", b"ROMDATA")],
+    );
+
+    harness
+        .mount_detail(
+            12,
+            detail_json(
+                12,
+                "Some Game",
+                "SNES",
+                "game.zip",
+                &[
+                    file_spec(121, "game.zip", bytes.len()),
+                    file_spec_with_category(122, "update.zip", 9, "update"),
+                ],
+            ),
+        )
+        .await;
+    harness.mount_content(12, "game.zip", bytes, 0).await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 12)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let extracted_dir = harness.library.join("SNES/game");
+    assert!(extracted_dir.join("game.sfc").is_file());
+
+    let row = harness.registry.find(Some(12), "", "").unwrap().unwrap();
+    assert_eq!(
+        row.multi_file_game_dir, "",
+        "the update file must not turn this into a multi-file install"
+    );
+
+    let requests = harness.server.received_requests().await.unwrap();
+    assert!(
+        requests
+            .iter()
+            .all(|r| !r.url.path().contains("update.zip")),
+        "the update-category file must never be requested: {:?}",
+        requests.iter().map(|r| r.url.path()).collect::<Vec<_>>()
+    );
+}
+
 // --- multi-file install -----------------------------------------------------
 
 #[tokio::test]
@@ -373,18 +441,21 @@ async fn multi_file_install_keeps_both_files_and_points_at_the_m3u() {
                         file_name: "game.json".to_string(),
                         size: 2,
                         top_level: true,
+                        category: None,
                     },
                     FileSpec {
                         id: 24,
                         file_name: "sub/nested.bin".to_string(),
                         size: 2,
                         top_level: true,
+                        category: None,
                     },
                     FileSpec {
                         id: 25,
                         file_name: "inner.bin".to_string(),
                         size: 2,
                         top_level: false,
+                        category: None,
                     },
                 ],
             ),
@@ -443,6 +514,7 @@ async fn no_downloadable_file_fails_before_admission() {
                     file_name: "game.json".to_string(),
                     size: 2,
                     top_level: true,
+                    category: None,
                 }],
             ),
         )
