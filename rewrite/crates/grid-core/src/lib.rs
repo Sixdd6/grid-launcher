@@ -5,6 +5,7 @@ pub mod autoconfig;
 pub mod cloud;
 pub mod config;
 pub mod fatx;
+pub mod firmware;
 pub mod images;
 pub mod launch;
 pub mod library;
