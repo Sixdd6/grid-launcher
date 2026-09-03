@@ -2748,6 +2748,78 @@ async fn native_update_merges_and_keeps_pinned_executable() {
         .exists());
 }
 
+/// The app hangs its update-set recompute (and the firmware pass) off the
+/// game-finalized hook, so the merge path has to report too: without this a
+/// native update would never clear its own "Update available" flag.
+#[tokio::test]
+async fn native_update_fires_the_game_finalized_hook_once() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let base = write_zip(
+        &staging.path().join("mygame.zip"),
+        &[("MyGame/mygame.exe", b"MZ"), ("data/old.txt", b"old")],
+    );
+    let update = write_zip(
+        &staging.path().join("mygame-update.zip"),
+        &[("data/new.txt", b"new")],
+    );
+
+    harness
+        .mount_detail_once(
+            42,
+            detail_json(
+                42,
+                "My Game",
+                "Windows",
+                "mygame.zip",
+                &[file_spec(421, "mygame.zip", base.len())],
+            ),
+        )
+        .await;
+    harness
+        .mount_detail(
+            42,
+            detail_json(
+                42,
+                "My Game",
+                "Windows",
+                "mygame-update.zip",
+                &[file_spec(422, "mygame-update.zip", update.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(42, "mygame.zip", base, 0).await;
+    harness
+        .mount_content(42, "mygame-update.zip", update, 0)
+        .await;
+
+    install_base(&harness, 42).await;
+    // Installed AFTER the base install, so the only call this counts is the
+    // native update's own.
+    let seen: Arc<Mutex<Vec<InstalledGame>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = seen.clone();
+    harness
+        .service
+        .set_game_finalized_hook(Arc::new(move |row| sink.lock().unwrap().push(row)));
+
+    harness
+        .service
+        .install_native_update(harness.client.clone(), 42)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 1, "exactly one hook call for one merge");
+    assert_eq!(seen[0].rom_id, Some(42));
+    assert_eq!(
+        seen[0].rom_file_name, "mygame-update.zip",
+        "the hook sees the MERGED row, not the pre-update one"
+    );
+}
+
 #[tokio::test]
 async fn native_update_without_an_install_directory_fails() {
     let harness = Harness::new().await;

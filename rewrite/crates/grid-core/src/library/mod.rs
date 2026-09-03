@@ -1577,8 +1577,9 @@ impl InstallService {
             self.write_games_yml(&record);
         }
 
-        // Same lock discipline as the image hook above. Only a base
-        // install produces a row for the app to follow up on.
+        // Same lock discipline as the image hook above. `finalize_native_update`
+        // fires the same hook for the merge path, so every finalize that
+        // writes a full registry row reports one.
         let finalized = self.game_finalized_hook.read().unwrap().clone();
         if let Some(finalized) = finalized {
             finalized(record.clone());
@@ -1724,6 +1725,15 @@ impl InstallService {
         self.registry.upsert(&updated.row)?;
         if !updated.warning.is_empty() {
             append_warning(warning, &updated.warning);
+        }
+
+        // The merged row replaces the installed one, so the app's follow-on
+        // work (firmware, the update-set recompute) has to run here too —
+        // `finalize_base` never sees a native update. Same lock discipline:
+        // the guard is dropped before the hook runs.
+        let finalized = self.game_finalized_hook.read().unwrap().clone();
+        if let Some(finalized) = finalized {
+            finalized(updated.row.clone());
         }
         Ok(())
     }

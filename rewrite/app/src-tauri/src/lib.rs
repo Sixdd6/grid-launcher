@@ -179,8 +179,10 @@ pub fn run() {
                 // there is nothing to do.
                 //
                 // One hook, two effects: the firmware pass above, and the
-                // update-set recompute below — a finalized install is one of
-                // doc 10's re-check triggers, whatever the install mode was.
+                // update-set recompute below. grid-core fires this hook from
+                // the base, update and native-update merge finalizes — every
+                // path that lays a full registry row down, which is exactly
+                // doc 10's post-install re-check trigger.
                 let firmware = state.firmware.clone();
                 let session = state.session.clone();
                 let install_for_game = install.clone();

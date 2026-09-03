@@ -275,8 +275,9 @@ export const COMPAT_TOOLS_CHANGED_EVENT = 'compat-tools-changed';
 /// button text, already resolved ('Update' or 'Update to v1.2.0').
 export type UpdateRow = { rom_id: number; label: string };
 
-/// Emitted after every update-set recompute (connect, install, uninstall)
-/// and on disconnect (empty).
+/// Emitted after every update-set recompute (connect, install, uninstall),
+/// and on disconnect with an empty array — but only when the set was
+/// non-empty, so a disconnect from an up-to-date library emits nothing.
 export const UPDATES_CHANGED_EVENT = 'updates-changed';
 
 // Launcher self-update (rewrite/app/src-tauri/src/app_update.rs).
