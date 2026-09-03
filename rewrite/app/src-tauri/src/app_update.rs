@@ -3,8 +3,8 @@
 //! is newer than the running version, nothing downloaded or installed.
 //!
 //! Goes through grid-core's `ForgeClient`: no RomM credential can reach the
-//! forge, and the E2E build's `GRID_LAUNCHER_E2E_FORGE_BASE` redirect
-//! applies. Every failure is silent at debug level, naming the host only.
+//! forge, and the E2E forge redirect in `launch/forge.rs` applies to the
+//! request. Every failure is silent at debug level, naming the host only.
 
 use grid_core::launch::forge::ForgeClient;
 use semver::Version;
@@ -14,6 +14,8 @@ use tauri::{AppHandle, Emitter};
 pub const APP_UPDATE_EVENT: &str = "app-update-available";
 pub const LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/Sixdd6/grid-launcher/releases/latest";
+/// The only part of [`LATEST_RELEASE_URL`] that may reach a log line.
+const LATEST_RELEASE_HOST: &str = "api.github.com";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct AppUpdateNotice {
@@ -72,12 +74,29 @@ pub fn spawn_check(app: AppHandle) {
     });
 }
 
+/// The production check: builds the forge client and asks GitHub.
 async fn fetch_notice(current: &str) -> Option<AppUpdateNotice> {
     let client = ForgeClient::new().ok()?;
-    let response = match client.get(LATEST_RELEASE_URL, true).await {
+    fetch_notice_from(&client, LATEST_RELEASE_URL, current).await
+}
+
+/// One `releases/latest` request against `url`, decoded and compared against
+/// `current`. The endpoint is a parameter so tests can point it at a local
+/// mock server; production always passes [`LATEST_RELEASE_URL`].
+///
+/// Returns `Some` only for a release that carries both a tag and a page URL
+/// and whose tag is newer than `current`. Every failure — transport, non-2xx
+/// status, undecodable body, missing fields — is a silent `None` logged at
+/// debug level, naming [`LATEST_RELEASE_HOST`] and never the request URL.
+async fn fetch_notice_from(
+    client: &ForgeClient,
+    url: &str,
+    current: &str,
+) -> Option<AppUpdateNotice> {
+    let response = match client.get(url, true).await {
         Ok(response) => response,
         Err(_) => {
-            tracing::debug!("self-update check: request to api.github.com failed");
+            tracing::debug!("self-update check: request to {LATEST_RELEASE_HOST} failed");
             return None;
         }
     };
@@ -103,6 +122,8 @@ async fn fetch_notice(current: &str) -> Option<AppUpdateNotice> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
     fn newer_compares_semver_with_prerelease_precedence() {
@@ -133,56 +154,59 @@ mod tests {
         assert!(should_check("0.9.0-dev", true));
         assert!(should_check("0.9.0", false));
     }
-}
 
-/// Only meaningful when built with `--features e2e`: that is the only build
-/// where `ForgeClient::get` honors `GRID_LAUNCHER_E2E_FORGE_BASE`, which is
-/// how this test points `fetch_notice` at a `MockServer` instead of the
-/// real `api.github.com`. `cargo test` runs tests in the same binary on
-/// separate threads by default, and this process-global env var would race
-/// against a second test that also set it — so both the success and 404
-/// cases live in this one test function, the only place in the crate that
-/// touches the variable.
-#[cfg(all(test, feature = "e2e"))]
-mod e2e_tests {
-    use super::*;
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
-    const VAR: &str = "GRID_LAUNCHER_E2E_FORGE_BASE";
-    const RELEASE_PATH: &str = "/api.github.com/repos/Sixdd6/grid-launcher/releases/latest";
+    /// Mounts `GET /releases/latest` on a fresh mock server and returns its
+    /// full URL, so each test owns its own server and no shared state.
+    async fn mock_release(server: &MockServer, response: ResponseTemplate) -> String {
+        Mock::given(method("GET"))
+            .and(path("/releases/latest"))
+            .respond_with(response)
+            .mount(server)
+            .await;
+        format!("{}/releases/latest", server.uri())
+    }
 
     #[tokio::test]
-    async fn fetch_notice_reflects_the_mocked_forge_response() {
-        let ok_server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path(RELEASE_PATH))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+    async fn newer_release_becomes_a_notice() {
+        let server = MockServer::start().await;
+        let url = mock_release(
+            &server,
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "tag_name": "v9.9.9",
                 "html_url": "https://github.com/Sixdd6/grid-launcher/releases/tag/v9.9.9"
-            })))
-            .mount(&ok_server)
-            .await;
-        std::env::set_var(VAR, ok_server.uri());
-        let newer = fetch_notice("0.9.0").await;
+            })),
+        )
+        .await;
+        let client = ForgeClient::new().unwrap();
         assert_eq!(
-            newer,
+            fetch_notice_from(&client, &url, "0.9.0").await,
             Some(AppUpdateNotice {
                 tag: "v9.9.9".to_string(),
                 url: "https://github.com/Sixdd6/grid-launcher/releases/tag/v9.9.9".to_string(),
             })
         );
+    }
 
-        let not_found_server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path(RELEASE_PATH))
-            .respond_with(ResponseTemplate::new(404))
-            .mount(&not_found_server)
-            .await;
-        std::env::set_var(VAR, not_found_server.uri());
-        let none = fetch_notice("0.9.0").await;
+    #[tokio::test]
+    async fn a_failed_request_is_no_notice() {
+        let server = MockServer::start().await;
+        let url = mock_release(&server, ResponseTemplate::new(404)).await;
+        let client = ForgeClient::new().unwrap();
+        assert_eq!(fetch_notice_from(&client, &url, "0.9.0").await, None);
+    }
 
-        std::env::remove_var(VAR);
-        assert_eq!(none, None);
+    #[tokio::test]
+    async fn an_older_release_is_no_notice() {
+        let server = MockServer::start().await;
+        let url = mock_release(
+            &server,
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "tag_name": "v0.1.0",
+                "html_url": "https://github.com/Sixdd6/grid-launcher/releases/tag/v0.1.0"
+            })),
+        )
+        .await;
+        let client = ForgeClient::new().unwrap();
+        assert_eq!(fetch_notice_from(&client, &url, "0.9.0").await, None);
     }
 }
