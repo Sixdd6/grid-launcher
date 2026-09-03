@@ -63,6 +63,11 @@ impl ImageService {
     /// One job at a time (Python's `isRunning()` guard): a trigger while a
     /// job runs is dropped. Emits `images-replenished` when done, even with
     /// nothing to do, so the UI can clear any busy state.
+    ///
+    /// The guard releases `replenish_running` on every exit path, including
+    /// a panic unwinding out of `replenish_once` — otherwise a poisoned lock
+    /// or any other panic in there would leave the flag stuck `true` forever
+    /// and drop every later trigger.
     pub fn spawn_replenish(
         self: &Arc<Self>,
         app: AppHandle,
@@ -74,8 +79,9 @@ impl ImageService {
         }
         let svc = self.clone();
         tauri::async_runtime::spawn(async move {
+            let guard = ReplenishGuard(svc);
             let report = replenish_once(&session, &install).await;
-            svc.end_replenish();
+            drop(guard);
             let _ = app.emit(REPLENISHED_EVENT, report);
         });
     }
@@ -99,6 +105,17 @@ impl ImageService {
     }
 }
 
+/// Releases [`ImageService::replenish_running`] when dropped — on the normal
+/// completion path (dropped explicitly before the event emit) and on a panic
+/// unwinding out of the spawned task alike.
+struct ReplenishGuard(Arc<ImageService>);
+
+impl Drop for ReplenishGuard {
+    fn drop(&mut self) {
+        self.0.end_replenish();
+    }
+}
+
 async fn replenish_once(session: &SessionManager, install: &InstallService) -> ReplenishReport {
     let Some(client) = session.client() else {
         return ReplenishReport::default();
@@ -119,13 +136,25 @@ async fn replenish_once(session: &SessionManager, install: &InstallService) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::ImageService;
+    use super::{ImageService, ReplenishGuard};
     #[test]
     fn only_one_replenish_runs_at_a_time() {
         let svc = ImageService::new();
         assert!(svc.try_begin_replenish());
         assert!(!svc.try_begin_replenish());
         svc.end_replenish();
+        assert!(svc.try_begin_replenish());
+    }
+
+    /// Proves the drop guard itself releases the flag — the mechanism
+    /// `spawn_replenish` relies on to survive a panic unwinding out of
+    /// `replenish_once` (see its doc comment).
+    #[test]
+    fn replenish_guard_releases_on_drop() {
+        let svc = ImageService::new();
+        assert!(svc.try_begin_replenish());
+        let guard = ReplenishGuard(svc.clone());
+        drop(guard);
         assert!(svc.try_begin_replenish());
     }
 }

@@ -119,11 +119,22 @@ pub fn run() {
             let state = app.state::<AppState>();
             // R3: sweep synchronously before any image command can run.
             if let Ok(install) = &state.install {
-                let rows = install.registry().all().unwrap_or_default();
-                let base = Config::load(&Config::default_path())
-                    .map(|c| c.server_url)
-                    .unwrap_or_default();
-                images::ImageService::sweep_at_startup(state.session.cache(), &rows, &base);
+                // A registry read failure must never turn into an empty
+                // pinned set: that would let the sweep evict installed
+                // games' covers. Skip the sweep and log only the error text
+                // — never a path or URL — the hook still gets installed so
+                // a later replenish/prefetch keeps working.
+                match install.registry().all() {
+                    Ok(rows) => {
+                        let base = Config::load(&Config::default_path())
+                            .map(|c| c.server_url)
+                            .unwrap_or_default();
+                        images::ImageService::sweep_at_startup(state.session.cache(), &rows, &base);
+                    }
+                    Err(e) => {
+                        tracing::warn!("image cache sweep skipped: registry read failed: {e}");
+                    }
+                }
                 let session = state.session.clone();
                 install.set_image_hook(Arc::new(move |fields| {
                     images::ImageService::spawn_prefetch(session.clone(), fields);

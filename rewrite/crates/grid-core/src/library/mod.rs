@@ -906,7 +906,12 @@ impl InstallService {
 
         self.registry.upsert(&record)?;
 
-        if let Some(hook) = self.image_hook.read().unwrap().clone() {
+        // Bound to a `let` first so the read lock is released before the
+        // hook runs — an `if let` scrutinee would keep the temporary guard
+        // alive for the whole body, holding the lock across arbitrary hook
+        // code.
+        let hook = self.image_hook.read().unwrap().clone();
+        if let Some(hook) = hook {
             hook(ImageFields {
                 cover_small_path: record.cover_small_path.clone(),
                 cover_large_path: record.cover_large_path.clone(),
