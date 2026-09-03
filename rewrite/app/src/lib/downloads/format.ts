@@ -2,7 +2,7 @@
 // grid_launcher/library/downloads.py (see docs/porting/03-library-install.md,
 // "Display text per status" and "Aggregate status text"). No store imports here
 // so this module stays import-cycle-free.
-import type { DownloadEntry, DownloadStatus } from '../api';
+import type { DownloadEntry, DownloadKind, DownloadStatus } from '../api';
 
 const SIZE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
 
@@ -74,6 +74,32 @@ export function aggregate(entries: DownloadEntry[]): string {
     return `Installing 1 game${queuedSuffix}`;
   }
   return `${activeDownloadCount} active download${activeDownloadCount !== 1 ? 's' : ''}${queuedSuffix}`;
+}
+
+/**
+ * The drawer row's small kind badge (task-17-brief.md): blank for the base
+ * "just a game" kind (no badge renders — Downloads.svelte hides the span
+ * entirely when this is empty), and a short label for every install-specials
+ * kind so the drawer distinguishes them from ordinary game rows at a glance.
+ */
+export function kindLabel(kind: DownloadKind): string {
+  switch (kind) {
+    case 'base':
+      return '';
+    case 'ps4_content':
+    case 'xbox360_content':
+      return 'Content';
+    case 'native_update':
+      return 'Update';
+    case 'emulator':
+      return 'Emulator';
+    case 'compat_tool':
+      return 'Compat tool';
+    case 'firmware':
+      return 'Firmware';
+    default:
+      return '';
+  }
 }
 
 export type DownloadAction = 'cancel' | 'installing' | 'retry-dismiss' | 'dismiss';

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { DownloadEntry } from '../api';
-import { actionFor, aggregate, entryDetail, formatSize, percent } from './format';
+import type { DownloadEntry, DownloadKind } from '../api';
+import { actionFor, aggregate, entryDetail, formatSize, kindLabel, percent } from './format';
 
 function entry(overrides: Partial<DownloadEntry>): DownloadEntry {
   return {
@@ -222,5 +222,47 @@ describe('actionFor', () => {
 
   it('dismiss for completed', () => {
     expect(actionFor('completed')).toBe('dismiss');
+  });
+});
+
+describe('kindLabel', () => {
+  it('is empty for the base kind', () => {
+    expect(kindLabel('base')).toBe('');
+  });
+
+  it('is Content for ps4_content and xbox360_content', () => {
+    expect(kindLabel('ps4_content')).toBe('Content');
+    expect(kindLabel('xbox360_content')).toBe('Content');
+  });
+
+  it('is Update for native_update', () => {
+    expect(kindLabel('native_update')).toBe('Update');
+  });
+
+  it('is Emulator for emulator', () => {
+    expect(kindLabel('emulator')).toBe('Emulator');
+  });
+
+  it('is Compat tool for compat_tool', () => {
+    expect(kindLabel('compat_tool')).toBe('Compat tool');
+  });
+
+  it('is Firmware for firmware', () => {
+    expect(kindLabel('firmware')).toBe('Firmware');
+  });
+
+  it('covers every DownloadKind variant with a defined label', () => {
+    const kinds: DownloadKind[] = [
+      'base',
+      'ps4_content',
+      'xbox360_content',
+      'native_update',
+      'emulator',
+      'compat_tool',
+      'firmware',
+    ];
+    for (const kind of kinds) {
+      expect(() => kindLabel(kind)).not.toThrow();
+    }
   });
 });

@@ -5,6 +5,7 @@
   import { session, restore } from './lib/stores/session.svelte';
   import { init as initDownloads } from './lib/stores/downloads.svelte';
   import { init as initSessions } from './lib/stores/sessions.svelte';
+  import { init as initCompatTools } from './lib/stores/compatTools.svelte';
   import { initReplenishListener } from './lib/stores/installed.svelte';
 
   let shell = $state<ReturnType<typeof Shell> | null>(null);
@@ -34,10 +35,12 @@
     });
     const unDownloads = session.phase === 'shell' ? initDownloads() : undefined;
     const unSessions = session.phase === 'shell' ? initSessions() : undefined;
+    const unCompatTools = session.phase === 'shell' ? initCompatTools() : undefined;
     return () => {
       un.then((f) => f());
       unDownloads?.then((f) => f());
       unSessions?.then((f) => f());
+      unCompatTools?.then((f) => f());
     };
   });
 </script>

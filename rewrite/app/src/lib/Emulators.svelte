@@ -18,6 +18,8 @@
   } from './emulators/catalog';
   import { NO_DEFAULT_VALUE, resolveDefaultEmulatorValue } from './emulators/defaults';
   import { canSubmit, fanOutSummary, statusLabel } from './emulators/retroachievements';
+  import { isWindowsHost } from './emulators/compatTools';
+  import CompatTools from './emulators/CompatTools.svelte';
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -98,6 +100,83 @@
       .join(',')
   );
 
+  // RPCS3 PS3 firmware note/button (task-17-brief.md). Keyed by emulator
+  // entry name; `null` means the status was queried and no PS3UPDAT.PUP is
+  // present yet, `undefined` means it hasn't been queried yet — either way
+  // the note/button stay hidden until a query resolves with a non-empty path.
+  let rpcs3Status = $state<Map<string, string | null>>(new Map());
+  let ps3InstallPending = $state<Set<string>>(new Set());
+  let ps3Toast = $state<{ entryName: string; ok: boolean; text: string } | null>(null);
+
+  // The app's own OS, not the server's platform field (isNativePlatform) —
+  // gates whether the CompatTools section (wine/proton, Windows-only content
+  // has nothing to do with) renders at all.
+  const windowsHost = isWindowsHost(navigator.platform);
+
+  // Re-queried whenever a `firmware`-kind drawer entry reaches 'completed'
+  // (task-17-brief.md): the background firmware installer finishing means a
+  // freshly-downloaded PS3UPDAT.PUP may now be sitting next to RPCS3.
+  let firmwareCompletedSignature = $derived(
+    downloads.entries
+      .filter((e) => e.kind === 'firmware' && e.status === 'completed')
+      .map((e) => `${e.id}:${e.status}`)
+      .join(',')
+  );
+
+  function isRpcs3(name: string): boolean {
+    return name.toLowerCase().includes('rpcs3');
+  }
+
+  async function refreshRpcs3StatusFor(name: string) {
+    try {
+      const status = await api.rpcs3FirmwareStatus(name);
+      const next = new Map(rpcs3Status);
+      next.set(name, status.pup_path);
+      rpcs3Status = next;
+    } catch {
+      // Best-effort only — leave the prior status (or none) on failure.
+    }
+  }
+
+  async function refreshAllRpcs3Status() {
+    await Promise.all(emulators.filter((e) => isRpcs3(e.name)).map((e) => refreshRpcs3StatusFor(e.name)));
+  }
+
+  $effect(() => {
+    const signature = firmwareCompletedSignature;
+    void signature;
+    refreshAllRpcs3Status();
+  });
+
+  async function handleInstallPs3Firmware(name: string) {
+    ps3Toast = null;
+    ps3InstallPending = new Set(ps3InstallPending).add(name);
+    try {
+      const ok = await api.installPs3Firmware(name);
+      ps3Toast = ok
+        ? {
+            entryName: name,
+            ok: true,
+            text: 'PS3 firmware installation started — follow the RPCS3 dialog to complete.',
+          }
+        : {
+            entryName: name,
+            ok: false,
+            text: 'Could not launch RPCS3 to install firmware. Check the emulator path.',
+          };
+    } catch {
+      ps3Toast = {
+        entryName: name,
+        ok: false,
+        text: 'Could not launch RPCS3 to install firmware. Check the emulator path.',
+      };
+    } finally {
+      const next = new Set(ps3InstallPending);
+      next.delete(name);
+      ps3InstallPending = next;
+    }
+  }
+
   let panelEl = $state<HTMLElement | null>(null);
 
   $effect(() => {
@@ -136,6 +215,7 @@
     try {
       emulators = await api.listEmulators();
       listError = null;
+      void refreshAllRpcs3Status();
     } catch (err) {
       listError = errorMessage(err);
     } finally {
@@ -439,22 +519,43 @@
           <ul class="emulator-list">
             {#each emulators as e (e.name)}
               <li data-testid={`emulator-row-${sanitizeName(e.name)}`} class="emulator-row">
-                <div class="row-text">
-                  <span class="name">{e.name}</span>
-                  <span class="path" title={e.path}>{e.path}</span>
-                  {#if e.args}<span class="args">{e.args}</span>{/if}
+                <div class="row-main">
+                  <div class="row-text">
+                    <span class="name">{e.name}</span>
+                    <span class="path" title={e.path}>{e.path}</span>
+                    {#if e.args}<span class="args">{e.args}</span>{/if}
+                  </div>
+                  <div class="row-actions">
+                    <button data-testid={`emulator-edit-${sanitizeName(e.name)}`} onclick={() => openEdit(e)}>Edit</button>
+                    <button
+                      data-testid={`emulator-delete-${sanitizeName(e.name)}`}
+                      class:confirm={confirmingDelete === e.name}
+                      disabled={deletePending === e.name}
+                      onclick={() => handleDeleteClick(e.name)}
+                    >
+                      {confirmingDelete === e.name ? 'Confirm delete' : 'Delete'}
+                    </button>
+                  </div>
                 </div>
-                <div class="row-actions">
-                  <button data-testid={`emulator-edit-${sanitizeName(e.name)}`} onclick={() => openEdit(e)}>Edit</button>
-                  <button
-                    data-testid={`emulator-delete-${sanitizeName(e.name)}`}
-                    class:confirm={confirmingDelete === e.name}
-                    disabled={deletePending === e.name}
-                    onclick={() => handleDeleteClick(e.name)}
-                  >
-                    {confirmingDelete === e.name ? 'Confirm delete' : 'Delete'}
-                  </button>
-                </div>
+                {#if isRpcs3(e.name) && rpcs3Status.get(e.name)}
+                  <div class="ps3-firmware">
+                    <p data-testid={`emulator-ps3-firmware-note-${sanitizeName(e.name)}`} class="hint">
+                      PS3 firmware downloaded — click Install to activate it.
+                    </p>
+                    <button
+                      data-testid={`emulator-ps3-firmware-${sanitizeName(e.name)}`}
+                      disabled={ps3InstallPending.has(e.name)}
+                      onclick={() => handleInstallPs3Firmware(e.name)}
+                    >
+                      {ps3InstallPending.has(e.name) ? 'Installing…' : 'Install PS3 Firmware'}
+                    </button>
+                  </div>
+                {/if}
+                {#if ps3Toast && ps3Toast.entryName === e.name}
+                  <p data-testid="emulator-ps3-firmware-toast" class={ps3Toast.ok ? 'hint' : 'error'}>
+                    {ps3Toast.text}
+                  </p>
+                {/if}
               </li>
             {/each}
           </ul>
@@ -595,6 +696,10 @@
         </ul>
       {/if}
     </section>
+
+    {#if !windowsHost}
+      <CompatTools />
+    {/if}
 
     <section class="ra-section">
       <h3>RetroAchievements</h3>
@@ -886,12 +991,49 @@
 
   .emulator-row {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    flex-direction: column;
+    gap: 8px;
     padding: 8px 10px;
     border-radius: 8px;
     background: var(--border);
+  }
+
+  .row-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .ps3-firmware {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .ps3-firmware .hint {
+    margin: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .ps3-firmware button {
+    flex: none;
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .ps3-firmware button:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
 
   .row-text {

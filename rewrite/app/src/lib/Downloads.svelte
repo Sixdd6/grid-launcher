@@ -2,7 +2,7 @@
   import { slide } from 'svelte/transition';
   import { downloads } from './stores/downloads.svelte';
   import { api, type DownloadEntry } from './api';
-  import { aggregate, actionFor, entryDetail, percent } from './downloads/format';
+  import { aggregate, actionFor, entryDetail, kindLabel, percent } from './downloads/format';
 
   let { onOpenEmulators }: { onOpenEmulators: () => void } = $props();
 
@@ -123,7 +123,12 @@
         <div data-testid={`download-row-${e.id}`} class="row">
           <div class="row-main">
             <div class="row-text">
-              <span class="title">{e.title}</span>
+              <span class="title-row">
+                <span class="title">{e.title}</span>
+                {#if kindLabel(e.kind)}
+                  <span data-testid={`download-kind-${e.id}`} class="kind">{kindLabel(e.kind)}</span>
+                {/if}
+              </span>
               <span class="platform">{e.platform}</span>
               <span data-testid={`download-detail-${e.id}`} class="detail">{entryDetail(e)}</span>
               {#if errors[e.id]}
@@ -286,11 +291,33 @@
     min-width: 0;
   }
 
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
   .title {
+    flex: 1 1 auto;
+    min-width: 0;
     color: var(--text-h);
     font-weight: 500;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .kind {
+    flex: none;
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text);
+    opacity: 0.8;
     white-space: nowrap;
   }
 
