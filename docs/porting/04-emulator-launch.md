@@ -491,11 +491,10 @@ A game is "native" when its platform, casefolded and stripped, starts with `wind
 host OS — a Windows-platform title on Linux still takes this branch, which is why the compat
 tool exists.
 
-**Rust port (milestone 8):** the Details "Install" button reads "Install App" only for native
-platforms; every other platform keeps the existing milestone 2 label "Install" (Python:
+**Rust port (milestone 8):** the Details "Install" button reads "Install App" for native
+platforms only; every other platform keeps the existing milestone 2 label "Install" (Python:
 "Install Game"). `installLabel` (`app/src/lib/details/actions.ts:77-78`) returns `'Install
-App'` for a native platform and `'Install'` otherwise — the design spec's platform-wide
-"Install App" rename is narrowed to native platforms only.
+App'` for a native platform and `'Install'` otherwise.
 
 Executable resolution, `resolved_native_executable_path_for_game`
 (grid_launcher/library/install_paths.py:130):

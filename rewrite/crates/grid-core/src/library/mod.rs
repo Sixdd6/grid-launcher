@@ -599,6 +599,12 @@ pub struct EmulatorInstalled {
     /// `true` when no `[[emulators]]` entry with this name existed before
     /// this write — i.e. this was not a reinstall over an existing entry.
     pub fresh: bool,
+    /// Always `false` today: a managed compat-tool install returns from its
+    /// own finalize branch before this hook is reached, so the hook is only
+    /// ever fired for an ordinary emulator. Kept as a field, and checked by
+    /// the app's hook (`app/src-tauri/src/lib.rs`), as defense in depth — a
+    /// future compat-tool branch that starts firing the hook must not
+    /// silently trigger a firmware pass for a compat tool.
     pub compat_tool: bool,
 }
 

@@ -118,7 +118,7 @@
       <p class="empty">No downloads yet</p>
     {:else}
       {#each downloads.entries as e (e.id)}
-        {@const action = actionFor(e.status)}
+        {@const action = actionFor(e.status, e.kind)}
         {@const progress = rowProgress(e)}
         <div data-testid={`download-row-${e.id}`} class="row">
           <div class="row-main">

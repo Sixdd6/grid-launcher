@@ -256,8 +256,11 @@ export type CompatTool = { name: string; kind: string; path: string; source: str
 
 export type CompatToolsDto = { tools: CompatTool[]; default_tool: string };
 
-/// `pup_path` is `null` when the RPCS3 install has no `PS3UPDAT.PUP` yet —
-/// i.e. when the Install Firmware button should be enabled.
+/// `pup_path` is the `PS3UPDAT.PUP` beside the RPCS3 executable, or `null`
+/// when that install has none. The Emulators panel shows the firmware note
+/// and its Install Firmware button only when `pup_path` is set: the button
+/// hands the already-downloaded PUP to RPCS3 (Python parity — the download
+/// itself is the background firmware job's work, not this button's).
 export type Rpcs3FirmwareStatus = { pup_path: string | null };
 
 /// Emitted after `setDefaultCompatTool` and after a managed compat-tool

@@ -1,5 +1,5 @@
 //! App-layer firmware wiring: the three background firmware triggers and the
-//! one-job-per-emulator-directory guard they share.
+//! one-job-per-pass guard they share.
 //!
 //! grid-core owns every rule about *what* firmware goes where
 //! (`firmware::routing`, `firmware::install_platform_firmware`,
@@ -21,17 +21,25 @@
 //!   `commands::save_emulator` and from `spawn_for_emulator` when the
 //!   installed emulator is RPCS3 (emulator_ui_mixin.py:1747-1795).
 //!
-//! Concurrency: at most one firmware job per emulator directory at a time
-//! ([`FirmwareService::try_begin`]), released by a drop guard so a panic in
-//! the spawned task cannot wedge that directory forever. Two *different*
-//! emulators may install firmware at the same time.
+//! Concurrency ([`FirmwareService::try_begin`], released by a drop guard so
+//! a panic in the spawned task cannot wedge anything forever): a job is
+//! claimed by a [`PassKey`] — an emulator directory plus, for a per-game
+//! pass, the platform it is fetching for. A whole-directory pass
+//! ([`FirmwareService::spawn_for_emulator`], [`FirmwareService::spawn_ps3_firmware`])
+//! claims the directory itself, which also blocks every per-game pass for
+//! that directory; two per-game passes for *different* platforms in the
+//! same directory may run at the same time, because one emulator can serve
+//! many platforms (RetroArch serves all of them from one directory). Two
+//! different emulators never block each other at all.
 //!
-//! Repetition (D19): `install_platform_firmware` downloads every firmware
-//! record BEFORE its `skip_existing` write check, so a per-game pass that
-//! ran once already costs the full BIOS set again on the next launch of the
-//! same platform. [`FirmwareService`] therefore remembers which emulator
-//! directories have completed a per-game pass in this process and skips a
-//! [`FirmwareTrigger::Launch`] pass for those.
+//! Repetition (D19, amended by the final review): `install_platform_firmware`
+//! downloads every firmware record BEFORE its `skip_existing` write check,
+//! so a per-game pass that ran once already costs the full BIOS set again on
+//! the next launch of the same platform. [`FirmwareService`] therefore
+//! remembers which `(emulator directory, platform id)` pairs have completed
+//! a per-game pass in this process and skips a [`FirmwareTrigger::Launch`]
+//! pass for those. Keying by directory alone was wrong: with RetroArch the
+//! first completed pass would suppress every later platform's.
 //! [`FirmwareTrigger::Install`] always runs: a fresh install is exactly the
 //! moment the answer can have changed.
 //!
@@ -70,8 +78,8 @@ pub enum FirmwareTrigger {
     /// A game install just finalized. Always runs: this is the moment the
     /// firmware answer can have changed.
     Install,
-    /// A game is about to launch. Runs at most once per emulator directory
-    /// per process.
+    /// A game is about to launch. Runs at most once per
+    /// `(emulator directory, platform id)` pair per process.
     Launch,
 }
 
@@ -79,13 +87,26 @@ pub enum FirmwareTrigger {
 /// unwound instead of reporting an outcome. Never a normal-path value.
 const ABORTED_ROW_ERROR: &str = "firmware job aborted";
 
-/// Serializes background firmware jobs per emulator directory, and gates
-/// repeat per-game passes (D19).
+/// What one firmware pass is claimed and remembered by: the emulator
+/// directory, plus the platform id for a per-game pass ([`None`] for a pass
+/// that covers the whole directory — [`FirmwareService::spawn_for_emulator`]
+/// walks every platform the profile claims, and
+/// [`FirmwareService::spawn_ps3_firmware`] is the directory's one PS3 PUP).
+type PassKey = (PathBuf, Option<i64>);
+
+/// Builds a [`PassKey`] without cloning the caller's path twice.
+fn pass_key(dir: &Path, platform_id: Option<i64>) -> PassKey {
+    (dir.to_path_buf(), platform_id)
+}
+
+/// Serializes background firmware jobs per [`PassKey`], and gates repeat
+/// per-game passes (D19).
 pub struct FirmwareService {
-    in_flight: StdMutex<HashSet<PathBuf>>,
-    /// Emulator directories whose per-game pass has run to completion in
-    /// this process. Never persisted: a restart is a deliberate re-check.
-    completed: StdMutex<HashSet<PathBuf>>,
+    in_flight: StdMutex<HashSet<PassKey>>,
+    /// The `(emulator directory, platform id)` pairs whose per-game pass has
+    /// run to completion in this process. Never persisted: a restart is a
+    /// deliberate re-check.
+    completed: StdMutex<HashSet<PassKey>>,
 }
 
 impl FirmwareService {
@@ -96,54 +117,65 @@ impl FirmwareService {
         })
     }
 
-    /// The D19 gate: whether a per-game pass for `dir` should run at all.
-    /// Checked BEFORE [`Self::try_begin`], so a skipped launch pass never
-    /// touches the in-flight set.
+    /// The D19 gate: whether a per-game pass for `platform_id` under `dir`
+    /// should run at all. Checked BEFORE [`Self::try_begin`], so a skipped
+    /// launch pass never touches the in-flight set.
+    ///
+    /// The key carries the platform because one emulator directory can
+    /// serve many platforms: completing PlayStation's pass must not suppress
+    /// Nintendo 64's in the same RetroArch directory.
     ///
     /// A poisoned lock is recovered rather than propagated, same rule as
-    /// [`Self::try_begin`]: the guarded set is plain paths, and refusing
-    /// every later pass would be worse than continuing.
-    pub fn should_run(&self, dir: &Path, trigger: FirmwareTrigger) -> bool {
+    /// [`Self::try_begin`]: the guarded set is plain paths and ids, and
+    /// refusing every later pass would be worse than continuing.
+    pub fn should_run(&self, dir: &Path, platform_id: i64, trigger: FirmwareTrigger) -> bool {
         match trigger {
             FirmwareTrigger::Install => true,
             FirmwareTrigger::Launch => !self
                 .completed
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .contains(dir),
+                .contains(&pass_key(dir, Some(platform_id))),
         }
     }
 
-    /// Records that a per-game pass for `dir` finished. Called on the task's
-    /// normal path only — a panicking pass did not complete, so the next
-    /// launch is allowed to retry it.
-    pub fn mark_completed(&self, dir: &Path) {
+    /// Records that a per-game pass for `platform_id` under `dir` finished.
+    /// Called on the task's normal path only — a panicking pass did not
+    /// complete, so the next launch is allowed to retry it.
+    pub fn mark_completed(&self, dir: &Path, platform_id: i64) {
         self.completed
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .insert(dir.to_path_buf());
+            .insert(pass_key(dir, Some(platform_id)));
     }
 
-    /// Claims `dir` for one firmware job. `false` when a job already holds
-    /// it — the caller must then do nothing at all, not even spawn.
+    /// Claims one firmware job. `false` when a job already holds the claim —
+    /// the caller must then do nothing at all, not even spawn.
+    ///
+    /// `platform_id` is `Some` for a per-game pass and `None` for a pass
+    /// that covers the whole directory. A per-game pass is also refused
+    /// while a whole-directory pass for the same directory is in flight
+    /// (both keys are checked), because that pass already covers every
+    /// platform there.
     ///
     /// A poisoned lock is recovered rather than propagated: the guarded set
-    /// is a plain `HashSet` of paths, so a panicking holder leaves nothing
+    /// is a plain `HashSet`, so a panicking holder leaves nothing
     /// inconsistent behind, and refusing every later firmware job would be
     /// worse than continuing.
-    pub fn try_begin(&self, dir: &Path) -> bool {
-        self.in_flight
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(dir.to_path_buf())
+    pub fn try_begin(&self, dir: &Path, platform_id: Option<i64>) -> bool {
+        let mut in_flight = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
+        if platform_id.is_some() && in_flight.contains(&pass_key(dir, None)) {
+            return false;
+        }
+        in_flight.insert(pass_key(dir, platform_id))
     }
 
     /// Releases a [`Self::try_begin`] claim.
-    pub fn end(&self, dir: &Path) {
+    pub fn end(&self, dir: &Path, platform_id: Option<i64>) {
         self.in_flight
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .remove(dir);
+            .remove(&pass_key(dir, platform_id));
     }
 
     /// Installs the platform firmware a just-finalized game needs, in the
@@ -154,9 +186,10 @@ impl FirmwareService {
     /// no connected session, no platform id for the row's platform (the
     /// guard `install_for_game` itself does NOT carry — it takes an
     /// `i64`), no default emulator for that platform, no config entry by
-    /// that name, a [`FirmwareTrigger::Launch`] pass for a directory that
-    /// already completed one (D19), or a firmware job already running for
-    /// that emulator directory. Never fails and never blocks the caller.
+    /// that name, a [`FirmwareTrigger::Launch`] pass for a
+    /// `(directory, platform)` pair that already completed one (D19), a pass
+    /// for that same pair already running, or a whole-directory pass running
+    /// for that emulator. Never fails and never blocks the caller.
     pub fn spawn_for_game(
         self: &Arc<Self>,
         session: Arc<SessionManager>,
@@ -181,13 +214,13 @@ impl FirmwareService {
         let dir = emulator_dir_of(entry);
         // D19, before the in-flight claim: a launch pass for a directory
         // that already completed one this process is a pure re-download.
-        if !self.should_run(&dir, trigger) {
+        if !self.should_run(&dir, platform_id, trigger) {
             return;
         }
-        if !self.try_begin(&dir) {
+        if !self.try_begin(&dir, Some(platform_id)) {
             return;
         }
-        let guard = FirmwareGuard::new(self.clone(), dir.clone());
+        let guard = FirmwareGuard::new(self.clone(), dir.clone(), Some(platform_id));
         let service = self.clone();
         let config_dir = config_dir_of(&config_path);
         let platform = record.platform.clone();
@@ -210,7 +243,7 @@ impl FirmwareService {
             // Completion means "the pass finished", warnings included: a
             // warning is a per-file outcome, and re-downloading the whole
             // set on the next launch would not change it.
-            service.mark_completed(&dir);
+            service.mark_completed(&dir, platform_id);
         });
     }
 
@@ -259,10 +292,13 @@ impl FirmwareService {
             return;
         }
         let dir = emulator_dir_of(entry);
-        if !self.try_begin(&dir) {
+        // A whole-directory claim: this pass walks every platform the
+        // profile claims, so no per-game pass for the same directory may
+        // start alongside it.
+        if !self.try_begin(&dir, None) {
             return;
         }
-        let guard = FirmwareGuard::new(self.clone(), dir);
+        let guard = FirmwareGuard::new(self.clone(), dir, None);
         let label = entry.name.clone();
         tauri::async_runtime::spawn(async move {
             let _guard = guard;
@@ -290,8 +326,8 @@ impl FirmwareService {
     /// Does nothing when a PUP is already installed beside the executable,
     /// when the profile routes no firmware directory, when the server's
     /// platform map carries no PS3 platform (D17), when no session is
-    /// connected, or when that emulator directory already has a firmware
-    /// job running.
+    /// connected, or when that emulator directory already has a
+    /// whole-directory firmware job running.
     pub fn spawn_ps3_firmware(
         self: &Arc<Self>,
         session: Arc<SessionManager>,
@@ -323,10 +359,12 @@ impl FirmwareService {
             return;
         };
         let dir = emulator_dir_of(&entry);
-        if !self.try_begin(&dir) {
+        // The PS3 PUP is the directory's single firmware item, so this too
+        // claims the whole directory rather than one platform of it.
+        if !self.try_begin(&dir, None) {
             return;
         }
-        let guard = FirmwareGuard::new(self.clone(), dir);
+        let guard = FirmwareGuard::new(self.clone(), dir, None);
         let row_id = install.admit_external(PS3_FIRMWARE_TITLE, PS3_FIRMWARE_PLATFORM);
         // The drawer row is admitted BEFORE the task exists, so it must be
         // closed by a drop guard too: a panic unwinding out of the task
@@ -397,22 +435,27 @@ impl Drop for RowGuard {
 
 /// Releases a [`FirmwareService::try_begin`] claim when dropped — on the
 /// normal completion path and on a panic unwinding out of the spawned task
-/// alike. Without it a panicking job would block that emulator directory
-/// for the life of the process.
+/// alike. Without it a panicking job would block that pass key for the life
+/// of the process.
 struct FirmwareGuard {
     service: Arc<FirmwareService>,
     dir: PathBuf,
+    platform_id: Option<i64>,
 }
 
 impl FirmwareGuard {
-    fn new(service: Arc<FirmwareService>, dir: PathBuf) -> Self {
-        Self { service, dir }
+    fn new(service: Arc<FirmwareService>, dir: PathBuf, platform_id: Option<i64>) -> Self {
+        Self {
+            service,
+            dir,
+            platform_id,
+        }
     }
 }
 
 impl Drop for FirmwareGuard {
     fn drop(&mut self) {
-        self.service.end(&self.dir);
+        self.service.end(&self.dir, self.platform_id);
     }
 }
 
@@ -464,20 +507,56 @@ mod tests {
     use super::*;
 
     #[test]
-    fn one_firmware_job_per_directory() {
+    fn one_whole_directory_job_per_directory() {
         let svc = FirmwareService::new();
         let dir = PathBuf::from("/emulators/rpcs3");
-        assert!(svc.try_begin(&dir));
-        assert!(!svc.try_begin(&dir));
-        svc.end(&dir);
-        assert!(svc.try_begin(&dir));
+        assert!(svc.try_begin(&dir, None));
+        assert!(!svc.try_begin(&dir, None));
+        svc.end(&dir, None);
+        assert!(svc.try_begin(&dir, None));
+    }
+
+    #[test]
+    fn one_per_game_job_per_directory_and_platform() {
+        let svc = FirmwareService::new();
+        let dir = PathBuf::from("/emulators/retroarch");
+        assert!(svc.try_begin(&dir, Some(7)));
+        assert!(!svc.try_begin(&dir, Some(7)));
+        svc.end(&dir, Some(7));
+        assert!(svc.try_begin(&dir, Some(7)));
+    }
+
+    /// One emulator directory can serve many platforms (RetroArch serves
+    /// every platform from one directory), so two per-game passes for
+    /// different platforms must both be allowed to start.
+    #[test]
+    fn two_platforms_in_one_directory_both_run() {
+        let svc = FirmwareService::new();
+        let dir = PathBuf::from("/emulators/retroarch");
+        assert!(svc.try_begin(&dir, Some(7)));
+        assert!(svc.try_begin(&dir, Some(19)));
+    }
+
+    /// A whole-directory pass covers every platform there, so no per-game
+    /// pass for that directory may run beside it.
+    #[test]
+    fn a_directory_wide_pass_blocks_a_per_game_pass() {
+        let svc = FirmwareService::new();
+        let dir = PathBuf::from("/emulators/retroarch");
+        assert!(svc.try_begin(&dir, None));
+        assert!(!svc.try_begin(&dir, Some(7)));
+        // ...and a different directory is unaffected.
+        assert!(svc.try_begin(Path::new("/emulators/duckstation"), Some(7)));
+        // Releasing the directory-wide claim unblocks the per-game pass.
+        svc.end(&dir, None);
+        assert!(svc.try_begin(&dir, Some(7)));
     }
 
     #[test]
     fn different_directories_do_not_block_each_other() {
         let svc = FirmwareService::new();
-        assert!(svc.try_begin(Path::new("/emulators/rpcs3")));
-        assert!(svc.try_begin(Path::new("/emulators/duckstation")));
+        assert!(svc.try_begin(Path::new("/emulators/rpcs3"), None));
+        assert!(svc.try_begin(Path::new("/emulators/duckstation"), None));
     }
 
     /// Proves the drop guard itself releases the claim — the mechanism every
@@ -486,10 +565,14 @@ mod tests {
     fn guard_releases_on_drop() {
         let svc = FirmwareService::new();
         let dir = PathBuf::from("/emulators/rpcs3");
-        assert!(svc.try_begin(&dir));
-        let guard = FirmwareGuard::new(svc.clone(), dir.clone());
-        drop(guard);
-        assert!(svc.try_begin(&dir));
+        assert!(svc.try_begin(&dir, None));
+        drop(FirmwareGuard::new(svc.clone(), dir.clone(), None));
+        assert!(svc.try_begin(&dir, None));
+        svc.end(&dir, None);
+
+        assert!(svc.try_begin(&dir, Some(7)));
+        drop(FirmwareGuard::new(svc.clone(), dir.clone(), Some(7)));
+        assert!(svc.try_begin(&dir, Some(7)));
     }
 
     #[test]
@@ -503,15 +586,15 @@ mod tests {
         assert_eq!(platform_id_for(&ids, "   "), None);
     }
 
-    /// D19: the first launch pass for a directory runs; the second is
-    /// skipped once the first completed.
+    /// D19: the first launch pass for a `(directory, platform)` pair runs;
+    /// the second is skipped once the first completed.
     #[test]
-    fn a_launch_pass_runs_once_per_directory() {
+    fn a_launch_pass_runs_once_per_directory_and_platform() {
         let svc = FirmwareService::new();
         let dir = Path::new("/emulators/duckstation");
-        assert!(svc.should_run(dir, FirmwareTrigger::Launch));
-        svc.mark_completed(dir);
-        assert!(!svc.should_run(dir, FirmwareTrigger::Launch));
+        assert!(svc.should_run(dir, 7, FirmwareTrigger::Launch));
+        svc.mark_completed(dir, 7);
+        assert!(!svc.should_run(dir, 7, FirmwareTrigger::Launch));
     }
 
     /// D19: the gate is per directory — completing one emulator's pass
@@ -519,8 +602,20 @@ mod tests {
     #[test]
     fn the_launch_gate_is_per_directory() {
         let svc = FirmwareService::new();
-        svc.mark_completed(Path::new("/emulators/duckstation"));
-        assert!(svc.should_run(Path::new("/emulators/xemu"), FirmwareTrigger::Launch));
+        svc.mark_completed(Path::new("/emulators/duckstation"), 7);
+        assert!(svc.should_run(Path::new("/emulators/xemu"), 7, FirmwareTrigger::Launch));
+    }
+
+    /// D19 as amended: the gate is per platform too. RetroArch serves every
+    /// platform out of one directory, so a completed PlayStation pass must
+    /// not suppress Nintendo 64's on the next launch.
+    #[test]
+    fn the_launch_gate_is_per_platform_within_one_directory() {
+        let svc = FirmwareService::new();
+        let dir = Path::new("/emulators/retroarch");
+        svc.mark_completed(dir, 7);
+        assert!(!svc.should_run(dir, 7, FirmwareTrigger::Launch));
+        assert!(svc.should_run(dir, 19, FirmwareTrigger::Launch));
     }
 
     /// D19: an install trigger is never gated — a fresh install is exactly
@@ -529,24 +624,38 @@ mod tests {
     fn an_install_pass_runs_even_after_completion() {
         let svc = FirmwareService::new();
         let dir = Path::new("/emulators/duckstation");
-        assert!(svc.should_run(dir, FirmwareTrigger::Install));
-        svc.mark_completed(dir);
-        assert!(svc.should_run(dir, FirmwareTrigger::Install));
+        assert!(svc.should_run(dir, 7, FirmwareTrigger::Install));
+        svc.mark_completed(dir, 7);
+        assert!(svc.should_run(dir, 7, FirmwareTrigger::Install));
         // ...and the install pass's own completion still does not unblock
         // the launch gate in the other direction.
-        assert!(!svc.should_run(dir, FirmwareTrigger::Launch));
+        assert!(!svc.should_run(dir, 7, FirmwareTrigger::Launch));
+    }
+
+    /// A second Install-trigger pass for a *different* platform in the same
+    /// directory is not dropped by the in-flight claim while the first one
+    /// runs — the case that made an Install pass for one game silently skip
+    /// while another game's pass was still going.
+    #[test]
+    fn a_second_install_pass_for_another_platform_is_not_dropped() {
+        let svc = FirmwareService::new();
+        let dir = Path::new("/emulators/retroarch");
+        assert!(svc.should_run(dir, 7, FirmwareTrigger::Install));
+        assert!(svc.try_begin(dir, Some(7)));
+        assert!(svc.should_run(dir, 19, FirmwareTrigger::Install));
+        assert!(svc.try_begin(dir, Some(19)));
     }
 
     /// The launch gate and the in-flight claim are independent sets: a
-    /// completed pass must not leave the directory claimed.
+    /// completed pass must not leave the pass key claimed.
     #[test]
-    fn completing_a_pass_does_not_hold_the_directory() {
+    fn completing_a_pass_does_not_hold_the_claim() {
         let svc = FirmwareService::new();
         let dir = Path::new("/emulators/duckstation");
-        assert!(svc.try_begin(dir));
-        svc.mark_completed(dir);
-        svc.end(dir);
-        assert!(svc.try_begin(dir));
+        assert!(svc.try_begin(dir, Some(7)));
+        svc.mark_completed(dir, 7);
+        svc.end(dir, Some(7));
+        assert!(svc.try_begin(dir, Some(7)));
     }
 
     /// Builds a real `InstallService` over a temp registry, so the two

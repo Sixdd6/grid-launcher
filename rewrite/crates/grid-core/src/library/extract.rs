@@ -320,6 +320,28 @@ pub(crate) fn rar_entry_relative_path(raw: &str) -> Result<PathBuf, LibraryError
     Ok(path.to_path_buf())
 }
 
+/// Whether a RAR entry's `file_attr` describes a symbolic link.
+///
+/// `unrar` 0.5.8's `FileHeader` exposes no `is_symlink()`; it exposes the
+/// raw `file_attr` word, which for a Unix-host entry is the `st_mode` value
+/// verbatim. This is the same test the bundled unrar C++ makes
+/// (`IsLink(uint Attr)` in `filefn.cpp`: `(Attr & 0xF000) == 0xA000`, i.e.
+/// `S_IFMT`/`S_IFLNK`).
+///
+/// SECURITY: unrar's extraction path materializes a real symlink for such
+/// an entry, and its payload is the link target. A link planted inside the
+/// destination is something a later entry can then be written *through*,
+/// which escapes a traversal guard that only inspects entry names. Nothing
+/// we install needs a link, so link entries are skipped outright. (The other
+/// readers cannot plant one: the `zip` crate writes a link entry's target
+/// path out as a plain file, and `tar`'s `unpack_in` applies its own
+/// containment check.) A Windows-host entry carries Windows attribute bits
+/// instead, and no combination of those sets `0xA000`, so this never
+/// misfires on one.
+fn rar_entry_is_symlink(file_attr: u32) -> bool {
+    file_attr & 0xF000 == 0xA000
+}
+
 /// Extracts a RAR archive via the vendored `unrar` library (there is no
 /// pure-Rust RAR decoder; RAR's format is proprietary and not documented
 /// well enough to reimplement safely). Two passes: `open_for_listing`
@@ -352,11 +374,23 @@ fn extract_rar(archive: &Path, dest: &Path, progress: ExtractProgress) -> Result
         let entry = header.entry();
         let raw_name = entry.filename.to_string_lossy().into_owned();
         let is_directory = entry.is_directory();
+        let is_symlink = rar_entry_is_symlink(entry.file_attr);
         let size = entry.unpacked_size;
         let relative = rar_entry_relative_path(&raw_name)?;
         let out_path = dest.join(&relative);
 
-        cursor = if is_directory {
+        cursor = if is_symlink {
+            // SECURITY: never materialize a link out of an untrusted
+            // archive — see `rar_entry_is_symlink`. Skipped, not an error:
+            // the rest of the archive still extracts. The skipped entry
+            // still counts toward `processed`, since the listing pass
+            // counted it toward `total`.
+            processed += size;
+            progress(processed, total);
+            header
+                .skip()
+                .map_err(|e| LibraryError::Extract(e.to_string()))?
+        } else if is_directory {
             fs::create_dir_all(&out_path)
                 .map_err(|e| LibraryError::Extract(format!("rar: {e}")))?;
             header
@@ -840,6 +874,31 @@ mod tests {
     #[test]
     fn rar_entry_relative_path_rejects_nul_bytes() {
         assert!(rar_entry_relative_path("dir/evil\0.bin").is_err());
+    }
+
+    // --- rar_entry_is_symlink -------------------------------------------------
+
+    /// Tested against raw attribute words rather than a real archive: there
+    /// is no `rar` binary on the build machines, so a link-carrying fixture
+    /// cannot be produced here. The values are the ones a Unix-host RAR
+    /// writes into `file_attr` (the `st_mode` verbatim).
+    #[test]
+    fn rar_entry_is_symlink_matches_the_unix_link_mode() {
+        // S_IFLNK | 0o777 — what a Unix-host RAR stores for a symlink.
+        assert!(rar_entry_is_symlink(0o120_777));
+        assert!(rar_entry_is_symlink(0xA1FF));
+        // Plain files, directories, and a setuid file are not links.
+        assert!(!rar_entry_is_symlink(0o100_644));
+        assert!(!rar_entry_is_symlink(0o040_755));
+        assert!(!rar_entry_is_symlink(0o104_755));
+        // Windows-host attribute words (READONLY, ARCHIVE, DIRECTORY,
+        // REPARSE_POINT) never match the Unix link mode.
+        for attr in [0x0001, 0x0010, 0x0020, 0x0400, 0x0080] {
+            assert!(
+                !rar_entry_is_symlink(attr),
+                "matched windows attr {attr:#x}"
+            );
+        }
     }
 
     // --- extract_iso_with_7z --------------------------------------------------

@@ -22,6 +22,42 @@ pub(crate) fn is_zip_bytes(data: &[u8]) -> bool {
         || data.starts_with(b"PK\x07\x08")
 }
 
+/// Whether `file_name` is safe to join onto a firmware target directory:
+/// a single plain path component, so the join can only ever produce a file
+/// directly inside that directory.
+///
+/// SECURITY: `file_name` comes from the server's firmware record and is
+/// never validated by the API layer. A record named `../../x`, `/abs/x` or
+/// `a/b.bin` would otherwise write outside the routed firmware directory.
+/// The check is deliberately strict — no separator of either flavour, no
+/// `.`/`..`, and the name must survive a `Path::file_name()` round trip
+/// unchanged — because firmware records legitimately carry bare file names
+/// only.
+pub(crate) fn is_plain_file_name(file_name: &str) -> bool {
+    if file_name.is_empty()
+        || file_name.contains('/')
+        || file_name.contains('\\')
+        || file_name.contains('\0')
+        || file_name == "."
+        || file_name == ".."
+    {
+        return false;
+    }
+    Path::new(file_name).file_name() == Some(std::ffi::OsStr::new(file_name))
+}
+
+/// The warning text for a firmware record whose file name failed
+/// [`is_plain_file_name`]. Uses the same
+/// `"Failed to write firmware <name> to <dest>: <error>"` shape as every
+/// other write failure (firmware_install.py:180-183) so the drawer and the
+/// log read the same either way.
+pub(crate) fn invalid_name_warning(file_name: &str, target_dir: &Path) -> String {
+    format!(
+        "Failed to write firmware {file_name} to {}: invalid firmware file name",
+        target_dir.display()
+    )
+}
+
 /// Writes one downloaded firmware file into `target_dir`, dispatching by
 /// extension/content: `.7z`/`.rar` extract-and-flatten via the shared
 /// extractor; a `.zip` (by name or by sniffed content) is kept as-is when
@@ -37,6 +73,12 @@ pub(crate) fn write_firmware_file(
     keep_archive: bool,
     opts: FirmwareOptions,
 ) -> Result<(), String> {
+    // Defense in depth: `install_platform_firmware` already rejects a
+    // hostile record before it downloads anything, so this only fires for a
+    // direct caller. Both paths produce the identical warning text.
+    if !is_plain_file_name(file_name) {
+        return Err(invalid_name_warning(file_name, target_dir));
+    }
     let lower = file_name.to_lowercase();
 
     if lower.ends_with(".7z") {
@@ -287,6 +329,74 @@ mod tests {
         assert!(is_zip_bytes(b"PK\x05\x06rest"));
         assert!(is_zip_bytes(b"PK\x07\x08rest"));
         assert!(!is_zip_bytes(b"not-a-zip"));
+    }
+
+    // --- hostile file names -----------------------------------------------------
+
+    /// SECURITY: the server-supplied record name must never escape the
+    /// routed firmware directory. Every rejected shape produces the write
+    /// warning and leaves the target directory untouched.
+    #[test]
+    fn a_file_name_that_is_not_a_plain_component_is_rejected() {
+        for name in [
+            "../x", "../../x", "/abs/x", "a/b.bin", ".", "..", "", "a\\b.bin",
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let target_dir = root.path().join("target");
+            fs::create_dir_all(&target_dir).unwrap();
+
+            let err = write_firmware_file(
+                name,
+                b"HOSTILE",
+                &target_dir,
+                false,
+                FirmwareOptions::default(),
+            )
+            .unwrap_err();
+            assert_eq!(
+                err,
+                format!(
+                    "Failed to write firmware {name} to {}: invalid firmware file name",
+                    target_dir.display()
+                ),
+                "unexpected warning for {name:?}"
+            );
+            // Nothing anywhere under the temp root was created — neither
+            // inside the target directory nor beside it.
+            assert_eq!(
+                fs::read_dir(&target_dir).unwrap().count(),
+                0,
+                "{name:?} wrote into the target directory"
+            );
+            assert_eq!(
+                fs::read_dir(root.path()).unwrap().count(),
+                1,
+                "{name:?} wrote outside the target directory"
+            );
+        }
+    }
+
+    #[test]
+    fn a_plain_file_name_is_accepted() {
+        assert!(is_plain_file_name("gc-ntsc-12-101.bin"));
+        assert!(is_plain_file_name("PS3UPDAT.PUP"));
+        assert!(is_plain_file_name("...bin"));
+        assert!(!is_plain_file_name("./x"));
+        assert!(!is_plain_file_name("x\0y"));
+
+        let dir = tempfile::tempdir().unwrap();
+        write_firmware_file(
+            "gc-ntsc-12-101.bin",
+            b"RAWDATA",
+            dir.path(),
+            false,
+            FirmwareOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read(dir.path().join("gc-ntsc-12-101.bin")).unwrap(),
+            b"RAWDATA"
+        );
     }
 
     // --- flat write -------------------------------------------------------------

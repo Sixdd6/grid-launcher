@@ -957,6 +957,9 @@ archive into an existing install rather than replacing it:
    non-empty values — these fields: `rom_id`, `rom_file_name`, `server_updated_at`,
    `description`, `rating`, `genres`, `regions`, `filesize_bytes`, `screenshot_urls`,
    `ra_id` (archive_preparation.py:1294-1308).
+   **Rust port (milestone 8):** `rom_id` is overwritten unconditionally, because
+   `RomDetail.id` is a non-optional `i64` there — Python's "only non-empty" guard is
+   vacuous for that field, since the update payload always carries a rom id.
 2. Require a non-blank `extracted_dir`
    (`"Installed game directory not found - reinstall the game and try again."`) that
    exists as a directory (`"Installed game directory does not exist: <path>"`).

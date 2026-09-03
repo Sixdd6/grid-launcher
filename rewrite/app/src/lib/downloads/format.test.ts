@@ -223,6 +223,30 @@ describe('actionFor', () => {
   it('dismiss for completed', () => {
     expect(actionFor('completed')).toBe('dismiss');
   });
+
+  it('keeps every non-firmware kind on the status-only rule', () => {
+    expect(actionFor('downloading', 'base')).toBe('cancel');
+    expect(actionFor('downloading', 'emulator')).toBe('cancel');
+    expect(actionFor('downloading', 'ps4_content')).toBe('cancel');
+    expect(actionFor('installing', 'native_update')).toBe('installing');
+    expect(actionFor('failed', 'compat_tool')).toBe('retry-dismiss');
+    expect(actionFor('completed', 'xbox360_content')).toBe('dismiss');
+  });
+
+  // A firmware row is an external entry with no queue slot: Cancel and
+  // Retry are both no-ops on it, so neither button may render.
+  it('offers no action on a live firmware row', () => {
+    expect(actionFor('queued', 'firmware')).toBe('none');
+    expect(actionFor('downloading', 'firmware')).toBe('none');
+    expect(actionFor('installing', 'firmware')).toBe('none');
+    expect(actionFor('cancelling', 'firmware')).toBe('none');
+  });
+
+  it('offers only dismiss on a terminal firmware row', () => {
+    expect(actionFor('completed', 'firmware')).toBe('dismiss');
+    expect(actionFor('failed', 'firmware')).toBe('dismiss');
+    expect(actionFor('cancelled', 'firmware')).toBe('dismiss');
+  });
 });
 
 describe('kindLabel', () => {

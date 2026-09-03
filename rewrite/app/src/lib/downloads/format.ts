@@ -102,9 +102,22 @@ export function kindLabel(kind: DownloadKind): string {
   }
 }
 
-export type DownloadAction = 'cancel' | 'installing' | 'retry-dismiss' | 'dismiss';
+export type DownloadAction = 'cancel' | 'installing' | 'retry-dismiss' | 'dismiss' | 'none';
 
-export function actionFor(status: DownloadStatus): DownloadAction {
+/**
+ * Which buttons a drawer row offers.
+ *
+ * A `firmware` row is the background firmware installer's external entry: it
+ * owns no queue slot, so `cancel_install` cannot stop it and `retry_install`
+ * returns without doing anything (`JobKey::External`). It therefore gets no
+ * button at all while it is live, and only `Dismiss` once it is terminal —
+ * never a Cancel or Retry that would do nothing. Every other kind keeps the
+ * behavior it had.
+ */
+export function actionFor(status: DownloadStatus, kind: DownloadKind = 'base'): DownloadAction {
+  if (kind === 'firmware') {
+    return LIVE_STATUSES.includes(status) ? 'none' : 'dismiss';
+  }
   switch (status) {
     case 'queued':
     case 'downloading':

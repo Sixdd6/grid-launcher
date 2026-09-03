@@ -279,6 +279,65 @@ async fn record_missing_id_or_blank_name_skipped() {
     assert!(fs::read_dir(dir.path()).unwrap().next().is_none());
 }
 
+/// SECURITY: a hostile server record whose `file_name` escapes the target
+/// directory is rejected before the content GET, so it costs no bytes and
+/// nothing is written anywhere.
+#[tokio::test]
+async fn a_traversal_file_name_is_warned_and_never_downloaded() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/firmware"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"id": 3, "file_name": "../../outside.bin"},
+            {"id": 4, "file_name": "/etc/outside.bin"},
+            {"id": 5, "file_name": "nested/inside.bin"}
+        ])))
+        .mount(&server)
+        .await;
+    // Every content route is mounted and would succeed: an untouched
+    // request log is therefore proof the guard runs BEFORE the download,
+    // not after it.
+    Mock::given(method("GET"))
+        .and(path("/api/firmware/3/content/../../outside.bin"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"HOSTILE".to_vec()))
+        .mount(&server)
+        .await;
+
+    let root = tempfile::tempdir().unwrap();
+    let target_dir = root.path().join("target");
+    fs::create_dir_all(&target_dir).unwrap();
+    let targets = [plain(&target_dir)];
+
+    let result =
+        install_platform_firmware(&client(&server), 19, &targets, FirmwareOptions::default()).await;
+    assert_eq!(
+        result,
+        vec![
+            format!(
+                "Failed to write firmware ../../outside.bin to {}: invalid firmware file name",
+                target_dir.display()
+            ),
+            format!(
+                "Failed to write firmware /etc/outside.bin to {}: invalid firmware file name",
+                target_dir.display()
+            ),
+            format!(
+                "Failed to write firmware nested/inside.bin to {}: invalid firmware file name",
+                target_dir.display()
+            ),
+        ]
+    );
+    assert!(fs::read_dir(&target_dir).unwrap().next().is_none());
+    // Only the listing GET reached the server.
+    let requests = server.received_requests().await.unwrap();
+    assert!(
+        requests.iter().all(|r| r.url.path() == "/api/firmware"),
+        "a rejected record was downloaded: {requests:?}"
+    );
+    // Nothing landed beside the target directory either.
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+}
+
 #[tokio::test]
 async fn routed_zip_to_correct_region_dir() {
     let server = MockServer::start().await;

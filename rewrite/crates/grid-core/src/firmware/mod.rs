@@ -144,6 +144,17 @@ pub async fn install_platform_firmware(
             continue;
         }
 
+        // SECURITY: the record's file name is server-supplied and is joined
+        // onto each routed target directory. Reject anything that is not a
+        // single plain path component BEFORE the download, so a hostile
+        // record costs no bytes and never reaches a write path.
+        if !write::is_plain_file_name(&file_name) {
+            for target in &applicable {
+                warnings.push(write::invalid_name_warning(&file_name, &target.path));
+            }
+            continue;
+        }
+
         let lower = file_name.to_lowercase();
         let keep_archive = !opts.extract_zip_with_paths
             && lower.ends_with(".zip")

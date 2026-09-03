@@ -248,7 +248,9 @@ pub async fn install_compat_tool(
 // --- RPCS3 PS3 firmware -------------------------------------------------------
 
 /// Whether an RPCS3 install already has its `PS3UPDAT.PUP`, and where.
-/// `None` means the Install Firmware button should be enabled.
+/// `None` means there is no PUP to install yet, so the frontend renders no
+/// firmware note and no Install Firmware button — the button exists to hand
+/// an already-downloaded PUP to RPCS3 (Python parity).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Rpcs3FirmwareStatus {
     pub pup_path: Option<String>,

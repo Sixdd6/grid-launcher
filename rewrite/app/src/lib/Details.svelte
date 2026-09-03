@@ -304,7 +304,16 @@
           <div class="action">
             {#if liveEntry}
               <button disabled>Installing…</button>
-              <button data-testid="details-cancel" class="secondary" disabled={cancelPending} onclick={handleCancel}>
+              <!-- `cancel_for_rom` leaves a finalizing entry alone —
+                   extraction is not cancellable — so the button is disabled
+                   rather than silently doing nothing while it runs. -->
+              <button
+                data-testid="details-cancel"
+                class="secondary"
+                disabled={cancelPending || liveEntry.status === 'installing'}
+                title={liveEntry.status === 'installing' ? 'Installing — this step cannot be cancelled' : undefined}
+                onclick={handleCancel}
+              >
                 {cancelPending ? 'Cancelling…' : 'Cancel'}
               </button>
             {:else if liveSession}
