@@ -6,6 +6,8 @@
   import { init as initDownloads } from './lib/stores/downloads.svelte';
   import { init as initSessions } from './lib/stores/sessions.svelte';
   import { init as initCompatTools } from './lib/stores/compatTools.svelte';
+  import { init as initUpdates } from './lib/stores/updates.svelte';
+  import { initAppUpdate } from './lib/stores/appUpdate.svelte';
   import { initReplenishListener } from './lib/stores/installed.svelte';
 
   let shell = $state<ReturnType<typeof Shell> | null>(null);
@@ -25,6 +27,15 @@
     };
   });
 
+  // The self-update notice can arrive before the shell mounts, same
+  // reasoning as initReplenishListener above.
+  $effect(() => {
+    const un = initAppUpdate();
+    return () => {
+      un.then((f) => f());
+    };
+  });
+
   $effect(() => {
     if (!restored) {
       restored = true;
@@ -36,11 +47,13 @@
     const unDownloads = session.phase === 'shell' ? initDownloads() : undefined;
     const unSessions = session.phase === 'shell' ? initSessions() : undefined;
     const unCompatTools = session.phase === 'shell' ? initCompatTools() : undefined;
+    const unUpdates = session.phase === 'shell' ? initUpdates() : undefined;
     return () => {
       un.then((f) => f());
       unDownloads?.then((f) => f());
       unSessions?.then((f) => f());
       unCompatTools?.then((f) => f());
+      unUpdates?.then((f) => f());
     };
   });
 </script>
