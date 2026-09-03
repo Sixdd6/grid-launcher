@@ -3,6 +3,7 @@
 //! docs/superpowers/specs/2026-09-02-covers-images-design.md.
 
 pub mod cache;
+pub mod sweep;
 pub mod urls;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
