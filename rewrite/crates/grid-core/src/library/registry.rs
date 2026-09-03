@@ -153,7 +153,7 @@ const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_pa
 /// `platform_key` are not part of this type: they are computed from `title`
 /// and `platform` at write and lookup time (`value.trim().to_lowercase()`),
 /// never stored differently from that derivation.
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct InstalledGame {
     pub title: String,
     pub platform: String,

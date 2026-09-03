@@ -6,6 +6,7 @@
 //! See `docs/porting/03-library-install.md` and the sibling Python modules
 //! under `grid_launcher/library/` for the behavior each submodule ports.
 
+pub mod native;
 pub mod ps3;
 pub mod ps4;
 pub mod xenia;
