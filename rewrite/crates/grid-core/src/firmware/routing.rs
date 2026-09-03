@@ -30,7 +30,7 @@ use crate::autoconfig::cores::{
     compatibility_map, core_config_files_metadata, core_entries, core_firmware_metadata,
     core_saves_files_metadata, cores_for_platform, CoreEntry,
 };
-use crate::autoconfig::paths::{expand_user, resolve_best_effort};
+use crate::autoconfig::paths::{self, expand_user, resolve_best_effort};
 use crate::autoconfig::{dolphin, is_cemu, is_dolphin, is_retroarch, retroarch};
 use crate::config::{Config, EmulatorEntry};
 use crate::launch::profiles::{platform_matches_keywords, profile_for_entry, EmulatorProfile};
@@ -96,11 +96,11 @@ pub fn emulator_dir_of(entry: &EmulatorEntry) -> PathBuf {
     if entry.path.is_empty() {
         return PathBuf::new();
     }
-    let expanded = expand_user(&entry.path);
-    if expanded.is_dir() {
-        return expanded;
-    }
-    expanded.parent().map(Path::to_path_buf).unwrap_or_default()
+    // The "itself when a directory, else the parent" rule lives in exactly
+    // one place: `paths::emulator_dir` (paths.rs:104). Its `None` (no parent
+    // at all — a filesystem root) collapses to the same empty `PathBuf` a
+    // blank entry path yields.
+    paths::emulator_dir(&expand_user(&entry.path)).unwrap_or_default()
 }
 
 /// The firmware target directories for one emulator entry
@@ -638,6 +638,25 @@ mod tests {
         assert_eq!(
             targets,
             vec![plain(resolve_best_effort(&dir.join("system")))]
+        );
+    }
+
+    #[test]
+    fn xemu_profile_dot_target_is_the_emulator_dir() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("Xemu");
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("xemu.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        let e = entry("Xemu (Xbox)", &exe);
+
+        let targets = targets_for_entry(&e, Some(catalog_profile("Xemu (Xbox)")), "", temp.path());
+
+        assert_eq!(targets, vec![plain(resolve_best_effort(&dir))]);
+        // Xbox firmware routes to that one plain target.
+        assert_eq!(
+            crate::firmware::resolve_targets("xbox-firmware.zip", &targets),
+            vec![&targets[0]]
         );
     }
 

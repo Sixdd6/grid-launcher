@@ -12,27 +12,22 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::autoconfig::paths::{expand_user, resolve_best_effort};
+use crate::autoconfig::paths::{self, expand_user, resolve_best_effort};
 use crate::launch::spawn::clean_env;
 
 /// The `PS3UPDAT.PUP` sitting beside `emulator_path`, or `None` when there
 /// is none (`rpcs3_pup_path`, rpcs3.py:274-283).
 ///
 /// The search directory is `emulator_path` itself when it is an existing
-/// directory, else its parent — the same rule
-/// [`crate::autoconfig::paths::emulator_dir`] applies. A blank path never
-/// resolves. The returned path is `.resolve()`d, matching Python.
+/// directory, else its parent — [`crate::autoconfig::paths::emulator_dir`],
+/// the crate's single home for that rule. A blank path never resolves. The
+/// returned path is `.resolve()`d, matching Python.
 pub fn rpcs3_pup_path(emulator_path: &str) -> Option<PathBuf> {
     let text = emulator_path.trim();
     if text.is_empty() {
         return None;
     }
-    let expanded = expand_user(text);
-    let emulator_dir = if expanded.is_dir() {
-        expanded
-    } else {
-        expanded.parent().map(Path::to_path_buf).unwrap_or_default()
-    };
+    let emulator_dir = paths::emulator_dir(&expand_user(text)).unwrap_or_default();
     let pup = emulator_dir.join("PS3UPDAT.PUP");
     // `is_file()` already implies `exists()` — Python checks both.
     pup.is_file().then(|| resolve_best_effort(&pup))
@@ -41,11 +36,15 @@ pub fn rpcs3_pup_path(emulator_path: &str) -> Option<PathBuf> {
 /// Launches `rpcs3 --installfw <pup>` and returns whether the process
 /// started (`trigger_rpcs3_firmware_install`, rpcs3.py:365-386).
 ///
-/// Both paths must canonicalize to existing files. The child is spawned and
-/// deliberately NOT waited on: RPCS3 shows its own install dialog and
-/// outlives this call, exactly like Python's bare `subprocess.Popen`. The
-/// environment is rebuilt from [`clean_env`] so an AppImage's
-/// `LD_LIBRARY_PATH` shim does not leak into the child.
+/// Both paths must canonicalize to existing files. This call does not block:
+/// RPCS3 shows its own install dialog and outlives it, exactly like Python's
+/// bare `subprocess.Popen`. A detached thread owns the
+/// [`std::process::Child`] and blocks in `wait()` on it, purely so the
+/// process is reaped once RPCS3 exits — a long-lived launcher would
+/// otherwise leave one zombie behind per firmware install. Python needs no
+/// such thread because `Popen`'s finalizer reaps the child when the object
+/// is collected. The environment is rebuilt from [`clean_env`] so an
+/// AppImage's `LD_LIBRARY_PATH` shim does not leak into the child.
 pub fn spawn_rpcs3_installfw(exe: &Path, pup: &Path) -> bool {
     let Ok(exe) = std::fs::canonicalize(exe) else {
         return false;
@@ -60,14 +59,27 @@ pub fn spawn_rpcs3_installfw(exe: &Path, pup: &Path) -> bool {
         return false;
     };
 
-    Command::new(&exe)
+    let spawned = Command::new(&exe)
         .arg("--installfw")
         .arg(&pup)
         .current_dir(working_dir)
         .env_clear()
         .envs(clean_env())
-        .spawn()
-        .is_ok()
+        .spawn();
+
+    match spawned {
+        Ok(mut child) => {
+            // Detached reaper: the thread owns the `Child`, blocks in
+            // `wait()` until RPCS3 exits, and then ends. It never keeps the
+            // process alive on its own and never reports back — the caller
+            // has already been told the launch succeeded.
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 /// The server platform id for PlayStation 3, or `None`
@@ -106,6 +118,80 @@ mod tests {
         std::fs::create_dir_all(temp.path().join("PS3UPDAT.PUP")).unwrap();
 
         assert!(rpcs3_pup_path(exe.to_str().unwrap()).is_none());
+    }
+
+    /// Polls `path` until it holds non-blank text, up to ~2s.
+    #[cfg(target_os = "linux")]
+    fn wait_for_text(path: &Path) -> Option<String> {
+        for _ in 0..200 {
+            if let Ok(text) = std::fs::read_to_string(path) {
+                if !text.trim().is_empty() {
+                    return Some(text);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        None
+    }
+
+    /// Whether `/proc/<pid>` disappears within ~2s. An exited-but-unreaped
+    /// child keeps its entry forever (state `Z`); a reaped one is gone.
+    #[cfg(target_os = "linux")]
+    fn wait_until_reaped(pid: &str) -> bool {
+        let stat = std::path::PathBuf::from(format!("/proc/{pid}/stat"));
+        for _ in 0..200 {
+            if !stat.exists() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        false
+    }
+
+    /// The spawn path end to end: the child really runs with
+    /// `--installfw <pup>` and is reaped after it exits.
+    ///
+    /// Linux-only because the reaping half is asserted through procfs. The
+    /// assertion is exact rather than incidental: nothing else in this test
+    /// binary ever calls `wait()`, so without the detached reaper thread the
+    /// exited stub would sit in `Z` state — and `/proc/<pid>` would still be
+    /// there — for the whole run, and the poll would time out.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn installfw_spawns_the_child_and_reaps_it() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let marker = temp.path().join("argv.txt");
+        let exe = temp.path().join("rpcs3-stub.sh");
+        std::fs::write(
+            &exe,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$$\" \"$@\" > '{}'\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let pup = temp.path().join("PS3UPDAT.PUP");
+        std::fs::write(&pup, b"").unwrap();
+
+        assert!(spawn_rpcs3_installfw(&exe, &pup));
+
+        let written = wait_for_text(&marker).expect("the stub never wrote its argv");
+        let lines: Vec<&str> = written.lines().collect();
+        assert_eq!(lines.len(), 3, "expected pid + two arguments: {lines:?}");
+        assert_eq!(lines[1], "--installfw");
+        assert_eq!(
+            Path::new(lines[2]),
+            std::fs::canonicalize(&pup).unwrap(),
+            "the PUP is passed canonicalized"
+        );
+        assert!(
+            wait_until_reaped(lines[0]),
+            "the spawned child was never reaped (pid {} still in /proc)",
+            lines[0]
+        );
     }
 
     #[test]
