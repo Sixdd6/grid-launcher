@@ -603,7 +603,6 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
         record(&mut report, name, "eden", eden::ensure_settings(path));
     }
     if is_rpcs3(&subject, profiles) {
-        // No background firmware download — D7.
         record(
             &mut report,
             name,
@@ -1420,40 +1419,5 @@ mod tests {
 
         let second = fan_out_ra_credentials(&config, &[], &ra);
         assert_eq!(second, vec![("RetroArch".to_string(), false)]);
-    }
-
-    /// Spec deviation D7: no RPCS3 firmware download is triggered, so nothing
-    /// under the emulator directory names a PUP or a `dev_flash` tree.
-    #[test]
-    fn sync_starts_no_firmware_download() {
-        let _lock = lock();
-        let temp = tempfile::tempdir().unwrap();
-        let _env = isolated(temp.path());
-
-        let exe = temp.path().join("RPCS3").join("rpcs3.AppImage");
-        touch(&exe);
-        let config = config_with(temp.path(), vec![entry("RPCS3", exe.to_str().unwrap())]);
-        let config_path = write_config(temp.path(), &config);
-
-        let ctx = SyncContext {
-            config_path: &config_path,
-            platforms: &[],
-            ps3_library_path: ps3_library_path(&config.library_path),
-            ra: None,
-            profiles: &[],
-        };
-        sync_new_emulator("RPCS3", &ctx).unwrap();
-
-        let dir = exe.parent().unwrap();
-        assert!(!dir.join("PS3UPDAT.PUP").exists());
-        assert!(!dir.join("portable").join("dev_flash").exists());
-        let names: Vec<String> = std::fs::read_dir(dir)
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        assert!(
-            !names.iter().any(|n| n.to_uppercase().ends_with(".PUP")),
-            "D7: no firmware download may start: {names:?}"
-        );
     }
 }

@@ -10,6 +10,8 @@
 //!
 //! Per-file write dispatch (`.7z`/`.rar`, `.zip`, raw) lives in [`write`].
 
+pub mod routing;
+pub mod rpcs3;
 mod write;
 
 use std::path::PathBuf;
