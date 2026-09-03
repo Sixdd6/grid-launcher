@@ -14,7 +14,7 @@ use grid_core::library::registry::InstalledGame;
 use grid_core::library::InstallService;
 use grid_core::romm::{GameSummary, Platform};
 use grid_core::secrets::RaTokenStore;
-use grid_core::session::{SessionManager, SessionState};
+use grid_core::session::{RestoreOutcome, SessionManager, SessionState};
 use secrecy::SecretString;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -56,8 +56,13 @@ pub async fn connect(
 }
 
 #[tauri::command]
-pub async fn restore_session(state: State<'_, AppState>) -> Result<Option<SessionState>, String> {
+pub async fn restore_session(state: State<'_, AppState>) -> Result<RestoreOutcome, String> {
     state.session.restore().await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn retry_connect(state: State<'_, AppState>) -> Result<SessionState, String> {
+    state.session.retry().await.map_err(err)
 }
 
 #[tauri::command]

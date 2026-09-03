@@ -8,7 +8,8 @@ export const session = $state<{ state: SessionState | null; error: string | null
 
 export async function restore() {
   try {
-    session.state = await api.restoreSession();
+    const outcome = await api.restoreSession();
+    session.state = outcome.kind === 'connected' ? outcome.state : null;
   } catch {
     session.state = null; // silent: no stored session is normal
   }

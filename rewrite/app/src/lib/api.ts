@@ -4,6 +4,10 @@ import { invoke } from '@tauri-apps/api/core';
 // (see rewrite/crates/grid-core/src/session.rs and romm/mod.rs) — no
 // cosmetic renames.
 export type SessionState = { connected: boolean; username: string; server_url: string };
+export type RestoreOutcome =
+  | { kind: 'no_session' }
+  | { kind: 'connected'; state: SessionState }
+  | { kind: 'unreachable'; server_url: string; username: string; error: string };
 export type Platform = { id: number; name: string; slug: string; rom_count: number };
 export type GameSummary = {
   id: number;
@@ -167,7 +171,8 @@ export type CloudSettings = {
 export const api = {
   connect: (serverUrl: string, username: string, secret: string, useToken: boolean) =>
     invoke<SessionState>('connect', { serverUrl, username, secret, useToken }),
-  restoreSession: () => invoke<SessionState | null>('restore_session'),
+  restoreSession: () => invoke<RestoreOutcome>('restore_session'),
+  retryConnect: () => invoke<SessionState>('retry_connect'),
   disconnect: () => invoke<void>('disconnect'),
   listPlatforms: () => invoke<Platform[]>('list_platforms'),
   listGames: (platformId: number) => invoke<GameSummary[]>('list_games', { platformId }),

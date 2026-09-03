@@ -16,6 +16,8 @@ pub enum SessionError {
     Secrets(#[from] SecretError),
     #[error("the token belongs to account '{actual}', not '{entered}'")]
     UsernameMismatch { entered: String, actual: String },
+    #[error("no stored session")]
+    NoStoredSession,
 }
 
 /// The only session shape that may cross the IPC boundary. No secrets.
@@ -24,6 +26,23 @@ pub struct SessionState {
     pub connected: bool,
     pub username: String,
     pub server_url: String,
+}
+
+/// The three-way outcome of [`SessionManager::restore`] (spec "App layer"):
+/// no stored session, a live reconnect, or a stored session whose server the
+/// probe could not reach.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RestoreOutcome {
+    NoSession,
+    Connected {
+        state: SessionState,
+    },
+    Unreachable {
+        server_url: String,
+        username: String,
+        error: String,
+    },
 }
 
 pub struct SessionManager {
@@ -112,18 +131,48 @@ impl SessionManager {
         Ok(state)
     }
 
-    pub async fn restore(&self) -> Result<Option<SessionState>, SessionError> {
+    /// Three-way restore (spec "App layer"): no stored session, connected,
+    /// or stored-but-unreachable with the probe error's text (SessionError
+    /// Display is secret-free by construction). Only config/secret load
+    /// failures are `Err`.
+    pub async fn restore(&self) -> Result<RestoreOutcome, SessionError> {
         let cfg = Config::load(&self.config_path)?;
         if cfg.server_url.is_empty() {
-            return Ok(None);
+            return Ok(RestoreOutcome::NoSession);
+        }
+        let Some(cred) = self.secrets.load()? else {
+            return Ok(RestoreOutcome::NoSession);
+        };
+        *self.server_url.lock().unwrap() = cfg.server_url.clone();
+        match self.probe(&cfg.server_url, &cfg.username, cred).await {
+            Ok((client, state)) => {
+                *self.client.lock().unwrap() = Some(Arc::new(client));
+                Ok(RestoreOutcome::Connected { state })
+            }
+            Err(e) => Ok(RestoreOutcome::Unreachable {
+                server_url: cfg.server_url,
+                username: cfg.username,
+                error: e.to_string(),
+            }),
+        }
+    }
+
+    /// Re-probes with the stored credentials (the chip's Retry). Sets the
+    /// stored server URL as soon as it is known non-empty, before the probe
+    /// — same placement as `restore`, so the chip's Retry works even after
+    /// a fresh start where `restore` itself already failed to connect.
+    pub async fn retry(&self) -> Result<SessionState, SessionError> {
+        let cfg = Config::load(&self.config_path)?;
+        let Some(cred) = self.secrets.load()? else {
+            return Err(SessionError::NoStoredSession);
+        };
+        if cfg.server_url.is_empty() {
+            return Err(SessionError::NoStoredSession);
         }
         *self.server_url.lock().unwrap() = cfg.server_url.clone();
-        let Some(cred) = self.secrets.load()? else {
-            return Ok(None);
-        };
         let (client, state) = self.probe(&cfg.server_url, &cfg.username, cred).await?;
         *self.client.lock().unwrap() = Some(Arc::new(client));
-        Ok(Some(state))
+        Ok(state)
     }
 
     /// Builds a client and probes the server. Does NOT touch `self.client` —

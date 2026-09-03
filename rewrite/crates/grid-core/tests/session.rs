@@ -1,9 +1,20 @@
 use grid_core::secrets::{Credential, MemoryStore, SecretError, SecretStore};
-use grid_core::session::SessionManager;
+use grid_core::session::{RestoreOutcome, SessionManager};
 use secrecy::SecretString;
 use std::sync::Arc;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+/// Mounts the `/api/users/me` response every successful probe needs.
+async fn mount_users_me(server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path("/api/users/me"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 1, "username": "six"
+        })))
+        .mount(server)
+        .await;
+}
 
 /// A `SecretStore` whose `save()` always fails, to exercise the
 /// persist-failure path of `SessionManager::connect()`.
@@ -58,13 +69,78 @@ async fn connect_persists_and_restore_reconnects() {
         dir.path().join("covers"),
         store,
     );
-    let restored = mgr2
-        .restore()
-        .await
-        .unwrap()
-        .expect("session should restore");
-    assert!(restored.connected);
-    assert_eq!(restored.server_url, server.uri());
+    let restored = mgr2.restore().await.expect("restore should not error");
+    let RestoreOutcome::Connected { state } = restored else {
+        panic!("expected Connected, got {restored:?}")
+    };
+    assert!(state.connected);
+    assert_eq!(state.server_url, server.uri());
+}
+
+#[tokio::test]
+async fn restore_reports_no_session_without_stored_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let mgr = SessionManager::new(
+        dir.path().join("config.toml"),
+        dir.path().join("covers"),
+        Arc::new(MemoryStore::default()),
+    );
+    assert!(matches!(
+        mgr.restore().await.unwrap(),
+        RestoreOutcome::NoSession
+    ));
+}
+
+#[tokio::test]
+async fn restore_reports_unreachable_and_retry_reconnects() {
+    // connect against a live mock, then drop the mock and restore from a
+    // fresh manager: Unreachable with the stored server url; bringing a mock
+    // back on the same address is not possible, so retry is asserted
+    // against a manager whose stored url still points at the (now dead)
+    // server, expecting the retry itself to fail too.
+    //
+    // `MockServer::start()` (no builder) is drawn from wiremock's internal
+    // pool and, on drop, is only reset and returned for reuse — the
+    // listener stays up on the same port, so a request right after drop
+    // would still succeed. `builder().start()` opts out of pooling: its
+    // listener genuinely shuts down when the server is dropped.
+    let server = MockServer::builder().start().await;
+    mount_users_me(&server).await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(MemoryStore::default());
+    let mgr = SessionManager::new(
+        dir.path().join("config.toml"),
+        dir.path().join("covers"),
+        store.clone(),
+    );
+    mgr.connect(
+        server.uri(),
+        String::new(),
+        SecretString::from("FAKE-TEST-TOKEN-not-real"),
+        true,
+    )
+    .await
+    .unwrap();
+    let uri = server.uri();
+    drop(server);
+
+    let mgr2 = SessionManager::new(
+        dir.path().join("config.toml"),
+        dir.path().join("covers"),
+        store.clone(),
+    );
+    match mgr2.restore().await.unwrap() {
+        RestoreOutcome::Unreachable {
+            server_url, error, ..
+        } => {
+            assert_eq!(server_url, uri);
+            assert!(!error.is_empty());
+        }
+        other => panic!("expected Unreachable, got {other:?}"),
+    }
+    assert!(mgr2.client().is_none());
+    assert_eq!(mgr2.server_url(), uri);
+    assert!(mgr2.retry().await.is_err());
 }
 
 #[tokio::test]

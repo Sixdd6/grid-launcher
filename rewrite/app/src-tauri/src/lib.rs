@@ -167,6 +167,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::connect,
             commands::restore_session,
+            commands::retry_connect,
             commands::disconnect,
             commands::list_platforms,
             commands::list_games,
