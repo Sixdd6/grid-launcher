@@ -407,11 +407,13 @@ pub fn apply_content(
     let content_json = serde_json::to_string(&entries).expect("entries always serialize");
 
     let mut warning = String::new();
-    if let Err(error) = fs::remove_file(archive) {
-        warning = format!(
-            "Applied PS4 content, but could not delete archive:\n{}\n{error}",
-            archive.display()
-        );
+    if archive.is_file() {
+        if let Err(error) = fs::remove_file(archive) {
+            warning = format!(
+                "Applied PS4 content, but could not delete archive:\n{}\n{error}",
+                archive.display()
+            );
+        }
     }
 
     Ok(Ps4Applied {
@@ -787,8 +789,11 @@ mod tests {
         assert!(!staging.exists());
     }
 
+    #[cfg(unix)]
     #[test]
     fn apply_content_archive_delete_failure_becomes_a_warning() {
+        use std::os::unix::fs::PermissionsExt;
+
         let dir = tempfile::tempdir().unwrap();
         let (row, installed_root) = setup_install(dir.path());
 
@@ -796,10 +801,50 @@ mod tests {
         fs::create_dir_all(prepared.join("CUSA12345")).unwrap();
         fs::write(prepared.join("CUSA12345/patch.txt"), b"patch data").unwrap();
 
-        // A directory in place of the archive file: `fs::remove_file` can
-        // never remove it, forcing the delete-failure path.
-        let archive = dir.path().join("archive.zip");
-        fs::create_dir_all(&archive).unwrap();
+        // A real archive file, but its containing directory is read+execute
+        // only: removing a file requires write permission on the directory
+        // that holds it, so `fs::remove_file` fails here even though the
+        // archive itself is an ordinary file.
+        let archive_dir = dir.path().join("archive_dir");
+        fs::create_dir_all(&archive_dir).unwrap();
+        let archive = archive_dir.join("archive.zip");
+        fs::write(&archive, b"zip bytes").unwrap();
+        fs::set_permissions(&archive_dir, fs::Permissions::from_mode(0o555)).unwrap();
+        let staging = dir.path().join("staging");
+
+        let extract = copy_extract(&prepared);
+        let outcome = apply_content(&row, &archive, ContentKind::Update, &staging, &extract);
+
+        // Restore write permission before any assertion can early-return,
+        // so the tempdir can always clean itself up.
+        fs::set_permissions(&archive_dir, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let result = outcome.unwrap();
+        assert_eq!(result.game_id, "CUSA12345");
+        assert!(result.warning.starts_with(&format!(
+            "Applied PS4 content, but could not delete archive:\n{}\n",
+            archive.display()
+        )));
+        assert!(archive.exists());
+        assert!(
+            installed_root.join("CUSA12345/patch.txt").exists(),
+            "the merge itself must still have succeeded"
+        );
+    }
+
+    #[test]
+    fn apply_content_missing_archive_yields_no_warning() {
+        let dir = tempfile::tempdir().unwrap();
+        let (row, installed_root) = setup_install(dir.path());
+
+        let prepared = dir.path().join("prepared");
+        fs::create_dir_all(prepared.join("CUSA12345")).unwrap();
+        fs::write(prepared.join("CUSA12345/patch.txt"), b"patch data").unwrap();
+
+        // The archive path never existed on disk (e.g. it was already
+        // cleaned up by something else) — Python's guarded delete skips
+        // deletion silently in this case, and so must the port.
+        let archive = dir.path().join("does-not-exist.zip");
         let staging = dir.path().join("staging");
 
         let extract = copy_extract(&prepared);
@@ -807,11 +852,7 @@ mod tests {
             apply_content(&row, &archive, ContentKind::Update, &staging, &extract).unwrap();
 
         assert_eq!(result.game_id, "CUSA12345");
-        assert!(result.warning.starts_with(&format!(
-            "Applied PS4 content, but could not delete archive:\n{}\n",
-            archive.display()
-        )));
-        assert!(archive.exists());
+        assert_eq!(result.warning, "");
         assert!(
             installed_root.join("CUSA12345/patch.txt").exists(),
             "the merge itself must still have succeeded"
