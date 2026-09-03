@@ -1,7 +1,8 @@
 <script lang="ts">
   import { api, type GameSummary, type Platform } from './api';
-  import Cover from './Cover.svelte';
+  import Image from './Image.svelte';
   import Details from './Details.svelte';
+  import { fromSummary } from './details/subject';
   import { moveFocus, type NavDirection } from './focus/grid';
   import { isInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
   import { hostOf } from './shell';
@@ -137,7 +138,7 @@
     <div class="grid" bind:this={gridEl} style="--columns: {COLUMNS}">
       {#each games as game, i (game.id)}
         <div data-testid={`game-card-${game.id}`} class="card" class:focused={i === focusIndex} onclick={() => openDetails(game)} role="presentation">
-          <Cover {game} />
+          <Image url={game.path_cover_small} alt={game.name} />
           {#if isInstalled(game, activePlatformName)}
             <span data-testid={`installed-badge-${game.id}`} class="badge">
               <span class="dot"></span>
@@ -152,8 +153,7 @@
   {#if detailsGame}
     {#key detailsGame.id}
       <Details
-        game={detailsGame}
-        platformName={activePlatformName}
+        subject={fromSummary(detailsGame, activePlatformName)}
         onClose={closeDetails}
         onLibraryPathUnset={() => { showLibraryBanner = true; }}
       />

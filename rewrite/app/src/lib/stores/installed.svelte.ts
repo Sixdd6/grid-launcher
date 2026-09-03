@@ -1,3 +1,4 @@
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { api, type DownloadEntry, type GameSummary, type InstalledGame } from '../api';
 import { downloads } from './downloads.svelte';
 
@@ -11,6 +12,18 @@ export const installed = {
 
 export async function refresh(): Promise<void> {
   state.list = await api.listInstalled();
+}
+
+/**
+ * The Tauri backend emits `images-replenished` after each cover/screenshot
+ * replenish job finishes (whether it found anything new or not) — refresh
+ * the registry so the Library grid picks up any covers that were missing at
+ * install time and have since been backfilled.
+ */
+export function initReplenishListener(): Promise<UnlistenFn> {
+  return listen('images-replenished', () => {
+    refresh();
+  });
 }
 
 /**

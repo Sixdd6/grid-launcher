@@ -4,6 +4,7 @@
   import Downloads from './Downloads.svelte';
   import Emulators from './Emulators.svelte';
   import { session, retry, disconnect } from './stores/session.svelte';
+  import { initReplenishListener } from './stores/installed.svelte';
   import { chipLabel, initialSection, type Section } from './shell';
   import type { NavDirection } from './focus/grid';
 
@@ -21,6 +22,13 @@
     if (section === 'library') library?.handleNav(action);
     else server?.handleNav(action);
   }
+
+  $effect(() => {
+    const un = initReplenishListener();
+    return () => {
+      un.then((f) => f());
+    };
+  });
 </script>
 
 <div data-testid="shell-topbar" class="topbar">

@@ -1,20 +1,19 @@
 <script lang="ts">
-  import { api, type CloudPanelInfo, type DownloadStatus, type GameSummary } from './api';
+  import { api, type CloudPanelInfo, type DownloadStatus } from './api';
   import { downloads } from './stores/downloads.svelte';
   import { isInstalled, installed, matchesInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
   import { sessions } from './stores/sessions.svelte';
-  import Cover from './Cover.svelte';
+  import Image from './Image.svelte';
   import CloudPanel from './details/CloudPanel.svelte';
+  import { summaryOf, type DetailsSubject } from './details/subject';
   import { cloudButtonLabel, isNativeExecutablePlatform, syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
 
   let {
-    game,
-    platformName,
+    subject,
     onClose,
     onLibraryPathUnset,
   }: {
-    game: GameSummary;
-    platformName: string;
+    subject: DetailsSubject;
     onClose: () => void;
     onLibraryPathUnset: () => void;
   } = $props();
@@ -29,21 +28,24 @@
   let panelEl = $state<HTMLElement | null>(null);
 
   let pending = $derived(pendingAction !== null);
+  let summary = $derived(summaryOf(subject));
   let liveEntry = $derived(
-    downloads.entries.find((e) => e.rom_id === game.id && LIVE_INSTALL_STATUSES.includes(e.status))
+    subject.romId !== null
+      ? downloads.entries.find((e) => e.rom_id === subject.romId && LIVE_INSTALL_STATUSES.includes(e.status))
+      : undefined
   );
-  let installedNow = $derived(isInstalled(game, platformName));
-  let liveSession = $derived(sessions.sessionFor(game.id));
+  let installedNow = $derived(isInstalled(summary, subject.platformName));
+  let liveSession = $derived(subject.romId !== null ? sessions.sessionFor(subject.romId) : undefined);
 
   // Cloud saves/states (task-19-brief.md). `cloudGame` is the InstalledGame
   // registry row when one exists, else a synthetic stand-in built from the
-  // GameSummary — the cloud commands resolve "installed" themselves by
-  // identity match (cloud_service.rs's `panel_info`), so a non-installed
-  // shared-scope game (e.g. an entry on the synthetic `Emulators` platform)
-  // can still open its panel.
-  let installedRow = $derived(installed.list.find((row) => matchesInstalled(row, game, platformName)) ?? null);
-  let cloudGame = $derived(installedRow ?? syntheticCloudGame(game, platformName));
-  let isNative = $derived(isNativeExecutablePlatform(platformName));
+  // subject — the cloud commands resolve "installed" themselves by identity
+  // match (cloud_service.rs's `panel_info`), so a non-installed shared-scope
+  // game (e.g. an entry on the synthetic `Emulators` platform) can still
+  // open its panel.
+  let installedRow = $derived(installed.list.find((row) => matchesInstalled(row, summary, subject.platformName)) ?? null);
+  let cloudGame = $derived(installedRow ?? syntheticCloudGame(summary, subject.platformName));
+  let isNative = $derived(isNativeExecutablePlatform(subject.platformName));
 
   let cloudMode = $state<CloudMode>('overview');
   let savePanelInfo = $state<CloudPanelInfo | null>(null);
@@ -57,6 +59,7 @@
   });
 
   $effect(() => {
+    if (subject.romId === null) return; // no server id: nothing to manage cloud saves for
     api
       .cloudPanelInfo(cloudGame, 'save')
       .then((info) => (savePanelInfo = info))
@@ -76,10 +79,11 @@
   }
 
   async function handleInstall() {
+    if (subject.romId === null) return;
     error = null;
     pendingAction = 'install';
     try {
-      await api.installGame(game.id);
+      await api.installGame(subject.romId);
     } catch (err) {
       const message = errorMessage(err);
       error = message;
@@ -90,6 +94,7 @@
   }
 
   async function handleUninstallClick() {
+    if (subject.romId === null) return;
     if (!confirmingUninstall) {
       confirmingUninstall = true;
       return;
@@ -97,7 +102,7 @@
     error = null;
     pendingAction = 'uninstall';
     try {
-      await api.uninstallGame(game.id);
+      await api.uninstallGame(subject.romId);
       await refreshInstalled();
       onClose();
     } catch (err) {
@@ -109,10 +114,11 @@
   }
 
   async function handlePlay() {
+    if (subject.romId === null) return;
     error = null;
     pendingAction = 'play';
     try {
-      await api.launchGame(game.id);
+      await api.launchGame(subject.romId);
     } catch (err) {
       error = errorMessage(err);
     } finally {
@@ -153,83 +159,87 @@
     bind:this={panelEl}
     role="dialog"
     aria-modal="true"
-    aria-label={game.name}
+    aria-label={subject.name}
     tabindex="-1"
     onkeydown={onKey}
   >
     <button data-testid="details-close" class="close" onclick={onClose} aria-label="Close">×</button>
     <div class="cover">
-      <Cover {game} />
+      <Image url={subject.coverSmall} alt={subject.name} />
     </div>
-    <h2>{game.name}</h2>
+    <h2>{subject.name}</h2>
     {#if liveSession}
       <span data-testid="details-playing-chip" class="chip">Playing</span>
     {/if}
-    <p class="platform">{platformName}</p>
+    <p class="platform">{subject.platformName}</p>
 
-    <div class="action">
-      {#if liveEntry}
-        <button disabled>Installing…</button>
-      {:else if liveSession}
-        <button data-testid="details-stop" disabled={pending} onclick={handleStop}>
-          {pendingAction === 'stop' ? 'Stopping…' : 'Stop'}
-        </button>
-      {:else if installedNow}
-        <button data-testid="details-play" disabled={pending} onclick={handlePlay}>
-          {pendingAction === 'play' ? 'Launching…' : 'Play'}
-        </button>
-        <button
-          data-testid="details-uninstall"
-          class="secondary"
-          class:confirm={confirmingUninstall}
-          disabled={pending}
-          onclick={handleUninstallClick}
-        >
-          {confirmingUninstall ? 'Confirm uninstall' : 'Uninstall'}
-        </button>
-      {:else}
-        <button data-testid="details-install" disabled={pending} onclick={handleInstall}>
-          {pendingAction === 'install' ? 'Installing…' : 'Install'}
-        </button>
-      {/if}
-    </div>
-
-    {#if savePanelInfo?.supported || statePanelInfo?.supported}
-      <div class="cloud-toggle">
-        {#if savePanelInfo?.supported}
-          <button
-            data-testid="details-cloud-save-toggle"
-            class:active={cloudMode === 'save'}
-            onclick={() => handleCloudToggle('save')}
-          >
-            {cloudButtonLabel('save', savePanelInfo.scope)}
+    {#if subject.romId === null}
+      <p data-testid="details-no-id">This entry has no server id</p>
+    {:else}
+      <div class="action">
+        {#if liveEntry}
+          <button disabled>Installing…</button>
+        {:else if liveSession}
+          <button data-testid="details-stop" disabled={pending} onclick={handleStop}>
+            {pendingAction === 'stop' ? 'Stopping…' : 'Stop'}
           </button>
-        {/if}
-        {#if statePanelInfo?.supported}
+        {:else if installedNow}
+          <button data-testid="details-play" disabled={pending} onclick={handlePlay}>
+            {pendingAction === 'play' ? 'Launching…' : 'Play'}
+          </button>
           <button
-            data-testid="details-cloud-state-toggle"
-            class:active={cloudMode === 'state'}
-            onclick={() => handleCloudToggle('state')}
+            data-testid="details-uninstall"
+            class="secondary"
+            class:confirm={confirmingUninstall}
+            disabled={pending}
+            onclick={handleUninstallClick}
           >
-            {cloudButtonLabel('state', statePanelInfo.scope)}
+            {confirmingUninstall ? 'Confirm uninstall' : 'Uninstall'}
+          </button>
+        {:else}
+          <button data-testid="details-install" disabled={pending} onclick={handleInstall}>
+            {pendingAction === 'install' ? 'Installing…' : 'Install'}
           </button>
         {/if}
       </div>
-    {/if}
 
-    {#if cloudPanelInfoError}
-      <p data-testid="cloud-panel-info-error" class="error" role="alert">{cloudPanelInfoError}</p>
-    {/if}
+      {#if savePanelInfo?.supported || statePanelInfo?.supported}
+        <div class="cloud-toggle">
+          {#if savePanelInfo?.supported}
+            <button
+              data-testid="details-cloud-save-toggle"
+              class:active={cloudMode === 'save'}
+              onclick={() => handleCloudToggle('save')}
+            >
+              {cloudButtonLabel('save', savePanelInfo.scope)}
+            </button>
+          {/if}
+          {#if statePanelInfo?.supported}
+            <button
+              data-testid="details-cloud-state-toggle"
+              class:active={cloudMode === 'state'}
+              onclick={() => handleCloudToggle('state')}
+            >
+              {cloudButtonLabel('state', statePanelInfo.scope)}
+            </button>
+          {/if}
+        </div>
+      {/if}
 
-    {#if cloudMode !== 'overview' && activeCloudPanelInfo}
-      <CloudPanel
-        game={cloudGame}
-        gameTitle={game.name}
-        saveType={cloudMode}
-        panelInfo={activeCloudPanelInfo}
-        {isNative}
-        onBack={() => (cloudMode = 'overview')}
-      />
+      {#if cloudPanelInfoError}
+        <p data-testid="cloud-panel-info-error" class="error" role="alert">{cloudPanelInfoError}</p>
+      {/if}
+
+      {#if cloudMode !== 'overview' && activeCloudPanelInfo}
+        <CloudPanel
+          game={cloudGame}
+          gameTitle={subject.name}
+          saveType={cloudMode}
+          panelInfo={activeCloudPanelInfo}
+          {isNative}
+          onBack={() => (cloudMode = 'overview')}
+        />
+      {/if}
     {/if}
 
     {#if error}
