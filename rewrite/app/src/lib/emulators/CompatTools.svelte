@@ -6,7 +6,13 @@
   // itself on mount, same shape as the Emulators install tab it sits beside.
   import { api, type CatalogEntry } from '../api';
   import { compatTools, refresh as refreshCompatTools } from '../stores/compatTools.svelte';
-  import { compatToolLabel, groupCompatTools } from './compatTools';
+  import { downloads } from '../stores/downloads.svelte';
+  import {
+    compatToolLabel,
+    compatToolTerminalSignature,
+    groupCompatTools,
+    liveCompatToolSourceIds,
+  } from './compatTools';
 
   let catalog = $state<CatalogEntry[]>([]);
   let catalogLoading = $state(true);
@@ -20,6 +26,14 @@
   // Flattened in the same grouped order the groups render in — `compat-default-<index>`
   // is this array's index, per task-17-brief.md's ambiguity resolution.
   let flattened = $derived(groups.flatMap((g) => g.tools));
+
+  // Fix round 1: the catalog must re-fetch whenever a compat_tool install
+  // reaches a terminal state (mirrors Emulators.svelte's own
+  // emulatorTerminalSignature for its emulator catalog tab), and a row's
+  // Install button must stay disabled for the whole background install, not
+  // just while the initial `installCompatTool` call is in flight.
+  let compatTerminalSignature = $derived(compatToolTerminalSignature(downloads.entries));
+  let liveSourceIds = $derived(liveCompatToolSourceIds(downloads.entries));
 
   function errorMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
@@ -37,7 +51,12 @@
     }
   }
 
+  // Runs once at mount (signature starts as '') and again whenever it
+  // changes — i.e. whenever a compat_tool drawer entry reaches a terminal
+  // status — so the Install/Installed buttons never go stale mid-install.
   $effect(() => {
+    const signature = compatTerminalSignature;
+    void signature;
     refreshCatalog();
   });
 
@@ -117,6 +136,7 @@
       <ul class="catalog-list">
         {#each catalog as entry (entry.source_id)}
           {@const testKey = testKeyFor(entry.source_id)}
+          {@const busy = installingSourceIds.has(entry.source_id) || liveSourceIds.has(entry.source_id)}
           <li class="catalog-row">
             <div class="row-text">
               <span class="name">{entry.name}</span>
@@ -127,10 +147,10 @@
             {:else}
               <button
                 data-testid={`compat-catalog-install-${testKey}`}
-                disabled={installingSourceIds.has(entry.source_id)}
+                disabled={busy}
                 onclick={() => handleInstallClick(entry.source_id)}
               >
-                {installingSourceIds.has(entry.source_id) ? 'Installing…' : 'Install'}
+                {busy ? 'Installing…' : 'Install'}
               </button>
             {/if}
           </li>

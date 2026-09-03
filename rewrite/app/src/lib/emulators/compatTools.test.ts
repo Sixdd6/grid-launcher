@@ -1,9 +1,35 @@
 import { describe, expect, it } from 'vitest';
-import type { CompatTool } from '../api';
-import { compatToolLabel, groupCompatTools, isWindowsHost } from './compatTools';
+import type { CompatTool, DownloadEntry } from '../api';
+import {
+  compatToolLabel,
+  compatToolTerminalSignature,
+  groupCompatTools,
+  isWindowsHost,
+  liveCompatToolSourceIds,
+} from './compatTools';
 
 function tool(overrides: Partial<CompatTool>): CompatTool {
   return { name: 'Tool', kind: 'wine', path: '/opt/tool', source: 'system', ...overrides };
+}
+
+function entry(overrides: Partial<DownloadEntry>): DownloadEntry {
+  return {
+    id: 1,
+    job: 'emulator',
+    kind: 'compat_tool',
+    rom_id: 0,
+    source_id: 'ge-proton/GE-Proton8-25',
+    title: 'GE-Proton8-25',
+    platform: '',
+    status: 'downloading',
+    downloaded_bytes: 0,
+    total_bytes: 0,
+    speed_bps: 0,
+    install_processed_bytes: 0,
+    install_total_bytes: 0,
+    error: '',
+    ...overrides,
+  };
 }
 
 describe('groupCompatTools', () => {
@@ -79,5 +105,86 @@ describe('isWindowsHost (re-exported from details/actions, not redefined)', () =
 
   it('is false for a non-Windows platform', () => {
     expect(isWindowsHost('Linux x86_64')).toBe(false);
+  });
+});
+
+describe('compatToolTerminalSignature', () => {
+  it('is empty with no entries', () => {
+    expect(compatToolTerminalSignature([])).toBe('');
+  });
+
+  it('is empty when the only compat_tool entries are still live', () => {
+    const entries = [entry({ id: 1, status: 'downloading' }), entry({ id: 2, status: 'queued' })];
+    expect(compatToolTerminalSignature(entries)).toBe('');
+  });
+
+  it('ignores terminal entries of a different kind', () => {
+    const entries = [entry({ id: 1, kind: 'emulator', status: 'completed' })];
+    expect(compatToolTerminalSignature(entries)).toBe('');
+  });
+
+  it('includes a completed compat_tool entry', () => {
+    const entries = [entry({ id: 1, status: 'completed' })];
+    expect(compatToolTerminalSignature(entries)).toBe('1:completed');
+  });
+
+  it('includes failed and cancelled compat_tool entries', () => {
+    const entries = [entry({ id: 1, status: 'failed' }), entry({ id: 2, status: 'cancelled' })];
+    expect(compatToolTerminalSignature(entries)).toBe('1:failed,2:cancelled');
+  });
+
+  it('changes when a live entry transitions to a terminal status', () => {
+    const before = compatToolTerminalSignature([entry({ id: 1, status: 'installing' })]);
+    const after = compatToolTerminalSignature([entry({ id: 1, status: 'completed' })]);
+    expect(before).toBe('');
+    expect(after).toBe('1:completed');
+    expect(before).not.toBe(after);
+  });
+
+  it('mixes terminal compat_tool entries with live and other-kind entries, keeping only terminal compat_tool ones', () => {
+    const entries = [
+      entry({ id: 1, status: 'completed' }),
+      entry({ id: 2, status: 'downloading' }),
+      entry({ id: 3, kind: 'emulator', status: 'failed' }),
+    ];
+    expect(compatToolTerminalSignature(entries)).toBe('1:completed');
+  });
+});
+
+describe('liveCompatToolSourceIds', () => {
+  it('is empty with no entries', () => {
+    expect(liveCompatToolSourceIds([])).toEqual(new Set());
+  });
+
+  it('includes queued, downloading, installing and cancelling compat_tool source_ids', () => {
+    const entries = [
+      entry({ id: 1, source_id: 'a', status: 'queued' }),
+      entry({ id: 2, source_id: 'b', status: 'downloading' }),
+      entry({ id: 3, source_id: 'c', status: 'installing' }),
+      entry({ id: 4, source_id: 'd', status: 'cancelling' }),
+    ];
+    expect(liveCompatToolSourceIds(entries)).toEqual(new Set(['a', 'b', 'c', 'd']));
+  });
+
+  it('excludes terminal compat_tool entries', () => {
+    const entries = [
+      entry({ id: 1, source_id: 'a', status: 'completed' }),
+      entry({ id: 2, source_id: 'b', status: 'failed' }),
+      entry({ id: 3, source_id: 'c', status: 'cancelled' }),
+    ];
+    expect(liveCompatToolSourceIds(entries)).toEqual(new Set());
+  });
+
+  it('excludes live entries of a different kind', () => {
+    const entries = [entry({ id: 1, source_id: 'a', kind: 'emulator', status: 'downloading' })];
+    expect(liveCompatToolSourceIds(entries)).toEqual(new Set());
+  });
+
+  it('deduplicates a source_id that appears in more than one live entry', () => {
+    const entries = [
+      entry({ id: 1, source_id: 'a', status: 'queued' }),
+      entry({ id: 2, source_id: 'a', status: 'downloading' }),
+    ];
+    expect(liveCompatToolSourceIds(entries)).toEqual(new Set(['a']));
   });
 });

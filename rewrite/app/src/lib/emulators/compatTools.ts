@@ -1,8 +1,9 @@
 // Pure helpers for the Emulators panel's CompatTools section (task-17-brief.md):
-// grouping compat tools by kind/source, their radio-row label, and the
-// Windows-host guard. No store/API imports here so this stays trivially
+// grouping compat tools by kind/source, their radio-row label, the
+// Windows-host guard, and (fix round 1) the catalog's terminal-signature /
+// live-source-id tracking. No store/API imports here so this stays trivially
 // unit-testable — CompatTools.svelte owns the fetching/wiring.
-import type { CompatTool } from '../api';
+import type { CompatTool, DownloadEntry } from '../api';
 
 export type CompatGroup = { title: 'Wine' | 'Proton (system)' | 'Managed'; tools: CompatTool[] };
 
@@ -39,6 +40,41 @@ export function compatToolLabel(tool: CompatTool): string {
     return `${tool.name} (system) — ${tool.path}`;
   }
   return `${tool.name} — ${tool.path}`;
+}
+
+const TERMINAL_STATUSES: DownloadEntry['status'][] = ['completed', 'failed', 'cancelled'];
+const LIVE_STATUSES: DownloadEntry['status'][] = ['queued', 'downloading', 'installing', 'cancelling'];
+
+/**
+ * Signature of every `compat_tool`-kind drawer entry that has reached a
+ * terminal status — mirrors `emulatorTerminalSignature` in Emulators.svelte
+ * (task-7-brief.md), scoped to `kind === 'compat_tool'` instead of
+ * `job === 'emulator'`. Read inside a `$effect` (approximate on purpose,
+ * same as the emulator catalog: any terminal compat_tool entry is signal
+ * enough, not just the one just installed) so a fresh terminal entry — an
+ * install completing, failing, or getting cancelled — triggers a catalog
+ * re-fetch, keeping the Install/Installed buttons from going stale
+ * (fix round 1 finding: the catalog previously only loaded once at mount).
+ */
+export function compatToolTerminalSignature(entries: DownloadEntry[]): string {
+  return entries
+    .filter((e) => e.kind === 'compat_tool' && TERMINAL_STATUSES.includes(e.status))
+    .map((e) => `${e.id}:${e.status}`)
+    .join(',');
+}
+
+/**
+ * The `source_id`s of every `compat_tool`-kind drawer entry that is still
+ * live (queued/downloading/installing/cancelling). CompatTools.svelte uses
+ * this to keep a catalog row's Install button disabled for the whole
+ * background install — not just while the initial `installCompatTool` call
+ * itself is in flight — so a duplicate click during the install is
+ * impossible (fix round 1 finding).
+ */
+export function liveCompatToolSourceIds(entries: DownloadEntry[]): Set<string> {
+  return new Set(
+    entries.filter((e) => e.kind === 'compat_tool' && LIVE_STATUSES.includes(e.status)).map((e) => e.source_id)
+  );
 }
 
 // Re-exported rather than redefined: `isWindowsHost` already exists in
