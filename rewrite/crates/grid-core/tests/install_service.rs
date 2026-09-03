@@ -2165,7 +2165,7 @@ async fn install_content_with_no_files_of_that_kind_fails_with_the_platform_mess
         .unwrap_err();
     assert_eq!(
         err.to_string(),
-        "No Xbox 360 update content is available for this title."
+        "No Xbox 360 update files were found for this title in server metadata."
     );
 }
 

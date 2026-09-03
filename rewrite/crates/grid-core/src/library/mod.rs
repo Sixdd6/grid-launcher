@@ -462,15 +462,19 @@ fn content_mode(platform: &str) -> Option<InstallMode> {
 }
 
 /// The verbatim "the server lists none of this" message for `mode`. The two
-/// consoles word it differently, so the message follows the platform rather
-/// than the content kind.
+/// consoles share one wording and differ only in the console they name, so
+/// the message follows the platform rather than the content kind
+/// (`details_view_mixin.py:1559` for PS4, `:1640` for Xbox 360).
 fn no_content_message(mode: InstallMode, kind: ContentKind) -> String {
-    let kind = kind.as_str();
-    if mode == InstallMode::Xbox360Content {
-        format!("No Xbox 360 {kind} content is available for this title.")
+    let console = if mode == InstallMode::Xbox360Content {
+        "Xbox 360"
     } else {
-        format!("No PS4 {kind} files were found for this title in server metadata.")
-    }
+        "PS4"
+    };
+    format!(
+        "No {console} {} files were found for this title in server metadata.",
+        kind.as_str()
+    )
 }
 
 /// `ids` as the `file_ids` query value: a comma-separated list, in order.
@@ -1609,6 +1613,11 @@ impl InstallService {
         let args = entry
             .map(|e| split_template(&e.args).unwrap_or_default())
             .unwrap_or_default();
+        // Defensive, and deliberately kept: today no branch of
+        // `xenia_directory_settings` can yield a blank content root (every
+        // storage-root branch is non-empty and the config override falls back
+        // to the literal "content"), but the reference checks it and a future
+        // reader change must not silently install into "".
         let content_root = xenia_directory_settings(path, &args).content_root;
         if content_root.trim().is_empty() {
             return Err(XENIA_CONTENT_ROOT_UNKNOWN.to_string());
@@ -3172,7 +3181,7 @@ mod tests {
         );
         assert_eq!(
             no_content_message(InstallMode::Xbox360Content, ContentKind::Update),
-            "No Xbox 360 update content is available for this title."
+            "No Xbox 360 update files were found for this title in server metadata."
         );
     }
 
@@ -3275,5 +3284,84 @@ mod tests {
             "/api/roms/42/content/a%20b%2F..%2Fc%3Fx%3D1.zip"
         );
         assert_eq!(job.targets[0].query.len(), 1);
+    }
+
+    // --- xenia_content_root -------------------------------------------------
+
+    /// Builds a service whose config file holds exactly `config_toml`.
+    /// Resolves emulator profiles against the embedded catalog, because the
+    /// Xenia profiles' Windows-only gating is what these tests exercise.
+    fn service_with_config(dir: &Path, config_toml: &str) -> Arc<InstallService> {
+        let config_path = dir.join("config.toml");
+        fs::write(&config_path, config_toml).unwrap();
+        let registry = Arc::new(Registry::open(&dir.join("registry.db")).unwrap());
+        InstallService::new(registry, config_path)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn xenia_content_root_without_an_emulator_reports_the_linux_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = service_with_config(dir.path(), "schema_version = 1\n");
+
+        let Err(message) = service.xenia_content_root("Xbox 360") else {
+            panic!("no configured Xbox 360 emulator must not resolve a content root");
+        };
+        assert_eq!(
+            message,
+            "Xbox 360 content requires a Linux-compatible emulator such as Xenia Edge. \
+             Install and configure Xenia Edge, then try again."
+        );
+    }
+
+    /// A configured emulator whose catalog profile is Windows-only gets its
+    /// own message: the content root could be resolved, but nothing on this
+    /// host could ever read it.
+    #[cfg(unix)]
+    #[test]
+    fn xenia_content_root_rejects_a_windows_only_emulator() {
+        let dir = tempfile::tempdir().unwrap();
+        let executable = dir.path().join("xenia_canary.exe");
+        fs::write(&executable, b"MZ").unwrap();
+        // `portable.txt` would make the reader resolve a content root, which
+        // this test must NOT reach: the host gate comes first.
+        let service = service_with_config(
+            dir.path(),
+            &format!(
+                "schema_version = 1\n\n\
+                 [default_emulators]\n\"Xbox 360\" = \"Xenia Canary (Xbox 360)\"\n\n\
+                 [[emulators]]\nname = \"Xenia Canary (Xbox 360)\"\npath = {:?}\nargs = \"\"\n",
+                executable.to_string_lossy()
+            ),
+        );
+
+        let Err(message) = service.xenia_content_root("Xbox 360") else {
+            panic!("a Windows-only emulator must not resolve a content root");
+        };
+        assert_eq!(
+            message,
+            "The configured Xbox 360 emulator only runs on Windows. Install a \
+             Linux-compatible emulator such as Xenia Edge to apply content."
+        );
+    }
+
+    /// The only reachable route to the "could not determine" message: the
+    /// config file itself will not parse, so there is no emulator list to
+    /// resolve anything from. `xenia_directory_settings` cannot produce a
+    /// blank `content_root` — every branch of its storage root is non-empty
+    /// and the override path defaults to the literal `"content"` — so a
+    /// blank-root test would assert on an unreachable state.
+    #[test]
+    fn xenia_content_root_reports_the_unknown_message_when_the_config_will_not_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = service_with_config(dir.path(), "this is not = = valid toml [[[");
+
+        let Err(message) = service.xenia_content_root("Xbox 360") else {
+            panic!("an unreadable config must not resolve a content root");
+        };
+        assert_eq!(
+            message,
+            "Could not determine Xenia content directory. Is Xenia configured?"
+        );
     }
 }
