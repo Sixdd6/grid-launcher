@@ -765,64 +765,96 @@ points:
 - `OPEN QUESTION:` `MAX_CACHED_COVER_BYTES` (grid_launcher/cover/manager.py:11) is
   referenced only by a test (tests/test_cover_manager.py:8). Was a size guard intended,
   and should a port implement one, or drop the constant?
+  **RULED (milestone 7): dropped — see "Rust port deviations (milestone 7)" D9.**
 - `OPEN QUESTION:` There is no cache eviction of any kind — the `imagecache` directory
   grows without bound and files orphaned by a failed uninstall or by a changed
   `installed_cover_cache_key` basis are never collected
   (grid_launcher/cover/manager.py:84 is the only deletion path). Should a port add a
   sweep, and if so keyed on what?
+  **RULED (milestone 7): yes — a bounded 512 MiB cache with an oldest-unpinned-first
+  startup sweep — see "Rust port deviations (milestone 7)" D3.**
 - `OPEN QUESTION:` The desktop async loader sends no `Authorization` header
   (grid_launcher/cover/loader.py:58) while the install-time path and the TV loader both do
   (grid_launcher/cover/cache.py:101, grid_launcher/tv/widgets/cover_loader.py:167). Is
   the RomM asset route expected to be unauthenticated (cookie/session only), or is this a
   latent failure for token-only deployments?
+  **RULED (milestone 7): latent failure — every image fetch is authenticated through the
+  RomM client — see "Rust port deviations (milestone 7)" D2.**
 - `OPEN QUESTION:` The desktop pipeline writes files named by game identity while the TV
   pipeline writes files named by URL hash, both into the same directory
   (grid_launcher/cover/utils.py:205 vs grid_launcher/tv/widgets/cover_loader.py:152). The
   same image is therefore stored twice. Should a port unify the schemes, and if so which
   one wins?
+  **RULED (milestone 7): unified on the URL-hash scheme — see "Rust port deviations
+  (milestone 7)" D1.**
 - `OPEN QUESTION:` `queue_game_cover_load` issues both a local and a remote request for
   the same label whenever a cached path exists, with no ordering guarantee about which
   one paints last (grid_launcher/cover/manager.py:65). Is the remote fetch meant to win
   (freshness) or the local one (speed/offline)?
+  **RULED (milestone 7): no equivalent — the webview owns decoded images, so there is no
+  local/remote race to resolve — see "Rust port deviations (milestone 7)" D9.**
 - `OPEN QUESTION:` `cleanup_cached_cover_for_game` drops the two `file`-flavoured cache
   keys but leaves the remote-URL entry in `cover_cache`
   (grid_launcher/cover/manager.py:93). Intentional (the remote image is still valid) or
   an oversight?
+  **RULED (milestone 7): moot — see "Rust port deviations (milestone 7)" D9; there is no
+  in-memory `cover_cache` structure to leave a stale entry in.**
 - `OPEN QUESTION:` `MissingCoverReplenishWorker` writes payloads without a decode check
   (grid_launcher/background/workers.py:870) whereas the install path requires a successful
   decode (grid_launcher/cover/cache.py:44). Should the worker validate too?
+  **RULED (milestone 7): both paths get the same content gate instead of a decode check —
+  see "Rust port deviations (milestone 7)" D8 and D6.**
 - `OPEN QUESTION:` After replenishment updates `cached_cover_path` and saves the config,
   no view refresh or cache invalidation is triggered (grid-launcher.py:2887). Should the
   library grid re-render so the newly fetched covers appear without a restart?
+  **RULED (milestone 7): yes — replenish emits an event the Library listens for and
+  re-renders on — see "Rust port deviations (milestone 7)" D6.**
 - `OPEN QUESTION:` `PlatformCard.set_platform` falls back to a `logo_url` key
   (grid_launcher/tv/widgets/components/platform_card.py:32), but the catalog emits
   `url_logo` (grid_launcher/server/catalog.py:144). The remote-logo fallback therefore
   never fires. Is the key name a bug?
+  **DEFERRED (milestone 7): TV mode is not yet in the rewrite; revisit with the TV mode
+  redesign.**
 - `OPEN QUESTION:` `AppBackend` stores `image_cache_dir`
   (grid_launcher/tv/bridge/app_backend.py:82) but never reads it. Dead parameter, or a
   hook a port is expected to keep?
+  **DEFERRED (milestone 7): TV mode is not yet in the rewrite; revisit with the TV mode
+  redesign.**
 - `OPEN QUESTION:` The TV `CoverLoader`'s URL→path map is a one-time snapshot taken when
   the TV window is first constructed (grid-launcher.py:714) and is never re-synced on
   `syncConfig`. Games installed while in TV mode fall back to network fetches. Intended?
+  **DEFERRED (milestone 7): TV mode is not yet in the rewrite; revisit with the TV mode
+  redesign.**
 - `OPEN QUESTION:` TV spawns one unbounded thread per image request
   (grid_launcher/tv/widgets/cover_loader.py:120) with no dedup. Should a port bound
   concurrency, and what limit preserves the current scroll responsiveness?
+  **DEFERRED (milestone 7): TV mode is not yet in the rewrite; revisit with the TV mode
+  redesign.**
 - `OPEN QUESTION:` The fanart widget is fed screenshot URLs while a `fanart_url` field
   exists on the game dict and is merged into TV metadata
   (grid_launcher/tv/bridge/app_backend.py:170). Should fanart prefer `fanart_url` when
   present?
+  **DEFERRED (milestone 7): TV mode is not yet in the rewrite; revisit with the TV mode
+  redesign.**
 - `OPEN QUESTION:` `FanartBackground.set_urls([])` stops the timer but leaves the last
   front pixmap painted (grid_launcher/tv/widgets/components/fanart_background.py:73).
   Should an empty list clear the background instead?
+  **DEFERRED (milestone 7): TV mode is not yet in the rewrite; revisit with the TV mode
+  redesign.**
 - `OPEN QUESTION:` Discover cards bypass `resolve_cover_url` and
   `filter_to_server_host` entirely (grid_launcher/server/discover.py:196), so a relative
   `path_cover_large` is handed to the loader unresolved and a foreign host is not
   filtered. Is Discover meant to use the same rules as the catalog?
+  **RULED (milestone 7): out of scope — Discover is not yet in the rewrite.**
 - `OPEN QUESTION:` `_looks_like_screenshot_url` defaults to "screenshot" for any URL with
   no recognizable token (grid_launcher/cover/utils.py:25), so opaque asset URLs
   (`/assets/…/1234.png`) always pass. Is permissive-by-default the desired bias?
+  **RULED (milestone 7): reproduced as-is — see "Rust port deviations (milestone 7)",
+  Follow-the-code quirks.**
 - `OPEN QUESTION:` The desktop details view is hard-limited to 5 screenshot slots
   (grid-launcher.py:2117) while TV shows all. Should the desktop limit be configurable?
+  **RULED (milestone 7): dropped — no cap and no width gate — see "Rust port deviations
+  (milestone 7)" D7.**
 
 ## Source map
 
@@ -850,3 +882,119 @@ points:
 | grid_launcher/server/catalog.py | Produces `cover_url` and newline-joined `screenshot_urls` per game; builds bundled platform logo file URIs |
 | grid_launcher/server/discover.py | Discover-card cover selection (unresolved, unfiltered) and empty screenshot list |
 | grid-launcher.py | `MainWindow` glue: cache dir, cover cache/waiter/loading state, network manager, `_resolve_cover_url` composition, replenish job lifecycle, 5 screenshot label slots, TV `CoverLoader` construction and URL→path snapshot |
+
+## Rust port deviations (milestone 7)
+
+Deliberate deviations, and rulings on ambiguous or defective reference behavior, made while
+porting covers and screenshots (URL resolution, the disk cache, the startup sweep, install-time
+prefetch, replenishment, and the Details screenshot strip) to Rust (grid-core's `images/` module
+— `urls.rs`, `cache.rs`, `sweep.rs`, `replenish.rs` — the Tauri `app/src-tauri/src/images.rs`
+glue and `commands.rs`, and the `app/src/lib/` Image, Library, Details, and Shell components).
+Rust paths are relative to `rewrite/`. D1-D10 restate the deviations already declared by the
+covers/images design task (`docs/superpowers/specs/2026-09-02-covers-images-design.md`,
+"Deviations" §D1-D10) for completeness; D11 is new to this milestone's review.
+
+1. **D1 — One filename scheme for every image: SHA-256 of the resolved URL.** Python used an
+   identity hash on desktop and a URL hash on TV, into one directory. Nothing reads the Python
+   cache, so no compatibility is lost. `image_key` (`crates/grid-core/src/images/cache.rs:30`) is
+   the single scheme; every cached file is named `<sha256(resolved url)>.<ext>`
+   (`crates/grid-core/src/images/cache.rs:153`).
+2. **D2 — Every image fetch is authenticated through the RomM client.** Python's desktop async
+   loader sent no `Authorization` header (doc 07 open question ruled: token-only servers must
+   work). `fetch_and_store` fetches through `RommClient::get_bytes_with_type`
+   (`crates/grid-core/src/images/cache.rs:137`, `crates/grid-core/src/romm/mod.rs:133`), which
+   attaches the same bearer token as every other authenticated request; there is no unauthenticated
+   image path.
+3. **D3 — Bounded cache: 512 MiB cap, startup sweep, oldest-unpinned-first, installed rows' small
+   and large covers pinned.** Uninstall deletes no files and cannot fail on image cleanup. Python
+   never evicted and unlinked on uninstall with a protected-path set. `sweep`
+   (`crates/grid-core/src/images/sweep.rs:43`) deletes the least-recently-modified unpinned files
+   under `IMAGE_CACHE_CAP_BYTES` (`crates/grid-core/src/images/sweep.rs:11`, 512 * 1024 * 1024);
+   `pinned_keys` (`crates/grid-core/src/images/sweep.rs:23`) pins every installed row's cover
+   paths. The sweep runs once, at startup — see the Rulings below.
+4. **D4 — At most 6 concurrent image downloads; 30 s per-fetch timeout on every path.** Python:
+   unbounded async loads, 30 s only on blocking paths. `MAX_CONCURRENT_DOWNLOADS = 6`
+   (`crates/grid-core/src/images/cache.rs:15`) bounds a `Semaphore` acquired before every fetch
+   (`crates/grid-core/src/images/cache.rs:132-137`); the RomM HTTP client's 30 s timeout
+   (`crates/grid-core/src/romm/mod.rs:49`) applies uniformly, install-time and replenish alike.
+5. **D5 — The install-time cover fetch is non-blocking.** Python blocked the UI thread for up to
+   30 s; the PNG re-encode fallback from an on-screen pixmap is dropped (no pixmap exists outside
+   the webview). `ImageService::spawn_prefetch` (`app/src-tauri/src/images.rs:89-103`) fetches the
+   small and large covers on a spawned async task; install itself never waits on it.
+6. **D6 — Replenish also back-fills the three image fields from `rom_detail` for rows that lack
+   them, and emits an event that re-renders the Library.** Python only refetched files and
+   triggered no refresh. `replenish::plan`/`run` (`crates/grid-core/src/images/replenish.rs:32`,
+   `:51`) back-fill `ImageFields` via `Registry::update_images`
+   (`crates/grid-core/src/images/replenish.rs:70`) before fetching a file; the Tauri glue emits
+   `images-replenished` (`app/src-tauri/src/images.rs:17`, `:85`), which the Library's frontend
+   listener re-renders on.
+7. **D7 — No screenshot cap and no width gate that hides screenshots; the strip collapses under
+   the description on narrow panels.** Python capped at 5 and hid the column below 1360 px.
+   `Details.svelte` renders every URL in `screenshotUrls` with no slice
+   (`app/src/lib/Details.svelte:229-243`); a container query
+   (`app/src/lib/Details.svelte:577`) reflows the layout under the description instead of hiding
+   the strip.
+8. **D8 — Content gate replaces the decode gate: a body is written only if Content-Type or magic
+   bytes identify an image.** Python required a successful `QPixmap` decode on the install path
+   and nothing on the replenish path. `fetch_and_store`'s gate
+   (`crates/grid-core/src/images/cache.rs:142-150`) applies to every caller — install prefetch and
+   replenish alike — and rejects on neither successful nor failed image decode, only on
+   unidentifiable content; the write itself is atomic (`.part` file, then rename,
+   `crates/grid-core/src/images/cache.rs:154-156`).
+9. **D9 — `MAX_CACHED_COVER_BYTES` is dropped (dead in Python).** The in-memory pixmap cache,
+   waiter lists, local-then-remote double queue, `file:` alias keys, and `path_key` case-folding
+   have no equivalent: the webview owns decoded images. `ImageCache`'s only state is the in-flight
+   map, the per-session negative-result map, and the disk itself
+   (`crates/grid-core/src/images/cache.rs:30-49`) — there is no in-memory image cache to bound,
+   race, or key by anything but the URL.
+10. **D10 — The details layout metrics (fixed 1.35 aspect math, font scaling by window height) are
+    not ported; CSS handles sizing.** `Details.svelte`'s `<style>` block
+    (`app/src/lib/Details.svelte:330-630`) uses container queries (`:362`, `:577`) and CSS
+    `aspect-ratio` (`:392`) instead of JS-computed pixel metrics recalculated on resize.
+
+11. **D11 — the SVG sniff lowercases instead of calling a nonexistent `bytes.casefold()`.**
+    Python's `cover_cache_extension_from_payload` calls `preview.casefold()` on a `bytes` object
+    (`grid_launcher/cover/utils.py:255`) — `bytes` has no `casefold` method in Python, so this
+    branch raises `AttributeError` the moment an `<?xml`-prefixed SVG body is actually sniffed; no
+    test exercises it. `extension_for`'s SVG branch
+    (`crates/grid-core/src/images/urls.rs:457-467`) lowercases with `to_ascii_lowercase()` instead,
+    so an `<?xml version="1.0"?><SVG>` body is correctly identified rather than crashing.
+
+### Follow-the-code quirks (ported as-is)
+
+Reproduced verbatim from the design spec's "Follow-the-code quirks" — where the reference's own
+behavior is internally inconsistent or arguably wrong, the port follows the CODE:
+
+- Host filtering compares whole netlocs: a port mismatch rejects, no case folding.
+- Screenshot heuristic defaults to "screenshot" for unlabelled URLs.
+- Screenshot source order and the `images`-only type rule, including "non-list value appended as
+  a single item".
+- Stored screenshot lists are re-filtered on read.
+- Negative image results are never retried within a process.
+- Replenish runs one job at a time; a second trigger while running is dropped.
+- Library sort and the hidden `emulator|emulators` platform.
+
+### Rulings
+
+Additional decisions made during execution, not individually numbered as deviations because they
+resolve implementation questions the design left open rather than diverging from a stated Python
+behavior:
+
+- `ensure_image` (`app/src-tauri/src/commands.rs:176`) takes only a URL — the cache key is the
+  URL; which cover variant (small/large) it is stays a frontend concern.
+- The startup sweep runs synchronously inside Tauri `setup`, before any command runs
+  (`ImageService::sweep_at_startup`, `app/src-tauri/src/images.rs:40-41`, called from
+  `app/src-tauri/src/lib.rs:132`) — no async gate delays the shell on it.
+- Downloads and Emulators keep the existing footer drawer and overlay, reachable from the new top
+  bar (`nav-downloads`, `nav-emulators`, `app/src/lib/Shell.svelte:48-49`); they were not
+  converted into sections alongside Library and Server.
+- The default section is Server when the shell renders connected and Library when it renders
+  offline (`initialSection`, `app/src/lib/shell.ts:26`).
+- The E2E offline scenario uses a mock toggle (`POST /__e2e__/offline`,
+  `e2e/mock-romm/server.mjs:318-322`) rather than an actual network failure.
+- The mock's rom 102 detail fixture carries `path_cover_small`
+  (`e2e/fixtures/rom-details.json:41`) because replenish only fetches a cover for a row
+  whose back-filled detail has one.
+- Replenish also treats a row that vanished between planning and running
+  (`Registry::update_images` returning no matching row) as skipped, without attempting a fetch
+  (`crates/grid-core/src/images/replenish.rs:69-72`).

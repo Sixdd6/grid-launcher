@@ -550,3 +550,19 @@ Run the suite with the repository's unittest discovery over `tests/`.
 | tests/test_token_store.py | Secret storage oracle |
 | tests/test_ps4_install.py, tests/test_update_detection.py, tests/test_ps4_content_apply.py | Config merge and installed-game normalization oracle |
 | .github/workflows/pyinstaller-linux.yml, .github/workflows/pyinstaller-windows.yml, .github/workflows/appimage-linux.yml | Bundled data layout and required keychain backends |
+
+## Rust port deviations (milestone 7)
+
+Deliberate deviation, recorded while porting the shell's session-restore behavior for the
+covers/images milestone (`docs/superpowers/specs/2026-09-02-covers-images-design.md`,
+"Deviations" §D-02-a). Rust paths are relative to `rewrite/`.
+
+- **D-02-a — Offline-first shell: with a stored server URL and credentials the main window
+  renders before and regardless of the probe result; "Not connected" state with Retry replaces
+  Python's status label + auto-reconnect.** Python's `server_auto_reconnect` flag maps to: probe
+  on startup, never automatically again; Retry is manual. `App.svelte` calls `restore()` once on
+  mount (`app/src/App.svelte:10-15`); `applyRestore` (`app/src/lib/shell.ts:12-21`) maps BOTH the
+  `connected` and `unreachable` outcomes of that one probe to `phase: 'shell'` — the shell renders
+  either way, with `session.connected` driving the "Not connected" chip and Retry button
+  (`app/src/lib/Shell.svelte:53-56`). `retry()` (`app/src/lib/stores/session.svelte.ts:27-34`) is
+  the only other place a connection is attempted; nothing calls it automatically.

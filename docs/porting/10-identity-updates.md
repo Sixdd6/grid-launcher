@@ -752,3 +752,20 @@ Adjacent oracles owned by other documents: emulator source version checks are
 | `grid_launcher/tv/bridge/game_backend.py` | The TV frontend's divergent rom-id-only identity |
 | `grid_launcher/__init__.py` | App version import with the `0.0.0-dev` fallback |
 | `build.sh`, `.github/workflows/appimage-linux.yml` | Version derivation, `version.py` generation, AppImage zsync update metadata |
+
+## Rust port deviations (milestone 7)
+
+Deliberate deviation, recorded while porting the Library/Details treatment of installed rows with
+no server ROM id for the covers/images milestone
+(`docs/superpowers/specs/2026-09-02-covers-images-design.md`, "Deviations" §D-10-a). Rust paths
+are relative to `rewrite/`.
+
+- **D-10-a — Installed rows without a rom id render in the Library but expose no actions
+  (Play/Uninstall are rom-id keyed).** Python identity falls back to `(title, platform)` for these.
+  Revisit in the identity milestone. `Library.svelte` keys each card on `row.rom_id ?? \`x-${i}\``
+  (`app/src/lib/Library.svelte:63-71`) so a rom-id-less row still gets a stable card and a cover,
+  rather than being dropped from the grid. `Details.svelte` checks `subject.romId === null` before
+  wiring the install/cloud-save overlay (`app/src/lib/Details.svelte:57`, `:106`) and, when true,
+  renders no action buttons at all — a one-line note instead
+  (`app/src/lib/Details.svelte:246-248`, `data-testid="details-no-id"`, "This entry has no server
+  id"). No `(title, platform)` fallback is ported: Play/Uninstall stay strictly rom-id keyed.
