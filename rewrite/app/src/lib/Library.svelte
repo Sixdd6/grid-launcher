@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { InstalledGame } from './api';
   import { installed } from './stores/installed.svelte';
+  import { updates } from './stores/updates.svelte';
   import { visibleLibraryGames } from './library';
   import { fromInstalled, type DetailsSubject } from './details/subject';
   import Image from './Image.svelte';
@@ -72,6 +73,9 @@
           <div class="caption">
             <span class="title">{row.title}</span>
             <span class="platform">{row.platform}</span>
+            {#if updates.labelFor(row.rom_id) !== null}
+              <span data-testid={`library-update-badge-${row.rom_id}`} class="update-badge">Update Available</span>
+            {/if}
           </div>
         </div>
       {/each}
@@ -148,6 +152,17 @@
   .caption .platform {
     font-size: 10px;
     opacity: 0.75;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Warning tone (the app's amber, as in CloudPanel's `.warn`) rather than
+     the accent: an available update is a notice, not the card's identity. */
+  .caption .update-badge {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e5a53a;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

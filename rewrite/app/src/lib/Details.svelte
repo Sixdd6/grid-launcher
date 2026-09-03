@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, type CloudPanelInfo, type ContentAvailability, type ContentKind, type DownloadStatus, type RomDetail } from './api';
   import { downloads } from './stores/downloads.svelte';
+  import { updates } from './stores/updates.svelte';
   import { isInstalled, installed, matchesInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
   import { session } from './stores/session.svelte';
   import { sessions } from './stores/sessions.svelte';
@@ -10,6 +11,7 @@
   import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
   import { cloudButtonLabel, isNativeExecutablePlatform, syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
   import { contentButtons, installLabel, isContentPlatform, isNativePlatform } from './details/actions';
+  import { versionLabel } from './details/version';
 
   let {
     subject,
@@ -119,6 +121,42 @@
   let cloudGame = $derived(installedRow ?? syntheticCloudGame(summary, subject.platformName));
   let isNative = $derived(isNativeExecutablePlatform(subject.platformName));
 
+  // Server-side game updates (doc 10). `updateLabel` is the update set's own
+  // label for this rom — null when the rom has no update, which also hides
+  // the button. `version` is the row under the rating: the version tag
+  // parsed out of the file name for Windows/PC, else the raw revision.
+  let updateLabel = $derived(installedNow ? updates.labelFor(subject.romId) : null);
+  let version = $derived(
+    versionLabel(
+      subject.platformName,
+      [detail?.fs_name ?? '', installedRow?.rom_file_name ?? ''],
+      detail?.revision || installedRow?.revision || ''
+    )
+  );
+  let confirmingUpdate = $state(false);
+  let updateToast = $state<string | null>(null);
+  let updatePending = $state(false);
+
+  // Last seen status per update entry for this rom. Deliberately NOT `$state`:
+  // it is only the effect's own memory of the previous run, and making it
+  // reactive would re-trigger the effect that writes it.
+  const seenUpdateStatus = new Map<number, DownloadStatus>();
+
+  // Toast on completion, not on click: the update runs as a download entry,
+  // so success is the entry reaching `completed`. Only a transition counts —
+  // an entry first seen already completed is drawer history, not this visit.
+  $effect(() => {
+    for (const entry of downloads.entries) {
+      if (entry.rom_id !== subject.romId) continue;
+      if (entry.kind !== 'update' && entry.kind !== 'native_update') continue;
+      const previous = seenUpdateStatus.get(entry.id);
+      seenUpdateStatus.set(entry.id, entry.status);
+      if (previous !== undefined && previous !== 'completed' && entry.status === 'completed') {
+        updateToast = `Updated '${subject.name}' successfully.`;
+      }
+    }
+  });
+
   let cloudMode = $state<CloudMode>('overview');
   let savePanelInfo = $state<CloudPanelInfo | null>(null);
   let statePanelInfo = $state<CloudPanelInfo | null>(null);
@@ -182,6 +220,27 @@
       confirmingUninstall = false;
     } finally {
       pendingAction = null;
+    }
+  }
+
+  // Two-click confirm for native installs only (doc 10): replacing a native
+  // game's files is the one update that touches a directory the user may
+  // have edited, so it states what is preserved before committing.
+  async function handleUpdateClick() {
+    if (subject.romId === null) return;
+    if (isNativeInstall && !confirmingUpdate) {
+      confirmingUpdate = true;
+      return;
+    }
+    error = null;
+    updatePending = true;
+    try {
+      await api.updateGame(subject.romId);
+    } catch (err) {
+      error = errorMessage(err);
+    } finally {
+      updatePending = false;
+      confirmingUpdate = false;
     }
   }
 
@@ -276,6 +335,9 @@
         {#if rating}
           <p data-testid="details-rating" class="rating">{rating}</p>
         {/if}
+        {#if version}
+          <p data-testid="details-version" class="version">{version}</p>
+        {/if}
         <p data-testid="details-genres" class="genres">{genres}</p>
         <p data-testid="details-description" class="description">{description}</p>
       </div>
@@ -333,6 +395,21 @@
               >
                 {confirmingUninstall ? 'Confirm uninstall' : 'Uninstall'}
               </button>
+              {#if updateLabel !== null}
+                <button
+                  data-testid="details-update"
+                  class="update"
+                  class:confirm={confirmingUpdate}
+                  disabled={pending || updatePending || liveEntry !== undefined}
+                  onclick={handleUpdateClick}
+                >
+                  {updatePending
+                    ? 'Updating…'
+                    : confirmingUpdate
+                      ? 'Saves and configuration will be preserved — confirm update'
+                      : updateLabel}
+                </button>
+              {/if}
               {#if buttons.update}
                 <button
                   data-testid="details-install-update"
@@ -364,6 +441,10 @@
               </button>
             {/if}
           </div>
+
+          {#if updateToast}
+            <p data-testid="details-update-toast" class="hint" role="status">{updateToast}</p>
+          {/if}
 
           {#if savePanelInfo?.supported || statePanelInfo?.supported}
             <div class="cloud-toggle">
@@ -546,6 +627,12 @@
     font-size: 14px;
   }
 
+  .version {
+    margin: 0;
+    color: var(--text);
+    font-size: 13px;
+  }
+
   .genres {
     margin: 0;
     color: var(--text);
@@ -616,6 +703,14 @@
     border-color: #e5484d;
   }
 
+  /* The update confirm is a caution, not a destruction: it keeps the
+     two-click shape but takes the warning amber instead of `.confirm`'s
+     red, which would contradict the label's "will be preserved". */
+  .action button.update.confirm {
+    background: #e5a53a;
+    color: #16171d;
+  }
+
   .cloud-toggle {
     margin-top: 4px;
     width: 100%;
@@ -643,6 +738,14 @@
   .action button:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+
+  .hint {
+    margin: 0;
+    color: var(--text);
+    opacity: 0.75;
+    font-size: 13px;
+    text-align: center;
   }
 
   .error {

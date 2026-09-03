@@ -3,7 +3,9 @@
   import Server from './Server.svelte';
   import Downloads from './Downloads.svelte';
   import Emulators from './Emulators.svelte';
+  import { api } from './api';
   import { session, retry, disconnect } from './stores/session.svelte';
+  import { appUpdate, dismiss } from './stores/appUpdate.svelte';
   import { refresh as refreshInstalled } from './stores/installed.svelte';
   import { chipLabel, initialSection, type Section } from './shell';
   import type { NavDirection } from './focus/grid';
@@ -63,6 +65,17 @@
     <p data-testid="session-error" class="error-line">{session.lastError}</p>
   {/if}
 </div>
+
+<!-- Self-update notice (doc 10). A strip under the bar rather than a modal:
+     it announces, it never blocks. `dismiss()` is per-process, so it stays
+     gone for the rest of the session. -->
+{#if appUpdate.notice}
+  <div data-testid="app-update-banner" class="update-banner" role="status">
+    <span>GRID Launcher {appUpdate.notice.tag} is available</span>
+    <button data-testid="app-update-open" onclick={() => api.openReleasePage(appUpdate.notice!.url).catch(() => {})}>Open release</button>
+    <button data-testid="app-update-dismiss" class="secondary" onclick={dismiss}>Dismiss</button>
+  </div>
+{/if}
 
 <div hidden={section !== 'library'}>
   <Library active={section === 'library'} bind:this={library} />
@@ -164,5 +177,54 @@
     margin: 0;
     color: #e5484d;
     font-size: 11px;
+  }
+
+  .update-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 24px;
+    box-sizing: border-box;
+    background: var(--accent);
+    color: #fff;
+    font-size: 13px;
+  }
+
+  /* The message yields first, so the two buttons never wrap to a second
+     line — the strip stays one row tall at any window width. */
+  .update-banner span {
+    flex: 1;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .update-banner button {
+    flex: none;
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.55);
+    background: transparent;
+    color: #fff;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .update-banner button:hover,
+  .update-banner button:focus-visible {
+    background: rgba(255, 255, 255, 0.18);
+  }
+
+  .update-banner button.secondary {
+    border-color: transparent;
+    opacity: 0.85;
+  }
+
+  .update-banner button.secondary:hover,
+  .update-banner button.secondary:focus-visible {
+    opacity: 1;
   }
 </style>
