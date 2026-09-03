@@ -141,7 +141,7 @@ const CONTENT_UNSUPPORTED_PLATFORM: &str =
 const NO_NATIVE_INSTALL_DIR: &str =
     "Game install directory could not be found. Reinstall the game and try again.";
 /// What every "this game is not in the registry" failure says.
-const NOT_INSTALLED: &str = "not installed";
+pub const NOT_INSTALLED: &str = "not installed";
 /// `install_update` refuses native rows: those merge through
 /// `install_native_update` instead of replacing the install.
 pub const NATIVE_UPDATE_REQUIRED: &str = "Native games update through the merge path.";

@@ -1,5 +1,6 @@
 pub mod cloud;
 pub mod specials;
+pub mod updates;
 
 use crate::config_write::modify_config;
 use crate::images::ImageService;
@@ -39,6 +40,9 @@ pub struct AppState {
     /// Background firmware triggers and their one-job-per-emulator-directory
     /// guard. See `firmware_service.rs`.
     pub firmware: Arc<crate::firmware_service::FirmwareService>,
+    /// The transient set of games with a newer server version, and the
+    /// triggers that recompute it. See `update_service.rs`.
+    pub updates: Arc<crate::update_service::UpdateService>,
 }
 
 pub(crate) fn err(e: impl std::fmt::Display) -> String {
@@ -65,7 +69,10 @@ pub async fn connect(
     if let Ok(install) = state.install.as_ref() {
         state
             .images
-            .spawn_replenish(app, state.session.clone(), install.clone());
+            .spawn_replenish(app.clone(), state.session.clone(), install.clone());
+        state
+            .updates
+            .spawn_refresh(app, state.session.clone(), install.clone());
     }
     Ok(result)
 }
@@ -80,7 +87,10 @@ pub async fn restore_session(
         if let Ok(install) = state.install.as_ref() {
             state
                 .images
-                .spawn_replenish(app, state.session.clone(), install.clone());
+                .spawn_replenish(app.clone(), state.session.clone(), install.clone());
+            state
+                .updates
+                .spawn_refresh(app, state.session.clone(), install.clone());
         }
     }
     Ok(outcome)
@@ -95,14 +105,20 @@ pub async fn retry_connect(
     if let Ok(install) = state.install.as_ref() {
         state
             .images
-            .spawn_replenish(app, state.session.clone(), install.clone());
+            .spawn_replenish(app.clone(), state.session.clone(), install.clone());
+        state
+            .updates
+            .spawn_refresh(app, state.session.clone(), install.clone());
     }
     Ok(result)
 }
 
 #[tauri::command]
-pub fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
-    state.session.disconnect().map_err(err)
+pub fn disconnect(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<(), String> {
+    state.session.disconnect().map_err(err)?;
+    // The update set describes a server that is no longer connected.
+    state.updates.clear(&app);
+    Ok(())
 }
 
 /// Whether a `list_platforms` response should re-run the defaults backfill:
@@ -231,11 +247,21 @@ pub fn dismiss_download(state: State<'_, AppState>, entry_id: u64) -> Result<(),
 }
 
 #[tauri::command]
-pub async fn uninstall_game(state: State<'_, AppState>, rom_id: i64) -> Result<(), String> {
+pub async fn uninstall_game(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    rom_id: i64,
+) -> Result<(), String> {
     let install = state.install.as_ref().map_err(Clone::clone)?.clone();
+    let install_for_updates = install.clone();
     tokio::task::spawn_blocking(move || install.uninstall(rom_id).map_err(err))
         .await
-        .map_err(|e| format!("uninstall did not finish: {e}"))?
+        .map_err(|e| format!("uninstall did not finish: {e}"))??;
+    // The uninstalled row can no longer carry an update.
+    state
+        .updates
+        .spawn_refresh(app, state.session.clone(), install_for_updates);
+    Ok(())
 }
 
 #[tauri::command]

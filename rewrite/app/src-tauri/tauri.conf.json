@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "GRID Launcher (Rust preview)",
-  "version": "0.1.0",
+  "version": "0.9.0-dev",
   "identifier": "io.github.sixdd6.gridlauncher2",
   "build": {
     "frontendDist": "../dist",

@@ -4,6 +4,7 @@ mod config_write;
 mod firmware_service;
 mod gamepad;
 mod images;
+mod update_service;
 
 use commands::AppState;
 use grid_core::autoconfig::RaCredentials;
@@ -87,6 +88,7 @@ pub fn run() {
         cloud,
         images: images::ImageService::new(),
         firmware: firmware_service::FirmwareService::new(),
+        updates: update_service::UpdateService::new(),
     });
     // Embedded WebDriver automation server, gated behind the `e2e` cargo
     // feature so it never ships in a release build (see
@@ -97,7 +99,14 @@ pub fn run() {
         .plugin(tauri_plugin_wdio::init())
         .plugin(tauri_plugin_wdio_webdriver::init());
     builder
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // The title carries the running version (doc 10): the About
+            // surface and a bug report both read it from here.
+            let version = app.package_info().version.to_string();
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_title(&format!("GRID Launcher {version}"));
+            }
             gamepad::spawn(app.handle().clone());
             // The static scope in tauri.conf.json only covers the default
             // ProjectDirs cache location ($CACHE/grid-launcher/covers/**/*).
@@ -166,15 +175,26 @@ pub fn run() {
                 // Each hook body is deliberately trivial — every decision
                 // lives in `FirmwareService`, which returns silently when
                 // there is nothing to do.
+                //
+                // One hook, two effects: the firmware pass above, and the
+                // update-set recompute below — a finalized install is one of
+                // doc 10's re-check triggers, whatever the install mode was.
                 let firmware = state.firmware.clone();
                 let session = state.session.clone();
                 let install_for_game = install.clone();
+                let updates = state.updates.clone();
+                let handle = app.handle().clone();
                 install.set_game_finalized_hook(Arc::new(move |record| {
                     firmware.spawn_for_game(
                         session.clone(),
                         install_for_game.clone(),
                         record,
                         firmware_service::FirmwareTrigger::Install,
+                    );
+                    updates.spawn_refresh(
+                        handle.clone(),
+                        session.clone(),
+                        install_for_game.clone(),
                     );
                 }));
 
@@ -289,6 +309,10 @@ pub fn run() {
             commands::specials::rpcs3_firmware_status,
             commands::specials::install_ps3_firmware,
             commands::specials::cancel_download_for_rom,
+            commands::updates::list_updates,
+            commands::updates::update_game,
+            commands::updates::app_version,
+            commands::updates::open_release_page,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

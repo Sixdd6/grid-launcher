@@ -268,6 +268,17 @@ export type Rpcs3FirmwareStatus = { pup_path: string | null };
 /// install finalizes in the background. Re-run `listCompatTools` on it.
 export const COMPAT_TOOLS_CHANGED_EVENT = 'compat-tools-changed';
 
+// Server updates (rewrite/app/src-tauri/src/update_service.rs,
+// rewrite/app/src-tauri/src/commands/updates.rs).
+
+/// One installed game with a newer version on the server. `label` is the
+/// button text, already resolved ('Update' or 'Update to v1.2.0').
+export type UpdateRow = { rom_id: number; label: string };
+
+/// Emitted after every update-set recompute (connect, install, uninstall)
+/// and on disconnect (empty).
+export const UPDATES_CHANGED_EVENT = 'updates-changed';
+
 export const api = {
   connect: (serverUrl: string, username: string, secret: string, useToken: boolean) =>
     invoke<SessionState>('connect', { serverUrl, username, secret, useToken }),
@@ -345,4 +356,8 @@ export const api = {
   installPs3Firmware: (emulatorName: string) =>
     invoke<boolean>('install_ps3_firmware', { emulatorName }),
   cancelDownloadForRom: (romId: number) => invoke<void>('cancel_download_for_rom', { romId }),
+  listUpdates: () => invoke<UpdateRow[]>('list_updates'),
+  updateGame: (romId: number) => invoke<void>('update_game', { romId }),
+  appVersion: () => invoke<string>('app_version'),
+  openReleasePage: (url: string) => invoke<void>('open_release_page', { url }),
 };
