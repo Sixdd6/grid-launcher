@@ -10,7 +10,7 @@
   let errors = $state<Record<number, string>>({});
   let pending = $state<Record<number, boolean>>({});
 
-  function toggle() {
+  export function toggle() {
     open = !open;
   }
 
