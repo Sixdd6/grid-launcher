@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use grid_core::library::content::ContentKind;
 use grid_core::library::queue::{DownloadEntry, DownloadStatus, DownloadsSnapshot};
 use grid_core::library::registry::{InstalledGame, Registry};
-use grid_core::library::{InstallService, LibraryError};
+use grid_core::library::{InstallService, LibraryError, NATIVE_UPDATE_REQUIRED};
 use grid_core::romm::RommClient;
 use grid_core::secrets::Credential;
 use secrecy::SecretString;
@@ -823,6 +823,109 @@ async fn a_same_title_platform_row_with_a_different_rom_id_does_not_skip_finaliz
         installed[0].extracted_path,
         extracted_dir.join("game.sfc").to_string_lossy()
     );
+}
+
+#[tokio::test]
+async fn install_update_re_extracts_and_replaces_the_row() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(
+        &staging.path().join("chrono (v00002).zip"),
+        &[("game.sfc", b"NEWDATA")],
+    );
+    harness
+        .registry
+        .upsert(&InstalledGame {
+            title: "Chrono Trigger".to_string(),
+            platform: "SNES".to_string(),
+            rom_id: Some(1),
+            rom_file_name: "chrono (v00001).zip".to_string(),
+            archive_path: "/somewhere/chrono.zip".to_string(),
+            server_updated_at: "2025-01-01T00:00:00Z".to_string(),
+            installed_at: 1,
+            ..Default::default()
+        })
+        .unwrap();
+
+    let mut detail = detail_json(
+        1,
+        "Chrono Trigger",
+        "SNES",
+        "chrono (v00002).zip",
+        &[file_spec(11, "chrono (v00002).zip", bytes.len())],
+    );
+    detail["updated_at"] = serde_json::json!("2026-06-01T00:00:00Z");
+    harness.mount_detail(1, detail).await;
+    harness
+        .mount_content(1, "chrono%20%28v00002%29.zip", bytes, 0)
+        .await;
+
+    harness
+        .service
+        .install_update(harness.client.clone(), 1)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+    assert_eq!(entry.kind, "update");
+
+    // Unlike a base install of an installed rom, the update DID finalize.
+    let extracted = harness.library.join("SNES/chrono (v00002)/game.sfc");
+    assert_eq!(std::fs::read(&extracted).unwrap(), b"NEWDATA");
+    let row = harness.registry.find(Some(1), "", "").unwrap().unwrap();
+    assert_eq!(row.rom_file_name, "chrono (v00002).zip");
+    assert_eq!(row.server_updated_at, "2026-06-01T00:00:00Z");
+    assert_eq!(
+        row.extracted_dir,
+        harness
+            .library
+            .join("SNES/chrono (v00002)")
+            .to_string_lossy()
+            .into_owned()
+    );
+    assert_ne!(row.installed_at, 1);
+    assert_eq!(
+        harness.registry.all().unwrap().len(),
+        1,
+        "the row was replaced, not duplicated"
+    );
+}
+
+#[tokio::test]
+async fn install_update_of_an_unknown_rom_reports_not_installed() {
+    let harness = Harness::new().await;
+    let err = harness
+        .service
+        .install_update(harness.client.clone(), 99)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("not installed"), "{err}");
+    assert!(harness.service.snapshot().entries.is_empty());
+}
+
+#[tokio::test]
+async fn install_update_refuses_a_native_row() {
+    let harness = Harness::new().await;
+    harness
+        .registry
+        .upsert(&InstalledGame {
+            title: "My Game".to_string(),
+            platform: "Windows".to_string(),
+            rom_id: Some(7),
+            rom_file_name: "mygame.zip".to_string(),
+            extracted_dir: harness.library.to_string_lossy().into_owned(),
+            installed_at: 1,
+            ..Default::default()
+        })
+        .unwrap();
+    let err = harness
+        .service
+        .install_update(harness.client.clone(), 7)
+        .await
+        .unwrap_err();
+    assert_eq!(err.to_string(), NATIVE_UPDATE_REQUIRED);
+    assert!(harness.service.snapshot().entries.is_empty());
 }
 
 // --- failure paths ----------------------------------------------------------

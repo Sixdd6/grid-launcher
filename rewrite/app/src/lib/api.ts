@@ -64,6 +64,7 @@ export type DownloadJob = 'game' | 'emulator' | 'firmware';
 // What an entry installs — finer-grained than `job`.
 export type DownloadKind =
   | 'base'
+  | 'update'
   | 'ps4_content'
   | 'xbox360_content'
   | 'native_update'

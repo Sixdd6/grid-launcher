@@ -142,6 +142,9 @@ const NO_NATIVE_INSTALL_DIR: &str =
     "Game install directory could not be found. Reinstall the game and try again.";
 /// What every "this game is not in the registry" failure says.
 const NOT_INSTALLED: &str = "not installed";
+/// `install_update` refuses native rows: those merge through
+/// `install_native_update` instead of replacing the install.
+pub const NATIVE_UPDATE_REQUIRED: &str = "Native games update through the merge path.";
 
 /// Everything outside the RFC 3986 unreserved set (`ALPHA / DIGIT / - . _ ~`)
 /// is percent-encoded. Applied to the file-name segment of a content URL so a
@@ -167,6 +170,10 @@ pub(crate) fn encode_file_segment(name: &str) -> String {
 #[serde(rename_all = "snake_case")]
 pub enum InstallMode {
     Base,
+    /// A non-native game re-installed over its existing install ("update"
+    /// mode, install_mixin.py:1867): the base pipeline, minus the
+    /// already-installed short-circuit.
+    Update,
     Ps4Content,
     Xbox360Content,
     NativeUpdate,
@@ -177,6 +184,7 @@ impl InstallMode {
     pub fn kind(self) -> &'static str {
         match self {
             InstallMode::Base => "base",
+            InstallMode::Update => "update",
             InstallMode::Ps4Content => "ps4_content",
             InstallMode::Xbox360Content => "xbox360_content",
             InstallMode::NativeUpdate => "native_update",
@@ -914,6 +922,38 @@ impl InstallService {
         Ok(())
     }
 
+    /// Starts (or queues) a plain re-install of an already installed
+    /// non-native game (Python "update" mode, doc 10 "Performing the update").
+    /// Same plan as a base install, but the job is marked `Update` so
+    /// `finish_download` never short-circuits on the existing row and
+    /// `finalize_base` replaces it. Admitted under `JobKey::Rom`, so an update
+    /// and a base install of the same rom can never run side by side.
+    pub async fn install_update(
+        self: &Arc<Self>,
+        client: Arc<RommClient>,
+        rom_id: i64,
+    ) -> Result<(), LibraryError> {
+        let library = self.library_root()?;
+        let row = self.current_row(rom_id)?;
+        if is_native_platform(&row.platform) {
+            return Err(LibraryError::Extract(NATIVE_UPDATE_REQUIRED.to_string()));
+        }
+        let detail = client.rom_detail(rom_id).await?;
+        let mut job = plan_install(&detail, &library, client)?;
+        job.mode = InstallMode::Update;
+        let key = JobKey::Rom(job.rom_id);
+        let title = job.detail.name.clone();
+        let platform = job.detail.platform_name.clone();
+        self.admit(
+            key,
+            &title,
+            &platform,
+            InstallMode::Update.kind(),
+            JobPayload::Game(job),
+        );
+        Ok(())
+    }
+
     /// Starts (or queues) an emulator acquisition for the catalog
     /// `source_id` (`"{owner}/{repo}"`).
     ///
@@ -1321,7 +1361,8 @@ impl InstallService {
         // config-write half still has to run.
         // A content / native-update job applies ON TOP of an installed
         // game, so "already installed" is its precondition, not a reason to
-        // skip: only a base install short-circuits here.
+        // skip: only a base install short-circuits here. An `Update` job
+        // exists precisely to bypass this.
         let skip_finalize = match &payload {
             JobPayload::Game(job) => {
                 job.mode == InstallMode::Base
@@ -1452,8 +1493,9 @@ impl InstallService {
         (result, warning)
     }
 
-    /// Routes a game job to its mode's finalize. `Base` lays a new registry
-    /// row down; the other three modify the row an earlier install left.
+    /// Routes a game job to its mode's finalize. `Base` and `Update` lay a
+    /// registry row down; the other two modify the row an earlier install
+    /// left.
     fn finalize_inner(
         self: &Arc<Self>,
         id: u64,
@@ -1461,7 +1503,7 @@ impl InstallService {
         warning: &mut String,
     ) -> Result<(), LibraryError> {
         match job.mode {
-            InstallMode::Base => self.finalize_base(id, job, warning),
+            InstallMode::Base | InstallMode::Update => self.finalize_base(id, job, warning),
             InstallMode::Ps4Content => self.finalize_ps4_content(id, job, warning),
             InstallMode::Xbox360Content => self.finalize_xbox360_content(id, job, warning),
             InstallMode::NativeUpdate => self.finalize_native_update(id, job, warning),
@@ -2982,6 +3024,7 @@ mod tests {
     #[test]
     fn install_mode_kinds_are_the_drawer_strings() {
         assert_eq!(InstallMode::Base.kind(), "base");
+        assert_eq!(InstallMode::Update.kind(), "update");
         assert_eq!(InstallMode::Ps4Content.kind(), "ps4_content");
         assert_eq!(InstallMode::Xbox360Content.kind(), "xbox360_content");
         assert_eq!(InstallMode::NativeUpdate.kind(), "native_update");

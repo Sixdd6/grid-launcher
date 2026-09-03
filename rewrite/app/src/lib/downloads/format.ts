@@ -90,6 +90,7 @@ export function kindLabel(kind: DownloadKind): string {
     case 'xbox360_content':
       return 'Content';
     case 'native_update':
+    case 'update':
       return 'Update';
     case 'emulator':
       return 'Emulator';

@@ -231,6 +231,7 @@ describe('actionFor', () => {
     expect(actionFor('installing', 'native_update')).toBe('installing');
     expect(actionFor('failed', 'compat_tool')).toBe('retry-dismiss');
     expect(actionFor('completed', 'xbox360_content')).toBe('dismiss');
+    expect(actionFor('downloading', 'update')).toBe('cancel');
   });
 
   // A firmware row is an external entry with no queue slot: Cancel and
@@ -259,8 +260,9 @@ describe('kindLabel', () => {
     expect(kindLabel('xbox360_content')).toBe('Content');
   });
 
-  it('is Update for native_update', () => {
+  it('is Update for native_update and update', () => {
     expect(kindLabel('native_update')).toBe('Update');
+    expect(kindLabel('update')).toBe('Update');
   });
 
   it('is Emulator for emulator', () => {
@@ -278,6 +280,7 @@ describe('kindLabel', () => {
   it('covers every DownloadKind variant with a defined label', () => {
     const kinds: DownloadKind[] = [
       'base',
+      'update',
       'ps4_content',
       'xbox360_content',
       'native_update',
