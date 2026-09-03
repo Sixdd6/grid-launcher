@@ -59,6 +59,18 @@ pub fn should_extract(platform: &str, archive: &Path) -> bool {
     }
 }
 
+/// Whether this engine can extract `archive` judging by its suffix alone,
+/// with no platform rule applied.
+///
+/// D13: [`should_extract`]'s table says a native (Windows) platform's
+/// payload is ALWAYS extracted, but the server also serves bare disc images
+/// and loose executables under that platform, and neither is an archive.
+/// The native finalize checks this on top of `should_extract` so such a
+/// payload installs as a direct file instead of failing extraction.
+pub fn is_extractable_archive(archive: &Path) -> bool {
+    lowercase_suffix(archive).is_some_and(|suffix| EXTRACTABLE_SUFFIXES.contains(&suffix.as_str()))
+}
+
 /// `path`'s extension, lowercased, without the leading dot.
 fn lowercase_suffix(path: &Path) -> Option<String> {
     path.extension()
@@ -677,6 +689,18 @@ pub(crate) fn extract_iso_with_7z(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn is_extractable_archive_ignores_platform_rules() {
+        assert!(is_extractable_archive(Path::new("/x/game.zip")));
+        assert!(is_extractable_archive(Path::new("/x/game.7Z")));
+        assert!(is_extractable_archive(Path::new("/x/game.rar")));
+        assert!(!is_extractable_archive(Path::new("/x/game.iso")));
+        assert!(!is_extractable_archive(Path::new("/x/game.exe")));
+        assert!(!is_extractable_archive(Path::new("/x/game")));
+        // The native platform's "always extract" rule does not apply here.
+        assert!(should_extract("Windows", Path::new("/x/game.iso")));
+    }
 
     // --- is_arcade_platform -------------------------------------------------
 

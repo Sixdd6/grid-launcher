@@ -124,14 +124,20 @@ struct Harness {
 
 impl Harness {
     async fn new() -> Self {
-        Self::build(true).await
+        Self::build(true, "").await
     }
 
     async fn without_library_path() -> Self {
-        Self::build(false).await
+        Self::build(false, "").await
     }
 
-    async fn build(with_library: bool) -> Self {
+    /// [`Harness::new`], with `extra_config` appended to the generated
+    /// `config.toml` — used to configure emulator entries.
+    async fn with_config(extra_config: &str) -> Self {
+        Self::build(true, extra_config).await
+    }
+
+    async fn build(with_library: bool, extra_config: &str) -> Self {
         let server = MockServer::start().await;
         let tmp = tempfile::tempdir().unwrap();
         let library = tmp.path().join("library");
@@ -146,7 +152,7 @@ impl Harness {
         fs::write(
             &config_path,
             format!(
-                "schema_version = 1\nserver_url = \"http://x\"\nusername = \"u\"\n{library_line}"
+                "schema_version = 1\nserver_url = \"http://x\"\nusername = \"u\"\n{library_line}{extra_config}"
             ),
         )
         .unwrap();
@@ -1240,4 +1246,716 @@ async fn uninstall_without_a_library_path_errors() {
     let harness = Harness::without_library_path().await;
     let err = harness.service.uninstall(1).unwrap_err();
     assert!(matches!(err, LibraryError::LibraryPathUnset));
+}
+
+// --- typed drawer entries ----------------------------------------------------
+
+#[tokio::test]
+async fn entry_carries_kind_base() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(
+        &staging.path().join("chrono.zip"),
+        &[("game.sfc", b"ROMDATA")],
+    );
+    harness
+        .mount_detail(
+            1,
+            detail_json(
+                1,
+                "Chrono Trigger",
+                "SNES",
+                "chrono.zip",
+                &[file_spec(11, "chrono.zip", bytes.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(1, "chrono.zip", bytes, 0).await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 1)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    assert_eq!(harness.entry(id).kind, "base");
+    assert_eq!(harness.entry(id).job, "game");
+    harness.wait_terminal(id).await;
+    assert_eq!(
+        harness.entry(id).kind,
+        "base",
+        "the kind survives every status change"
+    );
+}
+
+#[tokio::test]
+async fn cancel_for_rom_cancels_the_live_entry() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(
+        &staging.path().join("slow.zip"),
+        &[("game.sfc", b"ROMDATA")],
+    );
+    harness
+        .mount_detail(
+            4,
+            detail_json(
+                4,
+                "Slow Game",
+                "SNES",
+                "slow.zip",
+                &[file_spec(41, "slow.zip", bytes.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(4, "slow.zip", bytes, 3000).await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 4)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    harness
+        .wait_for(id, |e| e.status == DownloadStatus::Downloading)
+        .await;
+
+    // An unrelated rom id is ignored; the live entry is not touched.
+    harness.service.cancel_for_rom(999);
+    assert_eq!(harness.entry(id).status, DownloadStatus::Downloading);
+
+    harness.service.cancel_for_rom(4);
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Cancelled);
+}
+
+#[tokio::test]
+async fn admit_external_and_complete_external_round_trip() {
+    let harness = Harness::new().await;
+
+    let ok = harness
+        .service
+        .admit_external("PS3 Firmware", "PlayStation 3");
+    let entry = harness.entry(ok);
+    assert_eq!(entry.kind, "firmware");
+    assert_eq!(entry.job, "firmware");
+    assert_eq!(entry.status, DownloadStatus::Downloading);
+    assert_eq!(entry.title, "PS3 Firmware");
+    assert_eq!(entry.platform, "PlayStation 3");
+
+    harness.service.complete_external(ok, "");
+    assert_eq!(harness.entry(ok).status, DownloadStatus::Completed);
+    assert_eq!(harness.entry(ok).error, "");
+
+    let bad = harness
+        .service
+        .admit_external("PS3 Firmware", "PlayStation 3");
+    harness.service.complete_external(bad, "download failed");
+    assert_eq!(harness.entry(bad).status, DownloadStatus::Failed);
+    assert_eq!(harness.entry(bad).error, "download failed");
+
+    // Both transitions reached the notify listener.
+    let snapshots = harness.snapshots.lock().unwrap();
+    assert!(snapshots
+        .last()
+        .unwrap()
+        .entries
+        .iter()
+        .any(|e| e.id == bad && e.status == DownloadStatus::Failed));
+}
+
+// --- native (Windows) installs ----------------------------------------------
+
+/// [`detail_json`] with the metadata `game.json` is allowed to fill in left
+/// blank, so an `apply_game_json` write is visible rather than being skipped
+/// as "the row already has a value".
+fn detail_json_without_metadata(
+    id: i64,
+    name: &str,
+    platform: &str,
+    fs_name: &str,
+    files: &[FileSpec],
+) -> serde_json::Value {
+    let mut detail = detail_json(id, name, platform, fs_name, files);
+    detail["revision"] = json!(null);
+    detail["tags"] = json!([]);
+    detail["metadatum"]["first_release_date"] = json!(null);
+    detail
+}
+
+#[tokio::test]
+async fn native_install_lays_out_game_dir_prefix_and_game_json() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(
+        &staging.path().join("mygame.zip"),
+        &[
+            ("MyGame/mygame.exe", b"MZ"),
+            ("readme.txt", b"read me first"),
+        ],
+    );
+    let sidecar = br#"{"version": "1.2", "year": 2001, "tags": ["a", "b"], "included_dlc": ["x"]}"#;
+
+    harness
+        .mount_detail(
+            5,
+            detail_json_without_metadata(
+                5,
+                "My Game",
+                "Windows",
+                "mygame.zip",
+                &[
+                    file_spec(51, "mygame.zip", bytes.len()),
+                    file_spec(52, "game.json", sidecar.len()),
+                ],
+            ),
+        )
+        .await;
+    harness.mount_content(5, "mygame.zip", bytes, 0).await;
+    harness
+        .mount_content(5, "game.json", sidecar.to_vec(), 0)
+        .await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 5)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let game_dir = harness.library.join("Windows/My Game");
+    let extracted_dir = game_dir.join("game");
+    assert!(extracted_dir.join("MyGame/mygame.exe").is_file());
+    assert!(
+        !game_dir.join("mygame.zip").exists(),
+        "the archive is deleted once it has been extracted"
+    );
+    #[cfg(unix)]
+    assert!(game_dir.join("prefix").is_dir());
+
+    let row = harness.registry.find(Some(5), "", "").unwrap().unwrap();
+    assert_eq!(row.native_game_dir, game_dir.to_string_lossy());
+    assert_eq!(row.extracted_dir, extracted_dir.to_string_lossy());
+    assert_eq!(
+        row.extracted_path,
+        extracted_dir.join("MyGame/mygame.exe").to_string_lossy()
+    );
+    assert_eq!(row.archive_path, "");
+    assert_eq!(row.multi_file_game_dir, "");
+    #[cfg(unix)]
+    assert_eq!(
+        row.native_wineprefix,
+        game_dir.join("prefix").to_string_lossy()
+    );
+    assert_eq!(row.revision, "1.2");
+    assert_eq!(row.first_release_date, "2001");
+    assert_eq!(row.tags, "a, b");
+    assert_eq!(row.included_dlc, "[\"x\"]");
+}
+
+#[tokio::test]
+async fn native_non_archive_payload_installs_as_direct_file() {
+    let harness = Harness::new().await;
+
+    harness
+        .mount_detail(
+            6,
+            detail_json(
+                6,
+                "Disc Game",
+                "Windows",
+                "game.iso",
+                &[file_spec(61, "game.iso", 4)],
+            ),
+        )
+        .await;
+    harness
+        .mount_content(6, "game.iso", b"ISO!".to_vec(), 0)
+        .await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 6)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let game_dir = harness.library.join("Windows/Disc Game");
+    let archive = game_dir.join("game.iso");
+    assert!(archive.is_file(), "D13: the payload IS the install");
+    assert!(!game_dir.join("game").exists(), "nothing was extracted");
+
+    let row = harness.registry.find(Some(6), "", "").unwrap().unwrap();
+    assert_eq!(row.archive_path, archive.to_string_lossy());
+    assert_eq!(row.native_game_dir, game_dir.to_string_lossy());
+    assert_eq!(row.extracted_dir, "");
+    assert_eq!(row.extracted_path, "");
+    assert_eq!(row.native_wineprefix, "");
+}
+
+#[tokio::test]
+async fn uninstall_native_removes_the_game_dir() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(
+        &staging.path().join("mygame.zip"),
+        &[("MyGame/mygame.exe", b"MZ")],
+    );
+    harness
+        .mount_detail(
+            7,
+            detail_json(
+                7,
+                "My Game",
+                "Windows",
+                "mygame.zip",
+                &[file_spec(71, "mygame.zip", bytes.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(7, "mygame.zip", bytes, 0).await;
+    harness
+        .service
+        .install(harness.client.clone(), 7)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let game_dir = harness.library.join("Windows/My Game");
+    assert!(game_dir.is_dir());
+
+    harness.service.uninstall(7).unwrap();
+    assert!(
+        !game_dir.exists(),
+        "the whole home directory goes, prefix included"
+    );
+    assert!(harness.service.installed().unwrap().is_empty());
+}
+
+// --- PlayStation 3 installs --------------------------------------------------
+
+/// The `dev_hdd0` root a PS3 install falls back to when no emulator is
+/// configured: `<library>/PlayStation 3/.vfs/dev_hdd0`, canonicalized the
+/// way the VFS reader canonicalizes it.
+fn library_dev_hdd0(library: &Path) -> PathBuf {
+    let ps3 = library.join("PlayStation 3");
+    fs::canonicalize(&ps3)
+        .unwrap_or(ps3)
+        .join(".vfs")
+        .join("dev_hdd0")
+}
+
+#[tokio::test]
+async fn ps3_install_routes_into_the_library_vfs_fallback() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(
+        &staging.path().join("demons.zip"),
+        &[("BLUS30336/PS3_GAME/USRDIR/EBOOT.BIN", b"EBOOT")],
+    );
+
+    harness
+        .mount_detail(
+            10,
+            detail_json(
+                10,
+                "Demons Souls",
+                "PlayStation 3",
+                "demons.zip",
+                &[file_spec(101, "demons.zip", bytes.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(10, "demons.zip", bytes, 0).await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 10)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let dev_hdd0 = library_dev_hdd0(&harness.library);
+    let routed = dev_hdd0.join("game/BLUS30336");
+    assert!(routed.join("PS3_GAME/USRDIR/EBOOT.BIN").is_file());
+    assert!(
+        !harness.library.join("PlayStation 3/demons").exists(),
+        "the staging directory is removed once routing succeeded"
+    );
+    assert!(!harness.library.join("PlayStation 3/demons.zip").exists());
+
+    let row = harness.registry.find(Some(10), "", "").unwrap().unwrap();
+    assert_eq!(row.ps3_game_id, "BLUS30336");
+    assert_eq!(row.extracted_dir, routed.to_string_lossy());
+    assert_eq!(row.extracted_path, routed.to_string_lossy());
+    assert_eq!(row.ps3_trophy_paths, "[]");
+    assert_eq!(row.ps3_iso_path, "");
+}
+
+#[tokio::test]
+async fn ps3_iso_only_archive_short_circuits() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(&staging.path().join("disc.zip"), &[("game.iso", b"ISO!")]);
+
+    harness
+        .mount_detail(
+            11,
+            detail_json(
+                11,
+                "Disc Only",
+                "PlayStation 3",
+                "disc.zip",
+                &[file_spec(111, "disc.zip", bytes.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(11, "disc.zip", bytes, 0).await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 11)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let iso = harness.library.join("PlayStation 3/game.iso");
+    assert!(iso.is_file(), "the ISO is moved next to the archive");
+    assert!(!harness.library.join("PlayStation 3/disc").exists());
+    assert!(!harness.library.join("PlayStation 3/disc.zip").exists());
+
+    let row = harness.registry.find(Some(11), "", "").unwrap().unwrap();
+    assert_eq!(row.ps3_iso_path, iso.to_string_lossy());
+    assert_eq!(row.extracted_path, iso.to_string_lossy());
+    assert_eq!(row.extracted_dir, "");
+    assert_eq!(row.ps3_game_id, "");
+}
+
+#[tokio::test]
+async fn ps3_game_id_missing_fails() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(
+        &staging.path().join("junk.zip"),
+        &[("misc/readme.txt", b"nothing to see")],
+    );
+
+    harness
+        .mount_detail(
+            12,
+            detail_json(
+                12,
+                "Mystery Disc",
+                "PlayStation 3",
+                "junk.zip",
+                &[file_spec(121, "junk.zip", bytes.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(12, "junk.zip", bytes, 0).await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 12)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Failed);
+    assert_eq!(
+        entry.error,
+        "No PS3 game ID found in archive for Mystery Disc"
+    );
+    assert!(
+        harness.library.join("PlayStation 3/junk.zip").is_file(),
+        "a failed finalize keeps the archive so a retry skips the download"
+    );
+    assert!(harness.service.installed().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn ps3_archive_of_empty_directories_reports_no_rom_file() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(&staging.path().join("hollow.zip"), &[("empty/", b"")]);
+
+    harness
+        .mount_detail(
+            13,
+            detail_json(
+                13,
+                "Hollow",
+                "PlayStation 3",
+                "hollow.zip",
+                &[file_spec(131, "hollow.zip", bytes.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(13, "hollow.zip", bytes, 0).await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 13)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Failed);
+    assert_eq!(entry.error, "Archive extracted but no ROM file was found");
+    assert!(!harness.library.join("PlayStation 3/hollow").exists());
+}
+
+#[tokio::test]
+async fn uninstall_ps3_removes_iso_trophies_and_the_routed_dir() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(
+        &staging.path().join("trophies.zip"),
+        &[
+            ("BLUS30336/PS3_GAME/USRDIR/EBOOT.BIN", b"EBOOT"),
+            ("NPWR12345/TROPCONF.SFM", b"TROPHY"),
+        ],
+    );
+
+    harness
+        .mount_detail(
+            14,
+            detail_json(
+                14,
+                "Trophy Game",
+                "PlayStation 3",
+                "trophies.zip",
+                &[file_spec(141, "trophies.zip", bytes.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(14, "trophies.zip", bytes, 0).await;
+    harness
+        .service
+        .install(harness.client.clone(), 14)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let dev_hdd0 = library_dev_hdd0(&harness.library);
+    let routed = dev_hdd0.join("game/BLUS30336");
+    let trophy = dev_hdd0.join("home/00000001/trophy/NPWR12345");
+    assert!(routed.is_dir());
+    assert!(trophy.is_dir());
+
+    let row = harness.registry.find(Some(14), "", "").unwrap().unwrap();
+    assert!(
+        row.ps3_trophy_paths.contains("NPWR12345"),
+        "trophy paths: {}",
+        row.ps3_trophy_paths
+    );
+
+    // A stale ISO recorded on the row is removed too.
+    let iso = harness.library.join("PlayStation 3/stale.iso");
+    fs::write(&iso, b"ISO!").unwrap();
+    let mut updated = row.clone();
+    updated.ps3_iso_path = iso.to_string_lossy().into_owned();
+    harness.registry.upsert(&updated).unwrap();
+
+    harness.service.uninstall(14).unwrap();
+    assert!(!iso.exists());
+    assert!(!trophy.exists());
+    assert!(!routed.exists());
+    assert!(harness.service.installed().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn games_yml_written_for_ps3_with_configured_rpcs3() {
+    // A configured RPCS3 whose `portable/` directory holds a `vfs.yml`
+    // naming an explicit dev_hdd0: both the data root (where `games.yml`
+    // goes) and the VFS root are then fixed by the config, not guessed.
+    let emulator_dir = tempfile::tempdir().unwrap();
+    let executable = emulator_dir.path().join("rpcs3");
+    fs::write(&executable, b"#!/bin/sh\n").unwrap();
+    let portable = emulator_dir.path().join("portable");
+    fs::create_dir_all(portable.join("config")).unwrap();
+    let dev_hdd0 = emulator_dir.path().join("hdd0");
+    fs::create_dir_all(&dev_hdd0).unwrap();
+    fs::write(
+        portable.join("config/vfs.yml"),
+        format!(
+            "/dev_hdd0/: \"{}/\"\n/games/: \"{}/\"\n",
+            dev_hdd0.to_string_lossy(),
+            emulator_dir.path().join("games").to_string_lossy()
+        ),
+    )
+    .unwrap();
+
+    let harness = Harness::with_config(&format!(
+        "[default_emulators]\n\"PlayStation 3\" = \"RPCS3 (Playstation 3)\"\n\n\
+         [[emulators]]\nname = \"RPCS3 (Playstation 3)\"\npath = {:?}\nargs = \"\"\n",
+        executable.to_string_lossy()
+    ))
+    .await;
+
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(
+        &staging.path().join("demons.zip"),
+        &[("BLUS30336/PS3_GAME/USRDIR/EBOOT.BIN", b"EBOOT")],
+    );
+    harness
+        .mount_detail(
+            15,
+            detail_json(
+                15,
+                "Demons Souls",
+                "PlayStation 3",
+                "demons.zip",
+                &[file_spec(151, "demons.zip", bytes.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(15, "demons.zip", bytes, 0).await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 15)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let row = harness.registry.find(Some(15), "", "").unwrap().unwrap();
+    assert_eq!(row.ps3_game_id, "BLUS30336");
+    assert!(
+        row.extracted_dir.contains("hdd0"),
+        "routed into the configured VFS, not the library fallback: {}",
+        row.extracted_dir
+    );
+
+    let games_yml = fs::read_to_string(portable.join("config/games.yml")).unwrap();
+    assert!(
+        games_yml.contains("BLUS30336:"),
+        "games.yml should name the installed game: {games_yml}"
+    );
+}
+
+// --- PlayStation 4 installs --------------------------------------------------
+
+#[tokio::test]
+async fn ps4_install_detects_title_id_and_prefers_eboot() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(
+        &staging.path().join("ps4game.zip"),
+        &[
+            ("CUSA12345/sce_sys/param.sfo", b"SFO"),
+            ("CUSA12345/eboot.bin", b"EBOOT"),
+        ],
+    );
+
+    harness
+        .mount_detail(
+            16,
+            detail_json(
+                16,
+                "PS4 Game",
+                "PlayStation 4",
+                "ps4game.zip",
+                &[file_spec(161, "ps4game.zip", bytes.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(16, "ps4game.zip", bytes, 0).await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 16)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let extracted_dir = harness.library.join("PlayStation 4/ps4game");
+    let row = harness.registry.find(Some(16), "", "").unwrap().unwrap();
+    assert_eq!(row.ps4_game_id, "CUSA12345");
+    assert_eq!(row.extracted_dir, extracted_dir.to_string_lossy());
+    assert!(
+        row.extracted_path.ends_with("eboot.bin"),
+        "eboot.bin wins over the generic ranking: {}",
+        row.extracted_path
+    );
+    assert!(!harness.library.join("PlayStation 4/ps4game.zip").exists());
+}
+
+// --- post-install hook -------------------------------------------------------
+
+#[tokio::test]
+async fn the_game_finalized_hook_sees_the_written_row() {
+    let harness = Harness::new().await;
+    let seen: Arc<Mutex<Vec<InstalledGame>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = seen.clone();
+    harness
+        .service
+        .set_game_finalized_hook(Arc::new(move |row| sink.lock().unwrap().push(row)));
+
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(
+        &staging.path().join("chrono.zip"),
+        &[("game.sfc", b"ROMDATA")],
+    );
+    harness
+        .mount_detail(
+            17,
+            detail_json(
+                17,
+                "Chrono Trigger",
+                "SNES",
+                "chrono.zip",
+                &[file_spec(171, "chrono.zip", bytes.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(17, "chrono.zip", bytes, 0).await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 17)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].title, "Chrono Trigger");
+    assert_eq!(seen[0].rom_id, Some(17));
+    assert_eq!(
+        seen[0].extracted_dir,
+        harness.library.join("SNES/chrono").to_string_lossy(),
+        "the hook sees the finished row, not a half-filled one"
+    );
+}
+
+// --- platform ids ------------------------------------------------------------
+
+#[tokio::test]
+async fn platform_ids_default_to_empty_and_round_trip() {
+    let harness = Harness::new().await;
+    assert!(harness.service.platform_ids().is_empty());
+
+    let mut ids = std::collections::BTreeMap::new();
+    ids.insert("PlayStation 3".to_string(), 12i64);
+    harness.service.set_platform_ids(ids.clone());
+    assert_eq!(harness.service.platform_ids(), ids);
 }

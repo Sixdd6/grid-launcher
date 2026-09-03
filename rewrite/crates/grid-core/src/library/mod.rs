@@ -18,7 +18,7 @@ pub mod registry;
 pub mod specials;
 
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,22 +28,31 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use serde_json::Value;
 
+use crate::autoconfig::readers::{ps3_vfs_dev_hdd0_path, ps3_vfs_games_path, rpcs3_data_root};
+use crate::autoconfig::rpcs3::update_games_yml;
 use crate::autoconfig::{self, RaCredentials};
 use crate::config::{Config, EmulatorEntry};
 use crate::images::ImageFields;
 use crate::launch::forge::{ForgeClient, ForgeProvider, ResolvedDownload};
 use crate::launch::profiles::{load_profiles, EmulatorProfile};
+use crate::launch::selection::{default_emulator_name_for_platform, emulator_entry_by_name};
+use crate::launch::template::split_template;
 use crate::launch::{catalog, emu_install};
 use crate::romm::{RomDetail, RomFile, RommClient};
+use content::ContentKind;
 use download::{download_targets, FileTarget, RommProvider};
-use extract::{extract_archive, should_extract};
+use extract::{
+    extract_archive, extract_iso_with_system_7z, is_extractable_archive, should_extract,
+};
 use launch_select::select_launch_file;
 use paths::{
     archive_name, candidate_archives, candidate_extracted_dirs, extraction_dir, platform_dir,
     sanitize_component,
 };
+use platforms::{is_native_platform, is_ps3_platform, is_ps4_platform};
 use queue::{Admission, CancelAction, DownloadStatus, DownloadsSnapshot, JobKey, QueueState};
 use registry::{installed_match, InstalledGame, Registry};
+use specials::ps3::Ps3Roots;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LibraryError {
@@ -81,6 +90,9 @@ const ARCHIVE_DELETE_PAUSE: Duration = Duration::from_millis(250);
 /// download target.
 const METADATA_FILE_NAME: &str = "game.json";
 const NO_DOWNLOADABLE_FILE: &str = "the server lists no downloadable file for this game";
+/// The native (Windows) branch's own "nothing to install" message, which the
+/// reference words differently from the generic one above.
+const NO_NATIVE_DOWNLOADABLE_FILE: &str = "No downloadable file was found for this game";
 
 /// The `platform` column an emulator entry shows in the downloads drawer.
 /// Emulators are config entries, never registry rows, so this is a label
@@ -111,11 +123,49 @@ pub(crate) fn encode_file_segment(name: &str) -> String {
 
 // --- install plan -----------------------------------------------------------
 
+/// What one game job installs. Every job carries one; `Base` is the ordinary
+/// "install this game" flow and the only mode this task's `plan_install`
+/// produces. The rest name the add-on flows that install ON TOP of an
+/// already installed game.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstallMode {
+    Base,
+    Ps4Content,
+    Xbox360Content,
+    NativeUpdate,
+}
+
+impl InstallMode {
+    /// The `kind` string the drawer row carries for this mode.
+    pub fn kind(self) -> &'static str {
+        match self {
+            InstallMode::Base => "base",
+            InstallMode::Ps4Content => "ps4_content",
+            InstallMode::Xbox360Content => "xbox360_content",
+            InstallMode::NativeUpdate => "native_update",
+        }
+    }
+}
+
 /// Everything one admitted install needs, computed once before admission so a
 /// queued job can start later without re-fetching anything.
 #[derive(Clone)]
 struct InstallJob {
     rom_id: i64,
+    /// What this job installs. Decides the finalize branch and the drawer
+    /// row's `kind`.
+    mode: InstallMode,
+    /// The content category this job installs, for a `Ps4Content` /
+    /// `Xbox360Content` mode; `None` for every other mode. Read by the
+    /// content-install flow only, which lands in the next task.
+    #[allow(dead_code)]
+    content_kind: Option<ContentKind>,
+    /// The server file ids this job downloads, in target order. Carried so a
+    /// content job can record what it applied without re-deriving it; read
+    /// by that flow only, which lands in the next task.
+    #[allow(dead_code)]
+    file_ids: Vec<i64>,
     detail: RomDetail,
     targets: Vec<FileTarget>,
     /// The primary downloaded file: the archive for a single-file install,
@@ -126,6 +176,14 @@ struct InstallJob {
     /// Server `file_name` of the primary file — recorded as `rom_file_name`,
     /// and for a multi-file game the launch entry's name.
     launch_entry: String,
+    /// `Some` only for a native (Windows) game: the per-game directory the
+    /// archive, the extracted `game/` tree and the Wine prefix all live
+    /// under.
+    native_game_dir: Option<PathBuf>,
+    /// `Some` when the server listed a `game.json` sidecar for a native
+    /// game: where that sidecar was downloaded to, so finalize can read the
+    /// metadata back off disk.
+    game_json_target: Option<PathBuf>,
     /// The client the download runs on, carried on the job so a queued
     /// install can start after its caller has gone away.
     client: Arc<RommClient>,
@@ -225,12 +283,21 @@ fn plan_install(
     library: &Path,
     client: Arc<RommClient>,
 ) -> Result<InstallJob, LibraryError> {
+    let platform_root = platform_dir(library, &detail.platform_name);
+
+    // A native (Windows) game never becomes a multi-file install: the
+    // server lists its archive next to a `game.json` sidecar and any number
+    // of extras, and exactly one of those is the game. Everything lands in
+    // one per-game directory instead of the platform root.
+    if is_native_platform(&detail.platform_name) {
+        return plan_native_install(detail, &platform_root, client);
+    }
+
     let candidates: Vec<&RomFile> = detail
         .files
         .iter()
         .filter(|file| is_download_candidate(file))
         .collect();
-    let platform_root = platform_dir(library, &detail.platform_name);
 
     match candidates.as_slice() {
         [] => Err(LibraryError::Extract(NO_DOWNLOADABLE_FILE.to_string())),
@@ -249,11 +316,16 @@ fn plan_install(
             };
             Ok(InstallJob {
                 rom_id: detail.id,
+                mode: InstallMode::Base,
+                content_kind: None,
+                file_ids: vec![only.id],
                 detail: detail.clone(),
                 targets: vec![content_target(detail.id, only, dest.clone(), size)],
                 primary_archive: dest,
                 multi_file_game_dir: None,
                 launch_entry: only.file_name.clone(),
+                native_game_dir: None,
+                game_json_target: None,
                 client,
             })
         }
@@ -277,15 +349,81 @@ fn plan_install(
                 .collect();
             Ok(InstallJob {
                 rom_id: detail.id,
+                mode: InstallMode::Base,
+                content_kind: None,
+                file_ids: many.iter().map(|file| file.id).collect(),
                 detail: detail.clone(),
                 targets,
                 primary_archive: game_dir.join(&launch.file_name),
                 multi_file_game_dir: Some(game_dir),
                 launch_entry: launch.file_name.clone(),
+                native_game_dir: None,
+                game_json_target: None,
                 client,
             })
         }
     }
+}
+
+/// [`plan_install`]'s native (Windows) branch.
+///
+/// The archive is picked by [`specials::native::select_archive`], not by the
+/// generic candidate filter: a native game's server payload routinely lists
+/// artwork and soundtracks before the archive, and `game.json` is a metadata
+/// sidecar rather than something to launch. Everything is downloaded into
+/// `<platform dir>/<safe title>/` — the game's own home directory, which
+/// later holds the extracted `game/` tree and (on non-Windows hosts) the
+/// Wine prefix. Ports `_download_game_archive`'s native branch
+/// (`install_mixin.py:977-1020`).
+fn plan_native_install(
+    detail: &RomDetail,
+    platform_root: &Path,
+    client: Arc<RommClient>,
+) -> Result<InstallJob, LibraryError> {
+    let Some(archive) = specials::native::select_archive(&detail.files) else {
+        return Err(LibraryError::Extract(
+            NO_NATIVE_DOWNLOADABLE_FILE.to_string(),
+        ));
+    };
+    let game_dir = platform_root.join(sanitize_component(&detail.name, "game"));
+    let dest = game_dir.join(&archive.file_name);
+    let size = if archive.file_size_bytes > 0 {
+        archive.file_size_bytes
+    } else {
+        detail.filesize_bytes
+    };
+
+    let mut file_ids = vec![archive.id];
+    let mut targets = vec![content_target(detail.id, archive, dest.clone(), size)];
+    // The sidecar is fetched as its own request with its own `file_ids`:
+    // asking for the content endpoint without one makes the server bundle
+    // every listed file into a single zip.
+    let game_json_target = specials::native::has_game_json(&detail.files).map(|sidecar| {
+        let sidecar_dest = game_dir.join(METADATA_FILE_NAME);
+        file_ids.push(sidecar.id);
+        targets.push(content_target(
+            detail.id,
+            sidecar,
+            sidecar_dest.clone(),
+            sidecar.file_size_bytes,
+        ));
+        sidecar_dest
+    });
+
+    Ok(InstallJob {
+        rom_id: detail.id,
+        mode: InstallMode::Base,
+        content_kind: None,
+        file_ids,
+        detail: detail.clone(),
+        targets,
+        primary_archive: dest,
+        multi_file_game_dir: None,
+        launch_entry: archive.file_name.clone(),
+        native_game_dir: Some(game_dir),
+        game_json_target,
+        client,
+    })
 }
 
 // --- service ----------------------------------------------------------------
@@ -300,6 +438,12 @@ pub type RaProvider = Arc<dyn Fn() -> Option<RaCredentials> + Send + Sync>;
 /// write. grid-core never imports Tauri, so the app installs this to trigger
 /// its own post-install cover prefetch (D5).
 pub type ImageHook = Arc<dyn Fn(ImageFields) + Send + Sync>;
+
+/// Notified with a base install's finalized registry row, after the row and
+/// (for PS3) `games.yml` have been written. The app hangs the follow-on
+/// work that grid-core cannot do itself off this — auto-queuing Xbox 360
+/// content, kicking off a firmware install — so nothing here imports Tauri.
+pub type GameFinalizedHook = Arc<dyn Fn(InstalledGame) + Send + Sync>;
 
 /// Owns the install queue and drives one download task and one finalize task
 /// at a time. Every method takes `&self`; the async entry points take
@@ -333,6 +477,13 @@ pub struct InstallService {
     /// `None` until the app installs one; a finalized game then triggers no
     /// cover prefetch.
     image_hook: RwLock<Option<ImageHook>>,
+    /// `None` until the app installs one; a finalized base install then
+    /// triggers no follow-on work.
+    game_finalized_hook: RwLock<Option<GameFinalizedHook>>,
+    /// Server platform name -> platform id, as the last successful platform
+    /// fetch saw it. Firmware lookups need the id, and grid-core holds no
+    /// session of its own to fetch it with.
+    platform_ids: RwLock<BTreeMap<String, i64>>,
 }
 
 impl InstallService {
@@ -370,6 +521,8 @@ impl InstallService {
             known_platforms: RwLock::new(Vec::new()),
             ra_provider: RwLock::new(None),
             image_hook: RwLock::new(None),
+            game_finalized_hook: RwLock::new(None),
+            platform_ids: RwLock::new(BTreeMap::new()),
         })
     }
 
@@ -402,6 +555,23 @@ impl InstallService {
     /// replaces the first.
     pub fn set_image_hook(&self, f: ImageHook) {
         *self.image_hook.write().unwrap() = Some(f);
+    }
+
+    /// Installs the post-install follow-on hook. A second call replaces the
+    /// first.
+    pub fn set_game_finalized_hook(&self, f: GameFinalizedHook) {
+        *self.game_finalized_hook.write().unwrap() = Some(f);
+    }
+
+    /// Records the server platform name -> id map the app just fetched.
+    pub fn set_platform_ids(&self, ids: BTreeMap<String, i64>) {
+        *self.platform_ids.write().unwrap() = ids;
+    }
+
+    /// The platform ids [`Self::set_platform_ids`] last recorded; empty
+    /// until the app has fetched them once.
+    pub fn platform_ids(&self) -> BTreeMap<String, i64> {
+        self.platform_ids.read().unwrap().clone()
     }
 
     /// The current RetroAchievements pair, or `None` when no provider is
@@ -445,7 +615,8 @@ impl InstallService {
         let key = JobKey::Rom(job.rom_id);
         let title = job.detail.name.clone();
         let platform = job.detail.platform_name.clone();
-        self.admit(key, &title, &platform, JobPayload::Game(job));
+        let kind = job.mode.kind();
+        self.admit(key, &title, &platform, kind, JobPayload::Game(job));
         Ok(())
     }
 
@@ -493,6 +664,7 @@ impl InstallService {
             JobKey::Emulator(source_id),
             &title,
             EMULATOR_PLATFORM,
+            "emulator",
             JobPayload::Emulator(job),
         );
         Ok(())
@@ -514,6 +686,35 @@ impl InstallService {
             }
             CancelAction::Ignored => return,
         }
+        self.notify_now();
+    }
+
+    /// Cancels the oldest live (queued, downloading or finalizing) entry for
+    /// `rom_id`. A game with no live entry is ignored, and a finalizing
+    /// entry is left alone by [`Self::cancel`] itself — extraction is not
+    /// cancellable.
+    pub fn cancel_for_rom(&self, rom_id: i64) {
+        let id = self.queue.lock().unwrap().first_live_for_rom(rom_id);
+        if let Some(id) = id {
+            self.cancel(id);
+        }
+    }
+
+    /// Creates a drawer row for a transfer this service does NOT drive (the
+    /// background firmware installer moves its own bytes). The returned id
+    /// is handed back to [`Self::complete_external`] when that transfer
+    /// ends. The row takes no queue slot, so it neither blocks nor is
+    /// blocked by a real install.
+    pub fn admit_external(&self, title: &str, platform: &str) -> u64 {
+        let id = self.queue.lock().unwrap().admit_external(title, platform);
+        self.notify_now();
+        id
+    }
+
+    /// Reports the outcome of an [`Self::admit_external`] row: a blank
+    /// `error` completes it, anything else fails it with that text.
+    pub fn complete_external(&self, id: u64, error: &str) {
+        self.queue.lock().unwrap().finish_external(id, error);
         self.notify_now();
     }
 
@@ -543,6 +744,13 @@ impl InstallService {
                 self.dismiss(entry_id);
                 self.install_emulator(source_id).await
             }
+            // A content / native-update job carries state this service does
+            // not own (the installed row it applies to), and an external
+            // entry is somebody else's transfer. Neither is retried from
+            // here; the caller re-requests it instead.
+            Some(JobKey::Content(..))
+            | Some(JobKey::NativeUpdate(_))
+            | Some(JobKey::External(_)) => Ok(()),
             None => Ok(()),
         }
     }
@@ -564,10 +772,16 @@ impl InstallService {
 
     /// Deletes an installed game's files and its registry row.
     ///
-    /// A multi-file game's directory is removed wholesale; anything else has
-    /// every existing candidate archive and extraction directory removed. The
-    /// row is deleted only after the files are gone, so a failure leaves the
-    /// game installed rather than orphaning it.
+    /// What gets removed depends on the platform ([`uninstall_steps`]): a
+    /// PS3 game gives up its ISO, its trophy directories and its routed
+    /// directories; a native game its whole home directory; a multi-file
+    /// game its directory; anything else every existing candidate archive
+    /// and extraction directory.
+    ///
+    /// D11: every step runs even after an earlier one failed, and the
+    /// failures come back as one error listing them all. The row is deleted
+    /// only when nothing failed, so a partial removal leaves the game
+    /// installed rather than orphaning it.
     pub fn uninstall(&self, rom_id: i64) -> Result<(), LibraryError> {
         let library = self.library_root()?;
         // `find` falls back to the (title, platform) identity when no row
@@ -583,24 +797,10 @@ impl InstallService {
             .filter(|found| installed_match(found, rom_id))
             .ok_or_else(|| LibraryError::Registry("not installed".to_string()))?;
 
-        let game_dir = record.multi_file_game_dir.trim();
-        if !game_dir.is_empty() && Path::new(game_dir).is_dir() {
-            remove_dir_tree(Path::new(game_dir))?;
-        } else {
-            let name = archive_name(&record.rom_file_name, &record.title, &record.platform);
-            let archives =
-                candidate_archives(&library, &record.platform, &record.archive_path, &name);
-            let extracted = candidate_extracted_dirs(&archives, &record.extracted_dir);
-            for archive in &archives {
-                if archive.is_file() {
-                    fs::remove_file(archive)?;
-                }
-            }
-            for dir in &extracted {
-                if dir.is_dir() {
-                    remove_dir_tree(dir)?;
-                }
-            }
+        let steps = uninstall_steps(&record, &library);
+        let failures = run_removals(&steps, &mut apply_removal);
+        if !failures.is_empty() {
+            return Err(LibraryError::Registry(failures.join("\n")));
         }
 
         self.registry.remove(&record.title, &record.platform)?;
@@ -637,10 +837,17 @@ impl InstallService {
     /// first would let a finishing download's [`Self::pump`] pop the brand
     /// new id out of `waiting` before its job exists, fail the entry as lost
     /// and leave the job stranded in `pending_jobs`.
-    fn admit(self: &Arc<Self>, key: JobKey, title: &str, platform: &str, payload: JobPayload) {
+    fn admit(
+        self: &Arc<Self>,
+        key: JobKey,
+        title: &str,
+        platform: &str,
+        kind: &'static str,
+        payload: JobPayload,
+    ) {
         let (admitted, start) = {
             let mut queue = self.queue.lock().unwrap();
-            match queue.admit(key, title, platform) {
+            match queue.admit(key, title, platform, kind) {
                 Admission::Start(id) => (true, Some((id, payload))),
                 Admission::Queued(id) => {
                     self.pending_jobs.lock().unwrap().insert(id, payload);
@@ -872,40 +1079,42 @@ impl InstallService {
         warning: &mut String,
     ) -> Result<(), LibraryError> {
         let detail = &job.detail;
+        let platform = detail.platform_name.as_str();
         let mut record = new_record(detail, &job.launch_entry);
-        let mut archive_to_delete: Option<&Path> = None;
+        let archive = job.primary_archive.as_path();
+        let archive_to_delete: Option<&Path>;
 
         if let Some(game_dir) = &job.multi_file_game_dir {
             // A multi-file game is already laid out on disk: the files are
             // the install, and the launch entry is what gets started.
             record.multi_file_game_dir = path_string(game_dir);
             record.extracted_path = path_string(&job.primary_archive);
+            archive_to_delete = None;
+        } else if is_native_platform(platform) && job.mode == InstallMode::Base {
+            archive_to_delete = self.finalize_native_base(id, job, &mut record)?;
+        } else if is_ps3_platform(platform) {
+            archive_to_delete = self.finalize_ps3_base(id, job, &mut record)?;
+        } else if is_ps4_platform(platform) && should_extract(platform, archive) {
+            archive_to_delete = self.finalize_ps4_base(id, job, &mut record)?;
+        } else if should_extract(platform, archive) {
+            let dest = extraction_dir(archive);
+            let mut progress = |processed, total| self.on_install_progress(id, processed, total);
+            extract_archive(archive, &dest, &mut progress)?;
+            let Some(launch) = select_launch_file(&dest, &archive_stem(archive)) else {
+                let _ = fs::remove_dir_all(&dest);
+                return Err(LibraryError::NoLaunchFile);
+            };
+            make_executable(&launch);
+            record.extracted_path = path_string(&launch);
+            record.extracted_dir = path_string(&dest);
+            archive_to_delete = Some(archive);
         } else {
-            let archive = job.primary_archive.as_path();
-            if should_extract(&detail.platform_name, archive) {
-                let dest = extraction_dir(archive);
-                let mut progress =
-                    |processed, total| self.on_install_progress(id, processed, total);
-                extract_archive(archive, &dest, &mut progress)?;
-                let stem = archive
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                let Some(launch) = select_launch_file(&dest, &stem) else {
-                    let _ = fs::remove_dir_all(&dest);
-                    return Err(LibraryError::NoLaunchFile);
-                };
-                make_executable(&launch);
-                record.extracted_path = path_string(&launch);
-                record.extracted_dir = path_string(&dest);
-                archive_to_delete = Some(archive);
-            } else {
-                // Nothing to extract: the downloaded file is the install.
-                if is_appimage(archive) {
-                    make_executable(archive);
-                }
-                record.archive_path = path_string(archive);
+            // Nothing to extract: the downloaded file is the install.
+            if is_appimage(archive) {
+                make_executable(archive);
             }
+            record.archive_path = path_string(archive);
+            archive_to_delete = None;
         }
 
         self.registry.upsert(&record)?;
@@ -923,6 +1132,19 @@ impl InstallService {
             });
         }
 
+        // RPCS3 only sees a routed game once `games.yml` names it, so this
+        // runs on every PS3 install that produced an id — never on a failed
+        // one, and never before the row exists (install_mixin.py:120).
+        if is_ps3_platform(platform) && !record.ps3_game_id.trim().is_empty() {
+            self.write_games_yml(&record);
+        }
+
+        // Same lock discipline as the image hook above.
+        let finalized = self.game_finalized_hook.read().unwrap().clone();
+        if let (Some(finalized), InstallMode::Base) = (finalized, job.mode) {
+            finalized(record.clone());
+        }
+
         // Only after a successful write, and only when the archive has been
         // superseded by an extraction — a finalize failure keeps the archive
         // so a retry skips the re-download (doc 03 invariant 5).
@@ -932,6 +1154,211 @@ impl InstallService {
             }
         }
         Ok(())
+    }
+
+    /// Finalizes a native (Windows) base install into the game's own home
+    /// directory: `<home>/game/` holds the extracted tree, `<home>/prefix`
+    /// the Wine prefix on a non-Windows host, and the `game.json` sidecar
+    /// downloaded next to the archive supplies the metadata the server did
+    /// not. Ports `InstallFinalizeWorker.run`'s native branch
+    /// (`workers.py:576-587`) plus `native_extracted_dir_for_archive_path`
+    /// (`archive_preparation.py:846`).
+    fn finalize_native_base<'a>(
+        &self,
+        id: u64,
+        job: &'a InstallJob,
+        record: &mut InstalledGame,
+    ) -> Result<Option<&'a Path>, LibraryError> {
+        let archive = job.primary_archive.as_path();
+        // Always `Some` for a native job (`plan_native_install` sets it);
+        // the archive's own parent IS that directory, so the fallback keeps
+        // the layout right rather than guarding with an error.
+        let game_dir = job
+            .native_game_dir
+            .as_deref()
+            .or_else(|| archive.parent())
+            .unwrap_or(archive);
+        record.native_game_dir = path_string(game_dir);
+
+        let mut archive_to_delete = None;
+        // D13: a bare disc image or loose executable served under a native
+        // platform is not an archive, whatever `should_extract`'s table says.
+        if should_extract(&job.detail.platform_name, archive) && is_extractable_archive(archive) {
+            // Fixed at `<home>/game` whatever the archive is called, so
+            // every native install has the same shape.
+            let dest = game_dir.join("game");
+            let mut progress = |processed, total| self.on_install_progress(id, processed, total);
+            extract_archive(archive, &dest, &mut progress)?;
+            let Some(launch) = select_launch_file(&dest, &archive_stem(archive)) else {
+                let _ = fs::remove_dir_all(&dest);
+                return Err(LibraryError::NoLaunchFile);
+            };
+            make_executable(&launch);
+            record.extracted_path = path_string(&launch);
+            record.extracted_dir = path_string(&dest);
+            #[cfg(not(windows))]
+            {
+                // A Windows game on a non-Windows host launches through
+                // Wine/Proton, which needs a prefix of its own. Created
+                // here so the first launch does not have to.
+                let prefix = game_dir.join("prefix");
+                if fs::create_dir_all(&prefix).is_ok() {
+                    record.native_wineprefix = path_string(&prefix);
+                }
+            }
+            archive_to_delete = Some(archive);
+        } else {
+            // D13: a native payload this engine cannot extract (a disc
+            // image, a bare executable) IS the install, exactly as for any
+            // other platform's non-extractable download.
+            if is_appimage(archive) {
+                make_executable(archive);
+            }
+            record.archive_path = path_string(archive);
+        }
+
+        if let Some(sidecar) = &job.game_json_target {
+            if let Ok(bytes) = fs::read(sidecar) {
+                if let Some(parsed) = specials::native::parse_game_json(&bytes) {
+                    specials::native::apply_game_json(record, &parsed);
+                }
+            }
+        }
+        Ok(archive_to_delete)
+    }
+
+    /// Finalizes a PlayStation 3 base install.
+    ///
+    /// An extractable archive is unpacked into a staging directory and then
+    /// either short-circuited (a lone ISO, which RPCS3 boots directly, is
+    /// moved next to the archive) or routed into RPCS3's `dev_hdd0` VFS by
+    /// [`specials::ps3::route`]. A non-extractable one is the install, and a
+    /// bare `.iso` is additionally recorded as `ps3_iso_path`. Ports
+    /// `prepare_installed_game_without_ui`'s PS3 branches
+    /// (`archive_preparation.py:1135-1229`).
+    fn finalize_ps3_base<'a>(
+        &self,
+        id: u64,
+        job: &'a InstallJob,
+        record: &mut InstalledGame,
+    ) -> Result<Option<&'a Path>, LibraryError> {
+        let archive = job.primary_archive.as_path();
+        let title = job.detail.name.as_str();
+
+        if !should_extract(&job.detail.platform_name, archive) {
+            if is_appimage(archive) {
+                make_executable(archive);
+            }
+            record.archive_path = path_string(archive);
+            if lowercase_suffix(archive).as_deref() == Some("iso") {
+                record.ps3_iso_path = path_string(archive);
+            }
+            return Ok(None);
+        }
+
+        let staging = extraction_dir(archive);
+        let mut progress = |processed, total| self.on_install_progress(id, processed, total);
+        extract_archive(archive, &staging, &mut progress)?;
+        // The PS3 branch does not pick a launch file, so this is the only
+        // check that an archive of nothing but empty directories cannot
+        // pass for an install.
+        if !contains_regular_file(&staging) {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(LibraryError::NoLaunchFile);
+        }
+
+        if let Some(iso) = specials::ps3::iso_only_file(&staging) {
+            let destination = archive
+                .parent()
+                .unwrap_or(Path::new(""))
+                .join(iso.file_name().unwrap_or_default());
+            if destination != iso {
+                if destination.exists() {
+                    fs::remove_file(&destination)?;
+                }
+                move_file(&iso, &destination)?;
+            }
+            record.extracted_path = path_string(&destination);
+            record.extracted_dir = String::new();
+            record.ps3_iso_path = path_string(&destination);
+            let _ = fs::remove_dir_all(&staging);
+            return Ok(Some(archive));
+        }
+
+        let roots = self
+            .ps3_roots(&job.detail.platform_name, title)
+            .map_err(LibraryError::Extract)?;
+        let outcome = specials::ps3::route(&staging, &roots, title, &|iso, dest| {
+            extract_iso_with_system_7z(iso, dest)
+        })
+        .map_err(LibraryError::Extract)?;
+
+        record.ps3_game_id = outcome.game_id;
+        record.ps3_trophy_paths = outcome.trophy_paths_json;
+        record.extracted_path = outcome.extracted_path;
+        record.extracted_dir = outcome.extracted_dir;
+        Ok(Some(archive))
+    }
+
+    /// Finalizes a PlayStation 4 base install: the generic extract-and-pick
+    /// path, but `eboot.bin` under a title-id root wins over whatever the
+    /// generic ranking would have chosen, and the title id detected from the
+    /// resulting layout is recorded. Ports the PS4 hooks in
+    /// `select_extracted_launch_file` (`archive_preparation.py:990`) and
+    /// `prepare_installed_game_without_ui` (`archive_preparation.py:1177`).
+    fn finalize_ps4_base<'a>(
+        &self,
+        id: u64,
+        job: &'a InstallJob,
+        record: &mut InstalledGame,
+    ) -> Result<Option<&'a Path>, LibraryError> {
+        let archive = job.primary_archive.as_path();
+        let dest = extraction_dir(archive);
+        let mut progress = |processed, total| self.on_install_progress(id, processed, total);
+        extract_archive(archive, &dest, &mut progress)?;
+
+        let pool = regular_files_under(&dest);
+        let launch = specials::ps4::select_ps4_launch_file(&dest, &pool)
+            .or_else(|| select_launch_file(&dest, &archive_stem(archive)));
+        let Some(launch) = launch else {
+            let _ = fs::remove_dir_all(&dest);
+            return Err(LibraryError::NoLaunchFile);
+        };
+
+        make_executable(&launch);
+        record.extracted_path = path_string(&launch);
+        record.extracted_dir = path_string(&dest);
+        record.ps4_game_id = specials::ps4::detect_title_id(&dest, &launch, archive);
+        Ok(Some(archive))
+    }
+
+    /// The RPCS3 VFS roots a PS3 install for `platform` routes into.
+    ///
+    /// `Err` carries the verbatim message the drawer row shows when no
+    /// `dev_hdd0` can be resolved at all — neither from a configured
+    /// emulator's `vfs.yml` nor from the library's own `.vfs` fallback.
+    fn ps3_roots(&self, platform: &str, title: &str) -> Result<Ps3Roots, String> {
+        let config = Config::load(&self.config_path).map_err(|_| no_dev_hdd0_message(title))?;
+        ps3_roots_from_config(&config, &self.profiles, platform, title)
+    }
+
+    /// Names the just-installed PS3 game in RPCS3's `games.yml`, so the
+    /// emulator lists it without a rescan. Silent when RPCS3 is not
+    /// configured, or when its data root / `dev_hdd0` cannot be resolved:
+    /// this never fails an install (`install_mixin.py:512-525`).
+    fn write_games_yml(&self, record: &InstalledGame) {
+        let Ok(roots) = self.ps3_roots(&record.platform, &record.title) else {
+            return;
+        };
+        let Some(data_root) = roots.data_root.as_deref() else {
+            return;
+        };
+        update_games_yml(
+            data_root,
+            &record.ps3_game_id,
+            &roots.dev_hdd0,
+            roots.games_root.as_deref(),
+        );
     }
 
     /// The blocking half of finalizing an emulator: extraction into the
@@ -1281,7 +1708,276 @@ fn safe_file_name<'a>(name: &'a str, asset_name: &str) -> Result<&'a str, Librar
     )))
 }
 
+// --- uninstall ---------------------------------------------------------------
+
+/// What kind of thing one uninstall step removes. The variant decides both
+/// how the removal is done and the verbatim message a failure produces
+/// (`install_cleanup.py:19-91`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RemovalLabel {
+    /// A plain file — an archive, or a PS3 ISO.
+    File,
+    /// A PS3 trophy directory, which the reference names separately.
+    TrophyDir,
+    /// Any other directory: an extraction directory, a native game's home
+    /// directory, a multi-file game's directory.
+    Folder,
+}
+
+impl RemovalLabel {
+    fn message(self, path: &Path, error: &str) -> String {
+        let what = match self {
+            RemovalLabel::File => "Could not remove file",
+            RemovalLabel::TrophyDir => "Could not remove PS3 trophy directory",
+            RemovalLabel::Folder => "Could not remove folder",
+        };
+        format!("{what}: {}\n{error}", path.display())
+    }
+}
+
+/// One thing an uninstall removes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Removal {
+    path: PathBuf,
+    label: RemovalLabel,
+}
+
+/// Runs every removal in order, CONTINUING past a failure, and returns one
+/// message line per failure (D11).
+///
+/// The remover is injected so the aggregation itself is testable without a
+/// filesystem that can be made to fail on demand.
+fn run_removals(
+    steps: &[Removal],
+    remove: &mut dyn FnMut(&Removal) -> Result<(), String>,
+) -> Vec<String> {
+    let mut failures = Vec::new();
+    for step in steps {
+        if let Err(error) = remove(step) {
+            failures.push(step.label.message(&step.path, &error));
+        }
+    }
+    failures
+}
+
+/// The production remover: a file is unlinked, a directory is removed whole.
+fn apply_removal(step: &Removal) -> Result<(), String> {
+    match step.label {
+        RemovalLabel::File => fs::remove_file(&step.path).map_err(|e| e.to_string()),
+        RemovalLabel::TrophyDir | RemovalLabel::Folder => {
+            remove_dir_tree(&step.path).map_err(|e| e.to_string())
+        }
+    }
+}
+
+/// The ordered removal plan for `record`, branching by platform exactly as
+/// `remove_game_files` does (`install_cleanup.py:7-91`).
+///
+/// Every step's path is checked to exist in the expected shape here rather
+/// than at removal time: the reference skips a missing or wrong-shaped path
+/// silently, and nothing else is touching these paths between the two
+/// points. The reference's early `return`s become "stop adding steps": a
+/// native game whose home directory exists never falls through to the
+/// candidate extraction directories, and neither does a multi-file game.
+fn uninstall_steps(record: &InstalledGame, library: &Path) -> Vec<Removal> {
+    let mut steps = Vec::new();
+    let push_dir = |path: &Path, label: RemovalLabel, steps: &mut Vec<Removal>| {
+        if path.is_dir() {
+            steps.push(Removal {
+                path: path.to_path_buf(),
+                label,
+            });
+        }
+    };
+
+    let name = archive_name(&record.rom_file_name, &record.title, &record.platform);
+    let archives = candidate_archives(library, &record.platform, &record.archive_path, &name);
+    let extracted = candidate_extracted_dirs(&archives, &record.extracted_dir);
+
+    if is_ps3_platform(&record.platform) {
+        let iso = record.ps3_iso_path.trim();
+        if !iso.is_empty() && Path::new(iso).is_file() {
+            steps.push(Removal {
+                path: PathBuf::from(iso),
+                label: RemovalLabel::File,
+            });
+        }
+        for trophy in parse_trophy_paths(&record.ps3_trophy_paths) {
+            push_dir(&trophy, RemovalLabel::TrophyDir, &mut steps);
+        }
+        for dir in &extracted {
+            push_dir(dir, RemovalLabel::Folder, &mut steps);
+        }
+        return steps;
+    }
+
+    if is_native_platform(&record.platform) {
+        let game_dir = record.native_game_dir.trim();
+        if !game_dir.is_empty() && Path::new(game_dir).is_dir() {
+            steps.push(Removal {
+                path: PathBuf::from(game_dir),
+                label: RemovalLabel::Folder,
+            });
+            return steps;
+        }
+        for dir in &extracted {
+            push_dir(dir, RemovalLabel::Folder, &mut steps);
+        }
+        return steps;
+    }
+
+    let multi_file = record.multi_file_game_dir.trim();
+    if !multi_file.is_empty() && Path::new(multi_file).is_dir() {
+        steps.push(Removal {
+            path: PathBuf::from(multi_file),
+            label: RemovalLabel::Folder,
+        });
+        return steps;
+    }
+
+    for archive in &archives {
+        if archive.is_file() {
+            steps.push(Removal {
+                path: archive.clone(),
+                label: RemovalLabel::File,
+            });
+        }
+    }
+    for dir in &extracted {
+        push_dir(dir, RemovalLabel::Folder, &mut steps);
+    }
+    steps
+}
+
+/// The trophy directories a record's `ps3_trophy_paths` JSON names. Lenient:
+/// anything that is not a JSON array of strings yields no paths, matching
+/// the reference's `except (ValueError, TypeError): trophy_paths = []`.
+fn parse_trophy_paths(raw: &str) -> Vec<PathBuf> {
+    if raw.trim().is_empty() {
+        return Vec::new();
+    }
+    serde_json::from_str::<Vec<String>>(raw)
+        .map(|paths| paths.into_iter().map(PathBuf::from).collect())
+        .unwrap_or_default()
+}
+
+// --- PS3 VFS roots -----------------------------------------------------------
+
+/// The message a PS3 install fails with when no `dev_hdd0` can be resolved.
+fn no_dev_hdd0_message(title: &str) -> String {
+    format!("No PS3 VFS dev_hdd0 path configured for {title}")
+}
+
+/// [`InstallService::ps3_roots`]'s pure core: resolves the RPCS3 VFS roots
+/// from an already-loaded config.
+///
+/// The `dev_hdd0` and `games` roots come from the default PS3 emulator's
+/// `vfs.yml` when there is one, and from `<library>/PlayStation 3/.vfs/...`
+/// when there is not — so a PS3 game installs into a usable layout before
+/// RPCS3 is ever configured. The data root (D4) is only ever the configured
+/// emulator's: with no entry there is nowhere to write `games.yml`.
+fn ps3_roots_from_config(
+    config: &Config,
+    profiles: &[EmulatorProfile],
+    platform: &str,
+    title: &str,
+) -> Result<Ps3Roots, String> {
+    let ps3_library = autoconfig::ps3_library_path(&config.library_path);
+    let name = default_emulator_name_for_platform(
+        &config.emulators,
+        &config.default_emulators,
+        platform,
+        profiles,
+        &config.retroarch_cores,
+    );
+    let entry = emulator_entry_by_name(&config.emulators, &name);
+    let path = entry.map(|e| e.path.as_str()).unwrap_or("");
+    let args = entry
+        .map(|e| split_template(&e.args).unwrap_or_default())
+        .unwrap_or_default();
+
+    let dev_hdd0 = ps3_vfs_dev_hdd0_path(path, &args, &ps3_library)
+        .ok_or_else(|| no_dev_hdd0_message(title))?;
+    Ok(Ps3Roots {
+        dev_hdd0,
+        games_root: ps3_vfs_games_path(path, &args, &ps3_library),
+        data_root: entry.and_then(|e| rpcs3_data_root(&e.path)),
+    })
+}
+
 // --- record + filesystem helpers --------------------------------------------
+
+/// `archive`'s file stem, or an empty string when it has none. The stem is
+/// what launch-file ranking scores a candidate's name against.
+fn archive_stem(archive: &Path) -> String {
+    archive
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// `path`'s extension, lowercased, without the leading dot.
+fn lowercase_suffix(path: &Path) -> Option<String> {
+    path.extension()
+        .map(|ext| ext.to_string_lossy().to_lowercase())
+}
+
+/// Whether `root` holds at least one regular file, at any depth. Symlinked
+/// directories are not descended into, so the walk can never leave the tree.
+fn contains_regular_file(root: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(root) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_file() {
+            return true;
+        }
+        if file_type.is_dir() && contains_regular_file(&entry.path()) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Every regular file under `root`, at any depth, in filesystem order.
+/// Symlinked directories are not descended into.
+fn regular_files_under(root: &Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    collect_regular_files(root, &mut files);
+    files
+}
+
+fn collect_regular_files(root: &Path, into: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_file() {
+            into.push(entry.path());
+        } else if file_type.is_dir() {
+            collect_regular_files(&entry.path(), into);
+        }
+    }
+}
+
+/// Moves `from` to `to`, falling back to copy-then-delete when the two are
+/// on different filesystems (a rename cannot cross a mount point).
+fn move_file(from: &Path, to: &Path) -> Result<(), LibraryError> {
+    match fs::rename(from, to) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            fs::copy(from, to)?;
+            let _ = fs::remove_file(from);
+            Ok(())
+        }
+    }
+}
 
 /// Appends `line` to `warning`, keeping any warning already there.
 fn append_warning(warning: &mut String, line: &str) {
@@ -1589,6 +2285,282 @@ mod tests {
         ]);
         let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
         assert_eq!(job.launch_entry, "disc1.bin");
+    }
+
+    // --- install modes -------------------------------------------------------
+
+    #[test]
+    fn install_mode_kinds_are_the_drawer_strings() {
+        assert_eq!(InstallMode::Base.kind(), "base");
+        assert_eq!(InstallMode::Ps4Content.kind(), "ps4_content");
+        assert_eq!(InstallMode::Xbox360Content.kind(), "xbox360_content");
+        assert_eq!(InstallMode::NativeUpdate.kind(), "native_update");
+    }
+
+    // --- plan_install: native ------------------------------------------------
+
+    fn native_detail(files: Vec<RomFile>) -> RomDetail {
+        let mut detail = detail(files);
+        detail.name = "My Game".to_string();
+        detail.platform_name = "Windows".to_string();
+        detail
+    }
+
+    #[test]
+    fn plan_native_downloads_the_archive_into_the_game_home_dir() {
+        let detail = native_detail(vec![
+            rom_file(1, "artwork.png", true),
+            rom_file(2, "mygame.zip", true),
+        ]);
+        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+
+        let game_dir = PathBuf::from("/library/Windows/My Game");
+        assert_eq!(job.mode, InstallMode::Base);
+        assert_eq!(job.native_game_dir, Some(game_dir.clone()));
+        assert!(job.multi_file_game_dir.is_none());
+        assert_eq!(job.game_json_target, None);
+        assert_eq!(job.launch_entry, "mygame.zip");
+        assert_eq!(job.primary_archive, game_dir.join("mygame.zip"));
+        assert_eq!(job.file_ids, vec![2]);
+        assert_eq!(job.targets.len(), 1);
+        assert_eq!(
+            job.targets[0].query,
+            vec![("file_ids".to_string(), "2".to_string())]
+        );
+    }
+
+    #[test]
+    fn plan_native_adds_a_second_target_for_the_game_json_sidecar() {
+        let detail = native_detail(vec![
+            rom_file(1, "mygame.zip", true),
+            rom_file(2, "game.json", true),
+        ]);
+        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+
+        let game_dir = PathBuf::from("/library/Windows/My Game");
+        assert_eq!(job.game_json_target, Some(game_dir.join("game.json")));
+        assert_eq!(job.file_ids, vec![1, 2]);
+        assert_eq!(job.targets.len(), 2);
+        assert_eq!(job.targets[1].dest, game_dir.join("game.json"));
+        assert_eq!(
+            job.targets[1].query,
+            vec![("file_ids".to_string(), "2".to_string())]
+        );
+    }
+
+    #[test]
+    fn plan_native_rejects_a_payload_of_nothing_but_a_sidecar() {
+        let detail = native_detail(vec![rom_file(1, "game.json", true)]);
+        let Err(err) = plan_install(&detail, Path::new("/library"), client()) else {
+            panic!("expected an error");
+        };
+        assert_eq!(
+            err.to_string(),
+            "No downloadable file was found for this game"
+        );
+    }
+
+    // --- ps3_roots_from_config -----------------------------------------------
+
+    fn config_with_library(library_path: &str) -> Config {
+        Config {
+            library_path: library_path.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn ps3_roots_falls_back_to_the_library_vfs_when_no_emulator_is_configured() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("library");
+        fs::create_dir_all(library.join("PlayStation 3")).unwrap();
+        let config = config_with_library(&library.to_string_lossy());
+
+        let roots = ps3_roots_from_config(&config, &[], "PlayStation 3", "Demon's Souls").unwrap();
+        assert!(
+            roots.dev_hdd0.ends_with("PlayStation 3/.vfs/dev_hdd0"),
+            "unexpected dev_hdd0: {}",
+            roots.dev_hdd0.display()
+        );
+        assert!(roots
+            .games_root
+            .as_ref()
+            .is_some_and(|p| p.ends_with("PlayStation 3/.vfs/games")));
+        assert_eq!(
+            roots.data_root, None,
+            "with no emulator entry there is nowhere to write games.yml"
+        );
+    }
+
+    #[test]
+    fn ps3_roots_without_a_library_or_an_emulator_reports_the_verbatim_message() {
+        let config = config_with_library("");
+        let Err(message) = ps3_roots_from_config(&config, &[], "PlayStation 3", "Demon's Souls")
+        else {
+            panic!("expected an error");
+        };
+        assert_eq!(
+            message,
+            "No PS3 VFS dev_hdd0 path configured for Demon's Souls"
+        );
+    }
+
+    // --- uninstall aggregation (D11) -----------------------------------------
+
+    #[test]
+    fn run_removals_continues_past_failures_and_reports_every_one() {
+        let steps = vec![
+            Removal {
+                path: PathBuf::from("/x/game.iso"),
+                label: RemovalLabel::File,
+            },
+            Removal {
+                path: PathBuf::from("/x/trophy"),
+                label: RemovalLabel::TrophyDir,
+            },
+            Removal {
+                path: PathBuf::from("/x/dir"),
+                label: RemovalLabel::Folder,
+            },
+        ];
+        let mut attempted = Vec::new();
+        let failures = run_removals(&steps, &mut |step| {
+            attempted.push(step.path.clone());
+            if step.label == RemovalLabel::Folder {
+                Ok(())
+            } else {
+                Err("Permission denied".to_string())
+            }
+        });
+
+        assert_eq!(
+            attempted.len(),
+            3,
+            "a failed step must not stop the ones after it"
+        );
+        assert_eq!(
+            failures,
+            vec![
+                "Could not remove file: /x/game.iso\nPermission denied".to_string(),
+                "Could not remove PS3 trophy directory: /x/trophy\nPermission denied".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn run_removals_reports_nothing_when_every_step_succeeds() {
+        let steps = vec![Removal {
+            path: PathBuf::from("/x/dir"),
+            label: RemovalLabel::Folder,
+        }];
+        assert!(run_removals(&steps, &mut |_| Ok(())).is_empty());
+    }
+
+    #[test]
+    fn uninstall_steps_for_native_stops_at_the_game_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let game_dir = dir.path().join("Windows/My Game");
+        fs::create_dir_all(game_dir.join("game")).unwrap();
+        let record = InstalledGame {
+            title: "My Game".to_string(),
+            platform: "Windows".to_string(),
+            native_game_dir: game_dir.to_string_lossy().into_owned(),
+            extracted_dir: game_dir.join("game").to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+
+        let steps = uninstall_steps(&record, dir.path());
+        assert_eq!(
+            steps,
+            vec![Removal {
+                path: game_dir,
+                label: RemovalLabel::Folder,
+            }]
+        );
+    }
+
+    #[test]
+    fn uninstall_steps_for_ps3_covers_iso_trophies_and_routed_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let iso = dir.path().join("game.iso");
+        fs::write(&iso, b"iso").unwrap();
+        let trophy = dir.path().join("trophy/NPWR12345");
+        fs::create_dir_all(&trophy).unwrap();
+        let routed = dir.path().join("dev_hdd0/game/BLUS30336");
+        fs::create_dir_all(&routed).unwrap();
+
+        let record = InstalledGame {
+            title: "Demon's Souls".to_string(),
+            platform: "PlayStation 3".to_string(),
+            ps3_iso_path: iso.to_string_lossy().into_owned(),
+            ps3_trophy_paths: serde_json::to_string(&vec![
+                trophy.to_string_lossy().into_owned(),
+                dir.path().join("missing").to_string_lossy().into_owned(),
+            ])
+            .unwrap(),
+            extracted_dir: routed.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+
+        let steps = uninstall_steps(&record, dir.path());
+        assert_eq!(
+            steps,
+            vec![
+                Removal {
+                    path: iso,
+                    label: RemovalLabel::File,
+                },
+                Removal {
+                    path: trophy,
+                    label: RemovalLabel::TrophyDir,
+                },
+                Removal {
+                    path: routed,
+                    label: RemovalLabel::Folder,
+                },
+            ],
+            "a trophy path that is not a directory is skipped, not reported"
+        );
+    }
+
+    #[test]
+    fn parse_trophy_paths_is_lenient_about_junk() {
+        assert!(parse_trophy_paths("").is_empty());
+        assert!(parse_trophy_paths("   ").is_empty());
+        assert!(parse_trophy_paths("not json").is_empty());
+        assert!(parse_trophy_paths("{\"a\": 1}").is_empty());
+        assert_eq!(
+            parse_trophy_paths("[\"/a\", \"/b\"]"),
+            vec![PathBuf::from("/a"), PathBuf::from("/b")]
+        );
+    }
+
+    // --- filesystem helpers --------------------------------------------------
+
+    #[test]
+    fn contains_regular_file_looks_all_the_way_down() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("a/b/c")).unwrap();
+        assert!(!contains_regular_file(dir.path()));
+        fs::write(dir.path().join("a/b/c/rom.bin"), b"x").unwrap();
+        assert!(contains_regular_file(dir.path()));
+    }
+
+    #[test]
+    fn regular_files_under_lists_every_file_once() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("CUSA12345/sce_sys")).unwrap();
+        fs::write(dir.path().join("CUSA12345/eboot.bin"), b"x").unwrap();
+        fs::write(dir.path().join("CUSA12345/sce_sys/param.sfo"), b"x").unwrap();
+        let mut found = regular_files_under(dir.path());
+        found.sort();
+        assert_eq!(
+            found,
+            vec![
+                dir.path().join("CUSA12345/eboot.bin"),
+                dir.path().join("CUSA12345/sce_sys/param.sfo"),
+            ]
+        );
     }
 
     // --- helpers -------------------------------------------------------------
