@@ -7,6 +7,7 @@
 //! under `grid_launcher/library/` for the behavior each submodule ports.
 
 pub mod ps3;
+pub mod ps4;
 
 use std::fs;
 use std::io;
@@ -41,10 +42,9 @@ pub(crate) fn copy_tree_merge(src: &Path, dst: &Path) -> io::Result<()> {
 /// and never deletes anything already under `dst`. Mirrors Python's
 /// `_merge_tree` (`grid_launcher/library/archive_preparation.py:258-268`).
 ///
-/// Not called by `ps3` — it exists here for the PS4/Xenia/native routing
-/// modules that land in later tasks. Exercised only by its own unit test
-/// today.
-#[allow(dead_code)]
+/// Not called by `ps3` — `ps4::apply_content` uses it to merge a matching
+/// title-ID root from a content archive into the installed game directory;
+/// the Xenia/native routing modules in later tasks may use it too.
 pub(crate) fn merge_tree(src: &Path, dst: &Path) -> io::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
