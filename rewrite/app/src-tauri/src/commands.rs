@@ -325,6 +325,7 @@ pub async fn launch_game(state: State<'_, AppState>, rom_id: i64) -> Result<Game
             state.session.clone(),
             install.clone(),
             installed_game.clone(),
+            crate::firmware_service::FirmwareTrigger::Launch,
         );
         state
             .cloud

@@ -170,7 +170,12 @@ pub fn run() {
                 let session = state.session.clone();
                 let install_for_game = install.clone();
                 install.set_game_finalized_hook(Arc::new(move |record| {
-                    firmware.spawn_for_game(session.clone(), install_for_game.clone(), record);
+                    firmware.spawn_for_game(
+                        session.clone(),
+                        install_for_game.clone(),
+                        record,
+                        firmware_service::FirmwareTrigger::Install,
+                    );
                 }));
 
                 let firmware = state.firmware.clone();

@@ -26,6 +26,15 @@
 //! the spawned task cannot wedge that directory forever. Two *different*
 //! emulators may install firmware at the same time.
 //!
+//! Repetition (D19): `install_platform_firmware` downloads every firmware
+//! record BEFORE its `skip_existing` write check, so a per-game pass that
+//! ran once already costs the full BIOS set again on the next launch of the
+//! same platform. [`FirmwareService`] therefore remembers which emulator
+//! directories have completed a per-game pass in this process and skips a
+//! [`FirmwareTrigger::Launch`] pass for those.
+//! [`FirmwareTrigger::Install`] always runs: a fresh install is exactly the
+//! moment the answer can have changed.
+//!
 //! Token secrecy: the only text this module logs is a platform name and
 //! grid-core's own warning strings, which name local paths and platform ids
 //! and never a URL, header, or token. Every HTTP call goes through
@@ -54,16 +63,65 @@ pub const PS3_FIRMWARE_TITLE: &str = "PS3 Firmware";
 /// The drawer row platform for that transfer. Verbatim, same reason.
 pub const PS3_FIRMWARE_PLATFORM: &str = "PlayStation 3";
 
-/// Serializes background firmware jobs per emulator directory.
+/// Why a per-game firmware pass is being requested — the D19 gate's only
+/// input. See the module doc.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FirmwareTrigger {
+    /// A game install just finalized. Always runs: this is the moment the
+    /// firmware answer can have changed.
+    Install,
+    /// A game is about to launch. Runs at most once per emulator directory
+    /// per process.
+    Launch,
+}
+
+/// The text a [`RowGuard`] fails its drawer row with when the task owning it
+/// unwound instead of reporting an outcome. Never a normal-path value.
+const ABORTED_ROW_ERROR: &str = "firmware job aborted";
+
+/// Serializes background firmware jobs per emulator directory, and gates
+/// repeat per-game passes (D19).
 pub struct FirmwareService {
     in_flight: StdMutex<HashSet<PathBuf>>,
+    /// Emulator directories whose per-game pass has run to completion in
+    /// this process. Never persisted: a restart is a deliberate re-check.
+    completed: StdMutex<HashSet<PathBuf>>,
 }
 
 impl FirmwareService {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             in_flight: StdMutex::new(HashSet::new()),
+            completed: StdMutex::new(HashSet::new()),
         })
+    }
+
+    /// The D19 gate: whether a per-game pass for `dir` should run at all.
+    /// Checked BEFORE [`Self::try_begin`], so a skipped launch pass never
+    /// touches the in-flight set.
+    ///
+    /// A poisoned lock is recovered rather than propagated, same rule as
+    /// [`Self::try_begin`]: the guarded set is plain paths, and refusing
+    /// every later pass would be worse than continuing.
+    pub fn should_run(&self, dir: &Path, trigger: FirmwareTrigger) -> bool {
+        match trigger {
+            FirmwareTrigger::Install => true,
+            FirmwareTrigger::Launch => !self
+                .completed
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains(dir),
+        }
+    }
+
+    /// Records that a per-game pass for `dir` finished. Called on the task's
+    /// normal path only — a panicking pass did not complete, so the next
+    /// launch is allowed to retry it.
+    pub fn mark_completed(&self, dir: &Path) {
+        self.completed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(dir.to_path_buf());
     }
 
     /// Claims `dir` for one firmware job. `false` when a job already holds
@@ -96,13 +154,15 @@ impl FirmwareService {
     /// no connected session, no platform id for the row's platform (the
     /// guard `install_for_game` itself does NOT carry — it takes an
     /// `i64`), no default emulator for that platform, no config entry by
-    /// that name, or a firmware job already running for that emulator
-    /// directory. Never fails and never blocks the caller.
+    /// that name, a [`FirmwareTrigger::Launch`] pass for a directory that
+    /// already completed one (D19), or a firmware job already running for
+    /// that emulator directory. Never fails and never blocks the caller.
     pub fn spawn_for_game(
         self: &Arc<Self>,
         session: Arc<SessionManager>,
         install: Arc<InstallService>,
         record: InstalledGame,
+        trigger: FirmwareTrigger,
     ) {
         let Some(client) = session.client() else {
             return;
@@ -119,10 +179,16 @@ impl FirmwareService {
             return;
         };
         let dir = emulator_dir_of(entry);
+        // D19, before the in-flight claim: a launch pass for a directory
+        // that already completed one this process is a pure re-download.
+        if !self.should_run(&dir, trigger) {
+            return;
+        }
         if !self.try_begin(&dir) {
             return;
         }
-        let guard = FirmwareGuard::new(self.clone(), dir);
+        let guard = FirmwareGuard::new(self.clone(), dir.clone());
+        let service = self.clone();
         let config_dir = config_dir_of(&config_path);
         let platform = record.platform.clone();
         tauri::async_runtime::spawn(async move {
@@ -141,6 +207,10 @@ impl FirmwareService {
                 // ids only; grid-core builds no URL into them.
                 tracing::warn!("firmware for {platform}: {warnings}");
             }
+            // Completion means "the pass finished", warnings included: a
+            // warning is a per-file outcome, and re-downloading the whole
+            // set on the next launch would not change it.
+            service.mark_completed(&dir);
         });
     }
 
@@ -258,6 +328,11 @@ impl FirmwareService {
         }
         let guard = FirmwareGuard::new(self.clone(), dir);
         let row_id = install.admit_external(PS3_FIRMWARE_TITLE, PS3_FIRMWARE_PLATFORM);
+        // The drawer row is admitted BEFORE the task exists, so it must be
+        // closed by a drop guard too: a panic unwinding out of the task
+        // would otherwise release the directory but leave the row stuck in
+        // `downloading` for the life of the process.
+        let mut row = RowGuard::new(install, row_id);
         tauri::async_runtime::spawn(async move {
             let _guard = guard;
             let warnings = install_platform_firmware(
@@ -267,7 +342,7 @@ impl FirmwareService {
                 FirmwareOptions::default(),
             )
             .await;
-            install.complete_external(row_id, first_warning(&warnings));
+            row.complete(first_warning(&warnings));
         });
     }
 }
@@ -277,6 +352,47 @@ impl FirmwareService {
 /// row's one error line anyway.
 fn first_warning(warnings: &[String]) -> &str {
     warnings.first().map(String::as_str).unwrap_or("")
+}
+
+/// Closes an [`InstallService::admit_external`] drawer row exactly once.
+///
+/// The row is created before the task that fills it, so nothing else can
+/// close it if that task unwinds. [`Self::complete`] reports the real
+/// outcome and disarms the guard; a drop with the guard still armed fails
+/// the row with [`ABORTED_ROW_ERROR`] rather than leaving it `downloading`
+/// forever.
+struct RowGuard {
+    install: Arc<InstallService>,
+    id: u64,
+    /// `Some` while the row is still open: the text `Drop` would fail it
+    /// with. `None` once [`Self::complete`] has reported the real outcome,
+    /// which makes the drop a no-op.
+    error: Option<String>,
+}
+
+impl RowGuard {
+    fn new(install: Arc<InstallService>, id: u64) -> Self {
+        Self {
+            install,
+            id,
+            error: Some(ABORTED_ROW_ERROR.to_string()),
+        }
+    }
+
+    /// Reports the real outcome (blank completes the row, anything else
+    /// fails it) and disarms the guard.
+    fn complete(&mut self, error: &str) {
+        self.error = None;
+        self.install.complete_external(self.id, error);
+    }
+}
+
+impl Drop for RowGuard {
+    fn drop(&mut self) {
+        if let Some(error) = self.error.take() {
+            self.install.complete_external(self.id, &error);
+        }
+    }
 }
 
 /// Releases a [`FirmwareService::try_begin`] claim when dropped — on the
@@ -385,6 +501,105 @@ mod tests {
         assert_eq!(platform_id_for(&ids, "  PLAYSTATION 3 "), Some(7));
         assert_eq!(platform_id_for(&ids, "Xbox 360"), None);
         assert_eq!(platform_id_for(&ids, "   "), None);
+    }
+
+    /// D19: the first launch pass for a directory runs; the second is
+    /// skipped once the first completed.
+    #[test]
+    fn a_launch_pass_runs_once_per_directory() {
+        let svc = FirmwareService::new();
+        let dir = Path::new("/emulators/duckstation");
+        assert!(svc.should_run(dir, FirmwareTrigger::Launch));
+        svc.mark_completed(dir);
+        assert!(!svc.should_run(dir, FirmwareTrigger::Launch));
+    }
+
+    /// D19: the gate is per directory — completing one emulator's pass
+    /// never suppresses another's.
+    #[test]
+    fn the_launch_gate_is_per_directory() {
+        let svc = FirmwareService::new();
+        svc.mark_completed(Path::new("/emulators/duckstation"));
+        assert!(svc.should_run(Path::new("/emulators/xemu"), FirmwareTrigger::Launch));
+    }
+
+    /// D19: an install trigger is never gated — a fresh install is exactly
+    /// the moment the firmware answer can have changed.
+    #[test]
+    fn an_install_pass_runs_even_after_completion() {
+        let svc = FirmwareService::new();
+        let dir = Path::new("/emulators/duckstation");
+        assert!(svc.should_run(dir, FirmwareTrigger::Install));
+        svc.mark_completed(dir);
+        assert!(svc.should_run(dir, FirmwareTrigger::Install));
+        // ...and the install pass's own completion still does not unblock
+        // the launch gate in the other direction.
+        assert!(!svc.should_run(dir, FirmwareTrigger::Launch));
+    }
+
+    /// The launch gate and the in-flight claim are independent sets: a
+    /// completed pass must not leave the directory claimed.
+    #[test]
+    fn completing_a_pass_does_not_hold_the_directory() {
+        let svc = FirmwareService::new();
+        let dir = Path::new("/emulators/duckstation");
+        assert!(svc.try_begin(dir));
+        svc.mark_completed(dir);
+        svc.end(dir);
+        assert!(svc.try_begin(dir));
+    }
+
+    /// Builds a real `InstallService` over a temp registry, so the two
+    /// `RowGuard` paths are exercised against the actual queue rather than
+    /// a stand-in.
+    fn install_service(dir: &tempfile::TempDir) -> Arc<InstallService> {
+        let registry = Arc::new(
+            grid_core::library::registry::Registry::open(&dir.path().join("registry.db")).unwrap(),
+        );
+        InstallService::new(registry, dir.path().join("config.json"))
+    }
+
+    fn row_status(install: &InstallService, id: u64) -> (String, String) {
+        let snapshot = install.snapshot();
+        let entry = snapshot
+            .entries
+            .iter()
+            .find(|e| e.id == id)
+            .expect("the admitted row is in the snapshot");
+        (format!("{:?}", entry.status), entry.error.clone())
+    }
+
+    #[test]
+    fn a_completed_row_guard_reports_the_real_outcome_and_does_not_fire_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let install = install_service(&dir);
+        let id = install.admit_external(PS3_FIRMWARE_TITLE, PS3_FIRMWARE_PLATFORM);
+        {
+            let mut row = RowGuard::new(install.clone(), id);
+            row.complete("");
+            assert_eq!(
+                row_status(&install, id),
+                ("Completed".into(), String::new())
+            );
+        }
+        // The drop above must have been a no-op — a re-fail here would show
+        // up as a changed status.
+        assert_eq!(
+            row_status(&install, id),
+            ("Completed".into(), String::new())
+        );
+    }
+
+    #[test]
+    fn an_abandoned_row_guard_fails_the_row_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let install = install_service(&dir);
+        let id = install.admit_external(PS3_FIRMWARE_TITLE, PS3_FIRMWARE_PLATFORM);
+        drop(RowGuard::new(install.clone(), id));
+        assert_eq!(
+            row_status(&install, id),
+            ("Failed".into(), ABORTED_ROW_ERROR.to_string())
+        );
     }
 
     #[test]
