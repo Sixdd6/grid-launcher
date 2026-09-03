@@ -6,6 +6,7 @@ pub mod cloud;
 pub mod config;
 pub mod covers;
 pub mod fatx;
+pub mod images;
 pub mod launch;
 pub mod library;
 pub mod pcgw;
