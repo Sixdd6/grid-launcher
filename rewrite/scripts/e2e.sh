@@ -56,6 +56,10 @@ STAGE_GROUPS=(
   "emulator-catalog:specs/emulator-catalog.spec.ts"
   "cloud-saves:specs/cloud-saves.spec.ts"
   "images:specs/images-a.spec.ts specs/images-b.spec.ts"
+  "ps3-install:specs/ps3-install.spec.ts"
+  "content:specs/content.spec.ts"
+  "native:specs/native.spec.ts"
+  "firmware:specs/firmware.spec.ts"
 )
 
 # Run only the named groups by passing them as arguments, e.g.
@@ -400,6 +404,18 @@ mock_args_for_group() {
     # equivalent for. Kept separate for the same reason as
     # fixtures-emulator-catalog above.
     cloud-saves) printf -- '--fixtures-dir fixtures-cloud-saves' ;;
+    # The four milestone-8 install-specials groups. Each needs a platform
+    # name the shared fixture set does not have — "PlayStation 3",
+    # "PlayStation 4"/"Xbox 360", "Windows", "PlayStation"/"PlayStation 3" —
+    # because grid-core routes these installs on the platform NAME
+    # (library/platforms.rs). None is throttled server-wide: the one
+    # deliberately slow download in the set (the `native` group's cancel
+    # smoke) carries its own `e2e_throttle` on the fixture file entry, so
+    # every other install in that group still runs at full speed.
+    ps3-install) printf -- '--fixtures-dir fixtures-ps3-install' ;;
+    content) printf -- '--fixtures-dir fixtures-content' ;;
+    native) printf -- '--fixtures-dir fixtures-native' ;;
+    firmware) printf -- '--fixtures-dir fixtures-firmware' ;;
     *) printf '' ;;
   esac
 }
@@ -423,6 +439,10 @@ seed_script_for_group() {
     emulator-catalog) printf '%s' "$E2E_DIR/seed/emulator-catalog-seed.mjs" ;;
     cloud-saves) printf '%s' "$E2E_DIR/seed/cloud-saves-seed.mjs" ;;
     images) printf '%s' "$E2E_DIR/seed/images-seed.mjs" ;;
+    ps3-install) printf '%s' "$E2E_DIR/seed/ps3-install-seed.mjs" ;;
+    content) printf '%s' "$E2E_DIR/seed/content-seed.mjs" ;;
+    native) printf '%s' "$E2E_DIR/seed/native-seed.mjs" ;;
+    firmware) printf '%s' "$E2E_DIR/seed/firmware-seed.mjs" ;;
     *) printf '' ;;
   esac
 }
@@ -533,6 +553,25 @@ run_group_attempt() {
         # installed stub emulators record their argv.
         export E2E_FORGE_URL="$forge_url"
         export GRID_E2E_ARGV_FILE="$data_dir/emulator-argv.log"
+      fi
+      # Both of these are seed-script conventions rather than per-group
+      # settings: a seed that writes the directory opts its group in, and
+      # wdio.conf.ts turns each into an app-process environment variable.
+      #
+      # stubs/bin — prepended to PATH, so a `which()` lookup inside the app
+      # (today: `wine`, for the `native` group's compat-tool launch) finds
+      # the stub instead of whatever the developer has installed.
+      #
+      # xdg-config — an EMPTY directory used as both XDG_CONFIG_HOME and
+      # RPCS3_CONFIG_DIR. The RPCS3 readers probe both for a `vfs.yml`
+      # before falling back to the library VFS, so without this the
+      # `ps3-install` group would route a PS3 install into a real RPCS3
+      # install's dev_hdd0 on any machine that has one.
+      if [[ -d "$data_dir/stubs/bin" ]]; then
+        export E2E_STUB_BIN="$data_dir/stubs/bin"
+      fi
+      if [[ -d "$data_dir/xdg-config" ]]; then
+        export E2E_XDG_CONFIG_HOME="$data_dir/xdg-config"
       fi
       exec xvfb-run -a npx wdio run wdio.conf.ts
     ) 2>&1 | tee "$wdio_log"

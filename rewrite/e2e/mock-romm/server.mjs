@@ -10,6 +10,12 @@
 //   GET  /assets/romm/resources/roms/:id/cover/(small|large).png
 //   GET  /assets/romm/resources/roms/:id/screenshots/:n.png
 //
+// Server firmware (grid-core/src/romm/mod.rs's `firmware`/`firmware_bytes`,
+// used by the `firmware` stage group), served from an optional
+// `firmware.json` fixture:
+//   GET  /api/firmware?platform_id=<id>      ([{id, file_name}])
+//   GET  /api/firmware/:id/content/:file_name (bytes)
+//
 // `GET/POST /__e2e__/offline` (outside `/api/`, no auth, not logged), used
 // by the `images` stage group: POST { offline: true|false } sets whether
 // every /api/ or /assets/ request gets its socket destroyed rather than
@@ -61,7 +67,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFile, writeFile } from "node:fs/promises";
 
-import { buildZip } from "./archives.mjs";
+import { buildStfs, buildZip } from "./archives.mjs";
 
 export const FAKE_TOKEN = "FAKE-E2E-TOKEN-not-real";
 
@@ -90,6 +96,18 @@ const PNG_1X1_BASE64 =
  */
 const BIG_CONTENT_BYTES = 300 * 1024;
 
+/**
+ * The PS3 title id every PS3 fixture carries, both as a directory name and
+ * inside the `PARAM.SFO` bytes (grid-core's `detect_game_id_from_sfo` scans
+ * the raw file for a game-id-shaped run, so the plain ASCII id is enough).
+ */
+const PS3_GAME_ID = "BLUS30336";
+/** The PS4 title id the base and update archives share. */
+const PS4_TITLE_ID = "CUSA12345";
+/** The Xbox 360 title id and content type the STFS update package declares. */
+const X360_TITLE_ID = 0x415608c3;
+const X360_CONTENT_TYPE = 0x000b0000;
+
 function buildContentFixtures() {
   const zipBytes = buildZip([{ name: "game.sfc", data: dummyBytes(320, 0xa5) }]);
   const bigZipBytes = buildZip([
@@ -99,18 +117,137 @@ function buildContentFixtures() {
   const disc1Bytes = dummyBytes(256, 0x11);
   const disc2Bytes = dummyBytes(272, 0x22);
   const pngBytes = Buffer.from(PNG_1X1_BASE64, "base64");
-  return { zipBytes, bigZipBytes, m3uBytes, disc1Bytes, disc2Bytes, pngBytes };
+
+  // PlayStation 3 (`ps3-install` group): the `<GAMEID>/PS3_GAME/…` shape
+  // grid-core's `specials::ps3::classify` routes into `dev_hdd0/game/`.
+  const ps3ZipBytes = buildZip([
+    {
+      name: `${PS3_GAME_ID}/PS3_GAME/USRDIR/EBOOT.BIN`,
+      data: Buffer.from("E2E-EBOOT", "utf8"),
+    },
+    {
+      name: `${PS3_GAME_ID}/PS3_GAME/PARAM.SFO`,
+      data: Buffer.from(PS3_GAME_ID, "utf8"),
+    },
+  ]);
+
+  // PlayStation 4 (`content` group): the base carries the title-id tree
+  // `specials::ps4` detects; the update merges one new file into it and
+  // rewrites `eboot.bin` so a "the update really landed" assertion has both
+  // a new file and a changed one to look at.
+  const ps4BaseZipBytes = buildZip([
+    { name: `${PS4_TITLE_ID}/eboot.bin`, data: Buffer.from("EBOOT-BASE", "utf8") },
+    {
+      name: `${PS4_TITLE_ID}/sce_sys/param.sfo`,
+      data: Buffer.from(PS4_TITLE_ID, "utf8"),
+    },
+  ]);
+  const ps4UpdateZipBytes = buildZip([
+    { name: `${PS4_TITLE_ID}/eboot.bin`, data: Buffer.from("EBOOT-UPDATED", "utf8") },
+    { name: `${PS4_TITLE_ID}/patch.txt`, data: Buffer.from("PATCHED", "utf8") },
+  ]);
+
+  // Xbox 360 (`content` group): a plain base archive, and an update archive
+  // holding ONE STFS package, which `specials::xenia` copies to
+  // `<content root>/0000000000000000/<TitleID>/<ContentType>/tu00000001`.
+  const x360ZipBytes = buildZip([
+    { name: "default.xex", data: Buffer.from("XEX", "utf8") },
+  ]);
+  const x360UpdateZipBytes = buildZip([
+    { name: "tu00000001", data: buildStfs("LIVE", X360_TITLE_ID, X360_CONTENT_TYPE) },
+  ]);
+
+  // Windows / native (`native` group). `mygame.exe` is a real `#!/bin/sh`
+  // script, not a stub byte string: the native launch spawns it (through
+  // the `wine` stub) and its argv is what the spec asserts on. `readme.txt`
+  // is there so `executable_candidates` has something to filter out.
+  const nativeZipBytes = buildZip([
+    {
+      name: "MyGame/mygame.exe",
+      data: Buffer.from("#!/bin/sh\nexit 0\n", "utf8"),
+    },
+    { name: "readme.txt", data: Buffer.from("read me first\n", "utf8") },
+  ]);
+  const gameJsonBytes = Buffer.from(
+    JSON.stringify({ version: "1.0", year: 2004, tags: ["indie"] }),
+    "utf8",
+  );
+
+  // PlayStation 1 (`firmware` group): the smallest possible installable
+  // game — the install only exists to fire the per-game firmware pass.
+  const ps1ZipBytes = buildZip([{ name: "game.bin", data: dummyBytes(256, 0x33) }]);
+
+  return {
+    zipBytes,
+    bigZipBytes,
+    m3uBytes,
+    disc1Bytes,
+    disc2Bytes,
+    pngBytes,
+    ps3ZipBytes,
+    ps4BaseZipBytes,
+    ps4UpdateZipBytes,
+    x360ZipBytes,
+    x360UpdateZipBytes,
+    nativeZipBytes,
+    gameJsonBytes,
+    ps1ZipBytes,
+  };
 }
 
-/** Picks the content buffer for one RomFile entry, by name. */
+/**
+ * Picks the content buffer for one RomFile entry, by name. Names are the
+ * contract between a fixture set's `rom-details.json` and the builders
+ * above: a fixture that wants the PS3 tree names its file `game.zip`, one
+ * that wants the Windows payload names it `mygame.zip`, and so on. Anything
+ * unrecognized still gets a plausible archive (`.zip`) or 64 dummy bytes, so
+ * a fixture set can carry filler files without teaching this function about
+ * them.
+ */
 function contentForFile(fileName, content) {
   const lower = fileName.toLowerCase();
   if (fileName === "disc1.bin") return content.disc1Bytes;
   if (fileName === "disc2.bin") return content.disc2Bytes;
   if (lower.endsWith(".m3u")) return content.m3uBytes;
   if (lower === "big arcade game.zip") return content.bigZipBytes;
+  if (lower === "big.zip") return content.bigZipBytes;
+  if (lower === "game.json") return content.gameJsonBytes;
+  if (lower === "game.zip") return content.ps3ZipBytes;
+  if (lower === "ps4-base.zip") return content.ps4BaseZipBytes;
+  if (lower === "ps4-update.zip") return content.ps4UpdateZipBytes;
+  if (lower === "x360.zip") return content.x360ZipBytes;
+  if (lower === "x360-update.zip") return content.x360UpdateZipBytes;
+  if (lower === "mygame.zip") return content.nativeZipBytes;
+  if (lower === "ps1.zip") return content.ps1ZipBytes;
   if (lower.endsWith(".zip")) return content.zipBytes;
   return dummyBytes(64, 0x00);
+}
+
+/**
+ * The bytes `GET /api/firmware/:id/content/:file_name` serves for a
+ * `firmware.json` record's `content_key`. Deterministic, and shaped just
+ * enough that a spec can tell one apart from the other on disk:
+ *
+ * - `"bios"` — 512 dummy bytes, the size of a console BIOS image as far as
+ *   anything in this harness cares.
+ * - `"pup"`  — 1024 bytes opening with the ASCII `SCEUF` magic a real
+ *   `PS3UPDAT.PUP` starts with.
+ *
+ * An unknown key falls back to 256 dummy bytes rather than throwing: a
+ * fixture typo should show up as a failed assertion in the spec, not as a
+ * 500 from the mock.
+ */
+export function firmwareBytesFor(contentKey) {
+  switch (contentKey) {
+    case "bios":
+      return dummyBytes(512, 0x4b);
+    case "pup": {
+      const magic = Buffer.from("SCEUF", "ascii");
+      return Buffer.concat([magic, dummyBytes(1024 - magic.length, 0x5e)]);
+    }
+    default:
+      return dummyBytes(256, 0x00);
+  }
 }
 
 // --- fixture loading ---------------------------------------------------------
@@ -132,13 +269,32 @@ async function loadSaveFixtures(fixturesDir) {
   }
 }
 
+/**
+ * `firmware.json` is optional — only `fixtures-firmware/` has one. Each key
+ * is a platform id (string); each value is an array of firmware records
+ * `{id, file_name, content_key}`. `content_key` never reaches a client: it
+ * only picks which [`firmwareBytesFor`] buffer
+ * `GET /api/firmware/:id/content/:file_name` serves, mirroring how
+ * `saves.json`'s `content` field is stripped before its records go out.
+ */
+async function loadFirmwareFixtures(fixturesDir) {
+  try {
+    const raw = await readFile(path.join(fixturesDir, "firmware.json"), "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
 async function loadFixtures(fixturesDir) {
-  const [platforms, romsByPlatform, romDetails, savesByRom] = await Promise.all([
-    readFile(path.join(fixturesDir, "platforms.json"), "utf8").then(JSON.parse),
-    readFile(path.join(fixturesDir, "roms.json"), "utf8").then(JSON.parse),
-    readFile(path.join(fixturesDir, "rom-details.json"), "utf8").then(JSON.parse),
-    loadSaveFixtures(fixturesDir),
-  ]);
+  const [platforms, romsByPlatform, romDetails, savesByRom, firmwareByPlatformRaw] =
+    await Promise.all([
+      readFile(path.join(fixturesDir, "platforms.json"), "utf8").then(JSON.parse),
+      readFile(path.join(fixturesDir, "roms.json"), "utf8").then(JSON.parse),
+      readFile(path.join(fixturesDir, "rom-details.json"), "utf8").then(JSON.parse),
+      loadSaveFixtures(fixturesDir),
+      loadFirmwareFixtures(fixturesDir),
+    ]);
 
   const saveContentById = new Map();
   const saveRecordsByRom = {};
@@ -152,12 +308,31 @@ async function loadFixtures(fixturesDir) {
     });
   }
 
+  const firmwareByPlatform = {};
+  const firmwareBytesById = new Map();
+  for (const [platformId, records] of Object.entries(firmwareByPlatformRaw)) {
+    firmwareByPlatform[platformId] = records.map((record) => {
+      const { content_key: contentKey, ...rest } = record;
+      firmwareBytesById.set(String(record.id), firmwareBytesFor(contentKey));
+      return rest;
+    });
+  }
+
   const content = buildContentFixtures();
 
   // Patch each file's declared size (and the rom's total) to match the bytes
   // actually served, so a client that checks Content-Length or an
   // already-downloaded file's size against the fixture never sees a mismatch.
+  //
+  // `e2e_throttle` on a fixture file entry is a mock-only directive, not part
+  // of RomM's `RomFileSchema`: it names the per-chunk delay this ONE file's
+  // content is streamed with, and is stripped from the detail before any
+  // client sees it. That is how a single group can hold both instant
+  // fixtures and one deliberately slow download (the `native` group's cancel
+  // smoke) — a server-wide `--throttle-ms` would slow every install in the
+  // group, and the app itself never sends the `?e2e_throttle=` query param.
   const contentByKey = new Map();
+  const throttleByKey = new Map();
   for (const detail of Object.values(romDetails)) {
     let total = 0;
     for (const file of detail.files ?? []) {
@@ -165,6 +340,10 @@ async function loadFixtures(fixturesDir) {
       file.file_size_bytes = bytes.length;
       total += bytes.length;
       contentByKey.set(`${detail.id}:${file.file_name}`, bytes);
+      if (file.e2e_throttle !== undefined) {
+        throttleByKey.set(`${detail.id}:${file.file_name}`, Number(file.e2e_throttle));
+        delete file.e2e_throttle;
+      }
     }
     detail.fs_size_bytes = total;
   }
@@ -174,9 +353,12 @@ async function loadFixtures(fixturesDir) {
     romsByPlatform,
     romDetails,
     contentByKey,
+    throttleByKey,
     pngBytes: content.pngBytes,
     saveRecordsByRom,
     saveContentById,
+    firmwareByPlatform,
+    firmwareBytesById,
   };
 }
 
@@ -241,6 +423,37 @@ const SCREENSHOT_PATH_RE = /^\/assets\/romm\/resources\/roms\/\d+\/screenshots\/
 const ROM_ID_RE = /^\/api\/roms\/(\d+)$/;
 const ROM_CONTENT_RE = /^\/api\/roms\/(\d+)\/content\/(.+)$/;
 const SAVE_CONTENT_RE = /^\/api\/saves\/([^/]+)\/content$/;
+const FIRMWARE_CONTENT_RE = /^\/api\/firmware\/([^/]+)\/content\/(.+)$/;
+
+/**
+ * Which of a rom's files a content request is really asking for.
+ *
+ * RomM's content endpoint takes the game's own `fs_name` in the path and
+ * names the actual file(s) in ONE `file_ids=<csv>` query pair — that is how
+ * a PS4/Xbox 360 update is fetched from the same path as its base game
+ * (grid-core/src/library/mod.rs's `content_job`). So the ids win when they
+ * resolve to exactly one of the rom's files; the path's own file name is the
+ * fallback, which is what a plain base install (one target per file, path
+ * and id agreeing) and every pre-existing fixture already rely on.
+ *
+ * A multi-id request — the real server bundles those into one archive built
+ * on the fly — has no single fixture buffer to serve, so it falls back to
+ * the path name too. No E2E group needs a genuine multi-file bundle.
+ */
+function resolveContentKey(state, romId, pathFileName, fileIdsParam) {
+  if (fileIdsParam) {
+    const ids = fileIdsParam
+      .split(",")
+      .map((id) => id.trim())
+      .filter((id) => id !== "");
+    const files = state.romDetails[romId]?.files ?? [];
+    const matched = files.filter((file) => ids.includes(String(file.id)));
+    if (matched.length === 1) {
+      return `${romId}:${matched[0].file_name}`;
+    }
+  }
+  return `${romId}:${pathFileName}`;
+}
 
 /** Buffers a request body fully. Small fixture payloads only — no streaming. */
 function readBody(req) {
@@ -414,12 +627,19 @@ async function handleRequest(req, res, state) {
   const contentMatch = pathname.match(ROM_CONTENT_RE);
   if (req.method === "GET" && contentMatch) {
     const [, romId, fileName] = contentMatch;
-    const bytes = state.contentByKey.get(`${romId}:${fileName}`);
+    const key = resolveContentKey(
+      state,
+      romId,
+      fileName,
+      requestUrl.searchParams.get("file_ids"),
+    );
+    const bytes = state.contentByKey.get(key);
     if (!bytes) {
       sendJson(res, 404, { detail: "file not found" });
       return;
     }
-    const contentType = fileName.toLowerCase().endsWith(".zip")
+    const servedName = key.slice(key.indexOf(":") + 1);
+    const contentType = servedName.toLowerCase().endsWith(".zip")
       ? "application/zip"
       : "application/octet-stream";
     // Number(null) and Number("0") are both 0, so reading the param straight
@@ -432,12 +652,17 @@ async function handleRequest(req, res, state) {
     if (requestedThrottle !== null && Number.isNaN(requestedThrottle)) {
       requestedThrottle = null;
     }
+    // Precedence: an explicit query param, then this file's own fixture
+    // `e2e_throttle`, then the server-wide default.
+    const fixtureThrottle = state.throttleByKey.get(key);
     const throttleMs =
       requestedThrottle !== null
         ? Math.max(0, requestedThrottle)
-        : state.defaultThrottleMs > 0
-          ? state.defaultThrottleMs
-          : 0;
+        : fixtureThrottle !== undefined && fixtureThrottle > 0
+          ? fixtureThrottle
+          : state.defaultThrottleMs > 0
+            ? state.defaultThrottleMs
+            : 0;
     if (throttleMs > 0) {
       sendBufferThrottled(res, 200, contentType, bytes, throttleMs).catch(() => {
         // The client (or a test) closing the connection mid-download is an
@@ -446,6 +671,29 @@ async function handleRequest(req, res, state) {
     } else {
       sendBuffer(res, 200, contentType, bytes);
     }
+    return;
+  }
+
+  // --- server firmware (grid-core/src/firmware, romm/mod.rs) --------------
+
+  if (req.method === "GET" && pathname === "/api/firmware") {
+    const platformId = requestUrl.searchParams.get("platform_id") ?? "";
+    logEntry.query = { platform_id: platformId };
+    // An unknown platform gets `[]`, not a 404: that is what a real RomM
+    // returns for a platform with no firmware, and `install_platform_firmware`
+    // treats an empty list as "nothing to do" rather than an error.
+    sendJson(res, 200, state.firmwareByPlatform[platformId] ?? []);
+    return;
+  }
+
+  const firmwareContentMatch = pathname.match(FIRMWARE_CONTENT_RE);
+  if (req.method === "GET" && firmwareContentMatch) {
+    const bytes = state.firmwareBytesById.get(firmwareContentMatch[1]);
+    if (!bytes) {
+      sendJson(res, 404, { detail: "firmware not found" });
+      return;
+    }
+    sendBuffer(res, 200, "application/octet-stream", bytes);
     return;
   }
 

@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "name": "PlayStation 4",
+    "slug": "ps4",
+    "rom_count": 1
+  },
+  {
+    "id": 2,
+    "name": "Xbox 360",
+    "slug": "xbox360",
+    "rom_count": 1
+  }
+]

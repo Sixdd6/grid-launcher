@@ -511,3 +511,225 @@ test("startMockRomm honors an explicit port", async () => {
     await handle.close();
   }
 });
+
+// --- file_ids by-id resolution (PS4 / Xbox 360 update+DLC) -----------------
+//
+// RomM's content endpoint takes the GAME's `fs_name` in the path and names
+// the file(s) actually wanted in one `file_ids=<csv>` query pair, which is
+// how grid-core fetches an update from the same path as its base game
+// (library/mod.rs's `content_job`). These pin the mock's side of that.
+
+const contentFixturesDir = path.join(__dirname, "../fixtures-content");
+const firmwareFixturesDir = path.join(__dirname, "../fixtures-firmware");
+const nativeFixturesDir = path.join(__dirname, "../fixtures-native");
+
+async function withFixtureServer(dir, fn) {
+  const handle = await startMockRomm({ port: 0, fixturesDir: dir });
+  try {
+    await fn(handle);
+  } finally {
+    await handle.close();
+  }
+}
+
+test("file_ids selects the update archive even though the path names the base game", async () => {
+  await withFixtureServer(contentFixturesDir, async ({ url }) => {
+    const detail = await fetch(`${url}/api/roms/501`, { headers: authHeader() }).then((r) =>
+      r.json(),
+    );
+    const base = detail.files.find((f) => f.file_name === "ps4-base.zip");
+    const update = detail.files.find((f) => f.file_name === "ps4-update.zip");
+
+    // Both requests use the game's own fs_name in the path; only file_ids differs.
+    const baseRes = await fetch(`${url}/api/roms/501/content/ps4-base.zip?file_ids=${base.id}`, {
+      headers: authHeader(),
+    });
+    const updateRes = await fetch(
+      `${url}/api/roms/501/content/ps4-base.zip?file_ids=${update.id}`,
+      { headers: authHeader() },
+    );
+    assert.equal(baseRes.status, 200);
+    assert.equal(updateRes.status, 200);
+
+    const baseBuf = Buffer.from(await baseRes.arrayBuffer());
+    const updateBuf = Buffer.from(await updateRes.arrayBuffer());
+    assert.equal(baseBuf.length, base.file_size_bytes);
+    assert.equal(updateBuf.length, update.file_size_bytes);
+    assert.ok(baseBuf.includes(Buffer.from("CUSA12345/sce_sys/param.sfo")));
+    assert.ok(updateBuf.includes(Buffer.from("CUSA12345/patch.txt")));
+    assert.ok(!baseBuf.includes(Buffer.from("CUSA12345/patch.txt")));
+  });
+});
+
+test("a file_ids value naming no file of this rom falls back to the path's file name", async () => {
+  await withFixtureServer(contentFixturesDir, async ({ url }) => {
+    const res = await fetch(`${url}/api/roms/501/content/ps4-base.zip?file_ids=999999`, {
+      headers: authHeader(),
+    });
+    assert.equal(res.status, 200);
+    const buf = Buffer.from(await res.arrayBuffer());
+    assert.ok(buf.includes(Buffer.from("CUSA12345/sce_sys/param.sfo")));
+  });
+});
+
+test("the Xbox 360 update archive carries one STFS package with the fixture's title id", async () => {
+  await withFixtureServer(contentFixturesDir, async ({ url }) => {
+    const detail = await fetch(`${url}/api/roms/601`, { headers: authHeader() }).then((r) =>
+      r.json(),
+    );
+    const update = detail.files.find((f) => f.file_name === "x360-update.zip");
+    const res = await fetch(`${url}/api/roms/601/content/x360.zip?file_ids=${update.id}`, {
+      headers: authHeader(),
+    });
+    const buf = Buffer.from(await res.arrayBuffer());
+    assert.ok(buf.includes(Buffer.from("tu00000001")), "the STFS member name is in the zip");
+    // Stored (uncompressed) entries, so the STFS header sits verbatim in the
+    // archive: magic, then the big-endian content type and title id.
+    assert.ok(buf.includes(Buffer.from("LIVE", "ascii")));
+    assert.ok(buf.includes(Buffer.from([0x00, 0x0b, 0x00, 0x00])));
+    assert.ok(buf.includes(Buffer.from([0x41, 0x56, 0x08, 0xc3])));
+  });
+});
+
+test("a rom file's fixture e2e_throttle is stripped from the detail but throttles its content", async () => {
+  await withFixtureServer(nativeFixturesDir, async ({ url }) => {
+    const detail = await fetch(`${url}/api/roms/702`, { headers: authHeader() }).then((r) =>
+      r.json(),
+    );
+    const file = detail.files[0];
+    assert.equal(
+      file.e2e_throttle,
+      undefined,
+      "e2e_throttle is a mock-only directive and must never reach a client",
+    );
+
+    const start = Date.now();
+    const res = await fetch(`${url}/api/roms/702/content/big.zip?file_ids=${file.id}`, {
+      headers: authHeader(),
+    });
+    const buf = Buffer.from(await res.arrayBuffer());
+    const elapsed = Date.now() - start;
+    assert.equal(buf.length, file.file_size_bytes);
+    // ~300KB at 20KB per chunk, 100ms apart: well over a second. The bound
+    // is deliberately loose — this asserts "throttled at all", not a rate.
+    assert.ok(elapsed > 500, `expected a throttled stream, took ${elapsed}ms`);
+  });
+});
+
+test("an unthrottled file in the same fixture set streams instantly", async () => {
+  await withFixtureServer(nativeFixturesDir, async ({ url }) => {
+    const start = Date.now();
+    const res = await fetch(`${url}/api/roms/701/content/mygame.zip?file_ids=4001`, {
+      headers: authHeader(),
+    });
+    await res.arrayBuffer();
+    assert.ok(Date.now() - start < 400, "only the file carrying e2e_throttle is throttled");
+  });
+});
+
+// --- server firmware -------------------------------------------------------
+
+test("GET /api/firmware returns the fixture records without their content_key", async () => {
+  await withFixtureServer(firmwareFixturesDir, async ({ url }) => {
+    const res = await fetch(`${url}/api/firmware?platform_id=1`, { headers: authHeader() });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.deepEqual(body, [{ id: 9001, file_name: "scph5501.bin" }]);
+
+    const ps3 = await fetch(`${url}/api/firmware?platform_id=2`, {
+      headers: authHeader(),
+    }).then((r) => r.json());
+    assert.deepEqual(ps3, [{ id: 9002, file_name: "PS3UPDAT.PUP" }]);
+  });
+});
+
+test("GET /api/firmware for a platform with no records returns an empty list", async () => {
+  await withFixtureServer(firmwareFixturesDir, async ({ url }) => {
+    const res = await fetch(`${url}/api/firmware?platform_id=77`, { headers: authHeader() });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), []);
+  });
+});
+
+test("a fixture set with no firmware.json serves an empty firmware list", async () => {
+  await withServer(async ({ url }) => {
+    const res = await fetch(`${url}/api/firmware?platform_id=1`, { headers: authHeader() });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), []);
+  });
+});
+
+test("GET /api/firmware/:id/content/:name serves the bytes its content_key names", async () => {
+  await withFixtureServer(firmwareFixturesDir, async ({ url }) => {
+    const bios = await fetch(`${url}/api/firmware/9001/content/scph5501.bin`, {
+      headers: authHeader(),
+    });
+    assert.equal(bios.status, 200);
+    const biosBuf = Buffer.from(await bios.arrayBuffer());
+    assert.equal(biosBuf.length, 512);
+
+    const pup = await fetch(`${url}/api/firmware/9002/content/PS3UPDAT.PUP`, {
+      headers: authHeader(),
+    });
+    assert.equal(pup.status, 200);
+    const pupBuf = Buffer.from(await pup.arrayBuffer());
+    assert.equal(pupBuf.length, 1024);
+    assert.equal(pupBuf.subarray(0, 5).toString("ascii"), "SCEUF");
+  });
+});
+
+test("GET /api/firmware/:id/content 404s for an unknown firmware id", async () => {
+  await withFixtureServer(firmwareFixturesDir, async ({ url }) => {
+    const res = await fetch(`${url}/api/firmware/4242/content/whatever.bin`, {
+      headers: authHeader(),
+    });
+    assert.equal(res.status, 404);
+  });
+});
+
+test("the firmware routes require the bearer token like every other /api/ route", async () => {
+  await withFixtureServer(firmwareFixturesDir, async ({ url }) => {
+    assert.equal((await fetch(`${url}/api/firmware?platform_id=1`)).status, 401);
+    assert.equal((await fetch(`${url}/api/firmware/9001/content/scph5501.bin`)).status, 401);
+  });
+});
+
+// --- category passthrough --------------------------------------------------
+
+test("a rom detail's files keep their RomM category verbatim", async () => {
+  await withFixtureServer(contentFixturesDir, async ({ url }) => {
+    const detail = await fetch(`${url}/api/roms/601`, { headers: authHeader() }).then((r) =>
+      r.json(),
+    );
+    assert.deepEqual(
+      detail.files.map((f) => [f.file_name, f.category]),
+      [
+        ["x360.zip", "game"],
+        ["x360-update.zip", "update"],
+      ],
+    );
+  });
+});
+
+// --- the new fixture sets' own shape --------------------------------------
+
+test("the PS3 fixture archive holds the BLUS30336/PS3_GAME tree", async () => {
+  await withFixtureServer(path.join(__dirname, "../fixtures-ps3-install"), async ({ url }) => {
+    const res = await fetch(`${url}/api/roms/401/content/game.zip?file_ids=1401`, {
+      headers: authHeader(),
+    });
+    const buf = Buffer.from(await res.arrayBuffer());
+    assert.ok(buf.includes(Buffer.from("BLUS30336/PS3_GAME/USRDIR/EBOOT.BIN")));
+    assert.ok(buf.includes(Buffer.from("BLUS30336/PS3_GAME/PARAM.SFO")));
+  });
+});
+
+test("the native fixture serves game.json as its own JSON body", async () => {
+  await withFixtureServer(nativeFixturesDir, async ({ url }) => {
+    const res = await fetch(`${url}/api/roms/701/content/game.json?file_ids=4002`, {
+      headers: authHeader(),
+    });
+    const body = JSON.parse(Buffer.from(await res.arrayBuffer()).toString("utf8"));
+    assert.deepEqual(body, { version: "1.0", year: 2004, tags: ["indie"] });
+  });
+});

@@ -44,6 +44,29 @@ const appEnv: Record<string, string> = {
   ...(process.env.GRID_E2E_ARGV_FILE
     ? { GRID_E2E_ARGV_FILE: process.env.GRID_E2E_ARGV_FILE }
     : {}),
+  // The tauri service spawns the app with `{...process.env, ...options.env}`,
+  // so anything named here REPLACES the inherited value rather than adding
+  // to it — PATH has to be rebuilt explicitly, not just prefixed.
+  //
+  // E2E_STUB_BIN is set by e2e.sh for a stage group whose seed wrote
+  // `<data>/stubs/bin`. Putting it first is what makes the app's own
+  // `which()` lookups resolve to the stubs: grid-core's native launch
+  // (launch/native.rs) runs `which("wine")`, and a developer's real Wine
+  // must never be what an E2E launch spawns.
+  PATH: process.env.E2E_STUB_BIN
+    ? `${process.env.E2E_STUB_BIN}:${process.env.PATH ?? ''}`
+    : (process.env.PATH ?? ''),
+  // E2E_XDG_CONFIG_HOME is an EMPTY directory inside the stage's data dir,
+  // set by e2e.sh for a group whose seed created `<data>/xdg-config`. Both
+  // variables are RPCS3 config-root probes (autoconfig/readers.rs's
+  // `rpcs3_data_root_candidates`), so pointing them here keeps a PS3
+  // install's VFS resolution off the developer's real RPCS3 install.
+  ...(process.env.E2E_XDG_CONFIG_HOME
+    ? {
+        XDG_CONFIG_HOME: process.env.E2E_XDG_CONFIG_HOME,
+        RPCS3_CONFIG_DIR: process.env.E2E_XDG_CONFIG_HOME,
+      }
+    : {}),
 };
 
 export const config: WebdriverIO.Config = {

@@ -1,0 +1,66 @@
+{
+  "501": {
+    "id": 501,
+    "name": "PS4 Game",
+    "fs_name_no_ext": "ps4-base",
+    "platform_id": 1,
+    "platform_display_name": "PlayStation 4",
+    "fs_name": "ps4-base.zip",
+    "summary": "A PS4 fixture with a base archive and an update-category archive.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 2001,
+        "file_name": "ps4-base.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true,
+        "category": "game"
+      },
+      {
+        "id": 2002,
+        "file_name": "ps4-update.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true,
+        "category": "update"
+      }
+    ],
+    "metadatum": null
+  },
+  "601": {
+    "id": 601,
+    "name": "Xbox Game",
+    "fs_name_no_ext": "x360",
+    "platform_id": 2,
+    "platform_display_name": "Xbox 360",
+    "fs_name": "x360.zip",
+    "summary": "An Xbox 360 fixture whose update-category archive holds one STFS package.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 3001,
+        "file_name": "x360.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true,
+        "category": "game"
+      },
+      {
+        "id": 3002,
+        "file_name": "x360-update.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true,
+        "category": "update"
+      }
+    ],
+    "metadatum": null
+  }
+}

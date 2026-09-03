@@ -1,0 +1,47 @@
+{
+  "701": {
+    "id": 701,
+    "name": "My Game",
+    "fs_name_no_ext": "mygame",
+    "platform_id": 1,
+    "platform_display_name": "Windows",
+    "fs_name": "mygame.zip",
+    "summary": "A Windows fixture: one archive holding MyGame/mygame.exe, plus a game.json sidecar.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      { "id": 4001, "file_name": "mygame.zip", "file_size_bytes": 0, "is_top_level": true },
+      { "id": 4002, "file_name": "game.json", "file_size_bytes": 0, "is_top_level": true }
+    ],
+    "metadatum": null
+  },
+  "702": {
+    "id": 702,
+    "name": "Big App",
+    "fs_name_no_ext": "big",
+    "platform_id": 1,
+    "platform_display_name": "Windows",
+    "fs_name": "big.zip",
+    "summary": "A ~300KB Windows fixture streamed at 100ms per chunk, for the Details Cancel smoke.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 4003,
+        "file_name": "big.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true,
+        "e2e_throttle": 100
+      }
+    ],
+    "metadatum": null
+  }
+}

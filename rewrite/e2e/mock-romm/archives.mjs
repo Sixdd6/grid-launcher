@@ -176,3 +176,42 @@ export function buildTar(entries, { mtime = 0 } = {}) {
 export function buildTarGz(entries, options) {
   return zlib.gzipSync(buildTar(entries, options));
 }
+
+// --- minimal STFS package writer ---------------------------------------------
+
+/**
+ * Byte length of the STFS header the Rust reader consumes in one shot —
+ * `STFS_HEADER_LEN` (grid-core/src/library/specials/xenia.rs:18). A package
+ * shorter than this is rejected before its magic is even looked at.
+ */
+export const STFS_HEADER_LEN = 0x368;
+
+/** Big-endian `u32` offset of the content type field (`xenia.rs:25`). */
+const STFS_CONTENT_TYPE_OFFSET = 0x344;
+/** Big-endian `u32` offset of the title id field (`xenia.rs:28`). */
+const STFS_TITLE_ID_OFFSET = 0x360;
+
+/**
+ * Builds a [`STFS_HEADER_LEN`]-byte fake STFS package: zero-filled, with
+ * `magic` (a 4-byte ASCII string — `"CON "`, `"LIVE"` or `"PIRS"` are the
+ * three the reader accepts) at offset 0, `contentType` at
+ * `STFS_CONTENT_TYPE_OFFSET` and `titleId` at `STFS_TITLE_ID_OFFSET`, both
+ * big-endian.
+ *
+ * The JS twin of `grid_core::library::specials::xenia::build_stfs_bytes`.
+ * The layout is duplicated rather than shared because the mock server is a
+ * plain-Node process with no way to call into the Rust crate; the two must
+ * stay byte-identical, which `server.test.mjs` pins from this side and
+ * `xenia.rs`'s own tests pin from the other.
+ */
+export function buildStfs(magic, titleId, contentType) {
+  const magicBuf = Buffer.from(magic, "ascii");
+  if (magicBuf.length !== 4) {
+    throw new Error(`STFS magic must be exactly 4 bytes, got ${magicBuf.length}`);
+  }
+  const bytes = Buffer.alloc(STFS_HEADER_LEN);
+  magicBuf.copy(bytes, 0);
+  bytes.writeUInt32BE(contentType >>> 0, STFS_CONTENT_TYPE_OFFSET);
+  bytes.writeUInt32BE(titleId >>> 0, STFS_TITLE_ID_OFFSET);
+  return bytes;
+}

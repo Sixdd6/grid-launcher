@@ -1,0 +1,54 @@
+{
+  "801": {
+    "id": 801,
+    "name": "PS1 Game",
+    "fs_name_no_ext": "ps1",
+    "platform_id": 1,
+    "platform_display_name": "PlayStation",
+    "fs_name": "ps1.zip",
+    "summary": "A PS1 fixture whose only job is to fire the per-game firmware pass on finalize.",
+    "regions": [
+      "USA"
+    ],
+    "languages": [
+      "en"
+    ],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 8011,
+        "file_name": "ps1.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": null
+  },
+  "802": {
+    "id": 802,
+    "name": "PS3 Placeholder",
+    "fs_name_no_ext": "ps3-placeholder",
+    "platform_id": 2,
+    "platform_display_name": "PlayStation 3",
+    "fs_name": "ps3-placeholder.zip",
+    "summary": "Never installed. It exists so the PlayStation 3 platform has a nonzero rom_count: RommClient::platforms drops every platform with rom_count == 0, and ps3_platform_id reads the id out of that filtered list.",
+    "regions": [],
+    "languages": [],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 8021,
+        "file_name": "ps3-placeholder.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": null
+  }
+}

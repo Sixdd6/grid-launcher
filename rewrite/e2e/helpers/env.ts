@@ -62,3 +62,13 @@ export const THROTTLED_DOWNLOAD_TIMEOUT = 20_000;
  * of that one tick.
  */
 export const REAP_TIMEOUT = 4_000;
+/**
+ * Upper bound for a background firmware job to finish: the drawer row for
+ * the PS3 PUP transfer reaching `Completed`, or a per-game BIOS file
+ * appearing on disk. These are not driven by a click — `FirmwareService`
+ * spawns them off an install's finalize hook or an emulator save — so the
+ * budget covers the trigger, the `GET /api/firmware` list call, the byte
+ * download and the write, on top of the usual WebDriver round-trip
+ * overhead.
+ */
+export const FIRMWARE_TIMEOUT = 15_000;

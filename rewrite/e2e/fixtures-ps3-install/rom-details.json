@@ -1,0 +1,21 @@
+{
+  "401": {
+    "id": 401,
+    "name": "Demons Souls",
+    "fs_name_no_ext": "game",
+    "platform_id": 1,
+    "platform_display_name": "PlayStation 3",
+    "fs_name": "game.zip",
+    "summary": "A PS3 fixture whose archive holds the BLUS30336/PS3_GAME tree.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      { "id": 1401, "file_name": "game.zip", "file_size_bytes": 0, "is_top_level": true }
+    ],
+    "metadatum": null
+  }
+}
