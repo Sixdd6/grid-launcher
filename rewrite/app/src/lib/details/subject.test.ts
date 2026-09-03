@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { GameSummary, InstalledGame } from '../api';
-import { fromInstalled, fromSummary, summaryOf } from './subject';
+import type { GameSummary, InstalledGame, RomDetail } from '../api';
+import { fromInstalled, fromSummary, mergeDetail, summaryOf } from './subject';
 
 function row(overrides: Partial<InstalledGame>): InstalledGame {
   return {
@@ -127,5 +127,98 @@ describe('summaryOf', () => {
       path_cover_small: '/s.png',
       path_cover_large: '/l.png',
     });
+  });
+});
+
+function detail(overrides: Partial<RomDetail>): RomDetail {
+  return {
+    id: 42,
+    name: 'Chrono Trigger',
+    platform_id: 1,
+    platform_name: 'SNES',
+    fs_name: 'chrono.sfc',
+    description: '',
+    regions: '',
+    languages: '',
+    tags: '',
+    revision: '',
+    rating: '',
+    genres: '',
+    companies: '',
+    first_release_date: '',
+    filesize_bytes: 0,
+    server_updated_at: '',
+    files: [],
+    cover_small_path: '',
+    cover_large_path: '',
+    screenshot_urls: [],
+    ...overrides,
+  };
+}
+
+describe('mergeDetail', () => {
+  const stored = fromInstalled(
+    row({
+      cover_small_path: '/stored/small.png',
+      cover_large_path: '/stored/large.png',
+      screenshot_urls: '/stored/one.png\n/stored/two.png',
+      description: 'stored description',
+      rating: '4.0',
+      genres: 'RPG',
+    })
+  );
+
+  it('keeps the subject covers when the detail has no large cover', () => {
+    const merged = mergeDetail(stored, detail({ cover_large_path: '' }));
+    expect(merged.coverLarge).toBe('/stored/large.png');
+    expect(merged.coverSmall).toBe('/stored/small.png');
+  });
+
+  it('overrides the covers when the detail carries them', () => {
+    const merged = mergeDetail(
+      stored,
+      detail({ cover_small_path: '/new/small.png', cover_large_path: '/new/large.png' })
+    );
+    expect(merged.coverLarge).toBe('/new/large.png');
+    expect(merged.coverSmall).toBe('/new/small.png');
+  });
+
+  it('normalizes a cover missing on both sides to null, not an empty string', () => {
+    const bare = fromInstalled(row({ cover_small_path: '', cover_large_path: '' }));
+    const merged = mergeDetail(bare, detail({}));
+    expect(merged.coverLarge).toBeNull();
+    expect(merged.coverSmall).toBeNull();
+  });
+
+  it('keeps the stored screenshots when the detail list is empty', () => {
+    const merged = mergeDetail(stored, detail({ screenshot_urls: [] }));
+    expect(merged.screenshotUrls).toEqual(['/stored/one.png', '/stored/two.png']);
+  });
+
+  it('replaces the screenshots when the detail list is non-empty', () => {
+    const merged = mergeDetail(stored, detail({ screenshot_urls: ['/new/a.png'] }));
+    expect(merged.screenshotUrls).toEqual(['/new/a.png']);
+  });
+
+  it('keeps the stored text fields when the detail sends empty strings', () => {
+    const merged = mergeDetail(stored, detail({}));
+    expect(merged.description).toBe('stored description');
+    expect(merged.rating).toBe('4.0');
+    expect(merged.genres).toBe('RPG');
+  });
+
+  it('overrides the text fields when the detail carries them', () => {
+    const merged = mergeDetail(stored, detail({ description: 'new', rating: '5.0', genres: 'Action' }));
+    expect(merged.description).toBe('new');
+    expect(merged.rating).toBe('5.0');
+    expect(merged.genres).toBe('Action');
+  });
+
+  it('carries the subject identity fields through untouched', () => {
+    const merged = mergeDetail(stored, detail({ name: 'Renamed', platform_name: 'Elsewhere' }));
+    expect(merged.name).toBe(stored.name);
+    expect(merged.platformName).toBe(stored.platformName);
+    expect(merged.romId).toBe(stored.romId);
+    expect(merged.source).toBe('installed');
   });
 });

@@ -892,7 +892,7 @@ prefetch, replenishment, and the Details screenshot strip) to Rust (grid-core's 
 glue and `commands.rs`, and the `app/src/lib/` Image, Library, Details, and Shell components).
 Rust paths are relative to `rewrite/`. D1-D10 restate the deviations already declared by the
 covers/images design task (`docs/superpowers/specs/2026-09-02-covers-images-design.md`,
-"Deviations" §D1-D10) for completeness; D11 is new to this milestone's review.
+"Deviations" §D1-D10) for completeness; D11 and D12 are new to this milestone's review.
 
 1. **D1 — One filename scheme for every image: SHA-256 of the resolved URL.** Python used an
    identity hash on desktop and a URL hash on TV, into one directory. Nothing reads the Python
@@ -933,7 +933,10 @@ covers/images design task (`docs/superpowers/specs/2026-09-02-covers-images-desi
    `Details.svelte` renders every URL in `screenshotUrls` with no slice
    (`app/src/lib/Details.svelte:229-243`); a container query
    (`app/src/lib/Details.svelte:577`) reflows the layout under the description instead of hiding
-   the strip.
+   the strip. The three-column threshold is a 900 px query on the *panel* container
+   (`app/src/lib/Details.svelte:362`, `:577`), not the ≥ 1100 px panel width the design spec
+   named: the panel's content box is 1052 px at its full 1100 px width, so a 1100 px threshold
+   would never fire.
 8. **D8 — Content gate replaces the decode gate: a body is written only if Content-Type or magic
    bytes identify an image.** Python required a successful `QPixmap` decode on the install path
    and nothing on the replenish path. `fetch_and_store`'s gate
@@ -959,6 +962,15 @@ covers/images design task (`docs/superpowers/specs/2026-09-02-covers-images-desi
     test exercises it. `extension_for`'s SVG branch
     (`crates/grid-core/src/images/urls.rs:457-467`) lowercases with `to_ascii_lowercase()` instead,
     so an `<?xml version="1.0"?><SVG>` body is correctly identified rather than crashing.
+
+12. **D12 — `cover_url_from_payload` is not wired into `into_detail`.** The design spec's cover
+    fallback for a rom row whose `path_cover_small` and `path_cover_large` are both empty (walk
+    the remaining RomM cover keys) is implemented and unit-tested
+    (`crates/grid-core/src/images/urls.rs:248`) but no production caller uses it: `into_detail`
+    (`crates/grid-core/src/romm/mod.rs:387`) takes the two path fields directly. The keys the
+    fallback would reach are foreign-host IGDB/SteamGridDB URLs, which `filter_to_server_host`
+    discards anyway, so wiring it in would change no rendered cover. The function is kept for a
+    future server that serves those keys from its own host.
 
 ### Follow-the-code quirks (ported as-is)
 

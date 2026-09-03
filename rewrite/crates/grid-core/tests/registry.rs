@@ -228,6 +228,61 @@ fn open_migrates_a_v1_database_and_update_images_round_trips() {
 }
 
 #[test]
+fn open_migrates_a_v1_database_that_already_has_one_v2_column() {
+    // A database torn by the pre-transaction migration: the first ALTER
+    // committed in autocommit, the process died before the rest, so the file
+    // sits at user_version 1 with one of the three image columns already
+    // present. The migration is idempotent (it skips a column PRAGMA
+    // table_info already lists), so this opens and finishes at version 2
+    // rather than failing forever with "duplicate column name".
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(V1_SCHEMA).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE installed_games ADD COLUMN cover_small_path TEXT NOT NULL DEFAULT '';",
+        )
+        .unwrap();
+        conn.execute("INSERT INTO installed_games (title, platform, title_key, platform_key, rom_id, installed_at)
+                      VALUES ('Torn', 'SNES', 'torn', 'snes', 7, 1)", []).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+    }
+
+    let registry = Registry::open(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 2);
+
+    let mut stmt = conn.prepare("PRAGMA table_info(installed_games)").unwrap();
+    let columns: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    for column in ["cover_small_path", "cover_large_path", "screenshot_urls"] {
+        assert!(
+            columns.iter().any(|c| c == column),
+            "migrated schema is missing {column}: {columns:?}"
+        );
+    }
+
+    // The pre-existing row survives, and the image fields still round-trip.
+    let rows = registry.all().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].title, "Torn");
+    let fields = ImageFields {
+        cover_small_path: "/s.png".into(),
+        cover_large_path: "/l.png".into(),
+        screenshot_urls: "https://h/x.png".into(),
+    };
+    assert!(registry.update_images(7, &fields).unwrap());
+    assert_eq!(registry.all().unwrap()[0].cover_large_path, "/l.png");
+}
+
+#[test]
 fn open_refuses_a_newer_database() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");

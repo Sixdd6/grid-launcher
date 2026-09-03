@@ -3,7 +3,7 @@
 // RomM server) or the Library grid (an `InstalledGame` registry row already
 // on disk) — `DetailsSubject` normalizes both into one shape so Details.svelte
 // itself never has to branch on which grid opened it.
-import type { GameSummary, InstalledGame } from '../api';
+import type { GameSummary, InstalledGame, RomDetail } from '../api';
 
 export type DetailsSubject = {
   romId: number | null;
@@ -70,5 +70,27 @@ export function summaryOf(subject: DetailsSubject): GameSummary {
     platform_id: 0,
     path_cover_small: subject.coverSmall,
     path_cover_large: subject.coverLarge,
+  };
+}
+
+/**
+ * Folds a freshly fetched `RomDetail` over the subject the grid opened the
+ * overlay with. `RomDetail`'s string fields are never null — the backend
+ * sends `""` for "the server has nothing here" — so a naive
+ * `detail.cover_large_path ?? subject.coverLarge` would replace a perfectly
+ * good stored cover with an empty string and blank the cover box. Every
+ * field here therefore treats `""` as absent and keeps the subject's own
+ * value; `screenshot_urls` does the same with an empty list. Covers
+ * normalize `""` to `null`, the shape the rest of `DetailsSubject` uses.
+ */
+export function mergeDetail(subject: DetailsSubject, detail: RomDetail): DetailsSubject {
+  return {
+    ...subject,
+    coverSmall: detail.cover_small_path || subject.coverSmall || null,
+    coverLarge: detail.cover_large_path || subject.coverLarge || null,
+    screenshotUrls: detail.screenshot_urls.length > 0 ? detail.screenshot_urls : subject.screenshotUrls,
+    description: detail.description || subject.description,
+    rating: detail.rating || subject.rating,
+    genres: detail.genres || subject.genres,
   };
 }

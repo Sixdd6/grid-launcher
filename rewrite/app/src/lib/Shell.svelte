@@ -4,7 +4,7 @@
   import Downloads from './Downloads.svelte';
   import Emulators from './Emulators.svelte';
   import { session, retry, disconnect } from './stores/session.svelte';
-  import { initReplenishListener, refresh as refreshInstalled } from './stores/installed.svelte';
+  import { refresh as refreshInstalled } from './stores/installed.svelte';
   import { chipLabel, initialSection, type Section } from './shell';
   import type { NavDirection } from './focus/grid';
 
@@ -28,11 +28,10 @@
     // cached covers offline, so the registry must load once on mount even
     // when the shell comes up unreachable (Server.svelte's own refresh only
     // runs inside its session.connected-gated effect).
+    // The `images-replenished` listener is NOT registered here: the replenish
+    // job is spawned during restore/connect, before this shell ever mounts.
+    // App.svelte owns it.
     refreshInstalled();
-    const un = initReplenishListener();
-    return () => {
-      un.then((f) => f());
-    };
   });
 </script>
 

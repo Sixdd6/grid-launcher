@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { api, type CloudPanelInfo, type DownloadStatus } from './api';
+  import { api, type CloudPanelInfo, type DownloadStatus, type RomDetail } from './api';
   import { downloads } from './stores/downloads.svelte';
   import { isInstalled, installed, matchesInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
   import { session } from './stores/session.svelte';
   import { sessions } from './stores/sessions.svelte';
   import Image from './Image.svelte';
   import CloudPanel from './details/CloudPanel.svelte';
-  import { summaryOf, type DetailsSubject } from './details/subject';
+  import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
   import { cloudButtonLabel, isNativeExecutablePlatform, syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
 
   let {
@@ -33,20 +33,19 @@
   // subject only ever has a cover, or an installed row with no stored
   // screenshots) fetch the full RomDetail once and let it fill in the
   // gaps. Kept as separate local state rather than mutating `subject` —
-  // the prop is the caller's data, this is purely a display overlay.
-  let overlay = $state<{
-    coverLarge: string | null;
-    screenshotUrls: string[];
-    description: string;
-    rating: string;
-    genres: string;
-  } | null>(null);
+  // the prop is the caller's data, this is purely a display overlay. The
+  // fold itself lives in `mergeDetail` (details/subject.ts), which treats a
+  // detail's empty strings/lists as "the server has nothing here" and keeps
+  // the subject's own value rather than blanking the field.
+  let detail = $state<RomDetail | null>(null);
 
-  let coverLarge = $derived(overlay?.coverLarge ?? subject.coverLarge);
-  let screenshotUrls = $derived(overlay?.screenshotUrls ?? subject.screenshotUrls);
-  let description = $derived(overlay?.description ?? subject.description);
-  let rating = $derived(overlay?.rating ?? subject.rating);
-  let genres = $derived(overlay?.genres ?? subject.genres);
+  let merged = $derived(detail === null ? subject : mergeDetail(subject, detail));
+  let coverSmall = $derived(merged.coverSmall);
+  let coverLarge = $derived(merged.coverLarge);
+  let screenshotUrls = $derived(merged.screenshotUrls);
+  let description = $derived(merged.description);
+  let rating = $derived(merged.rating);
+  let genres = $derived(merged.genres);
 
   let failedScreenshots = $state<Record<string, true>>({});
   function markScreenshotFailed(url: string) {
@@ -59,14 +58,8 @@
     if (subject.source !== 'server' && subject.screenshotUrls.length > 0) return;
     api
       .getRomDetail(subject.romId)
-      .then((detail) => {
-        overlay = {
-          coverLarge: detail.cover_large_path,
-          screenshotUrls: detail.screenshot_urls,
-          description: detail.description,
-          rating: detail.rating,
-          genres: detail.genres,
-        };
+      .then((fetched) => {
+        detail = fetched;
       })
       .catch(() => {}); // offline/removed rom: the subject's own data stands
   });
@@ -210,7 +203,7 @@
 
     <div class="layout">
       <div class="cover">
-        <Image url={coverLarge ?? subject.coverSmall} alt={subject.name} placeholder="No cover" data-testid="details-cover" />
+        <Image url={coverLarge ?? coverSmall} alt={subject.name} placeholder="No cover" data-testid="details-cover" />
       </div>
 
       <div class="center-top">
@@ -337,7 +330,12 @@
     z-index: 20;
   }
 
+  /* The container for `.layout`'s breakpoint below. It has to be declared
+     on the ANCESTOR, not on `.layout` itself: a container query never
+     matches the element that declares the container, so styling `.layout`
+     from a container declared on `.layout` would silently never apply. */
   .panel {
+    container-type: inline-size;
     position: relative;
     width: min(1100px, calc(100vw - 48px));
     max-height: calc(100vh - 48px);
@@ -355,11 +353,12 @@
     outline-offset: 2px;
   }
 
-  /* The panel's own rendered width (not the viewport) drives the
+  /* The panel's own content-box width (not the viewport) drives the
      breakpoint below, since the panel already scales down on its own via
-     min(1100px, calc(100vw - 48px)) on narrow viewports. */
+     min(1100px, calc(100vw - 48px)) on narrow viewports. At full width that
+     content box is 1100 - 2*24px padding = 1052px, comfortably over the
+     900px threshold. */
   .layout {
-    container-type: inline-size;
     display: grid;
     grid-template-columns: 1fr;
     gap: 20px;

@@ -36,10 +36,19 @@
       cancelled = true;
     };
   });
+
+  function handleImgError() {
+    src = null;
+    onerror?.();
+  }
 </script>
 
 {#if src}
-  <img {src} {alt} loading="lazy" draggable="false" onerror={() => onerror?.()} {...rest} />
+  <!-- A decode failure drops back to the placeholder before telling the
+       caller: without clearing `src` first, a caller that passes no
+       `onerror` (the Library and Server cards) is left with the browser's
+       broken-image glyph in the card. -->
+  <img {src} {alt} loading="lazy" draggable="false" onerror={handleImgError} {...rest} />
 {:else}
   <div class="placeholder" {...rest}>{placeholder}</div>
 {/if}

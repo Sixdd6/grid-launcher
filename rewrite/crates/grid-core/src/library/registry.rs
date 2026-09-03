@@ -44,12 +44,49 @@ CREATE TABLE installed_games (
 /// columns (see spec: later milestones add native/PS3/PS4 fields).
 const LATEST_USER_VERSION: i64 = 2;
 
-/// v1 -> v2 (milestone 7): the three image columns.
-const MIGRATE_1_TO_2_SQL: &str = "
-ALTER TABLE installed_games ADD COLUMN cover_small_path TEXT NOT NULL DEFAULT '';
-ALTER TABLE installed_games ADD COLUMN cover_large_path TEXT NOT NULL DEFAULT '';
-ALTER TABLE installed_games ADD COLUMN screenshot_urls  TEXT NOT NULL DEFAULT '';
-";
+/// The columns v1 -> v2 (milestone 7) adds to `installed_games`.
+const V2_IMAGE_COLUMNS: [&str; 3] = ["cover_small_path", "cover_large_path", "screenshot_urls"];
+
+/// The column names `installed_games` currently has.
+fn installed_games_columns(conn: &Connection) -> Result<Vec<String>, LibraryError> {
+    let mut stmt = conn
+        .prepare("PRAGMA table_info(installed_games)")
+        .map_err(registry_err)?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(registry_err)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(registry_err)
+}
+
+/// v1 -> v2 (milestone 7): adds the three image columns.
+///
+/// The `ALTER TABLE`s and the `user_version` bump run inside ONE
+/// transaction, so a failure part way through leaves the database exactly as
+/// it was — still at version 1, with the columns it had. The earlier version
+/// of this migration ran the three `ALTER`s in autocommit and wrote
+/// `user_version` only afterwards: an interruption between two of them left a
+/// half-migrated database that stayed at version 1 and failed every later
+/// open with "duplicate column name", with no way out but deleting the file.
+///
+/// Each `ADD COLUMN` is also skipped when `PRAGMA table_info` already lists
+/// the column. That makes the migration idempotent, so a database already
+/// torn by the old code opens and finishes migrating instead of bricking.
+fn migrate_1_to_2(conn: &mut Connection) -> Result<(), LibraryError> {
+    let tx = conn.transaction().map_err(registry_err)?;
+    let existing = installed_games_columns(&tx)?;
+    for column in V2_IMAGE_COLUMNS {
+        if existing.iter().any(|name| name == column) {
+            continue;
+        }
+        tx.execute_batch(&format!(
+            "ALTER TABLE installed_games ADD COLUMN {column} TEXT NOT NULL DEFAULT '';"
+        ))
+        .map_err(registry_err)?;
+    }
+    tx.pragma_update(None, "user_version", 2)
+        .map_err(registry_err)?;
+    tx.commit().map_err(registry_err)
+}
 
 /// Every column of `installed_games`, in the order selected/inserted below.
 const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_path, \
@@ -158,7 +195,7 @@ impl Registry {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let conn = Connection::open(path).map_err(registry_err)?;
+        let mut conn = Connection::open(path).map_err(registry_err)?;
         let mut version: i64 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(registry_err)?;
@@ -172,16 +209,18 @@ impl Registry {
             conn.execute_batch(SCHEMA_SQL).map_err(registry_err)?;
             version = LATEST_USER_VERSION;
         }
+        // Each step commits its own `user_version` bump with its own schema
+        // change, so an interrupted upgrade never leaves the database at a
+        // version that does not describe its schema.
         while version < LATEST_USER_VERSION {
-            let sql = match version {
-                1 => MIGRATE_1_TO_2_SQL,
+            match version {
+                1 => migrate_1_to_2(&mut conn)?,
                 v => {
                     return Err(LibraryError::Registry(format!(
                         "no migration from user_version {v}"
                     )))
                 }
-            };
-            conn.execute_batch(sql).map_err(registry_err)?;
+            }
             version += 1;
         }
         conn.pragma_update(None, "user_version", LATEST_USER_VERSION)

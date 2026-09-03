@@ -92,7 +92,7 @@ async fn restore_reports_no_session_without_stored_server() {
 }
 
 #[tokio::test]
-async fn restore_reports_unreachable_and_retry_reconnects() {
+async fn restore_reports_unreachable_and_retry_fails_while_down() {
     // connect against a live mock, then drop the mock and restore from a
     // fresh manager: Unreachable with the stored server url; bringing a mock
     // back on the same address is not possible, so retry is asserted
