@@ -465,7 +465,9 @@ in this exact order:
    `.zip .7z .rar .tar .gz .bz2 .xz`.
 4. Everything else ⇒ extract if the suffix is one of
    `.7z .zip .tar .gz .bz2 .xz`. Note `.rar` is **not** in this set, so a non-PS3
-   `.rar` is left as-is.
+   `.rar` is left as-is. **Rust port (D1, "Rust port deviations (milestone 8)" below):** the
+   PS3-only restriction is not carried into the port — RAR archives extract on every platform
+   through the bundled `unrar` crate.
 
 Platform predicates: native = platform casefolds to something starting with `windows`
 (grid_launcher/emulator/selection.py:145); arcade = platform contains any of `arcade`,
@@ -728,6 +730,10 @@ anti-virus locks:
   `prepare_installed_game_without_ui` (archive_preparation.py:1163) and
   `_cleanup_install_archives_without_ui` (install_mixin.py:714) are therefore
   unreachable today. Confirm whether a port should keep them or surface real errors.
+  **RULED (milestone 8): surface real errors.** The port's `delete_with_retry` reports a
+  failed delete as the warning `"could not delete archive: <path>"` on the completed entry
+  instead of always returning success (restates milestone 2 deviation 3; see "Rust port
+  deviations (milestone 8)" below).
 
 The Windows process wait (archive_preparation.py:376) polls `tasklist` for `7z.exe`,
 `7za.exe`, `7zz.exe`, `7zr.exe` or `tar.exe` in the output every 150 ms until they are
@@ -792,6 +798,10 @@ fails with `"No PS3 VFS dev_hdd0 path configured for <title>"`. `games_root` and
 falls back to `dev_hdd0.parent` (ps3_install.py:268).
 `OPEN QUESTION:` is omitting `ps3_rpcs3_data_root` at that call site intended, given
 `_rpcs3_data_root_for_game` exists (grid-launcher.py:3479) and is used for `games.yml`?
+**RULED (milestone 8, D4): wire it in.** `ps3_roots_from_config`
+(`crates/grid-core/src/library/mod.rs:2560`) always resolves the data root from the configured
+PS3 emulator, so `config/` lands in the data root rather than falling back to
+`dev_hdd0.parent`.
 
 **Classification** of each top-level entry, sorted directories-first then by case-folded
 name (grid_launcher/library/ps3_install.py:71):
@@ -1141,6 +1151,20 @@ variables and the tokens `%EMULATOR_DIR%`, `%LIBRARY_DIR%`, `%CONFIG_DIR%`, expa
 `~`, resolved relative to the emulator directory when not absolute, and deduplicated by
 case-folded path (grid_launcher/ui/mixins/cloud_mixin.py:1032).
 
+**Rust port (milestone 8):** the three background firmware jobs above (RPCS3-on-configuration,
+fresh-source-emulator-install, per-game during finalize) move outside the install queue and
+run beside it, one per emulator directory at a time, instead of inline in finalize or on daemon
+threads (D6; `FirmwareService`, `app/src-tauri/src/firmware_service.rs:84`). The RPCS3 job is
+skipped silently, with no drawer row, when the server's PS3 platform id is unknown offline
+(D17). A fourth, launch-time call to the per-game trigger (doc 04 §11) is throttled to at most
+one pass per emulator directory per app process, where Python re-ran the full download before
+every launch (D19; `app/src-tauri/src/firmware_service.rs:29-83`); the install-time and
+fresh-emulator-install triggers are unchanged. `%LIBRARY_DIR%`/`%EMULATOR_DIR%` expand to `.`
+when blank, matching Python's `str(Path())`; config- and saves-target metadata file names are
+still matched verbatim (preserving the latent Python bug where firmware/config/saves matching
+is inconsistent), while firmware file names are lower-cased before the keyword match, matching
+Python's `file_name.lower()`.
+
 ---
 
 ## Invariants and error handling
@@ -1310,9 +1334,18 @@ Run everything with `python -m unittest discover tests/`.
   `_ps4_file_ids_by_category_from_payload` when parsing a server payload
   (grid_launcher/ui/mixins/install_mixin.py:257). Is the PS4 parser really correct for
   Xbox 360 payloads, or is this a copy-paste that a port should not replicate?
+  **RULED (milestone 8, D5): one parser for both.** RomM's `files[].category` is parsed by a
+  single content-category parser shared by PS4 and Xbox 360 from the start, rather than a
+  PS4-specific parser one console falls back to.
 - `OPEN QUESTION:` `uninstall_library_games` aborts on the first failure without rolling
   back the games already deleted (grid_launcher/library/install_cleanup.py:116). Should a
   port continue past failures and report them, instead?
+  **RULED (milestone 8, D11): continue and report.** `uninstall`
+  (`crates/grid-core/src/library/mod.rs:1147`) and `uninstall_steps`
+  (`crates/grid-core/src/library/mod.rs:2465`) run every removal step for a game even after an
+  earlier one failed, and join every failure into one message per failure; the registry row
+  stays when any step fails. This extends milestone 2 deviation 2, which covers only the
+  batch level across multiple games, not per-step failures within one game's removal.
 - `OPEN QUESTION:` cancellation is classified by searching the error string for `cancel`
   (grid_launcher/library/install_state.py:35). A server error message containing that
   word would be misclassified. Should a port use a distinct error type instead?
@@ -1323,6 +1356,10 @@ Run everything with `python -m unittest discover tests/`.
 - `OPEN QUESTION:` the PS3 firmware endpoints disable TLS hostname and certificate
   verification (grid_launcher/library/firmware_install.py:232). Is this acceptable for a
   port, or should it pin Sony's certificate?
+  **RULED (milestone 8, D2): moot — the direct-from-Sony path is dropped.** The port only
+  ever fetches firmware through the RomM server (`install_platform_firmware`,
+  `crates/grid-core/src/firmware/mod.rs:112`); there is no direct-from-Sony request left to
+  relax TLS verification for, and no TLS relaxation exists anywhere in the port.
 
 ---
 
@@ -1370,3 +1407,118 @@ question from the design spec, cited in
 5. **Traversal guard everywhere** (Deviations §5): Absolute and `..` member paths rejected in all archive formats, not only firmware zips.
 6. **Flattening is not ported** (Deviations §6): `flatten_single_subdir` dead code in reference (no real caller); port omits it.
 7. **Details overlay is thinner than the spec** (milestone 2): the overlay has no metadata block and no Cancel button (cancel lives in the downloads drawer); deferred to a later milestone.
+
+## Rust port deviations (milestone 8)
+
+Deliberate deviations, and rulings on open questions, made while porting install specials — PS3,
+PS4 and Xbox 360 install and content apply, native (Windows/Proton) install and update, managed
+compat-tool installs, and firmware download/routing — to Rust (grid-core's `library/mod.rs`,
+`library/extract.rs`, `library/specials/` (`ps3`, `ps4`, `xenia`, `native`), `firmware/` modules,
+the Tauri `app/src-tauri/src/firmware_service.rs` glue, and the `app/src/lib/` Details and
+Emulators components). Rust paths are relative to `rewrite/`. D1-D9 and D11 restate the
+deviations already declared by the install-specials design task
+(`docs/superpowers/specs/2026-09-02-install-specials-design.md`, "Deviations" D1-D11) for
+completeness; D10 is a launch-side deviation and is recorded in doc 04 instead. D12-D18 restate
+the plan's Global Constraints rulings
+(`docs/superpowers/plans/2026-09-03-install-specials.md`, "Global Constraints"); D19 and the
+Rulings below are new to this milestone's review.
+
+1. **D1 — RAR archives extract on every platform through the bundled `unrar` crate.** Python
+   restricted RAR extraction to PS3, going through an external 7-Zip binary. `extract_rar`
+   (`crates/grid-core/src/library/extract.rs:323`) has no platform gate; whichever platform's
+   should-extract table (`crates/grid-core/src/library/extract.rs:65`) admits a `.rar` suffix
+   routes to it.
+2. **D2 — The Sony direct PS3 firmware path is dropped; server firmware only.** Python tried
+   Sony's CDN first, with TLS hostname/certificate verification disabled, and fell back to the
+   RomM server. `install_platform_firmware` (`crates/grid-core/src/firmware/mod.rs:112`) is the
+   only firmware path; no TLS relaxation exists anywhere in the port.
+3. **D3 — An ISO inside a PS3 archive requires an external 7-Zip binary; with none, that entry
+   fails visibly** (Python had the same dependency but silently skipped the entry).
+   `crates/grid-core/src/library/extract.rs:684` returns `"Cannot extract ISO <name>: no
+   7-Zip binary found"` instead of skipping.
+4. **D4 — PS3 routing receives the RPCS3 data root, so `config/` lands in the data root**
+   (doc 03 §11 open question; Python omitted it at its one call site). `ps3_roots_from_config`
+   (`crates/grid-core/src/library/mod.rs:2560`) always resolves the data root from the
+   configured PS3 emulator.
+5. **D5 — One content-category parser (RomM's `files[].category`) serves PS4 and Xbox 360**
+   (doc 03 §12/13 open question about the Python Xbox 360 path falling back to the PS4 parser).
+6. **D6 — Firmware jobs run beside the install queue, one per emulator directory at a time,
+   never inside it** (Python ran firmware inline in `InstallFinalizeWorker` and spawned daemon
+   threads from the UI mixins). `FirmwareService` (`app/src-tauri/src/firmware_service.rs:84`)
+   owns all firmware triggers outside `InstallService`'s queue, serialized per emulator
+   directory by its `in_flight` set.
+7. **D7 — Managed compat-tool installs persist in config across restarts** (Python reset
+   `compat_tool_installs` on load — doc 02/04 defect). `Config.compat_tool_installs` round-trips
+   through `config.toml` with no load-time reset.
+8. **D8 — Content, compat-tool and firmware jobs are typed rows in the downloads drawer with
+   the kind in the title.** Python's firmware jobs were synthetic entries bolted onto the same
+   download-entry shape; the port gives every job kind (`content`, `compat_tool`, `firmware`)
+   its own label in the drawer.
+9. **D9 — Details gains a Cancel button** (closes milestone 2 deviation 7).
+   `app/src/lib/Details.svelte:188` (`handleCancel`) and the `details-cancel` button
+   (`app/src/lib/Details.svelte:307`) cancel a live install for the current rom.
+11. **D11 — Uninstall of a PS3 or native game continues past per-step failures and reports them
+    together** (extends milestone 2 deviation 2, which covers only the batch level across
+    multiple games). `uninstall` (`crates/grid-core/src/library/mod.rs:1147`) and
+    `uninstall_steps` (`crates/grid-core/src/library/mod.rs:2465`) run every removal step even
+    after an earlier one failed and join every failure into one message line per failure; the
+    registry row stays when any step fails.
+12. **D12 — Base-install candidates exclude files whose `category` is not `game`** (blank
+    counts as `game`), so a PS4/Xbox 360 ROM with update/DLC files does not become a multi-file
+    game. `is_download_candidate` (`crates/grid-core/src/library/mod.rs:295`) calls
+    `content::is_game_category`.
+13. **D13 — A native payload whose archive suffix is not extractable (e.g. a bare `.iso`)
+    installs as a direct file** (`archive_path` set, no `game/` dir) instead of failing
+    extraction (`crates/grid-core/src/library/extract.rs:65`,
+    `crates/grid-core/src/library/mod.rs:1777-1804`).
+14. **D14 — Firmware warnings from the finalize and launch triggers are logged
+    (`tracing::warn`), not joined into the download entry** (they run beside the queue per D6).
+    `app/src-tauri/src/firmware_service.rs:205`.
+15. **D15 — The managed compat-tool root honors the data-dir override:**
+    `<GRID_LAUNCHER_DATA_DIR>/compat-tools` when set, else
+    `<XDG_DATA_HOME>/grid-launcher/compat-tools`. `managed_root`
+    (`crates/grid-core/src/launch/compat.rs:52`); doc 04 §12 covers the compat-tool acquisition
+    path that calls it.
+16. **D16 — An Xbox 360 content archive is deleted after a successful apply** (Python left it
+    to the generic cleanup, which a Xenia content job never reaches).
+    `crates/grid-core/src/library/mod.rs:1553-1624`.
+17. **D17 — The RPCS3 "PS3 Firmware" job is skipped silently when the server's PS3 platform id
+    is unknown (offline); no drawer row appears.** `FirmwareService::spawn_ps3_firmware`
+    (`app/src-tauri/src/firmware_service.rs:295-320`).
+18. **D18 — A native launch registers a session like an emulated launch, so Stop works**
+    (Python registered none). See doc 04's D18 for detail. Native update has no UI trigger this
+    milestone (update detection is doc 10) — only the command and `api.ts` wrapper exist.
+19. **D19 — The launch-time firmware trigger runs at most once per emulator directory per app
+    process.** Python re-ran the full per-game firmware install before every launch.
+    `FirmwareService` (`app/src-tauri/src/firmware_service.rs:29-83`) remembers completed
+    directories and skips a repeat pass; the install-time (finalize) and
+    fresh-emulator-install triggers are unchanged — each still runs once per install, as in
+    Python.
+
+### Rulings on open questions
+
+Additional decisions made during execution, not individually numbered as deviations because
+they resolve implementation questions the design left open rather than diverging from a stated
+Python behavior:
+
+- §9 (finalize worker ordering): the "could not delete archive" warning branches that were
+  unreachable in Python (`cleanup_install_archive` always returned `""`) are reachable in the
+  port — `delete_with_retry`'s failure surfaces as the warning `"could not delete archive:
+  <path>"` on the completed entry (`crates/grid-core/src/library/mod.rs:1547,1653,2024,2052`;
+  restates milestone 2 deviation 3).
+- §11 (PS3 install): `ps3_rpcs3_data_root` is wired in — see D4 above.
+- §12/13 (PS4/Xbox 360 content apply): one category parser serves both — see D5 above.
+- §16 (uninstall): `uninstall_library_games` no longer aborts without rollback on the first
+  failure — see D11 above.
+- §18 (firmware): the PS3-direct-from-Sony TLS-relaxation question is moot — see D2 above
+  (there is no direct-from-Sony request left to relax TLS for). The three background firmware
+  triggers move outside the install queue — see D6 above — and the per-game trigger gains a
+  fourth, launch-time call site that gates on D19 (doc 04 §11 covers that call site).
+- A failed PS4/Xbox 360 content row or native-update row can be retried from the drawer
+  (re-planned through the same path as the original request); an external "PS3 Firmware" row
+  (D17) cannot — there is no installed-game record to re-plan against.
+- The Xbox 360 "no `<kind>` files" message is Python's verbatim `"No Xbox 360 <kind> files were
+  found for this title in server metadata."` (`grid_launcher/ui/mixins/details_view_mixin.py:1640`,
+  matching the PS4 sibling at `details_view_mixin.py:1559`); the plan's paraphrase ("No Xbox 360
+  {kind} content is available for this title") is superseded by the verbatim-strings rule (same
+  rule that supersedes the umu-run message — doc 04).

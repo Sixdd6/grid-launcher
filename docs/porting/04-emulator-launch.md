@@ -491,6 +491,12 @@ A game is "native" when its platform, casefolded and stripped, starts with `wind
 host OS — a Windows-platform title on Linux still takes this branch, which is why the compat
 tool exists.
 
+**Rust port (milestone 8):** the Details "Install" button reads "Install App" only for native
+platforms; every other platform keeps the existing milestone 2 label "Install" (Python:
+"Install Game"). `installLabel` (`app/src/lib/details/actions.ts:77-78`) returns `'Install
+App'` for a native platform and `'Install'` otherwise — the design spec's platform-wide
+"Install App" rename is narrowed to native platforms only.
+
 Executable resolution, `resolved_native_executable_path_for_game`
 (grid_launcher/library/install_paths.py:130):
 
@@ -533,6 +539,11 @@ The value `"wine"` is special-cased (grid_launcher/emulator/launch.py:252); **an
 non-empty value is treated as a Proton path and requires `umu-run`
 (grid_launcher/emulator/launch.py:257). `PROTONPATH` receives the value verbatim
 (grid_launcher/emulator/launch.py:264). The wine branch never sets `PROTONPATH`.
+
+**Rust port (milestone 8):** the missing-`umu-run` message is Python's verbatim `"umu-run is
+not installed. Install the umu-launcher package to use Proton compatibility tools."`
+(`crates/grid-core/src/launch/native.rs:106,314`) — the design spec's paraphrase of this
+message is superseded by the Global Constraints' verbatim-strings rule.
 
 `WINEPREFIX` is only set when `game["native_wineprefix"]` is non-blank; the directory is
 created eagerly with `exist_ok=True` (grid_launcher/emulator/launch.py:255,
@@ -586,6 +597,14 @@ Discovery of compat tools lives in the emulator UI mixin:
   `<XDG_DATA_HOME>/grid-launcher/compat-tools`
   (grid_launcher/ui/mixins/emulator_ui_mixin.py:361).
 
+**Rust port (milestone 8):** compat-tool profiles are listed and installed from their own
+CompatTools panel on the Emulators screen rather than a modal dialog, amending milestone 4
+deviation 2. The managed compat-tool root honors the data-dir override (D15, doc 03):
+`<GRID_LAUNCHER_DATA_DIR>/compat-tools` when set, else `<XDG_DATA_HOME>/grid-launcher/compat-tools`
+(`managed_root`, `crates/grid-core/src/launch/compat.rs:52`) — `install_compat_tool` resolves
+`install_dir = compat_tool_install_dir(&job.library, &stem)` under that root rather than the
+fixed Python path.
+
 ### 11. Firmware gating
 
 Firmware never blocks a launch. `_perform_game_action` calls
@@ -610,6 +629,13 @@ Missing-firmware conditions surface as advisory UI text, not gates: Eden shows n
 (grid_launcher/ui/mixins/emulator_ui_mixin.py:732,
 grid_launcher/ui/mixins/emulator_ui_mixin.py:741), and RPCS3 offers an "Install PS3 Firmware"
 button when a `.PUP` is present (grid_launcher/ui/mixins/emulator_ui_mixin.py:779).
+
+**Rust port (milestone 8): confirmed parity, plus one process-lifetime deviation.** The RPCS3
+card's firmware note and "Install PS3 Firmware" button render under the same condition — a
+`PS3UPDAT.PUP` present beside the emulator — with no behavior change. Clicking it spawns
+`rpcs3 --installfw <pup>` exactly as Python does (see doc 05's Processes-spawned section), but
+Python never waits on that child, leaving a zombie process until the whole app exits; the
+port's `spawn_rpcs3_installfw` reaps the child on a detached thread instead.
 
 Install-side gating is separate: `install_block_reason_for_game`
 (grid_launcher/emulator/selection.py:370) returns `""` for native and "Emulators" platforms,
@@ -876,6 +902,15 @@ Run everything with `python -m unittest discover tests/`.
   compatibility tool ever written into `config["compat_tool_installs"]`, or is it only
   discovered afterwards by `_scan_system_proton_installs`? A port needs to know whether
   managed installs are expected to persist.
+  **RULED (milestone 8, D7): yes, and it persists across restarts.** `install_compat_tool`
+  replaces or appends a `CompatToolInstall` by `source_id` on every managed install
+  (`write_compat_tool_entry`, `crates/grid-core/src/library/mod.rs:2017,2156-2173`), and
+  `Config.compat_tool_installs` round-trips through `config.toml` with no load-time reset
+  (Python's defect — resetting on load — is not reproduced). `CompatToolInstall.release_tag`
+  records the resolved release tag the forge actually downloaded (e.g. `GE-Proton9-1`), not
+  the configured `latest`, unlike an ordinary emulator entry's `source_release_tag`. A
+  compat-tool drawer row's Retry routes through the same compat-tool install path as the
+  original request.
 - `OPEN QUESTION:` Platform gating is applied to the *autoprofile list*
   (grid_launcher/ui/mixins/emulator_ui_mixin.py:466), but `_emulator_supports_platform`
   returns `True` when no profile matches (grid-launcher.py:3579). A configured
@@ -905,6 +940,9 @@ Run everything with `python -m unittest discover tests/`.
   `cloud_save_block_reason_for_game` blocking native games
   (grid_launcher/emulator/selection.py:110). Should a port keep native games entirely out of
   session tracking, including playtime accounting?
+  **RULED (milestone 8, D18): no — track native sessions like emulated ones.** A native launch
+  registers a session the same way an emulated launch does, so Stop works on native games too;
+  the cloud-save block (native games have no save/state sync) is unrelated and unaffected.
 - `OPEN QUESTION:` The desktop launch of a game whose platform is literally `"Emulators"`
   falls through to `prepare_emulator_launch_command` and would fail with "No emulator is
   configured." unless the Play button is suppressed elsewhere. What is the intended Play
@@ -961,11 +999,16 @@ download, install) to Rust (grid-core):
 
 1. Installed emulators are config entries only — never pseudo-rows in the installed-games
    registry (the reference listed them as library items).
-2. Compat-tool profiles are excluded from the catalog entirely this milestone (reference
-   listed them in a separate dialog).
+2. ~~Compat-tool profiles are excluded from the catalog entirely this milestone (reference
+   listed them in a separate dialog).~~ **Amended (milestone 8, D10):** compat-tool profiles
+   are no longer excluded — the Emulators screen's CompatTools panel lists and installs them,
+   separately from the emulator catalog, matching the reference's separate-dialog shape.
 3. Version checks deferred; `source_*` fields recorded now.
 4. Supplemental failures fail the install (visible) rather than partially succeeding.
-5. No firmware step after emulator install (firmware subsystem deferred).
+5. ~~No firmware step after emulator install (firmware subsystem deferred).~~ **Closed
+   (milestone 8, D10):** `FirmwareService::spawn_for_emulator`
+   (`app/src-tauri/src/firmware_service.rs:225`) now runs firmware install after a fresh
+   source-emulator install.
 6. `launch_executable`, present in several catalog `source` blocks, is intentionally unread:
    the reference never reads it either — executable choice is scoring-only — so the port
    never reads it (parity with the reference, not a gap).
@@ -1018,3 +1061,58 @@ download, install) to Rust (grid-core):
     extraction-time preservation is therefore a strict superset for zip: it is the only code
     path (reference or port) that leaves *companion* files — helper scripts, other binaries in
     the extracted tree, not just the one selected launch file — with a meaningful exec bit.
+
+## Rust port deviations (milestone 8)
+
+Deliberate deviations made while porting the launch-side pieces of install specials — PS3
+launch-target resolution, native (Windows/Proton) launch sessions, compat-tool acquisition, and
+firmware gating at launch — to Rust. Rust paths are relative to `rewrite/`. This restates D10
+from the install-specials design spec
+(`docs/superpowers/specs/2026-09-02-install-specials-design.md`, "Deviations" D10) and D7/D15/D18
+from the plan's Global Constraints
+(`docs/superpowers/plans/2026-09-03-install-specials.md`); D1-D6, D8-D9, D11-D14, D16-D17 and
+D19 are recorded in doc 03 instead, since they are install-side.
+
+1. **D10 — three closes/amends to earlier milestones:**
+   - **PS3 launch target resolves from registry fields**, closing milestone 3 deviation 3
+     (struck through above): `resolve_launch` fills `ps3_launch_target` from the row's
+     `ps3_iso_path`/`ps3_game_id`, matching the placeholder table in §5.
+   - **Firmware runs after a fresh source-emulator install**, closing milestone 4 deviation 5
+     (struck through above): `FirmwareService::spawn_for_emulator`
+     (`app/src-tauri/src/firmware_service.rs:225`) runs firmware install once a fresh
+     source-emulator install completes.
+   - **Compat-tool profiles are listed in their own panel**, amending milestone 4 deviation 2
+     (struck through above): they are no longer excluded from acquisition entirely — the
+     Emulators screen's CompatTools panel lists and installs them, separately from the
+     emulator catalog (§12 above).
+2. **D7 — Managed compat-tool installs persist in config across restarts** (Python reset
+   `compat_tool_installs` on load — doc 02/04 defect; see doc 03's D7). Recorded here because
+   it closes this doc's own open question, above, about whether a downloaded compatibility
+   tool is ever written into `config["compat_tool_installs"]`.
+3. **D15 — The managed compat-tool root honors the data-dir override** (see doc 03's D15; §12
+   above covers the acquisition path that resolves it).
+4. **D18 — A native launch registers a session like an emulated launch, so Stop works**
+   (Python registered none). Closes the open question, above, "Should a port keep native games
+   entirely out of session tracking, including playtime accounting?" — no: native sessions are
+   tracked the same as emulated ones. The unrelated cloud-save block on native games
+   (`cloud_save_block_reason_for_game`) is unaffected.
+
+### Rulings on open questions
+
+- The compat-tool-persistence open question is ruled by D7 above: managed compat-tool installs
+  do persist, via `write_compat_tool_entry`
+  (`crates/grid-core/src/library/mod.rs:2017,2156-2173`), which replaces or appends a
+  `CompatToolInstall` by `source_id` on every managed install. `CompatToolInstall.release_tag`
+  records the resolved release tag the forge actually downloaded (e.g. `GE-Proton9-1`), not
+  the configured `latest`, unlike an ordinary emulator entry's `source_release_tag`
+  (`crates/grid-core/src/library/mod.rs:2156-2159`). A compat-tool drawer row's Retry routes
+  through the same compat-tool install path as the original request.
+- The native-session-tracking open question is ruled by D18 above.
+- **Verbatim strings.** The umu-run message is Python's verbatim (§9 above); the design spec's
+  paraphrase is superseded by the Global Constraints' verbatim-strings rule.
+- **Details "Install App" label** (§9 above) applies to native platforms only; every other
+  platform keeps the existing milestone 2 "Install" label (Python: "Install Game").
+- **RPCS3 `--installfw` process reaping** (§11 above): Python leaves the spawned child a
+  zombie until the app exits; the port reaps it on a detached thread instead.
+- **RPCS3 firmware note and button** (§11 above): confirmed parity with Python — both render
+  when a `PS3UPDAT.PUP` is present beside the emulator, no deviation.

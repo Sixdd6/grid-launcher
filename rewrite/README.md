@@ -187,3 +187,21 @@ Cloud save/state sync exit gate: now automated by the E2E suite (`cloud-saves` s
 ## Manual test checklist — Milestone 7
 
 Covers/images exit gate: now automated by the E2E suite (`images` stage group) plus `cargo test --workspace`; milestone-specific residual items, neither reproducible against the mock: a real RomM server with LaunchBox/ScreenScraper screenshot metadata, to exercise foreign-host filtering and the type-token rules against real payloads instead of fixtures; and a cache directory grown past 512 MiB, to observe the startup sweep's log line. Residual items above also apply.
+
+## Manual test checklist — Milestone 8
+
+Install specials exit gate: now automated by the E2E suite (`ps3-install`, `content`, `native`,
+`firmware` stage groups) plus `cargo test --workspace`; milestone-specific residual items, none
+reproducible against the mock:
+
+- **A real RomM server with PS4/Xbox 360 content categories and firmware**: confirm
+  `files[].category` classification and update/DLC availability against real server payloads,
+  not fixture data.
+- **A real Proton install through `umu-run`**: confirm a managed compat-tool install actually
+  launches a Windows game via `umu-run`/Proton on a real Steam/Proton environment.
+- **An RPCS3 `--installfw` dialog**: confirm the spawned RPCS3 process shows its real firmware
+  installation UI and completes against a real `PS3UPDAT.PUP`.
+- **RAR archives from a real server**: confirm the bundled `unrar` crate extracts a real-world
+  RAR-compressed download end to end.
+
+Residual items above also apply.

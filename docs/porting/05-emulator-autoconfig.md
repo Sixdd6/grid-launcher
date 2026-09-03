@@ -107,7 +107,10 @@ grid_launcher/ui/mixins/emulator_ui_mixin.py:446, grid_launcher/ui/mixins/emulat
 `trigger_rpcs3_firmware_install(exe, pup)` spawns `[<rpcs3>, "--installfw", <PS3UPDAT.PUP>]`
 with cwd = exe's parent and a cleaned environment
 (grid_launcher/emulator/rpcs3.py:379). Both paths must exist and be files
-(grid_launcher/emulator/rpcs3.py:374).
+(grid_launcher/emulator/rpcs3.py:374). Python never waits on this child, leaving a zombie
+process until the whole app exits. **Rust port (milestone 8):** `spawn_rpcs3_installfw`
+(canonicalizes both paths, same argv/cwd/cleaned-environment shape) reaps the child on a
+detached thread instead — see doc 04's D10/"Rulings on open questions".
 
 ## Data model
 
@@ -1449,6 +1452,12 @@ are relative to `rewrite/`.
 7. **The RPCS3 background firmware download** (`PS3UPDAT.PUP` fetch and the `--installfw`
    spawn, `grid_launcher/emulator/rpcs3.py:365` `trigger_rpcs3_firmware_install`) **is out**,
    same deferral (`crates/grid-core/src/autoconfig/mod.rs:597`).
+   **Superseded (milestone 8):** the firmware subsystem landed. RPCS3 firmware now downloads
+   from the RomM server as a drawer job — `FirmwareService::spawn_ps3_firmware`
+   (`app/src-tauri/src/firmware_service.rs:295`), triggered on adding/configuring an RPCS3
+   entry — rather than a direct-from-Sony background thread (see doc 03's D2 and D6, and
+   doc 04's D10). The deferral test `sync_starts_no_firmware_download` and its pinning
+   `// No background firmware download — D7.` comment were deleted along with it.
 8. **Every `ensure_*` returns one `EnsureResult { changed, config_path, extras }`**
    (`crates/grid-core/src/autoconfig/mod.rs:93-110`); the reference's `str`-vs-`Path`-vs-`dict`
    mix (`grid_launcher/emulator/eden.py:280`, `grid_launcher/emulator/pcsx2.py:380` return
