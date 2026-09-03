@@ -2,7 +2,7 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
-use grid_core::library::extract::extract_archive;
+use grid_core::library::extract::{extract_archive, should_extract};
 use grid_core::library::LibraryError;
 
 // --- fixture builders -------------------------------------------------------
@@ -640,8 +640,49 @@ fn extract_7z_entry_with_setuid_mode_strips_setuid_bit() {
 
 #[test]
 fn should_extract_is_reexported_and_callable() {
-    use grid_core::library::extract::should_extract;
     assert!(should_extract("SNES", Path::new("game.zip")));
     assert!(!should_extract("Arcade", Path::new("game.zip")));
-    assert!(!should_extract("SNES", Path::new("game.rar")));
+    assert!(should_extract("SNES", Path::new("game.rar")));
+}
+
+#[test]
+fn should_extract_follows_the_python_table() {
+    let cases: &[(&str, &str, bool)] = &[
+        ("Windows", "game.exe", true),
+        ("Windows", "game.iso", true),
+        ("Arcade", "game.zip", false),
+        ("PlayStation 3", "game.rar", true),
+        ("SNES", "game.rar", true),
+        ("SNES", "game.bin", false),
+    ];
+    for (platform, archive, expected) in cases {
+        assert_eq!(
+            should_extract(platform, Path::new(archive)),
+            *expected,
+            "platform={platform} archive={archive}"
+        );
+    }
+}
+
+// --- RAR ---------------------------------------------------------------------
+
+#[test]
+fn extracts_the_rar_fixture() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/rar/version.rar");
+    let archive = dir.path().join("version.rar");
+    fs::copy(&fixture, &archive).unwrap();
+    let dest = dir.path().join("out");
+
+    let mut calls: Vec<(u64, u64)> = Vec::new();
+    extract_archive(&archive, &dest, &mut |processed, total| {
+        calls.push((processed, total));
+    })
+    .unwrap();
+
+    assert_eq!(fs::read(dest.join("VERSION")).unwrap(), b"unrar-0.4.0");
+
+    let (last_processed, last_total) = *calls.last().unwrap();
+    assert_eq!(last_processed, 11);
+    assert_eq!(last_total, 11);
 }

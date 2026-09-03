@@ -10,6 +10,7 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use super::platforms::{is_native_platform, is_ps3_platform};
 use super::LibraryError;
 
 // --- Platform predicates and extraction decision --------------------------
@@ -24,20 +25,37 @@ pub fn is_arcade_platform(platform: &str) -> bool {
 }
 
 /// Suffixes (without the dot, lowercase) that this engine knows how to
-/// extract.
-const EXTRACTABLE_SUFFIXES: &[&str] = &["7z", "zip", "tar", "gz", "bz2", "xz"];
+/// extract, for any platform that is neither native, arcade, nor
+/// PlayStation 3.
+const EXTRACTABLE_SUFFIXES: &[&str] = &["7z", "zip", "rar", "tar", "gz", "bz2", "xz"];
 
-/// Whether `archive` should be extracted for `platform`: never for an
-/// arcade platform, otherwise only when its suffix is one of
-/// `EXTRACTABLE_SUFFIXES` (case-insensitive; notably `.rar` is not
-/// extracted by this engine).
+/// Suffixes (without the dot, lowercase) extracted for a PlayStation 3
+/// archive specifically (Python `should_extract`'s PS3 branch).
+const PS3_SUFFIXES: &[&str] = &["zip", "7z", "rar", "tar", "gz", "bz2", "xz"];
+
+/// Whether `archive` should be extracted for `platform`, mirroring the
+/// Python `should_extract` table (`docs/porting/03-library-install.md`):
+/// a native (Windows) platform's archive is always extracted; an arcade
+/// platform's archive is never extracted (the archive is the ROM itself);
+/// a PlayStation 3 archive is extracted only when its suffix is one of
+/// `PS3_SUFFIXES`; every other platform's archive is extracted only when
+/// its suffix is one of `EXTRACTABLE_SUFFIXES` (both sets are
+/// case-insensitive and now include `rar`, extracted by this engine via
+/// `unrar`).
 pub fn should_extract(platform: &str, archive: &Path) -> bool {
+    if is_native_platform(platform) {
+        return true;
+    }
     if is_arcade_platform(platform) {
         return false;
     }
-    match lowercase_suffix(archive) {
-        Some(suffix) => EXTRACTABLE_SUFFIXES.contains(&suffix.as_str()),
-        None => false,
+    let Some(suffix) = lowercase_suffix(archive) else {
+        return false;
+    };
+    if is_ps3_platform(platform) {
+        PS3_SUFFIXES.contains(&suffix.as_str())
+    } else {
+        EXTRACTABLE_SUFFIXES.contains(&suffix.as_str())
     }
 }
 
@@ -105,6 +123,9 @@ fn wipe_and_recreate(dest: &Path) -> Result<(), LibraryError> {
 /// signature (zip magic bytes), falling back to tar (which sniffs its own
 /// gzip/bzip2/xz wrapping).
 fn dispatch(archive: &Path, dest: &Path, progress: ExtractProgress) -> Result<(), LibraryError> {
+    if lowercase_suffix(archive).as_deref() == Some("rar") {
+        return extract_rar(archive, dest, progress);
+    }
     if lowercase_suffix(archive).as_deref() == Some("7z") {
         return extract_7z(archive, dest, progress);
     }
@@ -252,6 +273,95 @@ fn extract_zip(archive: &Path, dest: &Path, progress: ExtractProgress) -> Result
             }
         }
         progress(processed, total);
+    }
+
+    Ok(())
+}
+
+// --- RAR ---------------------------------------------------------------------
+
+/// Converts a RAR entry's raw name into a path relative to the extraction
+/// root, normalizing `\` to `/` (RAR entries commonly use Windows
+/// separators) and rejecting anything the traversal guard treats as
+/// hostile: an absolute path (`is_absolute_entry_path`, shared with every
+/// other format), a `..` component, or a NUL byte. The NUL check exists
+/// because `unrar`'s own `FileHeader::extract_to` panics if the
+/// destination path it is handed contains one; every path this function
+/// returns is later joined onto `dest` and passed straight to
+/// `extract_to`, so a NUL in the raw entry name must never survive this
+/// function.
+pub(crate) fn rar_entry_relative_path(raw: &str) -> Result<PathBuf, LibraryError> {
+    if raw.contains('\0') {
+        return Err(unsafe_path_error(raw));
+    }
+    if is_absolute_entry_path(raw) {
+        return Err(unsafe_path_error(raw));
+    }
+    let normalized = raw.replace('\\', "/");
+    let path = Path::new(&normalized);
+    if path
+        .components()
+        .any(|component| matches!(component, Component::ParentDir | Component::Prefix(_)))
+    {
+        return Err(unsafe_path_error(raw));
+    }
+    Ok(path.to_path_buf())
+}
+
+/// Extracts a RAR archive via the vendored `unrar` library (there is no
+/// pure-Rust RAR decoder; RAR's format is proprietary and not documented
+/// well enough to reimplement safely). Two passes: `open_for_listing`
+/// first, to sum every file entry's `unpacked_size` into `total` for the
+/// progress callback (listing does not touch payload bytes, so this is
+/// cheap); then `open_for_processing`, which walks the header/payload
+/// cursor pair the crate exposes and either creates a directory or
+/// extracts a file for each entry.
+fn extract_rar(archive: &Path, dest: &Path, progress: ExtractProgress) -> Result<(), LibraryError> {
+    let listing = unrar::Archive::new(archive)
+        .open_for_listing()
+        .map_err(|e| LibraryError::Extract(e.to_string()))?;
+    let mut total: u64 = 0;
+    for entry in listing {
+        let entry = entry.map_err(|e| LibraryError::Extract(e.to_string()))?;
+        if entry.is_file() {
+            total += entry.unpacked_size;
+        }
+    }
+    progress(0, total);
+
+    let mut cursor = unrar::Archive::new(archive)
+        .open_for_processing()
+        .map_err(|e| LibraryError::Extract(e.to_string()))?;
+    let mut processed: u64 = 0;
+    while let Some(header) = cursor
+        .read_header()
+        .map_err(|e| LibraryError::Extract(e.to_string()))?
+    {
+        let entry = header.entry();
+        let raw_name = entry.filename.to_string_lossy().into_owned();
+        let is_directory = entry.is_directory();
+        let size = entry.unpacked_size;
+        let relative = rar_entry_relative_path(&raw_name)?;
+        let out_path = dest.join(&relative);
+
+        cursor = if is_directory {
+            fs::create_dir_all(&out_path)
+                .map_err(|e| LibraryError::Extract(format!("rar: {e}")))?;
+            header
+                .skip()
+                .map_err(|e| LibraryError::Extract(e.to_string()))?
+        } else {
+            if let Some(parent) = out_path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| LibraryError::Extract(format!("rar: {e}")))?;
+            }
+            let next = header
+                .extract_to(&out_path)
+                .map_err(|e| LibraryError::Extract(e.to_string()))?;
+            processed += size;
+            progress(processed, total);
+            next
+        };
     }
 
     Ok(())
@@ -512,6 +622,32 @@ fn extract_7z_system_fallback(archive: &Path, dest: &Path) -> Result<(), String>
     }
 }
 
+// --- ISO (via system 7-Zip only; no pure-Rust ISO 9660 extractor is wired
+// into this engine) ------------------------------------------------------
+
+/// Extracts an ISO 9660 image via the system 7-Zip binary. There is no
+/// pure-Rust fallback for ISOs (unlike `.7z`, which tries `sevenz-rust2`
+/// first), so this only ever succeeds by shelling out; it exists as a
+/// thin, ISO-specific entry point so the caller gets an error naming the
+/// ISO file itself when no 7-Zip binary can be found at all, before ever
+/// reaching `extract_7z_system_fallback`'s own (more generic) "no system
+/// 7-Zip executable found" message.
+///
+/// Still `pub(crate)` and exercised only by its own unit test today — no
+/// install-pipeline caller wires ISO extraction through it yet; that is
+/// out of scope for this task and lands in a later one.
+#[allow(dead_code)]
+pub(crate) fn extract_iso_with_system_7z(iso: &Path, dest: &Path) -> Result<(), String> {
+    if find_system_7z().is_none() {
+        let name = iso
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        return Err(format!("Cannot extract ISO {name}: no 7-Zip binary found"));
+    }
+    extract_7z_system_fallback(iso, dest)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -615,7 +751,7 @@ mod tests {
             ("SNES", "game.bz2", true),
             ("SNES", "game.xz", true),
             ("SNES", "game.ZIP", true),
-            ("SNES", "game.rar", false),
+            ("SNES", "game.rar", true),
             ("Arcade", "game.zip", false),
             ("MAME", "game.zip", false),
             ("SNES", "game", false),
@@ -626,6 +762,75 @@ mod tests {
                 *expected,
                 "platform={platform} archive={archive}"
             );
+        }
+    }
+
+    // --- rar_entry_relative_path ---------------------------------------------
+
+    #[test]
+    fn rar_entry_relative_path_rejects_traversal() {
+        for bad in ["../x", "/abs", "a/../../b"] {
+            assert!(
+                rar_entry_relative_path(bad).is_err(),
+                "{bad} should be rejected"
+            );
+        }
+        assert_eq!(
+            rar_entry_relative_path("dir/file.bin").unwrap(),
+            PathBuf::from("dir/file.bin")
+        );
+        // Backslashes (the separator RAR entries commonly use) normalize to
+        // `/` rather than being treated as a literal filename character.
+        assert_eq!(
+            rar_entry_relative_path("dir\\file.bin").unwrap(),
+            PathBuf::from("dir/file.bin")
+        );
+    }
+
+    #[test]
+    fn rar_entry_relative_path_rejects_nul_bytes() {
+        assert!(rar_entry_relative_path("dir/evil\0.bin").is_err());
+    }
+
+    // --- extract_iso_with_system_7z ------------------------------------------
+
+    #[test]
+    fn iso_helper_reports_missing_7z() {
+        // `find_system_7z` also probes a handful of hardcoded absolute
+        // paths (`SYSTEM_7Z_CANDIDATES`) that do not depend on `PATH` at
+        // all, so clearing `PATH` alone only reliably reproduces "no
+        // system 7-Zip" on a machine that has no 7-Zip binary installed at
+        // any of those locations either. On a machine that does (this
+        // dev box among them), the precondition this test needs can't be
+        // constructed without touching real system binaries, which is out
+        // of bounds — so the assertion is skipped rather than either
+        // faked or left flaky.
+        let previous_path = std::env::var_os("PATH");
+        std::env::set_var("PATH", "");
+        let found = find_system_7z();
+        let result = if found.is_none() {
+            Some(extract_iso_with_system_7z(
+                Path::new("game.iso"),
+                Path::new("/nonexistent-dest"),
+            ))
+        } else {
+            None
+        };
+        match previous_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+
+        match result {
+            Some(result) => assert_eq!(
+                result,
+                Err("Cannot extract ISO game.iso: no 7-Zip binary found".to_string())
+            ),
+            None => eprintln!(
+                "iso_helper_reports_missing_7z: skipped — a system 7-Zip binary is \
+                 installed at one of SYSTEM_7Z_CANDIDATES on this machine, so \
+                 find_system_7z() cannot be made to return None via PATH alone"
+            ),
         }
     }
 }
