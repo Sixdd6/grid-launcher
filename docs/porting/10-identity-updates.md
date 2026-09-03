@@ -769,3 +769,64 @@ are relative to `rewrite/`.
   renders no action buttons at all — a one-line note instead
   (`app/src/lib/Details.svelte:246-248`, `data-testid="details-no-id"`, "This entry has no server
   id"). No `(title, platform)` fallback is ported: Play/Uninstall stay strictly rom-id keyed.
+
+## Rust port deviations (milestone 9)
+
+Rulings on the open questions above, made while porting version-tag detection, the `Update`
+install mode, and the app-layer update service/self-update notice for the identity/updates
+milestone (`docs/superpowers/specs/2026-09-03-identity-updates-design.md`, §7). Rust paths are
+relative to `rewrite/`.
+
+- **D-10-b — `game_key` normalization is `to_lowercase`** (Rust `str::to_lowercase`), already the
+  registry's rule; OQ1 closed. No Rust-specific anchor: this restates the existing registry
+  behavior, not a new module.
+- **D-10-c — Server lookup is rom-id only and deterministic.** One `rom_detail` fetch per
+  installed row with a rom id; the Python per-entry title/platform disjunction is not ported.
+  `UpdateService::refresh` (`app/src-tauri/src/update_service.rs`); OQ3 closed.
+- **D-10-d — No positive-only cache.** The update set is recomputed wholesale on every trigger
+  (`UpdateService::refresh`, `app/src-tauri/src/update_service.rs`) and `update_game`
+  (`app/src-tauri/src/commands/updates.rs`) re-verifies against a fresh `rom_detail` before acting;
+  OQ5 closed.
+- **D-10-e — The PC-platform gap is reproduced verbatim.** `is_windows_pc_platform`
+  (`crates/grid-core/src/library/update_detection.rs`) accepts `pc`, but the native merge path
+  still requires `windows`; OQ6 kept.
+- **D-10-f — Naive timestamps parse as UTC** (`parse_timestamp`,
+  `crates/grid-core/src/library/update_detection.rs`; OQ8 kept); `revision` is displayed, never
+  compared (OQ9 kept); `versionLabel` (`app/src/lib/details/version.ts`) handles both tag kinds,
+  closing OQ11.
+- **D-10-g — Rows without a rom id (D-10-a) are never checked and never offer Update.**
+  `UpdateService::refresh` skips every row whose `rom_id` is `None`
+  (`app/src-tauri/src/update_service.rs`).
+- **D-10-h — Self-update is a check-only notice.** One GitHub `releases/latest` request per
+  process (`app_update::spawn_check`, `app/src-tauri/src/app_update.rs`), no download, no install;
+  dev builds (a pre-release containing `dev`) are suppressed unless
+  `GRID_LAUNCHER_E2E_UPDATE_CHECK=1` (`app_update::should_check`); OQ14 decided. `0.0.0-dev`
+  ambiguity (OQ15) is moot: the version is the package version, `-dev` marks a source build.
+- **D-10-i — `update_available` is never persisted** (invariant 5): it lives only in
+  `UpdateService`'s in-memory map (`app/src-tauri/src/update_service.rs`), cleared on disconnect.
+- **D-10-j — Non-native `Update` re-extracts over the existing directory without a pre-clean**
+  (Python parity, doc 03 "plain replacement"). `InstallService::install_update`
+  (`crates/grid-core/src/library/mod.rs`) routes through `finalize_base` unchanged; stale files
+  from the old build may remain. A follow-up may add a clean.
+- **D-10-k — The version row's name order follows the subject's source, and the self-update
+  notice survives a late mount.** `versionLabel` reads its candidate file names via
+  `romFileNamesFor(source, installedName, serverName)` (`app/src/lib/details/version.ts`): a
+  Library-opened (installed-source) subject reads the installed row's `rom_file_name` first,
+  naming the version it HAS; a server-source subject reads the server's `fs_name` first, naming
+  the version it WOULD become. Separately, `app_update::spawn_check`'s startup check can emit
+  `app-update-available` before the webview finishes mounting; `app_update_notice`
+  (`app/src-tauri/src/commands/updates.rs`) holds the last check's result so
+  `stores/appUpdate.svelte.ts`'s `initAppUpdate` — listener registered first, then one pull —
+  shows the banner even when it mounts after the event fired.
+
+**What the Rust port checks, and when.** `UpdateService::refresh` runs on `connect`,
+`restore_session` (connected outcome), `retry_connect` (success), after any game finalize (the
+existing firmware-finalize hook now also triggers a refresh), and after a successful
+`uninstall_game`; `disconnect` clears the map with no refresh. Each pass bumps a generation
+counter first; per-row `rom_detail` fetches run at up to 4 in flight
+(`tokio::sync::Semaphore`, `MAX_IN_FLIGHT` in `app/src-tauri/src/update_service.rs`), a fetch
+error counts as "no update" for that row, and a pass whose generation was superseded before it
+finished discards its result instead of overwriting a newer one. A completed, still-current pass
+replaces the map wholesale and emits `updates-changed` with the full `Vec<UpdateRow>`
+(`{ rom_id, label }`) — the frontend store applies the payload directly with no re-fetch. There is
+no timer and no polling: without a live session the set stays empty.

@@ -103,6 +103,7 @@ of the private bus and outlive `dbus-run-session`. A green run leaves no
 | `content` | `content.spec.ts` | update/DLC content, where a game and its extra content share one content path and are told apart only by `file_ids` (the mock resolves that pair back to a fixture file). PS4 (rom 501) is user-driven: base install completes, `Install Update` appears, clicking it opens a `PS4 Game (update)` row that merges the update archive's `CUSA12345/` tree into the base install's extraction directory. Xbox 360 (rom 601) is automatic: `queue_xbox360_content` admits the `Xbox Game (update)` row from inside the base install's finalize step with no click, and its STFS package lands at `<xenia dir>/content/0000000000000000/415608C3/000B0000/tu00000001`. The seeded Xenia stub is named `xenia_edge` (matching the Linux-capable `Xenia Edge (Xbox 360)` profile rather than the Windows-only Canary one) with a `portable.txt` beside it, which is what puts the content root next to the executable |
 | `native` | `native.spec.ts` | a Windows-platform ("native") game: the primary button reads `Install App`; installing rom 701 lays out `<library>/Windows/My Game/{game/MyGame/mygame.exe,prefix}`; Game Settings lists the extracted executable and saves `--fullscreen`; Play launches through the seeded `wine` stub — first on the app's `PATH` via `E2E_STUB_BIN`, with `default_compat_tool = "wine"` — whose `wine-argv.log` carries the executable path and the saved parameter, and Stop clears the playing chip. Rom 702's ~300KB archive carries a per-file `e2e_throttle` in the fixture (so only that one download is slow), giving the Details `Cancel` button a real in-flight install to cancel to `Cancelled` |
 | `firmware` | `firmware.spec.ts` | the two background firmware triggers. Per game: installing rom 801 (PlayStation) fires the finalize hook's firmware pass against the seeded DuckStation default, whose profile routes `scph5501.bin` to `<stubs>/duckstation/bios/`. Hand-added RPCS3: the seed writes the stub file but no config entry, so adding `RPCS3` through the Emulators form is what fires `spawn_ps3_firmware` — it admits its own `PS3 Firmware`/`Firmware` drawer row, completes, writes `<stubs>/rpcs3/PS3UPDAT.PUP`, and the RPCS3 card then shows the downloaded-firmware note and `Install PS3 Firmware`, which produces the verbatim success toast and spawns the stub with `--installfw <pup>` (asserted from the stub's own argv log). The fixture's PlayStation 3 platform carries a placeholder rom purely so its `rom_count` is nonzero: `RommClient::platforms` drops every zero-count platform, and `ps3_platform_id` reads the id out of that filtered list |
+| `updates` | `updates.spec.ts` | seeded rows (`e2e/seed/updates-seed.mjs`) against `fixtures-updates` and a mock forge route standing in for `api.github.com/repos/Sixdd6/grid-launcher/releases/latest`: badges appear on rom 801 (SNES, out of date by timestamp) and rom 802 (Windows, out of date by file-name tag) only — not on rom 803 (identical to the server) or rom 804 (absent from server rom detail); non-native Update on rom 801 re-downloads and re-extracts, landing beside the seeded install and clearing its badge; the native Update on rom 802 two-click-confirms, then MERGES the new archive over the installed tree, preserving the seeded `saves/slot1.sav`; an absent server entry (rom 804) shows no Update button at all; the self-update banner appears with the mock forge's tag `v9.9.9-e2e` (`GRID_LAUNCHER_E2E_UPDATE_CHECK=1` lifts the dev-build gate for this group only) and Dismiss hides it |
 
 The embedded WebDriver provider keeps one app process alive for a whole
 `wdio run` and cannot restart it, so the runner starts one `wdio run` per spec
@@ -203,5 +204,25 @@ reproducible against the mock:
   installation UI and completes against a real `PS3UPDAT.PUP`.
 - **RAR archives from a real server**: confirm the bundled `unrar` crate extracts a real-world
   RAR-compressed download end to end.
+
+Residual items above also apply.
+
+## Manual test checklist — Milestone 9
+
+Identity/updates exit gate: now automated by the E2E suite (`updates` stage group) plus
+`cargo test --workspace`; milestone-specific residual items, none reproducible against the mock:
+
+- **Window title shows the version**: confirm the title bar reads `GRID Launcher <version>` on a
+  real desktop window manager, not just the webview's own title element.
+- **An installed game updated on the server shows the badge after reconnect**: against a real
+  RomM server, upload a newer file for a ROM you already have installed, then reconnect (or
+  Retry) and confirm the Library badge appears with no restart needed.
+- **Update on a Windows game keeps saves**: run the native merge Update against a real
+  Proton/Wine save directory (not the fixture's single file) and confirm nothing outside the new
+  archive's paths is touched.
+- **The banner appears on a release build only**: confirm a real release build (no `-dev`
+  pre-release, `GRID_LAUNCHER_E2E_UPDATE_CHECK` unset) checks `releases/latest` once at startup
+  and shows the banner when a newer tag exists, while a `cargo tauri dev` source build never
+  checks at all.
 
 Residual items above also apply.

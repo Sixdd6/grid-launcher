@@ -1497,6 +1497,14 @@ Rulings below are new to this milestone's review.
     directories and skips a repeat pass; the install-time (finalize) and
     fresh-emulator-install triggers are unchanged — each still runs once per install, as in
     Python.
+20. **D20 — `Update` (`kind` `update`, added for the identity/updates milestone): plain
+    re-install of an installed non-native rom; bypasses the already-installed short-circuit;
+    finalizes as Base (D-10-j: no pre-clean).** `InstallMode::Update`
+    (`crates/grid-core/src/library/mod.rs:176`) requires an existing installed row for the rom,
+    then routes through `finalize_base` unchanged — no clean of the old extraction directory
+    first, matching Python's plain replacement. A native-platform row is rejected here; the app
+    layer sends native updates through the merge path instead (see doc 10 "Rust port deviations
+    (milestone 9)" D-10-j for the full rationale).
 
 ### Rulings on open questions
 
