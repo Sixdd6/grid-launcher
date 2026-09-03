@@ -2,6 +2,7 @@ mod cloud_service;
 mod commands;
 mod config_write;
 mod gamepad;
+mod images;
 
 use commands::AppState;
 use grid_core::autoconfig::RaCredentials;
@@ -83,6 +84,7 @@ pub fn run() {
         launch,
         ra_store,
         cloud,
+        images: images::ImageService::new(),
     });
     // Embedded WebDriver automation server, gated behind the `e2e` cargo
     // feature so it never ships in a release build (see
@@ -115,6 +117,18 @@ pub fn run() {
                 }
             }
             let state = app.state::<AppState>();
+            // R3: sweep synchronously before any image command can run.
+            if let Ok(install) = &state.install {
+                let rows = install.registry().all().unwrap_or_default();
+                let base = Config::load(&Config::default_path())
+                    .map(|c| c.server_url)
+                    .unwrap_or_default();
+                images::ImageService::sweep_at_startup(state.session.cache(), &rows, &base);
+                let session = state.session.clone();
+                install.set_image_hook(Arc::new(move |fields| {
+                    images::ImageService::spawn_prefetch(session.clone(), fields);
+                }));
+            }
             if let Ok(install) = &state.install {
                 let handle = app.handle().clone();
                 install.set_notify(Arc::new(move |snapshot| {
@@ -171,6 +185,7 @@ pub fn run() {
             commands::disconnect,
             commands::list_platforms,
             commands::list_games,
+            commands::get_rom_detail,
             commands::ensure_image,
             commands::install_game,
             commands::cancel_install,

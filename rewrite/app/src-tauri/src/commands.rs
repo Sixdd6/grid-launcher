@@ -1,6 +1,7 @@
 pub mod cloud;
 
 use crate::config_write::modify_config;
+use crate::images::ImageService;
 use grid_core::autoconfig::{self, entry as autoconfig_entry, RaCredentials};
 use grid_core::config::{Config, EmulatorEntry};
 use grid_core::images::urls::{filter_to_server_host, resolve_image_url};
@@ -12,7 +13,7 @@ use grid_core::launch::{GameSession, LaunchService, SessionsSnapshot};
 use grid_core::library::queue::DownloadsSnapshot;
 use grid_core::library::registry::InstalledGame;
 use grid_core::library::InstallService;
-use grid_core::romm::{GameSummary, Platform};
+use grid_core::romm::{GameSummary, Platform, RomDetail};
 use grid_core::secrets::RaTokenStore;
 use grid_core::session::{RestoreOutcome, SessionManager, SessionState};
 use secrecy::SecretString;
@@ -31,6 +32,9 @@ pub struct AppState {
     /// Cloud save/state sync: the emulator-entry/sync-dir caches and the
     /// D5 auto-upload pool. See `cloud_service.rs` and `commands/cloud.rs`.
     pub cloud: Arc<crate::cloud_service::CloudService>,
+    /// Cover/screenshot pipeline glue: the startup sweep, the one-at-a-time
+    /// replenish job, and the post-install prefetch. See `images.rs`.
+    pub images: Arc<ImageService>,
 }
 
 pub(crate) fn err(e: impl std::fmt::Display) -> String {
@@ -41,6 +45,7 @@ pub(crate) fn err(e: impl std::fmt::Display) -> String {
 #[tauri::command]
 pub async fn connect(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
     server_url: String,
     username: String,
     secret: String,
@@ -48,21 +53,47 @@ pub async fn connect(
 ) -> Result<SessionState, String> {
     // Wrap immediately; the plain String is dropped at the end of this scope.
     let secret = SecretString::from(secret);
-    state
+    let result = state
         .session
         .connect(server_url, username, secret, use_token)
         .await
-        .map_err(err)
+        .map_err(err)?;
+    if let Ok(install) = state.install.as_ref() {
+        state
+            .images
+            .spawn_replenish(app, state.session.clone(), install.clone());
+    }
+    Ok(result)
 }
 
 #[tauri::command]
-pub async fn restore_session(state: State<'_, AppState>) -> Result<RestoreOutcome, String> {
-    state.session.restore().await.map_err(err)
+pub async fn restore_session(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<RestoreOutcome, String> {
+    let outcome = state.session.restore().await.map_err(err)?;
+    if matches!(outcome, RestoreOutcome::Connected { .. }) {
+        if let Ok(install) = state.install.as_ref() {
+            state
+                .images
+                .spawn_replenish(app, state.session.clone(), install.clone());
+        }
+    }
+    Ok(outcome)
 }
 
 #[tauri::command]
-pub async fn retry_connect(state: State<'_, AppState>) -> Result<SessionState, String> {
-    state.session.retry().await.map_err(err)
+pub async fn retry_connect(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<SessionState, String> {
+    let result = state.session.retry().await.map_err(err)?;
+    if let Ok(install) = state.install.as_ref() {
+        state
+            .images
+            .spawn_replenish(app, state.session.clone(), install.clone());
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -133,6 +164,12 @@ pub async fn list_games(
 ) -> Result<Vec<GameSummary>, String> {
     let client = state.session.client().ok_or("not connected")?;
     client.games(platform_id).await.map_err(err)
+}
+
+#[tauri::command]
+pub async fn get_rom_detail(state: State<'_, AppState>, rom_id: i64) -> Result<RomDetail, String> {
+    let client = state.session.client().ok_or("not connected")?;
+    client.rom_detail(rom_id).await.map_err(err)
 }
 
 #[tauri::command]

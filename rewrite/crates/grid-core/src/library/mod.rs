@@ -27,6 +27,7 @@ use serde_json::Value;
 
 use crate::autoconfig::{self, RaCredentials};
 use crate::config::{Config, EmulatorEntry};
+use crate::images::ImageFields;
 use crate::launch::forge::{ForgeClient, ForgeProvider, ResolvedDownload};
 use crate::launch::profiles::{load_profiles, EmulatorProfile};
 use crate::launch::{catalog, emu_install};
@@ -291,6 +292,11 @@ type Listener = Arc<dyn Fn(DownloadsSnapshot) + Send + Sync>;
 /// never reads the keyring itself, so the app installs this.
 pub type RaProvider = Arc<dyn Fn() -> Option<RaCredentials> + Send + Sync>;
 
+/// Notified with a finalized game's image fields right after the registry
+/// write. grid-core never imports Tauri, so the app installs this to trigger
+/// its own post-install cover prefetch (D5).
+pub type ImageHook = Arc<dyn Fn(ImageFields) + Send + Sync>;
+
 /// Owns the install queue and drives one download task and one finalize task
 /// at a time. Every method takes `&self`; the async entry points take
 /// `&Arc<Self>` because they spawn tasks that outlive the call.
@@ -320,6 +326,9 @@ pub struct InstallService {
     /// `None` until the app installs one; autoconfig then writes no
     /// RetroAchievements credentials.
     ra_provider: RwLock<Option<RaProvider>>,
+    /// `None` until the app installs one; a finalized game then triggers no
+    /// cover prefetch.
+    image_hook: RwLock<Option<ImageHook>>,
 }
 
 impl InstallService {
@@ -356,6 +365,7 @@ impl InstallService {
             last_emit: Mutex::new(Instant::now()),
             known_platforms: RwLock::new(Vec::new()),
             ra_provider: RwLock::new(None),
+            image_hook: RwLock::new(None),
         })
     }
 
@@ -382,6 +392,12 @@ impl InstallService {
     /// reads. A second call replaces the first.
     pub fn set_ra_provider(&self, f: RaProvider) {
         *self.ra_provider.write().unwrap() = Some(f);
+    }
+
+    /// Installs the post-install image prefetch hook (D5). A second call
+    /// replaces the first.
+    pub fn set_image_hook(&self, f: ImageHook) {
+        *self.image_hook.write().unwrap() = Some(f);
     }
 
     /// The current RetroAchievements pair, or `None` when no provider is
@@ -889,6 +905,14 @@ impl InstallService {
         }
 
         self.registry.upsert(&record)?;
+
+        if let Some(hook) = self.image_hook.read().unwrap().clone() {
+            hook(ImageFields {
+                cover_small_path: record.cover_small_path.clone(),
+                cover_large_path: record.cover_large_path.clone(),
+                screenshot_urls: record.screenshot_urls.clone(),
+            });
+        }
 
         // Only after a successful write, and only when the archive has been
         // superseded by an extraction — a finalize failure keeps the archive

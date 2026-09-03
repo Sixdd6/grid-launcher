@@ -17,6 +17,36 @@ export type GameSummary = {
   path_cover_large: string | null;
 };
 
+export type RomFile = {
+  id: number;
+  file_name: string;
+  file_size_bytes: number;
+  is_top_level: boolean;
+};
+
+export type RomDetail = {
+  id: number;
+  name: string;
+  platform_id: number;
+  platform_name: string;
+  fs_name: string;
+  description: string;
+  regions: string;
+  languages: string;
+  tags: string;
+  revision: string;
+  rating: string;
+  genres: string;
+  companies: string;
+  first_release_date: string;
+  filesize_bytes: number;
+  server_updated_at: string;
+  files: RomFile[];
+  cover_small_path: string;
+  cover_large_path: string;
+  screenshot_urls: string[];
+};
+
 export type DownloadStatus =
   | 'queued'
   | 'downloading'
@@ -176,6 +206,7 @@ export const api = {
   disconnect: () => invoke<void>('disconnect'),
   listPlatforms: () => invoke<Platform[]>('list_platforms'),
   listGames: (platformId: number) => invoke<GameSummary[]>('list_games', { platformId }),
+  getRomDetail: (romId: number) => invoke<RomDetail>('get_rom_detail', { romId }),
   ensureImage: (url: string) => invoke<string>('ensure_image', { url }),
   installGame: (romId: number) => invoke<void>('install_game', { romId }),
   cancelInstall: (entryId: number) => invoke<void>('cancel_install', { entryId }),
