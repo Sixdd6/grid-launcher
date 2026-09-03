@@ -86,6 +86,7 @@ dependencies = [
  "log",
  "reqwest",
  "secrecy",
+ "semver",
  "serde",
  "serde_json",
  "tauri",

@@ -279,6 +279,12 @@ export type UpdateRow = { rom_id: number; label: string };
 /// and on disconnect (empty).
 export const UPDATES_CHANGED_EVENT = 'updates-changed';
 
+// Launcher self-update (rewrite/app/src-tauri/src/app_update.rs).
+
+export type AppUpdateNotice = { tag: string; url: string };
+/// Emitted at most once per process when a newer launcher release exists.
+export const APP_UPDATE_EVENT = 'app-update-available';
+
 export const api = {
   connect: (serverUrl: string, username: string, secret: string, useToken: boolean) =>
     invoke<SessionState>('connect', { serverUrl, username, secret, useToken }),

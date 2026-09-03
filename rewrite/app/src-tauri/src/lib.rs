@@ -1,3 +1,4 @@
+mod app_update;
 mod cloud_service;
 mod commands;
 mod config_write;
@@ -107,6 +108,7 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_title(&format!("GRID Launcher {version}"));
             }
+            app_update::spawn_check(app.handle().clone());
             gamepad::spawn(app.handle().clone());
             // The static scope in tauri.conf.json only covers the default
             // ProjectDirs cache location ($CACHE/grid-launcher/covers/**/*).
