@@ -4,7 +4,7 @@
   import Downloads from './Downloads.svelte';
   import Emulators from './Emulators.svelte';
   import { session, retry, disconnect } from './stores/session.svelte';
-  import { initReplenishListener } from './stores/installed.svelte';
+  import { initReplenishListener, refresh as refreshInstalled } from './stores/installed.svelte';
   import { chipLabel, initialSection, type Section } from './shell';
   import type { NavDirection } from './focus/grid';
 
@@ -24,6 +24,11 @@
   }
 
   $effect(() => {
+    // Independent of the connection: Library shows installed games with
+    // cached covers offline, so the registry must load once on mount even
+    // when the shell comes up unreachable (Server.svelte's own refresh only
+    // runs inside its session.connected-gated effect).
+    refreshInstalled();
     const un = initReplenishListener();
     return () => {
       un.then((f) => f());
