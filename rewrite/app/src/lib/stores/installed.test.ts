@@ -27,6 +27,18 @@ function row(overrides: Partial<InstalledGame>): InstalledGame {
     cover_small_path: '',
     cover_large_path: '',
     screenshot_urls: '',
+    native_executable_path: '',
+    native_launch_parameters: '',
+    native_compat_tool: '',
+    native_wineprefix: '',
+    native_game_dir: '',
+    included_dlc: '',
+    ps3_trophy_paths: '',
+    ps3_game_id: '',
+    ps3_iso_path: '',
+    ps4_game_id: '',
+    ps4_content: '',
+    ra_id: '',
     ...overrides,
   };
 }

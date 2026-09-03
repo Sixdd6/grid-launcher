@@ -1,4 +1,5 @@
 pub mod cloud;
+pub mod specials;
 
 use crate::config_write::modify_config;
 use crate::images::ImageService;
@@ -35,6 +36,9 @@ pub struct AppState {
     /// Cover/screenshot pipeline glue: the startup sweep, the one-at-a-time
     /// replenish job, and the post-install prefetch. See `images.rs`.
     pub images: Arc<ImageService>,
+    /// Background firmware triggers and their one-job-per-emulator-directory
+    /// guard. See `firmware_service.rs`.
+    pub firmware: Arc<crate::firmware_service::FirmwareService>,
 }
 
 pub(crate) fn err(e: impl std::fmt::Display) -> String {
@@ -120,6 +124,11 @@ pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>,
         let names: Vec<String> = platforms.iter().map(|p| p.name.clone()).collect();
         let assignable = autoconfig_entry::assignable_platforms(&names);
         install.set_known_platforms(assignable.clone());
+        // The firmware triggers need the platform *id*, not just the name,
+        // and grid-core holds no session to fetch it with. Recorded from the
+        // FULL platform list (not the assignable subset): a platform the
+        // autoconfig defaults skip can still have server firmware.
+        install.set_platform_ids(platforms.iter().map(|p| (p.name.clone(), p.id)).collect());
 
         // Self-heal for the gap D3's own trigger policy leaves: an emulator
         // installed or added before the FIRST successful platform fetch got
@@ -308,6 +317,15 @@ pub async fn launch_game(state: State<'_, AppState>, rom_id: i64) -> Result<Game
     // restore failure never blocks the launch — errors are swallowed here
     // (and only debug-logged inside `auto_restore_before_launch`).
     if let Ok(Some(installed_game)) = installed_game_by_rom_id(&install, rom_id).await {
+        // Firmware top-up before the process spawns (install_mixin.py:528's
+        // call site, re-run at launch so a game installed before its
+        // emulator existed still gets its BIOS). Fire-and-forget: it spawns
+        // its own task, returns immediately, and can never fail the launch.
+        state.firmware.spawn_for_game(
+            state.session.clone(),
+            install.clone(),
+            installed_game.clone(),
+        );
         state
             .cloud
             .auto_restore_before_launch(
@@ -384,43 +402,63 @@ pub async fn save_emulator(
         Err(_) => (Vec::new(), None),
     };
 
-    tokio::task::spawn_blocking(move || {
-        let config_path = Config::default_path();
-        let profiles = load_profiles();
-        // The autoconfig sync below reads no config.json and can be slow
-        // (it writes emulator config files), so it runs AFTER the write
-        // lock is released, on the three values the closure hands back.
-        let (is_add, saved_name, library_path) = modify_config(&config_path, |config| {
-            let is_add = is_manual_add(config, &original_name);
-            let entry = manual_add_entry(entry, is_add, profiles);
-            // The name as it will be STORED, so the sync lookup matches exactly.
-            let saved_name = entry.name.clone();
-            apply_save_emulator(config, &original_name, entry)?;
-            Ok((is_add, saved_name, config.library_path.clone()))
-        })?;
+    let session = state.session.clone();
+    let install_for_firmware = state.install.as_ref().ok().cloned();
+    let firmware = state.firmware.clone();
 
-        if is_add {
-            let ctx = autoconfig::SyncContext {
-                config_path: &config_path,
-                platforms: &platforms,
-                ps3_library_path: autoconfig::ps3_library_path(&library_path),
-                ra,
-                profiles,
-            };
-            // Warnings name emulators and file paths only — never a secret.
-            match autoconfig::sync_new_emulator(&saved_name, &ctx) {
-                Ok(report) => {
-                    for warning in report.warnings {
-                        tracing::warn!("emulator autoconfig: {warning}");
+    // `Some(entry)` only when this save ADDED an RPCS3 entry: the PS3
+    // firmware trigger's precondition. Handed back out of the blocking hop
+    // so the trigger (which spawns a tokio task) runs on the async side.
+    let rpcs3_added =
+        tokio::task::spawn_blocking(move || -> Result<Option<EmulatorEntry>, String> {
+            let config_path = Config::default_path();
+            let profiles = load_profiles();
+            // The autoconfig sync below reads no config.json and can be slow
+            // (it writes emulator config files), so it runs AFTER the write
+            // lock is released, on the three values the closure hands back.
+            let (is_add, saved_name, library_path, saved_entry) =
+                modify_config(&config_path, |config| {
+                    let is_add = is_manual_add(config, &original_name);
+                    let entry = manual_add_entry(entry, is_add, profiles);
+                    // The name as it will be STORED, so the sync lookup matches exactly.
+                    let saved_name = entry.name.clone();
+                    let saved_entry = entry.clone();
+                    apply_save_emulator(config, &original_name, entry)?;
+                    Ok((is_add, saved_name, config.library_path.clone(), saved_entry))
+                })?;
+
+            if is_add {
+                let ctx = autoconfig::SyncContext {
+                    config_path: &config_path,
+                    platforms: &platforms,
+                    ps3_library_path: autoconfig::ps3_library_path(&library_path),
+                    ra,
+                    profiles,
+                };
+                // Warnings name emulators and file paths only — never a secret.
+                match autoconfig::sync_new_emulator(&saved_name, &ctx) {
+                    Ok(report) => {
+                        for warning in report.warnings {
+                            tracing::warn!("emulator autoconfig: {warning}");
+                        }
                     }
+                    Err(e) => tracing::warn!("emulator autoconfig: {e}"),
                 }
-                Err(e) => tracing::warn!("emulator autoconfig: {e}"),
             }
-        }
-        Ok(())
-    })
-    .await
-    .map_err(|e| format!("save_emulator did not finish: {e}"))?
+            // D2/D17: adding an RPCS3 entry by hand kicks off the PS3 firmware
+            // fetch, the same as installing RPCS3 from the catalog does. An EDIT
+            // never does — the firmware is already there, or the user declined
+            // it once.
+            let is_rpcs3_add = is_add && autoconfig::is_rpcs3(&saved_entry, profiles);
+            Ok(is_rpcs3_add.then_some(saved_entry))
+        })
+        .await
+        .map_err(|e| format!("save_emulator did not finish: {e}"))??;
+
+    if let (Some(entry), Some(install)) = (rpcs3_added, install_for_firmware) {
+        firmware.spawn_ps3_firmware(session, install, entry);
+    }
+    Ok(())
 }
 
 #[tauri::command]

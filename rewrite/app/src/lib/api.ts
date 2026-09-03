@@ -56,9 +56,25 @@ export type DownloadStatus =
   | 'failed'
   | 'cancelled';
 
+// Which half of the install pipeline owns an entry. `'firmware'` is an
+// EXTERNAL row: the background firmware installer moves its own bytes, so
+// the entry takes no queue slot and reports no progress.
+export type DownloadJob = 'game' | 'emulator' | 'firmware';
+
+// What an entry installs — finer-grained than `job`.
+export type DownloadKind =
+  | 'base'
+  | 'ps4_content'
+  | 'xbox360_content'
+  | 'native_update'
+  | 'emulator'
+  | 'compat_tool'
+  | 'firmware';
+
 export type DownloadEntry = {
   id: number;
-  job: 'game' | 'emulator';
+  job: DownloadJob;
+  kind: DownloadKind;
   rom_id: number;
   source_id: string;
   title: string;
@@ -150,6 +166,21 @@ export type InstalledGame = {
   cover_small_path: string;
   cover_large_path: string;
   screenshot_urls: string;
+  // Native (Windows) launch settings, the PS3/PS4 identifiers, the bundled
+  // DLC manifest and the RetroAchievements id. All serialize as plain
+  // strings (never null): grid-core stores a blank rather than a NULL.
+  native_executable_path: string;
+  native_launch_parameters: string;
+  native_compat_tool: string;
+  native_wineprefix: string;
+  native_game_dir: string;
+  included_dlc: string;
+  ps3_trophy_paths: string;
+  ps3_game_id: string;
+  ps3_iso_path: string;
+  ps4_game_id: string;
+  ps4_content: string;
+  ra_id: string;
 };
 
 // Cloud save/state sync (rewrite/app/src-tauri/src/cloud_service.rs,
@@ -197,6 +228,41 @@ export type CloudSettings = {
   upload_delay_seconds: number;
   retention_limit: number;
 };
+
+// Install specials: extra content, native launch settings, compat tools and
+// the RPCS3 PS3 firmware button
+// (rewrite/app/src-tauri/src/commands/specials.rs).
+
+/// Which extra content kinds the server lists files for, from
+/// `client.rom_detail` — not the registry.
+export type ContentAvailability = { update: boolean; dlc: boolean };
+
+export type ContentKind = 'update' | 'dlc';
+
+/// `executable` is the RESOLVED executable (the pinned one when it still
+/// exists, else the first candidate), so the form shows what would actually
+/// launch. `candidates` are full paths, shallowest first.
+export type NativeGameSettings = {
+  executable: string;
+  parameters: string;
+  compat_tool: string;
+  wineprefix: string;
+  candidates: string[];
+};
+
+/// `kind` is `'wine'` or `'proton'`; `source` is `'system'`, `'steam'` or
+/// `'managed'`.
+export type CompatTool = { name: string; kind: string; path: string; source: string };
+
+export type CompatToolsDto = { tools: CompatTool[]; default_tool: string };
+
+/// `pup_path` is `null` when the RPCS3 install has no `PS3UPDAT.PUP` yet —
+/// i.e. when the Install Firmware button should be enabled.
+export type Rpcs3FirmwareStatus = { pup_path: string | null };
+
+/// Emitted after `setDefaultCompatTool` and after a managed compat-tool
+/// install finalizes in the background. Re-run `listCompatTools` on it.
+export const COMPAT_TOOLS_CHANGED_EVENT = 'compat-tools-changed';
 
 export const api = {
   connect: (serverUrl: string, username: string, secret: string, useToken: boolean) =>
@@ -253,4 +319,26 @@ export const api = {
     invoke<void>('native_remove_manual_save_path', { game, path }),
   cloudSettings: () => invoke<CloudSettings>('cloud_settings'),
   setCloudSettings: (settings: CloudSettings) => invoke<void>('set_cloud_settings', { settings }),
+  installContent: (romId: number, kind: ContentKind) =>
+    invoke<void>('install_content', { romId, kind }),
+  installNativeUpdate: (romId: number) => invoke<void>('install_native_update', { romId }),
+  contentAvailability: (romId: number) =>
+    invoke<ContentAvailability>('content_availability', { romId }),
+  nativeGameSettings: (romId: number) =>
+    invoke<NativeGameSettings>('native_game_settings', { romId }),
+  setNativeGameSettings: (
+    romId: number,
+    executable: string,
+    parameters: string,
+    compatTool: string,
+  ) => invoke<void>('set_native_game_settings', { romId, executable, parameters, compatTool }),
+  listCompatTools: () => invoke<CompatToolsDto>('list_compat_tools'),
+  setDefaultCompatTool: (value: string) => invoke<void>('set_default_compat_tool', { value }),
+  listCompatToolCatalog: () => invoke<CatalogEntry[]>('list_compat_tool_catalog'),
+  installCompatTool: (sourceId: string) => invoke<void>('install_compat_tool', { sourceId }),
+  rpcs3FirmwareStatus: (emulatorName: string) =>
+    invoke<Rpcs3FirmwareStatus>('rpcs3_firmware_status', { emulatorName }),
+  installPs3Firmware: (emulatorName: string) =>
+    invoke<boolean>('install_ps3_firmware', { emulatorName }),
+  cancelDownloadForRom: (romId: number) => invoke<void>('cancel_download_for_rom', { romId }),
 };

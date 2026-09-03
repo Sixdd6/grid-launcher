@@ -96,6 +96,20 @@ pub(crate) fn expand_home(raw: &str) -> PathBuf {
     PathBuf::from(raw)
 }
 
+/// The configured library root with a leading `~/` expanded, or `None` when
+/// `Config::library_path` is blank.
+///
+/// [`expand_home`] is `pub(crate)`, so the app layer cannot reach it; this is
+/// the one public way it derives the same root [`crate::library::InstallService`]
+/// installs into (its own `library_root` is private and returns
+/// `LibraryError::LibraryPathUnset` instead of `None`).
+pub fn library_root(config: &crate::config::Config) -> Option<PathBuf> {
+    if config.library_path.trim().is_empty() {
+        return None;
+    }
+    Some(expand_home(&config.library_path))
+}
+
 /// Deduplicate paths by their string form, keeping the first occurrence of
 /// each and preserving overall order.
 fn dedup_by_string(paths: Vec<PathBuf>) -> Vec<PathBuf> {

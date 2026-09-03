@@ -78,6 +78,13 @@ pub fn find_proton_dir(install_dir: &Path) -> Option<PathBuf> {
         .find(|dir| dir.join("proton").is_file())
 }
 
+/// `PATH` lookup for [`discover`]'s `which` argument, re-exported here so
+/// the app layer can pass it in: the real implementation lives in
+/// [`crate::library::extract`] and is `pub(crate)`.
+pub fn which_on_path(name: &str) -> Option<PathBuf> {
+    crate::library::extract::which_on_path(name)
+}
+
 /// Discovers the compat tools available to offer, in the reference's order
 /// (`_available_compat_tools_for_dialog`, emulator_ui_mixin.py:231-253),
 /// minus its leading "None" sentinel (a UI-only entry, not this layer's

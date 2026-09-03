@@ -1,6 +1,7 @@
 mod cloud_service;
 mod commands;
 mod config_write;
+mod firmware_service;
 mod gamepad;
 mod images;
 
@@ -85,6 +86,7 @@ pub fn run() {
         ra_store,
         cloud,
         images: images::ImageService::new(),
+        firmware: firmware_service::FirmwareService::new(),
     });
     // Embedded WebDriver automation server, gated behind the `e2e` cargo
     // feature so it never ships in a release build (see
@@ -156,6 +158,44 @@ pub fn run() {
                         .map(|c| c.retroachievements_username)
                         .unwrap_or_default();
                     Some(RaCredentials::new(username, token))
+                }));
+
+                // --- firmware triggers (Task 15) -------------------------
+                // grid-core cannot spawn these itself: they need a live
+                // `RommClient` out of the session and Tauri's async runtime.
+                // Each hook body is deliberately trivial — every decision
+                // lives in `FirmwareService`, which returns silently when
+                // there is nothing to do.
+                let firmware = state.firmware.clone();
+                let session = state.session.clone();
+                let install_for_game = install.clone();
+                install.set_game_finalized_hook(Arc::new(move |record| {
+                    firmware.spawn_for_game(session.clone(), install_for_game.clone(), record);
+                }));
+
+                let firmware = state.firmware.clone();
+                let session = state.session.clone();
+                let install_for_emulator = install.clone();
+                install.set_emulator_installed_hook(Arc::new(move |installed| {
+                    // A REINSTALL over an existing entry keeps whatever
+                    // firmware is already there; a managed compat tool has
+                    // no firmware at all.
+                    if !installed.fresh || installed.compat_tool {
+                        return;
+                    }
+                    firmware.spawn_for_emulator(
+                        session.clone(),
+                        install_for_emulator.clone(),
+                        installed.name,
+                    );
+                }));
+
+                // The compat-tool picker's only refresh signal: a managed
+                // install finishes in the background, with no command in
+                // flight to return the new list on.
+                let handle = app.handle().clone();
+                install.set_compat_tools_hook(Arc::new(move || {
+                    let _ = handle.emit(commands::specials::COMPAT_TOOLS_CHANGED_EVENT, ());
                 }));
             }
             if let Ok(launch) = &state.launch {
@@ -232,6 +272,18 @@ pub fn run() {
             commands::cloud::native_remove_manual_save_path,
             commands::cloud::cloud_settings,
             commands::cloud::set_cloud_settings,
+            commands::specials::install_content,
+            commands::specials::install_native_update,
+            commands::specials::content_availability,
+            commands::specials::native_game_settings,
+            commands::specials::set_native_game_settings,
+            commands::specials::list_compat_tools,
+            commands::specials::set_default_compat_tool,
+            commands::specials::list_compat_tool_catalog,
+            commands::specials::install_compat_tool,
+            commands::specials::rpcs3_firmware_status,
+            commands::specials::install_ps3_firmware,
+            commands::specials::cancel_download_for_rom,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

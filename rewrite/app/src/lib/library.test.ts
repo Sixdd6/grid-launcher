@@ -7,6 +7,7 @@ const row = (title: string, platform: string): InstalledGame => ({
   multi_file_game_dir: '', description: '', rating: '', genres: '', regions: '', languages: '', tags: '',
   revision: '', companies: '', first_release_date: '', filesize_bytes: 0, server_updated_at: '', installed_at: 0,
   cover_small_path: '', cover_large_path: '', screenshot_urls: '',
+  native_executable_path: '', native_launch_parameters: '', native_compat_tool: '', native_wineprefix: '', native_game_dir: '', included_dlc: '', ps3_trophy_paths: '', ps3_game_id: '', ps3_iso_path: '', ps4_game_id: '', ps4_content: '', ra_id: '',
 });
 
 describe('library visibility (game_views.py:297-311)', () => {

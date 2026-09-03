@@ -6,6 +6,7 @@ function entry(overrides: Partial<DownloadEntry>): DownloadEntry {
   return {
     id: 1,
     job: 'game',
+    kind: 'base',
     rom_id: 1,
     source_id: '',
     title: 'Game',
