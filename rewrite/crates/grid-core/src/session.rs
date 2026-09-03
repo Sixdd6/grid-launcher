@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::covers::CoverCache;
+use crate::images::cache::ImageCache;
 use crate::romm::{RommClient, RommError};
 use crate::secrets::{Credential, SecretError, SecretStore};
 use secrecy::SecretString;
@@ -29,8 +29,9 @@ pub struct SessionState {
 pub struct SessionManager {
     config_path: PathBuf,
     secrets: Arc<dyn SecretStore>,
-    cache: CoverCache,
+    cache: ImageCache,
     client: Mutex<Option<Arc<RommClient>>>,
+    server_url: Mutex<String>,
 }
 
 impl SessionManager {
@@ -38,17 +39,27 @@ impl SessionManager {
         Self {
             config_path,
             secrets,
-            cache: CoverCache::new(cache_dir),
+            cache: ImageCache::new(cache_dir),
             client: Mutex::new(None),
+            server_url: Mutex::new(String::new()),
         }
     }
 
-    pub fn cache(&self) -> &CoverCache {
+    pub fn cache(&self) -> &ImageCache {
         &self.cache
     }
 
     pub fn client(&self) -> Option<Arc<RommClient>> {
         self.client.lock().unwrap().clone()
+    }
+
+    /// The stored server URL: set in `connect` once the session is fully
+    /// persisted, and in `restore` as soon as a non-empty URL is read from
+    /// config — before that probe runs, so a restore whose probe fails still
+    /// leaves this populated (image URL filtering needs it regardless of
+    /// live-connection state).
+    pub fn server_url(&self) -> String {
+        self.server_url.lock().unwrap().clone()
     }
 
     /// `use_token`: true = `secret` is an API token; false = it is the
@@ -92,11 +103,12 @@ impl SessionManager {
             }
         }
         let mut cfg = Config::load(&self.config_path)?;
-        cfg.server_url = server_url;
+        cfg.server_url = server_url.clone();
         cfg.username = state.username.clone();
         cfg.save(&self.config_path)?;
         self.secrets.save(&cred)?;
         *self.client.lock().unwrap() = Some(Arc::new(client));
+        *self.server_url.lock().unwrap() = server_url;
         Ok(state)
     }
 
@@ -105,6 +117,7 @@ impl SessionManager {
         if cfg.server_url.is_empty() {
             return Ok(None);
         }
+        *self.server_url.lock().unwrap() = cfg.server_url.clone();
         let Some(cred) = self.secrets.load()? else {
             return Ok(None);
         };

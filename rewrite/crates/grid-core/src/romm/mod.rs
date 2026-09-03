@@ -108,21 +108,40 @@ impl RommClient {
         self.get_json("/api/users/me", &[]).await
     }
 
-    pub async fn get_bytes(&self, path: &str) -> Result<Vec<u8>, RommError> {
+    /// `path_or_url` is either a server-relative `/path` or an absolute
+    /// `http(s)://` URL (host filtering happens before this is called — see
+    /// `images::urls`).
+    fn target(&self, path_or_url: &str) -> Result<url::Url, RommError> {
+        if path_or_url.starts_with("http://") || path_or_url.starts_with("https://") {
+            url::Url::parse(path_or_url).map_err(|_| RommError::InvalidUrl)
+        } else {
+            self.endpoint(path_or_url)
+        }
+    }
+
+    /// Bytes plus the response Content-Type (empty when absent). Accepts a
+    /// server-relative `/path` or an absolute same-host URL (host filtering
+    /// happens before this is called — see images::urls). Same 401/403 →
+    /// Unauthorized mapping as `get_bytes`.
+    ///
+    /// Task 11 fix: this used to skip the 401/403 -> Unauthorized mapping
+    /// that `get_response` applies, so a save/cover download against an
+    /// expired token surfaced as a generic `Http{401,..}` instead of the
+    /// dedicated auth error every other client method returns. Bytes
+    /// endpoints (save content, relative download candidates, covers)
+    /// now match that mapping exactly.
+    pub async fn get_bytes_with_type(
+        &self,
+        path_or_url: &str,
+    ) -> Result<(Vec<u8>, String), RommError> {
         let resp = self
             .http
-            .get(self.endpoint(path)?)
+            .get(self.target(path_or_url)?)
             .header(reqwest::header::AUTHORIZATION, self.auth.clone())
             .send()
             .await
             .map_err(|e| RommError::Connection(e.without_url().to_string()))?;
         let status = resp.status();
-        // Task 11 fix: this used to skip the 401/403 -> Unauthorized mapping
-        // that `get_response` applies, so a save/cover download against an
-        // expired token surfaced as a generic `Http{401,..}` instead of the
-        // dedicated auth error every other client method returns. Bytes
-        // endpoints (save content, relative download candidates, covers)
-        // now match that mapping exactly.
         if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
             return Err(RommError::Unauthorized);
         }
@@ -132,11 +151,22 @@ impl RommClient {
                 excerpt: String::new(),
             });
         }
-        Ok(resp
+        let content_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        let bytes = resp
             .bytes()
             .await
             .map_err(|e| RommError::Connection(e.without_url().to_string()))?
-            .to_vec())
+            .to_vec();
+        Ok((bytes, content_type))
+    }
+
+    pub async fn get_bytes(&self, path: &str) -> Result<Vec<u8>, RommError> {
+        self.get_bytes_with_type(path).await.map(|(b, _)| b)
     }
 }
 

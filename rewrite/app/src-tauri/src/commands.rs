@@ -3,6 +3,7 @@ pub mod cloud;
 use crate::config_write::modify_config;
 use grid_core::autoconfig::{self, entry as autoconfig_entry, RaCredentials};
 use grid_core::config::{Config, EmulatorEntry};
+use grid_core::images::urls::{filter_to_server_host, resolve_image_url};
 use grid_core::launch::catalog::{catalog_entries, mark_installed, CatalogEntry};
 use grid_core::launch::profiles::{
     load_profiles, profile_for_entry, visible_profiles, EmulatorProfile,
@@ -130,16 +131,17 @@ pub async fn list_games(
 }
 
 #[tauri::command]
-pub async fn ensure_cover(
-    state: State<'_, AppState>,
-    game_id: i64,
-    cover_path: String,
-) -> Result<String, String> {
-    let client = state.session.client().ok_or("not connected")?;
+pub async fn ensure_image(state: State<'_, AppState>, url: String) -> Result<String, String> {
+    let base = state.session.server_url();
+    let resolved = filter_to_server_host(&resolve_image_url(&url, &base), &base);
+    if resolved.is_empty() {
+        return Err("filtered".to_string());
+    }
+    let client = state.session.client();
     let path = state
         .session
         .cache()
-        .ensure(&client, game_id, &cover_path)
+        .ensure(client.as_deref(), &resolved)
         .await
         .map_err(err)?;
     Ok(path.to_string_lossy().into_owned())

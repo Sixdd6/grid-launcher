@@ -162,8 +162,7 @@ export const api = {
   disconnect: () => invoke<void>('disconnect'),
   listPlatforms: () => invoke<Platform[]>('list_platforms'),
   listGames: (platformId: number) => invoke<GameSummary[]>('list_games', { platformId }),
-  ensureCover: (gameId: number, coverPath: string) =>
-    invoke<string>('ensure_cover', { gameId, coverPath }),
+  ensureImage: (url: string) => invoke<string>('ensure_image', { url }),
   installGame: (romId: number) => invoke<void>('install_game', { romId }),
   cancelInstall: (entryId: number) => invoke<void>('cancel_install', { entryId }),
   retryInstall: (entryId: number) => invoke<void>('retry_install', { entryId }),

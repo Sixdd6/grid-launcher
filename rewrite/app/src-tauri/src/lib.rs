@@ -170,7 +170,7 @@ pub fn run() {
             commands::disconnect,
             commands::list_platforms,
             commands::list_games,
-            commands::ensure_cover,
+            commands::ensure_image,
             commands::install_game,
             commands::cancel_install,
             commands::retry_install,

@@ -9,7 +9,7 @@
     let cancelled = false;
     src = null;
     if (game.path_cover_small) {
-      api.ensureCover(game.id, game.path_cover_small).then((path) => {
+      api.ensureImage(game.path_cover_small).then((path) => {
         if (!cancelled) src = convertFileSrc(path);
       }).catch(() => {}); // missing cover: placeholder stays
     }
