@@ -35,6 +35,18 @@ CREATE TABLE installed_games (
     cover_small_path    TEXT NOT NULL DEFAULT '',
     cover_large_path    TEXT NOT NULL DEFAULT '',
     screenshot_urls     TEXT NOT NULL DEFAULT '',
+    native_executable_path   TEXT NOT NULL DEFAULT '',
+    native_launch_parameters TEXT NOT NULL DEFAULT '',
+    native_compat_tool       TEXT NOT NULL DEFAULT '',
+    native_wineprefix        TEXT NOT NULL DEFAULT '',
+    native_game_dir          TEXT NOT NULL DEFAULT '',
+    included_dlc             TEXT NOT NULL DEFAULT '',
+    ps3_trophy_paths         TEXT NOT NULL DEFAULT '',
+    ps3_game_id              TEXT NOT NULL DEFAULT '',
+    ps3_iso_path             TEXT NOT NULL DEFAULT '',
+    ps4_game_id              TEXT NOT NULL DEFAULT '',
+    ps4_content              TEXT NOT NULL DEFAULT '',
+    ra_id                    TEXT NOT NULL DEFAULT '',
     installed_at        INTEGER NOT NULL,
     UNIQUE (title_key, platform_key)
 );
@@ -42,10 +54,27 @@ CREATE TABLE installed_games (
 
 /// The schema version this build understands. Bumped when a migration adds
 /// columns (see spec: later milestones add native/PS3/PS4 fields).
-const LATEST_USER_VERSION: i64 = 2;
+const LATEST_USER_VERSION: i64 = 3;
 
 /// The columns v1 -> v2 (milestone 7) adds to `installed_games`.
 const V2_IMAGE_COLUMNS: [&str; 3] = ["cover_small_path", "cover_large_path", "screenshot_urls"];
+
+/// The columns v2 -> v3 (native/PS3/PS4/RetroAchievements install fields)
+/// adds to `installed_games`.
+const V3_COLUMNS: [&str; 12] = [
+    "native_executable_path",
+    "native_launch_parameters",
+    "native_compat_tool",
+    "native_wineprefix",
+    "native_game_dir",
+    "included_dlc",
+    "ps3_trophy_paths",
+    "ps3_game_id",
+    "ps3_iso_path",
+    "ps4_game_id",
+    "ps4_content",
+    "ra_id",
+];
 
 /// The column names `installed_games` currently has.
 fn installed_games_columns(conn: &Connection) -> Result<Vec<String>, LibraryError> {
@@ -88,11 +117,37 @@ fn migrate_1_to_2(conn: &mut Connection) -> Result<(), LibraryError> {
     tx.commit().map_err(registry_err)
 }
 
+/// v2 -> v3 (milestone 8): adds the twelve native/PS3/PS4/RetroAchievements
+/// install columns. Same transaction + idempotent-`ADD COLUMN` shape as
+/// [`migrate_1_to_2`], for the same reason: one commit for the schema change
+/// and the `user_version` bump, and a column already present (a database torn
+/// by an earlier, non-transactional version of a migration) is skipped rather
+/// than erroring.
+fn migrate_2_to_3(conn: &mut Connection) -> Result<(), LibraryError> {
+    let tx = conn.transaction().map_err(registry_err)?;
+    let existing = installed_games_columns(&tx)?;
+    for column in V3_COLUMNS {
+        if existing.iter().any(|name| name == column) {
+            continue;
+        }
+        tx.execute_batch(&format!(
+            "ALTER TABLE installed_games ADD COLUMN {column} TEXT NOT NULL DEFAULT '';"
+        ))
+        .map_err(registry_err)?;
+    }
+    tx.pragma_update(None, "user_version", 3)
+        .map_err(registry_err)?;
+    tx.commit().map_err(registry_err)
+}
+
 /// Every column of `installed_games`, in the order selected/inserted below.
 const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_path, \
      extracted_path, extracted_dir, multi_file_game_dir, description, rating, genres, \
      regions, languages, tags, revision, companies, first_release_date, filesize_bytes, \
-     server_updated_at, installed_at, cover_small_path, cover_large_path, screenshot_urls";
+     server_updated_at, installed_at, cover_small_path, cover_large_path, screenshot_urls, \
+     native_executable_path, native_launch_parameters, native_compat_tool, native_wineprefix, \
+     native_game_dir, included_dlc, ps3_trophy_paths, ps3_game_id, ps3_iso_path, ps4_game_id, \
+     ps4_content, ra_id";
 
 /// One installed game, as persisted in the SQLite registry. `title_key` and
 /// `platform_key` are not part of this type: they are computed from `title`
@@ -123,6 +178,30 @@ pub struct InstalledGame {
     pub cover_small_path: String,
     pub cover_large_path: String,
     pub screenshot_urls: String,
+    #[serde(default)]
+    pub native_executable_path: String,
+    #[serde(default)]
+    pub native_launch_parameters: String,
+    #[serde(default)]
+    pub native_compat_tool: String,
+    #[serde(default)]
+    pub native_wineprefix: String,
+    #[serde(default)]
+    pub native_game_dir: String,
+    #[serde(default)]
+    pub included_dlc: String,
+    #[serde(default)]
+    pub ps3_trophy_paths: String,
+    #[serde(default)]
+    pub ps3_game_id: String,
+    #[serde(default)]
+    pub ps3_iso_path: String,
+    #[serde(default)]
+    pub ps4_game_id: String,
+    #[serde(default)]
+    pub ps4_content: String,
+    #[serde(default)]
+    pub ra_id: String,
 }
 
 impl InstalledGame {
@@ -151,6 +230,18 @@ impl InstalledGame {
             cover_small_path: row.get(20)?,
             cover_large_path: row.get(21)?,
             screenshot_urls: row.get(22)?,
+            native_executable_path: row.get(23)?,
+            native_launch_parameters: row.get(24)?,
+            native_compat_tool: row.get(25)?,
+            native_wineprefix: row.get(26)?,
+            native_game_dir: row.get(27)?,
+            included_dlc: row.get(28)?,
+            ps3_trophy_paths: row.get(29)?,
+            ps3_game_id: row.get(30)?,
+            ps3_iso_path: row.get(31)?,
+            ps4_game_id: row.get(32)?,
+            ps4_content: row.get(33)?,
+            ra_id: row.get(34)?,
         })
     }
 }
@@ -215,6 +306,7 @@ impl Registry {
         while version < LATEST_USER_VERSION {
             match version {
                 1 => migrate_1_to_2(&mut conn)?,
+                2 => migrate_2_to_3(&mut conn)?,
                 v => {
                     return Err(LibraryError::Registry(format!(
                         "no migration from user_version {v}"
@@ -243,6 +335,9 @@ impl Registry {
             ""
         };
 
+        let ps3_game_id = rec.ps3_game_id.to_uppercase();
+        let ps4_game_id = rec.ps4_game_id.to_uppercase();
+
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO installed_games (
@@ -250,10 +345,14 @@ impl Registry {
                 archive_path, extracted_path, extracted_dir, multi_file_game_dir,
                 description, rating, genres, regions, languages, tags, revision,
                 companies, first_release_date, filesize_bytes, server_updated_at,
-                installed_at, cover_small_path, cover_large_path, screenshot_urls
+                installed_at, cover_small_path, cover_large_path, screenshot_urls,
+                native_executable_path, native_launch_parameters, native_compat_tool,
+                native_wineprefix, native_game_dir, included_dlc, ps3_trophy_paths,
+                ps3_game_id, ps3_iso_path, ps4_game_id, ps4_content, ra_id
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25
+                ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
+                ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37
             )
             ON CONFLICT(title_key, platform_key) DO UPDATE SET
                 title = excluded.title,
@@ -278,7 +377,19 @@ impl Registry {
                 installed_at = excluded.installed_at,
                 cover_small_path = excluded.cover_small_path,
                 cover_large_path = excluded.cover_large_path,
-                screenshot_urls = excluded.screenshot_urls",
+                screenshot_urls = excluded.screenshot_urls,
+                native_executable_path = excluded.native_executable_path,
+                native_launch_parameters = excluded.native_launch_parameters,
+                native_compat_tool = excluded.native_compat_tool,
+                native_wineprefix = excluded.native_wineprefix,
+                native_game_dir = excluded.native_game_dir,
+                included_dlc = excluded.included_dlc,
+                ps3_trophy_paths = excluded.ps3_trophy_paths,
+                ps3_game_id = excluded.ps3_game_id,
+                ps3_iso_path = excluded.ps3_iso_path,
+                ps4_game_id = excluded.ps4_game_id,
+                ps4_content = excluded.ps4_content,
+                ra_id = excluded.ra_id",
             params![
                 rec.title,
                 rec.platform,
@@ -305,6 +416,18 @@ impl Registry {
                 rec.cover_small_path,
                 rec.cover_large_path,
                 rec.screenshot_urls,
+                rec.native_executable_path,
+                rec.native_launch_parameters,
+                rec.native_compat_tool,
+                rec.native_wineprefix,
+                rec.native_game_dir,
+                rec.included_dlc,
+                rec.ps3_trophy_paths,
+                ps3_game_id,
+                rec.ps3_iso_path,
+                ps4_game_id,
+                rec.ps4_content,
+                rec.ra_id,
             ],
         )
         .map_err(registry_err)?;
@@ -325,6 +448,46 @@ impl Registry {
                     fields.screenshot_urls,
                     rom_id
                 ],
+            )
+            .map_err(registry_err)?;
+        Ok(affected > 0)
+    }
+
+    /// Sets the native-launch columns on the row for `rom_id`. Returns
+    /// whether a row matched. The caller re-registers a full record through
+    /// [`Registry::upsert`] for anything beyond these three fields.
+    pub fn update_native_settings(
+        &self,
+        rom_id: i64,
+        executable: &str,
+        parameters: &str,
+        compat_tool: &str,
+    ) -> Result<bool, LibraryError> {
+        let conn = self.conn.lock().unwrap();
+        let affected = conn
+            .execute(
+                "UPDATE installed_games SET native_executable_path = ?1, \
+                 native_launch_parameters = ?2, native_compat_tool = ?3 WHERE rom_id = ?4",
+                params![executable, parameters, compat_tool, rom_id],
+            )
+            .map_err(registry_err)?;
+        Ok(affected > 0)
+    }
+
+    /// Sets the PS4 title-id and content-manifest columns on the row for
+    /// `rom_id`. Returns whether a row matched.
+    pub fn update_ps4_content(
+        &self,
+        rom_id: i64,
+        game_id: &str,
+        content_json: &str,
+    ) -> Result<bool, LibraryError> {
+        let conn = self.conn.lock().unwrap();
+        let affected = conn
+            .execute(
+                "UPDATE installed_games SET ps4_game_id = ?1, ps4_content = ?2 \
+                 WHERE rom_id = ?3",
+                params![game_id, content_json, rom_id],
             )
             .map_err(registry_err)?;
         Ok(affected > 0)

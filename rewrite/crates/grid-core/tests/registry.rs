@@ -27,11 +27,36 @@ fn sample(title: &str, platform: &str) -> InstalledGame {
         cover_small_path: "/assets/s.png".into(),
         cover_large_path: "/assets/l.png".into(),
         screenshot_urls: "https://h/a.png\nhttps://h/b.png".into(),
+        ..Default::default()
     }
 }
 
+/// The twelve columns milestone 8 (registry v3) adds.
+const V3_COLUMN_NAMES: [&str; 12] = [
+    "native_executable_path",
+    "native_launch_parameters",
+    "native_compat_tool",
+    "native_wineprefix",
+    "native_game_dir",
+    "included_dlc",
+    "ps3_trophy_paths",
+    "ps3_game_id",
+    "ps3_iso_path",
+    "ps4_game_id",
+    "ps4_content",
+    "ra_id",
+];
+
+fn table_columns(conn: &Connection) -> Vec<String> {
+    let mut stmt = conn.prepare("PRAGMA table_info(installed_games)").unwrap();
+    stmt.query_map([], |row| row.get::<_, String>(1))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect()
+}
+
 #[test]
-fn open_creates_file_and_sets_user_version_2() {
+fn open_creates_file_and_sets_user_version_3() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     let registry = Registry::open(&path).unwrap();
@@ -41,7 +66,29 @@ fn open_creates_file_and_sets_user_version_2() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
+    drop(registry);
+}
+
+#[test]
+fn fresh_db_is_v3_and_has_the_twelve_columns() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    let registry = Registry::open(&path).unwrap();
+
+    let conn = Connection::open(&path).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 3);
+
+    let columns = table_columns(&conn);
+    for column in V3_COLUMN_NAMES {
+        assert!(
+            columns.iter().any(|c| c == column),
+            "fresh schema is missing {column}: {columns:?}"
+        );
+    }
     drop(registry);
 }
 
@@ -208,11 +255,13 @@ fn open_migrates_a_v1_database_and_update_images_round_trips() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     let rows = registry.all().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].cover_small_path, "");
     assert_eq!(rows[0].screenshot_urls, "");
+    assert_eq!(rows[0].native_executable_path, "");
+    assert_eq!(rows[0].ra_id, "");
 
     let fields = ImageFields {
         cover_small_path: "/s.png".into(),
@@ -254,15 +303,16 @@ fn open_migrates_a_v1_database_that_already_has_one_v2_column() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
 
-    let mut stmt = conn.prepare("PRAGMA table_info(installed_games)").unwrap();
-    let columns: Vec<String> = stmt
-        .query_map([], |row| row.get::<_, String>(1))
-        .unwrap()
-        .map(|r| r.unwrap())
-        .collect();
+    let columns = table_columns(&conn);
     for column in ["cover_small_path", "cover_large_path", "screenshot_urls"] {
+        assert!(
+            columns.iter().any(|c| c == column),
+            "migrated schema is missing {column}: {columns:?}"
+        );
+    }
+    for column in V3_COLUMN_NAMES {
         assert!(
             columns.iter().any(|c| c == column),
             "migrated schema is missing {column}: {columns:?}"
@@ -280,6 +330,192 @@ fn open_migrates_a_v1_database_that_already_has_one_v2_column() {
     };
     assert!(registry.update_images(7, &fields).unwrap());
     assert_eq!(registry.all().unwrap()[0].cover_large_path, "/l.png");
+}
+
+/// v2 schema: v1 plus the three milestone-7 image columns, hand-built the
+/// same way `migrate_1_to_2` would leave it, at `user_version` 2.
+fn v2_schema() -> String {
+    format!(
+        "{V1_SCHEMA}
+        ALTER TABLE installed_games ADD COLUMN cover_small_path TEXT NOT NULL DEFAULT '';
+        ALTER TABLE installed_games ADD COLUMN cover_large_path TEXT NOT NULL DEFAULT '';
+        ALTER TABLE installed_games ADD COLUMN screenshot_urls TEXT NOT NULL DEFAULT '';"
+    )
+}
+
+#[test]
+fn migrates_v1_to_v3_transactionally() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(V1_SCHEMA).unwrap();
+        conn.execute("INSERT INTO installed_games (title, platform, title_key, platform_key, rom_id, installed_at)
+                      VALUES ('Old', 'SNES', 'old', 'snes', 7, 1)", []).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+    }
+
+    let registry = Registry::open(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 3);
+
+    let columns = table_columns(&conn);
+    for column in V3_COLUMN_NAMES {
+        assert!(
+            columns.iter().any(|c| c == column),
+            "migrated schema is missing {column}: {columns:?}"
+        );
+    }
+
+    let rows = registry.all().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].title, "Old");
+    assert_eq!(rows[0].native_executable_path, "");
+    assert_eq!(rows[0].ps3_game_id, "");
+    assert_eq!(rows[0].ps4_content, "");
+    assert_eq!(rows[0].ra_id, "");
+}
+
+#[test]
+fn migrates_v2_to_v3() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(&v2_schema()).unwrap();
+        conn.execute("INSERT INTO installed_games (title, platform, title_key, platform_key, rom_id, installed_at)
+                      VALUES ('Two', 'SNES', 'two', 'snes', 7, 1)", []).unwrap();
+        conn.pragma_update(None, "user_version", 2).unwrap();
+    }
+
+    let registry = Registry::open(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 3);
+
+    let columns = table_columns(&conn);
+    for column in V3_COLUMN_NAMES {
+        assert!(
+            columns.iter().any(|c| c == column),
+            "migrated schema is missing {column}: {columns:?}"
+        );
+    }
+
+    let rows = registry.all().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].title, "Two");
+    assert_eq!(rows[0].ra_id, "");
+}
+
+#[test]
+fn migration_is_idempotent_when_columns_preexist() {
+    // A v2 database that already has `ra_id` added by hand — e.g. a database
+    // torn by an earlier, non-transactional version of this migration.
+    // `migrate_2_to_3` must skip the column PRAGMA table_info already lists
+    // rather than failing with "duplicate column name".
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(&v2_schema()).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE installed_games ADD COLUMN ra_id TEXT NOT NULL DEFAULT '';",
+        )
+        .unwrap();
+        conn.execute("INSERT INTO installed_games (title, platform, title_key, platform_key, rom_id, installed_at)
+                      VALUES ('Torn', 'SNES', 'torn', 'snes', 7, 1)", []).unwrap();
+        conn.pragma_update(None, "user_version", 2).unwrap();
+    }
+
+    let registry = Registry::open(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 3);
+
+    let columns = table_columns(&conn);
+    for column in V3_COLUMN_NAMES {
+        assert!(
+            columns.iter().any(|c| c == column),
+            "migrated schema is missing {column}: {columns:?}"
+        );
+    }
+    let rows = registry.all().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].title, "Torn");
+}
+
+#[test]
+fn upsert_round_trips_new_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Registry::open(&dir.path().join("grid-launcher.db")).unwrap();
+    let mut game = sample("Native Game", "Linux");
+    game.native_executable_path = "/path/to/exe".into();
+    game.native_launch_parameters = "--fullscreen".into();
+    game.native_compat_tool = "proton".into();
+    game.native_wineprefix = "/prefix".into();
+    game.native_game_dir = "/gamedir".into();
+    game.included_dlc = "dlc1,dlc2".into();
+    game.ps3_trophy_paths = "/trophies".into();
+    game.ps3_game_id = "blus30336".into();
+    game.ps3_iso_path = "/iso".into();
+    game.ps4_game_id = "cusa00001".into();
+    game.ps4_content = "{}".into();
+    game.ra_id = "12345".into();
+    registry.upsert(&game).unwrap();
+
+    let all = registry.all().unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].native_executable_path, "/path/to/exe");
+    assert_eq!(all[0].native_launch_parameters, "--fullscreen");
+    assert_eq!(all[0].native_compat_tool, "proton");
+    assert_eq!(all[0].native_wineprefix, "/prefix");
+    assert_eq!(all[0].native_game_dir, "/gamedir");
+    assert_eq!(all[0].included_dlc, "dlc1,dlc2");
+    assert_eq!(all[0].ps3_trophy_paths, "/trophies");
+    assert_eq!(all[0].ps3_game_id, "BLUS30336");
+    assert_eq!(all[0].ps3_iso_path, "/iso");
+    assert_eq!(all[0].ps4_game_id, "CUSA00001");
+    assert_eq!(all[0].ps4_content, "{}");
+    assert_eq!(all[0].ra_id, "12345");
+}
+
+#[test]
+fn update_native_settings_and_ps4_content_return_false_for_unknown_rom() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Registry::open(&dir.path().join("grid-launcher.db")).unwrap();
+    assert!(!registry
+        .update_native_settings(999, "/exe", "--args", "proton")
+        .unwrap());
+    assert!(!registry.update_ps4_content(999, "cusa00001", "{}").unwrap());
+}
+
+#[test]
+fn update_native_settings_and_ps4_content_return_true_and_write_fields() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Registry::open(&dir.path().join("grid-launcher.db")).unwrap();
+    // sample()'s rom_id is Some(42).
+    registry.upsert(&sample("Zelda", "SNES")).unwrap();
+
+    assert!(registry
+        .update_native_settings(42, "/exe", "--args", "proton")
+        .unwrap());
+    assert!(registry
+        .update_ps4_content(42, "cusa00001", "{\"x\":1}")
+        .unwrap());
+
+    let row = registry.all().unwrap().into_iter().next().unwrap();
+    assert_eq!(row.native_executable_path, "/exe");
+    assert_eq!(row.native_launch_parameters, "--args");
+    assert_eq!(row.native_compat_tool, "proton");
+    assert_eq!(row.ps4_game_id, "cusa00001");
+    assert_eq!(row.ps4_content, "{\"x\":1}");
 }
 
 #[test]
