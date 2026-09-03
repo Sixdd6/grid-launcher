@@ -10,6 +10,17 @@
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
+/// One routed firmware directory from a profile's `firmware_directories`
+/// catalog entry (`_resolved_firmware_directories`, cloud_mixin.py:1055).
+/// `keywords` is `None` for a plain string entry (accepts any firmware
+/// file); `Some` for an object entry, filtering to files whose name
+/// contains one of the (already trimmed, lower-cased) keywords.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct FirmwareDirSpec {
+    pub path: String,
+    pub keywords: Option<Vec<String>>,
+}
+
 /// One entry from `emulator-autoprofiles.json`, normalized at load time.
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 pub struct EmulatorProfile {
@@ -50,6 +61,17 @@ pub struct EmulatorProfile {
     /// with no `EmulatorEntry` field to win over it first.
     #[serde(skip_serializing)]
     pub screenshot_directories: Vec<String>,
+    /// Routed firmware directories the profile declares
+    /// (`firmware_directories`, cloud_mixin.py:1055) — read by
+    /// `FirmwareDirSpec` consumers to decide where a downloaded firmware
+    /// file belongs. Never sent over IPC, matching `source` above.
+    #[serde(skip_serializing)]
+    pub firmware_directories: Vec<FirmwareDirSpec>,
+    /// The compat tool family this profile represents (currently only
+    /// `"proton"`, on GE-Proton and Proton-CachyOS), or `""` for an
+    /// ordinary emulator profile.
+    #[serde(skip_serializing)]
+    pub compat_tool_type: String,
 }
 
 /// Emulator autoprofile slugs that ship a Windows-only build and therefore
@@ -99,6 +121,10 @@ struct RawProfile {
     ignore_extensions: Vec<String>,
     #[serde(default)]
     screenshot_directories: Vec<String>,
+    #[serde(default)]
+    firmware_directories: Vec<serde_json::Value>,
+    #[serde(default)]
+    compat_tool_type: String,
 }
 
 /// The parsed, normalized autoprofile catalog, embedded at build time and
@@ -165,7 +191,91 @@ fn normalize_one(raw: RawProfile) -> Option<EmulatorProfile> {
         ignore_files: trimmed_non_blank(&raw.ignore_files),
         ignore_extensions: trimmed_non_blank(&raw.ignore_extensions),
         screenshot_directories: trimmed_non_blank(&raw.screenshot_directories),
+        firmware_directories: raw
+            .firmware_directories
+            .iter()
+            .filter_map(firmware_dir_spec)
+            .collect(),
+        compat_tool_type: raw.compat_tool_type,
     })
+}
+
+/// Normalizes one `firmware_directories` catalog entry
+/// (`_resolved_firmware_directories`, cloud_mixin.py:1055-1075): a non-blank
+/// string becomes a spec with no keyword filter; an object with a non-blank
+/// string `path` and a list `match` whose trimmed, lower-cased, non-empty
+/// strings are non-empty becomes a spec filtered to those keywords;
+/// anything else (a blank string, an object with a blank path, a non-list
+/// `match`, or a `match` that normalizes to nothing) is dropped.
+fn firmware_dir_spec(raw: &serde_json::Value) -> Option<FirmwareDirSpec> {
+    match raw {
+        serde_json::Value::String(s) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(FirmwareDirSpec {
+                    path: trimmed.to_string(),
+                    keywords: None,
+                })
+            }
+        }
+        serde_json::Value::Object(obj) => {
+            let path = obj.get("path")?.as_str()?.trim();
+            if path.is_empty() {
+                return None;
+            }
+            let match_list = obj.get("match")?.as_array()?;
+            let keywords: Vec<String> = match_list
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(|item| item.trim().to_lowercase())
+                .filter(|item| !item.is_empty())
+                .collect();
+            if keywords.is_empty() {
+                return None;
+            }
+            Some(FirmwareDirSpec {
+                path: path.to_string(),
+                keywords: Some(keywords),
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Whether `profile` can run on `host` (`sys.platform`-shaped, e.g. `linux`,
+/// `win32`, `darwin`) — `is_available_on_current_platform`
+/// (profiles.py:22-56). Windows always allows everything; elsewhere a
+/// Windows-only slug is gated out, and an explicit non-empty
+/// `source.platforms` allowlist that omits the host gates out the rest.
+pub fn profile_available_on_host(profile: &EmulatorProfile, host: &str) -> bool {
+    let host_casefold = host.to_lowercase();
+    if host_casefold.starts_with("win") {
+        return true;
+    }
+
+    if WINDOWS_ONLY_SLUGS.contains(&profile.name.trim().to_lowercase().as_str()) {
+        return false;
+    }
+
+    let Some(source) = &profile.source else {
+        return true;
+    };
+    let Some(platforms) = source.get("platforms").and_then(|p| p.as_array()) else {
+        return true;
+    };
+    let allowed: HashSet<String> = platforms
+        .iter()
+        .filter_map(|p| p.as_str())
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+        .map(|p| p.to_lowercase())
+        .collect();
+    if !allowed.is_empty() && !allowed.contains(&host_casefold) {
+        return false;
+    }
+    true
 }
 
 /// Each item trimmed, blank items dropped — the shape every cloud-save list
@@ -877,5 +987,157 @@ mod tests {
         assert_eq!(stem_of("pcsx2-qt.exe"), "pcsx2-qt");
         assert_eq!(stem_of("archive.tar.gz"), "archive.tar");
         assert_eq!(stem_of("no-extension"), "no-extension");
+    }
+
+    // --- firmware_directories / compat_tool_type ----------------------------
+
+    #[test]
+    fn retroarch_firmware_directories_is_one_plain_spec() {
+        let profiles = load_profiles();
+        let retroarch = profiles
+            .iter()
+            .find(|p| p.name == "RetroArch (Multi-System)")
+            .unwrap();
+        assert_eq!(
+            retroarch.firmware_directories,
+            vec![FirmwareDirSpec {
+                path: "system".to_string(),
+                keywords: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn eden_firmware_directories_are_routed_by_keyword() {
+        let profiles = load_profiles();
+        let eden = profiles
+            .iter()
+            .find(|p| p.name == "Eden (Nintendo Switch)")
+            .unwrap();
+        assert_eq!(
+            eden.firmware_directories,
+            vec![
+                FirmwareDirSpec {
+                    path: "user/keys".to_string(),
+                    keywords: Some(vec!["keys".to_string()]),
+                },
+                FirmwareDirSpec {
+                    path: "user/nand/system/Contents/registered".to_string(),
+                    keywords: Some(vec!["firmware".to_string()]),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn ge_proton_is_a_proton_compat_tool_type() {
+        let profiles = load_profiles();
+        let ge_proton = profiles.iter().find(|p| p.name == "GE-Proton").unwrap();
+        assert_eq!(ge_proton.compat_tool_type, "proton");
+    }
+
+    #[test]
+    fn non_compat_tool_profiles_have_no_compat_tool_type() {
+        let profiles = load_profiles();
+        let retroarch = profiles
+            .iter()
+            .find(|p| p.name == "RetroArch (Multi-System)")
+            .unwrap();
+        assert_eq!(retroarch.compat_tool_type, "");
+    }
+
+    #[test]
+    fn firmware_dir_spec_drops_blank_string() {
+        assert_eq!(firmware_dir_spec(&serde_json::json!("   ")), None);
+    }
+
+    #[test]
+    fn firmware_dir_spec_drops_object_with_blank_path() {
+        assert_eq!(
+            firmware_dir_spec(&serde_json::json!({"path": "  ", "match": ["keys"]})),
+            None
+        );
+    }
+
+    #[test]
+    fn firmware_dir_spec_drops_object_with_non_list_match() {
+        assert_eq!(
+            firmware_dir_spec(&serde_json::json!({"path": "user/keys", "match": "keys"})),
+            None
+        );
+    }
+
+    #[test]
+    fn firmware_dir_spec_drops_object_whose_keywords_normalize_to_nothing() {
+        assert_eq!(
+            firmware_dir_spec(&serde_json::json!({"path": "user/keys", "match": ["  ", 5]})),
+            None
+        );
+    }
+
+    #[test]
+    fn firmware_dir_spec_trims_and_lowercases_keywords() {
+        assert_eq!(
+            firmware_dir_spec(
+                &serde_json::json!({"path": " user/keys ", "match": [" KEYS ", "Prod"]})
+            ),
+            Some(FirmwareDirSpec {
+                path: "user/keys".to_string(),
+                keywords: Some(vec!["keys".to_string(), "prod".to_string()]),
+            })
+        );
+    }
+
+    // --- profile_available_on_host ------------------------------------------
+
+    #[test]
+    fn xenia_canary_unavailable_on_linux() {
+        let profiles = load_profiles();
+        let xenia_canary = profiles
+            .iter()
+            .find(|p| p.name == "Xenia Canary (Xbox 360)")
+            .unwrap();
+        assert!(!profile_available_on_host(xenia_canary, "linux"));
+    }
+
+    #[test]
+    fn xenia_canary_available_on_windows() {
+        let profiles = load_profiles();
+        let xenia_canary = profiles
+            .iter()
+            .find(|p| p.name == "Xenia Canary (Xbox 360)")
+            .unwrap();
+        assert!(profile_available_on_host(xenia_canary, "win32"));
+    }
+
+    #[test]
+    fn xenia_edge_available_on_linux() {
+        let profiles = load_profiles();
+        let xenia_edge = profiles
+            .iter()
+            .find(|p| p.name == "Xenia Edge (Xbox 360)")
+            .unwrap();
+        assert!(profile_available_on_host(xenia_edge, "linux"));
+    }
+
+    #[test]
+    fn windows_host_always_available_regardless_of_slug() {
+        let p = profile("Xenia Canary (Xbox 360)", &["xenia"], false);
+        assert!(profile_available_on_host(&p, "win32"));
+    }
+
+    #[test]
+    fn non_windows_only_profile_with_no_source_is_available_everywhere() {
+        let p = profile("Pico-8", &["pico-8"], false);
+        assert!(profile_available_on_host(&p, "linux"));
+        assert!(profile_available_on_host(&p, "darwin"));
+    }
+
+    #[test]
+    fn source_platforms_allowlist_gates_out_hosts_not_listed() {
+        let mut p = profile("Some Emu", &["someemu"], false);
+        p.source = Some(serde_json::json!({"platforms": ["darwin"]}));
+        assert!(!profile_available_on_host(&p, "linux"));
+        assert!(profile_available_on_host(&p, "darwin"));
     }
 }

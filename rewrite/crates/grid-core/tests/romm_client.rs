@@ -2,7 +2,7 @@ use base64::Engine;
 use grid_core::romm::{RommClient, RommError};
 use grid_core::secrets::Credential;
 use secrecy::SecretString;
-use wiremock::matchers::{header, method, path};
+use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn token_cred() -> Credential {
@@ -117,5 +117,91 @@ async fn errors_survive_non_ascii_body_without_panicking() {
     match err {
         RommError::Http { status, .. } => assert_eq!(status, 500),
         other => panic!("expected Http error, got {other:?}"),
+    }
+}
+
+// --- firmware -----------------------------------------------------------
+
+#[tokio::test]
+async fn firmware_sends_the_platform_id_query_param_and_decodes_items() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/firmware"))
+        .and(query_param("platform_id", "19"))
+        .and(header("authorization", "Bearer FAKE-TEST-TOKEN-not-real"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"id": 42, "file_name": "scph5501.bin"},
+            {"id": 43, "file_name": "scph5502.bin"}
+        ])))
+        .mount(&server)
+        .await;
+    let client = RommClient::new(&server.uri(), token_cred()).unwrap();
+    let firmware = client.firmware(19).await.unwrap();
+    assert_eq!(firmware.len(), 2);
+    assert_eq!(firmware[0].id, 42);
+    assert_eq!(firmware[0].file_name, "scph5501.bin");
+    assert_eq!(firmware[1].id, 43);
+    assert_eq!(firmware[1].file_name, "scph5502.bin");
+}
+
+#[tokio::test]
+async fn firmware_skips_items_without_an_integer_id() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/firmware"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
+            {"id": 1, "file_name": "good.bin"},
+            {"file_name": "missing-id.bin"},
+            {"id": "not-a-number", "file_name": "bad-id.bin"}
+        ])))
+        .mount(&server)
+        .await;
+    let client = RommClient::new(&server.uri(), token_cred()).unwrap();
+    let firmware = client.firmware(19).await.unwrap();
+    assert_eq!(firmware.len(), 1);
+    assert_eq!(firmware[0].id, 1);
+}
+
+#[tokio::test]
+async fn firmware_non_array_body_yields_empty_vec() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/firmware"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"detail": "nope"})),
+        )
+        .mount(&server)
+        .await;
+    let client = RommClient::new(&server.uri(), token_cred()).unwrap();
+    let firmware = client.firmware(19).await.unwrap();
+    assert!(firmware.is_empty());
+}
+
+#[tokio::test]
+async fn firmware_bytes_encodes_the_file_name_and_returns_the_body() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/firmware/42/content/my%20firmware.bin"))
+        .and(header("authorization", "Bearer FAKE-TEST-TOKEN-not-real"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"firmware-bytes".to_vec()))
+        .mount(&server)
+        .await;
+    let client = RommClient::new(&server.uri(), token_cred()).unwrap();
+    let bytes = client.firmware_bytes(42, "my firmware.bin").await.unwrap();
+    assert_eq!(bytes, b"firmware-bytes".to_vec());
+}
+
+#[tokio::test]
+async fn firmware_bytes_unauthorized_maps_to_auth_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/firmware/42/content/scph5501.bin"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    let client = RommClient::new(&server.uri(), token_cred()).unwrap();
+    match client.firmware_bytes(42, "scph5501.bin").await {
+        Err(RommError::Unauthorized) => {}
+        other => panic!("expected Unauthorized, got {other:?}"),
     }
 }

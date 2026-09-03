@@ -104,7 +104,7 @@ const FILE_SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'_')
     .remove(b'~');
 
-fn encode_file_segment(name: &str) -> String {
+pub(crate) fn encode_file_segment(name: &str) -> String {
     utf8_percent_encode(name, FILE_SEGMENT).to_string()
 }
 

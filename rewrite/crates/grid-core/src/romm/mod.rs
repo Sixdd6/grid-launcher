@@ -179,6 +179,18 @@ pub struct Platform {
     pub rom_count: i64,
 }
 
+/// One firmware file the server offers for a platform. The wire schema
+/// carries more fields (`file_size_bytes`, `crc_hash`, ...) this crate does
+/// not read; `#[serde(default)]` on `file_name` means an item missing it
+/// still decodes rather than being dropped by [`RommClient::firmware`]'s
+/// lenient per-item filter — only a missing/non-integer `id` drops an item.
+#[derive(Debug, Clone, Deserialize)]
+pub struct FirmwareRecord {
+    pub id: i64,
+    #[serde(default)]
+    pub file_name: String,
+}
+
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct GameSummary {
     pub id: i64,
@@ -274,6 +286,39 @@ impl RommClient {
             offset += PAGE_SIZE;
         }
         Ok(out)
+    }
+
+    /// `GET /api/firmware?platform_id=<id>` (`fetch_platform_firmware`,
+    /// firmware_install.py:27-30). The server's `FirmwareSchema` carries
+    /// more fields than this crate reads; each array item is decoded
+    /// leniently so one malformed/unexpected entry doesn't fail the whole
+    /// list — only items with an integer `id` are kept. A non-array body
+    /// (Python's `isinstance(firmware, list)` guard) yields an empty vec
+    /// rather than an error.
+    pub async fn firmware(&self, platform_id: i64) -> Result<Vec<FirmwareRecord>, RommError> {
+        let value: serde_json::Value = self
+            .get_json("/api/firmware", &[("platform_id", platform_id.to_string())])
+            .await?;
+        let Some(items) = value.as_array() else {
+            return Ok(Vec::new());
+        };
+        Ok(items
+            .iter()
+            .filter_map(|item| serde_json::from_value::<FirmwareRecord>(item.clone()).ok())
+            .collect())
+    }
+
+    /// `GET /api/firmware/{id}/content/{file_name}` (`download_firmware_bytes`,
+    /// firmware_install.py:33-34). `file_name` is percent-encoded the same
+    /// way a ROM content file name is (see `library::encode_file_segment`)
+    /// so a name containing a space or reserved character can't change the
+    /// shape of the request.
+    pub async fn firmware_bytes(&self, id: i64, file_name: &str) -> Result<Vec<u8>, RommError> {
+        self.get_bytes(&format!(
+            "/api/firmware/{id}/content/{}",
+            crate::library::encode_file_segment(file_name)
+        ))
+        .await
     }
 
     pub async fn rom_detail(&self, rom_id: i64) -> Result<RomDetail, RommError> {

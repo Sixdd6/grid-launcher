@@ -48,6 +48,22 @@ pub struct EmulatorEntry {
     pub state_paths: String,
 }
 
+/// One compat tool (e.g. GE-Proton, Proton-CachyOS) GRID installed and
+/// manages, recorded so the app can offer it as a launch option and detect
+/// it is already present without re-downloading. All fields default to `""`
+/// so a config saved before this type existed round-trips unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct CompatToolInstall {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub source_id: String,
+    #[serde(default)]
+    pub release_tag: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("config io: {0}")]
@@ -119,6 +135,16 @@ pub struct Config {
     /// entries. `grid-launcher.py:434`.
     #[serde(default)]
     pub native_manual_save_paths: BTreeMap<String, Vec<String>>,
+    /// The compat tool (by name) offered as the default for Windows-only
+    /// content on Linux/macOS, e.g. `"GE-Proton"`. Blank when unset.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub default_compat_tool: String,
+    /// Compat tools GRID has installed and manages, keyed by nothing in
+    /// particular — matched by `name` at read sites. Empty when none are
+    /// installed, so a config saved before this field existed round-trips
+    /// unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compat_tool_installs: Vec<CompatToolInstall>,
     /// Unknown keys survive load/save round trips for forward compatibility.
     #[serde(flatten)]
     pub extra: BTreeMap<String, toml::Value>,
@@ -155,6 +181,8 @@ impl Default for Config {
             cloud_save_retention_limit: 3,
             cloud_sync_state: toml::value::Table::new(),
             native_manual_save_paths: BTreeMap::new(),
+            default_compat_tool: String::new(),
+            compat_tool_installs: Vec::new(),
             extra: BTreeMap::new(),
         }
     }
@@ -684,5 +712,59 @@ mod tests {
             "wrong-typed field round-trips raw, unnormalized"
         );
         assert!(!loaded.extra.contains_key("cloud_sync_state"));
+    }
+
+    #[test]
+    fn compat_tool_config_defaults() {
+        let cfg = Config::default();
+        assert_eq!(cfg.default_compat_tool, "");
+        assert!(cfg.compat_tool_installs.is_empty());
+    }
+
+    #[test]
+    fn config_without_compat_tool_fields_writes_no_new_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config {
+            emulators: vec![EmulatorEntry {
+                name: "emulator1".into(),
+                path: "/path/to/emu1".into(),
+                args: "--arg1".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("\ndefault_compat_tool ="));
+        assert!(!written.contains("\ncompat_tool_installs"));
+    }
+
+    #[test]
+    fn compat_tool_install_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config {
+            default_compat_tool: "GE-Proton".into(),
+            compat_tool_installs: vec![CompatToolInstall {
+                name: "GE-Proton".into(),
+                path: "/home/six/.local/share/compat-tools/GE-Proton9-20".into(),
+                source_id: "GloriousEggroll/proton-ge-custom".into(),
+                release_tag: "GE-Proton9-20".into(),
+            }],
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.default_compat_tool, "GE-Proton");
+        assert_eq!(loaded.compat_tool_installs.len(), 1);
+        let install = &loaded.compat_tool_installs[0];
+        assert_eq!(install.name, "GE-Proton");
+        assert_eq!(
+            install.path,
+            "/home/six/.local/share/compat-tools/GE-Proton9-20"
+        );
+        assert_eq!(install.source_id, "GloriousEggroll/proton-ge-custom");
+        assert_eq!(install.release_tag, "GE-Proton9-20");
     }
 }
