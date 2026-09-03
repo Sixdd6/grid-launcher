@@ -365,60 +365,6 @@
     gap: 20px;
   }
 
-  @container (min-width: 900px) {
-    .layout {
-      grid-template-columns: 240px 1fr 220px;
-      grid-template-rows: auto auto;
-      align-items: start;
-    }
-
-    .cover {
-      grid-column: 1;
-      grid-row: 1 / 3;
-      max-width: none;
-      margin: 0;
-    }
-
-    .center-top {
-      grid-column: 2;
-      grid-row: 1;
-      text-align: left;
-      align-items: flex-start;
-    }
-
-    .center-bottom {
-      grid-column: 2;
-      grid-row: 2;
-      text-align: left;
-      align-items: flex-start;
-    }
-
-    .chip {
-      align-self: flex-start;
-    }
-
-    .shots,
-    .shots-empty {
-      grid-column: 3;
-      grid-row: 1 / 3;
-    }
-
-    .shots {
-      flex-direction: column;
-      overflow-x: hidden;
-      overflow-y: auto;
-      max-height: min(70vh, 640px);
-      padding-bottom: 0;
-      padding-right: 4px;
-    }
-
-    .shots :global(img) {
-      width: 100%;
-      height: auto;
-      flex: none;
-    }
-  }
-
   .close {
     position: absolute;
     top: 8px;
@@ -624,5 +570,61 @@
   .dismiss:hover,
   .dismiss:focus-visible {
     background: var(--border);
+  }
+
+  /* Container-query overrides must come after every base rule they
+     override (same specificity; source order decides the winner). */
+  @container (min-width: 900px) {
+    .layout {
+      grid-template-columns: 240px 1fr 220px;
+      grid-template-rows: auto auto;
+      align-items: start;
+    }
+
+    .cover {
+      grid-column: 1;
+      grid-row: 1 / 3;
+      max-width: none;
+      margin: 0;
+    }
+
+    .center-top {
+      grid-column: 2;
+      grid-row: 1;
+      text-align: left;
+      align-items: flex-start;
+    }
+
+    .center-bottom {
+      grid-column: 2;
+      grid-row: 2;
+      text-align: left;
+      align-items: flex-start;
+    }
+
+    .chip {
+      align-self: flex-start;
+    }
+
+    .shots,
+    .shots-empty {
+      grid-column: 3;
+      grid-row: 1 / 3;
+    }
+
+    .shots {
+      flex-direction: column;
+      overflow-x: hidden;
+      overflow-y: auto;
+      max-height: min(70vh, 640px);
+      padding-bottom: 0;
+      padding-right: 4px;
+    }
+
+    .shots :global(img) {
+      width: 100%;
+      height: auto;
+      flex: none;
+    }
   }
 </style>
