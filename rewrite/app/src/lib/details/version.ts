@@ -26,8 +26,8 @@ export function isWindowsPcPlatform(platform: string): boolean {
 
 /**
  * `_details_version_label_text_for_game`: for a Windows/PC platform, the
- * first tag found in `romFileNames` (server fs_name first, then the
- * installed row's rom_file_name) renders as `Version: v…`; otherwise the
+ * first tag found in `romFileNames` (see `romFileNamesFor` for the order)
+ * renders as `Version: v…`; otherwise the
  * trimmed `revision` verbatim (no prefix — Python parity); `''` hides the row.
  */
 export function versionLabel(platform: string, romFileNames: string[], revision: string): string {
@@ -38,4 +38,19 @@ export function versionLabel(platform: string, romFileNames: string[], revision:
     }
   }
   return revision.trim();
+}
+
+/**
+ * The order `versionLabel` reads the two candidate file names in, following
+ * the subject's source: Python's `_default_details_version_label_text`
+ * (game_views.py:259-268) reads the details game first and only then the
+ * installed record, so a Library-opened game names the version it HAS rather
+ * than the newer one waiting on the server.
+ */
+export function romFileNamesFor(
+  source: 'server' | 'installed',
+  installedName: string,
+  serverName: string
+): string[] {
+  return source === 'installed' ? [installedName, serverName] : [serverName, installedName];
 }

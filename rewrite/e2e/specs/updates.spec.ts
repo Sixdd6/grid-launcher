@@ -42,32 +42,6 @@ const SELF_UPDATE_TAG = 'v9.9.9-e2e';
  * the request at the mock forge, which answers with tag `v9.9.9-e2e` —
  * newer than any version the app can report.
  *
- * ---------------------------------------------------------------------------
- * FOUR TESTS ARE `it.skip` PENDING TWO APP-SIDE EVENT RACES. Both were
- * isolated by driving the app's own commands from this spec
- * (`.superpowers/sdd/2026-09-03-identity-updates/task-7-report.md`), and
- * neither is a harness problem:
- *
- * A. `updates-changed` is LOST on connect. `list_updates` returns
- *    `[{801,"Update"},{802,"Update to v1.1.0"}]` — the backend is exactly
- *    right — but `updates.svelte.ts`'s `init()` does `await refresh()` and
- *    only THEN `listen()`, while `connect` has already spawned the pass
- *    (commands.rs). Against the local mock the pass finishes and emits
- *    inside that gap, so the frontend store stays empty: no badge, and no
- *    `details-update` button. A later emit is received normally, which is
- *    what proves the listener itself is fine. Fix: listen before refresh.
- *
- * B. `app-update-available` is LOST at startup. The forge request IS made
- *    and answered 200 (`last-run-forge-requests.log`), but
- *    `app_update::spawn_check` emits from Tauri's `setup`, long before the
- *    webview mounts App.svelte and registers `initAppUpdate`. Nothing
- *    re-emits, so the banner never appears.
- *
- * Un-skipping is a one-word change once those land; every skipped assertion
- * below was verified green in a run that re-triggered the update pass after
- * the listener was registered.
- * ---------------------------------------------------------------------------
- *
  * Queue ids across this spec's single app instance: 1 = rom 801's update,
  * 2 = rom 802's native update. The spec still resolves the newest drawer row
  * by id rather than hardcoding those, so an extra background job admitted
@@ -156,9 +130,7 @@ describe('updates', () => {
     });
   });
 
-  // SKIPPED — defect A (`updates-changed` lost on connect); see the block
-  // comment above. The backend set is correct; the frontend store is empty.
-  it.skip('badges only the two games the server really has a newer copy of', async () => {
+  it('badges only the two games the server really has a newer copy of', async () => {
     // The update set is recomputed on connect and announced by
     // `updates-changed`, so the positives are what to WAIT for; only once
     // both are on screen is the absence of the other two meaningful.
@@ -185,9 +157,7 @@ describe('updates', () => {
     });
   });
 
-  // SKIPPED — defect B (`app-update-available` emitted before the webview
-  // registers its listener); see the block comment above.
-  it.skip('announces a newer launcher release and lets it be dismissed', async () => {
+  it('announces a newer launcher release and lets it be dismissed', async () => {
     await $(testId('app-update-banner')).waitForExist({
       timeout: APP_START_TIMEOUT,
       timeoutMsg: 'the self-update banner never appeared for the mock forge release',
@@ -204,8 +174,7 @@ describe('updates', () => {
     });
   });
 
-  // SKIPPED — defect A: `details-update` is driven by the same empty store.
-  it.skip('updates a non-native game by re-installing the newer server copy', async () => {
+  it('updates a non-native game by re-installing the newer server copy', async () => {
     await openDetails(801);
     // No version row: SNES is not a Windows/PC platform and the fixture
     // carries no revision, so `versionLabel` yields nothing to show.
@@ -236,17 +205,12 @@ describe('updates', () => {
     });
   });
 
-  // SKIPPED — defect A: `details-update` is driven by the same empty store.
-  it.skip('merges a native update over the install, preserving saves', async () => {
+  it('merges a native update over the install, preserving saves', async () => {
     await openDetails(802);
-    // Deliberately v1.1.0, NOT the installed v1.0.0: Details resolves the
-    // version row from `detail.fs_name` first and only falls back to the
-    // installed row's `rom_file_name` (details/version.ts's call site in
-    // Details.svelte), so the label already names the SERVER's version.
-    // Python's `_default_details_version_label_text` (game_views.py:259)
-    // reads the installed row only — the divergence is recorded as defect C
-    // in .superpowers/sdd/2026-09-03-identity-updates/task-7-report.md.
-    await expect($(testId('details-version'))).toHaveText('Version: v1.1.0');
+    // The INSTALLED version, not the server's: a Library-opened subject
+    // reads its own `rom_file_name` first (`romFileNamesFor`), so the row
+    // names what is on disk while the button names what it can become.
+    await expect($(testId('details-version'))).toHaveText('Version: v1.0.0');
     await expect($(testId('details-update'))).toHaveText('Update to v1.1.0');
 
     // Native updates confirm first (doc 10): the first click only states

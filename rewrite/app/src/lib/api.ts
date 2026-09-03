@@ -366,5 +366,6 @@ export const api = {
   listUpdates: () => invoke<UpdateRow[]>('list_updates'),
   updateGame: (romId: number) => invoke<void>('update_game', { romId }),
   appVersion: () => invoke<string>('app_version'),
+  appUpdateNotice: () => invoke<AppUpdateNotice | null>('app_update_notice'),
   openReleasePage: (url: string) => invoke<void>('open_release_page', { url }),
 };

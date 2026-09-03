@@ -43,6 +43,9 @@ pub struct AppState {
     /// The transient set of games with a newer server version, and the
     /// triggers that recompute it. See `update_service.rs`.
     pub updates: Arc<crate::update_service::UpdateService>,
+    /// The launcher's own self-update notice, pullable because the startup
+    /// check can emit before the webview listens. See `app_update.rs`.
+    pub app_update: Arc<crate::app_update::AppUpdateState>,
 }
 
 pub(crate) fn err(e: impl std::fmt::Display) -> String {

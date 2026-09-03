@@ -9,6 +9,7 @@ use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
 use super::{err, AppState};
+use crate::app_update::AppUpdateNotice;
 use crate::update_service::{UpdateRow, UPDATE_GONE};
 
 /// The only URL prefix `open_release_page` will hand to the OS.
@@ -73,6 +74,14 @@ pub async fn update_game(
     } else {
         install.install_update(client, rom_id).await.map_err(err)
     }
+}
+
+/// The self-update notice the startup check produced, if any. The banner's
+/// event listener can register after the check has already emitted, so the
+/// frontend pulls this once on mount as well as listening.
+#[tauri::command]
+pub fn app_update_notice(state: State<'_, AppState>) -> Option<AppUpdateNotice> {
+    state.app_update.get()
 }
 
 #[tauri::command]

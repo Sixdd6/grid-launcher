@@ -11,7 +11,7 @@
   import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
   import { cloudButtonLabel, isNativeExecutablePlatform, syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
   import { contentButtons, installLabel, isContentPlatform, isNativePlatform } from './details/actions';
-  import { versionLabel } from './details/version';
+  import { romFileNamesFor, versionLabel } from './details/version';
 
   let {
     subject,
@@ -129,7 +129,7 @@
   let version = $derived(
     versionLabel(
       subject.platformName,
-      [detail?.fs_name ?? '', installedRow?.rom_file_name ?? ''],
+      romFileNamesFor(subject.source, installedRow?.rom_file_name ?? '', detail?.fs_name ?? ''),
       detail?.revision || installedRow?.revision || ''
     )
   );

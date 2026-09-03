@@ -9,6 +9,7 @@
 use grid_core::launch::forge::ForgeClient;
 use semver::Version;
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 
 pub const APP_UPDATE_EVENT: &str = "app-update-available";
@@ -21,6 +22,28 @@ const LATEST_RELEASE_HOST: &str = "api.github.com";
 pub struct AppUpdateNotice {
     pub tag: String,
     pub url: String,
+}
+
+/// The notice the startup check produced, held so a webview that mounts
+/// after the emit can still pull it (`commands::updates::app_update_notice`).
+/// Tauri buffers nothing for a window with no listener, and the check never
+/// repeats, so without this the banner is simply lost when the forge answers
+/// faster than the frontend boots.
+#[derive(Default)]
+pub struct AppUpdateState(Mutex<Option<AppUpdateNotice>>);
+
+impl AppUpdateState {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    pub fn set(&self, notice: AppUpdateNotice) {
+        *self.0.lock().expect("app update notice mutex") = Some(notice);
+    }
+
+    pub fn get(&self) -> Option<AppUpdateNotice> {
+        self.0.lock().expect("app update notice mutex").clone()
+    }
 }
 
 #[derive(Deserialize)]
@@ -62,13 +85,16 @@ fn e2e_forced() -> bool {
 }
 
 /// Runs the check once, on Tauri's async runtime. Call from `setup`.
-pub fn spawn_check(app: AppHandle) {
+/// Stores the notice in `store` BEFORE emitting, so a frontend that misses
+/// the event can pull the same value afterwards.
+pub fn spawn_check(app: AppHandle, store: Arc<AppUpdateState>) {
     let current = app.package_info().version.to_string();
     if !should_check(&current, e2e_forced()) {
         return;
     }
     tauri::async_runtime::spawn(async move {
         if let Some(notice) = fetch_notice(&current).await {
+            store.set(notice.clone());
             let _ = app.emit(APP_UPDATE_EVENT, notice);
         }
     });
@@ -135,6 +161,18 @@ mod tests {
         assert!(!is_newer("0.9.0", "v0.9.0-beta1"));
         assert!(is_newer("0.9.0-dev", "v9.9.9-e2e"));
         assert!(is_newer("0.9.0-dev", "V0.9.0"));
+    }
+
+    #[test]
+    fn the_notice_store_starts_empty_and_round_trips() {
+        let store = AppUpdateState::new();
+        assert_eq!(store.get(), None);
+        let notice = AppUpdateNotice {
+            tag: "v9.9.9".to_string(),
+            url: "https://github.com/Sixdd6/grid-launcher/releases/tag/v9.9.9".to_string(),
+        };
+        store.set(notice.clone());
+        assert_eq!(store.get(), Some(notice));
     }
 
     #[test]

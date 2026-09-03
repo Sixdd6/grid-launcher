@@ -90,6 +90,7 @@ pub fn run() {
         images: images::ImageService::new(),
         firmware: firmware_service::FirmwareService::new(),
         updates: update_service::UpdateService::new(),
+        app_update: app_update::AppUpdateState::new(),
     });
     // Embedded WebDriver automation server, gated behind the `e2e` cargo
     // feature so it never ships in a release build (see
@@ -108,7 +109,10 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_title(&format!("GRID Launcher {version}"));
             }
-            app_update::spawn_check(app.handle().clone());
+            app_update::spawn_check(
+                app.handle().clone(),
+                app.state::<AppState>().app_update.clone(),
+            );
             gamepad::spawn(app.handle().clone());
             // The static scope in tauri.conf.json only covers the default
             // ProjectDirs cache location ($CACHE/grid-launcher/covers/**/*).
@@ -316,6 +320,7 @@ pub fn run() {
             commands::updates::list_updates,
             commands::updates::update_game,
             commands::updates::app_version,
+            commands::updates::app_update_notice,
             commands::updates::open_release_page,
         ])
         .run(tauri::generate_context!())

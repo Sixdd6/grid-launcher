@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatVersionTag, parseVersionTag, versionLabel } from './version';
+import { formatVersionTag, parseVersionTag, romFileNamesFor, versionLabel } from './version';
 
 describe('parseVersionTag', () => {
   it('matches a numeric 5-digit tag', () => {
@@ -44,5 +44,21 @@ describe('versionLabel', () => {
 
   it('returns an empty string when there is no tag and no revision', () => {
     expect(versionLabel('Windows', ['g.zip'], '')).toBe('');
+  });
+});
+
+describe('romFileNamesFor', () => {
+  it('reads the installed name first for a Library-opened game', () => {
+    expect(romFileNamesFor('installed', 'g (v1.0.0).zip', 'g (v1.1.0).zip')).toEqual([
+      'g (v1.0.0).zip',
+      'g (v1.1.0).zip',
+    ]);
+  });
+
+  it('reads the server name first for a Server-opened game', () => {
+    expect(romFileNamesFor('server', 'g (v1.0.0).zip', 'g (v1.1.0).zip')).toEqual([
+      'g (v1.1.0).zip',
+      'g (v1.0.0).zip',
+    ]);
   });
 });
