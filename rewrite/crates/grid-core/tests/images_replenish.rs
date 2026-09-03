@@ -124,3 +124,48 @@ async fn run_backfills_fields_fetches_files_and_counts_skips() {
         .find_existing(&image_key(&format!("{}/assets/1.png", server.uri())))
         .is_some());
 }
+
+/// A row planned as `NeedsFields` can vanish (be removed from the registry)
+/// between `plan()` and `run()`. `update_images` then returns `Ok(false)`
+/// (no row matched), which must count as `skipped` and must not fetch the
+/// cover — nothing pins a row that no longer exists.
+#[tokio::test]
+async fn run_skips_and_does_not_fetch_when_row_vanishes_before_update() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/roms/7"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 7, "name": "G7", "platform_id": 1, "path_cover_small": "/assets/7.png"
+        })))
+        .mount(&server)
+        .await;
+    let cover_mock = Mock::given(method("GET"))
+        .and(path("/assets/7.png"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(PNG_MAGIC))
+        .expect(0)
+        .mount_as_scoped(&server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let cache = ImageCache::new(dir.path().join("covers"));
+    let registry = Registry::open(&dir.path().join("db.sqlite")).unwrap();
+    let vanishing = row(Some(7), "", "", "");
+    registry.upsert(&vanishing).unwrap();
+    let client = client_for(&server);
+    let items = plan(&registry.all().unwrap(), &cache, &server.uri());
+    registry
+        .remove(&vanishing.title, &vanishing.platform)
+        .unwrap();
+
+    let report = run(&client, &cache, &registry, &server.uri(), items).await;
+
+    assert_eq!(
+        report,
+        ReplenishReport {
+            updated_rows: 0,
+            fetched_files: 0,
+            skipped: 1
+        }
+    );
+    drop(cover_mock); // expect(0) verified on drop: the cover was never fetched
+}
