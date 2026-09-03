@@ -1,13 +1,15 @@
 <script lang="ts">
-  import { api, type CloudPanelInfo, type DownloadStatus, type RomDetail } from './api';
+  import { api, type CloudPanelInfo, type ContentAvailability, type ContentKind, type DownloadStatus, type RomDetail } from './api';
   import { downloads } from './stores/downloads.svelte';
   import { isInstalled, installed, matchesInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
   import { session } from './stores/session.svelte';
   import { sessions } from './stores/sessions.svelte';
   import Image from './Image.svelte';
   import CloudPanel from './details/CloudPanel.svelte';
+  import NativeSettings from './details/NativeSettings.svelte';
   import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
   import { cloudButtonLabel, isNativeExecutablePlatform, syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
+  import { contentButtons, installLabel, isContentPlatform, isNativePlatform } from './details/actions';
 
   let {
     subject,
@@ -27,6 +29,15 @@
   let pendingAction = $state<PendingAction>(null);
   let error = $state<string | null>(null);
   let panelEl = $state<HTMLElement | null>(null);
+
+  // Install specials (task-16-brief.md): Cancel for a live install,
+  // Install Update/DLC for installed PS4/Xbox 360 games, and the native
+  // Game Settings dialog.
+  let cancelPending = $state(false);
+  let contentAvailability = $state<ContentAvailability | null>(null);
+  let wasLive = $state(false);
+  let contentActionKind = $state<ContentKind | null>(null);
+  let showNativeSettings = $state(false);
 
   // Metadata overlay (task-10-brief.md): the subject carries whatever the
   // grid it opened from already had on hand; when that's thin (a server
@@ -73,6 +84,30 @@
   );
   let installedNow = $derived(isInstalled(summary, subject.platformName));
   let liveSession = $derived(subject.romId !== null ? sessions.sessionFor(subject.romId) : undefined);
+
+  let isContent = $derived(isContentPlatform(subject.platformName));
+  let isNativeInstall = $derived(isNativePlatform(subject.platformName));
+  let buttons = $derived(contentButtons(contentAvailability, installedNow, liveEntry !== undefined));
+
+  // Fetched once the subject is installed-and-a-content-platform, and
+  // re-fetched right after a live install for it finishes (`wasLive` tracks
+  // the previous liveEntry-defined-ness across effect runs) — the server's
+  // file list only changes once an update/DLC job completes.
+  $effect(() => {
+    if (subject.romId === null || !installedNow || !isContent) {
+      contentAvailability = null;
+      wasLive = liveEntry !== undefined;
+      return;
+    }
+    const live = liveEntry !== undefined;
+    const justFinished = wasLive && !live;
+    wasLive = live;
+    if (live || (contentAvailability !== null && !justFinished)) return;
+    api
+      .contentAvailability(subject.romId)
+      .then((avail) => (contentAvailability = avail))
+      .catch(() => (contentAvailability = null));
+  });
 
   // Cloud saves/states (task-19-brief.md). `cloudGame` is the InstalledGame
   // registry row when one exists, else a synthetic stand-in built from the
@@ -147,6 +182,32 @@
       confirmingUninstall = false;
     } finally {
       pendingAction = null;
+    }
+  }
+
+  async function handleCancel() {
+    if (subject.romId === null) return;
+    error = null;
+    cancelPending = true;
+    try {
+      await api.cancelDownloadForRom(subject.romId);
+    } catch (err) {
+      error = errorMessage(err);
+    } finally {
+      cancelPending = false;
+    }
+  }
+
+  async function handleInstallContent(kind: ContentKind) {
+    if (subject.romId === null) return;
+    error = null;
+    contentActionKind = kind;
+    try {
+      await api.installContent(subject.romId, kind);
+    } catch (err) {
+      error = errorMessage(err);
+    } finally {
+      contentActionKind = null;
     }
   }
 
@@ -243,6 +304,9 @@
           <div class="action">
             {#if liveEntry}
               <button disabled>Installing…</button>
+              <button data-testid="details-cancel" class="secondary" disabled={cancelPending} onclick={handleCancel}>
+                {cancelPending ? 'Cancelling…' : 'Cancel'}
+              </button>
             {:else if liveSession}
               <button data-testid="details-stop" disabled={pending} onclick={handleStop}>
                 {pendingAction === 'stop' ? 'Stopping…' : 'Stop'}
@@ -260,9 +324,34 @@
               >
                 {confirmingUninstall ? 'Confirm uninstall' : 'Uninstall'}
               </button>
+              {#if buttons.update}
+                <button
+                  data-testid="details-install-update"
+                  class="secondary"
+                  disabled={contentActionKind !== null}
+                  onclick={() => handleInstallContent('update')}
+                >
+                  {contentActionKind === 'update' ? 'Installing…' : 'Install Update'}
+                </button>
+              {/if}
+              {#if buttons.dlc}
+                <button
+                  data-testid="details-install-dlc"
+                  class="secondary"
+                  disabled={contentActionKind !== null}
+                  onclick={() => handleInstallContent('dlc')}
+                >
+                  {contentActionKind === 'dlc' ? 'Installing…' : 'Install DLC'}
+                </button>
+              {/if}
+              {#if isNativeInstall}
+                <button data-testid="details-game-settings" class="secondary" onclick={() => (showNativeSettings = true)}>
+                  Game Settings
+                </button>
+              {/if}
             {:else}
               <button data-testid="details-install" disabled={pending} onclick={handleInstall}>
-                {pendingAction === 'install' ? 'Installing…' : 'Install'}
+                {pendingAction === 'install' ? 'Installing…' : installLabel(subject.platformName)}
               </button>
             {/if}
           </div>
@@ -319,6 +408,15 @@
     </div>
   </div>
 </div>
+
+{#if showNativeSettings && subject.romId !== null}
+  <NativeSettings
+    romId={subject.romId}
+    title={subject.name}
+    onClose={() => (showNativeSettings = false)}
+    onSaved={refreshInstalled}
+  />
+{/if}
 
 <style>
   .backdrop {
