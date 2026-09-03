@@ -15,6 +15,7 @@ pub mod paths;
 pub mod platforms;
 pub mod queue;
 pub mod registry;
+pub mod specials;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
