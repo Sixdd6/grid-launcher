@@ -597,9 +597,18 @@ fn extract_7z_system_fallback(archive: &Path, dest: &Path) -> Result<(), String>
     let Some(executable) = find_system_7z() else {
         return Err("no system 7-Zip executable found on this system".to_string());
     };
+    run_7z_extract(&executable, archive, dest)
+}
+
+/// Shells out to `executable` (`7z`/`7za`/`7zz`-compatible CLI) to extract
+/// `archive` into `dest`, wiping `dest` first. Shared by
+/// `extract_7z_system_fallback` and `extract_iso_with_7z` so both go
+/// through one place that builds the argument list and maps a
+/// nonzero exit / spawn failure to a message naming the executable.
+fn run_7z_extract(executable: &Path, archive: &Path, dest: &Path) -> Result<(), String> {
     wipe_and_recreate(dest).map_err(|e| format!("failed to reset destination: {e}"))?;
 
-    let output = Command::new(&executable)
+    let output = Command::new(executable)
         .arg("x")
         .arg(archive)
         .arg(format!("-o{}", dest.display()))
@@ -633,19 +642,36 @@ fn extract_7z_system_fallback(archive: &Path, dest: &Path) -> Result<(), String>
 /// reaching `extract_7z_system_fallback`'s own (more generic) "no system
 /// 7-Zip executable found" message.
 ///
-/// Still `pub(crate)` and exercised only by its own unit test today — no
+/// Still `pub(crate)` and exercised only by its own unit tests today — no
 /// install-pipeline caller wires ISO extraction through it yet; that is
 /// out of scope for this task and lands in a later one.
 #[allow(dead_code)]
 pub(crate) fn extract_iso_with_system_7z(iso: &Path, dest: &Path) -> Result<(), String> {
-    if find_system_7z().is_none() {
+    extract_iso_with_7z(iso, dest, find_system_7z().as_deref())
+}
+
+/// [`extract_iso_with_system_7z`]'s logic, with the 7-Zip binary supplied
+/// by the caller instead of resolved via [`find_system_7z`]. Split out so
+/// the "no binary found" branch can be exercised deterministically in
+/// tests: `find_system_7z` also probes a handful of hardcoded absolute
+/// paths (`SYSTEM_7Z_CANDIDATES`) that don't depend on `PATH`, so on a
+/// machine that has a system 7-Zip installed at one of them, no amount of
+/// `PATH` manipulation can make `find_system_7z()` return `None` — this
+/// function lets a test bypass that resolution step entirely and drive
+/// both branches directly.
+pub(crate) fn extract_iso_with_7z(
+    iso: &Path,
+    dest: &Path,
+    seven_zip: Option<&Path>,
+) -> Result<(), String> {
+    let Some(executable) = seven_zip else {
         let name = iso
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         return Err(format!("Cannot extract ISO {name}: no 7-Zip binary found"));
-    }
-    extract_7z_system_fallback(iso, dest)
+    };
+    run_7z_extract(executable, iso, dest)
 }
 
 #[cfg(test)]
@@ -792,45 +818,60 @@ mod tests {
         assert!(rar_entry_relative_path("dir/evil\0.bin").is_err());
     }
 
-    // --- extract_iso_with_system_7z ------------------------------------------
+    // --- extract_iso_with_7z --------------------------------------------------
 
+    /// Drives the "no binary" branch directly through `extract_iso_with_7z`
+    /// with `seven_zip: None`, rather than by trying to make
+    /// `find_system_7z()` itself return `None` (unreliable: it also probes
+    /// hardcoded absolute paths such as `/usr/bin/7z` that don't depend on
+    /// `PATH`, so on a machine that has a system 7-Zip installed at one of
+    /// them — this dev box among them — no environment manipulation can
+    /// force that branch through `extract_iso_with_system_7z`). This makes
+    /// the assertion deterministic on every machine.
     #[test]
     fn iso_helper_reports_missing_7z() {
-        // `find_system_7z` also probes a handful of hardcoded absolute
-        // paths (`SYSTEM_7Z_CANDIDATES`) that do not depend on `PATH` at
-        // all, so clearing `PATH` alone only reliably reproduces "no
-        // system 7-Zip" on a machine that has no 7-Zip binary installed at
-        // any of those locations either. On a machine that does (this
-        // dev box among them), the precondition this test needs can't be
-        // constructed without touching real system binaries, which is out
-        // of bounds — so the assertion is skipped rather than either
-        // faked or left flaky.
-        let previous_path = std::env::var_os("PATH");
-        std::env::set_var("PATH", "");
-        let found = find_system_7z();
-        let result = if found.is_none() {
-            Some(extract_iso_with_system_7z(
-                Path::new("game.iso"),
-                Path::new("/nonexistent-dest"),
-            ))
-        } else {
-            None
-        };
-        match previous_path {
-            Some(path) => std::env::set_var("PATH", path),
-            None => std::env::remove_var("PATH"),
-        }
+        let result =
+            extract_iso_with_7z(Path::new("game.iso"), Path::new("/nonexistent-dest"), None);
+        assert_eq!(
+            result,
+            Err("Cannot extract ISO game.iso: no 7-Zip binary found".to_string())
+        );
+    }
 
-        match result {
-            Some(result) => assert_eq!(
-                result,
-                Err("Cannot extract ISO game.iso: no 7-Zip binary found".to_string())
-            ),
-            None => eprintln!(
-                "iso_helper_reports_missing_7z: skipped — a system 7-Zip binary is \
-                 installed at one of SYSTEM_7Z_CANDIDATES on this machine, so \
-                 find_system_7z() cannot be made to return None via PATH alone"
-            ),
-        }
+    /// Drives the "binary found" branch with a fake `7z`-shaped script
+    /// (rather than depending on a real system 7-Zip, which may or may not
+    /// be installed) so this is deterministic on every machine too: the
+    /// script parses the `-o<dest>` argument `run_7z_extract` passes and
+    /// writes a known file into it, standing in for a real extraction.
+    #[cfg(unix)]
+    #[test]
+    fn iso_helper_extracts_via_a_provided_7z_binary() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("fake-7z.sh");
+        fs::write(
+            &script,
+            "#!/bin/sh\n\
+             dest=\n\
+             for arg in \"$@\"; do\n\
+             \x20\x20case \"$arg\" in\n\
+             \x20\x20\x20\x20-o*) dest=\"${arg#-o}\" ;;\n\
+             \x20\x20esac\n\
+             done\n\
+             mkdir -p \"$dest\"\n\
+             printf 'extracted' > \"$dest/GAME.BIN\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let iso = dir.path().join("game.iso");
+        fs::write(&iso, b"fake iso bytes").unwrap();
+        let dest = dir.path().join("out");
+
+        let result = extract_iso_with_7z(&iso, &dest, Some(&script));
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(fs::read(dest.join("GAME.BIN")).unwrap(), b"extracted");
     }
 }
