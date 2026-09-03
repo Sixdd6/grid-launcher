@@ -2,6 +2,7 @@
   import { api, type CloudPanelInfo, type DownloadStatus } from './api';
   import { downloads } from './stores/downloads.svelte';
   import { isInstalled, installed, matchesInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
+  import { session } from './stores/session.svelte';
   import { sessions } from './stores/sessions.svelte';
   import Image from './Image.svelte';
   import CloudPanel from './details/CloudPanel.svelte';
@@ -26,6 +27,49 @@
   let pendingAction = $state<PendingAction>(null);
   let error = $state<string | null>(null);
   let panelEl = $state<HTMLElement | null>(null);
+
+  // Metadata overlay (task-10-brief.md): the subject carries whatever the
+  // grid it opened from already had on hand; when that's thin (a server
+  // subject only ever has a cover, or an installed row with no stored
+  // screenshots) fetch the full RomDetail once and let it fill in the
+  // gaps. Kept as separate local state rather than mutating `subject` —
+  // the prop is the caller's data, this is purely a display overlay.
+  let overlay = $state<{
+    coverLarge: string | null;
+    screenshotUrls: string[];
+    description: string;
+    rating: string;
+    genres: string;
+  } | null>(null);
+
+  let coverLarge = $derived(overlay?.coverLarge ?? subject.coverLarge);
+  let screenshotUrls = $derived(overlay?.screenshotUrls ?? subject.screenshotUrls);
+  let description = $derived(overlay?.description ?? subject.description);
+  let rating = $derived(overlay?.rating ?? subject.rating);
+  let genres = $derived(overlay?.genres ?? subject.genres);
+
+  let failedScreenshots = $state<Record<string, true>>({});
+  function markScreenshotFailed(url: string) {
+    failedScreenshots = { ...failedScreenshots, [url]: true };
+  }
+
+  $effect(() => {
+    if (subject.romId === null) return; // no server id: nothing to overlay
+    if (!session.connected) return;
+    if (subject.source !== 'server' && subject.screenshotUrls.length > 0) return;
+    api
+      .getRomDetail(subject.romId)
+      .then((detail) => {
+        overlay = {
+          coverLarge: detail.cover_large_path,
+          screenshotUrls: detail.screenshot_urls,
+          description: detail.description,
+          rating: detail.rating,
+          genres: detail.genres,
+        };
+      })
+      .catch(() => {}); // offline/removed rom: the subject's own data stands
+  });
 
   let pending = $derived(pendingAction !== null);
   let summary = $derived(summaryOf(subject));
@@ -155,7 +199,6 @@
   <div
     data-testid="details-panel"
     class="panel"
-    class:wide={cloudMode !== 'overview'}
     bind:this={panelEl}
     role="dialog"
     aria-modal="true"
@@ -164,93 +207,123 @@
     onkeydown={onKey}
   >
     <button data-testid="details-close" class="close" onclick={onClose} aria-label="Close">×</button>
-    <div class="cover">
-      <Image url={subject.coverSmall} alt={subject.name} />
-    </div>
-    <h2>{subject.name}</h2>
-    {#if liveSession}
-      <span data-testid="details-playing-chip" class="chip">Playing</span>
-    {/if}
-    <p class="platform">{subject.platformName}</p>
 
-    {#if subject.romId === null}
-      <p data-testid="details-no-id">This entry has no server id</p>
-    {:else}
-      <div class="action">
-        {#if liveEntry}
-          <button disabled>Installing…</button>
-        {:else if liveSession}
-          <button data-testid="details-stop" disabled={pending} onclick={handleStop}>
-            {pendingAction === 'stop' ? 'Stopping…' : 'Stop'}
-          </button>
-        {:else if installedNow}
-          <button data-testid="details-play" disabled={pending} onclick={handlePlay}>
-            {pendingAction === 'play' ? 'Launching…' : 'Play'}
-          </button>
-          <button
-            data-testid="details-uninstall"
-            class="secondary"
-            class:confirm={confirmingUninstall}
-            disabled={pending}
-            onclick={handleUninstallClick}
-          >
-            {confirmingUninstall ? 'Confirm uninstall' : 'Uninstall'}
-          </button>
-        {:else}
-          <button data-testid="details-install" disabled={pending} onclick={handleInstall}>
-            {pendingAction === 'install' ? 'Installing…' : 'Install'}
-          </button>
-        {/if}
+    <div class="layout">
+      <div class="cover">
+        <Image url={coverLarge ?? subject.coverSmall} alt={subject.name} placeholder="No cover" data-testid="details-cover" />
       </div>
 
-      {#if savePanelInfo?.supported || statePanelInfo?.supported}
-        <div class="cloud-toggle">
-          {#if savePanelInfo?.supported}
-            <button
-              data-testid="details-cloud-save-toggle"
-              class:active={cloudMode === 'save'}
-              onclick={() => handleCloudToggle('save')}
-            >
-              {cloudButtonLabel('save', savePanelInfo.scope)}
-            </button>
-          {/if}
-          {#if statePanelInfo?.supported}
-            <button
-              data-testid="details-cloud-state-toggle"
-              class:active={cloudMode === 'state'}
-              onclick={() => handleCloudToggle('state')}
-            >
-              {cloudButtonLabel('state', statePanelInfo.scope)}
-            </button>
-          {/if}
+      <div class="center-top">
+        <h2>{subject.name}</h2>
+        <p class="platform">{subject.platformName}</p>
+        {#if liveSession}
+          <span data-testid="details-playing-chip" class="chip">Playing</span>
+        {/if}
+        {#if rating}
+          <p data-testid="details-rating" class="rating">{rating}</p>
+        {/if}
+        <p data-testid="details-genres" class="genres">{genres}</p>
+        <p data-testid="details-description" class="description">{description}</p>
+      </div>
+
+      {#if screenshotUrls.length}
+        <div class="shots" data-testid="details-screenshots">
+          {#each screenshotUrls as url, i (url)}
+            {#if !failedScreenshots[url]}
+              <Image
+                url={url}
+                alt={`${subject.name} screenshot ${i + 1}`}
+                data-testid={`details-screenshot-${i}`}
+                onerror={() => markScreenshotFailed(url)}
+              />
+            {/if}
+          {/each}
         </div>
+      {:else}
+        <p class="shots-empty" data-testid="details-no-screenshots">No screenshots available</p>
       {/if}
 
-      {#if cloudPanelInfoError}
-        <p data-testid="cloud-panel-info-error" class="error" role="alert">{cloudPanelInfoError}</p>
-      {/if}
+      <div class="center-bottom">
+        {#if subject.romId === null}
+          <p data-testid="details-no-id">This entry has no server id</p>
+        {:else}
+          <div class="action">
+            {#if liveEntry}
+              <button disabled>Installing…</button>
+            {:else if liveSession}
+              <button data-testid="details-stop" disabled={pending} onclick={handleStop}>
+                {pendingAction === 'stop' ? 'Stopping…' : 'Stop'}
+              </button>
+            {:else if installedNow}
+              <button data-testid="details-play" disabled={pending} onclick={handlePlay}>
+                {pendingAction === 'play' ? 'Launching…' : 'Play'}
+              </button>
+              <button
+                data-testid="details-uninstall"
+                class="secondary"
+                class:confirm={confirmingUninstall}
+                disabled={pending}
+                onclick={handleUninstallClick}
+              >
+                {confirmingUninstall ? 'Confirm uninstall' : 'Uninstall'}
+              </button>
+            {:else}
+              <button data-testid="details-install" disabled={pending} onclick={handleInstall}>
+                {pendingAction === 'install' ? 'Installing…' : 'Install'}
+              </button>
+            {/if}
+          </div>
 
-      {#if cloudMode !== 'overview' && activeCloudPanelInfo}
-        <CloudPanel
-          game={cloudGame}
-          gameTitle={subject.name}
-          saveType={cloudMode}
-          panelInfo={activeCloudPanelInfo}
-          {isNative}
-          onBack={() => (cloudMode = 'overview')}
-        />
-      {/if}
-    {/if}
+          {#if savePanelInfo?.supported || statePanelInfo?.supported}
+            <div class="cloud-toggle">
+              {#if savePanelInfo?.supported}
+                <button
+                  data-testid="details-cloud-save-toggle"
+                  class:active={cloudMode === 'save'}
+                  onclick={() => handleCloudToggle('save')}
+                >
+                  {cloudButtonLabel('save', savePanelInfo.scope)}
+                </button>
+              {/if}
+              {#if statePanelInfo?.supported}
+                <button
+                  data-testid="details-cloud-state-toggle"
+                  class:active={cloudMode === 'state'}
+                  onclick={() => handleCloudToggle('state')}
+                >
+                  {cloudButtonLabel('state', statePanelInfo.scope)}
+                </button>
+              {/if}
+            </div>
+          {/if}
 
-    {#if error}
-      <p data-testid="details-error" class="error" role="alert">{error}</p>
-    {/if}
-    {#if sessions.lastWarning}
-      <p data-testid="details-warning" class="error warning" role="alert">
-        {sessions.lastWarning}
-        <button data-testid="details-warning-dismiss" class="dismiss" onclick={() => sessions.dismissWarning()} aria-label="Dismiss warning">×</button>
-      </p>
-    {/if}
+          {#if cloudPanelInfoError}
+            <p data-testid="cloud-panel-info-error" class="error" role="alert">{cloudPanelInfoError}</p>
+          {/if}
+
+          {#if cloudMode !== 'overview' && activeCloudPanelInfo}
+            <CloudPanel
+              game={cloudGame}
+              gameTitle={subject.name}
+              saveType={cloudMode}
+              panelInfo={activeCloudPanelInfo}
+              {isNative}
+              onBack={() => (cloudMode = 'overview')}
+            />
+          {/if}
+        {/if}
+
+        {#if error}
+          <p data-testid="details-error" class="error" role="alert">{error}</p>
+        {/if}
+        {#if sessions.lastWarning}
+          <p data-testid="details-warning" class="error warning" role="alert">
+            {sessions.lastWarning}
+            <button data-testid="details-warning-dismiss" class="dismiss" onclick={() => sessions.dismissWarning()} aria-label="Dismiss warning">×</button>
+          </p>
+        {/if}
+      </div>
+    </div>
   </div>
 </div>
 
@@ -266,15 +339,10 @@
 
   .panel {
     position: relative;
-    width: min(360px, calc(100vw - 48px));
+    width: min(1100px, calc(100vw - 48px));
     max-height: calc(100vh - 48px);
     overflow-y: auto;
     box-sizing: border-box;
-    transition: width 0.15s ease;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
     padding: 24px;
     border-radius: 12px;
     background: var(--bg);
@@ -287,9 +355,68 @@
     outline-offset: 2px;
   }
 
-  .panel.wide {
-    width: min(480px, calc(100vw - 48px));
-    align-items: stretch;
+  /* The panel's own rendered width (not the viewport) drives the
+     breakpoint below, since the panel already scales down on its own via
+     min(1100px, calc(100vw - 48px)) on narrow viewports. */
+  .layout {
+    container-type: inline-size;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  @container (min-width: 900px) {
+    .layout {
+      grid-template-columns: 240px 1fr 220px;
+      grid-template-rows: auto auto;
+      align-items: start;
+    }
+
+    .cover {
+      grid-column: 1;
+      grid-row: 1 / 3;
+      max-width: none;
+      margin: 0;
+    }
+
+    .center-top {
+      grid-column: 2;
+      grid-row: 1;
+      text-align: left;
+      align-items: flex-start;
+    }
+
+    .center-bottom {
+      grid-column: 2;
+      grid-row: 2;
+      text-align: left;
+      align-items: flex-start;
+    }
+
+    .chip {
+      align-self: flex-start;
+    }
+
+    .shots,
+    .shots-empty {
+      grid-column: 3;
+      grid-row: 1 / 3;
+    }
+
+    .shots {
+      flex-direction: column;
+      overflow-x: hidden;
+      overflow-y: auto;
+      max-height: min(70vh, 640px);
+      padding-bottom: 0;
+      padding-right: 4px;
+    }
+
+    .shots :global(img) {
+      width: 100%;
+      height: auto;
+      flex: none;
+    }
   }
 
   .close {
@@ -313,7 +440,9 @@
   }
 
   .cover {
-    width: 160px;
+    width: 100%;
+    max-width: 240px;
+    margin: 0 auto;
     aspect-ratio: 3 / 4;
     border-radius: 8px;
     overflow: hidden;
@@ -325,14 +454,23 @@
     object-fit: cover;
   }
 
-  h2 {
-    margin: 4px 0 0;
+  .center-top,
+  .center-bottom {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
     text-align: center;
+  }
+
+  h2 {
+    margin: 0;
     color: var(--text-h);
-    font-size: 18px;
+    font-size: 20px;
   }
 
   .chip {
+    align-self: center;
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
@@ -349,8 +487,49 @@
     font-size: 13px;
   }
 
+  .rating {
+    margin: 0;
+    color: var(--text-h);
+    font-weight: 600;
+    font-size: 14px;
+  }
+
+  .genres {
+    margin: 0;
+    color: var(--text);
+    font-size: 13px;
+  }
+
+  .description {
+    margin: 0;
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .shots {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 4px;
+  }
+
+  .shots :global(img) {
+    height: 120px;
+    width: auto;
+    flex: none;
+    border-radius: 6px;
+    object-fit: cover;
+  }
+
+  .shots-empty {
+    margin: 0;
+    color: var(--text);
+    font-size: 13px;
+    text-align: center;
+  }
+
   .action {
-    margin-top: 8px;
     width: 100%;
     display: flex;
     flex-direction: column;

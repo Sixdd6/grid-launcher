@@ -6,8 +6,15 @@
     url,
     alt,
     placeholder = alt,
+    onerror,
     ...rest
-  }: { url: string | null; alt: string; placeholder?: string; [key: string]: unknown } = $props();
+  }: {
+    url: string | null;
+    alt: string;
+    placeholder?: string;
+    onerror?: () => void;
+    [key: string]: unknown;
+  } = $props();
   let src = $state<string | null>(null);
 
   $effect(() => {
@@ -19,7 +26,11 @@
         .then((path) => {
           if (!cancelled) src = convertFileSrc(path);
         })
-        .catch(() => {}); // offline/missing image: placeholder stays
+        .catch(() => {
+          // offline/missing image: placeholder stays, caller decides whether
+          // to keep showing it (covers) or drop the tile entirely (screenshots)
+          if (!cancelled) onerror?.();
+        });
     }
     return () => {
       cancelled = true;
@@ -28,7 +39,7 @@
 </script>
 
 {#if src}
-  <img {src} {alt} loading="lazy" draggable="false" {...rest} />
+  <img {src} {alt} loading="lazy" draggable="false" onerror={() => onerror?.()} {...rest} />
 {:else}
   <div class="placeholder" {...rest}>{placeholder}</div>
 {/if}
