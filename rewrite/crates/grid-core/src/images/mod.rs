@@ -3,6 +3,7 @@
 //! docs/superpowers/specs/2026-09-02-covers-images-design.md.
 
 pub mod cache;
+pub mod replenish;
 pub mod sweep;
 pub mod urls;
 
