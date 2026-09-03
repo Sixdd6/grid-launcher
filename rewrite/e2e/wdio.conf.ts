@@ -38,8 +38,15 @@ const appEnv: Record<string, string> = {
   // group_needs_forge). GRID_LAUNCHER_E2E_FORGE_BASE is what the app's `e2e`
   // build redirects forge requests to (grid-core launch/forge.rs); the app's
   // spawned emulators inherit GRID_E2E_ARGV_FILE and record their argv there.
+  // GRID_LAUNCHER_E2E_UPDATE_CHECK re-enables the launcher's own self-update
+  // check, which a dev build otherwise skips (app_update.rs `should_check`).
+  // It rides along with the forge base because it is useless without it: the
+  // check would otherwise reach the real api.github.com.
   ...(process.env.E2E_FORGE_URL
-    ? { GRID_LAUNCHER_E2E_FORGE_BASE: process.env.E2E_FORGE_URL }
+    ? {
+        GRID_LAUNCHER_E2E_FORGE_BASE: process.env.E2E_FORGE_URL,
+        GRID_LAUNCHER_E2E_UPDATE_CHECK: '1',
+      }
     : {}),
   ...(process.env.GRID_E2E_ARGV_FILE
     ? { GRID_E2E_ARGV_FILE: process.env.GRID_E2E_ARGV_FILE }

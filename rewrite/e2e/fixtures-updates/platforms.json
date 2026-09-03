@@ -1,0 +1,14 @@
+[
+  {
+    "id": 1,
+    "name": "SNES",
+    "slug": "snes",
+    "rom_count": 2
+  },
+  {
+    "id": 2,
+    "name": "Windows",
+    "slug": "win",
+    "rom_count": 1
+  }
+]

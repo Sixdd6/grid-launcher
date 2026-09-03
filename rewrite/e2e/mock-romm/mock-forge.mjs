@@ -14,6 +14,7 @@
 //
 // Routes (all GET):
 //   /api.github.com/repos/PCSX2/pcsx2/releases/latest   → release JSON
+//   /api.github.com/repos/Sixdd6/grid-launcher/releases/latest → release JSON
 //   /github.com/PCSX2/pcsx2/releases/download/…AppImage → the AppImage stub
 //   /redream.io/download                                → the download page
 //   /redream.io/download/redream.x86_64-linux-…tar.gz   → the tar.gz stub
@@ -55,6 +56,20 @@ export const PCSX2_ASSET_NAME = `pcsx2-${PCSX2_TAG}-linux-appimage-x64-Qt.AppIma
 export const PCSX2_RELEASE_PATH = "/api.github.com/repos/PCSX2/pcsx2/releases/latest";
 export const PCSX2_DOWNLOAD_URL = `https://github.com/PCSX2/pcsx2/releases/download/${PCSX2_TAG}/${PCSX2_ASSET_NAME}`;
 export const PCSX2_DOWNLOAD_PATH = `/github.com/PCSX2/pcsx2/releases/download/${PCSX2_TAG}/${PCSX2_ASSET_NAME}`;
+
+/**
+ * GRID Launcher's OWN `releases/latest`, for the `updates` group's
+ * self-update banner (app/src-tauri/src/app_update.rs). The tag is a
+ * deliberately absurd semver so it is newer than every real version the app
+ * can report, including the `0.9.0-dev` a source build carries; the check
+ * only ever runs in the `e2e` build with GRID_LAUNCHER_E2E_UPDATE_CHECK=1.
+ * `assets` is empty on purpose — the check reads `tag_name`/`html_url` and
+ * downloads nothing.
+ */
+export const GRID_LAUNCHER_TAG = "v9.9.9-e2e";
+export const GRID_LAUNCHER_RELEASE_PATH =
+  "/api.github.com/repos/Sixdd6/grid-launcher/releases/latest";
+export const GRID_LAUNCHER_RELEASE_URL = `https://github.com/Sixdd6/grid-launcher/releases/tag/${GRID_LAUNCHER_TAG}`;
 
 export const REDREAM_PAGE_PATH = "/redream.io/download";
 export const REDREAM_ASSET_NAME = "redream.x86_64-linux-v1.5.0-1000-gabcdef0.tar.gz";
@@ -120,6 +135,19 @@ export function pcsx2Release() {
         state: "uploaded",
       },
     ],
+  };
+}
+
+/**
+ * The GitHub "latest release" payload for GRID Launcher itself. The URL
+ * must stay under `RELEASE_URL_PREFIX` (commands/updates.rs), or the
+ * banner's "Open release" button would refuse to open it.
+ */
+export function gridLauncherRelease() {
+  return {
+    tag_name: GRID_LAUNCHER_TAG,
+    html_url: GRID_LAUNCHER_RELEASE_URL,
+    assets: [],
   };
 }
 
@@ -194,6 +222,11 @@ function handleRequest(req, res, state) {
 
   if (req.method === "GET" && pathname === REDREAM_DOWNLOAD_PATH) {
     sendBuffer(res, 200, "application/gzip", REDREAM_TAR_GZ_BYTES);
+    return;
+  }
+
+  if (req.method === "GET" && pathname === GRID_LAUNCHER_RELEASE_PATH) {
+    sendJson(res, 200, gridLauncherRelease());
     return;
   }
 

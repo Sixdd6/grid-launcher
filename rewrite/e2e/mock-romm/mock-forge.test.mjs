@@ -18,6 +18,9 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import {
   ARGV_FILE_ENV,
   AUTH_MARKER,
+  GRID_LAUNCHER_RELEASE_PATH,
+  GRID_LAUNCHER_RELEASE_URL,
+  GRID_LAUNCHER_TAG,
   PCSX2_APPIMAGE_BYTES,
   PCSX2_ASSET_NAME,
   PCSX2_DOWNLOAD_PATH,
@@ -70,6 +73,23 @@ test("serves a GitHub release payload select_release/select_asset can use", asyn
     // The catalog's linux asset_patterns glob has to match this name, or
     // the install fails before it downloads anything.
     assert.match(asset.name, PCSX2_ASSET_GLOB);
+  });
+});
+
+test("serves GRID Launcher's own latest release for the self-update check", async () => {
+  await withForge(async ({ url }) => {
+    const res = await fetch(`${url}${GRID_LAUNCHER_RELEASE_PATH}`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+
+    // The two fields app_update.rs's `LatestRelease` decodes; both must be
+    // non-empty or the check returns no notice at all.
+    assert.equal(body.tag_name, GRID_LAUNCHER_TAG);
+    assert.equal(body.html_url, GRID_LAUNCHER_RELEASE_URL);
+    // `open_release_page` (commands/updates.rs) only opens this prefix.
+    assert.ok(body.html_url.startsWith("https://github.com/Sixdd6/grid-launcher/releases/"));
+    // Nothing is downloaded for a self-update: the check is check-only.
+    assert.deepEqual(body.assets, []);
   });
 });
 

@@ -1,0 +1,27 @@
+{
+  "1": [
+    {
+      "id": 801,
+      "name": "Old Rom",
+      "fs_name_no_ext": "newrom",
+      "platform_id": 1,
+      "path_cover_small": null
+    },
+    {
+      "id": 803,
+      "name": "Current Rom",
+      "fs_name_no_ext": "current",
+      "platform_id": 1,
+      "path_cover_small": null
+    }
+  ],
+  "2": [
+    {
+      "id": 802,
+      "name": "My Game",
+      "fs_name_no_ext": "mygame (v1.1.0)",
+      "platform_id": 2,
+      "path_cover_small": null
+    }
+  ]
+}

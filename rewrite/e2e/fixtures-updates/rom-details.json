@@ -1,0 +1,60 @@
+{
+  "801": {
+    "id": 801,
+    "name": "Old Rom",
+    "fs_name_no_ext": "newrom",
+    "platform_id": 1,
+    "platform_display_name": "SNES",
+    "fs_name": "newrom.zip",
+    "summary": "An SNES fixture whose server timestamp is NEWER than the seeded install's, so the update set picks it up. Its file name carries no version tag, so the button reads a bare 'Update'.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-06-01T00:00:00Z",
+    "files": [
+      { "id": 4801, "file_name": "newrom.zip", "file_size_bytes": 0, "is_top_level": true }
+    ],
+    "metadatum": null
+  },
+  "802": {
+    "id": 802,
+    "name": "My Game",
+    "fs_name_no_ext": "mygame (v1.1.0)",
+    "platform_id": 2,
+    "platform_display_name": "Windows",
+    "fs_name": "mygame (v1.1.0).zip",
+    "summary": "A Windows fixture one semver tag ahead of the seeded install (v1.0.0 -> v1.1.0), so the update is detected by the file-name rule rather than the timestamp.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      { "id": 4802, "file_name": "mygame (v1.1.0).zip", "file_size_bytes": 0, "is_top_level": true },
+      { "id": 4803, "file_name": "game.json", "file_size_bytes": 0, "is_top_level": true }
+    ],
+    "metadatum": null
+  },
+  "803": {
+    "id": 803,
+    "name": "Current Rom",
+    "fs_name_no_ext": "current",
+    "platform_id": 1,
+    "platform_display_name": "SNES",
+    "fs_name": "current.zip",
+    "summary": "The negative case: same file name and same server timestamp as the seeded install, so no update.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      { "id": 4804, "file_name": "current.zip", "file_size_bytes": 0, "is_top_level": true }
+    ],
+    "metadatum": null
+  }
+}

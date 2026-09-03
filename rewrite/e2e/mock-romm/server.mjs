@@ -218,6 +218,12 @@ function contentForFile(fileName, content) {
   if (lower === "x360.zip") return content.x360ZipBytes;
   if (lower === "x360-update.zip") return content.x360UpdateZipBytes;
   if (lower === "mygame.zip") return content.nativeZipBytes;
+  // The `updates` group's native update archive: the same Windows payload,
+  // under the version-tagged name that makes it NEWER than the seeded
+  // install (`mygame (v1.0.0).zip`). It has to carry `MyGame/mygame.exe`,
+  // not the generic `game.sfc` zip, or the merge would leave the installed
+  // executable untouched and prove nothing.
+  if (lower === "mygame (v1.1.0).zip") return content.nativeZipBytes;
   if (lower === "ps1.zip") return content.ps1ZipBytes;
   if (lower.endsWith(".zip")) return content.zipBytes;
   return dummyBytes(64, 0x00);

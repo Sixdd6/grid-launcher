@@ -60,6 +60,7 @@ STAGE_GROUPS=(
   "content:specs/content.spec.ts"
   "native:specs/native.spec.ts"
   "firmware:specs/firmware.spec.ts"
+  "updates:specs/updates.spec.ts"
 )
 
 # Run only the named groups by passing them as arguments, e.g.
@@ -416,6 +417,12 @@ mock_args_for_group() {
     content) printf -- '--fixtures-dir fixtures-content' ;;
     native) printf -- '--fixtures-dir fixtures-native' ;;
     firmware) printf -- '--fixtures-dir fixtures-firmware' ;;
+    # A fixture set whose rom details are shaped to produce one update of
+    # each kind (a timestamp-driven SNES one, a version-tag-driven Windows
+    # one) plus two negatives — including rom 804, which is deliberately
+    # ABSENT from rom-details.json so the mock answers 404 and the check
+    # treats it as "no update".
+    updates) printf -- '--fixtures-dir fixtures-updates' ;;
     *) printf '' ;;
   esac
 }
@@ -424,8 +431,12 @@ mock_args_for_group() {
 # built with the `e2e` cargo feature, redirects every forge request to
 # $GRID_LAUNCHER_E2E_FORGE_BASE (launch/forge.rs `effective_url`), so an
 # emulator install can resolve and download without touching github.com.
+# `updates` needs it for a different reason than `emulator-catalog`: the
+# launcher's own self-update check (app_update.rs) asks GitHub for
+# `Sixdd6/grid-launcher`'s latest release through the same ForgeClient, so
+# the same redirect points it at the mock forge's release route.
 group_needs_forge() {
-  [[ "$1" == "emulator-catalog" ]]
+  [[ "$1" == "emulator-catalog" || "$1" == "updates" ]]
 }
 
 # The `launch` group's data dir is pre-seeded (Ruling A, task-7-brief.md):
@@ -443,6 +454,7 @@ seed_script_for_group() {
     content) printf '%s' "$E2E_DIR/seed/content-seed.mjs" ;;
     native) printf '%s' "$E2E_DIR/seed/native-seed.mjs" ;;
     firmware) printf '%s' "$E2E_DIR/seed/firmware-seed.mjs" ;;
+    updates) printf '%s' "$E2E_DIR/seed/updates-seed.mjs" ;;
     *) printf '' ;;
   esac
 }
