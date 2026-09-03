@@ -8,6 +8,7 @@
 
 pub mod ps3;
 pub mod ps4;
+pub mod xenia;
 
 use std::fs;
 use std::io;
