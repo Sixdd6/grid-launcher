@@ -388,6 +388,81 @@ test("cover endpoint returns a 1x1 PNG", async () => {
   });
 });
 
+test("cover endpoint serves the large variant too", async () => {
+  await withServer(async ({ url }) => {
+    const res = await fetch(`${url}/assets/romm/resources/roms/101/cover/large.png`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-type"), "image/png");
+    const buf = Buffer.from(await res.arrayBuffer());
+    assert.deepEqual(
+      buf.subarray(0, 8),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+  });
+});
+
+test("screenshot endpoint returns a PNG", async () => {
+  await withServer(async ({ url }) => {
+    const res = await fetch(`${url}/assets/romm/resources/roms/101/screenshots/1.png`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-type"), "image/png");
+    const buf = Buffer.from(await res.arrayBuffer());
+    assert.deepEqual(
+      buf.subarray(0, 8),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+  });
+});
+
+// --- offline toggle ------------------------------------------------------
+
+test("POST /__e2e__/offline {offline:true} makes /api/ requests fail with a connection error, and {offline:false} restores them", async () => {
+  await withServer(async ({ url }) => {
+    const setOffline = await fetch(`${url}/__e2e__/offline`, {
+      method: "POST",
+      body: JSON.stringify({ offline: true }),
+    });
+    assert.equal(setOffline.status, 200);
+    assert.deepEqual(await setOffline.json(), { offline: true });
+
+    await assert.rejects(fetch(`${url}/api/users/me`, { headers: authHeader() }));
+
+    const getOffline = await fetch(`${url}/__e2e__/offline`);
+    assert.equal(getOffline.status, 200);
+    assert.deepEqual(await getOffline.json(), { offline: true });
+
+    const setOnline = await fetch(`${url}/__e2e__/offline`, {
+      method: "POST",
+      body: JSON.stringify({ offline: false }),
+    });
+    assert.deepEqual(await setOnline.json(), { offline: false });
+
+    const res = await fetch(`${url}/api/users/me`, { headers: authHeader() });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { id: 1, username: "e2euser" });
+  });
+});
+
+test("the offline toggle also blocks /assets/ but /__e2e__/ routes keep working", async () => {
+  await withServer(async ({ url }) => {
+    await fetch(`${url}/__e2e__/offline`, {
+      method: "POST",
+      body: JSON.stringify({ offline: true }),
+    });
+
+    await assert.rejects(fetch(`${url}/assets/romm/resources/roms/101/cover/small.png`));
+
+    // The introspection route still works while offline.
+    const res = await fetch(`${url}/__e2e__/requests`);
+    assert.equal(res.status, 200);
+
+    await fetch(`${url}/__e2e__/offline`, {
+      method: "POST",
+      body: JSON.stringify({ offline: false }),
+    });
+  });
+});
+
 // --- request log -------------------------------------------------------
 
 test("requestLog records {method, path} for each request", async () => {

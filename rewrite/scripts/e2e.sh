@@ -55,6 +55,7 @@ STAGE_GROUPS=(
   "launch:specs/launch.spec.ts"
   "emulator-catalog:specs/emulator-catalog.spec.ts"
   "cloud-saves:specs/cloud-saves.spec.ts"
+  "images:specs/images-a.spec.ts specs/images-b.spec.ts"
 )
 
 # Run only the named groups by passing them as arguments, e.g.
@@ -421,6 +422,7 @@ seed_script_for_group() {
     launch) printf '%s' "$E2E_DIR/seed/launch-seed.mjs" ;;
     emulator-catalog) printf '%s' "$E2E_DIR/seed/emulator-catalog-seed.mjs" ;;
     cloud-saves) printf '%s' "$E2E_DIR/seed/cloud-saves-seed.mjs" ;;
+    images) printf '%s' "$E2E_DIR/seed/images-seed.mjs" ;;
     *) printf '' ;;
   esac
 }

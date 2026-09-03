@@ -7,7 +7,14 @@
 //   GET  /api/roms?platform_ids=&limit=&offset=&with_char_index=&with_filter_values=
 //   GET  /api/roms/:id
 //   GET  /api/roms/:id/content/:file_name?file_ids=[&e2e_throttle=<ms-per-chunk>]
-//   GET  /assets/romm/resources/roms/:id/cover/small.png
+//   GET  /assets/romm/resources/roms/:id/cover/(small|large).png
+//   GET  /assets/romm/resources/roms/:id/screenshots/:n.png
+//
+// `GET/POST /__e2e__/offline` (outside `/api/`, no auth, not logged), used
+// by the `images` stage group: POST { offline: true|false } sets whether
+// every /api/ or /assets/ request gets its socket destroyed rather than
+// answered (an unreachable server, from the client's point of view); GET
+// reads the current value.
 //
 // Cloud save/state sync (grid-core/src/romm/cloud.rs), used by the
 // `cloud-saves` stage group:
@@ -229,7 +236,8 @@ async function sendBufferThrottled(res, status, contentType, buf, chunkMs) {
   if (!aborted && !res.destroyed) res.end();
 }
 
-const COVER_PATH_RE = /^\/assets\/romm\/resources\/roms\/\d+\/cover\/small\.png$/;
+const COVER_PATH_RE = /^\/assets\/romm\/resources\/roms\/\d+\/cover\/(small|large)\.png$/;
+const SCREENSHOT_PATH_RE = /^\/assets\/romm\/resources\/roms\/\d+\/screenshots\/\d+\.png$/;
 const ROM_ID_RE = /^\/api\/roms\/(\d+)$/;
 const ROM_CONTENT_RE = /^\/api\/roms\/(\d+)\/content\/(.+)$/;
 const SAVE_CONTENT_RE = /^\/api\/saves\/([^/]+)\/content$/;
@@ -296,14 +304,47 @@ async function handleRequest(req, res, state) {
   const requestUrl = new URL(req.url, "http://127.0.0.1");
   const pathname = decodeURIComponent(requestUrl.pathname);
 
-  // Live introspection for the cloud-saves E2E group: the mock runs as a
-  // separate process from the wdio spec (scripts/e2e.sh's
-  // run_group_attempt), so this is the only way a spec can see what the
-  // mock received WHILE it is still running, rather than only after
-  // close() writes last-run-requests.log. Outside /api/, no auth — mirrors
-  // the cover asset's own bypass just below.
-  if (req.method === "GET" && pathname === "/__e2e__/requests") {
-    sendJson(res, 200, state.requestLog);
+  // Live introspection (cloud-saves) and the offline toggle (images): both
+  // live outside /api/, no auth, and are NOT recorded in requestLog — the
+  // mock runs as a separate process from the wdio spec (scripts/e2e.sh's
+  // run_group_attempt), so these are the only way a spec can see or steer
+  // the mock WHILE it is still running, rather than only after close()
+  // writes last-run-requests.log. These always work, even while "offline".
+  if (pathname.startsWith("/__e2e__/")) {
+    if (req.method === "GET" && pathname === "/__e2e__/requests") {
+      sendJson(res, 200, state.requestLog);
+      return;
+    }
+    if (req.method === "GET" && pathname === "/__e2e__/offline") {
+      sendJson(res, 200, { offline: state.offline });
+      return;
+    }
+    if (req.method === "POST" && pathname === "/__e2e__/offline") {
+      const body = await readBody(req);
+      let parsed = {};
+      try {
+        parsed = JSON.parse(body.toString("utf8"));
+      } catch {
+        parsed = {};
+      }
+      state.offline = Boolean(parsed.offline);
+      sendJson(res, 200, { offline: state.offline });
+      return;
+    }
+    sendJson(res, 404, { detail: "not found" });
+    return;
+  }
+
+  // "Offline" mode (images E2E group): every /api/ or /assets/ request is
+  // answered by destroying the socket, not by an error status — this is
+  // what an unreachable server looks like to reqwest (a connection error),
+  // which is what the app's startup routing and Retry flow actually branch
+  // on. Not logged to requestLog: nothing was really served.
+  if (
+    state.offline &&
+    (pathname.startsWith("/api/") || pathname.startsWith("/assets/"))
+  ) {
+    req.socket.destroy();
     return;
   }
 
@@ -314,9 +355,9 @@ async function handleRequest(req, res, state) {
     body = await readBody(req);
   }
 
-  // Static-style cover asset: not under /api, no auth required — mirrors
-  // RomM serving cover images directly off disk.
-  if (req.method === "GET" && COVER_PATH_RE.test(pathname)) {
+  // Static-style cover/screenshot asset: not under /api, no auth required —
+  // mirrors RomM serving these images directly off disk.
+  if (req.method === "GET" && (COVER_PATH_RE.test(pathname) || SCREENSHOT_PATH_RE.test(pathname))) {
     sendBuffer(res, 200, "image/png", state.pngBytes);
     return;
   }
@@ -477,6 +518,10 @@ export async function startMockRomm({
   // every content download made through this instance is throttled without
   // the live app needing to add the query param itself.
   state.defaultThrottleMs = defaultThrottleMs;
+  // Toggled by POST /__e2e__/offline (the `images` stage group): while true,
+  // every /api/ and /assets/ request gets its socket destroyed instead of a
+  // response, simulating an unreachable server.
+  state.offline = false;
 
   const server = http.createServer((req, res) => {
     handleRequest(req, res, state).catch((err) => {
