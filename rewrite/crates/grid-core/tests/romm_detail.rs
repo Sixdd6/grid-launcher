@@ -106,6 +106,51 @@ async fn rom_detail_minimal_payload_decodes_with_empty_strings() {
     assert_eq!(detail.filesize_bytes, 0);
     assert_eq!(detail.server_updated_at, "");
     assert!(detail.files.is_empty());
+    assert_eq!(detail.cover_small_path, "");
+    assert_eq!(detail.cover_large_path, "");
+    assert!(detail.screenshot_urls.is_empty());
+}
+
+#[tokio::test]
+async fn rom_detail_maps_image_fields() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/roms/1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 1,
+            "fs_name": "g.zip",
+            "fs_name_no_ext": "g",
+            "platform_id": 2,
+            "platform_display_name": "SNES",
+            "fs_size_bytes": 0,
+            "updated_at": "",
+            "regions": [],
+            "languages": [],
+            "tags": [],
+            "files": [],
+            "path_cover_small": "/assets/s.png",
+            "path_cover_large": "/assets/l.png",
+            "merged_screenshots": [
+                "/assets/roms/1/screenshots/a.png",
+                "https://other/b.png"
+            ],
+            "launchbox_metadata": {
+                "images": [
+                    {"type": "Box - Front", "url": "/box.png"}
+                ]
+            }
+        })))
+        .mount(&server)
+        .await;
+    let client = RommClient::new(&server.uri(), token_cred()).unwrap();
+    let detail = client.rom_detail(1).await.unwrap();
+
+    assert_eq!(detail.cover_small_path, "/assets/s.png");
+    assert_eq!(detail.cover_large_path, "/assets/l.png");
+    assert_eq!(
+        detail.screenshot_urls,
+        vec![format!("{}/assets/roms/1/screenshots/a.png", server.uri())]
+    );
 }
 
 #[tokio::test]

@@ -401,6 +401,12 @@ impl InstallService {
         self.registry.all()
     }
 
+    /// The registry backing this service, for callers that need to write to
+    /// it directly (e.g. the image replenish job's `update_images`).
+    pub fn registry(&self) -> Arc<Registry> {
+        self.registry.clone()
+    }
+
     /// Starts (or queues) an install for `rom_id`.
     ///
     /// `Err` is returned only for failures before admission — no library
@@ -1320,6 +1326,9 @@ fn new_record(detail: &RomDetail, rom_file_name: &str) -> InstalledGame {
         filesize_bytes: detail.filesize_bytes,
         server_updated_at: detail.server_updated_at.clone(),
         installed_at: unix_now(),
+        cover_small_path: detail.cover_small_path.clone(),
+        cover_large_path: detail.cover_large_path.clone(),
+        screenshot_urls: detail.screenshot_urls.join("\n"),
         ..Default::default()
     }
 }
@@ -1451,6 +1460,9 @@ mod tests {
             filesize_bytes: 999,
             server_updated_at: String::new(),
             files,
+            cover_small_path: String::new(),
+            cover_large_path: String::new(),
+            screenshot_urls: Vec::new(),
         }
     }
 

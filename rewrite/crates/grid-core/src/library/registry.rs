@@ -3,6 +3,7 @@
 //! (SQLite registry) for the schema and identity rules this implements.
 
 use super::LibraryError;
+use crate::images::ImageFields;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use std::path::Path;
 use std::sync::Mutex;
@@ -31,6 +32,9 @@ CREATE TABLE installed_games (
     first_release_date  TEXT NOT NULL DEFAULT '',
     filesize_bytes      INTEGER NOT NULL DEFAULT 0,
     server_updated_at   TEXT NOT NULL DEFAULT '',
+    cover_small_path    TEXT NOT NULL DEFAULT '',
+    cover_large_path    TEXT NOT NULL DEFAULT '',
+    screenshot_urls     TEXT NOT NULL DEFAULT '',
     installed_at        INTEGER NOT NULL,
     UNIQUE (title_key, platform_key)
 );
@@ -38,13 +42,20 @@ CREATE TABLE installed_games (
 
 /// The schema version this build understands. Bumped when a migration adds
 /// columns (see spec: later milestones add native/PS3/PS4 fields).
-const LATEST_USER_VERSION: i64 = 1;
+const LATEST_USER_VERSION: i64 = 2;
+
+/// v1 -> v2 (milestone 7): the three image columns.
+const MIGRATE_1_TO_2_SQL: &str = "
+ALTER TABLE installed_games ADD COLUMN cover_small_path TEXT NOT NULL DEFAULT '';
+ALTER TABLE installed_games ADD COLUMN cover_large_path TEXT NOT NULL DEFAULT '';
+ALTER TABLE installed_games ADD COLUMN screenshot_urls  TEXT NOT NULL DEFAULT '';
+";
 
 /// Every column of `installed_games`, in the order selected/inserted below.
 const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_path, \
      extracted_path, extracted_dir, multi_file_game_dir, description, rating, genres, \
      regions, languages, tags, revision, companies, first_release_date, filesize_bytes, \
-     server_updated_at, installed_at";
+     server_updated_at, installed_at, cover_small_path, cover_large_path, screenshot_urls";
 
 /// One installed game, as persisted in the SQLite registry. `title_key` and
 /// `platform_key` are not part of this type: they are computed from `title`
@@ -72,6 +83,9 @@ pub struct InstalledGame {
     pub filesize_bytes: i64,
     pub server_updated_at: String,
     pub installed_at: i64,
+    pub cover_small_path: String,
+    pub cover_large_path: String,
+    pub screenshot_urls: String,
 }
 
 impl InstalledGame {
@@ -97,6 +111,9 @@ impl InstalledGame {
             filesize_bytes: row.get(17)?,
             server_updated_at: row.get(18)?,
             installed_at: row.get(19)?,
+            cover_small_path: row.get(20)?,
+            cover_large_path: row.get(21)?,
+            screenshot_urls: row.get(22)?,
         })
     }
 }
@@ -142,23 +159,33 @@ impl Registry {
             std::fs::create_dir_all(parent)?;
         }
         let conn = Connection::open(path).map_err(registry_err)?;
-        let version: i64 = conn
+        let mut version: i64 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(registry_err)?;
-        match version {
-            0 => {
-                conn.execute_batch(SCHEMA_SQL).map_err(registry_err)?;
-                conn.pragma_update(None, "user_version", LATEST_USER_VERSION)
-                    .map_err(registry_err)?;
-            }
-            v if v == LATEST_USER_VERSION => {}
-            v => {
-                return Err(LibraryError::Registry(format!(
-                    "this database (user_version {v}) is from a newer app version; \
-                     update the app to open it"
-                )));
-            }
+        if version > LATEST_USER_VERSION {
+            return Err(LibraryError::Registry(format!(
+                "this database (user_version {version}) is from a newer app version; \
+                 update the app to open it"
+            )));
         }
+        if version == 0 {
+            conn.execute_batch(SCHEMA_SQL).map_err(registry_err)?;
+            version = LATEST_USER_VERSION;
+        }
+        while version < LATEST_USER_VERSION {
+            let sql = match version {
+                1 => MIGRATE_1_TO_2_SQL,
+                v => {
+                    return Err(LibraryError::Registry(format!(
+                        "no migration from user_version {v}"
+                    )))
+                }
+            };
+            conn.execute_batch(sql).map_err(registry_err)?;
+            version += 1;
+        }
+        conn.pragma_update(None, "user_version", LATEST_USER_VERSION)
+            .map_err(registry_err)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -184,10 +211,10 @@ impl Registry {
                 archive_path, extracted_path, extracted_dir, multi_file_game_dir,
                 description, rating, genres, regions, languages, tags, revision,
                 companies, first_release_date, filesize_bytes, server_updated_at,
-                installed_at
+                installed_at, cover_small_path, cover_large_path, screenshot_urls
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                ?16, ?17, ?18, ?19, ?20, ?21, ?22
+                ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25
             )
             ON CONFLICT(title_key, platform_key) DO UPDATE SET
                 title = excluded.title,
@@ -209,7 +236,10 @@ impl Registry {
                 first_release_date = excluded.first_release_date,
                 filesize_bytes = excluded.filesize_bytes,
                 server_updated_at = excluded.server_updated_at,
-                installed_at = excluded.installed_at",
+                installed_at = excluded.installed_at,
+                cover_small_path = excluded.cover_small_path,
+                cover_large_path = excluded.cover_large_path,
+                screenshot_urls = excluded.screenshot_urls",
             params![
                 rec.title,
                 rec.platform,
@@ -233,10 +263,32 @@ impl Registry {
                 rec.filesize_bytes,
                 rec.server_updated_at,
                 rec.installed_at,
+                rec.cover_small_path,
+                rec.cover_large_path,
+                rec.screenshot_urls,
             ],
         )
         .map_err(registry_err)?;
         Ok(())
+    }
+
+    /// Sets the three image columns on the row for `rom_id`. Returns whether
+    /// a row matched.
+    pub fn update_images(&self, rom_id: i64, fields: &ImageFields) -> Result<bool, LibraryError> {
+        let conn = self.conn.lock().unwrap();
+        let affected = conn
+            .execute(
+                "UPDATE installed_games SET cover_small_path = ?1, cover_large_path = ?2, \
+                 screenshot_urls = ?3 WHERE rom_id = ?4",
+                params![
+                    fields.cover_small_path,
+                    fields.cover_large_path,
+                    fields.screenshot_urls,
+                    rom_id
+                ],
+            )
+            .map_err(registry_err)?;
+        Ok(affected > 0)
     }
 
     /// All installed games, ordered by `title_key`.

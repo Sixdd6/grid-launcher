@@ -5,7 +5,13 @@ import { invoke } from '@tauri-apps/api/core';
 // cosmetic renames.
 export type SessionState = { connected: boolean; username: string; server_url: string };
 export type Platform = { id: number; name: string; slug: string; rom_count: number };
-export type GameSummary = { id: number; name: string; platform_id: number; path_cover_small: string | null };
+export type GameSummary = {
+  id: number;
+  name: string;
+  platform_id: number;
+  path_cover_small: string | null;
+  path_cover_large: string | null;
+};
 
 export type DownloadStatus =
   | 'queued'
@@ -107,6 +113,9 @@ export type InstalledGame = {
   filesize_bytes: number;
   server_updated_at: string;
   installed_at: number;
+  cover_small_path: string;
+  cover_large_path: string;
+  screenshot_urls: string;
 };
 
 // Cloud save/state sync (rewrite/app/src-tauri/src/cloud_service.rs,

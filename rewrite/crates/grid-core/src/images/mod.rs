@@ -23,3 +23,16 @@ pub struct ImageFields {
     pub cover_large_path: String,
     pub screenshot_urls: String,
 }
+
+impl ImageFields {
+    /// Builds the registry image columns from a freshly fetched
+    /// [`crate::romm::RomDetail`]: cover paths verbatim, screenshots
+    /// newline-joined.
+    pub fn from_detail(detail: &crate::romm::RomDetail) -> Self {
+        Self {
+            cover_small_path: detail.cover_small_path.clone(),
+            cover_large_path: detail.cover_large_path.clone(),
+            screenshot_urls: detail.screenshot_urls.join("\n"),
+        }
+    }
+}

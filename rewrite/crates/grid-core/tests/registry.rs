@@ -1,3 +1,4 @@
+use grid_core::images::ImageFields;
 use grid_core::library::registry::{InstalledGame, Registry};
 use rusqlite::Connection;
 
@@ -23,11 +24,14 @@ fn sample(title: &str, platform: &str) -> InstalledGame {
         filesize_bytes: 123_456,
         server_updated_at: "2026-01-01T00:00:00Z".into(),
         installed_at: 1_700_000_000,
+        cover_small_path: "/assets/s.png".into(),
+        cover_large_path: "/assets/l.png".into(),
+        screenshot_urls: "https://h/a.png\nhttps://h/b.png".into(),
     }
 }
 
 #[test]
-fn open_creates_file_and_sets_user_version_1() {
+fn open_creates_file_and_sets_user_version_2() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     let registry = Registry::open(&path).unwrap();
@@ -37,7 +41,7 @@ fn open_creates_file_and_sets_user_version_1() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 1);
+    assert_eq!(version, 2);
     drop(registry);
 }
 
@@ -174,4 +178,64 @@ fn opening_a_newer_database_errors_mentioning_newer() {
         err.to_string().to_lowercase().contains("newer"),
         "error message should mention the DB is from a newer app version: {err}"
     );
+}
+
+const V1_SCHEMA: &str = "CREATE TABLE installed_games (
+    id INTEGER PRIMARY KEY, title TEXT NOT NULL, platform TEXT NOT NULL,
+    title_key TEXT NOT NULL, platform_key TEXT NOT NULL, rom_id INTEGER,
+    rom_file_name TEXT NOT NULL DEFAULT '', archive_path TEXT NOT NULL DEFAULT '',
+    extracted_path TEXT NOT NULL DEFAULT '', extracted_dir TEXT NOT NULL DEFAULT '',
+    multi_file_game_dir TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
+    rating TEXT NOT NULL DEFAULT '', genres TEXT NOT NULL DEFAULT '', regions TEXT NOT NULL DEFAULT '',
+    languages TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '', revision TEXT NOT NULL DEFAULT '',
+    companies TEXT NOT NULL DEFAULT '', first_release_date TEXT NOT NULL DEFAULT '',
+    filesize_bytes INTEGER NOT NULL DEFAULT 0, server_updated_at TEXT NOT NULL DEFAULT '',
+    installed_at INTEGER NOT NULL, UNIQUE (title_key, platform_key));";
+
+#[test]
+fn open_migrates_a_v1_database_and_update_images_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(V1_SCHEMA).unwrap();
+        conn.execute("INSERT INTO installed_games (title, platform, title_key, platform_key, rom_id, installed_at)
+                      VALUES ('Old', 'SNES', 'old', 'snes', 7, 1)", []).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+    }
+    let registry = Registry::open(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 2);
+    let rows = registry.all().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].cover_small_path, "");
+    assert_eq!(rows[0].screenshot_urls, "");
+
+    let fields = ImageFields {
+        cover_small_path: "/s.png".into(),
+        cover_large_path: "/l.png".into(),
+        screenshot_urls: "https://h/x.png".into(),
+    };
+    assert!(registry.update_images(7, &fields).unwrap());
+    assert!(!registry.update_images(999, &fields).unwrap());
+    let row = &registry.all().unwrap()[0];
+    assert_eq!(row.cover_small_path, "/s.png");
+    assert_eq!(row.cover_large_path, "/l.png");
+    assert_eq!(row.screenshot_urls, "https://h/x.png");
+}
+
+#[test]
+fn open_refuses_a_newer_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    {
+        Connection::open(&path)
+            .unwrap()
+            .pragma_update(None, "user_version", 99)
+            .unwrap();
+    }
+    assert!(Registry::open(&path).is_err());
 }

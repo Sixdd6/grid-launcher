@@ -123,6 +123,9 @@ export function syntheticCloudGame(game: GameSummary, platformName: string): Ins
     filesize_bytes: 0,
     server_updated_at: '',
     installed_at: 0,
+    cover_small_path: '',
+    cover_large_path: '',
+    screenshot_urls: '',
   };
 }
 

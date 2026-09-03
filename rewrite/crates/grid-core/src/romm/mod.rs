@@ -187,6 +187,9 @@ pub struct GameSummary {
     /// Server-relative cover path (small variant), when present.
     #[serde(rename = "path_cover_small")]
     pub cover_path: Option<String>,
+    /// Server-relative cover path (large variant), when present.
+    #[serde(rename = "path_cover_large")]
+    pub cover_large_path: Option<String>,
 }
 
 /// Wire shape of a `SimpleRomSchema` entry. `name` is nullable server-side
@@ -205,6 +208,8 @@ struct RawGameSummary {
     platform_id: i64,
     #[serde(rename = "path_cover_small")]
     cover_path: Option<String>,
+    #[serde(rename = "path_cover_large", default)]
+    cover_large_path: Option<String>,
 }
 
 impl From<RawGameSummary> for GameSummary {
@@ -219,6 +224,7 @@ impl From<RawGameSummary> for GameSummary {
             name,
             platform_id: raw.platform_id,
             cover_path: raw.cover_path,
+            cover_large_path: raw.cover_large_path,
         }
     }
 }
@@ -272,7 +278,7 @@ impl RommClient {
 
     pub async fn rom_detail(&self, rom_id: i64) -> Result<RomDetail, RommError> {
         let raw: RawRomDetail = self.get_json(&format!("/api/roms/{rom_id}"), &[]).await?;
-        Ok(raw.into())
+        Ok(raw.into_detail(&self.base))
     }
 }
 
@@ -288,7 +294,7 @@ pub struct RomFile {
     pub is_top_level: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct RomDetail {
     pub id: i64,
     pub name: String,
@@ -307,6 +313,15 @@ pub struct RomDetail {
     pub filesize_bytes: i64,
     pub server_updated_at: String,
     pub files: Vec<RomFile>,
+    /// Server-relative cover path (small variant), verbatim from the
+    /// server — resolved lazily against the server URL.
+    pub cover_small_path: String,
+    /// Server-relative cover path (large variant), verbatim from the
+    /// server — resolved lazily against the server URL.
+    pub cover_large_path: String,
+    /// Already resolved + host-filtered absolute screenshot URLs, in
+    /// source order (see `images::urls::screenshot_urls_from_payload`).
+    pub screenshot_urls: Vec<String>,
 }
 
 /// Wire shape of `RomMetadataSchema` fields we use. Every field defaulted so
@@ -357,26 +372,40 @@ struct RawRomDetail {
     files: Vec<RomFile>,
     #[serde(default)]
     metadatum: Option<RawRomMetadata>,
+    #[serde(default)]
+    path_cover_small: Option<String>,
+    #[serde(default)]
+    path_cover_large: Option<String>,
+    /// Every field not named above — the screenshot sources
+    /// (`merged_screenshots`, `user_screenshots`, metadata blocks…) are read
+    /// from here by `screenshot_urls_from_payload`.
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
 }
 
-impl From<RawRomDetail> for RomDetail {
-    fn from(raw: RawRomDetail) -> Self {
-        let name = raw
+impl RawRomDetail {
+    fn into_detail(self, base_url: &str) -> RomDetail {
+        let name = self
             .name
             .filter(|n| !n.is_empty())
-            .unwrap_or(raw.fs_name_no_ext);
-        let metadatum = raw.metadatum.unwrap_or_default();
+            .unwrap_or(self.fs_name_no_ext);
+        let metadatum = self.metadatum.unwrap_or_default();
+        let resolver = crate::images::urls::server_resolver(base_url);
+        let screenshot_urls = crate::images::urls::screenshot_urls_from_payload(
+            &serde_json::Value::Object(self.extra),
+            &resolver,
+        );
         RomDetail {
-            id: raw.id,
+            id: self.id,
             name,
-            platform_id: raw.platform_id,
-            platform_name: raw.platform_display_name,
-            fs_name: raw.fs_name,
-            description: raw.summary.unwrap_or_default(),
-            regions: raw.regions.join(", "),
-            languages: raw.languages.join(", "),
-            tags: raw.tags.join(", "),
-            revision: raw.revision.unwrap_or_default(),
+            platform_id: self.platform_id,
+            platform_name: self.platform_display_name,
+            fs_name: self.fs_name,
+            description: self.summary.unwrap_or_default(),
+            regions: self.regions.join(", "),
+            languages: self.languages.join(", "),
+            tags: self.tags.join(", "),
+            revision: self.revision.unwrap_or_default(),
             rating: metadatum
                 .average_rating
                 .map(|r| format!("{r:.1}"))
@@ -387,9 +416,12 @@ impl From<RawRomDetail> for RomDetail {
                 .first_release_date
                 .map(|d| d.to_string())
                 .unwrap_or_default(),
-            filesize_bytes: raw.fs_size_bytes,
-            server_updated_at: raw.updated_at,
-            files: raw.files,
+            filesize_bytes: self.fs_size_bytes,
+            server_updated_at: self.updated_at,
+            files: self.files,
+            cover_small_path: self.path_cover_small.unwrap_or_default(),
+            cover_large_path: self.path_cover_large.unwrap_or_default(),
+            screenshot_urls,
         }
     }
 }

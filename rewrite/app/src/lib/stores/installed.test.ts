@@ -24,6 +24,9 @@ function row(overrides: Partial<InstalledGame>): InstalledGame {
     filesize_bytes: 0,
     server_updated_at: '',
     installed_at: 0,
+    cover_small_path: '',
+    cover_large_path: '',
+    screenshot_urls: '',
     ...overrides,
   };
 }
@@ -34,6 +37,7 @@ function game(overrides: Partial<GameSummary>): GameSummary {
     name: 'Chrono Trigger',
     platform_id: 1,
     path_cover_small: null,
+    path_cover_large: null,
     ...overrides,
   };
 }

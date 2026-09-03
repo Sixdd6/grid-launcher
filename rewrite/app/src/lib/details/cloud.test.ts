@@ -181,7 +181,13 @@ describe('isNativeExecutablePlatform', () => {
 
 describe('syntheticCloudGame', () => {
   it('carries the game id as rom_id and the given platform name', () => {
-    const game: GameSummary = { id: 42, name: 'Portal', platform_id: 3, path_cover_small: null };
+    const game: GameSummary = {
+      id: 42,
+      name: 'Portal',
+      platform_id: 3,
+      path_cover_small: null,
+      path_cover_large: null,
+    };
     const synthetic = syntheticCloudGame(game, 'Emulators');
     expect(synthetic.title).toBe('Portal');
     expect(synthetic.platform).toBe('Emulators');
