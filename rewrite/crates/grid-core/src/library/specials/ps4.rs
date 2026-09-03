@@ -301,19 +301,6 @@ pub(crate) fn read_content_entries(text: &str) -> Vec<BTreeMap<String, String>> 
 // Content apply
 // ---------------------------------------------------------------------------
 
-/// Removes `staging` (recursively, ignoring errors) when dropped — used so
-/// every exit path out of [`apply_content`] after extraction cleans up the
-/// extracted content directory, mirroring the Python `finally:
-/// shutil.rmtree(content_extract_dir, ignore_errors=True)`
-/// (`archive_preparation.py:777`).
-struct StagingGuard<'a>(&'a Path);
-
-impl Drop for StagingGuard<'_> {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(self.0);
-    }
-}
-
 /// Applies a PS4 update/DLC content archive to an already-installed game.
 /// Extracts `archive` into `staging` (removed on every exit afterwards),
 /// requires a title-id root inside it matching the installed game's
@@ -359,7 +346,7 @@ pub fn apply_content(
     }
 
     extract(archive, staging).map_err(|e| e.to_string())?;
-    let _staging_guard = StagingGuard(staging);
+    let _staging_guard = super::StagingGuard(staging.to_path_buf());
 
     let content_roots = title_id_roots(staging);
     if content_roots.is_empty() {

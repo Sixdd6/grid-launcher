@@ -13,7 +13,22 @@ pub mod xenia;
 
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Removes a staging/extraction directory (recursively, ignoring errors)
+/// when dropped — used so every exit path out of a content-apply function,
+/// after it has extracted an archive into a scratch directory, cleans that
+/// directory up. Mirrors the Python `finally: shutil.rmtree(..., ignore_errors=True)`
+/// blocks in `archive_preparation.py` (e.g. line 777 for PS4 content, line
+/// 818 for Xenia content). Shared by `ps4::apply_content` and
+/// `xenia::apply_content_archive`.
+pub(crate) struct StagingGuard(pub PathBuf);
+
+impl Drop for StagingGuard {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
 
 /// Copies every entry of `src` into `dst`, merging with anything already
 /// there: directories are created as needed and recursed into, files

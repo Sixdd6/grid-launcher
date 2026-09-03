@@ -150,19 +150,6 @@ pub fn apply_content_file(
     })
 }
 
-/// Removes `staging` (recursively, ignoring errors) when dropped — every
-/// exit path out of [`apply_content_archive`] after extraction cleans up
-/// the extracted content directory, mirroring the Python `finally:
-/// shutil.rmtree(str(extract_dir), ignore_errors=True)`
-/// (`archive_preparation.py:818`).
-struct StagingGuard<'a>(&'a Path);
-
-impl Drop for StagingGuard<'_> {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(self.0);
-    }
-}
-
 /// Recursively collects every regular file under `dir`, sorted by path.
 fn sorted_files(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
@@ -208,7 +195,7 @@ pub fn apply_content_archive(
     extract: ExtractFn,
 ) -> Result<(Vec<XeniaApplied>, String), String> {
     extract(archive, staging).map_err(|e| e.to_string())?;
-    let _staging_guard = StagingGuard(staging);
+    let _staging_guard = super::StagingGuard(staging.to_path_buf());
 
     let mut successes = Vec::new();
     let mut errors = Vec::new();
@@ -413,7 +400,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_content_archive_extract_failure_removes_staging_and_propagates() {
+    fn apply_content_archive_extract_failure_propagates_and_leaves_staging_in_place() {
         let dir = tempfile::tempdir().unwrap();
         let archive = dir.path().join("archive.zip");
         fs::write(&archive, b"fake archive").unwrap();
@@ -428,6 +415,11 @@ mod tests {
         let result = apply_content_archive(&archive, &content_root, &staging, "", &extract);
 
         assert_eq!(result, Err("boom".to_string()));
+        // The extraction error return happens before the staging guard is
+        // constructed, so staging is left untouched on this path — matching
+        // Python, which only wraps `shutil.rmtree` in the `finally` around
+        // the extraction call, not before it.
+        assert!(staging.exists());
     }
 
     #[test]
