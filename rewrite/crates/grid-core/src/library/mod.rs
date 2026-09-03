@@ -28,18 +28,23 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use serde_json::Value;
 
-use crate::autoconfig::readers::{ps3_vfs_dev_hdd0_path, ps3_vfs_games_path, rpcs3_data_root};
+use crate::autoconfig::readers::{
+    ps3_vfs_dev_hdd0_path, ps3_vfs_games_path, rpcs3_data_root, xenia_directory_settings,
+};
 use crate::autoconfig::rpcs3::update_games_yml;
 use crate::autoconfig::{self, RaCredentials};
 use crate::config::{Config, EmulatorEntry};
 use crate::images::ImageFields;
 use crate::launch::forge::{ForgeClient, ForgeProvider, ResolvedDownload};
-use crate::launch::profiles::{load_profiles, EmulatorProfile};
+use crate::launch::profiles::{
+    load_profiles, profile_available_on_host, profile_for_entry, EmulatorProfile,
+};
 use crate::launch::selection::{default_emulator_name_for_platform, emulator_entry_by_name};
+use crate::launch::source::HOST_PLATFORM;
 use crate::launch::template::split_template;
 use crate::launch::{catalog, emu_install};
 use crate::romm::{RomDetail, RomFile, RommClient};
-use content::ContentKind;
+use content::{content_file_ids, ContentKind};
 use download::{download_targets, FileTarget, RommProvider};
 use extract::{
     extract_archive, extract_iso_with_system_7z, is_extractable_archive, should_extract,
@@ -49,7 +54,7 @@ use paths::{
     archive_name, candidate_archives, candidate_extracted_dirs, extraction_dir, platform_dir,
     sanitize_component,
 };
-use platforms::{is_native_platform, is_ps3_platform, is_ps4_platform};
+use platforms::{is_native_platform, is_ps3_platform, is_ps4_platform, is_xbox360_platform};
 use queue::{Admission, CancelAction, DownloadStatus, DownloadsSnapshot, JobKey, QueueState};
 use registry::{installed_match, InstalledGame, Registry};
 use specials::ps3::Ps3Roots;
@@ -107,6 +112,26 @@ const EMULATOR_PLATFORM: &str = "Emulator";
 const EXTRACT_TMP_DIR: &str = ".extract-tmp";
 const NO_EMULATOR_EXECUTABLE: &str = "No launchable emulator executable was found after install";
 
+/// The verbatim messages the update/DLC flows show. Worded exactly as
+/// the reference does (`install_mixin.py:364-383`,
+/// `details_view_mixin.py:1559`, `:1849`); the drawer row shows them
+/// unchanged, so they must not drift.
+const XENIA_CONTENT_ROOT_UNKNOWN: &str =
+    "Could not determine Xenia content directory. Is Xenia configured?";
+const XBOX360_NEEDS_LINUX_EMULATOR: &str =
+    "Xbox 360 content requires a Linux-compatible emulator such as Xenia Edge. \
+     Install and configure Xenia Edge, then try again.";
+const XBOX360_EMULATOR_WINDOWS_ONLY: &str =
+    "The configured Xbox 360 emulator only runs on Windows. Install a \
+     Linux-compatible emulator such as Xenia Edge to apply content.";
+const CONTENT_UNSUPPORTED_PLATFORM: &str =
+    "Update/DLC content is only supported for PS4 and Xbox 360 games";
+/// A native update needs the directory it merges into.
+const NO_NATIVE_INSTALL_DIR: &str =
+    "Game install directory could not be found. Reinstall the game and try again.";
+/// What every "this game is not in the registry" failure says.
+const NOT_INSTALLED: &str = "not installed";
+
 /// Everything outside the RFC 3986 unreserved set (`ALPHA / DIGIT / - . _ ~`)
 /// is percent-encoded. Applied to the file-name segment of a content URL so a
 /// name containing a space, `#`, `?` or `/` can never change the shape of the
@@ -157,14 +182,12 @@ struct InstallJob {
     /// row's `kind`.
     mode: InstallMode,
     /// The content category this job installs, for a `Ps4Content` /
-    /// `Xbox360Content` mode; `None` for every other mode. Read by the
-    /// content-install flow only, which lands in the next task.
-    #[allow(dead_code)]
+    /// `Xbox360Content` mode; `None` for every other mode.
     content_kind: Option<ContentKind>,
-    /// The server file ids this job downloads, in target order. Carried so a
-    /// content job can record what it applied without re-deriving it; read
-    /// by that flow only, which lands in the next task.
-    #[allow(dead_code)]
+    /// The server file ids this job downloads. For a base or native-update
+    /// job that is one id per target, in target order; for a content job it
+    /// is every file of the requested category, which the server bundles
+    /// into ONE archive named by a single `file_ids` query pair.
     file_ids: Vec<i64>,
     detail: RomDetail,
     targets: Vec<FileTarget>,
@@ -426,6 +449,100 @@ fn plan_native_install(
     })
 }
 
+/// The install mode an update/DLC job for `platform` runs in, or `None`
+/// when that platform has no content flow at all.
+fn content_mode(platform: &str) -> Option<InstallMode> {
+    if is_ps4_platform(platform) {
+        Some(InstallMode::Ps4Content)
+    } else if is_xbox360_platform(platform) {
+        Some(InstallMode::Xbox360Content)
+    } else {
+        None
+    }
+}
+
+/// The verbatim "the server lists none of this" message for `mode`. The two
+/// consoles word it differently, so the message follows the platform rather
+/// than the content kind.
+fn no_content_message(mode: InstallMode, kind: ContentKind) -> String {
+    let kind = kind.as_str();
+    if mode == InstallMode::Xbox360Content {
+        format!("No Xbox 360 {kind} content is available for this title.")
+    } else {
+        format!("No PS4 {kind} files were found for this title in server metadata.")
+    }
+}
+
+/// `ids` as the `file_ids` query value: a comma-separated list, in order.
+fn file_ids_csv(ids: &[i64]) -> String {
+    ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",")
+}
+
+/// Builds the update/DLC job for `detail`: the admission key, the drawer
+/// row's title, and the payload.
+///
+/// ONE target, whatever `file_ids` holds: the content endpoint bundles every
+/// requested file into a single archive, so the whole category arrives as
+/// `<platform dir>/<safe title>-<kind>.zip`
+/// (`install_mixin.py:319-328`). The URL's file-name segment is the game's
+/// own `fs_name`, which is what the reference asks for too — the server
+/// names the bundle, not the caller.
+fn content_job(
+    library: &Path,
+    detail: &RomDetail,
+    kind: ContentKind,
+    mode: InstallMode,
+    file_ids: Vec<i64>,
+    client: Arc<RommClient>,
+) -> (JobKey, String, JobPayload) {
+    let fallback = if mode == InstallMode::Xbox360Content {
+        "xbox360-content"
+    } else {
+        "ps4-content"
+    };
+    let dest = platform_dir(library, &detail.platform_name).join(format!(
+        "{}-{}.zip",
+        sanitize_component(&detail.name, fallback),
+        kind.as_str()
+    ));
+
+    let mut job = InstallJob {
+        rom_id: detail.id,
+        mode,
+        content_kind: Some(kind),
+        file_ids,
+        detail: detail.clone(),
+        targets: Vec::new(),
+        primary_archive: dest.clone(),
+        multi_file_game_dir: None,
+        // Nothing reads this for a content job — no registry row is
+        // created — but the archive it names is what was downloaded.
+        launch_entry: detail.fs_name.clone(),
+        native_game_dir: None,
+        game_json_target: None,
+        client,
+    };
+    job.targets.push(FileTarget {
+        url_path: format!(
+            "/api/roms/{}/content/{}",
+            detail.id,
+            encode_file_segment(&detail.fs_name)
+        ),
+        query: vec![("file_ids".to_string(), file_ids_csv(&job.file_ids))],
+        dest,
+        // The server builds the bundle on the fly, so its size is not
+        // knowable before the response arrives.
+        expected_size: 0,
+    });
+
+    let title = format!("{} ({})", detail.name, kind.as_str());
+    (
+        JobKey::Content(detail.id, kind),
+        title,
+        JobPayload::Game(job),
+    )
+}
+
 // --- service ----------------------------------------------------------------
 
 type Listener = Arc<dyn Fn(DownloadsSnapshot) + Send + Sync>;
@@ -620,6 +737,110 @@ impl InstallService {
         Ok(())
     }
 
+    /// Starts (or queues) an update or DLC install for an already installed
+    /// PS4 or Xbox 360 game.
+    ///
+    /// The row is checked BEFORE anything is fetched: content is applied on
+    /// top of an install and is meaningless without one. `Err` covers every
+    /// pre-admission failure — no library path, no row, an unreachable
+    /// server, a platform with no content flow, or a title the server lists
+    /// no files of that kind for. Once the entry exists, every later failure
+    /// shows up on it. A `(rom_id, kind)` pair that is already downloading,
+    /// finalizing or queued is ignored silently; the same game's update and
+    /// DLC queue side by side.
+    pub async fn install_content(
+        self: &Arc<Self>,
+        client: Arc<RommClient>,
+        rom_id: i64,
+        kind: ContentKind,
+    ) -> Result<(), LibraryError> {
+        let library = self.library_root()?;
+        self.current_row(rom_id)?;
+        let detail = client.rom_detail(rom_id).await?;
+        let Some(mode) = content_mode(&detail.platform_name) else {
+            return Err(LibraryError::Extract(
+                CONTENT_UNSUPPORTED_PLATFORM.to_string(),
+            ));
+        };
+        let file_ids = content_file_ids(&detail.files, kind);
+        if file_ids.is_empty() {
+            return Err(LibraryError::Extract(no_content_message(mode, kind)));
+        }
+        let (key, title, payload) = content_job(&library, &detail, kind, mode, file_ids, client);
+        self.admit(key, &title, &detail.platform_name, mode.kind(), payload);
+        Ok(())
+    }
+
+    /// Starts (or queues) an update install for an already installed native
+    /// (Windows) game. The new archive is MERGED into the existing install
+    /// rather than replacing it, so saves and configs survive.
+    ///
+    /// `Err` covers every pre-admission failure: no row, a row that is not a
+    /// native game or has lost its install directory, an unreachable server,
+    /// or a payload with no archive in it.
+    pub async fn install_native_update(
+        self: &Arc<Self>,
+        client: Arc<RommClient>,
+        rom_id: i64,
+    ) -> Result<(), LibraryError> {
+        let row = self.current_row(rom_id)?;
+        let extracted_dir = row.extracted_dir.trim();
+        if !is_native_platform(&row.platform)
+            || extracted_dir.is_empty()
+            || !Path::new(extracted_dir).is_dir()
+        {
+            return Err(LibraryError::Extract(NO_NATIVE_INSTALL_DIR.to_string()));
+        }
+
+        let detail = client.rom_detail(rom_id).await?;
+        let Some(archive) = specials::native::select_archive(&detail.files) else {
+            return Err(LibraryError::Extract(
+                NO_NATIVE_DOWNLOADABLE_FILE.to_string(),
+            ));
+        };
+        // The game's own home directory, which already holds the extracted
+        // tree: the update archive lands beside it so the merge never
+        // crosses a filesystem.
+        let native_game_dir = match row.native_game_dir.trim() {
+            "" => Path::new(extracted_dir)
+                .parent()
+                .unwrap_or(Path::new(""))
+                .to_path_buf(),
+            recorded => PathBuf::from(recorded),
+        };
+        let dest = native_game_dir.join(&archive.file_name);
+        let size = if archive.file_size_bytes > 0 {
+            archive.file_size_bytes
+        } else {
+            detail.filesize_bytes
+        };
+
+        let title = format!("{} (update)", detail.name);
+        let platform = detail.platform_name.clone();
+        let job = InstallJob {
+            rom_id,
+            mode: InstallMode::NativeUpdate,
+            content_kind: None,
+            file_ids: vec![archive.id],
+            targets: vec![content_target(rom_id, archive, dest.clone(), size)],
+            primary_archive: dest,
+            multi_file_game_dir: None,
+            launch_entry: archive.file_name.clone(),
+            native_game_dir: Some(native_game_dir),
+            game_json_target: None,
+            detail: detail.clone(),
+            client,
+        };
+        self.admit(
+            JobKey::NativeUpdate(rom_id),
+            &title,
+            &platform,
+            InstallMode::NativeUpdate.kind(),
+            JobPayload::Game(job),
+        );
+        Ok(())
+    }
+
     /// Starts (or queues) an emulator acquisition for the catalog
     /// `source_id` (`"{owner}/{repo}"`).
     ///
@@ -744,13 +965,26 @@ impl InstallService {
                 self.dismiss(entry_id);
                 self.install_emulator(source_id).await
             }
-            // A content / native-update job carries state this service does
-            // not own (the installed row it applies to), and an external
-            // entry is somebody else's transfer. Neither is retried from
-            // here; the caller re-requests it instead.
-            Some(JobKey::Content(..))
-            | Some(JobKey::NativeUpdate(_))
-            | Some(JobKey::External(_)) => Ok(()),
+            // A content / native-update retry re-plans through the same
+            // entry point the first attempt used, so the row and the server
+            // metadata are read fresh: the game may have been updated, or
+            // uninstalled, since the failed attempt.
+            Some(JobKey::Content(rom_id, kind)) => {
+                let client =
+                    client.ok_or_else(|| LibraryError::Registry("not connected".to_string()))?;
+                self.dismiss(entry_id);
+                self.install_content(client, rom_id, kind).await
+            }
+            Some(JobKey::NativeUpdate(rom_id)) => {
+                let client =
+                    client.ok_or_else(|| LibraryError::Registry("not connected".to_string()))?;
+                self.dismiss(entry_id);
+                self.install_native_update(client, rom_id).await
+            }
+            // An external entry is somebody else's transfer: this service
+            // never moved its bytes and has no plan to restart. The owner
+            // re-requests it instead, which creates a new row.
+            Some(JobKey::External(_)) => Ok(()),
             None => Ok(()),
         }
     }
@@ -795,7 +1029,7 @@ impl InstallService {
             .registry
             .find(Some(rom_id), "", "")?
             .filter(|found| installed_match(found, rom_id))
-            .ok_or_else(|| LibraryError::Registry("not installed".to_string()))?;
+            .ok_or_else(|| LibraryError::Registry(NOT_INSTALLED.to_string()))?;
 
         let steps = uninstall_steps(&record, &library);
         let failures = run_removals(&steps, &mut apply_removal);
@@ -950,8 +1184,15 @@ impl InstallService {
         // An emulator never short-circuits: the registry is games-only, so
         // there is no "already installed" row to find, and the extract /
         // config-write half still has to run.
+        // A content / native-update job applies ON TOP of an installed
+        // game, so "already installed" is its precondition, not a reason to
+        // skip: only a base install short-circuits here.
         let skip_finalize = match &payload {
-            JobPayload::Game(job) => result.is_ok() && self.already_installed(&job.detail).await,
+            JobPayload::Game(job) => {
+                job.mode == InstallMode::Base
+                    && result.is_ok()
+                    && self.already_installed(&job.detail).await
+            }
             JobPayload::Emulator(_) => false,
         };
         // A cancel that lands after the last chunk arrived is too late: the
@@ -1063,7 +1304,11 @@ impl InstallService {
     /// registry write and archive cleanup. Returns the outcome plus a
     /// warning string that is empty unless the install succeeded with a
     /// caveat.
-    fn finalize(&self, id: u64, payload: &JobPayload) -> (Result<(), LibraryError>, String) {
+    fn finalize(
+        self: &Arc<Self>,
+        id: u64,
+        payload: &JobPayload,
+    ) -> (Result<(), LibraryError>, String) {
         let mut warning = String::new();
         let result = match payload {
             JobPayload::Game(job) => self.finalize_inner(id, job, &mut warning),
@@ -1072,8 +1317,24 @@ impl InstallService {
         (result, warning)
     }
 
+    /// Routes a game job to its mode's finalize. `Base` lays a new registry
+    /// row down; the other three modify the row an earlier install left.
     fn finalize_inner(
-        &self,
+        self: &Arc<Self>,
+        id: u64,
+        job: &InstallJob,
+        warning: &mut String,
+    ) -> Result<(), LibraryError> {
+        match job.mode {
+            InstallMode::Base => self.finalize_base(id, job, warning),
+            InstallMode::Ps4Content => self.finalize_ps4_content(id, job, warning),
+            InstallMode::Xbox360Content => self.finalize_xbox360_content(id, job, warning),
+            InstallMode::NativeUpdate => self.finalize_native_update(id, job, warning),
+        }
+    }
+
+    fn finalize_base(
+        self: &Arc<Self>,
         id: u64,
         job: &InstallJob,
         warning: &mut String,
@@ -1090,7 +1351,7 @@ impl InstallService {
             record.multi_file_game_dir = path_string(game_dir);
             record.extracted_path = path_string(&job.primary_archive);
             archive_to_delete = None;
-        } else if is_native_platform(platform) && job.mode == InstallMode::Base {
+        } else if is_native_platform(platform) {
             archive_to_delete = self.finalize_native_base(id, job, &mut record)?;
         } else if is_ps3_platform(platform) {
             archive_to_delete = self.finalize_ps3_base(id, job, &mut record)?;
@@ -1139,10 +1400,15 @@ impl InstallService {
             self.write_games_yml(&record);
         }
 
-        // Same lock discipline as the image hook above.
+        // Same lock discipline as the image hook above. Only a base
+        // install produces a row for the app to follow up on.
         let finalized = self.game_finalized_hook.read().unwrap().clone();
-        if let (Some(finalized), InstallMode::Base) = (finalized, job.mode) {
+        if let Some(finalized) = finalized {
             finalized(record.clone());
+        }
+
+        if is_xbox360_platform(platform) {
+            self.queue_xbox360_content(job);
         }
 
         // Only after a successful write, and only when the archive has been
@@ -1154,6 +1420,200 @@ impl InstallService {
             }
         }
         Ok(())
+    }
+
+    /// D16 / doc 03 §13: after a base Xbox 360 install finishes, its update
+    /// and then its DLC are queued automatically and silently.
+    ///
+    /// The file ids come from the base job's OWN `detail`, so no server
+    /// round trip happens here, and admission failures are not surfaced: a
+    /// duplicate (the user asked for the same content by hand a moment ago)
+    /// is simply dropped by the queue. This runs while the base entry still
+    /// owns the finalize slot, so both content jobs are queued rather than
+    /// started, and the FIFO gives base -> update -> DLC.
+    fn queue_xbox360_content(self: &Arc<Self>, job: &InstallJob) {
+        let Ok(library) = self.library_root() else {
+            return;
+        };
+        for kind in [ContentKind::Update, ContentKind::Dlc] {
+            let file_ids = content_file_ids(&job.detail.files, kind);
+            if file_ids.is_empty() {
+                continue;
+            }
+            let (key, title, payload) = content_job(
+                &library,
+                &job.detail,
+                kind,
+                InstallMode::Xbox360Content,
+                file_ids,
+                job.client.clone(),
+            );
+            self.admit(
+                key,
+                &title,
+                &job.detail.platform_name,
+                InstallMode::Xbox360Content.kind(),
+                payload,
+            );
+        }
+    }
+
+    /// Applies a PS4 update/DLC archive to the game's installed title-id
+    /// tree and records what was applied.
+    ///
+    /// No new registry row, no image hook and no game-finalized hook: this
+    /// modifies an existing install rather than creating one. The archive is
+    /// deleted by [`specials::ps4::apply_content`] itself, which is also
+    /// where a delete failure becomes a warning.
+    fn finalize_ps4_content(
+        &self,
+        id: u64,
+        job: &InstallJob,
+        warning: &mut String,
+    ) -> Result<(), LibraryError> {
+        let row = self.current_row(job.rom_id)?;
+        let archive = job.primary_archive.as_path();
+        let staging = extraction_dir(archive);
+        // Always `Some` for a content job (`content_job` sets it); the
+        // fallback keeps a malformed job from panicking.
+        let kind = job.content_kind.unwrap_or(ContentKind::Update);
+        let extract = self.extract_fn(id);
+
+        let applied = specials::ps4::apply_content(&row, archive, kind, &staging, &extract)
+            .map_err(LibraryError::Extract)?;
+        self.registry
+            .update_ps4_content(job.rom_id, &applied.game_id, &applied.content_json)?;
+        if !applied.warning.is_empty() {
+            append_warning(warning, &applied.warning);
+        }
+        Ok(())
+    }
+
+    /// Copies every STFS package in an Xbox 360 update/DLC archive into
+    /// Xenia's content directory.
+    ///
+    /// Nothing is written to the registry: Xenia finds its content by
+    /// scanning that directory, so the install IS the copy. D16: the archive
+    /// is deleted here, after a successful apply, exactly like a base
+    /// install's is.
+    fn finalize_xbox360_content(
+        &self,
+        id: u64,
+        job: &InstallJob,
+        warning: &mut String,
+    ) -> Result<(), LibraryError> {
+        let row = self.current_row(job.rom_id)?;
+        let content_root = self
+            .xenia_content_root(&row.platform)
+            .map_err(LibraryError::Extract)?;
+        let archive = job.primary_archive.as_path();
+        let staging = extraction_dir(archive);
+        let extract = self.extract_fn(id);
+
+        // The expected title id is left blank: the reference passes none
+        // either, so a package for a different title is copied under its own
+        // id rather than rejected.
+        let (_applied, apply_warning) =
+            specials::xenia::apply_content_archive(archive, &content_root, &staging, "", &extract)
+                .map_err(LibraryError::Extract)?;
+        if !apply_warning.is_empty() {
+            append_warning(warning, &apply_warning);
+        }
+        if !delete_with_retry(archive) {
+            append_warning(
+                warning,
+                &format!("could not delete archive: {}", archive.display()),
+            );
+        }
+        Ok(())
+    }
+
+    /// Merges a native (Windows) game's update archive into its existing
+    /// install and re-registers the resulting row.
+    fn finalize_native_update(
+        &self,
+        id: u64,
+        job: &InstallJob,
+        warning: &mut String,
+    ) -> Result<(), LibraryError> {
+        let row = self.current_row(job.rom_id)?;
+        let archive = job.primary_archive.as_path();
+        let temp_dir = specials::native::update_temp_dir(&row);
+        let extract = self.extract_fn(id);
+
+        let updated =
+            specials::native::apply_update(&row, &job.detail, archive, &temp_dir, &extract)
+                .map_err(LibraryError::Extract)?;
+        self.registry.upsert(&updated.row)?;
+        if !updated.warning.is_empty() {
+            append_warning(warning, &updated.warning);
+        }
+        Ok(())
+    }
+
+    /// The registry row for `rom_id` as it stands RIGHT NOW.
+    ///
+    /// Every content job reads this at finalize time rather than trusting
+    /// the plan: an install can finish, or be uninstalled, between admission
+    /// and the moment the archive is applied. `find`'s title/platform
+    /// fallback is skipped (both are passed blank) and `installed_match` has
+    /// the final word, so this only ever returns a row that genuinely
+    /// belongs to `rom_id`.
+    fn current_row(&self, rom_id: i64) -> Result<InstalledGame, LibraryError> {
+        self.registry
+            .find(Some(rom_id), "", "")?
+            .filter(|row| installed_match(row, rom_id))
+            .ok_or_else(|| LibraryError::Registry(NOT_INSTALLED.to_string()))
+    }
+
+    /// The extraction callback the specials take, bound to entry `id`'s
+    /// install-progress sink.
+    fn extract_fn(&self, id: u64) -> impl Fn(&Path, &Path) -> Result<(), LibraryError> + '_ {
+        move |archive: &Path, dest: &Path| {
+            let mut progress = |processed, total| self.on_install_progress(id, processed, total);
+            extract_archive(archive, dest, &mut progress)
+        }
+    }
+
+    /// Xenia's content directory for `platform`, or the verbatim message the
+    /// drawer row shows when it cannot be resolved.
+    ///
+    /// On a non-Windows host the emulator has to exist and has to be able to
+    /// run here first: a Windows-only Xenia build cannot apply anything, and
+    /// saying so is more use than "content directory not found". Ports
+    /// `_apply_xenia_content_archive_without_ui`'s preamble
+    /// (`install_mixin.py:348-383`).
+    fn xenia_content_root(&self, platform: &str) -> Result<PathBuf, String> {
+        let config =
+            Config::load(&self.config_path).map_err(|_| XENIA_CONTENT_ROOT_UNKNOWN.to_string())?;
+        let name = default_emulator_name_for_platform(
+            &config.emulators,
+            &config.default_emulators,
+            platform,
+            &self.profiles,
+            &config.retroarch_cores,
+        );
+        let entry = emulator_entry_by_name(&config.emulators, &name);
+        let path = entry.map(|e| e.path.as_str()).unwrap_or("");
+
+        if !cfg!(windows) {
+            if name.trim().is_empty() {
+                return Err(XBOX360_NEEDS_LINUX_EMULATOR.to_string());
+            }
+            let profile = profile_for_entry(&name, path, &self.profiles);
+            if profile.is_some_and(|profile| !profile_available_on_host(profile, HOST_PLATFORM)) {
+                return Err(XBOX360_EMULATOR_WINDOWS_ONLY.to_string());
+            }
+        }
+
+        let args = entry
+            .map(|e| split_template(&e.args).unwrap_or_default())
+            .unwrap_or_default();
+        let content_root = xenia_directory_settings(path, &args).content_root;
+        if content_root.trim().is_empty() {
+            return Err(XENIA_CONTENT_ROOT_UNKNOWN.to_string());
+        }
+        Ok(PathBuf::from(content_root))
     }
 
     /// Finalizes a native (Windows) base install into the game's own home
@@ -2649,5 +3109,146 @@ mod tests {
 
         service.set_known_platforms(Vec::new());
         assert!(service.known_platforms().is_empty());
+    }
+
+    // --- content job planning -----------------------------------------------
+
+    fn content_detail(platform: &str, files: Vec<RomFile>) -> RomDetail {
+        RomDetail {
+            platform_name: platform.to_string(),
+            ..detail(files)
+        }
+    }
+
+    fn content_file(id: i64, category: &str) -> RomFile {
+        RomFile {
+            category: category.to_string(),
+            ..rom_file(id, &format!("file{id}.zip"), true)
+        }
+    }
+
+    #[test]
+    fn content_mode_follows_the_platform() {
+        assert_eq!(content_mode("PlayStation 4"), Some(InstallMode::Ps4Content));
+        assert_eq!(content_mode("ps4"), Some(InstallMode::Ps4Content));
+        assert_eq!(
+            content_mode("Microsoft Xbox 360"),
+            Some(InstallMode::Xbox360Content)
+        );
+        assert_eq!(content_mode("SNES"), None);
+        assert_eq!(content_mode(""), None);
+    }
+
+    #[test]
+    fn no_content_message_words_each_console_differently() {
+        assert_eq!(
+            no_content_message(InstallMode::Ps4Content, ContentKind::Dlc),
+            "No PS4 dlc files were found for this title in server metadata."
+        );
+        assert_eq!(
+            no_content_message(InstallMode::Xbox360Content, ContentKind::Update),
+            "No Xbox 360 update content is available for this title."
+        );
+    }
+
+    #[test]
+    fn file_ids_csv_joins_in_order() {
+        assert_eq!(file_ids_csv(&[3, 1, 2]), "3,1,2");
+        assert_eq!(file_ids_csv(&[7]), "7");
+        assert_eq!(file_ids_csv(&[]), "");
+    }
+
+    #[test]
+    fn content_job_builds_one_target_with_one_file_ids_pair() {
+        let detail = content_detail(
+            "PlayStation 4",
+            vec![content_file(1, "game"), content_file(2, "update")],
+        );
+        let library = Path::new("/lib");
+        let (key, title, payload) = content_job(
+            library,
+            &detail,
+            ContentKind::Update,
+            InstallMode::Ps4Content,
+            vec![2, 3],
+            client(),
+        );
+
+        assert_eq!(key, JobKey::Content(42, ContentKind::Update));
+        assert_eq!(title, "Chrono Trigger (update)");
+        let JobPayload::Game(job) = payload else {
+            panic!("a content job is a game job");
+        };
+        assert_eq!(job.mode, InstallMode::Ps4Content);
+        assert_eq!(job.content_kind, Some(ContentKind::Update));
+        assert_eq!(job.file_ids, vec![2, 3]);
+        assert_eq!(
+            job.targets.len(),
+            1,
+            "the server bundles the whole category"
+        );
+        assert_eq!(job.targets[0].url_path, "/api/roms/42/content/chrono.zip");
+        assert_eq!(
+            job.targets[0].query,
+            vec![("file_ids".to_string(), "2,3".to_string())]
+        );
+        assert_eq!(
+            job.targets[0].dest,
+            Path::new("/lib/PlayStation 4/Chrono Trigger-update.zip")
+        );
+        assert_eq!(job.primary_archive, job.targets[0].dest);
+        assert!(job.multi_file_game_dir.is_none());
+        assert!(job.native_game_dir.is_none());
+    }
+
+    #[test]
+    fn content_job_names_the_xbox_archive_by_kind() {
+        let detail = content_detail("Xbox 360", vec![content_file(9, "dlc")]);
+        let (key, title, payload) = content_job(
+            Path::new("/lib"),
+            &detail,
+            ContentKind::Dlc,
+            InstallMode::Xbox360Content,
+            vec![9],
+            client(),
+        );
+
+        assert_eq!(key, JobKey::Content(42, ContentKind::Dlc));
+        assert_eq!(title, "Chrono Trigger (dlc)");
+        let JobPayload::Game(job) = payload else {
+            panic!("a content job is a game job");
+        };
+        assert_eq!(
+            job.targets[0].dest,
+            Path::new("/lib/Xbox 360/Chrono Trigger-dlc.zip")
+        );
+        assert_eq!(
+            job.targets[0].expected_size, 0,
+            "the bundle is built on the fly, so its size is unknown upfront"
+        );
+    }
+
+    /// The file-name segment of a content URL is percent-encoded, so a
+    /// hostile `fs_name` cannot add a path segment or a second query pair.
+    #[test]
+    fn content_job_encodes_the_file_name_segment() {
+        let mut detail = content_detail("PlayStation 4", vec![content_file(1, "update")]);
+        detail.fs_name = "a b/../c?x=1.zip".to_string();
+        let (_, _, payload) = content_job(
+            Path::new("/lib"),
+            &detail,
+            ContentKind::Update,
+            InstallMode::Ps4Content,
+            vec![1],
+            client(),
+        );
+        let JobPayload::Game(job) = payload else {
+            panic!("a content job is a game job");
+        };
+        assert_eq!(
+            job.targets[0].url_path,
+            "/api/roms/42/content/a%20b%2F..%2Fc%3Fx%3D1.zip"
+        );
+        assert_eq!(job.targets[0].query.len(), 1);
     }
 }

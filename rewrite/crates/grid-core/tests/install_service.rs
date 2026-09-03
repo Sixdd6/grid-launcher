@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use grid_core::library::content::ContentKind;
 use grid_core::library::queue::{DownloadEntry, DownloadStatus, DownloadsSnapshot};
 use grid_core::library::registry::{InstalledGame, Registry};
 use grid_core::library::{InstallService, LibraryError};
@@ -16,7 +17,7 @@ use grid_core::romm::RommClient;
 use grid_core::secrets::Credential;
 use secrecy::SecretString;
 use serde_json::json;
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 // --- fixtures ---------------------------------------------------------------
@@ -183,6 +184,29 @@ impl Harness {
             .await;
     }
 
+    /// [`Harness::mount_detail`], but answering only the FIRST request.
+    /// Lets one rom id serve a base payload and then an update payload.
+    async fn mount_detail_once(&self, rom_id: i64, detail: serde_json::Value) {
+        Mock::given(method("GET"))
+            .and(path(format!("/api/roms/{rom_id}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(detail))
+            .up_to_n_times(1)
+            .mount(&self.server)
+            .await;
+    }
+
+    /// [`Harness::mount_content`], matching on `file_ids` as well as the
+    /// path. A game and its content share one content path and are told
+    /// apart only by that query pair, so every content test needs this.
+    async fn mount_content_ids(&self, rom_id: i64, file_name: &str, ids: &str, body: Vec<u8>) {
+        Mock::given(method("GET"))
+            .and(path(format!("/api/roms/{rom_id}/content/{file_name}")))
+            .and(query_param("file_ids", ids))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
+            .mount(&self.server)
+            .await;
+    }
+
     async fn mount_content(&self, rom_id: i64, file_name: &str, body: Vec<u8>, delay_ms: u64) {
         let mut template = ResponseTemplate::new(200).set_body_bytes(body);
         if delay_ms > 0 {
@@ -233,6 +257,23 @@ impl Harness {
                     Instant::now() < deadline,
                     "timed out waiting for entry {id}"
                 );
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// Polls until the drawer holds at least `count` entries, returning the
+    /// newest one's id. `None` after 30 s. Used for entries this service
+    /// admits by itself, whose ids no caller ever sees.
+    async fn wait_for_entry_count(&self, count: usize) -> Option<u64> {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let entries = self.service.snapshot().entries;
+            if entries.len() >= count {
+                return entries.first().map(|e| e.id);
+            }
+            if Instant::now() >= deadline {
+                return None;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
@@ -1958,4 +1999,638 @@ async fn platform_ids_default_to_empty_and_round_trip() {
     ids.insert("PlayStation 3".to_string(), 12i64);
     harness.service.set_platform_ids(ids.clone());
     assert_eq!(harness.service.platform_ids(), ids);
+}
+
+// --- content jobs (PS4 / Xbox 360 update+DLC, native update) -----------------
+
+/// The registry row for `rom_id`, which every content job applies on top of.
+fn row_of(harness: &Harness, rom_id: i64) -> InstalledGame {
+    harness
+        .registry
+        .find(Some(rom_id), "", "")
+        .unwrap()
+        .expect("installed row")
+}
+
+/// Installs `rom_id` as a base game and waits for it to complete.
+async fn install_base(harness: &Harness, rom_id: i64) {
+    harness
+        .service
+        .install(harness.client.clone(), rom_id)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+}
+
+#[tokio::test]
+async fn install_content_requires_an_installed_row() {
+    let harness = Harness::new().await;
+    let err = harness
+        .service
+        .install_content(harness.client.clone(), 30, ContentKind::Update)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, LibraryError::Registry(m) if m == "not installed"),
+        "{err}"
+    );
+    assert!(
+        harness.server.received_requests().await.unwrap().is_empty(),
+        "no server round trip happens before the row check"
+    );
+}
+
+#[tokio::test]
+async fn install_content_rejects_unsupported_platform() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(
+        &staging.path().join("chrono.zip"),
+        &[("game.sfc", b"ROMDATA")],
+    );
+    harness
+        .mount_detail(
+            31,
+            detail_json(
+                31,
+                "Chrono Trigger",
+                "SNES",
+                "chrono.zip",
+                &[file_spec(311, "chrono.zip", bytes.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(31, "chrono.zip", bytes, 0).await;
+    install_base(&harness, 31).await;
+
+    let err = harness
+        .service
+        .install_content(harness.client.clone(), 31, ContentKind::Update)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Update/DLC content is only supported for PS4 and Xbox 360 games"
+    );
+}
+
+#[tokio::test]
+async fn install_content_with_no_files_of_that_kind_fails_with_the_platform_message() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let ps4_bytes = write_zip(
+        &staging.path().join("ps4game.zip"),
+        &[("CUSA12345/eboot.bin", b"EBOOT")],
+    );
+    harness
+        .mount_detail(
+            32,
+            detail_json(
+                32,
+                "PS4 Game",
+                "PlayStation 4",
+                "ps4game.zip",
+                &[file_spec(321, "ps4game.zip", ps4_bytes.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(32, "ps4game.zip", ps4_bytes, 0).await;
+    install_base(&harness, 32).await;
+
+    let err = harness
+        .service
+        .install_content(harness.client.clone(), 32, ContentKind::Dlc)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "No PS4 dlc files were found for this title in server metadata."
+    );
+
+    let xbox_bytes = write_zip(&staging.path().join("xbox.zip"), &[("default.xex", b"XEX")]);
+    harness
+        .mount_detail(
+            33,
+            detail_json(
+                33,
+                "Xbox Game",
+                "Xbox 360",
+                "xbox.zip",
+                &[file_spec(331, "xbox.zip", xbox_bytes.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(33, "xbox.zip", xbox_bytes, 0).await;
+    install_base(&harness, 33).await;
+
+    let err = harness
+        .service
+        .install_content(harness.client.clone(), 33, ContentKind::Update)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "No Xbox 360 update content is available for this title."
+    );
+}
+
+/// The PS4 detail every PS4 content test installs from: one game file
+/// (1001) and one update file (1002), both served from the same content
+/// path and told apart only by `file_ids`.
+fn ps4_content_detail(rom_id: i64, game_size: usize, update_size: usize) -> serde_json::Value {
+    detail_json(
+        rom_id,
+        "PS4 Game",
+        "PlayStation 4",
+        "ps4game.zip",
+        &[
+            file_spec(1001, "ps4game.zip", game_size),
+            file_spec_with_category(1002, "ps4update.zip", update_size, "update"),
+        ],
+    )
+}
+
+#[tokio::test]
+async fn ps4_update_applies_and_records_content() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let base = write_zip(
+        &staging.path().join("ps4game.zip"),
+        &[
+            ("CUSA12345/sce_sys/param.sfo", b"SFO"),
+            ("CUSA12345/eboot.bin", b"EBOOT"),
+        ],
+    );
+    let update = write_zip(
+        &staging.path().join("ps4update.zip"),
+        &[("CUSA12345/patch.txt", b"PATCHED")],
+    );
+
+    harness
+        .mount_detail(34, ps4_content_detail(34, base.len(), update.len()))
+        .await;
+    harness
+        .mount_content_ids(34, "ps4game.zip", "1001", base)
+        .await;
+    harness
+        .mount_content_ids(34, "ps4game.zip", "1002", update)
+        .await;
+    install_base(&harness, 34).await;
+
+    harness
+        .service
+        .install_content(harness.client.clone(), 34, ContentKind::Update)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    assert_eq!(harness.entry(id).kind, "ps4_content");
+    assert_eq!(harness.entry(id).title, "PS4 Game (update)");
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let extracted_dir = harness.library.join("PlayStation 4/ps4game");
+    assert_eq!(
+        fs::read_to_string(extracted_dir.join("CUSA12345/patch.txt")).unwrap(),
+        "PATCHED",
+        "the content archive's title-id tree is merged into the install"
+    );
+    assert!(
+        !harness
+            .library
+            .join("PlayStation 4/PS4 Game-update.zip")
+            .exists(),
+        "the content archive is deleted once it has been applied"
+    );
+
+    let row = row_of(&harness, 34);
+    assert_eq!(row.ps4_game_id, "CUSA12345");
+    let entries: Vec<serde_json::Value> = serde_json::from_str(&row.ps4_content).unwrap();
+    assert_eq!(entries.len(), 1, "{}", row.ps4_content);
+    assert_eq!(entries[0]["kind"], "update");
+    assert_eq!(entries[0]["title_id"], "CUSA12345");
+}
+
+#[tokio::test]
+async fn ps4_update_title_mismatch_fails_with_message() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let base = write_zip(
+        &staging.path().join("ps4game.zip"),
+        &[("CUSA12345/eboot.bin", b"EBOOT")],
+    );
+    let update = write_zip(
+        &staging.path().join("ps4update.zip"),
+        &[("CUSA00001/patch.txt", b"WRONG")],
+    );
+
+    harness
+        .mount_detail(35, ps4_content_detail(35, base.len(), update.len()))
+        .await;
+    harness
+        .mount_content_ids(35, "ps4game.zip", "1001", base)
+        .await;
+    harness
+        .mount_content_ids(35, "ps4game.zip", "1002", update)
+        .await;
+    install_base(&harness, 35).await;
+
+    harness
+        .service
+        .install_content(harness.client.clone(), 35, ContentKind::Update)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Failed);
+    assert_eq!(
+        entry.error,
+        "PS4 content title ID mismatch: expected CUSA12345, archive contains CUSA00001"
+    );
+    assert_eq!(
+        row_of(&harness, 35).ps4_content,
+        "",
+        "a failed apply records nothing"
+    );
+}
+
+#[tokio::test]
+async fn content_retry_restarts_a_failed_content_job() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let base = write_zip(
+        &staging.path().join("ps4game.zip"),
+        &[("CUSA12345/eboot.bin", b"EBOOT")],
+    );
+    let update = write_zip(
+        &staging.path().join("ps4update.zip"),
+        &[("CUSA12345/patch.txt", b"PATCHED")],
+    );
+
+    harness
+        .mount_detail(36, ps4_content_detail(36, base.len(), update.len()))
+        .await;
+    harness
+        .mount_content_ids(36, "ps4game.zip", "1001", base)
+        .await;
+    // The first content GET fails; the retry gets the archive.
+    Mock::given(method("GET"))
+        .and(path("/api/roms/36/content/ps4game.zip"))
+        .and(query_param("file_ids", "1002"))
+        .respond_with(ResponseTemplate::new(500))
+        .up_to_n_times(1)
+        .mount(&harness.server)
+        .await;
+    harness
+        .mount_content_ids(36, "ps4game.zip", "1002", update)
+        .await;
+    install_base(&harness, 36).await;
+
+    harness
+        .service
+        .install_content(harness.client.clone(), 36, ContentKind::Update)
+        .await
+        .unwrap();
+    let failed_id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(failed_id).await;
+    assert_eq!(entry.status, DownloadStatus::Failed, "{}", entry.error);
+
+    harness
+        .service
+        .retry(Some(harness.client.clone()), failed_id)
+        .await
+        .unwrap();
+    let retried_id = harness.newest_entry_id();
+    assert_ne!(retried_id, failed_id, "retry starts a fresh entry");
+    assert_eq!(harness.entry(retried_id).kind, "ps4_content");
+    let entry = harness.wait_terminal(retried_id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+    assert!(harness
+        .library
+        .join("PlayStation 4/ps4game/CUSA12345/patch.txt")
+        .is_file());
+}
+
+#[tokio::test]
+async fn content_retry_without_a_client_reports_not_connected() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let base = write_zip(
+        &staging.path().join("ps4game.zip"),
+        &[("CUSA12345/eboot.bin", b"EBOOT")],
+    );
+    harness
+        .mount_detail(37, ps4_content_detail(37, base.len(), 4))
+        .await;
+    harness
+        .mount_content_ids(37, "ps4game.zip", "1001", base)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/roms/37/content/ps4game.zip"))
+        .and(query_param("file_ids", "1002"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&harness.server)
+        .await;
+    install_base(&harness, 37).await;
+
+    harness
+        .service
+        .install_content(harness.client.clone(), 37, ContentKind::Update)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    harness.wait_terminal(id).await;
+
+    let err = harness.service.retry(None, id).await.unwrap_err();
+    assert!(
+        matches!(&err, LibraryError::Registry(m) if m == "not connected"),
+        "{err}"
+    );
+    assert_eq!(
+        harness.entry(id).status,
+        DownloadStatus::Failed,
+        "the row survives a retry that could not start"
+    );
+}
+
+/// A configured, Linux-runnable Xenia in portable mode: `portable.txt`
+/// beside the executable makes `xenia_directory_settings` resolve its
+/// storage root to the emulator directory, so the content root is
+/// `<dir>/content` and nothing probes the developer's own home directory.
+fn xenia_config(dir: &Path) -> (PathBuf, String) {
+    let executable = dir.join("xenia_edge");
+    fs::write(&executable, b"#!/bin/sh\n").unwrap();
+    fs::write(dir.join("portable.txt"), b"").unwrap();
+    let content_root = dir.canonicalize().unwrap().join("content");
+    let config = format!(
+        "[default_emulators]\n\"Xbox 360\" = \"Xenia Edge\"\n\n\
+         [[emulators]]\nname = \"Xenia Edge\"\npath = {:?}\nargs = \"\"\n",
+        executable.to_string_lossy()
+    );
+    (content_root, config)
+}
+
+#[tokio::test]
+async fn xbox360_base_install_queues_update_then_dlc_silently() {
+    let emulator_dir = tempfile::tempdir().unwrap();
+    let (content_root, config) = xenia_config(emulator_dir.path());
+    let harness = Harness::with_config(&config).await;
+
+    let staging = tempfile::tempdir().unwrap();
+    let base = write_zip(&staging.path().join("xbox.zip"), &[("default.xex", b"XEX")]);
+    let update = write_zip(
+        &staging.path().join("update.zip"),
+        &[(
+            "tu00000001",
+            &grid_core::library::specials::xenia::build_stfs_bytes(b"LIVE", 0x415608C3, 0x000B0000)
+                [..],
+        )],
+    );
+    let dlc = write_zip(
+        &staging.path().join("dlc.zip"),
+        &[(
+            "dlcpack",
+            &grid_core::library::specials::xenia::build_stfs_bytes(b"LIVE", 0x415608C3, 0x00000002)
+                [..],
+        )],
+    );
+
+    harness
+        .mount_detail(
+            38,
+            detail_json(
+                38,
+                "Xbox Game",
+                "Xbox 360",
+                "xbox.zip",
+                &[
+                    file_spec(3001, "xbox.zip", base.len()),
+                    file_spec_with_category(3002, "update.zip", update.len(), "update"),
+                    file_spec_with_category(3003, "dlc.zip", dlc.len(), "dlc"),
+                ],
+            ),
+        )
+        .await;
+    harness
+        .mount_content_ids(38, "xbox.zip", "3001", base)
+        .await;
+    harness
+        .mount_content_ids(38, "xbox.zip", "3002", update)
+        .await;
+    harness.mount_content_ids(38, "xbox.zip", "3003", dlc).await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 38)
+        .await
+        .unwrap();
+    let base_id = harness.newest_entry_id();
+    harness.wait_terminal(base_id).await;
+    // The two content entries are admitted by the base finalize itself, so
+    // they only exist once it has run.
+    let dlc_entry = harness
+        .wait_for_entry_count(3)
+        .await
+        .expect("update and dlc are queued automatically");
+    let update_id = base_id + 1;
+    assert_eq!(dlc_entry, base_id + 2);
+    for id in [base_id, update_id, dlc_entry] {
+        let entry = harness.wait_terminal(id).await;
+        assert_eq!(
+            entry.status,
+            DownloadStatus::Completed,
+            "entry {id}: {}",
+            entry.error
+        );
+    }
+    assert_eq!(harness.entry(update_id).kind, "xbox360_content");
+    assert_eq!(harness.entry(update_id).title, "Xbox Game (update)");
+    assert_eq!(harness.entry(dlc_entry).kind, "xbox360_content");
+    assert_eq!(harness.entry(dlc_entry).title, "Xbox Game (dlc)");
+
+    let xuid = content_root.join("0000000000000000/415608C3");
+    assert!(
+        xuid.join("000B0000/tu00000001").is_file(),
+        "the update package lands under its content type"
+    );
+    assert!(
+        xuid.join("00000002/dlcpack").is_file(),
+        "the dlc package lands under its content type"
+    );
+    assert!(!harness
+        .library
+        .join("Xbox 360/Xbox Game-update.zip")
+        .exists());
+    assert!(!harness.library.join("Xbox 360/Xbox Game-dlc.zip").exists());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn xbox360_content_without_emulator_fails_with_the_linux_message() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let base = write_zip(&staging.path().join("xbox.zip"), &[("default.xex", b"XEX")]);
+    let update = write_zip(
+        &staging.path().join("update.zip"),
+        &[(
+            "tu00000001",
+            &grid_core::library::specials::xenia::build_stfs_bytes(b"LIVE", 0x415608C3, 0x000B0000)
+                [..],
+        )],
+    );
+
+    harness
+        .mount_detail(
+            39,
+            detail_json(
+                39,
+                "Xbox Game",
+                "Xbox 360",
+                "xbox.zip",
+                &[
+                    file_spec(3001, "xbox.zip", base.len()),
+                    file_spec_with_category(3002, "update.zip", update.len(), "update"),
+                ],
+            ),
+        )
+        .await;
+    harness
+        .mount_content_ids(39, "xbox.zip", "3001", base)
+        .await;
+    harness
+        .mount_content_ids(39, "xbox.zip", "3002", update)
+        .await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 39)
+        .await
+        .unwrap();
+    let base_id = harness.newest_entry_id();
+    harness.wait_terminal(base_id).await;
+    let update_id = harness
+        .wait_for_entry_count(2)
+        .await
+        .expect("the update is still queued automatically");
+    let entry = harness.wait_terminal(update_id).await;
+    assert_eq!(entry.status, DownloadStatus::Failed);
+    assert_eq!(
+        entry.error,
+        "Xbox 360 content requires a Linux-compatible emulator such as Xenia Edge. \
+         Install and configure Xenia Edge, then try again."
+    );
+}
+
+#[tokio::test]
+async fn native_update_merges_and_keeps_pinned_executable() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let base = write_zip(
+        &staging.path().join("mygame.zip"),
+        &[("MyGame/mygame.exe", b"MZ"), ("data/old.txt", b"old")],
+    );
+    let update = write_zip(
+        &staging.path().join("mygame-update.zip"),
+        &[("data/new.txt", b"new"), ("Other/other.exe", b"MZ2")],
+    );
+
+    // The base install and the update read the SAME rom detail endpoint;
+    // the first response lists the base archive, the second the update one.
+    harness
+        .mount_detail_once(
+            40,
+            detail_json(
+                40,
+                "My Game",
+                "Windows",
+                "mygame.zip",
+                &[file_spec(401, "mygame.zip", base.len())],
+            ),
+        )
+        .await;
+    harness
+        .mount_detail(
+            40,
+            detail_json(
+                40,
+                "My Game",
+                "Windows",
+                "mygame-update.zip",
+                &[file_spec(402, "mygame-update.zip", update.len())],
+            ),
+        )
+        .await;
+    harness.mount_content(40, "mygame.zip", base, 0).await;
+    harness
+        .mount_content(40, "mygame-update.zip", update, 0)
+        .await;
+
+    install_base(&harness, 40).await;
+    let installed = row_of(&harness, 40);
+    let pinned = installed.extracted_path.clone();
+    assert!(pinned.ends_with("mygame.exe"), "{pinned}");
+    harness
+        .registry
+        .update_native_settings(40, &pinned, "", "")
+        .unwrap();
+
+    harness
+        .service
+        .install_native_update(harness.client.clone(), 40)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    assert_eq!(harness.entry(id).kind, "native_update");
+    assert_eq!(harness.entry(id).title, "My Game (update)");
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let extracted_dir = harness.library.join("Windows/My Game/game");
+    assert_eq!(
+        fs::read_to_string(extracted_dir.join("data/new.txt")).unwrap(),
+        "new"
+    );
+    assert_eq!(
+        fs::read_to_string(extracted_dir.join("data/old.txt")).unwrap(),
+        "old",
+        "the merge preserves files the update does not carry"
+    );
+    let row = row_of(&harness, 40);
+    assert_eq!(
+        row.extracted_path, pinned,
+        "a pinned executable survives the update"
+    );
+    assert_eq!(row.rom_file_name, "mygame-update.zip");
+    assert!(!harness
+        .library
+        .join("Windows/My Game/mygame-update.zip")
+        .exists());
+    assert!(!harness
+        .library
+        .join("Windows/My Game/My Game-temp")
+        .exists());
+}
+
+#[tokio::test]
+async fn native_update_without_an_install_directory_fails() {
+    let harness = Harness::new().await;
+    let record = InstalledGame {
+        title: "Broken".to_string(),
+        platform: "Windows".to_string(),
+        rom_id: Some(41),
+        ..Default::default()
+    };
+    harness.registry.upsert(&record).unwrap();
+
+    let err = harness
+        .service
+        .install_native_update(harness.client.clone(), 41)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Game install directory could not be found. Reinstall the game and try again."
+    );
+    assert!(harness.server.received_requests().await.unwrap().is_empty());
 }
