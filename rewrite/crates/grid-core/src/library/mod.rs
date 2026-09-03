@@ -33,8 +33,9 @@ use crate::autoconfig::readers::{
 };
 use crate::autoconfig::rpcs3::update_games_yml;
 use crate::autoconfig::{self, RaCredentials};
-use crate::config::{Config, EmulatorEntry};
+use crate::config::{CompatToolInstall, Config, EmulatorEntry};
 use crate::images::ImageFields;
+use crate::launch::compat;
 use crate::launch::forge::{ForgeClient, ForgeProvider, ResolvedDownload};
 use crate::launch::profiles::{
     load_profiles, profile_available_on_host, profile_for_entry, EmulatorProfile,
@@ -103,6 +104,15 @@ const NO_NATIVE_DOWNLOADABLE_FILE: &str = "No downloadable file was found for th
 /// Emulators are config entries, never registry rows, so this is a label
 /// only — nothing looks a platform directory up from it.
 const EMULATOR_PLATFORM: &str = "Emulator";
+/// The `platform` column a managed compat-tool entry shows in the downloads
+/// drawer.
+const COMPAT_TOOL_PLATFORM: &str = "Compatibility Tool";
+/// [`finalize_emulator`]'s message when a downloaded compat tool's tree
+/// carries no `proton` entry point ([`compat::find_proton_dir`]).
+const NO_PROTON_ENTRY_POINT: &str = "Downloaded compatibility tool has no `proton` entry point";
+/// [`InstallService::install_compat_tool`]'s message when `source_id` names
+/// no compat-tool catalog profile.
+const UNKNOWN_COMPAT_TOOL_SOURCE: &str = "unknown compat tool source";
 /// Where an emulator archive is extracted before its contents are merged
 /// into the install directory. A sibling of the archive inside the install
 /// directory, so the merge is a rename and never a cross-device copy; the
@@ -238,11 +248,19 @@ struct EmulatorJob {
     /// `platform_overrides` that `_resolve_source_download` merges per-spec.
     raw_source: Value,
     /// The library root, already `~`-expanded by [`InstallService::library_root`].
+    /// For a managed compat-tool job this is instead [`compat::managed_root`]
+    /// — never expanded from the user's library, and never a game-facing
+    /// path.
     library: PathBuf,
     forge: Arc<ForgeClient>,
     /// Filled in by the download task once the forge has resolved the
     /// release; consumed by finalize.
     resolved: Option<ResolvedPaths>,
+    /// Whether this job installs a managed compat tool (Task 12) rather than
+    /// an ordinary emulator. Decides which directory function names the
+    /// install directory ([`emu_install::compat_tool_install_dir`] vs.
+    /// [`emu_install::emulator_install_dir`]) and which finalize branch runs.
+    compat_tool: bool,
 }
 
 /// What the download task resolved an [`EmulatorJob`] down to.
@@ -566,6 +584,30 @@ pub type ImageHook = Arc<dyn Fn(ImageFields) + Send + Sync>;
 /// content, kicking off a firmware install — so nothing here imports Tauri.
 pub type GameFinalizedHook = Arc<dyn Fn(InstalledGame) + Send + Sync>;
 
+/// Notified (with no arguments) right after a managed compat-tool install
+/// writes its `CompatToolInstall` config record. The app hangs its own
+/// `compat-tools-changed` event emission off this (Task 15), so nothing here
+/// imports Tauri.
+pub type CompatToolsHook = Arc<dyn Fn() + Send + Sync>;
+
+/// What [`EmulatorInstalledHook`] is notified with, right after an ordinary
+/// emulator's config entry is written and autoconfig has run. Never fired
+/// for a managed compat-tool install.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmulatorInstalled {
+    pub name: String,
+    /// `true` when no `[[emulators]]` entry with this name existed before
+    /// this write — i.e. this was not a reinstall over an existing entry.
+    pub fresh: bool,
+    pub compat_tool: bool,
+}
+
+/// Notified after an ordinary emulator install writes its config entry and
+/// autoconfig has run. The app hangs its own follow-on work off this — a
+/// fresh install can trigger a firmware install (Task 15) — so nothing here
+/// imports Tauri.
+pub type EmulatorInstalledHook = Arc<dyn Fn(EmulatorInstalled) + Send + Sync>;
+
 /// Owns the install queue and drives one download task and one finalize task
 /// at a time. Every method takes `&self`; the async entry points take
 /// `&Arc<Self>` because they spawn tasks that outlive the call.
@@ -605,6 +647,12 @@ pub struct InstallService {
     /// fetch saw it. Firmware lookups need the id, and grid-core holds no
     /// session of its own to fetch it with.
     platform_ids: RwLock<BTreeMap<String, i64>>,
+    /// `None` until the app installs one; a finalized compat-tool install
+    /// then triggers no notification.
+    compat_tools_hook: RwLock<Option<CompatToolsHook>>,
+    /// `None` until the app installs one; a finalized ordinary emulator
+    /// install then triggers no follow-on work.
+    emulator_installed_hook: RwLock<Option<EmulatorInstalledHook>>,
 }
 
 impl InstallService {
@@ -644,6 +692,8 @@ impl InstallService {
             image_hook: RwLock::new(None),
             game_finalized_hook: RwLock::new(None),
             platform_ids: RwLock::new(BTreeMap::new()),
+            compat_tools_hook: RwLock::new(None),
+            emulator_installed_hook: RwLock::new(None),
         })
     }
 
@@ -682,6 +732,18 @@ impl InstallService {
     /// first.
     pub fn set_game_finalized_hook(&self, f: GameFinalizedHook) {
         *self.game_finalized_hook.write().unwrap() = Some(f);
+    }
+
+    /// Installs the post-compat-tool-install notification hook. A second
+    /// call replaces the first.
+    pub fn set_compat_tools_hook(&self, f: CompatToolsHook) {
+        *self.compat_tools_hook.write().unwrap() = Some(f);
+    }
+
+    /// Installs the post-emulator-install follow-on hook. A second call
+    /// replaces the first.
+    pub fn set_emulator_installed_hook(&self, f: EmulatorInstalledHook) {
+        *self.emulator_installed_hook.write().unwrap() = Some(f);
     }
 
     /// Records the server platform name -> id map the app just fetched.
@@ -883,6 +945,7 @@ impl InstallService {
             library,
             forge: self.forge()?,
             resolved: None,
+            compat_tool: false,
         };
         let title = job.profile_name.clone();
         self.admit(
@@ -890,6 +953,59 @@ impl InstallService {
             &title,
             EMULATOR_PLATFORM,
             "emulator",
+            JobPayload::Emulator(job),
+        );
+        Ok(())
+    }
+
+    /// Starts (or queues) a managed compat-tool acquisition for the
+    /// compat-tool catalog `source_id` (`"{owner}/{repo}"`).
+    ///
+    /// Unlike [`Self::install_emulator`], this never reads the configured
+    /// library path: a managed compat tool installs under
+    /// [`compat::managed_root`], independent of the user's game library
+    /// (D15). `Err` is returned only for a `source_id` no compat-tool
+    /// catalog profile carries; everything the forge is involved in shows up
+    /// on the drawer row instead, exactly like an emulator acquisition. A
+    /// `source_id` that is already downloading, finalizing or queued is
+    /// ignored silently.
+    pub async fn install_compat_tool(
+        self: &Arc<Self>,
+        source_id: String,
+    ) -> Result<(), LibraryError> {
+        fn unknown() -> LibraryError {
+            LibraryError::Extract(UNKNOWN_COMPAT_TOOL_SOURCE.to_string())
+        }
+
+        let profile =
+            catalog::find_compat_profile(&self.profiles, &source_id).ok_or_else(unknown)?;
+        // `find_compat_profile` only matches a profile whose `source` is an
+        // object carrying an owner and a repo, so this clone always
+        // succeeds; the fallback keeps that assumption from turning into a
+        // panic.
+        let raw_source = profile.source.clone().ok_or_else(unknown)?;
+        let configured_tag = raw_source
+            .as_object()
+            .map(catalog::configured_tag)
+            .unwrap_or_else(|| "latest".to_string());
+
+        let job = EmulatorJob {
+            source_id: source_id.clone(),
+            profile_name: profile.name.clone(),
+            profile_args: profile.args.clone(),
+            configured_tag,
+            raw_source,
+            library: compat::managed_root(),
+            forge: self.forge()?,
+            resolved: None,
+            compat_tool: true,
+        };
+        let title = job.profile_name.clone();
+        self.admit(
+            JobKey::Emulator(source_id),
+            &title,
+            COMPAT_TOOL_PLATFORM,
+            "compat_tool",
             JobPayload::Emulator(job),
         );
         Ok(())
@@ -1886,13 +2002,38 @@ impl InstallService {
             extracted_archives.push(supplemental);
         }
 
+        if job.compat_tool {
+            let Some(proton_dir) = compat::find_proton_dir(install_dir) else {
+                return Err(LibraryError::Extract(NO_PROTON_ENTRY_POINT.to_string()));
+            };
+            self.write_compat_tool_entry(job, &proton_dir)?;
+
+            // Only after a successful config write, matching the game path.
+            for path in extracted_archives {
+                if !delete_with_retry(path) {
+                    append_warning(
+                        warning,
+                        &format!("could not delete archive: {}", path.display()),
+                    );
+                }
+            }
+
+            // Bound to a `let` first so the read lock is released before the
+            // hook runs — never invoked under a lock.
+            let hook = self.compat_tools_hook.read().unwrap().clone();
+            if let Some(hook) = hook {
+                hook();
+            }
+            return Ok(());
+        }
+
         let Some(exe) = emu_install::select_executable(&job.profile_name, install_dir, archive)
         else {
             return Err(LibraryError::Extract(NO_EMULATOR_EXECUTABLE.to_string()));
         };
         make_executable(&exe);
 
-        self.write_emulator_entry(job, &paths.resolved, &exe)?;
+        let fresh = self.write_emulator_entry(job, &paths.resolved, &exe)?;
         self.sync_autoconfig(&job.profile_name, warning);
 
         // Only after a successful config write, matching the game path.
@@ -1903,6 +2044,17 @@ impl InstallService {
                     &format!("could not delete archive: {}", path.display()),
                 );
             }
+        }
+
+        // Bound to a `let` first so the read lock is released before the
+        // hook runs — never invoked under a lock.
+        let hook = self.emulator_installed_hook.read().unwrap().clone();
+        if let Some(hook) = hook {
+            hook(EmulatorInstalled {
+                name: job.profile_name.clone(),
+                fresh,
+                compat_tool: false,
+            });
         }
         Ok(())
     }
@@ -1938,6 +2090,8 @@ impl InstallService {
     }
 
     /// Writes (or replaces) `job`'s emulator entry in the config file.
+    /// Returns whether this was a FRESH install: `true` when no
+    /// `[[emulators]]` entry with this name existed before the write.
     ///
     /// An existing entry with the same name is replaced AT ITS INDEX, so the
     /// user's ordering survives a reinstall; the match is exact, mirroring
@@ -1947,7 +2101,7 @@ impl InstallService {
         job: &EmulatorJob,
         resolved: &ResolvedDownload,
         exe: &Path,
-    ) -> Result<(), LibraryError> {
+    ) -> Result<bool, LibraryError> {
         let mut config = Config::load(&self.config_path)?;
         let entry = EmulatorEntry {
             name: job.profile_name.clone(),
@@ -1965,13 +2119,52 @@ impl InstallService {
             // `autoconfig::entry` fills them on the next configure pass.
             ..Default::default()
         };
-        match config
+        let fresh = match config
             .emulators
             .iter()
             .position(|existing| existing.name == entry.name)
         {
-            Some(index) => config.emulators[index] = entry,
-            None => config.emulators.push(entry),
+            Some(index) => {
+                config.emulators[index] = entry;
+                false
+            }
+            None => {
+                config.emulators.push(entry);
+                true
+            }
+        };
+        config.save(&self.config_path)?;
+        Ok(fresh)
+    }
+
+    /// Writes (or replaces) `job`'s [`CompatToolInstall`] config record.
+    ///
+    /// An existing record for the same `source_id` is replaced AT ITS INDEX
+    /// — the compat-tool counterpart of [`Self::write_emulator_entry`]'s
+    /// by-name replace rule, matched by `source_id` instead because a
+    /// compat tool's `name` is not guaranteed unique the way an emulator
+    /// entry's is.
+    fn write_compat_tool_entry(
+        &self,
+        job: &EmulatorJob,
+        proton_dir: &Path,
+    ) -> Result<(), LibraryError> {
+        let mut config = Config::load(&self.config_path)?;
+        let entry = CompatToolInstall {
+            name: job.profile_name.clone(),
+            path: path_string(proton_dir),
+            source_id: job.source_id.clone(),
+            // The CONFIGURED tag, matching `write_emulator_entry`'s
+            // `source_release_tag` — a `latest` pin is recorded as `latest`.
+            release_tag: job.configured_tag.clone(),
+        };
+        match config
+            .compat_tool_installs
+            .iter()
+            .position(|existing| existing.source_id == entry.source_id)
+        {
+            Some(index) => config.compat_tool_installs[index] = entry,
+            None => config.compat_tool_installs.push(entry),
         }
         config.save(&self.config_path)?;
         Ok(())
@@ -2060,7 +2253,14 @@ async fn download_emulator(
     // the file INSIDE that already-fixed directory.
     let dir_name = emu_install::archive_file_name(&job.profile_name, &job.configured_tag, "");
     let stem = file_stem_of(&dir_name);
-    let install_dir = emu_install::emulator_install_dir(&job.library, &stem);
+    // `job.library` already IS the managed compat-tools root for a compat
+    // job ([`InstallService::install_compat_tool`]), so only the directory
+    // FUNCTION differs — never an extra path segment on top.
+    let install_dir = if job.compat_tool {
+        emu_install::compat_tool_install_dir(&job.library, &stem)
+    } else {
+        emu_install::emulator_install_dir(&job.library, &stem)
+    };
 
     let archive_name =
         emu_install::archive_file_name(&job.profile_name, &job.configured_tag, &primary.asset_name);

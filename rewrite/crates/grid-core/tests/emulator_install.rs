@@ -18,11 +18,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use std::sync::Mutex;
+
 use grid_core::config::Config;
 use grid_core::launch::profiles::EmulatorProfile;
 use grid_core::library::queue::{DownloadEntry, DownloadStatus};
 use grid_core::library::registry::Registry;
-use grid_core::library::InstallService;
+use grid_core::library::{EmulatorInstalled, InstallService};
 use grid_core::romm::RommClient;
 use grid_core::secrets::Credential;
 use secrecy::SecretString;
@@ -985,4 +987,77 @@ async fn autoconfig_failure_leaves_the_install_completed_with_a_warning() {
     // The entry itself was still written.
     assert_eq!(harness.config().emulators.len(), 1);
     assert_eq!(harness.config().emulators[0].name, "PCSX2");
+}
+
+// --- (j) emulator-installed hook (Task 12) -----------------------------------
+
+/// Two successive installs of the same ordinary emulator: the first is a
+/// fresh `[[emulators]]` entry, the second reinstalls over it. Neither
+/// carries `compat_tool`.
+#[tokio::test]
+async fn emulator_installed_hook_reports_fresh_true_then_false() {
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = zip_bytes(
+        &staging,
+        "widget.zip",
+        &[("bin/testemu.sh", b"#!/bin/sh\n")],
+    );
+
+    let harness = Harness::new(|uri| vec![profile("Test Emu", gitea_source(uri))]).await;
+    harness
+        .mount_widget("widget-linux.zip", bytes.clone(), 0)
+        .await;
+
+    let events: Arc<Mutex<Vec<EmulatorInstalled>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorder = events.clone();
+    harness
+        .service
+        .set_emulator_installed_hook(Arc::new(move |installed| {
+            recorder.lock().unwrap().push(installed);
+        }));
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    harness.server.reset().await;
+    harness.mount_widget("widget-linux.zip", bytes, 0).await;
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let second_id = harness.newest_entry_id();
+    let second_entry = harness.wait_terminal(second_id).await;
+    assert_eq!(
+        second_entry.status,
+        DownloadStatus::Completed,
+        "{}",
+        second_entry.error
+    );
+
+    let recorded = events.lock().unwrap().clone();
+    assert_eq!(recorded.len(), 2);
+    assert_eq!(
+        recorded[0],
+        EmulatorInstalled {
+            name: "Test Emu".to_string(),
+            fresh: true,
+            compat_tool: false,
+        }
+    );
+    assert_eq!(
+        recorded[1],
+        EmulatorInstalled {
+            name: "Test Emu".to_string(),
+            fresh: false,
+            compat_tool: false,
+        }
+    );
 }

@@ -27,6 +27,14 @@ pub fn emulator_install_dir(library: &Path, archive_stem: &str) -> PathBuf {
         .join(sanitize_component(archive_stem, "emulator"))
 }
 
+/// `<root>/<sanitize_component(archive_stem, "compat-tool")>` — the managed
+/// compat-tool counterpart of [`emulator_install_dir`]. `root` is the compat
+/// tools managed root ([`super::compat::managed_root`]), so, unlike
+/// `emulator_install_dir`, there is no `Emulators` subdirectory to join.
+pub fn compat_tool_install_dir(root: &Path, archive_stem: &str) -> PathBuf {
+    root.join(sanitize_component(archive_stem, "compat-tool"))
+}
+
 /// Splits `name` (a bare file name, no directory component) into
 /// `(stem, suffix)` matching `pathlib.Path.stem` / `.suffix`: the suffix is
 /// the run of characters from the last `.` onward, but only when that `.`
@@ -305,6 +313,20 @@ mod tests {
     fn install_dir_sanitizes_illegal_characters() {
         let dir = emulator_install_dir(Path::new("/lib"), "Emu: <bad>*chars");
         assert_eq!(dir, Path::new("/lib/Emulators/Emu_ _bad__chars"));
+    }
+
+    // --- compat_tool_install_dir -----------------------------------------
+
+    #[test]
+    fn compat_tool_install_dir_joins_root_and_sanitized_stem_with_no_emulators_subdir() {
+        let dir = compat_tool_install_dir(Path::new("/root"), "GE-Proton-latest");
+        assert_eq!(dir, Path::new("/root/GE-Proton-latest"));
+    }
+
+    #[test]
+    fn compat_tool_install_dir_sanitizes_illegal_characters() {
+        let dir = compat_tool_install_dir(Path::new("/root"), "Proton: <bad>*chars");
+        assert_eq!(dir, Path::new("/root/Proton_ _bad__chars"));
     }
 
     // --- archive_file_name -------------------------------------------------

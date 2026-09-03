@@ -155,17 +155,16 @@ fn catalog_row(profile: &EmulatorProfile) -> Option<CatalogEntry> {
     })
 }
 
-/// `profiles` turned into catalog rows, deduped and sorted
-/// (`source_download_emulator_entries`, ui/emulators.py:168-231), restricted
-/// to non-compat-tool profiles (spec deviation 2 — compat tools get their
-/// own dialog). `installed` is always `false` here — call
-/// [`mark_installed`] to fill it in.
-pub fn catalog_entries(profiles: &[EmulatorProfile]) -> Vec<CatalogEntry> {
+/// Shared body of [`catalog_entries`] and [`compat_tool_catalog_entries`]:
+/// every profile whose `is_compat_tool` equals `compat`, turned into rows,
+/// deduped and sorted (`source_download_emulator_entries`,
+/// ui/emulators.py:168-231).
+fn catalog_entries_filtered(profiles: &[EmulatorProfile], compat: bool) -> Vec<CatalogEntry> {
     let mut seen: HashSet<(String, String, String, String)> = HashSet::new();
     let mut rows: Vec<CatalogEntry> = Vec::new();
 
     for profile in profiles {
-        if profile.is_compat_tool {
+        if profile.is_compat_tool != compat {
             continue;
         }
         let Some(row) = catalog_row(profile) else {
@@ -190,6 +189,23 @@ pub fn catalog_entries(profiles: &[EmulatorProfile]) -> Vec<CatalogEntry> {
     rows
 }
 
+/// `profiles` turned into catalog rows, deduped and sorted
+/// (`source_download_emulator_entries`, ui/emulators.py:168-231), restricted
+/// to non-compat-tool profiles (spec deviation 2 — compat tools get their
+/// own dialog). `installed` is always `false` here — call
+/// [`mark_installed`] to fill it in.
+pub fn catalog_entries(profiles: &[EmulatorProfile]) -> Vec<CatalogEntry> {
+    catalog_entries_filtered(profiles, false)
+}
+
+/// [`catalog_entries`]'s counterpart for the compat-tool dialog: the same
+/// row shape and sort, restricted to `is_compat_tool` profiles only.
+/// `installed` is always `false` here — call [`mark_compat_installed`] to
+/// fill it in.
+pub fn compat_tool_catalog_entries(profiles: &[EmulatorProfile]) -> Vec<CatalogEntry> {
+    catalog_entries_filtered(profiles, true)
+}
+
 /// Marks each entry installed when its `name` casefold-matches any
 /// `config.emulators` entry's name, or its `source_id` casefold-matches any
 /// config emulator's `source_id`. A blank config `source_id` never
@@ -206,16 +222,32 @@ pub fn mark_installed(entries: &mut [CatalogEntry], config: &Config) {
     }
 }
 
-/// The first non-compat-tool profile whose source normalizes far enough to
-/// have an `owner/repo` matching `source_id`, casefolded — the same raw
-/// field reads as [`catalog_entries`] ([`catalog_row`]).
-pub fn find_profile<'a>(
+/// [`mark_installed`]'s counterpart for the compat-tool dialog: marks each
+/// entry installed when its `source_id` casefold-matches any
+/// `config.compat_tool_installs` entry's `source_id`. A blank config
+/// `source_id` never matches — every catalog `source_id` is non-blank by
+/// construction ([`catalog_row`] requires `owner` and `repo`).
+pub fn mark_compat_installed(entries: &mut [CatalogEntry], config: &Config) {
+    for entry in entries {
+        entry.installed = config.compat_tool_installs.iter().any(|install| {
+            !install.source_id.is_empty()
+                && install.source_id.to_lowercase() == entry.source_id.to_lowercase()
+        });
+    }
+}
+
+/// Shared body of [`find_profile`] and [`find_compat_profile`]: the first
+/// profile whose `is_compat_tool` equals `compat` and whose source
+/// normalizes far enough to have an `owner/repo` matching `source_id`,
+/// casefolded — the same raw field reads as [`catalog_entries_filtered`].
+fn find_profile_filtered<'a>(
     profiles: &'a [EmulatorProfile],
     source_id: &str,
+    compat: bool,
 ) -> Option<&'a EmulatorProfile> {
     let target = source_id.to_lowercase();
     profiles.iter().find(|profile| {
-        if profile.is_compat_tool {
+        if profile.is_compat_tool != compat {
             return false;
         }
         match catalog_row(profile) {
@@ -225,10 +257,29 @@ pub fn find_profile<'a>(
     })
 }
 
+/// The first non-compat-tool profile whose source normalizes far enough to
+/// have an `owner/repo` matching `source_id`, casefolded — the same raw
+/// field reads as [`catalog_entries`] ([`catalog_row`]).
+pub fn find_profile<'a>(
+    profiles: &'a [EmulatorProfile],
+    source_id: &str,
+) -> Option<&'a EmulatorProfile> {
+    find_profile_filtered(profiles, source_id, false)
+}
+
+/// [`find_profile`]'s counterpart for the compat-tool dialog: matches only
+/// `is_compat_tool` profiles.
+pub fn find_compat_profile<'a>(
+    profiles: &'a [EmulatorProfile],
+    source_id: &str,
+) -> Option<&'a EmulatorProfile> {
+    find_profile_filtered(profiles, source_id, true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::EmulatorEntry;
+    use crate::config::{CompatToolInstall, EmulatorEntry};
     use crate::launch::profiles::load_profiles;
     use serde_json::json;
 
@@ -591,5 +642,106 @@ mod tests {
     fn find_profile_skips_compat_tools() {
         // GE-Proton's real owner/repo, confirmed against the embedded catalog.
         assert!(find_profile(load_profiles(), "GloriousEggroll/proton-ge-custom").is_none());
+    }
+
+    // --- compat_tool_catalog_entries --------------------------------------------
+
+    #[test]
+    fn real_compat_catalog_contains_exactly_ge_proton_and_proton_cachyos() {
+        let entries = compat_tool_catalog_entries(load_profiles());
+        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["GE-Proton", "Proton-CachyOS"]);
+    }
+
+    #[test]
+    fn compat_tool_catalog_entries_excludes_ordinary_emulators() {
+        let profiles = vec![
+            profile(
+                "Foo",
+                true,
+                Some(json!({"provider": "github", "owner": "o", "repo": "r"})),
+            ),
+            profile(
+                "Bar",
+                false,
+                Some(json!({"provider": "github", "owner": "o2", "repo": "r2"})),
+            ),
+        ];
+        let entries = compat_tool_catalog_entries(&profiles);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "Foo");
+    }
+
+    // --- find_compat_profile ------------------------------------------------------
+
+    #[test]
+    fn find_compat_profile_hits_ge_proton_by_source_id() {
+        let found = find_compat_profile(load_profiles(), "GloriousEggroll/proton-ge-custom");
+        assert_eq!(found.map(|p| p.name.as_str()), Some("GE-Proton"));
+    }
+
+    #[test]
+    fn find_compat_profile_skips_ordinary_emulators() {
+        assert!(find_compat_profile(load_profiles(), "PCSX2/pcsx2").is_none());
+    }
+
+    #[test]
+    fn find_compat_profile_misses_unknown_source_id() {
+        assert!(find_compat_profile(load_profiles(), "nobody/nothing").is_none());
+    }
+
+    // --- mark_compat_installed --------------------------------------------------
+
+    fn config_with_compat(installs: Vec<CompatToolInstall>) -> Config {
+        Config {
+            compat_tool_installs: installs,
+            ..Config::default()
+        }
+    }
+
+    fn compat_install(name: &str, source_id: &str) -> CompatToolInstall {
+        CompatToolInstall {
+            name: name.to_string(),
+            path: "/opt/proton".to_string(),
+            source_id: source_id.to_string(),
+            release_tag: "latest".to_string(),
+        }
+    }
+
+    #[test]
+    fn mark_compat_installed_matches_by_source_id_casefold() {
+        let mut entries = vec![stub_entry("GE-Proton", "GloriousEggroll/proton-ge-custom")];
+        let config = config_with_compat(vec![compat_install(
+            "GE-Proton",
+            "gloriouseggroll/PROTON-GE-CUSTOM",
+        )]);
+        mark_compat_installed(&mut entries, &config);
+        assert!(entries[0].installed);
+    }
+
+    #[test]
+    fn mark_compat_installed_ignores_name_only_matches() {
+        // Unlike `mark_installed`, name never matches on its own — only
+        // `source_id` does.
+        let mut entries = vec![stub_entry("GE-Proton", "owner/repo")];
+        let config = config_with_compat(vec![compat_install("GE-Proton", "other/other")]);
+        mark_compat_installed(&mut entries, &config);
+        assert!(!entries[0].installed);
+    }
+
+    #[test]
+    fn mark_compat_installed_blank_config_source_id_never_matches() {
+        let mut entries = vec![stub_entry("Foo", "")];
+        let config = config_with_compat(vec![compat_install("Foo", "")]);
+        mark_compat_installed(&mut entries, &config);
+        assert!(!entries[0].installed);
+    }
+
+    #[test]
+    fn mark_compat_installed_leaves_unmatched_entries_uninstalled() {
+        let mut entries = vec![stub_entry("Foo", "o/r")];
+        let config = config_with_compat(vec![compat_install("Bar", "x/y")]);
+        mark_compat_installed(&mut entries, &config);
+        assert!(!entries[0].installed);
     }
 }
