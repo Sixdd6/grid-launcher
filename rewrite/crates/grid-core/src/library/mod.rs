@@ -2829,9 +2829,31 @@ mod tests {
         }
     }
 
+    /// Points every environment-driven RPCS3 data-root candidate
+    /// (`readers::rpcs3_data_root_candidates`) at an empty temp directory.
+    ///
+    /// With no emulator entry configured, the reader probes
+    /// `$RPCS3_CONFIG_DIR` and `$XDG_CONFIG_HOME/rpcs3` for a `vfs.yml`
+    /// BEFORE it reaches the `<library>/PlayStation 3/.vfs` fallback these
+    /// tests are about. On a machine with a real RPCS3 the fallback would
+    /// never be reached and the test would read the developer's own config.
+    /// Callers must hold `test_env::lock()` for the guard's lifetime.
+    fn empty_rpcs3_env(dir: &Path) -> crate::test_env::EnvGuard {
+        let config_dir = dir.join("no-rpcs3-config");
+        let xdg = dir.join("no-xdg-config");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::create_dir_all(&xdg).unwrap();
+        crate::test_env::EnvGuard::set(&[
+            ("RPCS3_CONFIG_DIR", Some(&config_dir.to_string_lossy())),
+            ("XDG_CONFIG_HOME", Some(&xdg.to_string_lossy())),
+        ])
+    }
+
     #[test]
     fn ps3_roots_falls_back_to_the_library_vfs_when_no_emulator_is_configured() {
+        let _lock = crate::test_env::lock();
         let dir = tempfile::tempdir().unwrap();
+        let _env = empty_rpcs3_env(dir.path());
         let library = dir.path().join("library");
         fs::create_dir_all(library.join("PlayStation 3")).unwrap();
         let config = config_with_library(&library.to_string_lossy());
@@ -2854,6 +2876,9 @@ mod tests {
 
     #[test]
     fn ps3_roots_without_a_library_or_an_emulator_reports_the_verbatim_message() {
+        let _lock = crate::test_env::lock();
+        let dir = tempfile::tempdir().unwrap();
+        let _env = empty_rpcs3_env(dir.path());
         let config = config_with_library("");
         let Err(message) = ps3_roots_from_config(&config, &[], "PlayStation 3", "Demon's Souls")
         else {

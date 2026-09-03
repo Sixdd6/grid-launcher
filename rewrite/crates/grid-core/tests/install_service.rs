@@ -1581,20 +1581,75 @@ async fn uninstall_native_removes_the_game_dir() {
 
 // --- PlayStation 3 installs --------------------------------------------------
 
-/// The `dev_hdd0` root a PS3 install falls back to when no emulator is
-/// configured: `<library>/PlayStation 3/.vfs/dev_hdd0`, canonicalized the
-/// way the VFS reader canonicalizes it.
-fn library_dev_hdd0(library: &Path) -> PathBuf {
-    let ps3 = library.join("PlayStation 3");
-    fs::canonicalize(&ps3)
-        .unwrap_or(ps3)
-        .join(".vfs")
-        .join("dev_hdd0")
+/// A hermetic RPCS3 install: a temp executable whose sibling
+/// `portable/config/vfs.yml` names temp `dev_hdd0` and `games` roots, plus
+/// the config lines that make it the default PlayStation 3 emulator.
+///
+/// EVERY PS3 test must build one. With no emulator entry configured,
+/// `ps3_vfs_dev_hdd0_path` probes `$RPCS3_CONFIG_DIR` and then
+/// `$XDG_CONFIG_HOME/rpcs3` for a `vfs.yml` before it ever reaches the
+/// `<library>/PlayStation 3/.vfs` fallback — so on a machine with a real
+/// RPCS3 a test would route a game into the developer's own `dev_hdd0`, and
+/// an uninstall test would then DELETE directories under it. A configured
+/// entry is the first data-root candidate, so it wins before any
+/// environment probe and nothing outside these temp directories is touched.
+struct Ps3Vfs {
+    _tmp: tempfile::TempDir,
+    /// Where RPCS3 keeps its config — `games.yml` lands in `<data_root>/config`.
+    data_root: PathBuf,
+    /// The VFS root a routed game lands under, canonicalized the way the
+    /// reader canonicalizes it.
+    dev_hdd0: PathBuf,
+    /// The config lines to hand [`Harness::with_config`].
+    config: String,
+}
+
+impl Ps3Vfs {
+    fn new() -> Self {
+        let tmp = tempfile::tempdir().unwrap();
+        let executable = tmp.path().join("rpcs3");
+        fs::write(&executable, b"#!/bin/sh\n").unwrap();
+        let data_root = tmp.path().join("portable");
+        fs::create_dir_all(data_root.join("config")).unwrap();
+        let dev_hdd0 = tmp.path().join("hdd0");
+        let games_root = tmp.path().join("games");
+        fs::create_dir_all(&dev_hdd0).unwrap();
+        fs::create_dir_all(&games_root).unwrap();
+        fs::write(
+            data_root.join("config/vfs.yml"),
+            format!(
+                "/dev_hdd0/: \"{}/\"\n/games/: \"{}/\"\n",
+                dev_hdd0.to_string_lossy(),
+                games_root.to_string_lossy()
+            ),
+        )
+        .unwrap();
+
+        let config = format!(
+            "[default_emulators]\n\"PlayStation 3\" = \"RPCS3 (Playstation 3)\"\n\n\
+             [[emulators]]\nname = \"RPCS3 (Playstation 3)\"\npath = {:?}\nargs = \"\"\n",
+            executable.to_string_lossy()
+        );
+
+        Ps3Vfs {
+            // The reader canonicalizes every resolved path, so the roots are
+            // stored canonicalized too and assertions compare like with like.
+            dev_hdd0: fs::canonicalize(&dev_hdd0).unwrap(),
+            data_root: fs::canonicalize(&data_root).unwrap(),
+            config,
+            _tmp: tmp,
+        }
+    }
+
+    async fn harness(&self) -> Harness {
+        Harness::with_config(&self.config).await
+    }
 }
 
 #[tokio::test]
-async fn ps3_install_routes_into_the_library_vfs_fallback() {
-    let harness = Harness::new().await;
+async fn ps3_install_routes_into_the_configured_vfs() {
+    let vfs = Ps3Vfs::new();
+    let harness = vfs.harness().await;
     let staging = tempfile::tempdir().unwrap();
     let bytes = write_zip(
         &staging.path().join("demons.zip"),
@@ -1624,8 +1679,7 @@ async fn ps3_install_routes_into_the_library_vfs_fallback() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let dev_hdd0 = library_dev_hdd0(&harness.library);
-    let routed = dev_hdd0.join("game/BLUS30336");
+    let routed = vfs.dev_hdd0.join("game/BLUS30336");
     assert!(routed.join("PS3_GAME/USRDIR/EBOOT.BIN").is_file());
     assert!(
         !harness.library.join("PlayStation 3/demons").exists(),
@@ -1643,7 +1697,8 @@ async fn ps3_install_routes_into_the_library_vfs_fallback() {
 
 #[tokio::test]
 async fn ps3_iso_only_archive_short_circuits() {
-    let harness = Harness::new().await;
+    let vfs = Ps3Vfs::new();
+    let harness = vfs.harness().await;
     let staging = tempfile::tempdir().unwrap();
     let bytes = write_zip(&staging.path().join("disc.zip"), &[("game.iso", b"ISO!")]);
 
@@ -1684,7 +1739,8 @@ async fn ps3_iso_only_archive_short_circuits() {
 
 #[tokio::test]
 async fn ps3_game_id_missing_fails() {
-    let harness = Harness::new().await;
+    let vfs = Ps3Vfs::new();
+    let harness = vfs.harness().await;
     let staging = tempfile::tempdir().unwrap();
     let bytes = write_zip(
         &staging.path().join("junk.zip"),
@@ -1726,7 +1782,8 @@ async fn ps3_game_id_missing_fails() {
 
 #[tokio::test]
 async fn ps3_archive_of_empty_directories_reports_no_rom_file() {
-    let harness = Harness::new().await;
+    let vfs = Ps3Vfs::new();
+    let harness = vfs.harness().await;
     let staging = tempfile::tempdir().unwrap();
     let bytes = write_zip(&staging.path().join("hollow.zip"), &[("empty/", b"")]);
 
@@ -1758,7 +1815,8 @@ async fn ps3_archive_of_empty_directories_reports_no_rom_file() {
 
 #[tokio::test]
 async fn uninstall_ps3_removes_iso_trophies_and_the_routed_dir() {
-    let harness = Harness::new().await;
+    let vfs = Ps3Vfs::new();
+    let harness = vfs.harness().await;
     let staging = tempfile::tempdir().unwrap();
     let bytes = write_zip(
         &staging.path().join("trophies.zip"),
@@ -1790,9 +1848,8 @@ async fn uninstall_ps3_removes_iso_trophies_and_the_routed_dir() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let dev_hdd0 = library_dev_hdd0(&harness.library);
-    let routed = dev_hdd0.join("game/BLUS30336");
-    let trophy = dev_hdd0.join("home/00000001/trophy/NPWR12345");
+    let routed = vfs.dev_hdd0.join("game/BLUS30336");
+    let trophy = vfs.dev_hdd0.join("home/00000001/trophy/NPWR12345");
     assert!(routed.is_dir());
     assert!(trophy.is_dir());
 
@@ -1819,32 +1876,8 @@ async fn uninstall_ps3_removes_iso_trophies_and_the_routed_dir() {
 
 #[tokio::test]
 async fn games_yml_written_for_ps3_with_configured_rpcs3() {
-    // A configured RPCS3 whose `portable/` directory holds a `vfs.yml`
-    // naming an explicit dev_hdd0: both the data root (where `games.yml`
-    // goes) and the VFS root are then fixed by the config, not guessed.
-    let emulator_dir = tempfile::tempdir().unwrap();
-    let executable = emulator_dir.path().join("rpcs3");
-    fs::write(&executable, b"#!/bin/sh\n").unwrap();
-    let portable = emulator_dir.path().join("portable");
-    fs::create_dir_all(portable.join("config")).unwrap();
-    let dev_hdd0 = emulator_dir.path().join("hdd0");
-    fs::create_dir_all(&dev_hdd0).unwrap();
-    fs::write(
-        portable.join("config/vfs.yml"),
-        format!(
-            "/dev_hdd0/: \"{}/\"\n/games/: \"{}/\"\n",
-            dev_hdd0.to_string_lossy(),
-            emulator_dir.path().join("games").to_string_lossy()
-        ),
-    )
-    .unwrap();
-
-    let harness = Harness::with_config(&format!(
-        "[default_emulators]\n\"PlayStation 3\" = \"RPCS3 (Playstation 3)\"\n\n\
-         [[emulators]]\nname = \"RPCS3 (Playstation 3)\"\npath = {:?}\nargs = \"\"\n",
-        executable.to_string_lossy()
-    ))
-    .await;
+    let vfs = Ps3Vfs::new();
+    let harness = vfs.harness().await;
 
     let staging = tempfile::tempdir().unwrap();
     let bytes = write_zip(
@@ -1876,13 +1909,13 @@ async fn games_yml_written_for_ps3_with_configured_rpcs3() {
 
     let row = harness.registry.find(Some(15), "", "").unwrap().unwrap();
     assert_eq!(row.ps3_game_id, "BLUS30336");
-    assert!(
-        row.extracted_dir.contains("hdd0"),
-        "routed into the configured VFS, not the library fallback: {}",
-        row.extracted_dir
+    assert_eq!(
+        row.extracted_dir,
+        vfs.dev_hdd0.join("game/BLUS30336").to_string_lossy(),
+        "routed into the configured VFS, not the library fallback"
     );
 
-    let games_yml = fs::read_to_string(portable.join("config/games.yml")).unwrap();
+    let games_yml = fs::read_to_string(vfs.data_root.join("config/games.yml")).unwrap();
     assert!(
         games_yml.contains("BLUS30336:"),
         "games.yml should name the installed game: {games_yml}"
