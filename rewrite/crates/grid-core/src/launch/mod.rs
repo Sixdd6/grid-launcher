@@ -1,10 +1,12 @@
-//! Emulated launch core. See `docs/porting/04-emulator-launch.md` for the
-//! behavior this module tree ports from `grid_launcher/emulator/` and
-//! `grid_launcher/ui/mixins/emulator_ui_mixin.py`.
+//! Native and emulated launch core. See `docs/porting/04-emulator-launch.md`
+//! for the behavior this module tree ports from `grid_launcher/emulator/`
+//! and `grid_launcher/ui/mixins/emulator_ui_mixin.py`.
 
 pub mod catalog;
+pub mod compat;
 pub mod emu_install;
 pub mod forge;
+pub mod native;
 pub mod profiles;
 pub mod rom;
 pub mod selection;
@@ -21,10 +23,12 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::config::{Config, EmulatorEntry};
+use crate::library::extract::which_on_path;
 use crate::library::paths::expand_home;
 use crate::library::platforms::is_native_platform;
 use crate::library::registry::{installed_match, InstalledGame, Registry};
 
+use native::build_native_command;
 use profiles::{load_profiles, profile_for_entry};
 use rom::resolve_rom_path;
 use selection::{
@@ -163,19 +167,15 @@ impl LaunchService {
         }
     }
 
-    /// Resolves and starts the emulated launch for `rom_id`.
+    /// Resolves and starts the launch for `rom_id`, native or emulated.
     ///
-    /// Order (doc 04 §8): registry lookup, native-platform gate, duplicate
-    /// gate, config load, emulator selection, placeholder build, the
-    /// validation chain in [`prepare_emulator_launch`], then the spawn.
+    /// Order (doc 04 §8): registry lookup, duplicate gate, config load, then
+    /// either the native branch ([`build_native_command`], doc 04 §9) for a
+    /// `windows*` platform row, or emulator selection, placeholder build,
+    /// and the validation chain in [`prepare_emulator_launch`] for
+    /// everything else; either way the result is spawned the same way.
     pub async fn launch(self: &Arc<Self>, rom_id: i64) -> Result<GameSession, LaunchError> {
         let game = self.installed_game(rom_id).await?;
-
-        if is_native_platform(&game.platform) {
-            return Err(LaunchError::Validation(
-                "Native Windows games are not supported yet in the Rust preview.".to_string(),
-            ));
-        }
 
         // Cheap rejection before any work; `SessionStore::register` repeats
         // the check under the store lock as the authoritative one.
@@ -184,18 +184,46 @@ impl LaunchService {
         }
 
         let config = Config::load(&self.config_path)?;
-        let plan = resolve_launch(&game, &config)?;
+
+        let (emulator_name, argv, working_dir, extra_env) = if is_native_platform(&game.platform) {
+            // Blank on a Windows host: no compat tool makes sense there.
+            // `build_native_command` applies the same gate on `default_compat_tool`
+            // itself, so this is belt-and-suspenders, not load-bearing.
+            let default_compat_tool = if host_os().starts_with("win") {
+                ""
+            } else {
+                config.default_compat_tool.as_str()
+            };
+            let library = expand_home(&config.library_path);
+            let native = build_native_command(
+                &game,
+                &library,
+                default_compat_tool,
+                host_os(),
+                &which_on_path,
+            )
+            .map_err(LaunchError::Validation)?;
+            let emulator_name = if native.tool_label.is_empty() {
+                "native".to_string()
+            } else {
+                native.tool_label
+            };
+            (emulator_name, native.argv, native.cwd, native.env)
+        } else {
+            let plan = resolve_launch(&game, &config)?;
+            (plan.emulator_name, plan.argv, plan.working_dir, Vec::new())
+        };
 
         let title = game.title.clone();
-        let joined_command = plan.argv.join(" ");
-        let child = spawn_child(plan.argv, plan.working_dir).await?;
+        let joined_command = argv.join(" ");
+        let child = spawn_child(argv, working_dir, extra_env).await?;
         let pid = child.id();
 
         let session = GameSession {
             id: self.next_id.fetch_add(1, Ordering::Relaxed),
             rom_id,
             title,
-            emulator_name: plan.emulator_name,
+            emulator_name,
             started_at: unix_now(),
             pid,
         };
@@ -458,11 +486,20 @@ fn resolve_launch(game: &InstalledGame, config: &Config) -> Result<LaunchPlan, L
         String::new()
     };
 
+    // The PS3 ISO path wins when set; else the game ID, formatted as the
+    // literal RPCS3 command-line target string; else blank.
+    let ps3_launch_target = if !game.ps3_iso_path.trim().is_empty() {
+        game.ps3_iso_path.trim().to_string()
+    } else if !game.ps3_game_id.trim().is_empty() {
+        format!("%RPCS3_GAMEID%:{}", game.ps3_game_id.trim())
+    } else {
+        String::new()
+    };
+
     let placeholders = Placeholders {
         rom: rom_path.clone(),
         core,
-        // PS3 targets need the RPCS3 metadata a later milestone adds.
-        ps3_launch_target: String::new(),
+        ps3_launch_target,
     };
 
     let (argv, working_dir) = prepare_emulator_launch(
@@ -491,11 +528,14 @@ fn entry_is_retroarch(entry: &EmulatorEntry, profiles: &[profiles::EmulatorProfi
 }
 
 /// Spawns `argv` in `working_dir` on the blocking pool. The child gets a
-/// clean environment ([`clean_env`]) and, on Windows, its own process group
-/// so a console signal to the launcher does not reach the game.
+/// clean environment ([`clean_env`]) overlaid with `extra_env` (the native
+/// branch's `WINEPREFIX`/`PROTONPATH`; empty for an emulated launch), and on
+/// Windows its own process group so a console signal to the launcher does
+/// not reach the game.
 async fn spawn_child(
     argv: Vec<String>,
     working_dir: PathBuf,
+    extra_env: Vec<(String, String)>,
 ) -> Result<std::process::Child, LaunchError> {
     let spawned = tokio::task::spawn_blocking(move || {
         let mut command = std::process::Command::new(&argv[0]);
@@ -503,7 +543,8 @@ async fn spawn_child(
             .args(&argv[1..])
             .current_dir(&working_dir)
             .env_clear()
-            .envs(clean_env());
+            .envs(clean_env())
+            .envs(extra_env);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;

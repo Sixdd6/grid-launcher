@@ -112,6 +112,35 @@ impl Harness {
         rom
     }
 
+    /// Registers an installed game like [`Self::install_game`], plus the two
+    /// PS3 launch-target fields.
+    fn install_ps3_game(
+        &self,
+        rom_id: i64,
+        title: &str,
+        platform: &str,
+        ps3_game_id: &str,
+        ps3_iso_path: &str,
+    ) -> PathBuf {
+        let platform_dir = self.library.join(platform);
+        fs::create_dir_all(&platform_dir).unwrap();
+        let rom = platform_dir.join(format!("{title}.rom"));
+        fs::write(&rom, b"rom bytes").unwrap();
+        self.registry
+            .upsert(&InstalledGame {
+                title: title.to_string(),
+                platform: platform.to_string(),
+                rom_id: Some(rom_id),
+                rom_file_name: format!("{title}.rom"),
+                archive_path: rom.to_string_lossy().into_owned(),
+                ps3_game_id: ps3_game_id.to_string(),
+                ps3_iso_path: ps3_iso_path.to_string(),
+                ..Default::default()
+            })
+            .unwrap();
+        rom
+    }
+
     /// Registers a game whose recorded `archive_path` is `archive_path` and
     /// which has nothing on disk.
     fn install_row(&self, rom_id: i64, title: &str, platform: &str, archive_path: &str) {
@@ -577,21 +606,6 @@ async fn a_rom_that_is_not_installed_is_rejected() {
 }
 
 #[tokio::test]
-async fn a_windows_platform_row_is_not_supported_yet() {
-    let h = Harness::new();
-    let exe = h.stub("sleeper", "sleep 30");
-    h.write_config(vec![entry("Stub", &exe, "%rom%")], &[("Windows", "Stub")]);
-    h.install_game(7, "Chrono", "Windows");
-
-    let service = h.service();
-    let error = service.launch(7).await.unwrap_err();
-    assert_eq!(
-        validation_message(error),
-        "Native Windows games are not supported yet in the Rust preview."
-    );
-}
-
-#[tokio::test]
 async fn a_retroarch_relative_core_is_rewritten_to_an_absolute_path() {
     let h = Harness::new();
     let (exe, record) = h.recording_stub("retroarch");
@@ -673,4 +687,54 @@ async fn the_poll_loop_reaps_a_child_that_exits_on_its_own() {
         recorder.warnings().is_empty(),
         "the poll loop must not emit an early-exit warning"
     );
+}
+
+#[tokio::test]
+async fn ps3_launch_target_falls_back_to_the_gameid_placeholder() {
+    let h = Harness::new();
+    let (exe, record) = h.recording_stub("rpcs3");
+    h.write_config(
+        vec![entry("RPCS3", &exe, "%ps3_launch_target%")],
+        &[("PS3", "RPCS3")],
+    );
+    h.install_ps3_game(7, "Demons Souls", "PS3", "BLUS30336", "");
+
+    let service = h.service();
+    let session = service.launch(7).await.unwrap();
+
+    let recorded = wait_until(|| record.is_file()).await;
+    assert!(recorded, "the stub never wrote its argv");
+    let argv = fs::read_to_string(&record).unwrap();
+    let lines: Vec<&str> = argv.lines().collect();
+    assert_eq!(lines, vec!["%RPCS3_GAMEID%:BLUS30336"]);
+
+    service.stop(session.id);
+}
+
+#[tokio::test]
+async fn ps3_launch_target_prefers_the_iso_path_when_set() {
+    let h = Harness::new();
+    let (exe, record) = h.recording_stub("rpcs3");
+    h.write_config(
+        vec![entry("RPCS3", &exe, "%ps3_launch_target%")],
+        &[("PS3", "RPCS3")],
+    );
+    h.install_ps3_game(
+        7,
+        "Demons Souls",
+        "PS3",
+        "BLUS30336",
+        "/isos/Demons Souls.iso",
+    );
+
+    let service = h.service();
+    let session = service.launch(7).await.unwrap();
+
+    let recorded = wait_until(|| record.is_file()).await;
+    assert!(recorded, "the stub never wrote its argv");
+    let argv = fs::read_to_string(&record).unwrap();
+    let lines: Vec<&str> = argv.lines().collect();
+    assert_eq!(lines, vec!["/isos/Demons Souls.iso"]);
+
+    service.stop(session.id);
 }
