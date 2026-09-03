@@ -1081,9 +1081,17 @@ impl InstallService {
                 self.dismiss(entry_id);
                 self.install(client, rom_id).await
             }
+            // A source_id cannot name both an ordinary emulator and a
+            // compat tool (`find_profile`/`find_compat_profile` partition
+            // the catalog by `is_compat_tool`), so this dispatch is
+            // unambiguous.
             Some(JobKey::Emulator(source_id)) => {
                 self.dismiss(entry_id);
-                self.install_emulator(source_id).await
+                if catalog::find_compat_profile(&self.profiles, &source_id).is_some() {
+                    self.install_compat_tool(source_id).await
+                } else {
+                    self.install_emulator(source_id).await
+                }
             }
             // A content / native-update retry re-plans through the same
             // entry point the first attempt used, so the row and the server
@@ -2006,7 +2014,7 @@ impl InstallService {
             let Some(proton_dir) = compat::find_proton_dir(install_dir) else {
                 return Err(LibraryError::Extract(NO_PROTON_ENTRY_POINT.to_string()));
             };
-            self.write_compat_tool_entry(job, &proton_dir)?;
+            self.write_compat_tool_entry(job, &proton_dir, &paths.resolved.release_tag)?;
 
             // Only after a successful config write, matching the game path.
             for path in extracted_archives {
@@ -2144,19 +2152,25 @@ impl InstallService {
     /// by-name replace rule, matched by `source_id` instead because a
     /// compat tool's `name` is not guaranteed unique the way an emulator
     /// entry's is.
+    ///
+    /// `release_tag` is the RESOLVED tag the forge actually downloaded
+    /// (`ResolvedDownload::release_tag`), NOT `job.configured_tag`: a
+    /// `latest`-pinned compat tool must record which concrete release is on
+    /// disk, unlike an ordinary emulator entry's `source_release_tag` (which
+    /// deliberately keeps recording the pin itself, so it keeps tracking the
+    /// newest release on a later reinstall).
     fn write_compat_tool_entry(
         &self,
         job: &EmulatorJob,
         proton_dir: &Path,
+        release_tag: &str,
     ) -> Result<(), LibraryError> {
         let mut config = Config::load(&self.config_path)?;
         let entry = CompatToolInstall {
             name: job.profile_name.clone(),
             path: path_string(proton_dir),
             source_id: job.source_id.clone(),
-            // The CONFIGURED tag, matching `write_emulator_entry`'s
-            // `source_release_tag` — a `latest` pin is recorded as `latest`.
-            release_tag: job.configured_tag.clone(),
+            release_tag: release_tag.to_string(),
         };
         match config
             .compat_tool_installs
