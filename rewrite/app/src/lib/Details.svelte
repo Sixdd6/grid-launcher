@@ -17,10 +17,15 @@
     subject,
     onClose,
     onLibraryPathUnset,
+    initialCloudMode = 'overview',
   }: {
     subject: DetailsSubject;
     onClose: () => void;
     onLibraryPathUnset: () => void;
+    /** Which cloud panel the popup opens with. A card's "Cloud sync" action
+     *  passes `'save'` so the panel is already expanded; every other opener
+     *  leaves it at `'overview'`. The redesigned Saves tab is plan 3's. */
+    initialCloudMode?: CloudMode;
   } = $props();
 
   const LIVE_INSTALL_STATUSES: DownloadStatus[] = ['queued', 'downloading', 'installing', 'cancelling'];
@@ -157,7 +162,7 @@
     }
   });
 
-  let cloudMode = $state<CloudMode>('overview');
+  let cloudMode = $state<CloudMode>(initialCloudMode);
   let savePanelInfo = $state<CloudPanelInfo | null>(null);
   let statePanelInfo = $state<CloudPanelInfo | null>(null);
   let cloudPanelInfoError = $state<string | null>(null);
