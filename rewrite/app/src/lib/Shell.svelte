@@ -27,6 +27,7 @@
   let library = $state<ReturnType<typeof Library> | null>(null);
   let server = $state<ReturnType<typeof Server> | null>(null);
   let settings = $state<ReturnType<typeof Settings> | null>(null);
+  let emulators = $state<ReturnType<typeof Emulators> | null>(null);
   let serverMenuOpen = $state(false);
   let sessionEl = $state<HTMLElement | null>(null);
 
@@ -179,7 +180,11 @@
 <div data-testid="server-view" class="view" hidden={view !== 'server'}>
   <Server
     active={view === 'server'}
-    onOpenEmulators={() => (view = 'emulators')}
+    onOpenEmulators={() => {
+      // Design §6: the default-emulator chip links to Emulators › Platform defaults.
+      view = 'emulators';
+      emulators?.show('defaults');
+    }}
     bind:this={server}
   />
 </div>
@@ -187,7 +192,7 @@
   <Downloads />
 </div>
 <div class="view" hidden={view !== 'emulators'}>
-  <Emulators active={view === 'emulators'} />
+  <Emulators active={view === 'emulators'} bind:this={emulators} />
 </div>
 <div data-testid="settings-view" class="view" hidden={view !== 'settings'}>
   <Settings active={view === 'settings'} bind:this={settings} />

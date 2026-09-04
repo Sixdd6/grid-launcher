@@ -14,6 +14,8 @@
     type PlatformRef,
     type ProfileSummary,
   } from './api';
+  import { tick } from 'svelte';
+  import { chordContext, shouldFocusSearch } from './views/searchKeys';
   import RailPane, { type RailPaneEntry } from './RailPane.svelte';
   import { downloads } from './stores/downloads.svelte';
   import { compatTools } from './stores/compatTools.svelte';
@@ -31,6 +33,7 @@
     formPlacement,
     pageAfterSave,
     safeEmulatorPage,
+    SEARCH_PAGE,
     type AddTab,
     type EmulatorPage,
     type EmulatorPageCounts,
@@ -55,6 +58,27 @@
    *  routes to Platform defaults (design §6). */
   export function show(next: EmulatorPage) {
     page = safeEmulatorPage(next, windowsHost);
+  }
+
+  /**
+   * Design §3: `Ctrl+F` focuses the current view's search box. This view's
+   * one search lives on the catalog pane, so the chord brings that pane
+   * forward first; the input is hidden until the DOM updates, hence `tick`.
+   */
+  export async function focusSearch() {
+    page = SEARCH_PAGE;
+    await tick();
+    searchEl?.focus();
+    searchEl?.select();
+  }
+
+  function onKey(e: KeyboardEvent) {
+    if (!active) return;
+    // `shouldFocusSearch` already applies `chordBlocked`: a modal dialog or
+    // a focused text control keeps the chord for itself.
+    if (!shouldFocusSearch(e, chordContext(document))) return;
+    e.preventDefault();
+    focusSearch();
   }
 
   let emulators = $state<EmulatorEntry[]>([]);
@@ -446,6 +470,8 @@
     }
   }
 </script>
+
+<svelte:window onkeydown={onKey} />
 
 <section data-testid="emulators-view" class="emulators" aria-label="Emulators">
   <RailPane entries={railRows} testId="emulators-rail" ariaLabel="Emulator categories" onSelect={(k) => (page = k)} />

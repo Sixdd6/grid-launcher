@@ -80,6 +80,22 @@ describe('library and server chrome', () => {
     await expect($(testId('server-emulator-chip'))).toBeDisplayed();
   });
 
+  it('routes the default-emulator chip to Emulators › Platform defaults (design §6)', async () => {
+    await $(testId('server-emulator-chip')).click();
+    await $(testId('emulators-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the emulators view never opened from the chip',
+    });
+    await expect($(testId('emu-page-defaults'))).toBeDisplayed();
+    await expect($(testId('default-select-1'))).toBeDisplayed();
+
+    await $(testId('nav-server')).click();
+    await $(testId('server-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the server view never came back',
+    });
+  });
+
   it('filters the Server grid client-side from its search box', async () => {
     await $(testId('platform-btn-1')).click();
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
