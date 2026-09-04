@@ -12,11 +12,8 @@
     type RaStatus,
   } from './api';
   import { downloads } from './stores/downloads.svelte';
-  import {
-    filterCatalogEntries,
-    matchProfileByName,
-    shouldAutoFillFromName,
-  } from './emulators/catalog';
+  import { filterCatalogEntries } from './emulators/catalog';
+  import EmulatorForm from './emulators/EmulatorForm.svelte';
   import {
     NO_CORE_VALUE,
     NO_DEFAULT_VALUE,
@@ -73,12 +70,6 @@
   // the manual form directly (there is no "install this again" flow for an
   // already-configured entry).
   let addTab = $state<'install' | 'manual'>('install');
-  let formName = $state('');
-  let formPath = $state('');
-  let formArgs = $state('');
-  let formError = $state<string | null>(null);
-  let formPending = $state(false);
-  let autofillMatch = $state<ProfileSummary | null>(null);
 
   let confirmingDelete = $state<string | null>(null);
   let deletePending = $state<string | null>(null);
@@ -341,30 +332,25 @@
   function openAdd() {
     editing = { mode: 'add' };
     addTab = 'install';
-    formName = '';
-    formPath = '';
-    formArgs = '';
-    formError = null;
     catalogError = null;
     catalogSearch = '';
-    autofillMatch = null;
     confirmingDelete = null;
   }
 
   function openEdit(entry: EmulatorEntry) {
     editing = { mode: 'edit', name: entry.name, entry };
-    formName = entry.name;
-    formPath = entry.path;
-    formArgs = entry.args;
-    formError = null;
-    autofillMatch = null;
     confirmingDelete = null;
   }
 
   function closeForm() {
     editing = null;
-    formError = null;
-    autofillMatch = null;
+  }
+
+  /** The form saved: close it, then re-read the list and the defaults it may have changed. */
+  async function afterSave() {
+    closeForm();
+    await refreshEmulators();
+    await refreshDefaults();
   }
 
   async function handleInstallClick(sourceId: string) {
@@ -383,70 +369,6 @@
 
   function testKeyFor(sourceId: string): string {
     return sourceId.replaceAll('/', '-');
-  }
-
-  async function autoFillFromPath() {
-    if (formName.trim() !== '' || formArgs.trim() !== '') return;
-    const path = formPath.trim();
-    if (!path) return;
-    try {
-      const profile = await api.matchProfile(path);
-      if (profile) {
-        formName = profile.name;
-        formArgs = profile.args;
-      }
-    } catch {
-      // Best-effort autofill only — leave the form as typed on failure.
-    }
-  }
-
-  // Manual-add auto-fill from the typed NAME (task-7-brief.md): add mode
-  // only, and only when path and args are both still empty, so it never
-  // clobbers a manually typed or path-derived value and never touches an
-  // entry being edited. Fires on blur/change of the name field, which the
-  // edit form shares.
-  function autoFillFromName() {
-    if (!shouldAutoFillFromName(editing?.mode ?? null, formPath, formArgs)) {
-      autofillMatch = null;
-      return;
-    }
-    const match = matchProfileByName(formName, profiles);
-    autofillMatch = match;
-    if (match) {
-      formArgs = match.args;
-    }
-  }
-
-  function onPathKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      autoFillFromPath();
-    }
-  }
-
-  async function saveForm() {
-    if (editing === null) return;
-    const originalName = editing.mode === 'add' ? '' : editing.name;
-    // Backend stores the name as-given; trim client-side so a name typed
-    // with stray whitespace doesn't get persisted verbatim.
-    const entry: EmulatorEntry = {
-      ...(editing.mode === 'edit' ? editing.entry : {}),
-      name: formName.trim(),
-      path: formPath,
-      args: formArgs,
-    };
-    formError = null;
-    formPending = true;
-    try {
-      await api.saveEmulator(originalName, entry);
-      closeForm();
-      await refreshEmulators();
-      await refreshDefaults();
-    } catch (err) {
-      formError = errorMessage(err);
-    } finally {
-      formPending = false;
-    }
   }
 
   async function handleDeleteClick(name: string) {
@@ -705,36 +627,15 @@
             {/if}
           </div>
         {:else}
-          <form
-            onsubmit={(e) => {
-              e.preventDefault();
-              saveForm();
-            }}
-          >
-            <label>
-              Name
-              <input
-                data-testid="emu-form-name"
-                bind:value={formName}
-                onblur={autoFillFromName}
-                oninput={autoFillFromName}
-                required
-              />
-            </label>
-            {#if autofillMatch}
-              <p data-testid="emu-autofill-hint" class="hint">Matched profile: {autofillMatch.name}</p>
-            {/if}
-            <label>
-              Executable path
-              <input data-testid="emu-form-path" bind:value={formPath} onblur={autoFillFromPath} onkeydown={onPathKeydown} />
-            </label>
-            <label>Arguments <input data-testid="emu-form-args" bind:value={formArgs} /></label>
-            {#if formError}<p data-testid="emu-form-error" class="error" role="alert">{formError}</p>{/if}
-            <div class="form-actions">
-              <button data-testid="emu-form-save" type="submit" disabled={formPending}>{formPending ? 'Saving…' : 'Save'}</button>
-              <button data-testid="emu-form-cancel" type="button" onclick={closeForm} disabled={formPending}>Cancel</button>
-            </div>
-          </form>
+          {#key editing.mode === 'edit' ? editing.name : 'add'}
+            <EmulatorForm
+              mode={editing.mode}
+              entry={editing.mode === 'edit' ? editing.entry : null}
+              {profiles}
+              onSaved={afterSave}
+              onCancel={closeForm}
+            />
+          {/key}
         {/if}
       </section>
     {/if}
@@ -1165,39 +1066,10 @@
     cursor: default;
   }
 
-  .form-section form {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .form-section label {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    font-size: 13px;
-    color: var(--text);
-  }
-
-  .form-section input {
-    font: inherit;
-    padding: 8px 10px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--text-h);
-  }
-
-  .form-section input:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
-  }
-
   .hint {
-    margin: -4px 0 0;
+    margin: 0;
     font-size: 12px;
-    color: var(--text);
-    opacity: 0.8;
+    color: var(--text-muted);
   }
 
   .tabs {
