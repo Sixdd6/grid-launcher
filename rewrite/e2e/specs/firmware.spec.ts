@@ -64,6 +64,12 @@ describe('firmware', () => {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the emulators view never rendered',
     });
+    // The RPCS3 row, its note and its button live on the Installed pane.
+    await $(testId('emu-nav-installed')).click();
+    await $(testId('emu-page-installed')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the Installed pane never came forward',
+    });
   }
 
   before(async () => {
@@ -120,6 +126,7 @@ describe('firmware', () => {
     await showEmulators();
 
     await $(testId('emulator-add')).click();
+    await $(testId('emu-page-catalog')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     await $(testId('emu-add-tab-manual')).click();
     await $(testId('emu-form-name')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     // Name typed FIRST so the form's autofill ("both blank" guard) leaves it

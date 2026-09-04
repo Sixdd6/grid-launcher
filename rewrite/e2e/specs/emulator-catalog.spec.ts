@@ -130,12 +130,26 @@ describe('emulator-catalog', () => {
     });
   }
 
-  /** Opens the Add form, which starts on the catalog (Install) tab. */
+  /**
+   * Design §9: the view is a rail of four panes and only the selected one
+   * is displayed. Every pane stays mounted, so a `waitForExist` on a hidden
+   * element passes — but a click or `getText` needs the pane in front.
+   */
+  async function showPage(page: 'installed' | 'catalog' | 'defaults' | 'compat') {
+    await $(testId(`emu-nav-${page}`)).click();
+    await $(testId(`emu-page-${page}`)).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: `the ${page} pane never came forward`,
+    });
+  }
+
+  /** The Add from catalog pane, on its Catalog tab (design §9). */
   async function openCatalog() {
-    await $(testId('emulator-add')).click();
+    await showPage('catalog');
+    await $(testId('emu-add-tab-install')).click();
     await $(testId('emu-catalog-search')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the catalog Install tab never rendered its search box',
+      timeoutMsg: 'the catalog pane never rendered its search box',
     });
   }
 
@@ -271,6 +285,10 @@ describe('emulator-catalog', () => {
     // Without closing the panel: the completed install refreshes the emulator
     // list and the per-platform defaults in place, and the selector offers
     // PCSX2 only where its profile supports the platform.
+    // The defaults pane stays mounted behind the catalog (its selects are
+    // readable while hidden), but the disabled-state assertion below reads
+    // rendered text, so bring it forward.
+    await showPage('defaults');
     await browser.waitUntil(async () => (await optionValues(PS2_SELECT)).includes(PCSX2_NAME), {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the PlayStation 2 default select never offered the freshly installed PCSX2',
@@ -280,9 +298,9 @@ describe('emulator-catalog', () => {
     await expect($(testId(GAMECUBE_SELECT))).toBeDisabled();
     expect(await optionTexts(GAMECUBE_SELECT)).toEqual(['No compatible emulator']);
 
-    // Reopened because the panel loads its emulator list once, on mount.
-    await closeEmulators();
-    await openEmulators();
+    // The terminal-status effect already re-read the list; the row's text
+    // is only readable once its pane is in front.
+    await showPage('installed');
     await $(testId(PCSX2_ROW)).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the installed PCSX2 entry never appeared in the emulator list',
@@ -324,6 +342,7 @@ describe('emulator-catalog', () => {
   });
 
   it('plays the seeded PS2 game with the installed PCSX2 as the platform default', async () => {
+    await showPage('defaults');
     await selectValue(PS2_SELECT, PCSX2_NAME);
     await waitForConfigLine(`"${PLATFORM}" = "${PCSX2_NAME}"`);
     await closeEmulators();
@@ -379,8 +398,7 @@ describe('emulator-catalog', () => {
       timeoutMsg: 'the Redream catalog row never flipped to Installed',
     });
 
-    await closeEmulators();
-    await openEmulators();
+    await showPage('installed');
     await $(testId(REDREAM_ROW)).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the installed Redream entry never appeared in the emulator list',

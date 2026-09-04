@@ -84,6 +84,19 @@ describe('launch', () => {
   }
 
   /**
+   * Design §9: the view is a rail of four panes and only the selected one
+   * is displayed. Every pane stays mounted, so a `waitForExist` on a hidden
+   * element passes — but a click or `getText` needs the pane in front.
+   */
+  async function showPage(page: 'installed' | 'catalog' | 'defaults' | 'compat') {
+    await $(testId(`emu-nav-${page}`)).click();
+    await $(testId(`emu-page-${page}`)).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: `the ${page} pane never came forward`,
+    });
+  }
+
+  /**
    * Sets a native `<select>`'s value and dispatches `change` directly. A
    * WebDriver-protocol click on the underlying `<option>` (what
    * `selectByAttribute` does) does not reliably fire a `change` event on
@@ -181,6 +194,7 @@ describe('launch', () => {
 
   it('shows "exited immediately" after switching the default to the instant-exit stub', async () => {
     await openEmulators();
+    await showPage('defaults');
     await selectValue('default-select-1', 'InstantExit');
     await waitForConfigLine(`"${PLATFORM}" = "InstantExit"`);
     await closeEmulators();
@@ -198,7 +212,9 @@ describe('launch', () => {
 
   it('shows the verbatim "Emulator executable not found:" error when the default\'s path is broken', async () => {
     await openEmulators();
+    await showPage('installed');
     await $(testId('emulator-edit-instantexit')).click();
+    await $(testId('emu-edit-sheet')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     await $(testId('emu-form-path')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('emu-form-path')).setValue('/nonexistent/no-such-emulator');
     await $(testId('emu-form-save')).click();

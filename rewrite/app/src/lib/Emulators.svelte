@@ -1,4 +1,10 @@
 <script lang="ts">
+  // The Emulators view (design §9, D-UI-5): a 220px category rail and one
+  // pane per category — Installed, Add from catalog, Platform defaults,
+  // Compat tools (Linux only). All four panes stay mounted and switch with
+  // `hidden`, the rule the shell applies to views: the catalog's refresh on
+  // a finished install and the defaults' compatibility fetch keep running
+  // whichever pane is in front. Each pane's column caps at 1100px (D-UI-7).
   import {
     api,
     type CatalogEntry,
@@ -8,9 +14,10 @@
     type PlatformRef,
     type ProfileSummary,
   } from './api';
+  import RailPane, { type RailPaneEntry } from './RailPane.svelte';
   import { downloads } from './stores/downloads.svelte';
+  import { compatTools } from './stores/compatTools.svelte';
   import { filterCatalogEntries } from './emulators/catalog';
-  import EmulatorForm from './emulators/EmulatorForm.svelte';
   import {
     NO_CORE_VALUE,
     NO_DEFAULT_VALUE,
@@ -18,13 +25,37 @@
     platformDefaultSelect,
   } from './emulators/defaults';
   import { isWindowsHost } from './emulators/compatTools';
+  import {
+    emulatorPageLabel,
+    emulatorRailEntries,
+    formPlacement,
+    pageAfterSave,
+    safeEmulatorPage,
+    type AddTab,
+    type EmulatorPage,
+    type EmulatorPageCounts,
+  } from './emulators/pages';
   import CompatTools from './emulators/CompatTools.svelte';
+  import EmulatorForm from './emulators/EmulatorForm.svelte';
 
   // Mounted for the whole session now that Emulators is a view, so the
   // refresh below is gated on being the visible view: navigating away and
   // back re-runs `list_platforms`, which is what makes a cleared default
   // survive (the emulators spec's "(none)" case).
   let { active = true }: { active?: boolean } = $props();
+
+  // The app's own OS, not the server's platform field (isNativePlatform) —
+  // gates whether the Compat tools pane (wine/proton, which Windows-only
+  // content has nothing to do with) exists at all.
+  const windowsHost = isWindowsHost(navigator.platform);
+
+  let page = $state<EmulatorPage>('installed');
+
+  /** Programmatic page selection: the Server header's default-emulator chip
+   *  routes to Platform defaults (design §6). */
+  export function show(next: EmulatorPage) {
+    page = safeEmulatorPage(next, windowsHost);
+  }
 
   let emulators = $state<EmulatorEntry[]>([]);
   let listLoading = $state(true);
@@ -51,35 +82,30 @@
 
   let profiles = $state<ProfileSummary[]>([]);
 
-  // Tagged rather than a bare string sentinel: a string-based 'new' marker
-  // would make an emulator literally named "new" impossible to edit (its
-  // name would collide with the add-mode sentinel and saveEmulator's
-  // originalName arg would come out blank, so the save gets rejected as a
-  // duplicate against itself). `name` is the entry's current name, used as
-  // saveEmulator's originalName so a rename can find & replace itself.
-  // `entry` is the row being edited, kept whole so the fields the form does
-  // not show (install provenance, autoconfig save/ignore paths) are written
-  // back untouched instead of being dropped on save.
-  type Editing = { mode: 'add' } | { mode: 'edit'; name: string; entry: EmulatorEntry } | null;
-  let editing = $state<Editing>(null);
-  // Only meaningful while editing.mode === 'add' — edit mode always shows
-  // the manual form directly (there is no "install this again" flow for an
-  // already-configured entry).
-  let addTab = $state<'install' | 'manual'>('install');
+  // The Installed pane's edit sheet (design §9: "Edit opens the manual form
+  // inline as a sheet on the right of the pane"). `name` is the entry's
+  // current name, used as saveEmulator's originalName so a rename can find
+  // & replace itself; `entry` is the row being edited, kept whole so the
+  // fields the form does not show are written back untouched.
+  let editing = $state<{ name: string; entry: EmulatorEntry } | null>(null);
+  // The catalog pane's two tabs: the catalog rows, or the manual add form.
+  let addTab = $state<AddTab>('install');
+  let placement = $derived(formPlacement(page, editing !== null, addTab));
 
   let confirmingDelete = $state<string | null>(null);
   let deletePending = $state<string | null>(null);
 
-  // Install tab state.
+  // Catalog pane state.
   let catalog = $state<CatalogEntry[]>([]);
   let catalogLoading = $state(true);
   let catalogError = $state<string | null>(null);
   let catalogSearch = $state('');
+  let searchEl = $state<HTMLInputElement | null>(null);
   let installingSourceIds = $state<Set<string>>(new Set());
   let filteredCatalog = $derived(filterCatalogEntries(catalogSearch, catalog));
 
   // Signature of every emulator-job download that has reached a terminal
-  // status — read inside the effect below so a fresh terminal entry (an
+  // status — read inside the effects below so a fresh terminal entry (an
   // install completing, failing, or getting cancelled) triggers a catalog
   // re-fetch. Approximate on purpose (task-7-brief.md): any terminal
   // emulator entry is enough of a signal, not just the one just installed.
@@ -98,11 +124,6 @@
   let ps3InstallPending = $state<Set<string>>(new Set());
   let ps3Toast = $state<{ entryName: string; ok: boolean; text: string } | null>(null);
 
-  // The app's own OS, not the server's platform field (isNativePlatform) —
-  // gates whether the CompatTools section (wine/proton, Windows-only content
-  // has nothing to do with) renders at all.
-  const windowsHost = isWindowsHost(navigator.platform);
-
   // Re-queried whenever a `firmware`-kind drawer entry reaches 'completed'
   // (task-17-brief.md): the background firmware installer finishing means a
   // freshly-downloaded PS3UPDAT.PUP may now be sitting next to RPCS3.
@@ -111,6 +132,27 @@
       .filter((e) => e.kind === 'firmware' && e.status === 'completed')
       .map((e) => `${e.id}:${e.status}`)
       .join(',')
+  );
+
+  let counts = $derived<EmulatorPageCounts>({
+    installed: emulators.length,
+    catalog: catalog.length,
+    defaults: platforms.length,
+    compat: compatTools.tools.length,
+  });
+
+  let railRows = $derived(
+    emulatorRailEntries(counts, page, windowsHost).map(
+      (e): RailPaneEntry<EmulatorPage> => ({
+        key: e.key,
+        testId: e.testId,
+        countTestId: e.countTestId,
+        label: e.label,
+        count: e.count,
+        selected: e.selected,
+        heading: e.heading,
+      }),
+    ),
   );
 
   function isRpcs3(name: string): boolean {
@@ -202,15 +244,14 @@
     refreshDefaults();
   });
 
-  // Loads (or reloads) the catalog whenever the Install tab becomes the
-  // visible tab, and again whenever an emulator download reaches a terminal
-  // status while it is visible.
+  // The catalog loads when the view comes forward (its count sits on the
+  // rail from the first look) and reloads whenever an emulator download
+  // reaches a terminal status, so Install/Installed never goes stale.
   $effect(() => {
     const signature = emulatorTerminalSignature;
     void signature;
-    if (editing?.mode === 'add' && addTab === 'install') {
-      refreshCatalog();
-    }
+    if (!active) return;
+    refreshCatalog();
   });
 
   function errorMessage(err: unknown): string {
@@ -302,8 +343,9 @@
     }
   }
 
+  /** `emulator-add`: the Add from catalog page, on its Catalog tab. */
   function openAdd() {
-    editing = { mode: 'add' };
+    page = 'catalog';
     addTab = 'install';
     catalogError = null;
     catalogSearch = '';
@@ -311,19 +353,27 @@
   }
 
   function openEdit(entry: EmulatorEntry) {
-    editing = { mode: 'edit', name: entry.name, entry };
+    page = 'installed';
+    editing = { name: entry.name, entry };
     confirmingDelete = null;
   }
 
-  function closeForm() {
+  function closeSheet() {
     editing = null;
   }
 
-  /** The form saved: close it, then re-read the list and the defaults it may have changed. */
-  async function afterSave() {
-    closeForm();
+  async function afterEditSave() {
+    closeSheet();
     await refreshEmulators();
     await refreshDefaults();
+    page = pageAfterSave('edit');
+  }
+
+  async function afterAddSave() {
+    addTab = 'install';
+    await refreshEmulators();
+    await refreshDefaults();
+    page = pageAfterSave('add');
   }
 
   async function handleInstallClick(sourceId: string) {
@@ -354,6 +404,7 @@
     deletePending = name;
     try {
       await api.deleteEmulator(name);
+      if (editing?.name === name) closeSheet();
       await refreshEmulators();
       await refreshDefaults();
     } catch (err) {
@@ -394,112 +445,134 @@
       defaultsError = errorMessage(err);
     }
   }
-
 </script>
 
-<section data-testid="emulators-view" class="emulators-view view-content" aria-label="Emulators">
-  <h2>Emulators</h2>
+<section data-testid="emulators-view" class="emulators" aria-label="Emulators">
+  <RailPane entries={railRows} testId="emulators-rail" ariaLabel="Emulator categories" onSelect={(k) => (page = k)} />
 
-    <section class="list-section">
-      <div class="section-header">
-        <h3>Installed emulators</h3>
-        <button data-testid="emulator-add" class="add-btn" onclick={openAdd}>+ Add emulator</button>
+  <div class="panes">
+    <!-- Installed -->
+    <section data-testid="emu-page-installed" class="pane" hidden={page !== 'installed'} aria-label={emulatorPageLabel('installed')}>
+      <div class="view-content pane-inner">
+        <div class="section-header">
+          <h2>{emulatorPageLabel('installed')}</h2>
+          <button data-testid="emulator-add" class="add-btn" onclick={openAdd}>+ Add emulator</button>
+        </div>
+
+        <div class="installed-body" class:with-sheet={placement === 'sheet'}>
+          <div class="list-column">
+            {#if listLoading}
+              <p class="muted">Loading…</p>
+            {:else if listError}
+              <p class="error" role="alert">{listError}</p>
+            {:else}
+              {#if deleteError}
+                <p class="error" role="alert">{deleteError}</p>
+              {/if}
+              {#if emulators.length === 0}
+                <p class="muted">No emulators configured.</p>
+              {:else}
+                <ul class="emulator-list">
+                  {#each emulators as e (e.name)}
+                    <li data-testid={`emulator-row-${sanitizeName(e.name)}`} class="emulator-row" class:editing={editing?.name === e.name}>
+                      <div class="row-main">
+                        <div class="row-text">
+                          <span class="name">{e.name}</span>
+                          <span class="path" title={e.path}>{e.path}</span>
+                          {#if e.args}<span class="args">{e.args}</span>{/if}
+                        </div>
+                        <div class="row-actions">
+                          <button data-testid={`emulator-edit-${sanitizeName(e.name)}`} onclick={() => openEdit(e)}>Edit</button>
+                          <button
+                            data-testid={`emulator-delete-${sanitizeName(e.name)}`}
+                            class:confirm={confirmingDelete === e.name}
+                            disabled={deletePending === e.name}
+                            onclick={() => handleDeleteClick(e.name)}
+                          >
+                            {confirmingDelete === e.name ? 'Confirm delete' : 'Delete'}
+                          </button>
+                        </div>
+                      </div>
+                      {#if isRpcs3(e.name) && rpcs3Status.get(e.name)}
+                        <div class="ps3-firmware">
+                          <p data-testid={`emulator-ps3-firmware-note-${sanitizeName(e.name)}`} class="hint">
+                            PS3 firmware downloaded — click Install to activate it.
+                          </p>
+                          <button
+                            data-testid={`emulator-ps3-firmware-${sanitizeName(e.name)}`}
+                            disabled={ps3InstallPending.has(e.name)}
+                            onclick={() => handleInstallPs3Firmware(e.name)}
+                          >
+                            {ps3InstallPending.has(e.name) ? 'Installing…' : 'Install PS3 Firmware'}
+                          </button>
+                        </div>
+                      {/if}
+                      {#if ps3Toast && ps3Toast.entryName === e.name}
+                        <p data-testid="emulator-ps3-firmware-toast" class={ps3Toast.ok ? 'hint' : 'error'}>
+                          {ps3Toast.text}
+                        </p>
+                      {/if}
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            {/if}
+          </div>
+
+          {#if placement === 'sheet' && editing}
+            <aside data-testid="emu-edit-sheet" class="sheet" aria-label="Edit emulator">
+              <h3>Edit emulator</h3>
+              <!-- Keyed on the entry name: the form seeds its fields on
+                   mount, so switching rows must remount it. -->
+              {#key editing.name}
+                <EmulatorForm mode="edit" entry={editing.entry} {profiles} onSaved={afterEditSave} onCancel={closeSheet} />
+              {/key}
+            </aside>
+          {/if}
+        </div>
       </div>
-
-      {#if listLoading}
-        <p class="muted">Loading…</p>
-      {:else if listError}
-        <p class="error" role="alert">{listError}</p>
-      {:else}
-        {#if deleteError}
-          <p class="error" role="alert">{deleteError}</p>
-        {/if}
-        {#if emulators.length === 0}
-          <p class="muted">No emulators configured.</p>
-        {:else}
-          <ul class="emulator-list">
-            {#each emulators as e (e.name)}
-              <li data-testid={`emulator-row-${sanitizeName(e.name)}`} class="emulator-row">
-                <div class="row-main">
-                  <div class="row-text">
-                    <span class="name">{e.name}</span>
-                    <span class="path" title={e.path}>{e.path}</span>
-                    {#if e.args}<span class="args">{e.args}</span>{/if}
-                  </div>
-                  <div class="row-actions">
-                    <button data-testid={`emulator-edit-${sanitizeName(e.name)}`} onclick={() => openEdit(e)}>Edit</button>
-                    <button
-                      data-testid={`emulator-delete-${sanitizeName(e.name)}`}
-                      class:confirm={confirmingDelete === e.name}
-                      disabled={deletePending === e.name}
-                      onclick={() => handleDeleteClick(e.name)}
-                    >
-                      {confirmingDelete === e.name ? 'Confirm delete' : 'Delete'}
-                    </button>
-                  </div>
-                </div>
-                {#if isRpcs3(e.name) && rpcs3Status.get(e.name)}
-                  <div class="ps3-firmware">
-                    <p data-testid={`emulator-ps3-firmware-note-${sanitizeName(e.name)}`} class="hint">
-                      PS3 firmware downloaded — click Install to activate it.
-                    </p>
-                    <button
-                      data-testid={`emulator-ps3-firmware-${sanitizeName(e.name)}`}
-                      disabled={ps3InstallPending.has(e.name)}
-                      onclick={() => handleInstallPs3Firmware(e.name)}
-                    >
-                      {ps3InstallPending.has(e.name) ? 'Installing…' : 'Install PS3 Firmware'}
-                    </button>
-                  </div>
-                {/if}
-                {#if ps3Toast && ps3Toast.entryName === e.name}
-                  <p data-testid="emulator-ps3-firmware-toast" class={ps3Toast.ok ? 'hint' : 'error'}>
-                    {ps3Toast.text}
-                  </p>
-                {/if}
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      {/if}
     </section>
 
-    {#if editing !== null}
-      <section class="form-section">
-        <h3>{editing.mode === 'add' ? 'Add emulator' : 'Edit emulator'}</h3>
+    <!-- Add from catalog -->
+    <section data-testid="emu-page-catalog" class="pane" hidden={page !== 'catalog'} aria-label={emulatorPageLabel('catalog')}>
+      <div class="view-content pane-inner">
+        <h2>{emulatorPageLabel('catalog')}</h2>
 
-        {#if editing.mode === 'add'}
-          <div class="tabs" role="tablist">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={addTab === 'install'}
-              class:active={addTab === 'install'}
-              data-testid="emu-add-tab-install"
-              onclick={() => (addTab = 'install')}
-            >
-              Install
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={addTab === 'manual'}
-              class:active={addTab === 'manual'}
-              data-testid="emu-add-tab-manual"
-              onclick={() => (addTab = 'manual')}
-            >
-              Manual
-            </button>
+        <div class="tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={addTab === 'install'}
+            class:active={addTab === 'install'}
+            data-testid="emu-add-tab-install"
+            onclick={() => (addTab = 'install')}
+          >
+            Catalog
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={addTab === 'manual'}
+            class:active={addTab === 'manual'}
+            data-testid="emu-add-tab-manual"
+            onclick={() => (addTab = 'manual')}
+          >
+            Manual
+          </button>
+        </div>
+
+        {#if placement === 'manual'}
+          <div class="manual-form">
+            <EmulatorForm mode="add" entry={null} {profiles} onSaved={afterAddSave} onCancel={() => (addTab = 'install')} />
           </div>
-        {/if}
-
-        {#if editing.mode === 'add' && addTab === 'install'}
+        {:else}
           <div class="catalog-tab">
             <input
               data-testid="emu-catalog-search"
               class="catalog-search"
               type="search"
               placeholder="Search emulators…"
+              bind:this={searchEl}
               bind:value={catalogSearch}
               aria-label="Search emulators"
             />
@@ -533,110 +606,134 @@
               </ul>
             {/if}
           </div>
-        {:else}
-          {#key editing.mode === 'edit' ? editing.name : 'add'}
-            <EmulatorForm
-              mode={editing.mode}
-              entry={editing.mode === 'edit' ? editing.entry : null}
-              {profiles}
-              onSaved={afterSave}
-              onCancel={closeForm}
-            />
-          {/key}
         {/if}
-      </section>
-    {/if}
+      </div>
+    </section>
 
-    <section class="defaults-section">
-      <h3>Per-platform defaults</h3>
-      {#if defaultsError}
-        <p class="error" role="alert">{defaultsError}</p>
-      {/if}
-      <!-- Rendered separately from the defaults error so neither can hide the
-           other: the compatibility fetch has its own failure mode. -->
-      {#if compatibleError}
-        <p class="error" role="alert">{compatibleError}</p>
-      {/if}
-      {#if platforms.length === 0}
-        <p class="muted">No platforms available.</p>
-      {:else}
-        <ul class="defaults-list">
-          {#each platforms as p (p.id)}
-            {@const selectId = `default-emulator-${p.id}`}
-            {@const choice = selectFor(p.name)}
-            {@const coreId = `default-core-${p.id}`}
-            {@const core = coreSelectFor(p.name, choice.selected)}
-            <li class="defaults-card">
-              <div class="defaults-card-header">
-                <label class="platform-name" for={selectId}>{p.name}</label>
-              </div>
-              <div class="defaults-field">
-                <span class="defaults-field-label">Emulator</span>
-                <!-- `default-select-<platformId>` is the per-platform select's
-                     test id; its `id` (used by the label) is
-                     `default-emulator-<platformId>`. -->
-                <select
-                  data-testid={`default-select-${p.id}`}
-                  id={selectId}
-                  disabled={choice.disabled}
-                  value={choice.selected}
-                  onchange={(e) => handleDefaultChange(p.name, (e.currentTarget as HTMLSelectElement).value)}
-                >
-                  {#if choice.disabled}
-                    <option value={NO_DEFAULT_VALUE}>No compatible emulator</option>
-                  {:else}
-                    <option value={NO_DEFAULT_VALUE}>(none)</option>
-                    {#each choice.options as name (name)}
-                      <option value={name}>{name}</option>
-                    {/each}
-                  {/if}
-                </select>
-              </div>
-              {#if core.visible}
+    <!-- Platform defaults -->
+    <section data-testid="emu-page-defaults" class="pane" hidden={page !== 'defaults'} aria-label={emulatorPageLabel('defaults')}>
+      <div class="view-content pane-inner">
+        <h2>{emulatorPageLabel('defaults')}</h2>
+        {#if defaultsError}
+          <p class="error" role="alert">{defaultsError}</p>
+        {/if}
+        <!-- Rendered separately from the defaults error so neither can hide the
+             other: the compatibility fetch has its own failure mode. -->
+        {#if compatibleError}
+          <p class="error" role="alert">{compatibleError}</p>
+        {/if}
+        {#if platforms.length === 0}
+          <p class="muted">No platforms available.</p>
+        {:else}
+          <ul class="defaults-list">
+            {#each platforms as p (p.id)}
+              {@const selectId = `default-emulator-${p.id}`}
+              {@const choice = selectFor(p.name)}
+              {@const coreId = `default-core-${p.id}`}
+              {@const core = coreSelectFor(p.name, choice.selected)}
+              <li class="defaults-card">
+                <div class="defaults-card-header">
+                  <label class="platform-name" for={selectId}>{p.name}</label>
+                </div>
                 <div class="defaults-field">
-                  <label class="defaults-field-label" for={coreId}>Core</label>
+                  <span class="defaults-field-label">Emulator</span>
+                  <!-- `default-select-<platformId>` is the per-platform select's
+                       test id; its `id` (used by the label) is
+                       `default-emulator-<platformId>`. -->
                   <select
-                    data-testid={`default-core-${p.id}`}
-                    id={coreId}
-                    disabled={core.disabled}
-                    value={core.selected}
-                    onchange={(e) => handleCoreChange(p.name, (e.currentTarget as HTMLSelectElement).value)}
+                    data-testid={`default-select-${p.id}`}
+                    id={selectId}
+                    disabled={choice.disabled}
+                    value={choice.selected}
+                    onchange={(e) => handleDefaultChange(p.name, (e.currentTarget as HTMLSelectElement).value)}
                   >
-                    {#if core.disabled}
-                      <option value={NO_CORE_VALUE}>No installed core</option>
+                    {#if choice.disabled}
+                      <option value={NO_DEFAULT_VALUE}>No compatible emulator</option>
                     {:else}
-                      {#each core.options as id (id)}
-                        <option value={id}>{id}</option>
+                      <option value={NO_DEFAULT_VALUE}>(none)</option>
+                      {#each choice.options as name (name)}
+                        <option value={name}>{name}</option>
                       {/each}
                     {/if}
                   </select>
                 </div>
-              {/if}
-            </li>
-          {/each}
-        </ul>
-      {/if}
+                {#if core.visible}
+                  <div class="defaults-field">
+                    <label class="defaults-field-label" for={coreId}>Core</label>
+                    <select
+                      data-testid={`default-core-${p.id}`}
+                      id={coreId}
+                      disabled={core.disabled}
+                      value={core.selected}
+                      onchange={(e) => handleCoreChange(p.name, (e.currentTarget as HTMLSelectElement).value)}
+                    >
+                      {#if core.disabled}
+                        <option value={NO_CORE_VALUE}>No installed core</option>
+                      {:else}
+                        {#each core.options as id (id)}
+                          <option value={id}>{id}</option>
+                        {/each}
+                      {/if}
+                    </select>
+                  </div>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
     </section>
 
+    <!-- Compat tools (design §9: hidden on Windows) -->
     {#if !windowsHost}
-      <CompatTools />
+      <section data-testid="emu-page-compat" class="pane" hidden={page !== 'compat'} aria-label={emulatorPageLabel('compat')}>
+        <div class="view-content pane-inner">
+          <h2>{emulatorPageLabel('compat')}</h2>
+          <CompatTools />
+        </div>
+      </section>
     {/if}
-
+  </div>
 </section>
 
 <style>
-  .emulators-view {
+  .emulators {
+    display: flex;
+    align-items: stretch;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .panes {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  /* No `display` on `.pane` itself: the `hidden` attribute's UA rule must
+     win, and an author `display: flex` here would override it. */
+  .pane {
+    height: 100%;
+    overflow-y: auto;
+    box-sizing: border-box;
+  }
+
+  .pane[hidden] {
+    display: none;
+  }
+
+  .pane-inner {
     display: flex;
     flex-direction: column;
     gap: 16px;
     padding: 24px;
-    box-sizing: border-box;
   }
 
   h2 {
     margin: 0;
     color: var(--text-h);
     font-size: 18px;
+    font-weight: 600;
   }
 
   h3 {
@@ -647,14 +744,20 @@
 
   .muted {
     margin: 0;
-    color: var(--text);
+    color: var(--text-muted);
     font-size: 13px;
   }
 
   .error {
     margin: 0;
-    color: #e5484d;
+    color: var(--danger);
     font-size: 13px;
+  }
+
+  .hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-muted);
   }
 
   .section-header {
@@ -662,42 +765,66 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 8px;
-  }
-
-  .list-section,
-  .form-section,
-  .defaults-section {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding-top: 12px;
-    border-top: 1px solid var(--border);
-  }
-
-  .list-section {
-    border-top: none;
-    padding-top: 0;
   }
 
   .add-btn {
     font: inherit;
     font-size: 12px;
     padding: 4px 10px;
-    border-radius: 6px;
+    border-radius: var(--r-chip);
     border: 1px solid var(--border);
     background: transparent;
     color: var(--text-h);
     cursor: pointer;
     white-space: nowrap;
+    transition: background var(--m-fast) ease;
   }
 
   .add-btn:hover {
-    background: var(--border);
+    background: var(--surface);
+  }
+
+  /* Design §9: the edit sheet sits to the right of the list. */
+  .installed-body {
+    display: flex;
+    align-items: flex-start;
+    gap: 24px;
+  }
+
+  .list-column {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .sheet {
+    flex: 0 0 360px;
+    position: sticky;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    box-sizing: border-box;
+    border: 1px solid var(--border);
+    border-radius: var(--r-card);
+    background: var(--surface-2);
+    animation: sheet-in var(--m-base) ease;
+  }
+
+  @keyframes sheet-in {
+    from {
+      opacity: 0;
+      transform: translateX(16px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
   }
 
   .emulator-list,
-  .defaults-list {
+  .defaults-list,
+  .catalog-list {
     list-style: none;
     margin: 0;
     padding: 0;
@@ -711,8 +838,14 @@
     flex-direction: column;
     gap: 8px;
     padding: 8px 10px;
-    border-radius: 8px;
-    background: var(--border);
+    border-radius: var(--r-row);
+    border: 1px solid transparent;
+    background: var(--surface);
+    transition: border-color var(--m-fast) ease;
+  }
+
+  .emulator-row.editing {
+    border-color: var(--primary);
   }
 
   .row-main {
@@ -730,27 +863,41 @@
   }
 
   .ps3-firmware .hint {
-    margin: 0;
     flex: 1 1 auto;
     min-width: 0;
   }
 
-  .ps3-firmware button {
+  .ps3-firmware button,
+  .row-actions button,
+  .catalog-row button {
     flex: none;
     font: inherit;
     font-size: 12px;
     padding: 4px 10px;
-    border-radius: 6px;
+    border-radius: var(--r-chip);
     border: none;
-    background: var(--accent);
+    background: var(--primary);
     color: #fff;
     cursor: pointer;
     white-space: nowrap;
+    transition: background var(--m-fast) ease;
   }
 
-  .ps3-firmware button:disabled {
+  .ps3-firmware button:hover:not(:disabled),
+  .row-actions button:hover:not(:disabled),
+  .catalog-row button:hover:not(:disabled) {
+    background: var(--primary-hover);
+  }
+
+  .ps3-firmware button:disabled,
+  .row-actions button:disabled,
+  .catalog-row button:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+
+  .row-actions button.confirm {
+    background: var(--danger);
   }
 
   .row-text {
@@ -770,7 +917,7 @@
   }
 
   .path {
-    color: var(--text);
+    color: var(--text-muted);
     font-size: 12px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -778,10 +925,10 @@
     max-width: 320px;
   }
 
-  .args {
-    color: var(--text);
+  .args,
+  .meta {
+    color: var(--text-muted);
     font-size: 11px;
-    opacity: 0.8;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -793,33 +940,6 @@
     gap: 6px;
   }
 
-  .row-actions button {
-    font: inherit;
-    font-size: 12px;
-    padding: 4px 10px;
-    border-radius: 6px;
-    border: none;
-    background: var(--accent);
-    color: #fff;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .row-actions button.confirm {
-    background: #e5484d;
-  }
-
-  .row-actions button:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-
-  .hint {
-    margin: 0;
-    font-size: 12px;
-    color: var(--text-muted);
-  }
-
   .tabs {
     display: flex;
     gap: 4px;
@@ -829,17 +949,22 @@
     font: inherit;
     font-size: 13px;
     padding: 6px 12px;
-    border-radius: 6px 6px 0 0;
+    border-radius: var(--r-chip) var(--r-chip) 0 0;
     border: 1px solid var(--border);
     border-bottom: none;
     background: transparent;
-    color: var(--text);
+    color: var(--text-muted);
     cursor: pointer;
+    transition: background var(--m-fast) ease, color var(--m-fast) ease;
   }
 
   .tabs button.active {
-    background: var(--border);
+    background: var(--surface);
     color: var(--text-h);
+  }
+
+  .manual-form {
+    max-width: 480px;
   }
 
   .catalog-tab {
@@ -851,26 +976,15 @@
   .catalog-search {
     font: inherit;
     padding: 8px 10px;
-    border-radius: 6px;
+    border-radius: var(--r-chip);
     border: 1px solid var(--border);
-    background: var(--bg);
+    background: var(--surface-2);
     color: var(--text-h);
   }
 
   .catalog-search:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--primary);
     outline-offset: 1px;
-  }
-
-  .catalog-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    max-height: 260px;
-    overflow-y: auto;
   }
 
   .catalog-row {
@@ -879,31 +993,8 @@
     justify-content: space-between;
     gap: 12px;
     padding: 8px 10px;
-    border-radius: 8px;
-    background: var(--border);
-  }
-
-  .catalog-row .meta {
-    color: var(--text);
-    font-size: 12px;
-  }
-
-  .catalog-row button {
-    flex: none;
-    font: inherit;
-    font-size: 12px;
-    padding: 4px 10px;
-    border-radius: 6px;
-    border: none;
-    background: var(--accent);
-    color: #fff;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .catalog-row button:disabled {
-    opacity: 0.6;
-    cursor: default;
+    border-radius: var(--r-row);
+    background: var(--surface);
   }
 
   .defaults-card {
@@ -911,9 +1002,9 @@
     flex-direction: column;
     gap: 8px;
     padding: 10px 12px;
-    border-radius: 6px;
+    border-radius: var(--r-row);
     border: 1px solid var(--border);
-    background: var(--border);
+    background: var(--surface);
   }
 
   .defaults-card-header {
@@ -935,7 +1026,7 @@
   }
 
   .defaults-field-label {
-    color: var(--text);
+    color: var(--text-muted);
     font-size: 13px;
     flex-shrink: 0;
   }
@@ -944,9 +1035,9 @@
     font: inherit;
     font-size: 13px;
     padding: 6px 8px;
-    border-radius: 6px;
+    border-radius: var(--r-control);
     border: 1px solid var(--border);
-    background: var(--bg);
+    background: var(--surface-2);
     color: var(--text-h);
     max-width: 260px;
     overflow: hidden;

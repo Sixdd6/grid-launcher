@@ -70,6 +70,19 @@ describe('emulators', () => {
   /** Row/edit/delete testids sanitize a name the same way Emulators.svelte does. */
   const sanitize = (name: string) => name.toLowerCase().replace(/\s+/g, '-');
 
+  /**
+   * Design §9: the view is a rail of four panes and only the selected one
+   * is displayed. Every pane stays mounted, so a `waitForExist` on a hidden
+   * element passes — but a click or `getText` needs the pane in front.
+   */
+  async function showPage(page: 'installed' | 'catalog' | 'defaults' | 'compat') {
+    await $(testId(`emu-nav-${page}`)).click();
+    await $(testId(`emu-page-${page}`)).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: `the ${page} pane never came forward`,
+    });
+  }
+
   async function rowNames(): Promise<string[]> {
     const rows = await $$('[data-testid^="emulator-row-"] .name');
     const names: string[] = [];
@@ -99,10 +112,31 @@ describe('emulators', () => {
     );
   }
 
+  it('walks the four category panes of the rail', async () => {
+    // Nothing is configured yet in this group: the Installed count is 0.
+    await expect($(testId('emu-nav-count-installed'))).toHaveText('0');
+
+    await showPage('catalog');
+    await expect($(testId('emu-catalog-search'))).toBeDisplayed();
+    await expect($(testId('emu-add-tab-install'))).toHaveAttribute('aria-selected', 'true');
+
+    await showPage('defaults');
+    await expect($(testId('default-select-1'))).toBeDisplayed();
+
+    // Linux host: Compat tools is on the rail (design §9 hides it on Windows).
+    await showPage('compat');
+    await expect($(testId('compat-tools-section'))).toBeDisplayed();
+
+    await showPage('installed');
+    await expect($(testId('emulator-add'))).toBeDisplayed();
+  });
+
   it('auto-fills name and args from a profile-matching path, then saves the row', async () => {
     await $(testId('emulator-add')).click();
     // Add now opens on the Install tab (task-7-brief.md); the manual form
     // this spec drives lives under the Manual tab.
+    // `emulator-add` opens the Add from catalog pane on its Catalog tab.
+    await $(testId('emu-page-catalog')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     await $(testId('emu-add-tab-manual')).click();
     await $(testId('emu-form-name')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await expect($(testId('emu-form-name'))).toHaveValue('');
@@ -125,6 +159,9 @@ describe('emulators', () => {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the saved emulator never appeared in the list',
     });
+    // A manual save lands on Installed, where the new row is.
+    await expect($(testId('emu-page-installed'))).toBeDisplayed();
+    await expect($(testId('emu-nav-count-installed'))).toHaveText('1');
   });
 
   it('adds a second emulator and keeps row order when editing the first', async () => {
@@ -147,6 +184,11 @@ describe('emulators', () => {
     // apply_save_emulator (commands.rs) re-inserts an edited entry at its
     // original index rather than appending it.
     await $(testId(`emulator-edit-${sanitize('RetroArch (Multi-System)')}`)).click();
+    // Design §9: Edit opens the form as a sheet beside the list.
+    await $(testId('emu-edit-sheet')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the edit sheet never opened',
+    });
     await $(testId('emu-form-name')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await expect($(testId('emu-form-name'))).toHaveValue('RetroArch (Multi-System)');
     await $(testId('emu-form-name')).setValue('RetroArch Renamed');
@@ -154,6 +196,11 @@ describe('emulators', () => {
     await $(testId(`emulator-row-${sanitize('RetroArch Renamed')}`)).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the renamed emulator never appeared under its new name',
+    });
+    await $(testId('emu-edit-sheet')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      reverse: true,
+      timeoutMsg: 'the edit sheet stayed open after a successful save',
     });
 
     expect(await rowNames()).toEqual(['RetroArch Renamed', 'AAA Manual Emulator']);
@@ -172,6 +219,7 @@ describe('emulators', () => {
   });
 
   it('deletes an emulator with a two-click confirm', async () => {
+    await showPage('installed');
     const deleteBtn = $(testId(`emulator-delete-${sanitize('AAA Manual Emulator')}`));
     await deleteBtn.click();
     await expect(deleteBtn).toHaveText('Confirm delete');
@@ -212,6 +260,7 @@ describe('emulators', () => {
   }
 
   it('assigns a per-platform default and records a core in config.toml', async () => {
+    await showPage('defaults');
     await selectValue('default-select-1', 'RetroArch Renamed');
     await waitForConfigLine('"Super Nintendo Entertainment System" = "RetroArch Renamed"');
     // D-RC-4: picking RetroArch also records the first installed compatible
@@ -266,6 +315,7 @@ describe('emulators', () => {
       timeoutMsg: 'the emulators view never went away',
     });
     await $(testId('nav-emulators')).click();
+    await showPage('defaults');
     await $(testId('default-select-1')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the per-platform defaults list never rendered after re-entering',

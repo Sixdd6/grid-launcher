@@ -189,7 +189,7 @@
 
   .error {
     margin: 0;
-    color: #e5484d;
+    color: var(--danger);
     font-size: 13px;
   }
 
