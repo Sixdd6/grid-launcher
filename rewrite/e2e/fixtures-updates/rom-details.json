@@ -33,7 +33,13 @@
     "fs_size_bytes": 0,
     "updated_at": "2026-01-01T00:00:00Z",
     "files": [
-      { "id": 4802, "file_name": "mygame (v1.1.0).zip", "file_size_bytes": 0, "is_top_level": true },
+      {
+        "id": 4802,
+        "file_name": "mygame (v1.1.0).zip",
+        "file_size_bytes": 0,
+        "is_top_level": true,
+        "last_modified": "2026-05-04T00:00:00"
+      },
       { "id": 4803, "file_name": "game.json", "file_size_bytes": 0, "is_top_level": true }
     ],
     "metadatum": null

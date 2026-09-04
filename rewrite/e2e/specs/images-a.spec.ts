@@ -99,6 +99,82 @@ describe('images (a): cover, screenshots, install, library grid', () => {
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
   });
 
+  it('renders the redesigned popup: header, tabs, related, media viewer and file version', async () => {
+    await $(testId('game-card-101')).click();
+    await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+
+    // Design §7's right header: platform · year · developer · genres · rating.
+    await expect($(testId('details-header-line'))).toHaveText(
+      'Super Nintendo Entertainment System · 1990 · Nintendo · Platformer · ★ 9.2',
+    );
+    await expect($(testId('details-verification'))).toHaveText('Identified');
+
+    // All four §11 tab ids exist, and Overview is the one showing.
+    for (const name of ['overview', 'media', 'saves', 'files']) {
+      await expect($(testId(`details-tab-${name}`))).toExist();
+    }
+    await expect($(testId('details-description'))).toHaveText('A classic platformer.');
+    await expect($(testId('details-meta-players'))).toHaveText('1');
+
+    // Related is filtered to titles the platform actually holds: "Chrono
+    // Trigger" is rom 102 (as "Chrono Trigger (USA)"), "A Game Nobody Owns"
+    // is on no platform and must not appear.
+    await $(testId('details-related-0')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the Related row never rendered after the platform list loaded',
+    });
+    // The chip renders the title and its kind label; `toHaveText`
+    // normalizes the whitespace between the two spans to one space.
+    await expect($(testId('details-related-0'))).toHaveText('Chrono Trigger Similar');
+    await expect($(testId('details-related-1'))).not.toExist();
+
+    // Media: two screenshots plus the YouTube trailer tile.
+    await $(testId('details-tab-media')).click();
+    await $(testId('details-media-0')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await expect($(testId('details-media-2'))).toExist();
+
+    await $(testId('details-media-0')).click();
+    await $(testId('media-viewer')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the fullscreen media viewer never opened',
+    });
+    await expect($(testId('media-viewer-caption'))).toHaveText(
+      'Super Mario World — screenshot 1',
+    );
+    await $(testId('media-viewer-next')).click();
+    await expect($(testId('media-viewer-caption'))).toHaveText(
+      'Super Mario World — screenshot 2',
+    );
+    // Wrapping past the last item returns to the first (media.ts nextIndex).
+    await $(testId('media-viewer-next')).click();
+    await expect($(testId('media-viewer-caption'))).toHaveText('Super Mario World — trailer');
+    await expect($(testId('media-viewer-youtube'))).toHaveAttribute(
+      'src',
+      'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+    );
+    await $(testId('media-viewer-next')).click();
+    await expect($(testId('media-viewer-caption'))).toHaveText(
+      'Super Mario World — screenshot 1',
+    );
+
+    // Esc closes the viewer and leaves the popup open.
+    await browser.keys(['Escape']);
+    await $(testId('media-viewer')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+    await expect($(testId('details-panel'))).toExist();
+
+    // Files: D-UI-10 with no version tag in the name falls back to the
+    // file's own last_modified date.
+    await $(testId('details-tab-files')).click();
+    await $(testId('details-file-1001')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await expect($(testId('details-file-version-1001'))).toHaveText('2026-01-02');
+
+    // Leave the session's remembered tab on Overview: it is module state,
+    // so it would otherwise decide which tab the next case's popup opens on.
+    await $(testId('details-tab-overview')).click();
+    await $(testId('details-close')).click();
+    await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+  });
+
   it('installs rom 101', async () => {
     // images-seed.mjs already writes a non-empty library_path into
     // config.toml (it has to — the seeded rom 102 row's game.rom lives

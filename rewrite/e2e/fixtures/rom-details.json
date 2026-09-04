@@ -13,14 +13,31 @@
     "revision": null,
     "fs_size_bytes": 0,
     "updated_at": "2026-01-01T00:00:00Z",
+    "is_identified": true,
+    "youtube_video_id": "dQw4w9WgXcQ",
     "files": [
-      { "id": 1001, "file_name": "Super Mario World.zip", "file_size_bytes": 0, "is_top_level": true }
+      {
+        "id": 1001,
+        "file_name": "Super Mario World.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true,
+        "last_modified": "2026-01-02T03:04:05"
+      }
     ],
     "metadatum": {
       "average_rating": 9.2,
       "genres": ["Platformer"],
       "companies": ["Nintendo"],
-      "first_release_date": 653529600
+      "first_release_date": 653529600,
+      "franchises": ["Super Mario"],
+      "game_modes": ["Single player"],
+      "player_count": "1"
+    },
+    "igdb_metadata": {
+      "similar_games": [
+        { "id": 900, "name": "Chrono Trigger", "slug": "ct", "type": "game", "cover_url": "" },
+        { "id": 901, "name": "A Game Nobody Owns", "slug": "ango", "type": "game", "cover_url": "" }
+      ]
     },
     "path_cover_small": "/assets/romm/resources/roms/101/cover/small.png",
     "path_cover_large": "/assets/romm/resources/roms/101/cover/large.png",
