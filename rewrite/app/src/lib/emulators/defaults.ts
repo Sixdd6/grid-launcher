@@ -5,6 +5,14 @@ import type { LaunchDefaults } from '../api';
 /** The `<select>` value that means "no default emulator for this platform". */
 export const NO_DEFAULT_VALUE = '';
 
+/**
+ * The reserved `default_emulators` value the backend stores when the user
+ * picks "(none)" for a platform (grid-core `launch::selection::NO_EMULATOR`).
+ * It is a REMEMBERED choice, not an absent one, so it must never fall back
+ * to the first compatible name.
+ */
+export const NO_EMULATOR_MARKER = '<none>';
+
 /** What one platform row's `<select>` renders. */
 export type PlatformDefaultSelect = {
   /** The `<option>` values, in backend (config) order. */
@@ -32,6 +40,7 @@ function savedDefaultFor(defaults: LaunchDefaults | null, platformName: string):
  * for that platform, so only emulators that support it are ever offered.
  *
  * The selection mirrors `default_emulator_name_for_platform` (doc 04 §2):
+ * [`NO_DEFAULT_VALUE`] when the saved value is [`NO_EMULATOR_MARKER`], else
  * the saved default when it is still compatible, otherwise the first
  * compatible name. Names are matched verbatim against `compatibleNames`,
  * which carry the `<option>` values' exact casing. This is DISPLAY only —
@@ -43,6 +52,13 @@ export function platformDefaultSelect(
   compatibleNames: string[]
 ): PlatformDefaultSelect {
   const saved = savedDefaultFor(defaults, platformName);
+  if (saved === NO_EMULATOR_MARKER) {
+    return {
+      options: compatibleNames,
+      selected: NO_DEFAULT_VALUE,
+      disabled: compatibleNames.length === 0,
+    };
+  }
   const selected = compatibleNames.includes(saved)
     ? saved
     : (compatibleNames[0] ?? NO_DEFAULT_VALUE);

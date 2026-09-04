@@ -4,6 +4,7 @@ import {
   isRetroarchName,
   NO_CORE_VALUE,
   NO_DEFAULT_VALUE,
+  NO_EMULATOR_MARKER,
   platformCoreSelect,
   platformDefaultSelect,
 } from './defaults';
@@ -47,6 +48,20 @@ describe('platformDefaultSelect', () => {
 
   it('no defaults loaded yet still selects the first compatible name', () => {
     expect(platformDefaultSelect(null, 'SNES', ['Snes9x']).selected).toBe('Snes9x');
+  });
+
+  it('the saved (none) marker selects (none) and never falls back', () => {
+    const defaults = launchDefaults({ SNES: NO_EMULATOR_MARKER });
+    const result = platformDefaultSelect(defaults, 'SNES', ['Snes9x', 'RetroArch']);
+    expect(result.selected).toBe(NO_DEFAULT_VALUE);
+    expect(result.options).toEqual(['Snes9x', 'RetroArch']);
+    expect(result.disabled).toBe(false);
+  });
+
+  it('the (none) marker hides the core select, because no emulator is selected', () => {
+    const defaults = launchDefaults({ SNES: NO_EMULATOR_MARKER }, { SNES: 'snes9x' });
+    const choice = platformDefaultSelect(defaults, 'SNES', ['RetroArch']);
+    expect(platformCoreSelect(defaults, 'SNES', choice.selected, ['snes9x']).visible).toBe(false);
   });
 
   it('the platform key lookup is case-insensitive', () => {
