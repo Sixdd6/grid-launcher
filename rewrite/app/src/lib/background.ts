@@ -5,6 +5,13 @@ import type { InstalledGame } from './api';
  *  becomes the background. Shorter dwells are pointer travel, not interest. */
 export const HOVER_DELAY_MS = 500;
 
+/** Design §3's cross-fade duration, matching the `--m-slow` CSS token
+ *  `BackgroundArt.svelte` transitions opacity with. Used on the JS side to
+ *  time when the outgoing layer's image is safe to drop (see
+ *  `backgroundSlots.ts`) — kept as a named constant, not a re-parsed CSS
+ *  value, since the two must already agree for the fade to look right. */
+export const CROSS_FADE_MS = 360;
+
 /**
  * The cover the shell starts with, before the user has viewed anything.
  *
