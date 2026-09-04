@@ -18,6 +18,7 @@
   let library = $state<ReturnType<typeof Library> | null>(null);
   let server = $state<ReturnType<typeof Server> | null>(null);
   let serverMenuOpen = $state(false);
+  let sessionEl = $state<HTMLElement | null>(null);
 
   export function handleNav(action: NavDirection | 'accept' | 'back') {
     if (view === 'library') library?.handleNav(action);
@@ -29,15 +30,42 @@
     view = next;
   }
 
+  /**
+   * True while the accelerator must stay out of the way: focus sits in a
+   * text-entry control (where Ctrl+<n> can be an editor chord), or a modal
+   * dialog owns the screen and switching the view behind it would strand it.
+   */
+  function chordBlocked(): boolean {
+    if (document.querySelector('[role="dialog"]') !== null) return true;
+    const el = document.activeElement as HTMLElement | null;
+    if (el === null) return false;
+    if (el.isContentEditable) return true;
+    return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT';
+  }
+
   // Ctrl+1..5 (design §3). Alt/Shift are excluded so this never steals a
   // window-manager or text-editing chord; Meta is accepted alongside Ctrl so
   // the same accelerator works on macOS.
   function onKeydown(e: KeyboardEvent) {
+    // Escape dismisses the server menu. Nothing is preventDefault-ed: other
+    // Escape handlers (the details panel) still see the key.
+    if (e.key === 'Escape' && serverMenuOpen) {
+      serverMenuOpen = false;
+      return;
+    }
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
     const next = viewForDigit(e.key);
-    if (next === null) return;
+    if (next === null || chordBlocked()) return;
     e.preventDefault();
     view = next;
+  }
+
+  /** A click anywhere outside the session cluster closes the server menu. */
+  function onWindowPointerDown(e: MouseEvent) {
+    if (!serverMenuOpen) return;
+    const target = e.target as Node | null;
+    if (target !== null && sessionEl?.contains(target)) return;
+    serverMenuOpen = false;
   }
 
   function openServer() {
@@ -60,7 +88,7 @@
   });
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} onpointerdown={onWindowPointerDown} />
 
 <header data-testid="shell-topbar" class="topbar">
   <div class="brand">
@@ -82,7 +110,7 @@
     {/each}
   </nav>
 
-  <div class="session">
+  <div class="session" bind:this={sessionEl}>
     {#if appUpdate.notice}
       <button
         data-testid="app-update-badge"
@@ -125,7 +153,7 @@
         <button data-testid="session-open-romm" role="menuitem" onclick={openServer}>
           Open RomM in browser
         </button>
-        <span class="menu-host">{hostOf(session.serverUrl)}</span>
+        <span class="menu-host" role="none">{hostOf(session.serverUrl)}</span>
       </div>
     {/if}
   </div>
@@ -144,10 +172,8 @@
   <Server active={view === 'server'} bind:this={server} />
 </div>
 <div data-testid="downloads-view" class="view" hidden={view !== 'downloads'}>
-  <!-- `onOpenEmulators` is still a required prop of the pre-redesign
-       Downloads drawer; Task 4 rewrites it into the view proper. Until then
-       its own Emulators button navigates the shell like the pill does. -->
-  <Downloads onOpenEmulators={() => (view = 'emulators')} />
+  <!-- Empty until Task 4 moves the transfer list in here. The Downloads
+       component itself is NOT mounted inside this root: see below. -->
 </div>
 <div class="view" hidden={view !== 'emulators'}>
   <Emulators active={view === 'emulators'} />
@@ -163,6 +189,13 @@
     </p>
   {/if}
 </div>
+
+<!-- Mounted outside the view roots, and never hidden. The footer strip is
+     `position: fixed` global chrome, and `hidden` on an ancestor is
+     `display: none` — inside a view root the strip would vanish from every
+     other view. `onOpenEmulators` is still a required prop of the
+     pre-redesign drawer; Task 4 folds both into `downloads-view`. -->
+<Downloads onOpenEmulators={() => (view = 'emulators')} />
 
 <style>
   .topbar {
