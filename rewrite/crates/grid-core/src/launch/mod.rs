@@ -41,6 +41,7 @@ use spawn::{clean_env, prepare_emulator_launch};
 use template::{host_os, retroarch_core_argument_path, Placeholders};
 
 pub use platform_slugs::{set_platform_slugs, slug_for_platform};
+pub use selection::NO_EMULATOR;
 pub use sessions::{GameSession, SessionsSnapshot};
 
 /// Errors raised while resolving or running an emulated launch.

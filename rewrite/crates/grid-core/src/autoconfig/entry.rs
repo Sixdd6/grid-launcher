@@ -16,6 +16,7 @@ use regex::Regex;
 
 use crate::config::{Config, EmulatorEntry};
 use crate::launch::profiles::{platform_matches_keywords, profile_for_entry, EmulatorProfile};
+use crate::launch::selection::NO_EMULATOR;
 
 /// The `[^a-z0-9]+` run-collapse the Dolphin variant rules apply to an
 /// already-casefolded string (selection.py:180, selection.py:200).
@@ -226,7 +227,9 @@ fn target_platforms(
 /// Per target platform: a blank current default is filled with
 /// `emulator_name`; a non-blank one is replaced ONLY when the incoming
 /// emulator is not RetroArch and the current default IS — a native emulator
-/// outranks RetroArch, never the reverse. Then, for RetroArch only, each
+/// outranks RetroArch, never the reverse. A default equal to
+/// [`NO_EMULATOR`] is the user's explicit "(none)" and is never touched by
+/// either rule, nor given a core. Then, for RetroArch only, each
 /// platform whose default now case-folds equal to `emulator_name` and that
 /// has no core default yet records the FIRST installed compatible core.
 ///
@@ -252,6 +255,9 @@ pub fn assign_profile_platform_defaults(
             .get(platform)
             .map(|value| value.trim())
             .unwrap_or("");
+        if current_default == NO_EMULATOR {
+            continue;
+        }
         if current_default.is_empty() {
             resolved_defaults.insert(platform.clone(), emulator_name.to_string());
             continue;
@@ -1336,6 +1342,55 @@ mod tests {
             map(&[("Super Nintendo", "RetroArch (Multi-System)")])
         );
         assert_eq!(config.retroarch_cores, map(&[("Super Nintendo", "snes9x")]));
+    }
+
+    #[test]
+    fn backfill_keeps_an_explicit_none_default_for_retroarch() {
+        // The user picked "(none)" for the platform. RetroArch has an
+        // installed core for it, but the marker outranks the fill and no
+        // core is recorded either.
+        let mut config = Config {
+            emulators: vec![EmulatorEntry {
+                name: "RetroArch (Multi-System)".into(),
+                path: "/x/retroarch".into(),
+                ..Default::default()
+            }],
+            default_emulators: map(&[("Super Nintendo", NO_EMULATOR)]),
+            ..Default::default()
+        };
+        let platforms = strings(&["Super Nintendo"]);
+        let cores = |_: &str, _: &str| strings(&["snes9x"]);
+        let changed = backfill(&mut config, &[retroarch_profile()], &platforms, &cores);
+
+        assert!(!changed, "nothing changed, so the caller must not save");
+        assert_eq!(
+            config.default_emulators,
+            map(&[("Super Nintendo", NO_EMULATOR)])
+        );
+        assert!(config.retroarch_cores.is_empty());
+    }
+
+    #[test]
+    fn backfill_keeps_an_explicit_none_default_against_a_native_emulator() {
+        // The native-outranks-RetroArch rule must not mistake the marker
+        // for a RetroArch default it may replace.
+        let mut config = Config {
+            emulators: vec![EmulatorEntry {
+                name: "PPSSPP".into(),
+                path: "/usr/bin/ppsspp".into(),
+                ..Default::default()
+            }],
+            default_emulators: map(&[("PlayStation Portable", NO_EMULATOR)]),
+            ..Default::default()
+        };
+        let platforms = strings(&["PlayStation Portable"]);
+        let changed = backfill(&mut config, &[ppsspp_profile()], &platforms, &no_cores);
+
+        assert!(!changed);
+        assert_eq!(
+            config.default_emulators,
+            map(&[("PlayStation Portable", NO_EMULATOR)])
+        );
     }
 
     #[test]

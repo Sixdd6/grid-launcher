@@ -10,6 +10,15 @@ use crate::config::EmulatorEntry;
 use super::platform_slugs::slug_for_platform;
 use super::profiles::{platform_matches_keywords, profile_for_entry, EmulatorProfile};
 
+/// The reserved `default_emulators` value meaning "this platform has NO
+/// emulator, and that choice is remembered". Written when the user picks
+/// "(none)" in the Emulators panel. It is deliberately not a legal emulator
+/// name (`<` and `>` are not produced by any autoprofile), so it can never
+/// collide with a real entry. Removing the key instead would let
+/// `autoconfig::backfill_all_defaults` re-fill it on the next
+/// `list_platforms`.
+pub const NO_EMULATOR: &str = "<none>";
+
 /// Looks up `platform` in `map`: exact key first, then a case-insensitive
 /// key scan; a blank value (after trim) at either stage is treated as
 /// absent (`mapping_value_for_platform`, selection.py:214).
@@ -196,11 +205,13 @@ pub fn compatible_emulator_names_for_platform(
 ///
 /// 1. Look up `platform` in `default_emulators` via
 ///    [`mapping_value_for_platform`].
-/// 2. If configured, find the entry by case-insensitive name and keep it
+/// 2. If the configured value is [`NO_EMULATOR`], return `""` at once — the
+///    user chose "(none)" and no fallback may override it.
+/// 3. If configured, find the entry by case-insensitive name and keep it
 ///    only when it supports `platform`.
-/// 3. Otherwise fall back to the first name in
+/// 4. Otherwise fall back to the first name in
 ///    [`compatible_emulator_names_for_platform`].
-/// 4. If nothing matches, `""`.
+/// 5. If nothing matches, `""`.
 pub fn default_emulator_name_for_platform(
     emulators: &[EmulatorEntry],
     default_emulators: &BTreeMap<String, String>,
@@ -209,6 +220,9 @@ pub fn default_emulator_name_for_platform(
     cores: CoreResolver<'_>,
 ) -> String {
     if let Some(configured) = mapping_value_for_platform(default_emulators, platform) {
+        if configured == NO_EMULATOR {
+            return String::new();
+        }
         if let Some(entry) = emulator_entry_by_name(emulators, configured) {
             if emulator_supports_platform(entry, platform, profiles, cores) {
                 return configured.to_string();
@@ -593,6 +607,29 @@ mod tests {
         let name =
             default_emulator_name_for_platform(&[], &BTreeMap::new(), "GameCube", &[], &no_cores);
         assert_eq!(name, "");
+    }
+
+    #[test]
+    fn default_marker_means_no_emulator_and_never_falls_back() {
+        // "(none)" is remembered: a compatible entry exists, but the saved
+        // `<none>` marker wins and the caller sees "no emulator".
+        let profiles = vec![profile_with("Dolphin", false, &["gamecube"])];
+        let emulators = vec![entry("Dolphin", "/x/dolphin")];
+        let defaults = map(&[("GameCube", NO_EMULATOR)]);
+        let name = default_emulator_name_for_platform(
+            &emulators, &defaults, "GameCube", &profiles, &no_cores,
+        );
+        assert_eq!(name, "");
+    }
+
+    #[test]
+    fn default_marker_is_returned_verbatim_by_mapping_value() {
+        // The raw map keeps the marker; only the name resolver interprets it.
+        let m = map(&[("GameCube", NO_EMULATOR)]);
+        assert_eq!(
+            mapping_value_for_platform(&m, "GameCube"),
+            Some(NO_EMULATOR)
+        );
     }
 
     #[test]
