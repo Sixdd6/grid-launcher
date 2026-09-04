@@ -6,6 +6,7 @@ pub mod cache;
 pub mod replenish;
 pub mod sweep;
 pub mod urls;
+pub mod video;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]

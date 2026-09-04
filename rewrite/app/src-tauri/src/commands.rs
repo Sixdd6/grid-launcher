@@ -239,6 +239,25 @@ pub async fn ensure_image(state: State<'_, AppState>, url: String) -> Result<Str
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// The local path of a server-hosted game video, fetching it through the
+/// session client on a cache miss. Mirrors [`ensure_image`]'s resolution and
+/// host filter exactly, so a `path_video` pointing anywhere but the
+/// configured server is refused rather than fetched.
+#[tauri::command]
+pub async fn ensure_video(state: State<'_, AppState>, url: String) -> Result<String, String> {
+    let base = state.session.server_url();
+    let resolved = filter_to_server_host(&resolve_image_url(&url, &base), &base);
+    if resolved.is_empty() {
+        return Err("filtered".to_string());
+    }
+    let client = state.session.client();
+    let path =
+        grid_core::images::video::ensure_video(state.session.cache(), client.as_deref(), &resolved)
+            .await
+            .map_err(err)?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 pub async fn install_game(state: State<'_, AppState>, rom_id: i64) -> Result<(), String> {
     let install = state.install.as_ref().map_err(Clone::clone)?;

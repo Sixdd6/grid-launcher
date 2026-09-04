@@ -341,6 +341,7 @@ export const api = {
   listGames: (platformId: number) => invoke<GameSummary[]>('list_games', { platformId }),
   getRomDetail: (romId: number) => invoke<RomDetail>('get_rom_detail', { romId }),
   ensureImage: (url: string) => invoke<string>('ensure_image', { url }),
+  ensureVideo: (url: string) => invoke<string>('ensure_video', { url }),
   installGame: (romId: number) => invoke<void>('install_game', { romId }),
   cancelInstall: (entryId: number) => invoke<void>('cancel_install', { entryId }),
   retryInstall: (entryId: number) => invoke<void>('retry_install', { entryId }),

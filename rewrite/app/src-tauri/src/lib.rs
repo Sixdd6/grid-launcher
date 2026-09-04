@@ -272,6 +272,7 @@ pub fn run() {
             commands::list_games,
             commands::get_rom_detail,
             commands::ensure_image,
+            commands::ensure_video,
             commands::install_game,
             commands::cancel_install,
             commands::retry_install,

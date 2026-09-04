@@ -63,6 +63,22 @@ impl ImageCache {
             .find(|p| p.is_file())
     }
 
+    /// The cached file for `key` under one exact extension, refreshing its
+    /// mtime so the startup sweep treats it as recently used.
+    /// [`find_existing`](Self::find_existing) only looks at the image
+    /// extensions; video files live in the same directory under the same
+    /// key scheme and need their own lookup.
+    pub fn find_with_extension(&self, key: &str, ext: &str) -> Option<PathBuf> {
+        let path = self.dir.join(format!("{key}.{ext}"));
+        if !path.is_file() {
+            return None;
+        }
+        if let Ok(f) = std::fs::File::options().write(true).open(&path) {
+            let _ = f.set_modified(SystemTime::now());
+        }
+        Some(path)
+    }
+
     /// The cached file for `url`, refreshing its mtime so the sweep treats
     /// it as recently used. No network.
     pub fn cached_path(&self, url: &str) -> Option<PathBuf> {
