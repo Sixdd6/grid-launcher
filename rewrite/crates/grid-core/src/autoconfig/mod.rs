@@ -380,6 +380,16 @@ pub struct SyncContext<'a> {
     /// which makes the platform-defaults step a no-op — matching the
     /// reference's behavior with an empty platform list.
     pub platforms: &'a [String],
+    /// Server platform NAME → server platform slug, as the last successful
+    /// platform fetch saw it. Empty when no session has fetched them; an
+    /// absent entry means an empty slug, which takes
+    /// [`installed_compatible_cores`]' fuzzy fallback (D-RC-2).
+    ///
+    /// This lives here rather than on [`entry::DefaultsContext`] on purpose:
+    /// the defaults seam is the `installed_cores` CLOSURE, and letting that
+    /// closure capture the map keeps `DefaultsContext` — and every test
+    /// built against it — unchanged.
+    pub platform_slugs: &'a BTreeMap<String, String>,
     /// `<library>/PlayStation 3`, or `""` when no library path is set. Build
     /// it with [`ps3_library_path`].
     pub ps3_library_path: String,
@@ -539,10 +549,15 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
     // after the layer-1 pass, so they see the entry as it will be saved.
     let snapshot = config.emulators.clone();
     let installed_cores = |platform: &str, emulator_name: &str| -> Vec<String> {
-        match emulator_entry_by_name(&snapshot, emulator_name) {
-            Some(entry) => installed_compatible_cores(platform, "", entry),
-            None => Vec::new(),
-        }
+        let Some(entry) = emulator_entry_by_name(&snapshot, emulator_name) else {
+            return Vec::new();
+        };
+        let slug = ctx
+            .platform_slugs
+            .get(platform)
+            .map(String::as_str)
+            .unwrap_or("");
+        installed_compatible_cores(platform, slug, entry)
     };
     let is_retroarch_name = |name: &str| -> bool {
         matches_tokens_by_name(name, &["retroarch"], &snapshot, ctx.profiles)
@@ -670,10 +685,15 @@ pub fn backfill_all_defaults(ctx: &SyncContext) -> Result<bool, ConfigError> {
 
     let snapshot = config.emulators.clone();
     let installed_cores = |platform: &str, emulator_name: &str| -> Vec<String> {
-        match emulator_entry_by_name(&snapshot, emulator_name) {
-            Some(entry) => installed_compatible_cores(platform, "", entry),
-            None => Vec::new(),
-        }
+        let Some(entry) = emulator_entry_by_name(&snapshot, emulator_name) else {
+            return Vec::new();
+        };
+        let slug = ctx
+            .platform_slugs
+            .get(platform)
+            .map(String::as_str)
+            .unwrap_or("");
+        installed_compatible_cores(platform, slug, entry)
     };
     let is_retroarch_name = |name: &str| -> bool {
         matches_tokens_by_name(name, &["retroarch"], &snapshot, ctx.profiles)
@@ -714,6 +734,13 @@ mod tests {
             match_tokens: tokens.iter().map(|t| t.to_string()).collect(),
             ..Default::default()
         }
+    }
+
+    /// The empty slug map every pre-D-RC-2 test wants: no slug, hence the
+    /// fuzzy fallback, hence exactly the behavior these tests were written
+    /// against.
+    fn no_slugs() -> BTreeMap<String, String> {
+        BTreeMap::new()
     }
 
     /// An empty file at `path`, parent directories created.
@@ -878,6 +905,7 @@ mod tests {
         let ctx = SyncContext {
             config_path: &config_path,
             platforms: &[],
+            platform_slugs: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
@@ -908,6 +936,7 @@ mod tests {
         let ctx = SyncContext {
             config_path: &config_path,
             platforms: &[],
+            platform_slugs: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
@@ -941,6 +970,7 @@ mod tests {
         let ctx = SyncContext {
             config_path: &config_path,
             platforms: &platforms,
+            platform_slugs: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
@@ -983,6 +1013,7 @@ mod tests {
         let ctx = SyncContext {
             config_path: &config_path,
             platforms: &[],
+            platform_slugs: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
@@ -1021,6 +1052,7 @@ mod tests {
         let ctx = SyncContext {
             config_path: &config_path,
             platforms: &[],
+            platform_slugs: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &[],
@@ -1057,6 +1089,7 @@ mod tests {
         let ctx = SyncContext {
             config_path: &config_path,
             platforms: &[],
+            platform_slugs: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &[],
@@ -1094,6 +1127,7 @@ mod tests {
         let ctx = SyncContext {
             config_path: &config_path,
             platforms: &[],
+            platform_slugs: &no_slugs(),
             ps3_library_path: ps3,
             ra: None,
             profiles: &[],
@@ -1136,6 +1170,7 @@ mod tests {
         let ctx = SyncContext {
             config_path: &config_path,
             platforms: &[],
+            platform_slugs: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &[],
@@ -1170,6 +1205,7 @@ mod tests {
         let ctx = SyncContext {
             config_path: &config_path,
             platforms: &[],
+            platform_slugs: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &[],
@@ -1206,6 +1242,7 @@ mod tests {
         let ctx = SyncContext {
             config_path: &config_path,
             platforms: &[],
+            platform_slugs: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &[],
@@ -1249,6 +1286,7 @@ mod tests {
         let ctx = SyncContext {
             config_path: &config_path,
             platforms: &platforms,
+            platform_slugs: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
@@ -1284,6 +1322,7 @@ mod tests {
         let ctx = SyncContext {
             config_path: &config_path,
             platforms: &platforms,
+            platform_slugs: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
@@ -1516,5 +1555,63 @@ mod tests {
             &missing
         )
         .is_empty());
+    }
+
+    #[test]
+    fn backfill_uses_the_platform_slug_for_core_resolution() {
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = lock();
+        let _env = isolated(temp.path());
+
+        let entry = retroarch_with_cores(temp.path(), &["bsnes", "snes9x"]);
+        let config_path = temp.path().join("config.toml");
+        let config = Config {
+            emulators: vec![entry],
+            ..Config::default()
+        };
+        config.save(&config_path).unwrap();
+
+        let profiles = vec![EmulatorProfile {
+            name: "RetroArch (Multi-System)".to_string(),
+            match_tokens: vec!["retroarch".to_string()],
+            args: "-L \"%core%\" \"%rom%\"".to_string(),
+            all_platforms: true,
+            ..Default::default()
+        }];
+        let platforms = vec!["Super Nintendo Entertainment System".to_string()];
+        let slugs: BTreeMap<String, String> = [(
+            "Super Nintendo Entertainment System".to_string(),
+            "snes".to_string(),
+        )]
+        .into_iter()
+        .collect();
+
+        let ctx = SyncContext {
+            config_path: &config_path,
+            platforms: &platforms,
+            platform_slugs: &slugs,
+            ps3_library_path: String::new(),
+            ra: None,
+            profiles: &profiles,
+        };
+        assert!(backfill_all_defaults(&ctx).unwrap());
+
+        let saved = Config::load(&config_path).unwrap();
+        assert_eq!(
+            saved
+                .default_emulators
+                .get("Super Nintendo Entertainment System")
+                .map(String::as_str),
+            Some("RetroArch")
+        );
+        // The slug map's curated order puts snes9x first; the fuzzy
+        // compatibility map is not consulted at all.
+        assert_eq!(
+            saved
+                .retroarch_cores
+                .get("Super Nintendo Entertainment System")
+                .map(String::as_str),
+            Some("snes9x")
+        );
     }
 }

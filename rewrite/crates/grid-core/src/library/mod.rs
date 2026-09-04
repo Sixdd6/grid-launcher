@@ -664,6 +664,11 @@ pub struct InstallService {
     /// fetch saw it. Firmware lookups need the id, and grid-core holds no
     /// session of its own to fetch it with.
     platform_ids: RwLock<BTreeMap<String, i64>>,
+    /// Server platform name -> server platform slug, as the last successful
+    /// platform fetch saw it. The autoconfig defaults backfill resolves
+    /// RetroArch cores slug-first (D-RC-2) and grid-core holds no session of
+    /// its own to fetch these with.
+    platform_slugs: RwLock<BTreeMap<String, String>>,
     /// `None` until the app installs one; a finalized compat-tool install
     /// then triggers no notification.
     compat_tools_hook: RwLock<Option<CompatToolsHook>>,
@@ -709,6 +714,7 @@ impl InstallService {
             image_hook: RwLock::new(None),
             game_finalized_hook: RwLock::new(None),
             platform_ids: RwLock::new(BTreeMap::new()),
+            platform_slugs: RwLock::new(BTreeMap::new()),
             compat_tools_hook: RwLock::new(None),
             emulator_installed_hook: RwLock::new(None),
         })
@@ -772,6 +778,17 @@ impl InstallService {
     /// until the app has fetched them once.
     pub fn platform_ids(&self) -> BTreeMap<String, i64> {
         self.platform_ids.read().unwrap().clone()
+    }
+
+    /// Records the server platform slugs the app just fetched.
+    pub fn set_platform_slugs(&self, slugs: BTreeMap<String, String>) {
+        *self.platform_slugs.write().unwrap() = slugs;
+    }
+
+    /// The platform slugs [`Self::set_platform_slugs`] last recorded; empty
+    /// until the app has fetched them once.
+    pub fn platform_slugs(&self) -> BTreeMap<String, String> {
+        self.platform_slugs.read().unwrap().clone()
     }
 
     /// The current RetroAchievements pair, or `None` when no provider is
@@ -2141,9 +2158,11 @@ impl InstallService {
             .map(|config| config.library_path)
             .unwrap_or_default();
         let platforms = self.known_platforms();
+        let platform_slugs = self.platform_slugs();
         let ctx = autoconfig::SyncContext {
             config_path: &self.config_path,
             platforms: &platforms,
+            platform_slugs: &platform_slugs,
             ps3_library_path: autoconfig::ps3_library_path(&library_path),
             ra: self.ra_credentials(),
             profiles: &self.profiles,

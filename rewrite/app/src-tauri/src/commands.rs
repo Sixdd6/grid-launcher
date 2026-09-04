@@ -152,6 +152,15 @@ pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>,
         // FULL platform list (not the assignable subset): a platform the
         // autoconfig defaults skip can still have server firmware.
         install.set_platform_ids(platforms.iter().map(|p| (p.name.clone(), p.id)).collect());
+        // Slug-first RetroArch core resolution (D-RC-2) needs the server's
+        // own slug for each platform; like the ids above, this is recorded
+        // from the FULL list, not the assignable subset.
+        install.set_platform_slugs(
+            platforms
+                .iter()
+                .map(|p| (p.name.clone(), p.slug.clone()))
+                .collect(),
+        );
 
         // Self-heal for the gap D3's own trigger policy leaves: an emulator
         // installed or added before the FIRST successful platform fetch got
@@ -165,10 +174,12 @@ pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>,
             let config_path = Config::default_path();
             let ra = install.ra_credentials();
             let profiles = load_profiles();
+            let slugs = install.platform_slugs();
             let outcome = tokio::task::spawn_blocking(move || {
                 let ctx = autoconfig::SyncContext {
                     config_path: &config_path,
                     platforms: &assignable,
+                    platform_slugs: &slugs,
                     ps3_library_path: String::new(),
                     ra,
                     profiles,
@@ -431,9 +442,13 @@ pub async fn save_emulator(
     // Read out of the install service before the blocking hop: `State` is not
     // `Send`. An install service that failed to build simply contributes no
     // platforms and no credentials.
-    let (platforms, ra) = match state.install.as_ref() {
-        Ok(install) => (install.known_platforms(), install.ra_credentials()),
-        Err(_) => (Vec::new(), None),
+    let (platforms, platform_slugs, ra) = match state.install.as_ref() {
+        Ok(install) => (
+            install.known_platforms(),
+            install.platform_slugs(),
+            install.ra_credentials(),
+        ),
+        Err(_) => (Vec::new(), std::collections::BTreeMap::new(), None),
     };
 
     let session = state.session.clone();
@@ -465,6 +480,7 @@ pub async fn save_emulator(
                 let ctx = autoconfig::SyncContext {
                     config_path: &config_path,
                     platforms: &platforms,
+                    platform_slugs: &platform_slugs,
                     ps3_library_path: autoconfig::ps3_library_path(&library_path),
                     ra,
                     profiles,
