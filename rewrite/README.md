@@ -221,7 +221,7 @@ Identity/updates exit gate: now automated by the E2E suite (`updates` stage grou
   Proton/Wine save directory (not the fixture's single file) and confirm nothing outside the new
   archive's paths is touched.
 - **The banner appears on a release build only**: confirm a real release build (no `-dev`
-  pre-release, `GRID_LAUNCHER_E2E_UPDATE_CHECK` unset) checks `releases/latest` once at startup
+  pre-release) checks `releases/latest` once at startup
   and shows the banner when a newer tag exists, while a `cargo tauri dev` source build never
   checks at all.
 

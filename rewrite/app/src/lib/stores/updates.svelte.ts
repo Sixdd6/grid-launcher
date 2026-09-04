@@ -22,8 +22,12 @@ export const updates = {
   },
 };
 
+async function fetchRows(): Promise<UpdateRow[]> {
+  return await api.listUpdates();
+}
+
 export async function refresh(): Promise<void> {
-  state.rows = await api.listUpdates();
+  state.rows = await fetchRows();
 }
 
 export async function init(): Promise<UnlistenFn> {
@@ -31,9 +35,16 @@ export async function init(): Promise<UnlistenFn> {
   // refresh-then-listen order drops the `updates-changed` the pass emits in
   // between and the store stays empty for the rest of the process. A
   // redundant refresh is harmless; a missed event is not.
+  let sawEvent = false;
   const unlisten = await listen<UpdateRow[]>(UPDATES_CHANGED_EVENT, (e) => {
+    sawEvent = true;
     state.rows = e.payload;
   });
-  await refresh().catch(() => {});
+  // ...but the pull can also RESOLVE after an event that landed while the
+  // command was in flight, which would replace the pushed rows with the older
+  // snapshot. Once an event has arrived, its payload wins and the pull result
+  // is dropped.
+  const pulled = await fetchRows().catch(() => null);
+  if (pulled !== null && !sawEvent) state.rows = pulled;
   return unlisten;
 }

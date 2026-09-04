@@ -1501,10 +1501,12 @@ Rulings below are new to this milestone's review.
     re-install of an installed non-native rom; bypasses the already-installed short-circuit;
     finalizes as Base (D-10-j: no pre-clean).** `InstallMode::Update`
     (`crates/grid-core/src/library/mod.rs:176`) requires an existing installed row for the rom,
-    then routes through `finalize_base` unchanged — no clean of the old extraction directory
-    first, matching Python's plain replacement. A native-platform row is rejected here; the app
-    layer sends native updates through the merge path instead (see doc 10 "Rust port deviations
-    (milestone 9)" D-10-j for the full rationale).
+    then routes through `finalize_base` unchanged, extracting into the directory derived from the
+    server's CURRENT file name — the same directory when the name is unchanged, a sibling when the
+    server renamed the file — with no clean of the old extraction directory first, matching
+    Python's plain replacement. The superseded directory is never removed. A native-platform row
+    is rejected here; the app layer sends native updates through the merge path instead (see doc
+    10 "Rust port deviations (milestone 9)" D-10-j for the full rationale).
 
 ### Rulings on open questions
 

@@ -74,7 +74,7 @@ impl UpdateService {
 
     /// Whether one rom carries an update. Not a command: the frontend reads
     /// the whole set through [`Self::rows`].
-    #[allow(dead_code)] // kept as the single-row form of `rows`
+    #[cfg(test)]
     pub fn has_update(&self, rom_id: i64) -> bool {
         self.available.lock().unwrap().contains_key(&rom_id)
     }

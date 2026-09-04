@@ -566,6 +566,13 @@ run_group_attempt() {
         export E2E_FORGE_URL="$forge_url"
         export GRID_E2E_ARGV_FILE="$data_dir/emulator-argv.log"
       fi
+      # Only the `updates` group asserts the self-update banner, so only it
+      # lifts the dev-build gate on the launcher's own release check
+      # (wdio.conf.ts turns this into GRID_LAUNCHER_E2E_UPDATE_CHECK). Every
+      # other forge-backed group would otherwise render the banner strip too.
+      if [[ "$name" == "updates" ]]; then
+        export E2E_UPDATE_CHECK=1
+      fi
       # Both of these are seed-script conventions rather than per-group
       # settings: a seed that writes the directory opts its group in, and
       # wdio.conf.ts turns each into an app-process environment variable.

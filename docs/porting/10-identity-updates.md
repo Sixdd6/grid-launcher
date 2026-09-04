@@ -800,14 +800,21 @@ relative to `rewrite/`.
 - **D-10-h — Self-update is a check-only notice.** One GitHub `releases/latest` request per
   process (`app_update::spawn_check`, `app/src-tauri/src/app_update.rs`), no download, no install;
   dev builds (a pre-release containing `dev`) are suppressed unless
-  `GRID_LAUNCHER_E2E_UPDATE_CHECK=1` (`app_update::should_check`); OQ14 decided. `0.0.0-dev`
+  `GRID_LAUNCHER_E2E_UPDATE_CHECK=1` in an `e2e`-feature build only — a release or
+  `cargo tauri dev` build never reads the variable (`app_update::should_check`); OQ14 decided. `0.0.0-dev`
   ambiguity (OQ15) is moot: the version is the package version, `-dev` marks a source build.
 - **D-10-i — `update_available` is never persisted** (invariant 5): it lives only in
   `UpdateService`'s in-memory map (`app/src-tauri/src/update_service.rs`), cleared on disconnect.
-- **D-10-j — Non-native `Update` re-extracts over the existing directory without a pre-clean**
-  (Python parity, doc 03 "plain replacement"). `InstallService::install_update`
-  (`crates/grid-core/src/library/mod.rs`) routes through `finalize_base` unchanged; stale files
-  from the old build may remain. A follow-up may add a clean.
+- **D-10-j — Non-native `Update` extracts into the directory derived from the server's CURRENT
+  file name, with no pre-clean.** `InstallService::install_update`
+  (`crates/grid-core/src/library/mod.rs`) routes through `finalize_base` unchanged, and that
+  destination is named after the server's current `fs_name`: the SAME directory when the name is
+  unchanged (stale files from the old build may remain), a SIBLING directory when the server
+  renamed the file. The superseded directory is never removed — `uninstall` derives its removal
+  candidates from the row's current `rom_file_name`/`archive_path`/`extracted_dir`, and
+  `registry.upsert` has already repointed those at the new build. This is Python parity
+  (`install_mixin.py:1194-1202` sets `rom_file_name` to the server's resolved name before
+  downloading). A follow-up may add a clean.
 - **D-10-k — The version row's name order follows the subject's source, and the self-update
   notice survives a late mount.** `versionLabel` reads its candidate file names via
   `romFileNamesFor(source, installedName, serverName)` (`app/src/lib/details/version.ts`): a
