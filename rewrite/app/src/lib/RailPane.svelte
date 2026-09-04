@@ -5,10 +5,11 @@
     key: K;
     /** `data-testid` for the row's button. */
     testId: string;
-    /** `data-testid` for the count badge. */
-    countTestId: string;
+    /** `data-testid` for the count badge. Only read when `count` is set. */
+    countTestId?: string;
     label: string;
-    count: number;
+    /** The count badge. Omit it (the Settings rail does) and no badge renders. */
+    count?: number;
     selected: boolean;
     /** A section heading rendered above this row when set (e.g. "PLATFORMS"). */
     heading?: string;
@@ -18,9 +19,9 @@
 </script>
 
 <script lang="ts" generics="K extends string">
-  // Design §5: the Library and Server views share one rail — 220px, a list
-  // of labelled counts, optional section headings. Only the entries differ,
-  // so the markup and the CSS live here once.
+  // Design §5: the Library, Server, Emulators and Settings views share one
+  // rail — 220px, a list of labelled counts, optional section headings.
+  // Only the entries differ, so the markup and the CSS live here once.
   let {
     entries,
     testId,
@@ -48,7 +49,9 @@
       onclick={() => onSelect(entry.key)}
     >
       <span class="rail-label">{entry.label}</span>
-      <span data-testid={entry.countTestId} class="rail-count">{entry.count}</span>
+      {#if entry.count !== undefined}
+        <span data-testid={entry.countTestId} class="rail-count">{entry.count}</span>
+      {/if}
     </button>
   {/each}
 </nav>
