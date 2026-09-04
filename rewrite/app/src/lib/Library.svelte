@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api, type InstalledGame } from './api';
-  import { installed } from './stores/installed.svelte';
+  import { installed, refresh as refreshInstalled } from './stores/installed.svelte';
   import { updates } from './stores/updates.svelte';
   import { visibleLibraryGames } from './library';
   import { emptyText, entryForKey, matchesRail, railEntries, type RailKey } from './library/rail';
@@ -84,6 +84,15 @@
   // where defaults change, and switching back re-runs this effect.
   $effect(() => {
     if (!active) return;
+    // The registry row's `last_played_at` is stamped by the backend after a
+    // launch with no event to announce it, and the rail's Recent entry and
+    // the "Recently played" sort both read it. Re-read the registry whenever
+    // this view comes forward, so a game played from Details or from the
+    // Server grid is ordered by when it was actually played.
+    refreshInstalled().catch(() => {
+      // The list already on screen stays. A failed re-read is not worth an
+      // error line over the grid.
+    });
     api
       .getLaunchDefaults()
       .then((defaults) => (cloudPlatforms = cloudPlatformSet(defaults.default_emulators)))
@@ -177,6 +186,16 @@
     }
   }
 
+  /** Design §3: Escape leaves the search box, so the arrow keys drive the
+   *  grid again (the input owns them while it has focus). The text stays —
+   *  Escape gives the keyboard back, it does not undo the search. */
+  function onSearchKey(e: KeyboardEvent) {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    (e.currentTarget as HTMLInputElement).blur();
+  }
+
   function onSortChange(e: Event) {
     sort = normalizeSort((e.currentTarget as HTMLSelectElement).value);
   }
@@ -209,6 +228,7 @@
         aria-label="Search installed games"
         bind:this={searchEl}
         bind:value={search}
+        onkeydown={onSearchKey}
       />
       <label class="control">
         <span>Sort</span>
