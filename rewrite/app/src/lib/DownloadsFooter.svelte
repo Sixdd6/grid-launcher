@@ -1,18 +1,22 @@
 <script lang="ts">
   import { downloads } from './stores/downloads.svelte';
-  import { footerLine } from './downloads/format';
+  import { currentTransfer, footerLine } from './downloads/format';
+  import Sparkline from './downloads/Sparkline.svelte';
 
   let { onOpen }: { onOpen: () => void } = $props();
 
+  let current = $derived(currentTransfer(downloads.entries));
   let line = $derived(footerLine(downloads.entries));
 </script>
 
 <!-- Always mounted, hidden when nothing is live (design §3). Clicking
-     anywhere on the strip opens the Downloads view. -->
+     anywhere on the strip opens the Downloads view. The sparkline is the
+     current transfer's 60 samples at 120×18 — the same component and the
+     same ring the Downloads view draws at 120×38. -->
 <footer
   data-testid="downloads-footer"
   class="strip"
-  hidden={line === null}
+  hidden={current === null}
   role="button"
   tabindex="0"
   onclick={onOpen}
@@ -24,9 +28,15 @@
   }}
 >
   <span data-testid="downloads-aggregate" class="line">{line ?? ''}</span>
-  <!-- Plan 4 puts the 60-sample sparkline here; the slot reserves its
-       120×18 footprint now so the strip's height never changes later. -->
-  <span class="sparkline-slot" aria-hidden="true"></span>
+  {#if current !== null}
+    <Sparkline
+      samples={downloads.samplesFor(current.id)}
+      width={120}
+      height={18}
+      label={`Transfer rate for ${current.title}`}
+      testId="downloads-footer-graph"
+    />
+  {/if}
   <span class="open-link">Open Downloads</span>
 </footer>
 
@@ -66,12 +76,6 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-h);
-  }
-
-  .sparkline-slot {
-    flex: none;
-    width: 120px;
-    height: 18px;
   }
 
   .open-link {
