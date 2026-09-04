@@ -5,7 +5,7 @@ pub mod updates;
 use crate::config_write::modify_config;
 use crate::images::ImageService;
 use grid_core::autoconfig::{self, entry as autoconfig_entry, RaCredentials};
-use grid_core::config::{Config, EmulatorEntry};
+use grid_core::config::{Config, EmulatorEntry, UiSettings};
 use grid_core::images::urls::{filter_to_server_host, resolve_image_url};
 use grid_core::launch::catalog::{catalog_entries, mark_installed, CatalogEntry};
 use grid_core::launch::profiles::{
@@ -27,6 +27,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tauri::State;
+use tauri_plugin_opener::OpenerExt;
 
 pub struct AppState {
     pub session: Arc<SessionManager>,
@@ -322,6 +323,87 @@ pub async fn set_library_path(path: String) -> Result<(), String> {
     })
     .await
     .map_err(|e| format!("set_library_path did not finish: {e}"))?
+}
+
+// --- desktop shell appearance (design §4, §10) --------------------------------
+
+/// The highest background-art opacity the Appearance slider offers
+/// (design §3: "0–60%").
+const MAX_BACKGROUND_FADE: u8 = 60;
+
+/// What actually gets written to `config.toml` for a set of appearance
+/// settings: an unrecognized theme falls back to `"system"` (rather than
+/// being rejected, which would make a stale frontend unable to save
+/// anything), and the fade is clamped into the design's range.
+pub fn normalize_ui_settings(settings: UiSettings) -> UiSettings {
+    let theme = match settings.theme.trim() {
+        "dark" => "dark",
+        "light" => "light",
+        _ => "system",
+    };
+    UiSettings {
+        theme: theme.to_string(),
+        background_fade: settings.background_fade.min(MAX_BACKGROUND_FADE),
+    }
+}
+
+/// The stored server URL, when it is safe to hand to the OS opener.
+///
+/// `None` for anything that is not a plain `http`/`https` URL, and — the
+/// reason this function exists — `None` for any URL carrying userinfo:
+/// basic-auth mode lets the user type `http://user:password@host/romm`,
+/// and a password must never leave the keyring for a browser command
+/// line. Deliberately hand-rolled rather than pulled from a URL crate:
+/// the check is a prefix test plus an `@` scan of the authority, and this
+/// crate has no URL dependency.
+pub fn browsable_server_url(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    let rest = trimmed
+        .strip_prefix("https://")
+        .or_else(|| trimmed.strip_prefix("http://"))?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if authority.is_empty() || authority.contains('@') {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+#[tauri::command]
+pub async fn get_ui_settings() -> Result<UiSettings, String> {
+    tokio::task::spawn_blocking(|| {
+        let config = Config::load(&Config::default_path()).map_err(err)?;
+        Ok(config.ui)
+    })
+    .await
+    .map_err(|e| format!("get_ui_settings did not finish: {e}"))?
+}
+
+#[tauri::command]
+pub async fn set_ui_settings(settings: UiSettings) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        modify_config(&Config::default_path(), |config| {
+            config.ui = normalize_ui_settings(settings);
+            Ok(())
+        })
+    })
+    .await
+    .map_err(|e| format!("set_ui_settings did not finish: {e}"))?
+}
+
+/// Opens the configured RomM server in the user's browser (design §3, the
+/// server menu). Takes NO url argument on purpose: the frontend cannot
+/// choose what gets opened, and the stored URL is filtered by
+/// [`browsable_server_url`] before it reaches the opener.
+#[tauri::command]
+pub async fn open_server_page(app: tauri::AppHandle) -> Result<(), String> {
+    let url = tokio::task::spawn_blocking(|| {
+        let config = Config::load(&Config::default_path()).map_err(err)?;
+        Ok::<Option<String>, String>(browsable_server_url(&config.server_url))
+    })
+    .await
+    .map_err(|e| format!("open_server_page did not finish: {e}"))??
+    .ok_or("no server URL to open")?;
+    app.opener().open_url(url, None::<&str>).map_err(err)
 }
 
 // --- launch/emulator types ---------------------------------------------------
@@ -1851,5 +1933,81 @@ mod retroachievements_tests {
             before, after,
             "clear must never touch an emulator config file"
         );
+    }
+}
+
+#[cfg(test)]
+mod ui_settings_tests {
+    use super::*;
+
+    #[test]
+    fn an_unknown_theme_normalizes_to_system() {
+        for raw in ["", "SYSTEM", "solarized", "  dark  "] {
+            let out = normalize_ui_settings(UiSettings {
+                theme: raw.to_string(),
+                background_fade: 25,
+            });
+            let expected = if raw.trim() == "dark" {
+                "dark"
+            } else {
+                "system"
+            };
+            assert_eq!(out.theme, expected, "input {raw:?}");
+        }
+    }
+
+    #[test]
+    fn the_three_known_themes_are_stored_verbatim() {
+        for raw in ["system", "dark", "light"] {
+            let out = normalize_ui_settings(UiSettings {
+                theme: raw.to_string(),
+                background_fade: 0,
+            });
+            assert_eq!(out.theme, raw);
+        }
+    }
+
+    #[test]
+    fn the_fade_is_clamped_to_the_designs_zero_to_sixty() {
+        let fade = |value: u8| {
+            normalize_ui_settings(UiSettings {
+                theme: "system".to_string(),
+                background_fade: value,
+            })
+            .background_fade
+        };
+        assert_eq!(fade(0), 0);
+        assert_eq!(fade(25), 25);
+        assert_eq!(fade(60), 60);
+        assert_eq!(fade(61), 60);
+        assert_eq!(fade(255), 60);
+    }
+
+    #[test]
+    fn a_server_url_carrying_userinfo_is_never_handed_to_the_os_opener() {
+        // Basic-auth mode puts the password in the URL the user typed. It
+        // must never reach a browser command line, a shell history, or a
+        // desktop portal log.
+        assert_eq!(
+            browsable_server_url("http://user:pw@romm.example/romm"),
+            None
+        );
+        assert_eq!(browsable_server_url("https://user@romm.example"), None);
+    }
+
+    #[test]
+    fn only_plain_http_and_https_urls_are_browsable() {
+        assert_eq!(
+            browsable_server_url("https://romm.example:8080/romm"),
+            Some("https://romm.example:8080/romm".to_string())
+        );
+        assert_eq!(
+            browsable_server_url("  http://192.168.1.5:8000  "),
+            Some("http://192.168.1.5:8000".to_string())
+        );
+        assert_eq!(browsable_server_url(""), None);
+        assert_eq!(browsable_server_url("romm.example"), None);
+        assert_eq!(browsable_server_url("file:///etc/passwd"), None);
+        assert_eq!(browsable_server_url("javascript:alert(1)"), None);
     }
 }

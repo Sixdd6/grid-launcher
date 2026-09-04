@@ -64,6 +64,41 @@ pub struct CompatToolInstall {
     pub release_tag: String,
 }
 
+/// Desktop-shell appearance settings (design §4, §10 Appearance). Both
+/// fields default so a config written before this table existed loads
+/// unchanged, and `Config::save` emits `[ui]` after every scalar key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSettings {
+    /// `"system"` (follow `prefers-color-scheme`), `"dark"` or `"light"`.
+    /// Stored as a plain string rather than an enum so an unknown value
+    /// written by a newer build round-trips instead of failing the whole
+    /// config load; the app layer normalizes on write and the frontend
+    /// normalizes on read.
+    #[serde(default = "default_theme")]
+    pub theme: String,
+    /// Background-art opacity in percent, 0–60 (design §3). Clamped on
+    /// write by `normalize_ui_settings`; read sites clamp again.
+    #[serde(default = "default_background_fade")]
+    pub background_fade: u8,
+}
+
+fn default_theme() -> String {
+    "system".to_string()
+}
+
+fn default_background_fade() -> u8 {
+    25
+}
+
+impl Default for UiSettings {
+    fn default() -> Self {
+        Self {
+            theme: default_theme(),
+            background_fade: default_background_fade(),
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("config io: {0}")]
@@ -145,6 +180,10 @@ pub struct Config {
     /// unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub compat_tool_installs: Vec<CompatToolInstall>,
+    /// Desktop shell appearance. A TOML table, so it must stay after every
+    /// scalar key in this struct.
+    #[serde(default)]
+    pub ui: UiSettings,
     /// Unknown keys survive load/save round trips for forward compatibility.
     #[serde(flatten)]
     pub extra: BTreeMap<String, toml::Value>,
@@ -183,6 +222,7 @@ impl Default for Config {
             native_manual_save_paths: BTreeMap::new(),
             default_compat_tool: String::new(),
             compat_tool_installs: Vec::new(),
+            ui: UiSettings::default(),
             extra: BTreeMap::new(),
         }
     }
@@ -247,6 +287,47 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ui_settings_default_to_system_and_a_25_percent_fade() {
+        let ui = UiSettings::default();
+        assert_eq!(ui.theme, "system");
+        assert_eq!(ui.background_fade, 25);
+        assert_eq!(Config::default().ui, ui);
+    }
+
+    #[test]
+    fn a_config_written_before_the_ui_table_existed_loads_the_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "schema_version = 1\nserver_url = \"https://romm.example\"\n",
+        )
+        .unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.ui.theme, "system");
+        assert_eq!(loaded.ui.background_fade, 25);
+    }
+
+    #[test]
+    fn ui_settings_round_trip_through_save_and_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config {
+            ui: UiSettings {
+                theme: "dark".to_string(),
+                background_fade: 60,
+            },
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(written.contains("[ui]"), "written config:\n{written}");
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.ui.theme, "dark");
+        assert_eq!(loaded.ui.background_fade, 60);
+    }
 
     #[test]
     fn round_trips_config() {

@@ -12,6 +12,9 @@ export type Platform = { id: number; name: string; slug: string; rom_count: numb
 /** One platform a batched emulator/core lookup is asking about. Field names
  *  match the backend's `PlatformRef` (app/src-tauri/src/commands.rs). */
 export type PlatformRef = { name: string; slug: string };
+
+/** Desktop shell appearance, mirroring `grid_core::config::UiSettings`. */
+export type UiSettings = { theme: 'system' | 'dark' | 'light'; background_fade: number };
 export type GameSummary = {
   id: number;
   name: string;
@@ -308,6 +311,11 @@ export const api = {
   listInstalled: () => invoke<InstalledGame[]>('list_installed'),
   getLibraryPath: () => invoke<string>('get_library_path'),
   setLibraryPath: (path: string) => invoke<void>('set_library_path', { path }),
+  getUiSettings: () => invoke<UiSettings>('get_ui_settings'),
+  setUiSettings: (settings: UiSettings) => invoke<void>('set_ui_settings', { settings }),
+  /** Opens the configured RomM server in the browser. The URL comes from the
+   *  backend's own config read — never from the frontend. */
+  openServerPage: () => invoke<void>('open_server_page'),
   launchGame: (romId: number) => invoke<GameSession>('launch_game', { romId }),
   stopGame: (sessionId: number) => invoke<void>('stop_game', { sessionId }),
   listSessions: () => invoke<SessionsSnapshot>('list_sessions'),
