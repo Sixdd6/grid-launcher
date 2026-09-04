@@ -21,6 +21,7 @@
 
   let library = $state<ReturnType<typeof Library> | null>(null);
   let server = $state<ReturnType<typeof Server> | null>(null);
+  let settings = $state<ReturnType<typeof Settings> | null>(null);
   let serverMenuOpen = $state(false);
   let sessionEl = $state<HTMLElement | null>(null);
 
@@ -128,7 +129,10 @@
         data-testid="app-update-badge"
         class="update-badge"
         title={`GRID Launcher ${appUpdate.notice.tag} is available`}
-        onclick={() => (view = 'settings')}
+        onclick={() => {
+          view = 'settings';
+          settings?.show('updates');
+        }}
       >
         Update
       </button>
@@ -190,7 +194,7 @@
   <Emulators active={view === 'emulators'} />
 </div>
 <div data-testid="settings-view" class="view view-content" hidden={view !== 'settings'}>
-  <Settings />
+  <Settings bind:this={settings} />
 </div>
 
 <!-- Mounted outside the view roots, and never hidden. The footer strip is

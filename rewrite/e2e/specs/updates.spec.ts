@@ -184,8 +184,9 @@ describe('updates', () => {
       timeout: APP_START_TIMEOUT,
       timeoutMsg: 'the self-update badge never appeared for the mock forge release',
     });
+    // The badge is the whole route: it opens Settings *on* the Updates
+    // page, with no second click on the rail (design §3).
     await $(testId('app-update-badge')).click();
-    await $(testId('settings-nav-updates')).click();
     const notice = $(testId('app-update-notice'));
     await notice.waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,

@@ -12,6 +12,14 @@
 
   let page = $state<SettingsPage>('appearance');
 
+  /**
+   * Programmatic page selection, for callers that route straight to a page
+   * — the top bar's update badge opens Settings on `updates` (design §3).
+   */
+  export function show(next: SettingsPage) {
+    page = next;
+  }
+
   function onThemeChange(e: Event) {
     const value = (e.currentTarget as HTMLSelectElement).value as ThemeChoice;
     setTheme(value).catch(() => {
