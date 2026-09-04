@@ -176,7 +176,7 @@ describe('updates', () => {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: "rom 802's update badge never appeared",
     });
-    await expect($(testId('library-update-badge-801'))).toHaveText('Update Available');
+    await expect($(testId('library-update-badge-801'))).toHaveText('UPDATE');
 
     // 803 matches the server exactly; 804 has no rom detail (404).
     await $(testId('library-update-badge-803')).waitForExist({
