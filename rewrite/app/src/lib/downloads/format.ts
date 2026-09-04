@@ -135,24 +135,33 @@ export function actionFor(status: DownloadStatus, kind: DownloadKind = 'base'): 
 }
 
 /**
+ * "The current transfer": the first downloading entry, else the first
+ * installing one, else the first entry in any other live state — the same
+ * precedence the old drawer footer's progress bar used. `null` when nothing
+ * is live. The strip's line and its sparkline both key off this.
+ */
+export function currentTransfer(entries: DownloadEntry[]): DownloadEntry | null {
+  const live = entries.filter((e) => LIVE_STATUSES.includes(e.status));
+  if (live.length === 0) return null;
+  return (
+    live.find((e) => e.status === 'downloading') ??
+    live.find((e) => e.status === 'installing') ??
+    live[0]
+  );
+}
+
+/**
  * The 28px status strip's one line (design §3):
  * `⬇ <title> · <percent> · <speed>`, or `null` when nothing is live and the
  * strip hides itself.
  *
- * "The current transfer" is the first downloading entry, else the first
- * installing one, else the first entry in any other live state — the same
- * precedence the old drawer footer's progress bar used. An unmeasurable
- * percent renders as an em dash rather than a fake `0%`, and the speed slot
- * carries the phase word when there is no byte rate to show (an install
- * reads local bytes, and a queued job has not started).
+ * An unmeasurable percent renders as an em dash rather than a fake `0%`,
+ * and the speed slot carries the phase word when there is no byte rate to
+ * show (an install reads local bytes, and a queued job has not started).
  */
 export function footerLine(entries: DownloadEntry[]): string | null {
-  const live = entries.filter((e) => LIVE_STATUSES.includes(e.status));
-  if (live.length === 0) return null;
-  const current =
-    live.find((e) => e.status === 'downloading') ??
-    live.find((e) => e.status === 'installing') ??
-    live[0];
+  const current = currentTransfer(entries);
+  if (current === null) return null;
 
   const dash = '—';
   let pct = dash;
@@ -176,4 +185,39 @@ export function footerLine(entries: DownloadEntry[]): string | null {
       break;
   }
   return `⬇ ${current.title} · ${pct} · ${speed}`;
+}
+
+/**
+ * Time remaining for a download with a known total and a measured rate
+ * (D-UI-6 names an ETA): `<s>s left`, `<m>m <s>s left`, `<h>h <m>m left`,
+ * rounded up. Empty for every other state — an install reads local bytes at
+ * a rate the backend does not report, and a queued job has no rate yet.
+ */
+export function etaText(e: DownloadEntry): string {
+  if (e.status !== 'downloading' || e.total_bytes <= 0 || e.speed_bps <= 0) return '';
+  const remaining = Math.max(0, e.total_bytes - e.downloaded_bytes);
+  const secs = Math.ceil(remaining / e.speed_bps);
+  if (secs >= 3600) return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m left`;
+  if (secs >= 60) return `${Math.floor(secs / 60)}m ${secs % 60}s left`;
+  return `${secs}s left`;
+}
+
+/**
+ * The one-line caption under a row's sparkline panel: the network rate and
+ * the ETA while bytes are moving over the network, the phase word while the
+ * install writes to disk, blank for queued and terminal rows.
+ */
+export function graphCaption(e: DownloadEntry): string {
+  switch (e.status) {
+    case 'downloading':
+    case 'cancelling': {
+      const rate = `${formatSize(e.speed_bps)}/s`;
+      const eta = etaText(e);
+      return eta === '' ? rate : `${rate} · ${eta}`;
+    }
+    case 'installing':
+      return 'Writing to disk';
+    default:
+      return '';
+  }
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DownloadEntry, DownloadKind } from '../api';
-import { actionFor, aggregate, entryDetail, footerLine, formatSize, kindLabel, percent } from './format';
+import { actionFor, aggregate, currentTransfer, entryDetail, etaText, footerLine, formatSize, graphCaption, kindLabel, percent } from './format';
 
 function entry(overrides: Partial<DownloadEntry>): DownloadEntry {
   return {
@@ -329,5 +329,68 @@ describe('footerLine', () => {
     ).toBe('⬇ A · 75% · Installing');
     expect(footerLine([entry({ title: 'A', status: 'queued' })])).toBe('⬇ A · — · Queued');
     expect(footerLine([entry({ title: 'A', status: 'cancelling' })])).toBe('⬇ A · — · Cancelling');
+  });
+});
+
+describe('currentTransfer', () => {
+  it('is null when nothing is live', () => {
+    expect(currentTransfer([])).toBeNull();
+    expect(currentTransfer([entry({ status: 'completed' }), entry({ status: 'failed' })])).toBeNull();
+  });
+
+  it('prefers downloading, then installing, then the first other live entry', () => {
+    const queued = entry({ id: 1, status: 'queued' });
+    const installing = entry({ id: 2, status: 'installing' });
+    const downloading = entry({ id: 3, status: 'downloading' });
+    expect(currentTransfer([queued, installing, downloading])?.id).toBe(3);
+    expect(currentTransfer([queued, installing])?.id).toBe(2);
+    expect(currentTransfer([queued])?.id).toBe(1);
+    expect(currentTransfer([entry({ id: 9, status: 'cancelling' })])?.id).toBe(9);
+  });
+
+  it('is the entry footerLine describes', () => {
+    const entries = [entry({ id: 1, status: 'installing' }), entry({ id: 2, title: 'Two', status: 'downloading' })];
+    expect(currentTransfer(entries)?.title).toBe('Two');
+    expect(footerLine(entries)).toContain('⬇ Two ·');
+  });
+});
+
+describe('etaText', () => {
+  it('is empty unless downloading with a known total and a positive speed', () => {
+    expect(etaText(entry({ status: 'queued' }))).toBe('');
+    expect(etaText(entry({ status: 'installing', install_processed_bytes: 1, install_total_bytes: 2 }))).toBe('');
+    expect(etaText(entry({ status: 'downloading', downloaded_bytes: 1, total_bytes: 0, speed_bps: 10 }))).toBe('');
+    expect(etaText(entry({ status: 'downloading', downloaded_bytes: 1, total_bytes: 10, speed_bps: 0 }))).toBe('');
+  });
+
+  it('formats seconds, minutes and hours, rounding up', () => {
+    expect(etaText(entry({ status: 'downloading', downloaded_bytes: 500, total_bytes: 1000, speed_bps: 100 }))).toBe('5s left');
+    expect(etaText(entry({ status: 'downloading', downloaded_bytes: 500, total_bytes: 1000, speed_bps: 4 }))).toBe('2m 5s left');
+    expect(etaText(entry({ status: 'downloading', downloaded_bytes: 500, total_bytes: 1000, speed_bps: 0.1 }))).toBe('1h 23m left');
+    expect(etaText(entry({ status: 'downloading', downloaded_bytes: 999, total_bytes: 1000, speed_bps: 1000 }))).toBe('1s left');
+  });
+
+  it('never goes negative when downloaded exceeds total', () => {
+    expect(etaText(entry({ status: 'downloading', downloaded_bytes: 1200, total_bytes: 1000, speed_bps: 10 }))).toBe('0s left');
+  });
+});
+
+describe('graphCaption', () => {
+  it('shows the rate and the ETA while downloading', () => {
+    expect(graphCaption(entry({ status: 'downloading', downloaded_bytes: 0, total_bytes: 2048, speed_bps: 1024 }))).toBe(
+      '1.0 KB/s · 2s left',
+    );
+  });
+
+  it('shows only the rate when the ETA is unknown', () => {
+    expect(graphCaption(entry({ status: 'downloading', downloaded_bytes: 0, total_bytes: 0, speed_bps: 512 }))).toBe('512 B/s');
+    expect(graphCaption(entry({ status: 'cancelling', speed_bps: 512 }))).toBe('512 B/s');
+  });
+
+  it('names the disk phase while installing and is blank otherwise', () => {
+    expect(graphCaption(entry({ status: 'installing' }))).toBe('Writing to disk');
+    expect(graphCaption(entry({ status: 'queued' }))).toBe('');
+    expect(graphCaption(entry({ status: 'completed' }))).toBe('');
+    expect(graphCaption(entry({ status: 'failed' }))).toBe('');
   });
 });
