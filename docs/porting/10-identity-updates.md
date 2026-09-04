@@ -824,7 +824,9 @@ relative to `rewrite/`.
   `app-update-available` before the webview finishes mounting; `app_update_notice`
   (`app/src-tauri/src/commands/updates.rs`) holds the last check's result so
   `stores/appUpdate.svelte.ts`'s `initAppUpdate` — listener registered first, then one pull —
-  shows the banner even when it mounts after the event fired.
+  shows the top-bar badge and the Settings › Updates entry even when it mounts after the
+  event fired (the banner strip was removed by the desktop redesign; Dismiss hides the
+  badge only).
 
 **What the Rust port checks, and when.** `UpdateService::refresh` runs on `connect`,
 `restore_session` (connected outcome), `retry_connect` (success), after any game finalize (the

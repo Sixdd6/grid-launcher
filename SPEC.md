@@ -53,11 +53,32 @@ There are several main sections to the application with buttons across the top b
   (network in the primary colour, disk in teal, with the rate and ETA under it), and the
   action for its state: Cancel, Retry and Dismiss, or Dismiss. A live firmware row offers
   no action. The Completed segment keeps the last 50 entries.
-- **Emulators** contains the list of emulators used to launch games. Users can add, update, remove, and assign defaults by platform. Each emulator entry includes a name, executable path, launch arguments, save strategy, ignore rules, and optional custom save/state directories.
-- **Settings** contains the application settings arranged by panels for server connection, library path, appearance, debug options, and cloud save sync behavior.
+- **Emulators** is a rail of four category panes, each capped at 1100px and centred:
+  **Installed** lists every configured emulator (name, path, arguments) with Edit and
+  Delete — Edit opens the manual form as a sheet beside the list — and, for an RPCS3
+  entry with a downloaded PS3 firmware package, the note and the Install PS3 Firmware
+  button; **Add from catalog** has a search box, one row per catalog entry with its
+  provider and an Install / Installed button, and a Manual tab for the hand-typed form
+  (name, executable path, arguments, with the profile auto-fill); **Platform defaults**
+  shows one card per server platform with the emulator select (only compatible
+  emulators, plus "(none)") and, for a RetroArch default, the core select; **Compat
+  tools** (Linux only) is the wine/proton default picker and its install catalog. Each
+  emulator entry includes a name, executable path, launch arguments, save strategy,
+  ignore rules, and optional custom save/state directories.
+- **Settings** is a rail of five panes: **Connection** (server URL, user, whether a
+  credential is stored in the OS keyring and whether the session is verified, Reconnect,
+  Disconnect), **Cloud saves** (restore before launch, upload after exit, skip when the
+  local save is newer, upload delay, retention limit), **RetroAchievements** (username
+  and a write-only token; Save fans the credentials out to every emulator that supports
+  them, Clear removes them), **Updates** (the running version, when the startup check
+  ran, the release notice with its Open release and Dismiss buttons, and the note that
+  the launcher only ever checks — it never downloads or installs an update), and
+  **Appearance**.
 - **Appearance** (under Settings) chooses the theme — follow the OS, dark, or light —
-  and the background-art fade from 0 to 60 percent. Both are stored under `[ui]` in
-  `config.toml` as `theme` and `background_fade`.
+  turns the background art on or off, sets its fade from 0 to 60 percent with a live
+  preview behind the pane, and sets the default card size for the Library and Server
+  grids. They are stored under `[ui]` in `config.toml` as `theme`, `background_fade`
+  (0 is off), `card_size_library` and `card_size_server`.
 - **Cards** (both grids) scale on hover with a gradient overlay, a centred Play or
   Install, and an action row of Details, Cloud sync and More. Badges: an installed dot
   top-right, an `UPDATE` tag top-left, a cloud icon bottom-right when the platform has

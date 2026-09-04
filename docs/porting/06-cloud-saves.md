@@ -1380,8 +1380,8 @@ review.
 7. **D7 — `cloud_save_retention_limit` is a config key (default 3, minimum 1); states are
    still never pruned.** The reference hardcodes the retention limit to the literal `3`
    (`grid-launcher.py:2224`); the port exposes it as `Config::cloud_save_retention_limit`
-   (`crates/grid-core/src/config.rs:101-109`, default 3), editable from the Emulators panel's
-   Cloud Saves settings block (`app/src/lib/Emulators.svelte`,
+   (`crates/grid-core/src/config.rs:101-109`, default 3), editable from Settings › Cloud saves
+   (`app/src/lib/settings/CloudSavesPage.svelte`,
    `cloud-settings-retention-limit`). Every read site clamps to a minimum of 1 (`.max(1)`,
    `crates/grid-core/src/cloud/retention.rs:76`,
    `crates/grid-core/src/cloud/ops/upload.rs:200-201`). Retention pruning still runs for saves

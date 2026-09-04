@@ -1115,6 +1115,14 @@ D19 are recorded in doc 03 instead, since they are install-side.
    only filtered the combo box). The panel also re-reads its emulator entries and defaults
    when an emulator install reaches a terminal status, so a freshly installed catalog
    emulator appears in the selector without reopening the panel.
+6. **The Emulators UI is a view with a category rail, not a panel.** Since the desktop
+   redesign (plan 5, `docs/superpowers/plans/2026-09-04-ui-redesign-5-emulators-settings.md`)
+   `app/src/lib/Emulators.svelte` renders four always-mounted panes — Installed (with the
+   edit form as a sheet, `app/src/lib/emulators/EmulatorForm.svelte`), Add from catalog,
+   Platform defaults, Compat tools (Linux only) — selected by `emu-nav-<page>`. The
+   per-platform default and core selects above live on the Platform defaults pane; the
+   Server header's default-emulator chip opens that pane directly. The RetroAchievements
+   and cloud-save settings forms moved to the Settings view.
 
 ### Rulings on open questions
 
