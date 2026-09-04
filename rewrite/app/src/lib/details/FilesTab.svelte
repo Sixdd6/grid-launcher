@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { RomFile } from '../api';
-  import { contentRows, fileRows } from './files';
+  import { contentRows, gameRows } from './files';
 
   let {
     files,
@@ -14,7 +14,7 @@
     installedNow: boolean;
   } = $props();
 
-  let rows = $derived(fileRows(files));
+  let rows = $derived(gameRows(files));
   let content = $derived(contentRows(files));
 
   // D-UI-10's comparison line. Only meaningful once the game is installed:

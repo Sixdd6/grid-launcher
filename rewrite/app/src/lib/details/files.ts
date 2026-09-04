@@ -43,6 +43,17 @@ export function fileRows(files: RomFile[]): FileRow[] {
   }));
 }
 
+const CONTENT_CATEGORIES = ['update', 'dlc'];
+
+/**
+ * The ordinary game files: everything [`contentRows`] does not claim. The
+ * two lists partition `files`, so the Files tab lists each file once
+ * instead of repeating every update/DLC row under "Extra content".
+ */
+export function gameRows(files: RomFile[]): FileRow[] {
+  return fileRows(files).filter((row) => !CONTENT_CATEGORIES.includes(row.category));
+}
+
 /**
  * The PS4 update / Xbox 360 content files the server lists for this rom.
  * These are the same `category` values `content_availability` reads on the
@@ -50,5 +61,5 @@ export function fileRows(files: RomFile[]): FileRow[] {
  * left column's Install Update / Install DLC buttons agree by construction.
  */
 export function contentRows(files: RomFile[]): FileRow[] {
-  return fileRows(files).filter((row) => row.category === 'update' || row.category === 'dlc');
+  return fileRows(files).filter((row) => CONTENT_CATEGORIES.includes(row.category));
 }

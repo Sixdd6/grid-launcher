@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contentRows, fileRows, fileSizeText } from './files';
+import { contentRows, fileRows, fileSizeText, gameRows } from './files';
 import type { RomFile } from '../api';
 
 function file(overrides: Partial<RomFile> & { id: number; file_name: string }): RomFile {
@@ -68,5 +68,30 @@ describe('contentRows', () => {
 
   it('is empty when every file is an ordinary game file', () => {
     expect(contentRows([file({ id: 1, file_name: 'g.zip', category: 'game' })])).toEqual([]);
+  });
+});
+
+describe('gameRows', () => {
+  it('leaves the update and dlc files to contentRows, so no file is listed twice', () => {
+    const files = [
+      file({ id: 1, file_name: 'ps4-base.zip', category: 'game' }),
+      file({ id: 2, file_name: 'ps4-update.zip', category: 'update' }),
+      file({ id: 3, file_name: 'ps4-dlc.zip', category: 'dlc' }),
+    ];
+    expect(gameRows(files).map((r) => r.name)).toEqual(['ps4-base.zip']);
+    // Together the two lists still account for every file the server sent.
+    expect(gameRows(files).length + contentRows(files).length).toBe(files.length);
+  });
+
+  it('folds the category case, which the server does not guarantee', () => {
+    expect(gameRows([file({ id: 1, file_name: 'u.zip', category: 'DLC' })])).toEqual([]);
+  });
+
+  it('keeps every ordinary file, including the blank category', () => {
+    const rows = gameRows([
+      file({ id: 1, file_name: 'a.zip', category: '' }),
+      file({ id: 2, file_name: 'b.zip', category: 'game' }),
+    ]);
+    expect(rows.map((r) => r.name)).toEqual(['a.zip', 'b.zip']);
   });
 });

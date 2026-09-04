@@ -496,9 +496,14 @@
             {#if liveSession}
               <span data-testid="details-playing-chip" class="chip playing">Playing</span>
             {/if}
-            <span class="chip" data-testid="details-verification">
-              {verificationLabel(detail?.is_identified ?? false)}
-            </span>
+            <!-- Only once the server's answer is in hand: before that (no
+                 server id, offline, or the first frames of any open) the
+                 chip would assert "Unidentified" the app cannot know. -->
+            {#if detail}
+              <span class="chip" data-testid="details-verification">
+                {verificationLabel(detail.is_identified)}
+              </span>
+            {/if}
             {#if flags.length}
               <span class="chip" data-testid="details-flags">{flags.join(' · ')}</span>
             {/if}

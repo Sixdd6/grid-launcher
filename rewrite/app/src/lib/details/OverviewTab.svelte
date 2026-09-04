@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { RomDetail } from '../api';
   import Image from '../Image.svelte';
+  import { epochDate } from './header';
   import { overviewStrip } from './media';
 
   let {
@@ -26,7 +27,10 @@
       [
         ['developer', 'Developer', detail?.companies.split(',')[0]?.trim() ?? ''],
         ['companies', 'Companies', detail?.companies ?? ''],
-        ['release', 'Release', detail?.first_release_date ?? ''],
+        // The backend sends IGDB's epoch SECONDS as a string; the raw
+        // number is not a date a reader can use. The full day, not just
+        // the year, because the header line above already states the year.
+        ['release', 'Release', epochDate(Number(detail?.first_release_date ?? ''))],
         ['genres', 'Genres', detail?.genres ?? ''],
         ['modes', 'Game modes', detail?.game_modes ?? ''],
         ['players', 'Players', detail?.player_count ?? ''],
