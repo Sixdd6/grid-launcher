@@ -177,7 +177,11 @@
   <Library active={view === 'library'} bind:this={library} />
 </div>
 <div data-testid="server-view" class="view" hidden={view !== 'server'}>
-  <Server active={view === 'server'} bind:this={server} />
+  <Server
+    active={view === 'server'}
+    onOpenEmulators={() => (view = 'emulators')}
+    bind:this={server}
+  />
 </div>
 <div data-testid="downloads-view" class="view" hidden={view !== 'downloads'}>
   <Downloads />

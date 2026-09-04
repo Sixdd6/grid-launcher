@@ -280,6 +280,10 @@ export type CompatToolsDto = { tools: CompatTool[]; default_tool: string };
 /// itself is the background firmware job's work, not this button's).
 export type Rpcs3FirmwareStatus = { pup_path: string | null };
 
+/// The Server platform header's firmware chip input (design §6). See
+/// `app/src-tauri/src/commands.rs`'s `PlatformFirmwareStatus`.
+export type PlatformFirmwareStatus = { file_count: number; has_default_emulator: boolean };
+
 /// Emitted after `setDefaultCompatTool` and after a managed compat-tool
 /// install finalizes in the background. Re-run `listCompatTools` on it.
 export const COMPAT_TOOLS_CHANGED_EVENT = 'compat-tools-changed';
@@ -391,6 +395,10 @@ export const api = {
     invoke<Rpcs3FirmwareStatus>('rpcs3_firmware_status', { emulatorName }),
   installPs3Firmware: (emulatorName: string) =>
     invoke<boolean>('install_ps3_firmware', { emulatorName }),
+  platformFirmwareStatus: (platformId: number, platform: string) =>
+    invoke<PlatformFirmwareStatus>('platform_firmware_status', { platformId, platform }),
+  installFirmwareForPlatform: (platformId: number, platform: string) =>
+    invoke<void>('install_firmware_for_platform', { platformId, platform }),
   cancelDownloadForRom: (romId: number) => invoke<void>('cancel_download_for_rom', { romId }),
   listUpdates: () => invoke<UpdateRow[]>('list_updates'),
   updateGame: (romId: number) => invoke<void>('update_game', { romId }),

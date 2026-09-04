@@ -184,29 +184,25 @@ impl FirmwareService {
             .remove(&pass_key(dir, platform_id));
     }
 
-    /// Installs the platform firmware a just-finalized game needs, in the
-    /// background (`_install_firmware_for_game_without_ui`,
-    /// install_mixin.py:528-697).
+    /// Installs a platform's server firmware into the platform's default
+    /// emulator. The whole of [`Self::spawn_for_game`]'s body, minus the
+    /// registry row: `spawn_for_game` only ever read `record.platform` off
+    /// that row, so the two now share one implementation.
     ///
     /// Returns immediately, and silently, whenever there is nothing to do:
-    /// no connected session, no platform id for the row's platform (the
-    /// guard `install_for_game` itself does NOT carry — it takes an
-    /// `i64`), no default emulator for that platform, no config entry by
-    /// that name, a [`FirmwareTrigger::Launch`] pass for a
-    /// `(directory, platform)` pair that already completed one (D19), a pass
-    /// for that same pair already running, or a whole-directory pass running
-    /// for that emulator. Never fails and never blocks the caller.
-    pub fn spawn_for_game(
+    /// no connected session, no default emulator for that platform, no
+    /// config entry by that name, a [`FirmwareTrigger::Launch`] pass for a
+    /// `(directory, platform)` pair that already completed one (D19), or a
+    /// pass already running for that emulator directory. Never fails and
+    /// never blocks the caller.
+    pub fn spawn_for_platform(
         self: &Arc<Self>,
         session: Arc<SessionManager>,
-        install: Arc<InstallService>,
-        record: InstalledGame,
+        platform: String,
+        platform_id: i64,
         trigger: FirmwareTrigger,
     ) {
         let Some(client) = session.client() else {
-            return;
-        };
-        let Some(platform_id) = platform_id_for(&install.platform_ids(), &record.platform) else {
             return;
         };
         let config_path = Config::default_path();
@@ -214,7 +210,7 @@ impl FirmwareService {
             return;
         };
         let profiles = load_profiles();
-        let Some(entry) = default_entry_for_platform(&config, &record.platform, profiles) else {
+        let Some(entry) = default_entry_for_platform(&config, &platform, profiles) else {
             return;
         };
         let dir = emulator_dir_of(entry);
@@ -229,7 +225,6 @@ impl FirmwareService {
         let guard = FirmwareGuard::new(self.clone(), dir.clone(), Some(platform_id));
         let service = self.clone();
         let config_dir = config_dir_of(&config_path);
-        let platform = record.platform.clone();
         tauri::async_runtime::spawn(async move {
             let _guard = guard;
             let ctx = GameFirmwareContext {
@@ -251,6 +246,31 @@ impl FirmwareService {
             // set on the next launch would not change it.
             service.mark_completed(&dir, platform_id);
         });
+    }
+
+    /// Installs the platform firmware a just-finalized game needs, in the
+    /// background (`_install_firmware_for_game_without_ui`,
+    /// install_mixin.py:528-697).
+    ///
+    /// Returns immediately, and silently, whenever there is nothing to do:
+    /// no connected session, no platform id for the row's platform (the
+    /// guard `install_for_game` itself does NOT carry — it takes an
+    /// `i64`), no default emulator for that platform, no config entry by
+    /// that name, a [`FirmwareTrigger::Launch`] pass for a
+    /// `(directory, platform)` pair that already completed one (D19), a pass
+    /// for that same pair already running, or a whole-directory pass running
+    /// for that emulator. Never fails and never blocks the caller.
+    pub fn spawn_for_game(
+        self: &Arc<Self>,
+        session: Arc<SessionManager>,
+        install: Arc<InstallService>,
+        record: InstalledGame,
+        trigger: FirmwareTrigger,
+    ) {
+        let Some(platform_id) = platform_id_for(&install.platform_ids(), &record.platform) else {
+            return;
+        };
+        self.spawn_for_platform(session, record.platform.clone(), platform_id, trigger);
     }
 
     /// Installs the platform firmware a freshly installed emulator wants,
@@ -488,7 +508,7 @@ fn platform_id_for(ids: &std::collections::BTreeMap<String, i64>, platform: &str
 
 /// The default emulator entry for `platform`, or `None` when none is
 /// configured or the configured name matches no entry.
-fn default_entry_for_platform<'a>(
+pub(crate) fn default_entry_for_platform<'a>(
     config: &'a Config,
     platform: &str,
     profiles: &[grid_core::launch::profiles::EmulatorProfile],

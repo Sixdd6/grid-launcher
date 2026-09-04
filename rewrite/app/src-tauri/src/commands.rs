@@ -421,6 +421,68 @@ pub async fn open_server_page(app: tauri::AppHandle) -> Result<(), String> {
     app.opener().open_url(url, None::<&str>).map_err(err)
 }
 
+/// What the Server platform header's firmware chip needs (design §6).
+/// Deliberately two plain flags rather than a rendered sentence: the chip's
+/// wording is the frontend's (`lib/server/header.ts`), and a count is what
+/// the backend can honestly report.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PlatformFirmwareStatus {
+    /// How many firmware files the server lists for this platform.
+    pub file_count: u32,
+    /// Whether the platform has a default emulator — i.e. somewhere for
+    /// that firmware to be installed to. Without one there is nothing to
+    /// install into, so the chip offers no action.
+    pub has_default_emulator: bool,
+}
+
+/// `GET /api/firmware?platform_id=<id>` plus the local default-emulator
+/// check. Read-only: nothing is downloaded here.
+#[tauri::command]
+pub async fn platform_firmware_status(
+    state: State<'_, AppState>,
+    platform_id: i64,
+    platform: String,
+) -> Result<PlatformFirmwareStatus, String> {
+    let file_count = match state.session.client() {
+        // Offline: report "no firmware" rather than an error. The chip is
+        // an affordance, not a task, and the Server view is already
+        // showing its own offline state when this can happen.
+        None => 0,
+        Some(client) => client.firmware(platform_id).await.map_err(err)?.len() as u32,
+    };
+    let has_default_emulator = tokio::task::spawn_blocking(move || {
+        let Ok(config) = Config::load(&Config::default_path()) else {
+            return false;
+        };
+        let profiles = grid_core::launch::profiles::load_profiles();
+        crate::firmware_service::default_entry_for_platform(&config, &platform, profiles).is_some()
+    })
+    .await
+    .map_err(|e| format!("platform_firmware_status did not finish: {e}"))?;
+    Ok(PlatformFirmwareStatus {
+        file_count,
+        has_default_emulator,
+    })
+}
+
+/// The firmware chip's Install action. Fire-and-forget, exactly like the
+/// per-game and per-emulator triggers: the pass runs in the background,
+/// logs its warnings, and never reports back through this command.
+#[tauri::command]
+pub fn install_firmware_for_platform(
+    state: State<'_, AppState>,
+    platform_id: i64,
+    platform: String,
+) -> Result<(), String> {
+    state.firmware.spawn_for_platform(
+        state.session.clone(),
+        platform,
+        platform_id,
+        crate::firmware_service::FirmwareTrigger::Install,
+    );
+    Ok(())
+}
+
 // --- launch/emulator types ---------------------------------------------------
 
 /// An autoprofile, trimmed to what the frontend needs (task-7-brief.md).
@@ -2068,5 +2130,32 @@ mod ui_settings_tests {
         assert_eq!(browsable_server_url("romm.example"), None);
         assert_eq!(browsable_server_url("file:///etc/passwd"), None);
         assert_eq!(browsable_server_url("javascript:alert(1)"), None);
+    }
+}
+
+#[cfg(test)]
+mod platform_firmware_tests {
+    use super::*;
+
+    #[test]
+    fn a_platform_with_no_files_and_no_emulator_offers_nothing() {
+        let status = PlatformFirmwareStatus {
+            file_count: 0,
+            has_default_emulator: false,
+        };
+        // The DTO is the whole contract: the frontend decides what to show.
+        // Serialization is asserted because the field names are the API.
+        let json = serde_json::to_string(&status).unwrap();
+        assert_eq!(json, r#"{"file_count":0,"has_default_emulator":false}"#);
+    }
+
+    #[test]
+    fn a_platform_with_files_and_an_emulator_serializes_both_flags() {
+        let status = PlatformFirmwareStatus {
+            file_count: 4,
+            has_default_emulator: true,
+        };
+        let json = serde_json::to_string(&status).unwrap();
+        assert_eq!(json, r#"{"file_count":4,"has_default_emulator":true}"#);
     }
 }

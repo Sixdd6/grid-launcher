@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, type GameSummary, type Platform } from './api';
+  import { api, type GameSummary, type Platform, type PlatformFirmwareStatus } from './api';
   import Details from './Details.svelte';
   import GameCard from './GameCard.svelte';
   import CardGrid from './CardGrid.svelte';
@@ -17,7 +17,12 @@
   import { CARD_SIZES, cardSizeLabel, type CardSize } from './cards/size';
   import { setCardSize, uiSettings } from './stores/uiSettings.svelte';
   import { titleContains } from './library/sort';
-  import { platformCountsLine } from './server/header';
+  import {
+    emulatorChipLabel,
+    firmwareChipLabel,
+    firmwareInstallable,
+    platformCountsLine,
+  } from './server/header';
   import { chordBlocked, chordContext, shouldFocusSearch } from './views/searchKeys';
 
   let {
@@ -36,6 +41,10 @@
   let detailsCloudMode = $state<CloudMode>('overview');
   let installError = $state<string | null>(null);
   let cloudPlatforms = $state<ReadonlySet<string>>(new Set<string>());
+  // Platform name -> default emulator name, for the header's emulator chip.
+  let defaultEmulators = $state<Record<string, string>>({});
+  let firmware = $state<PlatformFirmwareStatus | null>(null);
+  let firmwareRequested = $state(false);
 
   let libraryPathInput = $state('');
   let showLibraryBanner = $state(false);
@@ -78,6 +87,7 @@
       .getLaunchDefaults()
       .then((defaults) => {
         cloudPlatforms = cloudPlatformSet(defaults.default_emulators);
+        defaultEmulators = defaults.default_emulators;
       })
       .catch(() => {
         // No defaults readable: no cloud badges and a "No default emulator"
@@ -88,6 +98,34 @@
   $effect(() => {
     if (focusIndex > visible.length - 1) focusIndex = Math.max(0, visible.length - 1);
   });
+
+  // One status call per platform selection. Reset to `null` first so the
+  // chip reads "checking…" rather than the previous platform's answer.
+  $effect(() => {
+    const id = activePlatform;
+    const name = activePlatformName;
+    if (id === null || name === '') return;
+    firmware = null;
+    firmwareRequested = false;
+    api
+      .platformFirmwareStatus(id, name)
+      .then((status) => {
+        if (activePlatform === id) firmware = status;
+      })
+      .catch(() => {
+        // Unreachable or refused: leave the chip at "checking…" rather than
+        // claiming the server has no firmware when we simply do not know.
+      });
+  });
+
+  function installFirmware() {
+    const id = activePlatform;
+    if (id === null) return;
+    firmwareRequested = true;
+    api.installFirmwareForPlatform(id, activePlatformName).catch(() => {
+      firmwareRequested = false;
+    });
+  }
 
   async function checkLibraryPath() {
     try {
@@ -244,7 +282,21 @@
             {platformCountsLine(activePlatformRow?.rom_count ?? 0, installedCount)}
           </p>
           <div class="chips">
-            <!-- Task 6 mounts the firmware and emulator chips here. -->
+            <span data-testid="server-firmware-chip" class="chip">
+              {firmwareChipLabel(firmware)}
+              {#if firmwareInstallable(firmware)}
+                <button
+                  data-testid="server-firmware-install"
+                  onclick={installFirmware}
+                  disabled={firmwareRequested}
+                >
+                  {firmwareRequested ? 'Installing…' : 'Install'}
+                </button>
+              {/if}
+            </span>
+            <button data-testid="server-emulator-chip" class="chip link" onclick={onOpenEmulators}>
+              {emulatorChipLabel(defaultEmulators[activePlatformName] ?? '')}
+            </button>
           </div>
         </header>
 
@@ -369,6 +421,44 @@
     align-items: center;
     gap: 8px;
     margin-left: auto;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font: inherit;
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: var(--r-chip);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+  }
+
+  .chip.link {
+    cursor: pointer;
+  }
+
+  .chip.link:hover {
+    color: var(--text-h);
+    border-color: var(--primary);
+  }
+
+  .chip button {
+    font: inherit;
+    font-size: 11px;
+    padding: 2px 8px;
+    border: none;
+    border-radius: var(--r-pill);
+    background: var(--primary);
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .chip button:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
 
   .toolbar {
