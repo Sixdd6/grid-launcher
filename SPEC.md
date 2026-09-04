@@ -3,8 +3,19 @@ The application is a game launcher and manager for RomM which connects to the se
 It is built using Python + PySide6 and ships as a self-contained executable on Windows and a self-contained AppImage on Linux.
 
 # Top Bar
-The top bar includes navigation buttons for the main sections of the application and shows the current signed-in user on the right.
-It should also surface connection/download state in a lightweight, always-visible way while transfers are active.
+The top bar is 58px tall: the GRID logo and wordmark on the left, a centred pill
+group with the five views (Library, Server, Downloads, Emulators, Settings) in that
+order, and on the right a connection status dot, the server menu (Reconnect,
+Disconnect, Open RomM in browser) and the app-update badge when a release notice is
+stored. `Ctrl+1`..`Ctrl+5` switch views from the keyboard.
+
+Views stay mounted and switch with the `hidden` attribute, so scroll positions and
+selections survive a switch. Behind the content sits blurred background art — the
+cover of the last game viewed, at the opacity set in Settings › Appearance.
+
+A 28px download strip sits at the bottom of the window. It is hidden while nothing is
+transferring; otherwise it reads `⬇ <title> · <percent> · <speed>` and opens the
+Downloads view when clicked.
 
 # Main Sections
 There are several main sections to the application with buttons across the top bar to navigate between them:
@@ -21,6 +32,9 @@ There are several main sections to the application with buttons across the top b
 - **Downloads** contains a list of queued, active, installing, completed, and failed download jobs. Each entry should display status/progress details and support the appropriate action such as Cancel, Retry, or Dismiss.
 - **Emulators** contains the list of emulators used to launch games. Users can add, update, remove, and assign defaults by platform. Each emulator entry includes a name, executable path, launch arguments, save strategy, ignore rules, and optional custom save/state directories.
 - **Settings** contains the application settings arranged by panels for server connection, library path, appearance, debug options, and cloud save sync behavior.
+- **Appearance** (under Settings) chooses the theme — follow the OS, dark, or light —
+  and the background-art fade from 0 to 60 percent. Both are stored under `[ui]` in
+  `config.toml` as `theme` and `background_fade`.
 
 ## Emulator Configuration
 - Emulators should support launch arguments with placeholders such as `%rom%`, `%core%`, `%RPCS3_GAMEID%`, and `%ps3_gameid%`.

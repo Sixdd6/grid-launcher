@@ -134,6 +134,15 @@ These behaviors remain manual and require a desktop session + live RomM server
   installing the core makes it appear after the panel refreshes.
 - **Explicit "(none)"**: set a platform to (none), reopen the panel, it stays (none) and
   launching a game there reports no emulator.
+- **Theme override**: with the OS in dark mode, set Settings › Appearance › Theme to
+  Light, confirm the shell repaints immediately and stays light after a relaunch;
+  set it back to Follow system and confirm it tracks an OS theme change live.
+- **Background art**: hover a Library card for more than half a second and confirm the
+  blurred art behind the content cross-fades to that cover; drag the fade slider and
+  confirm the art responds while dragging and the value survives a relaunch.
+- **Server menu**: open the server name menu and confirm "Open RomM in browser" opens
+  the configured server. With a basic-auth server URL, confirm the menu item does
+  nothing rather than opening a URL carrying the password.
 
 ## Persisted state
 
