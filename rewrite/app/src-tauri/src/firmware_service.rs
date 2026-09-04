@@ -27,7 +27,9 @@
 //! pass, the platform it is fetching for. A whole-directory pass
 //! ([`FirmwareService::spawn_for_emulator`], [`FirmwareService::spawn_ps3_firmware`])
 //! claims the directory itself, which also blocks every per-game pass for
-//! that directory; two per-game passes for *different* platforms in the
+//! that directory — and, in the other direction, cannot start while any
+//! per-game pass for that directory is still running; two per-game passes
+//! for *different* platforms in the
 //! same directory may run at the same time, because one emulator can serve
 //! many platforms (RetroArch serves all of them from one directory). Two
 //! different emulators never block each other at all.
@@ -153,10 +155,13 @@ impl FirmwareService {
     /// the caller must then do nothing at all, not even spawn.
     ///
     /// `platform_id` is `Some` for a per-game pass and `None` for a pass
-    /// that covers the whole directory. A per-game pass is also refused
-    /// while a whole-directory pass for the same directory is in flight
-    /// (both keys are checked), because that pass already covers every
-    /// platform there.
+    /// that covers the whole directory. Because a whole-directory pass
+    /// covers every platform there, the two kinds exclude each other in
+    /// BOTH directions: a per-game pass is refused while a whole-directory
+    /// pass for the same directory is in flight, and a whole-directory pass
+    /// is refused while ANY pass for that directory is in flight. Without
+    /// the second half a fresh-emulator pass could start on top of a
+    /// per-game pass already writing into the same firmware directories.
     ///
     /// A poisoned lock is recovered rather than propagated: the guarded set
     /// is a plain `HashSet`, so a panicking holder leaves nothing
@@ -164,10 +169,11 @@ impl FirmwareService {
     /// worse than continuing.
     pub fn try_begin(&self, dir: &Path, platform_id: Option<i64>) -> bool {
         let mut in_flight = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
-        if platform_id.is_some() && in_flight.contains(&pass_key(dir, None)) {
-            return false;
+        match platform_id {
+            None if in_flight.iter().any(|(key, _)| key.as_path() == dir) => false,
+            Some(_) if in_flight.contains(&pass_key(dir, None)) => false,
+            _ => in_flight.insert(pass_key(dir, platform_id)),
         }
-        in_flight.insert(pass_key(dir, platform_id))
     }
 
     /// Releases a [`Self::try_begin`] claim.
@@ -294,7 +300,8 @@ impl FirmwareService {
         let dir = emulator_dir_of(entry);
         // A whole-directory claim: this pass walks every platform the
         // profile claims, so no per-game pass for the same directory may
-        // start alongside it.
+        // start alongside it — nor may this one start beside a per-game
+        // pass that is already running there.
         if !self.try_begin(&dir, None) {
             return;
         }
@@ -326,8 +333,8 @@ impl FirmwareService {
     /// Does nothing when a PUP is already installed beside the executable,
     /// when the profile routes no firmware directory, when the server's
     /// platform map carries no PS3 platform (D17), when no session is
-    /// connected, or when that emulator directory already has a
-    /// whole-directory firmware job running.
+    /// connected, or when that emulator directory already has any firmware
+    /// job running.
     pub fn spawn_ps3_firmware(
         self: &Arc<Self>,
         session: Arc<SessionManager>,
@@ -360,7 +367,9 @@ impl FirmwareService {
         };
         let dir = emulator_dir_of(&entry);
         // The PS3 PUP is the directory's single firmware item, so this too
-        // claims the whole directory rather than one platform of it.
+        // claims the whole directory rather than one platform of it — which
+        // also means it will not start while any pass for that directory is
+        // still running.
         if !self.try_begin(&dir, None) {
             return;
         }
@@ -550,6 +559,35 @@ mod tests {
         // Releasing the directory-wide claim unblocks the per-game pass.
         svc.end(&dir, None);
         assert!(svc.try_begin(&dir, Some(7)));
+    }
+
+    /// The other direction: a whole-directory pass writes into the same
+    /// firmware directories a per-game pass is already using, so it must not
+    /// start beside one.
+    #[test]
+    fn a_per_game_pass_blocks_a_directory_wide_pass() {
+        let svc = FirmwareService::new();
+        let dir = PathBuf::from("/emulators/retroarch");
+        assert!(svc.try_begin(&dir, Some(7)));
+        assert!(!svc.try_begin(&dir, None));
+        // ...and a different directory is unaffected.
+        assert!(svc.try_begin(Path::new("/emulators/duckstation"), None));
+        // Releasing the last per-game claim unblocks the directory-wide one.
+        svc.end(&dir, Some(7));
+        assert!(svc.try_begin(&dir, None));
+    }
+
+    /// Every per-game claim for the directory has to be gone, not just one.
+    #[test]
+    fn a_directory_wide_pass_waits_for_every_per_game_claim() {
+        let svc = FirmwareService::new();
+        let dir = PathBuf::from("/emulators/retroarch");
+        assert!(svc.try_begin(&dir, Some(7)));
+        assert!(svc.try_begin(&dir, Some(19)));
+        svc.end(&dir, Some(7));
+        assert!(!svc.try_begin(&dir, None));
+        svc.end(&dir, Some(19));
+        assert!(svc.try_begin(&dir, None));
     }
 
     #[test]

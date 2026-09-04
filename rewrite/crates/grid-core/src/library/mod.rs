@@ -171,7 +171,7 @@ pub(crate) fn encode_file_segment(name: &str) -> String {
 pub enum InstallMode {
     Base,
     /// A non-native game re-installed over its existing install ("update"
-    /// mode, install_mixin.py:1867): the base pipeline, minus the
+    /// mode, install_mixin.py:1554): the base pipeline, minus the
     /// already-installed short-circuit.
     Update,
     Ps4Content,

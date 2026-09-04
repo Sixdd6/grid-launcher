@@ -17,6 +17,10 @@ pub const LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/Sixdd6/grid-launcher/releases/latest";
 /// The only part of [`LATEST_RELEASE_URL`] that may reach a log line.
 const LATEST_RELEASE_HOST: &str = "api.github.com";
+/// The most release JSON that will be decoded. A `releases/latest` payload is
+/// a few KiB; anything past this is not the endpoint we asked for, and
+/// `serde_json` would otherwise be handed however much the peer sent.
+const MAX_RELEASE_BODY: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct AppUpdateNotice {
@@ -112,8 +116,9 @@ async fn fetch_notice(current: &str) -> Option<AppUpdateNotice> {
 ///
 /// Returns `Some` only for a release that carries both a tag and a page URL
 /// and whose tag is newer than `current`. Every failure — transport, non-2xx
-/// status, undecodable body, missing fields — is a silent `None` logged at
-/// debug level, naming [`LATEST_RELEASE_HOST`] and never the request URL.
+/// status, a body over [`MAX_RELEASE_BODY`], undecodable body, missing
+/// fields — is a silent `None` logged at debug level, naming
+/// [`LATEST_RELEASE_HOST`] and never the request URL.
 async fn fetch_notice_from(
     client: &ForgeClient,
     url: &str,
@@ -126,7 +131,18 @@ async fn fetch_notice_from(
             return None;
         }
     };
-    let release: LatestRelease = match response.json().await {
+    let body = match response.bytes().await {
+        Ok(body) => body,
+        Err(_) => {
+            tracing::debug!("self-update check: response from {LATEST_RELEASE_HOST} did not read");
+            return None;
+        }
+    };
+    if body.len() > MAX_RELEASE_BODY {
+        tracing::debug!("self-update check: release body from {LATEST_RELEASE_HOST} over the cap");
+        return None;
+    }
+    let release: LatestRelease = match serde_json::from_slice(&body) {
         Ok(release) => release,
         Err(_) => {
             tracing::debug!("self-update check: release JSON did not decode");
@@ -229,6 +245,25 @@ mod tests {
     async fn a_failed_request_is_no_notice() {
         let server = MockServer::start().await;
         let url = mock_release(&server, ResponseTemplate::new(404)).await;
+        let client = ForgeClient::new().unwrap();
+        assert_eq!(fetch_notice_from(&client, &url, "0.9.0").await, None);
+    }
+
+    /// The cap exists so a peer that answers the update check with an
+    /// endless body cannot hand `serde_json` all of it. Valid JSON, so only
+    /// the size can be what rejects it.
+    #[tokio::test]
+    async fn an_oversized_body_is_no_notice() {
+        let server = MockServer::start().await;
+        let url = mock_release(
+            &server,
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "tag_name": "v9.9.9",
+                "html_url": "https://github.com/Sixdd6/grid-launcher/releases/tag/v9.9.9",
+                "body": "x".repeat(MAX_RELEASE_BODY + 1),
+            })),
+        )
+        .await;
         let client = ForgeClient::new().unwrap();
         assert_eq!(fetch_notice_from(&client, &url, "0.9.0").await, None);
     }

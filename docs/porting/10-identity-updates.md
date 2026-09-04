@@ -829,7 +829,10 @@ relative to `rewrite/`.
 **What the Rust port checks, and when.** `UpdateService::refresh` runs on `connect`,
 `restore_session` (connected outcome), `retry_connect` (success), after any game finalize (the
 existing firmware-finalize hook now also triggers a refresh), and after a successful
-`uninstall_game`; `disconnect` clears the map with no refresh. Each pass bumps a generation
+`uninstall_game`; `disconnect` clears the map with no refresh. Overlapping triggers are
+coalesced: a trigger that arrives while a pass is running does not start a second pass, it makes
+the running one go around once more when it ends, and further triggers collapse into that same
+single rerun (`PassGate`, `app/src-tauri/src/update_service.rs`). Each pass bumps a generation
 counter first; per-row `rom_detail` fetches run at up to 4 in flight
 (`tokio::sync::Semaphore`, `MAX_IN_FLIGHT` in `app/src-tauri/src/update_service.rs`), a fetch
 error counts as "no update" for that row, and a pass whose generation was superseded before it

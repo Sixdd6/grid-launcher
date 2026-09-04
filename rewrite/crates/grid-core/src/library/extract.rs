@@ -385,6 +385,12 @@ fn extract_rar(archive: &Path, dest: &Path, progress: ExtractProgress) -> Result
             // the rest of the archive still extracts. The skipped entry
             // still counts toward `processed`, since the listing pass
             // counted it toward `total`.
+            //
+            // Named in the log so a game that is missing a file afterwards
+            // is explainable. The entry's own name only — never the
+            // archive path, and nothing here is server-supplied text
+            // beyond that name.
+            tracing::warn!("rar: skipped link entry {}", relative.display());
             processed += size;
             progress(processed, total);
             header

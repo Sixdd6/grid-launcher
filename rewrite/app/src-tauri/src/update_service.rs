@@ -13,7 +13,7 @@
 //! rom id only.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use grid_core::library::registry::InstalledGame;
@@ -46,6 +46,61 @@ pub struct UpdateRow {
 pub struct UpdateService {
     available: Mutex<HashMap<i64, UpdateInfo>>,
     generation: AtomicU64,
+    gate: PassGate,
+}
+
+/// Collapses overlapping refresh triggers into at most one pass in flight
+/// plus at most one queued rerun.
+///
+/// Several triggers fire close together in practice — a connect that also
+/// finalizes a queued install, a batch of installs completing — and each one
+/// used to spawn a full pass over the whole registry. The generation guard
+/// made the extra passes harmless but not free: every one of them re-fetched
+/// a rom detail for every installed game. So a trigger that arrives while a
+/// pass is running does not start one; it asks the running pass to go around
+/// once more when it ends, and repeated triggers collapse into that single
+/// rerun. The registry snapshot is taken at the START of a pass, which is
+/// why a rerun is needed at all rather than trusting the pass in flight.
+///
+/// Both decisions have to be atomic with the flag they read, so they live
+/// here on the flags rather than as free functions.
+#[derive(Default)]
+struct PassGate {
+    /// A pass is running (or a rerun has just been claimed for one).
+    in_flight: AtomicBool,
+    /// A trigger arrived while a pass was running.
+    rerun_requested: AtomicBool,
+}
+
+impl PassGate {
+    /// A trigger arrives: `true` when the caller must start a pass, `false`
+    /// when a pass is already running — in which case the request is
+    /// recorded and [`Self::should_rerun`] will pick it up.
+    ///
+    /// The request is recorded BEFORE the claim so a pass ending
+    /// concurrently either sees it or loses the claim to us; a claim we win
+    /// consumes it, because the pass we are about to start IS that run.
+    fn should_start(&self) -> bool {
+        self.rerun_requested.store(true, Ordering::SeqCst);
+        if self.in_flight.swap(true, Ordering::SeqCst) {
+            return false;
+        }
+        self.rerun_requested.store(false, Ordering::SeqCst);
+        true
+    }
+
+    /// A pass has just finished: `true` when it must run exactly once more,
+    /// having re-claimed the in-flight slot for that rerun. The request is
+    /// consumed either way, so two triggers during one pass buy one rerun,
+    /// not two. `false` also covers a trigger that claimed the slot for
+    /// itself in the gap — that pass is the rerun.
+    fn should_rerun(&self) -> bool {
+        self.in_flight.store(false, Ordering::SeqCst);
+        if !self.rerun_requested.swap(false, Ordering::SeqCst) {
+            return false;
+        }
+        !self.in_flight.swap(true, Ordering::SeqCst)
+    }
 }
 
 impl UpdateService {
@@ -53,6 +108,7 @@ impl UpdateService {
         Arc::new(Self {
             available: Mutex::new(HashMap::new()),
             generation: AtomicU64::new(0),
+            gate: PassGate::default(),
         })
     }
 
@@ -118,15 +174,33 @@ impl UpdateService {
 
     /// One full pass over the registry. Runs on Tauri's async runtime; a
     /// pass that is overtaken by a newer one discards its result.
+    ///
+    /// Returns without spawning when a pass is already in flight ([`PassGate`]):
+    /// that pass runs once more instead, so a burst of triggers costs two
+    /// walks of the registry at most rather than one per trigger.
     pub fn spawn_refresh(
         self: &Arc<Self>,
         app: AppHandle,
         session: Arc<SessionManager>,
         install: Arc<InstallService>,
     ) {
+        if !self.gate.should_start() {
+            return;
+        }
         let this = self.clone();
         tauri::async_runtime::spawn(async move {
-            this.refresh(app, session, install).await;
+            let mut guard = PassGuard::new(this.clone());
+            loop {
+                this.clone()
+                    .refresh(app.clone(), session.clone(), install.clone())
+                    .await;
+                if !this.gate.should_rerun() {
+                    // `should_rerun` already settled the flag, one way or
+                    // the other: nothing left for the guard to do.
+                    guard.disarm();
+                    break;
+                }
+            }
         });
     }
 
@@ -201,6 +275,37 @@ impl UpdateService {
             return;
         };
         let _ = app.emit(UPDATES_CHANGED_EVENT, emitted);
+    }
+}
+
+/// Releases [`PassGate`]'s in-flight flag when the pass task unwinds.
+///
+/// The normal path disarms it — by then [`PassGate::should_rerun`] has
+/// either freed the flag or handed it to the trigger that claimed it, and
+/// clearing it again would let a second pass start beside that one. Only a
+/// panic leaves the flag set with no task behind it, which would otherwise
+/// block every later update check for the life of the process.
+struct PassGuard {
+    service: Option<Arc<UpdateService>>,
+}
+
+impl PassGuard {
+    fn new(service: Arc<UpdateService>) -> Self {
+        Self {
+            service: Some(service),
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.service = None;
+    }
+}
+
+impl Drop for PassGuard {
+    fn drop(&mut self) {
+        if let Some(service) = self.service.take() {
+            service.gate.in_flight.store(false, Ordering::SeqCst);
+        }
     }
 }
 
@@ -376,6 +481,55 @@ mod tests {
             }]
         );
         assert!(service.has_update(2));
+    }
+
+    /// However many triggers land while a pass is running, the pass goes
+    /// around exactly once more — not once per trigger.
+    #[test]
+    fn triggers_during_a_pass_collapse_into_one_rerun() {
+        let gate = PassGate::default();
+        assert!(gate.should_start(), "nothing was running");
+        assert!(!gate.should_start(), "a pass is in flight");
+        assert!(!gate.should_start());
+        assert!(gate.should_rerun(), "the triggers earn one rerun");
+        assert!(!gate.should_rerun(), "...and only one");
+    }
+
+    #[test]
+    fn a_pass_with_no_trigger_does_not_rerun() {
+        let gate = PassGate::default();
+        assert!(gate.should_start());
+        assert!(!gate.should_rerun());
+        // The slot is free again, so the next trigger runs immediately.
+        assert!(gate.should_start());
+    }
+
+    /// A trigger that arrives after the pass released the slot is a fresh
+    /// pass, not a queued rerun.
+    #[test]
+    fn a_trigger_after_a_pass_ends_starts_its_own_pass() {
+        let gate = PassGate::default();
+        assert!(gate.should_start());
+        assert!(!gate.should_rerun());
+        assert!(gate.should_start());
+        assert!(!gate.should_rerun(), "that trigger was not queued twice");
+    }
+
+    /// The panic path: the guard frees the slot so later triggers still run.
+    #[test]
+    fn an_abandoned_pass_guard_frees_the_slot() {
+        let service = UpdateService::new();
+        assert!(service.gate.should_start());
+        drop(PassGuard::new(service.clone()));
+        assert!(service.gate.should_start());
+        // ...and a disarmed guard leaves the flag exactly as it found it.
+        let mut guard = PassGuard::new(service.clone());
+        guard.disarm();
+        drop(guard);
+        assert!(
+            !service.gate.should_start(),
+            "the pass still holds the slot"
+        );
     }
 
     /// `clear` emits only on the transition, so `take_all` reports the set as

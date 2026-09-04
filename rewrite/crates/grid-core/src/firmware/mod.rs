@@ -141,6 +141,10 @@ pub async fn install_platform_firmware(
 
         let applicable = resolve_targets(&file_name, targets);
         if applicable.is_empty() {
+            // No target's keywords match, so this file has nowhere to go.
+            // Logged, not a warning to the caller: the pass still
+            // succeeded. The file name only — never a URL or a header.
+            tracing::warn!("firmware: {file_name} matched no target directory");
             continue;
         }
 
