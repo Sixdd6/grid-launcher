@@ -25,8 +25,8 @@ export async function initAppUpdate(): Promise<UnlistenFn> {
     state.notice = e.payload;
   });
   try {
-    const notice = await api.appUpdateNotice();
-    if (notice !== null && state.notice === null) state.notice = notice;
+    const status = await api.appUpdateNotice();
+    if (status.notice !== null && state.notice === null) state.notice = status.notice;
   } catch {
     // No notice is the normal outcome; a failed pull is never surfaced.
   }

@@ -9,7 +9,7 @@ use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
 use super::{err, AppState};
-use crate::app_update::AppUpdateNotice;
+use crate::app_update::AppUpdateStatus;
 use crate::update_service::{UpdateRow, UPDATE_GONE};
 
 /// The only URL prefix `open_release_page` will hand to the OS.
@@ -76,12 +76,15 @@ pub async fn update_game(
     }
 }
 
-/// The self-update notice the startup check produced, if any. The banner's
-/// event listener can register after the check has already emitted, so the
-/// frontend pulls this once on mount as well as listening.
+/// The startup check's result: the notice, if any, and when the check
+/// completed (`checked_at`, RFC 3339 UTC). `checked_at` is `None` when the
+/// check was skipped (dev build) or failed, so Settings › Updates never
+/// claims "up to date" for a check that never ran. The frontend's event
+/// listener can register after the check has already emitted, so it pulls
+/// this once on mount as well as listening.
 #[tauri::command]
-pub fn app_update_notice(state: State<'_, AppState>) -> Option<AppUpdateNotice> {
-    state.app_update.get()
+pub fn app_update_notice(state: State<'_, AppState>) -> AppUpdateStatus {
+    state.app_update.status()
 }
 
 #[tauri::command]

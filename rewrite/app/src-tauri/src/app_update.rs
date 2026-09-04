@@ -23,31 +23,76 @@ const LATEST_RELEASE_HOST: &str = "api.github.com";
 /// response cannot make this process buffer it, let alone parse it.
 const MAX_RELEASE_BODY: usize = 1024 * 1024;
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AppUpdateNotice {
     pub tag: String,
     pub url: String,
 }
 
-/// The notice the startup check produced, held so a webview that mounts
-/// after the emit can still pull it (`commands::updates::app_update_notice`).
-/// Tauri buffers nothing for a window with no listener, and the check never
-/// repeats, so without this the banner is simply lost when the forge answers
+/// What one run of the check concluded. `Failed` covers every silent
+/// `None` of old — transport, status, cap, decode, missing fields — and is
+/// the one outcome that must NOT count as a completed check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckOutcome {
+    UpToDate,
+    Newer(AppUpdateNotice),
+    Failed,
+}
+
+/// The payload `commands::updates::app_update_notice` returns. `checked_at`
+/// is RFC 3339 UTC, set when a check COMPLETED (with or without a notice)
+/// and `None` when it was skipped (dev build, `should_check`) or failed —
+/// so Settings › Updates can say "Not checked yet" instead of a false
+/// "Up to date". `#[serde(default)]` keeps a payload written before this
+/// field existed decodable.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AppUpdateStatus {
+    pub notice: Option<AppUpdateNotice>,
+    #[serde(default)]
+    pub checked_at: Option<String>,
+}
+
+/// The startup check's result, held so a webview that mounts after the
+/// emit can still pull it (`commands::updates::app_update_notice`). Tauri
+/// buffers nothing for a window with no listener, and the check never
+/// repeats, so without this the badge is simply lost when the forge answers
 /// faster than the frontend boots.
 #[derive(Default)]
-pub struct AppUpdateState(Mutex<Option<AppUpdateNotice>>);
+pub struct AppUpdateState(Mutex<AppUpdateStatus>);
+
+fn stamp(now: chrono::DateTime<chrono::Utc>) -> String {
+    now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
 
 impl AppUpdateState {
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
     }
 
-    pub fn set(&self, notice: AppUpdateNotice) {
-        *self.0.lock().expect("app update notice mutex") = Some(notice);
+    /// Records one finished run. A `Failed` run changes nothing: the last
+    /// completed result (or the initial "not checked") stands.
+    pub fn record(&self, outcome: &CheckOutcome, now: chrono::DateTime<chrono::Utc>) {
+        let mut status = self.0.lock().expect("app update status mutex");
+        match outcome {
+            CheckOutcome::Failed => {}
+            CheckOutcome::UpToDate => {
+                status.notice = None;
+                status.checked_at = Some(stamp(now));
+            }
+            CheckOutcome::Newer(notice) => {
+                status.notice = Some(notice.clone());
+                status.checked_at = Some(stamp(now));
+            }
+        }
     }
 
+    pub fn status(&self) -> AppUpdateStatus {
+        self.0.lock().expect("app update status mutex").clone()
+    }
+
+    #[allow(dead_code)] // kept per Task 3's brief; Tasks 4/5 read the notice off `status()` too
     pub fn get(&self) -> Option<AppUpdateNotice> {
-        self.0.lock().expect("app update notice mutex").clone()
+        self.status().notice
     }
 }
 
@@ -90,46 +135,48 @@ fn e2e_forced() -> bool {
 }
 
 /// Runs the check once, on Tauri's async runtime. Call from `setup`.
-/// Stores the notice in `store` BEFORE emitting, so a frontend that misses
-/// the event can pull the same value afterwards.
+/// Records the outcome in `store` BEFORE emitting, so a frontend that
+/// misses the event can pull the same value (and its `checked_at`)
+/// afterwards. A dev build returns before spawning: nothing is recorded,
+/// and the status stays "not checked".
 pub fn spawn_check(app: AppHandle, store: Arc<AppUpdateState>) {
     let current = app.package_info().version.to_string();
     if !should_check(&current, e2e_forced()) {
         return;
     }
     tauri::async_runtime::spawn(async move {
-        if let Some(notice) = fetch_notice(&current).await {
-            store.set(notice.clone());
+        let outcome = fetch_outcome(&current).await;
+        store.record(&outcome, chrono::Utc::now());
+        if let CheckOutcome::Newer(notice) = outcome {
             let _ = app.emit(APP_UPDATE_EVENT, notice);
         }
     });
 }
 
 /// The production check: builds the forge client and asks GitHub.
-async fn fetch_notice(current: &str) -> Option<AppUpdateNotice> {
-    let client = ForgeClient::new().ok()?;
-    fetch_notice_from(&client, LATEST_RELEASE_URL, current).await
+async fn fetch_outcome(current: &str) -> CheckOutcome {
+    match ForgeClient::new() {
+        Ok(client) => fetch_outcome_from(&client, LATEST_RELEASE_URL, current).await,
+        Err(_) => CheckOutcome::Failed,
+    }
 }
 
 /// One `releases/latest` request against `url`, decoded and compared against
 /// `current`. The endpoint is a parameter so tests can point it at a local
 /// mock server; production always passes [`LATEST_RELEASE_URL`].
 ///
-/// Returns `Some` only for a release that carries both a tag and a page URL
-/// and whose tag is newer than `current`. Every failure — transport, non-2xx
-/// status, a body over [`MAX_RELEASE_BODY`], undecodable body, missing
-/// fields — is a silent `None` logged at debug level, naming
-/// [`LATEST_RELEASE_HOST`] and never the request URL.
-async fn fetch_notice_from(
-    client: &ForgeClient,
-    url: &str,
-    current: &str,
-) -> Option<AppUpdateNotice> {
+/// `Newer` only for a release that carries both a tag and a page URL and
+/// whose tag is newer than `current`; `UpToDate` for a well-formed release
+/// that is not newer; every failure — transport, non-2xx status, a body
+/// over [`MAX_RELEASE_BODY`], undecodable body, missing fields — is a
+/// silent `Failed` logged at debug level, naming [`LATEST_RELEASE_HOST`]
+/// and never the request URL.
+async fn fetch_outcome_from(client: &ForgeClient, url: &str, current: &str) -> CheckOutcome {
     let mut response = match client.get(url, true).await {
         Ok(response) => response,
         Err(_) => {
             tracing::debug!("self-update check: request to {LATEST_RELEASE_HOST} failed");
-            return None;
+            return CheckOutcome::Failed;
         }
     };
     // Chunk by chunk rather than `bytes()`: the cap has to stop the READ, not
@@ -143,7 +190,7 @@ async fn fetch_notice_from(
                     tracing::debug!(
                         "self-update check: release body from {LATEST_RELEASE_HOST} over the cap"
                     );
-                    return None;
+                    return CheckOutcome::Failed;
                 }
                 body.extend_from_slice(&chunk);
             }
@@ -152,7 +199,7 @@ async fn fetch_notice_from(
                 tracing::debug!(
                     "self-update check: response from {LATEST_RELEASE_HOST} did not read"
                 );
-                return None;
+                return CheckOutcome::Failed;
             }
         }
     }
@@ -160,16 +207,17 @@ async fn fetch_notice_from(
         Ok(release) => release,
         Err(_) => {
             tracing::debug!("self-update check: release JSON did not decode");
-            return None;
+            return CheckOutcome::Failed;
         }
     };
-    if release.tag_name.is_empty()
-        || release.html_url.is_empty()
-        || !is_newer(current, &release.tag_name)
-    {
-        return None;
+    if release.tag_name.is_empty() || release.html_url.is_empty() {
+        tracing::debug!("self-update check: release JSON is missing its tag or URL");
+        return CheckOutcome::Failed;
     }
-    Some(AppUpdateNotice {
+    if !is_newer(current, &release.tag_name) {
+        return CheckOutcome::UpToDate;
+    }
+    CheckOutcome::Newer(AppUpdateNotice {
         tag: release.tag_name,
         url: release.html_url,
     })
@@ -193,16 +241,94 @@ mod tests {
         assert!(is_newer("0.9.0-dev", "V0.9.0"));
     }
 
-    #[test]
-    fn the_notice_store_starts_empty_and_round_trips() {
-        let store = AppUpdateState::new();
-        assert_eq!(store.get(), None);
-        let notice = AppUpdateNotice {
+    fn at(secs: i64) -> chrono::DateTime<chrono::Utc> {
+        chrono::DateTime::from_timestamp(secs, 0).unwrap()
+    }
+
+    fn notice() -> AppUpdateNotice {
+        AppUpdateNotice {
             tag: "v9.9.9".to_string(),
             url: "https://github.com/Sixdd6/grid-launcher/releases/tag/v9.9.9".to_string(),
-        };
-        store.set(notice.clone());
-        assert_eq!(store.get(), Some(notice));
+        }
+    }
+
+    /// State 1: skipped (a dev build never calls `record`) or failed — no
+    /// stamp, so the frontend cannot claim "up to date".
+    #[test]
+    fn a_skipped_or_failed_check_leaves_no_timestamp() {
+        let store = AppUpdateState::new();
+        assert_eq!(store.status(), AppUpdateStatus::default());
+        store.record(&CheckOutcome::Failed, at(1_700_000_000));
+        assert_eq!(
+            store.status(),
+            AppUpdateStatus {
+                notice: None,
+                checked_at: None
+            }
+        );
+        assert_eq!(store.get(), None);
+    }
+
+    /// State 2: the check completed and found nothing newer.
+    #[test]
+    fn an_up_to_date_check_stamps_the_time_without_a_notice() {
+        let store = AppUpdateState::new();
+        store.record(&CheckOutcome::UpToDate, at(1_700_000_000));
+        assert_eq!(
+            store.status(),
+            AppUpdateStatus {
+                notice: None,
+                checked_at: Some("2023-11-14T22:13:20Z".to_string()),
+            }
+        );
+    }
+
+    /// State 3: the check completed and found a newer release.
+    #[test]
+    fn a_newer_release_stamps_the_time_and_stores_the_notice() {
+        let store = AppUpdateState::new();
+        store.record(&CheckOutcome::Newer(notice()), at(1_700_000_000));
+        assert_eq!(
+            store.status(),
+            AppUpdateStatus {
+                notice: Some(notice()),
+                checked_at: Some("2023-11-14T22:13:20Z".to_string()),
+            }
+        );
+        assert_eq!(store.get(), Some(notice()));
+    }
+
+    /// A failure after a completed check keeps the completed result: the
+    /// last true statement stands, and nothing is un-checked.
+    #[test]
+    fn a_failure_never_erases_a_completed_check() {
+        let store = AppUpdateState::new();
+        store.record(&CheckOutcome::Newer(notice()), at(1_700_000_000));
+        store.record(&CheckOutcome::Failed, at(1_700_000_060));
+        assert_eq!(
+            store.status().checked_at,
+            Some("2023-11-14T22:13:20Z".to_string())
+        );
+        assert_eq!(store.get(), Some(notice()));
+    }
+
+    /// `#[serde(default)]`: a payload written before `checked_at` existed
+    /// still decodes, as "not checked".
+    #[test]
+    fn a_payload_without_checked_at_still_decodes() {
+        let status: AppUpdateStatus = serde_json::from_str(r#"{"notice":null}"#).unwrap();
+        assert_eq!(
+            status,
+            AppUpdateStatus {
+                notice: None,
+                checked_at: None
+            }
+        );
+        let status: AppUpdateStatus =
+            serde_json::from_str(r#"{"notice":{"tag":"v9.9.9","url":"https://github.com/Sixdd6/grid-launcher/releases/tag/v9.9.9"}}"#)
+                .unwrap();
+        assert_eq!(status.notice, Some(notice()));
+        assert_eq!(status.checked_at, None);
     }
 
     #[test]
@@ -247,8 +373,8 @@ mod tests {
         .await;
         let client = ForgeClient::new().unwrap();
         assert_eq!(
-            fetch_notice_from(&client, &url, "0.9.0").await,
-            Some(AppUpdateNotice {
+            fetch_outcome_from(&client, &url, "0.9.0").await,
+            CheckOutcome::Newer(AppUpdateNotice {
                 tag: "v9.9.9".to_string(),
                 url: "https://github.com/Sixdd6/grid-launcher/releases/tag/v9.9.9".to_string(),
             })
@@ -260,7 +386,10 @@ mod tests {
         let server = MockServer::start().await;
         let url = mock_release(&server, ResponseTemplate::new(404)).await;
         let client = ForgeClient::new().unwrap();
-        assert_eq!(fetch_notice_from(&client, &url, "0.9.0").await, None);
+        assert_eq!(
+            fetch_outcome_from(&client, &url, "0.9.0").await,
+            CheckOutcome::Failed
+        );
     }
 
     /// The cap exists so a peer that answers the update check with an
@@ -280,7 +409,10 @@ mod tests {
         )
         .await;
         let client = ForgeClient::new().unwrap();
-        assert_eq!(fetch_notice_from(&client, &url, "0.9.0").await, None);
+        assert_eq!(
+            fetch_outcome_from(&client, &url, "0.9.0").await,
+            CheckOutcome::Failed
+        );
     }
 
     #[tokio::test]
@@ -295,6 +427,9 @@ mod tests {
         )
         .await;
         let client = ForgeClient::new().unwrap();
-        assert_eq!(fetch_notice_from(&client, &url, "0.9.0").await, None);
+        assert_eq!(
+            fetch_outcome_from(&client, &url, "0.9.0").await,
+            CheckOutcome::UpToDate
+        );
     }
 }

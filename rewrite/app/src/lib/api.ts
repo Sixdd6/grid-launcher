@@ -328,6 +328,9 @@ export const UPDATES_CHANGED_EVENT = 'updates-changed';
 // Launcher self-update (rewrite/app/src-tauri/src/app_update.rs).
 
 export type AppUpdateNotice = { tag: string; url: string };
+/** `app_update_notice`'s payload: the notice, if any, and when the startup
+ *  check completed (RFC 3339 UTC) — `null` when it was skipped or failed. */
+export type AppUpdateStatus = { notice: AppUpdateNotice | null; checked_at: string | null };
 /// Emitted at most once per process when a newer launcher release exists.
 export const APP_UPDATE_EVENT = 'app-update-available';
 
@@ -429,6 +432,6 @@ export const api = {
   listUpdates: () => invoke<UpdateRow[]>('list_updates'),
   updateGame: (romId: number) => invoke<void>('update_game', { romId }),
   appVersion: () => invoke<string>('app_version'),
-  appUpdateNotice: () => invoke<AppUpdateNotice | null>('app_update_notice'),
+  appUpdateNotice: () => invoke<AppUpdateStatus>('app_update_notice'),
   openReleasePage: (url: string) => invoke<void>('open_release_page', { url }),
 };
