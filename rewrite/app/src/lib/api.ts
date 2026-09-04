@@ -9,6 +9,9 @@ export type RestoreOutcome =
   | { kind: 'connected'; state: SessionState }
   | { kind: 'unreachable'; server_url: string; username: string; error: string };
 export type Platform = { id: number; name: string; slug: string; rom_count: number };
+/** One platform a batched emulator/core lookup is asking about. Field names
+ *  match the backend's `PlatformRef` (app/src-tauri/src/commands.rs). */
+export type PlatformRef = { name: string; slug: string };
 export type GameSummary = {
   id: number;
   name: string;
@@ -319,8 +322,13 @@ export const api = {
   setDefaultEmulator: (platform: string, name: string) =>
     invoke<void>('set_default_emulator', { platform, name }),
   /** Emulator names supporting each platform, keyed by the platform name asked about. */
-  compatibleEmulators: (platforms: string[]) =>
+  compatibleEmulators: (platforms: PlatformRef[]) =>
     invoke<Record<string, string[]>>('compatible_emulators', { platforms }),
+  /** Installed libretro cores offered for each platform, keyed by platform name. */
+  retroarchCoreOptions: (platforms: PlatformRef[]) =>
+    invoke<Record<string, string[]>>('retroarch_core_options', { platforms }),
+  setRetroarchCore: (platform: string, core: string) =>
+    invoke<void>('set_retroarch_core', { platform, core }),
   listEmulatorCatalog: () => invoke<CatalogEntry[]>('list_emulator_catalog'),
   installEmulator: (sourceId: string) => invoke<void>('install_emulator', { sourceId }),
   setRetroachievementsCredentials: (username: string, token: string) =>

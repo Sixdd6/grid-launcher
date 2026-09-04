@@ -48,3 +48,59 @@ export function platformDefaultSelect(
     : (compatibleNames[0] ?? NO_DEFAULT_VALUE);
   return { options: compatibleNames, selected, disabled: compatibleNames.length === 0 };
 }
+
+/** The `<select>` value that means "no core for this platform". */
+export const NO_CORE_VALUE = '';
+
+/**
+ * Whether `name` is a RetroArch build. Mirrors the backend's
+ * `is_retroarch_name` (crates/grid-core/src/launch/selection.rs): the name
+ * contains "retroarch", case-insensitively.
+ */
+export function isRetroarchName(name: string): boolean {
+  return name.toLowerCase().includes('retroarch');
+}
+
+/** What one platform row's core `<select>` renders. */
+export type PlatformCoreSelect = {
+  /** True only when the row's selected emulator is a RetroArch build. */
+  visible: boolean;
+  /** The installed compatible core ids, in backend order. */
+  options: string[];
+  /** The value shown selected — always one of `options`, or [`NO_CORE_VALUE`]. */
+  selected: string;
+  /** True when no compatible core is installed. */
+  disabled: boolean;
+};
+
+/** The core saved for `platformName`, or `''`. Case-insensitive lookup. */
+function savedCoreFor(defaults: LaunchDefaults | null, platformName: string): string {
+  if (!defaults) return '';
+  const folded = platformName.toLowerCase();
+  const key = Object.keys(defaults.retroarch_cores).find((k) => k.toLowerCase() === folded);
+  return key ? defaults.retroarch_cores[key] : '';
+}
+
+/**
+ * The core select for `platformName`. `coreOptions` is the backend's
+ * `retroarch_core_options` answer for that platform, so only cores actually
+ * installed beside the RetroArch executable are ever offered.
+ *
+ * A saved core that is no longer installed shows the first option instead
+ * (D-RC-5). This is DISPLAY only — falling back never writes the fallback.
+ */
+export function platformCoreSelect(
+  defaults: LaunchDefaults | null,
+  platformName: string,
+  selectedEmulator: string,
+  coreOptions: string[]
+): PlatformCoreSelect {
+  const saved = savedCoreFor(defaults, platformName);
+  const selected = coreOptions.includes(saved) ? saved : (coreOptions[0] ?? NO_CORE_VALUE);
+  return {
+    visible: isRetroarchName(selectedEmulator),
+    options: coreOptions,
+    selected,
+    disabled: coreOptions.length === 0,
+  };
+}

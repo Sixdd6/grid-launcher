@@ -6,6 +6,7 @@
     type EmulatorEntry,
     type LaunchDefaults,
     type Platform,
+    type PlatformRef,
     type ProfileSummary,
     type RaFanOutRow,
     type RaStatus,
@@ -16,7 +17,12 @@
     matchProfileByName,
     shouldAutoFillFromName,
   } from './emulators/catalog';
-  import { NO_DEFAULT_VALUE, platformDefaultSelect } from './emulators/defaults';
+  import {
+    NO_CORE_VALUE,
+    NO_DEFAULT_VALUE,
+    platformCoreSelect,
+    platformDefaultSelect,
+  } from './emulators/defaults';
   import { canSubmit, fanOutSummary, statusLabel } from './emulators/retroachievements';
   import { isWindowsHost } from './emulators/compatTools';
   import CompatTools from './emulators/CompatTools.svelte';
@@ -40,6 +46,11 @@
   // Its own error slot, never `defaultsError`: this fetch re-runs on every
   // platform/emulator change and would otherwise clear a real defaults error.
   let compatibleError = $state<string | null>(null);
+
+  // The backend's `retroarch_core_options` answer, keyed by platform NAME.
+  // Fetched on the same trigger set as `compatible`, because both depend on
+  // the emulator list and on which core files are on disk.
+  let coreOptions = $state<Record<string, string[]>>({});
 
   let profiles = $state<ProfileSummary[]>([]);
 
@@ -200,19 +211,20 @@
     refreshCloudSettings();
   });
 
-  // Both inputs of the compatibility answer: the platforms it is asked
-  // about, and the emulator list the backend draws it from. Reading both
-  // here is what makes a freshly added (or installed) emulator show up in
-  // the per-platform selects without a reload.
+  // Both inputs of the compatibility and core answers: the platforms they
+  // are asked about, and the emulator list the backend draws them from.
+  // Reading both here is what makes a freshly added (or installed) emulator
+  // show up in the per-platform selects without a reload.
   let compatibilityInputs = $derived({
-    platformNames: platforms.map((p) => p.name),
+    platformRefs: platforms.map((p) => ({ name: p.name, slug: p.slug })),
     emulatorNames: emulators.map((e) => e.name).join(','),
   });
 
   $effect(() => {
-    const { platformNames, emulatorNames } = compatibilityInputs;
+    const { platformRefs, emulatorNames } = compatibilityInputs;
     void emulatorNames;
-    refreshCompatible(platformNames);
+    refreshCompatible(platformRefs);
+    refreshCoreOptions(platformRefs);
   });
 
   // An emulator install reaching a terminal status can have ADDED an entry,
@@ -279,15 +291,30 @@
     }
   }
 
-  async function refreshCompatible(platformNames: string[]) {
-    if (platformNames.length === 0) {
+  async function refreshCompatible(refs: PlatformRef[]) {
+    if (refs.length === 0) {
       compatible = {};
       return;
     }
     try {
-      compatible = await api.compatibleEmulators(platformNames);
+      compatible = await api.compatibleEmulators(refs);
       compatibleError = null;
     } catch (err) {
+      compatibleError = errorMessage(err);
+    }
+  }
+
+  async function refreshCoreOptions(refs: PlatformRef[]) {
+    if (refs.length === 0) {
+      coreOptions = {};
+      return;
+    }
+    try {
+      coreOptions = await api.retroarchCoreOptions(refs);
+      compatibleError = null;
+    } catch (err) {
+      // Shares the compatibility error slot (design §3.4) so a core-options
+      // failure cannot clear a real defaults error.
       compatibleError = errorMessage(err);
     }
   }
@@ -447,9 +474,27 @@
     return platformDefaultSelect(defaults, platformName, compatible[platformName] ?? []);
   }
 
+  function coreSelectFor(platformName: string, selectedEmulator: string) {
+    return platformCoreSelect(
+      defaults,
+      platformName,
+      selectedEmulator,
+      coreOptions[platformName] ?? []
+    );
+  }
+
   async function handleDefaultChange(platformName: string, value: string) {
     try {
       await api.setDefaultEmulator(platformName, value);
+      await refreshDefaults();
+    } catch (err) {
+      defaultsError = errorMessage(err);
+    }
+  }
+
+  async function handleCoreChange(platformName: string, value: string) {
+    try {
+      await api.setRetroarchCore(platformName, value);
       await refreshDefaults();
     } catch (err) {
       defaultsError = errorMessage(err);
@@ -733,6 +778,8 @@
           {#each platforms as p (p.id)}
             {@const selectId = `default-emulator-${p.id}`}
             {@const choice = selectFor(p.name)}
+            {@const coreId = `default-core-${p.id}`}
+            {@const core = coreSelectFor(p.name, choice.selected)}
             <li class="defaults-row">
               <label class="platform-name" for={selectId}>{p.name}</label>
               <!-- `default-select-<platformId>` is the per-platform select's
@@ -754,6 +801,24 @@
                   {/each}
                 {/if}
               </select>
+              {#if core.visible}
+                <label class="visually-hidden" for={coreId}>Core</label>
+                <select
+                  data-testid={`default-core-${p.id}`}
+                  id={coreId}
+                  disabled={core.disabled}
+                  value={core.selected}
+                  onchange={(e) => handleCoreChange(p.name, (e.currentTarget as HTMLSelectElement).value)}
+                >
+                  {#if core.disabled}
+                    <option value={NO_CORE_VALUE}>No installed core</option>
+                  {:else}
+                    {#each core.options as id (id)}
+                      <option value={id}>{id}</option>
+                    {/each}
+                  {/if}
+                </select>
+              {/if}
             </li>
           {/each}
         </ul>
@@ -1331,5 +1396,17 @@
     background: var(--bg);
     color: var(--text-h);
     max-width: 200px;
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
   }
 </style>
