@@ -1,14 +1,57 @@
+/* Theme tokens, adopted from RomM v2's `tokens/index.ts` (design §4).
+   Defined ONCE, here. Light is the base palette on :root; dark replaces
+   the same variables under `prefers-color-scheme: dark` and under an
+   explicit `data-theme="dark"`, and light is restated under
+   `data-theme="light"` so the override wins in both directions. */
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --accent: #aa3bff;
+  /* Surfaces and text — light */
+  --bg: #f5f5fa;
+  --surface: rgba(0, 0, 0, 0.035);
+  --surface-2: #ffffff;
+  --border: #dcdce6;
+  --text: #111117;
+  --text-h: #111117;
+  --text-muted: #5a5a70;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  /* Brand — primary darkens in light mode (design §4) */
+  --primary: #553e98;
+  --primary-hover: #6043c8;
+  --primary-pressed: #45307c;
+  --secondary: #9e8cd6;
+  --accent-warm: #e1a38d;
+  --favourite: #ff4f6b;
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
+  /* Status */
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #ff5050;
+  --info: #93c5fd;
+  --graph-disk: #2dd4bf;
+
+  /* `--accent` predates the redesign and is still read by pre-redesign
+     components (focus rings, progress fills). It tracks --primary. */
+  --accent: var(--primary);
+
+  /* Type */
+  --sans: 'Segoe UI', system-ui, Inter, Roboto, sans-serif;
+
+  /* Radii (design §4: 4 controls / 6 chips / 8 rows / 14 cards / 100 pills) */
+  --r-control: 4px;
+  --r-chip: 6px;
+  --r-row: 8px;
+  --r-card: 14px;
+  --r-pill: 100px;
+
+  /* Motion */
+  --m-fast: 150ms;
+  --m-base: 220ms;
+  --m-slow: 360ms;
+
+  /* Shell metrics (design §3) */
+  --topbar-h: 58px;
+  --footer-h: 28px;
+
+  font: 13px/145% var(--sans);
   color-scheme: light dark;
   color: var(--text);
   background: var(--bg);
@@ -19,13 +62,44 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --accent: #c084fc;
+  :root:not([data-theme='light']) {
+    --bg: #07070f;
+    --surface: rgba(255, 255, 255, 0.07);
+    --surface-2: #14141f;
+    --border: #22223a;
+    --text: #ffffff;
+    --text-h: #ffffff;
+    --text-muted: #9a9ab0;
+    --primary: #8b74e8;
+    --primary-hover: #a18fff;
+    --primary-pressed: #6043c8;
   }
+}
+
+:root[data-theme='dark'] {
+  --bg: #07070f;
+  --surface: rgba(255, 255, 255, 0.07);
+  --surface-2: #14141f;
+  --border: #22223a;
+  --text: #ffffff;
+  --text-h: #ffffff;
+  --text-muted: #9a9ab0;
+  --primary: #8b74e8;
+  --primary-hover: #a18fff;
+  --primary-pressed: #6043c8;
+}
+
+:root[data-theme='light'] {
+  --bg: #f5f5fa;
+  --surface: rgba(0, 0, 0, 0.035);
+  --surface-2: #ffffff;
+  --border: #dcdce6;
+  --text: #111117;
+  --text-h: #111117;
+  --text-muted: #5a5a70;
+  --primary: #553e98;
+  --primary-hover: #6043c8;
+  --primary-pressed: #45307c;
 }
 
 body {
@@ -34,7 +108,8 @@ body {
 
 h1 {
   font-family: var(--sans);
-  font-weight: 500;
+  font-size: 20px;
+  font-weight: 600;
   color: var(--text-h);
 }
 
@@ -42,5 +117,14 @@ h1 {
   min-height: 100svh;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+}
+
+/* D-UI-7: list-shaped panes cap at 1100px and centre. Grids do not use
+   this class — they may run to the full window width. */
+.view-content {
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
   box-sizing: border-box;
 }

@@ -9,6 +9,7 @@
   import { init as initUpdates } from './lib/stores/updates.svelte';
   import { initAppUpdate } from './lib/stores/appUpdate.svelte';
   import { initReplenishListener } from './lib/stores/installed.svelte';
+  import { initUiSettings } from './lib/stores/uiSettings.svelte';
 
   let shell = $state<ReturnType<typeof Shell> | null>(null);
   let restored = false; // restore() must fire once on mount, not on every phase change
@@ -31,6 +32,16 @@
   // reasoning as initReplenishListener above.
   $effect(() => {
     const un = initAppUpdate();
+    return () => {
+      un.then((f) => f());
+    };
+  });
+
+  // The theme must be on `<html>` before the first paint the user sees, so
+  // this registers alongside the other pre-shell effects rather than inside
+  // Shell.svelte.
+  $effect(() => {
+    const un = initUiSettings();
     return () => {
       un.then((f) => f());
     };
