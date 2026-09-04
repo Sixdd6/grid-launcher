@@ -374,8 +374,11 @@
   .view {
     flex: 1 1 auto;
     min-height: 0;
+    /* Positioned, but `z-index: auto`: a stacking context here would trap
+       the Details dialog (z 20) below the top bar and the footer strip.
+       The background art sits at z -1 so these wrappers still paint over
+       it in DOM order. */
     position: relative;
-    z-index: 1;
   }
 
 </style>

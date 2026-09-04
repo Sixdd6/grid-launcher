@@ -50,7 +50,9 @@
   .art {
     position: fixed;
     inset: 0;
-    z-index: 0;
+    /* Behind every positioned view wrapper and the unpositioned shell
+       chrome (the `session-error` line), which paint at z 0. */
+    z-index: -1;
     pointer-events: none;
     overflow: hidden;
   }
