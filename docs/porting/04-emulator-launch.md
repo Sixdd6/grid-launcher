@@ -992,7 +992,7 @@ Deliberate deviations from the reference when porting the launch module to Rust 
 2. Sessions are tracked for every emulated launch and drive UI state; the reference tracked them only for cloud auto-upload.
 3. ~~PS3 titles cannot resolve `%ps3_launch_target%` yet (registry lacks PS3 fields until the PS3 install milestone); the reference's validation error is shown.~~ **Closed (milestone 8, task 11):** `resolve_launch` now fills `ps3_launch_target` from the row's `ps3_iso_path`/`ps3_game_id`, matching the placeholder table in §5.
 4. ~~RetroArch platform support = a non-blank `retroarch_cores` config entry, not a scan of installed core files.~~ **Closed (RetroArch cores, D-RC-1):** support is now a scan of the core files installed beside the executable, resolved slug-first; the `retroarch_cores` config map is no longer an input to the predicate.
-5. The per-platform default picker lists all emulators rather than filtering by the supports-platform test; the test still gates automatic selection.
+5. ~~The per-platform default picker lists all emulators rather than filtering by the supports-platform test; the test still gates automatic selection.~~ **Closed (dd67683):** the picker offers only the names `compatible_emulator_names_for_platform` returns.
 6. Desktop UI gains a Stop button (reference desktop had none).
 7. No `_ensure_emulator_sync_settings` call before spawn (doc 05 deferred).
 
@@ -1162,17 +1162,18 @@ Rust paths are relative to `rewrite/`.
    installed shows the first option; nothing is rewritten until the user changes it.
 6. Out of scope, deliberately: core downloads, per-game core overrides, and any change
    to `%core%` template handling.
-7. **Slug-aware panel vs. slug-less launch path.** The app commands
-   (`compatible_emulators`, `retroarch_core_options`, `set_default_emulator`) resolve
-   cores slug-first via `SyncContext::platform_slugs` / `InstallService::platform_slugs`
-   (D-RC-2). The other grid-core call sites — launch resolution
-   (`crates/grid-core/src/launch/mod.rs`), cloud ops
+7. **Slug-first resolution everywhere, via a process-wide registry.** The app commands
+   (`compatible_emulators`, `retroarch_core_options`, `set_default_emulator`,
+   `set_retroarch_core`) resolve cores slug-first from the platform list they were
+   handed / `InstallService::platform_slugs`. The grid-core call sites that see only a
+   platform NAME — launch resolution (`crates/grid-core/src/launch/mod.rs`), cloud ops
    (`crates/grid-core/src/cloud/ops/mod.rs`), firmware routing
-   (`crates/grid-core/src/firmware/routing.rs`), and install gating
-   (`crates/grid-core/src/library/mod.rs`) — pass `installed_core_resolver`
-   (`crates/grid-core/src/launch/selection.rs`), which always resolves with an empty
-   slug and therefore always falls back to the fuzzy name match. Consequence: for a
-   server platform name the fuzzy map misses but the slug map hits, the Emulators
-   panel can list RetroArch as compatible while the launch path (and cloud/firmware/
-   install gating) does not select it. Real RomM display names are full names the
-   fuzzy map recognises, so this is a known edge, recorded here rather than fixed.
+   (`crates/grid-core/src/firmware/routing.rs`), install gating
+   (`crates/grid-core/src/library/mod.rs`) and `app/src-tauri/src/firmware_service.rs` —
+   pass `installed_core_resolver` (`crates/grid-core/src/launch/selection.rs`), which
+   reads the slug from the process-wide registry
+   (`crates/grid-core/src/launch/platform_slugs.rs`). `list_platforms`
+   (`app/src-tauri/src/commands.rs`) fills that registry from the server's full platform
+   list, alongside `InstallService::set_platform_slugs`. Only a launch made BEFORE the
+   first successful platform fetch sees an empty registry and falls back to fuzzy name
+   matching; from the first fetch onward the panel and the launch path agree.

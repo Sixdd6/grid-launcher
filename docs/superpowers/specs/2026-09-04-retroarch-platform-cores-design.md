@@ -87,9 +87,12 @@ instead.
 The existing `installed_cores_for_platform` in `autoconfig/mod.rs` becomes this
 function; `DefaultsContext` and `SyncContext` learn platform slugs so the defaults
 backfill and `sync_new_emulator` use the same resolution. Slugs reach grid-core the
-way names do today: `list_platforms` records them on the install service
-alongside `set_known_platforms`. A platform with no known slug (launch path from an
-installed row, offline library) uses an empty slug and therefore the fuzzy fallback.
+way names do today: `list_platforms` records them on the install service alongside
+`set_known_platforms`, and in the process-wide registry
+(`launch/platform_slugs.rs`) that `installed_core_resolver` reads, so the launch,
+cloud, firmware and install paths are slug-aware without a signature change.
+A platform with no recorded slug — any platform before the first successful
+platform fetch — uses an empty slug and therefore the fuzzy fallback.
 
 Effect on auto-picks for a fresh install: Game Boy Advance → `mgba`, Arcade →
 `fbneo`, Super Nintendo → `snes9x`. Existing saved cores are untouched.
@@ -100,8 +103,11 @@ Effect on auto-picks for a fresh install: Game Boy Advance → `mgba`, Arcade �
   where `PlatformRef { name: String, slug: String }`. Same answer shape as today,
   keyed by name.
 - New `retroarch_core_options(platforms: Vec<PlatformRef>) -> BTreeMap<String, Vec<String>>`:
-  for each platform, the installed compatible cores of the **first** RetroArch entry
-  in config order (the entry the emulator select would offer), or `[]`.
+  for each platform, the installed compatible cores of that platform's RetroArch
+  entry — its saved default when that entry is a RetroArch build, else the **first**
+  RetroArch entry in config order — or `[]`. `set_retroarch_core`'s guard resolves
+  the entry the same way, so the picker and the guard never disagree when two
+  RetroArch builds are configured.
 - New `set_retroarch_core(platform: String, core: String) -> Result<(), String>`:
   inside the `modify_config` closure, refuse with
   `"<core> is not an installed RetroArch core for <platform>"` unless `core` is in
