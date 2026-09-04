@@ -291,6 +291,8 @@ pub fn run() {
             commands::get_launch_defaults,
             commands::set_default_emulator,
             commands::compatible_emulators,
+            commands::retroarch_core_options,
+            commands::set_retroarch_core,
             commands::list_emulator_catalog,
             commands::install_emulator,
             commands::set_retroachievements_credentials,
