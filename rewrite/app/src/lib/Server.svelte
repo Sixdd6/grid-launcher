@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { api, type GameSummary, type Platform } from './api';
+  import { api, FIRMWARE_PASS_FINISHED_EVENT, type FirmwarePassFinished, type GameSummary, type Platform } from './api';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import Details from './Details.svelte';
   import GameCard from './GameCard.svelte';
   import CardGrid from './CardGrid.svelte';
@@ -24,6 +25,15 @@
     platformCountsLine,
     type FirmwareChipState,
   } from './server/header';
+  import {
+    firmwareInstallLabel,
+    firmwarePassFinished,
+    firmwareRequested,
+    firmwareStatusSettled,
+    NO_FIRMWARE_REQUEST,
+    type FirmwareRequest,
+  } from './server/firmware';
+  import { savedDefaultFor } from './emulators/defaults';
   import { chordBlocked, chordContext, shouldFocusSearch } from './views/searchKeys';
 
   let {
@@ -40,12 +50,23 @@
   let searchEl = $state<HTMLInputElement | null>(null);
   let detailsGame = $state<GameSummary | null>(null);
   let detailsCloudMode = $state<CloudMode>('overview');
-  let installError = $state<string | null>(null);
+  // Every inline failure the grid can produce: a refused install AND a
+  // refused launch, both from `primary()`. Shown in `server-error`.
+  let actionError = $state<string | null>(null);
   let cloudPlatforms = $state<ReadonlySet<string>>(new Set<string>());
   // Platform name -> default emulator name, for the header's emulator chip.
   let defaultEmulators = $state<Record<string, string>>({});
   let firmware = $state<FirmwareChipState>(null);
-  let firmwareRequested = $state(false);
+  let firmwareRequest = $state<FirmwareRequest>(NO_FIRMWARE_REQUEST);
+  // True only while THIS platform's Install is unanswered: a request left
+  // over from another platform must never disable this one's button.
+  let firmwarePending = $derived(
+    firmwareRequest.pending && firmwareRequest.platformId === activePlatform,
+  );
+  // The game list belongs to the previous platform until `listGames`
+  // answers. The counts line and the empty message would both state
+  // something false about the new platform in that gap, so neither renders.
+  let gamesLoading = $state(false);
   // The header's own error line: a refused Install. Never a path or a token —
   // the backend's command errors carry neither, and nothing is appended.
   let headerError = $state<string | null>(null);
@@ -61,6 +82,7 @@
   let installedCount = $derived(
     games.filter((game) => isInstalled(game, activePlatformName)).length,
   );
+  let defaultEmulator = $derived(savedDefaultFor(defaultEmulators, activePlatformName));
 
   // Design §5: the Server rail is the shared `RailPane`. The row keeps the
   // `platform-btn-<id>` id the specs already use and carries the §11
@@ -116,41 +138,75 @@
 
   // One status call per platform selection. Reset to `null` first so the
   // chip reads "checking…" rather than the previous platform's answer.
+  // One status call per platform selection, and one more per reconnect:
+  // a status that was refused offline reads 'unavailable' forever otherwise.
   $effect(() => {
     const id = activePlatform;
     const name = activePlatformName;
     if (id === null || name === '') return;
+    void session.connected; // re-runs on reconnect
     firmware = null;
     // A new platform is a new question: the previous platform's install
-    // button must not still read "Installing…", nor its error still stand.
-    firmwareRequested = false;
+    // button must not still read "Requested…", nor its error still stand.
+    firmwareRequest = NO_FIRMWARE_REQUEST;
     headerError = null;
+    refreshFirmwareStatus(id, name);
+  });
+
+  /** One status read, with the staleness guard both callers need. Ends any
+   *  Install request for `id`: the chip is showing a fresh answer, so the
+   *  button has nothing left to wait for. */
+  function refreshFirmwareStatus(id: number, name: string) {
     api
       .platformFirmwareStatus(id, name)
       .then((status) => {
         if (activePlatform === id) firmware = status;
+        firmwareRequest = firmwareStatusSettled(firmwareRequest, id);
       })
       .catch(() => {
         // Unreachable or refused. Say so: "checking…" forever would claim a
         // call is still in flight when none is, and reporting "no firmware"
         // would claim an answer we never got.
         if (activePlatform === id) firmware = 'unavailable';
+        firmwareRequest = firmwareStatusSettled(firmwareRequest, id);
       });
+  }
+
+  // The background pass announces its own end (it is fire-and-forget, so the
+  // command's return says nothing about it). Listener first, at mount, so no
+  // event can land between an Install and the subscription.
+  $effect(() => {
+    let unlisten: UnlistenFn | null = null;
+    let stopped = false;
+    listen<FirmwarePassFinished>(FIRMWARE_PASS_FINISHED_EVENT, (e) => {
+      const next = firmwarePassFinished(firmwareRequest, e.payload, activePlatform);
+      firmwareRequest = next.state;
+      if (next.refetch && activePlatform !== null && activePlatformName !== '') {
+        refreshFirmwareStatus(activePlatform, activePlatformName);
+      }
+    }).then((un) => {
+      if (stopped) un();
+      else unlisten = un;
+    });
+    return () => {
+      stopped = true;
+      unlisten?.();
+    };
   });
 
   function installFirmware() {
     const id = activePlatform;
     if (id === null) return;
-    firmwareRequested = true;
+    firmwareRequest = firmwareRequested(id);
     headerError = null;
     api.installFirmwareForPlatform(id, activePlatformName).catch((e) => {
       // Same staleness guard as the status fetch: a rejection that arrives
       // after the user moved on belongs to the platform it was asked about,
       // not to whichever one is on screen now.
+      firmwareRequest = firmwareStatusSettled(firmwareRequest, id);
       if (activePlatform !== id) return;
       // The command's own message, verbatim. grid-core's command errors name
       // no path and carry no token, and nothing is appended to them here.
-      firmwareRequested = false;
       headerError = String(e);
     });
   }
@@ -168,9 +224,22 @@
   async function selectPlatform(id: number) {
     activePlatform = id;
     search = '';
-    const g = await api.listGames(id);
+    // The header renders the new platform's name at once; `games` still
+    // holds the old platform's rows until the call below answers.
+    gamesLoading = true;
+    let g: GameSummary[];
+    try {
+      g = await api.listGames(id);
+    } catch {
+      if (activePlatform === id) {
+        games = [];
+        gamesLoading = false;
+      }
+      return;
+    }
     if (activePlatform !== id) return; // superseded by a newer selection
     games = g;
+    gamesLoading = false;
     focusIndex = 0;
   }
 
@@ -188,13 +257,13 @@
   /** Design §6: the hover primary is Install when not installed, Play when
    *  installed. Both report their failure inline rather than silently. */
   async function primary(game: GameSummary) {
-    installError = null;
+    actionError = null;
     try {
       if (isInstalled(game, activePlatformName)) await api.launchGame(game.id);
       else await api.installGame(game.id);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      installError = message;
+      actionError = message;
       if (message.includes('library folder')) showLibraryBanner = true;
     }
   }
@@ -247,6 +316,16 @@
       e.preventDefault();
       handleNav(action);
     }
+  }
+
+  /** Design §3: Escape leaves the search box, so the arrow keys drive the
+   *  grid again (the input owns them while it has focus). The text stays —
+   *  Escape gives the keyboard back, it does not undo the search. */
+  function onSearchKey(e: KeyboardEvent) {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    (e.currentTarget as HTMLInputElement).blur();
   }
 
   function onSizeChange(e: Event) {
@@ -306,9 +385,11 @@
       <div class="body">
         <header data-testid="server-platform-header" class="platform-header">
           <h2>{activePlatformName}</h2>
-          <p data-testid="server-platform-counts" class="counts">
-            {platformCountsLine(activePlatformRow?.rom_count ?? 0, installedCount)}
-          </p>
+          {#if !gamesLoading}
+            <p data-testid="server-platform-counts" class="counts">
+              {platformCountsLine(activePlatformRow?.rom_count ?? 0, installedCount)}
+            </p>
+          {/if}
           <div class="chips">
             <span data-testid="server-firmware-chip" class="chip">
               {firmwareChipLabel(firmware)}
@@ -316,14 +397,14 @@
                 <button
                   data-testid="server-firmware-install"
                   onclick={installFirmware}
-                  disabled={firmwareRequested}
+                  disabled={firmwarePending}
                 >
-                  {firmwareRequested ? 'Installing…' : 'Install'}
+                  {firmwareInstallLabel(firmwarePending)}
                 </button>
               {/if}
             </span>
             <button data-testid="server-emulator-chip" class="chip link" onclick={onOpenEmulators}>
-              {emulatorChipLabel(defaultEmulators[activePlatformName] ?? '')}
+              {emulatorChipLabel(defaultEmulator)}
             </button>
           </div>
           {#if headerError !== null}
@@ -340,6 +421,7 @@
             aria-label="Search this platform"
             bind:this={searchEl}
             bind:value={search}
+            onkeydown={onSearchKey}
           />
           <label class="control">
             <span>Size</span>
@@ -351,11 +433,15 @@
           </label>
         </div>
 
-        {#if installError}
-          <p data-testid="server-error" class="error" role="alert">{installError}</p>
+        {#if actionError}
+          <p data-testid="server-error" class="error" role="alert">{actionError}</p>
         {/if}
 
-        {#if visible.length === 0}
+        {#if gamesLoading}
+          <!-- The list on screen belongs to the previous platform; saying
+               "no games" about the new one before it has answered would be a
+               guess. -->
+        {:else if visible.length === 0}
           <p data-testid="server-empty" class="empty">
             {search.trim() === ''
               ? 'This platform has no games'

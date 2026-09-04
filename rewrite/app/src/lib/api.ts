@@ -284,6 +284,17 @@ export type Rpcs3FirmwareStatus = { pup_path: string | null };
 /// `app/src-tauri/src/commands.rs`'s `PlatformFirmwareStatus`.
 export type PlatformFirmwareStatus = { file_count: number; has_default_emulator: boolean };
 
+/// The `firmware-pass-finished` payload (`app/src-tauri/src/firmware_service.rs`'s
+/// `FirmwarePassFinished`). `ok` is false when the pass could not run (no
+/// session, unreadable config) or grid-core reported warnings. It carries a
+/// platform id and a flag only — never a path, an emulator name, or a URL.
+export type FirmwarePassFinished = { platform_id: number; ok: boolean };
+
+/// Emitted once for every `installFirmwareForPlatform` call, when that call's
+/// background pass has ended — including when it ended with nothing to do.
+/// The firmware chip's Install button waits on it to re-enable.
+export const FIRMWARE_PASS_FINISHED_EVENT = 'firmware-pass-finished';
+
 /// Emitted after `setDefaultCompatTool` and after a managed compat-tool
 /// install finalizes in the background. Re-run `listCompatTools` on it.
 export const COMPAT_TOOLS_CHANGED_EVENT = 'compat-tools-changed';
