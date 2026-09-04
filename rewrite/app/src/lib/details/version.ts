@@ -79,3 +79,19 @@ export function fileVersionLabel(fileName: string, lastModified: string): string
   if (tag) return formatVersionTag(tag);
   return isoDate(lastModified);
 }
+
+/**
+ * Whether the Files tab shows D-UI-10's installed-vs-server comparison line.
+ *
+ * The two sides are not the same quantity: the installed side falls back to
+ * the date the install landed, the server side to the date the server file
+ * was last modified. On a console rom, where neither file name carries a
+ * version tag, that reads as "Installed 2026-09-04 · Server 2026-01-02" —
+ * a comparison the user cannot act on and which suggests the local copy is
+ * newer. D-UI-10 scopes the version rule to PC games, so the line follows
+ * the same platform gate `versionLabel` uses. Per-file rows are not gated:
+ * see [`fileVersionLabel`].
+ */
+export function showsFilesVersionLine(platform: string): boolean {
+  return isWindowsPcPlatform(platform);
+}

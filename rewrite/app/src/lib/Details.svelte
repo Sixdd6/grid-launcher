@@ -27,7 +27,12 @@
   import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
   import { isNativeExecutablePlatform, syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
   import { contentButtons, installLabel, isContentPlatform, isNativePlatform } from './details/actions';
-  import { fileVersionLabel, romFileNamesFor, versionLabel } from './details/version';
+  import {
+    fileVersionLabel,
+    romFileNamesFor,
+    showsFilesVersionLine,
+    versionLabel,
+  } from './details/version';
   import {
     cloudStatusLabel,
     epochDate,
@@ -266,13 +271,19 @@
 
   // D-UI-10, per side. The server side reads the top-level file's own
   // timestamp; the installed side has no server timestamp to fall back on,
-  // so it falls back to when the install landed.
+  // so it falls back to when the install landed. Those two fallbacks are
+  // different quantities, so the whole comparison is gated to PC platforms
+  // (`showsFilesVersionLine`); off PC both sides are '' and `FilesTab`
+  // drops the line.
+  let versionLineShown = $derived(showsFilesVersionLine(subject.platformName));
   let topLevelFile = $derived(detail?.files.find((f) => f.is_top_level) ?? detail?.files[0] ?? null);
   let serverVersion = $derived(
-    detail ? fileVersionLabel(detail.fs_name, topLevelFile?.last_modified ?? '') : ''
+    versionLineShown && detail
+      ? fileVersionLabel(detail.fs_name, topLevelFile?.last_modified ?? '')
+      : ''
   );
   let installedVersion = $derived(
-    installedRow
+    versionLineShown && installedRow
       ? fileVersionLabel(installedRow.rom_file_name, '') || epochDate(installedRow.installed_at)
       : ''
   );
@@ -460,9 +471,11 @@
       rating,
     })
   );
+  // `||`, not `??`: a loaded detail always carries strings, so `''` from the
+  // server would win over the registry's stored value under `??`.
   let flags = $derived([
-    ...flagList(detail?.regions ?? installedRow?.regions ?? ''),
-    ...flagList(detail?.languages ?? installedRow?.languages ?? ''),
+    ...flagList(detail?.regions || installedRow?.regions || ''),
+    ...flagList(detail?.languages || installedRow?.languages || ''),
   ]);
 </script>
 

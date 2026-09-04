@@ -20,6 +20,11 @@ pub enum ImageError {
     Offline,
     #[error("the server did not return an image")]
     NotAnImage,
+    /// The video endpoint answered with a body that is not a video (an HTML
+    /// error page, say). Distinct from [`ImageError::NotAnImage`] so the
+    /// message names what was actually asked for.
+    #[error("the server did not return a video")]
+    NotAVideo,
     #[error(transparent)]
     Http(#[from] RommError),
     #[error("file error: {0}")]

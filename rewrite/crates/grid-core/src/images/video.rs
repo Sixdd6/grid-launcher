@@ -80,7 +80,7 @@ pub async fn ensure_video(
     };
     let (bytes, content_type) = client.get_bytes_with_type(url).await?;
     let Some(ext) = video_extension_for(url, &bytes, &content_type) else {
-        return Err(ImageError::NotAnImage);
+        return Err(ImageError::NotAVideo);
     };
     let io = |e: std::io::Error| ImageError::Io(e.to_string());
     std::fs::create_dir_all(cache.dir()).map_err(io)?;

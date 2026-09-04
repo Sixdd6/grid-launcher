@@ -111,7 +111,9 @@ async fn ensure_video_refuses_a_non_video_body() {
     let client = client_for(&server);
     let url = format!("{}/assets/not-a-video.mp4", server.uri());
     match ensure_video(&cache, Some(&client), &url).await {
-        Err(ImageError::NotAnImage) => {}
-        other => panic!("expected NotAnImage, got {other:?}"),
+        Err(e @ ImageError::NotAVideo) => {
+            assert_eq!(e.to_string(), "the server did not return a video");
+        }
+        other => panic!("expected NotAVideo, got {other:?}"),
     }
 }

@@ -5,6 +5,7 @@ import {
   isoDate,
   parseVersionTag,
   romFileNamesFor,
+  showsFilesVersionLine,
   versionLabel,
 } from './version';
 
@@ -103,5 +104,17 @@ describe('fileVersionLabel (D-UI-10)', () => {
 
   it('is blank when the file has neither a tag nor a timestamp', () => {
     expect(fileVersionLabel('Super Mario World.zip', '')).toBe('');
+  });
+});
+
+describe('showsFilesVersionLine', () => {
+  it('shows the comparison line on a PC platform', () => {
+    expect(showsFilesVersionLine('Windows')).toBe(true);
+    expect(showsFilesVersionLine('PC')).toBe(true);
+  });
+
+  it('hides it on a console platform, where the two sides are not comparable', () => {
+    expect(showsFilesVersionLine('PlayStation 2')).toBe(false);
+    expect(showsFilesVersionLine('')).toBe(false);
   });
 });
