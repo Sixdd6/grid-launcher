@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   APP_START_TIMEOUT,
+  configPath,
   dataDir,
   FIXTURE_TOKEN,
   INSTALL_TIMEOUT,
@@ -58,6 +59,19 @@ describe('updates', () => {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: `the details overlay never opened for rom ${romId}`,
     });
+  }
+
+  async function waitForConfigLine(line: string) {
+    await browser.waitUntil(
+      () => {
+        try {
+          return readFileSync(configPath(), 'utf-8').includes(line);
+        } catch {
+          return false;
+        }
+      },
+      { timeout: TRANSITION_TIMEOUT, timeoutMsg: `config.toml never got: ${line}` },
+    );
   }
 
   async function closeDetails() {
@@ -282,5 +296,31 @@ describe('updates', () => {
   it('offers no Update button for a game the server no longer knows', async () => {
     await openDetails(804);
     expect(await $(testId('details-update')).isExisting()).toBe(false);
+  });
+
+  // Design §10. The pure halves live in `theme.test.ts` / `uiSettings.test.ts`;
+  // this is the one end-to-end pass over the surface: the select writes the
+  // `<html>` attribute the whole token set keys off, and reaches config.toml.
+  it('applies and persists the Appearance theme choice', async () => {
+    await closeDetails();
+    await $(testId('nav-settings')).click();
+    await $(testId('settings-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the settings view never rendered',
+    });
+    await $(testId('settings-nav-appearance')).click();
+
+    const select = $(testId('theme-select'));
+    await select.waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await select.selectByAttribute('value', 'dark');
+
+    await browser.waitUntil(
+      async () => (await $('html').getAttribute('data-theme')) === 'dark',
+      {
+        timeout: TRANSITION_TIMEOUT,
+        timeoutMsg: 'the dark theme never reached the <html> data-theme attribute',
+      },
+    );
+    await waitForConfigLine('theme = "dark"');
   });
 });

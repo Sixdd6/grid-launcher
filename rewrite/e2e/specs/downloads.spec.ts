@@ -164,4 +164,16 @@ describe('downloads', () => {
       timeoutMsg: 'the completed row was still there after dismissing it',
     });
   });
+
+  // The other half of the strip's contract (design §3): it is always
+  // mounted, and hides itself once no entry is in a live state. Entry 2
+  // (rom 201) is the last one that can still be running by now, so this
+  // gets the install budget rather than a transition one.
+  it('hides the footer strip once nothing is live', async () => {
+    await $(testId('downloads-footer')).waitForDisplayed({
+      timeout: INSTALL_TIMEOUT,
+      reverse: true,
+      timeoutMsg: 'the downloads strip stayed visible with no live transfer left',
+    });
+  });
 });
