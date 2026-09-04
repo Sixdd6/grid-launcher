@@ -270,17 +270,22 @@ file (`emulator_entry_has_usable_path`, grid_launcher/emulator/selection.py:245)
 platform returns `""` (grid_launcher/emulator/selection.py:301).
 
 `emulator_supports_platform` is supplied by the window
-(grid-launcher.py:3556):
+(grid-launcher.py:3556). The Rust port REORDERS this list — see "Rust port
+deviations (RetroArch cores)" below (D-RC-1):
 
 1. Blank platform → `True` (grid-launcher.py:3558).
-2. Resolve the profile for the entry; if the profile has `all_platforms` → `True`
+2. **(Rust port only, D-RC-1)** If the entry name or the profile name matches
+   "retroarch", support is decided purely by whether at least one compatible
+   core is INSTALLED beside the executable — before the `all_platforms`
+   check, not after it.
+3. Resolve the profile for the entry; if the profile has `all_platforms` → `True`
    (grid-launcher.py:3569).
-3. If the entry name or the profile name matches "retroarch", support is decided purely by
-   whether any installed RetroArch core is mapped to the platform
-   (grid-launcher.py:3572).
-4. If no profile matched at all → `True` (grid-launcher.py:3579).
-5. Otherwise the profile's `platform_keywords` are expanded into concrete server platform
-   names and compared case-insensitively (grid-launcher.py:3586).
+4. *(Reference position of the RetroArch check.)* If the entry name or the profile
+   name matches "retroarch", support is decided purely by whether any installed
+   RetroArch core is mapped to the platform (grid-launcher.py:3572).
+5. If no profile matched at all → `True` (grid-launcher.py:3579).
+6. Otherwise the profile's `platform_keywords` are expanded into concrete server
+   platform names and compared case-insensitively (grid-launcher.py:3586).
 
 ### 3. Profile matching
 
@@ -986,7 +991,7 @@ Deliberate deviations from the reference when porting the launch module to Rust 
 1. Duplicate launches of the same rom are rejected (reference desktop allowed them; the TV backend allowed one global session — we allow one per rom).
 2. Sessions are tracked for every emulated launch and drive UI state; the reference tracked them only for cloud auto-upload.
 3. ~~PS3 titles cannot resolve `%ps3_launch_target%` yet (registry lacks PS3 fields until the PS3 install milestone); the reference's validation error is shown.~~ **Closed (milestone 8, task 11):** `resolve_launch` now fills `ps3_launch_target` from the row's `ps3_iso_path`/`ps3_game_id`, matching the placeholder table in §5.
-4. RetroArch platform support = a non-blank `retroarch_cores` config entry, not a scan of installed core files.
+4. ~~RetroArch platform support = a non-blank `retroarch_cores` config entry, not a scan of installed core files.~~ **Closed (RetroArch cores, D-RC-1):** support is now a scan of the core files installed beside the executable, resolved slug-first; the `retroarch_cores` config map is no longer an input to the predicate.
 5. The per-platform default picker lists all emulators rather than filtering by the supports-platform test; the test still gates automatic selection.
 6. Desktop UI gains a Stop button (reference desktop had none).
 7. No `_ensure_emulator_sync_settings` call before spawn (doc 05 deferred).
@@ -1127,3 +1132,47 @@ D19 are recorded in doc 03 instead, since they are install-side.
   zombie until the app exits; the port reaps it on a detached thread instead.
 - **RPCS3 firmware note and button** (§11 above): confirmed parity with Python — both render
   when a `PS3UPDAT.PUP` is present beside the emulator, no deviation.
+
+## Rust port deviations (RetroArch cores)
+
+Implements `docs/superpowers/specs/2026-09-04-retroarch-platform-cores-design.md`.
+Rust paths are relative to `rewrite/`.
+
+1. **D-RC-1 — RetroArch support is decided by installed cores.** The RetroArch gate
+   runs BEFORE the `all_platforms` shortcut in `emulator_supports_platform`
+   (`crates/grid-core/src/launch/selection.rs`), and asks a `CoreResolver`
+   (`(entry, platform) -> Vec<String>`) rather than the `retroarch_cores` config map.
+   The shipped autoprofile still sets `all_platforms: true`; it simply no longer wins
+   for RetroArch. Closes milestone 3 deviation 4.
+2. **D-RC-2 — slug-first core resolution.** `installed_compatible_cores`
+   (`crates/grid-core/src/autoconfig/mod.rs`) takes the bundled
+   `romm-platform-cores.json` curated list for a non-blank, known slug, and otherwise
+   falls back to the fuzzy `cores_for_platform` match. The reference returned `[]` for
+   any non-blank slug missing from the map; falling back keeps a drifted RomM slug
+   spelling from silently dropping RetroArch support.
+3. **D-RC-3 — core picker inline.** Each platform row in the Emulators panel renders a
+   second `<select>` (`data-testid="default-core-<platformId>"`) shown only when that
+   row's selected emulator is a RetroArch build
+   (`app/src/lib/Emulators.svelte`, `app/src/lib/emulators/defaults.ts`).
+4. **D-RC-4 — picking RetroArch records a core.** `set_default_emulator`
+   (`app/src-tauri/src/commands.rs`) inserts the first installed compatible core when
+   the platform has no non-blank one, in the same `modify_config` closure as the
+   default write. A saved core is never overwritten by that path.
+5. **D-RC-5 — display fallback stays display-only.** A saved core that is no longer
+   installed shows the first option; nothing is rewritten until the user changes it.
+6. Out of scope, deliberately: core downloads, per-game core overrides, and any change
+   to `%core%` template handling.
+7. **Slug-aware panel vs. slug-less launch path.** The app commands
+   (`compatible_emulators`, `retroarch_core_options`, `set_default_emulator`) resolve
+   cores slug-first via `SyncContext::platform_slugs` / `InstallService::platform_slugs`
+   (D-RC-2). The other grid-core call sites — launch resolution
+   (`crates/grid-core/src/launch/mod.rs`), cloud ops
+   (`crates/grid-core/src/cloud/ops/mod.rs`), firmware routing
+   (`crates/grid-core/src/firmware/routing.rs`), and install gating
+   (`crates/grid-core/src/library/mod.rs`) — pass `installed_core_resolver`
+   (`crates/grid-core/src/launch/selection.rs`), which always resolves with an empty
+   slug and therefore always falls back to the fuzzy name match. Consequence: for a
+   server platform name the fuzzy map misses but the slug map hits, the Emulators
+   panel can list RetroArch as compatible while the launch path (and cloud/firmware/
+   install gating) does not select it. Real RomM display names are full names the
+   fuzzy map recognises, so this is a known edge, recorded here rather than fixed.

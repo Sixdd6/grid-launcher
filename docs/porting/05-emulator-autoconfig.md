@@ -232,7 +232,13 @@ profile, the current emulator list, and the current default/core-default maps
   (grid_launcher/emulator/autoconfig.py:382).
 - For RetroArch platforms whose default now points at this emulator and that have no
   core default yet, the first installed compatible core is recorded
-  (grid_launcher/emulator/autoconfig.py:391).
+  (grid_launcher/emulator/autoconfig.py:391). **Rust port (D-RC-2):** the
+  installed-core filter resolves candidates SLUG-FIRST —
+  `autoconfig::installed_compatible_cores` uses the bundled
+  `romm-platform-cores.json` list for a known server slug and falls back to the fuzzy
+  `cores_for_platform` match on a slug miss or an empty slug. Slugs reach grid-core
+  through `SyncContext::platform_slugs`, recorded by `list_platforms` on the install
+  service alongside `set_known_platforms`.
 
 `_backfill_missing_emulator_defaults` re-runs the same assignment for every registered
 emulator whenever the emulator views refresh, and saves only if something changed

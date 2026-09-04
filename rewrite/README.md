@@ -125,6 +125,13 @@ These behaviors remain manual and require a desktop session + live RomM server
 - **Basic-auth mode**: connect via `http://user:password@server:port/romm` and
   confirm both credentials enter the keyring and the password never reaches
   `config.toml` or logs.
+- **RetroArch core picker**: with a real RetroArch install, confirm the Emulators
+  panel shows a Core select only on rows whose emulator is RetroArch, that it lists
+  only cores present in the RetroArch `cores/` directory, and that changing it writes
+  `[retroarch_cores]` in `config.toml`.
+- **RetroArch platform gating**: with a real RetroArch install missing a platform's
+  core, confirm that platform's emulator select does NOT offer RetroArch, and that
+  installing the core makes it appear after the panel refreshes.
 
 ## Persisted state
 
