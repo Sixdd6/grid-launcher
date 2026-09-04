@@ -132,6 +132,8 @@ These behaviors remain manual and require a desktop session + live RomM server
 - **RetroArch platform gating**: with a real RetroArch install missing a platform's
   core, confirm that platform's emulator select does NOT offer RetroArch, and that
   installing the core makes it appear after the panel refreshes.
+- **Explicit "(none)"**: set a platform to (none), reopen the panel, it stays (none) and
+  launching a game there reports no emulator.
 
 ## Persisted state
 

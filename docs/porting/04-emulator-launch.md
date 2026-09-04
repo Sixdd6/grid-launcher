@@ -250,13 +250,16 @@ grid_launcher/emulator/selection.py:270):
 1. Look up the platform in the `default_emulators` mapping via
    `mapping_value_for_platform`: exact key first, then a case-insensitive key scan; blank
    values are ignored (grid_launcher/emulator/selection.py:214).
-2. If a name is configured, find its entry by case-insensitive name match
+2. **(Rust port only, D-NONE-1)** If the configured value is the reserved marker
+   `<none>` (`launch::selection::NO_EMULATOR`), return `""` immediately — the user chose
+   "(none)" for this platform and no fallback may override it.
+3. If a name is configured, find its entry by case-insensitive name match
    (grid_launcher/emulator/selection.py:234) and keep it **only if**
    `emulator_supports_platform(entry, platform)` (grid_launcher/emulator/selection.py:280).
-3. Otherwise fall back to the first entry in `compatible_emulator_names_for_platform`,
+4. Otherwise fall back to the first entry in `compatible_emulator_names_for_platform`,
    which preserves the order of the `emulators` list and skips entries with a blank name
    (grid_launcher/emulator/selection.py:254).
-4. If nothing matches, return `""` (grid_launcher/emulator/selection.py:290).
+5. If nothing matches, return `""` (grid_launcher/emulator/selection.py:290).
 
 There is no separate "per-game override" key for emulator choice: the override surface is
 the platform→emulator mapping. Per-game overrides exist only for the native path
@@ -1162,9 +1165,26 @@ Rust paths are relative to `rewrite/`.
    closure, so it never lingers for an emulator that no longer needs one.
 5. **D-RC-5 — display fallback stays display-only.** A saved core that is no longer
    installed shows the first option; nothing is rewritten until the user changes it.
-6. Out of scope, deliberately: core downloads, per-game core overrides, and any change
+6. **D-NONE-1 — "(none)" is remembered.** The reference CLEARS the platform's
+   `default_emulators` key when the user picks "(none)", so the very next
+   `_backfill_missing_emulator_defaults` pass sees a missing default and re-assigns an
+   emulator; the choice never sticks. The port instead stores the reserved marker
+   `<none>` (`launch::selection::NO_EMULATOR`,
+   written by `apply_set_default_emulator` in `app/src-tauri/src/commands.rs`). The
+   marker is not a legal emulator name, so it collides with nothing.
+   `default_emulator_name_for_platform` maps it to `""` (see §2 step 2), which reaches
+   launch as "No emulator is configured. Add one in Emulators settings."
+   (`crates/grid-core/src/launch/spawn.rs`) and reaches cloud ops, firmware routing and
+   install gating as "no emulator for this platform". `assign_profile_platform_defaults`
+   (`crates/grid-core/src/autoconfig/entry.rs`) skips a platform whose current default is
+   the marker — no RetroArch fill, no native-over-RetroArch replacement, no recorded
+   core. Setting a real emulator replaces the marker as usual. `get_launch_defaults`
+   returns the raw map, and the frontend (`app/src/lib/emulators/defaults.ts`,
+   `NO_EMULATOR_MARKER`) shows the marker as the "(none)" option without falling back to
+   the first compatible name.
+7. Out of scope, deliberately: core downloads, per-game core overrides, and any change
    to `%core%` template handling.
-7. **Slug-first resolution everywhere, via a process-wide registry.** The app commands
+8. **Slug-first resolution everywhere, via a process-wide registry.** The app commands
    (`compatible_emulators`, `retroarch_core_options`, `set_default_emulator`,
    `set_retroarch_core`) resolve cores slug-first from the platform list they were
    handed / `InstallService::platform_slugs`. The grid-core call sites that see only a
