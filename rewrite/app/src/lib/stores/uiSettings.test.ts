@@ -111,3 +111,50 @@ describe('initUiSettings', () => {
     expect(uiSettings.theme).toBe('light');
   });
 });
+
+describe('setTheme', () => {
+  it('mirrors the choice to localStorage once the save resolves', async () => {
+    const dataset: Record<string, string> = {};
+    const storage = fakeStorage({ 'grid.ui.theme': 'light' });
+    vi.stubGlobal('localStorage', storage);
+    vi.stubGlobal('document', { documentElement: { dataset } });
+    vi.stubGlobal('window', { matchMedia: () => fakeMedia(false) });
+    vi.doMock('../api', () => ({
+      api: {
+        getUiSettings: () => Promise.resolve({ theme: 'light', background_fade: 25 }),
+        setUiSettings: () => Promise.resolve(),
+      },
+    }));
+
+    const { initUiSettings, setTheme } = await import('./uiSettings.svelte');
+    await initUiSettings();
+    await setTheme('dark');
+
+    expect(dataset.theme).toBe('dark');
+    expect(storage.getItem('grid.ui.theme')).toBe('dark');
+  });
+
+  it('leaves the mirror on the saved value when the save fails', async () => {
+    const dataset: Record<string, string> = {};
+    const storage = fakeStorage({ 'grid.ui.theme': 'light' });
+    vi.stubGlobal('localStorage', storage);
+    vi.stubGlobal('document', { documentElement: { dataset } });
+    vi.stubGlobal('window', { matchMedia: () => fakeMedia(false) });
+    vi.doMock('../api', () => ({
+      api: {
+        getUiSettings: () => Promise.resolve({ theme: 'light', background_fade: 25 }),
+        setUiSettings: () => Promise.reject(new Error('config is read-only')),
+      },
+    }));
+
+    const { initUiSettings, setTheme } = await import('./uiSettings.svelte');
+    await initUiSettings();
+    await expect(setTheme('dark')).rejects.toThrow();
+
+    // The attribute follows the click immediately, but the hint index.html
+    // reads on the next launch still names what `config.toml` holds — no
+    // pre-paint of a theme that was never saved.
+    expect(dataset.theme).toBe('dark');
+    expect(storage.getItem('grid.ui.theme')).toBe('light');
+  });
+});

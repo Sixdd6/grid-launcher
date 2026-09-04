@@ -32,7 +32,13 @@ export const uiSettings = {
   },
 };
 
-/** Best-effort write of the localStorage hint that index.html reads inline. */
+/**
+ * Best-effort write of the localStorage hint that index.html reads inline.
+ * Only ever called once a choice is known to match `config.toml` — after a
+ * successful save, or after the config load reconciles the hint. A mirror
+ * written ahead of a failed save would pre-paint an unsaved theme on the
+ * next launch and then flip, which is the flash the mirror exists to stop.
+ */
 function mirrorTheme(choice: ThemeChoice): void {
   try {
     localStorage.setItem(THEME_STORAGE_KEY, choice);
@@ -56,7 +62,6 @@ function applyTheme(choice: ThemeChoice): void {
   const attribute = themeAttribute(choice);
   if (attribute === null) delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = attribute;
-  mirrorTheme(choice);
 }
 
 /**
@@ -94,12 +99,19 @@ export async function initUiSettings(): Promise<() => void> {
   } catch {
     // Defaults/mirror already in `state`.
   }
-  if (state.theme !== hint) applyTheme(state.theme);
+  if (state.theme !== hint) {
+    applyTheme(state.theme);
+    mirrorTheme(state.theme);
+  }
 
   return () => media.removeEventListener('change', onChange);
 }
 
-/** Applies immediately, then persists. */
+/**
+ * Applies immediately, then persists. The localStorage mirror is written
+ * only once the save resolves, so a failed write leaves the hint agreeing
+ * with `config.toml`.
+ */
 export async function setTheme(choice: ThemeChoice): Promise<void> {
   state.theme = choice;
   applyTheme(choice);
@@ -116,5 +128,4 @@ export function previewBackgroundFade(value: number): void {
 export async function commitBackgroundFade(value: number): Promise<void> {
   previewBackgroundFade(value);
   await api.setUiSettings({ theme: state.theme, background_fade: state.backgroundFade });
-  mirrorTheme(state.theme);
 }
