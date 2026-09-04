@@ -780,44 +780,51 @@
             {@const choice = selectFor(p.name)}
             {@const coreId = `default-core-${p.id}`}
             {@const core = coreSelectFor(p.name, choice.selected)}
-            <li class="defaults-row">
-              <label class="platform-name" for={selectId}>{p.name}</label>
-              <!-- `default-select-<platformId>` is the per-platform select's
-                   test id; its `id` (used by the label) is
-                   `default-emulator-<platformId>`. -->
-              <select
-                data-testid={`default-select-${p.id}`}
-                id={selectId}
-                disabled={choice.disabled}
-                value={choice.selected}
-                onchange={(e) => handleDefaultChange(p.name, (e.currentTarget as HTMLSelectElement).value)}
-              >
-                {#if choice.disabled}
-                  <option value={NO_DEFAULT_VALUE}>No compatible emulator</option>
-                {:else}
-                  <option value={NO_DEFAULT_VALUE}>(none)</option>
-                  {#each choice.options as name (name)}
-                    <option value={name}>{name}</option>
-                  {/each}
-                {/if}
-              </select>
-              {#if core.visible}
-                <label class="visually-hidden" for={coreId}>Core</label>
+            <li class="defaults-card">
+              <div class="defaults-card-header">
+                <label class="platform-name" for={selectId}>{p.name}</label>
+              </div>
+              <div class="defaults-field">
+                <span class="defaults-field-label">Emulator</span>
+                <!-- `default-select-<platformId>` is the per-platform select's
+                     test id; its `id` (used by the label) is
+                     `default-emulator-<platformId>`. -->
                 <select
-                  data-testid={`default-core-${p.id}`}
-                  id={coreId}
-                  disabled={core.disabled}
-                  value={core.selected}
-                  onchange={(e) => handleCoreChange(p.name, (e.currentTarget as HTMLSelectElement).value)}
+                  data-testid={`default-select-${p.id}`}
+                  id={selectId}
+                  disabled={choice.disabled}
+                  value={choice.selected}
+                  onchange={(e) => handleDefaultChange(p.name, (e.currentTarget as HTMLSelectElement).value)}
                 >
-                  {#if core.disabled}
-                    <option value={NO_CORE_VALUE}>No installed core</option>
+                  {#if choice.disabled}
+                    <option value={NO_DEFAULT_VALUE}>No compatible emulator</option>
                   {:else}
-                    {#each core.options as id (id)}
-                      <option value={id}>{id}</option>
+                    <option value={NO_DEFAULT_VALUE}>(none)</option>
+                    {#each choice.options as name (name)}
+                      <option value={name}>{name}</option>
                     {/each}
                   {/if}
                 </select>
+              </div>
+              {#if core.visible}
+                <div class="defaults-field">
+                  <label class="defaults-field-label" for={coreId}>Core</label>
+                  <select
+                    data-testid={`default-core-${p.id}`}
+                    id={coreId}
+                    disabled={core.disabled}
+                    value={core.selected}
+                    onchange={(e) => handleCoreChange(p.name, (e.currentTarget as HTMLSelectElement).value)}
+                  >
+                    {#if core.disabled}
+                      <option value={NO_CORE_VALUE}>No installed core</option>
+                    {:else}
+                      {#each core.options as id (id)}
+                        <option value={id}>{id}</option>
+                      {/each}
+                    {/if}
+                  </select>
+                </div>
               {/if}
             </li>
           {/each}
@@ -1372,22 +1379,41 @@
     cursor: default;
   }
 
-  .defaults-row {
+  .defaults-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--border);
+  }
+
+  .defaults-card-header {
+    display: flex;
+  }
+
+  .platform-name {
+    color: var(--text-h);
+    font-size: 13px;
+    font-weight: 600;
+    white-space: normal;
+  }
+
+  .defaults-field {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
   }
 
-  .platform-name {
-    color: var(--text-h);
+  .defaults-field-label {
+    color: var(--text);
     font-size: 13px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    flex-shrink: 0;
   }
 
-  .defaults-row select {
+  .defaults-card select {
     font: inherit;
     font-size: 13px;
     padding: 6px 8px;
@@ -1395,18 +1421,8 @@
     border: 1px solid var(--border);
     background: var(--bg);
     color: var(--text-h);
-    max-width: 200px;
-  }
-
-  .visually-hidden {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
+    max-width: 260px;
     overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-    border: 0;
+    text-overflow: ellipsis;
   }
 </style>
