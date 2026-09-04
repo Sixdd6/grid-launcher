@@ -37,6 +37,9 @@
   // select offers only these, so an emulator is never offered for a platform
   // its profile does not support.
   let compatible = $state<Record<string, string[]>>({});
+  // Its own error slot, never `defaultsError`: this fetch re-runs on every
+  // platform/emulator change and would otherwise clear a real defaults error.
+  let compatibleError = $state<string | null>(null);
 
   let profiles = $state<ProfileSummary[]>([]);
 
@@ -218,6 +221,8 @@
   $effect(() => {
     const signature = emulatorTerminalSignature;
     void signature;
+    // Also fires once at mount, duplicating the mount effect's two fetches —
+    // cheap, and it keeps the refresh rule free of a first-run special case.
     refreshEmulators();
     refreshDefaults();
   });
@@ -281,9 +286,9 @@
     }
     try {
       compatible = await api.compatibleEmulators(platformNames);
-      defaultsError = null;
+      compatibleError = null;
     } catch (err) {
-      defaultsError = errorMessage(err);
+      compatibleError = errorMessage(err);
     }
   }
 
@@ -715,6 +720,11 @@
       <h3>Per-platform defaults</h3>
       {#if defaultsError}
         <p class="error" role="alert">{defaultsError}</p>
+      {/if}
+      <!-- Rendered separately from the defaults error so neither can hide the
+           other: the compatibility fetch has its own failure mode. -->
+      {#if compatibleError}
+        <p class="error" role="alert">{compatibleError}</p>
       {/if}
       {#if platforms.length === 0}
         <p class="muted">No platforms available.</p>
