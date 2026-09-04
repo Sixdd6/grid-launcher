@@ -148,6 +148,35 @@ describe('launch', () => {
       timeoutMsg: 'the Play button never came back after stopping',
     });
     await $(testId('details-close')).click();
+
+    // `last_played_at` end to end (design §5): the launch above stamped it,
+    // and the Library rail's Recent entry and "Recently played" sort are the
+    // only readers. Nothing else in the suite drives them, so a broken stamp
+    // (wrong rom id, a held registry lock) would otherwise ship unnoticed.
+    await $(testId('nav-library')).click();
+    await $(testId('library-rail-count-recent')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the library rail never rendered its Recent count',
+    });
+    await browser.waitUntil(
+      async () => (await $(testId('library-rail-count-recent')).getText()) === '1',
+      {
+        timeout: TRANSITION_TIMEOUT,
+        timeoutMsg: 'the Recent rail count never reached 1 after playing rom 101',
+      },
+    );
+
+    await selectValue('library-sort', 'played');
+    const firstCard = await $(`${testId('library-grid')} > *:first-child`);
+    await firstCard.waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the library grid never rendered a card under the played sort',
+    });
+    expect(await firstCard.getAttribute('data-testid')).toBe('library-card-101');
+
+    // Back to the Server view the following tests start from.
+    await $(testId('nav-server')).click();
+    await $(testId('platform-btn-1')).waitForExist({ timeout: TRANSITION_TIMEOUT });
   });
 
   it('shows "exited immediately" after switching the default to the instant-exit stub', async () => {
