@@ -1,17 +1,45 @@
 <script lang="ts">
-  import { api, type CloudPanelInfo, type ContentAvailability, type ContentKind, type DownloadStatus, type RomDetail } from './api';
+  import {
+    api,
+    type CloudPanelInfo,
+    type ContentAvailability,
+    type ContentKind,
+    type DownloadStatus,
+    type LaunchDefaults,
+    type RomDetail,
+  } from './api';
   import { downloads } from './stores/downloads.svelte';
   import { updates } from './stores/updates.svelte';
   import { isInstalled, installed, matchesInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
   import { session } from './stores/session.svelte';
   import { sessions } from './stores/sessions.svelte';
   import Image from './Image.svelte';
-  import CloudPanel from './details/CloudPanel.svelte';
   import NativeSettings from './details/NativeSettings.svelte';
+  import OverviewTab from './details/OverviewTab.svelte';
+  import MediaTab from './details/MediaTab.svelte';
+  import SavesTab from './details/SavesTab.svelte';
+  import FilesTab from './details/FilesTab.svelte';
   import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
-  import { cloudButtonLabel, isNativeExecutablePlatform, syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
+  import { isNativeExecutablePlatform, syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
   import { contentButtons, installLabel, isContentPlatform, isNativePlatform } from './details/actions';
-  import { romFileNamesFor, versionLabel } from './details/version';
+  import { fileVersionLabel, romFileNamesFor, versionLabel } from './details/version';
+  import {
+    cloudStatusLabel,
+    epochDate,
+    flagList,
+    headerLine,
+    lastPlayedText,
+    launchTargetLine,
+    verificationLabel,
+  } from './details/header';
+  import {
+    DETAILS_TABS,
+    DETAILS_TAB_LABELS,
+    rememberTab,
+    rememberedTab,
+    tabTestId,
+    type DetailsTab,
+  } from './details/tabs';
 
   let {
     subject,
@@ -23,8 +51,7 @@
     onClose: () => void;
     onLibraryPathUnset: () => void;
     /** Which cloud panel the popup opens with. A card's "Cloud sync" action
-     *  passes `'save'` so the panel is already expanded; every other opener
-     *  leaves it at `'overview'`. The redesigned Saves tab is plan 3's. */
+     *  passes `'save'`, which also selects the Saves tab. */
     initialCloudMode?: CloudMode;
   } = $props();
 
@@ -46,16 +73,22 @@
   let contentActionKind = $state<ContentKind | null>(null);
   let showNativeSettings = $state(false);
 
+  // Design §7: last tab remembered per session, not per game.
+  let tab = $state<DetailsTab>(initialCloudMode === 'overview' ? rememberedTab() : 'saves');
+  function selectTab(next: DetailsTab) {
+    tab = next;
+    rememberTab(next);
+  }
+
   // Metadata overlay (task-10-brief.md): the subject carries whatever the
-  // grid it opened from already had on hand; when that's thin (a server
-  // subject only ever has a cover, or an installed row with no stored
-  // screenshots) fetch the full RomDetail once and let it fill in the
-  // gaps. Kept as separate local state rather than mutating `subject` —
-  // the prop is the caller's data, this is purely a display overlay. The
-  // fold itself lives in `mergeDetail` (details/subject.ts), which treats a
-  // detail's empty strings/lists as "the server has nothing here" and keeps
-  // the subject's own value rather than blanking the field.
+  // grid it opened from already had on hand; the full `RomDetail` fills in
+  // the gaps. The redesigned tabs read `files`, `related`, the IGDB block
+  // and the media fields off it, none of which the registry stores, so the
+  // fetch now runs for every rom with a server id rather than only for a
+  // subject with no screenshots. It stays a display overlay: `subject` is
+  // the caller's data and is never mutated.
   let detail = $state<RomDetail | null>(null);
+  let launchDefaults = $state<LaunchDefaults | null>(null);
 
   let merged = $derived(detail === null ? subject : mergeDetail(subject, detail));
   let coverSmall = $derived(merged.coverSmall);
@@ -65,21 +98,22 @@
   let rating = $derived(merged.rating);
   let genres = $derived(merged.genres);
 
-  let failedScreenshots = $state<Record<string, true>>({});
-  function markScreenshotFailed(url: string) {
-    failedScreenshots = { ...failedScreenshots, [url]: true };
-  }
-
   $effect(() => {
     if (subject.romId === null) return; // no server id: nothing to overlay
     if (!session.connected) return;
-    if (subject.source !== 'server' && subject.screenshotUrls.length > 0) return;
     api
       .getRomDetail(subject.romId)
       .then((fetched) => {
         detail = fetched;
       })
       .catch(() => {}); // offline/removed rom: the subject's own data stands
+  });
+
+  $effect(() => {
+    api
+      .getLaunchDefaults()
+      .then((d) => (launchDefaults = d))
+      .catch(() => {}); // unreadable config: the emulator row says "No default emulator"
   });
 
   let pending = $derived(pendingAction !== null);
@@ -98,8 +132,7 @@
 
   // Fetched once the subject is installed-and-a-content-platform, and
   // re-fetched right after a live install for it finishes (`wasLive` tracks
-  // the previous liveEntry-defined-ness across effect runs) — the server's
-  // file list only changes once an update/DLC job completes.
+  // the previous liveEntry-defined-ness across effect runs).
   $effect(() => {
     if (subject.romId === null || !installedNow || !isContent) {
       contentAvailability = null;
@@ -118,18 +151,15 @@
 
   // Cloud saves/states (task-19-brief.md). `cloudGame` is the InstalledGame
   // registry row when one exists, else a synthetic stand-in built from the
-  // subject — the cloud commands resolve "installed" themselves by identity
-  // match (cloud_service.rs's `panel_info`), so a non-installed shared-scope
-  // game (e.g. an entry on the synthetic `Emulators` platform) can still
-  // open its panel.
+  // subject.
   let installedRow = $derived(installed.list.find((row) => matchesInstalled(row, summary, subject.platformName)) ?? null);
   let cloudGame = $derived(installedRow ?? syntheticCloudGame(summary, subject.platformName));
   let isNative = $derived(isNativeExecutablePlatform(subject.platformName));
 
-  // Server-side game updates (doc 10). `updateLabel` is the update set's own
-  // label for this rom — null when the rom has no update, which also hides
-  // the button. `version` is the row under the rating: the version tag
-  // parsed out of the file name for Windows/PC, else the raw revision.
+  // Server-side game updates (doc 10). `updateLabel` is null when the rom
+  // has no update, which also hides the button. `version` is the header row:
+  // the version tag parsed out of the file name for Windows/PC, else the raw
+  // revision.
   let updateLabel = $derived(installedNow ? updates.labelFor(subject.romId) : null);
   let version = $derived(
     versionLabel(
@@ -138,18 +168,28 @@
       detail?.revision || installedRow?.revision || ''
     )
   );
+
+  // D-UI-10, per side. The server side reads the top-level file's own
+  // timestamp; the installed side has no server timestamp to fall back on,
+  // so it falls back to when the install landed.
+  let topLevelFile = $derived(detail?.files.find((f) => f.is_top_level) ?? detail?.files[0] ?? null);
+  let serverVersion = $derived(
+    detail ? fileVersionLabel(detail.fs_name, topLevelFile?.last_modified ?? '') : ''
+  );
+  let installedVersion = $derived(
+    installedRow
+      ? fileVersionLabel(installedRow.rom_file_name, '') || epochDate(installedRow.installed_at)
+      : ''
+  );
+
   let confirmingUpdate = $state(false);
   let updateToast = $state<string | null>(null);
   let updatePending = $state(false);
 
-  // Last seen status per update entry for this rom. Deliberately NOT `$state`:
-  // it is only the effect's own memory of the previous run, and making it
-  // reactive would re-trigger the effect that writes it.
+  // Last seen status per update entry for this rom. Deliberately NOT `$state`.
   const seenUpdateStatus = new Map<number, DownloadStatus>();
 
-  // Toast on completion, not on click: the update runs as a download entry,
-  // so success is the entry reaching `completed`. Only a transition counts —
-  // an entry first seen already completed is drawer history, not this visit.
+  // Toast on completion, not on click.
   $effect(() => {
     for (const entry of downloads.entries) {
       if (entry.rom_id !== subject.romId) continue;
@@ -166,8 +206,6 @@
   let savePanelInfo = $state<CloudPanelInfo | null>(null);
   let statePanelInfo = $state<CloudPanelInfo | null>(null);
   let cloudPanelInfoError = $state<string | null>(null);
-
-  let activeCloudPanelInfo = $derived(cloudMode === 'save' ? savePanelInfo : cloudMode === 'state' ? statePanelInfo : null);
 
   $effect(() => {
     panelEl?.focus();
@@ -187,6 +225,14 @@
 
   function handleCloudToggle(saveType: 'save' | 'state') {
     cloudMode = toggleCloudMode(cloudMode, saveType);
+  }
+
+  /** The left column's cloud button: go to the Saves tab and open a panel. */
+  function openCloud() {
+    selectTab('saves');
+    if (cloudMode === 'overview') {
+      cloudMode = savePanelInfo?.supported ? 'save' : statePanelInfo?.supported ? 'state' : 'overview';
+    }
   }
 
   function errorMessage(err: unknown): string {
@@ -228,9 +274,7 @@
     }
   }
 
-  // Two-click confirm for native installs only (doc 10): replacing a native
-  // game's files is the one update that touches a directory the user may
-  // have edited, so it states what is preserved before committing.
+  // Two-click confirm for native installs only (doc 10).
   async function handleUpdateClick() {
     if (subject.romId === null) return;
     if (isNativeInstall && !confirmingUpdate) {
@@ -311,6 +355,20 @@
   function onBackdropClick(e: MouseEvent) {
     if (e.target === e.currentTarget) onClose();
   }
+
+  let header = $derived(
+    headerLine({
+      platformName: subject.platformName,
+      firstReleaseDate: detail?.first_release_date ?? '',
+      companies: detail?.companies ?? '',
+      genres,
+      rating,
+    })
+  );
+  let flags = $derived([
+    ...flagList(detail?.regions ?? installedRow?.regions ?? ''),
+    ...flagList(detail?.languages ?? installedRow?.languages ?? ''),
+  ]);
 </script>
 
 <div class="backdrop" onclick={onBackdropClick} role="presentation">
@@ -327,44 +385,11 @@
     <button data-testid="details-close" class="close" onclick={onClose} aria-label="Close">×</button>
 
     <div class="layout">
-      <div class="cover">
-        <Image url={coverLarge ?? coverSmall} alt={subject.name} placeholder="No cover" data-testid="details-cover" />
-      </div>
-
-      <div class="center-top">
-        <h2>{subject.name}</h2>
-        <p class="platform">{subject.platformName}</p>
-        {#if liveSession}
-          <span data-testid="details-playing-chip" class="chip">Playing</span>
-        {/if}
-        {#if rating}
-          <p data-testid="details-rating" class="rating">{rating}</p>
-        {/if}
-        {#if version}
-          <p data-testid="details-version" class="version">{version}</p>
-        {/if}
-        <p data-testid="details-genres" class="genres">{genres}</p>
-        <p data-testid="details-description" class="description">{description}</p>
-      </div>
-
-      {#if screenshotUrls.length}
-        <div class="shots" data-testid="details-screenshots">
-          {#each screenshotUrls as url, i (url)}
-            {#if !failedScreenshots[url]}
-              <Image
-                url={url}
-                alt={`${subject.name} screenshot ${i + 1}`}
-                data-testid={`details-screenshot-${i}`}
-                onerror={() => markScreenshotFailed(url)}
-              />
-            {/if}
-          {/each}
+      <aside class="left">
+        <div class="cover">
+          <Image url={coverLarge ?? coverSmall} alt={subject.name} placeholder="No cover" data-testid="details-cover" />
         </div>
-      {:else}
-        <p class="shots-empty" data-testid="details-no-screenshots">No screenshots available</p>
-      {/if}
 
-      <div class="center-bottom">
         {#if subject.romId === null}
           <p data-testid="details-no-id">This entry has no server id</p>
         {:else}
@@ -390,15 +415,6 @@
             {:else if installedNow}
               <button data-testid="details-play" disabled={pending} onclick={handlePlay}>
                 {pendingAction === 'play' ? 'Launching…' : 'Play'}
-              </button>
-              <button
-                data-testid="details-uninstall"
-                class="secondary"
-                class:confirm={confirmingUninstall}
-                disabled={pending}
-                onclick={handleUninstallClick}
-              >
-                {confirmingUninstall ? 'Confirm uninstall' : 'Uninstall'}
               </button>
               {#if updateLabel !== null}
                 <button
@@ -440,55 +456,102 @@
                   Game Settings
                 </button>
               {/if}
+              <button
+                data-testid="details-uninstall"
+                class="secondary"
+                class:confirm={confirmingUninstall}
+                disabled={pending}
+                onclick={handleUninstallClick}
+              >
+                {confirmingUninstall ? 'Confirm uninstall' : 'Uninstall'}
+              </button>
             {:else}
               <button data-testid="details-install" disabled={pending} onclick={handleInstall}>
                 {pendingAction === 'install' ? 'Installing…' : installLabel(subject.platformName)}
               </button>
             {/if}
+            <button data-testid="details-cloud-status" class="secondary" onclick={openCloud}>
+              {cloudStatusLabel(savePanelInfo?.supported === true, statePanelInfo?.supported === true)}
+            </button>
           </div>
 
           {#if updateToast}
             <p data-testid="details-update-toast" class="hint" role="status">{updateToast}</p>
           {/if}
+        {/if}
 
-          {#if savePanelInfo?.supported || statePanelInfo?.supported}
-            <div class="cloud-toggle">
-              {#if savePanelInfo?.supported}
-                <button
-                  data-testid="details-cloud-save-toggle"
-                  class:active={cloudMode === 'save'}
-                  onclick={() => handleCloudToggle('save')}
-                >
-                  {cloudButtonLabel('save', savePanelInfo.scope)}
-                </button>
-              {/if}
-              {#if statePanelInfo?.supported}
-                <button
-                  data-testid="details-cloud-state-toggle"
-                  class:active={cloudMode === 'state'}
-                  onclick={() => handleCloudToggle('state')}
-                >
-                  {cloudButtonLabel('state', statePanelInfo.scope)}
-                </button>
-              {/if}
-            </div>
-          {/if}
+        <p class="meta-line" data-testid="details-last-played">
+          {lastPlayedText(installedRow?.last_played_at ?? 0)}
+        </p>
+        <p class="meta-line" data-testid="details-emulator">
+          {launchTargetLine(launchDefaults, subject.platformName)}
+        </p>
+      </aside>
 
-          {#if cloudPanelInfoError}
-            <p data-testid="cloud-panel-info-error" class="error" role="alert">{cloudPanelInfoError}</p>
-          {/if}
+      <section class="right">
+        <header class="head">
+          <h2>{subject.name}</h2>
+          <p class="header-line" data-testid="details-header-line">{header}</p>
+          <div class="chips">
+            {#if liveSession}
+              <span data-testid="details-playing-chip" class="chip playing">Playing</span>
+            {/if}
+            <span class="chip" data-testid="details-verification">
+              {verificationLabel(detail?.is_identified ?? false)}
+            </span>
+            {#if flags.length}
+              <span class="chip" data-testid="details-flags">{flags.join(' · ')}</span>
+            {/if}
+            {#if rating}
+              <span class="chip" data-testid="details-rating">{rating}</span>
+            {/if}
+            {#if version}
+              <span class="chip" data-testid="details-version">{version}</span>
+            {/if}
+          </div>
+          <p class="genres" data-testid="details-genres">{genres}</p>
+        </header>
 
-          {#if cloudMode !== 'overview' && activeCloudPanelInfo}
-            <CloudPanel
-              game={cloudGame}
+        <div class="tabs" role="tablist">
+          {#each DETAILS_TABS as name (name)}
+            <button
+              role="tab"
+              data-testid={tabTestId(name)}
+              class:active={tab === name}
+              aria-selected={tab === name}
+              onclick={() => selectTab(name)}
+            >
+              {DETAILS_TAB_LABELS[name]}
+            </button>
+          {/each}
+        </div>
+
+        <div class="tabpanel" role="tabpanel">
+          {#if tab === 'overview'}
+            <OverviewTab name={subject.name} {description} {screenshotUrls} {detail} />
+          {:else if tab === 'media'}
+            <MediaTab name={subject.name} {screenshotUrls} {detail} />
+          {:else if tab === 'saves'}
+            <SavesTab
               gameTitle={subject.name}
-              saveType={cloudMode}
-              panelInfo={activeCloudPanelInfo}
+              {cloudGame}
               {isNative}
+              {savePanelInfo}
+              {statePanelInfo}
+              {cloudMode}
+              infoError={cloudPanelInfoError}
+              onToggle={handleCloudToggle}
               onBack={() => (cloudMode = 'overview')}
             />
+          {:else}
+            <FilesTab
+              files={detail?.files ?? []}
+              {installedVersion}
+              {serverVersion}
+              {installedNow}
+            />
           {/if}
-        {/if}
+        </div>
 
         {#if error}
           <p data-testid="details-error" class="error" role="alert">{error}</p>
@@ -499,7 +562,7 @@
             <button data-testid="details-warning-dismiss" class="dismiss" onclick={() => sessions.dismissWarning()} aria-label="Dismiss warning">×</button>
           </p>
         {/if}
-      </div>
+      </section>
     </div>
   </div>
 </div>
@@ -514,25 +577,21 @@
 {/if}
 
 <style>
+  /* Design §7: dimmed AND blurred shell behind the dialog. */
   .backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(6px);
     display: grid;
     place-items: center;
     z-index: 20;
   }
 
-  /* The container for `.layout`'s breakpoint below. It has to be declared
-     on the ANCESTOR, not on `.layout` itself: a container query never
-     matches the element that declares the container, so styling `.layout`
-     from a container declared on `.layout` would silently never apply. */
   .panel {
-    container-type: inline-size;
     position: relative;
-    width: min(1100px, calc(100vw - 48px));
-    max-height: calc(100vh - 48px);
-    overflow-y: auto;
+    width: min(1040px, calc(100vw - 48px));
+    height: min(680px, calc(100vh - 48px));
     box-sizing: border-box;
     padding: 24px;
     border-radius: 12px;
@@ -542,19 +601,33 @@
   }
 
   .panel:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--primary);
     outline-offset: 2px;
   }
 
-  /* The panel's own content-box width (not the viewport) drives the
-     breakpoint below, since the panel already scales down on its own via
-     min(1100px, calc(100vw - 48px)) on narrow viewports. At full width that
-     content box is 1100 - 2*24px padding = 1052px, comfortably over the
-     900px threshold. */
+  /* The left column is fixed at design §7's 240px; only the right column's
+     tab panel scrolls, so the cover and the actions never leave the view. */
   .layout {
     display: grid;
-    grid-template-columns: 1fr;
-    gap: 20px;
+    grid-template-columns: 240px 1fr;
+    gap: 24px;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .left {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .right {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
   }
 
   .close {
@@ -566,7 +639,7 @@
     line-height: 1;
     font-size: 20px;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--r-chip);
     background: transparent;
     color: var(--text);
     cursor: pointer;
@@ -579,11 +652,10 @@
 
   .cover {
     width: 100%;
-    max-width: 240px;
-    margin: 0 auto;
     aspect-ratio: 3 / 4;
-    border-radius: 8px;
+    border-radius: var(--r-row);
     overflow: hidden;
+    flex: none;
   }
 
   .cover :global(img) {
@@ -592,85 +664,80 @@
     object-fit: cover;
   }
 
-  .center-top,
-  .center-bottom {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    text-align: center;
-  }
-
   h2 {
     margin: 0;
     color: var(--text-h);
     font-size: 20px;
   }
 
-  .chip {
-    align-self: center;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-    padding: 2px 10px;
-    border-radius: 999px;
-    background: var(--accent);
-    color: #fff;
-  }
-
-  .platform {
-    margin: 0;
-    color: var(--text);
-    font-size: 13px;
-  }
-
-  .rating {
-    margin: 0;
-    color: var(--text-h);
-    font-weight: 600;
-    font-size: 14px;
-  }
-
-  .version {
-    margin: 0;
-    color: var(--text);
-    font-size: 13px;
-  }
-
+  .header-line,
   .genres {
     margin: 0;
-    color: var(--text);
+    color: var(--text-muted);
     font-size: 13px;
   }
 
-  .description {
-    margin: 0;
-    color: var(--text);
-    font-size: 14px;
-    line-height: 1.5;
-  }
-
-  .shots {
+  .head {
     display: flex;
-    overflow-x: auto;
-    gap: 8px;
-    padding-bottom: 4px;
-  }
-
-  .shots :global(img) {
-    height: 120px;
-    width: auto;
+    flex-direction: column;
+    gap: 6px;
     flex: none;
-    border-radius: 6px;
-    object-fit: cover;
   }
 
-  .shots-empty {
-    margin: 0;
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .chip {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 10px;
+    border-radius: var(--r-pill);
+    background: var(--surface);
     color: var(--text);
-    font-size: 13px;
-    text-align: center;
+    border: 1px solid var(--border);
+  }
+
+  .chip.playing {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
+    flex: none;
+  }
+
+  .tabs button {
+    font: inherit;
+    padding: 8px 14px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition:
+      color var(--m-fast) ease,
+      border-color var(--m-fast) ease;
+  }
+
+  .tabs button.active {
+    color: var(--text-h);
+    border-bottom-color: var(--primary);
+  }
+
+  .tabpanel {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 4px;
   }
 
   .action {
@@ -684,15 +751,20 @@
     width: 100%;
     font: inherit;
     padding: 10px 16px;
-    border-radius: 6px;
+    border-radius: var(--r-control);
     border: none;
-    background: var(--accent);
+    background: var(--primary);
     color: #fff;
     cursor: pointer;
+    transition: background var(--m-fast) ease;
+  }
+
+  .action button:hover:not(:disabled) {
+    background: var(--primary-hover);
   }
 
   .action button.confirm {
-    background: #e5484d;
+    background: var(--danger);
   }
 
   .action button.secondary {
@@ -702,42 +774,22 @@
     border: 1px solid var(--border);
   }
 
+  .action button.secondary:hover:not(:disabled) {
+    background: var(--surface);
+  }
+
   .action button.secondary.confirm {
     background: transparent;
-    color: #e5484d;
-    border-color: #e5484d;
+    color: var(--danger);
+    border-color: var(--danger);
   }
 
   /* The update confirm is a caution, not a destruction: it keeps the
      two-click shape but takes the warning amber instead of `.confirm`'s
      red, which would contradict the label's "will be preserved". */
   .action button.update.confirm {
-    background: #e5a53a;
+    background: var(--warning);
     color: #16171d;
-  }
-
-  .cloud-toggle {
-    margin-top: 4px;
-    width: 100%;
-    display: flex;
-    gap: 8px;
-  }
-
-  .cloud-toggle button {
-    flex: 1;
-    font: inherit;
-    padding: 8px 12px;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--text);
-    border: 1px solid var(--border);
-    cursor: pointer;
-  }
-
-  .cloud-toggle button.active {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
   }
 
   .action button:disabled {
@@ -745,25 +797,29 @@
     cursor: default;
   }
 
+  .meta-line {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+
   .hint {
     margin: 0;
     color: var(--text);
     opacity: 0.75;
     font-size: 13px;
-    text-align: center;
   }
 
   .error {
     margin: 0;
-    color: #e5484d;
+    color: var(--danger);
     font-size: 13px;
-    text-align: center;
+    flex: none;
   }
 
   .error.warning {
     display: flex;
     align-items: center;
-    justify-content: center;
     gap: 6px;
   }
 
@@ -775,70 +831,14 @@
     padding: 0;
     font-size: 14px;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--r-control);
     background: transparent;
-    color: #e5484d;
+    color: var(--danger);
     cursor: pointer;
   }
 
   .dismiss:hover,
   .dismiss:focus-visible {
     background: var(--border);
-  }
-
-  /* Container-query overrides must come after every base rule they
-     override (same specificity; source order decides the winner). */
-  @container (min-width: 900px) {
-    .layout {
-      grid-template-columns: 240px 1fr 220px;
-      grid-template-rows: auto auto;
-      align-items: start;
-    }
-
-    .cover {
-      grid-column: 1;
-      grid-row: 1 / 3;
-      max-width: none;
-      margin: 0;
-    }
-
-    .center-top {
-      grid-column: 2;
-      grid-row: 1;
-      text-align: left;
-      align-items: flex-start;
-    }
-
-    .center-bottom {
-      grid-column: 2;
-      grid-row: 2;
-      text-align: left;
-      align-items: flex-start;
-    }
-
-    .chip {
-      align-self: flex-start;
-    }
-
-    .shots,
-    .shots-empty {
-      grid-column: 3;
-      grid-row: 1 / 3;
-    }
-
-    .shots {
-      flex-direction: column;
-      overflow-x: hidden;
-      overflow-y: auto;
-      max-height: min(70vh, 640px);
-      padding-bottom: 0;
-      padding-right: 4px;
-    }
-
-    .shots :global(img) {
-      width: 100%;
-      height: auto;
-      flex: none;
-    }
   }
 </style>

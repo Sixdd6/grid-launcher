@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  cloudStatusLabel,
   developerOf,
+  epochDate,
   flagList,
   headerLine,
+  lastPlayedText,
+  launchTargetLine,
   ratingText,
   releaseYear,
   verificationLabel,
@@ -97,5 +101,65 @@ describe('headerLine', () => {
     expect(
       headerLine({ platformName: '', firstReleaseDate: '', companies: '', genres: '', rating: '' })
     ).toBe('');
+  });
+});
+
+describe('epochDate', () => {
+  it('formats an epoch as a UTC date', () => {
+    expect(epochDate(1_800_000_000)).toBe('2027-01-15');
+  });
+
+  it('is blank for never', () => {
+    expect(epochDate(0)).toBe('');
+  });
+});
+
+describe('lastPlayedText', () => {
+  it('names the date of the last launch', () => {
+    expect(lastPlayedText(1_800_000_000)).toBe('Last played 2027-01-15');
+  });
+
+  it('says so when the game has never been launched through GRID', () => {
+    expect(lastPlayedText(0)).toBe('Never played');
+  });
+});
+
+describe('launchTargetLine', () => {
+  const defaults = (
+    emulators: Record<string, string>,
+    cores: Record<string, string> = {}
+  ) => ({ default_emulators: emulators, retroarch_cores: cores, launch_args: '' });
+
+  it('names the platform default emulator', () => {
+    expect(launchTargetLine(defaults({ snes: 'Snes9x' }), 'SNES')).toBe('Snes9x');
+  });
+
+  it('names the core too when the default is a RetroArch build', () => {
+    expect(
+      launchTargetLine(defaults({ snes: 'RetroArch' }, { snes: 'snes9x_libretro' }), 'SNES')
+    ).toBe('RetroArch · snes9x_libretro');
+  });
+
+  it('says a RetroArch default has no core rather than naming half a target', () => {
+    expect(launchTargetLine(defaults({ snes: 'RetroArch' }), 'SNES')).toBe('RetroArch · no core');
+  });
+
+  it('reads a remembered "(none)" the same as an absent default', () => {
+    expect(launchTargetLine(defaults({ snes: '<none>' }), 'SNES')).toBe('No default emulator');
+  });
+
+  it('says so when nothing is configured at all', () => {
+    expect(launchTargetLine(null, 'SNES')).toBe('No default emulator');
+  });
+});
+
+describe('cloudStatusLabel', () => {
+  it('offers the panel when either kind is supported', () => {
+    expect(cloudStatusLabel(true, false)).toBe('Cloud saves');
+    expect(cloudStatusLabel(false, true)).toBe('Cloud saves');
+  });
+
+  it('says so when neither is', () => {
+    expect(cloudStatusLabel(false, false)).toBe('Not configured');
   });
 });

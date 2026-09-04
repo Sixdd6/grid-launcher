@@ -96,6 +96,13 @@ describe('cloud-saves', () => {
   }
 
   async function openSavePanel() {
+    // The cloud toggles live on the Saves tab (design §7). The tab itself
+    // is always mounted; the toggle only exists once the tab is showing.
+    await $(testId('details-tab-saves')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the details popup never rendered its Saves tab',
+    });
+    await $(testId('details-tab-saves')).click();
     await $(testId('details-cloud-save-toggle')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the "Manage Saves" toggle never appeared',
