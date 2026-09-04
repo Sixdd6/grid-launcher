@@ -1,17 +1,24 @@
 <script lang="ts">
   import type { RomFile } from '../api';
   import { contentRows, gameRows } from './files';
+  import { firmwareChipLabel, firmwareInstallable, type FirmwareChipState } from '../server/header';
 
   let {
     files,
     installedVersion,
     serverVersion,
     installedNow,
+    firmware,
+    onInstallFirmware,
   }: {
     files: RomFile[];
     installedVersion: string;
     serverVersion: string;
     installedNow: boolean;
+    /** The platform's firmware status; `null` while it is in flight. */
+    firmware: FirmwareChipState;
+    /** `null` while a pass this popup started has not finished yet. */
+    onInstallFirmware: (() => void) | null;
   } = $props();
 
   let rows = $derived(gameRows(files));
@@ -58,6 +65,24 @@
       {/each}
     </ul>
   {/if}
+
+  <h3>Firmware</h3>
+  <div class="row" data-testid="details-firmware">
+    <span class="name">{firmwareChipLabel(firmware)}</span>
+    <span class="size"></span>
+    {#if firmwareInstallable(firmware)}
+      <button
+        data-testid="details-firmware-install"
+        class="firmware-install"
+        disabled={onInstallFirmware === null}
+        onclick={() => onInstallFirmware?.()}
+      >
+        {onInstallFirmware === null ? 'Requested…' : 'Install'}
+      </button>
+    {:else}
+      <span class="version"></span>
+    {/if}
+  </div>
 </div>
 
 <style>
@@ -116,5 +141,21 @@
     margin: 0;
     color: var(--text-muted);
     font-size: 13px;
+  }
+
+  .firmware-install {
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 12px;
+    border-radius: var(--r-control);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .firmware-install:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
 </style>

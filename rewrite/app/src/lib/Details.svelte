@@ -1,10 +1,13 @@
 <script lang="ts">
+  import { listen } from '@tauri-apps/api/event';
   import {
     api,
+    FIRMWARE_PASS_FINISHED_EVENT,
     type CloudPanelInfo,
     type ContentAvailability,
     type ContentKind,
     type DownloadStatus,
+    type FirmwarePassFinished,
     type LaunchDefaults,
     type RomDetail,
   } from './api';
@@ -42,6 +45,7 @@
     tabTestId,
     type DetailsTab,
   } from './details/tabs';
+  import type { FirmwareChipState } from './server/header';
 
   let {
     subject,
@@ -129,6 +133,83 @@
       .then((d) => (launchDefaults = d))
       .catch(() => {}); // unreadable config: the emulator row says "No default emulator"
   });
+
+  // Design §7 Overview: Related is filtered against the platform's own game
+  // list. Fetched once the detail names the platform id; a failure leaves
+  // the list empty, which renders no Related row at all rather than a row
+  // of titles the user may not have.
+  let serverTitles = $state<string[]>([]);
+  let firmware = $state<FirmwareChipState>(null);
+  let firmwarePending = $state(false);
+
+  $effect(() => {
+    const platformId = detail?.platform_id ?? null;
+    if (platformId === null || !session.connected) return;
+    if (detail !== null && detail.related.length === 0) return; // nothing to filter
+    let cancelled = false;
+    api
+      .listGames(platformId)
+      .then((games) => {
+        if (!cancelled) serverTitles = games.map((g) => g.name);
+      })
+      .catch(() => {}); // offline/refused: no Related row rather than a wrong one
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  // One firmware status read. The sequence guard drops an answer that a
+  // newer read has already superseded, so the chip never steps backwards
+  // when the pass-finished refetch overtakes the first fetch.
+  let firmwareSeq = 0;
+  function refreshFirmware(platformId: number) {
+    const seq = ++firmwareSeq;
+    api
+      .platformFirmwareStatus(platformId, subject.platformName)
+      .then((status) => {
+        if (seq === firmwareSeq) firmware = status;
+      })
+      .catch(() => {
+        // Refused or unreachable. "unavailable" is the honest chip: sitting
+        // at "checking…" forever would claim a call is still in flight.
+        if (seq === firmwareSeq) firmware = 'unavailable';
+      });
+  }
+
+  $effect(() => {
+    const platformId = detail?.platform_id ?? null;
+    if (platformId === null || !session.connected) return;
+    refreshFirmware(platformId);
+  });
+
+  // The pass runs in the background and answers with one event; the button
+  // stays disabled until it lands, whether or not anything was fetched. The
+  // status is then read again, since a pass can change what the server side
+  // reports.
+  $effect(() => {
+    const unlisten = listen<FirmwarePassFinished>(FIRMWARE_PASS_FINISHED_EVENT, (e) => {
+      const platformId = detail?.platform_id ?? null;
+      if (platformId === null || e.payload.platform_id !== platformId) return;
+      firmwarePending = false;
+      refreshFirmware(platformId);
+    });
+    return () => {
+      void unlisten.then((off) => off());
+    };
+  });
+
+  async function installFirmware() {
+    const platformId = detail?.platform_id ?? null;
+    if (platformId === null) return;
+    error = null;
+    firmwarePending = true;
+    try {
+      await api.installFirmwareForPlatform(platformId, subject.platformName);
+    } catch (err) {
+      error = errorMessage(err);
+      firmwarePending = false;
+    }
+  }
 
   let pending = $derived(pendingAction !== null);
   let summary = $derived(summaryOf(subject));
@@ -547,7 +628,7 @@
 
         <div class="tabpanel" role="tabpanel">
           {#if tab === 'overview'}
-            <OverviewTab name={subject.name} {description} {screenshotUrls} {detail} />
+            <OverviewTab name={subject.name} {description} {screenshotUrls} {detail} {serverTitles} />
           {:else if tab === 'media'}
             <MediaTab items={mediaItems} onOpen={(i) => (viewerIndex = i)} />
           {:else if tab === 'saves'}
@@ -568,6 +649,8 @@
               {installedVersion}
               {serverVersion}
               {installedNow}
+              {firmware}
+              onInstallFirmware={firmwarePending ? null : installFirmware}
             />
           {/if}
         </div>

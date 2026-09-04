@@ -3,20 +3,27 @@
   import Image from '../Image.svelte';
   import { epochDate } from './header';
   import { overviewStrip } from './media';
+  import { relatedKindLabel, relatedOnServer } from './related';
 
   let {
     name,
     description,
     screenshotUrls,
     detail,
+    serverTitles,
   }: {
     name: string;
     description: string;
     screenshotUrls: string[];
     detail: RomDetail | null;
+    /** Every title on this game's platform, for design §7's "filtered to
+     *  titles present on the server". Empty until the list loads. */
+    serverTitles: string[];
   } = $props();
 
   let strip = $derived(overviewStrip(screenshotUrls));
+
+  let related = $derived(relatedOnServer(detail?.related ?? [], serverTitles));
 
   // `details-meta-<key>` rows, built from whatever the server actually
   // knows. A row with no value is dropped rather than rendered blank: an
@@ -73,6 +80,20 @@
   {:else}
     <p class="empty" data-testid="details-no-screenshots">No screenshots available</p>
   {/if}
+
+  {#if related.length}
+    <div class="related" data-testid="details-related">
+      <h3>Related</h3>
+      <div class="chips">
+        {#each related as entry, i (entry.name)}
+          <span class="related-chip" data-testid={`details-related-${i}`}>
+            {entry.name}
+            <em>{relatedKindLabel(entry.kind)}</em>
+          </span>
+        {/each}
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -128,5 +149,36 @@
     margin: 0;
     color: var(--text-muted);
     font-size: 13px;
+  }
+
+  .related h3 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-h);
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .related-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: var(--r-pill);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+
+  .related-chip em {
+    font-style: normal;
+    color: var(--text-muted);
+    font-size: 11px;
   }
 </style>
