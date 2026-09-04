@@ -7,6 +7,8 @@
   import Image from './Image.svelte';
   import Details from './Details.svelte';
   import { moveFocus, type NavDirection } from './focus/grid';
+  import { createHoverViewed } from './lastViewedHover';
+  import { noteViewed } from './stores/lastViewed.svelte';
 
   let { active }: { active: boolean } = $props();
 
@@ -18,11 +20,16 @@
 
   function openDetails(row: InstalledGame) {
     subject = fromInstalled(row);
+    noteViewed(row.cover_large_path);
   }
 
   function closeDetails() {
     subject = null;
   }
+
+  // Design §3: a card becomes the background only after the pointer has
+  // rested on it for more than half a second.
+  const hover = createHoverViewed();
 
   export function handleNav(action: NavDirection | 'accept' | 'back') {
     if (action === 'back') {
@@ -67,6 +74,8 @@
           class="card"
           class:focused={i === focusIndex}
           onclick={() => openDetails(row)}
+          onmouseenter={() => hover.start(row.cover_large_path)}
+          onmouseleave={hover.end}
           role="presentation"
         >
           <Image url={row.cover_small_path || null} alt={row.title} placeholder="No cover" />

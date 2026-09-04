@@ -7,6 +7,8 @@
   import { isInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
   import { hostOf } from './shell';
   import { session, retry } from './stores/session.svelte';
+  import { createHoverViewed } from './lastViewedHover';
+  import { noteViewed } from './stores/lastViewed.svelte';
 
   let { active }: { active: boolean } = $props();
 
@@ -55,11 +57,16 @@
 
   function openDetails(game: GameSummary) {
     detailsGame = game;
+    noteViewed(game.path_cover_large);
   }
 
   function closeDetails() {
     detailsGame = null;
   }
+
+  // Design §3: a card becomes the background only after the pointer has
+  // rested on it for more than half a second.
+  const hover = createHoverViewed();
 
   export function handleNav(action: NavDirection | 'accept' | 'back') {
     if (action === 'back') {
@@ -137,7 +144,15 @@
 
     <div class="grid" bind:this={gridEl} style="--columns: {COLUMNS}">
       {#each games as game, i (game.id)}
-        <div data-testid={`game-card-${game.id}`} class="card" class:focused={i === focusIndex} onclick={() => openDetails(game)} role="presentation">
+        <div
+          data-testid={`game-card-${game.id}`}
+          class="card"
+          class:focused={i === focusIndex}
+          onclick={() => openDetails(game)}
+          onmouseenter={() => hover.start(game.path_cover_large)}
+          onmouseleave={hover.end}
+          role="presentation"
+        >
           <Image url={game.path_cover_small} alt={game.name} />
           {#if isInstalled(game, activePlatformName)}
             <span data-testid={`installed-badge-${game.id}`} class="badge">

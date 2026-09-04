@@ -4,10 +4,12 @@
   import Downloads from './Downloads.svelte';
   import DownloadsFooter from './DownloadsFooter.svelte';
   import Emulators from './Emulators.svelte';
+  import BackgroundArt from './BackgroundArt.svelte';
   import { api } from './api';
   import { session, retry, disconnect } from './stores/session.svelte';
   import { appUpdate, dismiss } from './stores/appUpdate.svelte';
-  import { refresh as refreshInstalled } from './stores/installed.svelte';
+  import { installed, refresh as refreshInstalled } from './stores/installed.svelte';
+  import { seedLastViewed } from './stores/lastViewed.svelte';
   import { chipLabel, hostOf, initialView, VIEWS, viewForDigit, viewLabel, type View } from './shell';
   import type { NavDirection } from './focus/grid';
 
@@ -87,9 +89,17 @@
     // App.svelte owns it.
     refreshInstalled();
   });
+
+  // Startup fallback for the background art. Re-runs as the registry loads;
+  // `seedLastViewed` is idempotent and never overwrites a real view.
+  $effect(() => {
+    seedLastViewed(installed.list);
+  });
 </script>
 
 <svelte:window onkeydown={onKeydown} onpointerdown={onWindowPointerDown} />
+
+<BackgroundArt />
 
 <header data-testid="shell-topbar" class="topbar">
   <div class="brand">
@@ -371,6 +381,8 @@
   .view {
     flex: 1 1 auto;
     min-height: 0;
+    position: relative;
+    z-index: 1;
   }
 
   .placeholder {
