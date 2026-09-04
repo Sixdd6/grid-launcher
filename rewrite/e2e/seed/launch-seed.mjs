@@ -22,15 +22,13 @@
  *
  * The RetroArch stub's basename ("retroarch") is a literal entry in the
  * repo-root emulator-autoprofiles.json's match_tokens for the "RetroArch
- * (Multi-System)" profile, which has `all_platforms: true`. That matters:
- * grid-core's emulator_supports_platform (launch/selection.rs) checks
- * `all_platforms` BEFORE the RetroArch core-mapped gate, so a RetroArch
- * default with no core mapped for the platform is still treated as
- * "supported" and gets selected — the setup launch.spec.ts's "no RetroArch
- * core configured" test needs. Naming the entry "RetroArch" too (rather
- * than relying on the profile match alone) mirrors how a real user would
- * set this up and keeps `entry_is_retroarch` true from the entry-name side
- * as well.
+ * (Multi-System)" profile. Under design D-RC-1 that profile's
+ * `all_platforms: true` no longer implies support: `emulator_supports_platform`
+ * (launch/selection.rs) runs the RetroArch core gate FIRST, so the stub
+ * needs a real core file beside it to be selectable at all. This seed writes
+ * `stubs/cores/snes9x_libretro.so` for exactly that reason, and deliberately
+ * writes NO [retroarch_cores] table — which is the setup launch.spec.ts's
+ * "no RetroArch core configured" test needs.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -67,6 +65,10 @@ chmodSync(instantExit, 0o755);
 const retroarch = path.join(stubsDir, 'retroarch');
 writeFileSync(retroarch, '#!/bin/sh\nexit 0\n');
 chmodSync(retroarch, 0o755);
+
+const coresDir = path.join(stubsDir, 'cores');
+mkdirSync(coresDir, { recursive: true });
+writeFileSync(path.join(coresDir, 'snes9x_libretro.so'), '');
 
 // --- the "installed" ROM file itself -----------------------------------------
 

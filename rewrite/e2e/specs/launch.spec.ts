@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   APP_START_TIMEOUT,
@@ -188,11 +188,19 @@ describe('launch', () => {
     await $(testId('details-close')).click();
   });
 
-  it('shows the verbatim "No RetroArch core is configured" error for an unmapped RetroArch default', async () => {
-    await openEmulators();
-    await selectValue('default-select-1', 'RetroArch');
-    await waitForConfigLine(`"${PLATFORM}" = "RetroArch"`);
-    await closeEmulators();
+  it('shows the verbatim "No RetroArch core is configured" error for a coreless RetroArch default', async () => {
+    // Seeded through config.toml rather than the UI (design §4): the
+    // Emulators panel now records a core whenever RetroArch is picked
+    // (D-RC-4), so the UI can no longer produce this state. Rewriting only
+    // the default_emulators line preserves the InstantExit path edit the
+    // previous test made. The default going into this test is "InstantExit"
+    // (set by the "exited immediately" test above; the following test only
+    // edited that entry's path, not the default).
+    const text = readFileSync(configPath(), 'utf-8');
+    writeFileSync(
+      configPath(),
+      text.replace(`"${PLATFORM}" = "InstantExit"`, `"${PLATFORM}" = "RetroArch"`),
+    );
 
     await openDetails();
     await $(testId('details-play')).click();

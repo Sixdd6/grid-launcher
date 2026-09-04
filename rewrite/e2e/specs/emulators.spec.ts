@@ -36,6 +36,18 @@ describe('emulators', () => {
     writeFileSync(stubPath, '#!/bin/sh\nexit 0\n');
     chmodSync(stubPath, 0o755);
 
+    // Design D-RC-1: RetroArch's platform support is now decided by the
+    // core files installed beside its executable, so the stub needs a
+    // `cores/` sibling. Two SNES cores in the bundled slug map's curated
+    // order (romm-platform-cores.json maps "snes" to
+    // ["snes9x", "snes9x2010", "bsnes"]) and no Arcade core at all, so
+    // platform 1 offers RetroArch and platform 2 (Arcade) does not.
+    const coresDir = path.join(stubsDir, 'cores');
+    mkdirSync(coresDir, { recursive: true });
+    for (const core of ['snes9x', 'bsnes']) {
+      writeFileSync(path.join(coresDir, `${core}_libretro.so`), '');
+    }
+
     await $(testId('connect-server-url')).waitForExist({
       timeout: APP_START_TIMEOUT,
       timeoutMsg: 'the connect form never appeared — the app did not reach a usable state',
@@ -173,22 +185,58 @@ describe('emulators', () => {
     });
   });
 
-  it('assigns a per-platform default and persists it to config.toml', async () => {
-    await selectValue('default-select-1', 'RetroArch Renamed');
-
+  /** Waits until config.toml contains `line`, or fails with a useful message. */
+  async function waitForConfigLine(line: string) {
     await browser.waitUntil(
       () => {
         try {
-          const text = readFileSync(configPath(), 'utf-8');
-          return text.includes('"Super Nintendo Entertainment System" = "RetroArch Renamed"');
+          return readFileSync(configPath(), 'utf-8').includes(line);
         } catch {
           return false;
         }
       },
       {
         timeout: TRANSITION_TIMEOUT,
-        timeoutMsg: 'config.toml never got the new default_emulators entry',
+        timeoutMsg: `config.toml never contained ${line}`,
       },
     );
+  }
+
+  /** The `<option>` values of a select, in DOM order. */
+  async function optionValues(testIdName: string): Promise<string[]> {
+    return browser.execute((selector) => {
+      const el = document.querySelector(selector) as HTMLSelectElement | null;
+      if (!el) throw new Error(`no element matched ${selector}`);
+      return Array.from(el.options).map((o) => o.value);
+    }, testId(testIdName));
+  }
+
+  it('assigns a per-platform default and records a core in config.toml', async () => {
+    await selectValue('default-select-1', 'RetroArch Renamed');
+    await waitForConfigLine('"Super Nintendo Entertainment System" = "RetroArch Renamed"');
+    // D-RC-4: picking RetroArch also records the first installed compatible
+    // core, which the slug map orders snes9x before bsnes.
+    await waitForConfigLine('"Super Nintendo Entertainment System" = "snes9x"');
+  });
+
+  it('lists the installed cores for the RetroArch row, in slug-map order', async () => {
+    await $(testId('default-core-1')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the core select never appeared for the RetroArch default',
+    });
+    await expect(await optionValues('default-core-1')).toEqual(['snes9x', 'bsnes']);
+  });
+
+  it('changing the core rewrites the retroarch_cores line', async () => {
+    await selectValue('default-core-1', 'bsnes');
+    await waitForConfigLine('"Super Nintendo Entertainment System" = "bsnes"');
+  });
+
+  it('does not offer RetroArch for a platform with no installed core', async () => {
+    // Arcade (platform 2) needs fbneo/mame2003_plus/mame; only SNES cores
+    // are installed, so D-RC-1's gate keeps RetroArch out of the list even
+    // though its autoprofile sets all_platforms: true.
+    const names = await optionValues('default-select-2');
+    expect(names).not.toContain('RetroArch Renamed');
   });
 });
