@@ -92,6 +92,7 @@ mod tests {
             file_name: format!("file{id}.zip"),
             file_size_bytes: 0,
             is_top_level: true,
+            last_modified: String::new(),
             category: category.to_string(),
         }
     }

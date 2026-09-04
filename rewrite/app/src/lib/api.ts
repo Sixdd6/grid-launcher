@@ -36,7 +36,12 @@ export type RomFile = {
   file_name: string;
   file_size_bytes: number;
   is_top_level: boolean;
+  /** ISO 8601 as the server states it, or `''`. D-UI-10's fallback. */
+  last_modified: string;
 };
+
+/** One Overview "Related" chip. Mirrors `grid_core::romm::RelatedGame`. */
+export type RelatedGame = { name: string; kind: string };
 
 export type RomDetail = {
   id: number;
@@ -53,12 +58,19 @@ export type RomDetail = {
   genres: string;
   companies: string;
   first_release_date: string;
+  franchises: string;
+  game_modes: string;
+  player_count: string;
   filesize_bytes: number;
   server_updated_at: string;
   files: RomFile[];
   cover_small_path: string;
   cover_large_path: string;
   screenshot_urls: string[];
+  youtube_video_id: string;
+  video_path: string;
+  is_identified: boolean;
+  related: RelatedGame[];
 };
 
 export type DownloadStatus =

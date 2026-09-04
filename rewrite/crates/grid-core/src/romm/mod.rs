@@ -337,6 +337,12 @@ pub struct RomFile {
     pub file_size_bytes: i64,
     #[serde(default)]
     pub is_top_level: bool,
+    /// The file's own last-modified timestamp as the server states it
+    /// (ISO 8601, e.g. `2026-02-03T11:22:33`). `""` when the server does
+    /// not send one. D-UI-10 falls back to this when a file name carries
+    /// no version tag, so it is kept verbatim and formatted in the UI.
+    #[serde(default, deserialize_with = "null_to_empty")]
+    pub last_modified: String,
     /// RomM's file category (e.g. "update", "dlc"); blank for an ordinary
     /// game file. The server sends `null` for no category.
     #[serde(default, deserialize_with = "null_to_empty")]
@@ -351,6 +357,16 @@ where
     D: serde::Deserializer<'de>,
 {
     Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+/// One entry of the details Overview "Related" row. IGDB's own cover URLs
+/// live on `images.igdb.com`, which `filter_to_server_host` (doc 07) drops,
+/// so only the title and which list it came from are carried.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RelatedGame {
+    pub name: String,
+    /// `"similar"`, `"remake"`, `"remaster"`, `"dlc"` or `"expansion"`.
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -369,6 +385,13 @@ pub struct RomDetail {
     pub genres: String,
     pub companies: String,
     pub first_release_date: String,
+    /// `metadatum.franchises`, comma-joined — same convention as `genres`.
+    pub franchises: String,
+    /// `metadatum.game_modes`, comma-joined.
+    pub game_modes: String,
+    /// `metadatum.player_count`, verbatim (the server sends a free-form
+    /// string such as `"1"` or `"1-4"`).
+    pub player_count: String,
     pub filesize_bytes: i64,
     pub server_updated_at: String,
     pub files: Vec<RomFile>,
@@ -381,6 +404,18 @@ pub struct RomDetail {
     /// Already resolved + host-filtered absolute screenshot URLs, in
     /// source order (see `images::urls::screenshot_urls_from_payload`).
     pub screenshot_urls: Vec<String>,
+    /// `youtube_video_id`, `""` when the server has none. The frontend
+    /// embeds it; it is never resolved to a URL here.
+    pub youtube_video_id: String,
+    /// `path_video`, verbatim from the server (server-relative) — resolved
+    /// lazily against the server URL by `ensure_video`, exactly as the
+    /// cover paths are by `ensure_image`. Never a token-bearing URL.
+    pub video_path: String,
+    /// RomM's `is_identified`: the game was matched against a metadata
+    /// provider. `false` when the server omits the flag.
+    pub is_identified: bool,
+    /// The Overview "Related" row, in source-list order.
+    pub related: Vec<RelatedGame>,
 }
 
 /// Wire shape of `RomMetadataSchema` fields we use. Every field defaulted so
@@ -396,6 +431,66 @@ struct RawRomMetadata {
     companies: Vec<String>,
     #[serde(default)]
     first_release_date: Option<i64>,
+    #[serde(default)]
+    franchises: Vec<String>,
+    #[serde(default)]
+    game_modes: Vec<String>,
+    #[serde(default)]
+    player_count: String,
+}
+
+/// One `IGDBRelatedGame`. Only `name` is used; the rest of the wire shape
+/// (`id`, `slug`, `type`, `cover_url`) is ignored by omission.
+#[derive(Deserialize, Default)]
+struct RawRelatedGame {
+    #[serde(default)]
+    name: String,
+}
+
+/// Wire shape of the `RomIGDBMetadata` lists §7's Related row reads. Every
+/// field defaulted: a null `igdb_metadata`, or one with only some lists,
+/// must never fail the outer decode.
+#[derive(Deserialize, Default)]
+struct RawIgdbMetadata {
+    #[serde(default)]
+    similar_games: Vec<RawRelatedGame>,
+    #[serde(default)]
+    remakes: Vec<RawRelatedGame>,
+    #[serde(default)]
+    remasters: Vec<RawRelatedGame>,
+    #[serde(default)]
+    dlcs: Vec<RawRelatedGame>,
+    #[serde(default)]
+    expansions: Vec<RawRelatedGame>,
+}
+
+impl RawIgdbMetadata {
+    /// Flattens the five lists into one row, in a FIXED order, dropping
+    /// blank names and any title already present (IGDB repeats a title
+    /// across lists often enough that the row would otherwise stutter).
+    fn into_related(self) -> Vec<RelatedGame> {
+        let lists = [
+            ("similar", self.similar_games),
+            ("remake", self.remakes),
+            ("remaster", self.remasters),
+            ("dlc", self.dlcs),
+            ("expansion", self.expansions),
+        ];
+        let mut out: Vec<RelatedGame> = Vec::new();
+        for (kind, list) in lists {
+            for entry in list {
+                let name = entry.name.trim().to_string();
+                if name.is_empty() || out.iter().any(|r| r.name == name) {
+                    continue;
+                }
+                out.push(RelatedGame {
+                    name,
+                    kind: kind.to_string(),
+                });
+            }
+        }
+        out
+    }
 }
 
 /// Wire shape of `DetailedRomSchema`'s fields we use. All optionals are
@@ -435,6 +530,14 @@ struct RawRomDetail {
     path_cover_small: Option<String>,
     #[serde(default)]
     path_cover_large: Option<String>,
+    #[serde(default)]
+    igdb_metadata: Option<RawIgdbMetadata>,
+    #[serde(default)]
+    youtube_video_id: Option<String>,
+    #[serde(default)]
+    path_video: Option<String>,
+    #[serde(default)]
+    is_identified: bool,
     /// Every field not named above — the screenshot sources
     /// (`merged_screenshots`, `user_screenshots`, metadata blocks…) are read
     /// from here by `screenshot_urls_from_payload`.
@@ -449,6 +552,7 @@ impl RawRomDetail {
             .filter(|n| !n.is_empty())
             .unwrap_or(self.fs_name_no_ext);
         let metadatum = self.metadatum.unwrap_or_default();
+        let igdb = self.igdb_metadata.unwrap_or_default();
         let resolver = crate::images::urls::server_resolver(base_url);
         let screenshot_urls = crate::images::urls::screenshot_urls_from_payload(
             &serde_json::Value::Object(self.extra),
@@ -475,12 +579,19 @@ impl RawRomDetail {
                 .first_release_date
                 .map(|d| d.to_string())
                 .unwrap_or_default(),
+            franchises: metadatum.franchises.join(", "),
+            game_modes: metadatum.game_modes.join(", "),
+            player_count: metadatum.player_count,
             filesize_bytes: self.fs_size_bytes,
             server_updated_at: self.updated_at,
             files: self.files,
             cover_small_path: self.path_cover_small.unwrap_or_default(),
             cover_large_path: self.path_cover_large.unwrap_or_default(),
             screenshot_urls,
+            youtube_video_id: self.youtube_video_id.unwrap_or_default(),
+            video_path: self.path_video.unwrap_or_default(),
+            is_identified: self.is_identified,
+            related: igdb.into_related(),
         }
     }
 }

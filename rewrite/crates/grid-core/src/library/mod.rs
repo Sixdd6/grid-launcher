@@ -287,6 +287,11 @@ struct ResolvedPaths {
 /// The two job kinds the queue drives. One `pending_jobs` map and one
 /// download/finalize pair serve both, so an emulator acquisition and a game
 /// install queue behind each other rather than racing for the same slot.
+///
+/// `InstallJob` carries the full `RomDetail` (needed at finalize time), so
+/// it is naturally larger than `EmulatorJob`; boxing it would ripple through
+/// every match site for no behavioural gain, so the size gap is accepted.
+#[allow(clippy::large_enum_variant)]
 enum JobPayload {
     Game(InstallJob),
     Emulator(EmulatorJob),
@@ -2930,6 +2935,7 @@ mod tests {
             file_name: file_name.to_string(),
             file_size_bytes: 10,
             is_top_level: top_level,
+            last_modified: String::new(),
             category: String::new(),
         }
     }
@@ -2950,12 +2956,19 @@ mod tests {
             genres: String::new(),
             companies: String::new(),
             first_release_date: String::new(),
+            franchises: String::new(),
+            game_modes: String::new(),
+            player_count: String::new(),
             filesize_bytes: 999,
             server_updated_at: String::new(),
             files,
             cover_small_path: String::new(),
             cover_large_path: String::new(),
             screenshot_urls: Vec::new(),
+            youtube_video_id: String::new(),
+            video_path: String::new(),
+            is_identified: false,
+            related: Vec::new(),
         }
     }
 

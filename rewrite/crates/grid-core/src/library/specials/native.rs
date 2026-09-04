@@ -449,6 +449,7 @@ mod tests {
             file_name: file_name.to_string(),
             file_size_bytes: 0,
             is_top_level,
+            last_modified: String::new(),
             category: String::new(),
         }
     }
@@ -809,12 +810,19 @@ mod tests {
             genres: "".to_string(),
             companies: "".to_string(),
             first_release_date: "".to_string(),
+            franchises: "".to_string(),
+            game_modes: "".to_string(),
+            player_count: "".to_string(),
             filesize_bytes: 0,
             server_updated_at: "".to_string(),
             files,
             cover_small_path: "".to_string(),
             cover_large_path: "".to_string(),
             screenshot_urls: Vec::new(),
+            youtube_video_id: "".to_string(),
+            video_path: "".to_string(),
+            is_identified: false,
+            related: Vec::new(),
         }
     }
 
