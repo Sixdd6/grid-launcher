@@ -52,7 +52,11 @@
   --footer-h: 28px;
 
   font: 13px/145% var(--sans);
-  color-scheme: light dark;
+  /* Native controls (the theme `select` popup, the range thumb, scrollbars)
+     follow this, not the tokens, so it tracks the resolved theme rather
+     than the OS scheme — otherwise `data-theme="light"` on a dark desktop
+     leaves the popup dark. */
+  color-scheme: light;
   color: var(--text);
   background: var(--bg);
   font-synthesis: none;
@@ -63,6 +67,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
+    color-scheme: dark;
     --bg: #07070f;
     --surface: rgba(255, 255, 255, 0.07);
     --surface-2: #14141f;
@@ -77,6 +82,7 @@
 }
 
 :root[data-theme='dark'] {
+  color-scheme: dark;
   --bg: #07070f;
   --surface: rgba(255, 255, 255, 0.07);
   --surface-2: #14141f;
