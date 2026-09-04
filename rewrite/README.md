@@ -152,6 +152,15 @@ These behaviors remain manual and require a desktop session + live RomM server
   press Install and confirm the firmware lands in that emulator's firmware directory;
   with the platform set to (none), confirm the chip reads "no default emulator" and
   offers no button.
+- **Details video**: on a RomM server whose game carries a `path_video`, open Details ›
+  Media and play it. Confirm it plays from the local cache (the file appears under the
+  covers directory) and that the network request came from the app, not the webview.
+- **YouTube trailer**: with a game whose `youtube_video_id` is set, open the trailer in the
+  fullscreen viewer and confirm it plays. A blank frame means the `frame-src` CSP entry is
+  missing — the webview reports nothing for a blocked frame.
+- **Related row**: open a game whose IGDB metadata lists similar games and confirm only
+  titles the server actually holds appear, and that clicking one is not offered (the row is
+  informational until collections land).
 - **Card sizes at width**: with the window maximised on a wide display, confirm the grid
   fills to at most 1920px and stays centred, and that Small / Medium / Large change the
   column count rather than stretching the covers.

@@ -71,18 +71,34 @@ On first launch, or when required configuration is missing, the app should promp
 The user must complete this setup before continuing into the main application.
 
 ### Game Details View
-Clicking on a game in the Library or Server sections opens a sub view with more information about the game and a button bar with Back, Details, and cloud save/state actions when supported.
-The sub view should include a larger cover art image, title/description/platform/rating information, and any available screenshots in a vertical scrollable area.
+Clicking a game in the Library or Server sections opens a popup, at most 1040×680, centred
+over a dimmed and blurred shell. Esc and the ✕ close it.
 
-The action area should be left-aligned in the center column and should update based on the game state and may include:
-- `Install Game` / `Install App`
-- `Play`
-- `Config`
-- `Uninstall`
+The left column is fixed at 240px: the large cover, then the primary action (Play, Stop,
+Install / Install App, or Cancel while an install is live), Update when the server holds a
+newer copy, Install Update / Install DLC for PS4 and Xbox 360 games, Game Settings for
+native games, Uninstall, and a cloud button that opens the Saves tab. Under them the column
+states when the game was last played and which emulator — and, for RetroArch, which core —
+would launch it.
 
-The button bar area should be left-aligned above the cover art in the left column and include:
-- 'Back'
-- 'Details'
+The right side carries the title, one header line (platform · release year · developer ·
+genres · rating), chips for the playing state, the identification state, region and language
+flags and the version, then four tabs:
+
+- **Overview** — the summary, a metadata grid (developer, companies, release, genres, game
+  modes, players, franchises), the first six screenshots, and a Related row filtered to
+  titles the server actually holds for that platform.
+- **Media** — every screenshot plus the trailer and any server-hosted video. Clicking a tile
+  opens a fullscreen viewer with arrows, Esc and a caption.
+- **Saves** — the Manage Saves / Emulator Saves / Manage States panels described below.
+- **Files** — every file the server lists with its size and its version (the version tag
+  parsed out of the file name, else the file's last-modified date), the installed-versus-
+  server version line, the PS4 / Xbox 360 content files, and the platform's firmware row
+  with an Install action when the server offers firmware.
+
+The last tab is remembered for the rest of the session.
+
+The button bar area should include:
 - `Manage Saves` for normal per-game cloud-save platforms
 - `Emulator Saves` for shared/global save media such as Xemu and Redream VMUs
 - `Manage States` when state sync is supported for that platform

@@ -1010,3 +1010,19 @@ behavior:
 - Replenish also treats a row that vanished between planning and running
   (`Registry::update_images` returning no matching row) as skipped, without attempting a fetch
   (`crates/grid-core/src/images/replenish.rs:69-72`).
+
+## Game videos (rewrite only)
+
+`DetailedRomSchema.path_video` is a file on the RomM server, not an image, so it cannot
+go through `ImageCache::ensure` — that gate rejects any body that is not an image, which
+is the correct behaviour for covers and the wrong one here. `images::video::ensure_video`
+reuses the same directory and the same `sha256(resolved url)` key scheme with its own
+content gate (Content-Type, then the `ftyp` / EBML magic bytes), storing the file as
+`<key>.mp4` / `.webm` / `.mov`. The startup sweep keys off the file stem, so a cached
+video is an ordinary unpinned entry: evictable, and refetched on the next view.
+
+The bytes are fetched through the session's `RommClient`, exactly like a cover, and the
+frontend only ever receives the resulting local path. No video URL in the UI carries a
+token. `youtube_video_id` is a different case entirely — it is embedded, touches no
+server bytes, and needs the `frame-src https://www.youtube-nocookie.com` CSP entry to
+render at all.
