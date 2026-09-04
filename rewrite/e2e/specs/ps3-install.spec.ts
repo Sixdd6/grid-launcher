@@ -101,7 +101,7 @@ describe('ps3-install', () => {
       },
     );
 
-    await $(testId('installed-badge-401')).waitForExist({
+    await $(`${testId('server-view')} ${testId('installed-badge-401')}`).waitForExist({
       timeout: INSTALL_TIMEOUT,
       timeoutMsg: "the installed badge never appeared on rom 401's card",
     });

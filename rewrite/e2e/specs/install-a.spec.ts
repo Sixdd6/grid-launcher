@@ -109,7 +109,7 @@ describe('install (a): connect, set library path, install', () => {
       timeoutMsg: 'the download never reached Completed',
     });
 
-    await $(testId('installed-badge-101')).waitForExist({
+    await $(`${testId('server-view')} ${testId('installed-badge-101')}`).waitForExist({
       timeout: INSTALL_TIMEOUT,
       timeoutMsg: 'the installed badge never appeared on rom 101\'s card',
     });

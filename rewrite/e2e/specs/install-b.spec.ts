@@ -35,7 +35,7 @@ describe('install (b): relaunch, badge persists, then uninstall', () => {
 
     await $(testId('platform-btn-1')).click();
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    await $(testId('installed-badge-101')).waitForExist({
+    await $(`${testId('server-view')} ${testId('installed-badge-101')}`).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the installed badge did not survive the restart',
     });
@@ -69,7 +69,7 @@ describe('install (b): relaunch, badge persists, then uninstall', () => {
       timeoutMsg: 'the details overlay never closed after uninstalling',
     });
 
-    await $(testId('installed-badge-101')).waitForExist({
+    await $(`${testId('server-view')} ${testId('installed-badge-101')}`).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       reverse: true,
       timeoutMsg: 'the installed badge was still there after uninstalling',

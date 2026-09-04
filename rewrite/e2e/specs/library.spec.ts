@@ -119,4 +119,24 @@ describe('library', () => {
     const card101Class = await $(testId('game-card-101')).getAttribute('class');
     expect(card101Class).not.toContain('focused');
   });
+
+  // The hover overlay (D-UI-9) raises a centred Install button and a bottom
+  // action row over the cover. WebdriverIO clicks an element's CENTRE, so
+  // if either sat under that point every `game-card-<id>` click in the
+  // suite would install instead of opening Details. `cards/size.ts` keeps
+  // the band around the card root's centre free; this is that contract's
+  // end-to-end check.
+  it('opens Details, not the hover action, when the card itself is clicked', async () => {
+    await $(testId('platform-btn-1')).click();
+    await $(testId('game-card-103')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await $(testId('game-card-103')).click();
+
+    await $(testId('details-panel')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'clicking the card centre did not open the details popup',
+    });
+    // Nothing was queued: the click never reached the Install action.
+    expect(await $(testId('details-install')).isExisting()).toBe(true);
+    await $(testId('details-close')).click();
+  });
 });

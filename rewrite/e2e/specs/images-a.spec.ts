@@ -110,7 +110,7 @@ describe('images (a): cover, screenshots, install, library grid', () => {
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('details-install')).click();
 
-    await $(testId('installed-badge-101')).waitForExist({
+    await $(`${testId('server-view')} ${testId('installed-badge-101')}`).waitForExist({
       timeout: INSTALL_TIMEOUT,
       timeoutMsg: 'the installed badge never appeared on rom 101\'s card',
     });

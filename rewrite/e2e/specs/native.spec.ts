@@ -104,7 +104,7 @@ describe('native', () => {
       async () => (await $(testId('download-detail-1')).getText()).startsWith('Completed'),
       { timeout: INSTALL_TIMEOUT, timeoutMsg: 'the native install never reached Completed' },
     );
-    await $(testId('installed-badge-701')).waitForExist({
+    await $(`${testId('server-view')} ${testId('installed-badge-701')}`).waitForExist({
       timeout: INSTALL_TIMEOUT,
       timeoutMsg: "the installed badge never appeared on rom 701's card",
     });

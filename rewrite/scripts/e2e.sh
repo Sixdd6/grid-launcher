@@ -48,7 +48,7 @@ BUILD_STAMP="$REWRITE_DIR/target/debug/.e2e-build-stamp"
 STAGE_GROUPS=(
   "connect:specs/connect.spec.ts"
   "connect-restore:specs/connect-restore-a.spec.ts specs/connect-restore-b.spec.ts"
-  "library:specs/library.spec.ts"
+  "library:specs/library.spec.ts specs/library-grid.spec.ts"
   "install:specs/install-a.spec.ts specs/install-b.spec.ts"
   "downloads:specs/downloads.spec.ts"
   "emulators:specs/emulators.spec.ts"
