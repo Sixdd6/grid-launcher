@@ -7,6 +7,7 @@ import {
   NO_EMULATOR_MARKER,
   platformCoreSelect,
   platformDefaultSelect,
+  savedDefaultFor,
 } from './defaults';
 
 function launchDefaults(
@@ -129,5 +130,22 @@ describe('platformCoreSelect', () => {
     expect(result.options).toEqual([]);
     expect(result.selected).toBe(NO_CORE_VALUE);
     expect(result.disabled).toBe(true);
+  });
+});
+
+describe('savedDefaultFor', () => {
+  const saved = { 'Super Nintendo Entertainment System': 'RetroArch' };
+
+  it('finds the default whatever case the platform name arrives in', () => {
+    // The Server header's emulator chip looks its platform up by the name
+    // the server sent, which need not match the config's key casing.
+    expect(savedDefaultFor(saved, 'super nintendo entertainment system')).toBe('RetroArch');
+    expect(savedDefaultFor(saved, 'Super Nintendo Entertainment System')).toBe('RetroArch');
+  });
+
+  it('is empty for an unmapped platform, and for no map at all', () => {
+    expect(savedDefaultFor(saved, 'Nintendo 64')).toBe('');
+    expect(savedDefaultFor(null, 'Nintendo 64')).toBe('');
+    expect(savedDefaultFor(undefined, 'Nintendo 64')).toBe('');
   });
 });

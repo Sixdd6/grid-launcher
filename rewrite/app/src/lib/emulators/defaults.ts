@@ -25,13 +25,22 @@ export type PlatformDefaultSelect = {
 
 /**
  * The emulator name saved as `platformName`'s default, or `''`. The platform
- * lookup is case-insensitive (server platform-name casing varies).
+ * lookup is case-insensitive: the backend folds the keys it writes
+ * (`commands.rs`'s `save_default_emulator`) and server platform-name casing
+ * varies, so a verbatim index can miss a default that is really there.
+ *
+ * Takes the map rather than the whole `LaunchDefaults` so every reader of
+ * `default_emulators` — the Emulators panel's select and the Server header's
+ * emulator chip — folds the same way.
  */
-function savedDefaultFor(defaults: LaunchDefaults | null, platformName: string): string {
-  if (!defaults) return '';
+export function savedDefaultFor(
+  defaultEmulators: Record<string, string> | null | undefined,
+  platformName: string,
+): string {
+  if (!defaultEmulators) return '';
   const folded = platformName.toLowerCase();
-  const key = Object.keys(defaults.default_emulators).find((k) => k.toLowerCase() === folded);
-  return key ? defaults.default_emulators[key] : '';
+  const key = Object.keys(defaultEmulators).find((k) => k.toLowerCase() === folded);
+  return key ? defaultEmulators[key] : '';
 }
 
 /**
@@ -51,7 +60,7 @@ export function platformDefaultSelect(
   platformName: string,
   compatibleNames: string[]
 ): PlatformDefaultSelect {
-  const saved = savedDefaultFor(defaults, platformName);
+  const saved = savedDefaultFor(defaults?.default_emulators, platformName);
   if (saved === NO_EMULATOR_MARKER) {
     return {
       options: compatibleNames,
