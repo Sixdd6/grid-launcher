@@ -10,8 +10,17 @@ export const installed = {
   },
 };
 
+// Monotonic ticket for in-flight refreshes: several callers (the downloads
+// watcher, `images-replenished`, the Library activation effect) can overlap,
+// and the LAST call to start must be the one whose answer sticks — an earlier
+// call resolving later would otherwise drop a just-finalized install.
+let refreshSeq = 0;
+
 export async function refresh(): Promise<void> {
-  state.list = await api.listInstalled();
+  const seq = ++refreshSeq;
+  const list = await api.listInstalled();
+  if (seq !== refreshSeq) return;
+  state.list = list;
 }
 
 /**
