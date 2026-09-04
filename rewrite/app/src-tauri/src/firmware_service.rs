@@ -65,6 +65,36 @@ use grid_core::launch::profiles::{load_profiles, profile_for_entry};
 use grid_core::library::registry::InstalledGame;
 use grid_core::library::InstallService;
 use grid_core::session::SessionManager;
+use serde::Serialize;
+use tauri::{AppHandle, Emitter};
+
+/// Emitted once for every [`FirmwareService::spawn_for_platform`] call, when
+/// that call's pass has ended — including the paths that end it before any
+/// download starts. The frontend's firmware chip re-enables on it, so a pass
+/// that silently had nothing to do must emit exactly like one that ran.
+pub const FIRMWARE_PASS_FINISHED_EVENT: &str = "firmware-pass-finished";
+
+/// The [`FIRMWARE_PASS_FINISHED_EVENT`] payload. Token secrecy: the platform
+/// id and a flag, nothing else — no path, no emulator name, no URL, and
+/// nothing derived from a credential.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct FirmwarePassFinished {
+    pub platform_id: i64,
+    /// `true` when the pass ended with nothing to report: it completed with
+    /// no warnings, or there was nothing to do (no default emulator, or a
+    /// D19-gated repeat). `false` when the pass could not run (no session,
+    /// unreadable config) or grid-core returned warnings.
+    pub ok: bool,
+}
+
+/// Emits [`FIRMWARE_PASS_FINISHED_EVENT`]. A webview that has gone away is
+/// not an error: the pass itself already did whatever it was going to do.
+fn emit_pass_finished(app: &AppHandle, platform_id: i64, ok: bool) {
+    let _ = app.emit(
+        FIRMWARE_PASS_FINISHED_EVENT,
+        FirmwarePassFinished { platform_id, ok },
+    );
+}
 
 /// The drawer row title for a background PS3 firmware transfer. Verbatim
 /// from the reference (emulator_ui_mixin.py:1760) — the frontend matches on
@@ -195,31 +225,49 @@ impl FirmwareService {
     /// `(directory, platform)` pair that already completed one (D19), or a
     /// pass already running for that emulator directory. Never fails and
     /// never blocks the caller.
+    ///
+    /// Every one of those paths still emits
+    /// [`FIRMWARE_PASS_FINISHED_EVENT`] before returning, and so does the
+    /// spawned task when it ends. The firmware chip's Install button waits
+    /// on that event to re-enable, so a pass that ends silently must not end
+    /// quietly: without the early emits the button would sit disabled for as
+    /// long as the platform stayed selected.
     pub fn spawn_for_platform(
         self: &Arc<Self>,
+        app: AppHandle,
         session: Arc<SessionManager>,
         platform: String,
         platform_id: i64,
         trigger: FirmwareTrigger,
     ) {
         let Some(client) = session.client() else {
+            // Asked for, and not done: nothing can be fetched offline.
+            emit_pass_finished(&app, platform_id, false);
             return;
         };
         let config_path = Config::default_path();
         let Ok(config) = Config::load(&config_path) else {
+            emit_pass_finished(&app, platform_id, false);
             return;
         };
         let profiles = load_profiles();
         let Some(entry) = default_entry_for_platform(&config, &platform, profiles) else {
+            // Nothing to do rather than a failure: there is nowhere to put
+            // firmware for this platform.
+            emit_pass_finished(&app, platform_id, true);
             return;
         };
         let dir = emulator_dir_of(entry);
         // D19, before the in-flight claim: a launch pass for a directory
         // that already completed one this process is a pure re-download.
         if !self.should_run(&dir, platform_id, trigger) {
+            emit_pass_finished(&app, platform_id, true);
             return;
         }
         if !self.try_begin(&dir, Some(platform_id)) {
+            // A pass for this pair is already running and will emit its own
+            // event when it ends; this one ended here, so it says so.
+            emit_pass_finished(&app, platform_id, true);
             return;
         }
         let guard = FirmwareGuard::new(self.clone(), dir.clone(), Some(platform_id));
@@ -235,6 +283,7 @@ impl FirmwareService {
                 config_dir: &config_dir,
             };
             let warnings = install_for_game(&client, &ctx).await;
+            let ok = warnings.is_empty();
             if !warnings.is_empty() {
                 // D14: warnings are logged, never surfaced as a dialog —
                 // the install already succeeded. Local paths and platform
@@ -245,6 +294,7 @@ impl FirmwareService {
             // warning is a per-file outcome, and re-downloading the whole
             // set on the next launch would not change it.
             service.mark_completed(&dir, platform_id);
+            emit_pass_finished(&app, platform_id, ok);
         });
     }
 
@@ -262,15 +312,20 @@ impl FirmwareService {
     /// for that emulator. Never fails and never blocks the caller.
     pub fn spawn_for_game(
         self: &Arc<Self>,
+        app: AppHandle,
         session: Arc<SessionManager>,
         install: Arc<InstallService>,
         record: InstalledGame,
         trigger: FirmwareTrigger,
     ) {
+        // No platform id, no event: the frontend keys the event by platform
+        // id, and this path never had one to key it by. Nothing is waiting
+        // on it either — the chip's Install always goes through
+        // [`Self::spawn_for_platform`], which has the id.
         let Some(platform_id) = platform_id_for(&install.platform_ids(), &record.platform) else {
             return;
         };
-        self.spawn_for_platform(session, record.platform.clone(), platform_id, trigger);
+        self.spawn_for_platform(app, session, record.platform.clone(), platform_id, trigger);
     }
 
     /// Installs the platform firmware a freshly installed emulator wants,
@@ -534,6 +589,31 @@ fn config_dir_of(config_path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The chip's contract with the frontend: the event name and the payload
+    /// shape are what `app/src/lib/api.ts` declares. A rename on either side
+    /// leaves the Install button disabled with nothing to re-enable it, so
+    /// both are pinned here.
+    ///
+    /// The payload is asserted whole, not field by field: the point of the
+    /// test is that nothing ELSE (a path, an emulator name, a URL) can be
+    /// added to a payload that crosses the IPC boundary without this failing.
+    #[test]
+    fn the_pass_finished_event_name_and_payload_are_pinned() {
+        assert_eq!(FIRMWARE_PASS_FINISHED_EVENT, "firmware-pass-finished");
+        let json = serde_json::to_string(&FirmwarePassFinished {
+            platform_id: 7,
+            ok: true,
+        })
+        .expect("payload serialises");
+        assert_eq!(json, r#"{"platform_id":7,"ok":true}"#);
+        let json = serde_json::to_string(&FirmwarePassFinished {
+            platform_id: 19,
+            ok: false,
+        })
+        .expect("payload serialises");
+        assert_eq!(json, r#"{"platform_id":19,"ok":false}"#);
+    }
 
     #[test]
     fn one_whole_directory_job_per_directory() {

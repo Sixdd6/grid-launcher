@@ -194,6 +194,7 @@ pub fn run() {
                 let handle = app.handle().clone();
                 install.set_game_finalized_hook(Arc::new(move |record| {
                     firmware.spawn_for_game(
+                        handle.clone(),
                         session.clone(),
                         install_for_game.clone(),
                         record,

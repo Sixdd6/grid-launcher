@@ -466,15 +466,20 @@ pub async fn platform_firmware_status(
 }
 
 /// The firmware chip's Install action. Fire-and-forget, exactly like the
-/// per-game and per-emulator triggers: the pass runs in the background,
-/// logs its warnings, and never reports back through this command.
+/// per-game and per-emulator triggers: the pass runs in the background and
+/// logs its warnings. It never reports back through this command's return
+/// value — the pass announces its end with
+/// `firmware_service::FIRMWARE_PASS_FINISHED_EVENT`, which is what the chip
+/// waits on.
 #[tauri::command]
 pub fn install_firmware_for_platform(
     state: State<'_, AppState>,
+    app: tauri::AppHandle,
     platform_id: i64,
     platform: String,
 ) -> Result<(), String> {
     state.firmware.spawn_for_platform(
+        app,
         state.session.clone(),
         platform,
         platform_id,
@@ -516,7 +521,11 @@ async fn installed_game_by_rom_id(
 }
 
 #[tauri::command]
-pub async fn launch_game(state: State<'_, AppState>, rom_id: i64) -> Result<GameSession, String> {
+pub async fn launch_game(
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+    rom_id: i64,
+) -> Result<GameSession, String> {
     let launch = state.launch.as_ref().map_err(Clone::clone)?.clone();
     let install = state.install.as_ref().map_err(Clone::clone)?.clone();
     let config_path = Config::default_path();
@@ -531,6 +540,7 @@ pub async fn launch_game(state: State<'_, AppState>, rom_id: i64) -> Result<Game
         // emulator existed still gets its BIOS). Fire-and-forget: it spawns
         // its own task, returns immediately, and can never fail the launch.
         state.firmware.spawn_for_game(
+            app,
             state.session.clone(),
             install.clone(),
             installed_game.clone(),
