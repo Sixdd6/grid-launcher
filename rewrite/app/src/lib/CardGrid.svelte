@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { columnsOf, gridTemplate, type CardSize } from './cards/size';
+  import { cardMinPx, columnsOf, gridTemplate, type CardSize } from './cards/size';
 
   let {
     size,
@@ -25,12 +25,14 @@
 </script>
 
 <!-- D-UI-7: grids may run to the full window width, capped at 1920px. They
-     deliberately do NOT take `.view-content` (1100px), which is for lists. -->
+     deliberately do NOT take `.view-content` (1100px), which is for lists.
+     `--card-min` is published for the cards to inherit: GameCard sizes its
+     off-screen `contain-intrinsic-size` estimate from it. -->
 <div
   data-testid={gridId}
   class="grid"
   bind:this={el}
-  style="--template: {gridTemplate(size)}"
+  style="--template: {gridTemplate(size)}; --card-min: {cardMinPx(size)}px"
 >
   {@render children()}
 </div>

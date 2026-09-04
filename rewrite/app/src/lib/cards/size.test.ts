@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ACTION_ROW_HEIGHT_PX,
+  CARD_COVER_RATIO,
+  CARD_GAP_PX,
   CARD_SIZES,
+  PRIMARY_CENTRE_FRACTION,
+  PRIMARY_HEIGHT_PX,
+  TITLE_ROW_HEIGHT_PX,
   cardMinPx,
   cardSizeLabel,
   columnsOf,
@@ -64,32 +70,41 @@ describe('columnsOf', () => {
   });
 });
 
-import { CARD_COVER_RATIO, PRIMARY_CENTRE_FRACTION, ACTION_ROW_HEIGHT_PX, TITLE_ROW_HEIGHT_PX } from './size';
-
 describe('card hover geometry (E2E click safety)', () => {
   // Specs click `library-card-<id>` / `game-card-<id>` to open Details, and
   // WebdriverIO clicks an element's CENTRE — which also hovers it, raising
   // the overlay. If the centred Play/Install button or the action row sat
   // under that point, every such click would launch or install instead.
-  // The card root is the cover plus a one-line title, so its centre is
-  // always slightly BELOW the cover's centre; the overlay keeps that band
+  // The card root is the cover plus the gap plus a one-line title, so its
+  // centre is always BELOW the cover's centre; the overlay keeps that band
   // free.
+  //
+  // Every number here is an exported constant that `GameCard.svelte` feeds
+  // into its own CSS as a custom property, so this arithmetic guards what
+  // the browser actually lays out.
   const heights = [160, 213, 267, 400]; // small, medium, large, a stretched large
+  const rootCentre = (cover: number) => (cover + CARD_GAP_PX + TITLE_ROW_HEIGHT_PX) / 2;
 
   it('never puts the centred primary action under the card root centre', () => {
     for (const cover of heights) {
-      const rootCentre = (cover + TITLE_ROW_HEIGHT_PX) / 2;
-      const primaryBottom = cover * PRIMARY_CENTRE_FRACTION + 17;
-      expect(primaryBottom).toBeLessThan(rootCentre);
+      const primaryBottom = cover * PRIMARY_CENTRE_FRACTION + PRIMARY_HEIGHT_PX / 2;
+      expect(primaryBottom).toBeLessThan(rootCentre(cover));
     }
   });
 
   it('never puts the bottom action row under the card root centre', () => {
     for (const cover of heights) {
-      const rootCentre = (cover + TITLE_ROW_HEIGHT_PX) / 2;
       const actionRowTop = cover - ACTION_ROW_HEIGHT_PX;
-      expect(actionRowTop).toBeGreaterThan(rootCentre);
+      expect(actionRowTop).toBeGreaterThan(rootCentre(cover));
     }
+  });
+
+  it('derives the covers from the grids own minimum column widths', () => {
+    // 3:4 at each minimum column width — the smallest cover each size can
+    // lay out, and so the tightest case for the two bounds above.
+    const covers = CARD_SIZES.map((size) => Math.round((cardMinPx(size) * 4) / 3));
+    expect(covers).toEqual([160, 213, 267]);
+    for (const cover of covers) expect(heights).toContain(cover);
   });
 
   it('states the 3:4 fallback ratio design section 5 requires', () => {

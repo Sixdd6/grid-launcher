@@ -4,7 +4,9 @@
   import {
     ACTION_ROW_HEIGHT_PX,
     CARD_COVER_RATIO,
+    CARD_GAP_PX,
     PRIMARY_CENTRE_FRACTION,
+    PRIMARY_HEIGHT_PX,
     TITLE_ROW_HEIGHT_PX,
   } from './cards/size';
 
@@ -64,7 +66,7 @@
   onmouseenter={onHoverStart}
   onmouseleave={onHoverEnd}
   role="presentation"
-  style="--cover-ratio: {CARD_COVER_RATIO}; --title-h: {TITLE_ROW_HEIGHT_PX}px; --primary-y: {PRIMARY_CENTRE_FRACTION * 100}%; --action-h: {ACTION_ROW_HEIGHT_PX}px"
+  style="--cover-ratio: {CARD_COVER_RATIO}; --title-h: {TITLE_ROW_HEIGHT_PX}px; --card-gap: {CARD_GAP_PX}px; --primary-y: {PRIMARY_CENTRE_FRACTION * 100}%; --primary-h: {PRIMARY_HEIGHT_PX}px; --action-h: {ACTION_ROW_HEIGHT_PX}px"
 >
   <div class="cover">
     <Image url={coverUrl} alt={title} placeholder="No cover" />
@@ -73,13 +75,13 @@
       <span data-testid={`library-update-badge-${badgeId}`} class="tag update">{UPDATE_TAG_TEXT}</span>
     {/if}
     {#if badges.installed}
-      <span data-testid={`installed-badge-${badgeId}`} class="dot" title="Installed"></span>
+      <span data-testid={`installed-badge-${badgeId}`} class="dot" role="img" aria-label="Installed" title="Installed"></span>
     {/if}
     {#if badges.platform}
       <span data-testid={`card-platform-${badgeId}`} class="tag platform">{badges.platform}</span>
     {/if}
     {#if badges.cloud}
-      <span data-testid={`card-cloud-badge-${badgeId}`} class="cloud-badge" title="Cloud sync available">☁</span>
+      <span data-testid={`card-cloud-badge-${badgeId}`} class="cloud-badge" role="img" aria-label="Cloud saves enabled" title="Cloud saves enabled">☁</span>
     {/if}
 
     <!-- The gradient itself never takes a click: the band around the card
@@ -90,15 +92,19 @@
       data-testid={`card-primary-${badgeId}`}
       class="primary"
       onclick={act(onPrimary)}
-      tabindex="-1"
+      tabindex="0"
     >
       {installed ? 'Play' : 'Install'}
     </button>
 
+    <!-- The four overlay controls stay in the Tab order: `:focus-within`
+         then reveals the overlay, so a keyboard or gamepad user reaches
+         Play/Install, Cloud sync and More. The card ROOT is not focusable —
+         the views drive selection with the `focused` class instead. -->
     <div class="actions">
-      <button data-testid={`card-details-${badgeId}`} onclick={act(onOpen)} tabindex="-1">Details</button>
-      <button data-testid={`card-cloud-${badgeId}`} onclick={act(onCloud)} tabindex="-1">Cloud sync</button>
-      <button data-testid={`card-more-${badgeId}`} onclick={act(onOpen)} tabindex="-1">More</button>
+      <button data-testid={`card-details-${badgeId}`} onclick={act(onOpen)} tabindex="0">Details</button>
+      <button data-testid={`card-cloud-${badgeId}`} onclick={act(onCloud)} tabindex="0">Cloud sync</button>
+      <button data-testid={`card-more-${badgeId}`} onclick={act(onOpen)} tabindex="0">More</button>
     </div>
   </div>
 
@@ -109,15 +115,18 @@
   .card {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--card-gap);
     cursor: pointer;
     transform: scale(1);
     transition: transform var(--m-fast) cubic-bezier(0.2, 0.9, 0.3, 1.2);
     will-change: transform;
     /* Off-screen cards skip layout/paint; the intrinsic size keeps the
-       scrollbar stable at the fallback cover ratio. */
+       scrollbar stable at the fallback cover ratio. `--card-min` is the
+       grid's minimum column width (CardGrid sets it), so the estimate
+       tracks the chosen card size instead of assuming the largest. */
     content-visibility: auto;
-    contain-intrinsic-size: auto 200px 289px;
+    contain-intrinsic-size: auto var(--card-min, 200px)
+      calc(var(--card-min, 200px) * 4 / 3 + var(--card-gap) + var(--title-h));
   }
 
   /* D-UI-9: hover scales 1.05. Focus (gamepad/arrow keys) uses the same
@@ -182,12 +191,16 @@
     opacity: 1;
   }
 
+  /* Hidden with opacity, NOT `visibility: hidden`: WebDriver refuses to
+     click a `visibility: hidden` element, and a driver click hovers the
+     card first, which is exactly when these must become clickable.
+     `pointer-events: none` keeps them inert until then. */
   .primary,
   .actions {
     position: absolute;
     opacity: 0;
-    visibility: hidden;
-    transition: opacity var(--m-fast) ease, visibility var(--m-fast) ease;
+    pointer-events: none;
+    transition: opacity var(--m-fast) ease;
   }
 
   .card:hover .primary,
@@ -195,7 +208,7 @@
   .card:focus-within .primary,
   .card:focus-within .actions {
     opacity: 1;
-    visibility: visible;
+    pointer-events: auto;
   }
 
   .primary {
@@ -205,7 +218,7 @@
     font: inherit;
     font-size: 12px;
     font-weight: 600;
-    height: 30px;
+    height: var(--primary-h);
     padding: 0 18px;
     border: none;
     border-radius: var(--r-pill);

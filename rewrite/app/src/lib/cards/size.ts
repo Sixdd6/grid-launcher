@@ -64,6 +64,18 @@ export const CARD_COVER_RATIO = '3 / 4';
 export const TITLE_ROW_HEIGHT_PX = 22;
 
 /**
+ * The gap between the cover and the title strip, and the height of the
+ * centred Play/Install button, in px.
+ *
+ * Both are part of the click-safety arithmetic below, so the component sets
+ * them as CSS custom properties (`--card-gap`, `--primary-h`) from these
+ * constants rather than hard-coding the numbers in its stylesheet. That way
+ * the test and the rendered CSS cannot drift apart.
+ */
+export const CARD_GAP_PX = 4;
+export const PRIMARY_HEIGHT_PX = 30;
+
+/**
  * Where the hover overlay's centred Play/Install sits, as a fraction of the
  * cover height, and how tall the bottom action row's reserved strip is.
  *
@@ -72,12 +84,13 @@ export const TITLE_ROW_HEIGHT_PX = 22;
  * `library-card-<id>` / `game-card-<id>` are the ids the specs click to
  * open Details — if the primary action or the action row covered that
  * point, every spec click would launch or install instead. The card root is
- * the cover plus `TITLE_ROW_HEIGHT_PX`, so its centre lands at
- * `0.5 + TITLE_ROW_HEIGHT_PX / (2 * cover)` of the cover — between 52.7%
- * and 56.9% for every size this app renders. `size.test.ts` proves the
- * primary button (34% ± 17px) and the action row (the last 38px) both clear
- * it. The gradient overlay itself is `pointer-events: none`, so a click in
- * that band falls through to the card root and opens Details.
+ * the cover plus `CARD_GAP_PX` plus `TITLE_ROW_HEIGHT_PX`, so its centre
+ * lands at `(cover + CARD_GAP_PX + TITLE_ROW_HEIGHT_PX) / 2` — below 59% of
+ * the cover for every size this app renders. `size.test.ts` proves the
+ * primary button (centred at 34% of the cover, `PRIMARY_HEIGHT_PX` tall)
+ * and the action row (the last `ACTION_ROW_HEIGHT_PX` px) both clear it.
+ * The gradient overlay itself is `pointer-events: none`, so a click in that
+ * band falls through to the card root and opens Details.
  */
 export const PRIMARY_CENTRE_FRACTION = 0.34;
 export const ACTION_ROW_HEIGHT_PX = 38;
