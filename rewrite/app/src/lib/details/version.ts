@@ -54,3 +54,28 @@ export function romFileNamesFor(
 ): string[] {
   return source === 'installed' ? [installedName, serverName] : [serverName, installedName];
 }
+
+/**
+ * The `YYYY-MM-DD` head of an ISO 8601 timestamp, or `''` when the value is
+ * not one. Sliced rather than parsed through `Date`: the server sends the
+ * file's own stated timestamp and D-UI-10 shows the date it states, not
+ * that instant re-rendered in the viewer's time zone.
+ */
+export function isoDate(value: string): string {
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(value.trim());
+  return match ? match[1] : '';
+}
+
+/**
+ * D-UI-10: one file's version — "the parsed version tag when the file name
+ * carries one, else the file's `last_modified` date". Unlike
+ * [`versionLabel`], which is the header's whole-game row and is
+ * platform-gated, this is per file and applies on every platform: the Files
+ * tab states what each file IS, and a tagged file name is as informative on
+ * a PS2 rom as on a PC one. `''` when the server offers neither.
+ */
+export function fileVersionLabel(fileName: string, lastModified: string): string {
+  const tag = parseVersionTag(fileName);
+  if (tag) return formatVersionTag(tag);
+  return isoDate(lastModified);
+}

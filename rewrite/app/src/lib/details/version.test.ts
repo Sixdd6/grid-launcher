@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { formatVersionTag, parseVersionTag, romFileNamesFor, versionLabel } from './version';
+import {
+  fileVersionLabel,
+  formatVersionTag,
+  isoDate,
+  parseVersionTag,
+  romFileNamesFor,
+  versionLabel,
+} from './version';
 
 describe('parseVersionTag', () => {
   it('matches a numeric 5-digit tag', () => {
@@ -60,5 +67,41 @@ describe('romFileNamesFor', () => {
       'g (v1.1.0).zip',
       'g (v1.0.0).zip',
     ]);
+  });
+});
+
+describe('isoDate', () => {
+  it('takes the date out of a server timestamp', () => {
+    expect(isoDate('2026-02-03T11:22:33')).toBe('2026-02-03');
+  });
+
+  it('takes the date out of a Z-suffixed timestamp', () => {
+    expect(isoDate('2026-02-03T11:22:33Z')).toBe('2026-02-03');
+  });
+
+  it('is blank when the server sends nothing', () => {
+    expect(isoDate('')).toBe('');
+  });
+
+  it('is blank for a value that is not a date, rather than a truncated string', () => {
+    expect(isoDate('last Tuesday')).toBe('');
+  });
+});
+
+describe('fileVersionLabel (D-UI-10)', () => {
+  it('names the parsed version tag when the file name carries one', () => {
+    expect(fileVersionLabel('mygame (v1.1.0).zip', '2026-02-03T11:22:33')).toBe('v1.1.0');
+  });
+
+  it('names the numeric tag in its padded form', () => {
+    expect(fileVersionLabel('Game (v00042).zip', '2026-02-03T11:22:33')).toBe('v00042');
+  });
+
+  it('falls back to the last_modified date when there is no tag', () => {
+    expect(fileVersionLabel('Super Mario World.zip', '2026-02-03T11:22:33')).toBe('2026-02-03');
+  });
+
+  it('is blank when the file has neither a tag nor a timestamp', () => {
+    expect(fileVersionLabel('Super Mario World.zip', '')).toBe('');
   });
 });

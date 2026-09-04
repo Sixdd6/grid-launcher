@@ -38,6 +38,8 @@ export type RomFile = {
   is_top_level: boolean;
   /** ISO 8601 as the server states it, or `''`. D-UI-10's fallback. */
   last_modified: string;
+  /** RomM's file category (e.g. `"update"`, `"dlc"`); `''` for an ordinary game file. */
+  category: string;
 };
 
 /** One Overview "Related" chip. Mirrors `grid_core::romm::RelatedGame`. */
