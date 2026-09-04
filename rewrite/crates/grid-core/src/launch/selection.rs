@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 
 use crate::config::EmulatorEntry;
 
+use super::platform_slugs::slug_for_platform;
 use super::profiles::{platform_matches_keywords, profile_for_entry, EmulatorProfile};
 
 /// Looks up `platform` in `map`: exact key first, then a case-insensitive
@@ -75,14 +76,45 @@ pub fn is_retroarch_name(name: &str) -> bool {
 /// own call sites, which have no slug, pass [`installed_core_resolver`].
 pub type CoreResolver<'a> = &'a dyn Fn(&EmulatorEntry, &str) -> Vec<String>;
 
-/// The production [`CoreResolver`] for callers that hold no platform slug —
-/// the launch path, cloud ops, firmware routing, and the install service,
-/// all of which see only a platform NAME. An empty slug takes
-/// `installed_compatible_cores`' fuzzy fallback (D-RC-2).
+/// The production [`CoreResolver`] for callers that hold no slug map of
+/// their own — the launch path, cloud ops, firmware routing, and the
+/// install service, all of which see only a platform NAME. The slug comes
+/// from the process-wide registry
+/// ([`super::platform_slugs::set_platform_slugs`]), which `list_platforms`
+/// fills from the server's platform list.
+///
+/// Before the first successful platform fetch the registry is empty, so the
+/// slug is `""` and `installed_compatible_cores` takes its fuzzy name
+/// fallback (D-RC-2).
 ///
 /// Pass it as `&installed_core_resolver`.
 pub fn installed_core_resolver(entry: &EmulatorEntry, platform: &str) -> Vec<String> {
-    crate::autoconfig::installed_compatible_cores(platform, "", entry)
+    // `slug_for_platform` releases the registry lock before returning, so
+    // nothing below runs while it is held.
+    let slug = slug_for_platform(platform);
+    crate::autoconfig::installed_compatible_cores(platform, &slug, entry)
+}
+
+/// A [`CoreResolver`] over a caller-supplied name -> slug map, for the app
+/// layer, which holds the platform list the UI is asking about and does not
+/// need the registry. An unknown name resolves to an empty slug and
+/// therefore to the fuzzy fallback.
+pub fn slug_core_resolver(
+    slugs: &BTreeMap<String, String>,
+) -> impl Fn(&EmulatorEntry, &str) -> Vec<String> + '_ {
+    move |entry: &EmulatorEntry, platform: &str| -> Vec<String> {
+        let slug = slugs.get(platform).cloned().unwrap_or_default();
+        crate::autoconfig::installed_compatible_cores(platform, &slug, entry)
+    }
+}
+
+/// Whether `entry` is a RetroArch build: its own name, or the name of the
+/// autoprofile it resolves to, mentions RetroArch (design D-RC-1 step 2).
+/// The single spelling of that test for both crates.
+pub fn entry_is_retroarch(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
+    is_retroarch_name(&entry.name)
+        || profile_for_entry(&entry.name, &entry.path, profiles)
+            .is_some_and(|profile| is_retroarch_name(&profile.name))
 }
 
 /// Whether `entry` supports `platform` (`_emulator_supports_platform`,
@@ -111,9 +143,7 @@ pub fn emulator_supports_platform(
 
     let profile = profile_for_entry(&entry.name, &entry.path, profiles);
 
-    let is_retroarch =
-        is_retroarch_name(&entry.name) || profile.is_some_and(|p| is_retroarch_name(&p.name));
-    if is_retroarch {
+    if entry_is_retroarch(entry, profiles) {
         return !cores(entry, selected).is_empty();
     }
 
@@ -295,6 +325,39 @@ mod tests {
     fn entry_by_name_no_match_returns_none() {
         let emulators = vec![entry("RetroArch", "/x/retroarch")];
         assert_eq!(emulator_entry_by_name(&emulators, "Dolphin"), None);
+    }
+
+    // --- is_retroarch_name / entry_is_retroarch ---------------------------
+
+    #[test]
+    fn retroarch_name_detection_ignores_case_and_matches_substrings() {
+        assert!(is_retroarch_name("RetroArch"));
+        assert!(is_retroarch_name("my retroarch build"));
+        assert!(!is_retroarch_name("Dolphin"));
+    }
+
+    #[test]
+    fn entry_is_retroarch_matches_the_entry_name_or_the_matched_profile_name() {
+        let profiles = vec![profile_with_tokens(
+            "RetroArch (Multi-System)",
+            false,
+            &[],
+            &["retroarch.appimage"],
+        )];
+        // Entry name half of the OR.
+        assert!(entry_is_retroarch(
+            &entry("RetroArch", "/x/whatever"),
+            &profiles
+        ));
+        // Profile name half: the entry name says nothing about RetroArch.
+        assert!(entry_is_retroarch(
+            &entry("Multi-System Frontend", "/x/RetroArch.AppImage"),
+            &profiles
+        ));
+        assert!(!entry_is_retroarch(
+            &entry("Dolphin", "/x/dolphin-emu"),
+            &profiles
+        ));
     }
 
     // --- emulator_supports_platform --------------------------------------

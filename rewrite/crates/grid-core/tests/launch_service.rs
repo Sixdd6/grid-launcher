@@ -649,6 +649,63 @@ async fn a_retroarch_relative_core_is_rewritten_to_an_absolute_path() {
     service.stop(session.id);
 }
 
+/// F7 / D-RC-2: the launch path must reach the same verdict as the
+/// Emulators panel for a platform whose slug the fuzzy compatibility map
+/// does NOT recognise. "PlayStation 2" scores below the fuzzy threshold, so
+/// before the slug registry existed the launch gate found no compatible
+/// core, dropped RetroArch, and a saved `PlayStation 2 = RetroArch/pcsx2`
+/// config stopped launching.
+///
+/// "PlayStation 2" is used ONLY here: the registry is process-wide, so a
+/// second test naming the same platform could see this test's slug.
+#[tokio::test]
+async fn a_platform_known_only_by_its_slug_still_resolves_a_retroarch_core() {
+    let h = Harness::new();
+    let (exe, record) = h.recording_stub("retroarch");
+    let cores = h.root.join("cores");
+    fs::create_dir_all(&cores).unwrap();
+    let core = cores.join("pcsx2_libretro.so");
+    fs::write(&core, b"core bytes").unwrap();
+
+    let platform = "PlayStation 2";
+    grid_core::launch::set_platform_slugs(BTreeMap::from([(
+        platform.to_string(),
+        "ps2".to_string(),
+    )]));
+
+    h.write_config_full(
+        vec![entry("RetroArch", &exe, "-L \"%core%\" \"%rom%\"")],
+        &[(platform, "RetroArch")],
+        &[(platform, "pcsx2")],
+        "",
+    );
+    let rom = h.install_game(21, "Okami", platform);
+
+    let service = h.service();
+    let session = service.launch(21).await.unwrap();
+
+    let recorded = wait_until(|| record.is_file()).await;
+    assert!(recorded, "the stub never wrote its argv");
+    let argv = fs::read_to_string(&record).unwrap();
+    let lines: Vec<&str> = argv.lines().collect();
+    let expected_core = fs::canonicalize(&core).unwrap();
+    assert_eq!(
+        lines,
+        vec![
+            "-L",
+            expected_core.to_string_lossy().as_ref(),
+            rom.to_string_lossy().as_ref(),
+        ]
+    );
+    assert!(
+        lines[1].ends_with("pcsx2_libretro.so"),
+        "expected the slug-mapped core, got {:?}",
+        lines[1]
+    );
+
+    service.stop(session.id);
+}
+
 #[tokio::test]
 async fn global_launch_args_are_appended() {
     let h = Harness::new();

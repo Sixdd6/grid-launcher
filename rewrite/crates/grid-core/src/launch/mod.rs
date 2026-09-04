@@ -7,6 +7,7 @@ pub mod compat;
 pub mod emu_install;
 pub mod forge;
 pub mod native;
+pub mod platform_slugs;
 pub mod profiles;
 pub mod rom;
 pub mod selection;
@@ -22,23 +23,24 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::config::{Config, EmulatorEntry};
+use crate::config::Config;
 use crate::library::extract::which_on_path;
 use crate::library::paths::expand_home;
 use crate::library::platforms::is_native_platform;
 use crate::library::registry::{installed_match, InstalledGame, Registry};
 
 use native::build_native_command;
-use profiles::{load_profiles, profile_for_entry};
+use profiles::load_profiles;
 use rom::resolve_rom_path;
 use selection::{
-    default_emulator_name_for_platform, emulator_entry_by_name, installed_core_resolver,
-    mapping_value_for_platform,
+    default_emulator_name_for_platform, emulator_entry_by_name, entry_is_retroarch,
+    installed_core_resolver, mapping_value_for_platform,
 };
 use sessions::SessionStore;
 use spawn::{clean_env, prepare_emulator_launch};
 use template::{host_os, retroarch_core_argument_path, Placeholders};
 
+pub use platform_slugs::{set_platform_slugs, slug_for_platform};
 pub use sessions::{GameSession, SessionsSnapshot};
 
 /// Errors raised while resolving or running an emulated launch.
@@ -446,12 +448,6 @@ struct LaunchPlan {
     working_dir: PathBuf,
 }
 
-/// Whether `name` should be treated as a RetroArch build (doc 04 §2): the
-/// name contains "retroarch", case-insensitively.
-fn is_retroarch_name(name: &str) -> bool {
-    name.to_lowercase().contains("retroarch")
-}
-
 /// Picks the emulator, builds the placeholders, and runs the validation
 /// chain. Pure apart from the on-disk existence checks inside
 /// [`prepare_emulator_launch`] and the ROM resolver.
@@ -520,14 +516,6 @@ fn resolve_launch(game: &InstalledGame, config: &Config) -> Result<LaunchPlan, L
     })
 }
 
-/// Whether `entry` is a RetroArch build: its own name, or the name of the
-/// autoprofile it resolves to, mentions RetroArch.
-fn entry_is_retroarch(entry: &EmulatorEntry, profiles: &[profiles::EmulatorProfile]) -> bool {
-    is_retroarch_name(&entry.name)
-        || profile_for_entry(&entry.name, &entry.path, profiles)
-            .is_some_and(|profile| is_retroarch_name(&profile.name))
-}
-
 /// Spawns `argv` in `working_dir` on the blocking pool. The child gets a
 /// clean environment ([`clean_env`]) overlaid with `extra_env` (the native
 /// branch's `WINEPREFIX`/`PROTONPATH`; empty for an emulated launch), and on
@@ -569,13 +557,7 @@ fn unix_now() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn retroarch_name_detection_ignores_case_and_matches_substrings() {
-        assert!(is_retroarch_name("RetroArch"));
-        assert!(is_retroarch_name("my retroarch build"));
-        assert!(!is_retroarch_name("Dolphin"));
-    }
+    use crate::config::EmulatorEntry;
 
     #[test]
     fn entry_is_retroarch_uses_the_matched_profile_name() {
