@@ -158,3 +158,52 @@ describe('setTheme', () => {
     expect(storage.getItem('grid.ui.theme')).toBe('light');
   });
 });
+
+describe('setBackgroundEnabled', () => {
+  async function loadStore(fade: number) {
+    vi.stubGlobal('localStorage', fakeStorage());
+    vi.stubGlobal('document', { documentElement: { dataset: {} } });
+    vi.stubGlobal('window', { matchMedia: () => fakeMedia(false) });
+    const setUiSettings = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('../api', () => ({
+      api: {
+        getUiSettings: () =>
+          Promise.resolve({
+            theme: 'system',
+            background_fade: fade,
+            card_size_library: 'medium',
+            card_size_server: 'medium',
+          }),
+        setUiSettings,
+      },
+    }));
+    const store = await import('./uiSettings.svelte');
+    await store.initUiSettings();
+    return { store, setUiSettings };
+  }
+
+  it('off writes fade 0, and on restores the value the slider last held', async () => {
+    const { store, setUiSettings } = await loadStore(40);
+    await store.setBackgroundEnabled(false);
+    expect(store.uiSettings.backgroundFade).toBe(0);
+    expect(setUiSettings).toHaveBeenLastCalledWith(expect.objectContaining({ background_fade: 0 }));
+
+    await store.setBackgroundEnabled(true);
+    expect(store.uiSettings.backgroundFade).toBe(40);
+    expect(setUiSettings).toHaveBeenLastCalledWith(expect.objectContaining({ background_fade: 40 }));
+  });
+
+  it('on with a config that was already 0 uses the design default', async () => {
+    const { store } = await loadStore(0);
+    await store.setBackgroundEnabled(true);
+    expect(store.uiSettings.backgroundFade).toBe(25);
+  });
+
+  it('a slider drag updates what "on" restores', async () => {
+    const { store } = await loadStore(25);
+    store.previewBackgroundFade(55);
+    await store.setBackgroundEnabled(false);
+    await store.setBackgroundEnabled(true);
+    expect(store.uiSettings.backgroundFade).toBe(55);
+  });
+});

@@ -4,6 +4,7 @@
 import { api } from '../api';
 import type { UiSettings } from '../api';
 import { normalizeCardSize, type CardSize } from '../cards/size';
+import { fadeForToggle, rememberFade } from '../settings/appearance';
 import {
   clampFade,
   FADE_DEFAULT,
@@ -29,6 +30,12 @@ const state = $state<{
   cardSizeLibrary: 'medium',
   cardSizeServer: 'medium',
 });
+
+// What "background art on" restores (design §10): the last non-zero fade
+// this session saw — loaded from config or dragged on the slider. Module
+// scoped like `state`, not persisted: fade 0 in config means off, and the
+// default is what a fresh "on" goes back to.
+let rememberedFade = FADE_DEFAULT;
 
 /** The one place the whole `UiSettings` payload is assembled, so no writer
  *  can drop a field another writer owns. */
@@ -123,6 +130,7 @@ export async function initUiSettings(): Promise<() => void> {
     const stored = await api.getUiSettings();
     state.theme = normalizeTheme(stored.theme);
     state.backgroundFade = clampFade(stored.background_fade);
+    rememberedFade = rememberFade(state.backgroundFade, rememberedFade);
     state.cardSizeLibrary = normalizeCardSize(stored.card_size_library);
     state.cardSizeServer = normalizeCardSize(stored.card_size_server);
   } catch {
@@ -151,6 +159,7 @@ export async function setTheme(choice: ThemeChoice): Promise<void> {
 /** Slider drag: updates the live preview without touching the config. */
 export function previewBackgroundFade(value: number): void {
   state.backgroundFade = clampFade(value);
+  rememberedFade = rememberFade(state.backgroundFade, rememberedFade);
 }
 
 /** Slider release: persists whatever the preview settled on. */
@@ -170,4 +179,13 @@ export async function setCardSize(view: 'library' | 'server', size: CardSize): P
   if (view === 'library') state.cardSizeLibrary = size;
   else state.cardSizeServer = size;
   await api.setUiSettings(payload());
+}
+
+/**
+ * The Appearance page's on/off checkbox (design §10). Off persists fade 0;
+ * on persists the remembered value, so toggling off and on returns the art
+ * exactly as it was.
+ */
+export async function setBackgroundEnabled(enabled: boolean): Promise<void> {
+  await commitBackgroundFade(fadeForToggle(enabled, rememberedFade));
 }

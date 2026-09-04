@@ -8,7 +8,7 @@
     uiSettings,
   } from './stores/uiSettings.svelte';
   import { FADE_MAX, type ThemeChoice } from './theme';
-  import { LATER_STEP_TEXT, SETTINGS_PAGES, settingsPageLabel, type SettingsPage } from './settings';
+  import { LATER_STEP_TEXT, SETTINGS_PAGES, settingsPageLabel, type SettingsPage } from './settings/pages';
 
   let page = $state<SettingsPage>('appearance');
 
