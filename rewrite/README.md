@@ -143,6 +143,18 @@ These behaviors remain manual and require a desktop session + live RomM server
 - **Server menu**: open the server name menu and confirm "Open RomM in browser" opens
   the configured server. With a basic-auth server URL, confirm the menu item does
   nothing rather than opening a URL carrying the password.
+- **Recently played**: launch an installed game, quit it, and confirm the Library rail's
+  Recent count includes it and the "Recently played" sort puts it first; confirm the
+  stamp survives updating that game (an update must not reset it) and a relaunch of the
+  app.
+- **Platform firmware chip**: on the Server view, select a platform the server holds
+  firmware for and confirm the chip counts the files. With a default emulator set,
+  press Install and confirm the firmware lands in that emulator's firmware directory;
+  with the platform set to (none), confirm the chip reads "no default emulator" and
+  offers no button.
+- **Card sizes at width**: with the window maximised on a wide display, confirm the grid
+  fills to at most 1920px and stays centred, and that Small / Medium / Large change the
+  column count rather than stretching the covers.
 
 ## Persisted state
 

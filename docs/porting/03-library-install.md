@@ -285,6 +285,17 @@ Identity key used everywhere: `(title.strip().lower(), platform.strip().lower())
 if both sides have a non-empty `rom_id`, compare case-folded rom ids; otherwise compare
 the identity key (grid_launcher/library/identity.py:15, identity.py:23).
 
+### `last_played_at` (rewrite only)
+
+The Rust rewrite's SQLite registry carries one column the Python
+`installed_games` record never had: `last_played_at`, epoch seconds of the last
+launch, `0` for a game never launched through GRID. It is written only when a
+launch has actually spawned a process, and never by the install upsert — an
+update or a reinstall keeps the stamp. Two surfaces read it, both in the
+redesigned desktop Library view: the rail's "Recent" entry (played within the
+last 30 days) and the "Recently played" sort. Nothing in the install pipeline
+depends on it; a port that omits it loses those two orderings and nothing else.
+
 ### Control keys on the in-flight game dict
 
 These underscore-prefixed keys steer the pipeline and are not part of the persisted

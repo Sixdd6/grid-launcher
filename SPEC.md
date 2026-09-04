@@ -26,8 +26,20 @@ There are several main sections to the application with buttons across the top b
 - Emulators
 - Settings
 
-- **Library** contains a grid layout of all currently installed games, represented by cover art and sorted for quick browsing. Clicking a game opens the details sub view.
-- **Server** contains a vertical list of server-supported platforms on the left and a searchable grid layout of games for the selected platform on the right. Downloads and installs should be queued and handled in the background.
+- **Library** contains a 220px filter rail — All games, Recent (played in the last 30
+  days), Updates, then each installed platform, every entry with a count — beside a
+  toolbar (search by title, sort by Recently played / Recently installed / Title /
+  Platform, card size Small / Medium / Large) and one grid of cover cards. Each rail
+  entry has its own empty state. Clicking a card opens the details sub view; the hover
+  Play launches directly. The card size is remembered as `ui.card_size_library`.
+- **Server** mirrors Library: a rail of the server's platforms with ROM counts, a
+  platform header (name, ROM count, installed count, a firmware chip with an Install
+  action when the server offers firmware, and the platform's default emulator chip
+  linking to the Emulators view), a search box that filters the loaded platform list,
+  and a grid whose not-installed cards render dimmed until hovered. The hover action is
+  Install for a game that is not installed and Play for one that is. The card size is
+  remembered as `ui.card_size_server`. Downloads and installs are queued and handled in
+  the background.
 - **Discover** contains collapsible, cached recommendation sections built from the server library — Short But Fun, New on Server, Highly Rated (All-Time), Recommended for You, Browse by Genre, and Your Watchlist — with genre/platform filters and a manual refresh. Sections load in the background and fall back to the cached view when the server is unreachable.
 - **Downloads** contains a list of queued, active, installing, completed, and failed download jobs. Each entry should display status/progress details and support the appropriate action such as Cancel, Retry, or Dismiss.
 - **Emulators** contains the list of emulators used to launch games. Users can add, update, remove, and assign defaults by platform. Each emulator entry includes a name, executable path, launch arguments, save strategy, ignore rules, and optional custom save/state directories.
@@ -35,6 +47,11 @@ There are several main sections to the application with buttons across the top b
 - **Appearance** (under Settings) chooses the theme — follow the OS, dark, or light —
   and the background-art fade from 0 to 60 percent. Both are stored under `[ui]` in
   `config.toml` as `theme` and `background_fade`.
+- **Cards** (both grids) scale on hover with a gradient overlay, a centred Play or
+  Install, and an action row of Details, Cloud sync and More. Badges: an installed dot
+  top-right, an `UPDATE` tag top-left, a cloud icon bottom-right when the platform has
+  cloud sync configured, and a short platform name bottom-left. `Ctrl+F` focuses the
+  current view's search box.
 
 ## Emulator Configuration
 - Emulators should support launch arguments with placeholders such as `%rom%`, `%core%`, `%RPCS3_GAMEID%`, and `%ps3_gameid%`.
