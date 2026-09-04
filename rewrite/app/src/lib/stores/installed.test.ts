@@ -39,6 +39,7 @@ function row(overrides: Partial<InstalledGame>): InstalledGame {
     ps4_game_id: '',
     ps4_content: '',
     ra_id: '',
+    last_played_at: 0,
     ...overrides,
   };
 }

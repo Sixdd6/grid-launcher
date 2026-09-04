@@ -56,7 +56,7 @@ fn table_columns(conn: &Connection) -> Vec<String> {
 }
 
 #[test]
-fn open_creates_file_and_sets_user_version_3() {
+fn open_creates_file_and_sets_user_version_4() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     let registry = Registry::open(&path).unwrap();
@@ -66,12 +66,12 @@ fn open_creates_file_and_sets_user_version_3() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     drop(registry);
 }
 
 #[test]
-fn fresh_db_is_v3_and_has_the_twelve_columns() {
+fn fresh_db_is_v4_and_has_the_twelve_columns() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     let registry = Registry::open(&path).unwrap();
@@ -80,7 +80,7 @@ fn fresh_db_is_v3_and_has_the_twelve_columns() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
 
     let columns = table_columns(&conn);
     for column in V3_COLUMN_NAMES {
@@ -255,7 +255,7 @@ fn open_migrates_a_v1_database_and_update_images_round_trips() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     let rows = registry.all().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].cover_small_path, "");
@@ -303,7 +303,7 @@ fn open_migrates_a_v1_database_that_already_has_one_v2_column() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
 
     let columns = table_columns(&conn);
     for column in ["cover_small_path", "cover_large_path", "screenshot_urls"] {
@@ -344,7 +344,7 @@ fn v2_schema() -> String {
 }
 
 #[test]
-fn migrates_v1_to_v3_transactionally() {
+fn migrates_v1_to_v4_transactionally() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -360,7 +360,7 @@ fn migrates_v1_to_v3_transactionally() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
 
     let columns = table_columns(&conn);
     for column in V3_COLUMN_NAMES {
@@ -380,7 +380,7 @@ fn migrates_v1_to_v3_transactionally() {
 }
 
 #[test]
-fn migrates_v2_to_v3() {
+fn migrates_v2_to_v4() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -396,7 +396,7 @@ fn migrates_v2_to_v3() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
 
     let columns = table_columns(&conn);
     for column in V3_COLUMN_NAMES {
@@ -437,7 +437,7 @@ fn migration_is_idempotent_when_columns_preexist() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
 
     let columns = table_columns(&conn);
     for column in V3_COLUMN_NAMES {
@@ -529,4 +529,144 @@ fn open_refuses_a_newer_database() {
             .unwrap();
     }
     assert!(Registry::open(&path).is_err());
+}
+
+/// The v3 schema: v2 plus the twelve native/PS3/PS4/RA columns. Built the
+/// same way `v2_schema()` builds v2 — from the previous schema plus the
+/// `ALTER`s that migration performs — so the fixture can never drift from
+/// what the migration actually produces.
+fn v3_schema() -> String {
+    let mut sql = v2_schema();
+    for column in V3_COLUMN_NAMES {
+        sql.push_str(&format!(
+            "\n        ALTER TABLE installed_games ADD COLUMN {column} TEXT NOT NULL DEFAULT '';"
+        ));
+    }
+    sql
+}
+
+#[test]
+fn fresh_db_is_v4_and_has_last_played_at() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    let registry = Registry::open(&path).unwrap();
+
+    let conn = Connection::open(&path).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 4);
+    let columns = table_columns(&conn);
+    assert!(
+        columns.iter().any(|c| c == "last_played_at"),
+        "fresh schema is missing last_played_at: {columns:?}"
+    );
+
+    registry.upsert(&sample("Chrono Trigger", "SNES")).unwrap();
+    let rows = registry.all().unwrap();
+    assert_eq!(
+        rows[0].last_played_at, 0,
+        "a fresh install has never played"
+    );
+}
+
+#[test]
+fn migrates_v3_to_v4_keeping_rows_and_defaulting_last_played_to_zero() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(&v3_schema()).unwrap();
+        conn.execute(
+            "INSERT INTO installed_games (title, platform, title_key, platform_key, rom_id, installed_at)
+             VALUES ('Three', 'SNES', 'three', 'snes', 7, 1)",
+            [],
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 3).unwrap();
+    }
+
+    let registry = Registry::open(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 4);
+
+    let rows = registry.all().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].title, "Three");
+    assert_eq!(rows[0].last_played_at, 0);
+}
+
+#[test]
+fn v3_to_v4_migration_is_idempotent_when_the_column_preexists() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(&v3_schema()).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE installed_games ADD COLUMN last_played_at INTEGER NOT NULL DEFAULT 0;",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 3).unwrap();
+    }
+
+    let registry = Registry::open(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 4);
+    assert!(registry.all().unwrap().is_empty());
+}
+
+#[test]
+fn touch_last_played_stamps_only_the_matching_rom() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    let registry = Registry::open(&path).unwrap();
+
+    let mut other = sample("Pac-Man", "Arcade");
+    other.rom_id = Some(201);
+    registry.upsert(&sample("Chrono Trigger", "SNES")).unwrap(); // rom_id 42
+    registry.upsert(&other).unwrap();
+
+    assert!(registry.touch_last_played(42, 1_800_000_000).unwrap());
+
+    let rows = registry.all().unwrap();
+    let ct = rows.iter().find(|r| r.rom_id == Some(42)).unwrap();
+    let pac = rows.iter().find(|r| r.rom_id == Some(201)).unwrap();
+    assert_eq!(ct.last_played_at, 1_800_000_000);
+    assert_eq!(pac.last_played_at, 0);
+}
+
+#[test]
+fn touch_last_played_reports_false_for_an_unknown_rom() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    let registry = Registry::open(&path).unwrap();
+    assert!(!registry.touch_last_played(999, 1_800_000_000).unwrap());
+}
+
+#[test]
+fn reinstalling_a_game_does_not_reset_its_last_played_stamp() {
+    // The Library's "Recent" rail entry and its "Recently played" sort both
+    // read this column, and an update or a reinstall runs `upsert` again.
+    // `upsert` must therefore leave `last_played_at` alone.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    let registry = Registry::open(&path).unwrap();
+
+    registry.upsert(&sample("Chrono Trigger", "SNES")).unwrap();
+    registry.touch_last_played(42, 1_800_000_000).unwrap();
+
+    let mut again = sample("Chrono Trigger", "SNES");
+    again.installed_at = 1_900_000_000;
+    registry.upsert(&again).unwrap();
+
+    let rows = registry.all().unwrap();
+    assert_eq!(rows[0].installed_at, 1_900_000_000);
+    assert_eq!(rows[0].last_played_at, 1_800_000_000);
 }

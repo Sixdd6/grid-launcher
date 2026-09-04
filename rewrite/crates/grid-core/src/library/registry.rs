@@ -48,13 +48,14 @@ CREATE TABLE installed_games (
     ps4_content              TEXT NOT NULL DEFAULT '',
     ra_id                    TEXT NOT NULL DEFAULT '',
     installed_at        INTEGER NOT NULL,
+    last_played_at      INTEGER NOT NULL DEFAULT 0,
     UNIQUE (title_key, platform_key)
 );
 ";
 
 /// The schema version this build understands. Bumped when a migration adds
 /// columns (see spec: later milestones add native/PS3/PS4 fields).
-const LATEST_USER_VERSION: i64 = 3;
+const LATEST_USER_VERSION: i64 = 4;
 
 /// The columns v1 -> v2 (milestone 7) adds to `installed_games`.
 const V2_IMAGE_COLUMNS: [&str; 3] = ["cover_small_path", "cover_large_path", "screenshot_urls"];
@@ -75,6 +76,11 @@ const V3_COLUMNS: [&str; 12] = [
     "ps4_content",
     "ra_id",
 ];
+
+/// The column v3 -> v4 (the redesign's Library rail) adds. An INTEGER, not
+/// a TEXT like every earlier migration's columns, so it gets its own
+/// `ADD COLUMN` type rather than joining a loop over string columns.
+const V4_COLUMN: &str = "last_played_at";
 
 /// The column names `installed_games` currently has.
 fn installed_games_columns(conn: &Connection) -> Result<Vec<String>, LibraryError> {
@@ -140,6 +146,28 @@ fn migrate_2_to_3(conn: &mut Connection) -> Result<(), LibraryError> {
     tx.commit().map_err(registry_err)
 }
 
+/// v3 -> v4 (desktop UI redesign 2): adds `last_played_at`, the epoch
+/// seconds of the last launch, `0` for a game never launched through GRID.
+/// The Library rail's "Recent" entry and the "Recently played" sort are its
+/// only readers; nothing else in the app depends on it, so a database that
+/// cannot be migrated would be a far worse outcome than a column of zeroes.
+///
+/// Same transaction + idempotent-`ADD COLUMN` shape as [`migrate_1_to_2`]
+/// and [`migrate_2_to_3`], for the same reasons.
+fn migrate_3_to_4(conn: &mut Connection) -> Result<(), LibraryError> {
+    let tx = conn.transaction().map_err(registry_err)?;
+    let existing = installed_games_columns(&tx)?;
+    if !existing.iter().any(|name| name == V4_COLUMN) {
+        tx.execute_batch(&format!(
+            "ALTER TABLE installed_games ADD COLUMN {V4_COLUMN} INTEGER NOT NULL DEFAULT 0;"
+        ))
+        .map_err(registry_err)?;
+    }
+    tx.pragma_update(None, "user_version", 4)
+        .map_err(registry_err)?;
+    tx.commit().map_err(registry_err)
+}
+
 /// Every column of `installed_games`, in the order selected/inserted below.
 const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_path, \
      extracted_path, extracted_dir, multi_file_game_dir, description, rating, genres, \
@@ -147,7 +175,7 @@ const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_pa
      server_updated_at, installed_at, cover_small_path, cover_large_path, screenshot_urls, \
      native_executable_path, native_launch_parameters, native_compat_tool, native_wineprefix, \
      native_game_dir, included_dlc, ps3_trophy_paths, ps3_game_id, ps3_iso_path, ps4_game_id, \
-     ps4_content, ra_id";
+     ps4_content, ra_id, last_played_at";
 
 /// One installed game, as persisted in the SQLite registry. `title_key` and
 /// `platform_key` are not part of this type: they are computed from `title`
@@ -202,6 +230,12 @@ pub struct InstalledGame {
     pub ps4_content: String,
     #[serde(default)]
     pub ra_id: String,
+    /// Epoch seconds of the last launch, `0` when the game has never been
+    /// launched through GRID. Written ONLY by
+    /// [`Registry::touch_last_played`] — never by [`Registry::upsert`], so
+    /// an update or a reinstall keeps the history the Library rail reads.
+    #[serde(default)]
+    pub last_played_at: i64,
 }
 
 impl InstalledGame {
@@ -242,6 +276,7 @@ impl InstalledGame {
             ps4_game_id: row.get(32)?,
             ps4_content: row.get(33)?,
             ra_id: row.get(34)?,
+            last_played_at: row.get(35)?,
         })
     }
 }
@@ -307,6 +342,7 @@ impl Registry {
             match version {
                 1 => migrate_1_to_2(&mut conn)?,
                 2 => migrate_2_to_3(&mut conn)?,
+                3 => migrate_3_to_4(&mut conn)?,
                 v => {
                     return Err(LibraryError::Registry(format!(
                         "no migration from user_version {v}"
@@ -448,6 +484,21 @@ impl Registry {
                     fields.screenshot_urls,
                     rom_id
                 ],
+            )
+            .map_err(registry_err)?;
+        Ok(affected > 0)
+    }
+
+    /// Stamps `last_played_at` on the row for `rom_id`. Returns whether a
+    /// row matched — a launch of something not in the registry (there is no
+    /// such path today, but `launch_game` does not require one) stamps
+    /// nothing and reports `false`.
+    pub fn touch_last_played(&self, rom_id: i64, at: i64) -> Result<bool, LibraryError> {
+        let conn = self.conn.lock().unwrap();
+        let affected = conn
+            .execute(
+                "UPDATE installed_games SET last_played_at = ?1 WHERE rom_id = ?2",
+                params![at, rom_id],
             )
             .map_err(registry_err)?;
         Ok(affected > 0)

@@ -344,7 +344,22 @@ pub fn normalize_ui_settings(settings: UiSettings) -> UiSettings {
     UiSettings {
         theme: theme.to_string(),
         background_fade: settings.background_fade.min(MAX_BACKGROUND_FADE),
+        card_size_library: normalize_card_size(&settings.card_size_library),
+        card_size_server: normalize_card_size(&settings.card_size_server),
     }
+}
+
+/// One of `"small"`, `"medium"`, `"large"`; anything else becomes
+/// `"medium"` (design §5's default). Case-sensitive on purpose: the three
+/// names are written by this app, and a `"Large"` in `config.toml` is a
+/// hand edit whose intent is not worth guessing at.
+fn normalize_card_size(raw: &str) -> String {
+    match raw.trim() {
+        "small" => "small",
+        "large" => "large",
+        _ => "medium",
+    }
+    .to_string()
 }
 
 /// The stored server URL, when it is safe to hand to the OS opener.
@@ -479,13 +494,28 @@ pub async fn launch_game(state: State<'_, AppState>, rom_id: i64) -> Result<Game
         state
             .cloud
             .stamp_session_started(
-                install,
+                install.clone(),
                 launch,
                 &config_path,
                 &installed_game,
                 session.started_at as f64,
             )
             .await;
+    }
+
+    // The Library rail's "Recent" entry and its "Recently played" sort read
+    // `last_played_at` (design §5). Stamped once the process has actually
+    // spawned, so a launch that failed to start never counts as played. A
+    // registry write failure is swallowed: the game IS running, and losing
+    // one ordering hint must never surface as a launch error.
+    {
+        let registry = install.registry();
+        let at = session.started_at as i64;
+        if let Err(e) =
+            tokio::task::spawn_blocking(move || registry.touch_last_played(rom_id, at)).await
+        {
+            tracing::debug!("last_played_at stamp did not finish for rom {rom_id}: {e}");
+        }
     }
 
     Ok(session)
@@ -1946,6 +1976,7 @@ mod ui_settings_tests {
             let out = normalize_ui_settings(UiSettings {
                 theme: raw.to_string(),
                 background_fade: 25,
+                ..Default::default()
             });
             let expected = if raw.trim() == "dark" {
                 "dark"
@@ -1962,8 +1993,31 @@ mod ui_settings_tests {
             let out = normalize_ui_settings(UiSettings {
                 theme: raw.to_string(),
                 background_fade: 0,
+                ..Default::default()
             });
             assert_eq!(out.theme, raw);
+        }
+    }
+
+    #[test]
+    fn normalize_ui_settings_clamps_both_card_sizes_to_the_three_names() {
+        for (raw, expected) in [
+            ("small", "small"),
+            ("medium", "medium"),
+            ("large", "large"),
+            ("  large  ", "large"),
+            ("Large", "medium"),
+            ("enormous", "medium"),
+            ("", "medium"),
+        ] {
+            let out = normalize_ui_settings(UiSettings {
+                theme: "system".to_string(),
+                background_fade: 25,
+                card_size_library: raw.to_string(),
+                card_size_server: raw.to_string(),
+            });
+            assert_eq!(out.card_size_library, expected, "library size for {raw:?}");
+            assert_eq!(out.card_size_server, expected, "server size for {raw:?}");
         }
     }
 
@@ -1973,6 +2027,7 @@ mod ui_settings_tests {
             normalize_ui_settings(UiSettings {
                 theme: "system".to_string(),
                 background_fade: value,
+                ..Default::default()
             })
             .background_fade
         };

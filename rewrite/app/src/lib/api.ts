@@ -13,8 +13,16 @@ export type Platform = { id: number; name: string; slug: string; rom_count: numb
  *  match the backend's `PlatformRef` (app/src-tauri/src/commands.rs). */
 export type PlatformRef = { name: string; slug: string };
 
+/** The three card sizes design §5 offers, in `ui.card_size_*`. */
+export type CardSizeName = 'small' | 'medium' | 'large';
+
 /** Desktop shell appearance, mirroring `grid_core::config::UiSettings`. */
-export type UiSettings = { theme: 'system' | 'dark' | 'light'; background_fade: number };
+export type UiSettings = {
+  theme: 'system' | 'dark' | 'light';
+  background_fade: number;
+  card_size_library: CardSizeName;
+  card_size_server: CardSizeName;
+};
 export type GameSummary = {
   id: number;
   name: string;
@@ -188,6 +196,8 @@ export type InstalledGame = {
   ps4_game_id: string;
   ps4_content: string;
   ra_id: string;
+  /** Epoch seconds of the last launch; 0 when never launched through GRID. */
+  last_played_at: number;
 };
 
 // Cloud save/state sync (rewrite/app/src-tauri/src/cloud_service.rs,

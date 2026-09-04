@@ -80,6 +80,18 @@ pub struct UiSettings {
     /// write by `normalize_ui_settings`; read sites clamp again.
     #[serde(default = "default_background_fade")]
     pub background_fade: u8,
+    /// Library grid card size: `"small"`, `"medium"` or `"large"`
+    /// (design §5, D-UI-9 "remembered per view"). Stored as a plain string
+    /// for the same forward-compatibility reason as `theme`: an unknown
+    /// value written by a newer build round-trips instead of failing the
+    /// whole config load, and both the app layer and the frontend
+    /// normalize it.
+    #[serde(default = "default_card_size")]
+    pub card_size_library: String,
+    /// Server grid card size. Independent of `card_size_library`: the two
+    /// grids are browsed differently and D-UI-9 remembers them per view.
+    #[serde(default = "default_card_size")]
+    pub card_size_server: String,
 }
 
 fn default_theme() -> String {
@@ -90,11 +102,17 @@ fn default_background_fade() -> u8 {
     25
 }
 
+fn default_card_size() -> String {
+    "medium".to_string()
+}
+
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
             theme: default_theme(),
             background_fade: default_background_fade(),
+            card_size_library: default_card_size(),
+            card_size_server: default_card_size(),
         }
     }
 }
@@ -318,6 +336,7 @@ mod tests {
             ui: UiSettings {
                 theme: "dark".to_string(),
                 background_fade: 60,
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -847,5 +866,47 @@ mod tests {
         );
         assert_eq!(install.source_id, "GloriousEggroll/proton-ge-custom");
         assert_eq!(install.release_tag, "GE-Proton9-20");
+    }
+
+    #[test]
+    fn card_sizes_default_to_medium_for_both_views() {
+        let ui = UiSettings::default();
+        assert_eq!(ui.card_size_library, "medium");
+        assert_eq!(ui.card_size_server, "medium");
+    }
+
+    #[test]
+    fn a_ui_table_written_before_the_card_sizes_existed_loads_the_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "schema_version = 1\n\n[ui]\ntheme = \"dark\"\nbackground_fade = 40\n",
+        )
+        .unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.ui.theme, "dark");
+        assert_eq!(loaded.ui.background_fade, 40);
+        assert_eq!(loaded.ui.card_size_library, "medium");
+        assert_eq!(loaded.ui.card_size_server, "medium");
+    }
+
+    #[test]
+    fn card_sizes_round_trip_through_save_and_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config {
+            ui: UiSettings {
+                theme: "system".to_string(),
+                background_fade: 25,
+                card_size_library: "large".to_string(),
+                card_size_server: "small".to_string(),
+            },
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.ui.card_size_library, "large");
+        assert_eq!(loaded.ui.card_size_server, "small");
     }
 }

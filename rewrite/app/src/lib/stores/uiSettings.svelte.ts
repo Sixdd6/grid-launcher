@@ -2,6 +2,7 @@
 // scoped, like `appUpdate.svelte.ts`, so the resolved theme survives Shell
 // remounts and every view reads one source.
 import { api } from '../api';
+import type { UiSettings } from '../api';
 import {
   clampFade,
   FADE_DEFAULT,
@@ -14,11 +15,30 @@ import {
   type ThemeChoice,
 } from '../theme';
 
-const state = $state<{ theme: ThemeChoice; backgroundFade: number; prefersDark: boolean }>({
+const state = $state<{
+  theme: ThemeChoice;
+  backgroundFade: number;
+  prefersDark: boolean;
+  cardSizeLibrary: UiSettings['card_size_library'];
+  cardSizeServer: UiSettings['card_size_server'];
+}>({
   theme: 'system',
   backgroundFade: FADE_DEFAULT,
   prefersDark: false,
+  cardSizeLibrary: 'medium',
+  cardSizeServer: 'medium',
 });
+
+/** The one place the whole `UiSettings` payload is assembled, so no writer
+ *  can drop a field another writer owns. */
+function payload(): UiSettings {
+  return {
+    theme: state.theme,
+    background_fade: state.backgroundFade,
+    card_size_library: state.cardSizeLibrary,
+    card_size_server: state.cardSizeServer,
+  };
+}
 
 export const uiSettings = {
   get theme(): ThemeChoice {
@@ -96,6 +116,8 @@ export async function initUiSettings(): Promise<() => void> {
     const stored = await api.getUiSettings();
     state.theme = normalizeTheme(stored.theme);
     state.backgroundFade = clampFade(stored.background_fade);
+    state.cardSizeLibrary = stored.card_size_library;
+    state.cardSizeServer = stored.card_size_server;
   } catch {
     // Defaults/mirror already in `state`.
   }
@@ -115,7 +137,7 @@ export async function initUiSettings(): Promise<() => void> {
 export async function setTheme(choice: ThemeChoice): Promise<void> {
   state.theme = choice;
   applyTheme(choice);
-  await api.setUiSettings({ theme: choice, background_fade: state.backgroundFade });
+  await api.setUiSettings(payload());
   mirrorTheme(choice);
 }
 
@@ -127,5 +149,5 @@ export function previewBackgroundFade(value: number): void {
 /** Slider release: persists whatever the preview settled on. */
 export async function commitBackgroundFade(value: number): Promise<void> {
   previewBackgroundFade(value);
-  await api.setUiSettings({ theme: state.theme, background_fade: state.backgroundFade });
+  await api.setUiSettings(payload());
 }

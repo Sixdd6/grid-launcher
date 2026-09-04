@@ -49,8 +49,8 @@ describe('initUiSettings', () => {
     vi.stubGlobal('document', { documentElement: { dataset } });
     vi.stubGlobal('window', { matchMedia: () => fakeMedia(false) });
 
-    let resolveConfig!: (v: { theme: string; background_fade: number }) => void;
-    const configPromise = new Promise<{ theme: string; background_fade: number }>((resolve) => {
+    let resolveConfig!: (v: { theme: string; background_fade: number; card_size_library: string; card_size_server: string }) => void;
+    const configPromise = new Promise<{ theme: string; background_fade: number; card_size_library: string; card_size_server: string }>((resolve) => {
       resolveConfig = resolve;
     });
     vi.doMock('../api', () => ({
@@ -65,7 +65,7 @@ describe('initUiSettings', () => {
     expect(dataset.theme).toBe('dark');
     expect(uiSettings.theme).toBe('dark');
 
-    resolveConfig({ theme: 'light', background_fade: 25 });
+    resolveConfig({ theme: 'light', background_fade: 25, card_size_library: 'medium', card_size_server: 'medium' });
     await initPromise;
 
     // The config value disagrees with the mirror, so it wins once it loads.
@@ -80,7 +80,7 @@ describe('initUiSettings', () => {
     vi.stubGlobal('window', { matchMedia: () => fakeMedia(false) });
     vi.doMock('../api', () => ({
       api: {
-        getUiSettings: () => Promise.resolve({ theme: 'dark', background_fade: 25 }),
+        getUiSettings: () => Promise.resolve({ theme: 'dark', background_fade: 25, card_size_library: 'medium', card_size_server: 'medium' }),
         setUiSettings: vi.fn(),
       },
     }));
@@ -99,7 +99,7 @@ describe('initUiSettings', () => {
     vi.stubGlobal('window', { matchMedia: () => fakeMedia(false) });
     vi.doMock('../api', () => ({
       api: {
-        getUiSettings: () => Promise.resolve({ theme: 'light', background_fade: 25 }),
+        getUiSettings: () => Promise.resolve({ theme: 'light', background_fade: 25, card_size_library: 'medium', card_size_server: 'medium' }),
         setUiSettings: vi.fn(),
       },
     }));
@@ -121,7 +121,7 @@ describe('setTheme', () => {
     vi.stubGlobal('window', { matchMedia: () => fakeMedia(false) });
     vi.doMock('../api', () => ({
       api: {
-        getUiSettings: () => Promise.resolve({ theme: 'light', background_fade: 25 }),
+        getUiSettings: () => Promise.resolve({ theme: 'light', background_fade: 25, card_size_library: 'medium', card_size_server: 'medium' }),
         setUiSettings: () => Promise.resolve(),
       },
     }));
@@ -142,7 +142,7 @@ describe('setTheme', () => {
     vi.stubGlobal('window', { matchMedia: () => fakeMedia(false) });
     vi.doMock('../api', () => ({
       api: {
-        getUiSettings: () => Promise.resolve({ theme: 'light', background_fade: 25 }),
+        getUiSettings: () => Promise.resolve({ theme: 'light', background_fade: 25, card_size_library: 'medium', card_size_server: 'medium' }),
         setUiSettings: () => Promise.reject(new Error('config is read-only')),
       },
     }));
