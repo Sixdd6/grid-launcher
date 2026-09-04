@@ -1000,6 +1000,11 @@ fn apply_save_emulator(
     if entry.name.trim().is_empty() {
         return Err("Emulator name is required.".to_string());
     }
+    // The panel's "(none)" choice is stored under this reserved value; an
+    // entry carrying it would be offered in the picker and then never launch.
+    if entry.name.trim() == NO_EMULATOR {
+        return Err(format!("{NO_EMULATOR} is a reserved name."));
+    }
 
     let original = original_name.trim();
     let mut original_index = None;
@@ -1426,6 +1431,14 @@ mod merge_tests {
         let mut config = config_with(&[], &[]);
         let result = apply_save_emulator(&mut config, "", entry("   "));
         assert_eq!(result, Err("Emulator name is required.".to_string()));
+        assert!(config.emulators.is_empty());
+    }
+
+    #[test]
+    fn save_refuses_the_reserved_none_marker_as_a_name() {
+        let mut config = config_with(&[], &[]);
+        let result = apply_save_emulator(&mut config, "", entry(NO_EMULATOR));
+        assert_eq!(result, Err("<none> is a reserved name.".to_string()));
         assert!(config.emulators.is_empty());
     }
 
