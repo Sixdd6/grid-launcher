@@ -232,13 +232,14 @@ describe('emulators', () => {
     await waitForConfigLine('"Super Nintendo Entertainment System" = "bsnes"');
   });
 
-  it('leaving RetroArch for none clears both the default and the saved core', async () => {
+  it('leaving RetroArch for none records the <none> marker and clears the saved core', async () => {
     await selectValue('default-select-1', '');
     await browser.waitUntil(
       () => {
         try {
           const contents = readFileSync(configPath(), 'utf-8');
           return (
+            contents.includes('"Super Nintendo Entertainment System" = "<none>"') &&
             !contents.includes('"Super Nintendo Entertainment System" = "bsnes"') &&
             !contents.includes('"Super Nintendo Entertainment System" = "RetroArch Renamed"')
           );
@@ -249,8 +250,30 @@ describe('emulators', () => {
       {
         timeout: TRANSITION_TIMEOUT,
         timeoutMsg:
-          'config.toml still had a default_emulators or retroarch_cores line for the platform after clearing the default to none',
+          'config.toml did not hold the <none> marker, or still had a retroarch_cores line for the platform, after clearing the default to none',
       },
+    );
+  });
+
+  it('the (none) choice survives closing and reopening the panel', async () => {
+    // Reopening re-runs list_platforms, which is where the autoconfig
+    // backfill used to re-assign RetroArch over a cleared default.
+    await $(testId('emulators-close')).click();
+    await $(testId('emulators-panel')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      reverse: true,
+      timeoutMsg: 'the emulators panel never closed',
+    });
+    await $(testId('emulators-open')).click();
+    await $(testId('default-select-1')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the per-platform defaults list never rendered after reopening',
+    });
+
+    await expect($(testId('default-select-1'))).toHaveValue('');
+    await expect($(testId('default-core-1'))).not.toExist();
+    expect(readFileSync(configPath(), 'utf-8')).toContain(
+      '"Super Nintendo Entertainment System" = "<none>"',
     );
   });
 
