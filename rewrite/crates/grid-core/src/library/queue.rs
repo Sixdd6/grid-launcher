@@ -77,6 +77,13 @@ pub struct DownloadEntry {
     key: JobKey,
 }
 
+/// How many terminal entries (`Completed`, `Failed`, `Cancelled`) the list
+/// keeps (design §8: "Completed keeps the last 50 entries"). Every terminal
+/// transition drops the oldest ones past this; live entries are never
+/// counted or pruned. The cap lives here, not in the frontend, because this
+/// list is the source of truth `list_downloads` returns.
+pub const TERMINAL_HISTORY: usize = 50;
+
 /// The full entry list, newest first (reverse of insertion order).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DownloadsSnapshot {
@@ -232,6 +239,7 @@ impl QueueState {
             entry.status = DownloadStatus::Failed;
             entry.error = error.to_string();
         }
+        self.prune_terminal();
     }
 
     /// The id of the oldest entry for `rom_id` that has not reached a
@@ -309,6 +317,7 @@ impl QueueState {
                 entry.error = e.to_string();
             }
         }
+        self.prune_terminal();
     }
 
     /// Finalize task ended. No-op unless `id` currently owns the finalize
@@ -342,6 +351,7 @@ impl QueueState {
                 };
             }
         }
+        self.prune_terminal();
     }
 
     /// When both slots are free and `waiting` is non-empty, pops the front
@@ -376,6 +386,7 @@ impl QueueState {
                 entry.error = "Cancelled while queued".to_string();
                 entry.speed_bps = 0.0;
             }
+            self.prune_terminal();
             return CancelAction::RemovedFromQueue;
         }
 
@@ -449,6 +460,37 @@ impl QueueState {
     fn alloc_id(&mut self) -> u64 {
         self.next_id += 1;
         self.next_id
+    }
+
+    fn is_terminal(status: DownloadStatus) -> bool {
+        matches!(
+            status,
+            DownloadStatus::Completed | DownloadStatus::Failed | DownloadStatus::Cancelled
+        )
+    }
+
+    /// Drops the oldest terminal entries past [`TERMINAL_HISTORY`]. Entries
+    /// are stored oldest first, so a forward `retain` evicts in age order.
+    /// A terminal entry never owns a slot and never sits in `waiting`, so
+    /// nothing else needs updating.
+    fn prune_terminal(&mut self) {
+        let terminal = self
+            .entries
+            .iter()
+            .filter(|entry| Self::is_terminal(entry.status))
+            .count();
+        let mut excess = terminal.saturating_sub(TERMINAL_HISTORY);
+        if excess == 0 {
+            return;
+        }
+        self.entries.retain(|entry| {
+            if excess > 0 && Self::is_terminal(entry.status) {
+                excess -= 1;
+                false
+            } else {
+                true
+            }
+        });
     }
 }
 
@@ -1175,5 +1217,71 @@ mod tests {
             other => panic!("expected Queued, got {other:?}"),
         };
         assert_eq!(third, 3);
+    }
+
+    // --- terminal history cap (design §8: "Completed keeps the last 50") --
+
+    #[test]
+    fn terminal_entries_are_capped_at_the_history_limit_oldest_first() {
+        let mut state = QueueState::default();
+        for rom in 1..=(TERMINAL_HISTORY as i64 + 5) {
+            let id = admit_idle(&mut state, rom);
+            state.download_finished(id, Ok(()), true);
+        }
+        let snapshot = state.snapshot();
+        assert_eq!(snapshot.entries.len(), TERMINAL_HISTORY);
+        // Ids are allocated in admission order, so the five oldest are 1..=5.
+        assert!(snapshot.entries.iter().all(|entry| entry.id > 5));
+        // Newest first, untouched.
+        assert_eq!(snapshot.entries[0].id, TERMINAL_HISTORY as u64 + 5);
+    }
+
+    #[test]
+    fn every_terminal_transition_prunes_including_cancel_and_external() {
+        let mut state = QueueState::default();
+        // Fill the history with completed installs.
+        for rom in 1..=(TERMINAL_HISTORY as i64) {
+            let id = admit_idle(&mut state, rom);
+            state.download_finished(id, Ok(()), true);
+        }
+        // A failed finalize is terminal and evicts id 1.
+        let failed = admit_idle(&mut state, 1000);
+        state.download_finished(failed, Ok(()), false);
+        state.finalize_finished(failed, Err(LibraryError::Cancelled), "");
+        assert!(state.entry(1).is_none());
+        assert_eq!(state.snapshot().entries.len(), TERMINAL_HISTORY);
+
+        // A queued entry cancelled out of the queue is terminal and evicts id 2.
+        let live = admit_idle(&mut state, 1001);
+        let queued = match state.admit(JobKey::Rom(1002), "Title", "Platform", "base") {
+            Admission::Queued(id) => id,
+            other => panic!("expected Queued, got {other:?}"),
+        };
+        assert_eq!(state.request_cancel(queued), CancelAction::RemovedFromQueue);
+        assert!(state.entry(2).is_none());
+
+        // An external (firmware) row finishing is terminal and evicts id 3.
+        let external = state.admit_external("PS3 Firmware", "PS3");
+        state.finish_external(external, "");
+        assert!(state.entry(3).is_none());
+
+        // The live download was never touched and still owns its slot.
+        assert_eq!(
+            state.entry(live).unwrap().status,
+            DownloadStatus::Downloading
+        );
+        assert_eq!(state.next_ready(), None);
+        let terminal = state
+            .snapshot()
+            .entries
+            .iter()
+            .filter(|entry| {
+                matches!(
+                    entry.status,
+                    DownloadStatus::Completed | DownloadStatus::Failed | DownloadStatus::Cancelled
+                )
+            })
+            .count();
+        assert_eq!(terminal, TERMINAL_HISTORY);
     }
 }
