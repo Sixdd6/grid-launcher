@@ -67,6 +67,9 @@
    */
   export async function focusSearch() {
     page = SEARCH_PAGE;
+    // The input lives on the Catalog tab only; the Manual tab persists across
+    // rail clicks, so the chord must bring the tab forward too (P5-3).
+    addTab = 'install';
     await tick();
     searchEl?.focus();
     searchEl?.select();
@@ -114,7 +117,7 @@
   let editing = $state<{ name: string; entry: EmulatorEntry } | null>(null);
   // The catalog pane's two tabs: the catalog rows, or the manual add form.
   let addTab = $state<AddTab>('install');
-  let placement = $derived(formPlacement(page, editing !== null, addTab));
+  let placement = $derived(formPlacement(editing !== null, addTab));
 
   let confirmingDelete = $state<string | null>(null);
   let deletePending = $state<string | null>(null);
@@ -371,6 +374,9 @@
   function openAdd() {
     page = 'catalog';
     addTab = 'install';
+    // A save lands on Installed; a stale `editing` would reopen the sheet
+    // there with the snapshot of a row the user left behind (P5-5).
+    editing = null;
     catalogError = null;
     catalogSearch = '';
     confirmingDelete = null;

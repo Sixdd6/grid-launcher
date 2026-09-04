@@ -63,12 +63,17 @@ export type AddTab = 'install' | 'manual';
  * Where the one `EmulatorForm` renders: as the Installed pane's edit sheet
  * (design §9: "Edit opens the manual form inline as a sheet on the right of
  * the pane"), as the catalog pane's Manual tab, or nowhere.
+ *
+ * The current page is deliberately not an input: each host pane is already
+ * hidden when it is not selected, so keying the placement on the page would
+ * unmount a half-filled form on any rail click and re-seed it on the way
+ * back (final review P5-2). An open edit sheet wins over the Manual tab.
  */
 export type FormPlacement = 'sheet' | 'manual' | null;
 
-export function formPlacement(page: EmulatorPage, editing: boolean, addTab: AddTab): FormPlacement {
-  if (page === 'installed' && editing) return 'sheet';
-  if (page === 'catalog' && addTab === 'manual') return 'manual';
+export function formPlacement(editing: boolean, addTab: AddTab): FormPlacement {
+  if (editing) return 'sheet';
+  if (addTab === 'manual') return 'manual';
   return null;
 }
 

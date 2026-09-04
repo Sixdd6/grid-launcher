@@ -131,6 +131,39 @@ describe('emulators', () => {
     await expect($(testId('emulator-add'))).toBeDisplayed();
   });
 
+  it('Ctrl+F brings the catalog pane forward and focuses its search', async () => {
+    // The search input renders only under the Catalog tab, and `addTab`
+    // survives rail clicks, so the chord has to reset the tab as well as the
+    // page (final review P5-3).
+    await showPage('catalog');
+    await $(testId('emu-add-tab-manual')).click();
+    await $(testId('emu-catalog-search')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      reverse: true,
+      timeoutMsg: 'the Manual tab never replaced the catalog search',
+    });
+
+    await showPage('installed');
+    await browser.keys(['Control', 'f']);
+
+    await $(testId('emu-page-catalog')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'Ctrl+F never brought the catalog pane forward',
+    });
+    await $(testId('emu-catalog-search')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'Ctrl+F left the Manual tab up, so there was no search box',
+    });
+    await browser.waitUntil(
+      async () =>
+        (await browser.execute(() => document.activeElement?.getAttribute('data-testid') ?? '')) ===
+        'emu-catalog-search',
+      { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the catalog search never took focus' },
+    );
+
+    await showPage('installed');
+  });
+
   it('auto-fills name and args from a profile-matching path, then saves the row', async () => {
     await $(testId('emulator-add')).click();
     // Add now opens on the Install tab (task-7-brief.md); the manual form

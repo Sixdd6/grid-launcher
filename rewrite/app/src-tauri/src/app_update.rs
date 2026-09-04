@@ -90,7 +90,7 @@ impl AppUpdateState {
         self.0.lock().expect("app update status mutex").clone()
     }
 
-    #[allow(dead_code)] // kept per Task 3's brief; Tasks 4/5 read the notice off `status()` too
+    #[cfg(test)] // only the tests read the notice alone; the app reads `status()`
     pub fn get(&self) -> Option<AppUpdateNotice> {
         self.status().notice
     }

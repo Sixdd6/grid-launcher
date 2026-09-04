@@ -5,7 +5,7 @@
   // time), or the notice. The notice line and its two buttons keep the ids
   // plan 1 gave them; Dismiss hides the badge, not this entry.
   import { api } from '../api';
-  import { appUpdate, dismiss } from '../stores/appUpdate.svelte';
+  import { appUpdate, dismiss, refreshAppUpdateStatus } from '../stores/appUpdate.svelte';
   import { CHECK_ONLY_NOTE, updateStatusLine, versionLine } from './updates';
 
   let { active = true }: { active?: boolean } = $props();
@@ -18,6 +18,9 @@
   $effect(() => {
     if (!active) return;
     now = Date.now();
+    // The backend emits its event only for a newer release, so a check that
+    // found nothing newer reaches this page only through a pull.
+    refreshAppUpdateStatus();
     api
       .appVersion()
       .then((v) => {

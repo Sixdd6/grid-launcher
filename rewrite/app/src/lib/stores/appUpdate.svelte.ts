@@ -36,6 +36,20 @@ function applyStatus(status: AppUpdateStatus): void {
   state.checkedAt = status.checked_at;
 }
 
+/**
+ * Re-read `app_update_notice`. The backend emits `APP_UPDATE_EVENT` only when
+ * it finds a newer release, so an up-to-date result recorded after the
+ * store's init pull would otherwise never reach the Updates page and leave
+ * `checkedAt` null for the session.
+ */
+export async function refreshAppUpdateStatus(): Promise<void> {
+  try {
+    applyStatus(await api.appUpdateNotice());
+  } catch {
+    // Same as init's pull: a failed read is never surfaced.
+  }
+}
+
 export async function initAppUpdate(): Promise<UnlistenFn> {
   // Listener FIRST, then pull: the startup check runs from Tauri's `setup`
   // and can emit before the webview mounts, and Tauri buffers nothing for a

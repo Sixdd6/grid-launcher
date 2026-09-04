@@ -73,21 +73,27 @@ describe('emulatorRailEntries', () => {
 });
 
 describe('formPlacement', () => {
-  it('renders the edit sheet only on Installed while an entry is being edited', () => {
-    expect(formPlacement('installed', true, 'install')).toBe('sheet');
-    expect(formPlacement('installed', false, 'install')).toBeNull();
-    expect(formPlacement('defaults', true, 'install')).toBeNull();
+  it('renders the edit sheet while an entry is being edited', () => {
+    expect(formPlacement(true, 'install')).toBe('sheet');
+    expect(formPlacement(false, 'install')).toBeNull();
   });
 
-  it('renders the manual add form only on the catalog page under the Manual tab', () => {
-    expect(formPlacement('catalog', false, 'manual')).toBe('manual');
-    expect(formPlacement('catalog', false, 'install')).toBeNull();
-    expect(formPlacement('installed', false, 'manual')).toBeNull();
+  it('renders the manual add form under the Manual tab', () => {
+    expect(formPlacement(false, 'manual')).toBe('manual');
   });
 
-  it('an open edit never leaks onto the catalog page', () => {
-    expect(formPlacement('catalog', true, 'install')).toBeNull();
-    expect(formPlacement('catalog', true, 'manual')).toBe('manual');
+  it('gives the edit sheet precedence over the Manual tab', () => {
+    expect(formPlacement(true, 'manual')).toBe('sheet');
+  });
+
+  it('does not depend on the selected page: a rail click never unmounts the form', () => {
+    // Each host pane is hidden when it is not selected, so the placement is
+    // page-independent by design (final review P5-2). Visiting Platform
+    // defaults mid-edit and coming back must not re-seed the form.
+    expect(formPlacement.length).toBe(2);
+    expect(formPlacement(true, 'install')).toBe('sheet');
+    expect(formPlacement(false, 'manual')).toBe('manual');
+    expect(formPlacement(false, 'install')).toBeNull();
   });
 });
 
