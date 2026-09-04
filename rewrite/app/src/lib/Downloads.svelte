@@ -97,7 +97,7 @@
 
 <style>
   .downloads {
-    padding: 24px 24px 60px;
+    padding: 24px;
     box-sizing: border-box;
   }
 

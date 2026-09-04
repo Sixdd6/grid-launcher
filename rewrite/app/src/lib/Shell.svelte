@@ -383,6 +383,10 @@
        The background art sits at z -1 so these wrappers still paint over
        it in DOM order. */
     position: relative;
+    /* Clearance under the fixed 28px download strip (design §3), applied
+       once here instead of a bottom padding per view. */
+    padding-bottom: calc(var(--footer-h) + 24px);
+    box-sizing: border-box;
   }
 
 </style>
