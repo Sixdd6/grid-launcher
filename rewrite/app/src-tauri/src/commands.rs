@@ -13,6 +13,7 @@ use grid_core::launch::profiles::{
 };
 use grid_core::launch::selection::{
     compatible_emulator_names_for_platform, emulator_entry_by_name, emulator_supports_platform,
+    installed_core_resolver,
 };
 use grid_core::launch::{GameSession, LaunchService, SessionsSnapshot};
 use grid_core::library::queue::DownloadsSnapshot;
@@ -529,7 +530,7 @@ pub async fn compatible_emulators(
                     &config.emulators,
                     &platform,
                     profiles,
-                    &config.retroarch_cores,
+                    &installed_core_resolver,
                 );
                 (platform, names)
             })
@@ -854,7 +855,7 @@ fn check_default_emulator_supported(
         return Ok(());
     }
     let supported = emulator_entry_by_name(&config.emulators, trimmed).is_some_and(|entry| {
-        emulator_supports_platform(entry, platform, profiles, &config.retroarch_cores)
+        emulator_supports_platform(entry, platform, profiles, &installed_core_resolver)
     });
     if supported {
         Ok(())

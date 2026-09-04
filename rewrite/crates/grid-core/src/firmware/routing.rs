@@ -35,7 +35,8 @@ use crate::autoconfig::{dolphin, is_cemu, is_dolphin, is_retroarch, retroarch};
 use crate::config::{Config, EmulatorEntry};
 use crate::launch::profiles::{platform_matches_keywords, profile_for_entry, EmulatorProfile};
 use crate::launch::selection::{
-    default_emulator_name_for_platform, emulator_entry_by_name, mapping_value_for_platform,
+    default_emulator_name_for_platform, emulator_entry_by_name, installed_core_resolver,
+    mapping_value_for_platform,
 };
 use crate::romm::RommClient;
 
@@ -372,7 +373,7 @@ pub async fn install_for_game(client: &RommClient, ctx: &GameFirmwareContext<'_>
         &ctx.config.default_emulators,
         ctx.platform,
         ctx.profiles,
-        &ctx.config.retroarch_cores,
+        &installed_core_resolver,
     );
     if emulator_name.trim().is_empty() {
         return String::new();

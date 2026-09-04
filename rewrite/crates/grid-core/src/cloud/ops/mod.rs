@@ -34,7 +34,8 @@ use crate::autoconfig::{self, name_matches_any_token_substring, readers};
 use crate::config::{Config, EmulatorEntry};
 use crate::launch::profiles::{profile_for_entry, EmulatorProfile};
 use crate::launch::selection::{
-    default_emulator_name_for_platform, emulator_entry_by_name, mapping_value_for_platform,
+    default_emulator_name_for_platform, emulator_entry_by_name, installed_core_resolver,
+    mapping_value_for_platform,
 };
 use crate::romm::RommClient;
 
@@ -333,7 +334,7 @@ fn resolved_cloud_emulator_pair(
             &ctx.config.default_emulators,
             platform,
             ctx.profiles,
-            &ctx.config.retroarch_cores,
+            &installed_core_resolver,
         )
     };
     let default_entry = if default_name.is_empty() {
@@ -507,7 +508,7 @@ fn wrapper_emulator_name(
         &ctx.config.default_emulators,
         platform,
         ctx.profiles,
-        &ctx.config.retroarch_cores,
+        &installed_core_resolver,
     )
 }
 

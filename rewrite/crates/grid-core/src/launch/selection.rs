@@ -61,17 +61,40 @@ pub fn emulator_entry_by_name<'a>(
 /// profile name contains "retroarch", case-insensitively. A simplified
 /// stand-in for `_is_retroarch_emulator_name` (emulator_ui_mixin.py:1916),
 /// which additionally consults autoprofile metadata not modeled here.
-fn is_retroarch_name(name: &str) -> bool {
+pub fn is_retroarch_name(name: &str) -> bool {
     name.to_lowercase().contains("retroarch")
 }
 
+/// Resolves a RetroArch entry's INSTALLED compatible cores for a platform.
+/// `(entry, platform_name) -> core ids`, empty when none are installed.
+///
+/// The predicate takes this rather than the `retroarch_cores` config map
+/// (design D-RC-1): what a RetroArch build can play is decided by the core
+/// files on disk, not by what the user happened to save. The app layer
+/// passes a closure that also knows the platform's server slug; grid-core's
+/// own call sites, which have no slug, pass [`installed_core_resolver`].
+pub type CoreResolver<'a> = &'a dyn Fn(&EmulatorEntry, &str) -> Vec<String>;
+
+/// The production [`CoreResolver`] for callers that hold no platform slug —
+/// the launch path, cloud ops, firmware routing, and the install service,
+/// all of which see only a platform NAME. An empty slug takes
+/// `installed_compatible_cores`' fuzzy fallback (D-RC-2).
+///
+/// Pass it as `&installed_core_resolver`.
+pub fn installed_core_resolver(entry: &EmulatorEntry, platform: &str) -> Vec<String> {
+    crate::autoconfig::installed_compatible_cores(platform, "", entry)
+}
+
 /// Whether `entry` supports `platform` (`_emulator_supports_platform`,
-/// grid-launcher.py:3556; doc 04 §2):
+/// grid-launcher.py:3556; doc 04 §2, as amended by design D-RC-1):
 ///
 /// 1. Blank platform → `true`.
-/// 2. Resolve the profile for the entry; `all_platforms` → `true`.
-/// 3. Entry or profile name contains "retroarch" → supported iff a
-///    non-blank core is mapped for `platform` in `retroarch_cores`.
+/// 2. Entry or profile name contains "retroarch" → supported iff `cores`
+///    resolves at least one installed compatible core. This runs BEFORE the
+///    `all_platforms` shortcut, which is the whole point of D-RC-1: the
+///    shipped RetroArch autoprofile sets `all_platforms: true`, and the old
+///    order let that mark RetroArch compatible with Windows and PS5.
+/// 3. Profile `all_platforms` → `true`.
 /// 4. No profile matched → `true`.
 /// 5. Otherwise compare `platform` against the profile's
 ///    `platform_keywords`.
@@ -79,7 +102,7 @@ pub fn emulator_supports_platform(
     entry: &EmulatorEntry,
     platform: &str,
     profiles: &[EmulatorProfile],
-    retroarch_cores: &BTreeMap<String, String>,
+    cores: CoreResolver<'_>,
 ) -> bool {
     let selected = platform.trim();
     if selected.is_empty() {
@@ -88,14 +111,14 @@ pub fn emulator_supports_platform(
 
     let profile = profile_for_entry(&entry.name, &entry.path, profiles);
 
-    if profile.is_some_and(|p| p.all_platforms) {
-        return true;
-    }
-
     let is_retroarch =
         is_retroarch_name(&entry.name) || profile.is_some_and(|p| is_retroarch_name(&p.name));
     if is_retroarch {
-        return mapping_value_for_platform(retroarch_cores, selected).is_some();
+        return !cores(entry, selected).is_empty();
+    }
+
+    if profile.is_some_and(|p| p.all_platforms) {
+        return true;
     }
 
     let Some(profile) = profile else {
@@ -112,7 +135,7 @@ pub fn compatible_emulator_names_for_platform(
     emulators: &[EmulatorEntry],
     platform: &str,
     profiles: &[EmulatorProfile],
-    retroarch_cores: &BTreeMap<String, String>,
+    cores: CoreResolver<'_>,
 ) -> Vec<String> {
     emulators
         .iter()
@@ -121,7 +144,7 @@ pub fn compatible_emulator_names_for_platform(
             if name.is_empty() {
                 return None;
             }
-            if emulator_supports_platform(entry, platform, profiles, retroarch_cores) {
+            if emulator_supports_platform(entry, platform, profiles, cores) {
                 Some(name.to_string())
             } else {
                 None
@@ -145,17 +168,17 @@ pub fn default_emulator_name_for_platform(
     default_emulators: &BTreeMap<String, String>,
     platform: &str,
     profiles: &[EmulatorProfile],
-    retroarch_cores: &BTreeMap<String, String>,
+    cores: CoreResolver<'_>,
 ) -> String {
     if let Some(configured) = mapping_value_for_platform(default_emulators, platform) {
         if let Some(entry) = emulator_entry_by_name(emulators, configured) {
-            if emulator_supports_platform(entry, platform, profiles, retroarch_cores) {
+            if emulator_supports_platform(entry, platform, profiles, cores) {
                 return configured.to_string();
             }
         }
     }
 
-    compatible_emulator_names_for_platform(emulators, platform, profiles, retroarch_cores)
+    compatible_emulator_names_for_platform(emulators, platform, profiles, cores)
         .into_iter()
         .next()
         .unwrap_or_default()
@@ -200,6 +223,17 @@ mod tests {
             is_compat_tool: false,
             ..Default::default()
         }
+    }
+
+    /// A resolver that answers `cores` for every entry and platform.
+    fn cores_always(cores: &[&str]) -> impl Fn(&EmulatorEntry, &str) -> Vec<String> {
+        let cores: Vec<String> = cores.iter().map(|c| c.to_string()).collect();
+        move |_entry, _platform| cores.clone()
+    }
+
+    /// A resolver that answers nothing for anything — "no core installed".
+    fn no_cores(_entry: &EmulatorEntry, _platform: &str) -> Vec<String> {
+        Vec::new()
     }
 
     // --- mapping_value_for_platform -----------------------------------
@@ -268,7 +302,7 @@ mod tests {
     #[test]
     fn supports_blank_platform_is_always_true() {
         let e = entry("Anything", "");
-        assert!(emulator_supports_platform(&e, "  ", &[], &BTreeMap::new()));
+        assert!(emulator_supports_platform(&e, "  ", &[], &no_cores));
     }
 
     #[test]
@@ -276,10 +310,7 @@ mod tests {
         let profiles = vec![profile_with("Cemu", true, &[])];
         let e = entry("Cemu", "/x/cemu.exe");
         assert!(emulator_supports_platform(
-            &e,
-            "Wii U",
-            &profiles,
-            &BTreeMap::new()
+            &e, "Wii U", &profiles, &no_cores
         ));
     }
 
@@ -290,26 +321,25 @@ mod tests {
             &e,
             "PlayStation 2",
             &[],
-            &BTreeMap::new()
+            &no_cores
         ));
     }
 
     #[test]
-    fn supports_retroarch_entry_true_when_core_mapped() {
+    fn supports_retroarch_entry_true_when_a_core_is_installed() {
         let e = entry("RetroArch", "/x/retroarch");
-        let cores = map(&[("SNES", "snes9x_libretro")]);
-        assert!(emulator_supports_platform(&e, "SNES", &[], &cores));
-    }
-
-    #[test]
-    fn supports_retroarch_entry_false_when_no_core_mapped() {
-        let e = entry("RetroArch", "/x/retroarch");
-        assert!(!emulator_supports_platform(
+        assert!(emulator_supports_platform(
             &e,
             "SNES",
             &[],
-            &BTreeMap::new()
+            &cores_always(&["snes9x"])
         ));
+    }
+
+    #[test]
+    fn supports_retroarch_entry_false_when_no_core_is_installed() {
+        let e = entry("RetroArch", "/x/retroarch");
+        assert!(!emulator_supports_platform(&e, "SNES", &[], &no_cores));
     }
 
     #[test]
@@ -333,13 +363,14 @@ mod tests {
         assert!(is_retroarch_name(&matched.name));
 
         assert!(!emulator_supports_platform(
+            &e, "SNES", &profiles, &no_cores
+        ));
+        assert!(emulator_supports_platform(
             &e,
             "SNES",
             &profiles,
-            &BTreeMap::new()
+            &cores_always(&["snes9x"])
         ));
-        let cores = map(&[("SNES", "snes9x_libretro")]);
-        assert!(emulator_supports_platform(&e, "SNES", &profiles, &cores));
     }
 
     #[test]
@@ -350,13 +381,50 @@ mod tests {
             &e,
             "PlayStation 2",
             &profiles,
-            &BTreeMap::new()
+            &no_cores
         ));
         assert!(!emulator_supports_platform(
             &e,
             "PlayStation 3",
             &profiles,
-            &BTreeMap::new()
+            &no_cores
+        ));
+    }
+
+    #[test]
+    fn supports_retroarch_gate_beats_all_platforms_when_no_core_is_installed() {
+        // Design D-RC-1 and the root cause of report 1: the shipped
+        // RetroArch autoprofile sets all_platforms: true, which used to
+        // short-circuit ahead of the core gate and make RetroArch the
+        // apparent default for every platform, PS5 and Windows included.
+        let profiles = vec![profile_with("RetroArch (Multi-System)", true, &[])];
+        let e = entry("RetroArch", "/x/retroarch");
+        assert!(!emulator_supports_platform(
+            &e,
+            "PlayStation 5",
+            &profiles,
+            &no_cores
+        ));
+    }
+
+    #[test]
+    fn supports_retroarch_all_platforms_profile_is_supported_once_a_core_is_installed() {
+        let profiles = vec![profile_with("RetroArch (Multi-System)", true, &[])];
+        let e = entry("RetroArch", "/x/retroarch");
+        let cores = cores_always(&["snes9x"]);
+        assert!(emulator_supports_platform(&e, "SNES", &profiles, &cores));
+    }
+
+    #[test]
+    fn supports_all_platforms_still_wins_for_a_non_retroarch_profile() {
+        // The reorder must not touch the native all_platforms path.
+        let profiles = vec![profile_with("MAME", true, &[])];
+        let e = entry("MAME", "/x/mame");
+        assert!(emulator_supports_platform(
+            &e,
+            "PlayStation 5",
+            &profiles,
+            &no_cores
         ));
     }
 
@@ -378,11 +446,12 @@ mod tests {
             entry("Dolphin", "/x/dolphin"),
             entry("RetroArch", "/x/retroarch"),
         ];
+        // A resolver that answers a core for everything keeps RetroArch compatible, so this still tests ORDER rather than the D-RC-1 gate.
         let names = compatible_emulator_names_for_platform(
             &emulators,
             "GameCube",
             &profiles,
-            &BTreeMap::new(),
+            &cores_always(&["dolphin_core"]),
         );
         assert_eq!(names, vec!["Dolphin".to_string(), "RetroArch".to_string()]);
     }
@@ -395,7 +464,7 @@ mod tests {
             &emulators,
             "PlayStation 3",
             &profiles,
-            &BTreeMap::new(),
+            &no_cores,
         );
         assert!(names.is_empty());
     }
@@ -412,7 +481,7 @@ mod tests {
             &defaults,
             "PlayStation 2",
             &profiles,
-            &BTreeMap::new(),
+            &no_cores,
         );
         assert_eq!(name, "PCSX2");
     }
@@ -432,11 +501,7 @@ mod tests {
         // entry, Dolphin.
         let defaults = map(&[("GameCube", "PCSX2")]);
         let name = default_emulator_name_for_platform(
-            &emulators,
-            &defaults,
-            "GameCube",
-            &profiles,
-            &BTreeMap::new(),
+            &emulators, &defaults, "GameCube", &profiles, &no_cores,
         );
         assert_eq!(name, "Dolphin");
     }
@@ -447,24 +512,15 @@ mod tests {
         let emulators = vec![entry("Dolphin", "/x/dolphin")];
         let defaults = map(&[("GameCube", "Nonexistent")]);
         let name = default_emulator_name_for_platform(
-            &emulators,
-            &defaults,
-            "GameCube",
-            &profiles,
-            &BTreeMap::new(),
+            &emulators, &defaults, "GameCube", &profiles, &no_cores,
         );
         assert_eq!(name, "Dolphin");
     }
 
     #[test]
     fn default_is_blank_when_nothing_matches() {
-        let name = default_emulator_name_for_platform(
-            &[],
-            &BTreeMap::new(),
-            "GameCube",
-            &[],
-            &BTreeMap::new(),
-        );
+        let name =
+            default_emulator_name_for_platform(&[], &BTreeMap::new(), "GameCube", &[], &no_cores);
         assert_eq!(name, "");
     }
 
@@ -480,11 +536,7 @@ mod tests {
         ];
         let defaults = map(&[("GameCube", "RetroArch")]);
         let name = default_emulator_name_for_platform(
-            &emulators,
-            &defaults,
-            "GameCube",
-            &profiles,
-            &BTreeMap::new(),
+            &emulators, &defaults, "GameCube", &profiles, &no_cores,
         );
         assert_eq!(name, "Dolphin");
     }

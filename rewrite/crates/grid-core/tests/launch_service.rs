@@ -614,13 +614,20 @@ async fn a_retroarch_relative_core_is_rewritten_to_an_absolute_path() {
     let core = cores.join("snes9x_libretro.so");
     fs::write(&core, b"core bytes").unwrap();
 
+    // D-RC-1: the core gate now resolves against cores actually installed
+    // on disk (grid_core::autoconfig::installed_compatible_cores), which
+    // fuzzy-matches the platform name against the bundled RetroArch
+    // compatibility map. That map only recognizes real platform names, not
+    // the "SNES" shorthand used elsewhere in this file, so this one test
+    // uses the full name.
+    let platform = "Super Nintendo Entertainment System";
     h.write_config_full(
         vec![entry("RetroArch", &exe, "-L \"%core%\" \"%rom%\"")],
-        &[("SNES", "RetroArch")],
-        &[("SNES", "snes9x")],
+        &[(platform, "RetroArch")],
+        &[(platform, "snes9x")],
         "",
     );
-    let rom = h.install_game(7, "Chrono", "SNES");
+    let rom = h.install_game(7, "Chrono", platform);
 
     let service = h.service();
     let session = service.launch(7).await.unwrap();

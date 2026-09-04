@@ -498,7 +498,7 @@ fn default_entry_for_platform<'a>(
         &config.default_emulators,
         platform,
         profiles,
-        &config.retroarch_cores,
+        &grid_core::launch::selection::installed_core_resolver,
     );
     grid_core::launch::selection::emulator_entry_by_name(&config.emulators, &name)
 }

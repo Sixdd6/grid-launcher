@@ -32,7 +32,8 @@ use native::build_native_command;
 use profiles::{load_profiles, profile_for_entry};
 use rom::resolve_rom_path;
 use selection::{
-    default_emulator_name_for_platform, emulator_entry_by_name, mapping_value_for_platform,
+    default_emulator_name_for_platform, emulator_entry_by_name, installed_core_resolver,
+    mapping_value_for_platform,
 };
 use sessions::SessionStore;
 use spawn::{clean_env, prepare_emulator_launch};
@@ -463,7 +464,7 @@ fn resolve_launch(game: &InstalledGame, config: &Config) -> Result<LaunchPlan, L
         &config.default_emulators,
         platform,
         profiles,
-        &config.retroarch_cores,
+        &installed_core_resolver,
     );
     let entry = emulator_entry_by_name(&config.emulators, &emulator_name);
     let is_retroarch = entry.is_some_and(|e| entry_is_retroarch(e, profiles));

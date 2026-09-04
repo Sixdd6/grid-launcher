@@ -41,7 +41,9 @@ use crate::launch::forge::{ForgeClient, ForgeProvider, ResolvedDownload};
 use crate::launch::profiles::{
     load_profiles, profile_available_on_host, profile_for_entry, EmulatorProfile,
 };
-use crate::launch::selection::{default_emulator_name_for_platform, emulator_entry_by_name};
+use crate::launch::selection::{
+    default_emulator_name_for_platform, emulator_entry_by_name, installed_core_resolver,
+};
 use crate::launch::source::HOST_PLATFORM;
 use crate::launch::template::split_template;
 use crate::launch::{catalog, emu_install};
@@ -1778,7 +1780,7 @@ impl InstallService {
             &config.default_emulators,
             platform,
             &self.profiles,
-            &config.retroarch_cores,
+            &installed_core_resolver,
         );
         let entry = emulator_entry_by_name(&config.emulators, &name);
         let path = entry.map(|e| e.path.as_str()).unwrap_or("");
@@ -2630,7 +2632,7 @@ fn ps3_roots_from_config(
         &config.default_emulators,
         platform,
         profiles,
-        &config.retroarch_cores,
+        &installed_core_resolver,
     );
     let entry = emulator_entry_by_name(&config.emulators, &name);
     let path = entry.map(|e| e.path.as_str()).unwrap_or("");
