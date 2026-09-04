@@ -5,9 +5,10 @@
   import DownloadsFooter from './DownloadsFooter.svelte';
   import Emulators from './Emulators.svelte';
   import BackgroundArt from './BackgroundArt.svelte';
+  import Settings from './Settings.svelte';
   import { api } from './api';
   import { session, retry, disconnect } from './stores/session.svelte';
-  import { appUpdate, dismiss } from './stores/appUpdate.svelte';
+  import { appUpdate } from './stores/appUpdate.svelte';
   import { installed, refresh as refreshInstalled } from './stores/installed.svelte';
   import { seedLastViewed } from './stores/lastViewed.svelte';
   import { chipLabel, hostOf, initialView, VIEWS, viewForDigit, viewLabel, type View } from './shell';
@@ -189,15 +190,7 @@
   <Emulators active={view === 'emulators'} />
 </div>
 <div data-testid="settings-view" class="view view-content" hidden={view !== 'settings'}>
-  <h2>Settings</h2>
-  <p class="placeholder">Coming in a later step</p>
-  {#if appUpdate.notice}
-    <p class="update-line">
-      GRID Launcher {appUpdate.notice.tag} is available
-      <button data-testid="app-update-open" onclick={() => api.openReleasePage(appUpdate.notice!.url).catch(() => {})}>Open release</button>
-      <button data-testid="app-update-dismiss" onclick={dismiss}>Dismiss</button>
-    </p>
-  {/if}
+  <Settings />
 </div>
 
 <!-- Mounted outside the view roots, and never hidden. The footer strip is
@@ -385,26 +378,4 @@
     z-index: 1;
   }
 
-  .placeholder {
-    color: var(--text-muted);
-  }
-
-  .update-line {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text-h);
-    font-size: 13px;
-  }
-
-  .update-line button {
-    font: inherit;
-    font-size: 12px;
-    padding: 4px 10px;
-    border-radius: var(--r-control);
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--text-h);
-    cursor: pointer;
-  }
 </style>

@@ -177,24 +177,36 @@ describe('updates', () => {
     });
   });
 
-  it('announces a newer launcher release and lets it be dismissed', async () => {
-    await $(testId('app-update-banner')).waitForExist({
+  it('badges a newer launcher release and lets it be dismissed from Settings', async () => {
+    // The banner strip is gone (design §3): the notice is a badge on the
+    // server menu plus an entry under Settings › Updates.
+    await $(testId('app-update-badge')).waitForExist({
       timeout: APP_START_TIMEOUT,
-      timeoutMsg: 'the self-update banner never appeared for the mock forge release',
+      timeoutMsg: 'the self-update badge never appeared for the mock forge release',
     });
-    expect(await $(testId('app-update-banner')).getText()).toContain(SELF_UPDATE_TAG);
+    await $(testId('app-update-badge')).click();
+    await $(testId('settings-nav-updates')).click();
+    const notice = $(testId('app-update-notice'));
+    await notice.waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'Settings › Updates never showed the stored notice',
+    });
+    expect(await notice.getText()).toContain(SELF_UPDATE_TAG);
 
     // `app-update-open` is deliberately NOT clicked: it hands the URL to the
     // OS opener, which would spawn a real browser out of the headless run.
     await $(testId('app-update-dismiss')).click();
-    await $(testId('app-update-banner')).waitForExist({
+    await $(testId('app-update-badge')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       reverse: true,
-      timeoutMsg: 'the self-update banner survived Dismiss',
+      timeoutMsg: 'the self-update badge survived Dismiss',
     });
   });
 
   it('updates a non-native game by re-installing the newer server copy', async () => {
+    // The case above ends on Settings; the Library root is hidden until the
+    // pill is clicked, and a hidden card cannot be clicked.
+    await showLibrary();
     await openDetails(801);
     // No version row: SNES is not a Windows/PC platform and the fixture
     // carries no revision, so `versionLabel` yields nothing to show.
