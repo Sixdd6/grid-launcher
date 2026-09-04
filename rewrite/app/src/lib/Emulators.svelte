@@ -27,7 +27,11 @@
   import { isWindowsHost } from './emulators/compatTools';
   import CompatTools from './emulators/CompatTools.svelte';
 
-  let { onClose }: { onClose: () => void } = $props();
+  // Mounted for the whole session now that Emulators is a view, so the
+  // refresh below is gated on being the visible view: navigating away and
+  // back re-runs `list_platforms`, which is what makes a cleared default
+  // survive (the emulators spec's "(none)" case).
+  let { active = true }: { active?: boolean } = $props();
 
   let emulators = $state<EmulatorEntry[]>([]);
   let listLoading = $state(true);
@@ -197,13 +201,8 @@
     }
   }
 
-  let panelEl = $state<HTMLElement | null>(null);
-
   $effect(() => {
-    panelEl?.focus();
-  });
-
-  $effect(() => {
+    if (!active) return;
     refreshEmulators();
     refreshPlatformsAndDefaults();
     refreshProfiles();
@@ -567,31 +566,10 @@
     }
   }
 
-  function onKey(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      onClose();
-    }
-  }
-
-  function onBackdropClick(e: MouseEvent) {
-    if (e.target === e.currentTarget) onClose();
-  }
 </script>
 
-<div class="backdrop" onclick={onBackdropClick} role="presentation">
-  <div
-    data-testid="emulators-panel"
-    class="panel"
-    bind:this={panelEl}
-    role="dialog"
-    aria-modal="true"
-    aria-label="Emulators"
-    tabindex="-1"
-    onkeydown={onKey}
-  >
-    <button data-testid="emulators-close" class="close" onclick={onClose} aria-label="Close">×</button>
-    <h2>Emulators</h2>
+<section data-testid="emulators-view" class="emulators-view view-content" aria-label="Emulators">
+  <h2>Emulators</h2>
 
     <section class="list-section">
       <div class="section-header">
@@ -946,66 +924,21 @@
         <p class="muted">Loading…</p>
       {/if}
     </section>
-  </div>
-</div>
+</section>
 
 <style>
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.6);
-    display: grid;
-    place-items: center;
-    z-index: 20;
-  }
-
-  .panel {
-    position: relative;
-    width: min(560px, calc(100vw - 48px));
-    max-height: calc(100vh - 48px);
-    overflow-y: auto;
-    overflow-x: hidden;
-    box-sizing: border-box;
+  .emulators-view {
     display: flex;
     flex-direction: column;
     gap: 16px;
     padding: 24px;
-    border-radius: 12px;
-    background: var(--bg);
-    border: 1px solid var(--border);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
-  }
-
-  .panel:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
-
-  .close {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    width: 28px;
-    height: 28px;
-    line-height: 1;
-    font-size: 20px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-  }
-
-  .close:hover,
-  .close:focus-visible {
-    background: var(--border);
+    box-sizing: border-box;
   }
 
   h2 {
     margin: 0;
     color: var(--text-h);
     font-size: 18px;
-    padding-right: 28px;
   }
 
   h3 {

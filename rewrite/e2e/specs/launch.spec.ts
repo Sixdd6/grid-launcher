@@ -67,19 +67,19 @@ describe('launch', () => {
   }
 
   async function openEmulators() {
-    await $(testId('emulators-open')).click();
-    await $(testId('emulators-panel')).waitForExist({
+    await $(testId('nav-emulators')).click();
+    await $(testId('emulators-view')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the emulators panel never opened',
+      timeoutMsg: 'the emulators view never rendered',
     });
   }
 
   async function closeEmulators() {
-    await $(testId('emulators-close')).click();
-    await $(testId('emulators-panel')).waitForExist({
+    await $(testId('nav-server')).click();
+    await $(testId('emulators-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       reverse: true,
-      timeoutMsg: 'the emulators panel never closed',
+      timeoutMsg: 'the emulators view never went away',
     });
   }
 

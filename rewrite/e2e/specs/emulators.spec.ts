@@ -60,10 +60,10 @@ describe('emulators', () => {
       timeoutMsg: 'the library never rendered a platform button after connecting',
     });
 
-    await $(testId('emulators-open')).click();
-    await $(testId('emulators-panel')).waitForExist({
+    await $(testId('nav-emulators')).click();
+    await $(testId('emulators-view')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the emulators panel never opened',
+      timeoutMsg: 'the emulators view never rendered',
     });
   });
 
@@ -255,19 +255,20 @@ describe('emulators', () => {
     );
   });
 
-  it('the (none) choice survives closing and reopening the panel', async () => {
-    // Reopening re-runs list_platforms, which is where the autoconfig
-    // backfill used to re-assign RetroArch over a cleared default.
-    await $(testId('emulators-close')).click();
-    await $(testId('emulators-panel')).waitForExist({
+  it('the (none) choice survives leaving and re-entering the view', async () => {
+    // Re-entering re-runs list_platforms (Emulators.svelte's load effect is
+    // gated on `active`), which is where the autoconfig backfill used to
+    // re-assign RetroArch over a cleared default.
+    await $(testId('nav-server')).click();
+    await $(testId('emulators-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       reverse: true,
-      timeoutMsg: 'the emulators panel never closed',
+      timeoutMsg: 'the emulators view never went away',
     });
-    await $(testId('emulators-open')).click();
+    await $(testId('nav-emulators')).click();
     await $(testId('default-select-1')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the per-platform defaults list never rendered after reopening',
+      timeoutMsg: 'the per-platform defaults list never rendered after re-entering',
     });
 
     await expect($(testId('default-select-1'))).toHaveValue('');

@@ -7,22 +7,45 @@
   import { session, retry, disconnect } from './stores/session.svelte';
   import { appUpdate, dismiss } from './stores/appUpdate.svelte';
   import { refresh as refreshInstalled } from './stores/installed.svelte';
-  import { chipLabel, initialSection, type Section } from './shell';
+  import { chipLabel, hostOf, initialView, VIEWS, viewForDigit, viewLabel, type View } from './shell';
   import type { NavDirection } from './focus/grid';
 
   // Set once when the shell first mounts (R2): Server when the restored/just
   // -connected session is online, Library when it came up offline. Switching
-  // sections afterward is a user action via the nav buttons below.
-  let section = $state<Section>(initialSection(session.connected));
+  // views afterward is a user action — a pill, Ctrl+1..5, or `show()`.
+  let view = $state<View>(initialView(session.connected));
 
   let library = $state<ReturnType<typeof Library> | null>(null);
   let server = $state<ReturnType<typeof Server> | null>(null);
-  let downloads = $state<ReturnType<typeof Downloads> | null>(null);
-  let showEmulators = $state(false);
+  let serverMenuOpen = $state(false);
 
   export function handleNav(action: NavDirection | 'accept' | 'back') {
-    if (section === 'library') library?.handleNav(action);
-    else server?.handleNav(action);
+    if (view === 'library') library?.handleNav(action);
+    else if (view === 'server') server?.handleNav(action);
+  }
+
+  /** Programmatic navigation, for the footer strip and the update badge. */
+  export function show(next: View) {
+    view = next;
+  }
+
+  // Ctrl+1..5 (design §3). Alt/Shift are excluded so this never steals a
+  // window-manager or text-editing chord; Meta is accepted alongside Ctrl so
+  // the same accelerator works on macOS.
+  function onKeydown(e: KeyboardEvent) {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    const next = viewForDigit(e.key);
+    if (next === null) return;
+    e.preventDefault();
+    view = next;
+  }
+
+  function openServer() {
+    serverMenuOpen = false;
+    api.openServerPage().catch(() => {
+      // The opener refuses a URL it cannot browse to (userinfo, or none
+      // stored). Nothing to report: the menu item is a convenience.
+    });
   }
 
   $effect(() => {
@@ -37,194 +60,307 @@
   });
 </script>
 
-<div data-testid="shell-topbar" class="topbar">
-  <div class="topbar-row">
-    <nav class="sections">
-      <button data-testid="nav-library" class:active={section === 'library'} onclick={() => (section = 'library')}>
-        Library
-      </button>
-      <button data-testid="nav-server" class:active={section === 'server'} onclick={() => (section = 'server')}>
-        Server
-      </button>
-      <button data-testid="nav-downloads" onclick={() => downloads?.toggle()}>Downloads</button>
-      <button data-testid="nav-emulators" onclick={() => (showEmulators = true)}>Emulators</button>
-    </nav>
+<svelte:window onkeydown={onKeydown} />
 
-    <div class="session">
-      <span data-testid="session-chip" class="chip" title={session.lastError ?? undefined}>
-        {chipLabel(session)}
-      </span>
-      {#if !session.connected}
-        <button data-testid="session-retry" disabled={session.busy} onclick={() => retry()}>Retry</button>
-      {/if}
-      <button data-testid="session-disconnect" onclick={() => disconnect()}>Disconnect</button>
-    </div>
+<header data-testid="shell-topbar" class="topbar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">▦</span>
+    <span class="wordmark">GRID</span>
   </div>
 
-  {#if !session.connected && session.lastError}
-    <p data-testid="session-error" class="error-line">{session.lastError}</p>
+  <nav class="pills" aria-label="Views">
+    {#each VIEWS as v (v)}
+      <button
+        data-testid={`nav-${v}`}
+        class="pill"
+        class:active={view === v}
+        aria-current={view === v ? 'page' : undefined}
+        onclick={() => (view = v)}
+      >
+        {viewLabel(v)}
+      </button>
+    {/each}
+  </nav>
+
+  <div class="session">
+    {#if appUpdate.notice}
+      <button
+        data-testid="app-update-badge"
+        class="update-badge"
+        title={`GRID Launcher ${appUpdate.notice.tag} is available`}
+        onclick={() => (view = 'settings')}
+      >
+        Update
+      </button>
+    {/if}
+    <span class="status-dot" class:online={session.connected} aria-hidden="true"></span>
+    <button
+      data-testid="session-chip"
+      class="chip"
+      title={session.lastError ?? undefined}
+      aria-expanded={serverMenuOpen}
+      onclick={() => (serverMenuOpen = !serverMenuOpen)}
+    >
+      {chipLabel(session)}
+    </button>
+    {#if serverMenuOpen}
+      <div class="server-menu" role="menu">
+        {#if !session.connected}
+          <button
+            data-testid="session-retry"
+            role="menuitem"
+            disabled={session.busy}
+            onclick={() => { serverMenuOpen = false; retry(); }}
+          >
+            Reconnect
+          </button>
+        {/if}
+        <button
+          data-testid="session-disconnect"
+          role="menuitem"
+          onclick={() => { serverMenuOpen = false; disconnect(); }}
+        >
+          Disconnect
+        </button>
+        <button data-testid="session-open-romm" role="menuitem" onclick={openServer}>
+          Open RomM in browser
+        </button>
+        <span class="menu-host">{hostOf(session.serverUrl)}</span>
+      </div>
+    {/if}
+  </div>
+</header>
+
+{#if !session.connected && session.lastError}
+  <p data-testid="session-error" class="error-line">{session.lastError}</p>
+{/if}
+
+<!-- All five views stay mounted and switch with `hidden` (design §3), so
+     scroll positions, selections and in-flight fetches survive a switch. -->
+<div data-testid="library-view" class="view" hidden={view !== 'library'}>
+  <Library active={view === 'library'} bind:this={library} />
+</div>
+<div data-testid="server-view" class="view" hidden={view !== 'server'}>
+  <Server active={view === 'server'} bind:this={server} />
+</div>
+<div data-testid="downloads-view" class="view" hidden={view !== 'downloads'}>
+  <!-- `onOpenEmulators` is still a required prop of the pre-redesign
+       Downloads drawer; Task 4 rewrites it into the view proper. Until then
+       its own Emulators button navigates the shell like the pill does. -->
+  <Downloads onOpenEmulators={() => (view = 'emulators')} />
+</div>
+<div class="view" hidden={view !== 'emulators'}>
+  <Emulators active={view === 'emulators'} />
+</div>
+<div data-testid="settings-view" class="view view-content" hidden={view !== 'settings'}>
+  <h2>Settings</h2>
+  <p class="placeholder">Coming in a later step</p>
+  {#if appUpdate.notice}
+    <p class="update-line">
+      GRID Launcher {appUpdate.notice.tag} is available
+      <button data-testid="app-update-open" onclick={() => api.openReleasePage(appUpdate.notice!.url).catch(() => {})}>Open release</button>
+      <button data-testid="app-update-dismiss" onclick={dismiss}>Dismiss</button>
+    </p>
   {/if}
 </div>
-
-<!-- Self-update notice (doc 10). A strip under the bar rather than a modal:
-     it announces, it never blocks. `dismiss()` is per-process, so it stays
-     gone for the rest of the session. -->
-{#if appUpdate.notice}
-  <div data-testid="app-update-banner" class="update-banner" role="status">
-    <span>GRID Launcher {appUpdate.notice.tag} is available</span>
-    <button data-testid="app-update-open" onclick={() => api.openReleasePage(appUpdate.notice!.url).catch(() => {})}>Open release</button>
-    <button data-testid="app-update-dismiss" class="secondary" onclick={dismiss}>Dismiss</button>
-  </div>
-{/if}
-
-<div hidden={section !== 'library'}>
-  <Library active={section === 'library'} bind:this={library} />
-</div>
-<div hidden={section !== 'server'}>
-  <Server active={section === 'server'} bind:this={server} />
-</div>
-
-<Downloads bind:this={downloads} onOpenEmulators={() => (showEmulators = true)} />
-{#if showEmulators}
-  <Emulators onClose={() => (showEmulators = false)} />
-{/if}
 
 <style>
   .topbar {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 10px 24px;
+    align-items: center;
+    gap: 16px;
+    height: var(--topbar-h);
+    padding: 0 16px;
     box-sizing: border-box;
-    background: var(--bg);
+    background: var(--surface-2);
     border-bottom: 1px solid var(--border);
     position: sticky;
     top: 0;
     z-index: 5;
   }
 
-  .topbar-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-
-  .sections {
-    display: flex;
-    gap: 6px;
-  }
-
-  .sections button {
-    font: inherit;
-    font-size: 13px;
-    padding: 6px 14px;
-    border-radius: 8px;
-    border: 1px solid transparent;
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-  }
-
-  .sections button:hover {
-    background: var(--border);
-  }
-
-  .sections button.active {
-    background: var(--border);
-    color: var(--text-h);
-    border-color: var(--border);
-  }
-
-  .session {
+  .brand {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex: 1 1 0;
+    min-width: 0;
+    color: var(--text-h);
+  }
+
+  .logo {
+    color: var(--primary);
+    font-size: 18px;
+  }
+
+  .wordmark {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+  }
+
+  .pills {
+    display: flex;
+    gap: 4px;
+    flex: 0 0 auto;
+    padding: 3px;
+    border-radius: var(--r-pill);
+    background: var(--surface);
+  }
+
+  .pill {
+    font: inherit;
+    font-size: 13px;
+    padding: 5px 16px;
+    border-radius: var(--r-pill);
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background var(--m-fast) ease, color var(--m-fast) ease;
+  }
+
+  .pill:hover {
+    color: var(--text-h);
+  }
+
+  .pill.active {
+    background: var(--primary);
+    color: #fff;
+  }
+
+  .session {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .status-dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--danger);
+  }
+
+  .status-dot.online {
+    background: var(--success);
   }
 
   .chip {
+    font: inherit;
     font-size: 13px;
+    padding: 5px 10px;
+    border-radius: var(--r-chip);
+    border: 1px solid transparent;
+    background: transparent;
     color: var(--text-h);
+    cursor: pointer;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 260px;
   }
 
-  .session button {
+  .chip:hover {
+    border-color: var(--border);
+  }
+
+  .update-badge {
     font: inherit;
-    font-size: 12px;
-    padding: 5px 12px;
-    border-radius: 8px;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    border: none;
+    background: var(--primary);
+    color: #fff;
+    cursor: pointer;
+  }
+
+  .server-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    min-width: 200px;
+    padding: 4px;
+    border-radius: var(--r-row);
     border: 1px solid var(--border);
+    background: var(--surface-2);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  }
+
+  .server-menu button {
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    padding: 7px 10px;
+    border: none;
+    border-radius: var(--r-control);
     background: transparent;
     color: var(--text-h);
     cursor: pointer;
-    white-space: nowrap;
   }
 
-  .session button:hover {
-    background: var(--border);
+  .server-menu button:hover:not(:disabled) {
+    background: var(--surface);
   }
 
-  .session button:disabled {
+  .server-menu button:disabled {
     opacity: 0.6;
     cursor: default;
   }
 
+  .menu-host {
+    padding: 6px 10px 4px;
+    border-top: 1px solid var(--border);
+    margin-top: 4px;
+    color: var(--text-muted);
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .error-line {
     margin: 0;
-    color: #e5484d;
+    padding: 4px 16px;
+    color: var(--danger);
     font-size: 11px;
   }
 
-  .update-banner {
+  .view {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .placeholder {
+    color: var(--text-muted);
+  }
+
+  .update-line {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 6px 24px;
-    box-sizing: border-box;
-    background: var(--accent);
-    color: #fff;
+    gap: 8px;
+    color: var(--text-h);
     font-size: 13px;
   }
 
-  /* The message yields first, so the two buttons never wrap to a second
-     line — the strip stays one row tall at any window width. */
-  .update-banner span {
-    flex: 1;
-    min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .update-banner button {
-    flex: none;
+  .update-line button {
     font: inherit;
     font-size: 12px;
-    padding: 4px 12px;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.55);
+    padding: 4px 10px;
+    border-radius: var(--r-control);
+    border: 1px solid var(--border);
     background: transparent;
-    color: #fff;
+    color: var(--text-h);
     cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .update-banner button:hover,
-  .update-banner button:focus-visible {
-    background: rgba(255, 255, 255, 0.18);
-  }
-
-  .update-banner button.secondary {
-    border-color: transparent;
-    opacity: 0.85;
-  }
-
-  .update-banner button.secondary:hover,
-  .update-banner button.secondary:focus-visible {
-    opacity: 1;
   }
 </style>

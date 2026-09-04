@@ -87,10 +87,10 @@ describe('firmware', () => {
   });
 
   it('fetches the PS3 PUP through its own drawer row when RPCS3 is added by hand', async () => {
-    await $(testId('emulators-open')).click();
-    await $(testId('emulators-panel')).waitForExist({
+    await $(testId('nav-emulators')).click();
+    await $(testId('emulators-view')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the emulators panel never opened',
+      timeoutMsg: 'the emulators view never rendered',
     });
 
     await $(testId('emulator-add')).click();

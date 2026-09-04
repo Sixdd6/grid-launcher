@@ -124,10 +124,10 @@ describe('cloud-saves', () => {
     // `true` (config.rs's `default_true`), so the seed's bare config.toml
     // already has them on. Only the upload delay (default 3s) needs
     // changing — down to 0 so scenario 3 doesn't need a real wait.
-    await $(testId('emulators-open')).click();
-    await $(testId('emulators-panel')).waitForExist({
+    await $(testId('nav-emulators')).click();
+    await $(testId('emulators-view')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the emulators panel never opened',
+      timeoutMsg: 'the emulators view never rendered',
     });
     const delayInput = $(testId('cloud-settings-upload-delay'));
     await delayInput.waitForExist({ timeout: TRANSITION_TIMEOUT });
@@ -135,11 +135,11 @@ describe('cloud-saves', () => {
     await delayInput.setValue('0');
     await $(testId('cloud-settings-save')).click();
     await waitForConfigLine('auto_cloud_save_upload_delay_seconds = 0');
-    await $(testId('emulators-close')).click();
-    await $(testId('emulators-panel')).waitForExist({
+    await $(testId('nav-server')).click();
+    await $(testId('emulators-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       reverse: true,
-      timeoutMsg: 'the emulators panel never closed',
+      timeoutMsg: 'the emulators view never went away',
     });
   });
 
