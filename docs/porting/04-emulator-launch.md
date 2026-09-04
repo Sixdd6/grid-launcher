@@ -1095,6 +1095,18 @@ D19 are recorded in doc 03 instead, since they are install-side.
    entirely out of session tracking, including playtime accounting?" — no: native sessions are
    tracked the same as emulated ones. The unrelated cloud-save block on native games
    (`cloud_save_block_reason_for_game`) is unaffected.
+5. **The Emulators panel's per-platform default selector is filtered by compatibility.**
+   It offers only the names `compatible_emulator_names_for_platform`
+   (`crates/grid-core/src/launch/selection.rs:111`, §2 above) returns for that platform,
+   via the `compatible_emulators` command; a platform with no compatible emulator gets a
+   disabled select reading "No compatible emulator". The displayed selection is the stored
+   default while it is still compatible and otherwise the first compatible name (display
+   only — the fallback is never written back), matching
+   `default_emulator_name_for_platform`. `set_default_emulator` additionally REFUSES an
+   incompatible pick with `"<name> does not support <platform>"` and writes nothing (Python
+   only filtered the combo box). The panel also re-reads its emulator entries and defaults
+   when an emulator install reaches a terminal status, so a freshly installed catalog
+   emulator appears in the selector without reopening the panel.
 
 ### Rulings on open questions
 

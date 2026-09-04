@@ -11,6 +11,9 @@ use grid_core::launch::catalog::{catalog_entries, mark_installed, CatalogEntry};
 use grid_core::launch::profiles::{
     load_profiles, profile_for_entry, visible_profiles, EmulatorProfile,
 };
+use grid_core::launch::selection::{
+    compatible_emulator_names_for_platform, emulator_entry_by_name, emulator_supports_platform,
+};
 use grid_core::launch::{GameSession, LaunchService, SessionsSnapshot};
 use grid_core::library::queue::DownloadsSnapshot;
 use grid_core::library::registry::InstalledGame;
@@ -503,10 +506,47 @@ pub async fn delete_emulator(name: String) -> Result<(), String> {
     .map_err(|e| format!("delete_emulator did not finish: {e}"))?
 }
 
+/// The emulator names that support each requested platform, keyed by the
+/// platform string that was asked about. One config + profile load answers
+/// the whole batch; each platform runs the ported
+/// `compatible_emulator_names_for_platform` (doc 04 §2), so names come back
+/// in config order with blank-named entries skipped.
+///
+/// The Emulators panel calls this to build its per-platform default
+/// selector, which offers only compatible emulators — matching Python's
+/// `_on_default_platform_changed` (emulator_ui_mixin.py:598).
+#[tauri::command]
+pub async fn compatible_emulators(
+    platforms: Vec<String>,
+) -> Result<BTreeMap<String, Vec<String>>, String> {
+    tokio::task::spawn_blocking(move || {
+        let config = Config::load(&Config::default_path()).map_err(err)?;
+        let profiles = load_profiles();
+        Ok(platforms
+            .into_iter()
+            .map(|platform| {
+                let names = compatible_emulator_names_for_platform(
+                    &config.emulators,
+                    &platform,
+                    profiles,
+                    &config.retroarch_cores,
+                );
+                (platform, names)
+            })
+            .collect())
+    })
+    .await
+    .map_err(|e| format!("compatible_emulators did not finish: {e}"))?
+}
+
 #[tauri::command]
 pub async fn set_default_emulator(platform: String, name: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
+        let profiles = load_profiles();
         modify_config(&Config::default_path(), |config| {
+            // Inside the closure so the check and the write see the same
+            // config; an Err here aborts the write (config_write.rs).
+            check_default_emulator_supported(config, &platform, &name, profiles)?;
             apply_set_default_emulator(config, &platform, &name);
             Ok(())
         })
@@ -793,6 +833,36 @@ fn apply_delete_emulator(config: &mut Config, name: &str) {
         .retain(|_, v| v.trim().to_lowercase() != folded);
 }
 
+/// [`set_default_emulator`]'s guard: the picked emulator must actually
+/// support the platform it is being made the default for. A blank `name`
+/// (which CLEARS the mapping) always passes; any other name must resolve to
+/// a configured entry that `emulator_supports_platform` accepts (doc 04
+/// §2). A name no entry matches is refused with the same message — there is
+/// nothing to support the platform with.
+///
+/// Python only ever OFFERS compatible names in the combo box
+/// (emulator_ui_mixin.py:598) and drops an incompatible stored default at
+/// read time; the port additionally refuses the write.
+fn check_default_emulator_supported(
+    config: &Config,
+    platform: &str,
+    name: &str,
+    profiles: &[EmulatorProfile],
+) -> Result<(), String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    let supported = emulator_entry_by_name(&config.emulators, trimmed).is_some_and(|entry| {
+        emulator_supports_platform(entry, platform, profiles, &config.retroarch_cores)
+    });
+    if supported {
+        Ok(())
+    } else {
+        Err(format!("{trimmed} does not support {platform}"))
+    }
+}
+
 /// [`set_default_emulator`]'s merge logic. A blank `name` removes the
 /// `platform` key (exact match first, then case-insensitive); otherwise the
 /// value is inserted/overwritten under the exact key when one already
@@ -1045,6 +1115,73 @@ mod merge_tests {
             config.default_emulators.get("Wii").map(String::as_str),
             Some("Dolphin")
         );
+    }
+
+    // --- check_default_emulator_supported --------------------------------------
+
+    /// A profile that matches the `config_with` entry named "PCSX2" by name
+    /// and supports PlayStation 2 only.
+    fn ps2_only_profile() -> EmulatorProfile {
+        EmulatorProfile {
+            name: "PCSX2".to_string(),
+            platform_keywords: vec!["playstation 2".to_string()],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn default_check_accepts_a_compatible_pick() {
+        let config = config_with(&["PCSX2"], &[]);
+        let result = check_default_emulator_supported(
+            &config,
+            "Sony PlayStation 2",
+            "PCSX2",
+            &[ps2_only_profile()],
+        );
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn default_check_refuses_an_incompatible_pick() {
+        let config = config_with(&["PCSX2"], &[]);
+        let result =
+            check_default_emulator_supported(&config, "GameCube", "PCSX2", &[ps2_only_profile()]);
+        assert_eq!(result, Err("PCSX2 does not support GameCube".to_string()));
+    }
+
+    #[test]
+    fn default_check_refuses_a_name_no_entry_matches() {
+        let config = config_with(&["PCSX2"], &[]);
+        let result =
+            check_default_emulator_supported(&config, "GameCube", "Ghost", &[ps2_only_profile()]);
+        assert_eq!(result, Err("Ghost does not support GameCube".to_string()));
+    }
+
+    #[test]
+    fn default_check_allows_a_blank_name_which_clears_the_mapping() {
+        let config = config_with(&["PCSX2"], &[("GameCube", "PCSX2")]);
+        let result =
+            check_default_emulator_supported(&config, "GameCube", "  ", &[ps2_only_profile()]);
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn set_default_refusal_writes_nothing_to_the_config_file() {
+        // The guard runs inside the modify_config closure, so its Err has to
+        // abort the whole load-modify-save (config_write.rs).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        config_with(&["PCSX2"], &[]).save(&path).unwrap();
+        let profiles = vec![ps2_only_profile()];
+
+        let result = modify_config(&path, |config| {
+            check_default_emulator_supported(config, "GameCube", "PCSX2", &profiles)?;
+            apply_set_default_emulator(config, "GameCube", "PCSX2");
+            Ok(())
+        });
+
+        assert_eq!(result, Err("PCSX2 does not support GameCube".to_string()));
+        assert!(Config::load(&path).unwrap().default_emulators.is_empty());
     }
 
     // --- manual-add profile defaults (D1) --------------------------------------

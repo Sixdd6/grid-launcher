@@ -52,6 +52,11 @@ const EMULATOR_INSTALL_TIMEOUT = 15_000;
  * from e2e/fixtures-emulator-catalog) so the freshly installed PCSX2 can be
  * made that platform's default and actually launched.
  *
+ * The fixture's platform list carries a second platform, "Nintendo GameCube"
+ * (id 2), purely as the negative case for the per-platform default selector:
+ * PCSX2's `platform_keywords` (["playstation 2", "ps2"]) do not match it, so
+ * `compatible_emulators` must leave PCSX2 out of that platform's options.
+ *
  * The group also covers post-install autoconfig (doc 05 milestone-5
  * deviations, D1): right after the PCSX2 install lands, `sync_new_emulator`
  * runs against the freshly installed entry, which for PCSX2 means
@@ -61,6 +66,9 @@ const EMULATOR_INSTALL_TIMEOUT = 15_000;
  */
 describe('emulator-catalog', () => {
   const PLATFORM = 'Sony PlayStation 2';
+  /** The per-platform default selects, by fixture platform id. */
+  const PS2_SELECT = 'default-select-1';
+  const GAMECUBE_SELECT = 'default-select-2';
   const PCSX2_NAME = 'PCSX2 (Playstation 2)';
   const PCSX2_ROW = 'emulator-row-pcsx2-(playstation-2)';
   const PCSX2_ASSET = 'pcsx2-v9.9-e2e-linux-appimage-x64-Qt.AppImage';
@@ -143,6 +151,24 @@ describe('emulator-catalog', () => {
       testId(testIdName),
       value,
     );
+  }
+
+  /** The `<option>` values one per-platform default select currently offers. */
+  async function optionValues(testIdName: string): Promise<string[]> {
+    return browser.execute((selector) => {
+      const el = document.querySelector(selector) as HTMLSelectElement | null;
+      if (!el) throw new Error(`no element matched ${selector}`);
+      return Array.from(el.options).map((o) => o.value);
+    }, testId(testIdName));
+  }
+
+  /** The same select's option LABELS (a disabled select renders no text). */
+  async function optionTexts(testIdName: string): Promise<string[]> {
+    return browser.execute((selector) => {
+      const el = document.querySelector(selector) as HTMLSelectElement | null;
+      if (!el) throw new Error(`no element matched ${selector}`);
+      return Array.from(el.options).map((o) => o.text);
+    }, testId(testIdName));
   }
 
   async function setSearch(value: string) {
@@ -230,6 +256,18 @@ describe('emulator-catalog', () => {
     expect(existsSync(pcsx2Path())).toBe(true);
     await waitForConfigLine(pcsx2Path());
 
+    // Without closing the panel: the completed install refreshes the emulator
+    // list and the per-platform defaults in place, and the selector offers
+    // PCSX2 only where its profile supports the platform.
+    await browser.waitUntil(async () => (await optionValues(PS2_SELECT)).includes(PCSX2_NAME), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the PlayStation 2 default select never offered the freshly installed PCSX2',
+    });
+    expect(await optionValues(GAMECUBE_SELECT)).not.toContain(PCSX2_NAME);
+    // Nothing else is installed yet, so GameCube has no compatible emulator.
+    await expect($(testId(GAMECUBE_SELECT))).toBeDisabled();
+    expect(await optionTexts(GAMECUBE_SELECT)).toEqual(['No compatible emulator']);
+
     // Reopened because the panel loads its emulator list once, on mount.
     await closeEmulators();
     await openEmulators();
@@ -274,7 +312,7 @@ describe('emulator-catalog', () => {
   });
 
   it('plays the seeded PS2 game with the installed PCSX2 as the platform default', async () => {
-    await selectValue('default-select-1', PCSX2_NAME);
+    await selectValue(PS2_SELECT, PCSX2_NAME);
     await waitForConfigLine(`"${PLATFORM}" = "${PCSX2_NAME}"`);
     await closeEmulators();
 

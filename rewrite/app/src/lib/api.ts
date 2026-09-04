@@ -318,6 +318,9 @@ export const api = {
   getLaunchDefaults: () => invoke<LaunchDefaults>('get_launch_defaults'),
   setDefaultEmulator: (platform: string, name: string) =>
     invoke<void>('set_default_emulator', { platform, name }),
+  /** Emulator names supporting each platform, keyed by the platform name asked about. */
+  compatibleEmulators: (platforms: string[]) =>
+    invoke<Record<string, string[]>>('compatible_emulators', { platforms }),
   listEmulatorCatalog: () => invoke<CatalogEntry[]>('list_emulator_catalog'),
   installEmulator: (sourceId: string) => invoke<void>('install_emulator', { sourceId }),
   setRetroachievementsCredentials: (username: string, token: string) =>

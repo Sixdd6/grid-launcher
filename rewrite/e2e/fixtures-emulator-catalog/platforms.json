@@ -4,5 +4,11 @@
     "name": "Sony PlayStation 2",
     "slug": "ps2",
     "rom_count": 1
+  },
+  {
+    "id": 2,
+    "name": "Nintendo GameCube",
+    "slug": "gc",
+    "rom_count": 1
   }
 ]

@@ -16,7 +16,7 @@
     matchProfileByName,
     shouldAutoFillFromName,
   } from './emulators/catalog';
-  import { NO_DEFAULT_VALUE, resolveDefaultEmulatorValue } from './emulators/defaults';
+  import { NO_DEFAULT_VALUE, platformDefaultSelect } from './emulators/defaults';
   import { canSubmit, fanOutSummary, statusLabel } from './emulators/retroachievements';
   import { isWindowsHost } from './emulators/compatTools';
   import CompatTools from './emulators/CompatTools.svelte';
@@ -31,6 +31,12 @@
   let platforms = $state<Platform[]>([]);
   let defaults = $state<LaunchDefaults | null>(null);
   let defaultsError = $state<string | null>(null);
+
+  // The backend's `compatible_emulators` answer, keyed by platform NAME (the
+  // same string `default_emulators` is keyed by). The per-platform default
+  // select offers only these, so an emulator is never offered for a platform
+  // its profile does not support.
+  let compatible = $state<Record<string, string[]>>({});
 
   let profiles = $state<ProfileSummary[]>([]);
 
@@ -191,6 +197,31 @@
     refreshCloudSettings();
   });
 
+  // Both inputs of the compatibility answer: the platforms it is asked
+  // about, and the emulator list the backend draws it from. Reading both
+  // here is what makes a freshly added (or installed) emulator show up in
+  // the per-platform selects without a reload.
+  let compatibilityInputs = $derived({
+    platformNames: platforms.map((p) => p.name),
+    emulatorNames: emulators.map((e) => e.name).join(','),
+  });
+
+  $effect(() => {
+    const { platformNames, emulatorNames } = compatibilityInputs;
+    void emulatorNames;
+    refreshCompatible(platformNames);
+  });
+
+  // An emulator install reaching a terminal status can have ADDED an entry,
+  // so the entry list and the stored defaults are both stale (the
+  // compatibility effect above then re-runs off the new emulator list).
+  $effect(() => {
+    const signature = emulatorTerminalSignature;
+    void signature;
+    refreshEmulators();
+    refreshDefaults();
+  });
+
   // Loads (or reloads) the catalog whenever the Install tab becomes the
   // visible tab, and again whenever an emulator download reaches a terminal
   // status while it is visible.
@@ -237,6 +268,19 @@
   async function refreshDefaults() {
     try {
       defaults = await api.getLaunchDefaults();
+      defaultsError = null;
+    } catch (err) {
+      defaultsError = errorMessage(err);
+    }
+  }
+
+  async function refreshCompatible(platformNames: string[]) {
+    if (platformNames.length === 0) {
+      compatible = {};
+      return;
+    }
+    try {
+      compatible = await api.compatibleEmulators(platformNames);
       defaultsError = null;
     } catch (err) {
       defaultsError = errorMessage(err);
@@ -394,8 +438,8 @@
     }
   }
 
-  function defaultFor(platformName: string): string {
-    return resolveDefaultEmulatorValue(defaults, platformName, emulators);
+  function selectFor(platformName: string) {
+    return platformDefaultSelect(defaults, platformName, compatible[platformName] ?? []);
   }
 
   async function handleDefaultChange(platformName: string, value: string) {
@@ -678,18 +722,27 @@
         <ul class="defaults-list">
           {#each platforms as p (p.id)}
             {@const selectId = `default-emulator-${p.id}`}
+            {@const choice = selectFor(p.name)}
             <li class="defaults-row">
               <label class="platform-name" for={selectId}>{p.name}</label>
+              <!-- `default-select-<platformId>` is the per-platform select's
+                   test id; its `id` (used by the label) is
+                   `default-emulator-<platformId>`. -->
               <select
                 data-testid={`default-select-${p.id}`}
                 id={selectId}
-                value={defaultFor(p.name)}
+                disabled={choice.disabled}
+                value={choice.selected}
                 onchange={(e) => handleDefaultChange(p.name, (e.currentTarget as HTMLSelectElement).value)}
               >
-                <option value={NO_DEFAULT_VALUE}>(none)</option>
-                {#each emulators as em (em.name)}
-                  <option value={em.name}>{em.name}</option>
-                {/each}
+                {#if choice.disabled}
+                  <option value={NO_DEFAULT_VALUE}>No compatible emulator</option>
+                {:else}
+                  <option value={NO_DEFAULT_VALUE}>(none)</option>
+                  {#each choice.options as name (name)}
+                    <option value={name}>{name}</option>
+                  {/each}
+                {/if}
               </select>
             </li>
           {/each}
