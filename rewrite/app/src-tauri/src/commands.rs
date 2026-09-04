@@ -13,7 +13,7 @@ use grid_core::launch::profiles::{
 };
 use grid_core::launch::selection::{
     compatible_emulator_names_for_platform, emulator_entry_by_name, emulator_supports_platform,
-    entry_is_retroarch, mapping_value_for_platform, slug_core_resolver,
+    entry_is_retroarch, mapping_value_for_platform, slug_core_resolver, NO_EMULATOR,
 };
 use grid_core::launch::{GameSession, LaunchService, SessionsSnapshot};
 use grid_core::library::queue::DownloadsSnapshot;
@@ -1089,7 +1089,8 @@ fn apply_delete_emulator(config: &mut Config, name: &str) {
 
 /// [`set_default_emulator`]'s guard: the picked emulator must actually
 /// support the platform it is being made the default for. A blank `name`
-/// (which CLEARS the mapping) always passes; any other name must resolve to
+/// (the panel's "(none)", stored as [`NO_EMULATOR`]) always passes; any
+/// other name must resolve to
 /// a configured entry that `emulator_supports_platform` accepts (doc 04
 /// §2). A name no entry matches is refused with the same message — there is
 /// nothing to support the platform with.
@@ -1119,17 +1120,22 @@ fn check_default_emulator_supported(
     }
 }
 
-/// [`set_default_emulator`]'s merge logic. A blank `name` removes the
-/// `platform` key (exact match first, then case-insensitive); otherwise the
-/// value is inserted/overwritten under the exact key when one already
-/// exists, else under a case-insensitive match's key, else as a new key.
+/// [`set_default_emulator`]'s merge logic. A blank `name` is the panel's
+/// "(none)" choice and writes the reserved [`NO_EMULATOR`] marker; removing
+/// the key instead would let `autoconfig::backfill_all_defaults` re-fill it
+/// on the next `list_platforms`. Any value is inserted/overwritten under the
+/// exact key when one already exists, else under a case-insensitive match's
+/// key, else as a new key. The platform's saved core is cleared separately
+/// by [`apply_clear_retroarch_core_when_not_retroarch`], which a blank name
+/// already triggers.
 fn apply_set_default_emulator(config: &mut Config, platform: &str, name: &str) {
     let trimmed_name = name.trim();
-    if trimmed_name.is_empty() {
-        remove_platform_key(&mut config.default_emulators, platform);
-        return;
-    }
-    upsert_platform_key(&mut config.default_emulators, platform, trimmed_name);
+    let value = if trimmed_name.is_empty() {
+        NO_EMULATOR
+    } else {
+        trimmed_name
+    };
+    upsert_platform_key(&mut config.default_emulators, platform, value);
 }
 
 fn remove_platform_key(map: &mut BTreeMap<String, String>, platform: &str) {
@@ -1545,24 +1551,48 @@ mod merge_tests {
     // --- apply_set_default_emulator -------------------------------------------
 
     #[test]
-    fn set_default_blank_name_removes_exact_key() {
+    fn set_default_blank_name_writes_the_none_marker_at_the_exact_key() {
         let mut config = config_with(&[], &[("GameCube", "Dolphin")]);
         apply_set_default_emulator(&mut config, "GameCube", "");
-        assert!(config.default_emulators.is_empty());
+        assert_eq!(
+            config.default_emulators.get("GameCube").map(String::as_str),
+            Some(NO_EMULATOR)
+        );
+        assert_eq!(config.default_emulators.len(), 1);
     }
 
     #[test]
-    fn set_default_blank_name_removes_case_insensitive_key() {
+    fn set_default_blank_name_replaces_a_case_insensitive_key_with_the_marker() {
         let mut config = config_with(&[], &[("GameCube", "Dolphin")]);
         apply_set_default_emulator(&mut config, "gamecube", "  ");
-        assert!(config.default_emulators.is_empty());
+        assert_eq!(config.default_emulators.len(), 1);
+        assert_eq!(
+            config.default_emulators.get("gamecube").map(String::as_str),
+            Some(NO_EMULATOR)
+        );
     }
 
     #[test]
-    fn set_default_blank_name_with_no_matching_key_is_a_no_op() {
+    fn set_default_blank_name_records_the_marker_for_an_absent_key() {
+        // "(none)" on a platform that had no saved default still has to be
+        // written: that is what stops the backfill re-filling it.
         let mut config = config_with(&[], &[("GameCube", "Dolphin")]);
         apply_set_default_emulator(&mut config, "Wii", "");
-        assert_eq!(config.default_emulators.len(), 1);
+        assert_eq!(config.default_emulators.len(), 2);
+        assert_eq!(
+            config.default_emulators.get("Wii").map(String::as_str),
+            Some(NO_EMULATOR)
+        );
+    }
+
+    #[test]
+    fn set_default_replaces_the_none_marker_with_a_real_emulator() {
+        let mut config = config_with(&[], &[("GameCube", NO_EMULATOR)]);
+        apply_set_default_emulator(&mut config, "GameCube", "Dolphin");
+        assert_eq!(
+            config.default_emulators.get("GameCube").map(String::as_str),
+            Some("Dolphin")
+        );
     }
 
     #[test]
@@ -1660,7 +1690,7 @@ mod merge_tests {
     }
 
     #[test]
-    fn default_check_allows_a_blank_name_which_clears_the_mapping() {
+    fn default_check_allows_a_blank_name_which_means_none() {
         let config = config_with(&["PCSX2"], &[("GameCube", "PCSX2")]);
         let result =
             check_default_emulator_supported(&config, "GameCube", "  ", "", &[ps2_only_profile()]);
