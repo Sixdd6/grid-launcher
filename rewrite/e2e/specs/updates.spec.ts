@@ -310,12 +310,24 @@ describe('updates', () => {
     });
     await $(testId('settings-nav-appearance')).click();
 
-    const select = $(testId('theme-select'));
-    await select.waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
-    await select.selectByAttribute('value', 'dark');
+    await $(testId('theme-select')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    // A WebDriver click on the `<option>` (what `selectByAttribute` does)
+    // does not reliably fire `change` on this embedded WebKitGTK driver —
+    // the same limitation `emulators.spec.ts` documents, confirmed here by
+    // config.toml keeping `theme = "system"`. Set the value and dispatch.
+    await browser.execute(
+      (selector: string) => {
+        const el = document.querySelector(selector) as HTMLSelectElement | null;
+        if (!el) throw new Error(`no element matched ${selector}`);
+        el.value = 'dark';
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      },
+      testId('theme-select'),
+    );
 
     await browser.waitUntil(
-      async () => (await $('html').getAttribute('data-theme')) === 'dark',
+      async () =>
+        (await browser.execute(() => document.documentElement.dataset.theme ?? null)) === 'dark',
       {
         timeout: TRANSITION_TIMEOUT,
         timeoutMsg: 'the dark theme never reached the <html> data-theme attribute',
