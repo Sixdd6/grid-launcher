@@ -67,3 +67,6 @@ rewrite/e2e/node_modules/
 # appended live by mock-forge as requests arrive
 rewrite/e2e/last-run-requests.log
 rewrite/e2e/last-run-forge-requests.log
+
+# Superpowers scratch (SDD ledgers, brainstorm mockups)
+.superpowers/
