@@ -133,3 +133,47 @@ export function actionFor(status: DownloadStatus, kind: DownloadKind = 'base'): 
       return 'dismiss';
   }
 }
+
+/**
+ * The 28px status strip's one line (design §3):
+ * `⬇ <title> · <percent> · <speed>`, or `null` when nothing is live and the
+ * strip hides itself.
+ *
+ * "The current transfer" is the first downloading entry, else the first
+ * installing one, else the first entry in any other live state — the same
+ * precedence the old drawer footer's progress bar used. An unmeasurable
+ * percent renders as an em dash rather than a fake `0%`, and the speed slot
+ * carries the phase word when there is no byte rate to show (an install
+ * reads local bytes, and a queued job has not started).
+ */
+export function footerLine(entries: DownloadEntry[]): string | null {
+  const live = entries.filter((e) => LIVE_STATUSES.includes(e.status));
+  if (live.length === 0) return null;
+  const current =
+    live.find((e) => e.status === 'downloading') ??
+    live.find((e) => e.status === 'installing') ??
+    live[0];
+
+  const dash = '—';
+  let pct = dash;
+  let speed: string;
+  switch (current.status) {
+    case 'downloading':
+      if (current.total_bytes > 0) pct = `${percent(current.downloaded_bytes, current.total_bytes)}%`;
+      speed = `${formatSize(current.speed_bps)}/s`;
+      break;
+    case 'installing':
+      if (current.install_total_bytes > 0) {
+        pct = `${percent(current.install_processed_bytes, current.install_total_bytes)}%`;
+      }
+      speed = 'Installing';
+      break;
+    case 'cancelling':
+      speed = 'Cancelling';
+      break;
+    default:
+      speed = 'Queued';
+      break;
+  }
+  return `⬇ ${current.title} · ${pct} · ${speed}`;
+}

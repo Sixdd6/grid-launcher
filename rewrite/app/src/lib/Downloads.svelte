@@ -1,37 +1,10 @@
 <script lang="ts">
-  import { slide } from 'svelte/transition';
   import { downloads } from './stores/downloads.svelte';
   import { api, type DownloadEntry } from './api';
-  import { aggregate, actionFor, entryDetail, kindLabel, percent } from './downloads/format';
+  import { actionFor, entryDetail, kindLabel, percent } from './downloads/format';
 
-  let { onOpenEmulators }: { onOpenEmulators: () => void } = $props();
-
-  let open = $state(false);
   let errors = $state<Record<number, string>>({});
   let pending = $state<Record<number, boolean>>({});
-
-  export function toggle() {
-    open = !open;
-  }
-
-  function toggleOnKey(e: KeyboardEvent) {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      toggle();
-    }
-  }
-
-  function openEmulatorsClick(e: MouseEvent) {
-    e.stopPropagation();
-    onOpenEmulators();
-  }
-
-  // Enter/Space on this button reach the footer's own keydown listener via
-  // bubbling before the button's synthesized click fires, so without this
-  // the drawer would toggle open alongside the panel on keyboard activation.
-  function stopKeydownPropagation(e: KeyboardEvent) {
-    e.stopPropagation();
-  }
 
   function errorMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
@@ -79,131 +52,53 @@
         };
     }
   }
-
-  function footerProgress(): Progress | null {
-    if (!downloads.hasLive) return null;
-    const entries = downloads.entries;
-    const active = entries.find((e) => e.status === 'downloading');
-    if (active) return rowProgress(active);
-    const installing = entries.find((e) => e.status === 'installing');
-    if (installing) return rowProgress(installing);
-    return { pct: 0, indeterminate: true }; // queued/cancelling only: nothing measurable yet
-  }
-
-  let footerLabel = $derived(aggregate(downloads.entries) || 'Downloads');
-  let bar = $derived(footerProgress());
 </script>
 
-<footer
-  data-testid="downloads-footer"
-  class="downloads-footer"
-  role="button"
-  tabindex="0"
-  aria-expanded={open}
-  onclick={toggle}
-  onkeydown={toggleOnKey}
->
-  <span data-testid="downloads-aggregate" class="label">{footerLabel}</span>
-  {#if bar}
-    <span class="bar-track" class:indeterminate={bar.indeterminate}>
-      <span class="bar-fill" style={bar.indeterminate ? '' : `width: ${bar.pct}%`}></span>
-    </span>
-  {/if}
-  <button data-testid="emulators-open" class="emulators-btn" onclick={openEmulatorsClick} onkeydown={stopKeydownPropagation}>Emulators</button>
-</footer>
-
-{#if open}
-  <div data-testid="downloads-drawer" class="drawer" transition:slide={{ duration: 160 }}>
-    {#if downloads.entries.length === 0}
-      <p class="empty">No downloads yet</p>
-    {:else}
-      {#each downloads.entries as e (e.id)}
-        {@const action = actionFor(e.status, e.kind)}
-        {@const progress = rowProgress(e)}
-        <div data-testid={`download-row-${e.id}`} class="row">
-          <div class="row-main">
-            <div class="row-text">
-              <span class="title-row">
-                <span class="title">{e.title}</span>
-                {#if kindLabel(e.kind)}
-                  <span data-testid={`download-kind-${e.id}`} class="kind">{kindLabel(e.kind)}</span>
-                {/if}
-              </span>
-              <span class="platform">{e.platform}</span>
-              <span data-testid={`download-detail-${e.id}`} class="detail">{entryDetail(e)}</span>
-              {#if errors[e.id]}
-                <p class="row-error">{errors[e.id]}</p>
+<section class="downloads view-content" aria-label="Downloads">
+  {#if downloads.entries.length === 0}
+    <p class="empty">No downloads yet</p>
+  {:else}
+    {#each downloads.entries as e (e.id)}
+      {@const action = actionFor(e.status, e.kind)}
+      {@const progress = rowProgress(e)}
+      <div data-testid={`download-row-${e.id}`} class="row">
+        <div class="row-main">
+          <div class="row-text">
+            <span class="title-row">
+              <span class="title">{e.title}</span>
+              {#if kindLabel(e.kind)}
+                <span data-testid={`download-kind-${e.id}`} class="kind">{kindLabel(e.kind)}</span>
               {/if}
-            </div>
-            <div class="row-actions">
-              {#if action === 'cancel'}
-                <button data-testid={`download-action-cancel-${e.id}`} disabled={pending[e.id]} onclick={() => cancel(e.id)}>Cancel</button>
-              {:else if action === 'retry-dismiss'}
-                <button data-testid={`download-action-retry-${e.id}`} disabled={pending[e.id]} onclick={() => retry(e.id)}>Retry</button>
-                <button data-testid={`download-action-dismiss-${e.id}`} disabled={pending[e.id]} onclick={() => dismiss(e.id)}>Dismiss</button>
-              {:else if action === 'dismiss'}
-                <button data-testid={`download-action-dismiss-${e.id}`} disabled={pending[e.id]} onclick={() => dismiss(e.id)}>Dismiss</button>
-              {/if}
-            </div>
+            </span>
+            <span class="platform">{e.platform}</span>
+            <span data-testid={`download-detail-${e.id}`} class="detail">{entryDetail(e)}</span>
+            {#if errors[e.id]}
+              <p class="row-error">{errors[e.id]}</p>
+            {/if}
           </div>
-          <span class="bar-track row-bar-track" class:indeterminate={progress.indeterminate}>
-            <span class="bar-fill" style={progress.indeterminate ? '' : `width: ${progress.pct}%`}></span>
-          </span>
+          <div class="row-actions">
+            {#if action === 'cancel'}
+              <button data-testid={`download-action-cancel-${e.id}`} disabled={pending[e.id]} onclick={() => cancel(e.id)}>Cancel</button>
+            {:else if action === 'retry-dismiss'}
+              <button data-testid={`download-action-retry-${e.id}`} disabled={pending[e.id]} onclick={() => retry(e.id)}>Retry</button>
+              <button data-testid={`download-action-dismiss-${e.id}`} disabled={pending[e.id]} onclick={() => dismiss(e.id)}>Dismiss</button>
+            {:else if action === 'dismiss'}
+              <button data-testid={`download-action-dismiss-${e.id}`} disabled={pending[e.id]} onclick={() => dismiss(e.id)}>Dismiss</button>
+            {/if}
+          </div>
         </div>
-      {/each}
-    {/if}
-  </div>
-{/if}
+        <span class="bar-track row-bar-track" class:indeterminate={progress.indeterminate}>
+          <span class="bar-fill" style={progress.indeterminate ? '' : `width: ${progress.pct}%`}></span>
+        </span>
+      </div>
+    {/each}
+  {/if}
+</section>
 
 <style>
-  .downloads-footer {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 36px;
+  .downloads {
+    padding: 24px 24px 60px;
     box-sizing: border-box;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 0 16px;
-    background: var(--bg);
-    border-top: 1px solid var(--border);
-    color: var(--text);
-    font-size: 13px;
-    cursor: pointer;
-    z-index: 10;
-  }
-
-  .downloads-footer:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: -2px;
-  }
-
-  .label {
-    flex: 1 1 auto;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .emulators-btn {
-    flex: none;
-    font: inherit;
-    font-size: 12px;
-    padding: 4px 10px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--text-h);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .emulators-btn:hover,
-  .emulators-btn:focus-visible {
-    background: var(--border);
   }
 
   .bar-track {
@@ -244,20 +139,6 @@
     100% {
       left: 100%;
     }
-  }
-
-  .drawer {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 36px;
-    max-height: 40vh;
-    overflow-x: hidden;
-    overflow-y: auto;
-    box-sizing: border-box;
-    background: var(--bg);
-    border-top: 1px solid var(--border);
-    z-index: 9;
   }
 
   .empty {

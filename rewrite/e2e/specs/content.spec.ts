@@ -34,15 +34,35 @@ const testId = (id: string) => `[data-testid="${id}"]`;
 describe('content', () => {
   const library = () => path.join(dataDir(), 'library');
 
-  /** Waits for a drawer row to reach `Completed`. */
+  // The five views no longer stack (design §3): one pill click swaps which
+  // root is displayed, so a spec has to be on the right view before it reads
+  // text from it or clicks anything inside it.
+  async function showDownloads() {
+    await $(testId('nav-downloads')).click();
+    await $(testId('downloads-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the downloads view never opened',
+    });
+  }
+
+  async function showServer() {
+    await $(testId('nav-server')).click();
+    await $(testId('server-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the server view never came back',
+    });
+  }
+
+  /** Waits for a download row to reach `Completed`, on the Downloads view. */
   async function waitCompleted(id: number, what: string) {
+    await showDownloads();
     await browser.waitUntil(
       async () => (await $(testId(`download-detail-${id}`)).getText()).startsWith('Completed'),
       { timeout: INSTALL_TIMEOUT, timeoutMsg: `${what} never reached Completed` },
     );
   }
 
-  /** The title text of one drawer row. */
+  /** The title text of one download row (the Downloads view must be up). */
   async function rowTitle(id: number): Promise<string> {
     return $(`${testId(`download-row-${id}`)} .title`).getText();
   }
@@ -70,14 +90,13 @@ describe('content', () => {
     });
 
     // The seed already wrote library_path, so no library-path banner step.
-    await $(testId('downloads-footer')).click();
-    await $(testId('downloads-drawer')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the downloads drawer never opened',
-    });
+    // Prove the Downloads pill reaches its view once, up front; the tests
+    // below switch back and forth as they need it.
+    await showDownloads();
   });
 
   it('installs the PS4 base game and then offers Install Update', async () => {
+    await showServer();
     await $(testId('platform-btn-1')).click();
     await openDetails(501);
     await $(testId('details-install')).click();
@@ -90,11 +109,13 @@ describe('content', () => {
   });
 
   it('applies the PS4 update into the installed title-id tree', async () => {
+    await showServer();
     await $(testId('details-install-update')).click();
 
+    await showDownloads();
     await $(testId('download-row-2')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'no drawer row appeared for the PS4 update job',
+      timeoutMsg: 'no download row appeared for the PS4 update job',
     });
     expect(await rowTitle(2)).toBe('PS4 Game (update)');
     await waitCompleted(2, 'the PS4 update');
@@ -113,6 +134,7 @@ describe('content', () => {
   });
 
   it('queues the Xbox 360 update by itself once the base install finalizes', async () => {
+    await showServer();
     await $(testId('details-close')).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
 
@@ -123,6 +145,7 @@ describe('content', () => {
 
     // No click: grid-core's `queue_xbox360_content` admitted this row from
     // inside the base install's finalize step.
+    await showDownloads();
     await $(testId('download-row-4')).waitForExist({
       timeout: INSTALL_TIMEOUT,
       timeoutMsg: 'the Xbox 360 update was never queued automatically',

@@ -3,6 +3,7 @@ import {
   APP_START_TIMEOUT,
   dataDir,
   FIXTURE_TOKEN,
+  INSTALL_TIMEOUT,
   mockUrl,
   THROTTLED_DOWNLOAD_TIMEOUT,
   TRANSITION_TIMEOUT,
@@ -53,21 +54,33 @@ describe('downloads', () => {
       timeoutMsg: 'platform 2 never rendered its game cards',
     });
 
-    // Open the downloads drawer once, up front, and leave it open — every
-    // row assertion below reads through it.
-    await $(testId('downloads-footer')).click();
-    await $(testId('downloads-drawer')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the downloads drawer never opened',
-    });
+    await showDownloads();
   });
 
+  // The five views no longer stack (design §3): one pill click swaps which
+  // root is displayed, so a spec has to be on the right view before it reads
+  // text from it or clicks anything inside it. Every row assertion below
+  // reads through the Downloads view, so `install` leaves it displayed.
+  async function showDownloads() {
+    await $(testId('nav-downloads')).click();
+    await $(testId('downloads-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the downloads view never opened',
+    });
+  }
+
   async function install(cardTestId: string) {
+    await $(testId('nav-server')).click();
+    await $(testId('server-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the server view never came back',
+    });
     await $(testId(cardTestId)).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('details-install')).click();
     await $(testId('details-close')).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+    await showDownloads();
   }
 
   it('starts the first install downloading and queues the second behind it', async () => {
@@ -90,6 +103,21 @@ describe('downloads', () => {
       timeoutMsg: 'no download-row appeared for the second install',
     });
     await expect($(testId('download-detail-2'))).toHaveText('Queued');
+  });
+
+  it('shows the live transfer on the footer strip and opens the view from it', async () => {
+    const strip = $(testId('downloads-footer'));
+    await strip.waitForDisplayed({
+      timeout: INSTALL_TIMEOUT,
+      timeoutMsg: 'the downloads strip never appeared for a live transfer',
+    });
+    expect(await strip.getText()).toContain('⬇ ');
+    await $(testId('nav-library')).click();
+    await strip.click();
+    await $(testId('downloads-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'clicking the strip did not open the Downloads view',
+    });
   });
 
   it('cancels the active throttled download', async () => {

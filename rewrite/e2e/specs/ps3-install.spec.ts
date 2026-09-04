@@ -31,6 +31,25 @@ describe('ps3-install', () => {
   const library = () => path.join(dataDir(), 'library');
   const devHdd0 = () => path.join(library(), 'PlayStation 3', '.vfs', 'dev_hdd0');
 
+  // The five views no longer stack (design §3): one pill click swaps which
+  // root is displayed, so a spec has to be on the right view before it reads
+  // text from it or clicks anything inside it.
+  async function showDownloads() {
+    await $(testId('nav-downloads')).click();
+    await $(testId('downloads-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the downloads view never opened',
+    });
+  }
+
+  async function showServer() {
+    await $(testId('nav-server')).click();
+    await $(testId('server-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the server view never came back',
+    });
+  }
+
   before(async () => {
     await $(testId('connect-server-url')).waitForExist({
       timeout: APP_START_TIMEOUT,
@@ -52,16 +71,17 @@ describe('ps3-install', () => {
       timeoutMsg: 'the library-path banner never hid after saving a path',
     });
 
-    // download-row-* only exists while the drawer is open ({#if open} in
-    // Downloads.svelte) — open it once, up front.
-    await $(testId('downloads-footer')).click();
-    await $(testId('downloads-drawer')).waitForExist({
+    // Prove the Downloads pill reaches its view once, up front; the test
+    // below switches back and forth as it needs it.
+    await $(testId('nav-downloads')).click();
+    await $(testId('downloads-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the downloads drawer never opened',
+      timeoutMsg: 'the downloads view never opened',
     });
   });
 
-  it('installs the PS3 game through to a Completed drawer row', async () => {
+  it('installs the PS3 game through to a Completed download row', async () => {
+    await showServer();
     await $(testId('platform-btn-1')).click();
     await $(testId('game-card-401')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('game-card-401')).click();
@@ -72,6 +92,7 @@ describe('ps3-install', () => {
     });
     await $(testId('details-install')).click();
 
+    await showDownloads();
     await browser.waitUntil(
       async () => (await $(testId('download-detail-1')).getText()).startsWith('Completed'),
       {

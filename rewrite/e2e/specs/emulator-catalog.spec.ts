@@ -115,7 +115,7 @@ describe('emulator-catalog', () => {
 
   async function openEmulators() {
     await $(testId('nav-emulators')).click();
-    await $(testId('emulators-view')).waitForExist({
+    await $(testId('emulators-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the emulators view never rendered',
     });
@@ -175,8 +175,19 @@ describe('emulator-catalog', () => {
     await $(testId('emu-catalog-search')).setValue(value);
   }
 
-  /** Waits for one downloads-drawer row to reach `Completed`. */
+  /**
+   * Waits for one Downloads-view row to reach `Completed`.
+   *
+   * The five views no longer stack (design §3), so this switches to the
+   * Downloads view to read the row and hands the Emulators view back to the
+   * caller, which is the view every call site is working in.
+   */
   async function waitForCompleted(entryId: number) {
+    await $(testId('nav-downloads')).click();
+    await $(testId('downloads-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the downloads view never opened',
+    });
     await $(testId(`download-row-${entryId}`)).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: `no downloads row appeared for emulator install ${entryId}`,
@@ -188,6 +199,7 @@ describe('emulator-catalog', () => {
         timeoutMsg: `emulator install ${entryId} never completed`,
       },
     );
+    await openEmulators();
   }
 
   before(async () => {
@@ -203,13 +215,13 @@ describe('emulator-catalog', () => {
       timeoutMsg: 'the library never rendered a platform button after connecting',
     });
 
-    // Opened once, up front, and left open: every install below is asserted
-    // through it, and the emulators panel renders over it without hiding it
-    // from the DOM.
-    await $(testId('downloads-footer')).click();
-    await $(testId('downloads-drawer')).waitForExist({
+    // Prove the Downloads pill reaches its view once, up front; every
+    // install below is asserted through `waitForCompleted`, which switches
+    // to that view and back to the Emulators one.
+    await $(testId('nav-downloads')).click();
+    await $(testId('downloads-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the downloads drawer never opened',
+      timeoutMsg: 'the downloads view never opened',
     });
   });
 
@@ -316,6 +328,10 @@ describe('emulator-catalog', () => {
     await waitForConfigLine(`"${PLATFORM}" = "${PCSX2_NAME}"`);
     await closeEmulators();
 
+    await $(testId('server-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the server view never came back after closing the emulators panel',
+    });
     await $(testId('platform-btn-1')).click();
     await $(testId('game-card-401')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('game-card-401')).click();

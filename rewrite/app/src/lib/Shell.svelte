@@ -2,6 +2,7 @@
   import Library from './Library.svelte';
   import Server from './Server.svelte';
   import Downloads from './Downloads.svelte';
+  import DownloadsFooter from './DownloadsFooter.svelte';
   import Emulators from './Emulators.svelte';
   import { api } from './api';
   import { session, retry, disconnect } from './stores/session.svelte';
@@ -172,8 +173,7 @@
   <Server active={view === 'server'} bind:this={server} />
 </div>
 <div data-testid="downloads-view" class="view" hidden={view !== 'downloads'}>
-  <!-- Empty until Task 4 moves the transfer list in here. The Downloads
-       component itself is NOT mounted inside this root: see below. -->
+  <Downloads />
 </div>
 <div class="view" hidden={view !== 'emulators'}>
   <Emulators active={view === 'emulators'} />
@@ -193,9 +193,8 @@
 <!-- Mounted outside the view roots, and never hidden. The footer strip is
      `position: fixed` global chrome, and `hidden` on an ancestor is
      `display: none` — inside a view root the strip would vanish from every
-     other view. `onOpenEmulators` is still a required prop of the
-     pre-redesign drawer; Task 4 folds both into `downloads-view`. -->
-<Downloads onOpenEmulators={() => (view = 'emulators')} />
+     other view. -->
+<DownloadsFooter onOpen={() => (view = 'downloads')} />
 
 <style>
   .topbar {

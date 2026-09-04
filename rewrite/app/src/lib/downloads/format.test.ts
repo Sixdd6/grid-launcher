@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DownloadEntry, DownloadKind } from '../api';
-import { actionFor, aggregate, entryDetail, formatSize, kindLabel, percent } from './format';
+import { actionFor, aggregate, entryDetail, footerLine, formatSize, kindLabel, percent } from './format';
 
 function entry(overrides: Partial<DownloadEntry>): DownloadEntry {
   return {
@@ -291,5 +291,43 @@ describe('kindLabel', () => {
     for (const kind of kinds) {
       expect(() => kindLabel(kind)).not.toThrow();
     }
+  });
+});
+
+describe('footerLine', () => {
+  it('is null when nothing is live, so the strip can hide', () => {
+    expect(footerLine([])).toBeNull();
+    expect(footerLine([entry({ status: 'completed' })])).toBeNull();
+    expect(footerLine([entry({ status: 'failed' })])).toBeNull();
+  });
+
+  it('shows the downloading transfer with percent and speed', () => {
+    const line = footerLine([
+      entry({ title: 'Chrono Trigger', status: 'downloading', downloaded_bytes: 512, total_bytes: 1024, speed_bps: 2048 }),
+    ]);
+    expect(line).toBe('⬇ Chrono Trigger · 50% · 2.0 KB/s');
+  });
+
+  it('shows an em dash for an unknown total', () => {
+    const line = footerLine([
+      entry({ title: 'Chrono Trigger', status: 'downloading', downloaded_bytes: 512, speed_bps: 0 }),
+    ]);
+    expect(line).toBe('⬇ Chrono Trigger · — · 0 B/s');
+  });
+
+  it('prefers a downloading entry over an installing one', () => {
+    const line = footerLine([
+      entry({ id: 1, title: 'Installing One', status: 'installing', install_processed_bytes: 1, install_total_bytes: 2 }),
+      entry({ id: 2, title: 'Downloading One', status: 'downloading', downloaded_bytes: 1, total_bytes: 4, speed_bps: 1024 }),
+    ]);
+    expect(line).toBe('⬇ Downloading One · 25% · 1.0 KB/s');
+  });
+
+  it('reports the phase instead of a speed for installing and queued work', () => {
+    expect(
+      footerLine([entry({ title: 'A', status: 'installing', install_processed_bytes: 3, install_total_bytes: 4 })]),
+    ).toBe('⬇ A · 75% · Installing');
+    expect(footerLine([entry({ title: 'A', status: 'queued' })])).toBe('⬇ A · — · Queued');
+    expect(footerLine([entry({ title: 'A', status: 'cancelling' })])).toBe('⬇ A · — · Cancelling');
   });
 });

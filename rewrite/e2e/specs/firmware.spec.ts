@@ -39,6 +39,33 @@ describe('firmware', () => {
   const stubs = () => path.join(dataDir(), 'stubs');
   const rpcs3Exe = () => path.join(stubs(), 'rpcs3', 'rpcs3');
 
+  // The five views no longer stack (design §3): one pill click swaps which
+  // root is displayed, so a spec has to be on the right view before it reads
+  // text from it or clicks anything inside it.
+  async function showDownloads() {
+    await $(testId('nav-downloads')).click();
+    await $(testId('downloads-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the downloads view never opened',
+    });
+  }
+
+  async function showServer() {
+    await $(testId('nav-server')).click();
+    await $(testId('server-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the server view never came back',
+    });
+  }
+
+  async function showEmulators() {
+    await $(testId('nav-emulators')).click();
+    await $(testId('emulators-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the emulators view never rendered',
+    });
+  }
+
   before(async () => {
     await $(testId('connect-server-url')).waitForExist({
       timeout: APP_START_TIMEOUT,
@@ -52,14 +79,15 @@ describe('firmware', () => {
       timeoutMsg: 'the library never rendered a platform button after connecting',
     });
 
-    await $(testId('downloads-footer')).click();
-    await $(testId('downloads-drawer')).waitForExist({
+    await $(testId('nav-downloads')).click();
+    await $(testId('downloads-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the downloads drawer never opened',
+      timeoutMsg: 'the downloads view never opened',
     });
   });
 
   it("downloads the platform's BIOS beside the default emulator after a game install", async () => {
+    await showServer();
     await $(testId('platform-btn-1')).click();
     await $(testId('game-card-801')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('game-card-801')).click();
@@ -69,6 +97,7 @@ describe('firmware', () => {
     });
     await $(testId('details-install')).click();
 
+    await showDownloads();
     await browser.waitUntil(
       async () => (await $(testId('download-detail-1')).getText()).startsWith('Completed'),
       { timeout: INSTALL_TIMEOUT, timeoutMsg: 'the PS1 install never reached Completed' },
@@ -82,16 +111,13 @@ describe('firmware', () => {
       timeoutMsg: `the per-game firmware pass never wrote ${bios}`,
     });
 
+    await showServer();
     await $(testId('details-close')).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
   });
 
   it('fetches the PS3 PUP through its own drawer row when RPCS3 is added by hand', async () => {
-    await $(testId('nav-emulators')).click();
-    await $(testId('emulators-view')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the emulators view never rendered',
-    });
+    await showEmulators();
 
     await $(testId('emulator-add')).click();
     await $(testId('emu-add-tab-manual')).click();
@@ -107,11 +133,13 @@ describe('firmware', () => {
       timeoutMsg: 'the RPCS3 entry never appeared in the emulator list',
     });
 
-    // `spawn_ps3_firmware` admits its own external drawer row, titled
+    await showDownloads();
+
+    // `spawn_ps3_firmware` admits its own external download row, titled
     // verbatim "PS3 Firmware" (firmware_service.rs's PS3_FIRMWARE_TITLE).
     await $(testId('download-row-2')).waitForExist({
       timeout: FIRMWARE_TIMEOUT,
-      timeoutMsg: 'adding RPCS3 never admitted a PS3 firmware drawer row',
+      timeoutMsg: 'adding RPCS3 never admitted a PS3 firmware download row',
     });
     expect(await $(`${testId('download-row-2')} .title`).getText()).toBe('PS3 Firmware');
     expect(await $(testId('download-kind-2')).getText()).toBe('Firmware');
@@ -127,8 +155,9 @@ describe('firmware', () => {
   });
 
   it("hands the downloaded PUP to RPCS3's own --installfw", async () => {
+    await showEmulators();
     // The note and the button only render once `rpcs3_firmware_status`
-    // reports a PUP; the panel re-queries it when a `firmware`-kind drawer
+    // reports a PUP; the panel re-queries it when a `firmware`-kind download
     // entry completes.
     await $(testId('emulator-ps3-firmware-note-rpcs3')).waitForExist({
       timeout: FIRMWARE_TIMEOUT,

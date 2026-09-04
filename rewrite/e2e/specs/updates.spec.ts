@@ -65,7 +65,7 @@ describe('updates', () => {
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
   }
 
-  /** The highest drawer-row id currently rendered, or 0 for an empty drawer. */
+  /** The highest download-row id currently rendered, or 0 when there is none. */
   async function newestRowId(): Promise<number> {
     const rows = await $$('[data-testid^="download-row-"]');
     const ids: number[] = [];
@@ -77,7 +77,7 @@ describe('updates', () => {
   }
 
   /**
-   * Waits for a drawer row NEWER than `previous` and returns its id. The
+   * Waits for a download row NEWER than `previous` and returns its id. The
    * queue never reuses an id, so "newer than the last one I saw" is what
    * makes this safe to call a second time with rom 801's row still on
    * screen.
@@ -89,13 +89,33 @@ describe('updates', () => {
         id = await newestRowId();
         return id > previous;
       },
-      { timeout: TRANSITION_TIMEOUT, timeoutMsg: `no drawer row appeared for ${what}` },
+      { timeout: TRANSITION_TIMEOUT, timeoutMsg: `no download row appeared for ${what}` },
     );
     return id;
   }
 
-  /** Waits for one drawer row to reach `Completed`. */
+  // The five views no longer stack (design §3): one pill click swaps which
+  // root is displayed, so a spec has to be on the right view before it reads
+  // text from it or clicks anything inside it.
+  async function showDownloads() {
+    await $(testId('nav-downloads')).click();
+    await $(testId('downloads-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the downloads view never opened',
+    });
+  }
+
+  async function showLibrary() {
+    await $(testId('nav-library')).click();
+    await $(testId('library-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the library view never came back',
+    });
+  }
+
+  /** Waits for one download row to reach `Completed`, on the Downloads view. */
   async function waitCompleted(id: number, what: string) {
+    await showDownloads();
     await browser.waitUntil(
       async () => (await $(testId(`download-detail-${id}`)).getText()).startsWith('Completed'),
       { timeout: INSTALL_TIMEOUT, timeoutMsg: `${what} never reached Completed` },
@@ -115,12 +135,12 @@ describe('updates', () => {
       timeoutMsg: 'the library never rendered a platform button after connecting',
     });
 
-    // Kept open for the whole spec, as native.spec.ts does: both update jobs
-    // are observed as drawer rows.
-    await $(testId('downloads-footer')).click();
-    await $(testId('downloads-drawer')).waitForExist({
+    // Prove the Downloads pill reaches its view once, up front; both update
+    // jobs are observed as rows on it.
+    await $(testId('nav-downloads')).click();
+    await $(testId('downloads-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the downloads drawer never opened',
+      timeoutMsg: 'the downloads view never opened',
     });
 
     await $(testId('nav-library')).click();
@@ -184,9 +204,10 @@ describe('updates', () => {
     const before = await newestRowId();
     await $(testId('details-update')).click();
     const rowId = await waitForNewRow(before, "rom 801's update job");
-    await expect($(testId(`download-kind-${rowId}`))).toHaveText('Update');
     await waitCompleted(rowId, "rom 801's update");
+    await expect($(testId(`download-kind-${rowId}`))).toHaveText('Update');
 
+    await showLibrary();
     await expect($(testId('details-update-toast'))).toHaveText("Updated 'Old Rom' successfully.");
 
     // The server copy is `newrom.zip`, so it extracts beside the seeded
@@ -223,8 +244,9 @@ describe('updates', () => {
     const before = await newestRowId();
     await $(testId('details-update')).click();
     const rowId = await waitForNewRow(before, "rom 802's native update job");
-    await expect($(testId(`download-kind-${rowId}`))).toHaveText('Update');
     await waitCompleted(rowId, "rom 802's native update");
+    await expect($(testId(`download-kind-${rowId}`))).toHaveText('Update');
+    await showLibrary();
 
     // The whole point of the native path: the archive holds
     // `MyGame/mygame.exe` and nothing else the seed wrote, so a merge keeps

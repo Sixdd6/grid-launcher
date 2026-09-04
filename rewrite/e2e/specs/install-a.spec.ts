@@ -22,6 +22,25 @@ const testId = (id: string) => `[data-testid="${id}"]`;
  * provider cannot restart the app inside one `wdio run`.
  */
 describe('install (a): connect, set library path, install', () => {
+  // The five views no longer stack (design §3): one pill click swaps which
+  // root is displayed, so a spec has to be on the right view before it reads
+  // text from it or clicks anything inside it.
+  async function showDownloads() {
+    await $(testId('nav-downloads')).click();
+    await $(testId('downloads-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the downloads view never opened',
+    });
+  }
+
+  async function showServer() {
+    await $(testId('nav-server')).click();
+    await $(testId('server-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the server view never came back',
+    });
+  }
+
   before(async () => {
     await $(testId('connect-server-url')).waitForExist({
       timeout: APP_START_TIMEOUT,
@@ -35,17 +54,17 @@ describe('install (a): connect, set library path, install', () => {
       timeoutMsg: 'the library never rendered a platform button after connecting',
     });
 
-    // download-row-* only exists in the DOM while the downloads drawer is
-    // open ({#if open} in Downloads.svelte) — open it once, up front, so the
-    // install test below can actually observe the row it expects.
-    await $(testId('downloads-footer')).click();
-    await $(testId('downloads-drawer')).waitForExist({
+    // Prove the Downloads pill reaches its view once, up front; the tests
+    // below switch back and forth as they need it.
+    await $(testId('nav-downloads')).click();
+    await $(testId('downloads-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the downloads drawer never opened',
+      timeoutMsg: 'the downloads view never opened',
     });
   });
 
   it('shows the library-path banner when unset, and hides it once a path is saved', async () => {
+    await showServer();
     const banner = $(testId('library-path-banner'));
     await expect(banner).toExist();
 
@@ -71,6 +90,8 @@ describe('install (a): connect, set library path, install', () => {
       timeoutMsg: 'the details overlay never opened for rom 101',
     });
     await $(testId('details-install')).click();
+
+    await showDownloads();
 
     // A download row appears for the new entry (id 1: the first admitted
     // job in this fresh app instance's queue) — even for a fast install

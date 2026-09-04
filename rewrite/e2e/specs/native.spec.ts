@@ -50,6 +50,25 @@ describe('native', () => {
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
   }
 
+  // The five views no longer stack (design §3): one pill click swaps which
+  // root is displayed, so a spec has to be on the right view before it reads
+  // text from it or clicks anything inside it.
+  async function showDownloads() {
+    await $(testId('nav-downloads')).click();
+    await $(testId('downloads-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the downloads view never opened',
+    });
+  }
+
+  async function showServer() {
+    await $(testId('nav-server')).click();
+    await $(testId('server-view')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the server view never came back',
+    });
+  }
+
   before(async () => {
     await $(testId('connect-server-url')).waitForExist({
       timeout: APP_START_TIMEOUT,
@@ -63,11 +82,13 @@ describe('native', () => {
       timeoutMsg: 'the library never rendered a platform button after connecting',
     });
 
-    await $(testId('downloads-footer')).click();
-    await $(testId('downloads-drawer')).waitForExist({
+    await $(testId('nav-downloads')).click();
+    await $(testId('downloads-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the downloads drawer never opened',
+      timeoutMsg: 'the downloads view never opened',
     });
+
+    await showServer();
     await $(testId('platform-btn-1')).click();
   });
 
@@ -78,6 +99,7 @@ describe('native', () => {
 
   it('installs the game into its own home directory with a Wine prefix', async () => {
     await $(testId('details-install')).click();
+    await showDownloads();
     await browser.waitUntil(
       async () => (await $(testId('download-detail-1')).getText()).startsWith('Completed'),
       { timeout: INSTALL_TIMEOUT, timeoutMsg: 'the native install never reached Completed' },
@@ -92,6 +114,7 @@ describe('native', () => {
   });
 
   it('lists the extracted executable in Game Settings and saves launch parameters', async () => {
+    await showServer();
     await $(testId('details-game-settings')).click();
     await $(testId('native-settings-exe')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
@@ -163,6 +186,7 @@ describe('native', () => {
     });
     await $(testId('details-cancel')).click();
 
+    await showDownloads();
     await browser.waitUntil(
       async () => (await $(testId('download-detail-2')).getText()) === 'Cancelled',
       {
