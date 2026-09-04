@@ -1,38 +1,31 @@
 <script lang="ts">
-  import type { RomDetail } from '../api';
   import Image from '../Image.svelte';
-  import { galleryItems } from './media';
+  import type { MediaItem } from './media';
 
   let {
-    name,
-    screenshotUrls,
-    detail,
+    items,
+    onOpen,
   }: {
-    name: string;
-    screenshotUrls: string[];
-    detail: RomDetail | null;
+    items: MediaItem[];
+    onOpen: (index: number) => void;
   } = $props();
-
-  let items = $derived(
-    galleryItems({
-      title: name,
-      screenshotUrls,
-      youtubeVideoId: detail?.youtube_video_id ?? '',
-      videoPath: detail?.video_path ?? '',
-    })
-  );
 </script>
 
 {#if items.length}
   <div class="gallery">
     {#each items as item, i (item.caption)}
-      <div class="tile" data-testid={`details-media-${i}`} title={item.caption}>
+      <button
+        class="tile"
+        data-testid={`details-media-${i}`}
+        title={item.caption}
+        onclick={() => onOpen(i)}
+      >
         {#if item.kind === 'screenshot'}
           <Image url={item.url} alt={item.caption} placeholder="Screenshot" />
         {:else}
           <div class="video-tile">▶ {item.kind === 'youtube' ? 'Trailer' : 'Video'}</div>
         {/if}
-      </div>
+      </button>
     {/each}
   </div>
 {:else}
@@ -52,6 +45,10 @@
     overflow: hidden;
     background: var(--surface);
     border: 1px solid var(--border);
+    padding: 0;
+    cursor: pointer;
+    display: block;
+    width: 100%;
   }
 
   .tile :global(img) {

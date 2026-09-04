@@ -17,8 +17,10 @@
   import NativeSettings from './details/NativeSettings.svelte';
   import OverviewTab from './details/OverviewTab.svelte';
   import MediaTab from './details/MediaTab.svelte';
+  import MediaViewer from './details/MediaViewer.svelte';
   import SavesTab from './details/SavesTab.svelte';
   import FilesTab from './details/FilesTab.svelte';
+  import { galleryItems } from './details/media';
   import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
   import { isNativeExecutablePlatform, syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
   import { contentButtons, installLabel, isContentPlatform, isNativePlatform } from './details/actions';
@@ -94,6 +96,18 @@
   let coverSmall = $derived(merged.coverSmall);
   let coverLarge = $derived(merged.coverLarge);
   let screenshotUrls = $derived(merged.screenshotUrls);
+
+  // The gallery lives here, not in MediaTab: the viewer is rendered above
+  // the whole dialog, so both need the same list and the same indices.
+  let mediaItems = $derived(
+    galleryItems({
+      title: subject.name,
+      screenshotUrls,
+      youtubeVideoId: detail?.youtube_video_id ?? '',
+      videoPath: detail?.video_path ?? '',
+    })
+  );
+  let viewerIndex = $state<number | null>(null);
   let description = $derived(merged.description);
   let rating = $derived(merged.rating);
   let genres = $derived(merged.genres);
@@ -535,7 +549,7 @@
           {#if tab === 'overview'}
             <OverviewTab name={subject.name} {description} {screenshotUrls} {detail} />
           {:else if tab === 'media'}
-            <MediaTab name={subject.name} {screenshotUrls} {detail} />
+            <MediaTab items={mediaItems} onOpen={(i) => (viewerIndex = i)} />
           {:else if tab === 'saves'}
             <SavesTab
               gameTitle={subject.name}
@@ -578,6 +592,20 @@
     title={subject.name}
     onClose={() => (showNativeSettings = false)}
     onSaved={refreshInstalled}
+  />
+{/if}
+
+{#if viewerIndex !== null}
+  <MediaViewer
+    items={mediaItems}
+    index={viewerIndex}
+    onIndex={(i) => (viewerIndex = i)}
+    onClose={() => {
+      viewerIndex = null;
+      // The viewer took focus off the panel; without handing it back, the
+      // popup's own Escape handler would no longer hear the next press.
+      panelEl?.focus();
+    }}
   />
 {/if}
 
