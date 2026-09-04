@@ -416,29 +416,39 @@ pub fn ps3_library_path(library_path: &str) -> String {
         .into_owned()
 }
 
-/// `_installed_retroarch_cores_for_platform` (emulator_ui_mixin.py:547-559),
-/// resolved against the config's own emulator list: the platform's
-/// compatible cores narrowed to the ones actually installed next to that
-/// emulator's executable, and `[]` when none are.
+/// `_installed_retroarch_cores_for_platform` (emulator_ui_mixin.py:547-568):
+/// the cores compatible with a platform, narrowed to the ones actually
+/// installed next to `entry`'s executable, in candidate order. `[]` when the
+/// entry has no core files or nothing compatible is installed.
 ///
-/// The reference's slug-map fast path (emulator_ui_mixin.py:568) needs the
-/// server's platform slugs, which grid-core does not hold; the fuzzy
-/// [`cores::cores_for_platform`] fallback the reference uses offline is the
-/// only branch here.
-fn installed_cores_for_platform(
-    platform: &str,
-    emulator_name: &str,
-    emulators: &[EmulatorEntry],
-    compat: &cores::CompatMap,
+/// Candidate resolution is SLUG-FIRST (design D-RC-2): the bundled
+/// `romm-platform-cores.json` curated list for `platform_slug` when that
+/// slug is non-blank and present, else the fuzzy
+/// [`cores::cores_for_platform`] match on `platform_name`. The reference
+/// returned `[]` for any non-blank slug missing from the map; this port
+/// falls back instead, so a RomM slug spelling the bundled map has not
+/// caught up with cannot silently drop RetroArch support for the platform.
+pub fn installed_compatible_cores(
+    platform_name: &str,
+    platform_slug: &str,
+    entry: &EmulatorEntry,
 ) -> Vec<String> {
-    let Some(entry) = emulator_entry_by_name(emulators, emulator_name) else {
-        return Vec::new();
-    };
     let installed = cores::installed_core_ids(&entry.path, None);
     if installed.is_empty() {
         return Vec::new();
     }
-    cores::cores_for_platform(platform, compat)
+
+    let slug = platform_slug.trim();
+    let mut candidates = if slug.is_empty() {
+        Vec::new()
+    } else {
+        cores::cores_for_slug(slug, cores::slug_core_map())
+    };
+    if candidates.is_empty() {
+        candidates = cores::cores_for_platform(platform_name, cores::compatibility_map());
+    }
+
+    candidates
         .into_iter()
         .filter(|core| installed.contains(core))
         .collect()
@@ -528,9 +538,11 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
     // entry autoconfig. Both closures read a snapshot of the entry list taken
     // after the layer-1 pass, so they see the entry as it will be saved.
     let snapshot = config.emulators.clone();
-    let compat = cores::compatibility_map();
     let installed_cores = |platform: &str, emulator_name: &str| -> Vec<String> {
-        installed_cores_for_platform(platform, emulator_name, &snapshot, compat)
+        match emulator_entry_by_name(&snapshot, emulator_name) {
+            Some(entry) => installed_compatible_cores(platform, "", entry),
+            None => Vec::new(),
+        }
     };
     let is_retroarch_name = |name: &str| -> bool {
         matches_tokens_by_name(name, &["retroarch"], &snapshot, ctx.profiles)
@@ -657,9 +669,11 @@ pub fn backfill_all_defaults(ctx: &SyncContext) -> Result<bool, ConfigError> {
     let mut config = Config::load(ctx.config_path)?;
 
     let snapshot = config.emulators.clone();
-    let compat = cores::compatibility_map();
     let installed_cores = |platform: &str, emulator_name: &str| -> Vec<String> {
-        installed_cores_for_platform(platform, emulator_name, &snapshot, compat)
+        match emulator_entry_by_name(&snapshot, emulator_name) {
+            Some(entry) => installed_compatible_cores(platform, "", entry),
+            None => Vec::new(),
+        }
     };
     let is_retroarch_name = |name: &str| -> bool {
         matches_tokens_by_name(name, &["retroarch"], &snapshot, ctx.profiles)
@@ -1419,5 +1433,88 @@ mod tests {
 
         let second = fan_out_ra_credentials(&config, &[], &ra);
         assert_eq!(second, vec![("RetroArch".to_string(), false)]);
+    }
+
+    // --- installed_compatible_cores ------------------------------------------
+
+    /// A RetroArch-shaped stub at `<dir>/retroarch` with a sibling
+    /// `cores/` directory holding one file per id in `core_ids`, written
+    /// with ALL THREE host extensions (`so`, `dylib`, `dll`) so the test
+    /// passes whichever host `cores::installed_core_ids` is compiled for
+    /// (`host_core_extension`, cores.rs:497).
+    fn retroarch_with_cores(dir: &Path, core_ids: &[&str]) -> EmulatorEntry {
+        let exe = dir.join("retroarch");
+        std::fs::write(&exe, b"binary").unwrap();
+        let cores_dir = dir.join("cores");
+        std::fs::create_dir_all(&cores_dir).unwrap();
+        for id in core_ids {
+            for extension in ["so", "dylib", "dll"] {
+                std::fs::write(cores_dir.join(format!("{id}_libretro.{extension}")), b"").unwrap();
+            }
+        }
+        entry("RetroArch", exe.to_str().unwrap())
+    }
+
+    #[test]
+    fn installed_compatible_cores_uses_the_slug_map_curated_order() {
+        // romm-platform-cores.json maps "snes" to
+        // ["snes9x", "snes9x2010", "bsnes"]; only two of those are
+        // installed, and the answer keeps the map's order, not the
+        // filesystem's.
+        let temp = tempfile::tempdir().unwrap();
+        let entry = retroarch_with_cores(temp.path(), &["bsnes", "snes9x"]);
+        assert_eq!(
+            installed_compatible_cores("Super Nintendo Entertainment System", "snes", &entry),
+            vec!["snes9x".to_string(), "bsnes".to_string()]
+        );
+    }
+
+    #[test]
+    fn installed_compatible_cores_falls_back_to_fuzzy_on_an_unknown_slug() {
+        // D-RC-2: a server slug the bundled map has never heard of must not
+        // silently drop RetroArch support — the fuzzy platform matcher
+        // answers instead.
+        let temp = tempfile::tempdir().unwrap();
+        let entry = retroarch_with_cores(temp.path(), &["snes9x"]);
+        assert_eq!(
+            installed_compatible_cores(
+                "Super Nintendo Entertainment System",
+                "nintendo-sfc-2026",
+                &entry
+            ),
+            vec!["snes9x".to_string()]
+        );
+    }
+
+    #[test]
+    fn installed_compatible_cores_falls_back_to_fuzzy_on_an_empty_slug() {
+        // The launch path and the offline library have no slug at all.
+        let temp = tempfile::tempdir().unwrap();
+        let entry = retroarch_with_cores(temp.path(), &["snes9x"]);
+        assert_eq!(
+            installed_compatible_cores("Super Nintendo Entertainment System", "", &entry),
+            vec!["snes9x".to_string()]
+        );
+    }
+
+    #[test]
+    fn installed_compatible_cores_is_empty_when_no_core_file_is_installed() {
+        let temp = tempfile::tempdir().unwrap();
+        let ra_entry = retroarch_with_cores(temp.path(), &["mgba"]);
+        // mgba is a Game Boy Advance core, not a SNES one.
+        assert!(installed_compatible_cores(
+            "Super Nintendo Entertainment System",
+            "snes",
+            &ra_entry
+        )
+        .is_empty());
+        // And an entry whose path does not exist has no cores at all.
+        let missing = entry("RetroArch", "/nonexistent/retroarch");
+        assert!(installed_compatible_cores(
+            "Super Nintendo Entertainment System",
+            "snes",
+            &missing
+        )
+        .is_empty());
     }
 }
