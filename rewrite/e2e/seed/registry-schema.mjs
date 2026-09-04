@@ -13,13 +13,13 @@
  *
  * Deliberately NOT retrofitted onto `launch-seed.mjs`, `cloud-saves-seed.mjs`
  * or `images-seed.mjs`: those seed v1 databases on purpose (images-seed
- * exercises the v1 -> v2 -> v3 migration path), and rewriting them to v3
+ * exercises the v1 -> v2 -> v3 migration path), and rewriting them to v4
  * would delete that coverage.
  */
 
 import { execFileSync } from 'node:child_process';
 
-export const USER_VERSION = 3;
+export const USER_VERSION = 4;
 
 export const SCHEMA_SQL = `
 CREATE TABLE installed_games (
@@ -61,6 +61,7 @@ CREATE TABLE installed_games (
     ps4_content              TEXT NOT NULL DEFAULT '',
     ra_id                    TEXT NOT NULL DEFAULT '',
     installed_at        INTEGER NOT NULL,
+    last_played_at      INTEGER NOT NULL DEFAULT 0,
     UNIQUE (title_key, platform_key)
 );
 PRAGMA user_version = ${USER_VERSION};

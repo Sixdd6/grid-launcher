@@ -505,17 +505,21 @@ pub async fn launch_game(state: State<'_, AppState>, rom_id: i64) -> Result<Game
 
     // The Library rail's "Recent" entry and its "Recently played" sort read
     // `last_played_at` (design §5). Stamped once the process has actually
-    // spawned, so a launch that failed to start never counts as played. A
-    // registry write failure is swallowed: the game IS running, and losing
-    // one ordering hint must never surface as a launch error.
+    // spawned, so a launch that failed to start never counts as played.
+    //
+    // Fire-and-forget on purpose: the join handle is dropped rather than
+    // awaited, so a registry mutex held by a concurrent scan can never delay
+    // the launch response. A write failure is logged and swallowed — the game
+    // IS running, and losing one ordering hint must never surface as a launch
+    // error. `rom_id` is safe to log; nothing here touches a path or a secret.
     {
         let registry = install.registry();
-        let at = session.started_at as i64;
-        if let Err(e) =
-            tokio::task::spawn_blocking(move || registry.touch_last_played(rom_id, at)).await
-        {
-            tracing::debug!("last_played_at stamp did not finish for rom {rom_id}: {e}");
-        }
+        let at = session.started_at;
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = registry.touch_last_played(rom_id, at) {
+                tracing::debug!("last_played_at stamp failed for rom {rom_id}: {e}");
+            }
+        });
     }
 
     Ok(session)
