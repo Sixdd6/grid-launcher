@@ -125,7 +125,7 @@ describe('cloud-saves', () => {
     // already has them on. Only the upload delay (default 3s) needs
     // changing — down to 0 so scenario 3 doesn't need a real wait.
     await $(testId('nav-emulators')).click();
-    await $(testId('emulators-view')).waitForExist({
+    await $(testId('emulators-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the emulators view never rendered',
     });

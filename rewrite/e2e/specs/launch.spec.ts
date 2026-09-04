@@ -68,7 +68,7 @@ describe('launch', () => {
 
   async function openEmulators() {
     await $(testId('nav-emulators')).click();
-    await $(testId('emulators-view')).waitForExist({
+    await $(testId('emulators-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the emulators view never rendered',
     });
