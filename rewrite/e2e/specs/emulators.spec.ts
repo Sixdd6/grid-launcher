@@ -232,6 +232,28 @@ describe('emulators', () => {
     await waitForConfigLine('"Super Nintendo Entertainment System" = "bsnes"');
   });
 
+  it('leaving RetroArch for none clears both the default and the saved core', async () => {
+    await selectValue('default-select-1', '');
+    await browser.waitUntil(
+      () => {
+        try {
+          const contents = readFileSync(configPath(), 'utf-8');
+          return (
+            !contents.includes('"Super Nintendo Entertainment System" = "bsnes"') &&
+            !contents.includes('"Super Nintendo Entertainment System" = "RetroArch Renamed"')
+          );
+        } catch {
+          return false;
+        }
+      },
+      {
+        timeout: TRANSITION_TIMEOUT,
+        timeoutMsg:
+          'config.toml still had a default_emulators or retroarch_cores line for the platform after clearing the default to none',
+      },
+    );
+  });
+
   it('does not offer RetroArch for a platform with no installed core', async () => {
     // Arcade (platform 2) needs fbneo/mame2003_plus/mame; only SNES cores
     // are installed, so D-RC-1's gate keeps RetroArch out of the list even

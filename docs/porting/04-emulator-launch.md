@@ -1157,7 +1157,9 @@ Rust paths are relative to `rewrite/`.
 4. **D-RC-4 — picking RetroArch records a core.** `set_default_emulator`
    (`app/src-tauri/src/commands.rs`) inserts the first installed compatible core when
    the platform has no non-blank one, in the same `modify_config` closure as the
-   default write. A saved core is never overwritten by that path.
+   default write. A saved core is never overwritten by that path. Leaving RetroArch —
+   to none or to another emulator — clears the platform's saved core in that same
+   closure, so it never lingers for an emulator that no longer needs one.
 5. **D-RC-5 — display fallback stays display-only.** A saved core that is no longer
    installed shows the first option; nothing is rewritten until the user changes it.
 6. Out of scope, deliberately: core downloads, per-game core overrides, and any change

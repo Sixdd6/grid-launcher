@@ -663,6 +663,27 @@ fn apply_record_retroarch_core(
     }
 }
 
+/// Clears `platform`'s saved RetroArch core whenever the new default is not
+/// a RetroArch entry — a blank `name`, an unrecognized `name`, or a
+/// non-RetroArch emulator. Complements [`apply_record_retroarch_core`]: that
+/// one records a core when the new default IS RetroArch; this one removes
+/// the stale core when it is not, so a platform never keeps a core saved
+/// for an emulator that no longer needs one.
+fn apply_clear_retroarch_core_when_not_retroarch(
+    config: &mut Config,
+    platform_name: &str,
+    name: &str,
+    profiles: &[EmulatorProfile],
+) {
+    let trimmed = name.trim();
+    let is_retroarch = !trimmed.is_empty()
+        && emulator_entry_by_name(&config.emulators, trimmed)
+            .is_some_and(|entry| entry_is_retroarch(entry, profiles));
+    if !is_retroarch {
+        remove_platform_key(&mut config.retroarch_cores, platform_name);
+    }
+}
+
 /// The emulator names that support each requested platform, keyed by the
 /// platform NAME that was asked about. One config + profile load answers the
 /// whole batch; each platform runs the ported
@@ -780,6 +801,7 @@ pub async fn set_default_emulator(
             check_default_emulator_supported(config, &platform, &name, &slug, profiles)?;
             apply_set_default_emulator(config, &platform, &name);
             apply_record_retroarch_core(config, profiles, &platform, &slug, &name);
+            apply_clear_retroarch_core_when_not_retroarch(config, &platform, &name, profiles);
             Ok(())
         })
     })
@@ -1329,6 +1351,66 @@ mod merge_tests {
         let profiles = load_profiles();
         apply_record_retroarch_core(&mut config, profiles, "PlayStation 2", "ps2", "PCSX2");
         assert!(config.retroarch_cores.is_empty());
+    }
+
+    #[test]
+    fn leaving_retroarch_for_none_clears_the_saved_core() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = config_with_retroarch(temp.path(), &["snes9x"]);
+        let profiles = load_profiles();
+        let platform = "Super Nintendo Entertainment System";
+        config
+            .retroarch_cores
+            .insert(platform.to_string(), "snes9x".to_string());
+
+        apply_clear_retroarch_core_when_not_retroarch(&mut config, platform, "", profiles);
+        assert!(!config.retroarch_cores.contains_key(platform));
+    }
+
+    #[test]
+    fn leaving_retroarch_for_none_clears_a_differently_cased_saved_core() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = config_with_retroarch(temp.path(), &["snes9x"]);
+        let profiles = load_profiles();
+        let platform = "Super Nintendo Entertainment System";
+        config
+            .retroarch_cores
+            .insert(platform.to_uppercase(), "snes9x".to_string());
+
+        apply_clear_retroarch_core_when_not_retroarch(&mut config, platform, "", profiles);
+        assert!(config.retroarch_cores.is_empty());
+    }
+
+    #[test]
+    fn leaving_retroarch_for_a_native_emulator_clears_the_saved_core() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = config_with_retroarch(temp.path(), &["snes9x"]);
+        config.emulators.push(entry("Snes9x"));
+        let profiles = load_profiles();
+        let platform = "Super Nintendo Entertainment System";
+        config
+            .retroarch_cores
+            .insert(platform.to_string(), "snes9x".to_string());
+
+        apply_clear_retroarch_core_when_not_retroarch(&mut config, platform, "Snes9x", profiles);
+        assert!(!config.retroarch_cores.contains_key(platform));
+    }
+
+    #[test]
+    fn staying_on_retroarch_keeps_the_saved_core() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = config_with_retroarch(temp.path(), &["snes9x"]);
+        let profiles = load_profiles();
+        let platform = "Super Nintendo Entertainment System";
+        config
+            .retroarch_cores
+            .insert(platform.to_string(), "bsnes".to_string());
+
+        apply_clear_retroarch_core_when_not_retroarch(&mut config, platform, "RetroArch", profiles);
+        assert_eq!(
+            config.retroarch_cores.get(platform).map(String::as_str),
+            Some("bsnes")
+        );
     }
 
     // --- apply_save_emulator -------------------------------------------------
