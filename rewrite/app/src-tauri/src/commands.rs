@@ -13,7 +13,7 @@ use grid_core::launch::profiles::{
 };
 use grid_core::launch::selection::{
     compatible_emulator_names_for_platform, emulator_entry_by_name, emulator_supports_platform,
-    is_retroarch_name, mapping_value_for_platform,
+    entry_is_retroarch, mapping_value_for_platform, slug_core_resolver,
 };
 use grid_core::launch::{GameSession, LaunchService, SessionsSnapshot};
 use grid_core::library::queue::DownloadsSnapshot;
@@ -155,12 +155,18 @@ pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>,
         // Slug-first RetroArch core resolution (D-RC-2) needs the server's
         // own slug for each platform; like the ids above, this is recorded
         // from the FULL list, not the assignable subset.
-        install.set_platform_slugs(
-            platforms
-                .iter()
-                .map(|p| (p.name.clone(), p.slug.clone()))
-                .collect(),
-        );
+        let slug_map: BTreeMap<String, String> = platforms
+            .iter()
+            .map(|p| (p.name.clone(), p.slug.clone()))
+            .collect();
+        install.set_platform_slugs(slug_map.clone());
+        // The same map again, into grid-core's process-wide registry: the
+        // launch resolver, cloud ops, firmware routing and the install
+        // service see only a platform NAME, and read the slug from there
+        // (`launch::selection::installed_core_resolver`). Without it those
+        // paths would fall back to fuzzy name matching and disagree with
+        // the Emulators panel about which platforms RetroArch supports.
+        grid_core::launch::set_platform_slugs(slug_map);
 
         // Self-heal for the gap D3's own trigger policy leaves: an emulator
         // installed or added before the FIRST successful platform fetch got
@@ -534,29 +540,44 @@ pub struct PlatformRef {
     pub slug: String,
 }
 
-/// The FIRST RetroArch entry in config order — the one the emulator select
-/// offers, and therefore the one whose installed cores the core picker
-/// lists. `None` when no configured entry is a RetroArch build.
-fn first_retroarch_entry<'a>(
+/// The RetroArch entry whose installed cores this platform's picker lists:
+/// the platform's SAVED default when that entry is a RetroArch build, else
+/// the first RetroArch entry in config order (the one the emulator select
+/// would offer). `None` when no configured entry is a RetroArch build.
+///
+/// Resolving per platform rather than always taking the first RetroArch
+/// entry keeps the picker, [`set_retroarch_core`]'s guard and the recorded
+/// core in agreement when two RetroArch builds are configured and only the
+/// second one has the platform's core installed.
+fn retroarch_entry_for_platform<'a>(
     config: &'a Config,
     profiles: &[EmulatorProfile],
+    platform_name: &str,
 ) -> Option<&'a EmulatorEntry> {
-    config.emulators.iter().find(|entry| {
-        is_retroarch_name(&entry.name)
-            || profile_for_entry(&entry.name, &entry.path, profiles)
-                .is_some_and(|p| is_retroarch_name(&p.name))
-    })
+    if let Some(saved) = mapping_value_for_platform(&config.default_emulators, platform_name) {
+        if let Some(entry) = emulator_entry_by_name(&config.emulators, saved) {
+            if entry_is_retroarch(entry, profiles) {
+                return Some(entry);
+            }
+        }
+    }
+    config
+        .emulators
+        .iter()
+        .find(|entry| entry_is_retroarch(entry, profiles))
 }
 
 /// The installed compatible cores the picker offers for one platform, or
-/// `[]` when there is no RetroArch entry or nothing compatible is installed.
+/// `[]` when there is no RetroArch entry for it or nothing compatible is
+/// installed. The entry is resolved per platform
+/// ([`retroarch_entry_for_platform`]).
 fn core_options_for(
     config: &Config,
     profiles: &[EmulatorProfile],
     platform_name: &str,
     platform_slug: &str,
 ) -> Vec<String> {
-    first_retroarch_entry(config, profiles)
+    retroarch_entry_for_platform(config, profiles, platform_name)
         .map(|entry| autoconfig::installed_compatible_cores(platform_name, platform_slug, entry))
         .unwrap_or_default()
 }
@@ -629,10 +650,7 @@ fn apply_record_retroarch_core(
         let Some(entry) = emulator_entry_by_name(&config.emulators, trimmed) else {
             return;
         };
-        let is_retroarch = is_retroarch_name(&entry.name)
-            || profile_for_entry(&entry.name, &entry.path, profiles)
-                .is_some_and(|p| is_retroarch_name(&p.name));
-        if !is_retroarch {
+        if !entry_is_retroarch(entry, profiles) {
             return;
         }
         autoconfig::installed_compatible_cores(platform_name, platform_slug, entry)
@@ -664,20 +682,22 @@ pub async fn compatible_emulators(
     tokio::task::spawn_blocking(move || {
         let config = Config::load(&Config::default_path()).map_err(err)?;
         let profiles = load_profiles();
+        // One resolver over the whole batch: the requested name -> slug map.
+        let slugs: BTreeMap<String, String> = platforms
+            .iter()
+            .map(|p| (p.name.clone(), p.slug.clone()))
+            .collect();
+        let resolver = slug_core_resolver(&slugs);
         Ok(platforms
-            .into_iter()
+            .iter()
             .map(|platform| {
-                let slug = platform.slug.clone();
-                let resolver = move |entry: &EmulatorEntry, name: &str| -> Vec<String> {
-                    autoconfig::installed_compatible_cores(name, &slug, entry)
-                };
                 let names = compatible_emulator_names_for_platform(
                     &config.emulators,
                     &platform.name,
                     profiles,
                     &resolver,
                 );
-                (platform.name, names)
+                (platform.name.clone(), names)
             })
             .collect())
     })
@@ -1065,9 +1085,8 @@ fn check_default_emulator_supported(
     if trimmed.is_empty() {
         return Ok(());
     }
-    let resolver = |entry: &EmulatorEntry, platform_name: &str| -> Vec<String> {
-        autoconfig::installed_compatible_cores(platform_name, platform_slug, entry)
-    };
+    let slugs = BTreeMap::from([(platform.to_string(), platform_slug.to_string())]);
+    let resolver = slug_core_resolver(&slugs);
     let supported = emulator_entry_by_name(&config.emulators, trimmed)
         .is_some_and(|entry| emulator_supports_platform(entry, platform, profiles, &resolver));
     if supported {
@@ -1187,6 +1206,56 @@ mod merge_tests {
             "snes"
         )
         .is_empty());
+    }
+
+    /// F3: with two RetroArch builds configured and only the SECOND one
+    /// holding the platform's core, the picker, the guard and the recorded
+    /// core must all answer against the entry the platform's saved default
+    /// names — not blindly against the first RetroArch entry in config
+    /// order.
+    #[test]
+    fn core_options_follow_the_platforms_saved_retroarch_default() {
+        let temp = tempfile::tempdir().unwrap();
+        let first = temp.path().join("first");
+        let second = temp.path().join("second");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        // "first" has a core, but not one compatible with SNES.
+        let mut config = config_with_retroarch(&first, &["dolphin"]);
+        let with_core = config_with_retroarch(&second, &["snes9x"]);
+        config.emulators[0].name = "RetroArch".to_string();
+        let mut second_entry = with_core.emulators[0].clone();
+        second_entry.name = "RetroArch (nightly)".to_string();
+        config.emulators.push(second_entry);
+
+        let profiles = load_profiles();
+        let platform = "Super Nintendo Entertainment System";
+
+        // No saved default yet -> the first RetroArch entry answers, and it
+        // has no SNES core.
+        assert!(core_options_for(&config, profiles, platform, "snes").is_empty());
+
+        // Saving the second build as the platform's default moves the
+        // picker, the guard and the recorded core onto it.
+        apply_set_default_emulator(&mut config, platform, "RetroArch (nightly)");
+        assert_eq!(
+            core_options_for(&config, profiles, platform, "snes"),
+            vec!["snes9x".to_string()]
+        );
+        assert!(
+            check_retroarch_core_installed(&config, profiles, platform, "snes", "snes9x").is_ok()
+        );
+        apply_record_retroarch_core(
+            &mut config,
+            profiles,
+            platform,
+            "snes",
+            "RetroArch (nightly)",
+        );
+        assert_eq!(
+            config.retroarch_cores.get(platform).map(String::as_str),
+            Some("snes9x")
+        );
     }
 
     #[test]
