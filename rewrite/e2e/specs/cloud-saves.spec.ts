@@ -131,10 +131,15 @@ describe('cloud-saves', () => {
     // `true` (config.rs's `default_true`), so the seed's bare config.toml
     // already has them on. Only the upload delay (default 3s) needs
     // changing — down to 0 so scenario 3 doesn't need a real wait.
-    await $(testId('nav-emulators')).click();
-    await $(testId('emulators-view')).waitForDisplayed({
+    await $(testId('nav-settings')).click();
+    await $(testId('settings-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the emulators view never rendered',
+      timeoutMsg: 'the settings view never rendered',
+    });
+    await $(testId('settings-nav-cloud-saves')).click();
+    await $(testId('settings-page-cloud-saves')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'Settings › Cloud saves never rendered',
     });
     const delayInput = $(testId('cloud-settings-upload-delay'));
     await delayInput.waitForExist({ timeout: TRANSITION_TIMEOUT });
@@ -143,10 +148,10 @@ describe('cloud-saves', () => {
     await $(testId('cloud-settings-save')).click();
     await waitForConfigLine('auto_cloud_save_upload_delay_seconds = 0');
     await $(testId('nav-server')).click();
-    await $(testId('emulators-view')).waitForDisplayed({
+    await $(testId('settings-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
       reverse: true,
-      timeoutMsg: 'the emulators view never went away',
+      timeoutMsg: 'the settings view never went away',
     });
   });
 

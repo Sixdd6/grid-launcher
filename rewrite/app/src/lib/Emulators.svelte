@@ -2,14 +2,11 @@
   import {
     api,
     type CatalogEntry,
-    type CloudSettings,
     type EmulatorEntry,
     type LaunchDefaults,
     type Platform,
     type PlatformRef,
     type ProfileSummary,
-    type RaFanOutRow,
-    type RaStatus,
   } from './api';
   import { downloads } from './stores/downloads.svelte';
   import { filterCatalogEntries } from './emulators/catalog';
@@ -20,7 +17,6 @@
     platformCoreSelect,
     platformDefaultSelect,
   } from './emulators/defaults';
-  import { canSubmit, fanOutSummary, statusLabel } from './emulators/retroachievements';
   import { isWindowsHost } from './emulators/compatTools';
   import CompatTools from './emulators/CompatTools.svelte';
 
@@ -73,27 +69,6 @@
 
   let confirmingDelete = $state<string | null>(null);
   let deletePending = $state<string | null>(null);
-
-  // RetroAchievements block state (task-12-brief.md).
-  let raStatus = $state<RaStatus | null>(null);
-  let raUsername = $state('');
-  // The token field is write-only: it starts empty on every mount and is
-  // never bound to a value read back from the backend, which never returns
-  // the token in the first place (RaStatus carries only `token_present`).
-  let raToken = $state('');
-  let raError = $state<string | null>(null);
-  let raResultLine = $state<string | null>(null);
-  let raSavePending = $state(false);
-  let raClearPending = $state(false);
-
-  // Cloud saves settings block (task-19-brief.md). Lives here rather than
-  // Connect.svelte (which only renders pre-login) — this is where the
-  // app's other per-device settings (RetroAchievements, above) already
-  // live.
-  let cloudSettings = $state<CloudSettings | null>(null);
-  let cloudSettingsError = $state<string | null>(null);
-  let cloudSettingsSavedLine = $state<string | null>(null);
-  let cloudSettingsPending = $state(false);
 
   // Install tab state.
   let catalog = $state<CatalogEntry[]>([]);
@@ -197,8 +172,6 @@
     refreshEmulators();
     refreshPlatformsAndDefaults();
     refreshProfiles();
-    refreshRaStatus();
-    refreshCloudSettings();
   });
 
   // Both inputs of the compatibility and core answers: the platforms they
@@ -419,72 +392,6 @@
       await refreshDefaults();
     } catch (err) {
       defaultsError = errorMessage(err);
-    }
-  }
-
-  async function refreshRaStatus() {
-    try {
-      raStatus = await api.getRetroachievementsStatus();
-      raUsername = raStatus.username;
-    } catch (err) {
-      raError = errorMessage(err);
-    }
-  }
-
-  async function handleRaSave() {
-    if (!canSubmit(raUsername, raToken)) return;
-    raError = null;
-    raResultLine = null;
-    raSavePending = true;
-    try {
-      const rows: RaFanOutRow[] = await api.setRetroachievementsCredentials(raUsername, raToken);
-      raToken = '';
-      raResultLine = fanOutSummary(rows);
-      await refreshRaStatus();
-    } catch (err) {
-      raError = errorMessage(err);
-    } finally {
-      raSavePending = false;
-    }
-  }
-
-  async function handleRaClear() {
-    raError = null;
-    raResultLine = null;
-    raClearPending = true;
-    try {
-      await api.clearRetroachievementsCredentials();
-      raToken = '';
-      await refreshRaStatus();
-    } catch (err) {
-      raError = errorMessage(err);
-    } finally {
-      raClearPending = false;
-    }
-  }
-
-  async function refreshCloudSettings() {
-    try {
-      cloudSettings = await api.cloudSettings();
-      cloudSettingsError = null;
-    } catch (err) {
-      cloudSettingsError = errorMessage(err);
-    }
-  }
-
-  async function handleCloudSettingsSave() {
-    if (!cloudSettings) return;
-    cloudSettingsError = null;
-    cloudSettingsSavedLine = null;
-    cloudSettingsPending = true;
-    try {
-      await api.setCloudSettings(cloudSettings);
-      cloudSettingsSavedLine = 'Saved.';
-      await refreshCloudSettings();
-    } catch (err) {
-      cloudSettingsError = errorMessage(err);
-    } finally {
-      cloudSettingsPending = false;
     }
   }
 
@@ -715,116 +622,6 @@
       <CompatTools />
     {/if}
 
-    <section class="ra-section">
-      <h3>RetroAchievements</h3>
-      <p class="muted" data-testid="ra-status">{statusLabel(raStatus)}</p>
-      <form
-        onsubmit={(e) => {
-          e.preventDefault();
-          handleRaSave();
-        }}
-      >
-        <label>
-          Username
-          <input data-testid="ra-username" bind:value={raUsername} autocomplete="username" />
-        </label>
-        <label>
-          Token
-          <input
-            data-testid="ra-token"
-            type="password"
-            bind:value={raToken}
-            autocomplete="new-password"
-          />
-        </label>
-        {#if raError}<p data-testid="ra-error" class="error" role="alert">{raError}</p>{/if}
-        {#if raResultLine}<p class="hint">{raResultLine}</p>{/if}
-        <div class="form-actions">
-          <button
-            data-testid="ra-save"
-            type="submit"
-            disabled={raSavePending || !canSubmit(raUsername, raToken)}
-          >
-            {raSavePending ? 'Saving…' : 'Save'}
-          </button>
-          <button
-            data-testid="ra-clear"
-            type="button"
-            onclick={handleRaClear}
-            disabled={raClearPending}
-          >
-            {raClearPending ? 'Clearing…' : 'Clear'}
-          </button>
-        </div>
-      </form>
-    </section>
-
-    <section class="cloud-settings-section">
-      <h3>Cloud Saves</h3>
-      {#if cloudSettings}
-        <form
-          onsubmit={(e) => {
-            e.preventDefault();
-            handleCloudSettingsSave();
-          }}
-        >
-          <label class="checkbox">
-            <input
-              data-testid="cloud-settings-download-on-launch"
-              type="checkbox"
-              bind:checked={cloudSettings.download_on_launch}
-            />
-            Restore cloud saves before launch
-          </label>
-          <label class="checkbox">
-            <input
-              data-testid="cloud-settings-upload-on-exit"
-              type="checkbox"
-              bind:checked={cloudSettings.upload_on_exit}
-            />
-            Upload cloud saves after exit
-          </label>
-          <label class="checkbox">
-            <input
-              data-testid="cloud-settings-skip-if-local-newer"
-              type="checkbox"
-              bind:checked={cloudSettings.skip_if_local_newer}
-            />
-            Skip download when the local save is newer
-          </label>
-          <label>
-            Upload delay (seconds)
-            <input
-              data-testid="cloud-settings-upload-delay"
-              type="number"
-              min="0"
-              max="60"
-              bind:value={cloudSettings.upload_delay_seconds}
-            />
-          </label>
-          <label>
-            Save retention limit
-            <input
-              data-testid="cloud-settings-retention-limit"
-              type="number"
-              min="1"
-              bind:value={cloudSettings.retention_limit}
-            />
-          </label>
-          {#if cloudSettingsError}<p data-testid="cloud-settings-error" class="error" role="alert">{cloudSettingsError}</p>{/if}
-          {#if cloudSettingsSavedLine}<p class="hint">{cloudSettingsSavedLine}</p>{/if}
-          <div class="form-actions">
-            <button data-testid="cloud-settings-save" type="submit" disabled={cloudSettingsPending}>
-              {cloudSettingsPending ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        </form>
-      {:else if cloudSettingsError}
-        <p data-testid="cloud-settings-error" class="error" role="alert">{cloudSettingsError}</p>
-      {:else}
-        <p class="muted">Loading…</p>
-      {/if}
-    </section>
 </section>
 
 <style>
@@ -870,61 +667,12 @@
 
   .list-section,
   .form-section,
-  .defaults-section,
-  .ra-section,
-  .cloud-settings-section {
+  .defaults-section {
     display: flex;
     flex-direction: column;
     gap: 8px;
     padding-top: 12px;
     border-top: 1px solid var(--border);
-  }
-
-  .ra-section form,
-  .cloud-settings-section form {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .ra-section label,
-  .cloud-settings-section label {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    font-size: 13px;
-    color: var(--text);
-  }
-
-  .cloud-settings-section label.checkbox {
-    flex-direction: row;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .ra-section input,
-  .cloud-settings-section input {
-    font: inherit;
-    padding: 8px 10px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--text-h);
-  }
-
-  .cloud-settings-section input[type='checkbox'] {
-    width: auto;
-    padding: 0;
-  }
-
-  .cloud-settings-section input[type='number'] {
-    width: 100px;
-  }
-
-  .ra-section input:focus-visible,
-  .cloud-settings-section input:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
   }
 
   .list-section {
@@ -1154,32 +902,6 @@
   }
 
   .catalog-row button:disabled {
-    opacity: 0.6;
-    cursor: default;
-  }
-
-  .form-actions {
-    display: flex;
-    gap: 8px;
-  }
-
-  .form-actions button {
-    font: inherit;
-    padding: 8px 16px;
-    border-radius: 6px;
-    border: none;
-    background: var(--accent);
-    color: #fff;
-    cursor: pointer;
-  }
-
-  .form-actions button[type='button'] {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--text-h);
-  }
-
-  .form-actions button:disabled {
     opacity: 0.6;
     cursor: default;
   }

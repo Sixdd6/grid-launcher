@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LATER_STEP_TEXT, SETTINGS_PAGES, settingsPageLabel, settingsRailEntries } from './pages';
+import { SETTINGS_PAGES, settingsPageLabel, settingsRailEntries } from './pages';
 
 describe('settings rail', () => {
   it('lists the five pages of design §10, in order', () => {
@@ -18,10 +18,6 @@ describe('settings rail', () => {
     expect(settingsPageLabel('retroachievements')).toBe('RetroAchievements');
     expect(settingsPageLabel('updates')).toBe('Updates');
     expect(settingsPageLabel('appearance')).toBe('Appearance');
-  });
-
-  it('holds the placeholder copy verbatim', () => {
-    expect(LATER_STEP_TEXT).toBe('Coming in a later step');
   });
 });
 

@@ -23,10 +23,6 @@ export function settingsPageLabel(page: SettingsPage): string {
   return LABELS[page];
 }
 
-/** The exact line an unbuilt page shows. Asserted by settings.test.ts so it
- *  cannot drift while five call sites reference it. */
-export const LATER_STEP_TEXT = 'Coming in a later step';
-
 /** One rail row, the shape `RailPane.svelte` renders (no count: Settings has none). */
 export type SettingsRailEntry = {
   key: SettingsPage;

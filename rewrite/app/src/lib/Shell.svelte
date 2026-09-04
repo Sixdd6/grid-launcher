@@ -189,8 +189,8 @@
 <div class="view" hidden={view !== 'emulators'}>
   <Emulators active={view === 'emulators'} />
 </div>
-<div data-testid="settings-view" class="view view-content" hidden={view !== 'settings'}>
-  <Settings bind:this={settings} />
+<div data-testid="settings-view" class="view" hidden={view !== 'settings'}>
+  <Settings active={view === 'settings'} bind:this={settings} />
 </div>
 
 <!-- Mounted outside the view roots, and never hidden. The footer strip is

@@ -347,4 +347,44 @@ describe('updates', () => {
     );
     await waitForConfigLine('theme = "dark"');
   });
+
+  // Design §10: the four pages plan 1 left as placeholders. One pass over
+  // the rail, reading one line each page owns; the pure rules live in
+  // `settings/*.test.ts`.
+  it('walks the Settings rail: Connection, Updates, Cloud saves, RetroAchievements', async () => {
+    await $(testId('settings-nav-connection')).click();
+    await $(testId('settings-page-connection')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await expect($(testId('settings-connection-url'))).toHaveText(mockUrl());
+    await expect($(testId('settings-connection-credential'))).toHaveText(
+      'Stored in the OS keyring · session verified',
+    );
+    // Connected: Reconnect is not on offer, Disconnect is.
+    await expect($(testId('settings-connection-reconnect'))).toBeDisabled();
+    await expect($(testId('settings-connection-disconnect'))).toBeEnabled();
+
+    await $(testId('settings-nav-updates')).click();
+    await $(testId('settings-page-updates')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    expect(await $(testId('settings-updates-version')).getText()).toMatch(/^GRID Launcher \d/);
+    // The notice dismissed earlier is still listed here — Dismiss hid the
+    // badge, not the entry (design §3).
+    expect(await $(testId('app-update-notice')).getText()).toContain(SELF_UPDATE_TAG);
+    expect(await $(testId('app-update-dismiss')).isExisting()).toBe(false);
+    await expect($(testId('settings-updates-note'))).toHaveText(
+      'GRID Launcher checks GitHub for a newer release once at startup. It never downloads or installs an update — open the release page to get it.',
+    );
+
+    await $(testId('settings-nav-cloud-saves')).click();
+    await $(testId('settings-page-cloud-saves')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await $(testId('cloud-settings-save')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+
+    await $(testId('settings-nav-retroachievements')).click();
+    await $(testId('settings-page-retroachievements')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await expect($(testId('ra-status'))).toHaveText('Not set');
+    await expect($(testId('ra-save'))).toBeDisabled();
+
+    await $(testId('settings-nav-appearance')).click();
+    await $(testId('settings-page-appearance')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await expect($(testId('background-art-toggle'))).toBeSelected();
+    await expect($(testId('card-size-library'))).toHaveValue('medium');
+  });
 });
