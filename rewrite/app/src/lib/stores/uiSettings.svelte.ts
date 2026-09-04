@@ -3,6 +3,7 @@
 // remounts and every view reads one source.
 import { api } from '../api';
 import type { UiSettings } from '../api';
+import { normalizeCardSize, type CardSize } from '../cards/size';
 import {
   clampFade,
   FADE_DEFAULT,
@@ -49,6 +50,12 @@ export const uiSettings = {
   },
   get resolved(): ResolvedTheme {
     return resolveTheme(state.theme, state.prefersDark);
+  },
+  get cardSizeLibrary(): CardSize {
+    return state.cardSizeLibrary;
+  },
+  get cardSizeServer(): CardSize {
+    return state.cardSizeServer;
   },
 };
 
@@ -116,8 +123,8 @@ export async function initUiSettings(): Promise<() => void> {
     const stored = await api.getUiSettings();
     state.theme = normalizeTheme(stored.theme);
     state.backgroundFade = clampFade(stored.background_fade);
-    state.cardSizeLibrary = stored.card_size_library;
-    state.cardSizeServer = stored.card_size_server;
+    state.cardSizeLibrary = normalizeCardSize(stored.card_size_library);
+    state.cardSizeServer = normalizeCardSize(stored.card_size_server);
   } catch {
     // Defaults/mirror already in `state`.
   }
@@ -149,5 +156,18 @@ export function previewBackgroundFade(value: number): void {
 /** Slider release: persists whatever the preview settled on. */
 export async function commitBackgroundFade(value: number): Promise<void> {
   previewBackgroundFade(value);
+  await api.setUiSettings(payload());
+}
+
+/**
+ * The size control on a grid toolbar. Applies immediately — the grid
+ * re-flows on the next frame — then persists. A failed save leaves the
+ * grid at the new size for this session and the config at the old one;
+ * that is the same trade `setTheme` makes, and reverting a grid under the
+ * user's cursor would be worse than a setting that did not stick.
+ */
+export async function setCardSize(view: 'library' | 'server', size: CardSize): Promise<void> {
+  if (view === 'library') state.cardSizeLibrary = size;
+  else state.cardSizeServer = size;
   await api.setUiSettings(payload());
 }
