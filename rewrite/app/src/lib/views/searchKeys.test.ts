@@ -48,6 +48,14 @@ describe('chordBlocked', () => {
     }
     expect(chordBlocked(ctx({ activeTag: 'DIV', activeEditable: true }))).toBe(true);
   });
+
+  it('blocks the grid views\u2019 arrow navigation while a toolbar select has focus', () => {
+    // The grid views reuse this guard for Arrow keys, not just Ctrl+F: a
+    // focused `library-sort`/`library-size` must keep its own Up/Down, while
+    // a focused rail button must not stop the grid moving.
+    expect(chordBlocked(ctx({ activeTag: 'SELECT' }))).toBe(true);
+    expect(chordBlocked(ctx({ activeTag: 'BUTTON' }))).toBe(false);
+  });
 });
 
 describe('shouldFocusSearch', () => {

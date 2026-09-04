@@ -15,7 +15,7 @@
   import CardGrid from './CardGrid.svelte';
   import RailPane, { type RailPaneEntry } from './RailPane.svelte';
   import Details from './Details.svelte';
-  import { chordContext, shouldFocusSearch } from './views/searchKeys';
+  import { chordBlocked, chordContext, shouldFocusSearch } from './views/searchKeys';
   import { moveFocus, type NavDirection } from './focus/grid';
   import { createHoverViewed } from './lastViewedHover';
   import { noteViewed } from './stores/lastViewed.svelte';
@@ -93,6 +93,14 @@
       });
   });
 
+  // `entryForKey` falls back to All games when the selected key has gone
+  // away (the last game on a platform was uninstalled). Write that fallback
+  // back into the store, so the rail's stored key matches what is on screen
+  // and reinstalling the platform does not snap the view somewhere else.
+  $effect(() => {
+    if (selected.key !== librarySelection.key) selectRail(selected.key);
+  });
+
   // A filter change can leave the focus index past the end of the new list.
   $effect(() => {
     if (focusIndex > rows.length - 1) focusIndex = Math.max(0, rows.length - 1);
@@ -148,13 +156,17 @@
 
   function onKey(e: KeyboardEvent) {
     if (!active) return;
-    if (shouldFocusSearch(e, chordContext(document))) {
+    // One read of the document, shared by both branches below.
+    const ctx = chordContext(document);
+    if (shouldFocusSearch(e, ctx)) {
       e.preventDefault();
       focusSearch();
       return;
     }
-    // The search box owns its own arrow keys.
-    if (document.activeElement === searchEl) return;
+    // The search box and the sort/size selects own their own arrow keys —
+    // and so does an open dialog. Taking them for grid movement would stop
+    // `library-sort` and `library-size` changing with Arrow Up/Down.
+    if (chordBlocked(ctx)) return;
     const map: Record<string, NavDirection> = {
       ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
     };

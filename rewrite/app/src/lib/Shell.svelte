@@ -13,6 +13,11 @@
   import { seedLastViewed } from './stores/lastViewed.svelte';
   import { chipLabel, hostOf, initialView, VIEWS, viewForDigit, viewLabel, type View } from './shell';
   import type { NavDirection } from './focus/grid';
+  // The same guard the grid views use for Ctrl+F: an accelerator must stay
+  // out of the way while focus sits in a text-entry control (where
+  // Ctrl+<n> can be an editor chord) or a modal dialog owns the screen and
+  // switching the view behind it would strand it.
+  import { chordBlocked, chordContext } from './views/searchKeys';
 
   // Set once when the shell first mounts (R2): Server when the restored/just
   // -connected session is online, Library when it came up offline. Switching
@@ -35,19 +40,6 @@
     view = next;
   }
 
-  /**
-   * True while the accelerator must stay out of the way: focus sits in a
-   * text-entry control (where Ctrl+<n> can be an editor chord), or a modal
-   * dialog owns the screen and switching the view behind it would strand it.
-   */
-  function chordBlocked(): boolean {
-    if (document.querySelector('[role="dialog"]') !== null) return true;
-    const el = document.activeElement as HTMLElement | null;
-    if (el === null) return false;
-    if (el.isContentEditable) return true;
-    return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT';
-  }
-
   // Ctrl+1..5 (design §3). Alt/Shift are excluded so this never steals a
   // window-manager or text-editing chord; Meta is accepted alongside Ctrl so
   // the same accelerator works on macOS.
@@ -60,7 +52,7 @@
     }
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
     const next = viewForDigit(e.key);
-    if (next === null || chordBlocked()) return;
+    if (next === null || chordBlocked(chordContext(document))) return;
     e.preventDefault();
     view = next;
   }
