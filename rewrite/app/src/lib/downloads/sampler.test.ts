@@ -116,6 +116,28 @@ describe('sampler', () => {
     expect(Object.keys(graphsOf(s))).toEqual(['2']);
   });
 
+  it('returns the same array for a track whose ring did not change', () => {
+    const s = createSampler(0);
+    observe(s, [entry({ id: 1 }), entry({ id: 2 })]);
+    observe(s, [entry({ id: 1, downloaded_bytes: 100 }), entry({ id: 2, downloaded_bytes: 100 })]);
+    tick(s, 1000);
+    const first = graphsOf(s);
+    // Nothing moved: the record itself comes back unchanged.
+    expect(graphsOf(s)).toBe(first);
+
+    // Track 2 is frozen, so only track 1 gets a new sample; track 2 keeps
+    // the array it already handed out.
+    observe(s, [
+      entry({ id: 1, downloaded_bytes: 300 }),
+      entry({ id: 2, status: 'completed', downloaded_bytes: 100 }),
+    ]);
+    tick(s, 2000);
+    const second = graphsOf(s);
+    expect(second).not.toBe(first);
+    expect(second[1]).not.toBe(first[1]);
+    expect(second[2]).toBe(first[2]);
+  });
+
   it('keeps only the newest SAMPLE_COUNT samples', () => {
     const s = createSampler(0);
     observe(s, [entry({ downloaded_bytes: 0 })]);

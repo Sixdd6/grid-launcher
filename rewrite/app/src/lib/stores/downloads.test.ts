@@ -3,8 +3,9 @@ import type { DownloadEntry, DownloadsSnapshot } from '../api';
 
 // `downloads.svelte.ts` is module-scoped state, so each test takes a fresh
 // module instance: `vi.resetModules()` plus a dynamic `import()` after the
-// fakes are wired with `vi.doMock`. Fake timers also fake `Date.now`, which
-// is the clock the store hands the sampler.
+// fakes are wired with `vi.doMock`. Fake timers also fake `performance.now`
+// (vitest's default `toFake` set), which is the clock the store hands the
+// sampler.
 
 function entry(overrides: Partial<DownloadEntry>): DownloadEntry {
   return {
@@ -91,6 +92,21 @@ describe('downloads store sampling', () => {
 
     expect(downloads.samplesFor(1)).toEqual([]);
     expect(downloads.samplesFor(42)).toEqual([]);
+  });
+
+  it('does not replace the sample arrays on an idle tick', async () => {
+    const mock = wire([entry({ id: 1, downloaded_bytes: 0 })]);
+    const { downloads, init } = await import('./downloads.svelte');
+    await init();
+    mock.emit([entry({ id: 1, downloaded_bytes: 2_000 })]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const live = downloads.samplesFor(1);
+
+    // The entry goes terminal: its ring freezes, so later ticks must hand
+    // back the very same array and leave every row's sparkline alone.
+    mock.emit([entry({ id: 1, status: 'completed', downloaded_bytes: 2_000 })]);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(downloads.samplesFor(1)).toBe(live);
   });
 
   it('keeps hasLive on the live statuses only', async () => {

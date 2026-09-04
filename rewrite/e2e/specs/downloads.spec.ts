@@ -158,10 +158,11 @@ describe('downloads', () => {
       timeoutMsg: 'the downloads strip never appeared for a live transfer',
     });
     // `⬇ <title> · <percent> · <speed>` (design §3). The percent is a
-    // number while the total is known and an em dash otherwise; the speed
-    // slot is a byte rate while downloading.
+    // number while the total is known and an em dash otherwise; the last
+    // slot is a byte rate while downloading and the phase word once the
+    // entry has moved on to installing.
     expect(await $(testId('downloads-aggregate')).getText()).toMatch(
-      /^⬇ Big Arcade Game · (\d{1,3}%|—) · [\d.]+ [KMGT]?B\/s$/,
+      /^⬇ Big Arcade Game · (\d{1,3}%|—) · ([\d.]+ [KMGT]?B\/s|Installing)$/,
     );
     await expect($(testId('downloads-footer-graph'))).toExist();
     expect(await strip.getText()).toContain('Open Downloads');

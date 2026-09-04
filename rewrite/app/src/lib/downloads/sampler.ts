@@ -14,6 +14,9 @@ export const SAMPLE_INTERVAL_MS = 1000;
 
 const LIVE_STATUSES = new Set<DownloadStatus>(['queued', 'downloading', 'installing', 'cancelling']);
 
+/** Shared empty samples array for a track whose ring is still empty. */
+const EMPTY: Sample[] = [];
+
 type Track = {
   ring: Ring;
   lastDownloaded: number;
@@ -22,15 +25,23 @@ type Track = {
   pendingDisk: number;
   /** False once the entry is terminal: the ring freezes. */
   live: boolean;
+  /** True when the ring changed since `graphsOf` last read this track. */
+  dirty: boolean;
+  /** The array `graphsOf` last handed out for this track. */
+  cached: Sample[];
 };
 
 export type Sampler = {
   tracks: Map<number, Track>;
   lastTickAt: number;
+  /** The record `graphsOf` last returned. */
+  graphs: Record<number, Sample[]>;
+  /** True when a ring changed or the track set changed since that read. */
+  graphsDirty: boolean;
 };
 
 export function createSampler(nowMs: number): Sampler {
-  return { tracks: new Map(), lastTickAt: nowMs };
+  return { tracks: new Map(), lastTickAt: nowMs, graphs: {}, graphsDirty: false };
 }
 
 /**
@@ -53,7 +64,10 @@ export function observe(sampler: Sampler, entries: DownloadEntry[]): void {
         pendingNet: 0,
         pendingDisk: 0,
         live: LIVE_STATUSES.has(e.status),
+        dirty: true,
+        cached: EMPTY,
       });
+      sampler.graphsDirty = true;
       continue;
     }
     track.pendingNet += Math.max(0, e.downloaded_bytes - track.lastDownloaded);
@@ -63,7 +77,10 @@ export function observe(sampler: Sampler, entries: DownloadEntry[]): void {
     track.live = LIVE_STATUSES.has(e.status);
   }
   for (const id of Array.from(sampler.tracks.keys())) {
-    if (!seen.has(id)) sampler.tracks.delete(id);
+    if (!seen.has(id)) {
+      sampler.tracks.delete(id);
+      sampler.graphsDirty = true;
+    }
   }
 }
 
@@ -83,16 +100,30 @@ export function tick(sampler: Sampler, nowMs: number): void {
       net: track.pendingNet * perSecond,
       disk: track.pendingDisk * perSecond,
     });
+    track.dirty = true;
+    sampler.graphsDirty = true;
     track.pendingNet = 0;
     track.pendingDisk = 0;
   }
 }
 
-/** Every track's samples, oldest first, keyed by entry id. */
+/**
+ * Every track's samples, oldest first, keyed by entry id. The result is
+ * memoised: the same record comes back while no ring and no track changed,
+ * and an unchanged track keeps the same array inside a rebuilt record, so a
+ * frozen row's sparkline never recomputes.
+ */
 export function graphsOf(sampler: Sampler): Record<number, Sample[]> {
+  if (!sampler.graphsDirty) return sampler.graphs;
   const out: Record<number, Sample[]> = {};
   for (const [id, track] of sampler.tracks) {
-    out[id] = samplesOf(track.ring);
+    if (track.dirty) {
+      track.cached = samplesOf(track.ring);
+      track.dirty = false;
+    }
+    out[id] = track.cached;
   }
+  sampler.graphs = out;
+  sampler.graphsDirty = false;
   return out;
 }
