@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, type GameSummary, type Platform, type PlatformFirmwareStatus } from './api';
+  import { api, type GameSummary, type Platform } from './api';
   import Details from './Details.svelte';
   import GameCard from './GameCard.svelte';
   import CardGrid from './CardGrid.svelte';
@@ -22,6 +22,7 @@
     firmwareChipLabel,
     firmwareInstallable,
     platformCountsLine,
+    type FirmwareChipState,
   } from './server/header';
   import { chordBlocked, chordContext, shouldFocusSearch } from './views/searchKeys';
 
@@ -43,8 +44,11 @@
   let cloudPlatforms = $state<ReadonlySet<string>>(new Set<string>());
   // Platform name -> default emulator name, for the header's emulator chip.
   let defaultEmulators = $state<Record<string, string>>({});
-  let firmware = $state<PlatformFirmwareStatus | null>(null);
+  let firmware = $state<FirmwareChipState>(null);
   let firmwareRequested = $state(false);
+  // The header's own error line: a refused Install. Never a path or a token —
+  // the backend's command errors carry neither, and nothing is appended.
+  let headerError = $state<string | null>(null);
 
   let libraryPathInput = $state('');
   let showLibraryBanner = $state(false);
@@ -83,6 +87,17 @@
     });
     refreshInstalled();
     checkLibraryPath();
+    loadLaunchDefaults();
+  });
+
+  // The emulator chip sends the user to the Emulators view to change the very
+  // mapping it displays, so re-read the defaults every time this view comes
+  // back to the front. The cloud badges derive from the same call.
+  $effect(() => {
+    if (active && session.connected) loadLaunchDefaults();
+  });
+
+  function loadLaunchDefaults() {
     api
       .getLaunchDefaults()
       .then((defaults) => {
@@ -93,7 +108,7 @@
         // No defaults readable: no cloud badges and a "No default emulator"
         // chip. Both are honest fallbacks, neither is worth an error line.
       });
-  });
+  }
 
   $effect(() => {
     if (focusIndex > visible.length - 1) focusIndex = Math.max(0, visible.length - 1);
@@ -106,15 +121,20 @@
     const name = activePlatformName;
     if (id === null || name === '') return;
     firmware = null;
+    // A new platform is a new question: the previous platform's install
+    // button must not still read "Installing…", nor its error still stand.
     firmwareRequested = false;
+    headerError = null;
     api
       .platformFirmwareStatus(id, name)
       .then((status) => {
         if (activePlatform === id) firmware = status;
       })
       .catch(() => {
-        // Unreachable or refused: leave the chip at "checking…" rather than
-        // claiming the server has no firmware when we simply do not know.
+        // Unreachable or refused. Say so: "checking…" forever would claim a
+        // call is still in flight when none is, and reporting "no firmware"
+        // would claim an answer we never got.
+        if (activePlatform === id) firmware = 'unavailable';
       });
   });
 
@@ -122,8 +142,12 @@
     const id = activePlatform;
     if (id === null) return;
     firmwareRequested = true;
-    api.installFirmwareForPlatform(id, activePlatformName).catch(() => {
+    headerError = null;
+    api.installFirmwareForPlatform(id, activePlatformName).catch((e) => {
+      // The command's own message, verbatim. grid-core's command errors name
+      // no path and carry no token, and nothing is appended to them here.
       firmwareRequested = false;
+      headerError = String(e);
     });
   }
 
@@ -298,6 +322,9 @@
               {emulatorChipLabel(defaultEmulators[activePlatformName] ?? '')}
             </button>
           </div>
+          {#if headerError !== null}
+            <p data-testid="server-header-error" class="header-error">{headerError}</p>
+          {/if}
         </header>
 
         <div class="toolbar">
@@ -421,6 +448,13 @@
     align-items: center;
     gap: 8px;
     margin-left: auto;
+  }
+
+  .header-error {
+    flex-basis: 100%;
+    margin: 0;
+    font-size: 12px;
+    color: var(--danger);
   }
 
   .chip {

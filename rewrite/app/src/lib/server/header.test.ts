@@ -5,6 +5,7 @@ import {
   firmwareInstallable,
   platformCountsLine,
 } from './header';
+import { NO_EMULATOR_MARKER } from '../emulators/defaults';
 
 describe('platformCountsLine', () => {
   it('reads as a sentence for the ordinary case', () => {
@@ -26,11 +27,18 @@ describe('emulatorChipLabel', () => {
     expect(emulatorChipLabel('')).toBe('No default emulator');
     expect(emulatorChipLabel('   ')).toBe('No default emulator');
   });
+  it('never prints the reserved <none> marker back at the user', () => {
+    expect(emulatorChipLabel(NO_EMULATOR_MARKER)).toBe('No default emulator');
+    expect(emulatorChipLabel(`  ${NO_EMULATOR_MARKER}  `)).toBe('No default emulator');
+  });
 });
 
 describe('firmwareChipLabel', () => {
   it('says nothing is known while the status is still loading', () => {
     expect(firmwareChipLabel(null)).toBe('Firmware: checking…');
+  });
+  it('admits a refused status call rather than checking forever', () => {
+    expect(firmwareChipLabel('unavailable')).toBe('Firmware: unavailable');
   });
   it('says plainly when the server offers none', () => {
     expect(firmwareChipLabel({ file_count: 0, has_default_emulator: true })).toBe(
@@ -58,5 +66,6 @@ describe('firmwareInstallable', () => {
     expect(firmwareInstallable({ file_count: 0, has_default_emulator: true })).toBe(false);
     expect(firmwareInstallable({ file_count: 4, has_default_emulator: false })).toBe(false);
     expect(firmwareInstallable(null)).toBe(false);
+    expect(firmwareInstallable('unavailable')).toBe(false);
   });
 });
