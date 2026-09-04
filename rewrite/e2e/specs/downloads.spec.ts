@@ -11,6 +11,10 @@ import {
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
+/** Verbatim from design §8; `segments.ts` carries the same string. */
+const LEGEND =
+  'Active: downloading or installing · Queued: waiting for a slot · Completed: finished, failed, or cancelled';
+
 /**
  * Stage `downloads`: this group's mock server is started with
  * `--throttle-ms 100` (see rewrite/scripts/e2e.sh's mock_args_for_group),
@@ -20,13 +24,19 @@ const testId = (id: string) => `[data-testid="${id}"]`;
  * those chunks — a comfortable, real in-flight download window to cancel,
  * long enough to outlast a full second `install()` round-trip through the
  * five-view shell. Rom 201 (Pac-Man) is small and used only to prove
- * queuing: its
- * own download slot never opens until 301's does, regardless of its size.
+ * queuing: its own download slot never opens until 301's does, regardless
+ * of its size.
  *
  * The queue hands out entry ids in strict admission order and never reuses
  * one (see grid-core/src/library/queue.rs's `alloc_id`), so across this
  * spec's one fresh app instance the ids are deterministic: 1 = rom 301's
  * first install, 2 = rom 201's install, 3 = rom 301's retried install.
+ *
+ * The redesign (design §8) splits the view into three stacked segments and
+ * gives every row a sparkline panel. Sampling is once per wall-clock second
+ * and WebDriver round trips are hundreds of milliseconds, so nothing here
+ * asserts a sample count or a drawn path — only that the graph element with
+ * its two series exists and that rows sit in the right segment.
  */
 describe('downloads', () => {
   before(async () => {
@@ -86,7 +96,21 @@ describe('downloads', () => {
     await showDownloads();
   }
 
-  it('starts the first install downloading and queues the second behind it', async () => {
+  /** The row with `id`, scoped to the segment it must live in right now. */
+  function rowIn(segment: 'active' | 'queued' | 'completed', id: number) {
+    return $(testId(`downloads-seg-${segment}`)).$(testId(`download-row-${id}`));
+  }
+
+  it('renders the three segments, their counts and the legend before anything runs', async () => {
+    await expect($(testId('downloads-legend'))).toHaveText(LEGEND);
+    for (const seg of ['active', 'queued', 'completed'] as const) {
+      await expect($(testId(`downloads-seg-${seg}`))).toExist();
+      await expect($(testId(`downloads-seg-count-${seg}`))).toHaveText('0');
+    }
+    await expect($(testId('downloads-graph-key'))).toExist();
+  });
+
+  it('starts the first install downloading in Active and queues the second in Queued', async () => {
     await install('game-card-301');
     await $(testId('download-row-1')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
@@ -99,6 +123,10 @@ describe('downloads', () => {
         timeoutMsg: 'the throttled download for rom 301 never entered the downloading state',
       },
     );
+    await expect(rowIn('active', 1)).toExist();
+    await expect($(testId('downloads-seg-count-active'))).toHaveText('1');
+    // A base game carries no kind badge (design §8: "base none").
+    expect(await $(testId('download-kind-1')).isExisting()).toBe(false);
 
     await install('game-card-201');
     await $(testId('download-row-2')).waitForExist({
@@ -106,15 +134,38 @@ describe('downloads', () => {
       timeoutMsg: 'no download-row appeared for the second install',
     });
     await expect($(testId('download-detail-2'))).toHaveText('Queued');
+    await expect(rowIn('queued', 2)).toExist();
+    await expect($(testId('downloads-seg-count-queued'))).toHaveText('1');
   });
 
-  it('shows the live transfer on the footer strip and opens the view from it', async () => {
+  it('gives every row a sparkline panel with a network and a disk series', async () => {
+    for (const id of [1, 2]) {
+      const graph = $(testId(`download-graph-${id}`));
+      await expect(graph).toExist();
+      expect(await graph.getTagName()).toBe('svg');
+      const paths = await graph.$$('path');
+      expect(paths.length).toBe(2);
+      expect(await paths[0].getAttribute('class')).toContain('net');
+      expect(await paths[1].getAttribute('class')).toContain('disk');
+      await expect($(testId(`download-graph-caption-${id}`))).toExist();
+    }
+  });
+
+  it('shows the live transfer on the footer strip with its sparkline and opens the view from it', async () => {
     const strip = $(testId('downloads-footer'));
     await strip.waitForDisplayed({
       timeout: INSTALL_TIMEOUT,
       timeoutMsg: 'the downloads strip never appeared for a live transfer',
     });
-    expect(await strip.getText()).toContain('⬇ ');
+    // `⬇ <title> · <percent> · <speed>` (design §3). The percent is a
+    // number while the total is known and an em dash otherwise; the speed
+    // slot is a byte rate while downloading.
+    expect(await $(testId('downloads-aggregate')).getText()).toMatch(
+      /^⬇ Big Arcade Game · (\d{1,3}%|—) · [\d.]+ [KMGT]?B\/s$/,
+    );
+    await expect($(testId('downloads-footer-graph'))).toExist();
+    expect(await strip.getText()).toContain('Open Downloads');
+
     await $(testId('nav-library')).click();
     await strip.click();
     await $(testId('downloads-view')).waitForDisplayed({
@@ -123,7 +174,7 @@ describe('downloads', () => {
     });
   });
 
-  it('cancels the active throttled download', async () => {
+  it('cancels the active throttled download and moves it to Completed', async () => {
     await $(testId('download-action-cancel-1')).click();
     await browser.waitUntil(
       async () => (await $(testId('download-detail-1')).getText()) === 'Cancelled',
@@ -132,6 +183,10 @@ describe('downloads', () => {
         timeoutMsg: 'the cancelled download never showed the Cancelled status',
       },
     );
+    // Only the row's segment is asserted here, not the Completed count:
+    // cancelling frees the download slot, and entry 2 (small, unthrottled
+    // past the chunk gap) can reach Completed within a WebDriver round trip.
+    await expect(rowIn('completed', 1)).toExist();
   });
 
   it('retries the cancelled download and lets it complete', async () => {
@@ -154,6 +209,7 @@ describe('downloads', () => {
         timeoutMsg: 'the retried download never reached Completed',
       },
     );
+    await expect(rowIn('completed', 3)).toExist();
   });
 
   it('dismiss removes the completed row', async () => {
@@ -175,5 +231,7 @@ describe('downloads', () => {
       reverse: true,
       timeoutMsg: 'the downloads strip stayed visible with no live transfer left',
     });
+    await expect($(testId('downloads-seg-count-active'))).toHaveText('0');
+    await expect($(testId('downloads-seg-count-queued'))).toHaveText('0');
   });
 });
