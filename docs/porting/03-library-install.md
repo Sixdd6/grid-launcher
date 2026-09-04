@@ -1546,3 +1546,26 @@ Python behavior:
   matching the PS4 sibling at `details_view_mixin.py:1559`); the plan's paraphrase ("No Xbox 360
   {kind} content is available for this title") is superseded by the verbatim-strings rule (same
   rule that supersedes the umu-run message — doc 04).
+
+## Downloads view (rewrite only)
+
+The Rust/Tauri rewrite replaces the Python drawer with a full Downloads view (design
+§8). Three segments, stacked in this order, group the entries by status: Active
+(`downloading`, `installing`, `cancelling`), Queued (`queued`), Completed (`completed`,
+`failed`, `cancelled`). The row texts above are unchanged; the kind badge and the action
+affordance are the `kindLabel` / `actionFor` rules already ported.
+
+Each row carries a 120×38 sparkline of the last 60 seconds — network bytes per second in
+the primary colour, disk (extraction) bytes per second in teal. The samples are not an
+IPC: the frontend store folds the `downloaded_bytes` and `install_processed_bytes`
+deltas between successive `downloads-changed` snapshots into a pending delta per entry
+and, once per second, turns it into one sample (normalised to bytes per second over the
+real elapsed time). A track starts at the entry's current counters, so an app that
+comes up mid-transfer does not book the whole downloaded-so-far figure as one second's
+rate; a terminal entry's ring freezes; a dismissed entry's ring is dropped. The footer
+strip draws the current transfer's ring at 120×18.
+
+`QueueState` keeps at most 50 terminal entries (`TERMINAL_HISTORY`): every terminal
+transition — download finished, finalize finished, a queued entry cancelled, an external
+firmware row finished — drops the oldest terminal entries past the cap. Live entries are
+never counted or pruned.

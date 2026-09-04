@@ -14,8 +14,10 @@ selections survive a switch. Behind the content sits blurred background art — 
 cover of the last game viewed, at the opacity set in Settings › Appearance.
 
 A 28px download strip sits at the bottom of the window. It is hidden while nothing is
-transferring; otherwise it reads `⬇ <title> · <percent> · <speed>` and opens the
-Downloads view when clicked.
+transferring; otherwise it reads `⬇ <title> · <percent> · <speed>` beside a small
+sparkline of the current transfer's last 60 seconds (network in the primary colour, disk
+in teal) and an "Open Downloads" link. Clicking anywhere on the strip opens the Downloads
+view.
 
 # Main Sections
 There are several main sections to the application with buttons across the top bar to navigate between them:
@@ -41,7 +43,16 @@ There are several main sections to the application with buttons across the top b
   remembered as `ui.card_size_server`. Downloads and installs are queued and handled in
   the background.
 - **Discover** contains collapsible, cached recommendation sections built from the server library — Short But Fun, New on Server, Highly Rated (All-Time), Recommended for You, Browse by Genre, and Your Watchlist — with genre/platform filters and a manual refresh. Sections load in the background and fall back to the cached view when the server is unreachable.
-- **Downloads** contains a list of queued, active, installing, completed, and failed download jobs. Each entry should display status/progress details and support the appropriate action such as Cancel, Retry, or Dismiss.
+- **Downloads** is a full view, capped at 1100px and centred, with three stacked
+  segments in this order — Active (downloading, installing, cancelling), Queued, and
+  Completed (finished, failed, or cancelled) — each with a count, under the legend
+  "Active: downloading or installing · Queued: waiting for a slot · Completed: finished,
+  failed, or cancelled". Each row shows the title, a kind badge (none for a base game;
+  Update, Content, Emulator, Compat tool, or Firmware otherwise), the platform, the
+  status/progress line, a progress bar, a 120×38 sparkline panel of the last 60 seconds
+  (network in the primary colour, disk in teal, with the rate and ETA under it), and the
+  action for its state: Cancel, Retry and Dismiss, or Dismiss. A live firmware row offers
+  no action. The Completed segment keeps the last 50 entries.
 - **Emulators** contains the list of emulators used to launch games. Users can add, update, remove, and assign defaults by platform. Each emulator entry includes a name, executable path, launch arguments, save strategy, ignore rules, and optional custom save/state directories.
 - **Settings** contains the application settings arranged by panels for server connection, library path, appearance, debug options, and cloud save sync behavior.
 - **Appearance** (under Settings) chooses the theme — follow the OS, dark, or light —

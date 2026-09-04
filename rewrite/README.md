@@ -93,7 +93,7 @@ of the private bus and outlive `dbus-run-session`. A green run leaves no
 | `connect-restore` | `connect-restore-a/-b.spec.ts` | connect, then relaunch the binary against the same data dir and keyring — the session restores with no credential re-entry |
 | `library` | `library.spec.ts` | both fixture platforms render; selecting platform 1 shows its cards, including the server `name: null` game falling back to `fs_name_no_ext`; a cover `<img>` gets a real `src` and a nonzero `naturalWidth` (the regression test for the asset-protocol-scope fix); `ArrowRight` moves the focused card |
 | `install` | `install-a/-b.spec.ts` | the library-path banner appears when unset and hides once a path is saved; installing rom 101 from the details overlay reaches a `Completed` download row and an `installed` badge, and extracts `game.sfc` under the temp library dir; the badge survives a relaunch (part b); uninstalling via the details two-click removes the badge and the files; `grid-launcher.db` never contains the fixture token |
-| `downloads` | `downloads.spec.ts` | this group's mock server runs with `--throttle-ms 100` (chunked slow streaming — see `mock-romm/server.mjs`'s `e2e_throttle`) against the ~300KB "Big Arcade Game" fixture (rom 301), giving a real in-flight download to interact with: a second install queues behind the first; cancelling the active download shows `Cancelled`; retrying it reaches `Completed`; dismissing removes the row |
+| `downloads` | `downloads.spec.ts` | this group's mock server runs with `--throttle-ms 100` (chunked slow streaming — see `mock-romm/server.mjs`'s `e2e_throttle`) against the ~2MB "Big Arcade Game" fixture (rom 301), giving a real in-flight download to interact with: the three segments, their counts and the verbatim legend render before anything runs; a first install sits in Active and a second queues behind it in Queued; a base row carries no kind badge; every row has a `download-graph-<id>` svg with a network and a disk path (structure only — sampling is once per wall-clock second, so no spec asserts a sample count); the footer strip reads `⬇ Big Arcade Game · <pct> · <rate>/s` with its own sparkline and opens the view; cancelling the active download shows `Cancelled` in Completed; retrying it reaches `Completed`; dismissing removes the row |
 | `emulators` | `emulators.spec.ts` | auto-fill from autoprofile match on path basename; name and args persist; row order preserved on edit; duplicate name rejection; two-click delete; per-platform defaults persist to `config.toml` |
 | `launch` | `launch.spec.ts` | pre-seeded with one installed game and three emulator stubs; play the game (argv recorded); instant-exit stub error; broken path error; unmapped RetroArch error with the verbatim message. Each mutation through the emulators UI is confirmed written to `config.toml` before proceeding. |
 | `emulator-catalog` | `emulator-catalog.spec.ts` | open the catalog tab, install a github-provider stub (`PCSX2`, an AppImage asset) and a direct-provider stub (`Redream`, scraped from an HTML download page and extracted from tar.gz) against `mock-forge.mjs`; both drawer rows reach `Completed`, land under `Emulators/<name>-<tag>/`, and the catalog marks them installed/disabled; post-install autoconfig creates `portable.ini` next to the installed PCSX2 and writes the managed keys into `inis/PCSX2.ini` (with no `[Achievements]`/`Bios` keys, since no RA credentials are configured); PCSX2 is set as the PS2 default and launches the pre-seeded game (argv file assertion) |
@@ -164,6 +164,17 @@ These behaviors remain manual and require a desktop session + live RomM server
 - **Card sizes at width**: with the window maximised on a wide display, confirm the grid
   fills to at most 1920px and stays centred, and that Small / Medium / Large change the
   column count rather than stretching the covers.
+- **Download sparklines**: install a game large enough to run for a minute against a
+  live server. In the Downloads view confirm the row's graph grows from the right, one
+  point per second, in the primary colour during the download and in teal once the
+  install phase writes to disk; the caption under it shows the rate and an ETA that
+  counts down; the footer strip draws the same line at 120×18 and stops updating (but
+  keeps its last shape) when the row completes.
+- **Completed history**: with more than 50 finished rows (repeat a small install and
+  dismiss nothing), confirm the Completed segment holds exactly 50 and the oldest rows
+  disappear first while any active or queued row stays.
+- **Light theme graphs**: switch Settings › Appearance to Light and confirm both series
+  are legible against the row surface.
 
 ## Persisted state
 
