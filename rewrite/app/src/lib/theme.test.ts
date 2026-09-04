@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { clampFade, FADE_DEFAULT, normalizeTheme, resolveTheme, themeAttribute } from './theme';
+import {
+  clampFade,
+  FADE_DEFAULT,
+  normalizeTheme,
+  resolveTheme,
+  themeAttribute,
+  themeFromStorageValue,
+} from './theme';
 
 describe('normalizeTheme', () => {
   it('accepts the three stored spellings', () => {
@@ -51,5 +58,18 @@ describe('clampFade', () => {
   it('rounds fractional slider values and falls back on garbage', () => {
     expect(clampFade(30.6)).toBe(31);
     expect(clampFade(Number.NaN)).toBe(FADE_DEFAULT);
+  });
+});
+
+describe('themeFromStorageValue', () => {
+  it('maps the two explicit spellings straight through', () => {
+    expect(themeFromStorageValue('dark')).toBe('dark');
+    expect(themeFromStorageValue('light')).toBe('light');
+  });
+  it('returns null for missing, garbage, or "system" — nothing to pre-apply', () => {
+    expect(themeFromStorageValue(null)).toBeNull();
+    expect(themeFromStorageValue('')).toBeNull();
+    expect(themeFromStorageValue('system')).toBeNull();
+    expect(themeFromStorageValue('Dark')).toBeNull();
   });
 });

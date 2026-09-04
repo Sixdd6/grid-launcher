@@ -40,3 +40,22 @@ export function clampFade(value: number): number {
   if (!Number.isFinite(value)) return FADE_DEFAULT;
   return Math.min(FADE_MAX, Math.max(0, Math.round(value)));
 }
+
+/**
+ * localStorage key mirroring the last applied explicit theme, so the app
+ * can paint the right scheme before the config round-trip finishes (index.html
+ * reads the same key inline, before the bundle loads). The mirror is a hint
+ * only — the config from `api.getUiSettings()` is still authoritative once it
+ * arrives.
+ */
+export const THEME_STORAGE_KEY = 'grid.ui.theme';
+
+/**
+ * Maps a raw `localStorage.getItem(THEME_STORAGE_KEY)` result to the explicit
+ * theme it names, or `null` when there is nothing worth pre-applying — the
+ * value is missing, garbage, or "system" (the media query already renders
+ * that case correctly with no attribute at all).
+ */
+export function themeFromStorageValue(raw: string | null): ResolvedTheme | null {
+  return raw === 'dark' || raw === 'light' ? raw : null;
+}

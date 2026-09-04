@@ -8,6 +8,8 @@ import {
   normalizeTheme,
   resolveTheme,
   themeAttribute,
+  themeFromStorageValue,
+  THEME_STORAGE_KEY,
   type ResolvedTheme,
   type ThemeChoice,
 } from '../theme';
@@ -30,11 +32,31 @@ export const uiSettings = {
   },
 };
 
+/** Best-effort write of the localStorage hint that index.html reads inline. */
+function mirrorTheme(choice: ThemeChoice): void {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, choice);
+  } catch {
+    // No storage (private mode, disabled): the hint is an optimization,
+    // not a requirement — the config load still resolves the theme.
+  }
+}
+
+/** Reads the mirrored hint back, tolerating a missing/blocked localStorage. */
+function readStoredTheme(): ResolvedTheme | null {
+  try {
+    return themeFromStorageValue(localStorage.getItem(THEME_STORAGE_KEY));
+  } catch {
+    return null;
+  }
+}
+
 /** The single writer of `<html data-theme>`. */
 function applyTheme(choice: ThemeChoice): void {
   const attribute = themeAttribute(choice);
   if (attribute === null) delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = attribute;
+  mirrorTheme(choice);
 }
 
 /**
@@ -43,6 +65,13 @@ function applyTheme(choice: ThemeChoice): void {
  * plain function (not a promise of one) so `$effect` teardown is trivial.
  * A failed load is NOT surfaced: the defaults are a perfectly usable
  * shell, and a missing config is the normal first-run case.
+ *
+ * The `api.getUiSettings()` round-trip is IPC + disk, not one frame, so an
+ * explicit theme is pre-applied synchronously from the localStorage mirror
+ * before that `await` — otherwise the shell paints under whichever scheme
+ * `prefers-color-scheme` and the light defaults produce, then flips once the
+ * config arrives. The mirror is reconciled against the config value once it
+ * loads, applying again only if the two disagree.
  */
 export async function initUiSettings(): Promise<() => void> {
   const media = window.matchMedia('(prefers-color-scheme: dark)');
@@ -52,14 +81,20 @@ export async function initUiSettings(): Promise<() => void> {
   };
   media.addEventListener('change', onChange);
 
+  const hint = readStoredTheme();
+  if (hint !== null) {
+    state.theme = hint;
+    applyTheme(hint);
+  }
+
   try {
     const stored = await api.getUiSettings();
     state.theme = normalizeTheme(stored.theme);
     state.backgroundFade = clampFade(stored.background_fade);
   } catch {
-    // Defaults already in `state`.
+    // Defaults/mirror already in `state`.
   }
-  applyTheme(state.theme);
+  if (state.theme !== hint) applyTheme(state.theme);
 
   return () => media.removeEventListener('change', onChange);
 }
@@ -69,6 +104,7 @@ export async function setTheme(choice: ThemeChoice): Promise<void> {
   state.theme = choice;
   applyTheme(choice);
   await api.setUiSettings({ theme: choice, background_fade: state.backgroundFade });
+  mirrorTheme(choice);
 }
 
 /** Slider drag: updates the live preview without touching the config. */
@@ -80,4 +116,5 @@ export function previewBackgroundFade(value: number): void {
 export async function commitBackgroundFade(value: number): Promise<void> {
   previewBackgroundFade(value);
   await api.setUiSettings({ theme: state.theme, background_fade: state.backgroundFade });
+  mirrorTheme(state.theme);
 }

@@ -5,6 +5,15 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>app</title>
+    <!-- Mirrors lib/theme.ts's THEME_STORAGE_KEY: paints the last-known
+         explicit theme before the bundle loads, so a non-"system" choice
+         does not flash the wrong scheme while the config round-trips. -->
+    <script>
+      try {
+        var t = localStorage.getItem('grid.ui.theme');
+        if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="app"></div>
