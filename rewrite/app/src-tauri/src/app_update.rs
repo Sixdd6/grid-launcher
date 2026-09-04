@@ -17,9 +17,10 @@ pub const LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/Sixdd6/grid-launcher/releases/latest";
 /// The only part of [`LATEST_RELEASE_URL`] that may reach a log line.
 const LATEST_RELEASE_HOST: &str = "api.github.com";
-/// The most release JSON that will be decoded. A `releases/latest` payload is
-/// a few KiB; anything past this is not the endpoint we asked for, and
-/// `serde_json` would otherwise be handed however much the peer sent.
+/// The most release JSON that will be read. A `releases/latest` payload is a
+/// few KiB; anything past this is not the endpoint we asked for. Enforced
+/// while the body streams in, so a peer that answers with an endless
+/// response cannot make this process buffer it, let alone parse it.
 const MAX_RELEASE_BODY: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -124,23 +125,36 @@ async fn fetch_notice_from(
     url: &str,
     current: &str,
 ) -> Option<AppUpdateNotice> {
-    let response = match client.get(url, true).await {
+    let mut response = match client.get(url, true).await {
         Ok(response) => response,
         Err(_) => {
             tracing::debug!("self-update check: request to {LATEST_RELEASE_HOST} failed");
             return None;
         }
     };
-    let body = match response.bytes().await {
-        Ok(body) => body,
-        Err(_) => {
-            tracing::debug!("self-update check: response from {LATEST_RELEASE_HOST} did not read");
-            return None;
+    // Chunk by chunk rather than `bytes()`: the cap has to stop the READ, not
+    // just the parse, or an endless body is buffered in full before anyone
+    // objects. Dropping `response` here closes the connection.
+    let mut body: Vec<u8> = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                if body.len() + chunk.len() > MAX_RELEASE_BODY {
+                    tracing::debug!(
+                        "self-update check: release body from {LATEST_RELEASE_HOST} over the cap"
+                    );
+                    return None;
+                }
+                body.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            Err(_) => {
+                tracing::debug!(
+                    "self-update check: response from {LATEST_RELEASE_HOST} did not read"
+                );
+                return None;
+            }
         }
-    };
-    if body.len() > MAX_RELEASE_BODY {
-        tracing::debug!("self-update check: release body from {LATEST_RELEASE_HOST} over the cap");
-        return None;
     }
     let release: LatestRelease = match serde_json::from_slice(&body) {
         Ok(release) => release,
@@ -250,8 +264,9 @@ mod tests {
     }
 
     /// The cap exists so a peer that answers the update check with an
-    /// endless body cannot hand `serde_json` all of it. Valid JSON, so only
-    /// the size can be what rejects it.
+    /// endless body cannot make this process buffer it: the read is aborted
+    /// as soon as the running total passes the cap. Valid JSON, so only the
+    /// size can be what rejects it.
     #[tokio::test]
     async fn an_oversized_body_is_no_notice() {
         let server = MockServer::start().await;
