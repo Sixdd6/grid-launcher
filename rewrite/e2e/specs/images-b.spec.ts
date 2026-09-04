@@ -84,6 +84,13 @@ describe('images (b): offline startup, cached cover, retry, replenish', () => {
     });
     expect(res.ok).toBe(true);
 
+    // Reconnect lives inside the session chip's menu (Shell.svelte), not as
+    // a standalone button: the chip has to be opened first.
+    await $(testId('session-chip')).click();
+    await $(testId('session-retry')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'session-retry never appeared in the session menu',
+    });
     await $(testId('session-retry')).click();
 
     await browser.waitUntil(

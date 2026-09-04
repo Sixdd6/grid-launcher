@@ -24,7 +24,7 @@ const testId = (id: string) => `[data-testid="${id}"]`;
  * (grid-core/src/launch/native.rs) resolves to that stub and the launch it
  * records is the real argv the app built.
  *
- * Rom 702 exists only for the Cancel smoke: its ~300KB archive carries an
+ * Rom 702 exists only for the Cancel smoke: its ~2MB archive carries an
  * `e2e_throttle` on its fixture file entry (mock-romm/server.mjs), so that
  * ONE download streams slowly enough to be cancelled mid-flight while every
  * other install in this group still runs at full speed.

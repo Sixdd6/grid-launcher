@@ -93,8 +93,17 @@ const PNG_1X1_BASE64 =
  * throttled streaming (see THROTTLE_CHUNK_BYTES below) takes a comfortable,
  * multi-chunk amount of wall-clock time — long enough for the downloads E2E
  * spec to observe an in-flight download and cancel it before it completes.
+ *
+ * Sized at ~2MB (rather than the ~300KB this used to be) because the window
+ * has to outlast a full second `install()` round-trip through the five-view
+ * shell — nav click, view-displayed wait, card click, details-panel wait,
+ * install click, close click, details-panel-gone wait, nav-downloads click,
+ * downloads-view wait — which measured 1.3–1.7s end to end on a slow
+ * WebKitGTK host even though no single step is slow on its own. At the old
+ * 300KB size (~1.4s of effective throttle) that round-trip alone could race
+ * the transfer to completion before the spec ever observed "Queued".
  */
-const BIG_CONTENT_BYTES = 300 * 1024;
+const BIG_CONTENT_BYTES = 2 * 1024 * 1024;
 
 /**
  * The PS3 title id every PS3 fixture carries, both as a directory name and

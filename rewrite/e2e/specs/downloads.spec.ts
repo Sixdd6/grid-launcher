@@ -15,9 +15,12 @@ const testId = (id: string) => `[data-testid="${id}"]`;
  * Stage `downloads`: this group's mock server is started with
  * `--throttle-ms 100` (see rewrite/scripts/e2e.sh's mock_args_for_group),
  * so content requests stream in ~20KB chunks with a 100ms gap between them.
- * Rom 301 ("Big Arcade Game", ~300KB) is the fixture sized to actually span
- * several of those chunks — a comfortable, real in-flight download window
- * to cancel. Rom 201 (Pac-Man) is small and used only to prove queuing: its
+ * Rom 301 ("Big Arcade Game", ~2MB — see mock-romm/server.mjs's
+ * `BIG_CONTENT_BYTES`) is the fixture sized to actually span several of
+ * those chunks — a comfortable, real in-flight download window to cancel,
+ * long enough to outlast a full second `install()` round-trip through the
+ * five-view shell. Rom 201 (Pac-Man) is small and used only to prove
+ * queuing: its
  * own download slot never opens until 301's does, regardless of its size.
  *
  * The queue hands out entry ids in strict admission order and never reuses
