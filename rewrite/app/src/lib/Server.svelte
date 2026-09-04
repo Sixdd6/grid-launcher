@@ -144,6 +144,10 @@
     firmwareRequested = true;
     headerError = null;
     api.installFirmwareForPlatform(id, activePlatformName).catch((e) => {
+      // Same staleness guard as the status fetch: a rejection that arrives
+      // after the user moved on belongs to the platform it was asked about,
+      // not to whichever one is on screen now.
+      if (activePlatform !== id) return;
       // The command's own message, verbatim. grid-core's command errors name
       // no path and carry no token, and nothing is appended to them here.
       firmwareRequested = false;
