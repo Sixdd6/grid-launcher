@@ -72,8 +72,9 @@ pub fn is_retroarch_name(name: &str) -> bool {
 /// The predicate takes this rather than the `retroarch_cores` config map
 /// (design D-RC-1): what a RetroArch build can play is decided by the core
 /// files on disk, not by what the user happened to save. The app layer
-/// passes a closure that also knows the platform's server slug; grid-core's
-/// own call sites, which have no slug, pass [`installed_core_resolver`].
+/// passes a closure over the platform list it is asking about; grid-core's
+/// own call sites hold no slug map and pass [`installed_core_resolver`],
+/// which reads the process-wide slug registry instead.
 pub type CoreResolver<'a> = &'a dyn Fn(&EmulatorEntry, &str) -> Vec<String>;
 
 /// The production [`CoreResolver`] for callers that hold no slug map of
@@ -103,7 +104,14 @@ pub fn slug_core_resolver(
     slugs: &BTreeMap<String, String>,
 ) -> impl Fn(&EmulatorEntry, &str) -> Vec<String> + '_ {
     move |entry: &EmulatorEntry, platform: &str| -> Vec<String> {
-        let slug = slugs.get(platform).cloned().unwrap_or_default();
+        // The predicate hands over a trimmed name; the map is keyed on the
+        // server's raw spelling, so match on the trimmed form of both.
+        let wanted = platform.trim();
+        let slug = slugs
+            .iter()
+            .find(|(name, _)| name.trim() == wanted)
+            .map(|(_, slug)| slug.clone())
+            .unwrap_or_default();
         crate::autoconfig::installed_compatible_cores(platform, &slug, entry)
     }
 }
@@ -602,5 +610,28 @@ mod tests {
             &emulators, &defaults, "GameCube", &profiles, &no_cores,
         );
         assert_eq!(name, "Dolphin");
+    }
+
+    #[test]
+    fn slug_core_resolver_matches_padded_map_keys_on_the_trimmed_name() {
+        // The predicate passes a trimmed platform name; a map keyed on the
+        // server's padded spelling must still yield the slug (final review G3).
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("retroarch");
+        std::fs::write(&exe, b"").unwrap();
+        let cores = dir.path().join("cores");
+        std::fs::create_dir_all(&cores).unwrap();
+        for ext in ["so", "dll", "dylib"] {
+            std::fs::write(cores.join(format!("pcsx2_libretro.{ext}")), b"").unwrap();
+        }
+        let ra = entry("RetroArch", exe.to_str().unwrap());
+
+        let mut slugs = BTreeMap::new();
+        slugs.insert(" PlayStation 2 ".to_string(), "ps2".to_string());
+        let resolver = slug_core_resolver(&slugs);
+
+        // "PlayStation 2" has no fuzzy hit (best Jaccard 2/3 < 0.7), so only
+        // the slug path can find the installed core.
+        assert_eq!(resolver(&ra, "PlayStation 2"), vec!["pcsx2".to_string()]);
     }
 }

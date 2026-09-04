@@ -706,9 +706,10 @@ pub async fn compatible_emulators(
 }
 
 /// The installed libretro cores the core picker offers for each requested
-/// platform, keyed by platform NAME. Every platform is answered against the
-/// FIRST RetroArch entry in config order — the entry the emulator select
-/// would offer — or `[]` when there is none (design §3.3).
+/// platform, keyed by platform NAME. Each platform is answered against its
+/// saved default when that is a RetroArch entry, else the FIRST RetroArch
+/// entry in config order — the entry the emulator select would offer — or
+/// `[]` when there is none (design §3.3, final review F3).
 #[tauri::command]
 pub async fn retroarch_core_options(
     platforms: Vec<PlatformRef>,
