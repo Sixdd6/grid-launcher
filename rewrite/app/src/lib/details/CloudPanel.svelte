@@ -266,7 +266,13 @@
 
 <div data-testid="cloud-panel" class="cloud-panel">
   <div class="cloud-header">
-    <button data-testid="cloud-back" class="back" onclick={onBack} aria-label="Back to details">← Back</button>
+    <!-- No `aria-label`: it duplicated the visible word and overrode it, so
+         voice control ("click Back") did not match the button. The icon is
+         `aria-hidden`, so the visible text is the accessible name. -->
+    <button data-testid="cloud-back" class="back" onclick={onBack}>
+      <Icon name="arrowLeft" size={16} />
+      Back
+    </button>
     <h3>{panelLabel}</h3>
   </div>
 
@@ -447,9 +453,12 @@
   }
 
   .back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     font: inherit;
     padding: 4px 8px;
-    border-radius: 6px;
+    border-radius: var(--r-chip);
     border: 1px solid var(--border);
     background: transparent;
     color: var(--text);

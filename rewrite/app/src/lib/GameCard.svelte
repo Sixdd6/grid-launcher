@@ -1,5 +1,6 @@
 <script lang="ts">
   import Image from './Image.svelte';
+  import Icon from './Icon.svelte';
   import { cardBadges, UPDATE_TAG_TEXT } from './cards/badges';
   import {
     ACTION_ROW_HEIGHT_PX,
@@ -81,7 +82,7 @@
       <span data-testid={`card-platform-${badgeId}`} class="tag platform">{badges.platform}</span>
     {/if}
     {#if badges.cloud}
-      <span data-testid={`card-cloud-badge-${badgeId}`} class="cloud-badge" role="img" aria-label="Cloud saves enabled" title="Cloud saves enabled">☁</span>
+      <span data-testid={`card-cloud-badge-${badgeId}`} class="cloud-badge" role="img" aria-label="Cloud saves enabled" title="Cloud saves enabled"><Icon name="cloud" size={14} /></span>
     {/if}
 
     <!-- The gradient itself never takes a click: the band around the card
@@ -325,9 +326,9 @@
     position: absolute;
     bottom: 6px;
     right: 6px;
-    font-size: 11px;
-    line-height: 1;
-    padding: 3px 5px;
+    display: grid;
+    place-items: center;
+    padding: 3px;
     border-radius: var(--r-chip);
     background: rgba(0, 0, 0, 0.65);
     color: var(--info);

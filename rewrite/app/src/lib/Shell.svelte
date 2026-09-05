@@ -5,6 +5,7 @@
   import DownloadsFooter from './DownloadsFooter.svelte';
   import Emulators from './Emulators.svelte';
   import BackgroundArt from './BackgroundArt.svelte';
+  import Icon from './Icon.svelte';
   import Settings from './Settings.svelte';
   import Toast from './Toast.svelte';
   import { api } from './api';
@@ -99,7 +100,7 @@
 
 <header data-testid="shell-topbar" class="topbar">
   <div class="brand">
-    <span class="logo" aria-hidden="true">▦</span>
+    <span class="logo"><Icon name="grid" size={20} /></span>
     <span class="wordmark">GRID</span>
   </div>
 
@@ -233,9 +234,12 @@
     color: var(--text-h);
   }
 
+  /* Just the colour carrier for the brandmark: the `Icon` inside paints with
+     `currentColor`, and `display: flex` keeps the 20px mark from sitting on
+     the wordmark's text baseline. */
   .logo {
+    display: flex;
     color: var(--primary);
-    font-size: 18px;
   }
 
   .wordmark {
