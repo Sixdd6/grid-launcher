@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   APP_START_TIMEOUT,
+  configPath,
   dataDir,
   FIXTURE_TOKEN,
   INSTALL_TIMEOUT,
@@ -11,6 +12,16 @@ import {
 } from '../helpers/env.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
+
+/**
+ * Upper bound for the native save panel's PCGamingWiki lookup to settle.
+ * `native_save_paths` fetches the live wiki (`PCGW_API_BASE`, grid-core's
+ * pcgw.rs — there is no mock for it), which is up to two sequential requests
+ * on a 10s-timeout client, and it degrades a failure to an empty list rather
+ * than an error. Whether this host has network access or not, the panel
+ * leaves its "loading" phase within this budget.
+ */
+const PCGW_LOOKUP_TIMEOUT = 30_000;
 
 /**
  * Stage `native`: a Windows-platform ("native") game, which grid-core
@@ -97,6 +108,16 @@ describe('native', () => {
     await expect($(testId('details-install'))).toHaveText('Install App');
   });
 
+  it('states no emulator launch target for a native game', async () => {
+    // User ruling 2026-09-05: a Windows/Linux game runs its own executable
+    // through a compat tool, so the popup renders no launch-target line at
+    // all rather than "No default emulator" (details/header.ts).
+    await expect($(testId('details-emulator'))).not.toExist();
+    // The line beside it is still rendered, so this proves the aside itself
+    // is present and only the emulator row is gone.
+    await expect($(testId('details-last-played'))).toExist();
+  });
+
   it('installs the game into its own home directory with a Wine prefix', async () => {
     await $(testId('details-install')).click();
     await showDownloads();
@@ -122,10 +143,13 @@ describe('native', () => {
     });
 
     // The option VALUE is the candidate's absolute path; its visible label is
-    // that path relative to the install dir the backend's shallowest
-    // candidate implies (`installDirOf`/`candidateLabel`, details/actions.ts).
-    // With one candidate that relative form is just `mygame.exe`, so the
-    // assertion that actually pins WHICH file was found is on the value.
+    // that path relative to the install directory the BACKEND reports
+    // (`NativeGameSettings.install_dir`, falling back to `installDirOf` for
+    // a row written before that field existed — NativeSettings.svelte —
+    // then rendered by `candidateLabel`, details/actions.ts). The label is
+    // therefore a display concern; the assertion that pins WHICH file was
+    // found is on the option's value, because the value is what identifies
+    // the file.
     const options = await $$(`${testId('native-settings-exe')} option`);
     expect(options.length).toBe(1);
     const value = await options[0].getValue();
@@ -138,6 +162,97 @@ describe('native', () => {
       reverse: true,
       timeoutMsg: 'the Game Settings dialog never closed after saving',
     });
+  });
+
+  /** Opens the Saves tab's native save panel for the currently open game. */
+  async function openNativeSavePanel() {
+    await $(testId('details-tab-saves')).click();
+    await $(testId('details-cloud-save-toggle')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the Manage Saves toggle never appeared for the native game',
+    });
+    await $(testId('details-cloud-save-toggle')).click();
+    await $(testId('cloud-native-status')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the native save-location section never rendered',
+    });
+    // `cloud-native-fetching` exists only while the PCGamingWiki lookup is
+    // in flight, so its disappearance IS the "loaded" phase. Every status
+    // and row assertion below reads the settled list, not the lookup's
+    // placeholder text.
+    await $(testId('cloud-native-fetching')).waitForExist({
+      timeout: PCGW_LOOKUP_TIMEOUT,
+      reverse: true,
+      timeoutMsg: 'the PCGamingWiki lookup never settled',
+    });
+  }
+
+  /**
+   * The `[native_removed_save_paths]` table of the on-disk config, sliced
+   * out so a match cannot come from the `native_manual_save_paths` table
+   * that holds the same key.
+   */
+  function removedSavePathsTable(): string {
+    const text = readFileSync(configPath(), 'utf-8');
+    const after = text.split('[native_removed_save_paths]')[1] ?? '';
+    return after.split('\n[')[0];
+  }
+
+  it('adds, lists and removes a manual native save location', async () => {
+    await openNativeSavePanel();
+
+    const manual = path.join(dataDir(), 'manual-saves');
+    await $(testId('cloud-native-path-input')).setValue(manual);
+    await $(testId('cloud-native-path-add')).click();
+
+    const row = $(`[data-testid="cloud-native-path-manual-${manual}"]`);
+    await row.waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the manual save location never appeared in the list',
+    });
+    // The row's tooltip is the path this host would really read
+    // (`native_path_entries`' expanded form), so it is never blank.
+    expect(await row.getAttribute('title')).not.toBe('');
+
+    // The Browse button opens a NATIVE folder dialog, which no WebDriver
+    // session can dismiss — assert it exists, never click it.
+    await expect($(testId('cloud-native-path-browse'))).toExist();
+
+    // "N save location(s) configured." — the count is asserted as a regex
+    // because a live PCGamingWiki answer would legitimately raise it.
+    const status = await $(testId('cloud-native-status')).getText();
+    expect(status).toMatch(/^\d+ save location\(s\) configured\.$/);
+    expect(Number(status.split(' ')[0])).toBeGreaterThanOrEqual(1);
+
+    await $(`[data-testid="cloud-native-path-remove-${manual}"]`).click();
+    await row.waitForExist({
+      timeout: PCGW_LOOKUP_TIMEOUT,
+      reverse: true,
+      timeoutMsg: 'the manual save location never disappeared after Remove',
+    });
+  });
+
+  it('persists the removal across a popup reopen', async () => {
+    const manual = path.join(dataDir(), 'manual-saves');
+
+    // The suppression list is what makes a removal survive: it is written to
+    // the config, not just to the open panel's state.
+    await browser.waitUntil(() => removedSavePathsTable().includes(manual), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the removal never reached native_removed_save_paths in the config',
+    });
+
+    await closeDetails();
+    await openDetails(701);
+    await openNativeSavePanel();
+    await expect($(`[data-testid="cloud-native-path-manual-${manual}"]`)).not.toExist();
+    // Reconciled against a real run (task 10, step 4): the fixture title
+    // "My Game" has no PCGamingWiki article, so the settled list is empty
+    // with or without network and the status line is the "none found" one.
+    // The removed row's absence above is the real subject either way.
+    await expect($(testId('cloud-native-status'))).toHaveText(
+      'No save locations found on PCGamingWiki.',
+    );
   });
 
   it('launches through the wine stub with the executable and the saved parameters', async () => {
