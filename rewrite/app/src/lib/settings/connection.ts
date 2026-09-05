@@ -28,3 +28,13 @@ export function serverLine(serverUrl: string): string {
 
 /** `_open_config_folder`'s button text (grid-launcher.py:3163), verbatim. */
 export const OPEN_CONFIG_FOLDER_LABEL = 'Open Config Folder';
+
+/**
+ * The Edit-connection form's submit gate. Mirrors the `required` attributes
+ * on `Connect.svelte`'s two fields: a URL that is more than whitespace and a
+ * non-empty secret. The secret is not trimmed — a token or password may
+ * legitimately end in one.
+ */
+export function canConnect(serverUrl: string, secret: string): boolean {
+  return serverUrl.trim() !== '' && secret !== '';
+}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canConnect,
   CREDENTIAL_STORED,
   credentialStatusLabel,
   OPEN_CONFIG_FOLDER_LABEL,
@@ -33,5 +34,18 @@ describe('serverLine', () => {
 describe('OPEN_CONFIG_FOLDER_LABEL', () => {
   it('is the reference button text verbatim', () => {
     expect(OPEN_CONFIG_FOLDER_LABEL).toBe('Open Config Folder');
+  });
+});
+
+describe('canConnect', () => {
+  it('needs a server URL and a secret', () => {
+    expect(canConnect('https://romm.example', 'tok')).toBe(true);
+    expect(canConnect('', 'tok')).toBe(false);
+    expect(canConnect('   ', 'tok')).toBe(false);
+    expect(canConnect('https://romm.example', '')).toBe(false);
+  });
+
+  it('does not trim the secret', () => {
+    expect(canConnect('https://romm.example', '  ')).toBe(true);
   });
 });
