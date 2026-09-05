@@ -923,7 +923,17 @@ Initiating a PS4 content install (grid_launcher/ui/mixins/details_view_mixin.py:
 block reasons are checked first (base game must be installed, ROM id must exist, content
 must be available); when both `update` and `dlc` are available the user picks one; the
 selected file ids become `_ps4_file_ids_csv`; the archive name is
-`<safe title>-<kind>.zip` (install_mixin.py:321); mode is `ps4_content`.
+`<safe title>-<kind>.zip` (install_mixin.py:321); mode is `ps4_content`. Python computes the
+PS4 and Xbox 360 block reasons with `_ps4_content_install_block_reason` /
+`_xbox360_content_install_block_reason` (install_mixin.py:300-318) and disables the Update/DLC
+buttons while a reason is non-empty (`game_views.py:668,687,699`). **Rust port:** the same two
+reasons are ported verbatim into `app/src/lib/details/blocked.ts`
+(`ps4ContentBlockReason`/`xbox360ContentBlockReason`/`contentBlockReason`) and rendered as a
+`title` tooltip on `details-install-update` / `details-install-dlc` — the buttons stay enabled;
+see D21 below. The primary Install button's reason has no Python equivalent string to port: it
+depends on the configured emulator list, so it comes from the backend
+`install_block_reason` command (`crates/grid-core/src/launch/selection.rs`), shown as the
+`title` on `details-install`.
 
 ### 13. Xbox 360 (Xenia) content apply
 
@@ -1434,7 +1444,7 @@ deviations already declared by the install-specials design task
 (`docs/superpowers/specs/2026-09-02-install-specials-design.md`, "Deviations" D1-D11) for
 completeness; D10 is a launch-side deviation and is recorded in doc 04 instead. D12-D18 restate
 the plan's Global Constraints rulings
-(`docs/superpowers/plans/2026-09-03-install-specials.md`, "Global Constraints"); D19 and the
+(`docs/superpowers/plans/2026-09-03-install-specials.md`, "Global Constraints"); D19-D22 and the
 Rulings below are new to this milestone's review.
 
 1. **D1 — RAR archives extract on every platform through the bundled `unrar` crate.** Python
@@ -1518,6 +1528,18 @@ Rulings below are new to this milestone's review.
     Python's plain replacement. The superseded directory is never removed. A native-platform row
     is rejected here; the app layer sends native updates through the merge path instead (see doc
     10 "Rust port deviations (milestone 9)" D-10-j for the full rationale).
+21. **D21 — install-blocked reasons are shown, not enforced.** Python disables the primary and
+    content buttons while a block reason is non-empty (`game_views.py:668,687,699`). The rewrite
+    renders the reason as a `title` tooltip on `details-install`, `details-install-update` and
+    `details-install-dlc` and leaves the button enabled; the backend refuses an impossible
+    install with its own error, which the popup already surfaces. Reason: the button's enabled
+    state would otherwise depend on the machine's emulator configuration, which is not a
+    property of the game.
+22. **D22 — `emulator_entry_has_usable_path` is not ported.** `install_block_reason`
+    (`crates/grid-core/src/launch/selection.rs`) tests only whether a configured emulator
+    supports the platform (`compatible_emulator_names_for_platform`), not whether its binary
+    exists on disk (`selection.py:310-315`). A configured-but-missing emulator therefore reports
+    no block reason and fails at launch instead.
 
 ### Rulings on open questions
 

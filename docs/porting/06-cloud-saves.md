@@ -750,6 +750,30 @@ extension, so screenshot assets returned by the server are never treated as stat
   `%USERPROFILE%\Documents`, return the Shell path; if it is *under* it, splice the
   remainder onto the Shell path (grid_launcher/library/cloud_transfer.py:532).
 
+### Save-location panel
+
+`_native_save_paths_for_game` (grid_launcher/ui/mixins/details_view_mixin.py:1060) builds the
+row list: PCGamingWiki-discovered paths first, then any manually-added path not already among
+them (`path not in cached`). `_render_native_save_path_section` (:1072-1141) turns that list
+into one row per path — a label showing the raw (unexpanded) string, `os.path.expandvars(raw)`
+as the label's tooltip, and a trash-can remove button (accessible name "Remove", tooltip
+"Remove this path") that calls `_pcgw_remove_path_for_game` and refreshes the panel
+(:1096-1126).
+
+`_refresh_native_save_panel` (:1143-1185) picks the status line, empty label and upload-button
+tooltip from the row count and the ROM id: no rows → status "No save locations found on
+PCGamingWiki.", upload disabled, tooltip "Add a save location to enable uploads."; rows present
+→ status "`<n>` save location(s) configured.", upload enabled only when a ROM id exists, tooltip
+"Upload save files from the listed locations." when it does, else "Missing ROM id for this
+game." The empty label under the section heading is "Missing ROM id for this game." or "Loading
+cloud saves from the server..." depending on the ROM id.
+
+Removing a row (`_pcgw_remove_path_for_game`, :1224-1235) deletes it from both the PCGW cache
+and the manual list for that game and persists the manual-list change to
+`config["native_manual_save_paths"]`. Adding the same raw path back through the manual field or
+Browse (`_pcgw_add_manual_path_for_game`, :1211-1222) re-adds it to the manual cache, so it
+reappears on the next refresh.
+
 ### Conflict and newer detection
 
 Two independent short circuits, both only active on automatic (pre-launch) restores.
@@ -1333,7 +1357,7 @@ porting cloud save/state sync (candidate discovery, upload/restore/retention, na
 xemu raw-disk sync, auto-sync triggers, and the desktop panel) to Rust (grid-core, the Tauri
 `cloud_service`/`commands/cloud.rs` layer, and the `app/src/lib/details/` panel). Rust paths
 are relative to `rewrite/`. D1-D3 (xemu raw-disk sync) were already declared by the xemu
-design task and are restated here for completeness; D4-D11 are new to this milestone's
+design task and are restated here for completeness; D4-D13 are new to this milestone's
 review.
 
 1. **D1 — xemu raw-disk sync replaces whole-image sync, with no fallback.** The reference
@@ -1431,6 +1455,28 @@ review.
     actionable one and must fire before anything opens the image. It has no Python original.
     Auto-upload after exit is unaffected: that path passes no active sessions, because the
     game's own session has already ended.
+
+12. **D12 — native save-path removals are persisted, not session-only.** Python's
+    `_pcgw_remove_path_for_game` (`details_view_mixin.py:1224-1235`) edits only the in-memory
+    `_pcgw_paths_cache` for a PCGW row, so the row reappears after the next PCGamingWiki lookup.
+    The rewrite records the removal in `Config::native_removed_save_paths`
+    (`crates/grid-core/src/config.rs`) and filters it out of every read through the one shared
+    `visible_native_paths` helper (`crates/grid-core/src/cloud/native.rs`), used by both the
+    panel's list command and the upload/restore paths (`crates/grid-core/src/cloud/ops/native.rs`).
+    Reason: a removal the user made deliberately must survive a restart. Adding the path back
+    through the manual field or Browse clears the suppression, so nothing is unrecoverable.
+13. **D13 — native save-path row tooltips use `resolve_native_save_dir`, not `expandvars`.**
+    Python's tooltip is `os.path.expandvars(raw)` (`details_view_mixin.py:1097`), which on Linux
+    leaves a `%APPDATA%` path unchanged. The rewrite resolves it through the same
+    `resolve_native_save_dir(raw, None, wine_prefix)` the upload and restore paths use
+    (`app/src-tauri/src/cloud_service.rs`), so the tooltip names the directory that would really
+    be read. Related fix, not a deviation: `CloudContext.wine_prefix` was hardcoded `None` at
+    both construction sites, so native upload/restore on Linux never translated
+    `%APPDATA%`/`%LOCALAPPDATA%`/`%USERPROFILE%` into the wine prefix despite
+    `crates/grid-core/src/cloud/ops/native.rs:113,207,267,271` consuming it correctly. The prefix
+    is now threaded from the matching registry row's `native_wineprefix`
+    (`crates/grid-core/src/library/registry.rs`, resolved by
+    `app/src-tauri/src/cloud_service.rs`'s `wine_prefix_from`/`wine_prefix_for`).
 
 ### Follow-the-code rulings (ported as-is)
 
