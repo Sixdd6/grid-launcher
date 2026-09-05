@@ -13,6 +13,8 @@
     serverLine,
   } from './connection';
 
+  let { active = true }: { active?: boolean } = $props();
+
   let configFolderError = $state<string | null>(null);
 
   // The reference's Settings › Server Connection panel (grid-launcher.py:
@@ -25,6 +27,9 @@
   let editUseToken = $state(true);
 
   function openEdit() {
+    // A failed edit-connect leaves `session.error` set; clear it so the old
+    // message does not greet the user on reopen.
+    session.error = null;
     // Seeded from the store's URL only. The secret is never seeded: the
     // store has never held one and the backend never returns one.
     editServerUrl = session.serverUrl;
@@ -38,6 +43,13 @@
     editing = false;
     editSecret = '';
   }
+
+  // Panes and views switch with `hidden` and never unmount (Settings.svelte,
+  // Shell.svelte), so nothing else would drop a typed secret when the user
+  // navigates away mid-edit. `closeEdit` clears it.
+  $effect(() => {
+    if (!active) closeEdit();
+  });
 
   async function submitEdit() {
     // Started, then cleared in the same tick, exactly as `Connect.svelte`
@@ -85,6 +97,7 @@
 
 {#if editing}
   <form
+    id="settings-connection-edit-form"
     data-testid="settings-connection-edit-form"
     class="edit"
     onsubmit={(e) => {
@@ -142,6 +155,8 @@
   <button
     data-testid="settings-connection-edit"
     class="secondary"
+    aria-expanded={editing}
+    aria-controls="settings-connection-edit-form"
     onclick={() => (editing ? closeEdit() : openEdit())}
   >
     {editing ? 'Close editor' : 'Edit connection'}

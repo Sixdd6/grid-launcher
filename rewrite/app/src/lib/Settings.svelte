@@ -51,7 +51,9 @@
         <div class="view-content pane-inner">
           <h2>{settingsPageLabel(p)}</h2>
           {#if p === 'connection'}
-            <ConnectionPage />
+            <!-- Page-level activation, unlike the other panes: the edit form
+                 holds a plain secret, so leaving this page must close it. -->
+            <ConnectionPage active={active && page === 'connection'} />
           {:else if p === 'cloud-saves'}
             <CloudSavesPage {active} />
           {:else if p === 'retroachievements'}
