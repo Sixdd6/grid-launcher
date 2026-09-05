@@ -1116,6 +1116,38 @@ fn ra_fan_out_rows(rows: Vec<(String, bool)>) -> Vec<RaFanOutRow> {
 /// `Config.retroachievements_username` (plain, non-secret) before the
 /// fan-out runs, so `fan_out_ra_credentials`'s own `usable()` gate decides
 /// whether anything is actually written.
+/// The blocking half both credential paths share: store-or-clear the token,
+/// write the plain username to config, then fan it out to the RA-capable
+/// emulators (D2). Never returns, logs or formats the token; `token_is_blank`
+/// is computed by the caller from the plain `String` before it is wrapped,
+/// because a `SecretString` is deliberately not readable here.
+fn store_ra_credentials(
+    ra_store: Arc<dyn RaTokenStore>,
+    username: String,
+    token: SecretString,
+    token_is_blank: bool,
+) -> Result<Vec<RaFanOutRow>, String> {
+    if token_is_blank {
+        ra_store.clear().map_err(err)?;
+    } else {
+        ra_store.save(&token).map_err(err)?;
+    }
+
+    // The fan-out writes emulator config files, never config.json, so it
+    // runs outside the write lock on the saved snapshot.
+    let config = modify_config(&Config::default_path(), |config| {
+        config.retroachievements_username = username.clone();
+        Ok(config.clone())
+    })?;
+
+    let ra = RaCredentials::new(username, token);
+    Ok(ra_fan_out_rows(autoconfig::fan_out_ra_credentials(
+        &config,
+        load_profiles(),
+        &ra,
+    )))
+}
+
 #[tauri::command]
 pub async fn set_retroachievements_credentials(
     state: State<'_, AppState>,
@@ -1128,25 +1160,54 @@ pub async fn set_retroachievements_credentials(
     let ra_store = state.ra_store.clone();
 
     tokio::task::spawn_blocking(move || {
-        if token_is_blank {
-            ra_store.clear().map_err(err)?;
-        } else {
-            ra_store.save(&token).map_err(err)?;
-        }
-
-        // The fan-out writes emulator config files, never config.json, so
-        // it runs outside the write lock on the saved snapshot.
-        let config = modify_config(&Config::default_path(), |config| {
-            config.retroachievements_username = trimmed_username.clone();
-            Ok(config.clone())
-        })?;
-
-        let ra = RaCredentials::new(trimmed_username, token);
-        let rows = autoconfig::fan_out_ra_credentials(&config, load_profiles(), &ra);
-        Ok(ra_fan_out_rows(rows))
+        store_ra_credentials(ra_store, trimmed_username, token, token_is_blank)
     })
     .await
     .map_err(|e| format!("set_retroachievements_credentials did not finish: {e}"))?
+}
+
+/// What [`retroachievements_login`] returns: the account name the RA server
+/// reported and the fan-out rows. NEVER the token — the only place it lands
+/// is `AppState.ra_store`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RaLoginResult {
+    pub username: String,
+    pub fan_out: Vec<RaFanOutRow>,
+}
+
+/// Username + password login (`_ra_login_clicked` / `_on_ra_login_finished`,
+/// grid-launcher.py:2705-2756). The password is wrapped in `SecretString`
+/// immediately, used once, and dropped at the end of this scope; it is never
+/// written to config, never logged, and never present in an error — the
+/// login client strips the URL from every transport failure.
+///
+/// On success the SERVER's spelling of the account name is what gets stored,
+/// matching the reference (`bundle["username"]` is `result["username"]`,
+/// which is the payload's `User`).
+#[tauri::command]
+pub async fn retroachievements_login(
+    state: State<'_, AppState>,
+    username: String,
+    password: String,
+) -> Result<RaLoginResult, String> {
+    let password = SecretString::from(password);
+    let typed_username = username.trim().to_string();
+    let ra_store = state.ra_store.clone();
+
+    let http = grid_core::retroachievements::build_http_client();
+    let login = grid_core::retroachievements::ra_login(&http, &typed_username, &password).await?;
+    let account = login.username.clone();
+
+    let fan_out = tokio::task::spawn_blocking(move || {
+        store_ra_credentials(ra_store, login.username, login.token, false)
+    })
+    .await
+    .map_err(|e| format!("retroachievements_login did not finish: {e}"))??;
+
+    Ok(RaLoginResult {
+        username: account,
+        fan_out,
+    })
 }
 
 /// The username from config and whether a token is stored — NEVER the

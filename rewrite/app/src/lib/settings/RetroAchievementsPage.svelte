@@ -2,7 +2,17 @@
   // Settings › RetroAchievements (design §10: "current form"), moved out of
   // Emulators.svelte (task-12-brief.md).
   import { api, type RaFanOutRow, type RaStatus } from '../api';
-  import { canSubmit, fanOutSummary, statusLabel } from '../emulators/retroachievements';
+  import {
+    canLogin,
+    canSubmit,
+    CREDENTIALS_CLEARED_TOAST,
+    fanOutSummary,
+    LOGIN_MISSING_FIELDS_TOAST,
+    loginFailedToast,
+    loginToast,
+    statusLabel,
+  } from '../emulators/retroachievements';
+  import { pushToast } from '../stores/toasts.svelte';
 
   let { active = true }: { active?: boolean } = $props();
 
@@ -16,6 +26,10 @@
   let raResultLine = $state<string | null>(null);
   let raSavePending = $state(false);
   let raClearPending = $state(false);
+  // Write-only, like the token field: never seeded, never read back, blanked
+  // the moment the login resolves either way.
+  let raPassword = $state('');
+  let raLoginPending = $state(false);
 
   function errorMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
@@ -47,13 +61,40 @@
     }
   }
 
+  async function handleRaLogin() {
+    if (!canLogin(raUsername, raPassword)) {
+      pushToast(LOGIN_MISSING_FIELDS_TOAST, 'error');
+      return;
+    }
+    raError = null;
+    raResultLine = null;
+    raLoginPending = true;
+    try {
+      const result = await api.retroachievementsLogin(raUsername, raPassword);
+      raPassword = '';
+      raToken = '';
+      raResultLine = fanOutSummary(result.fan_out);
+      pushToast(loginToast(result.username));
+      await refreshRaStatus();
+    } catch (err) {
+      raPassword = '';
+      const message = errorMessage(err);
+      raError = message;
+      pushToast(loginFailedToast(message), 'error');
+    } finally {
+      raLoginPending = false;
+    }
+  }
+
   async function handleRaClear() {
     raError = null;
     raResultLine = null;
     raClearPending = true;
     try {
       await api.clearRetroachievementsCredentials();
+      raPassword = '';
       raToken = '';
+      pushToast(CREDENTIALS_CLEARED_TOAST);
       await refreshRaStatus();
     } catch (err) {
       raError = errorMessage(err);
@@ -80,6 +121,15 @@
     <input data-testid="ra-username" bind:value={raUsername} autocomplete="username" />
   </label>
   <label>
+    Password
+    <input
+      data-testid="ra-password"
+      type="password"
+      bind:value={raPassword}
+      autocomplete="current-password"
+    />
+  </label>
+  <label>
     Token
     <input
       data-testid="ra-token"
@@ -91,6 +141,14 @@
   {#if raError}<p data-testid="ra-error" class="error" role="alert">{raError}</p>{/if}
   {#if raResultLine}<p class="hint">{raResultLine}</p>{/if}
   <div class="form-actions">
+    <button
+      data-testid="ra-login"
+      type="button"
+      onclick={handleRaLogin}
+      disabled={raLoginPending || !canLogin(raUsername, raPassword)}
+    >
+      {raLoginPending ? 'Logging in…' : 'Log In'}
+    </button>
     <button
       data-testid="ra-save"
       type="submit"

@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { RaFanOutRow, RaStatus } from '../api';
-import { canSubmit, fanOutSummary, statusLabel } from './retroachievements';
+import {
+  canLogin,
+  canSubmit,
+  CREDENTIALS_CLEARED_TOAST,
+  fanOutSummary,
+  LOGIN_MISSING_FIELDS_TOAST,
+  loginFailedToast,
+  loginToast,
+  statusLabel,
+} from './retroachievements';
 
 describe('canSubmit', () => {
   it('requires both fields', () => {
@@ -45,5 +54,27 @@ describe('fanOutSummary', () => {
   it('reports no changes', () => {
     expect(fanOutSummary([row('RetroArch', false), row('PCSX2', false)])).toBe('No changes');
     expect(fanOutSummary([])).toBe('No changes');
+  });
+});
+
+describe('canLogin', () => {
+  it('needs both fields', () => {
+    expect(canLogin('six', 'pw')).toBe(true);
+    expect(canLogin('', 'pw')).toBe(false);
+    expect(canLogin('six', '')).toBe(false);
+    expect(canLogin('   ', '   ')).toBe(false);
+  });
+
+  it('does not trim the password, which may legitimately have spaces', () => {
+    expect(canLogin('six', '  ')).toBe(true);
+  });
+});
+
+describe('the RetroAchievements toast texts', () => {
+  it('are the reference strings verbatim', () => {
+    expect(LOGIN_MISSING_FIELDS_TOAST).toBe('Enter both username and password.');
+    expect(loginToast('Sixdd6')).toBe('Logged in as Sixdd6');
+    expect(loginFailedToast('Invalid credentials')).toBe('RA login failed: Invalid credentials');
+    expect(CREDENTIALS_CLEARED_TOAST).toBe('RetroAchievements credentials cleared.');
   });
 });

@@ -306,6 +306,7 @@ pub fn run() {
             commands::list_emulator_catalog,
             commands::install_emulator,
             commands::set_retroachievements_credentials,
+            commands::retroachievements_login,
             commands::get_retroachievements_status,
             commands::clear_retroachievements_credentials,
             commands::cloud::cloud_panel_info,

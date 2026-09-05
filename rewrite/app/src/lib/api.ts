@@ -154,6 +154,8 @@ export type ProfileSummary = { name: string; args: string };
 
 export type RaStatus = { username: string; token_present: boolean };
 export type RaFanOutRow = { emulator: string; changed: boolean };
+/** `retroachievements_login`'s answer. Carries no token, by construction. */
+export type RaLoginResult = { username: string; fan_out: RaFanOutRow[] };
 
 export type CatalogEntry = {
   name: string;
@@ -396,6 +398,13 @@ export const api = {
   installEmulator: (sourceId: string) => invoke<void>('install_emulator', { sourceId }),
   setRetroachievementsCredentials: (username: string, token: string) =>
     invoke<RaFanOutRow[]>('set_retroachievements_credentials', { username, token }),
+  /**
+   * Username + password login. The password crosses IPC once and is stored
+   * nowhere; the token it yields goes straight to the OS keyring and is
+   * never part of this answer.
+   */
+  retroachievementsLogin: (username: string, password: string) =>
+    invoke<RaLoginResult>('retroachievements_login', { username, password }),
   getRetroachievementsStatus: () => invoke<RaStatus>('get_retroachievements_status'),
   clearRetroachievementsCredentials: () => invoke<void>('clear_retroachievements_credentials'),
   cloudPanelInfo: (game: InstalledGame, saveType: SaveType) =>

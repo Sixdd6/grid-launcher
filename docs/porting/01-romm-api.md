@@ -75,7 +75,7 @@ path anywhere in the client.
 
 | Service | Method | URL | Auth | Response use |
 |---------|--------|-----|------|--------------|
-| RetroAchievements login | GET | `https://retroachievements.org/dorequest.php?r=login&u=<user>&p=<password>` | credentials in query string | Reads `Success`, `User`, `Token` (`grid_launcher/server/retroachievements.py:75`) |
+| RetroAchievements login | GET | `https://retroachievements.org/dorequest.php?r=login&u=<user>&p=<password>` | credentials in query string | Reads `Success`, `User`, `Token` (`grid_launcher/server/retroachievements.py:75`). Rewrite: `crates/grid-core/src/retroachievements.rs` (`ra_login`), reached by the `retroachievements_login` command; the token goes to the keyring only and the password is never persisted |
 | RetroAchievements, authenticated | GET | `https://retroachievements.org/API/API_GetGameInfoAndUserProgress.php?u=<user>&y=<api_key>&g=<game_id>` | username + web API key in query | Reads the `Achievements` map, including per-achievement earned dates (`grid_launcher/server/retroachievements.py:99`) |
 | RetroAchievements, anonymous | GET | `https://retroachievements.org/API/API_GetGameExtended.php?g=<game_id>` | none | Same `Achievements` map, without earned dates (`grid_launcher/server/retroachievements.py:106`) |
 | PCGamingWiki page lookup | GET | `https://www.pcgamingwiki.com/w/api.php?action=query&titles=<title>&prop=info&format=json` | none | Extracts the first non-missing page id (`grid_launcher/server/pcgamingwiki.py:185`, `:190`) |
