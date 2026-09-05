@@ -40,6 +40,7 @@
   } from './emulators/pages';
   import CompatTools from './emulators/CompatTools.svelte';
   import EmulatorForm from './emulators/EmulatorForm.svelte';
+  import { emulatorNotes } from './emulators/notes';
 
   // Mounted for the whole session now that Emulators is a view, so the
   // refresh below is gated on being the visible view: navigating away and
@@ -525,6 +526,11 @@
                           </button>
                         </div>
                       </div>
+                      {#each emulatorNotes(e.name) as note (note.key)}
+                        <p data-testid={`emulator-note-${note.key}-${sanitizeName(e.name)}`} class="note">
+                          {note.text}
+                        </p>
+                      {/each}
                       {#if isRpcs3(e.name) && rpcs3Status.get(e.name)}
                         <div class="ps3-firmware">
                           <p data-testid={`emulator-ps3-firmware-note-${sanitizeName(e.name)}`} class="hint">
@@ -964,6 +970,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* Deliberately NOT `.hint` and never `.name`: `emulators.spec.ts`'s
+     `rowNames()` reads `[data-testid^="emulator-row-"] .name`, and a second
+     match per row would break it. Wraps, unlike `.args`, because the notes
+     are sentences. */
+  .note {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 11px;
+    overflow-wrap: anywhere;
   }
 
   .row-actions {
