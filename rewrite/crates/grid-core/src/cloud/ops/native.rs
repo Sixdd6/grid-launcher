@@ -14,6 +14,7 @@ use super::super::archive::{
 };
 use super::super::native::{
     native_save_paths, resolve_native_save_dir, restore_native_multi_dir_archive,
+    visible_native_paths,
 };
 use super::super::restore::{latest_server_record, stringify_id};
 use super::super::retention::prune_server_save_records;
@@ -39,9 +40,10 @@ const NO_NATIVE_CLOUD_SAVE: &str = "No cloud save found on the server for this g
 /// (`details_view_mixin.py`'s `manual_key`).
 ///
 /// `pub`, not `pub(crate)`: the app layer's `native_add_manual_save_path` /
-/// `native_remove_manual_save_path` commands (task 17) write into
-/// `config.native_manual_save_paths` under this exact key and must use the
-/// same derivation this module reads with, rather than recomputing it.
+/// `native_remove_save_path` commands (task 17) write into
+/// `config.native_manual_save_paths` and `config.native_removed_save_paths`
+/// under this exact key and must use the same derivation this module reads
+/// with, rather than recomputing it.
 pub fn manual_paths_key(game: &CloudGame) -> String {
     format!("{}__manual", game.title.trim())
 }
@@ -54,6 +56,34 @@ fn manual_paths_for<'a>(ctx: &'a CloudContext, game: &CloudGame) -> &'a [String]
         .unwrap_or(&[])
 }
 
+/// The rows the user deleted from this game's save-location list, PCGW or
+/// manual (`config.native_removed_save_paths`, same key as the manual
+/// list).
+fn removed_paths_for<'a>(ctx: &'a CloudContext, game: &CloudGame) -> &'a [String] {
+    ctx.config
+        .native_removed_save_paths
+        .get(&manual_paths_key(game))
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
+/// Every save location this game still has: PCGW rows then manual ones,
+/// minus the rows the user removed. Upload zips exactly these directories
+/// and restore targets exactly these directories, so a removed row is gone
+/// from both flows, not just from the popup's list.
+fn configured_save_paths(
+    ctx: &CloudContext,
+    game: &CloudGame,
+    pcgw_paths: &[String],
+) -> Vec<String> {
+    let (pcgw, manual) = visible_native_paths(
+        pcgw_paths,
+        manual_paths_for(ctx, game),
+        removed_paths_for(ctx, game),
+    );
+    native_save_paths(&pcgw, &manual)
+}
+
 /// `_upload_native_saves_for_game` (cloud_mixin.py:2668). The total is
 /// always 1 — one combined archive, one POST.
 pub async fn upload_native_saves_for_game(
@@ -63,7 +93,7 @@ pub async fn upload_native_saves_for_game(
     pcgw_paths: &[String],
 ) -> UploadReport {
     // 1. Configured paths (PCGW + manual).
-    let all_raw = native_save_paths(pcgw_paths, manual_paths_for(ctx, game));
+    let all_raw = configured_save_paths(ctx, game, pcgw_paths);
     if all_raw.is_empty() {
         return UploadReport::stop(CloudMessage::warning(NO_SAVE_LOCATIONS));
     }
@@ -171,7 +201,7 @@ pub async fn restore_native_cloud_save_for_game(
     record: Option<&Value>,
 ) -> (bool, Vec<CloudMessage>) {
     let windows_documents = ctx.resolve_ctx.windows_documents;
-    let all_raw = native_save_paths(pcgw_paths, manual_paths_for(ctx, game));
+    let all_raw = configured_save_paths(ctx, game, pcgw_paths);
     let fallback_dirs: Vec<PathBuf> = all_raw
         .iter()
         .map(|raw| resolve_native_save_dir(raw, windows_documents, ctx.wine_prefix))

@@ -1219,6 +1219,81 @@ async fn native_restore_supports_the_legacy_native_dir_record() {
     );
 }
 
+/// N1: removing a PCGW row suppresses it for UPLOAD, not just in the
+/// popup's list — with the game's only PCGW row removed there is nothing
+/// left to zip and the flow stops before it touches the server.
+#[tokio::test]
+async fn native_upload_skips_a_removed_pcgw_path() {
+    let server = MockServer::start().await;
+    let client = client_for(&server);
+
+    let saves = TempDir::new().unwrap();
+    write_file(&saves.path().join("profile/save1.dat"), b"x");
+    let raw = saves.path().to_string_lossy().into_owned();
+
+    let target = game("Portal", "Windows", "7");
+    let mut config = Config::default();
+    config
+        .native_removed_save_paths
+        .insert(super::native::manual_paths_key(&target), vec![raw.clone()]);
+    let mut fx = Fixture::new(config);
+    fx.pcgw = vec![raw];
+
+    let report =
+        super::native::upload_native_saves_for_game(&client, &fx.ctx(), &target, &fx.pcgw).await;
+
+    assert_eq!((report.uploaded, report.total), (0, 0));
+    assert_eq!(
+        texts(&report.messages),
+        vec![
+            "No save locations are configured for this game. Use 'Manage Saves' → 'Browse' to add one."
+        ]
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+/// N1, the other half: a removed PCGW row is not a RESTORE target either.
+/// The record names neither `native_multi_dir` nor a `native_dir:` path, so
+/// the archive lands in the first configured directory — which must be the
+/// surviving row, not the removed one.
+#[tokio::test]
+async fn native_restore_skips_a_removed_pcgw_path() {
+    let removed_dir = TempDir::new().unwrap();
+    let kept_dir = TempDir::new().unwrap();
+    let payload = zip_bytes(&[("save1.dat", b"restored")]);
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(wm_path("/api/saves/71/content"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(payload))
+        .mount(&server)
+        .await;
+    let client = client_for(&server);
+
+    let target = game("Portal", "Windows", "7");
+    let mut config = Config::default();
+    config.native_removed_save_paths.insert(
+        super::native::manual_paths_key(&target),
+        vec![removed_dir.path().to_string_lossy().into_owned()],
+    );
+    let mut fx = Fixture::new(config);
+    fx.pcgw = vec![
+        removed_dir.path().to_string_lossy().into_owned(),
+        kept_dir.path().to_string_lossy().into_owned(),
+    ];
+
+    let record = json!({"id": 71, "emulator": ""});
+    let (ok, messages) =
+        restore_native_cloud_save_for_game(&client, &fx.ctx(), &target, &fx.pcgw, Some(&record))
+            .await;
+
+    assert!(ok, "{messages:?}");
+    assert_eq!(
+        fs::read(kept_dir.path().join("save1.dat")).unwrap(),
+        b"restored"
+    );
+    assert!(!removed_dir.path().join("save1.dat").exists());
+}
+
 // --- caches / gates ----------------------------------------------------
 
 /// Doc 06 recorded quirk 9: the cloud emulator cache key omits the ROM id,

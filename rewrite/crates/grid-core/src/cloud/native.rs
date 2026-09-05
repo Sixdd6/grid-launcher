@@ -440,6 +440,40 @@ pub fn native_save_paths(pcgw: &[String], manual: &[String]) -> Vec<String> {
     combined
 }
 
+/// Splits a game's configured save locations into the rows that are still
+/// in effect. `removed` is `config.native_removed_save_paths` for the game
+/// — the user's per-row deletions (`_pcgw_remove_path_for_game`,
+/// details_view_mixin.py:1218-1230). PCGW rows cannot be deleted at the
+/// source, so suppression is how a PCGW row disappears; a suppressed row
+/// must vanish everywhere, not just from the list the popup draws, or
+/// upload would still zip it and restore would still target it.
+///
+/// The returned manual list is also de-duplicated against the visible PCGW
+/// list (`_native_save_paths_for_game`, details_view_mixin.py:1060-1065,
+/// which appends only manual paths "not in cached"), so each raw path
+/// appears exactly once across the two. That matters for the details popup,
+/// where both lists render a row with a remove button: two rows for one raw
+/// path would collide on their test ids and would double the
+/// "N save location(s) configured." count.
+pub fn visible_native_paths(
+    pcgw: &[String],
+    manual: &[String],
+    removed: &[String],
+) -> (Vec<String>, Vec<String>) {
+    let visible_pcgw: Vec<String> = pcgw
+        .iter()
+        .filter(|p| !removed.iter().any(|r| r == *p))
+        .cloned()
+        .collect();
+    let visible_manual: Vec<String> = manual
+        .iter()
+        .filter(|p| !removed.iter().any(|r| r == *p))
+        .filter(|p| !visible_pcgw.iter().any(|q| q == *p))
+        .cloned()
+        .collect();
+    (visible_pcgw, visible_manual)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1094,5 +1128,38 @@ mod tests {
                 "D:\\Custom\\saves".to_string(),
             ]
         );
+    }
+
+    // -------------------------------------------------------------
+    // visible_native_paths
+    // -------------------------------------------------------------
+
+    #[test]
+    fn visible_native_paths_drops_suppressed_rows_and_de_duplicates_manual_ones() {
+        let pcgw = vec![
+            "%APPDATA%\\Game\\saves".to_string(),
+            "%USERPROFILE%\\Documents\\Game".to_string(),
+        ];
+        let manual = vec![
+            // Same raw string as a PCGW row: the reference lists it once
+            // (`_native_save_paths_for_game`, details_view_mixin.py:1060-1065).
+            "%APPDATA%\\Game\\saves".to_string(),
+            "D:\\Extra\\Saves".to_string(),
+        ];
+        let removed = vec!["%USERPROFILE%\\Documents\\Game".to_string()];
+
+        let (visible_pcgw, visible_manual) = visible_native_paths(&pcgw, &manual, &removed);
+
+        assert_eq!(visible_pcgw, vec!["%APPDATA%\\Game\\saves".to_string()]);
+        assert_eq!(visible_manual, vec!["D:\\Extra\\Saves".to_string()]);
+    }
+
+    #[test]
+    fn visible_native_paths_keeps_everything_when_nothing_is_suppressed() {
+        let pcgw = vec!["%APPDATA%\\Game".to_string()];
+        let manual = vec!["D:\\Saves".to_string()];
+        let (visible_pcgw, visible_manual) = visible_native_paths(&pcgw, &manual, &[]);
+        assert_eq!(visible_pcgw, pcgw);
+        assert_eq!(visible_manual, manual);
     }
 }

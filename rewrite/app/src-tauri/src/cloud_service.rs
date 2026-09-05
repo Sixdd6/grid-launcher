@@ -33,7 +33,9 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use crate::config_write::modify_config;
-use grid_core::cloud::native::{normalize_manual_save_path, resolve_native_save_dir};
+use grid_core::cloud::native::{
+    normalize_manual_save_path, resolve_native_save_dir, visible_native_paths,
+};
 use grid_core::cloud::ops::native::manual_paths_key;
 use grid_core::cloud::ops::{self, CloudCaches, CloudContext, CloudMessage};
 use grid_core::cloud::scope::SaveScope;
@@ -483,12 +485,7 @@ impl CloudService {
         // read, so they need the same wine prefix the upload/restore paths
         // use (N14).
         let installed = blocking_installed(install).await?;
-        let wine_prefix = installed
-            .iter()
-            .find(|row| games_match_identity(&cloud_game_from_installed(row), &cloud_game))
-            .map(|row| row.native_wineprefix.trim().to_string())
-            .filter(|prefix| !prefix.is_empty())
-            .map(PathBuf::from);
+        let wine_prefix = wine_prefix_from(&installed, &cloud_game);
 
         Ok(NativeSavePathsDto {
             pcgw: native_path_entries(&visible_pcgw, wine_prefix.as_deref()),
@@ -1058,12 +1055,7 @@ impl Inputs {
     /// translated `%APPDATA%` and friends into the prefix on Linux — native
     /// upload and restore silently scanned host paths that do not exist.
     fn wine_prefix_for(&self, game: &CloudGame) -> Option<PathBuf> {
-        self.installed
-            .iter()
-            .find(|row| games_match_identity(&cloud_game_from_installed(row), game))
-            .map(|row| row.native_wineprefix.trim().to_string())
-            .filter(|prefix| !prefix.is_empty())
-            .map(PathBuf::from)
+        wine_prefix_from(&self.installed, game)
     }
 
     /// `pcgw_paths` is threaded in by the caller (Task 18: [`CloudService::cached_pcgw_paths`],
@@ -1532,30 +1524,16 @@ pub struct NativeSavePathsDto {
     pub manual: Vec<NativeSavePathEntryDto>,
 }
 
-/// The rows a native game's save-location list shows: `pcgw` minus every
-/// suppressed path, then `manual` minus every suppressed path AND minus any
-/// path the PCGW list already carries (`_native_save_paths_for_game`,
-/// details_view_mixin.py:1060-1065, which appends only manual paths "not in
-/// cached"). De-duplication matters now that both lists render a remove
-/// button: two rows for one raw path would collide on their test ids and
-/// would double the "N save location(s) configured." count.
-fn visible_native_paths(
-    pcgw: &[String],
-    manual: &[String],
-    removed: &[String],
-) -> (Vec<String>, Vec<String>) {
-    let visible_pcgw: Vec<String> = pcgw
+/// `game`'s wine prefix, from the registry row that matches it by identity.
+/// `None` when the game is not installed, or when the row has no prefix (a
+/// Windows host, or a game installed before prefixes were recorded).
+fn wine_prefix_from(installed: &[InstalledGame], game: &CloudGame) -> Option<PathBuf> {
+    installed
         .iter()
-        .filter(|p| !removed.iter().any(|r| r == *p))
-        .cloned()
-        .collect();
-    let visible_manual: Vec<String> = manual
-        .iter()
-        .filter(|p| !removed.iter().any(|r| r == *p))
-        .filter(|p| !visible_pcgw.iter().any(|q| q == *p))
-        .cloned()
-        .collect();
-    (visible_pcgw, visible_manual)
+        .find(|row| games_match_identity(&cloud_game_from_installed(row), game))
+        .map(|row| row.native_wineprefix.trim().to_string())
+        .filter(|prefix| !prefix.is_empty())
+        .map(PathBuf::from)
 }
 
 /// Builds the DTO rows for `paths`, resolving each one for display.
@@ -1603,35 +1581,6 @@ mod tests {
             format_size(1024.0 * 1024.0 * 1024.0 * 1024.0 * 1024.0),
             "1024.0 TB"
         );
-    }
-
-    #[test]
-    fn visible_native_paths_drops_suppressed_rows_and_de_duplicates_manual_ones() {
-        let pcgw = vec![
-            "%APPDATA%\\Game\\saves".to_string(),
-            "%USERPROFILE%\\Documents\\Game".to_string(),
-        ];
-        let manual = vec![
-            // Same raw string as a PCGW row: the reference lists it once
-            // (`_native_save_paths_for_game`, details_view_mixin.py:1060-1065).
-            "%APPDATA%\\Game\\saves".to_string(),
-            "D:\\Extra\\Saves".to_string(),
-        ];
-        let removed = vec!["%USERPROFILE%\\Documents\\Game".to_string()];
-
-        let (visible_pcgw, visible_manual) = visible_native_paths(&pcgw, &manual, &removed);
-
-        assert_eq!(visible_pcgw, vec!["%APPDATA%\\Game\\saves".to_string()]);
-        assert_eq!(visible_manual, vec!["D:\\Extra\\Saves".to_string()]);
-    }
-
-    #[test]
-    fn visible_native_paths_keeps_everything_when_nothing_is_suppressed() {
-        let pcgw = vec!["%APPDATA%\\Game".to_string()];
-        let manual = vec!["D:\\Saves".to_string()];
-        let (visible_pcgw, visible_manual) = visible_native_paths(&pcgw, &manual, &[]);
-        assert_eq!(visible_pcgw, pcgw);
-        assert_eq!(visible_manual, manual);
     }
 
     #[test]
