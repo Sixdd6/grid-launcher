@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { api } from './api';
   import { BACKGROUND_CYCLE_MS, CROSS_FADE_MS, cycleIndex, shouldCycle } from './background';
+  import { rememberVariant, variantPaths } from './backgroundPrefetch';
   import { clearIfBottom, initialSlotState, outgoingSlot, withNextCover } from './backgroundSlots';
   import { lastViewed } from './stores/lastViewed.svelte';
   import { uiSettings } from './stores/uiSettings.svelte';
@@ -13,13 +15,6 @@
   // opacity transitions — see `backgroundSlots.ts` for the sequencing.
   let slots = $state(initialSlotState);
 
-  // Resolved URL -> local variant path, for the process lifetime. The path is
-  // stable (the cache is content-addressed by URL) and the answer costs an
-  // IPC round trip, so re-hovering a card the user has already dwelled on
-  // must not pay for it again. Module scoped, like `lastViewed` itself, so it
-  // survives a Shell remount.
-  const variantPaths = new Map<string, string>();
-
   // Which of the subject's images is showing. Reset whenever the subject
   // changes, so a new game always starts at its first image.
   let index = $state(0);
@@ -27,9 +22,17 @@
   // new array on every read, so reading it directly in an effect or a timer
   // callback would churn arrays and never compare equal.
   let urls = $derived(lastViewed.urls);
+
+  // Declared BEFORE the fetch effect on purpose: effects flush in creation
+  // order, so `index` is back at 0 before the fetch effect below reads
+  // `current` for the new subject. Swapped, the first frame of a new game
+  // would be whatever image the previous game's cycle had reached.
   $effect(() => {
-    // Referencing `urls` is what subscribes this effect to a subject change.
-    urls;
+    // Read only to subscribe. `noteViewed` gates a re-report of the same art,
+    // so this fires when the subject's art actually changes, not on every
+    // list refresh.
+    const subjectArt = urls;
+    void subjectArt;
     index = 0;
   });
 
@@ -50,6 +53,10 @@
   });
 
   $effect(() => {
+    // Background art off (design §10): nothing is visible, so nothing is
+    // worth downloading, decoding and blurring. Turning it back on re-runs
+    // this effect, which then fetches.
+    if (uiSettings.backgroundFade === 0) return;
     const url = current;
     if (url === null) return;
     let cancelled = false;
@@ -58,6 +65,12 @@
     // change, each firing after the component may already have gone.
     let clearTimer: ReturnType<typeof setTimeout> | null = null;
 
+    // `show` both reads and writes `slots`, so every call goes through
+    // `untrack`: otherwise a memo hit — which calls it synchronously, inside
+    // the effect — would make `slots` a dependency, and the write would
+    // immediately re-run the effect whose teardown cancels the
+    // `clearIfBottom` timer it had just armed. The outgoing layer's image
+    // would then never be dropped.
     function show(path: string) {
       const src = convertFileSrc(path);
       if (slots[slots.top] === src) return; // already showing this image
@@ -71,13 +84,13 @@
 
     const memoised = variantPaths.get(url);
     if (memoised !== undefined) {
-      show(memoised);
+      untrack(() => show(memoised));
     } else {
       api
         .ensureBackgroundVariant(url)
         .then((path) => {
-          variantPaths.set(url, path);
-          if (!cancelled) show(path);
+          rememberVariant(url, path);
+          if (!cancelled) untrack(() => show(path));
         })
         .catch(() => {
           // Offline, missing, or a format this build cannot decode. User
