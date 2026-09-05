@@ -20,6 +20,13 @@
     uploadButtonLabel,
     uploadedLine,
   } from './cloud';
+  import {
+    nativePathsEmptyLabel,
+    nativePathsStatusLine,
+    nativeUploadEnabled,
+    nativeUploadTooltip,
+    type NativePathsPhase,
+  } from './nativePaths';
 
   let {
     game,
@@ -126,23 +133,26 @@
     if (nativeSave && !recordsBlocked) loadNativePaths();
   });
 
-  // `_refresh_native_save_panel` (details_view_mixin.py:1160-1179): disabled
-  // with "Add a save location to enable uploads." when there are no paths
-  // at all; otherwise gated on the rom id alone.
-  let nativePathCount = $derived((nativePaths?.pcgw.length ?? 0) + (nativePaths?.manual.length ?? 0));
-  let nativeUploadEnabled = $derived(
-    !uploadPending && !nativePathsLoading && nativePathCount > 0 && game.rom_id !== null
+  // The lookup is "loading" until the first `native_save_paths` answer
+  // lands; a failed PCGW fetch still answers (with an empty pcgw list), so
+  // this never sticks (`pcgw_paths_for_title`, cloud_service.rs:206-216).
+  let nativePhase = $derived<NativePathsPhase>(
+    nativePathsLoading || nativePaths === null ? 'loading' : 'loaded'
   );
-  let nativeUploadTooltip = $derived(
-    nativePathCount === 0
-      ? 'Add a save location to enable uploads.'
-      : game.rom_id !== null
-        ? 'Upload save files from the listed locations.'
-        : 'Missing ROM id for this game.'
+  let nativePathCount = $derived((nativePaths?.pcgw.length ?? 0) + (nativePaths?.manual.length ?? 0));
+  let nativeUploadIsEnabled = $derived(
+    nativeUploadEnabled(nativePhase, nativePathCount, game.rom_id !== null, uploadPending)
+  );
+  let nativeUploadHint = $derived(
+    nativeUploadTooltip(nativePhase, nativePathCount, game.rom_id !== null)
   );
 
-  let uploadEnabled = $derived(nativeSave ? nativeUploadEnabled : !nativeStateBlocked && panelInfo.supported && !uploadPending);
-  let uploadTooltip = $derived(nativeSave ? nativeUploadTooltip : panelInfo.supported ? '' : panelInfo.block_reason);
+  let uploadEnabled = $derived(
+    nativeSave ? nativeUploadIsEnabled : !nativeStateBlocked && panelInfo.supported && !uploadPending
+  );
+  let uploadTooltip = $derived(
+    nativeSave ? nativeUploadHint : panelInfo.supported ? '' : panelInfo.block_reason
+  );
 
   async function handleUpload() {
     uploadPending = true;
@@ -245,6 +255,7 @@
 
   {#if nativeStateBlocked}
     <p data-testid="cloud-native-states-unsupported" class="hint">Save states are not supported for native games.</p>
+    <p data-testid="cloud-native-states-note" class="hint">Only save file backups are supported for native games.</p>
   {:else}
     <button
       data-testid="cloud-upload"
@@ -317,32 +328,31 @@
         <hr data-testid="cloud-native-separator" class="native-separator" />
         <div class="native-paths">
           <h4>Save Locations</h4>
-          {#if nativePathsLoading}
-            <p class="hint">Looking up save locations…</p>
+          <p data-testid="cloud-native-status" class="hint">
+            {nativePathsStatusLine(nativePhase, nativePathCount)}
+          </p>
+          {#if nativePhase === 'loading'}
+            <p data-testid="cloud-native-fetching" class="hint">{nativePathsEmptyLabel(nativePhase)}</p>
           {:else if nativePaths}
-            {#if nativePaths.pcgw.length === 0 && nativePaths.manual.length === 0}
-              <p class="hint">No save locations found. Add one below.</p>
-            {:else}
-              <ul class="path-list">
-                {#each nativePaths.pcgw as path (path)}
-                  <li data-testid={`cloud-native-path-pcgw-${path}`}>{path}</li>
-                {/each}
-                {#each nativePaths.manual as path (path)}
-                  <li data-testid={`cloud-native-path-manual-${path}`}>
-                    <span>{path}</span>
-                    <button
-                      data-testid={`cloud-native-path-remove-${path}`}
-                      class="remove"
-                      disabled={manualPathPending}
-                      onclick={() => handleRemoveManualPath(path)}
-                      aria-label={`Remove ${path}`}
-                    >
-                      ×
-                    </button>
-                  </li>
-                {/each}
-              </ul>
-            {/if}
+            <ul class="path-list">
+              {#each nativePaths.pcgw as path (path)}
+                <li data-testid={`cloud-native-path-pcgw-${path}`}>{path}</li>
+              {/each}
+              {#each nativePaths.manual as path (path)}
+                <li data-testid={`cloud-native-path-manual-${path}`}>
+                  <span>{path}</span>
+                  <button
+                    data-testid={`cloud-native-path-remove-${path}`}
+                    class="remove"
+                    disabled={manualPathPending}
+                    onclick={() => handleRemoveManualPath(path)}
+                    aria-label={`Remove ${path}`}
+                  >
+                    ×
+                  </button>
+                </li>
+              {/each}
+            </ul>
           {/if}
           <div class="add-path">
             <input
@@ -433,7 +443,7 @@
 
   .error {
     margin: 0;
-    color: #e5484d;
+    color: var(--danger);
     font-size: 13px;
   }
 
@@ -444,7 +454,7 @@
   }
 
   .message.warn {
-    color: #e5a53a;
+    color: var(--warning);
   }
 
   .native-paths h4,
@@ -492,7 +502,7 @@
     border: none;
     border-radius: 4px;
     background: transparent;
-    color: #e5484d;
+    color: var(--danger);
     cursor: pointer;
   }
 
@@ -588,8 +598,8 @@
   }
 
   .record-actions button.danger {
-    color: #e5484d;
-    border-color: #e5484d;
+    color: var(--danger);
+    border-color: var(--danger);
   }
 
   .confirm-overlay {
