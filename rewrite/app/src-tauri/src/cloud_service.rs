@@ -55,6 +55,7 @@ use grid_core::session::SessionManager;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
+use tauri::{AppHandle, Emitter};
 use tokio::sync::{Mutex as AsyncMutex, Semaphore};
 
 /// D5: at most this many auto-uploads run at once, across every game.
@@ -320,8 +321,13 @@ impl CloudService {
         ))
     }
 
+    // The `AppHandle` for the finished-upload event pushes this one over
+    // clippy's 7-argument line; every argument is a distinct dependency the
+    // caller owns, so grouping them into a struct would only move the list.
+    #[allow(clippy::too_many_arguments)]
     pub async fn upload(
         &self,
+        app: &AppHandle,
         session: &SessionManager,
         install: Arc<InstallService>,
         launch: Arc<LaunchService>,
@@ -359,6 +365,10 @@ impl CloudService {
             save_type,
         )
         .await;
+        // The panel already renders `report.messages` inline; the toast is
+        // the same text, so a user who has scrolled the panel away still
+        // learns the result. Both come from one `upload_completion_message`.
+        emit_upload_finished(app, &cloud_game.title, &report.messages);
         Ok(UploadReportDto::from(report))
     }
 
@@ -770,6 +780,7 @@ impl CloudService {
     /// call site requires for any code that reaches `tokio::spawn`.
     pub fn install_session_finished_hook(
         self: &Arc<Self>,
+        app: AppHandle,
         launch: &Arc<LaunchService>,
         session_mgr: Arc<SessionManager>,
         install: Arc<InstallService>,
@@ -777,13 +788,14 @@ impl CloudService {
     ) {
         let cloud = self.clone();
         launch.set_session_finished_hook(Arc::new(move |session: GameSession| {
+            let app = app.clone();
             let cloud = cloud.clone();
             let session_mgr = session_mgr.clone();
             let install = install.clone();
             let config_path = config_path.clone();
             tauri::async_runtime::spawn(async move {
                 cloud
-                    .handle_session_finished(session, session_mgr, install, config_path)
+                    .handle_session_finished(app, session, session_mgr, install, config_path)
                     .await;
             });
         }));
@@ -797,6 +809,7 @@ impl CloudService {
     /// running is coalesced.
     async fn handle_session_finished(
         self: Arc<Self>,
+        app: AppHandle,
         session: GameSession,
         session_mgr: Arc<SessionManager>,
         install: Arc<InstallService>,
@@ -893,6 +906,7 @@ impl CloudService {
                     config_dir,
                     config_path,
                     key,
+                    Some(app),
                     wine_prefix,
                 )
                 .await;
@@ -930,6 +944,10 @@ impl CloudService {
         config_dir: PathBuf,
         config_path: PathBuf,
         key: String,
+        // `None` only in unit tests, which run this whole path against a
+        // mock server with no Tauri app to emit into; the session-finished
+        // hook always carries the real handle.
+        app: Option<AppHandle>,
         wine_prefix: Option<PathBuf>,
     ) {
         let now = unix_now_f64();
@@ -989,6 +1007,9 @@ impl CloudService {
         }
 
         let mut per_type: BTreeMap<SaveType, PerTypeResult> = BTreeMap::new();
+        // Kept, not dropped: these are the SAME `upload_completion_message`
+        // strings the manual panel shows, and they are what the toast says.
+        let mut messages: Vec<CloudMessage> = Vec::new();
         for save_type in plan.types.clone() {
             let report = ops::upload::upload_cloud_files_for_game(
                 &client,
@@ -998,6 +1019,7 @@ impl CloudService {
                 save_type,
             )
             .await;
+            messages.extend(report.messages.iter().cloned());
             per_type.insert(
                 save_type,
                 PerTypeResult {
@@ -1006,6 +1028,9 @@ impl CloudService {
                     failed: report.failed,
                 },
             );
+        }
+        if let Some(app) = &app {
+            emit_upload_finished(app, &game.title, &messages);
         }
 
         let uploaded_at = now_iso_z();
@@ -1459,6 +1484,62 @@ fn absolute_time_text(timestamp: f64) -> String {
     }
 }
 
+/// Emitted after EVERY cloud upload that actually ran — the manual button in
+/// the details cloud panel and the D5 auto-upload after a session exits
+/// alike. Before this, an auto upload reported only into `tracing::debug!`
+/// (`run_auto_upload`), so a user who left a game had no way to know whether
+/// their save reached the server.
+pub const CLOUD_UPLOAD_FINISHED_EVENT: &str = "cloud-upload-finished";
+
+/// The [`CLOUD_UPLOAD_FINISHED_EVENT`] payload. Token secrecy: a game title
+/// and the completion message `upload_completion_message` already produced
+/// (`crates/grid-core/src/cloud/transfer.rs:855-901`) — no path, no URL, no
+/// header, nothing derived from a credential.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CloudUploadFinished {
+    /// The game's title, trimmed. `""` when the caller has none.
+    pub title: String,
+    /// Every completion message from this run, space-joined in save-type
+    /// order (Save then State).
+    pub message: String,
+    /// `true` when ANY message was a `Warning` — a total failure and a
+    /// partial upload alike. The frontend raises an error-level toast for it.
+    pub failed: bool,
+}
+
+/// Maps one upload run's messages onto the toast payload, or `None` when the
+/// run produced nothing worth reporting (an empty plan, or only blank text).
+/// `failed` follows `MessageSeverity`, NOT a count: `upload_completion_message`
+/// already decided that a partial upload is a warning, and re-deriving it
+/// from `uploaded`/`total` here would let the toast and the panel's own line
+/// disagree about the same run.
+fn upload_finished_payload(title: &str, messages: &[CloudMessage]) -> Option<CloudUploadFinished> {
+    let text: Vec<&str> = messages
+        .iter()
+        .map(|m| m.text.trim())
+        .filter(|t| !t.is_empty())
+        .collect();
+    if text.is_empty() {
+        return None;
+    }
+    Some(CloudUploadFinished {
+        title: title.trim().to_string(),
+        message: text.join(" "),
+        failed: messages
+            .iter()
+            .any(|m| m.severity == MessageSeverity::Warning),
+    })
+}
+
+/// Emits [`CLOUD_UPLOAD_FINISHED_EVENT`]. A webview that has gone away is not
+/// an error: the upload itself already happened. Mirrors
+/// `firmware_service::emit_pass_finished`.
+fn emit_upload_finished(app: &AppHandle, title: &str, messages: &[CloudMessage]) {
+    if let Some(payload) = upload_finished_payload(title, messages) {
+        let _ = app.emit(CLOUD_UPLOAD_FINISHED_EVENT, payload);
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CloudMessageDto {
     pub text: String,
@@ -1687,6 +1768,91 @@ mod tests {
             vec![2, 1],
             "the newer record must come first"
         );
+    }
+
+    fn info(text: &str) -> CloudMessage {
+        CloudMessage {
+            text: text.to_string(),
+            severity: MessageSeverity::Info,
+        }
+    }
+
+    fn warn(text: &str) -> CloudMessage {
+        CloudMessage {
+            text: text.to_string(),
+            severity: MessageSeverity::Warning,
+        }
+    }
+
+    #[test]
+    fn upload_finished_payload_reports_a_clean_upload_as_a_success() {
+        let payload = upload_finished_payload("Chrono Trigger", &[info("Uploaded 2 save files.")])
+            .expect("a completed upload always has a message");
+        assert_eq!(payload.title, "Chrono Trigger");
+        assert_eq!(payload.message, "Uploaded 2 save files.");
+        assert!(!payload.failed);
+    }
+
+    #[test]
+    fn upload_finished_payload_reports_a_partial_upload_as_a_failure() {
+        // `upload_completion_message` marks a partial upload Warning
+        // (transfer.rs:870-885); the toast follows that severity rather than
+        // guessing from counts it was never given.
+        let payload = upload_finished_payload(
+            "Chrono Trigger",
+            &[warn("Uploaded 1 save files. Failed: b.sav")],
+        )
+        .expect("a completed upload always has a message");
+        assert_eq!(payload.message, "Uploaded 1 save files. Failed: b.sav");
+        assert!(payload.failed);
+    }
+
+    #[test]
+    fn upload_finished_payload_reports_a_total_failure() {
+        let payload = upload_finished_payload(
+            "Chrono Trigger",
+            &[warn("Cloud upload failed for all matching files.")],
+        )
+        .expect("a completed upload always has a message");
+        assert_eq!(
+            payload.message,
+            "Cloud upload failed for all matching files."
+        );
+        assert!(payload.failed);
+    }
+
+    #[test]
+    fn upload_finished_payload_joins_both_save_types_and_fails_if_either_did() {
+        // An auto upload can run Save AND State in one pass
+        // (`auto_cloud_upload_plan`), producing one message each.
+        let payload = upload_finished_payload(
+            "Chrono Trigger",
+            &[
+                info("Uploaded 2 save files."),
+                warn("Cloud upload failed for all matching files."),
+            ],
+        )
+        .expect("a completed upload always has a message");
+        assert_eq!(
+            payload.message,
+            "Uploaded 2 save files. Cloud upload failed for all matching files."
+        );
+        assert!(payload.failed);
+    }
+
+    #[test]
+    fn upload_finished_payload_is_none_when_nothing_ran() {
+        // A plan with no save types, or a stop-with-no-message: there is
+        // nothing to tell the user, so no event and no toast.
+        assert!(upload_finished_payload("Chrono Trigger", &[]).is_none());
+        assert!(upload_finished_payload("Chrono Trigger", &[info("   ")]).is_none());
+    }
+
+    #[test]
+    fn upload_finished_payload_keeps_a_blank_title_out_of_the_message() {
+        let payload = upload_finished_payload("  ", &[info("Uploaded 1 save files.")])
+            .expect("a completed upload always has a message");
+        assert_eq!(payload.title, "");
     }
 
     /// Fix round 1, FIX 5: local time, no seconds, no zone suffix, and a
@@ -1944,6 +2110,7 @@ mod tests {
             config_path.clone(),
             game_key(&game_a),
             None,
+            None,
         );
         let b = cloud.clone().run_auto_upload(
             client.clone(),
@@ -1953,6 +2120,7 @@ mod tests {
             config_dir,
             config_path,
             game_key(&game_b),
+            None,
             None,
         );
         tokio::join!(a, b);

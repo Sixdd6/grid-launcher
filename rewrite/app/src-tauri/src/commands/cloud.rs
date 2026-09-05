@@ -51,6 +51,7 @@ pub async fn cloud_records(
 
 #[tauri::command]
 pub async fn cloud_upload(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     game: CloudGameInput,
     save_type: SaveType,
@@ -60,6 +61,7 @@ pub async fn cloud_upload(
     state
         .cloud
         .upload(
+            &app,
             &state.session,
             install,
             launch,

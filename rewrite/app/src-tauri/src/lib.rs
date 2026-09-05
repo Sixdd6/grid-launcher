@@ -257,6 +257,7 @@ pub fn run() {
                 // `CloudService::install_session_finished_hook`).
                 if let Ok(install) = &state.install {
                     state.cloud.install_session_finished_hook(
+                        app.handle().clone(),
                         launch,
                         state.session.clone(),
                         install.clone(),
