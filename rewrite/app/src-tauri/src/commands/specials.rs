@@ -91,6 +91,12 @@ pub struct NativeGameSettings {
     pub parameters: String,
     pub compat_tool: String,
     pub wineprefix: String,
+    /// The game's install directory (`native::install_dir`), as a full path;
+    /// `""` when neither a live extracted directory nor a candidate archive
+    /// resolves one. Read-only display: the dialog shows it as its own row
+    /// and labels every executable candidate relative to it
+    /// (`grid_launcher/ui/dialogs.py:211-214`).
+    pub install_dir: String,
     /// Every launchable file under the install directory, as full paths, in
     /// `native::executable_candidates` order (shallowest first).
     pub candidates: Vec<String>,
@@ -119,8 +125,9 @@ pub async fn native_game_settings(
             ),
             None => Vec::new(),
         };
-        let candidates = match native::install_dir(&row, &archives) {
-            Some(dir) => native::executable_candidates(&dir),
+        let dir = native::install_dir(&row, &archives);
+        let candidates = match dir.as_ref() {
+            Some(dir) => native::executable_candidates(dir),
             None => Vec::new(),
         };
         let executable = native::resolved_executable(&row, &candidates)
@@ -131,6 +138,7 @@ pub async fn native_game_settings(
             parameters: row.native_launch_parameters.clone(),
             compat_tool: row.native_compat_tool.clone(),
             wineprefix: row.native_wineprefix.clone(),
+            install_dir: dir.map(path_string).unwrap_or_default(),
             candidates: candidates.iter().map(|p| path_string(p.clone())).collect(),
         })
     })
@@ -307,7 +315,21 @@ pub fn cancel_download_for_rom(state: State<'_, AppState>, rom_id: i64) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_compat_for_host;
+    use super::*;
+
+    #[test]
+    fn native_game_settings_carries_the_install_directory() {
+        let dto = NativeGameSettings {
+            executable: "/games/My Game/game/MyGame/mygame.exe".to_string(),
+            parameters: "--fullscreen".to_string(),
+            compat_tool: "wine".to_string(),
+            wineprefix: "/games/My Game/prefix".to_string(),
+            install_dir: "/games/My Game/game".to_string(),
+            candidates: vec!["/games/My Game/game/MyGame/mygame.exe".to_string()],
+        };
+        let json = serde_json::to_value(&dto).unwrap();
+        assert_eq!(json["install_dir"], "/games/My Game/game");
+    }
 
     #[test]
     fn a_windows_host_stores_no_compat_tool() {

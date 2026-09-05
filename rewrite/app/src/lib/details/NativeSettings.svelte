@@ -41,7 +41,10 @@
 
   let panelEl = $state<HTMLElement | null>(null);
 
-  let installDir = $derived(settings ? installDirOf(settings.candidates) : '');
+  // The backend's own answer when it has one; the shallowest candidate's
+  // directory otherwise, so a row built before `install_dir` existed still
+  // labels its options (`installDirOf`, details/actions.ts).
+  let installDir = $derived(settings?.install_dir || installDirOf(settings?.candidates ?? []));
 
   function errorMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
@@ -130,6 +133,10 @@
           No launchable executables were found in this game's install directory.
         </p>
       {:else}
+        <div class="row">
+          <span class="row-label">Install Directory</span>
+          <p data-testid="native-settings-install-dir" class="row-value">{installDir || '(not found)'}</p>
+        </div>
         <label>
           Executable
           <select data-testid="native-settings-exe" bind:value={selectedExecutable}>
@@ -140,10 +147,16 @@
         </label>
       {/if}
 
-      <label>
-        Launch parameters
-        <input data-testid="native-settings-params" bind:value={parameters} />
-      </label>
+      <div class="section">
+        <h4 class="section-title">Custom Launch Parameters</h4>
+        <label>
+          Parameters
+          <input data-testid="native-settings-params" bind:value={parameters} />
+        </label>
+        <p data-testid="native-settings-params-hint" class="hint">
+          Arguments are optional and appended when launching this game.
+        </p>
+      </div>
 
       {#if !windowsHost}
         <label>
@@ -158,10 +171,17 @@
         {#if compatToolsError}<p class="hint error-hint">{compatToolsError}</p>{/if}
       {/if}
 
-      <div class="prefix">
-        <span class="prefix-label">Wine prefix</span>
-        <p data-testid="native-settings-prefix" class="prefix-value">{settings.wineprefix || '(none)'}</p>
-      </div>
+      <!-- dialogs.py:249-251: the prefix row is built ONLY on a non-Windows
+           host — a Windows host runs the .exe directly and has no prefix —
+           and reads "(will be created at install)" before one exists. -->
+      {#if !windowsHost}
+        <div class="row">
+          <span class="row-label">Wine Prefix (read-only)</span>
+          <p data-testid="native-settings-prefix" class="row-value">
+            {settings.wineprefix || '(will be created at install)'}
+          </p>
+        </div>
+      {/if}
 
       {#if saveError}<p data-testid="native-settings-error" class="error" role="alert">{saveError}</p>{/if}
 
@@ -269,22 +289,22 @@
   }
 
   .error-hint {
-    color: #e5484d;
+    color: var(--danger);
     opacity: 1;
   }
 
-  .prefix {
+  .row {
     display: flex;
     flex-direction: column;
     gap: 4px;
   }
 
-  .prefix-label {
+  .row-label {
     font-size: 13px;
     color: var(--text);
   }
 
-  .prefix-value {
+  .row-value {
     margin: 0;
     font-size: 13px;
     color: var(--text-h);
@@ -293,8 +313,24 @@
 
   .error {
     margin: 0;
-    color: #e5484d;
+    color: var(--danger);
     font-size: 13px;
+  }
+
+  .section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+
+  .section-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-h);
   }
 
   .save {

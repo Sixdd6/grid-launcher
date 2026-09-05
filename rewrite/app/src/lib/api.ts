@@ -278,6 +278,8 @@ export type NativeGameSettings = {
   parameters: string;
   compat_tool: string;
   wineprefix: string;
+  /** The install directory the executable candidates are labelled relative to; '' when none resolved. */
+  install_dir: string;
   candidates: string[];
 };
 
