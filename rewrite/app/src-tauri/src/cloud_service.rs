@@ -896,8 +896,9 @@ impl CloudService {
 
         let cloud_for_task = self.clone();
         let key_for_trigger = key.clone();
+        let title_for_event = cloud_game.title.clone();
         self.pool.trigger(key_for_trigger, move || async move {
-            cloud_for_task
+            let messages = cloud_for_task
                 .run_auto_upload(
                     client,
                     cloud_game,
@@ -906,10 +907,14 @@ impl CloudService {
                     config_dir,
                     config_path,
                     key,
-                    Some(app),
                     wine_prefix,
                 )
                 .await;
+            // Fix round 1: emit AFTER the run returns, not inside it. The
+            // run's last act is `reload_apply_and_save`, so emitting from
+            // within it would let a listener that re-reads the sync entry
+            // on the event still see the pre-upload `last_uploaded_at`.
+            emit_upload_finished(&app, &title_for_event, &messages);
         });
     }
 
@@ -944,12 +949,8 @@ impl CloudService {
         config_dir: PathBuf,
         config_path: PathBuf,
         key: String,
-        // `None` only in unit tests, which run this whole path against a
-        // mock server with no Tauri app to emit into; the session-finished
-        // hook always carries the real handle.
-        app: Option<AppHandle>,
         wine_prefix: Option<PathBuf>,
-    ) {
+    ) -> Vec<CloudMessage> {
         let now = unix_now_f64();
         let pcgw_paths = self.cached_pcgw_paths(&game.title);
         let ctx = CloudContext {
@@ -1003,7 +1004,7 @@ impl CloudService {
         let sync_entry = sync_entry_for(&config, &key);
         let plan = auto_cloud_upload_plan(&sync_entry, save_mtime, state_mtime, include_state);
         if plan.types.is_empty() {
-            return;
+            return Vec::new();
         }
 
         let mut per_type: BTreeMap<SaveType, PerTypeResult> = BTreeMap::new();
@@ -1011,7 +1012,7 @@ impl CloudService {
         // strings the manual panel shows, and they are what the toast says.
         let mut messages: Vec<CloudMessage> = Vec::new();
         for save_type in plan.types.clone() {
-            let report = ops::upload::upload_cloud_files_for_game(
+            let mut report = ops::upload::upload_cloud_files_for_game(
                 &client,
                 &ctx,
                 &mut caches,
@@ -1019,7 +1020,7 @@ impl CloudService {
                 save_type,
             )
             .await;
-            messages.extend(report.messages.iter().cloned());
+            messages.append(&mut report.messages);
             per_type.insert(
                 save_type,
                 PerTypeResult {
@@ -1029,10 +1030,6 @@ impl CloudService {
                 },
             );
         }
-        if let Some(app) = &app {
-            emit_upload_finished(app, &game.title, &messages);
-        }
-
         let uploaded_at = now_iso_z();
         let (update, debug_segments) =
             summarize_auto_cloud_upload_result(&per_type, &plan.latest_mtimes, &uploaded_at);
@@ -1051,6 +1048,9 @@ impl CloudService {
         if let Err(e) = reload_apply_and_save(&config_path, &key, update).await {
             tracing::debug!("cloud auto-upload: config save failed: {e}");
         }
+        // The caller emits `cloud-upload-finished` from these — once per
+        // run, and only once the config save above has landed.
+        messages
     }
 }
 
@@ -1784,6 +1784,24 @@ mod tests {
         }
     }
 
+    /// Mirrors `firmware_service`'s own pin: the frontend listens on this
+    /// exact string and reads these exact keys, so a rename here is a
+    /// silent break there.
+    #[test]
+    fn the_upload_finished_event_name_and_payload_are_pinned() {
+        assert_eq!(CLOUD_UPLOAD_FINISHED_EVENT, "cloud-upload-finished");
+        let json = serde_json::to_string(&CloudUploadFinished {
+            title: "Chrono Trigger".to_string(),
+            message: "Uploaded 2 save files.".to_string(),
+            failed: false,
+        })
+        .expect("payload serialises");
+        assert_eq!(
+            json,
+            r#"{"title":"Chrono Trigger","message":"Uploaded 2 save files.","failed":false}"#
+        );
+    }
+
     #[test]
     fn upload_finished_payload_reports_a_clean_upload_as_a_success() {
         let payload = upload_finished_payload("Chrono Trigger", &[info("Uploaded 2 save files.")])
@@ -2110,7 +2128,6 @@ mod tests {
             config_path.clone(),
             game_key(&game_a),
             None,
-            None,
         );
         let b = cloud.clone().run_auto_upload(
             client.clone(),
@@ -2120,7 +2137,6 @@ mod tests {
             config_dir,
             config_path,
             game_key(&game_b),
-            None,
             None,
         );
         tokio::join!(a, b);
