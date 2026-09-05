@@ -203,7 +203,7 @@ describe('images (a): cover, screenshots, install, library grid', () => {
     });
 
     await waitForLoadedImage(
-      `${testId('library-card-101')} img`,
+      `${testId('library-card-101')} img:not(.backdrop)`,
       TRANSITION_TIMEOUT,
       'library-card-101',
     );

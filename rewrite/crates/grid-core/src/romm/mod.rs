@@ -362,10 +362,12 @@ where
 /// RomM stores IGDB's `first_release_date` in **milliseconds** (the value
 /// the user's server sends renders as year 56322 when read as seconds),
 /// while older payloads and the IGDB source use seconds. Anything above
-/// 100_000_000_000 (year 5138 in seconds) can only be milliseconds, so it
-/// is divided down; the frontend then always receives seconds.
+/// 100_000_000_000 in magnitude (year 5138 in seconds, and the same
+/// distance before 1970 for the pre-1970 titles IGDB lists) can only be
+/// milliseconds, so it is divided down; the frontend then always receives
+/// seconds.
 fn release_date_seconds(raw: i64) -> i64 {
-    if raw > 100_000_000_000 {
+    if raw.abs() > 100_000_000_000 {
         raw / 1000
     } else {
         raw
@@ -626,5 +628,11 @@ mod release_date_tests {
     #[test]
     fn zero_passes_through_unchanged() {
         assert_eq!(release_date_seconds(0), 0);
+    }
+
+    #[test]
+    fn pre_1970_milliseconds_are_divided_down_too() {
+        // 1958-06-01T00:00:00Z
+        assert_eq!(release_date_seconds(-365_558_400_000), -365_558_400);
     }
 }

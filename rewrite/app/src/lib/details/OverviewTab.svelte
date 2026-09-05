@@ -126,6 +126,10 @@
 
   .meta dd {
     margin: 0;
+    /* A grid item defaults to `min-width: auto`; one unbreakable company
+       or franchise token would otherwise widen the whole right column. */
+    min-width: 0;
+    overflow-wrap: anywhere;
     color: var(--text);
     font-size: 13px;
   }

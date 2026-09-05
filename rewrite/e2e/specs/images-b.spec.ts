@@ -49,7 +49,7 @@ describe('images (b): offline startup, cached cover, retry, replenish', () => {
       timeoutMsg: 'library-card-101 never appeared — the installed store never loaded',
     });
     await waitForLoadedImage(
-      `${testId('library-card-101')} img`,
+      `${testId('library-card-101')} img:not(.backdrop)`,
       TRANSITION_TIMEOUT,
       'library-card-101 (offline, from the disk cache)',
     );
@@ -112,7 +112,7 @@ describe('images (b): offline startup, cached cover, retry, replenish', () => {
     // then its small cover file — a detail fetch plus a cover fetch, so
     // this gets the more generous install-scale timeout.
     await waitForLoadedImage(
-      `${testId('library-card-102')} img`,
+      `${testId('library-card-102')} img:not(.backdrop)`,
       INSTALL_TIMEOUT,
       'library-card-102 (post-replenish)',
     );

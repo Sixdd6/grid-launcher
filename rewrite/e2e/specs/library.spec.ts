@@ -78,7 +78,7 @@ describe('library', () => {
   // asset protocol, not merely that a request reached the mock.
   it('renders a real, loaded cover image for a game that has one', async () => {
     await $(testId('platform-btn-1')).click();
-    const img = $(`${testId('game-card-101')} img`);
+    const img = $(`${testId('game-card-101')} img:not(.backdrop)`);
     await img.waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the cover <img> never appeared for rom 101',
@@ -88,7 +88,7 @@ describe('library', () => {
     expect(src).toBeTruthy();
 
     const naturalWidth = await browser.execute((testIdAttr: string) => {
-      const el = document.querySelector(`${testIdAttr} img`) as HTMLImageElement | null;
+      const el = document.querySelector(`${testIdAttr} img:not(.backdrop)`) as HTMLImageElement | null;
       return el?.naturalWidth ?? 0;
     }, testId('game-card-101'));
     expect(naturalWidth).toBeGreaterThan(0);
