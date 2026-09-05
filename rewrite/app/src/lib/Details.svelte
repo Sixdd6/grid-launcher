@@ -615,14 +615,10 @@
             {#if flags.length}
               <span class="chip" data-testid="details-flags">{flags.join(' · ')}</span>
             {/if}
-            {#if rating}
-              <span class="chip" data-testid="details-rating">{rating}</span>
-            {/if}
             {#if version}
               <span class="chip" data-testid="details-version">{version}</span>
             {/if}
           </div>
-          <p class="genres" data-testid="details-genres">{genres}</p>
         </header>
 
         <div class="tabs" role="tablist">
@@ -757,6 +753,7 @@
     flex-direction: column;
     gap: 12px;
     min-height: 0;
+    min-width: 0;
   }
 
   .close {
@@ -799,11 +796,11 @@
     font-size: 20px;
   }
 
-  .header-line,
-  .genres {
+  .header-line {
     margin: 0;
     color: var(--text-muted);
     font-size: 13px;
+    overflow-wrap: anywhere;
   }
 
   .head {
@@ -865,6 +862,7 @@
   .tabpanel {
     flex: 1;
     min-height: 0;
+    min-width: 0;
     overflow-y: auto;
     padding-right: 4px;
   }
