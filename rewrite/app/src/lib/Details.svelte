@@ -631,7 +631,7 @@
       <section class="right">
         <header class="head">
           <h2>{subject.name}</h2>
-          <p class="header-line" data-testid="details-header-line">{header}{#if ratingNumber !== ''} · <span class="rating"><span class="star"><Icon name="star" size={14} /></span>{ratingNumber}</span>{/if}</p>
+          <p class="header-line" data-testid="details-header-line">{header}{#if ratingNumber !== ''}{#if header !== ''} · {/if}<span class="rating"><span class="star"><Icon name="star" size={14} /></span>{ratingNumber}</span>{/if}</p>
           <div class="chips">
             {#if liveSession}
               <span data-testid="details-playing-chip" class="chip playing">Playing</span>
