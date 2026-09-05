@@ -1101,21 +1101,6 @@ fn ra_fan_out_rows(rows: Vec<(String, bool)>) -> Vec<RaFanOutRow> {
         .collect()
 }
 
-/// Saves the RetroAchievements login, then fans it out to every registered
-/// RA-capable emulator's narrow credential writer (D2). The reference
-/// re-runs the FULL per-emulator sync for every emulator instead
-/// (`_on_ra_login_finished`, grid-launcher.py:2730-2754); this only ever
-/// touches the three credential keys, via
-/// [`autoconfig::fan_out_ra_credentials`].
-///
-/// `token` is checked for blankness (post-trim) on the plain argument and
-/// then wrapped in `SecretString` immediately — the plain `String` is never
-/// read again and is dropped at the end of this scope, matching `connect`.
-/// A blank token clears the keyring entry rather than storing an empty
-/// secret; either way the username is written to
-/// `Config.retroachievements_username` (plain, non-secret) before the
-/// fan-out runs, so `fan_out_ra_credentials`'s own `usable()` gate decides
-/// whether anything is actually written.
 /// The blocking half both credential paths share: store-or-clear the token,
 /// write the plain username to config, then fan it out to the RA-capable
 /// emulators (D2). Never returns, logs or formats the token; `token_is_blank`
@@ -1148,6 +1133,21 @@ fn store_ra_credentials(
     )))
 }
 
+/// Saves the RetroAchievements login, then fans it out to every registered
+/// RA-capable emulator's narrow credential writer (D2). The reference
+/// re-runs the FULL per-emulator sync for every emulator instead
+/// (`_on_ra_login_finished`, grid-launcher.py:2730-2754); this only ever
+/// touches the three credential keys, via
+/// [`autoconfig::fan_out_ra_credentials`].
+///
+/// `token` is checked for blankness (post-trim) on the plain argument and
+/// then wrapped in `SecretString` immediately — the plain `String` is never
+/// read again and is dropped at the end of this scope, matching `connect`.
+/// A blank token clears the keyring entry rather than storing an empty
+/// secret; either way the username is written to
+/// `Config.retroachievements_username` (plain, non-secret) before the
+/// fan-out runs, so `fan_out_ra_credentials`'s own `usable()` gate decides
+/// whether anything is actually written.
 #[tauri::command]
 pub async fn set_retroachievements_credentials(
     state: State<'_, AppState>,

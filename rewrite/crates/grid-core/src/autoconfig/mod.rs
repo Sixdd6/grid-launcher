@@ -38,9 +38,10 @@ use crate::launch::selection::emulator_entry_by_name;
 /// writers that log RetroArch (and the other RA-aware emulators) into
 /// RetroAchievements.
 ///
-/// `token()` is the ONLY `expose_secret()` call site outside
-/// `secrets.rs`/`romm/mod.rs` — `scripts/check_secret_hygiene.sh` allowlists
-/// this file for exactly that reason. `Debug` is hand-written rather than
+/// `token()` is the ONLY `expose_secret()` call site in this file, and one
+/// of the few outside `secrets.rs`/`romm/mod.rs` (`retroachievements.rs` has
+/// two more) — `scripts/check_secret_hygiene.sh` allowlists this file for
+/// exactly that reason. `Debug` is hand-written rather than
 /// derived so the redaction is stated here rather than inherited from
 /// `SecretString`, and can never regress if the field type changes.
 #[derive(Clone)]

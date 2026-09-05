@@ -162,9 +162,12 @@ pub fn prepare_standalone_emulator_launch(
 /// row for a ROM-less launch, so nothing else is watching it.
 ///
 /// Python then warns 500ms later if the process already died
-/// (`_warn_if_process_exited_early`, :1662). That is not ported: the rewrite
-/// has no modal warning surface, and a deliberate deviation is better than a
-/// half-modelled one.
+/// (`_warn_if_process_exited_early`, :1662). That is deferred, not
+/// unported for lack of a surface — the toast surface exists. This command
+/// returns as soon as the process starts and keeps no handle to it, so
+/// porting `process_exited_early_message` needs either a 500ms hold here or
+/// an event fired from the reaper thread; both are out of scope for parity
+/// pass 1.
 pub fn spawn_standalone_emulator(argv: &[String], working_dir: &Path) -> Result<(), String> {
     let Some(program) = argv.first() else {
         return Err("Failed to launch emulator:\nno executable to run".to_string());

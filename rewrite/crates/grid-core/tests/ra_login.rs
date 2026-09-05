@@ -55,6 +55,38 @@ async fn login_reports_the_servers_error_message() {
 }
 
 #[tokio::test]
+async fn a_success_payload_with_a_message_still_logs_in() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "Success": true,
+            "User": "Sixdd6",
+            "Token": "FAKE-RA-TOKEN-not-real",
+            "Message": "Welcome back"
+        })))
+        .mount(&server)
+        .await;
+
+    let login = login(&server).await.unwrap();
+    assert_eq!(login.username, "Sixdd6");
+    assert_eq!(login.token.expose_secret(), "FAKE-RA-TOKEN-not-real");
+}
+
+#[tokio::test]
+async fn a_failure_payload_with_only_a_message_surfaces_it() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "Success": false,
+            "Message": "Account locked"
+        })))
+        .mount(&server)
+        .await;
+
+    assert_eq!(login(&server).await.unwrap_err(), "Account locked");
+}
+
+#[tokio::test]
 async fn login_falls_back_to_invalid_credentials_when_the_server_says_nothing() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

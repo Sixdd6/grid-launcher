@@ -18,7 +18,8 @@
 //! * [`RaLogin`]'s `Debug` can print only the account name and that
 //!   redaction — the struct carries nothing else;
 //! * this module is on `scripts/check_secret_hygiene.sh`'s `expose_secret`
-//!   allowlist for exactly one call: putting the password into the query.
+//!   allowlist for exactly two calls: the blank-password check and putting
+//!   the password into the query.
 
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::Value;
@@ -85,9 +86,9 @@ pub async fn ra_login_with_base(
         &[
             ("r", "login"),
             ("u", username),
-            // The one `expose_secret` in this crate outside secrets.rs,
-            // romm/mod.rs and autoconfig/mod.rs: the endpoint has no other
-            // way to take the password.
+            // The second of this module's two `expose_secret` calls
+            // (the other is the blank-password check above): the endpoint
+            // has no other way to take the password.
             ("p", password.expose_secret()),
         ],
     )
@@ -161,9 +162,15 @@ async fn fetch_json(
     }
 
     // retroachievements.py:40-42: a non-empty `Error` is an error even on a
-    // 200.
-    if let Some(text) = error_text(&payload) {
-        return Err(text);
+    // 200. `Message` alone (e.g. on a `Success: true` payload) is not — the
+    // `Error`‖`Message` fallback belongs only to `ra_login_with_base`'s
+    // failure branch.
+    if let Some(text) = payload
+        .get("Error")
+        .and_then(Value::as_str)
+        .filter(|t| !t.trim().is_empty())
+    {
+        return Err(text.to_string());
     }
 
     Ok(payload)

@@ -526,8 +526,11 @@ returns silently. Two recorded deviations:
 - No `_ensure_emulator_sync_settings` pre-pass (:1653) — the rewrite runs the
   autoconfig sync at add/install time, and `launch_game` does not re-run it
   either.
-- No 500 ms early-exit warning (:1662) — the rewrite has no modal warning
-  surface for it.
+- No 500 ms early-exit warning (:1662) — deferred, not unported for lack of a
+  surface (the toast surface exists). `spawn_standalone_emulator` returns as
+  soon as the process starts and keeps no handle to it, so porting
+  `process_exited_early_message` needs either a 500 ms hold or an event;
+  scoped out of parity pass 1.
 
 ### 9. Native (non-emulated) launch details
 
