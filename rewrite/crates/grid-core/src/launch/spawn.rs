@@ -83,7 +83,7 @@ pub fn prepare_emulator_launch(
     };
 
     let args = if is_retroarch {
-        normalized_retroarch_core_args(&working_dir, args)
+        normalized_retroarch_core_args(&executable, args)
     } else {
         args
     };

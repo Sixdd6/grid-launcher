@@ -108,6 +108,24 @@ pub fn emulator_dir(path: &Path) -> Option<PathBuf> {
     path.parent().map(Path::to_path_buf)
 }
 
+/// The RetroArch AppImage's portable home, `<parent>/<file name>.home/
+/// .config/retroarch`, when that directory exists. The AppImage runtime
+/// sets `$HOME` to `<AppImage>.home` whenever that directory exists next
+/// to the file, so RetroArch then reads its `retroarch.cfg` and its
+/// `cores/` from here rather than from the emulator directory. Both the
+/// core installer (cores.rs) and the launch-time core resolver
+/// (launch/template.rs) and the config writer (retroarch.rs) consult this
+/// one rule so they can never disagree about the layout.
+pub fn retroarch_portable_home(executable: &Path) -> Option<PathBuf> {
+    let parent = executable.parent()?;
+    let file_name = executable.file_name()?.to_string_lossy();
+    let home = parent
+        .join(format!("{file_name}.home"))
+        .join(".config")
+        .join("retroarch");
+    home.is_dir().then_some(home)
+}
+
 /// `lstat`-equivalent symlink check for [`join_realpath`]: any failure to
 /// stat `candidate` — not only "does not exist" — is treated as "not a
 /// symlink", mirroring CPython's broad `except OSError: is_link = False`
@@ -289,6 +307,37 @@ mod tests {
             Some(dir.join("missing")),
             "a path that does not exist is treated as a file"
         );
+    }
+
+    #[test]
+    fn portable_home_is_found_next_to_an_appimage() {
+        let temp = tempfile::tempdir().unwrap();
+        let exe = temp.path().join("RetroArch-Linux-x86_64.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        let home = temp
+            .path()
+            .join("RetroArch-Linux-x86_64.AppImage.home")
+            .join(".config")
+            .join("retroarch");
+        std::fs::create_dir_all(&home).unwrap();
+        assert_eq!(retroarch_portable_home(&exe), Some(home));
+    }
+
+    #[test]
+    fn portable_home_is_none_without_the_home_dir() {
+        let temp = tempfile::tempdir().unwrap();
+        let exe = temp.path().join("retroarch");
+        std::fs::write(&exe, b"").unwrap();
+        assert_eq!(retroarch_portable_home(&exe), None);
+    }
+
+    #[test]
+    fn portable_home_is_none_when_home_is_a_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let exe = temp.path().join("retroarch");
+        std::fs::write(&exe, b"").unwrap();
+        std::fs::write(temp.path().join("retroarch.home"), b"").unwrap();
+        assert_eq!(retroarch_portable_home(&exe), None);
     }
 
     #[test]

@@ -284,16 +284,33 @@ pub fn apply_placeholders(tokens: Vec<String>, ph: &Placeholders) -> Vec<String>
 }
 
 /// RetroArch-only post-pass (`normalized_retroarch_core_args`,
-/// launch.py:202): for every element except the last that equals `-L`,
-/// `--libretro`, or `--core`, if the following token is non-blank,
-/// relative, and `emulator_dir.join(token)` exists as a file, rewrites it
-/// to the canonicalized absolute path. Absolute paths and candidates that
-/// don't resolve to an existing file are left untouched.
-pub fn normalized_retroarch_core_args(emulator_dir: &Path, args: Vec<String>) -> Vec<String> {
+/// launch.py:202, extended for the AppImage portable-home layout): for
+/// every element except the last that equals `-L`, `--libretro`, or
+/// `--core`, if the following token is non-blank and relative, it is
+/// resolved against the AppImage's portable home
+/// (`crate::autoconfig::paths::retroarch_portable_home`) first when that
+/// directory exists, else the emulator's own directory — the AppImage
+/// runtime points `$HOME` at the portable home when present, so that is
+/// where RetroArch (and the platform-cores installer) actually put the
+/// `cores/` directory. The first search directory the token resolves to an
+/// existing file under wins and is canonicalized in. Absolute paths and
+/// tokens that resolve under no search directory are left untouched.
+pub fn normalized_retroarch_core_args(executable: &Path, args: Vec<String>) -> Vec<String> {
     let mut normalized = args;
     if normalized.is_empty() {
         return normalized;
     }
+
+    let emulator_dir = executable
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
+    let portable_home = crate::autoconfig::paths::retroarch_portable_home(executable);
+    let search_dirs: Vec<&Path> = portable_home
+        .iter()
+        .map(PathBuf::as_path)
+        .chain(std::iter::once(emulator_dir.as_path()))
+        .collect();
 
     let last_index = normalized.len() - 1;
     for index in 0..last_index {
@@ -311,10 +328,13 @@ pub fn normalized_retroarch_core_args(emulator_dir: &Path, args: Vec<String>) ->
             continue;
         }
 
-        let candidate = emulator_dir.join(&core_path);
-        if !candidate.is_file() {
+        let Some(candidate) = search_dirs
+            .iter()
+            .map(|dir| dir.join(&core_path))
+            .find(|candidate| candidate.is_file())
+        else {
             continue;
-        }
+        };
 
         if let Ok(resolved) = std::fs::canonicalize(&candidate) {
             normalized[index + 1] = resolved.to_string_lossy().into_owned();
@@ -515,6 +535,8 @@ mod tests {
     #[test]
     fn normalize_rewrites_relative_core_to_absolute() {
         let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("retroarch");
+        fs::write(&exe, b"").unwrap();
         let cores_dir = dir.path().join("cores");
         fs::create_dir_all(&cores_dir).unwrap();
         let core_file = cores_dir.join("snes9x_libretro.so");
@@ -525,7 +547,7 @@ mod tests {
             "cores/snes9x_libretro.so".to_string(),
             "%rom%".to_string(),
         ];
-        let result = normalized_retroarch_core_args(dir.path(), args);
+        let result = normalized_retroarch_core_args(&exe, args);
         let expected = fs::canonicalize(&core_file).unwrap();
         assert_eq!(result[1], expected.to_string_lossy());
     }
@@ -533,29 +555,84 @@ mod tests {
     #[test]
     fn normalize_leaves_absolute_core_untouched() {
         let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("retroarch");
+        fs::write(&exe, b"").unwrap();
         let args = vec!["--core".to_string(), "/opt/cores/snes9x.so".to_string()];
-        let result = normalized_retroarch_core_args(dir.path(), args.clone());
+        let result = normalized_retroarch_core_args(&exe, args.clone());
         assert_eq!(result, args);
     }
 
     #[test]
     fn normalize_ignores_flag_in_last_position() {
         let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("retroarch");
+        fs::write(&exe, b"").unwrap();
         let args = vec!["--libretro".to_string()];
-        let result = normalized_retroarch_core_args(dir.path(), args.clone());
+        let result = normalized_retroarch_core_args(&exe, args.clone());
         assert_eq!(result, args);
     }
 
     #[test]
     fn normalize_leaves_missing_file_untouched() {
         let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("retroarch");
+        fs::write(&exe, b"").unwrap();
         let args = vec![
             "-L".to_string(),
             "cores/does_not_exist.so".to_string(),
             "%rom%".to_string(),
         ];
-        let result = normalized_retroarch_core_args(dir.path(), args.clone());
+        let result = normalized_retroarch_core_args(&exe, args.clone());
         assert_eq!(result, args);
+    }
+
+    #[test]
+    fn normalize_prefers_the_appimage_portable_home_cores() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("RetroArch-Linux-x86_64.AppImage");
+        fs::write(&exe, b"").unwrap();
+        let home_cores = dir
+            .path()
+            .join("RetroArch-Linux-x86_64.AppImage.home")
+            .join(".config")
+            .join("retroarch")
+            .join("cores");
+        fs::create_dir_all(&home_cores).unwrap();
+        let core_file = home_cores.join("bsnes_libretro.so");
+        fs::write(&core_file, b"core bytes").unwrap();
+        // No <emulator dir>/cores at all — the layout the user has.
+
+        let args = vec![
+            "-L".to_string(),
+            "cores/bsnes_libretro.so".to_string(),
+            "/roms/game.sfc".to_string(),
+        ];
+        let result = normalized_retroarch_core_args(&exe, args);
+        let expected = fs::canonicalize(&core_file).unwrap();
+        assert_eq!(result[1], expected.to_string_lossy());
+    }
+
+    #[test]
+    fn normalize_falls_back_to_the_emulator_dir_when_the_home_lacks_the_core() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("RetroArch-Linux-x86_64.AppImage");
+        fs::write(&exe, b"").unwrap();
+        fs::create_dir_all(
+            dir.path()
+                .join("RetroArch-Linux-x86_64.AppImage.home")
+                .join(".config")
+                .join("retroarch"),
+        )
+        .unwrap();
+        let cores_dir = dir.path().join("cores");
+        fs::create_dir_all(&cores_dir).unwrap();
+        let core_file = cores_dir.join("snes9x_libretro.so");
+        fs::write(&core_file, b"core bytes").unwrap();
+
+        let args = vec!["-L".to_string(), "cores/snes9x_libretro.so".to_string()];
+        let result = normalized_retroarch_core_args(&exe, args);
+        let expected = fs::canonicalize(&core_file).unwrap();
+        assert_eq!(result[1], expected.to_string_lossy());
     }
 
     // --- build_args -------------------------------------------------------

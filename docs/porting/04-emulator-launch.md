@@ -444,6 +444,16 @@ RetroArch-only post-pass, `normalized_retroarch_core_args(emulator_dir, args)`
 (grid_launcher/emulator/launch.py:217). Absolute paths and non-existent candidates are left
 untouched.
 
+**Rewrite deviation**: the Rust rewrite's `normalized_retroarch_core_args` takes the
+emulator *executable* rather than its directory, and searches `<exe>.home/.config/retroarch/
+<token>` first (when that portable-home directory exists), falling back to
+`<emulator dir>/<token>` — the Python version only ever knew the emulator directory. This is
+deliberate: the AppImage runtime sets `$HOME` to `<AppImage>.home` whenever that directory
+exists next to the file, so RetroArch reads its config and loads its cores from there, and
+the platform-cores installer (doc 05) places installed cores in that same directory. Without
+this search order, a RetroArch AppImage with cores only in its portable home fails to launch
+any game.
+
 ### 8. Launch decision tree
 
 ```
@@ -475,7 +485,7 @@ _launch_installed_game(game)                       details_view_mixin.py:1426
 │             ├── rom path blank      ⇒ "No ROM file is available for this game."
 │             ├── rom missing/not a file ⇒ "ROM file not found:\n<path>"
 │             ├── argument resolution ValueError ⇒ "Invalid launch arguments: <e>"
-│             └── RetroArch ⇒ normalized_retroarch_core_args(exe.parent, args)
+│             └── RetroArch ⇒ normalized_retroarch_core_args(exe, args)  (rewrite: searches exe's AppImage portable home first)
 │           _ensure_emulator_sync_settings(name, path)   (doc 05)     details_view_mixin.py:1457
 │           RPCS3 + non-blank ps3_game_id + both dirs resolvable ⇒
 │               copy_ps3_custom_config_to_emulator(dev_hdd0.parent/"config", rpcs3_root)

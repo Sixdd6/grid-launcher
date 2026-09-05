@@ -536,20 +536,9 @@ fn installed_core_ids_with_extension(
         }
 
         let parent = expanded.parent().unwrap_or_else(|| Path::new(""));
-        let file_name = expanded
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let appimage_home_cores = parent
-            .join(format!("{file_name}.home"))
-            .join(".config")
-            .join("retroarch")
-            .join("cores");
-
-        if appimage_home_cores.exists() && appimage_home_cores.is_dir() {
-            appimage_home_cores
-        } else {
-            parent.join("cores")
+        match crate::autoconfig::paths::retroarch_portable_home(&expanded) {
+            Some(home) if home.join("cores").is_dir() => home.join("cores"),
+            _ => parent.join("cores"),
         }
     };
 
