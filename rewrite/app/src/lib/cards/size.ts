@@ -54,10 +54,10 @@ export function columnsOf(grid: HTMLElement | null): number {
 }
 
 /**
- * The cover's fallback aspect ratio (design §5: "cover ratio from the image
- * with a 3:4 fallback"). Applied to the cover box; a loaded image with a
- * different intrinsic ratio is fitted inside it (`object-fit: contain`)
- * over a blurred copy of itself.
+ * The cover's fixed aspect ratio (design §5, user decision 2026-09-05).
+ * Applied to the cover box; a loaded image with a different intrinsic
+ * ratio is fitted inside it (`object-fit: contain`) over a blurred copy of
+ * itself, so rows stay even and no box art is cropped.
  */
 export const CARD_COVER_RATIO = '3 / 4';
 
