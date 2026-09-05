@@ -10,6 +10,10 @@
   // (dialogs.py:133-146). A folder picker is a separate plan; this is the
   // free-text half only.
   let libraryPath = $state('');
+  // Set only for the `setLibraryPath` await below, which runs BEFORE
+  // `connect` sets `session.busy`: without this, a double click in that gap
+  // could fire two submits.
+  let submitting = $state(false);
 
   async function browseLibraryPath() {
     const picked = await pickFolder('Select Library Folder');
@@ -17,25 +21,33 @@
   }
 
   async function submit() {
-    // Written BEFORE the connect, exactly as `FirstRunDialog`'s "Save and
-    // Continue" persists all three values before the app tries the server
-    // (grid-launcher.py:1689): a rejected credential must not lose the path
-    // the user just typed. Safe in either order — `SessionManager::connect`
-    // re-reads config.toml and overwrites only `server_url`/`username`
-    // (crates/grid-core/src/session.rs:124-127).
-    const path = libraryPath.trim();
-    if (path !== '') {
-      try {
-        await api.setLibraryPath(path);
-      } catch {
-        // Best-effort: a path that cannot be stored must not block the
-        // connect, and Settings can set it afterwards.
+    submitting = true;
+    try {
+      // Written BEFORE the connect, exactly as `FirstRunDialog`'s "Save and
+      // Continue" persists all three values before the app tries the server
+      // (grid-launcher.py:1689): a rejected credential must not lose the path
+      // the user just typed. Safe in either order — `SessionManager::connect`
+      // re-reads config.toml and overwrites only `server_url`/`username`
+      // (crates/grid-core/src/session.rs:124-127).
+      const path = libraryPath.trim();
+      if (path !== '') {
+        try {
+          await api.setLibraryPath(path);
+        } catch {
+          // Best-effort: a path that cannot be stored must not block the
+          // connect, and Settings can set it afterwards.
+        }
       }
+      // Fire-and-forget, same as before: `connect` sets `session.busy`
+      // synchronously, and `secret` clears in the same tick rather than
+      // staying in frontend state for the whole network round trip.
+      // Token auth identifies the account by itself; the username input only
+      // exists for Basic mode, so never send a stale one alongside a token.
+      connect(serverUrl, useToken ? '' : username, secret, useToken);
+      secret = ''; // never keep the plain secret in frontend state
+    } finally {
+      submitting = false;
     }
-    // Token auth identifies the account by itself; the username input only
-    // exists for Basic mode, so never send a stale one alongside a token.
-    await connect(serverUrl, useToken ? '' : username, secret, useToken);
-    secret = ''; // never keep the plain secret in frontend state
   }
 </script>
 
@@ -70,7 +82,7 @@
       </button>
     </span>
   </label>
-  <button data-testid="connect-submit" disabled={session.busy}>{session.busy ? 'Connecting…' : 'Connect'}</button>
+  <button data-testid="connect-submit" disabled={session.busy || submitting}>{session.busy ? 'Connecting…' : 'Connect'}</button>
   {#if session.error}<p data-testid="connect-error" class="error" role="alert">{session.error}</p>{/if}
 </form>
 
