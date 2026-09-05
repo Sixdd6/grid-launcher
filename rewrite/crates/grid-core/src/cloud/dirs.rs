@@ -390,7 +390,16 @@ pub fn expand_sync_path(
             "states"
         }))
     } else if is_retroarch && (stripped.starts_with(":\\") || stripped.starts_with(":/")) {
-        paths::resolve_best_effort(&retroarch_base.join(&stripped[2..]))
+        // `:` is RetroArch's APPLICATION directory, not `$HOME`: keep the
+        // emulator directory first and fall back to the portable home only
+        // when nothing is there, so a `:/saves` beside the AppImage still
+        // resolves.
+        let beside_app = paths::resolve_best_effort(&base.join(&stripped[2..]));
+        if beside_app.is_dir() || beside_app.is_file() || ctx.retroarch_portable_home.is_none() {
+            beside_app
+        } else {
+            paths::resolve_best_effort(&retroarch_base.join(&stripped[2..]))
+        }
     } else {
         generic_candidate(&expanded, ctx)
     };

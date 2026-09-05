@@ -439,7 +439,9 @@ describe('emulator-catalog', () => {
   it('reverts the catalog row to installable once the installed PCSX2 is deleted', async () => {
     // Last case in the group (not right after the install), since the two
     // tests above still need PCSX2 configured: the platform-default select
-    // and the launch it drives.
+    // and the launch it drives. The previous case leaves the shell on the
+    // Library view, so bring Emulators forward first.
+    await openEmulators();
     await showPage('installed');
     const deleteBtn = $(testId(`emulator-delete-${sanitize(PCSX2_NAME)}`));
     await deleteBtn.click();
