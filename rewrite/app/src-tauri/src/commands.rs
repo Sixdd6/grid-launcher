@@ -1405,6 +1405,13 @@ fn apply_delete_emulator(config: &mut Config, name: &str) {
     config
         .default_emulators
         .retain(|_, v| v.trim().to_lowercase() != folded);
+    // `remove_emulator_default_mappings` (grid_launcher/ui/emulators.py:137-152):
+    // a platform's saved RetroArch core is meaningless once that platform has
+    // no default emulator at all, which just happened above for every
+    // platform that defaulted to the removed emulator.
+    config
+        .retroarch_cores
+        .retain(|platform, _| config.default_emulators.contains_key(platform));
 }
 
 /// [`set_default_emulator`]'s guard: the picked emulator must actually
@@ -1874,6 +1881,41 @@ mod merge_tests {
         let mut config = config_with(&["Dolphin"], &[]);
         apply_delete_emulator(&mut config, "Nonexistent");
         assert_eq!(config.emulators, vec![entry("Dolphin")]);
+    }
+
+    #[test]
+    fn delete_drops_retroarch_cores_for_platforms_that_lost_their_default() {
+        // `remove_emulator_default_mappings` (grid_launcher/ui/emulators.py:137-152):
+        // a saved core is only meaningful alongside a saved default emulator.
+        let mut config = config_with(
+            &["Dolphin", "RetroArch"],
+            &[("GameCube", "Dolphin"), ("SNES", "RetroArch")],
+        );
+        config
+            .retroarch_cores
+            .insert("GameCube".to_string(), "dolphin_libretro".to_string());
+        config
+            .retroarch_cores
+            .insert("SNES".to_string(), "bsnes_libretro".to_string());
+        apply_delete_emulator(&mut config, "Dolphin");
+        assert!(!config.retroarch_cores.contains_key("GameCube"));
+        assert_eq!(
+            config.retroarch_cores.get("SNES").map(String::as_str),
+            Some("bsnes_libretro")
+        );
+    }
+
+    #[test]
+    fn delete_leaves_retroarch_cores_alone_when_no_default_pointed_at_it() {
+        let mut config = config_with(&["Dolphin", "Other"], &[("GameCube", "Dolphin")]);
+        config
+            .retroarch_cores
+            .insert("GameCube".to_string(), "dolphin_libretro".to_string());
+        apply_delete_emulator(&mut config, "Other");
+        assert_eq!(
+            config.retroarch_cores.get("GameCube").map(String::as_str),
+            Some("dolphin_libretro")
+        );
     }
 
     // --- apply_set_default_emulator -------------------------------------------

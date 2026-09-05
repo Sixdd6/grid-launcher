@@ -74,6 +74,8 @@ describe('emulator-catalog', () => {
   const PCSX2_ASSET = 'pcsx2-v9.9-e2e-linux-appimage-x64-Qt.AppImage';
   const REDREAM_NAME = 'Redream (Sega Dreamcast)';
   const REDREAM_ROW = 'emulator-row-redream-(sega-dreamcast)';
+  /** Row/delete testids sanitize a name the same way Emulators.svelte does (see emulators.spec.ts). */
+  const sanitize = (name: string) => name.toLowerCase().replace(/\s+/g, '-');
 
   const romPath = () => path.join(dataDir(), 'library', PLATFORM, 'Gran Turismo 3', 'game.iso');
   const emulatorsDir = () => path.join(dataDir(), 'library', 'Emulators');
@@ -432,5 +434,30 @@ describe('emulator-catalog', () => {
     // after the spec process is gone — see task-8-report.md.)
     expect(readFileSync(pcsx2Path(), 'utf-8')).toContain('mock forge stub: pcsx2');
     expect(readFileSync(redreamPath(), 'utf-8')).toContain('mock forge stub: redream');
+  });
+
+  it('reverts the catalog row to installable once the installed PCSX2 is deleted', async () => {
+    // Last case in the group (not right after the install), since the two
+    // tests above still need PCSX2 configured: the platform-default select
+    // and the launch it drives.
+    await showPage('installed');
+    const deleteBtn = $(testId(`emulator-delete-${sanitize(PCSX2_NAME)}`));
+    await deleteBtn.click();
+    await expect(deleteBtn).toHaveText('Confirm delete');
+    await deleteBtn.click();
+    await $(testId(PCSX2_ROW)).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      reverse: true,
+      timeoutMsg: 'the deleted PCSX2 row was still there after the second click',
+    });
+
+    // The catalog pane must follow the config, not wait for another install
+    // job to reach a terminal status (the bug this case guards against).
+    await openCatalog();
+    await $(testId('emu-catalog-install-PCSX2-pcsx2')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the PCSX2 catalog row never went back to Install after deleting it',
+    });
+    await expect($(testId('emu-catalog-installed-PCSX2-pcsx2'))).not.toExist();
   });
 });

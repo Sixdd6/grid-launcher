@@ -398,6 +398,7 @@
     closeSheet();
     await refreshEmulators();
     await refreshDefaults();
+    await refreshCatalog();
     page = pageAfterSave('edit');
   }
 
@@ -405,6 +406,7 @@
     addTab = 'install';
     await refreshEmulators();
     await refreshDefaults();
+    await refreshCatalog();
     page = pageAfterSave('add');
   }
 
@@ -439,6 +441,7 @@
       if (editing?.name === name) closeSheet();
       await refreshEmulators();
       await refreshDefaults();
+      await refreshCatalog();
     } catch (err) {
       deleteError = errorMessage(err);
     } finally {
