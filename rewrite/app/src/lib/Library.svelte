@@ -300,11 +300,16 @@
     min-height: 0;
   }
 
+  /* The column scrolls, not the shell: the rail beside it is a sibling, so
+     scrolling here leaves it in place. `scrollIntoView` on a focused card
+     walks to this box for the same reason. */
   .body {
     flex: 1 1 auto;
     min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
+    overflow-y: auto;
   }
 
   .toolbar {

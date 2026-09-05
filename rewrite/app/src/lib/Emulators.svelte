@@ -769,16 +769,26 @@
     min-height: 0;
   }
 
+  /* A definite-height flex column, not a plain block: the pane below scrolls
+     itself, and it can only do that if this box stops growing with its
+     content. Left auto-height, the pane's height resolved to its own content,
+     the section grew past the window and the document scrolled — taking the
+     rail with it. */
   .panes {
     flex: 1 1 auto;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
     min-height: 0;
   }
 
   /* No `display` on `.pane` itself: the `hidden` attribute's UA rule must
-     win, and an author `display: flex` here would override it. */
+     win, and an author `display: flex` here would override it. Sizing comes
+     from `flex`, which needs no `display` on the item. */
   .pane {
-    height: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
     box-sizing: border-box;
   }
@@ -861,10 +871,12 @@
     min-width: 0;
   }
 
+  /* Sticks against the Installed pane's scrollport, one pane padding down so
+     it does not sit flush on the pane's top edge. */
   .sheet {
     flex: 0 0 360px;
     position: sticky;
-    top: 0;
+    top: 24px;
     display: flex;
     flex-direction: column;
     gap: 12px;

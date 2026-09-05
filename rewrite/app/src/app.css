@@ -119,8 +119,14 @@ h1 {
   color: var(--text-h);
 }
 
+/* `height`, not `min-height`: a definite height here is what lets the views
+   below resolve their own `height: 100%` and clip. With `min-height` the
+   chain stays indefinite, every `height: 100%` collapses back to content
+   height, nothing scrolls internally and the DOCUMENT scrolls instead —
+   which drags the category rails out of view and repaints the fixed,
+   blurred `BackgroundArt` layer on every scrolled frame. */
 #app {
-  min-height: 100svh;
+  height: 100svh;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;

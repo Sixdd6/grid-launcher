@@ -80,16 +80,23 @@
     min-height: 0;
   }
 
+  /* Definite-height flex column so the pane below can scroll itself — see
+     the same note in `Emulators.svelte`. */
   .panes {
     flex: 1 1 auto;
     min-width: 0;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
     min-height: 0;
   }
 
   /* No `display` on `.pane` itself: the `hidden` attribute's UA rule must
-     win, and an author `display: flex` here would override it. */
+     win, and an author `display: flex` here would override it. Sizing comes
+     from `flex`, which needs no `display` on the item. */
   .pane {
-    height: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
     box-sizing: border-box;
   }

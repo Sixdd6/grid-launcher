@@ -514,11 +514,15 @@
     min-height: 0;
   }
 
+  /* Scrolls itself so the platform rail beside it stays put — same reasoning
+     as `Library.svelte`'s `.body`. */
   .body {
     flex: 1 1 auto;
     min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
+    overflow-y: auto;
   }
 
   .platform-header {

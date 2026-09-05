@@ -215,6 +215,9 @@
     display: flex;
     align-items: center;
     gap: 16px;
+    /* `flex: none` so a tall view can never compress the bar: `#app` is now
+       a fixed viewport height, and every other row there is shrinkable. */
+    flex: none;
     height: var(--topbar-h);
     padding: 0 16px;
     box-sizing: border-box;
@@ -379,6 +382,7 @@
   }
 
   .error-line {
+    flex: none;
     margin: 0;
     padding: 4px 16px;
     color: var(--danger);
@@ -397,6 +401,13 @@
        once here instead of a bottom padding per view. */
     padding-bottom: calc(var(--footer-h) + 24px);
     box-sizing: border-box;
+    /* The app's scroll boundary. `#app` is exactly one viewport tall, so a
+       view that overflows scrolls HERE and never on the document; the fixed
+       `BackgroundArt` layer then stays composited instead of repainting its
+       40px blur on every frame. Views that own their own scrollers (all four
+       rail views) sit at `height: 100%` and never reach this one.
+       Does not create a stacking context, so the note above still holds. */
+    overflow-y: auto;
   }
 
 </style>

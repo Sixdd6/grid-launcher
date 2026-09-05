@@ -87,6 +87,8 @@
 </form>
 
 <style>
+  /* `#app` is exactly one viewport tall, so this form is a flex item that can
+     be squeezed on a short window; it scrolls itself rather than spilling. */
   .connect {
     display: flex;
     flex-direction: column;
@@ -95,6 +97,8 @@
     margin: 0 auto;
     padding: 32px 24px;
     box-sizing: border-box;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   h1 {
