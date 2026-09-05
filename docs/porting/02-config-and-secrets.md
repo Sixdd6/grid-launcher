@@ -137,8 +137,8 @@ The defaults object is the schema: only keys present in it survive a load (grid-
 | `launch_args` | string | `""` | Extra launch arguments passed through to the launch path (grid_launcher/ui/mixins/details_view_mixin.py:1406). Preserved verbatim across settings saves (grid-launcher.py:2595-2597). |
 | `debug_prints` | bool | `true` | Enables debug logging; same lenient string parsing (grid-launcher.py:2150-2156). |
 | `theme` | string | `"system"` | One of `system`, `dark`, `light`; anything else collapses to `system` (grid_launcher/ui/theme.py:140-146). |
-| `window_geometry` | string | `""` | Base64 of the opaque toolkit geometry blob; invalid base64 is ignored (grid-launcher.py:2364-2380). |
-| `window_state` | string | `"normal"` | `"maximized"` (case-insensitive) restores a maximized window; any other value means normal (grid-launcher.py:2382-2384). |
+| `window_geometry` | string | `""` | Base64 of the opaque toolkit geometry blob; invalid base64 is ignored (grid-launcher.py:2364-2380). **Not ported**: the blob is Qt-specific and meaningless to a webview window. `tauri-plugin-window-state` owns geometry persistence in the rewrite, storing size, position and maximized state in its own `.window-state.json` under Tauri's AppConfig directory (config.toml gains no equivalent key). The plugin is registered only in non-`e2e` builds, so E2E specs always start from `tauri.conf.json`'s fixed 800x600 window and never inherit a developer's saved geometry. |
+| `window_state` | string | `"normal"` | `"maximized"` (case-insensitive) restores a maximized window; any other value means normal (grid-launcher.py:2382-2384). **Not ported**: folded into `tauri-plugin-window-state`'s `.window-state.json` alongside geometry, for the same reason. |
 | `emulators` | list of objects | `[]` | Configured emulators. Normalized — see "Emulator entry". |
 | `default_emulators` | object | `{}` | Platform label -> emulator name. Normalized. |
 | `default_retroarch_cores` | object | `{}` | Platform slug -> RetroArch core id. Normalized. |

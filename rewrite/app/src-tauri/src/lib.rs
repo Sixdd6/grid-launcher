@@ -100,6 +100,20 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_wdio::init())
         .plugin(tauri_plugin_wdio_webdriver::init());
+    // Window geometry across restarts — `_persist_window_geometry` /
+    // `_restore_window_geometry` (grid-launcher.py:2362, 2372). The plugin
+    // saves size, position and maximized state on exit and restores them
+    // when the window is created, replacing Python's base64 blob in
+    // config.toml with its own `.window-state.json`.
+    //
+    // NOT under the `e2e` feature: the plugin writes to Tauri's AppConfig
+    // directory, which `GRID_LAUNCHER_DATA_DIR` does not redirect and
+    // `scripts/e2e.sh` does not sandbox (it redirects XDG_DATA_HOME,
+    // XDG_RUNTIME_DIR and XDG_CACHE_HOME only). Registering it under the
+    // harness would write into the developer's real home and make the Xvfb
+    // window size carry between stage groups.
+    #[cfg(not(feature = "e2e"))]
+    let builder = builder.plugin(tauri_plugin_window_state::Builder::new().build());
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
