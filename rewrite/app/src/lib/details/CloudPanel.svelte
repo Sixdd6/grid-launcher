@@ -72,6 +72,7 @@
 
   let nativePaths = $state<NativeSavePaths | null>(null);
   let nativePathsLoading = $state(false);
+  let nativePathsAttempted = $state(false);
   let manualPathInput = $state('');
   let manualPathPending = $state(false);
   let manualPathError = $state<string | null>(null);
@@ -122,7 +123,10 @@
       if (!nativeGuard.isCurrent(id)) return;
       manualPathError = errorMessage(err);
     } finally {
-      if (nativeGuard.isCurrent(id)) nativePathsLoading = false;
+      if (nativeGuard.isCurrent(id)) {
+        nativePathsLoading = false;
+        nativePathsAttempted = true;
+      }
     }
   }
 
@@ -133,11 +137,12 @@
     if (nativeSave && !recordsBlocked) loadNativePaths();
   });
 
-  // The lookup is "loading" until the first `native_save_paths` answer
-  // lands; a failed PCGW fetch still answers (with an empty pcgw list), so
-  // this never sticks (`pcgw_paths_for_title`, cloud_service.rs:206-216).
+  // The lookup is "loading" until `loadNativePaths()` settles, success or
+  // failure: `native_save_paths` can itself error (e.g. `blocking_load_config`
+  // failing before the PCGW step ever runs), leaving `nativePaths` null
+  // forever, so phase must track the attempt rather than a non-null result.
   let nativePhase = $derived<NativePathsPhase>(
-    nativePathsLoading || nativePaths === null ? 'loading' : 'loaded'
+    nativePathsLoading || !nativePathsAttempted ? 'loading' : 'loaded'
   );
   let nativePathCount = $derived((nativePaths?.pcgw.length ?? 0) + (nativePaths?.manual.length ?? 0));
   let nativeUploadIsEnabled = $derived(
