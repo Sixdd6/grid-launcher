@@ -456,10 +456,23 @@ describe('emulator-catalog', () => {
     // The catalog pane must follow the config, not wait for another install
     // job to reach a terminal status (the bug this case guards against).
     await openCatalog();
-    await $(testId('emu-catalog-install-PCSX2-pcsx2')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the PCSX2 catalog row never went back to Install after deleting it',
-    });
+    // The Redream case above leaves "redream" in the search box, which
+    // filters PCSX2 out of the list; clear it before looking for the row.
+    await setSearch('');
+    try {
+      await $(testId('emu-catalog-install-PCSX2-pcsx2')).waitForExist({
+        timeout: TRANSITION_TIMEOUT,
+        timeoutMsg: 'the PCSX2 catalog row never went back to Install after deleting it',
+      });
+    } catch (err) {
+      // Diagnostic: what the catalog pane actually shows, so a failure
+      // distinguishes "backend still says installed" from "refresh errored".
+      const pane = await browser.execute(() => {
+        const el = document.querySelector('[data-testid="emu-page-catalog"]');
+        return el ? (el as HTMLElement).innerText.slice(0, 600) : '(no catalog pane)';
+      });
+      throw new Error(`${(err as Error).message}\n--- catalog pane ---\n${pane}`);
+    }
     await expect($(testId('emu-catalog-installed-PCSX2-pcsx2'))).not.toExist();
   });
 });
