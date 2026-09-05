@@ -7,6 +7,7 @@ import {
   createRequestGuard,
   deleteConfirmText,
   isNativeExecutablePlatform,
+  isNativeLaunchPlatform,
   recordsStatusLine,
   restoreConfirmText,
   sharedScopeWarning,
@@ -176,6 +177,28 @@ describe('isNativeExecutablePlatform', () => {
 
   it('is false for a platform that merely contains "windows" mid-string', () => {
     expect(isNativeExecutablePlatform('Not Windows')).toBe(false);
+  });
+});
+
+describe('isNativeLaunchPlatform', () => {
+  it('accepts Windows and Linux platform names case-insensitively', () => {
+    expect(isNativeLaunchPlatform('Windows')).toBe(true);
+    expect(isNativeLaunchPlatform('  WINDOWS  ')).toBe(true);
+    expect(isNativeLaunchPlatform('Linux')).toBe(true);
+    expect(isNativeLaunchPlatform('linux')).toBe(true);
+    expect(isNativeLaunchPlatform('Windows PC')).toBe(true);
+  });
+
+  it('rejects emulated platforms', () => {
+    expect(isNativeLaunchPlatform('SNES')).toBe(false);
+    expect(isNativeLaunchPlatform('Not Windows')).toBe(false);
+    expect(isNativeLaunchPlatform('')).toBe(false);
+  });
+
+  // The scope predicate mirrors grid-core and must stay windows-only.
+  it('is wider than isNativeExecutablePlatform, which stays windows-only', () => {
+    expect(isNativeExecutablePlatform('Linux')).toBe(false);
+    expect(isNativeLaunchPlatform('Linux')).toBe(true);
   });
 });
 

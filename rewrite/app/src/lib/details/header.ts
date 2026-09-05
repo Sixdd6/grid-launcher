@@ -3,6 +3,7 @@
 // verification state. Pure — the `.svelte` shell only renders what these
 // return.
 import type { LaunchDefaults } from '../api';
+import { isNativeLaunchPlatform } from './cloud';
 import { NO_EMULATOR_MARKER, isRetroarchName, savedDefaultFor } from '../emulators/defaults';
 
 /**
@@ -93,9 +94,15 @@ export function lastPlayedText(lastPlayedAt: number): string {
  * platform's saved default (case-folded lookup, same as everywhere else);
  * the core is only meaningful for a RetroArch build, and a RetroArch
  * default with no core mapped is named as such rather than silently
- * reading like a complete target.
+ * reading like a complete target. Returns `''` for a native platform
+ * (`isNativeLaunchPlatform`), which the caller renders as no line at all.
  */
 export function launchTargetLine(defaults: LaunchDefaults | null, platformName: string): string {
+  // User ruling 2026-09-05: a native (Windows/Linux) game launches its own
+  // executable through a compat tool, never an emulator entry, so the popup
+  // must not claim a launch target for one. `''` means "render no line" —
+  // Details.svelte drops the whole <p> rather than showing an empty row.
+  if (isNativeLaunchPlatform(platformName)) return '';
   const name = savedDefaultFor(defaults?.default_emulators, platformName).trim();
   if (name === '' || name === NO_EMULATOR_MARKER) return 'No default emulator';
   if (!isRetroarchName(name)) return name;

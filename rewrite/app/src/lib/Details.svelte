@@ -255,6 +255,9 @@
   let installedRow = $derived(installed.list.find((row) => matchesInstalled(row, summary, subject.platformName)) ?? null);
   let cloudGame = $derived(installedRow ?? syntheticCloudGame(summary, subject.platformName));
   let isNative = $derived(isNativeExecutablePlatform(subject.platformName));
+  // `''` from `launchTargetLine` means "no launch target to state" — today
+  // only a native platform, whose game runs its own executable.
+  let launchTarget = $derived(launchTargetLine(launchDefaults, subject.platformName));
 
   // Server-side game updates (doc 10). `updateLabel` is null when the rom
   // has no update, which also hides the button. `version` is the header row:
@@ -591,9 +594,9 @@
         <p class="meta-line" data-testid="details-last-played">
           {lastPlayedText(installedRow?.last_played_at ?? 0)}
         </p>
-        <p class="meta-line" data-testid="details-emulator">
-          {launchTargetLine(launchDefaults, subject.platformName)}
-        </p>
+        {#if launchTarget !== ''}
+          <p class="meta-line" data-testid="details-emulator">{launchTarget}</p>
+        {/if}
       </aside>
 
       <section class="right">

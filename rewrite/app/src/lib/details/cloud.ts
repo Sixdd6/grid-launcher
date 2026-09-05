@@ -93,6 +93,26 @@ export function isNativeExecutablePlatform(platform: string): boolean {
 }
 
 /**
+ * Whether `platform` names a platform whose games run as native HOST
+ * executables — trimmed, case-folded, starting with "windows" or "linux".
+ *
+ * Deliberately NOT the same function as [`isNativeExecutablePlatform`]
+ * above. That one is a mirror of grid-core's
+ * `cloud::scope::is_native_executable_platform`
+ * (`crates/grid-core/src/cloud/scope.rs:68`), which is windows-only and
+ * decides the cloud save SCOPE and BLOCK REASONS the backend computes;
+ * widening it would desync the panel from the answers the backend gives it.
+ * This one is display-only: it decides whether the details popup claims an
+ * emulator launch target at all (user ruling 2026-09-05 — a native game
+ * launches its own executable through a compat tool, so "No default
+ * emulator" was never a true statement about it).
+ */
+export function isNativeLaunchPlatform(platform: string): boolean {
+  const folded = platform.trim().toLowerCase();
+  return folded.startsWith('windows') || folded.startsWith('linux');
+}
+
+/**
  * Builds an `InstalledGame`-shaped object for a game that has no registry
  * row (e.g. a shared-scope entry on the synthetic `Emulators` platform that
  * was never installed through GRID). The cloud commands only read

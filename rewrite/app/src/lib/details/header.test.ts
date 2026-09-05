@@ -151,6 +151,18 @@ describe('launchTargetLine', () => {
   it('says so when nothing is configured at all', () => {
     expect(launchTargetLine(null, 'SNES')).toBe('No default emulator');
   });
+
+  it('renders no line for a native Windows game', () => {
+    expect(launchTargetLine(defaults({ windows: 'Wine' }), 'Windows')).toBe('');
+  });
+
+  it('renders no line for a native Linux game', () => {
+    expect(launchTargetLine(null, 'Linux')).toBe('');
+  });
+
+  it('still names the emulator for an emulated platform', () => {
+    expect(launchTargetLine(defaults({ snes: 'Snes9x' }), 'SNES')).toBe('Snes9x');
+  });
 });
 
 describe('cloudStatusLabel', () => {
