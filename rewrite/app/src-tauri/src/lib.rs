@@ -286,6 +286,7 @@ pub fn run() {
             commands::get_ui_settings,
             commands::set_ui_settings,
             commands::open_server_page,
+            commands::open_config_folder,
             commands::platform_firmware_status,
             commands::install_firmware_for_platform,
             commands::launch_game,

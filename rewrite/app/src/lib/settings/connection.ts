@@ -25,3 +25,6 @@ export function serverLine(serverUrl: string): string {
   const trimmed = serverUrl.trim();
   return trimmed === '' ? 'Not set' : trimmed;
 }
+
+/** `_open_config_folder`'s button text (grid-launcher.py:3163), verbatim. */
+export const OPEN_CONFIG_FOLDER_LABEL = 'Open Config Folder';

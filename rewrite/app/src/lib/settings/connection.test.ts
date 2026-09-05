@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { CREDENTIAL_STORED, credentialStatusLabel, reconnectEnabled, serverLine } from './connection';
+import {
+  CREDENTIAL_STORED,
+  credentialStatusLabel,
+  OPEN_CONFIG_FOLDER_LABEL,
+  reconnectEnabled,
+  serverLine,
+} from './connection';
 
 describe('credentialStatusLabel', () => {
   it('reports presence only, never a value (token secrecy)', () => {
@@ -21,5 +27,11 @@ describe('serverLine', () => {
     expect(serverLine('https://romm.example:8080/base')).toBe('https://romm.example:8080/base');
     expect(serverLine('')).toBe('Not set');
     expect(serverLine('   ')).toBe('Not set');
+  });
+});
+
+describe('OPEN_CONFIG_FOLDER_LABEL', () => {
+  it('is the reference button text verbatim', () => {
+    expect(OPEN_CONFIG_FOLDER_LABEL).toBe('Open Config Folder');
   });
 });

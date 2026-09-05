@@ -367,6 +367,8 @@ export const api = {
   /** Opens the configured RomM server in the browser. The URL comes from the
    *  backend's own config read — never from the frontend. */
   openServerPage: () => invoke<void>('open_server_page'),
+  /** Reveals the config directory in the desktop file manager. Takes no path. */
+  openConfigFolder: () => invoke<void>('open_config_folder'),
   launchGame: (romId: number) => invoke<GameSession>('launch_game', { romId }),
   stopGame: (sessionId: number) => invoke<void>('stop_game', { sessionId }),
   listSessions: () => invoke<SessionsSnapshot>('list_sessions'),

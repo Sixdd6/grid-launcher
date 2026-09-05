@@ -4,7 +4,19 @@
   // functions the server menu calls. Nothing here can render a secret —
   // the store never holds one.
   import { disconnect, retry, session } from '../stores/session.svelte';
-  import { credentialStatusLabel, reconnectEnabled, serverLine } from './connection';
+  import { api } from '../api';
+  import { credentialStatusLabel, OPEN_CONFIG_FOLDER_LABEL, reconnectEnabled, serverLine } from './connection';
+
+  let configFolderError = $state<string | null>(null);
+
+  async function handleOpenConfigFolder() {
+    configFolderError = null;
+    try {
+      await api.openConfigFolder();
+    } catch (err) {
+      configFolderError = err instanceof Error ? err.message : String(err);
+    }
+  }
 </script>
 
 <dl class="rows">
@@ -52,7 +64,20 @@
   >
     Disconnect
   </button>
+  <button
+    data-testid="settings-open-config-folder"
+    class="secondary"
+    onclick={() => {
+      handleOpenConfigFolder();
+    }}
+  >
+    {OPEN_CONFIG_FOLDER_LABEL}
+  </button>
 </div>
+
+{#if configFolderError}
+  <p data-testid="settings-config-folder-error" class="error" role="alert">{configFolderError}</p>
+{/if}
 
 <style>
   .rows {

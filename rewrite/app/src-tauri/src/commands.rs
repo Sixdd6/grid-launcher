@@ -440,6 +440,36 @@ pub async fn open_server_page(app: tauri::AppHandle) -> Result<(), String> {
     app.opener().open_url(url, None::<&str>).map_err(err)
 }
 
+/// The directory `config.toml` lives in — `_config_dir()`'s answer
+/// (grid-launcher.py:3163). Split out from [`open_config_folder`] so the
+/// path rule is unit-testable without a keyring, a webview or an opener.
+pub fn config_dir_for(config_path: &std::path::Path) -> std::path::PathBuf {
+    match config_path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => std::path::PathBuf::from("."),
+    }
+}
+
+/// Reveals the config directory in the desktop file manager
+/// (`_open_config_folder`, grid-launcher.py:3162-3172). Takes NO path
+/// argument, for the same reason [`open_server_page`] takes no URL: the
+/// frontend cannot choose what gets opened. The directory is created first,
+/// matching Python's `mkdir(parents=True, exist_ok=True)`, so a first run
+/// that has not written a config yet still opens something.
+#[tauri::command]
+pub async fn open_config_folder(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = tokio::task::spawn_blocking(|| {
+        let dir = config_dir_for(&Config::default_path());
+        std::fs::create_dir_all(&dir).map_err(|e| format!("Could not open config folder: {e}"))?;
+        Ok::<std::path::PathBuf, String>(dir)
+    })
+    .await
+    .map_err(|e| format!("open_config_folder did not finish: {e}"))??;
+    app.opener()
+        .open_path(dir.to_string_lossy().into_owned(), None::<&str>)
+        .map_err(|e| format!("Could not open config folder: {e}"))
+}
+
 /// What the Server platform header's firmware chip needs (design §6).
 /// Deliberately two plain flags rather than a rendered sentence: the chip's
 /// wording is the frontend's (`lib/server/header.ts`), and a count is what
@@ -2004,6 +2034,25 @@ mod merge_tests {
     fn should_backfill_on_platform_list_needs_a_non_empty_assignable_list() {
         assert!(!should_backfill_on_platform_list(&[]));
         assert!(should_backfill_on_platform_list(&["SNES".to_string()]));
+    }
+}
+
+#[cfg(test)]
+mod config_dir_tests {
+    use super::config_dir_for;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn config_dir_is_the_config_files_parent() {
+        assert_eq!(
+            config_dir_for(Path::new("/home/six/.config/grid-launcher/config.toml")),
+            PathBuf::from("/home/six/.config/grid-launcher")
+        );
+    }
+
+    #[test]
+    fn config_dir_falls_back_to_the_current_directory() {
+        assert_eq!(config_dir_for(Path::new("config.toml")), PathBuf::from("."));
     }
 }
 
