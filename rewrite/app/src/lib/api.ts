@@ -255,6 +255,7 @@ export type RestoreReport = { ok: boolean; messages: CloudMessage[] };
  * for this host and the game's wine prefix — the row's tooltip. */
 export type NativeSavePathEntry = { raw: string; expanded: string };
 
+/** A native game's save locations: PCGamingWiki rows first, then manual rows. */
 export type NativeSavePaths = { pcgw: NativeSavePathEntry[]; manual: NativeSavePathEntry[] };
 
 export type CloudSettings = {
@@ -406,6 +407,7 @@ export const api = {
   nativeSavePaths: (game: InstalledGame) => invoke<NativeSavePaths>('native_save_paths', { game }),
   nativeAddManualSavePath: (game: InstalledGame, path: string) =>
     invoke<void>('native_add_manual_save_path', { game, path }),
+  /** Removes one row from a native game's save-location list, PCGW or manual. */
   nativeRemoveSavePath: (game: InstalledGame, path: string) =>
     invoke<void>('native_remove_save_path', { game, path }),
   cloudSettings: () => invoke<CloudSettings>('cloud_settings'),

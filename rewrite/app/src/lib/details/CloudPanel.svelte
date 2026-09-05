@@ -237,7 +237,10 @@
     }
   }
 
-  async function handleRemoveManualPath(path: string) {
+  // Both lists' rows remove the same way (`_pcgw_remove_path_for_game`,
+  // details_view_mixin.py:1218-1230): the backend deletes a manual path and
+  // suppresses a PCGW one, so the caller passes only the row's raw value.
+  async function handleRemoveSavePath(path: string) {
     manualPathPending = true;
     manualPathError = null;
     try {
@@ -341,17 +344,30 @@
           {:else if nativePaths}
             <ul class="path-list">
               {#each nativePaths.pcgw as entry (entry.raw)}
-                <li data-testid={`cloud-native-path-pcgw-${entry.raw}`}>{entry.raw}</li>
-              {/each}
-              {#each nativePaths.manual as entry (entry.raw)}
-                <li data-testid={`cloud-native-path-manual-${entry.raw}`}>
+                <li data-testid={`cloud-native-path-pcgw-${entry.raw}`} title={entry.expanded}>
                   <span>{entry.raw}</span>
                   <button
                     data-testid={`cloud-native-path-remove-${entry.raw}`}
                     class="remove"
                     disabled={manualPathPending}
-                    onclick={() => handleRemoveManualPath(entry.raw)}
-                    aria-label={`Remove ${entry.raw}`}
+                    onclick={() => handleRemoveSavePath(entry.raw)}
+                    aria-label="Remove"
+                    title="Remove this path"
+                  >
+                    ×
+                  </button>
+                </li>
+              {/each}
+              {#each nativePaths.manual as entry (entry.raw)}
+                <li data-testid={`cloud-native-path-manual-${entry.raw}`} title={entry.expanded}>
+                  <span>{entry.raw}</span>
+                  <button
+                    data-testid={`cloud-native-path-remove-${entry.raw}`}
+                    class="remove"
+                    disabled={manualPathPending}
+                    onclick={() => handleRemoveSavePath(entry.raw)}
+                    aria-label="Remove"
+                    title="Remove this path"
                   >
                     ×
                   </button>
