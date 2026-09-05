@@ -16,7 +16,8 @@
 //! 2. Otherwise the matched autoprofile's `save_directories`/
 //!    `state_directories` list.
 //! 3. Emulator-specific override paths are prepended (RetroArch prepends
-//!    its configured `savefile_directory`/`savestate_directory` and
+//!    its configured `savefile_directory`/`savestate_directory` — in the
+//!    rewrite regardless of step 1, see the deviations below — and
 //!    APPENDS the literal fallbacks `saves`,`savefiles` /
 //!    `states`,`savestates` — cloud_mixin.py:647-662; every other family
 //!    below just prepends its reader's output and dedupes: Azahar (663),
@@ -72,6 +73,13 @@
 //!   `<emulator_dir>/saves|states`, neither of which a portable install
 //!   writes to, so no save or state was ever found for one — see
 //!   `docs/porting/06-cloud-saves.md`.
+//! - The RetroArch block (cfg override + `saves`/`savefiles` /
+//!   `states`/`savestates` + portable-home fallbacks) runs even when the
+//!   entry HAS configured paths, unlike Python's `if not configured_paths`
+//!   gate and unlike every other family here, which keeps that gate. The
+//!   RetroArch autoprofile fills `save_paths`/`state_paths` on every entry
+//!   the app adds, so Python's gate made the override unreachable in
+//!   practice; RetroArch's own config is the truth about where it writes.
 //! - [`resolved_sync_directory_paths`] takes `profile: Option<&EmulatorProfile>`
 //!   (the entry's ALREADY-MATCHED autoprofile), not the full profiles list
 //!   `emulator_matches_tokens`/`is_retroarch`/etc. want. Every per-emulator
@@ -435,43 +443,46 @@ pub fn resolved_sync_directory_paths(
             .unwrap_or_default()
     };
 
+    // RetroArch's own config is the truth about where RetroArch writes, so
+    // it is consulted even when the entry has configured paths — rewrite
+    // deviation, see this module's doc comment.
+    if is_retroarch_flag {
+        let settings = retroarch::directory_settings(&entry.path);
+        let override_path = if key_is_save {
+            settings.savefile_directory
+        } else {
+            settings.savestate_directory
+        };
+        let portable_root = portable_home.as_deref().and_then(portable_home_root);
+        let override_path = match portable_root {
+            Some(root) => rewrite_tilde(override_path.trim(), root),
+            None => override_path.trim().to_string(),
+        };
+        if !override_path.is_empty() {
+            let mut prefixed = vec![override_path];
+            prefixed.extend(all_paths);
+            all_paths = prefixed;
+        }
+        let mut fallback: Vec<String> = if key_is_save {
+            vec!["saves".to_string(), "savefiles".to_string()]
+        } else {
+            vec!["states".to_string(), "savestates".to_string()]
+        };
+        // The portable home's own saves/states, for a cfg that never
+        // wrote the key: the relative fallbacks above resolve against
+        // the emulator directory, which an AppImage never uses.
+        if let Some(home) = portable_home.as_deref() {
+            fallback.push(
+                home.join(if key_is_save { "saves" } else { "states" })
+                    .to_string_lossy()
+                    .to_string(),
+            );
+        }
+        all_paths = merge_dedup(all_paths, fallback);
+    }
+
     if configured_paths.is_empty() {
         let args_vec = template::split_template(&entry.args).unwrap_or_default();
-
-        if is_retroarch_flag {
-            let settings = retroarch::directory_settings(&entry.path);
-            let override_path = if key_is_save {
-                settings.savefile_directory
-            } else {
-                settings.savestate_directory
-            };
-            let portable_root = portable_home.as_deref().and_then(portable_home_root);
-            let override_path = match portable_root {
-                Some(root) => rewrite_tilde(override_path.trim(), root),
-                None => override_path.trim().to_string(),
-            };
-            if !override_path.is_empty() {
-                let mut prefixed = vec![override_path];
-                prefixed.extend(all_paths);
-                all_paths = prefixed;
-            }
-            let mut fallback: Vec<String> = if key_is_save {
-                vec!["saves".to_string(), "savefiles".to_string()]
-            } else {
-                vec!["states".to_string(), "savestates".to_string()]
-            };
-            // The portable home's own saves/states, for a cfg that never
-            // wrote the key: the relative fallbacks above resolve against
-            // the emulator directory, which an AppImage never uses.
-            if let Some(home) = portable_home.as_deref() {
-                fallback.push(
-                    home.join(if key_is_save { "saves" } else { "states" })
-                        .to_string_lossy()
-                        .to_string(),
-                );
-            }
-            all_paths = merge_dedup(all_paths, fallback);
-        }
 
         if autoconfig::is_azahar(entry, matched_profiles) {
             let overrides = if key_is_save {
@@ -652,34 +663,28 @@ mod tests {
         ])
     }
 
+    /// Configured entry paths win outright for every NON-RetroArch family:
+    /// no reader is consulted at all. (RetroArch is the one exception — see
+    /// `retroarch_cfg_override_applies_even_with_configured_paths`.)
     #[test]
     fn entry_paths_win_and_skip_all_probing() {
         let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
 
-        let emulator_dir = temp.path().join("RetroArch");
+        let emulator_dir = temp.path().join("PCSX2");
         std::fs::create_dir_all(&emulator_dir).unwrap();
-        let exe = emulator_dir.join("retroarch.exe");
+        let exe = emulator_dir.join("pcsx2-qt.exe");
         std::fs::write(&exe, b"").unwrap();
-
-        // A poisoned retroarch.cfg that WOULD add a save directory if the
-        // retroarch reader were ever consulted.
-        let poisoned = emulator_dir.join("poisoned_saves");
-        std::fs::create_dir_all(&poisoned).unwrap();
-        std::fs::write(
-            emulator_dir.join("retroarch.cfg"),
-            format!(
-                "savefile_directory = \"{}\"\n",
-                poisoned.to_string_lossy().replace('\\', "\\\\")
-            ),
-        )
-        .unwrap();
+        // Portable marker plus the default memory-card directory: probing
+        // WOULD prepend this if configured paths did not skip it.
+        std::fs::write(emulator_dir.join("portable.ini"), "").unwrap();
+        std::fs::create_dir_all(emulator_dir.join("memcards")).unwrap();
 
         let configured = temp.path().join("configured_saves");
         std::fs::create_dir_all(&configured).unwrap();
 
-        let mut e = entry("RetroArch", &exe.to_string_lossy());
+        let mut e = entry("PCSX2", &exe.to_string_lossy());
         e.save_paths = configured.to_string_lossy().to_string();
 
         let c = ctx(Some(&emulator_dir), temp.path());
@@ -1152,5 +1157,68 @@ mod tests {
 
         let (resolved, _) = resolved_sync_directory_paths(&e, None, PathKey::SavePaths, &c);
         assert_eq!(resolved, vec![paths::resolve_best_effort(&user_saves)]);
+    }
+
+    /// Every RetroArch entry added through the app carries the profile's
+    /// `save_paths`/`state_paths` defaults, so gating the cfg override on
+    /// "no configured paths" made it unreachable and a portable AppImage
+    /// resolved nothing. The cfg is the truth about where RetroArch writes,
+    /// so it is consulted regardless — see `docs/porting/06-cloud-saves.md`.
+    #[test]
+    fn retroarch_cfg_override_applies_even_with_configured_paths() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+
+        let (exe, portable_home) = retroarch_appimage(temp.path());
+        std::fs::write(
+            portable_home.join("retroarch.cfg"),
+            "savestate_directory = \"~/.config/retroarch/states\"\n\
+             savefile_directory = \"~/.config/retroarch/saves\"\n",
+        )
+        .unwrap();
+        let states = portable_home.join("states");
+        let saves = portable_home.join("saves");
+        std::fs::create_dir_all(states.join("bsnes")).unwrap();
+        std::fs::create_dir_all(saves.join("bsnes")).unwrap();
+
+        // Exactly what the RetroArch autoprofile writes into a new entry.
+        let mut e = entry("RetroArch", &exe.to_string_lossy());
+        e.save_paths = "saves;\nsavefiles".to_string();
+        e.state_paths = "states;\nsavestates".to_string();
+
+        let c = ctx(Some(temp.path()), temp.path());
+
+        let (resolved_states, _) = resolved_sync_directory_paths(&e, None, PathKey::StatePaths, &c);
+        assert_eq!(resolved_states, vec![paths::resolve_best_effort(&states)]);
+
+        let (resolved_saves, _) = resolved_sync_directory_paths(&e, None, PathKey::SavePaths, &c);
+        assert_eq!(resolved_saves, vec![paths::resolve_best_effort(&saves)]);
+    }
+
+    /// The same profile-filled entry on a normal (non-AppImage) install with
+    /// no cfg keys: the configured relative paths still resolve against the
+    /// emulator directory.
+    #[test]
+    fn retroarch_configured_paths_still_resolve_without_an_appimage() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+
+        let emulator_dir = temp.path().join("RetroArch");
+        std::fs::create_dir_all(&emulator_dir).unwrap();
+        let exe = emulator_dir.join("retroarch.exe");
+        std::fs::write(&exe, b"").unwrap();
+        let states = emulator_dir.join("states");
+        std::fs::create_dir_all(&states).unwrap();
+
+        let mut e = entry("RetroArch", &exe.to_string_lossy());
+        e.save_paths = "saves;\nsavefiles".to_string();
+        e.state_paths = "states;\nsavestates".to_string();
+
+        let c = ctx(Some(&emulator_dir), temp.path());
+
+        let (resolved, _) = resolved_sync_directory_paths(&e, None, PathKey::StatePaths, &c);
+        assert_eq!(resolved, vec![paths::resolve_best_effort(&states)]);
     }
 }

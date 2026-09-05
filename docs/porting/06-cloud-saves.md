@@ -140,7 +140,21 @@ directory, and appends the portable home's `saves`/`states` after the literal
 (`crates/grid-core/src/cloud/dirs.rs`, `ResolveContext::retroarch_portable_home`). Python
 expanded `~` against the real home and only ever fell back to `<emulator_dir>/saves|states`,
 neither of which a portable install writes to, so no save or state was ever detected for a
-RetroArch AppImage. The portable home is detected by the same
+RetroArch AppImage.
+
+**Rewrite deviation — the RetroArch block is not gated on step 1.** RetroArch's cfg override
+and its `saves`,`savefiles` / `states`,`savestates` + portable-home fallbacks are applied even
+when the entry has configured `save_paths`/`state_paths`, so the override still lands first.
+Every other family keeps Python's `if not configured_paths` gate. Reason: the RetroArch
+autoprofile fills `save_paths`/`state_paths` on every entry the app adds (`state_paths` is
+`states;\nsavestates`), so Python's gate made the RetroArch override unreachable for any
+profile-added entry. Python got away with it because its autoconfig wrote
+`savestate_directory = "states"` into the cfg a non-portable RetroArch read, which happened to
+match `<emulator_dir>/states`; with a portable AppImage nothing matches, since RetroArch writes
+to `<AppImage>.home/.config/retroarch/states/<core>/`. RetroArch's own config is the truth
+about where it writes, so it is consulted unconditionally.
+
+The portable home is detected by the same
 `autoconfig::paths::retroarch_portable_home` helper the config writer and core resolver use
 (doc 05, "Config discovery").
 
