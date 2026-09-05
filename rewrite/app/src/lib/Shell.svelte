@@ -8,11 +8,13 @@
   import Icon from './Icon.svelte';
   import Settings from './Settings.svelte';
   import Toast from './Toast.svelte';
-  import { api } from './api';
+  import { listen } from '@tauri-apps/api/event';
+  import { api, CLOUD_UPLOAD_FINISHED_EVENT, type CloudUploadFinished } from './api';
   import { session, retry, disconnect } from './stores/session.svelte';
   import { appUpdate } from './stores/appUpdate.svelte';
   import { installed, refresh as refreshInstalled } from './stores/installed.svelte';
   import { seedLastViewed } from './stores/lastViewed.svelte';
+  import { pushToast } from './stores/toasts.svelte';
   import { chipLabel, hostOf, initialView, VIEWS, viewForDigit, viewLabel, type View } from './shell';
   import type { NavDirection } from './focus/grid';
   // The same guard the grid views use for Ctrl+F: an accelerator must stay
@@ -91,6 +93,20 @@
   // `seedLastViewed` is idempotent and never overwrites a real view.
   $effect(() => {
     seedLastViewed(installed.list);
+  });
+
+  // The only report an auto upload has: it runs after the game has exited,
+  // with no command in flight and usually no popup open. Mounted here, not
+  // in Details.svelte, because the Shell is mounted exactly once and is
+  // never `hidden` — the same reason `Toast.svelte` lives here.
+  $effect(() => {
+    const unlisten = listen<CloudUploadFinished>(CLOUD_UPLOAD_FINISHED_EVENT, (e) => {
+      const { title, message, failed } = e.payload;
+      pushToast(title === '' ? message : `${title} — ${message}`, failed ? 'error' : 'success');
+    });
+    return () => {
+      void unlisten.then((off) => off());
+    };
   });
 </script>
 

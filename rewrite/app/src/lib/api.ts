@@ -323,6 +323,16 @@ export const FIRMWARE_PASS_FINISHED_EVENT = 'firmware-pass-finished';
 /// install finalizes in the background. Re-run `listCompatTools` on it.
 export const COMPAT_TOOLS_CHANGED_EVENT = 'compat-tools-changed';
 
+/// The `cloud-upload-finished` payload (`app/src-tauri/src/cloud_service.rs`'s
+/// `CloudUploadFinished`). `message` is the completion text
+/// `upload_completion_message` produced for this run; `failed` is true for a
+/// partial upload as well as a total one. Carries no path, URL or token.
+export type CloudUploadFinished = { title: string; message: string; failed: boolean };
+
+/// Emitted after every cloud upload that ran — the manual panel button and
+/// the auto upload after a game exits. The Shell turns it into one toast.
+export const CLOUD_UPLOAD_FINISHED_EVENT = 'cloud-upload-finished';
+
 // Server updates (rewrite/app/src-tauri/src/update_service.rs,
 // rewrite/app/src-tauri/src/commands/updates.rs).
 

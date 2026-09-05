@@ -162,6 +162,16 @@ describe('cloud-saves', () => {
     const before = (await mockRequests()).length;
     await $(testId('cloud-upload')).click();
 
+    // Round 4: every upload now reports through the shell toast, so a user
+    // who has scrolled the panel away still learns the result. rom 601 has
+    // exactly one local save file (cloud-saves-seed.mjs), so the text is the
+    // Info branch of `upload_completion_message` (transfer.rs:897-900).
+    await $(testId('toast')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'no toast appeared after the manual upload',
+    });
+    await expect($(testId('toast'))).toHaveText('SaveSyncManual — Uploaded 1 save files.');
+
     await browser.waitUntil(
       async () => (await mockRequests()).length > before,
       { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the mock never received the manual upload' },
@@ -244,6 +254,16 @@ describe('cloud-saves', () => {
         timeoutMsg: 'no auto-upload POST /api/saves arrived after exit',
       },
     );
+
+    // The auto upload's own toast — the round-4 gap this closes. The wait
+    // above returns as soon as the POST reaches the mock, and the event is
+    // emitted on the same task right after that POST resolves, so the toast
+    // is still inside its 4 s window here.
+    await $(testId('toast')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'no toast appeared after the auto upload on exit',
+    });
+    await expect($(testId('toast'))).toHaveText('SaveSyncLaunch — Uploaded 1 save files.');
 
     const uploads = (await mockRequests())
       .slice(before)
