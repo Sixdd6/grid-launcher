@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const { noteViewed } = vi.hoisted(() => ({ noteViewed: vi.fn() }));
 vi.mock('./stores/lastViewed.svelte', () => ({ noteViewed }));
 
+const { prefetchBackground } = vi.hoisted(() => ({ prefetchBackground: vi.fn() }));
+vi.mock('./backgroundPrefetch', () => ({ prefetchBackground }));
+
 import { createHoverViewed } from './lastViewedHover';
 
 // The dwell timer only carries the subject through; the priority rule that
@@ -12,6 +15,7 @@ const subject = (cover: string) => ({ fanart: [], screenshots: [], cover });
 beforeEach(() => {
   vi.useFakeTimers();
   noteViewed.mockClear();
+  prefetchBackground.mockClear();
 });
 
 afterEach(() => {
@@ -60,5 +64,27 @@ describe('createHoverViewed', () => {
     expect(noteViewed).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(noteViewed).toHaveBeenCalledExactlyOnceWith(subject('https://romm/cover.png'));
+  });
+
+  it('starts the fetch at 150ms but does not swap until 500ms', () => {
+    const hover = createHoverViewed(500, 150);
+    hover.start(subject('https://romm/cover.png'));
+
+    vi.advanceTimersByTime(150);
+    expect(prefetchBackground).toHaveBeenCalledExactlyOnceWith(subject('https://romm/cover.png'));
+    expect(noteViewed).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(350);
+    expect(noteViewed).toHaveBeenCalledExactlyOnceWith(subject('https://romm/cover.png'));
+  });
+
+  it('cancels the prefetch too when the pointer leaves early', () => {
+    const hover = createHoverViewed(500, 150);
+    hover.start(subject('https://romm/cover.png'));
+    vi.advanceTimersByTime(100);
+    hover.end();
+    vi.advanceTimersByTime(1000);
+    expect(prefetchBackground).not.toHaveBeenCalled();
+    expect(noteViewed).not.toHaveBeenCalled();
   });
 });
