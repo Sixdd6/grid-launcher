@@ -27,7 +27,8 @@ use super::template::{build_args, normalized_retroarch_core_args, Placeholders};
 /// 7. argument-template failure → "Invalid launch arguments: <e>"
 ///
 /// `is_retroarch` gates the RetroArch `-L` post-pass, which resolves a
-/// relative core path against the emulator's directory. The caller decides
+/// relative core path against the AppImage portable home first, then the
+/// emulator's directory. The caller decides
 /// what counts as RetroArch (entry name or matched profile name), and the
 /// same flag decides whether `placeholders.core` was populated at all.
 ///

@@ -450,9 +450,9 @@ emulator *executable* rather than its directory, and searches `<exe>.home/.confi
 `<emulator dir>/<token>` — the Python version only ever knew the emulator directory. This is
 deliberate: the AppImage runtime sets `$HOME` to `<AppImage>.home` whenever that directory
 exists next to the file, so RetroArch reads its config and loads its cores from there, and
-the platform-cores installer (doc 05) places installed cores in that same directory. Without
-this search order, a RetroArch AppImage with cores only in its portable home fails to launch
-any game.
+RetroArch's own core updater — not GRID — writes downloaded cores there, and GRID's
+installed-core discovery (doc 05) reads them from that same directory. Without this search
+order, a RetroArch AppImage with cores only in its portable home fails to launch any game.
 
 ### 8. Launch decision tree
 

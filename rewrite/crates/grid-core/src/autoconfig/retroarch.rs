@@ -35,10 +35,15 @@ pub struct RetroarchSettings {
 /// parent directory when the (expanded) path is an existing file OR merely
 /// has a non-empty extension — so a not-yet-installed `retroarch.exe` still
 /// resolves to its would-be install directory — else the path itself.
-/// `<root>/retroarch.cfg` and `<root>/config/retroarch.cfg` come first, then
-/// the two XDG candidates and the `~/.config` fallback; the whole list is
-/// deduped case-insensitively, first occurrence wins. Existence is never
-/// checked here.
+/// If `<expanded>.home/.config/retroarch` exists (rewrite deviation, see
+/// [`paths::retroarch_portable_home`] and doc 05 "Config discovery"), its
+/// `retroarch.cfg` comes first — the AppImage runtime only redirects `$HOME`
+/// there when that directory exists, so this one candidate is
+/// existence-gated while every other candidate below is not; writing into a
+/// `.home` RetroArch will never read would be wrong for every non-AppImage
+/// install. Then `<root>/retroarch.cfg` and `<root>/config/retroarch.cfg`,
+/// then the two XDG candidates and the `~/.config` fallback; the whole list
+/// is deduped case-insensitively, first occurrence wins.
 pub fn config_path_candidates(emulator_path: &str) -> Vec<PathBuf> {
     if emulator_path.is_empty() {
         return Vec::new();
@@ -58,7 +63,11 @@ pub fn config_path_candidates(emulator_path: &str) -> Vec<PathBuf> {
         expanded.clone()
     };
 
-    let mut candidates = vec![
+    let mut candidates = Vec::new();
+    if let Some(home) = paths::retroarch_portable_home(&expanded) {
+        candidates.push(home.join("retroarch.cfg"));
+    }
+    candidates.extend([
         root.join("retroarch.cfg"),
         root.join("config").join("retroarch.cfg"),
         paths::xdg_config_home()
@@ -67,7 +76,7 @@ pub fn config_path_candidates(emulator_path: &str) -> Vec<PathBuf> {
         paths::xdg_data_home()
             .join("retroarch")
             .join("retroarch.cfg"),
-    ];
+    ]);
     if let Some(home) = paths::home_dir() {
         candidates.push(home.join(".config").join("retroarch").join("retroarch.cfg"));
     }
@@ -439,6 +448,27 @@ mod tests {
 
         let dir_candidates = config_path_candidates(dir.to_str().unwrap());
         assert_eq!(dir_candidates[0], dir.join("retroarch.cfg"));
+    }
+
+    #[test]
+    fn candidates_put_the_appimage_portable_home_cfg_first() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+
+        let dir = temp.path().join("RetroArch");
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("RetroArch-Linux-x86_64.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        let home = dir
+            .join("RetroArch-Linux-x86_64.AppImage.home")
+            .join(".config")
+            .join("retroarch");
+        std::fs::create_dir_all(&home).unwrap();
+
+        let candidates = config_path_candidates(exe.to_str().unwrap());
+        assert_eq!(candidates[0], home.join("retroarch.cfg"));
+        assert_eq!(candidates[1], dir.join("retroarch.cfg"));
     }
 
     #[test]

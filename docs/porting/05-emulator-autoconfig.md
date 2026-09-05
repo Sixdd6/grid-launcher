@@ -358,6 +358,14 @@ Signature: `(path, *, enable_fullscreen=False, username="", retroachievements_us
 
 **Config discovery** (`retroarch_config_path_candidates`, grid_launcher/emulator/retroarch.py:136):
 
+0. **Rewrite deviation:** `<exe>.home/.config/retroarch/retroarch.cfg`, only when that
+   directory exists. The Python version has no equivalent candidate. This is deliberate,
+   for the same reason as the `-L` core-resolution deviation in doc 04: the AppImage
+   runtime sets `$HOME` to `<AppImage>.home` whenever that directory exists next to the
+   file, so RetroArch reads its config from there instead of the emulator directory —
+   writing anywhere else would never be applied. This is the one candidate that is
+   existence-gated; writing a cfg into a `.home` that RetroArch will not use would be
+   wrong for every non-AppImage install, so every other candidate below is unconditional.
 1. `<root>/retroarch.cfg` and `<root>/config/retroarch.cfg`, where `<root>` is the
    emulator directory if the path looks like a file (is a file, or has a suffix),
    else the path itself (grid_launcher/emulator/retroarch.py:142).
@@ -370,7 +378,9 @@ logged warning (grid_launcher/emulator/retroarch.py:245).
 
 **Target file:** whichever candidate the reader already parsed successfully
 (`config_path` from `retroarch_directory_settings`), otherwise the first candidate
-(grid_launcher/emulator/retroarch.py:252).
+(grid_launcher/emulator/retroarch.py:252). On an AppImage install with a portable home,
+that first candidate is the portable-home cfg, so the written file is the one RetroArch
+actually reads.
 
 **Save-location semantics.** `savefile_directory`/`savestate_directory` are seeded from
 the *current* values and only fall back to the literals `saves` / `states` when unset
