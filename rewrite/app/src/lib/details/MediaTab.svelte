@@ -63,6 +63,11 @@
                   referrerpolicy="no-referrer"
                   draggable="false"
                   onerror={() => markThumbnailFailed(item.videoId)}
+                  onload={(e) => {
+                    // YouTube answers a missing thumbnail with HTTP 200 and a
+                    // grey 120×90 placeholder, so `onerror` never fires for it.
+                    if ((e.currentTarget as HTMLImageElement).naturalWidth <= 120) markThumbnailFailed(item.videoId);
+                  }}
                 />
               {:else}
                 <Image
