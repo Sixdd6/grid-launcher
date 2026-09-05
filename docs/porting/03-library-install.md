@@ -1541,6 +1541,19 @@ Rulings below are new to this milestone's review.
     exists on disk (`selection.py:310-315`). A configured-but-missing emulator therefore reports
     no block reason and fails at launch instead.
 
+**Open decision — launch-target line vs. install block reason disagree on Linux platforms.**
+The details popup hides the launch-target line (the "No default emulator" / emulator-name line)
+for any platform whose name starts with `"windows"` OR `"linux"` (`isNativeLaunchPlatform`,
+`app/src/lib/details/cloud.ts`, user ruling 2026-09-05) — both run as native host executables, so
+naming an emulator would be false for either. `install_block_reason`
+(`crates/grid-core/src/launch/selection.rs`) still calls `is_native_executable_platform`
+(`crates/grid-core/src/cloud/scope.rs:68`), which is windows-only and unchanged from Python
+(`selection.py:138-143`). The result: a `"Linux"`-platform game shows no launch target in the
+popup body, yet its Install button's tooltip still asks for a configured emulator, because the
+block-reason predicate does not know Linux is native either. Left as-is pending user direction —
+narrowing `is_native_executable_platform` would also change cloud save scope and block reasons,
+which is a larger surface than the display-only line above.
+
 ### Rulings on open questions
 
 Additional decisions made during execution, not individually numbered as deviations because

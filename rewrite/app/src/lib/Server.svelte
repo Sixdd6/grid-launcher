@@ -369,7 +369,7 @@
       />
       <button
         data-testid="library-path-browse"
-        class="browse"
+        class="browse-secondary"
         disabled={libraryPathSaving}
         onclick={browseLibraryPath}
       >
@@ -689,15 +689,20 @@
     cursor: default;
   }
 
-  .browse {
+  .browse-secondary {
     font: inherit;
     padding: 6px 14px;
     border-radius: var(--r-control);
-    border: none;
-    background: var(--primary);
-    color: #fff;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-h);
     cursor: pointer;
     white-space: nowrap;
+  }
+
+  .browse-secondary:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
 
   .banner-error {

@@ -1463,8 +1463,12 @@ review.
     (`crates/grid-core/src/config.rs`) and filters it out of every read through the one shared
     `visible_native_paths` helper (`crates/grid-core/src/cloud/native.rs`), used by both the
     panel's list command and the upload/restore paths (`crates/grid-core/src/cloud/ops/native.rs`).
-    Reason: a removal the user made deliberately must survive a restart. Adding the path back
-    through the manual field or Browse clears the suppression, so nothing is unrecoverable.
+    Reason: a removal the user made deliberately must survive a restart. The suppression is keyed
+    on the row's raw string (its literal `%APPDATA%\…`-style value, not a resolved path), so it
+    clears only when that same raw string is re-added: retyping it into the manual field works,
+    but Browse writes back an absolute resolved directory and adds a new row instead of clearing
+    the old one. Nothing is unrecoverable either way — the suppressed row is still listed nowhere
+    but is not deleted from the underlying save-path source, so re-adding it by hand always works.
 13. **D13 — native save-path row tooltips use `resolve_native_save_dir`, not `expandvars`.**
     Python's tooltip is `os.path.expandvars(raw)` (`details_view_mixin.py:1097`), which on Linux
     leaves a `%APPDATA%` path unchanged. The rewrite resolves it through the same
@@ -1473,7 +1477,7 @@ review.
     be read. Related fix, not a deviation: `CloudContext.wine_prefix` was hardcoded `None` at
     both construction sites, so native upload/restore on Linux never translated
     `%APPDATA%`/`%LOCALAPPDATA%`/`%USERPROFILE%` into the wine prefix despite
-    `crates/grid-core/src/cloud/ops/native.rs:113,207,267,271` consuming it correctly. The prefix
+    `crates/grid-core/src/cloud/ops/native.rs:118,212,272,276` consuming it correctly. The prefix
     is now threaded from the matching registry row's `native_wineprefix`
     (`crates/grid-core/src/library/registry.rs`, resolved by
     `app/src-tauri/src/cloud_service.rs`'s `wine_prefix_from`/`wine_prefix_for`).

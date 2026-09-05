@@ -429,7 +429,12 @@ pub fn restore_native_multi_dir_archive(
 /// `pcgw + [m for m in manual if m not in pcgw]` (`cloud_mixin.py:2689`):
 /// every PCGW-sourced path, followed by every manually-added path not
 /// already present among them (manual-internal duplicates are not
-/// themselves deduplicated, matching the Python list comprehension).
+/// themselves deduplicated, matching the Python list comprehension). In
+/// practice this is never reached with raw, undeduplicated `manual` — every
+/// caller (upload/restore via `crates/grid-core/src/cloud/ops/native.rs`,
+/// and the panel's list command) runs `visible_native_paths` first, which
+/// self-dedupes both lists, so a repeated directory is never archived twice.
+/// A benign deviation from Python, which had no such guarantee.
 pub fn native_save_paths(pcgw: &[String], manual: &[String]) -> Vec<String> {
     let mut combined = pcgw.to_vec();
     for m in manual {

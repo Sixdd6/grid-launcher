@@ -359,7 +359,7 @@
                     class="remove"
                     disabled={manualPathPending}
                     onclick={() => handleRemoveSavePath(entry.raw)}
-                    aria-label="Remove"
+                    aria-label={`Remove ${entry.raw}`}
                     title="Remove this path"
                   >
                     ×
@@ -374,7 +374,7 @@
                     class="remove"
                     disabled={manualPathPending}
                     onclick={() => handleRemoveSavePath(entry.raw)}
-                    aria-label="Remove"
+                    aria-label={`Remove ${entry.raw}`}
                     title="Remove this path"
                   >
                     ×

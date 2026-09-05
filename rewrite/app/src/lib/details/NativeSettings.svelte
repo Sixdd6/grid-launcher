@@ -128,15 +128,16 @@
     {#if loading}
       <p class="hint">Loading…</p>
     {:else if settings}
+      <div class="row">
+        <span class="row-label">Install Directory</span>
+        <p data-testid="native-settings-install-dir" class="row-value">{installDir || '(not found)'}</p>
+      </div>
+
       {#if settings.candidates.length === 0}
         <p data-testid="native-settings-empty" class="hint">
           No launchable executables were found in this game's install directory.
         </p>
       {:else}
-        <div class="row">
-          <span class="row-label">Install Directory</span>
-          <p data-testid="native-settings-install-dir" class="row-value">{installDir || '(not found)'}</p>
-        </div>
         <label>
           Executable
           <select data-testid="native-settings-exe" bind:value={selectedExecutable}>
