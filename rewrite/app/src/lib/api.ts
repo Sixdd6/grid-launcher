@@ -250,7 +250,12 @@ export type UploadReport = {
 
 export type RestoreReport = { ok: boolean; messages: CloudMessage[] };
 
-export type NativeSavePaths = { pcgw: string[]; manual: string[] };
+/** One save-location row: `raw` is the stored path (and the value
+ * `native_remove_save_path` takes back), `expanded` is that path resolved
+ * for this host and the game's wine prefix — the row's tooltip. */
+export type NativeSavePathEntry = { raw: string; expanded: string };
+
+export type NativeSavePaths = { pcgw: NativeSavePathEntry[]; manual: NativeSavePathEntry[] };
 
 export type CloudSettings = {
   download_on_launch: boolean;
@@ -401,8 +406,8 @@ export const api = {
   nativeSavePaths: (game: InstalledGame) => invoke<NativeSavePaths>('native_save_paths', { game }),
   nativeAddManualSavePath: (game: InstalledGame, path: string) =>
     invoke<void>('native_add_manual_save_path', { game, path }),
-  nativeRemoveManualSavePath: (game: InstalledGame, path: string) =>
-    invoke<void>('native_remove_manual_save_path', { game, path }),
+  nativeRemoveSavePath: (game: InstalledGame, path: string) =>
+    invoke<void>('native_remove_save_path', { game, path }),
   cloudSettings: () => invoke<CloudSettings>('cloud_settings'),
   setCloudSettings: (settings: CloudSettings) => invoke<void>('set_cloud_settings', { settings }),
   installContent: (romId: number, kind: ContentKind) =>

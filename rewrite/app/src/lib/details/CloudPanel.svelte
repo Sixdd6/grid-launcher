@@ -236,7 +236,7 @@
     manualPathPending = true;
     manualPathError = null;
     try {
-      await api.nativeRemoveManualSavePath(game, path);
+      await api.nativeRemoveSavePath(game, path);
       await loadNativePaths();
       await loadRecords();
     } catch (err) {
@@ -335,18 +335,18 @@
             <p data-testid="cloud-native-fetching" class="hint">{nativePathsEmptyLabel(nativePhase)}</p>
           {:else if nativePaths}
             <ul class="path-list">
-              {#each nativePaths.pcgw as path (path)}
-                <li data-testid={`cloud-native-path-pcgw-${path}`}>{path}</li>
+              {#each nativePaths.pcgw as entry (entry.raw)}
+                <li data-testid={`cloud-native-path-pcgw-${entry.raw}`}>{entry.raw}</li>
               {/each}
-              {#each nativePaths.manual as path (path)}
-                <li data-testid={`cloud-native-path-manual-${path}`}>
-                  <span>{path}</span>
+              {#each nativePaths.manual as entry (entry.raw)}
+                <li data-testid={`cloud-native-path-manual-${entry.raw}`}>
+                  <span>{entry.raw}</span>
                   <button
-                    data-testid={`cloud-native-path-remove-${path}`}
+                    data-testid={`cloud-native-path-remove-${entry.raw}`}
                     class="remove"
                     disabled={manualPathPending}
-                    onclick={() => handleRemoveManualPath(path)}
-                    aria-label={`Remove ${path}`}
+                    onclick={() => handleRemoveManualPath(entry.raw)}
+                    aria-label={`Remove ${entry.raw}`}
                   >
                     ×
                   </button>

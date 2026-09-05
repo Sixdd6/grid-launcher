@@ -312,7 +312,7 @@ pub fn run() {
             commands::cloud::cloud_delete,
             commands::cloud::native_save_paths,
             commands::cloud::native_add_manual_save_path,
-            commands::cloud::native_remove_manual_save_path,
+            commands::cloud::native_remove_save_path,
             commands::cloud::cloud_settings,
             commands::cloud::set_cloud_settings,
             commands::specials::install_content,

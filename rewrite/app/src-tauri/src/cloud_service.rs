@@ -33,7 +33,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use crate::config_write::modify_config;
-use grid_core::cloud::native::normalize_manual_save_path;
+use grid_core::cloud::native::{normalize_manual_save_path, resolve_native_save_dir};
 use grid_core::cloud::ops::native::manual_paths_key;
 use grid_core::cloud::ops::{self, CloudCaches, CloudContext, CloudMessage};
 use grid_core::cloud::scope::SaveScope;
@@ -275,7 +275,8 @@ impl CloudService {
             .iter()
             .any(|g| games_match_identity(g, &cloud_game));
         let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
-        let ctx = inputs.context(&pcgw_paths);
+        let wine_prefix = inputs.wine_prefix_for(&cloud_game);
+        let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
         let mut caches = self.caches.lock().await;
         let entry = ops::resolved_cloud_emulator_entry(&ctx, &mut caches, &cloud_game, save_type);
         let supported =
@@ -302,7 +303,8 @@ impl CloudService {
         let inputs = Self::load_inputs(config_path, install, launch).await?;
         let cloud_game = cloud_game_from_input(&game);
         let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
-        let ctx = inputs.context(&pcgw_paths);
+        let wine_prefix = inputs.wine_prefix_for(&cloud_game);
+        let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
         let mut caches = self.caches.lock().await;
         let records =
             ops::fetch_cloud_records(&client, &ctx, &mut caches, &cloud_game, save_type).await?;
@@ -344,7 +346,8 @@ impl CloudService {
             });
         }
         let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
-        let ctx = inputs.context(&pcgw_paths);
+        let wine_prefix = inputs.wine_prefix_for(&cloud_game);
+        let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
         let mut caches = self.caches.lock().await;
         let report = ops::upload::upload_cloud_files_for_game(
             &client,
@@ -379,7 +382,8 @@ impl CloudService {
         let inputs = Self::load_inputs(config_path, install, launch).await?;
         let cloud_game = cloud_game_from_input(&game);
         let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
-        let ctx = inputs.context(&pcgw_paths);
+        let wine_prefix = inputs.wine_prefix_for(&cloud_game);
+        let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
         let mut caches = self.caches.lock().await;
 
         let selected: Option<Value> = match record_id {
@@ -451,6 +455,7 @@ impl CloudService {
 
     pub async fn native_save_paths(
         &self,
+        install: Arc<InstallService>,
         config_path: &Path,
         game: CloudGameInput,
     ) -> Result<NativeSavePathsDto, String> {
@@ -462,12 +467,33 @@ impl CloudService {
             .get(&key)
             .cloned()
             .unwrap_or_default();
+        let removed = config
+            .native_removed_save_paths
+            .get(&key)
+            .cloned()
+            .unwrap_or_default();
         // The only call site that ever fetches: see `pcgw_paths_for_title`'s
         // doc comment. A fetch failure degrades to an empty list here (via
         // that method's own `unwrap_or_default`) — never an error, so the
         // panel still allows manual paths.
         let pcgw = self.pcgw_paths_for_title(&cloud_game.title).await;
-        Ok(NativeSavePathsDto { pcgw, manual })
+        let (visible_pcgw, visible_manual) = visible_native_paths(&pcgw, &manual, &removed);
+
+        // The row tooltips must state the directory this host would really
+        // read, so they need the same wine prefix the upload/restore paths
+        // use (N14).
+        let installed = blocking_installed(install).await?;
+        let wine_prefix = installed
+            .iter()
+            .find(|row| games_match_identity(&cloud_game_from_installed(row), &cloud_game))
+            .map(|row| row.native_wineprefix.trim().to_string())
+            .filter(|prefix| !prefix.is_empty())
+            .map(PathBuf::from);
+
+        Ok(NativeSavePathsDto {
+            pcgw: native_path_entries(&visible_pcgw, wine_prefix.as_deref()),
+            manual: native_path_entries(&visible_manual, wine_prefix.as_deref()),
+        })
     }
 
     pub async fn native_add_manual_save_path(
@@ -477,49 +503,66 @@ impl CloudService {
         path: String,
     ) -> Result<(), String> {
         let normalized = normalize_manual_save_path(Path::new(&path));
-        self.mutate_manual_paths(config_path, game, move |paths| {
-            if !paths.iter().any(|p| p == &normalized) {
-                paths.push(normalized.clone());
+        self.mutate_native_paths(config_path, game, move |manual, removed| {
+            if !manual.iter().any(|p| p == &normalized) {
+                manual.push(normalized.clone());
             }
+            // Adding a path back un-suppresses it: without this a removed
+            // PCGW row could never be restored by the user.
+            removed.retain(|p| p != &normalized);
         })
         .await
     }
 
-    pub async fn native_remove_manual_save_path(
+    /// Removes ONE row from a native game's save-location list, whichever
+    /// list it came from (`_pcgw_remove_path_for_game`,
+    /// details_view_mixin.py:1218-1230). Manual paths are deleted; PCGW
+    /// paths cannot be deleted at the source, so the path is recorded in
+    /// `native_removed_save_paths` and filtered out of every later read.
+    pub async fn native_remove_save_path(
         &self,
         config_path: &Path,
         game: CloudGameInput,
         path: String,
     ) -> Result<(), String> {
-        self.mutate_manual_paths(config_path, game, move |paths| {
-            paths.retain(|p| p != &path);
+        self.mutate_native_paths(config_path, game, move |manual, removed| {
+            manual.retain(|p| p != &path);
+            if !removed.iter().any(|p| p == &path) {
+                removed.push(path.clone());
+            }
         })
         .await
     }
 
-    async fn mutate_manual_paths(
+    async fn mutate_native_paths(
         &self,
         config_path: &Path,
         game: CloudGameInput,
-        mutate: impl FnOnce(&mut Vec<String>) + Send + 'static,
+        mutate: impl FnOnce(&mut Vec<String>, &mut Vec<String>) + Send + 'static,
     ) -> Result<(), String> {
         let config_path = config_path.to_path_buf();
         let cloud_game = cloud_game_from_input(&game);
         let key = manual_paths_key(&cloud_game);
         tokio::task::spawn_blocking(move || {
             modify_config(&config_path, |config| {
-                let mut paths = config
+                let mut manual = config
                     .native_manual_save_paths
                     .get(&key)
                     .cloned()
                     .unwrap_or_default();
-                mutate(&mut paths);
-                config.native_manual_save_paths.insert(key, paths);
+                let mut removed = config
+                    .native_removed_save_paths
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or_default();
+                mutate(&mut manual, &mut removed);
+                config.native_manual_save_paths.insert(key.clone(), manual);
+                config.native_removed_save_paths.insert(key, removed);
                 Ok(())
             })
         })
         .await
-        .map_err(|e| format!("manual path save did not finish: {e}"))??;
+        .map_err(|e| format!("native save path save did not finish: {e}"))??;
         self.caches.lock().await.clear();
         Ok(())
     }
@@ -598,7 +641,8 @@ impl CloudService {
         let cloud_game = cloud_game_from_installed(installed_game);
         let skip_if_local_newer = inputs.config.auto_cloud_save_skip_download_if_local_newer;
         let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
-        let ctx = inputs.context(&pcgw_paths);
+        let wine_prefix = inputs.wine_prefix_for(&cloud_game);
+        let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
         let mut caches = self.caches.lock().await;
         let mut combined = SyncStateUpdate::default();
 
@@ -678,7 +722,8 @@ impl CloudService {
         };
         let cloud_game = cloud_game_from_installed(installed_game);
         let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
-        let ctx = inputs.context(&pcgw_paths);
+        let wine_prefix = inputs.wine_prefix_for(&cloud_game);
+        let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
         let mut caches = self.caches.lock().await;
         let save_entry =
             ops::resolved_cloud_emulator_entry(&ctx, &mut caches, &cloud_game, SaveType::Save);
@@ -773,6 +818,14 @@ impl CloudService {
             return;
         };
         let cloud_game = cloud_game_from_installed(installed_game);
+        let wine_prefix = {
+            let prefix = installed_game.native_wineprefix.trim();
+            if prefix.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(prefix))
+            }
+        };
         let key = game_key(&cloud_game);
 
         // `session.started_at` is a unix-seconds `i64`; only re-stamped
@@ -843,6 +896,7 @@ impl CloudService {
                     config_dir,
                     config_path,
                     key,
+                    wine_prefix,
                 )
                 .await;
         });
@@ -879,6 +933,7 @@ impl CloudService {
         config_dir: PathBuf,
         config_path: PathBuf,
         key: String,
+        wine_prefix: Option<PathBuf>,
     ) {
         let now = unix_now_f64();
         let pcgw_paths = self.cached_pcgw_paths(&game.title);
@@ -897,7 +952,7 @@ impl CloudService {
             active_sessions: &[],
             now,
             pcgw_paths: &pcgw_paths,
-            wine_prefix: None,
+            wine_prefix: wine_prefix.as_deref(),
         };
 
         let mut caches = CloudCaches::default();
@@ -984,7 +1039,6 @@ struct Inputs {
     config: Config,
     profiles: &'static [EmulatorProfile],
     all_games: Vec<CloudGame>,
-    #[allow(dead_code)] // kept for callers that need the raw registry rows too
     installed: Vec<InstalledGame>,
     config_dir: PathBuf,
     active_sessions: Vec<grid_core::cloud::window::ActiveSessionRef>,
@@ -992,11 +1046,36 @@ struct Inputs {
 }
 
 impl Inputs {
+    /// This game's wine prefix, from the registry row that matches it by
+    /// identity. `None` when the game is not installed, or when the row has
+    /// no prefix (a Windows host, or a game installed before prefixes were
+    /// recorded).
+    ///
+    /// N14 fix: both `CloudContext` construction sites used to hardcode
+    /// `wine_prefix: None`, so `ops/native.rs`'s
+    /// `resolve_native_save_dir(raw, _, ctx.wine_prefix)` calls
+    /// (`crates/grid-core/src/cloud/ops/native.rs:83,177,237,241`) never
+    /// translated `%APPDATA%` and friends into the prefix on Linux — native
+    /// upload and restore silently scanned host paths that do not exist.
+    fn wine_prefix_for(&self, game: &CloudGame) -> Option<PathBuf> {
+        self.installed
+            .iter()
+            .find(|row| games_match_identity(&cloud_game_from_installed(row), game))
+            .map(|row| row.native_wineprefix.trim().to_string())
+            .filter(|prefix| !prefix.is_empty())
+            .map(PathBuf::from)
+    }
+
     /// `pcgw_paths` is threaded in by the caller (Task 18: [`CloudService::cached_pcgw_paths`],
     /// a cache-only read keyed on the specific game's title — `Inputs`
     /// itself is built once per command with no single game in view, so it
-    /// cannot resolve this on its own).
-    fn context<'a>(&'a self, pcgw_paths: &'a [String]) -> CloudContext<'a> {
+    /// cannot resolve this on its own). `wine_prefix` is threaded in the
+    /// same way, from [`Self::wine_prefix_for`].
+    fn context<'a>(
+        &'a self,
+        pcgw_paths: &'a [String],
+        wine_prefix: Option<&'a Path>,
+    ) -> CloudContext<'a> {
         CloudContext {
             config: &self.config,
             profiles: self.profiles,
@@ -1010,7 +1089,7 @@ impl Inputs {
             active_sessions: &self.active_sessions,
             now: self.now,
             pcgw_paths,
-            wine_prefix: None,
+            wine_prefix,
         }
     }
 }
@@ -1433,10 +1512,66 @@ pub struct RestoreReportDto {
     pub messages: Vec<CloudMessageDto>,
 }
 
+/// One row of a native game's save-location list.
+#[derive(Debug, Clone, Serialize)]
+pub struct NativeSavePathEntryDto {
+    /// The stored, unexpanded path (`%APPDATA%\Game\saves`). This is the
+    /// row's label AND the value `native_remove_save_path` takes back.
+    pub raw: String,
+    /// `raw` resolved for THIS host and this game's wine prefix — the row's
+    /// tooltip. Ports `os.path.expandvars(raw_path)`
+    /// (details_view_mixin.py:1097), widened to the same
+    /// `resolve_native_save_dir` the upload/restore paths use, so the
+    /// tooltip states the directory that would really be read.
+    pub expanded: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct NativeSavePathsDto {
-    pub pcgw: Vec<String>,
-    pub manual: Vec<String>,
+    pub pcgw: Vec<NativeSavePathEntryDto>,
+    pub manual: Vec<NativeSavePathEntryDto>,
+}
+
+/// The rows a native game's save-location list shows: `pcgw` minus every
+/// suppressed path, then `manual` minus every suppressed path AND minus any
+/// path the PCGW list already carries (`_native_save_paths_for_game`,
+/// details_view_mixin.py:1060-1065, which appends only manual paths "not in
+/// cached"). De-duplication matters now that both lists render a remove
+/// button: two rows for one raw path would collide on their test ids and
+/// would double the "N save location(s) configured." count.
+fn visible_native_paths(
+    pcgw: &[String],
+    manual: &[String],
+    removed: &[String],
+) -> (Vec<String>, Vec<String>) {
+    let visible_pcgw: Vec<String> = pcgw
+        .iter()
+        .filter(|p| !removed.iter().any(|r| r == *p))
+        .cloned()
+        .collect();
+    let visible_manual: Vec<String> = manual
+        .iter()
+        .filter(|p| !removed.iter().any(|r| r == *p))
+        .filter(|p| !visible_pcgw.iter().any(|q| q == *p))
+        .cloned()
+        .collect();
+    (visible_pcgw, visible_manual)
+}
+
+/// Builds the DTO rows for `paths`, resolving each one for display.
+fn native_path_entries(
+    paths: &[String],
+    wine_prefix: Option<&Path>,
+) -> Vec<NativeSavePathEntryDto> {
+    paths
+        .iter()
+        .map(|raw| NativeSavePathEntryDto {
+            raw: raw.clone(),
+            expanded: resolve_native_save_dir(raw, None, wine_prefix)
+                .to_string_lossy()
+                .into_owned(),
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1470,6 +1605,94 @@ mod tests {
         );
     }
 
+    #[test]
+    fn visible_native_paths_drops_suppressed_rows_and_de_duplicates_manual_ones() {
+        let pcgw = vec![
+            "%APPDATA%\\Game\\saves".to_string(),
+            "%USERPROFILE%\\Documents\\Game".to_string(),
+        ];
+        let manual = vec![
+            // Same raw string as a PCGW row: the reference lists it once
+            // (`_native_save_paths_for_game`, details_view_mixin.py:1060-1065).
+            "%APPDATA%\\Game\\saves".to_string(),
+            "D:\\Extra\\Saves".to_string(),
+        ];
+        let removed = vec!["%USERPROFILE%\\Documents\\Game".to_string()];
+
+        let (visible_pcgw, visible_manual) = visible_native_paths(&pcgw, &manual, &removed);
+
+        assert_eq!(visible_pcgw, vec!["%APPDATA%\\Game\\saves".to_string()]);
+        assert_eq!(visible_manual, vec!["D:\\Extra\\Saves".to_string()]);
+    }
+
+    #[test]
+    fn visible_native_paths_keeps_everything_when_nothing_is_suppressed() {
+        let pcgw = vec!["%APPDATA%\\Game".to_string()];
+        let manual = vec!["D:\\Saves".to_string()];
+        let (visible_pcgw, visible_manual) = visible_native_paths(&pcgw, &manual, &[]);
+        assert_eq!(visible_pcgw, pcgw);
+        assert_eq!(visible_manual, manual);
+    }
+
+    #[test]
+    fn wine_prefix_for_reads_the_matching_installed_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let row = InstalledGame {
+            title: "My Game".to_string(),
+            platform: "Windows".to_string(),
+            rom_id: Some(701),
+            native_wineprefix: "/library/Windows/My Game/prefix".to_string(),
+            ..Default::default()
+        };
+
+        let inputs = Inputs {
+            config: Config::default(),
+            profiles: &[],
+            all_games: vec![cloud_game_from_installed(&row)],
+            installed: vec![row],
+            config_dir: dir.path().to_path_buf(),
+            active_sessions: Vec::new(),
+            now: 1_800_000_000.0,
+        };
+
+        let game = CloudGame {
+            title: "My Game".to_string(),
+            platform: "Windows".to_string(),
+            rom_id: "701".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            inputs.wine_prefix_for(&game),
+            Some(PathBuf::from("/library/Windows/My Game/prefix"))
+        );
+
+        let other = CloudGame {
+            title: "Other".to_string(),
+            platform: "Windows".to_string(),
+            rom_id: "702".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(inputs.wine_prefix_for(&other), None);
+    }
+
+    #[test]
+    fn context_threads_the_wine_prefix_into_the_cloud_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let inputs = Inputs {
+            config: Config::default(),
+            profiles: &[],
+            all_games: Vec::new(),
+            installed: Vec::new(),
+            config_dir: dir.path().to_path_buf(),
+            active_sessions: Vec::new(),
+            now: 1_800_000_000.0,
+        };
+        let pcgw: Vec<String> = Vec::new();
+        let prefix = PathBuf::from("/prefix");
+        let ctx = inputs.context(&pcgw, Some(prefix.as_path()));
+        assert_eq!(ctx.wine_prefix, Some(prefix.as_path()));
+    }
+
     /// Final-review fix wave: the server's own order must not reach the
     /// panel — records render newest-first, as Python's
     /// `sort_server_records_by_recency` does.
@@ -1486,7 +1709,7 @@ mod tests {
             now: 1_800_000_000.0,
         };
         let pcgw: Vec<String> = Vec::new();
-        let ctx = inputs.context(&pcgw);
+        let ctx = inputs.context(&pcgw, None);
         let mut caches = CloudCaches::default();
         let game = CloudGame {
             title: "Alpha".to_string(),
@@ -1769,6 +1992,7 @@ mod tests {
             config_dir.clone(),
             config_path.clone(),
             game_key(&game_a),
+            None,
         );
         let b = cloud.clone().run_auto_upload(
             client.clone(),
@@ -1778,6 +2002,7 @@ mod tests {
             config_dir,
             config_path,
             game_key(&game_b),
+            None,
         );
         tokio::join!(a, b);
         let elapsed = start.elapsed();

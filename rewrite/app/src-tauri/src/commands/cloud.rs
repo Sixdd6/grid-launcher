@@ -118,9 +118,10 @@ pub async fn native_save_paths(
     state: State<'_, AppState>,
     game: CloudGameInput,
 ) -> Result<NativeSavePathsDto, String> {
+    let install = state.install.as_ref().map_err(Clone::clone)?.clone();
     state
         .cloud
-        .native_save_paths(&Config::default_path(), game)
+        .native_save_paths(install, &Config::default_path(), game)
         .await
 }
 
@@ -137,14 +138,14 @@ pub async fn native_add_manual_save_path(
 }
 
 #[tauri::command]
-pub async fn native_remove_manual_save_path(
+pub async fn native_remove_save_path(
     state: State<'_, AppState>,
     game: CloudGameInput,
     path: String,
 ) -> Result<(), String> {
     state
         .cloud
-        .native_remove_manual_save_path(&Config::default_path(), game, path)
+        .native_remove_save_path(&Config::default_path(), game, path)
         .await
 }
 

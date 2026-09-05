@@ -188,6 +188,19 @@ pub struct Config {
     /// entries. `grid-launcher.py:434`.
     #[serde(default)]
     pub native_manual_save_paths: BTreeMap<String, Vec<String>>,
+    /// Save paths the user removed from a native game's save-location list,
+    /// keyed exactly like `native_manual_save_paths`. Filtered out of the
+    /// PCGamingWiki list every time it is read, so a removed PCGW row does
+    /// not come back on the next lookup.
+    ///
+    /// Deliberate improvement over the reference, which mutated only the
+    /// in-memory `_pcgw_paths_cache` (`_pcgw_remove_path_for_game`,
+    /// details_view_mixin.py:1218-1230) and therefore forgot the removal as
+    /// soon as the cache was rebuilt. Adding a path back through
+    /// `native_add_manual_save_path` clears it from here, so a removal is
+    /// never permanent.
+    #[serde(default)]
+    pub native_removed_save_paths: BTreeMap<String, Vec<String>>,
     /// The compat tool (by name) offered as the default for Windows-only
     /// content on Linux/macOS, e.g. `"GE-Proton"`. Blank when unset.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -238,6 +251,7 @@ impl Default for Config {
             cloud_save_retention_limit: 3,
             cloud_sync_state: toml::value::Table::new(),
             native_manual_save_paths: BTreeMap::new(),
+            native_removed_save_paths: BTreeMap::new(),
             default_compat_tool: String::new(),
             compat_tool_installs: Vec::new(),
             ui: UiSettings::default(),
@@ -639,6 +653,36 @@ mod tests {
         let cfg = Config::load(&path).unwrap();
         assert_eq!(cfg.emulators.len(), 1);
         assert_eq!(cfg.emulators[0].name, "valid");
+    }
+
+    #[test]
+    fn native_removed_save_paths_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut removed = BTreeMap::new();
+        removed.insert(
+            "my game|windows".to_string(),
+            vec!["%APPDATA%\\MyGame\\saves".to_string()],
+        );
+        let cfg = Config {
+            native_removed_save_paths: removed,
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(
+            loaded.native_removed_save_paths.get("my game|windows"),
+            Some(&vec!["%APPDATA%\\MyGame\\saves".to_string()])
+        );
+    }
+
+    #[test]
+    fn native_removed_save_paths_defaults_to_empty_for_an_older_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "schema_version = 1\n").unwrap();
+        let cfg = Config::load(&path).unwrap();
+        assert!(cfg.native_removed_save_paths.is_empty());
     }
 
     #[test]
