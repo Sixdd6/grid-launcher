@@ -6,6 +6,15 @@
   import { api, type EmulatorEntry, type ProfileSummary } from '../api';
   import { matchProfileByName, shouldAutoFillFromName } from './catalog';
   import { pickFile } from '../pickers';
+  import {
+    addedEmulatorToast,
+    ARGS_LABEL,
+    emulatorFormValues,
+    entryPatch,
+    normalizeSaveStrategy,
+    SAVE_STRATEGIES,
+  } from './form';
+  import { pushToast } from '../stores/toasts.svelte';
 
   let {
     mode,
@@ -25,11 +34,15 @@
   // edit. A parent that switches which entry is edited remounts this with
   // `{#key entry.name}` rather than expecting the fields to track the prop.
   // svelte-ignore state_referenced_locally
-  let formName = $state(entry?.name ?? '');
-  // svelte-ignore state_referenced_locally
-  let formPath = $state(entry?.path ?? '');
-  // svelte-ignore state_referenced_locally
-  let formArgs = $state(entry?.args ?? '');
+  const seed = emulatorFormValues(entry);
+  let formName = $state(seed.name);
+  let formPath = $state(seed.path);
+  let formArgs = $state(seed.args);
+  let formSaveStrategy = $state<string>(seed.saveStrategy);
+  let formIgnoreFiles = $state(seed.ignoreFiles);
+  let formIgnoreExtensions = $state(seed.ignoreExtensions);
+  let formSavePaths = $state(seed.savePaths);
+  let formStatePaths = $state(seed.statePaths);
   let formError = $state<string | null>(null);
   let formPending = $state(false);
   let autofillMatch = $state<ProfileSummary | null>(null);
@@ -92,18 +105,27 @@
     // show (install provenance, autoconfig paths) are spread back from
     // `entry` untouched instead of being dropped on save.
     const originalName = mode === 'add' ? '' : (entry?.name ?? '');
-    const next: EmulatorEntry = {
-      ...(mode === 'edit' && entry ? entry : {}),
-      // Backend stores the name as-given; trim client-side so a name typed
-      // with stray whitespace doesn't get persisted verbatim.
-      name: formName.trim(),
+    const patch = entryPatch({
+      name: formName,
       path: formPath,
       args: formArgs,
+      saveStrategy: normalizeSaveStrategy(formSaveStrategy),
+      ignoreFiles: formIgnoreFiles,
+      ignoreExtensions: formIgnoreExtensions,
+      savePaths: formSavePaths,
+      statePaths: formStatePaths,
+    });
+    const next: EmulatorEntry = {
+      ...(mode === 'edit' && entry ? entry : {}),
+      ...patch,
     };
     formError = null;
     formPending = true;
     try {
       await api.saveEmulator(originalName, next);
+      // `_save_emulator_entry` toasts only for a NEW manual entry
+      // (emulator_ui_mixin.py:1590-1591) — an edit stays silent.
+      if (mode === 'add') pushToast(addedEmulatorToast(patch.name));
       onSaved();
     } catch (err) {
       formError = errorMessage(err);
@@ -142,7 +164,34 @@
       </button>
     </span>
   </label>
-  <label>Arguments <input data-testid="emu-form-args" bind:value={formArgs} /></label>
+  <label>
+    <span data-testid="emu-form-args-label">{ARGS_LABEL}</span>
+    <input data-testid="emu-form-args" bind:value={formArgs} />
+  </label>
+  <label>
+    Save Strategy
+    <select data-testid="emu-form-save-strategy" bind:value={formSaveStrategy}>
+      {#each SAVE_STRATEGIES as strategy (strategy)}
+        <option value={strategy}>{strategy}</option>
+      {/each}
+    </select>
+  </label>
+  <label>
+    Ignore Files (; separated)
+    <input data-testid="emu-form-ignore-files" bind:value={formIgnoreFiles} />
+  </label>
+  <label>
+    Ignore Extensions (; separated)
+    <input data-testid="emu-form-ignore-extensions" bind:value={formIgnoreExtensions} />
+  </label>
+  <label>
+    Save Dirs (; separated)
+    <input data-testid="emu-form-save-paths" bind:value={formSavePaths} />
+  </label>
+  <label>
+    State Dirs (; separated)
+    <input data-testid="emu-form-state-paths" bind:value={formStatePaths} />
+  </label>
   {#if formError}<p data-testid="emu-form-error" class="error" role="alert">{formError}</p>{/if}
   <div class="form-actions">
     <button data-testid="emu-form-save" type="submit" disabled={formPending}>{formPending ? 'Saving…' : 'Save'}</button>
@@ -179,6 +228,20 @@
     outline-offset: 1px;
   }
 
+  select {
+    font: inherit;
+    padding: 8px 10px;
+    border-radius: var(--r-chip);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-h);
+  }
+
+  select:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+  }
+
   .path-row {
     display: flex;
     gap: 8px;
@@ -188,6 +251,22 @@
   .path-row input {
     flex: 1;
     min-width: 0;
+  }
+
+  .path-row button {
+    font: inherit;
+    padding: 8px 16px;
+    border-radius: var(--r-chip);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-h);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .path-row button:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
 
   .hint {
