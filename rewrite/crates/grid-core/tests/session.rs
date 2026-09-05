@@ -77,6 +77,56 @@ async fn connect_persists_and_restore_reconnects() {
     assert_eq!(state.server_url, server.uri());
 }
 
+/// A server URL typed with embedded credentials must never be stored in
+/// memory or persisted to config: the password would land in `config.toml`
+/// and in every `SessionState` crossing IPC, and the userinfo netloc would
+/// make host filtering reject every absolute image URL.
+#[tokio::test]
+async fn connect_strips_userinfo_from_the_stored_and_persisted_server_url() {
+    let server = MockServer::start().await;
+    mount_users_me(&server).await;
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(MemoryStore::default());
+    let mgr = SessionManager::new(
+        dir.path().join("config.toml"),
+        dir.path().join("covers"),
+        store.clone(),
+    );
+
+    // The mock's host with userinfo spliced in, so the probe still reaches it.
+    let with_userinfo = server
+        .uri()
+        .replacen("http://", "http://user:FAKE-TEST-PASSWORD@", 1);
+    let state = mgr
+        .connect(
+            with_userinfo,
+            "six".into(),
+            SecretString::from("FAKE-TEST-TOKEN-not-real"),
+            true,
+        )
+        .await
+        .unwrap();
+
+    let expected = server.uri();
+    assert_eq!(mgr.server_url(), expected);
+    assert_eq!(state.server_url, expected);
+    let persisted = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+    assert!(!persisted.contains("FAKE-TEST-PASSWORD"));
+    assert!(persisted.contains(&expected));
+
+    // A restore over the same config keeps the stripped URL.
+    let mgr2 = SessionManager::new(
+        dir.path().join("config.toml"),
+        dir.path().join("covers"),
+        store,
+    );
+    let RestoreOutcome::Connected { state } = mgr2.restore().await.unwrap() else {
+        panic!("expected Connected")
+    };
+    assert_eq!(state.server_url, expected);
+    assert_eq!(mgr2.server_url(), expected);
+}
+
 #[tokio::test]
 async fn restore_reports_no_session_without_stored_server() {
     let dir = tempfile::tempdir().unwrap();

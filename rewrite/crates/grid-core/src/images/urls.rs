@@ -725,6 +725,20 @@ mod tests {
         assert_eq!(filter_to_server_host("", "https://my-romm-server"), "");
     }
 
+    /// A server URL typed with embedded credentials is stripped once at the
+    /// session boundary, so the base the app filters against and the base the
+    /// client resolved image URLs from share the same netloc. Without the
+    /// strip the netloc comparison sees `user:pass@host` vs `host` and drops
+    /// every absolute image URL.
+    #[test]
+    fn userinfo_base_still_matches_the_urls_a_client_resolved_from_it() {
+        let raw = "https://user:FAKE-TEST-PASSWORD@example.test";
+        let base = crate::romm::strip_userinfo(raw);
+        let resolved = resolve_image_url("/api/roms/1/cover/big.png", &base);
+        assert_eq!(resolved, "https://example.test/api/roms/1/cover/big.png");
+        assert_eq!(filter_to_server_host(&resolved, &base), resolved);
+    }
+
     #[test]
     fn resolve_relative_and_normalize() {
         assert_eq!(

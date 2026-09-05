@@ -26,18 +26,40 @@ pub struct RommClient {
     auth: reqwest::header::HeaderValue,
 }
 
+/// Removes any `user:pass@` from a server URL, leaving everything else
+/// (scheme, host, port, subpath, trailing-slash shape) as typed. Unparsable
+/// input and URLs without userinfo are returned verbatim.
+///
+/// A server URL typed with embedded credentials must never leak `user:pass@`
+/// into stored config, `SessionState`, or the image/screenshot/fanart URLs
+/// this crate resolves — and the userinfo netloc would also make
+/// `images::urls::filter_to_server_host` reject every absolute image URL.
+/// The Authorization header is the only credential channel this client uses.
+pub fn strip_userinfo(url: &str) -> String {
+    let Ok(mut parsed) = url::Url::parse(url) else {
+        return url.to_string();
+    };
+    if parsed.username().is_empty() && parsed.password().is_none() {
+        return url.to_string();
+    }
+    let _ = parsed.set_username("");
+    let _ = parsed.set_password(None);
+    // `Url` always serializes a path, so a bare `https://host` grows a
+    // trailing slash; keep the caller's shape so a stripped base concatenates
+    // with a `/path` exactly like an untouched one.
+    if url.ends_with('/') {
+        parsed.as_str().to_string()
+    } else {
+        parsed.as_str().trim_end_matches('/').to_string()
+    }
+}
+
 impl RommClient {
     /// The ONLY place (besides KeyringStore serialization) where a secret is
     /// exposed. Builds the Authorization header value once.
     pub fn new(base_url: &str, cred: Credential) -> Result<Self, RommError> {
-        let mut parsed = url::Url::parse(base_url).map_err(|_| RommError::InvalidUrl)?;
-        // A server URL typed with embedded credentials (`https://user:pass@host`)
-        // must never leak `user:pass@` into every resolved image/screenshot/
-        // fanart URL this crate stores in the registry and sends over IPC.
-        // The Authorization header (built above from `cred`) is the only
-        // credential channel this client uses.
-        let _ = parsed.set_username("");
-        let _ = parsed.set_password(None);
+        let stripped = strip_userinfo(base_url);
+        let parsed = url::Url::parse(&stripped).map_err(|_| RommError::InvalidUrl)?;
         let base = parsed.as_str().trim_end_matches('/').to_string();
         let raw = match &cred {
             Credential::Token(t) => format!("Bearer {}", t.expose_secret()),
@@ -774,5 +796,21 @@ mod credential_stripping_tests {
         );
         assert!(!cover.as_str().contains("user:pass@"));
         assert!(!cover.as_str().contains("pass"));
+    }
+
+    /// `strip_userinfo` is the single normalisation the session boundary
+    /// applies before a server URL is stored or persisted.
+    #[test]
+    fn strip_userinfo_clears_credentials_and_passes_through_unparsable_input() {
+        assert_eq!(
+            super::strip_userinfo("https://user:FAKE-TEST-PASSWORD@example.test/romm"),
+            "https://example.test/romm"
+        );
+        assert_eq!(
+            super::strip_userinfo("https://example.test/romm"),
+            "https://example.test/romm"
+        );
+        assert_eq!(super::strip_userinfo("not-a-url"), "not-a-url");
+        assert_eq!(super::strip_userinfo(""), "");
     }
 }

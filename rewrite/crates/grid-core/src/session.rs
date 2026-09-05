@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::images::cache::ImageCache;
-use crate::romm::{RommClient, RommError};
+use crate::romm::{strip_userinfo, RommClient, RommError};
 use crate::secrets::{Credential, SecretError, SecretStore};
 use secrecy::SecretString;
 use std::path::PathBuf;
@@ -104,6 +104,10 @@ impl SessionManager {
                 password: secret,
             }
         };
+        // Normalise once, at the session boundary: everything downstream —
+        // the probe, `SessionState`, config, and the base used for image host
+        // filtering — sees the same credential-free URL.
+        let server_url = strip_userinfo(&server_url);
         let (client, state) = self.probe(&server_url, &username, cred.clone()).await?;
         // Token auth never sends the username, so a typed one is only a claim.
         // The server-reported account is the truth: a non-empty mismatching
@@ -143,14 +147,16 @@ impl SessionManager {
         let Some(cred) = self.secrets.load()? else {
             return Ok(RestoreOutcome::NoSession);
         };
-        *self.server_url.lock().unwrap() = cfg.server_url.clone();
-        match self.probe(&cfg.server_url, &cfg.username, cred).await {
+        // A config written by an older build may still carry userinfo.
+        let server_url = strip_userinfo(&cfg.server_url);
+        *self.server_url.lock().unwrap() = server_url.clone();
+        match self.probe(&server_url, &cfg.username, cred).await {
             Ok((client, state)) => {
                 *self.client.lock().unwrap() = Some(Arc::new(client));
                 Ok(RestoreOutcome::Connected { state })
             }
             Err(e) => Ok(RestoreOutcome::Unreachable {
-                server_url: cfg.server_url,
+                server_url,
                 username: cfg.username,
                 error: e.to_string(),
             }),
@@ -169,8 +175,9 @@ impl SessionManager {
         if cfg.server_url.is_empty() {
             return Err(SessionError::NoStoredSession);
         }
-        *self.server_url.lock().unwrap() = cfg.server_url.clone();
-        let (client, state) = self.probe(&cfg.server_url, &cfg.username, cred).await?;
+        let server_url = strip_userinfo(&cfg.server_url);
+        *self.server_url.lock().unwrap() = server_url.clone();
+        let (client, state) = self.probe(&server_url, &cfg.username, cred).await?;
         *self.client.lock().unwrap() = Some(Arc::new(client));
         Ok(state)
     }
