@@ -7,10 +7,11 @@
   // is a block box that cannot drift on a text baseline the way a glyph
   // does, and `currentColor` so the colour is always the caller's token.
   //
-  // `label` decides the ARIA shape. Absent (the icon sits beside visible
-  // text, or its button already has an `aria-label`): the SVG is hidden from
-  // the accessibility tree so it cannot be announced twice. Present (the
-  // icon IS the label): `role="img"` plus the name.
+  // `label` decides the ARIA shape. Absent or blank (the icon sits beside
+  // visible text, or its button already has an `aria-label`): the SVG is
+  // hidden from the accessibility tree so it cannot be announced twice.
+  // Present and non-blank (the icon IS the label): `role="img"` plus the
+  // name.
   let {
     name,
     size = 16,
@@ -22,6 +23,11 @@
   } = $props();
 
   let filled = $derived(FILLED_ICONS.includes(name));
+
+  // `label=""` or whitespace-only is not a name. Treat it the same as
+  // absent, so a button that forgets to pass a real label doesn't ship an
+  // `aria-label=""` icon announced as unnamed to screen readers.
+  let labelled = $derived(label !== undefined && label.trim() !== '');
 </script>
 
 <svg
@@ -34,9 +40,9 @@
   stroke-width="1.5"
   stroke-linecap="round"
   stroke-linejoin="round"
-  role={label === undefined ? undefined : 'img'}
-  aria-label={label}
-  aria-hidden={label === undefined ? 'true' : undefined}
+  role={labelled ? 'img' : undefined}
+  aria-label={labelled ? label : undefined}
+  aria-hidden={labelled ? undefined : 'true'}
   focusable="false"
 >
   <path

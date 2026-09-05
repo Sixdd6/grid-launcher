@@ -139,14 +139,17 @@ h1 {
    box (18×18, 22×22 and two 28×28) and they had already drifted — one used
    `var(--r-chip)` where its twin used a literal `6px`, and none of the four
    set `font: inherit`. 28×28 is the plan's minimum pointer target; the
-   `Icon` inside is 14 or 20. A component adds only what genuinely differs:
-   `position`, `color`, and its own hover/focus background. */
+   `Icon` inside is 14 or 20. Hover/focus is a shared token-only background
+   below; a component adds only what genuinely differs: `position` and
+   `color`. */
 .icon-btn {
   width: 28px;
   height: 28px;
   padding: 0;
   display: grid;
   place-items: center;
+  flex: none;
+  box-sizing: border-box;
   font: inherit;
   line-height: 1;
   border: none;
@@ -154,4 +157,10 @@ h1 {
   background: transparent;
   color: inherit;
   cursor: pointer;
+  transition: background var(--m-fast) ease;
+}
+
+.icon-btn:hover,
+.icon-btn:focus-visible {
+  background: var(--border);
 }
