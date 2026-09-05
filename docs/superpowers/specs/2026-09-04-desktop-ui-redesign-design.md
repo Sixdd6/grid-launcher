@@ -24,7 +24,7 @@ the options.
 |---|---|
 | D-UI-1 | Shell = fixed top bar with centred pill tabs (RomM v2 `AppNav`), logo left, server/user menu right, a download footer strip, and blurred background art behind content. |
 | D-UI-2 | Library = left rail (All games, Recent, Updates, then installed platforms with counts) + one grid with a toolbar (search, sort, card size). |
-| D-UI-3 | Server mirrors Library: rail of server platforms with counts, platform header (name, counts, firmware status), grid with Installed / Update badges and dimmed not-installed cards. |
+| D-UI-3 | Server mirrors Library: rail of server platforms with counts, platform header (name, counts, firmware status), grid with Installed / Update badges. Not-installed cards render at full opacity — the 60%-until-hover dimming this row originally called for was removed on 2026-09-05 (user ruling): the installed dot and the Play/Install button already state that, and a dimmed cover reads as a failed image. |
 | D-UI-4 | Game details stays a popup: fixed cover and action column left, header and four tabs right: Overview, Media, Saves, Files. Media opens fullscreen viewers for screenshots and video. |
 | D-UI-5 | Emulators and Settings use a left category rail with one scrolling pane per category. Emulators: Installed, Add from catalog, Platform defaults, Compat tools (Linux only). Settings: Connection, Cloud saves, RetroAchievements, Updates, Appearance. |
 | D-UI-6 | Downloads is a full view: Active / Queued / Completed segments with a legend; one row per transfer with a kind badge, progress, speed, ETA, a mini sparkline panel (network purple, disk teal) beside the buttons. The footer strip shows the current transfer with a tiny sparkline and opens the view. |

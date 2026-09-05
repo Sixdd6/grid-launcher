@@ -62,7 +62,6 @@
   data-testid={testId}
   class="card"
   class:focused
-  class:dim={!installed}
   onclick={onOpen}
   onmouseenter={onHoverStart}
   onmouseleave={onHoverEnd}
@@ -144,16 +143,6 @@
   .card.focused .cover {
     outline: 2px solid var(--primary);
     outline-offset: -2px;
-  }
-
-  /* D-UI-3: not-installed cards render at 60% until hover. */
-  .card.dim .cover {
-    opacity: 0.6;
-    transition: opacity var(--m-fast) ease;
-  }
-  .card.dim:hover .cover,
-  .card.dim.focused .cover {
-    opacity: 1;
   }
 
   .cover {
