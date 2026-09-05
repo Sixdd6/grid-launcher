@@ -99,6 +99,13 @@ describe('cycleIndex', () => {
   it('recovers from an index past the end (the list shrank mid-cycle)', () => {
     expect(cycleIndex(9, 2)).toBe(0);
   });
+
+  // JS `%` keeps the sign of its left operand, so a bare `(current + 1) % count`
+  // would hand a negative index straight back to the caller.
+  it('never returns a negative index', () => {
+    expect(cycleIndex(-5, 3)).toBe(2);
+    expect(cycleIndex(-1, 3)).toBe(0);
+  });
 });
 
 describe('startupSubject', () => {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { api, type InstalledGame } from './api';
   import { installed, refresh as refreshInstalled } from './stores/installed.svelte';
   import { updates } from './stores/updates.svelte';
@@ -147,12 +148,33 @@
   // let a mouse move cancel a keyboard selection's pending swap.
   const focusDwell = createHoverViewed();
 
+  // Precedence is details > focus > hover, enforced rather than left to
+  // whichever timer fires last: the overlay blocks both writers while it is
+  // open, and a selection change cancels any hover dwell still in flight.
   $effect(() => {
-    const row = rows[focusIndex];
-    if (!active || row === undefined) return;
-    focusDwell.start(subjectFromInstalled(row));
+    const index = focusIndex;
+    if (!active || subject !== null) return;
+    // `rows` is a fresh array on every `installed.list` refresh (replenish,
+    // download and native-settings events all publish one). Tracking it here
+    // would re-arm this dwell on a background refresh and, 500ms later, snap
+    // the art to whatever sits at the current index. Only the SELECTION is a
+    // reason to change the background, so the row is read untracked.
+    const selected = untrack(() => {
+      const row = rows[index];
+      return row === undefined ? null : subjectFromInstalled(row);
+    });
+    if (selected === null) return;
+    hover.end();
+    focusDwell.start(selected);
     return () => focusDwell.end();
   });
+
+  /** The pointer only feeds the background while the overlay is closed —
+   *  the details popup owns the art for as long as it is open. */
+  function hoverStart(row: InstalledGame) {
+    if (subject !== null) return;
+    hover.start(subjectFromInstalled(row));
+  }
 
   /** Design §3: `Ctrl+F` focuses the current view's search box. */
   export function focusSearch() {
@@ -286,7 +308,7 @@
             onOpen={() => openDetails(row)}
             onPrimary={() => play(row)}
             onCloud={() => openDetails(row, 'save')}
-            onHoverStart={() => hover.start(subjectFromInstalled(row))}
+            onHoverStart={() => hoverStart(row)}
             onHoverEnd={hover.end}
           />
         {/each}

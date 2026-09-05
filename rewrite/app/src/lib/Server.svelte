@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { api, FIRMWARE_PASS_FINISHED_EVENT, type FirmwarePassFinished, type GameSummary, type Platform } from './api';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import Details from './Details.svelte';
@@ -280,12 +281,33 @@
   // let a mouse move cancel a keyboard selection's pending swap.
   const focusDwell = createHoverViewed();
 
+  // Precedence is details > focus > hover, enforced rather than left to
+  // whichever timer fires last: the overlay blocks both writers while it is
+  // open, and a selection change cancels any hover dwell still in flight.
   $effect(() => {
-    const game = visible[focusIndex];
-    if (!active || game === undefined) return;
-    focusDwell.start(subjectFromSummary(game));
+    const index = focusIndex;
+    if (!active || detailsGame !== null) return;
+    // `visible` is a fresh array on every games reload and every search
+    // keystroke. Tracking it would re-arm this dwell on a refresh and, 500ms
+    // later, snap the art to whatever sits at the current index. Only the
+    // SELECTION is a reason to change the background, so the game is read
+    // untracked.
+    const selected = untrack(() => {
+      const game = visible[index];
+      return game === undefined ? null : subjectFromSummary(game);
+    });
+    if (selected === null) return;
+    hover.end();
+    focusDwell.start(selected);
     return () => focusDwell.end();
   });
+
+  /** The pointer only feeds the background while the overlay is closed —
+   *  the details popup owns the art for as long as it is open. */
+  function hoverStart(game: GameSummary) {
+    if (detailsGame !== null) return;
+    hover.start(subjectFromSummary(game));
+  }
 
   /** Design §3: `Ctrl+F` focuses the current view's search box. */
   export function focusSearch() {
@@ -491,7 +513,7 @@
                 onOpen={() => openDetails(game)}
                 onPrimary={() => primary(game)}
                 onCloud={() => openDetails(game, 'save')}
-                onHoverStart={() => hover.start(subjectFromSummary(game))}
+                onHoverStart={() => hoverStart(game)}
                 onHoverEnd={hover.end}
               />
             {/each}

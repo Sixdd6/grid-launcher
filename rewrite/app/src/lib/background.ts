@@ -74,10 +74,15 @@ export function shouldCycle(urls: string[], fade: number): boolean {
   return urls.length > 1 && fade > 0;
 }
 
-/** The next index, wrapping. `0` for an empty list — never `NaN`. */
+/**
+ * The next index, wrapping. `0` for an empty list — never `NaN`, and never
+ * negative: JS's `%` keeps the sign of its left operand, so a caller holding a
+ * negative index (a reset that raced a shrinking list) would otherwise get a
+ * negative index back and read past the start of the array.
+ */
 export function cycleIndex(current: number, count: number): number {
   if (count <= 0) return 0;
-  return (current + 1) % count;
+  return (((current + 1) % count) + count) % count;
 }
 
 /** The registry stores these columns as newline-joined text. */
@@ -123,10 +128,11 @@ export function subjectFromDetails(subject: DetailsSubject): BackgroundSubject {
  * further down the list.
  */
 export function startupSubject(rows: InstalledGame[]): BackgroundSubject | null {
-  let best: InstalledGame | null = null;
+  let best: { row: InstalledGame; subject: BackgroundSubject } | null = null;
   for (const row of rows) {
-    if (isEmptySubject(subjectFromInstalled(row))) continue;
-    if (best === null || row.installed_at > best.installed_at) best = row;
+    const subject = subjectFromInstalled(row);
+    if (isEmptySubject(subject)) continue;
+    if (best === null || row.installed_at > best.row.installed_at) best = { row, subject };
   }
-  return best === null ? null : subjectFromInstalled(best);
+  return best === null ? null : best.subject;
 }
