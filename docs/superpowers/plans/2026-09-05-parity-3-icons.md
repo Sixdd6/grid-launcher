@@ -23,7 +23,7 @@ All paths below are relative to `rewrite/` unless they start with `docs/`.
 5. **Minimum icon-only pointer target is 28×28.** The dismiss button (18×18) and the CloudPanel remove button (22×22) grow to it.
 6. **`.icon-btn` lives in `app.css`, not per component.** `app.css` is the only file allowed to hold global styles, and this is exactly the case it exists for: `Details.svelte`'s and `NativeSettings.svelte`'s close-button CSS are duplicates that have already drifted (`var(--r-chip)` vs a literal `6px`). The class carries box, radius, reset and `font: inherit`; each component keeps only its own `position`, `color` and `:hover`/`:focus-visible` background, because those genuinely differ (panel `var(--border)` vs media-viewer `rgba(255,255,255,.24)`).
 7. **The header rating star moves out of the string.** `ratingText()` is deleted; `headerLine()` keeps every part except the rating; a new `ratingValue()` returns the trimmed number; `Details.svelte` renders the star as an `<Icon>` before it. `details-header-line` therefore reads `… · Platformer · 9.2`. The E2E assertion and the `header.test.ts` cases are updated in the same task. Same shape for the downloads footer `⬇`.
-8. **The rating star is `var(--warning)`**, matching the old app which wrapped the rating in the accent colour (`grid_launcher/ui/game_views.py:582`) and drew the watchlist star in the `warning` role. The **number** stays `var(--text-h)`, not `--warning` — see the open question at the end of this plan.
+8. **The rating star is `var(--primary)`** (controller ruling 2026-09-05, resolving the open question at the end of this plan: `--warning` is ~1.5:1 on the light theme, `--primary` is legible in both). The old app wrapped the rating in the accent colour (`grid_launcher/ui/game_views.py:582`), so `--primary` is also the closer match. The **number** stays `var(--text-h)`.
 9. **The CloudPanel back button drops its `aria-label`.** The visible word "Back" stays and becomes the accessible name, so voice control ("click Back") matches. The arrow icon is `aria-hidden`.
 10. **The `#e5484d` / `#e5a53a` literals in `CloudPanel.svelte` and `NativeSettings.svelte` become `var(--danger)` / `var(--warning)`.** `Connect.svelte:96` has the same literal but is outside the audit's scope and is **not** touched.
 11. **Parity-2 lands first.** Another plan edits `CloudPanel.svelte` and `NativeSettings.svelte` before this one runs. In those two files every task **must** re-read the file and locate elements by `data-testid` or class, never by the line numbers quoted here.
@@ -1221,8 +1221,8 @@ After:
 ```css
   /* The rating is the one part of the header line that is not muted: the old
      app drew it in the accent colour so it stood out from the metadata
-     around it. The star takes `--warning` (the role the old app used for
-     stars); the NUMBER takes `--text-h`, because `--warning` is the same
+     around it. The star takes `--primary` (the accent the old app used for
+     the rating); the NUMBER takes `--text-h`, because `--warning` is the same
      amber in both themes and would fall below a readable contrast on the
      light background. */
   .rating {
@@ -1234,7 +1234,7 @@ After:
 
   .star {
     display: flex;
-    color: var(--warning);
+    color: var(--primary);
   }
 ```
 
@@ -1527,7 +1527,7 @@ Then poll the log until the summary line appears. Group coverage: `images` reads
 | #10 CloudPanel back | `←` | 4 | `arrowLeft` @ 16, `aria-label` dropped |
 | #11 CloudPanel remove path | `×` | 2 | `close` @ 14, target 22→28, `--danger` |
 | #12 Downloads footer | `⬇` | 6 | `download` @ 14 |
-| #13 Details rating | `★` | 5 | `star` @ 14, `--warning` |
+| #13 Details rating | `★` | 5 | `star` @ 14, `--primary` |
 
 Structural fixes from §4.4 all placed: `translateY(-50%)` (Task 3 Step 4), MediaTab `aria-hidden` (Task 3 Step 6), CloudPanel `aria-label` dropped (Task 4 Step 2), 28×28 growth (Task 2 Steps 6 and 11), `font: inherit` (via `.icon-btn`, Task 1 Step 6), colour literals (Task 2 Steps 9 and 12). The four CSS-drawn dots and every typographic separator are untouched, as the audit requires.
 
@@ -1541,4 +1541,4 @@ Structural fixes from §4.4 all placed: `translateY(-50%)` (Task 3 Step 4), Medi
 
 ## Open question
 
-**The rating star's colour on the light theme.** Ruling 8 sets the star to `var(--warning)` to match the old app. `--warning` is `#fbbf24` in *both* themes (`app.css` does not override it under `data-theme="light"`), and `#fbbf24` on the light `--bg` `#f5f5fa` is about **1.5:1** — below the 3:1 that WCAG asks of a meaningful graphic. The plan therefore colours only the star with `--warning` and keeps the number at `--text-h`, which is legible in both themes, so nothing *unreadable* ships. But on the light theme the star itself will be faint. Two one-line alternatives, both inside Task 5 Step 8: use `var(--primary)` for `.star` (it darkens to `#553e98` on light and is legible in both), or add a light-theme override for `--warning` in `app.css`. This needs the user's call — it is a palette decision, not an implementation one.
+**The rating star's colour on the light theme — RESOLVED: `var(--primary)` (ruling 8).** The original draft set the star to `var(--warning)` to match the old app. `--warning` is `#fbbf24` in *both* themes (`app.css` does not override it under `data-theme="light"`), and `#fbbf24` on the light `--bg` `#f5f5fa` is about **1.5:1** — below the 3:1 that WCAG asks of a meaningful graphic. The plan therefore colours only the star with `--warning` and keeps the number at `--text-h`, which is legible in both themes, so nothing *unreadable* ships. But on the light theme the star itself will be faint. Two one-line alternatives, both inside Task 5 Step 8: use `var(--primary)` for `.star` (it darkens to `#553e98` on light and is legible in both), or add a light-theme override for `--warning` in `app.css`. This needs the user's call — it is a palette decision, not an implementation one.
