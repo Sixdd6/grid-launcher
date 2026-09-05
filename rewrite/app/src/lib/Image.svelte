@@ -7,12 +7,14 @@
     alt,
     placeholder = alt,
     onerror,
+    backdrop = false,
     ...rest
   }: {
     url: string | null;
     alt: string;
     placeholder?: string;
     onerror?: () => void;
+    backdrop?: boolean;
     [key: string]: unknown;
   } = $props();
   let src = $state<string | null>(null);
@@ -48,6 +50,9 @@
        caller: without clearing `src` first, a caller that passes no
        `onerror` (the Library and Server cards) is left with the browser's
        broken-image glyph in the card. -->
+  {#if backdrop}
+    <img class="backdrop" src={src} alt="" aria-hidden="true" loading="lazy" draggable="false" />
+  {/if}
   <img {src} {alt} loading="lazy" draggable="false" onerror={handleImgError} {...rest} />
 {:else}
   <div class="placeholder" {...rest}>{placeholder}</div>

@@ -69,7 +69,7 @@
   style="--cover-ratio: {CARD_COVER_RATIO}; --title-h: {TITLE_ROW_HEIGHT_PX}px; --card-gap: {CARD_GAP_PX}px; --primary-y: {PRIMARY_CENTRE_FRACTION * 100}%; --primary-h: {PRIMARY_HEIGHT_PX}px; --action-h: {ACTION_ROW_HEIGHT_PX}px"
 >
   <div class="cover">
-    <Image url={coverUrl} alt={title} placeholder="No cover" />
+    <Image url={coverUrl} alt={title} placeholder="No cover" backdrop />
 
     {#if badges.update}
       <span data-testid={`library-update-badge-${badgeId}`} class="tag update">{UPDATE_TAG_TEXT}</span>
@@ -137,9 +137,12 @@
     z-index: 1;
   }
 
+  /* Drawn INSIDE the cover: `.card` uses `content-visibility: auto`, whose
+     paint containment clips anything painted outside the card box, so a
+     ring with a positive offset lost its top, left and right edges. */
   .card.focused .cover {
     outline: 2px solid var(--primary);
-    outline-offset: 1px;
+    outline-offset: -2px;
   }
 
   /* D-UI-3: not-installed cards render at 60% until hover. */
@@ -160,11 +163,26 @@
     background: var(--surface-2);
   }
 
+  /* The user's review choice ("option B"): the frame stays 3:4 so rows
+     stay even, the whole cover fits inside it, and a blurred, dimmed copy
+     of the same cover fills the letterbox for square (PS1) and wide
+     (Genesis) art instead of cropping their sides. */
   .cover :global(img) {
+    position: relative;
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
     display: block;
+  }
+
+  .cover :global(img.backdrop) {
+    position: absolute;
+    inset: -12px;
+    width: calc(100% + 24px);
+    height: calc(100% + 24px);
+    object-fit: cover;
+    filter: blur(10px) brightness(0.45);
+    pointer-events: none;
   }
 
   .title {

@@ -76,7 +76,9 @@ Adopted from RomM v2 `tokens/index.ts`, defined once in `app.css` as CSS variabl
 - Toolbar: search (title contains), sort (Recently played, Recently installed, Title,
   Platform), card size. Empty state per rail item.
 - Grid: `repeat(auto-fill, minmax(<size>, 1fr))` with sizes 120 / 160 / 200px; cover
-  ratio from the image with a 3:4 fallback; title under the card, one line, ellipsis.
+  fixed 3:4 frame; the cover is fitted inside it over a blurred, dimmed copy of itself
+  (user decision 2026-09-05, replaces the image-ratio rule); title under the card, one
+  line, ellipsis.
 - Card click opens the details popup; the hover Play launches directly.
 
 ## 6. Server view
