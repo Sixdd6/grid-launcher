@@ -33,6 +33,16 @@ fn gradient_png(width: u32, height: u32) -> Vec<u8> {
     bytes
 }
 
+/// Every `.part` file left in `dir`. The temp name carries a pid and a
+/// sequence, so it cannot be predicted by name.
+fn part_files(dir: &Path) -> usize {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "part"))
+        .count()
+}
+
 /// Writes a 1200x800 PNG, wider than `BACKGROUND_WIDTH`, so the resize branch
 /// actually runs.
 fn write_source(dir: &Path, key: &str) -> PathBuf {
@@ -58,8 +68,27 @@ fn the_variant_is_written_beside_the_source_and_is_960_wide() {
     assert_eq!(decoded.width(), BACKGROUND_WIDTH);
     // 1200x800 scaled to 960 wide keeps its 3:2 ratio.
     assert_eq!(decoded.height(), 640);
-    // No `.part` file is left behind.
-    assert!(!dir.path().join(format!("{key}.bg.part")).exists());
+    // Both dimensions are inside the box, not just the width.
+    assert!(decoded.width().max(decoded.height()) <= BACKGROUND_WIDTH);
+    // No temp file is left behind.
+    assert_eq!(part_files(dir.path()), 0);
+}
+
+/// A tall cover is capped on its HEIGHT: capping the width alone would have
+/// left an 850x1122 cover at its full ~1 Mpx, which is what the CSS blur was
+/// paying for in the first place.
+#[test]
+fn a_portrait_source_is_capped_on_its_long_edge() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = image_key("https://romm.example/portrait.png");
+    let source = dir.path().join(format!("{key}.png"));
+    std::fs::write(&source, gradient_png(850, 1122)).unwrap();
+
+    let out = build_background_variant(&source, dir.path(), &key).unwrap();
+
+    let decoded = image::open(&out).unwrap();
+    assert_eq!((decoded.width(), decoded.height()), (727, 960));
+    assert!(decoded.width().max(decoded.height()) <= BACKGROUND_WIDTH);
 }
 
 #[test]
@@ -127,8 +156,7 @@ async fn a_cold_url_is_fetched_once_and_the_second_call_is_a_cache_hit() {
     );
     assert_eq!(std::fs::read(&second).unwrap(), bytes);
     let decoded = image::open(&second).unwrap();
-    assert_eq!(decoded.width(), BACKGROUND_WIDTH);
-    assert!(decoded.width() <= BACKGROUND_WIDTH);
+    assert!(decoded.width().max(decoded.height()) <= BACKGROUND_WIDTH);
     drop(mock); // expect(1) verified on drop: exactly one fetch
 }
 
@@ -144,9 +172,73 @@ async fn a_second_call_is_a_cache_hit_and_does_not_rebuild() {
     // the whole path runs offline.
     let first = ensure_background_variant(&cache, None, url).await.unwrap();
     let bytes = std::fs::read(&first).unwrap();
+
+    // Deleting the source proves the second call cannot have rebuilt: a
+    // rebuild would need the source and would fail with `Offline`.
+    std::fs::remove_file(dir.path().join(format!("{key}.png"))).unwrap();
+
     let second = ensure_background_variant(&cache, None, url).await.unwrap();
     assert_eq!(first, second);
     assert_eq!(std::fs::read(&second).unwrap(), bytes);
+}
+
+/// The shell arms two dwell timers per hovered card (150ms and 500ms), so a
+/// cold variant is asked for twice at once. Both calls must return the same
+/// COMPLETE file — a shared temp name would let one rename a truncated JPEG
+/// over the other's.
+#[tokio::test]
+async fn two_concurrent_calls_for_a_cold_variant_both_get_a_complete_file() {
+    let server = MockServer::start().await;
+    let mock = Mock::given(method("GET"))
+        .and(path("/assets/roms/2/fanart.png"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_bytes(gradient_png(1600, 900))
+                .insert_header("content-type", "image/png"),
+        )
+        .expect(1)
+        .mount_as_scoped(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let cache = ImageCache::new(dir.path().to_path_buf());
+    let client = client_for(&server);
+    let url = format!("{}/assets/roms/2/fanart.png", server.uri());
+
+    let (a, b) = tokio::join!(
+        ensure_background_variant(&cache, Some(&client), &url),
+        ensure_background_variant(&cache, Some(&client), &url),
+    );
+
+    let a = a.unwrap();
+    assert_eq!(a, b.unwrap());
+    // Decoding it back is the completeness check: a truncated JPEG fails here.
+    let decoded = image::open(&a).unwrap();
+    assert_eq!((decoded.width(), decoded.height()), (960, 540));
+    assert_eq!(part_files(dir.path()), 0);
+    drop(mock); // expect(1): the source was fetched once, not twice
+}
+
+/// A source this build cannot decode is remembered for the session, so a card
+/// hovered again does not pay for another decode attempt. The second call
+/// must not even read the source — deleting it proves the answer is cached.
+#[tokio::test]
+async fn an_undecodable_source_is_negatively_cached_for_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = ImageCache::new(dir.path().to_path_buf());
+    let url = "https://romm.example/vector.svg";
+    let key = image_key(url);
+    let source = dir.path().join(format!("{key}.svg"));
+    std::fs::write(&source, b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>").unwrap();
+
+    assert!(matches!(
+        ensure_background_variant(&cache, None, url).await,
+        Err(ImageError::Decode)
+    ));
+    std::fs::remove_file(&source).unwrap();
+    assert!(matches!(
+        ensure_background_variant(&cache, None, url).await,
+        Err(ImageError::Decode)
+    ));
 }
 
 #[tokio::test]

@@ -3,7 +3,7 @@
 //! post-install cover prefetch.
 
 use grid_core::images::cache::ImageCache;
-use grid_core::images::replenish::{self, ReplenishReport};
+use grid_core::images::replenish::{self, background_source_url, ReplenishReport};
 use grid_core::images::sweep::{pinned_keys, sweep, SweepReport, IMAGE_CACHE_CAP_BYTES};
 use grid_core::images::urls::{filter_to_server_host, resolve_image_url};
 use grid_core::images::ImageFields;
@@ -43,11 +43,31 @@ impl ImageService {
         rows: &[InstalledGame],
         base_url: &str,
     ) -> SweepReport {
+        Self::sweep_at_startup_with_cap(cache, rows, base_url, IMAGE_CACHE_CAP_BYTES)
+    }
+
+    /// [`sweep_at_startup`](Self::sweep_at_startup) with the cap as an
+    /// argument, so a test can force an eviction without writing 512 MB.
+    pub fn sweep_at_startup_with_cap(
+        cache: &ImageCache,
+        rows: &[InstalledGame],
+        base_url: &str,
+        cap_bytes: u64,
+    ) -> SweepReport {
+        // Both covers AND the row's background source: a fanart- or
+        // screenshot-sourced variant lives under its OWN key, so pinning only
+        // the covers would evict it and its source on every start above the
+        // cap, and the next hover would download and blur them again.
+        let backgrounds: Vec<String> = rows
+            .iter()
+            .map(|r| background_source_url(r, base_url))
+            .collect();
         let paths = rows
             .iter()
-            .flat_map(|r| [r.cover_small_path.as_str(), r.cover_large_path.as_str()]);
+            .flat_map(|r| [r.cover_small_path.as_str(), r.cover_large_path.as_str()])
+            .chain(backgrounds.iter().map(String::as_str));
         let pinned = pinned_keys(paths, base_url);
-        let report = sweep(cache.dir(), IMAGE_CACHE_CAP_BYTES, &pinned);
+        let report = sweep(cache.dir(), cap_bytes, &pinned);
         if report.deleted > 0 || report.stale_parts > 0 {
             tracing::info!(
                 "image cache sweep: {} -> {} bytes, {} deleted, {} stale parts",
@@ -162,6 +182,43 @@ async fn replenish_once(session: &SessionManager, install: &InstallService) -> R
 #[cfg(test)]
 mod tests {
     use super::{ImageService, ReplenishGuard};
+    use grid_core::images::cache::{image_key, ImageCache};
+    use grid_core::library::registry::InstalledGame;
+
+    fn write(dir: &std::path::Path, name: &str, size: usize) {
+        std::fs::write(dir.join(name), vec![0u8; size]).unwrap();
+    }
+
+    /// A fanart-sourced variant lives under the FANART's key, so pinning only
+    /// the cover keys would evict it and its source on every start above the
+    /// cap — and the next hover would download and blur them again.
+    #[test]
+    fn the_startup_sweep_pins_a_fanart_sourced_background_and_its_variant() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = ImageCache::new(dir.path().to_path_buf());
+        let base = "https://h";
+        let row = InstalledGame {
+            title: "G".to_string(),
+            platform: "SNES".to_string(),
+            rom_id: Some(1),
+            cover_small_path: "/assets/1.png".to_string(),
+            cover_large_path: "/assets/1l.png".to_string(),
+            fanart_urls: "https://h/assets/1f.png".to_string(),
+            ..Default::default()
+        };
+        let fanart = image_key("https://h/assets/1f.png");
+        write(dir.path(), &format!("{fanart}.png"), 4096);
+        write(dir.path(), &format!("{fanart}.bg.jpg"), 4096);
+        write(dir.path(), "loose.png", 8192);
+
+        let report = ImageService::sweep_at_startup_with_cap(&cache, &[row], base, 8192);
+
+        assert!(dir.path().join(format!("{fanart}.png")).exists());
+        assert!(dir.path().join(format!("{fanart}.bg.jpg")).exists());
+        assert!(!dir.path().join("loose.png").exists());
+        assert_eq!(report.deleted, 1);
+    }
+
     #[test]
     fn only_one_replenish_runs_at_a_time() {
         let svc = ImageService::new();

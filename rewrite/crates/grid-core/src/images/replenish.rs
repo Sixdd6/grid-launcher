@@ -29,6 +29,12 @@ pub enum ReplenishItem {
     },
 }
 
+/// How many background variants one replenish pass may build. Each one is a
+/// full-size image download, so building every installed row's variant on the
+/// first connect after an upgrade would saturate the link; the rest are built
+/// lazily when the shell first shows them.
+pub const BACKGROUND_VARIANT_LIMIT: usize = 32;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ReplenishReport {
     pub updated_rows: usize,
@@ -47,7 +53,11 @@ fn small_cover_url(row: &InstalledGame, base_url: &str) -> String {
 /// its first screenshot (both already resolved + host-filtered when they were
 /// stored), else its large cover. Mirrors `backgroundUrls`' priority on the
 /// frontend.
-fn background_source_url(row: &InstalledGame, base_url: &str) -> String {
+///
+/// Public because the startup sweep pins this URL's key too: pinning only the
+/// cover keys would evict a fanart-sourced variant AND its source on every
+/// start above the cache cap, so the next hover rebuilds them, forever.
+pub fn background_source_url(row: &InstalledGame, base_url: &str) -> String {
     for stored in [&row.fanart_urls, &row.screenshot_urls] {
         if let Some(first) = stored.lines().map(str::trim).find(|u| !u.is_empty()) {
             return filter_to_server_host(&resolve_image_url(first, base_url), base_url);
@@ -81,13 +91,22 @@ pub fn plan(rows: &[InstalledGame], cache: &ImageCache, base_url: &str) -> Vec<R
                 .find_with_extension(&image_key(&background), BACKGROUND_VARIANT_EXT)
                 .is_none()
         {
-            variants.push(ReplenishItem::NeedsVariant {
-                rom_id,
-                url: background,
-            });
+            variants.push((
+                row.last_played_at,
+                row.installed_at,
+                ReplenishItem::NeedsVariant {
+                    rom_id,
+                    url: background,
+                },
+            ));
         }
     }
-    items.extend(variants);
+    // Most recently played first, then most recently installed — the rows the
+    // shell is most likely to put behind the grid next. `sort_by` is stable,
+    // so rows with no history keep their registry order.
+    variants.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
+    variants.truncate(BACKGROUND_VARIANT_LIMIT);
+    items.extend(variants.into_iter().map(|(_, _, item)| item));
     items
 }
 

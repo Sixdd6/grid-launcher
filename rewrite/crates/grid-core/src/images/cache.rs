@@ -25,12 +25,18 @@ pub enum ImageError {
     /// message names what was actually asked for.
     #[error("the server did not return a video")]
     NotAVideo,
-    /// The cached bytes are not a format this build can decode, or the
-    /// re-encode failed. Distinct from [`ImageError::NotAnImage`]: the server
-    /// DID return an image (an SVG, an AVIF), it just cannot be turned into a
-    /// background variant.
+    /// The cached bytes are not a format this build can decode. Distinct
+    /// from [`ImageError::NotAnImage`]: the server DID return an image (an
+    /// SVG, an AVIF), it just cannot be turned into a background variant.
+    /// Deterministic, so `images::background` records it per session and
+    /// stops re-decoding the same source on every hover.
     #[error("the image could not be decoded")]
     Decode,
+    /// The re-encode of a successfully decoded image failed. Separate from
+    /// [`ImageError::Decode`] so the message never blames the source for a
+    /// fault on our side.
+    #[error("the image could not be re-encoded")]
+    Encode,
     #[error(transparent)]
     Http(#[from] RommError),
     #[error("file error: {0}")]
@@ -45,12 +51,22 @@ pub fn image_key(url: &str) -> String {
         .collect()
 }
 
+/// The in-flight map shape shared by the source fetch and the derived-variant
+/// build: one `Notify` per key, woken when its owner finishes.
+pub type InFlightMap = Mutex<HashMap<String, Arc<Notify>>>;
+
 pub struct ImageCache {
     dir: PathBuf,
     downloads: Semaphore,
-    in_flight: Mutex<HashMap<String, Arc<Notify>>>,
+    in_flight: InFlightMap,
     /// Session-only negative cache: a URL that failed once replays its error.
     failed: Mutex<HashMap<String, ImageError>>,
+    /// The same two maps again, for the derived background variants
+    /// (`images::background`). Kept separate from `in_flight`/`failed`
+    /// because they are keyed on the same key but gate a different file:
+    /// a source that is cached fine can still fail to become a variant.
+    variant_in_flight: InFlightMap,
+    variant_failed: Mutex<HashMap<String, ImageError>>,
 }
 
 impl ImageCache {
@@ -60,11 +76,26 @@ impl ImageCache {
             downloads: Semaphore::new(MAX_CONCURRENT_DOWNLOADS),
             in_flight: Mutex::new(HashMap::new()),
             failed: Mutex::new(HashMap::new()),
+            variant_in_flight: Mutex::new(HashMap::new()),
+            variant_failed: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// Dedup state for `images::background`: without it the shell's two
+    /// dwell timers (150ms and 500ms) start two builds of the same cold
+    /// variant, which duplicates the decode+blur and races on the temp file.
+    pub fn variant_in_flight(&self) -> &InFlightMap {
+        &self.variant_in_flight
+    }
+
+    /// Session-only negative cache for `images::background`, holding only
+    /// deterministic failures ([`ImageError::Decode`]).
+    pub fn variant_failed(&self) -> &Mutex<HashMap<String, ImageError>> {
+        &self.variant_failed
     }
 
     pub fn find_existing(&self, key: &str) -> Option<PathBuf> {

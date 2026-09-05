@@ -106,3 +106,47 @@ fn a_background_variant_is_pinned_with_its_source() {
     assert!(!dir.path().join(format!("{victim}.png")).exists());
     assert_eq!(report.deleted, 1);
 }
+
+/// A fanart-sourced variant lives under the FANART's key, not the cover's, so
+/// the startup pin set has to include `background_source_url`'s answer or the
+/// sweep evicts the variant and its source together every start.
+#[test]
+fn a_fanart_sourced_background_is_pinned_when_its_own_key_is_in_the_set() {
+    use grid_core::images::replenish::background_source_url;
+    let dir = tempfile::tempdir().unwrap();
+    let row = grid_core::library::registry::InstalledGame {
+        title: "G".to_string(),
+        platform: "SNES".to_string(),
+        rom_id: Some(1),
+        cover_small_path: "/assets/1.png".to_string(),
+        cover_large_path: "/assets/1l.png".to_string(),
+        fanart_urls: "https://h/assets/1f.png".to_string(),
+        ..Default::default()
+    };
+    let fanart = background_source_url(&row, "https://h");
+    assert_eq!(fanart, "https://h/assets/1f.png");
+    let fanart_key = image_key(&fanart);
+    write(dir.path(), &format!("{fanart_key}.png"), 4096, 300);
+    write(dir.path(), &format!("{fanart_key}.bg.jpg"), 4096, 300);
+    write(dir.path(), "loose.png", 8192, 100);
+
+    // Covers alone: the fanart source and its variant are the oldest, so both
+    // are evicted.
+    let covers_only = pinned_keys(["/assets/1.png", "/assets/1l.png"], "https://h");
+    let report = sweep(dir.path(), 8192, &covers_only);
+    assert_eq!(report.deleted, 2);
+    assert!(!dir.path().join(format!("{fanart_key}.bg.jpg")).exists());
+
+    // With the background source in the set, both survive.
+    write(dir.path(), &format!("{fanart_key}.png"), 4096, 300);
+    write(dir.path(), &format!("{fanart_key}.bg.jpg"), 4096, 300);
+    let with_background = pinned_keys(
+        ["/assets/1.png", "/assets/1l.png", fanart.as_str()],
+        "https://h",
+    );
+    let report = sweep(dir.path(), 8192, &with_background);
+    assert!(dir.path().join(format!("{fanart_key}.png")).exists());
+    assert!(dir.path().join(format!("{fanart_key}.bg.jpg")).exists());
+    assert!(!dir.path().join("loose.png").exists());
+    assert_eq!(report.deleted, 1);
+}

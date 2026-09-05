@@ -1,5 +1,7 @@
 use grid_core::images::cache::{image_key, ImageCache};
-use grid_core::images::replenish::{plan, run, ReplenishItem, ReplenishReport};
+use grid_core::images::replenish::{
+    plan, run, ReplenishItem, ReplenishReport, BACKGROUND_VARIANT_LIMIT,
+};
 use grid_core::library::registry::{InstalledGame, Registry};
 use grid_core::romm::RommClient;
 use grid_core::secrets::Credential;
@@ -245,4 +247,71 @@ async fn run_skips_and_does_not_fetch_when_row_vanishes_before_update() {
         }
     );
     drop(cover_mock); // expect(0) verified on drop: the cover was never fetched
+}
+
+/// One variant is one full-size download, so a first connect with a large
+/// library must not queue every row. The cap keeps the most recently played
+/// rows; the rest build lazily when the shell first shows them.
+#[tokio::test]
+async fn plan_caps_variants_at_the_limit_and_keeps_the_most_recently_played() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = ImageCache::new(dir.path().to_path_buf());
+    let base = "https://h";
+    let rows: Vec<_> = (0..(BACKGROUND_VARIANT_LIMIT as i64 + 8))
+        .map(|i| {
+            let mut r = row(
+                Some(i),
+                &format!("/assets/{i}.png"),
+                &format!("/assets/{i}l.png"),
+                "",
+            );
+            // Row 0 is the most recently played, row N the least.
+            r.last_played_at = 10_000 - i;
+            r
+        })
+        .collect();
+
+    let items = plan(&rows, &cache, base);
+    let variants: Vec<_> = items
+        .iter()
+        .filter_map(|i| match i {
+            ReplenishItem::NeedsVariant { rom_id, .. } => Some(*rom_id),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(variants.len(), BACKGROUND_VARIANT_LIMIT);
+    assert_eq!(
+        variants,
+        (0..BACKGROUND_VARIANT_LIMIT as i64).collect::<Vec<_>>()
+    );
+    // Still last: every cover comes before the first variant.
+    let first_variant = items
+        .iter()
+        .position(|i| matches!(i, ReplenishItem::NeedsVariant { .. }))
+        .unwrap();
+    assert!(items[..first_variant]
+        .iter()
+        .all(|i| matches!(i, ReplenishItem::NeedsFile { .. })));
+}
+
+/// With no play history the cap falls back to most-recently-installed.
+#[tokio::test]
+async fn plan_orders_unplayed_rows_by_install_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = ImageCache::new(dir.path().to_path_buf());
+    let mut old = row(Some(1), "/assets/1.png", "/assets/1l.png", "");
+    old.installed_at = 100;
+    let mut fresh = row(Some(2), "/assets/2.png", "/assets/2l.png", "");
+    fresh.installed_at = 900;
+
+    let items = plan(&[old, fresh], &cache, "https://h");
+    let variants: Vec<_> = items
+        .iter()
+        .filter_map(|i| match i {
+            ReplenishItem::NeedsVariant { rom_id, .. } => Some(*rom_id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(variants, vec![2, 1]);
 }
