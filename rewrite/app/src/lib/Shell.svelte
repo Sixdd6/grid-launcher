@@ -6,6 +6,7 @@
   import Emulators from './Emulators.svelte';
   import BackgroundArt from './BackgroundArt.svelte';
   import Settings from './Settings.svelte';
+  import Toast from './Toast.svelte';
   import { api } from './api';
   import { session, retry, disconnect } from './stores/session.svelte';
   import { appUpdate } from './stores/appUpdate.svelte';
@@ -203,6 +204,10 @@
      `display: none` — inside a view root the strip would vanish from every
      other view. -->
 <DownloadsFooter onOpen={() => (view = 'downloads')} />
+
+<!-- Mounted here for the same reason as the footer strip: `position: fixed`
+     global chrome inside a `hidden` view root would vanish with that view. -->
+<Toast />
 
 <style>
   .topbar {
