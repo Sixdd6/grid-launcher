@@ -18,6 +18,7 @@
   import { chordContext, shouldFocusSearch } from './views/searchKeys';
   import RailPane, { type RailPaneEntry } from './RailPane.svelte';
   import { downloads } from './stores/downloads.svelte';
+  import { pushToast } from './stores/toasts.svelte';
   import { compatTools } from './stores/compatTools.svelte';
   import { filterCatalogEntries } from './emulators/catalog';
   import {
@@ -446,6 +447,22 @@
     }
   }
 
+  // Set for the row whose launch is in flight, so its button disables and
+  // says "Launching…" — the click spawns a process and gives no other
+  // feedback until it fails.
+  let launchPending = $state<string | null>(null);
+
+  async function handleLaunchClick(name: string) {
+    launchPending = name;
+    try {
+      await api.launchEmulator(name);
+    } catch (err) {
+      pushToast(errorMessage(err), 'error');
+    } finally {
+      launchPending = null;
+    }
+  }
+
   function selectFor(platformName: string) {
     return platformDefaultSelect(defaults, platformName, compatible[platformName] ?? []);
   }
@@ -515,6 +532,13 @@
                           {#if e.args}<span class="args">{e.args}</span>{/if}
                         </div>
                         <div class="row-actions">
+                          <button
+                            data-testid={`emulator-launch-${sanitizeName(e.name)}`}
+                            disabled={launchPending === e.name}
+                            onclick={() => handleLaunchClick(e.name)}
+                          >
+                            {launchPending === e.name ? 'Launching…' : 'Launch'}
+                          </button>
                           <button data-testid={`emulator-edit-${sanitizeName(e.name)}`} onclick={() => openEdit(e)}>Edit</button>
                           <button
                             data-testid={`emulator-delete-${sanitizeName(e.name)}`}

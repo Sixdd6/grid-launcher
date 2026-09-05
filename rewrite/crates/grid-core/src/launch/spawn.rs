@@ -5,7 +5,7 @@
 //! `docs/porting/04-emulator-launch.md` §8.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::config::EmulatorEntry;
 use crate::library::paths::expand_home;
@@ -93,6 +93,105 @@ pub fn prepare_emulator_launch(
     argv.push(executable.to_string_lossy().into_owned());
     argv.extend(args);
     Ok((argv, working_dir))
+}
+
+/// Builds the argv and working directory for a ROM-less "open the emulator
+/// so I can configure controls" launch — `_launch_emulator_at_index`
+/// (emulator_ui_mixin.py:1635-1665). The argv is the resolved executable and
+/// nothing else: Python builds `command = [str(emulator_path)]` (:1657) and
+/// never templates `entry.args`, so a `%rom%` in the stored arguments cannot
+/// leak into a launch that has no ROM.
+///
+/// The validation chain and its wording follow the reference, minus the
+/// ROM checks it has no use for:
+///
+/// 1. no `entry` → "Emulator '<name>' was not found." (Python's index guard
+///    silently returns instead, :1637-1639; a click on a row that vanished
+///    is a race worth reporting rather than swallowing)
+/// 2. blank `entry.path` → "Emulator '<name>' has no executable path
+///    configured." (:1645)
+/// 3. the executable is not an existing file → "Emulator executable not
+///    found:\n<path>" (:1650)
+///
+/// Python also calls `_ensure_emulator_sync_settings` before spawning
+/// (:1653); the rewrite does not — the autoconfig sync runs at add/install
+/// time (D1 call site B) and `launch_game` does not re-run it either.
+pub fn prepare_standalone_emulator_launch(
+    emulator_name: &str,
+    entry: Option<&EmulatorEntry>,
+) -> Result<(Vec<String>, PathBuf), String> {
+    let name = emulator_name.trim();
+
+    let Some(entry) = entry else {
+        return Err(format!("Emulator '{name}' was not found."));
+    };
+
+    let configured_path = entry.path.trim();
+    if configured_path.is_empty() {
+        return Err(format!(
+            "Emulator '{name}' has no executable path configured."
+        ));
+    }
+
+    let executable = expand_home(configured_path);
+    if !executable.is_file() {
+        return Err(format!(
+            "Emulator executable not found:\n{}",
+            executable.display()
+        ));
+    }
+
+    let working_dir = match executable.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => PathBuf::from("."),
+    };
+
+    Ok((vec![executable.to_string_lossy().into_owned()], working_dir))
+}
+
+/// Spawns a standalone emulator and returns as soon as it has started —
+/// Python's bare `subprocess.Popen` (emulator_ui_mixin.py:1655-1661). The
+/// child gets [`clean_env`] and, on Windows, its own process group, exactly
+/// like `spawn_child` in `launch/mod.rs` and Python's
+/// `CREATE_NEW_PROCESS_GROUP` (:1660).
+///
+/// A detached thread owns the [`std::process::Child`] and blocks in `wait()`
+/// purely so the process is reaped when the emulator exits — the same
+/// arrangement (and the same reason) as
+/// [`crate::firmware::rpcs3::spawn_rpcs3_installfw`]. There is no session
+/// row for a ROM-less launch, so nothing else is watching it.
+///
+/// Python then warns 500ms later if the process already died
+/// (`_warn_if_process_exited_early`, :1662). That is not ported: the rewrite
+/// has no modal warning surface, and a deliberate deviation is better than a
+/// half-modelled one.
+pub fn spawn_standalone_emulator(argv: &[String], working_dir: &Path) -> Result<(), String> {
+    let Some(program) = argv.first() else {
+        return Err("Failed to launch emulator:\nno executable to run".to_string());
+    };
+
+    let mut command = std::process::Command::new(program);
+    command
+        .args(&argv[1..])
+        .current_dir(working_dir)
+        .env_clear()
+        .envs(clean_env());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    }
+
+    match command.spawn() {
+        Ok(mut child) => {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            Ok(())
+        }
+        Err(e) => Err(format!("Failed to launch emulator:\n{e}")),
+    }
 }
 
 /// The environment a spawned host binary gets: a copy of this process's
@@ -338,5 +437,90 @@ mod tests {
         let (argv, _) =
             prepare_emulator_launch("RetroArch", Some(&entry), &rom_text, &ph, "", false).unwrap();
         assert_eq!(argv[2], "cores/snes9x_libretro.so");
+    }
+
+    // --- standalone (ROM-less) launch ---------------------------------------
+
+    #[test]
+    fn standalone_launch_rejects_an_unknown_entry() {
+        assert_eq!(
+            prepare_standalone_emulator_launch("Ghost", None).unwrap_err(),
+            "Emulator 'Ghost' was not found."
+        );
+    }
+
+    #[test]
+    fn standalone_launch_rejects_a_blank_path() {
+        let e = entry("   ", "%rom%");
+        assert_eq!(
+            prepare_standalone_emulator_launch("Dolphin", Some(&e)).unwrap_err(),
+            "Emulator 'Dolphin' has no executable path configured."
+        );
+    }
+
+    #[test]
+    fn standalone_launch_rejects_a_missing_executable() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("nope");
+        let e = entry(missing.to_str().unwrap(), "%rom%");
+        assert_eq!(
+            prepare_standalone_emulator_launch("Dolphin", Some(&e)).unwrap_err(),
+            format!("Emulator executable not found:\n{}", missing.display())
+        );
+    }
+
+    #[test]
+    fn standalone_launch_drops_every_argument_and_uses_the_executables_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("dolphin");
+        std::fs::write(&exe, b"").unwrap();
+        // Args that would normally be templated: a ROM-less launch takes none.
+        let e = entry(exe.to_str().unwrap(), "-b \"%rom%\"");
+
+        let (argv, working_dir) = prepare_standalone_emulator_launch("Dolphin", Some(&e)).unwrap();
+        assert_eq!(argv, vec![exe.to_string_lossy().into_owned()]);
+        assert_eq!(working_dir, dir.path());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_standalone_runs_the_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("ran");
+        let exe = dir.path().join("stub.sh");
+        std::fs::write(&exe, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let argv = vec![exe.to_string_lossy().into_owned()];
+        spawn_standalone_emulator(&argv, dir.path()).unwrap();
+
+        // The reaper thread owns the child; poll for the marker rather than
+        // waiting on a handle this API deliberately does not hand back.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !marker.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(marker.exists(), "the stub never ran");
+    }
+
+    #[test]
+    fn spawn_standalone_reports_a_failed_spawn() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("not-there");
+        let argv = vec![missing.to_string_lossy().into_owned()];
+        let err = spawn_standalone_emulator(&argv, dir.path()).unwrap_err();
+        assert!(
+            err.starts_with("Failed to launch emulator:\n"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn spawn_standalone_rejects_an_empty_argv() {
+        assert_eq!(
+            spawn_standalone_emulator(&[], Path::new(".")).unwrap_err(),
+            "Failed to launch emulator:\nno executable to run"
+        );
     }
 }

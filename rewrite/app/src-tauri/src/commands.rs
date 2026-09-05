@@ -15,6 +15,7 @@ use grid_core::launch::selection::{
     compatible_emulator_names_for_platform, emulator_entry_by_name, emulator_supports_platform,
     entry_is_retroarch, mapping_value_for_platform, slug_core_resolver, NO_EMULATOR,
 };
+use grid_core::launch::spawn::{prepare_standalone_emulator_launch, spawn_standalone_emulator};
 use grid_core::launch::{GameSession, LaunchService, SessionsSnapshot};
 use grid_core::library::queue::DownloadsSnapshot;
 use grid_core::library::registry::InstalledGame;
@@ -764,6 +765,22 @@ pub async fn delete_emulator(name: String) -> Result<(), String> {
     })
     .await
     .map_err(|e| format!("delete_emulator did not finish: {e}"))?
+}
+
+/// Opens a configured emulator with no ROM, so the user can set its controls
+/// up (`_launch_emulator_at_index`, emulator_ui_mixin.py:1635-1665). Returns
+/// as soon as the process has started; every failure is a plain, path-only
+/// message the Emulators view shows as a toast.
+#[tauri::command]
+pub async fn launch_emulator(name: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let config = Config::load(&Config::default_path()).map_err(err)?;
+        let entry = emulator_entry_by_name(&config.emulators, &name);
+        let (argv, working_dir) = prepare_standalone_emulator_launch(&name, entry)?;
+        spawn_standalone_emulator(&argv, &working_dir)
+    })
+    .await
+    .map_err(|e| format!("launch_emulator did not finish: {e}"))?
 }
 
 /// One platform the Emulators panel is asking about: the NAME every config

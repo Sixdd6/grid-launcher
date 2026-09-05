@@ -295,6 +295,7 @@ pub fn run() {
             commands::list_emulators,
             commands::save_emulator,
             commands::delete_emulator,
+            commands::launch_emulator,
             commands::list_profiles,
             commands::match_profile,
             commands::get_launch_defaults,

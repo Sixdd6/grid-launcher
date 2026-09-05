@@ -502,6 +502,33 @@ warning containing the code and the space-joined command line
 (`process_exited_early_message`, grid_launcher/emulator/launch.py:321,
 grid_launcher/ui/mixins/details_view_mixin.py:1481).
 
+### 8b. Standalone emulator launch (no ROM)
+
+The Emulators list can open a configured emulator on its own, so its controller
+setup UI can be reached (`_launch_emulator_at_index`,
+grid_launcher/ui/mixins/emulator_ui_mixin.py:1635-1665). The reference builds
+`command = [str(emulator_path)]` — the executable and nothing else, never the
+entry's `args` — runs it with `cwd = emulator_path.parent` and
+`clean_subprocess_env()`, plus `CREATE_NEW_PROCESS_GROUP` on win32 (:1655-1661).
+Its validation chain is the emulated one minus the ROM checks: blank path ⇒
+"Emulator '<name>' has no executable path configured." (:1645); missing file ⇒
+"Emulator executable not found:\n<path>" (:1650); `OSError` ⇒
+"Failed to launch emulator:\n<e>" (:1665). No session row is registered.
+
+The rewrite ports this as `prepare_standalone_emulator_launch` /
+`spawn_standalone_emulator` (`rewrite/crates/grid-core/src/launch/spawn.rs`),
+behind the `launch_emulator` command and the per-row Launch button in the
+Installed list. Same argv, same working directory, same cleaned environment,
+same error texts, and a missing entry (a click on a row that has just been
+deleted) reports "Emulator '<name>' was not found." where Python's index guard
+returns silently. Two recorded deviations:
+
+- No `_ensure_emulator_sync_settings` pre-pass (:1653) — the rewrite runs the
+  autoconfig sync at add/install time, and `launch_game` does not re-run it
+  either.
+- No 500 ms early-exit warning (:1662) — the rewrite has no modal warning
+  surface for it.
+
 ### 9. Native (non-emulated) launch details
 
 A game is "native" when its platform, casefolded and stripped, starts with `windows`
