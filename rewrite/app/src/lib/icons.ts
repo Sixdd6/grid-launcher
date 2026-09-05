@@ -7,9 +7,9 @@
 // `-0.5 0 7 7` to `0 0 1000 1000`, so re-fitting them would still leave each
 // icon inconsistent. Nothing here references those files.
 //
-// The marks do not share one optical weight — like Feather's icon set, each
-// is sized to its own shape: `close`'s diagonals span 13.5 units, the
-// chevrons are 8.5 units wide, and the rest span 16–18 units.
+// The marks do not share one optical weight — like Feather's icon set,
+// per-mark sizing follows the shape, not a fixed span. See each icon's own
+// docstring below for its exact bounds.
 //
 // No colour appears in this module. The component paints with
 // `currentColor`, so an icon is always the colour of the text around it.
@@ -29,7 +29,7 @@ export const ICONS = {
 
   /**
    * Outline cloud: a flat base at y=17, a 4-radius right lobe, a shallow
-   * 5.2-radius top and a 3.3-radius left lobe. Spans x 4.1–20.5, y 6.9–17.
+   * 5.2-radius top and a 3.3-radius left lobe. Spans x 3.8–20.2, y 6.9–17.
    */
   cloud: 'M6.2 17h10a4 4 0 0 0 0-8h-.6A5.2 5.2 0 0 0 6.4 10.6 3.3 3.3 0 0 0 6.2 17z',
 

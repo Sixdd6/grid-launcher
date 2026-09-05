@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
 import Icon from './Icon.svelte';
@@ -24,8 +25,16 @@ describe('Icon', () => {
 
   it.each(['star', 'play'] as const)('%s is a filled mark', (name) => {
     const { body } = render(Icon, { props: { name } });
-    expect(body).toContain('fill="currentColor"');
-    expect(body).toContain('stroke="none"');
+    const path = body.match(/<path[^>]*>/)?.[0] ?? '';
+    expect(path).toContain('fill="currentColor"');
+    expect(path).toContain('stroke="none"');
+  });
+
+  it('does not fill an outline icon', () => {
+    // Outline icons paint with stroke only; `fill="currentColor"` is
+    // reserved for the solid marks (`star`, `play`).
+    const { body } = render(Icon, { props: { name: 'close' } });
+    expect(body).not.toContain('fill="currentColor"');
   });
 
   it('renders the requested size on width and height', () => {

@@ -799,11 +799,6 @@
     color: var(--text);
   }
 
-  .close:hover,
-  .close:focus-visible {
-    background: var(--border);
-  }
-
   .cover {
     width: 100%;
     aspect-ratio: 3 / 4;
@@ -1000,12 +995,6 @@
      28×28; the 14px icon inside keeps it visually small next to the 13px
      warning text. */
   .dismiss {
-    flex: none;
     color: var(--danger);
-  }
-
-  .dismiss:hover,
-  .dismiss:focus-visible {
-    background: var(--border);
   }
 </style>

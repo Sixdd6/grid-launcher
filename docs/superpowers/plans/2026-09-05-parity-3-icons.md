@@ -28,6 +28,8 @@ All paths below are relative to `rewrite/` unless they start with `docs/`.
 10. **The `#e5484d` / `#e5a53a` literals in `CloudPanel.svelte` and `NativeSettings.svelte` become `var(--danger)` / `var(--warning)`.** `Connect.svelte:96` has the same literal but is outside the audit's scope and is **not** touched.
 11. **Parity-2 lands first.** Another plan edits `CloudPanel.svelte` and `NativeSettings.svelte` before this one runs. In those two files every task **must** re-read the file and locate elements by `data-testid` or class, never by the line numbers quoted here.
 
+**Amendment 2026-09-05:** `.svelte` files MAY be tested at the markup level with `render` from `svelte/server` (node environment, no jsdom, no new dependency) — see `Icon.svelte.test.ts`. The no-harness rule still forbids adding a DOM test harness.
+
 ## Global Constraints
 
 - **Token secrecy (hard):** tokens live only in the OS keyring and the redacting in-memory type; never in files, logs, errors, IPC, or console output.

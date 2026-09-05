@@ -24,6 +24,12 @@
 
   let filled = $derived(FILLED_ICONS.includes(name));
 
+  // No production call site passes `label` today — every labelled icon
+  // (e.g. the card cloud badge) puts `role="img"`/`aria-label` on its own
+  // wrapping element instead, so the icon underneath stays `aria-hidden`.
+  // The `label` branch below is exercised by the SSR test only; that is
+  // intended, not dead code.
+
   // `label=""` or whitespace-only is not a name. Treat it the same as
   // absent, so a button that forgets to pass a real label doesn't ship an
   // `aria-label=""` icon announced as unnamed to screen readers.
