@@ -107,6 +107,16 @@
     if (!active) return;
     refreshRaStatus();
   });
+
+  // Panes never unmount (Settings.svelte switches with `hidden`), so a
+  // typed-but-unsubmitted password would otherwise sit in state and the DOM
+  // indefinitely. Mirrors ConnectionPage.svelte's `closeEdit` on `!active`.
+  $effect(() => {
+    if (!active) {
+      raPassword = '';
+      raToken = '';
+    }
+  });
 </script>
 
 <p class="muted" data-testid="ra-status">{statusLabel(raStatus)}</p>
@@ -145,7 +155,7 @@
       data-testid="ra-login"
       type="button"
       onclick={handleRaLogin}
-      disabled={raLoginPending || !canLogin(raUsername, raPassword)}
+      disabled={raLoginPending}
     >
       {raLoginPending ? 'Logging in…' : 'Log In'}
     </button>

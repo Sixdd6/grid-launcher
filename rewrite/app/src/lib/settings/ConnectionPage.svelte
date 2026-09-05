@@ -156,7 +156,6 @@
     data-testid="settings-connection-edit"
     class="secondary"
     aria-expanded={editing}
-    aria-controls="settings-connection-edit-form"
     onclick={() => (editing ? closeEdit() : openEdit())}
   >
     {editing ? 'Close editor' : 'Edit connection'}

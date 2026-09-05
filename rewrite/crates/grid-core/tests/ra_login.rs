@@ -117,7 +117,7 @@ async fn login_rejects_a_success_payload_with_no_token() {
 }
 
 #[tokio::test]
-async fn login_maps_an_http_error_to_the_reference_wording() {
+async fn login_maps_an_http_error_to_the_status_line_only() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .respond_with(ResponseTemplate::new(503).set_body_string("upstream down"))
@@ -126,7 +126,29 @@ async fn login_maps_an_http_error_to_the_reference_wording() {
 
     assert_eq!(
         login(&server).await.unwrap_err(),
-        "RetroAchievements HTTP 503: upstream down"
+        "RetroAchievements HTTP 503: Service Unavailable"
+    );
+}
+
+/// Token secrecy: a non-2xx body must never be echoed into the error, because
+/// a proxy/WAF error page that echoes the request URL (which carries the
+/// password as a query parameter) would put the password in the error.
+#[tokio::test]
+async fn an_http_error_body_containing_the_password_never_reaches_the_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(502).set_body_string(format!(
+            "<html>bad gateway for /dorequest.php?r=login&u=sixdd6&p={FAKE_PASSWORD}</html>"
+        )))
+        .mount(&server)
+        .await;
+
+    let err = login(&server).await.unwrap_err();
+    assert_eq!(err, "RetroAchievements HTTP 502: Bad Gateway");
+    assert!(!err.contains(FAKE_PASSWORD), "password leaked: {err}");
+    assert!(
+        !err.contains("FAKE-RA-TOKEN-not-real"),
+        "token leaked: {err}"
     );
 }
 

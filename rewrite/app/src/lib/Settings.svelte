@@ -57,7 +57,10 @@
           {:else if p === 'cloud-saves'}
             <CloudSavesPage {active} />
           {:else if p === 'retroachievements'}
-            <RetroAchievementsPage {active} />
+            <!-- Page-level activation, like the connection page: the login
+                 form holds a plain-typed password, so leaving this page must
+                 clear it. -->
+            <RetroAchievementsPage active={active && page === 'retroachievements'} />
           {:else if p === 'updates'}
             <UpdatesPage {active} />
           {:else}

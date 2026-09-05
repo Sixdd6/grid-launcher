@@ -71,7 +71,7 @@
   <label>
     Library Path
     <span class="path-row">
-      <input data-testid="connect-library-path" bind:value={libraryPath} placeholder="/home/you/Games" />
+      <input data-testid="connect-library-path" bind:value={libraryPath} placeholder="~/grid-launcher-library" />
       <button
         type="button"
         data-testid="connect-library-path-browse"

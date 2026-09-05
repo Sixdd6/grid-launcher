@@ -19,7 +19,11 @@
 //!   redaction — the struct carries nothing else;
 //! * this module is on `scripts/check_secret_hygiene.sh`'s `expose_secret`
 //!   allowlist for exactly two calls: the blank-password check and putting
-//!   the password into the query.
+//!   the password into the query;
+//! * a non-2xx response's error is the status line only (`RetroAchievements
+//!   HTTP <code>: <reason>`) — the body is never quoted, unlike
+//!   retroachievements.py:32-38's excerpt, because a proxy or WAF error page
+//!   that echoes the request URL would put the password in it.
 
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::Value;
@@ -140,17 +144,15 @@ async fn fetch_json(
         .map_err(|e| format!("RetroAchievements request failed: {}", e.without_url()))?;
 
     if !status.is_success() {
-        // retroachievements.py:32-38: a <=300-char body excerpt, or the
-        // status line when the body is empty. RetroAchievements answers with
-        // its own JSON error object here, never an echo of the request.
-        let detail = if body.trim().is_empty() {
-            status.to_string()
-        } else {
-            body.chars().take(300).collect::<String>()
-        };
+        // Status line only — NOT retroachievements.py:32-38's body excerpt.
+        // The password travels as a query parameter, so a proxy/WAF error
+        // page that echoes the request URL would put it in the body; the
+        // fix is to never quote the body here at all, regardless of what a
+        // future non-2xx response contains.
         return Err(format!(
-            "RetroAchievements HTTP {}: {detail}",
-            status.as_u16()
+            "RetroAchievements HTTP {}: {}",
+            status.as_u16(),
+            status.canonical_reason().unwrap_or("unknown error")
         ));
     }
 
