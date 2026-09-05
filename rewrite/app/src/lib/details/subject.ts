@@ -12,6 +12,7 @@ export type DetailsSubject = {
   coverSmall: string | null;
   coverLarge: string | null;
   screenshotUrls: string[];
+  fanartUrls: string[];
   description: string;
   rating: string;
   genres: string;
@@ -25,7 +26,8 @@ export function fromSummary(game: GameSummary, platformName: string): DetailsSub
     platformName,
     coverSmall: game.path_cover_small,
     coverLarge: game.path_cover_large,
-    screenshotUrls: [],
+    screenshotUrls: game.screenshot_urls,
+    fanartUrls: game.fanart_urls,
     description: '',
     rating: '',
     genres: '',
@@ -33,11 +35,19 @@ export function fromSummary(game: GameSummary, platformName: string): DetailsSub
   };
 }
 
+/** The registry stores these columns as newline-joined text; blanks are
+ *  dropped defensively even though the backend already filters them. */
+function splitStored(stored: string): string[] {
+  return stored
+    .split('\n')
+    .map((url) => url.trim())
+    .filter((url) => url.length > 0);
+}
+
 /**
- * `screenshot_urls` is stored as the backend's own newline-joined text
- * (install_metadata.py:111, "\n".join(screenshots)) — the backend already
- * filters out blank entries before joining, but split defensively here too:
- * trim each line and drop anything empty.
+ * `screenshot_urls` and `fanart_urls` are stored as the backend's own
+ * newline-joined text (install_metadata.py:111, "\n".join(screenshots)) — see
+ * `splitStored`.
  */
 export function fromInstalled(row: InstalledGame): DetailsSubject {
   return {
@@ -46,10 +56,8 @@ export function fromInstalled(row: InstalledGame): DetailsSubject {
     platformName: row.platform,
     coverSmall: row.cover_small_path,
     coverLarge: row.cover_large_path,
-    screenshotUrls: row.screenshot_urls
-      .split('\n')
-      .map((url) => url.trim())
-      .filter((url) => url.length > 0),
+    screenshotUrls: splitStored(row.screenshot_urls),
+    fanartUrls: splitStored(row.fanart_urls),
     description: row.description,
     rating: row.rating,
     genres: row.genres,
@@ -70,6 +78,8 @@ export function summaryOf(subject: DetailsSubject): GameSummary {
     platform_id: 0,
     path_cover_small: subject.coverSmall,
     path_cover_large: subject.coverLarge,
+    screenshot_urls: subject.screenshotUrls,
+    fanart_urls: subject.fanartUrls,
   };
 }
 
@@ -89,6 +99,7 @@ export function mergeDetail(subject: DetailsSubject, detail: RomDetail): Details
     coverSmall: detail.cover_small_path || subject.coverSmall || null,
     coverLarge: detail.cover_large_path || subject.coverLarge || null,
     screenshotUrls: detail.screenshot_urls.length > 0 ? detail.screenshot_urls : subject.screenshotUrls,
+    fanartUrls: detail.fanart_urls.length > 0 ? detail.fanart_urls : subject.fanartUrls,
     description: detail.description || subject.description,
     rating: detail.rating || subject.rating,
     genres: detail.genres || subject.genres,

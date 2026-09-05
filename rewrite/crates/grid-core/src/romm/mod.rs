@@ -202,6 +202,17 @@ pub struct GameSummary {
     /// Server-relative cover path (large variant), when present.
     #[serde(rename = "path_cover_large")]
     pub cover_large_path: Option<String>,
+    /// Already resolved + host-filtered absolute screenshot URLs, in source
+    /// order — the same `screenshot_urls_from_payload` output `RomDetail`
+    /// carries, read from the LIST payload so the Server grid's background
+    /// art has screenshots without a per-card detail fetch.
+    #[serde(default)]
+    pub screenshot_urls: Vec<String>,
+    /// Already resolved + host-filtered absolute fanart URLs
+    /// (`fanart_urls_from_payload`). Usually empty: most servers have no
+    /// fanart, which is why the background falls back to screenshots.
+    #[serde(default)]
+    pub fanart_urls: Vec<String>,
 }
 
 /// Wire shape of a `SimpleRomSchema` entry. `name` is nullable server-side
@@ -222,21 +233,34 @@ struct RawGameSummary {
     cover_path: Option<String>,
     #[serde(rename = "path_cover_large", default)]
     cover_large_path: Option<String>,
+    /// Every field not named above — the screenshot and fanart sources
+    /// (`merged_screenshots`, `ss_metadata`, `gamelist_metadata`, …) are read
+    /// from here, exactly as `RawRomDetail` does it.
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
 }
 
-impl From<RawGameSummary> for GameSummary {
-    fn from(raw: RawGameSummary) -> Self {
-        let name = raw
+impl RawGameSummary {
+    /// `base_url` is needed because a screenshot/fanart path is server
+    /// relative and must be resolved and host-filtered before it leaves this
+    /// crate — which is why this is a method rather than the `From` impl it
+    /// replaces.
+    fn into_summary(self, base_url: &str) -> GameSummary {
+        let name = self
             .name
             .filter(|n| !n.is_empty())
-            .or(raw.fs_name_no_ext)
+            .or(self.fs_name_no_ext)
             .unwrap_or_default();
+        let resolver = crate::images::urls::server_resolver(base_url);
+        let extra = serde_json::Value::Object(self.extra);
         GameSummary {
-            id: raw.id,
+            id: self.id,
             name,
-            platform_id: raw.platform_id,
-            cover_path: raw.cover_path,
-            cover_large_path: raw.cover_large_path,
+            platform_id: self.platform_id,
+            cover_path: self.cover_path,
+            cover_large_path: self.cover_large_path,
+            screenshot_urls: crate::images::urls::screenshot_urls_from_payload(&extra, &resolver),
+            fanart_urls: crate::images::urls::fanart_urls_from_payload(&extra, &resolver),
         }
     }
 }
@@ -279,7 +303,11 @@ impl RommClient {
                 )
                 .await?;
             let n = page.items.len();
-            out.extend(page.items.into_iter().map(GameSummary::from));
+            out.extend(
+                page.items
+                    .into_iter()
+                    .map(|raw| raw.into_summary(&self.base)),
+            );
             if n < PAGE_SIZE {
                 break;
             }
@@ -419,6 +447,10 @@ pub struct RomDetail {
     /// Already resolved + host-filtered absolute screenshot URLs, in
     /// source order (see `images::urls::screenshot_urls_from_payload`).
     pub screenshot_urls: Vec<String>,
+    /// Already resolved + host-filtered absolute fanart URLs
+    /// (`images::urls::fanart_urls_from_payload`). The shell's background art
+    /// prefers these over screenshots (user ruling 2026-09-05).
+    pub fanart_urls: Vec<String>,
     /// `youtube_video_id`, `""` when the server has none. The frontend
     /// embeds it; it is never resolved to a URL here.
     pub youtube_video_id: String,
@@ -553,9 +585,10 @@ struct RawRomDetail {
     path_video: Option<String>,
     #[serde(default)]
     is_identified: bool,
-    /// Every field not named above — the screenshot sources
+    /// Every field not named above — the screenshot and fanart sources
     /// (`merged_screenshots`, `user_screenshots`, metadata blocks…) are read
-    /// from here by `screenshot_urls_from_payload`.
+    /// from here by `screenshot_urls_from_payload` and
+    /// `fanart_urls_from_payload`.
     #[serde(flatten)]
     extra: serde_json::Map<String, serde_json::Value>,
 }
@@ -569,10 +602,9 @@ impl RawRomDetail {
         let metadatum = self.metadatum.unwrap_or_default();
         let igdb = self.igdb_metadata.unwrap_or_default();
         let resolver = crate::images::urls::server_resolver(base_url);
-        let screenshot_urls = crate::images::urls::screenshot_urls_from_payload(
-            &serde_json::Value::Object(self.extra),
-            &resolver,
-        );
+        let extra = serde_json::Value::Object(self.extra);
+        let screenshot_urls = crate::images::urls::screenshot_urls_from_payload(&extra, &resolver);
+        let fanart_urls = crate::images::urls::fanart_urls_from_payload(&extra, &resolver);
         RomDetail {
             id: self.id,
             name,
@@ -603,6 +635,7 @@ impl RawRomDetail {
             cover_small_path: self.path_cover_small.unwrap_or_default(),
             cover_large_path: self.path_cover_large.unwrap_or_default(),
             screenshot_urls,
+            fanart_urls,
             youtube_video_id: self.youtube_video_id.unwrap_or_default(),
             video_path: self.path_video.unwrap_or_default(),
             is_identified: self.is_identified,
@@ -634,5 +667,79 @@ mod release_date_tests {
     fn pre_1970_milliseconds_are_divided_down_too() {
         // 1958-06-01T00:00:00Z
         assert_eq!(release_date_seconds(-365_558_400_000), -365_558_400);
+    }
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::{GameSummary, RawGameSummary};
+
+    fn parse(value: serde_json::Value) -> GameSummary {
+        let raw: RawGameSummary = serde_json::from_value(value).expect("summary decodes");
+        raw.into_summary("https://romm.example")
+    }
+
+    #[test]
+    fn a_summary_carries_its_screenshots_and_fanart_resolved_and_filtered() {
+        let summary = parse(serde_json::json!({
+            "id": 101,
+            "name": "Super Mario World",
+            "platform_id": 1,
+            "path_cover_small": "/assets/small.png",
+            "path_cover_large": "/assets/large.png",
+            "merged_screenshots": [
+                "/assets/shots/1.png",
+                "https://img.elsewhere/box-front.jpg"
+            ],
+            "ss_metadata": { "fanart_path": "/assets/art/fanart.jpg" }
+        }));
+        assert_eq!(summary.id, 101);
+        assert_eq!(
+            summary.screenshot_urls,
+            vec!["https://romm.example/assets/shots/1.png".to_string()]
+        );
+        assert_eq!(
+            summary.fanart_urls,
+            vec!["https://romm.example/assets/art/fanart.jpg".to_string()]
+        );
+    }
+
+    /// The pinned public contract from before this change: a null `name`
+    /// still falls back to `fs_name_no_ext`, and a payload with none of the
+    /// new fields still decodes.
+    #[test]
+    fn an_older_payload_still_decodes_with_empty_lists() {
+        let summary = parse(serde_json::json!({
+            "id": 102,
+            "name": null,
+            "fs_name_no_ext": "Chrono Trigger (USA)",
+            "platform_id": 1,
+            "path_cover_small": "/assets/small.png"
+        }));
+        assert_eq!(summary.name, "Chrono Trigger (USA)");
+        assert!(summary.screenshot_urls.is_empty());
+        assert!(summary.fanart_urls.is_empty());
+        assert_eq!(summary.cover_large_path, None);
+    }
+}
+
+#[cfg(test)]
+mod detail_fanart_tests {
+    use super::RawRomDetail;
+
+    #[test]
+    fn a_detail_carries_its_fanart() {
+        let raw: RawRomDetail = serde_json::from_value(serde_json::json!({
+            "id": 101,
+            "fs_name_no_ext": "Super Mario World",
+            "platform_id": 1,
+            "gamelist_metadata": { "fanart_path": "/assets/art/fanart.jpg" }
+        }))
+        .expect("detail decodes");
+        let detail = raw.into_detail("https://romm.example");
+        assert_eq!(
+            detail.fanart_urls,
+            vec!["https://romm.example/assets/art/fanart.jpg".to_string()]
+        );
     }
 }

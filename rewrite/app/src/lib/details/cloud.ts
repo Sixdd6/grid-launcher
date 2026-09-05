@@ -146,6 +146,7 @@ export function syntheticCloudGame(game: GameSummary, platformName: string): Ins
     cover_small_path: '',
     cover_large_path: '',
     screenshot_urls: '',
+    fanart_urls: '',
     native_executable_path: '',
     native_launch_parameters: '',
     native_compat_tool: '',

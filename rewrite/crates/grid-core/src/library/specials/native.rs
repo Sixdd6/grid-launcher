@@ -386,6 +386,9 @@ pub fn apply_update(
     if !detail.screenshot_urls.is_empty() {
         prepared.screenshot_urls = detail.screenshot_urls.join("\n");
     }
+    if !detail.fanart_urls.is_empty() {
+        prepared.fanart_urls = detail.fanart_urls.join("\n");
+    }
     // ra_id: RomDetail has none, so `prepared.ra_id` keeps row's value as-is.
 
     let extracted_dir_text = prepared.extracted_dir.trim();
@@ -819,6 +822,7 @@ mod tests {
             cover_small_path: "".to_string(),
             cover_large_path: "".to_string(),
             screenshot_urls: Vec::new(),
+            fanart_urls: Vec::new(),
             youtube_video_id: "".to_string(),
             video_path: "".to_string(),
             is_identified: false,

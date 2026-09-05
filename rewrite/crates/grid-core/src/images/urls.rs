@@ -379,6 +379,36 @@ pub fn screenshot_urls_from_payload(
         .collect()
 }
 
+/// The rom's fanart URLs, resolved and host-filtered, in a stable order:
+/// `ss_metadata` before `gamelist_metadata`, and `fanart_path` (server
+/// relative) before `fanart_url` (usually an external host, and therefore
+/// usually dropped by the host filter — which is the desired outcome).
+///
+/// Deliberately NOT routed through `looks_like_screenshot_url`:
+/// `NON_SCREENSHOT_ART_RE` exists to keep fanart, box art and logos OUT of a
+/// screenshot list, so applying it here would reject every fanart by name.
+/// Both metadata blocks are present on `SimpleRomSchema` and
+/// `DetailedRomSchema`, so the grid payload and the detail payload feed the
+/// same function.
+pub fn fanart_urls_from_payload(payload: &Value, resolver: &dyn Fn(&str) -> String) -> Vec<String> {
+    let mut urls: Vec<String> = Vec::new();
+    for block in ["ss_metadata", "gamelist_metadata"] {
+        let Some(Value::Object(map)) = payload.get(block) else {
+            continue;
+        };
+        for key in ["fanart_path", "fanart_url"] {
+            let Some(Value::String(candidate)) = map.get(key) else {
+                continue;
+            };
+            let resolved = resolver(candidate);
+            if !resolved.is_empty() && !urls.contains(&resolved) {
+                urls.push(resolved);
+            }
+        }
+    }
+    urls
+}
+
 /// `screenshot_urls_from_game` (cover/utils.py:183): re-filter on read.
 pub fn screenshot_urls_from_stored(raw: &str) -> Vec<String> {
     if raw.trim().is_empty() {
@@ -597,6 +627,60 @@ mod tests {
             ]
         );
         assert!(screenshot_urls_from_stored("   ").is_empty());
+    }
+
+    #[test]
+    fn fanart_is_read_from_both_metadata_blocks_and_resolved_against_the_server() {
+        let resolver = server_resolver("https://romm.example");
+        let payload = serde_json::json!({
+            "ss_metadata": { "fanart_path": "/assets/romm/resources/roms/1/fanart.jpg" },
+            "gamelist_metadata": { "fanart_path": "/assets/romm/resources/roms/1/gl-fanart.jpg" }
+        });
+        assert_eq!(
+            fanart_urls_from_payload(&payload, &resolver),
+            vec![
+                "https://romm.example/assets/romm/resources/roms/1/fanart.jpg".to_string(),
+                "https://romm.example/assets/romm/resources/roms/1/gl-fanart.jpg".to_string(),
+            ]
+        );
+    }
+
+    /// The whole reason this is a separate function: `NON_SCREENSHOT_ART_RE`
+    /// rejects any URL containing "fanart", so routing fanart through
+    /// `screenshot_urls_from_payload`'s own `looks_like_screenshot_url` filter
+    /// would drop every one of them.
+    #[test]
+    fn fanart_is_not_filtered_by_the_screenshot_art_regex() {
+        let resolver = server_resolver("https://romm.example");
+        let payload = serde_json::json!({ "ss_metadata": { "fanart_path": "/art/fanart.jpg" } });
+        assert!(!looks_like_screenshot_url("/art/fanart.jpg"));
+        assert_eq!(
+            fanart_urls_from_payload(&payload, &resolver),
+            vec!["https://romm.example/art/fanart.jpg".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_foreign_fanart_url_is_dropped_by_the_host_filter() {
+        let resolver = server_resolver("https://romm.example");
+        let payload = serde_json::json!({
+            "ss_metadata": { "fanart_url": "https://cdn.elsewhere/fanart.jpg" }
+        });
+        assert!(fanart_urls_from_payload(&payload, &resolver).is_empty());
+    }
+
+    #[test]
+    fn fanart_de_duplicates_and_ignores_blanks_and_missing_blocks() {
+        let resolver = server_resolver("https://romm.example");
+        let payload = serde_json::json!({
+            "ss_metadata": { "fanart_path": "/a/fanart.jpg", "fanart_url": "/a/fanart.jpg" },
+            "gamelist_metadata": { "fanart_path": "" }
+        });
+        assert_eq!(
+            fanart_urls_from_payload(&payload, &resolver),
+            vec!["https://romm.example/a/fanart.jpg".to_string()]
+        );
+        assert!(fanart_urls_from_payload(&serde_json::json!({}), &resolver).is_empty());
     }
 
     #[test]

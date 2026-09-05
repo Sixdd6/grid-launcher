@@ -13,13 +13,13 @@
  *
  * Deliberately NOT retrofitted onto `launch-seed.mjs`, `cloud-saves-seed.mjs`
  * or `images-seed.mjs`: those seed v1 databases on purpose (images-seed
- * exercises the v1 -> v2 -> v3 migration path), and rewriting them to v4
+ * exercises the v1 -> v2 -> v3 migration path), and rewriting them to v5
  * would delete that coverage.
  */
 
 import { execFileSync } from 'node:child_process';
 
-export const USER_VERSION = 4;
+export const USER_VERSION = 5;
 
 export const SCHEMA_SQL = `
 CREATE TABLE installed_games (
@@ -48,6 +48,7 @@ CREATE TABLE installed_games (
     cover_small_path    TEXT NOT NULL DEFAULT '',
     cover_large_path    TEXT NOT NULL DEFAULT '',
     screenshot_urls     TEXT NOT NULL DEFAULT '',
+    fanart_urls         TEXT NOT NULL DEFAULT '',
     native_executable_path   TEXT NOT NULL DEFAULT '',
     native_launch_parameters TEXT NOT NULL DEFAULT '',
     native_compat_tool       TEXT NOT NULL DEFAULT '',

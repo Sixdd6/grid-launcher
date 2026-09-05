@@ -27,6 +27,7 @@ function row(overrides: Partial<InstalledGame>): InstalledGame {
     cover_small_path: '',
     cover_large_path: '',
     screenshot_urls: '',
+    fanart_urls: '',
     native_executable_path: '',
     native_launch_parameters: '',
     native_compat_tool: '',
@@ -51,6 +52,8 @@ function game(overrides: Partial<GameSummary>): GameSummary {
     platform_id: 1,
     path_cover_small: null,
     path_cover_large: null,
+    screenshot_urls: [],
+    fanart_urls: [],
     ...overrides,
   };
 }
@@ -83,11 +86,17 @@ describe('fromInstalled', () => {
       coverSmall: '/c/small.png',
       coverLarge: '/c/large.png',
       screenshotUrls: [],
+      fanartUrls: [],
       description: 'desc',
       rating: '4.5',
       genres: 'RPG',
       source: 'installed',
     });
+  });
+
+  it('splits the registry row\'s newline-joined fanart column', () => {
+    const subject = fromInstalled(row({ fanart_urls: 'https://romm/f1.jpg\n\n https://romm/f2.jpg ' }));
+    expect(subject.fanartUrls).toEqual(['https://romm/f1.jpg', 'https://romm/f2.jpg']);
   });
 
   it('carries a null rom_id through as romId: null', () => {
@@ -112,11 +121,21 @@ describe('fromSummary', () => {
       coverSmall: null,
       coverLarge: null,
       screenshotUrls: [],
+      fanartUrls: [],
       description: '',
       rating: '',
       genres: '',
       source: 'server',
     });
+  });
+
+  it('carries the summary\'s own screenshots and fanart', () => {
+    const subject = fromSummary(
+      game({ screenshot_urls: ['https://romm/s1.png'], fanart_urls: ['https://romm/f1.jpg'] }),
+      'SNES'
+    );
+    expect(subject.screenshotUrls).toEqual(['https://romm/s1.png']);
+    expect(subject.fanartUrls).toEqual(['https://romm/f1.jpg']);
   });
 });
 
@@ -139,6 +158,8 @@ describe('summaryOf', () => {
       platform_id: 0,
       path_cover_small: '/s.png',
       path_cover_large: '/l.png',
+      screenshot_urls: [],
+      fanart_urls: [],
     });
   });
 });
@@ -168,6 +189,7 @@ function detail(overrides: Partial<RomDetail>): RomDetail {
     cover_small_path: '',
     cover_large_path: '',
     screenshot_urls: [],
+    fanart_urls: [],
     youtube_video_id: '',
     video_path: '',
     is_identified: false,
@@ -218,6 +240,14 @@ describe('mergeDetail', () => {
   it('replaces the screenshots when the detail list is non-empty', () => {
     const merged = mergeDetail(stored, detail({ screenshot_urls: ['/new/a.png'] }));
     expect(merged.screenshotUrls).toEqual(['/new/a.png']);
+  });
+
+  it('keeps the subject\'s fanart when the detail has none', () => {
+    const merged = mergeDetail(
+      { ...stored, fanartUrls: ['https://romm/f1.jpg'] },
+      detail({ fanart_urls: [] })
+    );
+    expect(merged.fanartUrls).toEqual(['https://romm/f1.jpg']);
   });
 
   it('keeps the stored text fields when the detail sends empty strings', () => {

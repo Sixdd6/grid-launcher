@@ -210,6 +210,8 @@ describe('syntheticCloudGame', () => {
       platform_id: 3,
       path_cover_small: null,
       path_cover_large: null,
+      screenshot_urls: [],
+      fanart_urls: [],
     };
     const synthetic = syntheticCloudGame(game, 'Emulators');
     expect(synthetic.title).toBe('Portal');

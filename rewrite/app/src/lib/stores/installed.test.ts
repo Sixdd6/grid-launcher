@@ -27,6 +27,7 @@ function row(overrides: Partial<InstalledGame>): InstalledGame {
     cover_small_path: '',
     cover_large_path: '',
     screenshot_urls: '',
+    fanart_urls: '',
     native_executable_path: '',
     native_launch_parameters: '',
     native_compat_tool: '',
@@ -51,6 +52,8 @@ function game(overrides: Partial<GameSummary>): GameSummary {
     platform_id: 1,
     path_cover_small: null,
     path_cover_large: null,
+    screenshot_urls: [],
+    fanart_urls: [],
     ...overrides,
   };
 }

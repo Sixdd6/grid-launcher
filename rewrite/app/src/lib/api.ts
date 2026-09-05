@@ -29,6 +29,10 @@ export type GameSummary = {
   platform_id: number;
   path_cover_small: string | null;
   path_cover_large: string | null;
+  /** Resolved + host-filtered; the Server grid's background art reads these. */
+  screenshot_urls: string[];
+  /** Resolved + host-filtered; the Server grid's background art reads these. */
+  fanart_urls: string[];
 };
 
 export type RomFile = {
@@ -69,6 +73,7 @@ export type RomDetail = {
   cover_small_path: string;
   cover_large_path: string;
   screenshot_urls: string[];
+  fanart_urls: string[];
   youtube_video_id: string;
   video_path: string;
   is_identified: boolean;
@@ -197,6 +202,8 @@ export type InstalledGame = {
   cover_small_path: string;
   cover_large_path: string;
   screenshot_urls: string;
+  /** Newline-joined, like screenshot_urls; '' for a row installed before schema v5. */
+  fanart_urls: string;
   // Native (Windows) launch settings, the PS3/PS4 identifiers, the bundled
   // DLC manifest and the RetroAchievements id. All serialize as plain
   // strings (never null): grid-core stores a blank rather than a NULL.

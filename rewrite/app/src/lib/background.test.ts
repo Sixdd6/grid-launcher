@@ -10,7 +10,7 @@ function row(overrides: Partial<InstalledGame>): InstalledGame {
     extracted_path: '', extracted_dir: '', multi_file_game_dir: '', description: '', rating: '',
     genres: '', regions: '', languages: '', tags: '', revision: '', companies: '',
     first_release_date: '', filesize_bytes: 0, server_updated_at: '', installed_at: 0,
-    cover_small_path: '', cover_large_path: '', screenshot_urls: '', native_executable_path: '',
+    cover_small_path: '', cover_large_path: '', screenshot_urls: '', fanart_urls: '', native_executable_path: '',
     native_launch_parameters: '', native_compat_tool: '', native_wineprefix: '',
     native_game_dir: '', included_dlc: '', ps3_trophy_paths: '', ps3_game_id: '',
     ps3_iso_path: '', ps4_game_id: '', ps4_content: '', ra_id: '', last_played_at: 0,

@@ -1591,6 +1591,7 @@ impl InstallService {
                 cover_small_path: record.cover_small_path.clone(),
                 cover_large_path: record.cover_large_path.clone(),
                 screenshot_urls: record.screenshot_urls.clone(),
+                fanart_urls: record.fanart_urls.clone(),
             });
         }
 
@@ -2826,6 +2827,7 @@ fn new_record(detail: &RomDetail, rom_file_name: &str) -> InstalledGame {
         cover_small_path: detail.cover_small_path.clone(),
         cover_large_path: detail.cover_large_path.clone(),
         screenshot_urls: detail.screenshot_urls.join("\n"),
+        fanart_urls: detail.fanart_urls.join("\n"),
         ..Default::default()
     }
 }
@@ -2965,6 +2967,7 @@ mod tests {
             cover_small_path: String::new(),
             cover_large_path: String::new(),
             screenshot_urls: Vec::new(),
+            fanart_urls: Vec::new(),
             youtube_video_id: String::new(),
             video_path: String::new(),
             is_identified: false,

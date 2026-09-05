@@ -35,6 +35,7 @@ CREATE TABLE installed_games (
     cover_small_path    TEXT NOT NULL DEFAULT '',
     cover_large_path    TEXT NOT NULL DEFAULT '',
     screenshot_urls     TEXT NOT NULL DEFAULT '',
+    fanart_urls         TEXT NOT NULL DEFAULT '',
     native_executable_path   TEXT NOT NULL DEFAULT '',
     native_launch_parameters TEXT NOT NULL DEFAULT '',
     native_compat_tool       TEXT NOT NULL DEFAULT '',
@@ -55,7 +56,7 @@ CREATE TABLE installed_games (
 
 /// The schema version this build understands. Bumped when a migration adds
 /// columns (see spec: later milestones add native/PS3/PS4 fields).
-const LATEST_USER_VERSION: i64 = 4;
+const LATEST_USER_VERSION: i64 = 5;
 
 /// The columns v1 -> v2 (milestone 7) adds to `installed_games`.
 const V2_IMAGE_COLUMNS: [&str; 3] = ["cover_small_path", "cover_large_path", "screenshot_urls"];
@@ -81,6 +82,12 @@ const V3_COLUMNS: [&str; 12] = [
 /// a TEXT like every earlier migration's columns, so it gets its own
 /// `ADD COLUMN` type rather than joining a loop over string columns.
 const V4_COLUMN: &str = "last_played_at";
+
+/// The column v4 -> v5 (round 4's background art) adds: the row's fanart
+/// URLs, newline-joined exactly like `screenshot_urls`. A TEXT with a blank
+/// default, so an existing row simply has no fanart and the background falls
+/// back to its screenshots.
+const V5_COLUMN: &str = "fanart_urls";
 
 /// The column names `installed_games` currently has.
 fn installed_games_columns(conn: &Connection) -> Result<Vec<String>, LibraryError> {
@@ -168,6 +175,24 @@ fn migrate_3_to_4(conn: &mut Connection) -> Result<(), LibraryError> {
     tx.commit().map_err(registry_err)
 }
 
+/// v4 -> v5 (round 4): adds `fanart_urls`. Same transaction +
+/// idempotent-`ADD COLUMN` shape as every migration above it, for the same
+/// reasons — one commit for the schema change and the `user_version` bump,
+/// and a column already present is skipped rather than erroring.
+fn migrate_4_to_5(conn: &mut Connection) -> Result<(), LibraryError> {
+    let tx = conn.transaction().map_err(registry_err)?;
+    let existing = installed_games_columns(&tx)?;
+    if !existing.iter().any(|name| name == V5_COLUMN) {
+        tx.execute_batch(&format!(
+            "ALTER TABLE installed_games ADD COLUMN {V5_COLUMN} TEXT NOT NULL DEFAULT '';"
+        ))
+        .map_err(registry_err)?;
+    }
+    tx.pragma_update(None, "user_version", 5)
+        .map_err(registry_err)?;
+    tx.commit().map_err(registry_err)
+}
+
 /// Every column of `installed_games`, in the order selected/inserted below.
 const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_path, \
      extracted_path, extracted_dir, multi_file_game_dir, description, rating, genres, \
@@ -175,7 +200,7 @@ const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_pa
      server_updated_at, installed_at, cover_small_path, cover_large_path, screenshot_urls, \
      native_executable_path, native_launch_parameters, native_compat_tool, native_wineprefix, \
      native_game_dir, included_dlc, ps3_trophy_paths, ps3_game_id, ps3_iso_path, ps4_game_id, \
-     ps4_content, ra_id, last_played_at";
+     ps4_content, ra_id, last_played_at, fanart_urls";
 
 /// One installed game, as persisted in the SQLite registry. `title_key` and
 /// `platform_key` are not part of this type: they are computed from `title`
@@ -236,6 +261,11 @@ pub struct InstalledGame {
     /// an update or a reinstall keeps the history the Library rail reads.
     #[serde(default)]
     pub last_played_at: i64,
+    /// Newline-joined fanart URLs, already resolved + host-filtered, exactly
+    /// like `screenshot_urls`. `""` for a row installed before v5 or for a
+    /// game the server has no fanart for.
+    #[serde(default)]
+    pub fanart_urls: String,
 }
 
 impl InstalledGame {
@@ -277,6 +307,7 @@ impl InstalledGame {
             ps4_content: row.get(33)?,
             ra_id: row.get(34)?,
             last_played_at: row.get(35)?,
+            fanart_urls: row.get(36)?,
         })
     }
 }
@@ -343,6 +374,7 @@ impl Registry {
                 1 => migrate_1_to_2(&mut conn)?,
                 2 => migrate_2_to_3(&mut conn)?,
                 3 => migrate_3_to_4(&mut conn)?,
+                4 => migrate_4_to_5(&mut conn)?,
                 v => {
                     return Err(LibraryError::Registry(format!(
                         "no migration from user_version {v}"
@@ -381,14 +413,14 @@ impl Registry {
                 archive_path, extracted_path, extracted_dir, multi_file_game_dir,
                 description, rating, genres, regions, languages, tags, revision,
                 companies, first_release_date, filesize_bytes, server_updated_at,
-                installed_at, cover_small_path, cover_large_path, screenshot_urls,
+                installed_at, cover_small_path, cover_large_path, screenshot_urls, fanart_urls,
                 native_executable_path, native_launch_parameters, native_compat_tool,
                 native_wineprefix, native_game_dir, included_dlc, ps3_trophy_paths,
                 ps3_game_id, ps3_iso_path, ps4_game_id, ps4_content, ra_id
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
                 ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
-                ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37
+                ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38
             )
             ON CONFLICT(title_key, platform_key) DO UPDATE SET
                 title = excluded.title,
@@ -414,6 +446,7 @@ impl Registry {
                 cover_small_path = excluded.cover_small_path,
                 cover_large_path = excluded.cover_large_path,
                 screenshot_urls = excluded.screenshot_urls,
+                fanart_urls = excluded.fanart_urls,
                 native_executable_path = excluded.native_executable_path,
                 native_launch_parameters = excluded.native_launch_parameters,
                 native_compat_tool = excluded.native_compat_tool,
@@ -452,6 +485,7 @@ impl Registry {
                 rec.cover_small_path,
                 rec.cover_large_path,
                 rec.screenshot_urls,
+                rec.fanart_urls,
                 rec.native_executable_path,
                 rec.native_launch_parameters,
                 rec.native_compat_tool,
@@ -470,18 +504,19 @@ impl Registry {
         Ok(())
     }
 
-    /// Sets the three image columns on the row for `rom_id`. Returns whether
-    /// a row matched.
+    /// Sets the image columns on the row for `rom_id`. Returns whether a
+    /// row matched.
     pub fn update_images(&self, rom_id: i64, fields: &ImageFields) -> Result<bool, LibraryError> {
         let conn = self.conn.lock().unwrap();
         let affected = conn
             .execute(
                 "UPDATE installed_games SET cover_small_path = ?1, cover_large_path = ?2, \
-                 screenshot_urls = ?3 WHERE rom_id = ?4",
+                 screenshot_urls = ?3, fanart_urls = ?4 WHERE rom_id = ?5",
                 params![
                     fields.cover_small_path,
                     fields.cover_large_path,
                     fields.screenshot_urls,
+                    fields.fanart_urls,
                     rom_id
                 ],
             )

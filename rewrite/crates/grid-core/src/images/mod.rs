@@ -16,14 +16,16 @@ pub enum ImageVariant {
     Screenshot,
 }
 
-/// The three registry image columns, as stored: cover paths verbatim from
-/// the server (resolved lazily against the server URL), screenshots as a
-/// newline-joined list of already resolved + host-filtered absolute URLs.
+/// The registry image columns, as stored: cover paths verbatim from the
+/// server (resolved lazily against the server URL), screenshots and fanart as
+/// newline-joined lists of already resolved + host-filtered absolute URLs.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct ImageFields {
     pub cover_small_path: String,
     pub cover_large_path: String,
     pub screenshot_urls: String,
+    /// Fanart URLs, newline-joined — same convention as `screenshot_urls`.
+    pub fanart_urls: String,
 }
 
 impl ImageFields {
@@ -35,6 +37,7 @@ impl ImageFields {
             cover_small_path: detail.cover_small_path.clone(),
             cover_large_path: detail.cover_large_path.clone(),
             screenshot_urls: detail.screenshot_urls.join("\n"),
+            fanart_urls: detail.fanart_urls.join("\n"),
         }
     }
 }
