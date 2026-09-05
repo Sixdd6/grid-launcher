@@ -291,7 +291,7 @@ pub fn apply_placeholders(tokens: Vec<String>, ph: &Placeholders) -> Vec<String>
 /// (`crate::autoconfig::paths::retroarch_portable_home`) first when that
 /// directory exists, else the emulator's own directory — the AppImage
 /// runtime points `$HOME` at the portable home when present, so that is
-/// where RetroArch (and the platform-cores installer) actually put the
+/// where RetroArch and its own core updater actually put the
 /// `cores/` directory. The first search directory the token resolves to an
 /// existing file under wins and is canonicalized in. Absolute paths and
 /// tokens that resolve under no search directory are left untouched.
