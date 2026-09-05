@@ -635,6 +635,35 @@ theme background, draw the front image centred and scaled with
 overlay a flat `rgba(0,0,0,178)` scrim over the whole rect
 (grid_launcher/tv/widgets/components/fanart_background.py:150).
 
+#### Rust port (round 4)
+
+The Python desktop window never had a background — the rewrite's shell (`BackgroundArt.svelte`)
+adds one where none existed. It follows the TV widget's own cycle timing and its "more than one
+URL" gate: `BACKGROUND_CYCLE_MS = 5000` and `shouldCycle(urls, fade) = urls.length > 1 && fade > 0`
+mirror `fanart_background.py:52-53,80-84` almost exactly, the only difference being that the fade
+slider (not just the URL count) can hold the rotation.
+
+Unlike TV, the rewrite has a real fanart source instead of overloading the screenshot list:
+`RomSSMetadata.fanart_path` and `RomGamelistMetadata.fanart_path`, read by
+`fanart_urls_from_payload` (`crates/grid-core/src/images/urls.rs`) off both `SimpleRomSchema` and
+`DetailedRomSchema` payloads — so the Server grid and the Library both carry fanart with no
+per-card detail fetch, closing the gap this doc's own note above flags (TV carried `fanart_url`
+through the catalog but never displayed it).
+
+`NON_SCREENSHOT_ART_RE` is deliberately NOT applied to fanart URLs — that regex exists to keep
+fanart, box art and logos OUT of a *screenshot* list; applying it to the fanart list would reject
+every fanart by name (`looks_like_screenshot_url("/art/fanart.jpg")` is `false`).
+
+`fanart_url` (usually an external host, since it points at ScreenScraper/LaunchBox art) is dropped
+by `filter_to_server_host` like any other foreign URL, and that is intended: apart from the
+YouTube trailer thumbnail (below), nothing may leave the server host. `fanart_path` (server
+relative) is what actually survives in practice.
+
+The priority used to choose the shell's background is fanart → screenshots → cover
+(`backgroundUrls` in `app/src/lib/background.ts`). The cover is the last resort of the three: a
+portrait cover stretched across a landscape window is worse than a screenshot or fanart image
+that was already shot in a roughly landscape aspect.
+
 ## Invariants and error handling
 
 - **No exception from image handling ever aborts a user flow, except uninstall.** Every
@@ -1010,6 +1039,22 @@ behavior:
 - Replenish also treats a row that vanished between planning and running
   (`Registry::update_images` returning no matching row) as skipped, without attempting a fetch
   (`crates/grid-core/src/images/replenish.rs:69-72`).
+- **The background art has a variant; the cover pipeline does not.** `ensure_image` still returns
+  the raw cached bytes for every card and screenshot; only the shell background asks for
+  `ensure_background_variant`. One extra variant per background source, not per image.
+- **A failed variant keeps the current art.** There is no raw-image fallback: the CSS blur is
+  gone, so the raw source would be a different effect rather than a degraded one.
+- **The YouTube trailer thumbnail is the only foreign host.**
+  `https://img.youtube.com/vi/<id>/hqdefault.jpg`, a plain `<img>` with
+  `referrerpolicy="no-referrer"`, allowed by `img-src` in `app/src-tauri/tauri.conf.json`. It is
+  deliberately NOT routed through `ensure_image`, which would fetch it via `RommClient` and attach
+  the RomM Authorization header to a foreign request. On error it falls back to the server-hosted
+  cover with the same play badge.
+- **`noteViewed` gates on subject equality.** Landing alongside this documentation pass: reporting
+  the same `BackgroundSubject` twice — for example `Details.svelte`'s effect re-firing because an
+  unrelated field on `merged` changed while the popup stays open on the same game — no longer
+  overwrites `state.subject`, so `BackgroundArt.svelte`'s cycle index and its 5000ms interval are
+  not reset by a report that carries no new art.
 
 ## Game videos (rewrite only)
 
@@ -1026,3 +1071,28 @@ frontend only ever receives the resulting local path. No video URL in the UI car
 token. `youtube_video_id` is a different case entirely — it is embedded, touches no
 server bytes, and needs the `frame-src https://www.youtube-nocookie.com` CSP entry to
 render at all.
+
+## Background variant (rewrite only)
+
+`images::background::ensure_background_variant` (`crates/grid-core/src/images/background.rs`)
+reuses `ImageCache::ensure` to fetch the source and stores `<key>.bg.jpg` beside it, the same
+directory and the same `sha256(resolved url)` key scheme `video.rs` uses (`image_key`).
+
+The variant is 960px wide (never upscaled, `FilterType::Triangle`), blurred once with
+`fast_blur` at sigma 12.0, and encoded as JPEG at quality 80. It is written through a `.bg.part` +
+rename, a temp name distinct from `ImageCache`'s own `<key>.part` so a concurrent fetch of the
+same source cannot rename its half-written JPEG over the variant, or vice versa.
+
+`sweep::pinned_keys` pins by key PREFIX, so `<key>.bg.jpg` is pinned whenever its source `<key>`
+is — a variant is never evicted out from under an installed game's art.
+
+It is built ahead of time in two places — `spawn_prefetch` (install, `app/src-tauri/src/images.rs`)
+and `replenish::plan`'s `NeedsVariant` items (a game connected to the library, planned last, after
+every cover item) — and on demand when the frontend hovers a card for 150ms
+(`PREFETCH_DELAY_MS` in `app/src/lib/background.ts`, before the 500ms `noteViewed` swap).
+
+The reason it exists at all: `BackgroundArt.svelte` used to hand a full-resolution cover to two
+`filter: blur(40px)` layers, blurring the same ~2.4 Mpx image on the compositor every frame of the
+360ms cross-fade. That is Python's TV `_blur_pixmap` (`fanart_background.py:16`) done per frame
+instead of once on arrival — the variant moves the blur to Rust, once, so the webview only ever
+composites a small pre-blurred still.

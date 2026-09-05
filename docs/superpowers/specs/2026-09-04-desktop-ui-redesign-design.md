@@ -39,10 +39,14 @@ the options.
   views; right cluster = connection status dot + server name menu (Reconnect, Disconnect,
   Open RomM in browser) and the app-update badge when a notice is stored.
 - Keyboard: `Ctrl+1..5` switch views; `Ctrl+F` focuses the current view's search.
-- Background art: the large cover of the last game the user viewed (opened in the
-  details popup or hovered for more than 500ms), falling back to the most recently played
-  installed game on startup; blurred 40px; opacity from the Settings › Appearance fade
-  slider (0–60%, default 25%, stored as `ui.background_fade`); cross-fades over 360ms.
+- Background art: the art of the last game the user viewed (opened in the details
+  popup, selected with the keyboard/gamepad, or hovered for more than 500ms), chosen
+  fanart → screenshots → large cover (user ruling 2026-09-05); more than one image
+  rotates every 5000ms, and the rotation stops while the fade is 0. Falls back on
+  startup to the most recently installed game that has any art. The image is scaled to
+  960px and blurred by the backend once (`ensure_background_variant`) rather than by the
+  compositor every frame; opacity comes from the Settings › Appearance fade slider
+  (0–60%, default 25%, stored as `ui.background_fade`); cross-fades over 360ms.
 - Download footer strip, 28px, always mounted: hidden when nothing is live; otherwise
   "⬇ <title> · <percent> · <speed>" with a 60-sample sparkline and an "Open Downloads"
   link. Clicking anywhere on it opens the Downloads view.
