@@ -128,6 +128,22 @@ relative to the emulator root and is stripped
 (grid_launcher/ui/mixins/cloud_mixin.py:954). Otherwise relative paths resolve against the
 emulator directory (grid_launcher/ui/mixins/cloud_mixin.py:961).
 
+**Rewrite deviation — RetroArch AppImages resolve against their portable home.** When
+`<AppImage>.home/.config/retroarch` exists next to the executable, the AppImage runtime sets
+`$HOME` to `<AppImage>.home`, so RetroArch writes to
+`<AppImage>.home/.config/retroarch/saves|states` and its `retroarch.cfg` records those as
+`~/.config/retroarch/saves|states`. The rewrite therefore resolves a leading `~` in the
+config's `savefile_directory`/`savestate_directory`, and the `default` sentinel and the
+`:\`/`:/` notation, against that portable home instead of the real user home / the emulator
+directory, and appends the portable home's `saves`/`states` after the literal
+`saves`,`savefiles` / `states`,`savestates` fallbacks so a cfg missing the key still resolves
+(`crates/grid-core/src/cloud/dirs.rs`, `ResolveContext::retroarch_portable_home`). Python
+expanded `~` against the real home and only ever fell back to `<emulator_dir>/saves|states`,
+neither of which a portable install writes to, so no save or state was ever detected for a
+RetroArch AppImage. The portable home is detected by the same
+`autoconfig::paths::retroarch_portable_home` helper the config writer and core resolver use
+(doc 05, "Config discovery").
+
 A resolved entry is kept only if it exists, and it may be **either a directory or a file**
 (grid_launcher/ui/mixins/cloud_mixin.py:966). Results are de-duplicated case-insensitively
 (grid_launcher/ui/mixins/cloud_mixin.py:969) and memoised per

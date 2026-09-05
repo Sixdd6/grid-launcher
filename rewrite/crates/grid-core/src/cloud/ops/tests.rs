@@ -93,6 +93,7 @@ impl Fixture {
                 library_dir: "",
                 config_dir: self._config_dir.path(),
                 windows_documents: None,
+                retroarch_portable_home: None,
             },
             active_sessions: &self.sessions,
             now: 1_700_000_000.0,

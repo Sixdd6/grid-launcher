@@ -64,6 +64,14 @@
 //!   which is not what Python does. The bool is computed once by
 //!   [`resolved_sync_directory_paths`] via [`autoconfig::is_retroarch`] and
 //!   threaded through.
+//! - RetroArch AppImages resolve `~`, `default` and `:/` against the
+//!   AppImage's portable home (`<AppImage>.home/.config/retroarch`, the
+//!   `$HOME` the AppImage runtime hands RetroArch) when one exists, and
+//!   gain that directory's `saves`/`states` as extra fallbacks. Python
+//!   expanded `~` against the REAL user home and only ever fell back to
+//!   `<emulator_dir>/saves|states`, neither of which a portable install
+//!   writes to, so no save or state was ever found for one — see
+//!   `docs/porting/06-cloud-saves.md`.
 //! - [`resolved_sync_directory_paths`] takes `profile: Option<&EmulatorProfile>`
 //!   (the entry's ALREADY-MATCHED autoprofile), not the full profiles list
 //!   `emulator_matches_tokens`/`is_retroarch`/etc. want. Every per-emulator
@@ -137,6 +145,15 @@ pub struct ResolveContext<'a> {
     /// off Windows, in which case `%DOCUMENTS%` falls back to plain
     /// `%USERPROFILE%\Documents` env expansion (cloud_mixin.py:936).
     pub windows_documents: Option<&'a Path>,
+    /// The RetroArch AppImage's portable home
+    /// (`autoconfig::paths::retroarch_portable_home`,
+    /// `<AppImage>.home/.config/retroarch`) when the entry is a RetroArch
+    /// AppImage — `None` for every other entry and for a normal RetroArch
+    /// install. The AppImage runtime sets `$HOME` to `<AppImage>.home`, so
+    /// RetroArch's own `~`, `default` and `:/` notations mean paths under
+    /// there, not under the real user home; rewrite deviation, see
+    /// `docs/porting/06-cloud-saves.md`.
+    pub retroarch_portable_home: Option<&'a Path>,
 }
 
 /// `$VAR` / `${VAR}` — the POSIX subset of `os.path.expandvars` this
@@ -322,6 +339,27 @@ fn generic_candidate(expanded: &str, ctx: &ResolveContext) -> PathBuf {
     }
 }
 
+/// What the AppImage runtime sets `$HOME` to for a portable RetroArch:
+/// the `.home` directory two levels above the portable
+/// `<...>.home/.config/retroarch` config home.
+fn portable_home_root(portable_home: &Path) -> Option<&Path> {
+    portable_home.parent()?.parent()
+}
+
+/// Rewrites a leading `~`/`~/` in a RetroArch config path against the
+/// AppImage's portable home instead of the real user home — rewrite
+/// deviation (see [`ResolveContext::retroarch_portable_home`]). Paths that
+/// do not start with `~` are returned unchanged.
+fn rewrite_tilde(raw: &str, portable_root: &Path) -> String {
+    if raw == "~" {
+        return portable_root.to_string_lossy().to_string();
+    }
+    match raw.strip_prefix("~/") {
+        Some(rest) => portable_root.join(rest).to_string_lossy().to_string(),
+        None => raw.to_string(),
+    }
+}
+
 /// Expands one raw sync-path entry against `ctx` and keeps it only if it
 /// exists as a directory or a file (cloud_mixin.py:939-967, one loop
 /// iteration). `key_is_save` picks `"saves"`/`"states"` for the RetroArch
@@ -337,11 +375,22 @@ pub fn expand_sync_path(
     let expanded = expand_tokens(raw, ctx, true);
     let stripped = expanded.trim();
     let base = ctx.emulator_dir.map(Path::to_path_buf).unwrap_or_default();
+    // RetroArch's own notations are relative to what RetroArch sees as its
+    // root: the AppImage portable home when there is one, else the
+    // emulator directory (Python only ever knew the latter).
+    let retroarch_base = ctx
+        .retroarch_portable_home
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| base.clone());
 
     let candidate = if is_retroarch && stripped.to_lowercase() == "default" {
-        paths::resolve_best_effort(&base.join(if key_is_save { "saves" } else { "states" }))
+        paths::resolve_best_effort(&retroarch_base.join(if key_is_save {
+            "saves"
+        } else {
+            "states"
+        }))
     } else if is_retroarch && (stripped.starts_with(":\\") || stripped.starts_with(":/")) {
-        paths::resolve_best_effort(&base.join(&stripped[2..]))
+        paths::resolve_best_effort(&retroarch_base.join(&stripped[2..]))
     } else {
         generic_candidate(&expanded, ctx)
     };
@@ -364,6 +413,10 @@ pub fn resolved_sync_directory_paths(
     let key_is_save = key.is_save();
     let configured_paths = split_entry_list(key.entry_field(entry));
     let matched_profiles = profile_slice(profile);
+    let is_retroarch_flag = autoconfig::is_retroarch(entry, matched_profiles);
+    let portable_home = is_retroarch_flag
+        .then(|| paths::retroarch_portable_home(&paths::expand_user(&entry.path)))
+        .flatten();
 
     let mut all_paths: Vec<String> = if !configured_paths.is_empty() {
         configured_paths.clone()
@@ -376,23 +429,38 @@ pub fn resolved_sync_directory_paths(
     if configured_paths.is_empty() {
         let args_vec = template::split_template(&entry.args).unwrap_or_default();
 
-        if autoconfig::is_retroarch(entry, matched_profiles) {
+        if is_retroarch_flag {
             let settings = retroarch::directory_settings(&entry.path);
             let override_path = if key_is_save {
                 settings.savefile_directory
             } else {
                 settings.savestate_directory
             };
-            if !override_path.trim().is_empty() {
-                let mut prefixed = vec![override_path.trim().to_string()];
+            let portable_root = portable_home.as_deref().and_then(portable_home_root);
+            let override_path = match portable_root {
+                Some(root) => rewrite_tilde(override_path.trim(), root),
+                None => override_path.trim().to_string(),
+            };
+            if !override_path.is_empty() {
+                let mut prefixed = vec![override_path];
                 prefixed.extend(all_paths);
                 all_paths = prefixed;
             }
-            let fallback: Vec<String> = if key_is_save {
+            let mut fallback: Vec<String> = if key_is_save {
                 vec!["saves".to_string(), "savefiles".to_string()]
             } else {
                 vec!["states".to_string(), "savestates".to_string()]
             };
+            // The portable home's own saves/states, for a cfg that never
+            // wrote the key: the relative fallbacks above resolve against
+            // the emulator directory, which an AppImage never uses.
+            if let Some(home) = portable_home.as_deref() {
+                fallback.push(
+                    home.join(if key_is_save { "saves" } else { "states" })
+                        .to_string_lossy()
+                        .to_string(),
+                );
+            }
             all_paths = merge_dedup(all_paths, fallback);
         }
 
@@ -494,10 +562,17 @@ pub fn resolved_sync_directory_paths(
         return (Vec::new(), Vec::new());
     }
 
-    let is_retroarch_flag = autoconfig::is_retroarch(entry, matched_profiles);
+    let expand_ctx = ResolveContext {
+        emulator_dir: ctx.emulator_dir,
+        library_dir: ctx.library_dir,
+        config_dir: ctx.config_dir,
+        windows_documents: ctx.windows_documents,
+        retroarch_portable_home: portable_home.as_deref().or(ctx.retroarch_portable_home),
+    };
     let mut resolved: Vec<PathBuf> = Vec::new();
     for raw in &all_paths {
-        if let Some(candidate) = expand_sync_path(raw, key_is_save, is_retroarch_flag, ctx) {
+        if let Some(candidate) = expand_sync_path(raw, key_is_save, is_retroarch_flag, &expand_ctx)
+        {
             resolved.push(candidate);
         }
     }
@@ -554,6 +629,7 @@ mod tests {
             library_dir: "",
             config_dir,
             windows_documents: None,
+            retroarch_portable_home: None,
         }
     }
 
@@ -687,6 +763,7 @@ mod tests {
             library_dir: &library_dir_str,
             config_dir: &config_dir,
             windows_documents: None,
+            retroarch_portable_home: None,
         };
 
         let via_emulator =
@@ -937,5 +1014,134 @@ mod tests {
                 paths::resolve_best_effort(&profile_only_dir),
             ]
         );
+    }
+
+    /// A RetroArch AppImage laid out the way the AppImage runtime expects:
+    /// `<name>.AppImage` next to `<name>.AppImage.home/.config/retroarch`,
+    /// which becomes `$HOME` for the emulator at runtime. Returns
+    /// `(executable, portable home)`.
+    fn retroarch_appimage(root: &Path) -> (PathBuf, PathBuf) {
+        let exe = root.join("RetroArch.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        let portable_home = root
+            .join("RetroArch.AppImage.home")
+            .join(".config")
+            .join("retroarch");
+        std::fs::create_dir_all(&portable_home).unwrap();
+        (exe, portable_home)
+    }
+
+    #[test]
+    fn retroarch_appimage_tilde_overrides_resolve_against_the_portable_home() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+
+        let (exe, portable_home) = retroarch_appimage(temp.path());
+        std::fs::write(
+            portable_home.join("retroarch.cfg"),
+            "savestate_directory = \"~/.config/retroarch/states\"\n\
+             savefile_directory = \"~/.config/retroarch/saves\"\n",
+        )
+        .unwrap();
+        // `sort_savestates_enable` puts files in a per-core subfolder; the
+        // candidate walk is recursive (cloud::candidates' `walk_files`), so
+        // only the parent directory has to resolve.
+        let states = portable_home.join("states");
+        let saves = portable_home.join("saves");
+        std::fs::create_dir_all(states.join("bsnes")).unwrap();
+        std::fs::create_dir_all(saves.join("bsnes")).unwrap();
+
+        let e = entry("RetroArch", &exe.to_string_lossy());
+        let c = ctx(Some(temp.path()), temp.path());
+
+        let (resolved_states, _) = resolved_sync_directory_paths(&e, None, PathKey::StatePaths, &c);
+        assert_eq!(resolved_states, vec![paths::resolve_best_effort(&states)]);
+
+        let (resolved_saves, _) = resolved_sync_directory_paths(&e, None, PathKey::SavePaths, &c);
+        assert_eq!(resolved_saves, vec![paths::resolve_best_effort(&saves)]);
+    }
+
+    #[test]
+    fn retroarch_appimage_portable_fallbacks_apply_without_cfg_keys() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+
+        let (exe, portable_home) = retroarch_appimage(temp.path());
+        // A cfg with no savefile/savestate keys at all.
+        std::fs::write(
+            portable_home.join("retroarch.cfg"),
+            "sort_savestates_enable = \"true\"\n",
+        )
+        .unwrap();
+        let states = portable_home.join("states");
+        let saves = portable_home.join("saves");
+        std::fs::create_dir_all(states.join("bsnes")).unwrap();
+        std::fs::create_dir_all(saves.join("bsnes")).unwrap();
+
+        let e = entry("RetroArch", &exe.to_string_lossy());
+        let c = ctx(Some(temp.path()), temp.path());
+
+        let (resolved_states, _) = resolved_sync_directory_paths(&e, None, PathKey::StatePaths, &c);
+        assert_eq!(resolved_states, vec![paths::resolve_best_effort(&states)]);
+
+        let (resolved_saves, _) = resolved_sync_directory_paths(&e, None, PathKey::SavePaths, &c);
+        assert_eq!(resolved_saves, vec![paths::resolve_best_effort(&saves)]);
+    }
+
+    #[test]
+    fn retroarch_appimage_default_and_colon_notation_use_the_portable_home() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+
+        let (_exe, portable_home) = retroarch_appimage(temp.path());
+        let saves = portable_home.join("saves");
+        std::fs::create_dir_all(&saves).unwrap();
+
+        let c = ResolveContext {
+            emulator_dir: Some(temp.path()),
+            library_dir: "",
+            config_dir: temp.path(),
+            windows_documents: None,
+            retroarch_portable_home: Some(&portable_home),
+        };
+
+        assert_eq!(
+            expand_sync_path("default", true, true, &c),
+            Some(paths::resolve_best_effort(&saves))
+        );
+        assert_eq!(
+            expand_sync_path(":/saves", true, true, &c),
+            Some(paths::resolve_best_effort(&saves))
+        );
+    }
+
+    #[test]
+    fn non_appimage_retroarch_still_expands_tilde_against_the_user_home() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let _guard = isolated_env(&home);
+
+        let emulator_dir = temp.path().join("RetroArch");
+        std::fs::create_dir_all(&emulator_dir).unwrap();
+        let exe = emulator_dir.join("retroarch.exe");
+        std::fs::write(&exe, b"").unwrap();
+        std::fs::write(
+            emulator_dir.join("retroarch.cfg"),
+            "savefile_directory = \"~/.config/retroarch/saves\"\n",
+        )
+        .unwrap();
+        let user_saves = home.join(".config").join("retroarch").join("saves");
+        std::fs::create_dir_all(&user_saves).unwrap();
+
+        let e = entry("RetroArch", &exe.to_string_lossy());
+        let c = ctx(Some(&emulator_dir), temp.path());
+
+        let (resolved, _) = resolved_sync_directory_paths(&e, None, PathKey::SavePaths, &c);
+        assert_eq!(resolved, vec![paths::resolve_best_effort(&user_saves)]);
     }
 }

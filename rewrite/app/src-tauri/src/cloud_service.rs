@@ -943,6 +943,7 @@ impl CloudService {
                 library_dir: &config.library_path,
                 config_dir: &config_dir,
                 windows_documents: None,
+                retroarch_portable_home: None,
             },
             // This game's own session already ended; no live session
             // window applies to its own upload plan.
@@ -1077,6 +1078,7 @@ impl Inputs {
                 library_dir: &self.config.library_path,
                 config_dir: &self.config_dir,
                 windows_documents: None,
+                retroarch_portable_home: None,
             },
             active_sessions: &self.active_sessions,
             now: self.now,

@@ -232,6 +232,10 @@ fn resolve_ctx_for<'a>(
         library_dir: ctx.resolve_ctx.library_dir,
         config_dir: ctx.resolve_ctx.config_dir,
         windows_documents: ctx.resolve_ctx.windows_documents,
+        // Left as the caller set it (normally `None`):
+        // `resolved_sync_directory_paths` derives the portable home from
+        // the entry's own path, which this layer does not need to know.
+        retroarch_portable_home: ctx.resolve_ctx.retroarch_portable_home,
     }
 }
 
