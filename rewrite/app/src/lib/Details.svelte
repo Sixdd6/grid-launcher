@@ -42,6 +42,7 @@
     headerLine,
     lastPlayedText,
     launchTargetLine,
+    ratingValue,
     verificationLabel,
   } from './details/header';
   import {
@@ -495,9 +496,9 @@
       firstReleaseDate: detail?.first_release_date ?? '',
       companies: detail?.companies ?? '',
       genres,
-      rating,
     })
   );
+  let ratingNumber = $derived(ratingValue(rating));
   // `||`, not `??`: a loaded detail always carries strings, so `''` from the
   // server would win over the registry's stored value under `??`.
   let flags = $derived([
@@ -630,7 +631,7 @@
       <section class="right">
         <header class="head">
           <h2>{subject.name}</h2>
-          <p class="header-line" data-testid="details-header-line">{header}</p>
+          <p class="header-line" data-testid="details-header-line">{header}{#if ratingNumber !== ''} · <span class="rating"><span class="star"><Icon name="star" size={14} /></span>{ratingNumber}</span>{/if}</p>
           <div class="chips">
             {#if liveSession}
               <span data-testid="details-playing-chip" class="chip playing">Playing</span>
@@ -828,6 +829,24 @@
     color: var(--text-muted);
     font-size: 13px;
     overflow-wrap: anywhere;
+  }
+
+  /* The rating is the one part of the header line that is not muted: the old
+     app drew it in the accent colour so it stood out from the metadata
+     around it. The star takes `--primary` (the accent the old app used for
+     the rating); the NUMBER takes `--text-h`, because `--warning` is the same
+     amber in both themes and would fall below a readable contrast on the
+     light background. */
+  .rating {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    color: var(--text-h);
+  }
+
+  .star {
+    display: flex;
+    color: var(--primary);
   }
 
   .head {

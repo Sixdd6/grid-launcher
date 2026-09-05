@@ -30,10 +30,17 @@ export function developerOf(companies: string): string {
   return companies.split(',')[0]?.trim() ?? '';
 }
 
-/** The header's rating chip, or `''` when the server has no rating. */
-export function ratingText(rating: string): string {
-  const trimmed = rating.trim();
-  return trimmed === '' ? '' : `★ ${trimmed}`;
+/**
+ * The header's rating number, or `''` when the server has no rating.
+ *
+ * The star is NOT here. It is an `<Icon name="star">` in `Details.svelte`,
+ * because (a) `★` resolved to a different typeface than the rest of the
+ * line and (b) the old app drew this star in the accent colour
+ * (`grid_launcher/ui/game_views.py:582`), which a character inside a joined
+ * string cannot be given.
+ */
+export function ratingValue(rating: string): string {
+  return rating.trim();
 }
 
 /** Splits a comma-joined backend field (`regions`, `languages`) into flags. */
@@ -54,12 +61,13 @@ export type HeaderInput = {
   firstReleaseDate: string;
   companies: string;
   genres: string;
-  rating: string;
 };
 
 /**
- * The one line under the title. Every part the server has nothing for is
- * dropped, so the separator never dangles on a sparse rom.
+ * The one line under the title, up to and including the genres. Every part
+ * the server has nothing for is dropped, so the separator never dangles on a
+ * sparse rom. The rating is appended by `Details.svelte` instead, because it
+ * carries an icon and its own colour — see [`ratingValue`].
  */
 export function headerLine(input: HeaderInput): string {
   return [
@@ -67,7 +75,6 @@ export function headerLine(input: HeaderInput): string {
     releaseYear(input.firstReleaseDate),
     developerOf(input.companies),
     input.genres.trim(),
-    ratingText(input.rating),
   ]
     .filter((part) => part !== '')
     .join(' · ');

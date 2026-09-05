@@ -104,8 +104,10 @@ describe('images (a): cover, screenshots, install, library grid', () => {
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
 
     // Design §7's right header: platform · year · developer · genres · rating.
+    // The rating's star is an inline SVG (`Icon name="star"`), so it does not
+    // appear in the element's text — only the number does.
     await expect($(testId('details-header-line'))).toHaveText(
-      'Super Nintendo Entertainment System · 1990 · Nintendo · Platformer · ★ 9.2',
+      'Super Nintendo Entertainment System · 1990 · Nintendo · Platformer · 9.2',
     );
     await expect($(testId('details-verification'))).toHaveText('Identified');
 

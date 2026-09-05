@@ -7,7 +7,7 @@ import {
   headerLine,
   lastPlayedText,
   launchTargetLine,
-  ratingText,
+  ratingValue,
   releaseYear,
   verificationLabel,
 } from './header';
@@ -41,13 +41,18 @@ describe('developerOf', () => {
   });
 });
 
-describe('ratingText', () => {
-  it('stars a rating', () => {
-    expect(ratingText('9.2')).toBe('★ 9.2');
+describe('ratingValue', () => {
+  // The star is now an <Icon> in Details.svelte, not a character in this
+  // string: a glyph resolved to a different typeface than the line around
+  // it and could not be given the accent colour the old app used.
+  it('is the trimmed number', () => {
+    expect(ratingValue('9.2')).toBe('9.2');
+    expect(ratingValue('  9.2  ')).toBe('9.2');
   });
 
   it('is blank for no rating', () => {
-    expect(ratingText('   ')).toBe('');
+    expect(ratingValue('   ')).toBe('');
+    expect(ratingValue('')).toBe('');
   });
 });
 
@@ -73,16 +78,15 @@ describe('verificationLabel', () => {
 });
 
 describe('headerLine', () => {
-  it('joins platform, year, developer, genres and rating with the middot', () => {
+  it('joins platform, year, developer and genres with the middot', () => {
     expect(
       headerLine({
         platformName: 'SNES',
         firstReleaseDate: '631152000',
         companies: 'Nintendo',
         genres: 'Platformer',
-        rating: '9.2',
       })
-    ).toBe('SNES · 1990 · Nintendo · Platformer · ★ 9.2');
+    ).toBe('SNES · 1990 · Nintendo · Platformer');
   });
 
   it('drops every part the server has nothing for, with no dangling separator', () => {
@@ -92,15 +96,14 @@ describe('headerLine', () => {
         firstReleaseDate: '',
         companies: '',
         genres: '',
-        rating: '',
       })
     ).toBe('SNES');
   });
 
   it('is blank when the server knows nothing at all', () => {
-    expect(
-      headerLine({ platformName: '', firstReleaseDate: '', companies: '', genres: '', rating: '' })
-    ).toBe('');
+    expect(headerLine({ platformName: '', firstReleaseDate: '', companies: '', genres: '' })).toBe(
+      ''
+    );
   });
 });
 
