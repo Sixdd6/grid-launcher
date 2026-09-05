@@ -96,6 +96,10 @@
         bind:value={cloudSettings.retention_limit}
       />
     </label>
+    <!-- grid-launcher.py:1733-1738, verbatim. -->
+    <p data-testid="cloud-settings-autosync-hint" class="hint">
+      Auto-sync applies to emulator-based games and uses the latest server save record only.
+    </p>
     {#if cloudSettingsError}<p data-testid="cloud-settings-error" class="error" role="alert">{cloudSettingsError}</p>{/if}
     {#if cloudSettingsSavedLine}<p class="hint">{cloudSettingsSavedLine}</p>{/if}
     <div class="form-actions">

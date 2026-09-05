@@ -1,19 +1,49 @@
 <script lang="ts">
+  import { api } from './api';
   import { session, connect } from './stores/session.svelte';
+  import { pickFolder } from './pickers';
   let serverUrl = $state('');
   let username = $state('');
   let secret = $state('');
   let useToken = $state(true);
+  // `FirstRunDialog` asks for the library path alongside the server details
+  // (dialogs.py:133-146). A folder picker is a separate plan; this is the
+  // free-text half only.
+  let libraryPath = $state('');
+
+  async function browseLibraryPath() {
+    const picked = await pickFolder('Select Library Folder');
+    if (picked !== null) libraryPath = picked;
+  }
+
+  async function submit() {
+    // Written BEFORE the connect, exactly as `FirstRunDialog`'s "Save and
+    // Continue" persists all three values before the app tries the server
+    // (grid-launcher.py:1689): a rejected credential must not lose the path
+    // the user just typed. Safe in either order — `SessionManager::connect`
+    // re-reads config.toml and overwrites only `server_url`/`username`
+    // (crates/grid-core/src/session.rs:124-127).
+    const path = libraryPath.trim();
+    if (path !== '') {
+      try {
+        await api.setLibraryPath(path);
+      } catch {
+        // Best-effort: a path that cannot be stored must not block the
+        // connect, and Settings can set it afterwards.
+      }
+    }
+    // Token auth identifies the account by itself; the username input only
+    // exists for Basic mode, so never send a stale one alongside a token.
+    await connect(serverUrl, useToken ? '' : username, secret, useToken);
+    secret = ''; // never keep the plain secret in frontend state
+  }
 </script>
 
 <form
   class="connect"
   onsubmit={(e) => {
     e.preventDefault();
-    // Token auth identifies the account by itself; the username input only
-    // exists for Basic mode, so never send a stale one alongside a token.
-    connect(serverUrl, useToken ? '' : username, secret, useToken);
-    secret = ''; // never keep the plain secret in frontend state
+    submit();
   }}
 >
   <h1>Connect to RomM</h1>
@@ -26,6 +56,20 @@
     <input data-testid="connect-secret" bind:value={secret} type="password" autocomplete="current-password" required />
   </label>
   <label class="mode"><input data-testid="connect-use-token" type="checkbox" bind:checked={useToken} /> Use API token</label>
+  <label>
+    Library Path
+    <span class="path-row">
+      <input data-testid="connect-library-path" bind:value={libraryPath} placeholder="/home/you/Games" />
+      <button
+        type="button"
+        data-testid="connect-library-path-browse"
+        class="browse"
+        onclick={browseLibraryPath}
+      >
+        Browse…
+      </button>
+    </span>
+  </label>
   <button data-testid="connect-submit" disabled={session.busy}>{session.busy ? 'Connecting…' : 'Connect'}</button>
   {#if session.error}<p data-testid="connect-error" class="error" role="alert">{session.error}</p>{/if}
 </form>
@@ -61,6 +105,16 @@
     gap: 8px;
   }
 
+  .path-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .path-row input {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
   input:not([type]),
   input[type='password'] {
     font: inherit;
@@ -89,6 +143,15 @@
   button:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+
+  .browse {
+    padding: 8px 14px;
+    border-radius: var(--r-chip);
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-h);
+    white-space: nowrap;
   }
 
   .error {
