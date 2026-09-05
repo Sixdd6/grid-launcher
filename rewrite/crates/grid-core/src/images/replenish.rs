@@ -3,6 +3,7 @@
 //! fetch missing small-cover files. Sequential, never fails; errors skip
 //! the item.
 
+use super::background::{ensure_background_variant, BACKGROUND_VARIANT_EXT};
 use super::cache::{image_key, ImageCache};
 use super::urls::{filter_to_server_host, resolve_image_url};
 use super::ImageFields;
@@ -11,8 +12,21 @@ use crate::romm::RommClient;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReplenishItem {
-    NeedsFields { rom_id: i64 },
-    NeedsFile { rom_id: i64, url: String },
+    NeedsFields {
+        rom_id: i64,
+    },
+    NeedsFile {
+        rom_id: i64,
+        url: String,
+    },
+    /// The row's background source (its first fanart, else its first
+    /// screenshot, else its large cover) has no `<key>.bg.jpg` yet. Planned
+    /// LAST, after every `NeedsFields`/`NeedsFile` item, so building variants
+    /// never delays the grid covers the user is actually looking at.
+    NeedsVariant {
+        rom_id: i64,
+        url: String,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
@@ -29,8 +43,25 @@ fn small_cover_url(row: &InstalledGame, base_url: &str) -> String {
     )
 }
 
+/// The URL the background art would show for `row`: its first fanart, else
+/// its first screenshot (both already resolved + host-filtered when they were
+/// stored), else its large cover. Mirrors `backgroundUrls`' priority on the
+/// frontend.
+fn background_source_url(row: &InstalledGame, base_url: &str) -> String {
+    for stored in [&row.fanart_urls, &row.screenshot_urls] {
+        if let Some(first) = stored.lines().map(str::trim).find(|u| !u.is_empty()) {
+            return filter_to_server_host(&resolve_image_url(first, base_url), base_url);
+        }
+    }
+    filter_to_server_host(
+        &resolve_image_url(&row.cover_large_path, base_url),
+        base_url,
+    )
+}
+
 pub fn plan(rows: &[InstalledGame], cache: &ImageCache, base_url: &str) -> Vec<ReplenishItem> {
     let mut items = Vec::new();
+    let mut variants = Vec::new();
     for row in rows {
         let Some(rom_id) = row.rom_id else { continue };
         if row.cover_small_path.is_empty()
@@ -44,7 +75,19 @@ pub fn plan(rows: &[InstalledGame], cache: &ImageCache, base_url: &str) -> Vec<R
         if !url.is_empty() && cache.find_existing(&image_key(&url)).is_none() {
             items.push(ReplenishItem::NeedsFile { rom_id, url });
         }
+        let background = background_source_url(row, base_url);
+        if !background.is_empty()
+            && cache
+                .find_with_extension(&image_key(&background), BACKGROUND_VARIANT_EXT)
+                .is_none()
+        {
+            variants.push(ReplenishItem::NeedsVariant {
+                rom_id,
+                url: background,
+            });
+        }
     }
+    items.extend(variants);
     items
 }
 
@@ -89,6 +132,12 @@ pub async fn run(
                 Ok(_) => report.fetched_files += 1,
                 Err(_) => report.skipped += 1,
             },
+            ReplenishItem::NeedsVariant { url, .. } => {
+                match ensure_background_variant(cache, Some(client), &url).await {
+                    Ok(_) => report.fetched_files += 1,
+                    Err(_) => report.skipped += 1,
+                }
+            }
         }
     }
     report

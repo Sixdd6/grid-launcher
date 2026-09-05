@@ -95,11 +95,36 @@ impl ImageService {
             let Some(client) = session.client() else {
                 return;
             };
+            let mut background_source = String::new();
             for path in [&fields.cover_small_path, &fields.cover_large_path] {
                 let url = filter_to_server_host(&resolve_image_url(path, &base), &base);
                 if !url.is_empty() {
                     let _ = session.cache().ensure(Some(&client), &url).await;
+                    background_source = url;
                 }
+            }
+            // The background art's own source, preferred in the same order
+            // `backgroundUrls` uses on the frontend: fanart, then the first
+            // screenshot, then the large cover (already set above, because it
+            // is the last URL the loop visits).
+            for stored in [&fields.fanart_urls, &fields.screenshot_urls] {
+                if let Some(first) = stored.lines().map(str::trim).find(|u| !u.is_empty()) {
+                    let url = filter_to_server_host(&resolve_image_url(first, &base), &base);
+                    if !url.is_empty() {
+                        background_source = url;
+                        break;
+                    }
+                }
+            }
+            if !background_source.is_empty() {
+                // Built here so the first time this game becomes the
+                // background there is nothing to wait for.
+                let _ = grid_core::images::background::ensure_background_variant(
+                    session.cache(),
+                    Some(&client),
+                    &background_source,
+                )
+                .await;
             }
         });
     }

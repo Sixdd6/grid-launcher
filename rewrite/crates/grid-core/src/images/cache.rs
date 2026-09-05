@@ -25,6 +25,12 @@ pub enum ImageError {
     /// message names what was actually asked for.
     #[error("the server did not return a video")]
     NotAVideo,
+    /// The cached bytes are not a format this build can decode, or the
+    /// re-encode failed. Distinct from [`ImageError::NotAnImage`]: the server
+    /// DID return an image (an SVG, an AVIF), it just cannot be turned into a
+    /// background variant.
+    #[error("the image could not be decoded")]
+    Decode,
     #[error(transparent)]
     Http(#[from] RommError),
     #[error("file error: {0}")]

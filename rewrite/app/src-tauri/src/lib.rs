@@ -289,6 +289,7 @@ pub fn run() {
             commands::get_rom_detail,
             commands::ensure_image,
             commands::ensure_video,
+            commands::ensure_background_variant,
             commands::install_game,
             commands::cancel_install,
             commands::retry_install,

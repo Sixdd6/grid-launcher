@@ -60,7 +60,84 @@ async fn plan_classifies_rows() {
                 rom_id: 2,
                 url: "https://h/assets/2.png".into()
             },
+            // rom 3 is the only row with a background source (its large
+            // cover), and variants are planned after every other item.
+            ReplenishItem::NeedsVariant {
+                rom_id: 3,
+                url: "https://h/assets/3l.png".into()
+            },
         ]
+    );
+}
+
+/// The background source is the first fanart, else the first screenshot,
+/// else the large cover — and every variant item sorts after every cover
+/// item, so covers the user is looking at are never delayed by a blur.
+#[tokio::test]
+async fn plan_puts_variants_last_and_prefers_fanart_then_screenshots() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = ImageCache::new(dir.path().to_path_buf());
+    let base = "https://h";
+    let mut fanart_row = row(Some(1), "/assets/1.png", "/assets/1l.png", "");
+    fanart_row.fanart_urls = "https://h/assets/1f.png".to_string();
+    let mut shot_row = row(
+        Some(2),
+        "/assets/2.png",
+        "/assets/2l.png",
+        "https://h/assets/2s.png",
+    );
+    shot_row.fanart_urls = String::new();
+    let cover_row = row(Some(3), "/assets/3.png", "/assets/3l.png", "");
+
+    assert_eq!(
+        plan(&[fanart_row, shot_row, cover_row], &cache, base),
+        vec![
+            ReplenishItem::NeedsFile {
+                rom_id: 1,
+                url: "https://h/assets/1.png".into()
+            },
+            ReplenishItem::NeedsFile {
+                rom_id: 2,
+                url: "https://h/assets/2.png".into()
+            },
+            ReplenishItem::NeedsFile {
+                rom_id: 3,
+                url: "https://h/assets/3.png".into()
+            },
+            ReplenishItem::NeedsVariant {
+                rom_id: 1,
+                url: "https://h/assets/1f.png".into()
+            },
+            ReplenishItem::NeedsVariant {
+                rom_id: 2,
+                url: "https://h/assets/2s.png".into()
+            },
+            ReplenishItem::NeedsVariant {
+                rom_id: 3,
+                url: "https://h/assets/3l.png".into()
+            },
+        ]
+    );
+}
+
+/// A variant already on disk plans nothing — the blur runs once per source.
+#[tokio::test]
+async fn plan_skips_a_row_whose_variant_already_exists() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = ImageCache::new(dir.path().to_path_buf());
+    let base = "https://h";
+    let small = image_key("https://h/assets/4.png");
+    std::fs::write(dir.path().join(format!("{small}.png")), PNG_MAGIC).unwrap();
+    let large = image_key("https://h/assets/4l.png");
+    std::fs::write(dir.path().join(format!("{large}.bg.jpg")), b"jpeg").unwrap();
+
+    assert_eq!(
+        plan(
+            &[row(Some(4), "/assets/4.png", "/assets/4l.png", "")],
+            &cache,
+            base
+        ),
+        vec![]
     );
 }
 

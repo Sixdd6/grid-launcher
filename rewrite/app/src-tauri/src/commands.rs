@@ -259,6 +259,31 @@ pub async fn ensure_video(state: State<'_, AppState>, url: String) -> Result<Str
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// The local path of the shell background's pre-scaled, pre-blurred variant
+/// of `url`, building it on a miss. Mirrors [`ensure_image`]'s resolution and
+/// host filter exactly, so a URL pointing anywhere but the configured server
+/// is refused rather than fetched.
+#[tauri::command]
+pub async fn ensure_background_variant(
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<String, String> {
+    let base = state.session.server_url();
+    let resolved = filter_to_server_host(&resolve_image_url(&url, &base), &base);
+    if resolved.is_empty() {
+        return Err("filtered".to_string());
+    }
+    let client = state.session.client();
+    let path = grid_core::images::background::ensure_background_variant(
+        state.session.cache(),
+        client.as_deref(),
+        &resolved,
+    )
+    .await
+    .map_err(err)?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 pub async fn install_game(state: State<'_, AppState>, rom_id: i64) -> Result<(), String> {
     let install = state.install.as_ref().map_err(Clone::clone)?;

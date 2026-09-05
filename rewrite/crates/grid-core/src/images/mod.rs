@@ -2,6 +2,7 @@
 //! cache, the startup sweep, and the replenish job. Spec:
 //! docs/superpowers/specs/2026-09-02-covers-images-design.md.
 
+pub mod background;
 pub mod cache;
 pub mod replenish;
 pub mod sweep;

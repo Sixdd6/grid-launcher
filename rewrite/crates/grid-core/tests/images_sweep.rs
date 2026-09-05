@@ -85,3 +85,24 @@ fn missing_dir_is_a_noop() {
     let r = sweep(&dir.path().join("nope"), 10, &HashSet::new());
     assert_eq!(r, SweepReport::default());
 }
+
+/// `<key>.bg.jpg` has the file stem `<key>.bg`, so pinning by whole stem
+/// would evict every background variant while keeping its source.
+#[test]
+fn a_background_variant_is_pinned_with_its_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = image_key("https://h/assets/cover.png");
+    write(dir.path(), &format!("{key}.png"), 4096, 300);
+    write(dir.path(), &format!("{key}.bg.jpg"), 4096, 300);
+    let victim = image_key("https://h/assets/other.png");
+    write(dir.path(), &format!("{victim}.png"), 8192, 100);
+
+    let pinned = pinned_keys(["/assets/cover.png"], "https://h");
+    // A cap below the total forces the sweep to delete something.
+    let report = sweep(dir.path(), 8192, &pinned);
+
+    assert!(dir.path().join(format!("{key}.png")).exists());
+    assert!(dir.path().join(format!("{key}.bg.jpg")).exists());
+    assert!(!dir.path().join(format!("{victim}.png")).exists());
+    assert_eq!(report.deleted, 1);
+}
