@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   APP_START_TIMEOUT,
@@ -17,13 +17,15 @@ const testId = (id: string) => `[data-testid="${id}"]`;
  * per-platform defaults select, asserted against the real config.toml on
  * disk.
  *
- * None of these flows ever spawn the emulator, so — unlike launch.spec.ts —
- * the stub file below only needs to exist on disk with its executable bit
- * set; `match_profile` (grid-core's `profile_for_entry`) matches purely on
- * the path string, not on file contents.
+ * Only the `emulator-launch-*` case spawns the emulator; every other flow
+ * here just needs the stub to exist on disk with its executable bit set,
+ * because `match_profile` (grid-core's `profile_for_entry`) matches purely
+ * on the path string, not on file contents. The stub therefore touches a
+ * marker file, which is how the launch case proves the spawn happened.
  */
 describe('emulators', () => {
   let stubPath: string;
+  let launchMarker: string;
 
   before(async () => {
     const stubsDir = path.join(dataDir(), 'stubs');
@@ -33,7 +35,10 @@ describe('emulators', () => {
     // "RetroArch (Multi-System)" profile: name "RetroArch (Multi-System)",
     // args `-L "%core%" "%rom%"`.
     stubPath = path.join(stubsDir, 'retroarch');
-    writeFileSync(stubPath, '#!/bin/sh\nexit 0\n');
+    launchMarker = path.join(stubsDir, 'retroarch.launched');
+    // The `emulator-launch-*` case below is the only thing in this group
+    // that runs the stub; the marker is how it proves the spawn happened.
+    writeFileSync(stubPath, `#!/bin/sh\ntouch '${launchMarker}'\nexit 0\n`);
     chmodSync(stubPath, 0o755);
 
     // Design D-RC-1: RetroArch's platform support is now decided by the
@@ -112,6 +117,23 @@ describe('emulators', () => {
     );
   }
 
+  /** Waits until config.toml contains `line`, or fails with a useful message. */
+  async function waitForConfigLine(line: string) {
+    await browser.waitUntil(
+      () => {
+        try {
+          return readFileSync(configPath(), 'utf-8').includes(line);
+        } catch {
+          return false;
+        }
+      },
+      {
+        timeout: TRANSITION_TIMEOUT,
+        timeoutMsg: `config.toml never contained ${line}`,
+      },
+    );
+  }
+
   it('walks the four category panes of the rail', async () => {
     // Nothing is configured yet in this group: the Installed count is 0.
     await expect($(testId('emu-nav-count-installed'))).toHaveText('0');
@@ -186,8 +208,27 @@ describe('emulators', () => {
     });
     await expect($(testId('emu-form-name'))).toHaveValue('RetroArch (Multi-System)');
     await expect($(testId('emu-form-args'))).toHaveValue('-L "%core%" "%rom%"');
+    await expect($(testId('emu-form-args-label'))).toHaveText(
+      'Arguments (%rom%, %core%, %ps3_launch_target%)',
+    );
+
+    // The five per-emulator cloud fields (parity gap 1), read back from
+    // config.toml and the edit sheet by the case below.
+    await selectValue('emu-form-save-strategy', 'folder');
+    await $(testId('emu-form-ignore-files')).setValue('skip.bin;other.bin');
+    await $(testId('emu-form-ignore-extensions')).setValue('.tmp;.log');
+    await $(testId('emu-form-save-paths')).setValue('saves');
+    await $(testId('emu-form-state-paths')).setValue('states');
 
     await $(testId('emu-form-save')).click();
+    // The global toast surface (parity gap 5) with the reference's text
+    // (emulator_ui_mixin.py:1591). Asserted before the row wait so it is
+    // read well inside TOAST_DURATION_MS.
+    await $(testId('toast')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'no toast appeared after adding an emulator',
+    });
+    await expect($(testId('toast'))).toHaveText("Added emulator 'RetroArch (Multi-System)'.");
     await $(testId(`emulator-row-${sanitize('RetroArch (Multi-System)')}`)).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the saved emulator never appeared in the list',
@@ -195,6 +236,35 @@ describe('emulators', () => {
     // A manual save lands on Installed, where the new row is.
     await expect($(testId('emu-page-installed'))).toBeDisplayed();
     await expect($(testId('emu-nav-count-installed'))).toHaveText('1');
+  });
+
+  it('writes the five per-emulator cloud fields to config.toml and reloads them into the edit sheet', async () => {
+    await waitForConfigLine('save_strategy = "folder"');
+    await waitForConfigLine('ignore_files = "skip.bin;other.bin"');
+    await waitForConfigLine('ignore_extensions = ".tmp;.log"');
+    await waitForConfigLine('save_paths = "saves"');
+    await waitForConfigLine('state_paths = "states"');
+
+    await showPage('installed');
+    await $(testId(`emulator-edit-${sanitize('RetroArch (Multi-System)')}`)).click();
+    await $(testId('emu-edit-sheet')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await expect($(testId('emu-form-save-strategy'))).toHaveValue('folder');
+    await expect($(testId('emu-form-ignore-files'))).toHaveValue('skip.bin;other.bin');
+    await expect($(testId('emu-form-ignore-extensions'))).toHaveValue('.tmp;.log');
+    await expect($(testId('emu-form-save-paths'))).toHaveValue('saves');
+    await expect($(testId('emu-form-state-paths'))).toHaveValue('states');
+    await $(testId('emu-form-cancel')).click();
+  });
+
+  it('launches an installed emulator with no ROM', async () => {
+    await showPage('installed');
+    const launch = $(testId(`emulator-launch-${sanitize('RetroArch (Multi-System)')}`));
+    await expect(launch).toBeDisplayed();
+    await launch.click();
+    await browser.waitUntil(() => existsSync(launchMarker), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the standalone launch never ran the emulator stub',
+    });
   });
 
   it('adds a second emulator and keeps row order when editing the first', async () => {
@@ -266,22 +336,33 @@ describe('emulators', () => {
     });
   });
 
-  /** Waits until config.toml contains `line`, or fails with a useful message. */
-  async function waitForConfigLine(line: string) {
-    await browser.waitUntil(
-      () => {
-        try {
-          return readFileSync(configPath(), 'utf-8').includes(line);
-        } catch {
-          return false;
-        }
-      },
-      {
-        timeout: TRANSITION_TIMEOUT,
-        timeoutMsg: `config.toml never contained ${line}`,
-      },
+  it('shows the DuckStation controller note and none for RetroArch', async () => {
+    await $(testId('emulator-add')).click();
+    await $(testId('emu-add-tab-manual')).click();
+    await $(testId('emu-form-name')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await $(testId('emu-form-name')).setValue('DuckStation');
+    await $(testId('emu-form-path')).setValue('/nonexistent/duckstation');
+    await $(testId('emu-form-save')).click();
+    await $(testId(`emulator-row-${sanitize('DuckStation')}`)).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the DuckStation row never appeared',
+    });
+
+    await expect($(testId('emulator-note-duckstation-duckstation'))).toHaveText(
+      'RetroAchievements: Configure login via Emulator Settings → Achievements (tokens are machine-encrypted)',
     );
-  }
+    await expect($(testId('emulator-note-azahar-duckstation'))).not.toExist();
+
+    // Clean up so the defaults cases below still see the single RetroArch row.
+    const deleteBtn = $(testId(`emulator-delete-${sanitize('DuckStation')}`));
+    await deleteBtn.click();
+    await deleteBtn.click();
+    await $(testId(`emulator-row-${sanitize('DuckStation')}`)).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      reverse: true,
+      timeoutMsg: 'the DuckStation row was not removed',
+    });
+  });
 
   /** The `<option>` values of a select, in DOM order. */
   async function optionValues(testIdName: string): Promise<string[]> {

@@ -70,4 +70,45 @@ describe('connect', () => {
     expect(text).not.toContain('token');
     expect(text).not.toContain('password');
   });
+
+  it('re-connects from Settings › Connection with the same credentials', async () => {
+    await $(testId('nav-settings')).click();
+    await $(testId('settings-nav-connection')).click();
+    await $(testId('settings-connection-url')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the connection settings page never rendered',
+    });
+
+    await $(testId('settings-connection-edit')).click();
+    await $(testId('settings-connection-server-url')).waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the edit-connection form never opened',
+    });
+    await expect($(testId('settings-connection-server-url'))).toHaveValue(mockUrl());
+    await $(testId('settings-connection-secret')).setValue(FIXTURE_TOKEN);
+    await $(testId('settings-connection-save')).click();
+
+    await $(testId('settings-connection-edit-form')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      reverse: true,
+      timeoutMsg: 'the edit form stayed open after a successful reconnect',
+    });
+    // `toHaveText` with a matcher, not `toHaveTextContaining` (removed in
+    // expect-webdriverio 6) — the same form the wrong-token case uses.
+    await expect($(testId('settings-connection-status'))).toHaveText(
+      expect.stringContaining('Connected'),
+    );
+    // Still no secret anywhere on disk.
+    const text = readFileSync(configPath(), 'utf8');
+    expect(text).toContain(`server_url = "${mockUrl()}"`);
+    expect(text).not.toContain(FIXTURE_TOKEN);
+  });
+
+  it('offers Open Config Folder without navigating away', async () => {
+    // The opener has nothing to open into under Xvfb, so this asserts the
+    // control exists and is reachable — the command's own path rule is unit
+    // tested (commands.rs `config_dir_tests`).
+    await expect($(testId('settings-open-config-folder'))).toBeDisplayed();
+    await expect($(testId('settings-open-config-folder'))).toHaveText('Open Config Folder');
+  });
 });
