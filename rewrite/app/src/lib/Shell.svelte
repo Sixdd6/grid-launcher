@@ -175,7 +175,9 @@
 {/if}
 
 <!-- All five views stay mounted and switch with `hidden` (design §3), so
-     scroll positions, selections and in-flight fetches survive a switch. -->
+     selections and in-flight fetches survive a switch. Scroll offsets do
+     not: each view scrolls inside its own container, and a `display: none`
+     subtree drops its scroll position. -->
 <div data-testid="library-view" class="view" hidden={view !== 'library'}>
   <Library active={view === 'library'} bind:this={library} />
 </div>
