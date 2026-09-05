@@ -81,6 +81,10 @@
     "revision": null,
     "fs_size_bytes": 0,
     "updated_at": "2026-01-01T00:00:00Z",
+    "merged_screenshots": [
+      "/assets/romm/resources/roms/103/screenshots/1.png",
+      "/assets/romm/resources/roms/103/screenshots/missing.png"
+    ],
     "files": [
       { "id": 1031, "file_name": "disc1.bin", "file_size_bytes": 0, "is_top_level": true },
       { "id": 1032, "file_name": "disc2.bin", "file_size_bytes": 0, "is_top_level": true },

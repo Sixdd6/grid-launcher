@@ -177,6 +177,78 @@ describe('images (a): cover, screenshots, install, library grid', () => {
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
   });
 
+  it('drops a screenshot tile whose image 404s, and keeps the one that loads', async () => {
+    // rom 103's second merged_screenshots entry does not match the mock's
+    // screenshot route (`/screenshots/<digits>.png`), so it 404s and
+    // `ensure_image` rejects. The tile must disappear rather than sit there
+    // as a permanent placeholder — the round-4 bug this closes.
+    await $(testId('game-card-103')).click();
+    await $(testId('details-panel')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the details overlay never opened for rom 103',
+    });
+
+    await waitForLoadedImage(
+      testId('details-screenshot-0'),
+      TRANSITION_TIMEOUT,
+      "rom 103's first screenshot",
+    );
+    await $(testId('details-screenshot-1')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      reverse: true,
+      timeoutMsg: 'the 404 screenshot tile never went away on the Overview strip',
+    });
+
+    await $(testId('details-tab-media')).click();
+    await $(testId('details-media-0')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    // Indices are stable (`{#if}` inside `{#each}`), so the dead tile is
+    // simply absent rather than renumbering the surviving ones.
+    await $(testId('details-media-1')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      reverse: true,
+      timeoutMsg: 'the 404 screenshot tile never went away on the Media tab',
+    });
+
+    await $(testId('details-tab-overview')).click();
+    await $(testId('details-close')).click();
+    await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+  });
+
+  it('paints artwork and a play badge on the trailer tile', async () => {
+    await $(testId('game-card-101')).click();
+    await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await $(testId('details-tab-media')).click();
+    await $(testId('details-media-2')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: "rom 101's trailer tile never rendered",
+    });
+
+    // Which poster wins depends on whether the runner can reach
+    // img.youtube.com, so this asserts what is true either way: the tile is
+    // artwork with a play badge, not the bare icon it used to be. The
+    // fallback RULE is pinned by media.test.ts's `trailerPoster` cases.
+    await browser.waitUntil(
+      async () =>
+        (await $(testId('details-media-thumb-2')).isExisting()) ||
+        (await $(testId('details-media-poster-2')).isExisting()),
+      {
+        timeout: TRANSITION_TIMEOUT,
+        timeoutMsg: 'the trailer tile rendered neither the thumbnail nor the cover poster',
+      },
+    );
+    if (await $(testId('details-media-thumb-2')).isExisting()) {
+      await expect($(testId('details-media-thumb-2'))).toHaveAttribute(
+        'src',
+        'https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
+      );
+    }
+    await expect($(testId('details-media-play-2'))).toExist();
+
+    await $(testId('details-tab-overview')).click();
+    await $(testId('details-close')).click();
+    await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+  });
+
   it('installs rom 101', async () => {
     // images-seed.mjs already writes a non-empty library_path into
     // config.toml (it has to — the seeded rom 102 row's game.rom lives

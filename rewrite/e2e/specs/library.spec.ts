@@ -139,4 +139,38 @@ describe('library', () => {
     expect(await $(testId('details-install')).isExisting()).toBe(true);
     await $(testId('details-close')).click();
   });
+
+  // Round 4: the shell background is no longer the raw cover blurred by the
+  // compositor — the backend builds one 960px, pre-blurred `<key>.bg.jpg`
+  // (`ensure_background_variant`) and the layer composites that. Opening rom
+  // 101's details reports its subject synchronously (`noteViewed`), so no
+  // hover dwell has to be simulated here.
+  it('paints the pre-blurred background variant after a game is viewed', async () => {
+    // The previous case closed the popup without waiting; the overlay would
+    // otherwise swallow the platform-button click below.
+    await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+
+    await $(testId('platform-btn-1')).click();
+    await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await $(testId('game-card-101')).click();
+    await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+
+    await browser.waitUntil(
+      async () => {
+        const images = await browser.execute(() =>
+          Array.from(document.querySelectorAll('[data-testid="background-art"] .layer'))
+            .map((el) => (el as HTMLElement).style.backgroundImage)
+            .join(' '),
+        );
+        return images.includes('.bg.jpg');
+      },
+      {
+        timeout: TRANSITION_TIMEOUT,
+        timeoutMsg: 'the background layer never got a .bg.jpg variant path',
+      },
+    );
+
+    await $(testId('details-close')).click();
+    await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+  });
 });
