@@ -120,6 +120,14 @@
     })
   );
   let viewerIndex = $state<number | null>(null);
+  // One failure map for the Media tab AND the fullscreen viewer: the viewer
+  // is rendered outside the tab (above the whole dialog), so a map owned by
+  // either one would let the two disagree about which screenshot is dead.
+  // Keyed by URL, exactly like OverviewTab's own `failedScreenshots`.
+  let failedMedia = $state<Record<string, true>>({});
+  function markMediaFailed(url: string) {
+    failedMedia = { ...failedMedia, [url]: true };
+  }
   let description = $derived(merged.description);
   let rating = $derived(merged.rating);
   let genres = $derived(merged.genres);
@@ -671,7 +679,12 @@
           {#if tab === 'overview'}
             <OverviewTab name={subject.name} {description} {screenshotUrls} {detail} {serverTitles} />
           {:else if tab === 'media'}
-            <MediaTab items={mediaItems} onOpen={(i) => (viewerIndex = i)} />
+            <MediaTab
+              items={mediaItems}
+              onOpen={(i) => (viewerIndex = i)}
+              failed={failedMedia}
+              onScreenshotError={markMediaFailed}
+            />
           {:else if tab === 'saves'}
             <SavesTab
               gameTitle={subject.name}
@@ -726,6 +739,8 @@
     items={mediaItems}
     index={viewerIndex}
     onIndex={(i) => (viewerIndex = i)}
+    failed={failedMedia}
+    onScreenshotError={markMediaFailed}
     onClose={() => {
       viewerIndex = null;
       // The viewer took focus off the panel; without handing it back, the

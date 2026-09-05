@@ -10,11 +10,15 @@
     index,
     onIndex,
     onClose,
+    failed,
+    onScreenshotError,
   }: {
     items: MediaItem[];
     index: number;
     onIndex: (index: number) => void;
     onClose: () => void;
+    failed: Record<string, true>;
+    onScreenshotError: (url: string) => void;
   } = $props();
 
   let viewerEl = $state<HTMLElement | null>(null);
@@ -116,12 +120,22 @@
     {/if}
 
     <div class="stage">
-      {#if current.kind === 'screenshot'}
+      {#if current.kind === 'screenshot' && failed[current.url]}
+        <!-- User ruling 2026-09-05: the viewer does NOT auto-advance past a
+             dead screenshot. Dropping the item would shift every index under
+             the user, and advancing would loop forever when every item
+             fails; an explicit line is the honest answer. The tile itself is
+             already gone from the Media tab behind this. -->
+        <p class="pending" data-testid="media-viewer-image-error">
+          This screenshot could not be loaded
+        </p>
+      {:else if current.kind === 'screenshot'}
         <Image
           url={current.url}
           alt={current.caption}
           placeholder="Screenshot"
           data-testid="media-viewer-image"
+          onerror={() => onScreenshotError(current.url)}
         />
       {:else if current.kind === 'youtube'}
         <iframe

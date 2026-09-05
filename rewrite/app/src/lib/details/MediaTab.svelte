@@ -6,30 +6,42 @@
   let {
     items,
     onOpen,
+    failed,
+    onScreenshotError,
   }: {
     items: MediaItem[];
     onOpen: (index: number) => void;
+    /** URLs whose image failed to load, keyed by URL (owned by Details.svelte). */
+    failed: Record<string, true>;
+    onScreenshotError: (url: string) => void;
   } = $props();
 </script>
 
 {#if items.length}
   <div class="gallery">
     {#each items as item, i (item.caption)}
-      <button
-        class="tile"
-        data-testid={`details-media-${i}`}
-        title={item.caption}
-        onclick={() => onOpen(i)}
-      >
-        {#if item.kind === 'screenshot'}
-          <Image url={item.url} alt={item.caption} placeholder="Screenshot" />
-        {:else}
-          <div class="video-tile">
-            <Icon name="play" size={20} />
-            <span>{item.kind === 'youtube' ? 'Trailer' : 'Video'}</span>
-          </div>
-        {/if}
-      </button>
+      {#if !(item.kind === 'screenshot' && failed[item.url])}
+        <button
+          class="tile"
+          data-testid={`details-media-${i}`}
+          title={item.caption}
+          onclick={() => onOpen(i)}
+        >
+          {#if item.kind === 'screenshot'}
+            <Image
+              url={item.url}
+              alt={item.caption}
+              placeholder="Screenshot"
+              onerror={() => onScreenshotError(item.url)}
+            />
+          {:else}
+            <div class="video-tile">
+              <Icon name="play" size={20} />
+              <span>{item.kind === 'youtube' ? 'Trailer' : 'Video'}</span>
+            </div>
+          {/if}
+        </button>
+      {/if}
     {/each}
   </div>
 {:else}
