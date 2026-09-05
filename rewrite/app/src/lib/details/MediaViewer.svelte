@@ -1,6 +1,7 @@
 <script lang="ts">
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { api } from '../api';
+  import Icon from '../Icon.svelte';
   import Image from '../Image.svelte';
   import { nextIndex, prevIndex, youtubeEmbedUrl, type MediaItem } from './media';
 
@@ -91,24 +92,26 @@
     onkeydown={onKey}
     onclick={onBackdropClick}
   >
-    <button data-testid="media-viewer-close" class="icon close" onclick={onClose} aria-label="Close">×</button>
+    <button data-testid="media-viewer-close" class="icon-btn icon close" onclick={onClose} aria-label="Close">
+      <Icon name="close" size={20} />
+    </button>
 
     {#if items.length > 1}
       <button
         data-testid="media-viewer-prev"
-        class="icon prev"
+        class="icon-btn icon prev"
         onclick={() => go(prevIndex(index, items.length))}
         aria-label="Previous"
       >
-        ‹
+        <Icon name="chevronLeft" size={20} />
       </button>
       <button
         data-testid="media-viewer-next"
-        class="icon next"
+        class="icon-btn icon next"
         onclick={() => go(nextIndex(index, items.length))}
         aria-label="Next"
       >
-        ›
+        <Icon name="chevronRight" size={20} />
       </button>
     {/if}
 
@@ -190,18 +193,17 @@
     font-size: 13px;
   }
 
+  /* `.icon-btn` (app.css) supplies the reset; the viewer keeps its own 44px
+     circle on a scrim, because these three float over artwork rather than
+     sitting in a panel. `#fff` is deliberate: the viewer is always a dark
+     overlay, so its controls do not track the theme. */
   .icon {
     position: absolute;
-    font: inherit;
-    font-size: 28px;
-    line-height: 1;
     width: 44px;
     height: 44px;
-    border: none;
     border-radius: var(--r-pill);
     background: rgba(255, 255, 255, 0.12);
     color: #fff;
-    cursor: pointer;
     transition: background var(--m-fast) ease;
   }
 
@@ -215,13 +217,18 @@
     right: 16px;
   }
 
+  /* `top: 50%` alone put the button's TOP edge on the centre line, so both
+     nav buttons rendered 22px low. The translate is what actually centres
+     them. */
   .prev {
     left: 16px;
     top: 50%;
+    transform: translateY(-50%);
   }
 
   .next {
     right: 16px;
     top: 50%;
+    transform: translateY(-50%);
   }
 </style>

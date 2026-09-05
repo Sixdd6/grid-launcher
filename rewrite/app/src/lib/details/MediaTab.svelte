@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from '../Icon.svelte';
   import Image from '../Image.svelte';
   import type { MediaItem } from './media';
 
@@ -23,7 +24,10 @@
         {#if item.kind === 'screenshot'}
           <Image url={item.url} alt={item.caption} placeholder="Screenshot" />
         {:else}
-          <div class="video-tile">▶ {item.kind === 'youtube' ? 'Trailer' : 'Video'}</div>
+          <div class="video-tile">
+            <Icon name="play" size={20} />
+            <span>{item.kind === 'youtube' ? 'Trailer' : 'Video'}</span>
+          </div>
         {/if}
       </button>
     {/each}
@@ -58,8 +62,10 @@
   }
 
   .video-tile {
-    display: grid;
-    place-items: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
     height: 100%;
     color: var(--text);
     font-size: 14px;
