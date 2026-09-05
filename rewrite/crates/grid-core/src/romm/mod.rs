@@ -30,7 +30,14 @@ impl RommClient {
     /// The ONLY place (besides KeyringStore serialization) where a secret is
     /// exposed. Builds the Authorization header value once.
     pub fn new(base_url: &str, cred: Credential) -> Result<Self, RommError> {
-        let parsed = url::Url::parse(base_url).map_err(|_| RommError::InvalidUrl)?;
+        let mut parsed = url::Url::parse(base_url).map_err(|_| RommError::InvalidUrl)?;
+        // A server URL typed with embedded credentials (`https://user:pass@host`)
+        // must never leak `user:pass@` into every resolved image/screenshot/
+        // fanart URL this crate stores in the registry and sends over IPC.
+        // The Authorization header (built above from `cred`) is the only
+        // credential channel this client uses.
+        let _ = parsed.set_username("");
+        let _ = parsed.set_password(None);
         let base = parsed.as_str().trim_end_matches('/').to_string();
         let raw = match &cred {
             Credential::Token(t) => format!("Bearer {}", t.expose_secret()),
@@ -741,5 +748,31 @@ mod detail_fanart_tests {
             detail.fanart_urls,
             vec!["https://romm.example/assets/art/fanart.jpg".to_string()]
         );
+    }
+}
+
+#[cfg(test)]
+mod credential_stripping_tests {
+    use super::RommClient;
+    use crate::secrets::Credential;
+    use secrecy::SecretString;
+
+    /// A server URL typed with embedded userinfo must never survive into a
+    /// resolved image/cover URL — it would otherwise leak the password into
+    /// every URL this crate stores in the registry and sends over IPC.
+    #[test]
+    fn embedded_userinfo_is_stripped_from_a_resolved_cover_url() {
+        let client = RommClient::new(
+            "https://user:pass@example.test/",
+            Credential::Token(SecretString::from("FAKE-TEST-TOKEN-not-real")),
+        )
+        .unwrap();
+        let cover = client.target("/api/roms/1/cover/thumb.png").unwrap();
+        assert_eq!(
+            cover.as_str(),
+            "https://example.test/api/roms/1/cover/thumb.png"
+        );
+        assert!(!cover.as_str().contains("user:pass@"));
+        assert!(!cover.as_str().contains("pass"));
     }
 }

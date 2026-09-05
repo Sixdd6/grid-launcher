@@ -29,7 +29,8 @@ export type GameSummary = {
   platform_id: number;
   path_cover_small: string | null;
   path_cover_large: string | null;
-  /** Resolved + host-filtered; the Server grid's background art reads these. */
+  /** Resolved + host-filtered; the Server grid's background art reads these,
+   *  and before the detail loads so does the Overview strip and Media gallery. */
   screenshot_urls: string[];
   /** Resolved + host-filtered; the Server grid's background art reads these. */
   fanart_urls: string[];

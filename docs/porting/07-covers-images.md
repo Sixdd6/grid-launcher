@@ -1078,18 +1078,32 @@ render at all.
 reuses `ImageCache::ensure` to fetch the source and stores `<key>.bg.jpg` beside it, the same
 directory and the same `sha256(resolved url)` key scheme `video.rs` uses (`image_key`).
 
-The variant is 960px wide (never upscaled, `FilterType::Triangle`), blurred once with
-`fast_blur` at sigma 12.0, and encoded as JPEG at quality 80. It is written through a `.bg.part` +
-rename, a temp name distinct from `ImageCache`'s own `<key>.part` so a concurrent fetch of the
-same source cannot rename its half-written JPEG over the variant, or vice versa.
+The variant is fitted inside a 960×960 box on BOTH edges — never upscaled, `FilterType::Triangle`
+— so a wide fanart caps at 960px wide and a tall cover caps at 960px tall; capping only the width
+would leave a portrait cover near its full ~1 Mpx. It is blurred once with `fast_blur` at sigma
+20.0, and encoded as JPEG at quality 80 (`BACKGROUND_JPEG_QUALITY`); a failed encode is a distinct
+`ImageError::Encode`, kept apart from `ImageError::Decode` so the message never blames the source
+for a fault on this side. It is written through a `<key>.bg.{pid}-{seq}.part` temp file, then
+renamed to `<key>.bg.jpg` — a name distinct from both `ImageCache`'s own `<key>.part` and any other
+in-process build of the same key, so neither can rename its half-written bytes over the other.
+Building the variant is deduplicated per key (an in-flight map, same shape as `ImageCache::ensure`'s),
+so the shell's two hover dwell timers (150ms and 500ms) asking for the same cold variant twice
+only trigger one decode+blur. A `Decode` failure is recorded in a per-session negative cache
+(cleared on restart), so a source that will never decode is not re-attempted on every hover.
 
 `sweep::pinned_keys` pins by key PREFIX, so `<key>.bg.jpg` is pinned whenever its source `<key>`
-is — a variant is never evicted out from under an installed game's art.
+is — a variant is never evicted out from under an installed game's art. `sweep_at_startup`
+(`app/src-tauri/src/images.rs`) builds that pinned set from BOTH covers and each row's background
+source, one URL per row chosen by `background_source_url` — its first fanart, else its first
+screenshot, else its large cover — so a fanart- or screenshot-sourced variant is pinned under its
+own key rather than evicted alongside its source on every start above the cache cap.
 
 It is built ahead of time in two places — `spawn_prefetch` (install, `app/src-tauri/src/images.rs`)
 and `replenish::plan`'s `NeedsVariant` items (a game connected to the library, planned last, after
-every cover item) — and on demand when the frontend hovers a card for 150ms
-(`PREFETCH_DELAY_MS` in `app/src/lib/background.ts`, before the 500ms `noteViewed` swap).
+every cover item, capped at `BACKGROUND_VARIANT_LIMIT = 32` rows ordered by `last_played_at` then
+`installed_at` descending, so a first connect after an upgrade never floods the link) — and on
+demand when the frontend hovers a card for 150ms (`PREFETCH_DELAY_MS` in
+`app/src/lib/background.ts`, before the 500ms `noteViewed` swap).
 
 The reason it exists at all: `BackgroundArt.svelte` used to hand a full-resolution cover to two
 `filter: blur(40px)` layers, blurring the same ~2.4 Mpx image on the compositor every frame of the

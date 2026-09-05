@@ -27,6 +27,7 @@ fn sample(title: &str, platform: &str) -> InstalledGame {
         cover_small_path: "/assets/s.png".into(),
         cover_large_path: "/assets/l.png".into(),
         screenshot_urls: "https://h/a.png\nhttps://h/b.png".into(),
+        fanart_urls: "https://h/f1.jpg\nhttps://h/f2.jpg".into(),
         ..Default::default()
     }
 }
@@ -275,6 +276,7 @@ fn open_migrates_a_v1_database_and_update_images_round_trips() {
     assert_eq!(row.cover_small_path, "/s.png");
     assert_eq!(row.cover_large_path, "/l.png");
     assert_eq!(row.screenshot_urls, "https://h/x.png");
+    assert_eq!(row.fanart_urls, "https://h/fanart.jpg");
 }
 
 #[test]

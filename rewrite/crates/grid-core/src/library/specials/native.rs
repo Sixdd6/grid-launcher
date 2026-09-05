@@ -1036,6 +1036,7 @@ mod tests {
         detail.filesize_bytes = 0;
         detail.rating = "9.5".to_string();
         detail.screenshot_urls = vec!["http://a".to_string(), "http://b".to_string()];
+        detail.fanart_urls = vec!["http://f1".into()];
 
         let result = apply_update(&row, &detail, &archive, &temp_dir, &extract).unwrap();
 
@@ -1043,5 +1044,6 @@ mod tests {
         assert_eq!(result.row.filesize_bytes, 12345);
         assert_eq!(result.row.rating, "9.5");
         assert_eq!(result.row.screenshot_urls, "http://a\nhttp://b");
+        assert_eq!(result.row.fanart_urls, "http://f1");
     }
 }
