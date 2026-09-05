@@ -92,6 +92,64 @@ async fn rom_detail_maps_full_payload() {
 }
 
 #[tokio::test]
+async fn rom_detail_normalises_millisecond_release_dates_to_seconds() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/roms/43"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 43,
+            "fs_name": "g.zip",
+            "fs_name_no_ext": "g",
+            "platform_id": 2,
+            "platform_display_name": "SNES",
+            "fs_size_bytes": 0,
+            "updated_at": "",
+            "regions": [],
+            "languages": [],
+            "tags": [],
+            "files": [],
+            "metadatum": {
+                "first_release_date": 653529600000i64
+            }
+        })))
+        .mount(&server)
+        .await;
+    let client = RommClient::new(&server.uri(), token_cred()).unwrap();
+    let detail = client.rom_detail(43).await.unwrap();
+
+    assert_eq!(detail.first_release_date, "653529600");
+}
+
+#[tokio::test]
+async fn rom_detail_leaves_second_precision_release_dates_unchanged() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/roms/44"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 44,
+            "fs_name": "g.zip",
+            "fs_name_no_ext": "g",
+            "platform_id": 2,
+            "platform_display_name": "SNES",
+            "fs_size_bytes": 0,
+            "updated_at": "",
+            "regions": [],
+            "languages": [],
+            "tags": [],
+            "files": [],
+            "metadatum": {
+                "first_release_date": 631152000
+            }
+        })))
+        .mount(&server)
+        .await;
+    let client = RommClient::new(&server.uri(), token_cred()).unwrap();
+    let detail = client.rom_detail(44).await.unwrap();
+
+    assert_eq!(detail.first_release_date, "631152000");
+}
+
+#[tokio::test]
 async fn rom_detail_minimal_payload_decodes_with_empty_strings() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

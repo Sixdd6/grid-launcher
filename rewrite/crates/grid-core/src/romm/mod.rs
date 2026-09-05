@@ -359,6 +359,19 @@ where
     Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
 }
 
+/// RomM stores IGDB's `first_release_date` in **milliseconds** (the value
+/// the user's server sends renders as year 56322 when read as seconds),
+/// while older payloads and the IGDB source use seconds. Anything above
+/// 100_000_000_000 (year 5138 in seconds) can only be milliseconds, so it
+/// is divided down; the frontend then always receives seconds.
+fn release_date_seconds(raw: i64) -> i64 {
+    if raw > 100_000_000_000 {
+        raw / 1000
+    } else {
+        raw
+    }
+}
+
 /// One entry of the details Overview "Related" row. IGDB's own cover URLs
 /// live on `images.igdb.com`, which `filter_to_server_host` (doc 07) drops,
 /// so only the title and which list it came from are carried.
@@ -577,7 +590,7 @@ impl RawRomDetail {
             companies: metadatum.companies.join(", "),
             first_release_date: metadatum
                 .first_release_date
-                .map(|d| d.to_string())
+                .map(|d| release_date_seconds(d).to_string())
                 .unwrap_or_default(),
             franchises: metadatum.franchises.join(", "),
             game_modes: metadatum.game_modes.join(", "),
@@ -593,5 +606,25 @@ impl RawRomDetail {
             is_identified: self.is_identified,
             related: igdb.into_related(),
         }
+    }
+}
+
+#[cfg(test)]
+mod release_date_tests {
+    use super::release_date_seconds;
+
+    #[test]
+    fn milliseconds_are_divided_down_to_seconds() {
+        assert_eq!(release_date_seconds(653_529_600_000), 653_529_600);
+    }
+
+    #[test]
+    fn seconds_pass_through_unchanged() {
+        assert_eq!(release_date_seconds(631_152_000), 631_152_000);
+    }
+
+    #[test]
+    fn zero_passes_through_unchanged() {
+        assert_eq!(release_date_seconds(0), 0);
     }
 }
