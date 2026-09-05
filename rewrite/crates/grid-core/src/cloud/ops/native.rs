@@ -68,9 +68,14 @@ fn removed_paths_for<'a>(ctx: &'a CloudContext, game: &CloudGame) -> &'a [String
 }
 
 /// Every save location this game still has: PCGW rows then manual ones,
-/// minus the rows the user removed. Upload zips exactly these directories
-/// and restore targets exactly these directories, so a removed row is gone
-/// from both flows, not just from the popup's list.
+/// minus the rows the user removed. Upload zips exactly these directories.
+/// Restore also targets exactly these directories when it falls back to
+/// `fallback_dirs` (the legacy `native_dir:` format and the by-position
+/// fallback below) — but the `native_multi_dir` manifest-driven branch
+/// (`restore_native_multi_dir_archive`) targets whatever directories the
+/// archive's own manifest names, which is the directory set at upload time,
+/// not necessarily this call's current list (Python parity). A removed row
+/// is still gone from the popup's list and from future uploads either way.
 fn configured_save_paths(
     ctx: &CloudContext,
     game: &CloudGame,

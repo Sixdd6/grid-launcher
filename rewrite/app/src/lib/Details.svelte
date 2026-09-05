@@ -235,6 +235,10 @@
   // comes from the backend; a failure leaves it blank rather than guessing.
   let installBlocked = $state('');
   $effect(() => {
+    if (installedNow) {
+      installBlocked = '';
+      return;
+    }
     const platform = subject.platformName;
     api
       .installBlockReason(platform)

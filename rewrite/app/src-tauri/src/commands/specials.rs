@@ -80,9 +80,9 @@ pub async fn content_availability(
 }
 
 /// Why the primary Install button cannot install this game, or `""`. Config
-/// + profile work only, so the blocking pool; the platform SLUG comes from
-/// the process-wide registry through `installed_core_resolver`, which is why
-/// the caller only has to send the platform NAME.
+/// + profile work only, so this runs on the blocking pool; the platform SLUG
+/// comes from the process-wide registry through `installed_core_resolver`,
+/// which is why the caller only has to send the platform NAME.
 #[tauri::command]
 pub async fn install_block_reason(platform: String) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {

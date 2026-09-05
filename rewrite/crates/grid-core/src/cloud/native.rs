@@ -455,20 +455,29 @@ pub fn native_save_paths(pcgw: &[String], manual: &[String]) -> Vec<String> {
 /// where both lists render a row with a remove button: two rows for one raw
 /// path would collide on their test ids and would double the
 /// "N save location(s) configured." count.
+///
+/// Both lists are also de-duplicated against themselves (first occurrence
+/// wins): `pcgw` and `manual` are config-file-backed and not guaranteed
+/// unique the way `_native_save_paths_for_game`'s Python source assumes, and
+/// a duplicate raw string would hit the same test-id collision above.
 pub fn visible_native_paths(
     pcgw: &[String],
     manual: &[String],
     removed: &[String],
 ) -> (Vec<String>, Vec<String>) {
+    let mut seen_pcgw: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let visible_pcgw: Vec<String> = pcgw
         .iter()
         .filter(|p| !removed.iter().any(|r| r == *p))
+        .filter(|p| seen_pcgw.insert(p.as_str()))
         .cloned()
         .collect();
+    let mut seen_manual: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let visible_manual: Vec<String> = manual
         .iter()
         .filter(|p| !removed.iter().any(|r| r == *p))
         .filter(|p| !visible_pcgw.iter().any(|q| q == *p))
+        .filter(|p| seen_manual.insert(p.as_str()))
         .cloned()
         .collect();
     (visible_pcgw, visible_manual)
@@ -1161,5 +1170,25 @@ mod tests {
         let (visible_pcgw, visible_manual) = visible_native_paths(&pcgw, &manual, &[]);
         assert_eq!(visible_pcgw, pcgw);
         assert_eq!(visible_manual, manual);
+    }
+
+    /// A hand-edited config can carry the same raw string twice in either
+    /// list; the UI keys its rows on the raw path, so a duplicate must not
+    /// survive into the returned lists (first occurrence wins).
+    #[test]
+    fn visible_native_paths_de_duplicates_each_list_against_itself() {
+        let pcgw = vec![
+            "%APPDATA%\\Game\\saves".to_string(),
+            "%APPDATA%\\Game\\saves".to_string(), // duplicate PCGW row
+        ];
+        let manual = vec![
+            "D:\\Extra\\Saves".to_string(),
+            "D:\\Extra\\Saves".to_string(), // duplicate manual row
+        ];
+
+        let (visible_pcgw, visible_manual) = visible_native_paths(&pcgw, &manual, &[]);
+
+        assert_eq!(visible_pcgw, vec!["%APPDATA%\\Game\\saves".to_string()]);
+        assert_eq!(visible_manual, vec!["D:\\Extra\\Saves".to_string()]);
     }
 }
