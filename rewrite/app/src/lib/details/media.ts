@@ -31,6 +31,45 @@ export function youtubeEmbedUrl(videoId: string): string {
   return `https://www.youtube-nocookie.com/embed/${videoId}`;
 }
 
+/**
+ * YouTube's static thumbnail CDN. User ruling 2026-09-05: this is the ONE
+ * foreign host anything in this app may load, because `/vi/<id>/hqdefault.jpg`
+ * needs no API key, no quota and no cookie. It is loaded as a plain `<img>`
+ * with `referrerpolicy="no-referrer"` — NEVER through `ensure_image`, which
+ * would fetch it via `RommClient` and attach the RomM Authorization header
+ * to a request leaving the server's host.
+ */
+export const YOUTUBE_THUMBNAIL_BASE = 'https://img.youtube.com/vi';
+
+/** The thumbnail URL for `videoId`, or `''` when it is not an 11-character id. */
+export function youtubeThumbnailUrl(videoId: string): string {
+  const id = videoId.trim();
+  if (!isYoutubeId(id)) return '';
+  return `${YOUTUBE_THUMBNAIL_BASE}/${id}/hqdefault.jpg`;
+}
+
+/** What a trailer/video tile paints behind its play badge. */
+export type TilePoster =
+  | { kind: 'youtube'; url: string }
+  | { kind: 'cover'; url: string | null };
+
+/**
+ * The trailer tile's poster. YouTube's thumbnail when there is a real id and
+ * it has not already failed to load (offline, or a video with no thumbnail);
+ * the game's own server-hosted cover otherwise. `{ kind: 'cover', url: null }`
+ * means "no artwork at all" — the tile renders its placeholder, which is
+ * still better than the bare play icon this replaces.
+ */
+export function trailerPoster(
+  videoId: string,
+  coverUrl: string | null,
+  thumbnailFailed: boolean
+): TilePoster {
+  const thumbnail = youtubeThumbnailUrl(videoId);
+  if (thumbnail !== '' && !thumbnailFailed) return { kind: 'youtube', url: thumbnail };
+  return { kind: 'cover', url: coverUrl };
+}
+
 /** Screenshots first (source order), then the trailer, then a hosted video. */
 export function galleryItems(input: MediaGalleryInput): MediaItem[] {
   const items: MediaItem[] = input.screenshotUrls.map((url, i) => ({

@@ -6,7 +6,10 @@ import {
   nextIndex,
   overviewStrip,
   prevIndex,
+  trailerPoster,
   youtubeEmbedUrl,
+  youtubeThumbnailUrl,
+  YOUTUBE_THUMBNAIL_BASE,
 } from './media';
 
 describe('galleryItems', () => {
@@ -101,5 +104,63 @@ describe('overviewStrip', () => {
 
   it('passes a shorter list through', () => {
     expect(overviewStrip(['a', 'b'])).toEqual(['a', 'b']);
+  });
+});
+
+describe('youtubeThumbnailUrl', () => {
+  it('builds the static CDN path for a valid id', () => {
+    expect(youtubeThumbnailUrl('dQw4w9WgXcQ')).toBe(
+      'https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg'
+    );
+  });
+
+  it('trims before building', () => {
+    expect(youtubeThumbnailUrl('  dQw4w9WgXcQ  ')).toBe(
+      'https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg'
+    );
+  });
+
+  // The id is interpolated into a URL the page loads directly, so anything
+  // that is not exactly an id must produce nothing at all.
+  it('is blank for anything that is not an 11-character id', () => {
+    expect(youtubeThumbnailUrl('')).toBe('');
+    expect(youtubeThumbnailUrl('short')).toBe('');
+    expect(youtubeThumbnailUrl('https://youtu.be/dQw4w9WgXcQ')).toBe('');
+    expect(youtubeThumbnailUrl('../../etc/passwd')).toBe('');
+  });
+
+  it('never leaves the one allowed foreign host', () => {
+    expect(youtubeThumbnailUrl('dQw4w9WgXcQ').startsWith(`${YOUTUBE_THUMBNAIL_BASE}/`)).toBe(true);
+  });
+});
+
+describe('trailerPoster', () => {
+  it("prefers YouTube's own thumbnail for a valid id", () => {
+    expect(trailerPoster('dQw4w9WgXcQ', 'https://romm/cover.png', false)).toEqual({
+      kind: 'youtube',
+      url: 'https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
+    });
+  });
+
+  it('falls back to the server-hosted cover once the thumbnail has failed', () => {
+    expect(trailerPoster('dQw4w9WgXcQ', 'https://romm/cover.png', true)).toEqual({
+      kind: 'cover',
+      url: 'https://romm/cover.png',
+    });
+  });
+
+  it('falls back to the cover when there is no usable id', () => {
+    expect(trailerPoster('', 'https://romm/cover.png', false)).toEqual({
+      kind: 'cover',
+      url: 'https://romm/cover.png',
+    });
+    expect(trailerPoster('not-an-id', 'https://romm/cover.png', false)).toEqual({
+      kind: 'cover',
+      url: 'https://romm/cover.png',
+    });
+  });
+
+  it('reports a cover poster with no cover, which the tile renders as its placeholder', () => {
+    expect(trailerPoster('', null, false)).toEqual({ kind: 'cover', url: null });
   });
 });

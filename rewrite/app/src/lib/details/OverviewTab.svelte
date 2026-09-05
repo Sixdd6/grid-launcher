@@ -149,6 +149,18 @@
     object-fit: cover;
   }
 
+  /* `Image.svelte`'s loading state is a <div class="skeleton">, not an <img>,
+     and its own `height: 100%` collapses against this auto-height flex line.
+     Without an explicit box the strip shows nothing until each screenshot
+     decodes, so the row jumps in as the images arrive. 16:9 keeps the
+     placeholder the width a landscape screenshot will take. */
+  .shots :global(.skeleton) {
+    height: 110px;
+    width: calc(110px * 16 / 9);
+    flex: none;
+    border-radius: var(--r-chip);
+  }
+
   .empty {
     margin: 0;
     color: var(--text-muted);

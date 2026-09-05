@@ -1,20 +1,31 @@
 <script lang="ts">
   import Icon from '../Icon.svelte';
   import Image from '../Image.svelte';
-  import type { MediaItem } from './media';
+  import { trailerPoster, type MediaItem } from './media';
 
   let {
     items,
     onOpen,
     failed,
     onScreenshotError,
+    coverUrl,
   }: {
     items: MediaItem[];
     onOpen: (index: number) => void;
     /** URLs whose image failed to load, keyed by URL (owned by Details.svelte). */
     failed: Record<string, true>;
     onScreenshotError: (url: string) => void;
+    /** The game's large cover — the poster for a hosted video, and the
+     *  fallback poster when YouTube's thumbnail cannot be reached. */
+    coverUrl: string | null;
   } = $props();
+
+  // Which YouTube thumbnails have failed, keyed by video id: an offline
+  // launcher must fall back to the cover once, not retry on every re-render.
+  let thumbnailFailed = $state<Record<string, true>>({});
+  function markThumbnailFailed(videoId: string) {
+    thumbnailFailed = { ...thumbnailFailed, [videoId]: true };
+  }
 </script>
 
 {#if items.length}
@@ -34,10 +45,50 @@
               placeholder="Screenshot"
               onerror={() => onScreenshotError(item.url)}
             />
+          {:else if item.kind === 'youtube'}
+            {@const poster = trailerPoster(item.videoId, coverUrl, thumbnailFailed[item.videoId] === true)}
+            <div class="video-tile">
+              {#if poster.kind === 'youtube'}
+                <!-- Plain <img>, deliberately NOT `Image.svelte`: that
+                     component fetches through `ensure_image` -> RommClient,
+                     which would attach the RomM token to a foreign host.
+                     `no-referrer` keeps this app's URL out of the request. -->
+                <img
+                  data-testid={`details-media-thumb-${i}`}
+                  class="poster"
+                  src={poster.url}
+                  alt=""
+                  aria-hidden="true"
+                  loading="lazy"
+                  referrerpolicy="no-referrer"
+                  draggable="false"
+                  onerror={() => markThumbnailFailed(item.videoId)}
+                />
+              {:else}
+                <Image
+                  url={poster.url}
+                  alt=""
+                  placeholder="Trailer"
+                  data-testid={`details-media-poster-${i}`}
+                />
+              {/if}
+              <span class="play-badge" data-testid={`details-media-play-${i}`}>
+                <Icon name="play" size={20} />
+              </span>
+              <span class="video-label">Trailer</span>
+            </div>
           {:else}
             <div class="video-tile">
-              <Icon name="play" size={20} />
-              <span>{item.kind === 'youtube' ? 'Trailer' : 'Video'}</span>
+              <Image
+                url={coverUrl}
+                alt=""
+                placeholder="Video"
+                data-testid={`details-media-poster-${i}`}
+              />
+              <span class="play-badge" data-testid={`details-media-play-${i}`}>
+                <Icon name="play" size={20} />
+              </span>
+              <span class="video-label">Video</span>
             </div>
           {/if}
         </button>
@@ -74,13 +125,47 @@
   }
 
   .video-tile {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
+    position: relative;
     height: 100%;
+    width: 100%;
+    display: block;
     color: var(--text);
     font-size: 14px;
+  }
+
+  /* Both posters fill the tile the same way the screenshot tiles do; the
+     `.tile :global(img)` rule above already sizes the <Image> branch. */
+  .video-tile .poster {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .play-badge {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--r-pill);
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+  }
+
+  .video-label {
+    position: absolute;
+    left: 8px;
+    bottom: 6px;
+    padding: 2px 8px;
+    border-radius: var(--r-chip);
+    background: rgba(0, 0, 0, 0.65);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
   }
 
   .empty {

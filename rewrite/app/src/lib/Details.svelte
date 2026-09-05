@@ -684,6 +684,7 @@
               onOpen={(i) => (viewerIndex = i)}
               failed={failedMedia}
               onScreenshotError={markMediaFailed}
+              coverUrl={coverLarge ?? coverSmall}
             />
           {:else if tab === 'saves'}
             <SavesTab
