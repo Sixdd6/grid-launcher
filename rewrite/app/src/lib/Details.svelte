@@ -16,6 +16,7 @@
   import { isInstalled, installed, matchesInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
   import { session } from './stores/session.svelte';
   import { sessions } from './stores/sessions.svelte';
+  import Icon from './Icon.svelte';
   import Image from './Image.svelte';
   import NativeSettings from './details/NativeSettings.svelte';
   import OverviewTab from './details/OverviewTab.svelte';
@@ -516,7 +517,9 @@
     tabindex="-1"
     onkeydown={onKey}
   >
-    <button data-testid="details-close" class="close" onclick={onClose} aria-label="Close">×</button>
+    <button data-testid="details-close" class="close icon-btn" onclick={onClose} aria-label="Close">
+      <Icon name="close" size={20} />
+    </button>
 
     <div class="layout">
       <aside class="left">
@@ -698,7 +701,9 @@
         {#if sessions.lastWarning}
           <p data-testid="details-warning" class="error warning" role="alert">
             {sessions.lastWarning}
-            <button data-testid="details-warning-dismiss" class="dismiss" onclick={() => sessions.dismissWarning()} aria-label="Dismiss warning">×</button>
+            <button data-testid="details-warning-dismiss" class="dismiss icon-btn" onclick={() => sessions.dismissWarning()} aria-label="Dismiss warning">
+              <Icon name="close" size={14} />
+            </button>
           </p>
         {/if}
       </section>
@@ -784,19 +789,13 @@
     min-width: 0;
   }
 
+  /* Box, radius and reset come from `.icon-btn` in app.css. Only the
+     placement and the colour are this dialog's own. */
   .close {
     position: absolute;
     top: 8px;
     right: 8px;
-    width: 28px;
-    height: 28px;
-    line-height: 1;
-    font-size: 20px;
-    border: none;
-    border-radius: var(--r-chip);
-    background: transparent;
     color: var(--text);
-    cursor: pointer;
   }
 
   .close:hover,
@@ -978,18 +977,12 @@
     gap: 6px;
   }
 
+  /* Was 18×18 — below the minimum pointer target. `.icon-btn` makes it
+     28×28; the 14px icon inside keeps it visually small next to the 13px
+     warning text. */
   .dismiss {
     flex: none;
-    width: 18px;
-    height: 18px;
-    line-height: 1;
-    padding: 0;
-    font-size: 14px;
-    border: none;
-    border-radius: var(--r-control);
-    background: transparent;
     color: var(--danger);
-    cursor: pointer;
   }
 
   .dismiss:hover,

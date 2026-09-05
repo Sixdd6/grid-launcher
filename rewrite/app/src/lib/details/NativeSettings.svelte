@@ -5,6 +5,7 @@
   // itself (backdrop + `role="dialog"`, Escape/backdrop/close-button
   // dismissal) so it reads as the same design language stacked on top.
   import { api, type CompatTool, type NativeGameSettings } from '../api';
+  import Icon from '../Icon.svelte';
   import { candidateLabel, installDirOf, isWindowsHost } from './actions';
 
   let {
@@ -122,7 +123,9 @@
     tabindex="-1"
     onkeydown={onKey}
   >
-    <button data-testid="native-settings-close" class="close" onclick={onClose} aria-label="Close">×</button>
+    <button data-testid="native-settings-close" class="close icon-btn" onclick={onClose} aria-label="Close">
+      <Icon name="close" size={20} />
+    </button>
     <h3>Game Settings</h3>
 
     {#if loading}
@@ -231,19 +234,14 @@
     outline-offset: 2px;
   }
 
+  /* Same shape as Details.svelte's close, and now literally the same rules:
+     `.icon-btn` in app.css owns the box (this copy had drifted to a literal
+     `6px` radius where its twin used `var(--r-chip)`). */
   .close {
     position: absolute;
     top: 8px;
     right: 8px;
-    width: 28px;
-    height: 28px;
-    line-height: 1;
-    font-size: 20px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
     color: var(--text);
-    cursor: pointer;
   }
 
   .close:hover,

@@ -8,6 +8,7 @@
     type NativeSavePaths,
     type SaveType,
   } from '../api';
+  import Icon from '../Icon.svelte';
   import {
     cloudButtonLabel,
     cloudRecordSummary,
@@ -356,13 +357,13 @@
                   <span>{entry.raw}</span>
                   <button
                     data-testid={`cloud-native-path-remove-${entry.raw}`}
-                    class="remove"
+                    class="remove icon-btn"
                     disabled={manualPathPending}
                     onclick={() => handleRemoveSavePath(entry.raw)}
                     aria-label={`Remove ${entry.raw}`}
                     title="Remove this path"
                   >
-                    ×
+                    <Icon name="close" size={14} />
                   </button>
                 </li>
               {/each}
@@ -371,13 +372,13 @@
                   <span>{entry.raw}</span>
                   <button
                     data-testid={`cloud-native-path-remove-${entry.raw}`}
-                    class="remove"
+                    class="remove icon-btn"
                     disabled={manualPathPending}
                     onclick={() => handleRemoveSavePath(entry.raw)}
                     aria-label={`Remove ${entry.raw}`}
                     title="Remove this path"
                   >
-                    ×
+                    <Icon name="close" size={14} />
                   </button>
                 </li>
               {/each}
@@ -530,17 +531,12 @@
     word-break: break-all;
   }
 
+  /* Was 22×22 with a raw `#e5484d` that did not track the theme. `.icon-btn`
+     gives it the 28×28 minimum target and `var(--r-chip)`; the colour is now
+     the danger token. */
   .remove {
     flex: none;
-    width: 22px;
-    height: 22px;
-    line-height: 1;
-    padding: 0;
-    border: none;
-    border-radius: 4px;
-    background: transparent;
     color: var(--danger);
-    cursor: pointer;
   }
 
   .add-path {
