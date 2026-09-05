@@ -65,6 +65,17 @@ Adopted from RomM v2 `tokens/index.ts`, defined once in `app.css` as CSS variabl
 - Type: Segoe UI / system-ui / Inter; base 13px; titles 15–20px semibold.
 - Spacing on a 4px scale; radii 4 (controls) / 6 (chips) / 8 (rows) / 14 (cards) /
   100 (pills). Motion 150 / 220 / 360ms.
+- Iconography: one `Icon.svelte` component over `lib/icons.ts`, a pure module of nine
+  hand-authored paths on a fixed `0 0 24 24` grid (`close`, `chevronLeft`, `chevronRight`,
+  `arrowLeft`, `cloud`, `star`, `download`, `play`, `grid`). Outline icons use
+  `stroke="currentColor"` at 1.5 with round caps and joins; `star` and `play` are the only
+  solid marks (`fill="currentColor"`). No colour literal appears in an icon — colour is
+  always the caller's token. Sizes are 14 (inline with 12–13px text), 16 (default) and 20
+  (standalone icon buttons, brandmark); no other value. Icon-only buttons use the global
+  `.icon-btn` class in `app.css` and are at least 28×28. An icon paired with visible text
+  is `aria-hidden="true" focusable="false"`; an icon that IS the label takes `role="img"`
+  plus `aria-label`. No Unicode character is used as an icon anywhere in the UI (added
+  2026-09-05, parity-3).
 - Theme resolution: `prefers-color-scheme` unless Settings › Appearance overrides (stored
   in config as `ui.theme = "system" | "dark" | "light"`).
 
@@ -167,6 +178,13 @@ on/off, background fade slider 0–60% with a live preview behind the settings p
 - New ids: `nav-settings`, `emu-nav-<page>`, `settings-nav-<page>`, `library-rail-<key>`,
   `server-rail-<id>`, `details-tab-<name>`, `media-viewer`, `downloads-seg-<name>`,
   `download-graph-<id>`, `theme-select`.
+- Icons and E2E text: an inline SVG contributes nothing to `getText()`, so any mark moved
+  out of a returned string and into an `<Icon>` changes the element's text. Two did:
+  `details-header-line` now reads `… · Platformer · 9.2` (the `★` left `ratingText`, which
+  became `ratingValue`), and `downloads-aggregate` now reads `<title> · <percent> ·
+  <speed>` (the `⬇` left `footerLine`). Each move landed in one commit with its unit tests
+  and its spec assertion. No test id changed. New icon markup must never be given a test
+  id of its own — the id stays on the control (parity-3, 2026-09-05).
 
 ## 12. Delivery
 
