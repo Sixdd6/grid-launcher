@@ -11,6 +11,8 @@
     type LaunchDefaults,
     type RomDetail,
   } from './api';
+  import { subjectFromDetails } from './background';
+  import { noteViewed } from './stores/lastViewed.svelte';
   import { downloads } from './stores/downloads.svelte';
   import { updates } from './stores/updates.svelte';
   import { isInstalled, installed, matchesInstalled, refresh as refreshInstalled } from './stores/installed.svelte';
@@ -105,6 +107,15 @@
   let launchDefaults = $state<LaunchDefaults | null>(null);
 
   let merged = $derived(detail === null ? subject : mergeDetail(subject, detail));
+
+  // The grid already reported what IT knew when the popup opened (a summary
+  // has a cover and, since round 4, the list payload's screenshots); once the
+  // detail lands, the merged subject is strictly richer — it is the only
+  // place fanart is ever known. Reporting again is idempotent when nothing
+  // changed, because `noteViewed` just replaces the subject.
+  $effect(() => {
+    noteViewed(subjectFromDetails(merged));
+  });
   let coverSmall = $derived(merged.coverSmall);
   let coverLarge = $derived(merged.coverLarge);
   let screenshotUrls = $derived(merged.screenshotUrls);

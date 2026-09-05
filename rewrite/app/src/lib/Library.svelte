@@ -17,6 +17,7 @@
   import Details from './Details.svelte';
   import { chordBlocked, chordContext, shouldFocusSearch } from './views/searchKeys';
   import { moveFocus, type NavDirection } from './focus/grid';
+  import { subjectFromInstalled } from './background';
   import { createHoverViewed } from './lastViewedHover';
   import { noteViewed } from './stores/lastViewed.svelte';
 
@@ -118,7 +119,7 @@
   function openDetails(row: InstalledGame, mode: CloudMode = 'overview') {
     detailsCloudMode = mode;
     subject = fromInstalled(row);
-    noteViewed(row.cover_large_path);
+    noteViewed(subjectFromInstalled(row));
   }
 
   function closeDetails() {
@@ -139,6 +140,19 @@
   // Design §3: a card becomes the background only after the pointer has
   // rested on it for more than half a second.
   const hover = createHoverViewed();
+
+  // Keyboard/gamepad selection feeds the background through the SAME 500ms
+  // dwell as the pointer, so holding an arrow key across the grid does not
+  // start a fetch per card. A separate timer from `hover`: sharing one would
+  // let a mouse move cancel a keyboard selection's pending swap.
+  const focusDwell = createHoverViewed();
+
+  $effect(() => {
+    const row = rows[focusIndex];
+    if (!active || row === undefined) return;
+    focusDwell.start(subjectFromInstalled(row));
+    return () => focusDwell.end();
+  });
 
   /** Design §3: `Ctrl+F` focuses the current view's search box. */
   export function focusSearch() {
@@ -272,7 +286,7 @@
             onOpen={() => openDetails(row)}
             onPrimary={() => play(row)}
             onCloud={() => openDetails(row, 'save')}
-            onHoverStart={() => hover.start(row.cover_large_path)}
+            onHoverStart={() => hover.start(subjectFromInstalled(row))}
             onHoverEnd={hover.end}
           />
         {/each}

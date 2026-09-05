@@ -14,8 +14,8 @@
   let slots = $state(initialSlotState);
 
   $effect(() => {
-    const url = lastViewed.coverUrl;
-    if (url === null) return;
+    const url = lastViewed.urls[0];
+    if (url === undefined) return;
     let cancelled = false;
     api
       .ensureImage(url)

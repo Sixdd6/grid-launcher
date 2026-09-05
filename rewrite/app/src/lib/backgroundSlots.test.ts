@@ -41,6 +41,21 @@ describe('withNextCover / clearIfBottom', () => {
     expect(cleared).toEqual({ top: 'b', a: null, b: 'https://romm/z.png' });
   });
 
+  it('keeps alternating across a 5s cycle through three images', () => {
+    let state = initialSlotState;
+    state = withNextCover(state, 'one');
+    expect(state.top).toBe('b');
+    state = clearIfBottom(state, outgoingSlot(state));
+    state = withNextCover(state, 'two');
+    expect(state.top).toBe('a');
+    expect(state.a).toBe('two');
+    // The outgoing image is still on screen for the fade.
+    expect(state.b).toBe('one');
+    state = withNextCover(state, 'three');
+    expect(state.top).toBe('b');
+    expect(state.b).toBe('three');
+  });
+
   it('clearing an already-empty slot is a no-op', () => {
     expect(clearIfBottom(initialSlotState, 'a')).toEqual(initialSlotState);
   });
