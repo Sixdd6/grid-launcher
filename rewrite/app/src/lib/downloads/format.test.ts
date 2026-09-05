@@ -305,14 +305,14 @@ describe('footerLine', () => {
     const line = footerLine([
       entry({ title: 'Chrono Trigger', status: 'downloading', downloaded_bytes: 512, total_bytes: 1024, speed_bps: 2048 }),
     ]);
-    expect(line).toBe('⬇ Chrono Trigger · 50% · 2.0 KB/s');
+    expect(line).toBe('Chrono Trigger · 50% · 2.0 KB/s');
   });
 
   it('shows an em dash for an unknown total', () => {
     const line = footerLine([
       entry({ title: 'Chrono Trigger', status: 'downloading', downloaded_bytes: 512, speed_bps: 0 }),
     ]);
-    expect(line).toBe('⬇ Chrono Trigger · — · 0 B/s');
+    expect(line).toBe('Chrono Trigger · — · 0 B/s');
   });
 
   it('prefers a downloading entry over an installing one', () => {
@@ -320,15 +320,15 @@ describe('footerLine', () => {
       entry({ id: 1, title: 'Installing One', status: 'installing', install_processed_bytes: 1, install_total_bytes: 2 }),
       entry({ id: 2, title: 'Downloading One', status: 'downloading', downloaded_bytes: 1, total_bytes: 4, speed_bps: 1024 }),
     ]);
-    expect(line).toBe('⬇ Downloading One · 25% · 1.0 KB/s');
+    expect(line).toBe('Downloading One · 25% · 1.0 KB/s');
   });
 
   it('reports the phase instead of a speed for installing and queued work', () => {
     expect(
       footerLine([entry({ title: 'A', status: 'installing', install_processed_bytes: 3, install_total_bytes: 4 })]),
-    ).toBe('⬇ A · 75% · Installing');
-    expect(footerLine([entry({ title: 'A', status: 'queued' })])).toBe('⬇ A · — · Queued');
-    expect(footerLine([entry({ title: 'A', status: 'cancelling' })])).toBe('⬇ A · — · Cancelling');
+    ).toBe('A · 75% · Installing');
+    expect(footerLine([entry({ title: 'A', status: 'queued' })])).toBe('A · — · Queued');
+    expect(footerLine([entry({ title: 'A', status: 'cancelling' })])).toBe('A · — · Cancelling');
   });
 });
 
@@ -351,7 +351,7 @@ describe('currentTransfer', () => {
   it('is the entry footerLine describes', () => {
     const entries = [entry({ id: 1, status: 'installing' }), entry({ id: 2, title: 'Two', status: 'downloading' })];
     expect(currentTransfer(entries)?.title).toBe('Two');
-    expect(footerLine(entries)).toContain('⬇ Two ·');
+    expect(footerLine(entries)).toContain('Two ·');
   });
 });
 

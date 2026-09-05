@@ -2,6 +2,7 @@
   import { downloads } from './stores/downloads.svelte';
   import { currentTransfer, footerLine } from './downloads/format';
   import Sparkline from './downloads/Sparkline.svelte';
+  import Icon from './Icon.svelte';
 
   let { onOpen }: { onOpen: () => void } = $props();
 
@@ -27,6 +28,9 @@
     }
   }}
 >
+  {#if line !== null}
+    <span class="lead"><Icon name="download" size={14} /></span>
+  {/if}
   <span data-testid="downloads-aggregate" class="line">{line ?? ''}</span>
   {#if current !== null}
     <Sparkline
@@ -67,6 +71,15 @@
   .strip:focus-visible {
     outline: 2px solid var(--primary);
     outline-offset: -2px;
+  }
+
+  /* The download mark, outside `.line` so the ellipsis box stays a single
+     text run, and in `.line`'s colour rather than the strip's muted one so
+     the two read as one unit. */
+  .lead {
+    display: flex;
+    flex: none;
+    color: var(--text-h);
   }
 
   .line {

@@ -152,8 +152,11 @@ export function currentTransfer(entries: DownloadEntry[]): DownloadEntry | null 
 
 /**
  * The 28px status strip's one line (design §3):
- * `⬇ <title> · <percent> · <speed>`, or `null` when nothing is live and the
- * strip hides itself.
+ * `<title> · <percent> · <speed>`, or `null` when nothing is live and the
+ * strip hides itself. The download arrow that used to prefix this string is
+ * an `<Icon name="download">` in `DownloadsFooter.svelte`: `⬇` fell back to
+ * a different typeface mid-sentence, and as an emoji-defaulted character it
+ * could render as a coloured bitmap inside a `var(--text-h)` status line.
  *
  * An unmeasurable percent renders as an em dash rather than a fake `0%`,
  * and the speed slot carries the phase word when there is no byte rate to
@@ -184,7 +187,7 @@ export function footerLine(entries: DownloadEntry[]): string | null {
       speed = 'Queued';
       break;
   }
-  return `⬇ ${current.title} · ${pct} · ${speed}`;
+  return `${current.title} · ${pct} · ${speed}`;
 }
 
 /**

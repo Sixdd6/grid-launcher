@@ -157,12 +157,13 @@ describe('downloads', () => {
       timeout: INSTALL_TIMEOUT,
       timeoutMsg: 'the downloads strip never appeared for a live transfer',
     });
-    // `⬇ <title> · <percent> · <speed>` (design §3). The percent is a
-    // number while the total is known and an em dash otherwise; the last
-    // slot is a byte rate while downloading and the phase word once the
-    // entry has moved on to installing.
+    // `<title> · <percent> · <speed>` (design §3). The percent is a number
+    // while the total is known and an em dash otherwise; the last slot is a
+    // byte rate while downloading and the phase word once the entry has
+    // moved on to installing. The download arrow is an inline SVG in a
+    // sibling span, so it is not part of this element's text.
     expect(await $(testId('downloads-aggregate')).getText()).toMatch(
-      /^⬇ Big Arcade Game · (\d{1,3}%|—) · ([\d.]+ [KMGT]?B\/s|Installing)$/,
+      /^Big Arcade Game · (\d{1,3}%|—) · ([\d.]+ [KMGT]?B\/s|Installing)$/,
     );
     await expect($(testId('downloads-footer-graph'))).toExist();
     expect(await strip.getText()).toContain('Open Downloads');
