@@ -5,6 +5,7 @@
   // changes which entry is edited wraps this in `{#key entry.name}`.
   import { api, type EmulatorEntry, type ProfileSummary } from '../api';
   import { matchProfileByName, shouldAutoFillFromName } from './catalog';
+  import { pickFile } from '../pickers';
 
   let {
     mode,
@@ -68,6 +69,16 @@
     }
   }
 
+  // No filter: this one field accepts a bare executable, an AppImage or a
+  // downloadable archive — Python labels it "Executable / Archive Path" for
+  // a new entry (dialogs.py:355).
+  async function browseEmulatorPath() {
+    const picked = await pickFile('Select Emulator Executable or Archive');
+    if (picked === null) return;
+    formPath = picked;
+    await autoFillFromPath();
+  }
+
   function onPathKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -124,7 +135,12 @@
   {/if}
   <label>
     Executable path
-    <input data-testid="emu-form-path" bind:value={formPath} onblur={autoFillFromPath} onkeydown={onPathKeydown} />
+    <span class="path-row">
+      <input data-testid="emu-form-path" bind:value={formPath} onblur={autoFillFromPath} onkeydown={onPathKeydown} />
+      <button data-testid="emu-form-path-browse" type="button" disabled={formPending} onclick={browseEmulatorPath}>
+        Browse…
+      </button>
+    </span>
   </label>
   <label>Arguments <input data-testid="emu-form-args" bind:value={formArgs} /></label>
   {#if formError}<p data-testid="emu-form-error" class="error" role="alert">{formError}</p>{/if}
@@ -161,6 +177,17 @@
   input:focus-visible {
     outline: 2px solid var(--primary);
     outline-offset: 1px;
+  }
+
+  .path-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .path-row input {
+    flex: 1;
+    min-width: 0;
   }
 
   .hint {

@@ -27,6 +27,7 @@
     nativeUploadTooltip,
     type NativePathsPhase,
   } from './nativePaths';
+  import { pickFolder } from '../pickers';
 
   let {
     game,
@@ -237,6 +238,13 @@
     }
   }
 
+  async function browseManualPath() {
+    const picked = await pickFolder('Select Save Folder');
+    if (picked === null) return;
+    manualPathInput = picked;
+    await handleAddManualPath();
+  }
+
   // Both lists' rows remove the same way (`_pcgw_remove_path_for_game`,
   // details_view_mixin.py:1218-1230): the backend deletes a manual path and
   // suppresses a PCGW one, so the caller passes only the row's raw value.
@@ -388,6 +396,14 @@
               onclick={handleAddManualPath}
             >
               Add
+            </button>
+            <button
+              data-testid="cloud-native-path-browse"
+              disabled={manualPathPending}
+              onclick={browseManualPath}
+              title="Add a custom save folder for this game"
+            >
+              Browse…
             </button>
           </div>
           {#if manualPathError}<p class="error" role="alert">{manualPathError}</p>{/if}

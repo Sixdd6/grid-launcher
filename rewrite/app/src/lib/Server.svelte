@@ -35,6 +35,7 @@
   } from './server/firmware';
   import { savedDefaultFor } from './emulators/defaults';
   import { chordBlocked, chordContext, shouldFocusSearch } from './views/searchKeys';
+  import { pickFolder } from './pickers';
 
   let {
     active,
@@ -335,6 +336,11 @@
     });
   }
 
+  async function browseLibraryPath() {
+    const picked = await pickFolder('Select Library Folder');
+    if (picked !== null) libraryPathInput = picked;
+  }
+
   async function saveLibraryPath() {
     libraryPathError = null;
     libraryPathSaving = true;
@@ -361,6 +367,14 @@
         placeholder="/path/to/library"
         disabled={libraryPathSaving}
       />
+      <button
+        data-testid="library-path-browse"
+        class="browse"
+        disabled={libraryPathSaving}
+        onclick={browseLibraryPath}
+      >
+        Browse…
+      </button>
       <button data-testid="library-path-save" disabled={libraryPathSaving || !libraryPathInput.trim()} onclick={saveLibraryPath}>
         {libraryPathSaving ? 'Saving…' : 'Save'}
       </button>
@@ -673,6 +687,17 @@
   .library-banner button:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+
+  .browse {
+    font: inherit;
+    padding: 6px 14px;
+    border-radius: var(--r-control);
+    border: none;
+    background: var(--primary);
+    color: #fff;
+    cursor: pointer;
+    white-space: nowrap;
   }
 
   .banner-error {
