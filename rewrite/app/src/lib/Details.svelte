@@ -27,6 +27,7 @@
   import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
   import { isNativeExecutablePlatform, syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
   import { contentButtons, installLabel, isContentPlatform, isNativePlatform } from './details/actions';
+  import { contentBlockReason } from './details/blocked';
   import {
     fileVersionLabel,
     romFileNamesFor,
@@ -229,6 +230,24 @@
   let isContent = $derived(isContentPlatform(subject.platformName));
   let isNativeInstall = $derived(isNativePlatform(subject.platformName));
   let buttons = $derived(contentButtons(contentAvailability, installedNow, liveEntry !== undefined));
+
+  // The primary button's reason needs the configured emulator list, so it
+  // comes from the backend; a failure leaves it blank rather than guessing.
+  let installBlocked = $state('');
+  $effect(() => {
+    const platform = subject.platformName;
+    api
+      .installBlockReason(platform)
+      .then((reason) => (installBlocked = reason))
+      .catch(() => (installBlocked = ''));
+  });
+
+  let updateBlocked = $derived(
+    contentBlockReason('update', subject.platformName, installedNow, subject.romId, buttons.update)
+  );
+  let dlcBlocked = $derived(
+    contentBlockReason('dlc', subject.platformName, installedNow, subject.romId, buttons.dlc)
+  );
 
   // Fetched once the subject is installed-and-a-content-platform, and
   // re-fetched right after a live install for it finishes (`wasLive` tracks
@@ -546,6 +565,7 @@
                 <button
                   data-testid="details-install-update"
                   class="secondary"
+                  title={updateBlocked}
                   disabled={contentActionKind !== null}
                   onclick={() => handleInstallContent('update')}
                 >
@@ -556,6 +576,7 @@
                 <button
                   data-testid="details-install-dlc"
                   class="secondary"
+                  title={dlcBlocked}
                   disabled={contentActionKind !== null}
                   onclick={() => handleInstallContent('dlc')}
                 >
@@ -577,7 +598,7 @@
                 {confirmingUninstall ? 'Confirm uninstall' : 'Uninstall'}
               </button>
             {:else}
-              <button data-testid="details-install" disabled={pending} onclick={handleInstall}>
+              <button data-testid="details-install" title={installBlocked} disabled={pending} onclick={handleInstall}>
                 {pendingAction === 'install' ? 'Installing…' : installLabel(subject.platformName)}
               </button>
             {/if}

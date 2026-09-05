@@ -318,6 +318,7 @@ pub fn run() {
             commands::specials::install_content,
             commands::specials::install_native_update,
             commands::specials::content_availability,
+            commands::specials::install_block_reason,
             commands::specials::native_game_settings,
             commands::specials::set_native_game_settings,
             commands::specials::list_compat_tools,

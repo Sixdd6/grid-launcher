@@ -417,6 +417,8 @@ export const api = {
   installNativeUpdate: (romId: number) => invoke<void>('install_native_update', { romId }),
   contentAvailability: (romId: number) =>
     invoke<ContentAvailability>('content_availability', { romId }),
+  /** Why the Install button cannot install this platform's games, or ''. */
+  installBlockReason: (platform: string) => invoke<string>('install_block_reason', { platform }),
   nativeGameSettings: (romId: number) =>
     invoke<NativeGameSettings>('native_game_settings', { romId }),
   setNativeGameSettings: (

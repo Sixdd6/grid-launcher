@@ -236,6 +236,41 @@ pub fn default_emulator_name_for_platform(
         .unwrap_or_default()
 }
 
+/// Why this game cannot be installed, or `""` when it can
+/// (`install_block_reason_for_game`, selection.py:370-390). Both strings are
+/// the reference's verbatim.
+///
+/// Deviation from the reference: Python filters the candidate names through
+/// `emulator_entry_has_usable_path` (selection.py:310-315), a filesystem
+/// probe this port does not have; the rewrite's test is "a configured
+/// emulator supports this platform". A configured-but-missing binary
+/// therefore reports no block reason here and fails later at launch, with
+/// the launcher's own error. Recorded in
+/// `docs/porting/03-library-install.md`.
+pub fn install_block_reason(
+    platform: &str,
+    emulators: &[EmulatorEntry],
+    profiles: &[EmulatorProfile],
+    cores: CoreResolver<'_>,
+) -> String {
+    if crate::cloud::scope::is_native_executable_platform(platform)
+        || crate::cloud::scope::is_emulators_platform(platform)
+    {
+        return String::new();
+    }
+    let trimmed = platform.trim();
+    if trimmed.is_empty() {
+        return "Selected game has no platform value and cannot be installed.".to_string();
+    }
+    if !compatible_emulator_names_for_platform(emulators, trimmed, profiles, cores).is_empty() {
+        return String::new();
+    }
+    format!(
+        "No available emulator is configured for platform '{trimmed}'. \
+         Add/configure one in Emulators before installing this game."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -670,5 +705,39 @@ mod tests {
         // "PlayStation 2" has no fuzzy hit (best Jaccard 2/3 < 0.7), so only
         // the slug path can find the installed core.
         assert_eq!(resolver(&ra, "PlayStation 2"), vec!["pcsx2".to_string()]);
+    }
+
+    // --- install_block_reason ---------------------------------------------
+
+    #[test]
+    fn install_block_reason_is_empty_for_native_and_emulators_platforms() {
+        assert_eq!(install_block_reason("Windows", &[], &[], &no_cores), "");
+        assert_eq!(install_block_reason("Emulators", &[], &[], &no_cores), "");
+    }
+
+    #[test]
+    fn install_block_reason_names_a_missing_platform_value() {
+        assert_eq!(
+            install_block_reason("   ", &[], &[], &no_cores),
+            "Selected game has no platform value and cannot be installed."
+        );
+    }
+
+    #[test]
+    fn install_block_reason_asks_for_an_emulator_when_none_supports_the_platform() {
+        assert_eq!(
+            install_block_reason("SNES", &[], &[], &no_cores),
+            "No available emulator is configured for platform 'SNES'. \
+             Add/configure one in Emulators before installing this game."
+        );
+    }
+
+    #[test]
+    fn install_block_reason_is_empty_when_one_configured_emulator_supports_the_platform() {
+        // No profile matches this entry, and `emulator_supports_platform`
+        // rule 4 ("no profile matched") calls that supported, so the single
+        // configured entry covers SNES.
+        let emulators = vec![entry("Snes9x", "/x/snes9x")];
+        assert_eq!(install_block_reason("SNES", &emulators, &[], &no_cores), "");
     }
 }

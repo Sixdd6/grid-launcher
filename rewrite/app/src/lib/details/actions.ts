@@ -38,7 +38,7 @@ function normalizedTokens(platform: string): { normalized: string; compact: stri
  * "ps4" (whole normalized string or a whole token), or a compact
  * "playstation4" run.
  */
-function isPs4Platform(platform: string): boolean {
+export function isPs4Platform(platform: string): boolean {
   const { normalized, compact, tokens } = normalizedTokens(platform);
   if (normalized === '') return false;
   if (normalized === 'playstation 4' || normalized === 'ps4') return true;
