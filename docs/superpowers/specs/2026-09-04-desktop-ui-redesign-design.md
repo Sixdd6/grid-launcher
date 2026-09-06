@@ -64,9 +64,9 @@ the options.
 Adopted from RomM v2 `tokens/index.ts`, defined once in `app.css` as CSS variables:
 
 - Dark: `--bg #07070f`, `--surface rgba(255,255,255,.07)`, `--surface-2 #14141f`,
-  `--border #22223a`, `--text #ffffff`, `--text-muted #9a9ab0`.
-- Light: `--bg #f5f5fa`, `--surface rgba(0,0,0,.035)`, `--text #111117`; primary darkens
-  to `#553E98`.
+  `--border #22223a`, `--text #ffffff`, `--text-muted #c8c8dc`.
+- Light: `--bg #f5f5fa`, `--surface rgba(0,0,0,.035)`, `--text #111117`,
+  `--text-muted #3d3d52`; primary darkens to `#553E98`.
 - Text over the background art: the five view roots carry the global `.over-art` class
   from `app.css`, which sets `text-shadow: var(--text-halo)` — `0 0 2px` plus `0 0 8px` of
   the theme's own background colour (`rgba(7,7,15,.85)/.5` dark,
@@ -144,8 +144,11 @@ Dialog 1040×680 max, centred over a dimmed, blurred shell; Esc and ✕ close.
      WebKitGTK cannot play media from a custom URI scheme, so the cached file's bytes
      cross IPC and the page wraps them in a `Blob`). Click opens a fullscreen viewer with
      arrows, Esc, and a caption. The viewer walks the same viewable list as the gallery: a
-     screenshot that failed to load is skipped, and if the current one fails the viewer
-     moves to the next viewable item, or closes when none is left.
+     screenshot that failed to load is skipped. The viewer holds the position it
+     is on as an index into the full list, so a screenshot that dies elsewhere in
+     the list never shifts the picture on screen; if the current one dies, the
+     viewer moves to the next viewable item, wrapping past the end, and closes
+     when none is left.
   3. **Saves**: user saves and states (`user_saves`, `user_states`) with timestamps and
      sizes, last cloud sync, Upload / Download / Sync now, and the cloud scope warning
      the current details view shows.

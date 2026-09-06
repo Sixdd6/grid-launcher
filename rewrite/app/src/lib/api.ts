@@ -378,8 +378,8 @@ export const api = {
    *  session client and cached by the backend. Bytes rather than a path:
    *  WebKitGTK will not decode media served from a custom URI scheme, so the
    *  viewer wraps these in a `Blob` and plays the object URL. Rejects with
-   *  the backend's message — "video too large to play in-app" past the
-   *  64 MiB IPC cap. */
+   *  the backend's message — "video too large to play in-app" past the IPC
+   *  cap (`MAX_INLINE_VIDEO_BYTES`, the only place the size is written). */
   readVideo: (url: string) => invoke<ArrayBuffer>('read_video', { url }),
   /** The 960px-wide background variant of `url`, blurred at `blur` sigma and
    *  built on demand. Same host filter as `ensureImage`; the sigma is part of

@@ -61,6 +61,7 @@ describe('clampFade', () => {
   it('rounds fractional slider values and falls back on garbage', () => {
     expect(clampFade(30.6)).toBe(31);
     expect(clampFade(Number.NaN)).toBe(FADE_DEFAULT);
+    expect(FADE_DEFAULT).toBe(50);
   });
 });
 

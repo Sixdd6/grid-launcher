@@ -26,7 +26,7 @@
   import MediaViewer from './details/MediaViewer.svelte';
   import SavesTab from './details/SavesTab.svelte';
   import FilesTab from './details/FilesTab.svelte';
-  import { galleryItems, viewableIndex, viewableItems } from './details/media';
+  import { fullIndex, galleryItems, viewableIndex, viewableItems } from './details/media';
   import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
   import { isNativeExecutablePlatform, syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
   import { contentButtons, installLabel, isContentPlatform, isNativePlatform } from './details/actions';
@@ -130,7 +130,13 @@
       videoPath: detail?.video_path ?? '',
     })
   );
-  let viewerIndex = $state<number | null>(null);
+  // Which picture the viewer is on, held as an index into `mediaItems` — the
+  // FULL list, not the filtered one. A screenshot that fails while the viewer
+  // is open shortens `viewerItems` under it, and a position in that shrinking
+  // list would silently address a different picture; a full-list index cannot,
+  // because `mediaItems` only changes when the game does. `null` means the
+  // viewer is closed.
+  let viewerAnchor = $state<number | null>(null);
   // One failure map for the Media tab AND the fullscreen viewer: the viewer
   // is rendered outside the tab (above the whole dialog), so a map owned by
   // either one would let the two disagree about which screenshot is dead.
@@ -140,21 +146,20 @@
     failedMedia = { ...failedMedia, [url]: true };
   }
   // The viewer walks the same list the gallery shows, so a screenshot whose
-  // image 404s is skipped instead of paged onto. `viewerIndex` indexes THIS
-  // list, never `mediaItems`; `MediaTab`'s `onOpen` emits a `mediaItems`
-  // index (its `{#if}` sits inside the `{#each}`, so tile numbering is
-  // stable), and `viewableIndex` maps one to the other.
+  // image 404s is skipped instead of paged onto. `viewerIndex` is the anchor's
+  // position in THAT list: `viewableIndex` moves to the next viewable item
+  // (wrapping) when the anchor itself has died, and answers `null` when
+  // nothing is left, which unmounts the viewer.
   let viewerItems = $derived(viewableItems(mediaItems, failedMedia));
+  let viewerIndex = $derived(
+    viewerAnchor === null ? null : viewableIndex(mediaItems, failedMedia, viewerAnchor)
+  );
   $effect(() => {
-    // A screenshot that fails while the viewer is open shortens the list
-    // under it. Move to the last item still there, or close when the
-    // failure took the only thing left to look at.
-    if (viewerIndex === null) return;
-    if (viewerItems.length === 0) {
-      viewerIndex = null;
+    // The viewer closed itself because the last viewable item died. Forget the
+    // anchor and hand focus back, exactly as the close button does.
+    if (viewerAnchor !== null && viewerIndex === null) {
+      viewerAnchor = null;
       panelEl?.focus();
-    } else if (viewerIndex >= viewerItems.length) {
-      viewerIndex = viewerItems.length - 1;
     }
   });
   let description = $derived(merged.description);
@@ -710,7 +715,7 @@
           {:else if tab === 'media'}
             <MediaTab
               items={mediaItems}
-              onOpen={(i) => (viewerIndex = viewableIndex(mediaItems, failedMedia, i))}
+              onOpen={(i) => (viewerAnchor = i)}
               failed={failedMedia}
               onScreenshotError={markMediaFailed}
               coverUrl={coverLarge ?? coverSmall}
@@ -768,11 +773,11 @@
   <MediaViewer
     items={viewerItems}
     index={viewerIndex}
-    onIndex={(i) => (viewerIndex = i)}
+    onIndex={(i) => (viewerAnchor = fullIndex(mediaItems, failedMedia, i))}
     onScreenshotError={markMediaFailed}
     coverUrl={coverLarge ?? coverSmall}
     onClose={() => {
-      viewerIndex = null;
+      viewerAnchor = null;
       // The viewer took focus off the panel; without handing it back, the
       // popup's own Escape handler would no longer hear the next press.
       panelEl?.focus();

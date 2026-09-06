@@ -10,7 +10,10 @@
 #
 #   rewrite/scripts/e2e.sh              # build, then run every stage
 #   rewrite/scripts/e2e.sh connect      # run only the named stage groups
-#   E2E_SKIP_BUILD=1 rewrite/scripts/e2e.sh
+#   E2E_SKIP_BUILD=1 rewrite/scripts/e2e.sh   # skips the Rust AND frontend
+#                                             # builds: safe ONLY when nothing
+#                                             # under rewrite/app/src or the
+#                                             # Rust crates has changed
 #   E2E_KEEP=1 rewrite/scripts/e2e.sh   # keep the temp run directory
 #
 # Exit codes: 0 pass, 1 a stage group failed, 2 a prerequisite is missing or
@@ -103,6 +106,11 @@ if [[ "${E2E_INNER:-}" != "1" ]]; then
   fi
 
   if [[ "${E2E_SKIP_BUILD:-}" == "1" ]]; then
+    # This skips the frontend build too, and nothing below detects a stale
+    # `dist/`: the stamp checks only guard the Rust binary. Use it ONLY when
+    # nothing under rewrite/app/src or the Rust crates has changed since the
+    # last full run, or the suite silently tests the previous frontend.
+    #
     # A debug binary at this path proves nothing on its own: a plain
     # `cargo build -p app` writes the same file WITHOUT the e2e feature, and
     # the resulting run fails opaquely (the embedded WebDriver server never

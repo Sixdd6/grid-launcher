@@ -127,6 +127,24 @@ export function viewableIndex(
   return null;
 }
 
+/**
+ * The inverse of `viewableIndex`: where `viewableItems(items, failed)[position]`
+ * sits in `items`.
+ *
+ * `-1` when `position` is outside the viewable list. The viewer only ever
+ * reports a position it has just rendered, so that answer means the list
+ * emptied under it and the caller must close.
+ */
+export function fullIndex(
+  items: MediaItem[],
+  failed: Record<string, true>,
+  position: number
+): number {
+  const viewable = viewableItems(items, failed);
+  if (position < 0 || position >= viewable.length) return -1;
+  return items.indexOf(viewable[position]);
+}
+
 /** The next item, wrapping. `0` for an empty gallery — never `NaN`. */
 export function nextIndex(current: number, count: number): number {
   if (count <= 0) return 0;

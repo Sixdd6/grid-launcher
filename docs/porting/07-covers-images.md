@@ -1114,8 +1114,9 @@ the URL's extension (`videoMimeType` in `details/media.ts`) and plays
 `URL.createObjectURL(...)`, revoking it on every teardown. The CSP therefore carries
 `blob:` in `media-src`. Because the bytes cross IPC in one message and are then held
 again as a `Blob`, `read_video` refuses a cached file larger than
-`MAX_INLINE_VIDEO_BYTES` (64 MiB) with "video too large to play in-app", checked against
-the file's metadata before anything is read.
+`MAX_INLINE_VIDEO_BYTES` with "video too large to play in-app", checked against the
+file's metadata before anything is read. The constant is the only place that size is
+written down.
 
 `youtube_video_id` is a different case entirely — it is embedded, touches no
 server bytes, and needs the `frame-src https://www.youtube-nocookie.com` CSP entry to

@@ -8,10 +8,22 @@ pub enum RommError {
     Connection(String),
     #[error("the server rejected the credentials")]
     Unauthorized,
-    #[error("server error {status}: {excerpt}")]
+    #[error("server error {status}{}", http_excerpt_suffix(.excerpt))]
     Http { status: u16, excerpt: String },
     #[error("unexpected response from the server: {0}")]
     Decode(String),
+}
+
+/// The `": <body>"` tail of an HTTP error line, or nothing at all when the
+/// server sent no body worth quoting. Without this a 404 whose excerpt was
+/// suppressed reads `server error 404: `, and the UI paints the dangling
+/// colon (the video path builds `Http` with an empty excerpt on purpose).
+fn http_excerpt_suffix(excerpt: &str) -> String {
+    if excerpt.trim().is_empty() {
+        String::new()
+    } else {
+        format!(": {excerpt}")
+    }
 }
 
 pub(crate) fn excerpt(body: &str) -> String {
@@ -27,5 +39,40 @@ pub(crate) fn excerpt(body: &str) -> String {
         format!("{}...", &collapsed[..end])
     } else {
         collapsed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RommError;
+
+    #[test]
+    fn http_error_with_a_body_quotes_it_after_a_colon() {
+        let err = RommError::Http {
+            status: 500,
+            excerpt: "upstream unavailable".into(),
+        };
+        assert_eq!(err.to_string(), "server error 500: upstream unavailable");
+    }
+
+    #[test]
+    fn http_error_without_a_body_ends_at_the_status() {
+        // `get_bytes_with_type` (the video path) always builds this shape, so a
+        // missing `path_video` must read `server error 404`, with no trailing
+        // colon and no trailing space for the UI to paint.
+        let err = RommError::Http {
+            status: 404,
+            excerpt: String::new(),
+        };
+        assert_eq!(err.to_string(), "server error 404");
+    }
+
+    #[test]
+    fn http_error_with_a_whitespace_only_body_ends_at_the_status() {
+        let err = RommError::Http {
+            status: 502,
+            excerpt: "   ".into(),
+        };
+        assert_eq!(err.to_string(), "server error 502");
     }
 }

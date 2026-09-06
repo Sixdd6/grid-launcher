@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   OVERVIEW_STRIP_LIMIT,
+  fullIndex,
   galleryItems,
   isYoutubeId,
   nextIndex,
@@ -161,6 +162,86 @@ describe('viewableIndex', () => {
   it('is null for an index outside the list', () => {
     expect(viewableIndex(items, {}, 5)).toBe(null);
     expect(viewableIndex([], {}, 0)).toBe(null);
+  });
+});
+
+describe('fullIndex', () => {
+  const items: MediaItem[] = [
+    { kind: 'screenshot', url: 'http://s/1.png', caption: 'g — screenshot 1' },
+    { kind: 'screenshot', url: 'http://s/2.png', caption: 'g — screenshot 2' },
+    { kind: 'screenshot', url: 'http://s/3.png', caption: 'g — screenshot 3' },
+  ];
+
+  it('is the identity when nothing failed', () => {
+    expect(fullIndex(items, {}, 0)).toBe(0);
+    expect(fullIndex(items, {}, 2)).toBe(2);
+  });
+
+  it('shifts right past an earlier failure', () => {
+    expect(fullIndex(items, { 'http://s/1.png': true }, 0)).toBe(1);
+    expect(fullIndex(items, { 'http://s/1.png': true }, 1)).toBe(2);
+  });
+
+  it('skips a run of failures', () => {
+    expect(fullIndex(items, { 'http://s/1.png': true, 'http://s/2.png': true }, 0)).toBe(2);
+  });
+
+  it('is -1 for a position outside the viewable list', () => {
+    expect(fullIndex(items, {}, 3)).toBe(-1);
+    expect(fullIndex(items, {}, -1)).toBe(-1);
+    expect(fullIndex(items, { 'http://s/3.png': true }, 2)).toBe(-1);
+    expect(fullIndex([], {}, 0)).toBe(-1);
+  });
+
+  it('round-trips every viewable position through viewableIndex', () => {
+    const failed: Record<string, true> = { 'http://s/2.png': true };
+    for (const full of [0, 2]) {
+      const position = viewableIndex(items, failed, full);
+      expect(position).not.toBe(null);
+      expect(fullIndex(items, failed, position as number)).toBe(full);
+    }
+  });
+});
+
+describe('the viewer anchor (design §7)', () => {
+  // `Details.svelte` holds the viewer position as an index into the FULL list
+  // and derives the viewable position from it, so these two calls together are
+  // what the user sees. `at` is the picture on screen.
+  const items: MediaItem[] = [
+    { kind: 'screenshot', url: 'http://s/1.png', caption: 'g — screenshot 1' },
+    { kind: 'screenshot', url: 'http://s/2.png', caption: 'g — screenshot 2' },
+    { kind: 'screenshot', url: 'http://s/3.png', caption: 'g — screenshot 3' },
+  ];
+  function shown(failed: Record<string, true>, anchor: number): MediaItem | null {
+    const position = viewableIndex(items, failed, anchor);
+    if (position === null) return null;
+    return viewableItems(items, failed)[position];
+  }
+
+  it('keeps the same picture when an EARLIER screenshot fails', () => {
+    expect(shown({}, 2)).toBe(items[2]);
+    expect(shown({ 'http://s/1.png': true }, 2)).toBe(items[2]);
+  });
+
+  it('keeps the same picture when a LATER screenshot fails', () => {
+    expect(shown({ 'http://s/3.png': true }, 0)).toBe(items[0]);
+  });
+
+  it('moves to the next viewable picture when the CURRENT one fails', () => {
+    expect(shown({ 'http://s/2.png': true }, 1)).toBe(items[2]);
+  });
+
+  it('wraps forward when the current one is the last', () => {
+    expect(shown({ 'http://s/3.png': true }, 2)).toBe(items[0]);
+  });
+
+  it('closes when the last viewable picture fails', () => {
+    const failed: Record<string, true> = {
+      'http://s/1.png': true,
+      'http://s/2.png': true,
+      'http://s/3.png': true,
+    };
+    expect(shown(failed, 1)).toBe(null);
   });
 });
 
