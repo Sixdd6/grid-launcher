@@ -9,15 +9,16 @@
     index,
     onIndex,
     onClose,
-    failed,
     onScreenshotError,
     coverUrl,
   }: {
+    /** Already filtered to what can be shown (`viewableItems`): a screenshot
+     *  whose image failed is not in here, so nothing pages onto a dead frame. */
     items: MediaItem[];
     index: number;
     onIndex: (index: number) => void;
     onClose: () => void;
-    failed: Record<string, true>;
+    /** Marks a URL failed in Details.svelte, which drops it from `items`. */
     onScreenshotError: (url: string) => void;
     /** The game's large cover — the trailer poster's fallback once YouTube's
      *  thumbnail is unreachable or has already failed (mirrors MediaTab). */
@@ -160,16 +161,12 @@
     {/if}
 
     <div class="stage">
-      {#if current.kind === 'screenshot' && failed[current.url]}
-        <!-- User ruling 2026-09-05: the viewer does NOT auto-advance past a
-             dead screenshot. Dropping the item would shift every index under
-             the user, and advancing would loop forever when every item
-             fails; an explicit line is the honest answer. The tile itself is
-             already gone from the Media tab behind this. -->
-        <p class="pending" data-testid="media-viewer-image-error">
-          This screenshot could not be loaded
-        </p>
-      {:else if current.kind === 'screenshot'}
+      {#if current.kind === 'screenshot'}
+        <!-- No error line here: `items` is already the viewable list
+             (`viewableItems` in Details.svelte), so a screenshot that fails
+             leaves the list and the viewer moves to the next one — the same
+             thing the Media tab does with its tile. `onScreenshotError` is
+             what removes it. -->
         <Image
           url={current.url}
           alt={current.caption}

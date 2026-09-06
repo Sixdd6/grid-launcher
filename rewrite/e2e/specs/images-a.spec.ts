@@ -266,6 +266,34 @@ describe('images (a): cover, screenshots, install, library grid', () => {
       timeoutMsg: 'the 404 screenshot tile never went away on the Media tab',
     });
 
+    // The viewer pages through the same viewable list as the gallery. With
+    // the 404 screenshot gone, rom 103 has ONE item left, so Next wraps to
+    // it: the caption never changes and no "could not be loaded" line is
+    // ever painted. `onOpen` emits the full-list index (the surviving tile
+    // is still `details-media-0` here); Details.svelte maps it through
+    // `viewableIndex` before the viewer sees it.
+    await $(testId('details-media-0')).click();
+    await $(testId('media-viewer')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the fullscreen media viewer never opened for rom 103',
+    });
+    await expect($(testId('media-viewer-caption'))).toHaveText(
+      'Secret of Mana Disc Set — screenshot 1',
+    );
+    await expect($(testId('media-viewer-image-error'))).not.toExist();
+    // A one-item list hides the arrows entirely — proof that the dead
+    // screenshot is not in the viewer's list at all, not merely skipped on
+    // the way past. ArrowRight is the paging that still works here.
+    await expect($(testId('media-viewer-next'))).not.toExist();
+    await browser.keys(['ArrowRight']);
+    await expect($(testId('media-viewer-caption'))).toHaveText(
+      'Secret of Mana Disc Set — screenshot 1',
+    );
+    await expect($(testId('media-viewer-image-error'))).not.toExist();
+
+    await browser.keys(['Escape']);
+    await $(testId('media-viewer')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+
     await $(testId('details-tab-overview')).click();
     await $(testId('details-close')).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });

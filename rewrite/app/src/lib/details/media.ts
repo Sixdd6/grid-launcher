@@ -89,6 +89,44 @@ export function galleryItems(input: MediaGalleryInput): MediaItem[] {
   return items;
 }
 
+/**
+ * The gallery items a user can actually look at: every screenshot whose
+ * image failed to load is dropped, exactly as `MediaTab.svelte` drops its
+ * tile. A trailer or a hosted video is never dropped — `failed` holds only
+ * screenshot URLs (`onScreenshotError`), and those two kinds report their
+ * own failures inside the viewer.
+ */
+export function viewableItems(items: MediaItem[], failed: Record<string, true>): MediaItem[] {
+  return items.filter((item) => !(item.kind === 'screenshot' && failed[item.url] === true));
+}
+
+/**
+ * Where `items[index]` sits in `viewableItems(items, failed)`.
+ *
+ * When that item is itself a failed screenshot there is no position for it,
+ * so this answers with the NEXT viewable item after it, wrapping past the
+ * end — the viewer then moves on by itself instead of showing a dead frame.
+ * `null` means nothing is viewable at all (or `index` is outside `items`),
+ * and the caller must not open — or must close — the viewer.
+ */
+export function viewableIndex(
+  items: MediaItem[],
+  failed: Record<string, true>,
+  index: number
+): number | null {
+  if (index < 0 || index >= items.length) return null;
+  const viewable = viewableItems(items, failed);
+  if (viewable.length === 0) return null;
+  // Walk forward from `index` (wrapping) to the first item that survived the
+  // filter, then report that item's position in the filtered list.
+  for (let step = 0; step < items.length; step += 1) {
+    const candidate = items[(index + step) % items.length];
+    const position = viewable.indexOf(candidate);
+    if (position !== -1) return position;
+  }
+  return null;
+}
+
 /** The next item, wrapping. `0` for an empty gallery — never `NaN`. */
 export function nextIndex(current: number, count: number): number {
   if (count <= 0) return 0;

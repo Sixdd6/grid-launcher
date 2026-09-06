@@ -7,9 +7,12 @@ import {
   overviewStrip,
   prevIndex,
   trailerPoster,
+  viewableIndex,
+  viewableItems,
   videoMimeType,
   youtubeThumbnailUrl,
   YOUTUBE_THUMBNAIL_BASE,
+  type MediaItem,
 } from './media';
 
 describe('galleryItems', () => {
@@ -84,6 +87,79 @@ describe('viewer navigation', () => {
   it('never divides by zero on an empty gallery', () => {
     expect(nextIndex(0, 0)).toBe(0);
     expect(prevIndex(0, 0)).toBe(0);
+  });
+});
+
+describe('viewableItems', () => {
+  const items: MediaItem[] = [
+    { kind: 'screenshot', url: 'http://s/1.png', caption: 'g — screenshot 1' },
+    { kind: 'screenshot', url: 'http://s/2.png', caption: 'g — screenshot 2' },
+    { kind: 'youtube', videoId: 'dQw4w9WgXcQ', caption: 'g — trailer' },
+    { kind: 'video', url: 'http://s/v.mp4', caption: 'g — video' },
+  ];
+
+  it('keeps every item and its order when nothing failed', () => {
+    expect(viewableItems(items, {})).toEqual(items);
+  });
+
+  it('drops a screenshot whose image failed', () => {
+    expect(viewableItems(items, { 'http://s/1.png': true })).toEqual([
+      items[1],
+      items[2],
+      items[3],
+    ]);
+  });
+
+  it('never drops a trailer or a hosted video, even on a URL collision', () => {
+    expect(viewableItems(items, { 'http://s/v.mp4': true })).toEqual(items);
+  });
+
+  it('is empty when every screenshot failed and there is no video', () => {
+    expect(viewableItems(items.slice(0, 2), { 'http://s/1.png': true, 'http://s/2.png': true }))
+      .toEqual([]);
+  });
+});
+
+describe('viewableIndex', () => {
+  const items: MediaItem[] = [
+    { kind: 'screenshot', url: 'http://s/1.png', caption: 'g — screenshot 1' },
+    { kind: 'screenshot', url: 'http://s/2.png', caption: 'g — screenshot 2' },
+    { kind: 'screenshot', url: 'http://s/3.png', caption: 'g — screenshot 3' },
+  ];
+
+  it('is the identity when nothing failed', () => {
+    expect(viewableIndex(items, {}, 0)).toBe(0);
+    expect(viewableIndex(items, {}, 2)).toBe(2);
+  });
+
+  it('shifts left past an earlier failure', () => {
+    expect(viewableIndex(items, { 'http://s/1.png': true }, 2)).toBe(1);
+  });
+
+  it('moves a failed current item to the next viewable one', () => {
+    expect(viewableIndex(items, { 'http://s/2.png': true }, 1)).toBe(1);
+  });
+
+  it('wraps to the first viewable item when the failed one is last', () => {
+    expect(viewableIndex(items, { 'http://s/3.png': true }, 2)).toBe(0);
+  });
+
+  it('skips a run of failures', () => {
+    expect(viewableIndex(items, { 'http://s/2.png': true, 'http://s/3.png': true }, 1)).toBe(0);
+  });
+
+  it('is null when nothing is viewable', () => {
+    const failed: Record<string, true> = {
+      'http://s/1.png': true,
+      'http://s/2.png': true,
+      'http://s/3.png': true,
+    };
+    expect(viewableIndex(items, failed, 0)).toBe(null);
+  });
+
+  it('is null for an index outside the list', () => {
+    expect(viewableIndex(items, {}, 5)).toBe(null);
+    expect(viewableIndex([], {}, 0)).toBe(null);
   });
 });
 

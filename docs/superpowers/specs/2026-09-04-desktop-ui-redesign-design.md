@@ -143,7 +143,9 @@ Dialog 1040×680 max, centred over a dimmed, blurred shell; Esc and ✕ close.
      referrer policy, YouTube error 153); `path_video` played in-app from an object URL —
      WebKitGTK cannot play media from a custom URI scheme, so the cached file's bytes
      cross IPC and the page wraps them in a `Blob`). Click opens a fullscreen viewer with
-     arrows, Esc, and a caption.
+     arrows, Esc, and a caption. The viewer walks the same viewable list as the gallery: a
+     screenshot that failed to load is skipped, and if the current one fails the viewer
+     moves to the next viewable item, or closes when none is left.
   3. **Saves**: user saves and states (`user_saves`, `user_states`) with timestamps and
      sizes, last cloud sync, Upload / Download / Sync now, and the cloud scope warning
      the current details view shows.

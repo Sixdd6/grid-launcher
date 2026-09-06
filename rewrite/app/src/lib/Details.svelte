@@ -26,7 +26,7 @@
   import MediaViewer from './details/MediaViewer.svelte';
   import SavesTab from './details/SavesTab.svelte';
   import FilesTab from './details/FilesTab.svelte';
-  import { galleryItems } from './details/media';
+  import { galleryItems, viewableIndex, viewableItems } from './details/media';
   import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
   import { isNativeExecutablePlatform, syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
   import { contentButtons, installLabel, isContentPlatform, isNativePlatform } from './details/actions';
@@ -139,6 +139,24 @@
   function markMediaFailed(url: string) {
     failedMedia = { ...failedMedia, [url]: true };
   }
+  // The viewer walks the same list the gallery shows, so a screenshot whose
+  // image 404s is skipped instead of paged onto. `viewerIndex` indexes THIS
+  // list, never `mediaItems`; `MediaTab`'s `onOpen` emits a `mediaItems`
+  // index (its `{#if}` sits inside the `{#each}`, so tile numbering is
+  // stable), and `viewableIndex` maps one to the other.
+  let viewerItems = $derived(viewableItems(mediaItems, failedMedia));
+  $effect(() => {
+    // A screenshot that fails while the viewer is open shortens the list
+    // under it. Move to the last item still there, or close when the
+    // failure took the only thing left to look at.
+    if (viewerIndex === null) return;
+    if (viewerItems.length === 0) {
+      viewerIndex = null;
+      panelEl?.focus();
+    } else if (viewerIndex >= viewerItems.length) {
+      viewerIndex = viewerItems.length - 1;
+    }
+  });
   let description = $derived(merged.description);
   let rating = $derived(merged.rating);
   let genres = $derived(merged.genres);
@@ -692,7 +710,7 @@
           {:else if tab === 'media'}
             <MediaTab
               items={mediaItems}
-              onOpen={(i) => (viewerIndex = i)}
+              onOpen={(i) => (viewerIndex = viewableIndex(mediaItems, failedMedia, i))}
               failed={failedMedia}
               onScreenshotError={markMediaFailed}
               coverUrl={coverLarge ?? coverSmall}
@@ -748,10 +766,9 @@
 
 {#if viewerIndex !== null}
   <MediaViewer
-    items={mediaItems}
+    items={viewerItems}
     index={viewerIndex}
     onIndex={(i) => (viewerIndex = i)}
-    failed={failedMedia}
     onScreenshotError={markMediaFailed}
     coverUrl={coverLarge ?? coverSmall}
     onClose={() => {
