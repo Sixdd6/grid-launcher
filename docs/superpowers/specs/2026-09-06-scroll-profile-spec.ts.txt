@@ -1,0 +1,102 @@
+import { APP_START_TIMEOUT, FIXTURE_TOKEN, mockUrl, TRANSITION_TIMEOUT } from '../helpers/env.js';
+const testId = (id: string) => `[data-testid="${id}"]`;
+
+const QCV = '.cover img.backdrop { width: calc((100% + 24px) / 4) !important; height: calc((100% + 24px) / 4) !important; transform: scale(4) !important; transform-origin: top left !important; filter: blur(2.5px) brightness(0.45) !important; } .card { content-visibility: visible !important; }';
+const VARIANTS: Record<string, string> = {
+  warmup: '',
+  quarterNoCV: QCV,
+  docScroll: QCV + ' #app { height: auto !important; min-height: 100svh; } .view { overflow: visible !important; height: auto !important; } .server { height: auto !important; } .server .body { overflow: visible !important; height: auto !important; max-height: none !important; }',
+  docScrollNoHalo: QCV + ' .over-art { text-shadow: none !important; } #app { height: auto !important; min-height: 100svh; } .view { overflow: visible !important; height: auto !important; } .server { height: auto !important; } .server .body { overflow: visible !important; height: auto !important; max-height: none !important; }',
+  quarterNoCV2: QCV,
+};
+
+async function measure(css: string): Promise<number[]> {
+  return browser.executeAsync((variantCss: string, done: (f: number[]) => void) => {
+    const style = document.createElement('style');
+    style.textContent = variantCss;
+    document.head.appendChild(style);
+    const body = document.querySelector('.server .body') as HTMLElement;
+    const useDoc = variantCss.includes('#app');
+    const el = (useDoc ? document.scrollingElement : body) as HTMLElement;
+    el.scrollTop = 0;
+    const total = el.scrollHeight - el.clientHeight;
+    const frames: number[] = [];
+    setTimeout(() => {
+      let last = performance.now();
+      const start = last;
+      function step(t: number) {
+        if (frames.length === 0 && total < 1000) { style.remove(); done([-1]); return; }
+        frames.push(t - last);
+        last = t;
+        const p = (t - start) / 4000;
+        el.scrollTop = Math.min(total, total * p);
+        if (p < 1) requestAnimationFrame(step);
+        else { style.remove(); el.scrollTop = 0; done(frames); }
+      }
+      requestAnimationFrame(step);
+    }, 300);
+  }, css);
+}
+
+function stats(frames: number[]): string {
+  const sorted = [...frames].sort((a, b) => a - b);
+  const p = (q: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))];
+  const long = frames.filter((f) => f > 50).length;
+  const mean = frames.reduce((a, b) => a + b, 0) / frames.length;
+  return `frames=${frames.length} mean=${mean.toFixed(1)} p50=${p(0.5).toFixed(1)} p95=${p(0.95).toFixed(1)} max=${p(1).toFixed(1)} >50ms=${long}`;
+}
+
+async function openCost(css: string): Promise<number> {
+  await $(testId('platform-btn-1')).click();
+  await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+  await browser.pause(500);
+  return browser.executeAsync((variantCss: string, done: (ms: number) => void) => {
+    const style = document.createElement('style');
+    style.textContent = variantCss;
+    document.head.appendChild(style);
+    const t0 = performance.now();
+    (document.querySelector('[data-testid="platform-btn-2"]') as HTMLElement).click();
+    const poll = () => {
+      if (document.querySelector('[data-testid="game-card-1299"]')) {
+        requestAnimationFrame(() => requestAnimationFrame(() => { style.remove(); done(performance.now() - t0); }));
+      } else requestAnimationFrame(poll);
+    };
+    requestAnimationFrame(poll);
+  }, css);
+}
+
+describe('perf scroll', () => {
+  before(async () => {
+    await $(testId('connect-server-url')).waitForExist({ timeout: APP_START_TIMEOUT });
+    try { await browser.setWindowSize(1920, 1080); } catch { /* driver may refuse */ }
+    await $(testId('connect-server-url')).setValue(mockUrl());
+    await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
+    await $(testId('connect-submit')).click();
+    await $(testId('platform-btn-2')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await $(testId('platform-btn-2')).click();
+    await $(testId('game-card-1299')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await browser.pause(3000);
+  });
+
+  it.skip('measures platform open cost with and without content-visibility', async () => {
+    const lines: string[] = [];
+    for (const [name, css] of [['cv', ''], ['noCV', '.card { content-visibility: visible !important; }'], ['cv2', ''], ['noCV2', '.card { content-visibility: visible !important; }']] as const) {
+      lines.push(`${name} open=${(await openCost(css)).toFixed(0)}ms`);
+      await browser.pause(1500);
+    }
+    console.log(`OPENCOST ${lines.join(' | ')}`);
+  });
+
+  it('measures scroll frame times per CSS variant', async () => {
+    const lines: string[] = [];
+    const count = await browser.execute(() => document.querySelectorAll('[data-testid^="game-card-"]').length);
+    const vp = await browser.execute(() => `${window.innerWidth}x${window.innerHeight}`);
+    lines.push(`cards=${count} viewport=${vp}`);
+    for (const [name, css] of Object.entries(VARIANTS)) {
+      const frames = await measure(css);
+      lines.push(`${name.padEnd(14)} ${stats(frames)}`);
+      await browser.pause(800);
+    }
+    throw new Error(`PERF\n${lines.join('\n')}`);
+  });
+});
