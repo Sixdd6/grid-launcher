@@ -142,7 +142,7 @@ describe('library', () => {
   });
 
   // Round 4: the shell background is no longer the raw cover blurred by the
-  // compositor — the backend builds one 960px, pre-blurred `<key>.bg.jpg`
+  // compositor — the backend builds one 960px, pre-blurred `<key>.bg<sigma>.jpg`
   // (`ensure_background_variant`) and the layer composites that. Opening rom
   // 101's details reports its subject synchronously (`noteViewed`), so no
   // hover dwell has to be simulated here.
@@ -156,13 +156,13 @@ describe('library', () => {
     await $(testId('game-card-101')).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
 
-    // A loose `.bg.jpg` check would pass even if the wrong source image (say,
+    // A loose `.bg` check would pass even if the wrong source image (say,
     // the cover) got blurred: `subjectFromDetails` prefers fanart over
     // screenshots and the cover (background.ts), and rom 101's fanart_path
     // ("roms/1/101/fanart/fanart.png") only resolves to a real, fetchable
     // URL because of resolve_image_url's relative-path fix (Task 1) — before
     // that fix it joined onto the SPA root and 404'd. `ensure_background_variant`
-    // names the variant `<sha256 of the resolved URL>.bg.jpg`
+    // names the variant `<sha256 of the resolved URL>.bg<sigma>.jpg`
     // (images/background.rs, images/cache.rs's `image_key`), so hashing the
     // exact resolved URL and matching that prefix proves the fanart's URL
     // specifically made it all the way through, not just any image.

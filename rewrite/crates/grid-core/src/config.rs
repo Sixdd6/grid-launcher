@@ -80,6 +80,12 @@ pub struct UiSettings {
     /// write by `normalize_ui_settings`; read sites clamp again.
     #[serde(default = "default_background_fade")]
     pub background_fade: u8,
+    /// Background-art blur sigma, 0-40, applied at the variant's 960px scale
+    /// (`images::background`). Baked into the variant's file name, so a
+    /// change never serves a stale blur. Clamped on write by
+    /// `normalize_ui_settings`.
+    #[serde(default = "default_background_blur")]
+    pub background_blur: u8,
     /// Library grid card size: `"small"`, `"medium"` or `"large"`
     /// (design §5, D-UI-9 "remembered per view"). Stored as a plain string
     /// for the same forward-compatibility reason as `theme`: an unknown
@@ -102,6 +108,10 @@ fn default_background_fade() -> u8 {
     25
 }
 
+fn default_background_blur() -> u8 {
+    12
+}
+
 fn default_card_size() -> String {
     "medium".to_string()
 }
@@ -111,6 +121,7 @@ impl Default for UiSettings {
         Self {
             theme: default_theme(),
             background_fade: default_background_fade(),
+            background_blur: default_background_blur(),
             card_size_library: default_card_size(),
             card_size_server: default_card_size(),
         }
@@ -325,6 +336,7 @@ mod tests {
         let ui = UiSettings::default();
         assert_eq!(ui.theme, "system");
         assert_eq!(ui.background_fade, 25);
+        assert_eq!(ui.background_blur, 12);
         assert_eq!(Config::default().ui, ui);
     }
 
@@ -340,6 +352,7 @@ mod tests {
         let loaded = Config::load(&path).unwrap();
         assert_eq!(loaded.ui.theme, "system");
         assert_eq!(loaded.ui.background_fade, 25);
+        assert_eq!(loaded.ui.background_blur, 12);
     }
 
     #[test]
@@ -935,6 +948,42 @@ mod tests {
         assert_eq!(loaded.ui.card_size_server, "medium");
     }
 
+    /// A `[ui]` table written before the blur setting existed loads the
+    /// default rather than failing: `background_blur` is `serde(default)`.
+    #[test]
+    fn a_ui_table_written_before_the_blur_existed_loads_the_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "schema_version = 1\n\n[ui]\ntheme = \"dark\"\nbackground_fade = 40\n",
+        )
+        .unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.ui.background_blur, 12);
+    }
+
+    #[test]
+    fn the_background_blur_round_trips_through_save_and_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config {
+            ui: UiSettings {
+                background_blur: 30,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            written.contains("background_blur"),
+            "written config:\n{written}"
+        );
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.ui.background_blur, 30);
+    }
+
     #[test]
     fn card_sizes_round_trip_through_save_and_load() {
         let dir = tempfile::tempdir().unwrap();
@@ -943,6 +992,7 @@ mod tests {
             ui: UiSettings {
                 theme: "system".to_string(),
                 background_fade: 25,
+                background_blur: 12,
                 card_size_library: "large".to_string(),
                 card_size_server: "small".to_string(),
             },

@@ -2,6 +2,8 @@
 //! one-at-a-time replenish job with its `images-replenished` event, and the
 //! post-install cover prefetch.
 
+use grid_core::config::Config;
+use grid_core::images::background::BACKGROUND_BLUR_DEFAULT;
 use grid_core::images::cache::ImageCache;
 use grid_core::images::replenish::{self, background_source_url, ReplenishReport};
 use grid_core::images::sweep::{pinned_keys, sweep, SweepReport, IMAGE_CACHE_CAP_BYTES};
@@ -115,6 +117,7 @@ impl ImageService {
             let Some(client) = session.client() else {
                 return;
             };
+            let sigma = background_blur();
             let mut background_source = String::new();
             for path in [&fields.cover_small_path, &fields.cover_large_path] {
                 let url = filter_to_server_host(&resolve_image_url(path, &base), &base);
@@ -143,6 +146,7 @@ impl ImageService {
                     session.cache(),
                     Some(&client),
                     &background_source,
+                    sigma,
                 )
                 .await;
             }
@@ -167,16 +171,25 @@ async fn replenish_once(session: &SessionManager, install: &InstallService) -> R
     };
     let base = session.server_url();
     let registry = install.registry();
-    let rows = {
+    // The rows and the blur sigma are both blocking reads (SQLite, then
+    // `config.toml`), so they share the one `spawn_blocking` hop.
+    let (rows, sigma) = {
         let registry = registry.clone();
-        tokio::task::spawn_blocking(move || registry.all())
+        tokio::task::spawn_blocking(move || (registry.all().unwrap_or_default(), background_blur()))
             .await
-            .ok()
-            .and_then(Result::ok)
-            .unwrap_or_default()
+            .unwrap_or_else(|_| (Vec::new(), BACKGROUND_BLUR_DEFAULT))
     };
-    let items = replenish::plan(&rows, session.cache(), &base);
-    replenish::run(&client, session.cache(), &registry, &base, items).await
+    let items = replenish::plan(&rows, session.cache(), &base, sigma);
+    replenish::run(&client, session.cache(), &registry, &base, items, sigma).await
+}
+
+/// The configured background blur sigma, or the default when the config will
+/// not load. A background image is not worth failing a replenish or a
+/// post-install prefetch over.
+fn background_blur() -> u8 {
+    Config::load(&Config::default_path())
+        .map(|c| c.ui.background_blur)
+        .unwrap_or(BACKGROUND_BLUR_DEFAULT)
 }
 
 #[cfg(test)]

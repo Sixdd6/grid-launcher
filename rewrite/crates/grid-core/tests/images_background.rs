@@ -1,5 +1,5 @@
 use grid_core::images::background::{
-    build_background_variant, ensure_background_variant, BACKGROUND_VARIANT_EXT, BACKGROUND_WIDTH,
+    background_variant_ext, build_background_variant, ensure_background_variant, BACKGROUND_WIDTH,
 };
 use grid_core::images::cache::{image_key, ImageCache, ImageError};
 use grid_core::romm::RommClient;
@@ -57,11 +57,12 @@ fn the_variant_is_written_beside_the_source_and_is_960_wide() {
     let key = image_key("https://romm.example/cover.png");
     let source = write_source(dir.path(), &key);
 
-    let out = build_background_variant(&source, dir.path(), &key).unwrap();
+    let out = build_background_variant(&source, dir.path(), &key, 12).unwrap();
 
     assert_eq!(
         out,
-        dir.path().join(format!("{key}.{BACKGROUND_VARIANT_EXT}"))
+        dir.path()
+            .join(format!("{key}.{}", background_variant_ext(12)))
     );
     assert!(out.is_file());
     let decoded = image::open(&out).unwrap();
@@ -84,7 +85,7 @@ fn a_portrait_source_is_capped_on_its_long_edge() {
     let source = dir.path().join(format!("{key}.png"));
     std::fs::write(&source, gradient_png(850, 1122)).unwrap();
 
-    let out = build_background_variant(&source, dir.path(), &key).unwrap();
+    let out = build_background_variant(&source, dir.path(), &key, 12).unwrap();
 
     let decoded = image::open(&out).unwrap();
     assert_eq!((decoded.width(), decoded.height()), (727, 960));
@@ -98,7 +99,7 @@ fn a_source_narrower_than_the_target_is_not_upscaled() {
     let source = dir.path().join(format!("{key}.png"));
     std::fs::write(&source, gradient_png(320, 240)).unwrap();
 
-    let out = build_background_variant(&source, dir.path(), &key).unwrap();
+    let out = build_background_variant(&source, dir.path(), &key, 12).unwrap();
     let decoded = image::open(&out).unwrap();
     assert_eq!(decoded.width(), 320);
     assert_eq!(decoded.height(), 240);
@@ -111,7 +112,7 @@ fn a_body_that_is_not_an_image_reports_decode_rather_than_panicking() {
     let source = dir.path().join(format!("{key}.png"));
     std::fs::write(&source, b"<html>not an image</html>").unwrap();
     assert!(matches!(
-        build_background_variant(&source, dir.path(), &key),
+        build_background_variant(&source, dir.path(), &key, 12),
         Err(ImageError::Decode)
     ));
 }
@@ -137,22 +138,25 @@ async fn a_cold_url_is_fetched_once_and_the_second_call_is_a_cache_hit() {
     let client = client_for(&server);
     let url = format!("{}/assets/roms/1/fanart.png", server.uri());
 
-    let first = ensure_background_variant(&cache, Some(&client), &url)
+    let first = ensure_background_variant(&cache, Some(&client), &url, 12)
         .await
         .unwrap();
     // Compared instead of the mtime: `find_with_extension` refreshes the
     // mtime on a hit, so only the content proves nothing was rebuilt.
     let bytes = std::fs::read(&first).unwrap();
 
-    let second = ensure_background_variant(&cache, Some(&client), &url)
+    let second = ensure_background_variant(&cache, Some(&client), &url, 12)
         .await
         .unwrap();
 
     assert_eq!(first, second);
     assert_eq!(
         first,
-        dir.path()
-            .join(format!("{}.{BACKGROUND_VARIANT_EXT}", image_key(&url)))
+        dir.path().join(format!(
+            "{}.{}",
+            image_key(&url),
+            background_variant_ext(12)
+        ))
     );
     assert_eq!(std::fs::read(&second).unwrap(), bytes);
     let decoded = image::open(&second).unwrap();
@@ -170,14 +174,18 @@ async fn a_second_call_is_a_cache_hit_and_does_not_rebuild() {
 
     // No client: `ImageCache::ensure` finds the source already cached, so
     // the whole path runs offline.
-    let first = ensure_background_variant(&cache, None, url).await.unwrap();
+    let first = ensure_background_variant(&cache, None, url, 12)
+        .await
+        .unwrap();
     let bytes = std::fs::read(&first).unwrap();
 
     // Deleting the source proves the second call cannot have rebuilt: a
     // rebuild would need the source and would fail with `Offline`.
     std::fs::remove_file(dir.path().join(format!("{key}.png"))).unwrap();
 
-    let second = ensure_background_variant(&cache, None, url).await.unwrap();
+    let second = ensure_background_variant(&cache, None, url, 12)
+        .await
+        .unwrap();
     assert_eq!(first, second);
     assert_eq!(std::fs::read(&second).unwrap(), bytes);
 }
@@ -205,8 +213,8 @@ async fn two_concurrent_calls_for_a_cold_variant_both_get_a_complete_file() {
     let url = format!("{}/assets/roms/2/fanart.png", server.uri());
 
     let (a, b) = tokio::join!(
-        ensure_background_variant(&cache, Some(&client), &url),
-        ensure_background_variant(&cache, Some(&client), &url),
+        ensure_background_variant(&cache, Some(&client), &url, 12),
+        ensure_background_variant(&cache, Some(&client), &url, 12),
     );
 
     let a = a.unwrap();
@@ -231,12 +239,12 @@ async fn an_undecodable_source_is_negatively_cached_for_the_session() {
     std::fs::write(&source, b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>").unwrap();
 
     assert!(matches!(
-        ensure_background_variant(&cache, None, url).await,
+        ensure_background_variant(&cache, None, url, 12).await,
         Err(ImageError::Decode)
     ));
     std::fs::remove_file(&source).unwrap();
     assert!(matches!(
-        ensure_background_variant(&cache, None, url).await,
+        ensure_background_variant(&cache, None, url, 12).await,
         Err(ImageError::Decode)
     ));
 }
@@ -245,8 +253,74 @@ async fn an_undecodable_source_is_negatively_cached_for_the_session() {
 async fn a_cold_url_with_no_client_is_offline() {
     let dir = tempfile::tempdir().unwrap();
     let cache = ImageCache::new(dir.path().to_path_buf());
-    match ensure_background_variant(&cache, None, "https://romm.example/cold.png").await {
+    match ensure_background_variant(&cache, None, "https://romm.example/cold.png", 12).await {
         Err(ImageError::Offline) => {}
         other => panic!("expected Offline, got {other:?}"),
     }
+}
+
+/// Each blur level is its own cache entry: the sigma is baked into the file
+/// name, so changing the Appearance slider can never serve the old blur.
+#[test]
+fn two_sigmas_for_one_source_build_two_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = image_key("https://romm.example/two-sigmas.png");
+    let source = write_source(dir.path(), &key);
+
+    let blurred = build_background_variant(&source, dir.path(), &key, 12).unwrap();
+    let sharp = build_background_variant(&source, dir.path(), &key, 0).unwrap();
+
+    assert_eq!(blurred, dir.path().join(format!("{key}.bg12.jpg")));
+    assert_eq!(sharp, dir.path().join(format!("{key}.bg0.jpg")));
+    assert!(blurred.is_file() && sharp.is_file());
+    assert_ne!(
+        std::fs::read(&blurred).unwrap(),
+        std::fs::read(&sharp).unwrap(),
+        "sigma 12 and sigma 0 must not produce identical bytes"
+    );
+}
+
+/// Sigma 0 means no blur at all, but the variant is still the downscaled
+/// JPEG the shell composites — the size win is independent of the blur.
+#[test]
+fn sigma_zero_skips_the_blur_but_still_downscales() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = image_key("https://romm.example/sharp.png");
+    let source = write_source(dir.path(), &key);
+
+    let out = build_background_variant(&source, dir.path(), &key, 0).unwrap();
+
+    let decoded = image::open(&out).unwrap();
+    assert_eq!((decoded.width(), decoded.height()), (BACKGROUND_WIDTH, 640));
+    assert_eq!(part_files(dir.path()), 0);
+}
+
+/// A failed build is remembered per sigma, not per source: a source that
+/// cannot decode at one sigma cannot decode at another either, but the two
+/// in-flight/failed entries must stay independent so one sigma's build never
+/// blocks or short-circuits another's.
+#[tokio::test]
+async fn a_second_sigma_builds_its_own_file_through_the_ensure_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = ImageCache::new(dir.path().to_path_buf());
+    let url = "https://romm.example/ensure-two.png";
+    let key = image_key(url);
+    write_source(dir.path(), &key);
+
+    let a = ensure_background_variant(&cache, None, url, 12)
+        .await
+        .unwrap();
+    let b = ensure_background_variant(&cache, None, url, 30)
+        .await
+        .unwrap();
+
+    assert_eq!(a, dir.path().join(format!("{key}.bg12.jpg")));
+    assert_eq!(b, dir.path().join(format!("{key}.bg30.jpg")));
+}
+
+#[test]
+fn the_variant_extension_carries_the_sigma() {
+    assert_eq!(background_variant_ext(0), "bg0.jpg");
+    assert_eq!(background_variant_ext(12), "bg12.jpg");
+    assert_eq!(background_variant_ext(40), "bg40.jpg");
 }

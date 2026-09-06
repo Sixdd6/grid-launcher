@@ -3,7 +3,7 @@
 //! fetch missing small-cover files. Sequential, never fails; errors skip
 //! the item.
 
-use super::background::{ensure_background_variant, BACKGROUND_VARIANT_EXT};
+use super::background::{background_variant_ext, ensure_background_variant};
 use super::cache::{image_key, ImageCache};
 use super::urls::{filter_to_server_host, resolve_image_url};
 use super::ImageFields;
@@ -20,7 +20,8 @@ pub enum ReplenishItem {
         url: String,
     },
     /// The row's background source (its first fanart, else its first
-    /// screenshot, else its large cover) has no `<key>.bg.jpg` yet. Planned
+    /// screenshot, else its large cover) has no variant at the configured
+    /// blur (`<key>.bg<sigma>.jpg`) yet. Planned
     /// LAST, after every `NeedsFields`/`NeedsFile` item, so building variants
     /// never delays the grid covers the user is actually looking at.
     NeedsVariant {
@@ -69,7 +70,16 @@ pub fn background_source_url(row: &InstalledGame, base_url: &str) -> String {
     )
 }
 
-pub fn plan(rows: &[InstalledGame], cache: &ImageCache, base_url: &str) -> Vec<ReplenishItem> {
+/// `sigma` is the configured background blur: the variant's file name
+/// carries it, so a row whose art exists only at another sigma still needs a
+/// build.
+pub fn plan(
+    rows: &[InstalledGame],
+    cache: &ImageCache,
+    base_url: &str,
+    sigma: u8,
+) -> Vec<ReplenishItem> {
+    let ext = background_variant_ext(sigma);
     let mut items = Vec::new();
     let mut variants = Vec::new();
     for row in rows {
@@ -88,7 +98,7 @@ pub fn plan(rows: &[InstalledGame], cache: &ImageCache, base_url: &str) -> Vec<R
         let background = background_source_url(row, base_url);
         if !background.is_empty()
             && cache
-                .find_with_extension(&image_key(&background), BACKGROUND_VARIANT_EXT)
+                .find_with_extension(&image_key(&background), &ext)
                 .is_none()
         {
             variants.push((
@@ -116,6 +126,7 @@ pub async fn run(
     registry: &Registry,
     base_url: &str,
     items: Vec<ReplenishItem>,
+    sigma: u8,
 ) -> ReplenishReport {
     let mut report = ReplenishReport::default();
     for item in items {
@@ -152,7 +163,7 @@ pub async fn run(
                 Err(_) => report.skipped += 1,
             },
             ReplenishItem::NeedsVariant { url, .. } => {
-                match ensure_background_variant(cache, Some(client), &url).await {
+                match ensure_background_variant(cache, Some(client), &url, sigma).await {
                     Ok(_) => report.fetched_files += 1,
                     Err(_) => report.skipped += 1,
                 }

@@ -259,14 +259,17 @@ pub async fn ensure_video(state: State<'_, AppState>, url: String) -> Result<Str
     Ok(path.to_string_lossy().into_owned())
 }
 
-/// The local path of the shell background's pre-scaled, pre-blurred variant
-/// of `url`, building it on a miss. Mirrors [`ensure_image`]'s resolution and
+/// The local path of the shell background's pre-scaled variant of `url`,
+/// blurred at `blur` (the frontend passes the stored `ui.background_blur`;
+/// the sigma is part of the variant's file name, so a slider change builds a
+/// new file rather than serving the old blur) and building it on a miss. Mirrors [`ensure_image`]'s resolution and
 /// host filter exactly, so a URL pointing anywhere but the configured server
 /// is refused rather than fetched.
 #[tauri::command]
 pub async fn ensure_background_variant(
     state: State<'_, AppState>,
     url: String,
+    blur: u8,
 ) -> Result<String, String> {
     let base = state.session.server_url();
     let resolved = filter_to_server_host(&resolve_image_url(&url, &base), &base);
@@ -278,6 +281,7 @@ pub async fn ensure_background_variant(
         state.session.cache(),
         client.as_deref(),
         &resolved,
+        blur.min(MAX_BACKGROUND_BLUR),
     )
     .await
     .map_err(err)?;
@@ -376,6 +380,11 @@ pub async fn set_library_path(path: String) -> Result<(), String> {
 /// (design §3: "0–60%").
 const MAX_BACKGROUND_FADE: u8 = 60;
 
+/// The strongest background blur the Appearance slider offers. Aliased from
+/// grid-core so the clamp here and the builder's documented range can never
+/// drift apart.
+const MAX_BACKGROUND_BLUR: u8 = grid_core::images::background::BACKGROUND_BLUR_MAX;
+
 /// What actually gets written to `config.toml` for a set of appearance
 /// settings: an unrecognized theme falls back to `"system"` (rather than
 /// being rejected, which would make a stale frontend unable to save
@@ -389,6 +398,7 @@ pub fn normalize_ui_settings(settings: UiSettings) -> UiSettings {
     UiSettings {
         theme: theme.to_string(),
         background_fade: settings.background_fade.min(MAX_BACKGROUND_FADE),
+        background_blur: settings.background_blur.min(MAX_BACKGROUND_BLUR),
         card_size_library: normalize_card_size(&settings.card_size_library),
         card_size_server: normalize_card_size(&settings.card_size_server),
     }
@@ -2302,6 +2312,7 @@ mod ui_settings_tests {
             let out = normalize_ui_settings(UiSettings {
                 theme: "system".to_string(),
                 background_fade: 25,
+                background_blur: 12,
                 card_size_library: raw.to_string(),
                 card_size_server: raw.to_string(),
             });
@@ -2325,6 +2336,38 @@ mod ui_settings_tests {
         assert_eq!(fade(60), 60);
         assert_eq!(fade(61), 60);
         assert_eq!(fade(255), 60);
+    }
+
+    /// The blur is clamped the same way the fade is: a stale or hand-edited
+    /// frontend value must never become a 255-sigma blur nobody can undo.
+    #[test]
+    fn the_blur_is_clamped_to_the_designs_zero_to_forty() {
+        let blur = |value: u8| {
+            normalize_ui_settings(UiSettings {
+                background_blur: value,
+                ..Default::default()
+            })
+            .background_blur
+        };
+        assert_eq!(blur(0), 0);
+        assert_eq!(blur(12), 12);
+        assert_eq!(blur(40), 40);
+        assert_eq!(blur(41), 40);
+        assert_eq!(blur(255), 40);
+    }
+
+    #[test]
+    fn the_default_ui_settings_normalize_unchanged() {
+        assert_eq!(
+            normalize_ui_settings(UiSettings::default()),
+            UiSettings {
+                theme: "system".to_string(),
+                background_fade: 25,
+                background_blur: 12,
+                card_size_library: "medium".to_string(),
+                card_size_server: "medium".to_string(),
+            }
+        );
     }
 
     #[test]

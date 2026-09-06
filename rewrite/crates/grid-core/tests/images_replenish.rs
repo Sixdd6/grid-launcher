@@ -55,7 +55,7 @@ async fn plan_classifies_rows() {
         row(Some(5), "https://other/5.png", "", ""), // foreign host: no fetch target
     ];
     assert_eq!(
-        plan(&rows, &cache, base),
+        plan(&rows, &cache, base, 12),
         vec![
             ReplenishItem::NeedsFields { rom_id: 1 },
             ReplenishItem::NeedsFile {
@@ -92,7 +92,7 @@ async fn plan_puts_variants_last_and_prefers_fanart_then_screenshots() {
     let cover_row = row(Some(3), "/assets/3.png", "/assets/3l.png", "");
 
     assert_eq!(
-        plan(&[fanart_row, shot_row, cover_row], &cache, base),
+        plan(&[fanart_row, shot_row, cover_row], &cache, base, 12),
         vec![
             ReplenishItem::NeedsFile {
                 rom_id: 1,
@@ -131,13 +131,14 @@ async fn plan_skips_a_row_whose_variant_already_exists() {
     let small = image_key("https://h/assets/4.png");
     std::fs::write(dir.path().join(format!("{small}.png")), PNG_MAGIC).unwrap();
     let large = image_key("https://h/assets/4l.png");
-    std::fs::write(dir.path().join(format!("{large}.bg.jpg")), b"jpeg").unwrap();
+    std::fs::write(dir.path().join(format!("{large}.bg12.jpg")), b"jpeg").unwrap();
 
     assert_eq!(
         plan(
             &[row(Some(4), "/assets/4.png", "/assets/4l.png", "")],
             &cache,
-            base
+            base,
+            12
         ),
         vec![]
     );
@@ -180,8 +181,8 @@ async fn run_backfills_fields_fetches_files_and_counts_skips() {
         .unwrap();
     registry.upsert(&row(Some(9), "", "", "")).unwrap();
     let client = client_for(&server);
-    let items = plan(&registry.all().unwrap(), &cache, &server.uri());
-    let report = run(&client, &cache, &registry, &server.uri(), items).await;
+    let items = plan(&registry.all().unwrap(), &cache, &server.uri(), 12);
+    let report = run(&client, &cache, &registry, &server.uri(), items, 12).await;
 
     assert_eq!(
         report,
@@ -231,12 +232,12 @@ async fn run_skips_and_does_not_fetch_when_row_vanishes_before_update() {
     let vanishing = row(Some(7), "", "", "");
     registry.upsert(&vanishing).unwrap();
     let client = client_for(&server);
-    let items = plan(&registry.all().unwrap(), &cache, &server.uri());
+    let items = plan(&registry.all().unwrap(), &cache, &server.uri(), 12);
     registry
         .remove(&vanishing.title, &vanishing.platform)
         .unwrap();
 
-    let report = run(&client, &cache, &registry, &server.uri(), items).await;
+    let report = run(&client, &cache, &registry, &server.uri(), items, 12).await;
 
     assert_eq!(
         report,
@@ -271,7 +272,7 @@ async fn plan_caps_variants_at_the_limit_and_keeps_the_most_recently_played() {
         })
         .collect();
 
-    let items = plan(&rows, &cache, base);
+    let items = plan(&rows, &cache, base, 12);
     let variants: Vec<_> = items
         .iter()
         .filter_map(|i| match i {
@@ -305,7 +306,7 @@ async fn plan_orders_unplayed_rows_by_install_time() {
     let mut fresh = row(Some(2), "/assets/2.png", "/assets/2l.png", "");
     fresh.installed_at = 900;
 
-    let items = plan(&[old, fresh], &cache, "https://h");
+    let items = plan(&[old, fresh], &cache, "https://h", 12);
     let variants: Vec<_> = items
         .iter()
         .filter_map(|i| match i {
@@ -314,4 +315,31 @@ async fn plan_orders_unplayed_rows_by_install_time() {
         })
         .collect();
     assert_eq!(variants, vec![2, 1]);
+}
+
+/// The blur sigma is part of the variant's name, so art built at the old
+/// slider position does NOT satisfy the new one: `plan` must still emit a
+/// `NeedsVariant` for a row whose only variant on disk is another sigma's.
+#[tokio::test]
+async fn plan_still_needs_a_variant_when_only_another_sigma_is_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = ImageCache::new(dir.path().to_path_buf());
+    let base = "https://h";
+    let small = image_key("https://h/assets/9.png");
+    std::fs::write(dir.path().join(format!("{small}.png")), PNG_MAGIC).unwrap();
+    let large = image_key("https://h/assets/9l.png");
+    std::fs::write(dir.path().join(format!("{large}.bg20.jpg")), b"jpeg").unwrap();
+
+    assert_eq!(
+        plan(
+            &[row(Some(9), "/assets/9.png", "/assets/9l.png", "")],
+            &cache,
+            base,
+            12
+        ),
+        vec![ReplenishItem::NeedsVariant {
+            rom_id: 9,
+            url: "https://h/assets/9l.png".to_string(),
+        }]
+    );
 }

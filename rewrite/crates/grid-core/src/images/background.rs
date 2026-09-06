@@ -14,8 +14,17 @@
 //! tall covers at their full ~1 Mpx.
 //!
 //! Shares the image cache's directory and key scheme, like `video.rs`: the
-//! variant for `<key>` is `<key>.bg.jpg`, which keeps it with its source for
-//! the sweep (`sweep::sweep` pins by key PREFIX for exactly this).
+//! variant for `<key>` at blur sigma `<sigma>` is `<key>.bg<sigma>.jpg`,
+//! which keeps it with its source for the sweep (`sweep::sweep` pins by key
+//! PREFIX for exactly this). The sigma is part of the name so each blur
+//! level is its own cache entry and a changed setting can never serve a
+//! stale blur.
+//!
+//! Orphans: a variant built at a sigma the user has since moved away from —
+//! and any `<key>.bg.jpg` from before the sigma was in the name — is simply
+//! never asked for again. No migration deletes them: the sweep pins by key
+//! prefix, so an orphan stays with its source while the source is pinned,
+//! and is reaped by the cache cap like any other unpinned file.
 //!
 //! Token secrecy: the source bytes come from `ImageCache::ensure` (the
 //! session's `RommClient`); nothing here builds a URL or logs one.
@@ -29,33 +38,40 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::Notify;
 
-/// The variant's extension. Not in `LOOKUP_EXTENSIONS`, so `find_existing`
-/// never mistakes a variant for its own source.
-pub const BACKGROUND_VARIANT_EXT: &str = "bg.jpg";
+/// The default blur sigma when no setting can be read (`ui.background_blur`
+/// in `config.rs` defaults to the same value).
+pub const BACKGROUND_BLUR_DEFAULT: u8 = 12;
+/// The strongest blur the Appearance slider offers. The app layer clamps to
+/// this before any variant is built.
+pub const BACKGROUND_BLUR_MAX: u8 = 40;
 /// The side of the box the variant is fitted inside. Wide enough for a 1080p
 /// window's background, small enough to blur once and composite for free.
 pub const BACKGROUND_WIDTH: u32 = 960;
-/// The blur radius. The CSS it replaces was `blur(40px)` on a layer stretched
-/// across a ~1920px viewport; at the 960px the variant is built at, the same
-/// visual radius is half that. Lower values (12 was tried) leave the cover's
-/// title legible through the background.
-pub const BACKGROUND_BLUR_SIGMA: f32 = 20.0;
 pub const BACKGROUND_JPEG_QUALITY: u8 = 80;
+
+/// The variant's extension for blur `sigma`: `bg<sigma>.jpg`. Not in
+/// `LOOKUP_EXTENSIONS`, so `find_existing` never mistakes a variant for its
+/// own source.
+pub fn background_variant_ext(sigma: u8) -> String {
+    format!("bg{sigma}.jpg")
+}
 
 /// Makes each temp file unique within the process, so two builds of the same
 /// key can never rename each other's half-written bytes into place. Combined
 /// with the pid it is unique across concurrently running launchers too.
 static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
-/// Decodes `source`, fits it inside a [`BACKGROUND_WIDTH`] box, blurs it and
-/// writes `<key>.bg.jpg` into `dir` through a `.part` + rename, so a killed
-/// process never leaves a half-written JPEG that a later run would serve.
+/// Decodes `source`, fits it inside a [`BACKGROUND_WIDTH`] box, blurs it at
+/// `sigma` and writes `<key>.bg<sigma>.jpg` into `dir` through a `.part` +
+/// rename, so a killed process never leaves a half-written JPEG that a later
+/// run would serve. A `sigma` of 0 skips the blur but still downscales.
 ///
 /// Blocking: the caller runs it on `spawn_blocking`.
 pub fn build_background_variant(
     source: &Path,
     dir: &Path,
     key: &str,
+    sigma: u8,
 ) -> Result<PathBuf, ImageError> {
     let io = |e: std::io::Error| ImageError::Io(e.to_string());
     let bytes = std::fs::read(source).map_err(io)?;
@@ -71,8 +87,14 @@ pub fn build_background_variant(
     };
 
     // RGB8: the background is opaque behind the whole shell, and JPEG has no
-    // alpha channel anyway.
-    let blurred = fast_blur(&scaled.to_rgb8(), BACKGROUND_BLUR_SIGMA);
+    // alpha channel anyway. Sigma 0 is "no blur": `fast_blur` at 0 is a
+    // pointless full pass over the pixels, so skip it outright.
+    let rgb = scaled.to_rgb8();
+    let blurred = if sigma == 0 {
+        rgb
+    } else {
+        fast_blur(&rgb, f32::from(sigma))
+    };
 
     let mut encoded: Vec<u8> = Vec::new();
     JpegEncoder::new_with_quality(&mut encoded, BACKGROUND_JPEG_QUALITY)
@@ -80,7 +102,7 @@ pub fn build_background_variant(
         .map_err(|_| ImageError::Encode)?;
 
     std::fs::create_dir_all(dir).map_err(io)?;
-    let target = dir.join(format!("{key}.{BACKGROUND_VARIANT_EXT}"));
+    let target = dir.join(format!("{key}.{}", background_variant_ext(sigma)));
     // `.bg.<pid>-<seq>.part`, NOT `.part`: `ImageCache::fetch_and_store` uses
     // `<key>.part` for the source, so a shared name would let a concurrent
     // fetch rename our half-written JPEG over the source. The pid and
@@ -110,18 +132,24 @@ pub async fn ensure_background_variant(
     cache: &ImageCache,
     client: Option<&RommClient>,
     url: &str,
+    sigma: u8,
 ) -> Result<PathBuf, ImageError> {
     let key = image_key(url);
+    let ext = background_variant_ext(sigma);
+    // Keyed by key AND sigma, not by key alone: two blur levels of one source
+    // are two separate files, so one must never wait on — or inherit the
+    // failure of — the other.
+    let slot = format!("{key}.{ext}");
     loop {
-        if let Some(e) = cache.variant_failed().lock().await.get(&key) {
+        if let Some(e) = cache.variant_failed().lock().await.get(&slot) {
             return Err(e.clone());
         }
-        if let Some(path) = cache.find_with_extension(&key, BACKGROUND_VARIANT_EXT) {
+        if let Some(path) = cache.find_with_extension(&key, &ext) {
             return Ok(path);
         }
 
         let mut map = cache.variant_in_flight().lock().await;
-        if let Some(existing) = map.get(&key).cloned() {
+        if let Some(existing) = map.get(&slot).cloned() {
             // Register interest while still holding the map lock, exactly as
             // `ImageCache::ensure` does: the owner takes this same lock
             // before notify_waiters(), so no wakeup can be lost.
@@ -132,18 +160,18 @@ pub async fn ensure_background_variant(
             notified.await;
             continue;
         }
-        map.insert(key.clone(), Arc::new(Notify::new()));
+        map.insert(slot.clone(), Arc::new(Notify::new()));
         drop(map);
 
-        let result = build_once(cache, client, url, key.clone()).await;
+        let result = build_once(cache, client, url, key.clone(), sigma).await;
         if let Err(e @ ImageError::Decode) = &result {
             cache
                 .variant_failed()
                 .lock()
                 .await
-                .insert(key.clone(), e.clone());
+                .insert(slot.clone(), e.clone());
         }
-        if let Some(n) = cache.variant_in_flight().lock().await.remove(&key) {
+        if let Some(n) = cache.variant_in_flight().lock().await.remove(&slot) {
             n.notify_waiters();
         }
         return result;
@@ -151,16 +179,17 @@ pub async fn ensure_background_variant(
 }
 
 /// Fetches the source (or takes the cache hit) and builds the variant off the
-/// async runtime. Called with `key` registered in the in-flight map.
+/// async runtime. Called with `<key>.<ext>` registered in the in-flight map.
 async fn build_once(
     cache: &ImageCache,
     client: Option<&RommClient>,
     url: &str,
     key: String,
+    sigma: u8,
 ) -> Result<PathBuf, ImageError> {
     let source = cache.ensure(client, url).await?;
     let dir = cache.dir().to_path_buf();
-    tokio::task::spawn_blocking(move || build_background_variant(&source, &dir, &key))
+    tokio::task::spawn_blocking(move || build_background_variant(&source, &dir, &key, sigma))
         .await
         .map_err(|e| ImageError::Io(format!("background variant did not finish: {e}")))?
 }
