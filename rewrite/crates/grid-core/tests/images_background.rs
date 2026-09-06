@@ -43,6 +43,20 @@ fn part_files(dir: &Path) -> usize {
         .count()
 }
 
+/// Every `<key>.bg*.jpg` in `dir`, sorted, so a test can assert that exactly
+/// one variant survives a build.
+fn variant_files(dir: &Path, key: &str) -> Vec<String> {
+    let prefix = format!("{key}.bg");
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|n| n.starts_with(&prefix) && n.ends_with(".jpg"))
+        .collect();
+    names.sort();
+    names
+}
+
 /// Writes a 1200x800 PNG, wider than `BACKGROUND_WIDTH`, so the resize branch
 /// actually runs.
 fn write_source(dir: &Path, key: &str) -> PathBuf {
@@ -262,22 +276,69 @@ async fn a_cold_url_with_no_client_is_offline() {
 /// Each blur level is its own cache entry: the sigma is baked into the file
 /// name, so changing the Appearance slider can never serve the old blur.
 #[test]
-fn two_sigmas_for_one_source_build_two_files() {
+fn each_sigma_gets_its_own_file_name_and_its_own_bytes() {
     let dir = tempfile::tempdir().unwrap();
     let key = image_key("https://romm.example/two-sigmas.png");
     let source = write_source(dir.path(), &key);
 
     let blurred = build_background_variant(&source, dir.path(), &key, 12).unwrap();
+    let blurred_bytes = std::fs::read(&blurred).unwrap();
     let sharp = build_background_variant(&source, dir.path(), &key, 0).unwrap();
 
     assert_eq!(blurred, dir.path().join(format!("{key}.bg12.jpg")));
     assert_eq!(sharp, dir.path().join(format!("{key}.bg0.jpg")));
-    assert!(blurred.is_file() && sharp.is_file());
     assert_ne!(
-        std::fs::read(&blurred).unwrap(),
+        blurred_bytes,
         std::fs::read(&sharp).unwrap(),
         "sigma 12 and sigma 0 must not produce identical bytes"
     );
+}
+
+/// Only ONE variant per source survives a build. The sweep cannot clean these
+/// up — it never evicts a pinned entry, and every variant of an installed
+/// game's source is pinned by key prefix — so dragging the Appearance slider
+/// would otherwise leave a permanently pinned JPEG at every sigma it passed.
+#[test]
+fn a_new_sigma_deletes_the_previous_variant_and_the_legacy_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = image_key("https://romm.example/one-at-a-time.png");
+    let source = write_source(dir.path(), &key);
+    // A `<key>.bg.jpg` from before the sigma was part of the name.
+    let legacy = dir.path().join(format!("{key}.bg.jpg"));
+    std::fs::write(&legacy, b"legacy").unwrap();
+
+    let first = build_background_variant(&source, dir.path(), &key, 12).unwrap();
+    assert!(first.is_file());
+    assert!(!legacy.exists(), "the legacy variant must be deleted");
+
+    let second = build_background_variant(&source, dir.path(), &key, 20).unwrap();
+
+    assert_eq!(second, dir.path().join(format!("{key}.bg20.jpg")));
+    assert!(second.is_file());
+    assert!(!first.exists(), "the sigma-12 variant must be deleted");
+    assert!(!legacy.exists());
+    // The SOURCE is not a variant and must survive untouched.
+    assert!(source.is_file());
+    assert_eq!(
+        variant_files(dir.path(), &key),
+        vec![format!("{key}.bg20.jpg")]
+    );
+}
+
+/// A different source's variant is not collateral damage: the delete matches
+/// the exact `<key>.bg` prefix, and keys are hex SHA-256.
+#[test]
+fn building_one_sources_variant_leaves_another_sources_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let mine = image_key("https://romm.example/mine.png");
+    let theirs = image_key("https://romm.example/theirs.png");
+    let source = write_source(dir.path(), &mine);
+    let other = dir.path().join(format!("{theirs}.bg12.jpg"));
+    std::fs::write(&other, b"other").unwrap();
+
+    build_background_variant(&source, dir.path(), &mine, 20).unwrap();
+
+    assert!(other.is_file(), "another key's variant must survive");
 }
 
 /// Sigma 0 means no blur at all, but the variant is still the downscaled

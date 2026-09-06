@@ -3,7 +3,7 @@
 //! post-install cover prefetch.
 
 use grid_core::config::Config;
-use grid_core::images::background::BACKGROUND_BLUR_DEFAULT;
+use grid_core::images::background::{BACKGROUND_BLUR_DEFAULT, BACKGROUND_BLUR_MAX};
 use grid_core::images::cache::ImageCache;
 use grid_core::images::replenish::{self, background_source_url, ReplenishReport};
 use grid_core::images::sweep::{pinned_keys, sweep, SweepReport, IMAGE_CACHE_CAP_BYTES};
@@ -117,7 +117,6 @@ impl ImageService {
             let Some(client) = session.client() else {
                 return;
             };
-            let sigma = background_blur();
             let mut background_source = String::new();
             for path in [&fields.cover_small_path, &fields.cover_large_path] {
                 let url = filter_to_server_host(&resolve_image_url(path, &base), &base);
@@ -140,6 +139,12 @@ impl ImageService {
                 }
             }
             if !background_source.is_empty() {
+                // Read only now that there is art to build: an install with
+                // no background source must not pay a `config.toml` read, and
+                // it is a blocking one, so it goes off the runtime thread.
+                let sigma = tokio::task::spawn_blocking(background_blur)
+                    .await
+                    .unwrap_or(BACKGROUND_BLUR_DEFAULT);
                 // Built here so the first time this game becomes the
                 // background there is nothing to wait for.
                 let _ = grid_core::images::background::ensure_background_variant(
@@ -186,10 +191,18 @@ async fn replenish_once(session: &SessionManager, install: &InstallService) -> R
 /// The configured background blur sigma, or the default when the config will
 /// not load. A background image is not worth failing a replenish or a
 /// post-install prefetch over.
+///
+/// Clamped here as well as in `normalize_ui_settings`: `Config::load` does no
+/// clamping, so a hand-edited `background_blur = 200` would otherwise reach
+/// the builder through this path and name a variant the command path can
+/// never ask for again.
+///
+/// Blocking (`std::fs`): call it from a blocking context.
 fn background_blur() -> u8 {
     Config::load(&Config::default_path())
         .map(|c| c.ui.background_blur)
         .unwrap_or(BACKGROUND_BLUR_DEFAULT)
+        .min(BACKGROUND_BLUR_MAX)
 }
 
 #[cfg(test)]
@@ -221,13 +234,13 @@ mod tests {
         };
         let fanart = image_key("https://h/assets/1f.png");
         write(dir.path(), &format!("{fanart}.png"), 4096);
-        write(dir.path(), &format!("{fanart}.bg.jpg"), 4096);
+        write(dir.path(), &format!("{fanart}.bg12.jpg"), 4096);
         write(dir.path(), "loose.png", 8192);
 
         let report = ImageService::sweep_at_startup_with_cap(&cache, &[row], base, 8192);
 
         assert!(dir.path().join(format!("{fanart}.png")).exists());
-        assert!(dir.path().join(format!("{fanart}.bg.jpg")).exists());
+        assert!(dir.path().join(format!("{fanart}.bg12.jpg")).exists());
         assert!(!dir.path().join("loose.png").exists());
         assert_eq!(report.deleted, 1);
     }

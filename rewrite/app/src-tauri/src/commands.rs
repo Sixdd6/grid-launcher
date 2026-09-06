@@ -260,11 +260,13 @@ pub async fn ensure_video(state: State<'_, AppState>, url: String) -> Result<Str
 }
 
 /// The local path of the shell background's pre-scaled variant of `url`,
-/// blurred at `blur` (the frontend passes the stored `ui.background_blur`;
-/// the sigma is part of the variant's file name, so a slider change builds a
-/// new file rather than serving the old blur) and building it on a miss. Mirrors [`ensure_image`]'s resolution and
-/// host filter exactly, so a URL pointing anywhere but the configured server
-/// is refused rather than fetched.
+/// blurred at `blur` and built on a miss. The frontend passes the stored
+/// `ui.background_blur`; the sigma is part of the variant's file name, so a
+/// slider change builds a new file rather than serving the old blur.
+///
+/// Mirrors [`ensure_image`]'s resolution and host filter exactly, so a URL
+/// pointing anywhere but the configured server is refused rather than
+/// fetched.
 #[tauri::command]
 pub async fn ensure_background_variant(
     state: State<'_, AppState>,

@@ -20,11 +20,20 @@
 //! level is its own cache entry and a changed setting can never serve a
 //! stale blur.
 //!
-//! Orphans: a variant built at a sigma the user has since moved away from —
-//! and any `<key>.bg.jpg` from before the sigma was in the name — is simply
-//! never asked for again. No migration deletes them: the sweep pins by key
-//! prefix, so an orphan stays with its source while the source is pinned,
-//! and is reaped by the cache cap like any other unpinned file.
+//! One variant per source: a successful build deletes the source's OTHER
+//! `<key>.bg<N>.jpg` files, and any `<key>.bg.jpg` from before the sigma was
+//! in the name (`remove_stale_variants`). This is not housekeeping the sweep
+//! could do instead — the sweep evicts only UNPINNED entries
+//! (`sweep::sweep`) and pins by key prefix, so every variant of an installed
+//! game's background source is pinned and unreclaimable at any cache size.
+//! Without the delete, each sigma the user's slider passes through would
+//! mint another permanently pinned JPEG per installed game.
+//!
+//! What the delete does NOT reach: a source that is never built again keeps
+//! the one variant last built for it, at whatever sigma was current then.
+//! That residue is bounded at one file per source and is reclaimed only when
+//! the source itself leaves the pinned set and the cache is over its cap.
+//! Accepted: it is the same file the source would have had anyway.
 //!
 //! Token secrecy: the source bytes come from `ImageCache::ensure` (the
 //! session's `RommClient`); nothing here builds a URL or logs one.
@@ -87,8 +96,10 @@ pub fn build_background_variant(
     };
 
     // RGB8: the background is opaque behind the whole shell, and JPEG has no
-    // alpha channel anyway. Sigma 0 is "no blur": `fast_blur` at 0 is a
-    // pointless full pass over the pixels, so skip it outright.
+    // alpha channel anyway. Sigma 0 must mean NO blur at all, and skipping is
+    // the only way to get that: `fast_blur(_, 0.0)` is not a no-op — its
+    // `boxes_for_gauss` still yields radius-1 boxes, so passing 0 through
+    // would soften the image.
     let rgb = scaled.to_rgb8();
     let blurred = if sigma == 0 {
         rgb
@@ -115,7 +126,43 @@ pub fn build_background_variant(
     ));
     std::fs::write(&tmp, &encoded).map_err(io)?;
     std::fs::rename(&tmp, &target).map_err(io)?;
+    remove_stale_variants(dir, key, &target);
     Ok(target)
+}
+
+/// Deletes every variant of `key` in `dir` except `keep`: the other sigmas,
+/// and the legacy extensionless-sigma `<key>.bg.jpg` written before this
+/// scheme existed. Best effort — a variant that will not delete is a wasted
+/// file, never a failed build.
+///
+/// Matches `<key>.bg<digits>.jpg` and `<key>.bg.jpg` only, so a concurrent
+/// build's `<key>.bg.<pid>-<seq>.part` is never touched. Two sigmas of one
+/// source built at the same moment can still delete each other's output; the
+/// loser is simply rebuilt on the next miss, and the shell asks for one sigma
+/// at a time anyway.
+fn remove_stale_variants(dir: &Path, key: &str, keep: &Path) {
+    let prefix = format!("{key}.bg");
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path == keep {
+            continue;
+        }
+        let Some(sigma) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_prefix(&prefix))
+            .and_then(|rest| rest.strip_suffix(".jpg"))
+        else {
+            continue;
+        };
+        // "" is the legacy `<key>.bg.jpg`; digits are this scheme's sigmas.
+        if sigma.is_empty() || sigma.bytes().all(|b| b.is_ascii_digit()) {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
 }
 
 /// The local path of `url`'s background variant, building it (and fetching

@@ -63,10 +63,11 @@ pub fn sweep(dir: &Path, cap_bytes: u64, pinned: &HashSet<String>) -> SweepRepor
             continue;
         }
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        // `<key>.bg.jpg`'s file stem is `<key>.bg`, so a whole-stem compare
-        // would leave every background variant unpinned and let the sweep
-        // evict an installed game's art while keeping its source. Keys are
-        // hex SHA-256 and never contain a dot, so the prefix is the key.
+        // `<key>.bg<sigma>.jpg`'s file stem is `<key>.bg<sigma>`, so a
+        // whole-stem compare would leave every background variant unpinned
+        // and let the sweep evict an installed game's art while keeping its
+        // source. Keys are hex SHA-256 and never contain a dot, so the
+        // prefix up to the first dot is the key.
         let key = stem.split('.').next().unwrap_or(stem);
         entries.push(Entry {
             pinned: pinned.contains(key),
