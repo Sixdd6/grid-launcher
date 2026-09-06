@@ -67,6 +67,16 @@ Adopted from RomM v2 `tokens/index.ts`, defined once in `app.css` as CSS variabl
   `--border #22223a`, `--text #ffffff`, `--text-muted #9a9ab0`.
 - Light: `--bg #f5f5fa`, `--surface rgba(0,0,0,.035)`, `--text #111117`; primary darkens
   to `#553E98`.
+- Text over the background art: the five view roots carry the global `.over-art` class
+  from `app.css`, which sets `text-shadow: var(--text-halo)` — `0 0 2px` plus `0 0 8px` of
+  the theme's own background colour (`rgba(7,7,15,.85)/.5` dark,
+  `rgba(245,245,250,.92)/.6` light) at zero offset, so it composites to nothing on an
+  opaque surface or at fade 0 and holds a ≥15:1 band at every glyph edge over the
+  brightest or darkest art at 60% fade; elements with their own fill (inputs, selects and
+  filled buttons) opt out through the companion reset list. `--text-muted` is `#c8c8dc`
+  dark and `#3d3d52` light, and `--danger` darkens to `#c62828` in light mode, because the
+  published `#ff5050` scores 2.97:1 on `#f5f5fa` (added 2026-09-05, background-contrast
+  ruling).
 - Primary `#8B74E8` (hover `#A18FFF`, pressed `#6043C8`), secondary `#9E8CD6`, accent
   `#E1A38D`, favourite `#FF4F6B`, success `#4ADE80`, warning `#FBBF24`, danger `#FF5050`,
   info `#93C5FD`, disk-graph teal `#2dd4bf`.

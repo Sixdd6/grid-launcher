@@ -393,7 +393,7 @@
 
 <svelte:window onkeydown={onKey} />
 
-<section data-testid="server-section" class="server">
+<section data-testid="server-section" class="server over-art">
   {#if showLibraryBanner}
     <div data-testid="library-path-banner" class="library-banner">
       <span>Set a library folder to install games.</span>

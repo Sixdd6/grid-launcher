@@ -246,7 +246,7 @@
 
 <svelte:window onkeydown={onKey} />
 
-<section data-testid="library-section" class="library">
+<section data-testid="library-section" class="library over-art">
   <RailPane
     entries={railRows}
     testId="library-rail"

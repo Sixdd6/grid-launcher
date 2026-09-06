@@ -42,7 +42,7 @@
   );
 </script>
 
-<section class="settings" aria-label="Settings">
+<section class="settings over-art" aria-label="Settings">
   <RailPane entries={railRows} testId="settings-rail" ariaLabel="Settings pages" onSelect={(k) => (page = k)} />
 
   <div class="panes">

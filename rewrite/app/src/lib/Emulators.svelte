@@ -500,7 +500,7 @@
 
 <svelte:window onkeydown={onKey} />
 
-<section data-testid="emulators-view" class="emulators" aria-label="Emulators">
+<section data-testid="emulators-view" class="emulators over-art" aria-label="Emulators">
   <RailPane entries={railRows} testId="emulators-rail" ariaLabel="Emulator categories" onSelect={(k) => (page = k)} />
 
   <div class="panes">

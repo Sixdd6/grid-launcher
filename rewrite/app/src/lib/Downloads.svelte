@@ -68,7 +68,7 @@
 </script>
 
 <!-- D-UI-7: `.view-content` caps the column at 1100px and centres it. -->
-<section class="downloads view-content" aria-label="Downloads">
+<section class="downloads view-content over-art" aria-label="Downloads">
   <header class="head">
     <div class="head-text">
       <h1>Downloads</h1>

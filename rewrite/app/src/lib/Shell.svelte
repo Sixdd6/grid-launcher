@@ -187,7 +187,7 @@
 </header>
 
 {#if !session.connected && session.lastError}
-  <p data-testid="session-error" class="error-line">{session.lastError}</p>
+  <p data-testid="session-error" class="error-line over-art">{session.lastError}</p>
 {/if}
 
 <!-- All five views stay mounted and switch with `hidden` (design §3), so

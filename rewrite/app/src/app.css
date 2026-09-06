@@ -11,7 +11,10 @@
   --border: #dcdce6;
   --text: #111117;
   --text-h: #111117;
-  --text-muted: #5a5a70;
+  --text-muted: #3d3d52;
+  --text-halo:
+    0 0 2px rgba(245, 245, 250, 0.92),
+    0 0 8px rgba(245, 245, 250, 0.6);
 
   /* Brand — primary darkens in light mode (design §4) */
   --primary: #553e98;
@@ -24,7 +27,7 @@
   /* Status */
   --success: #4ade80;
   --warning: #fbbf24;
-  --danger: #ff5050;
+  --danger: #c62828;
   --info: #93c5fd;
   --graph-disk: #2dd4bf;
 
@@ -74,7 +77,10 @@
     --border: #22223a;
     --text: #ffffff;
     --text-h: #ffffff;
-    --text-muted: #9a9ab0;
+    --text-muted: #c8c8dc;
+    --text-halo:
+      0 0 2px rgba(7, 7, 15, 0.85),
+      0 0 8px rgba(7, 7, 15, 0.5);
     --primary: #8b74e8;
     --primary-hover: #a18fff;
     --primary-pressed: #6043c8;
@@ -89,7 +95,10 @@
   --border: #22223a;
   --text: #ffffff;
   --text-h: #ffffff;
-  --text-muted: #9a9ab0;
+  --text-muted: #c8c8dc;
+  --text-halo:
+    0 0 2px rgba(7, 7, 15, 0.85),
+    0 0 8px rgba(7, 7, 15, 0.5);
   --primary: #8b74e8;
   --primary-hover: #a18fff;
   --primary-pressed: #6043c8;
@@ -102,7 +111,11 @@
   --border: #dcdce6;
   --text: #111117;
   --text-h: #111117;
-  --text-muted: #5a5a70;
+  --text-muted: #3d3d52;
+  --danger: #c62828;
+  --text-halo:
+    0 0 2px rgba(245, 245, 250, 0.92),
+    0 0 8px rgba(245, 245, 250, 0.6);
   --primary: #553e98;
   --primary-hover: #6043c8;
   --primary-pressed: #45307c;
@@ -139,6 +152,35 @@ h1 {
   max-width: 1100px;
   margin: 0 auto;
   box-sizing: border-box;
+}
+
+/* The five view roots paint straight onto the fixed background-art layer —
+   nothing between them sets a background. The halo is the theme's own `--bg`
+   at zero offset, so it composites to nothing on an opaque surface and to
+   nothing when the fade is 0; over art it holds a ~2px high-contrast band
+   at every glyph edge. Not a drop shadow: no offset, no colour of its own. */
+.over-art {
+  text-shadow: var(--text-halo);
+}
+
+/* Anything that carries its own fill opts out — the halo is for text on the
+   art, and inside a filled control it would only bloom the label. */
+.over-art input,
+.over-art select,
+.over-art textarea,
+.over-art .primary,
+.over-art .tag,
+.over-art .actions button,
+.over-art .form-actions button,
+.over-art .row-actions button,
+.over-art .library-banner button,
+.over-art .catalog-row button,
+.over-art .ps3-firmware button,
+.over-art .chip button,
+.over-art .offline button,
+.over-art .update-line button,
+.over-art .browse-secondary {
+  text-shadow: none;
 }
 
 /* The one icon-only button. Four components had hand-rolled copies of this
