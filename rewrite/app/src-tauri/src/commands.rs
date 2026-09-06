@@ -145,6 +145,18 @@ fn should_backfill_on_platform_list(assignable_platforms: &[String]) -> bool {
     !assignable_platforms.is_empty()
 }
 
+/// The `(label, id)` pairs `install.set_platform_ids` records. Keyed by
+/// `Platform::label()`, not `name`: `firmware_service.rs`'s `platform_id_for`
+/// looks the id up with `record.platform`, which is `RomDetail.platform_name`
+/// (the rom's own display name) — a raw-`name` key here silently missed
+/// every lookup for a custom-named platform (round 9 review finding 2).
+fn platform_id_entries(platforms: &[Platform]) -> BTreeMap<String, i64> {
+    platforms
+        .iter()
+        .map(|p| (p.label().to_string(), p.id))
+        .collect()
+}
+
 #[tauri::command]
 pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>, String> {
     let client = state.session.client().ok_or("not connected")?;
@@ -159,7 +171,7 @@ pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>,
         // and grid-core holds no session to fetch it with. Recorded from the
         // FULL platform list (not the assignable subset): a platform the
         // autoconfig defaults skip can still have server firmware.
-        install.set_platform_ids(platforms.iter().map(|p| (p.name.clone(), p.id)).collect());
+        install.set_platform_ids(platform_id_entries(&platforms));
         // Slug-first RetroArch core resolution (D-RC-2) needs the server's
         // own slug for each platform; like the ids above, this is recorded
         // from the FULL list, not the assignable subset.
@@ -2255,6 +2267,22 @@ mod merge_tests {
     fn should_backfill_on_platform_list_needs_a_non_empty_assignable_list() {
         assert!(!should_backfill_on_platform_list(&[]));
         assert!(should_backfill_on_platform_list(&["SNES".to_string()]));
+    }
+
+    #[test]
+    fn platform_id_entries_keys_by_the_display_label_not_the_raw_name() {
+        let platforms = vec![Platform {
+            id: 3,
+            name: "Windows".to_string(),
+            slug: "win".to_string(),
+            rom_count: 1,
+            custom_name: Some("Windows 9x".to_string()),
+            display_name: "Windows 9x".to_string(),
+        }];
+        assert_eq!(
+            platform_id_entries(&platforms),
+            BTreeMap::from([("Windows 9x".to_string(), 3)])
+        );
     }
 }
 

@@ -1,6 +1,21 @@
 // Pure helpers for the Emulators panel's "Per-platform defaults" select.
 // No store/API imports here so this stays trivially unit-testable.
-import type { LaunchDefaults } from '../api';
+import type { LaunchDefaults, Platform } from '../api';
+import { platformLabel } from '../server/platformLabel';
+
+/**
+ * The key `default_emulators` (and `retroarch_cores`) is written and read
+ * under for `p` — RomM's display label, not the raw `name`. This is what the
+ * launch/firmware backend and the Server header's emulator chip already key
+ * by (round 9 review finding 1: the Emulators panel used to persist under
+ * `p.name`, so a default set for a custom-named platform was silently never
+ * applied at launch). Platform *compatibility* lookups
+ * (`compatible_emulators`/`retroarch_core_options`, keyed by `PlatformRef`)
+ * are a separate, out-of-scope heuristic and still key off `name`/`slug`.
+ */
+export function defaultEmulatorKey(p: Pick<Platform, 'display_name' | 'name' | 'slug'>): string {
+  return platformLabel(p);
+}
 
 /** The `<select>` value that means "no default emulator for this platform". */
 export const NO_DEFAULT_VALUE = '';

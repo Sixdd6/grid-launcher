@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { LaunchDefaults } from '../api';
 import {
+  defaultEmulatorKey,
   isRetroarchName,
   NO_CORE_VALUE,
   NO_DEFAULT_VALUE,
@@ -9,6 +10,18 @@ import {
   platformDefaultSelect,
   savedDefaultFor,
 } from './defaults';
+
+describe('defaultEmulatorKey', () => {
+  it('keys a custom-named platform by its display name, not its raw name', () => {
+    expect(
+      defaultEmulatorKey({ display_name: 'Windows 9x', name: 'Windows', slug: 'win' })
+    ).toBe('Windows 9x');
+  });
+
+  it('falls back to name for a platform without a display_name (older server)', () => {
+    expect(defaultEmulatorKey({ display_name: '', name: 'SNES', slug: 'snes' })).toBe('SNES');
+  });
+});
 
 function launchDefaults(
   entries: Record<string, string>,

@@ -22,6 +22,7 @@
   import { compatTools } from './stores/compatTools.svelte';
   import { filterCatalogEntries } from './emulators/catalog';
   import {
+    defaultEmulatorKey,
     NO_CORE_VALUE,
     NO_DEFAULT_VALUE,
     platformCoreSelect,
@@ -466,16 +467,22 @@
     }
   }
 
-  function selectFor(platformName: string) {
-    return platformDefaultSelect(defaults, platformName, compatible[platformName] ?? []);
+  // `defaultsKey` (the display label) is where `default_emulators` /
+  // `retroarch_cores` are persisted (matches the launch/firmware backend and
+  // the Server header's emulator chip). `compatKey` (the raw `name`) is a
+  // separate, out-of-scope lookup: `compatible`/`coreOptions` come back
+  // keyed by the `PlatformRef.name` sent in `compatibilityInputs` above, per
+  // the backend's name+slug compatibility heuristic.
+  function selectFor(defaultsKey: string, compatKey: string) {
+    return platformDefaultSelect(defaults, defaultsKey, compatible[compatKey] ?? []);
   }
 
-  function coreSelectFor(platformName: string, selectedEmulator: string) {
+  function coreSelectFor(defaultsKey: string, compatKey: string, selectedEmulator: string) {
     return platformCoreSelect(
       defaults,
-      platformName,
+      defaultsKey,
       selectedEmulator,
-      coreOptions[platformName] ?? []
+      coreOptions[compatKey] ?? []
     );
   }
 
@@ -693,9 +700,9 @@
           <ul class="defaults-list">
             {#each platforms as p (p.id)}
               {@const selectId = `default-emulator-${p.id}`}
-              {@const choice = selectFor(p.name)}
+              {@const choice = selectFor(defaultEmulatorKey(p), p.name)}
               {@const coreId = `default-core-${p.id}`}
-              {@const core = coreSelectFor(p.name, choice.selected)}
+              {@const core = coreSelectFor(defaultEmulatorKey(p), p.name, choice.selected)}
               <li class="defaults-card">
                 <div class="defaults-card-header">
                   <label class="platform-name" for={selectId}>{p.name}</label>
@@ -710,7 +717,7 @@
                     id={selectId}
                     disabled={choice.disabled}
                     value={choice.selected}
-                    onchange={(e) => handleDefaultChange(p.name, (e.currentTarget as HTMLSelectElement).value)}
+                    onchange={(e) => handleDefaultChange(defaultEmulatorKey(p), (e.currentTarget as HTMLSelectElement).value)}
                   >
                     {#if choice.disabled}
                       <option value={NO_DEFAULT_VALUE}>No compatible emulator</option>
@@ -730,7 +737,7 @@
                       id={coreId}
                       disabled={core.disabled}
                       value={core.selected}
-                      onchange={(e) => handleCoreChange(p.name, (e.currentTarget as HTMLSelectElement).value)}
+                      onchange={(e) => handleCoreChange(defaultEmulatorKey(p), (e.currentTarget as HTMLSelectElement).value)}
                     >
                       {#if core.disabled}
                         <option value={NO_CORE_VALUE}>No installed core</option>
