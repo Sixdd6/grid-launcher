@@ -15,6 +15,11 @@
     "updated_at": "2026-01-01T00:00:00Z",
     "is_identified": true,
     "youtube_video_id": "dQw4w9WgXcQ",
+    "path_video": "roms/1/101/video_normalized/video-normalized.mp4",
+    "ss_metadata": {
+      "fanart_path": "roms/1/101/fanart/fanart.png",
+      "fanart_url": "https://img.example/fanart-external.jpg"
+    },
     "files": [
       {
         "id": 1001,

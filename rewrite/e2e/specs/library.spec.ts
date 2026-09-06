@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   APP_START_TIMEOUT,
   FIXTURE_TOKEN,
@@ -155,18 +156,32 @@ describe('library', () => {
     await $(testId('game-card-101')).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
 
+    // A loose `.bg.jpg` check would pass even if the wrong source image (say,
+    // the cover) got blurred: `subjectFromDetails` prefers fanart over
+    // screenshots and the cover (background.ts), and rom 101's fanart_path
+    // ("roms/1/101/fanart/fanart.png") only resolves to a real, fetchable
+    // URL because of resolve_image_url's relative-path fix (Task 1) — before
+    // that fix it joined onto the SPA root and 404'd. `ensure_background_variant`
+    // names the variant `<sha256 of the resolved URL>.bg.jpg`
+    // (images/background.rs, images/cache.rs's `image_key`), so hashing the
+    // exact resolved URL and matching that prefix proves the fanart's URL
+    // specifically made it all the way through, not just any image.
+    const fanartKey = createHash('sha256')
+      .update(`${mockUrl()}/assets/romm/resources/roms/1/101/fanart/fanart.png`)
+      .digest('hex');
     await browser.waitUntil(
       async () => {
         const images = await browser.execute(() =>
           Array.from(document.querySelectorAll('[data-testid="background-art"] .layer'))
+            .filter((el) => el.classList.contains('visible'))
             .map((el) => (el as HTMLElement).style.backgroundImage)
             .join(' '),
         );
-        return images.includes('.bg.jpg');
+        return images.includes(`${fanartKey}.bg`);
       },
       {
         timeout: TRANSITION_TIMEOUT,
-        timeoutMsg: 'the background layer never got a .bg.jpg variant path',
+        timeoutMsg: "the visible background layer never showed rom 101's fanart variant",
       },
     );
 

@@ -414,6 +414,36 @@ test("screenshot endpoint returns a PNG", async () => {
   });
 });
 
+// --- fanart and hosted video (roms/<platform id>/<rom id>/... — two id
+// segments, unlike cover/screenshot's one) --------------------------------
+
+test("fanart endpoint returns a PNG", async () => {
+  await withServer(async ({ url }) => {
+    const res = await fetch(`${url}/assets/romm/resources/roms/1/101/fanart/fanart.png`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-type"), "image/png");
+    const buf = Buffer.from(await res.arrayBuffer());
+    assert.deepEqual(
+      buf.subarray(0, 8),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+  });
+});
+
+test("hosted video endpoint returns an MP4 with the ftyp magic at offset 4", async () => {
+  await withServer(async ({ url }) => {
+    const res = await fetch(
+      `${url}/assets/romm/resources/roms/1/101/video_normalized/video-normalized.mp4`,
+    );
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-type"), "video/mp4");
+    const buf = Buffer.from(await res.arrayBuffer());
+    // ensure_video (grid-core/src/images/video.rs) gates on this magic at
+    // offset 4, not on decodability — this is what it checks for.
+    assert.equal(buf.subarray(4, 8).toString("latin1"), "ftyp");
+  });
+});
+
 // --- offline toggle ------------------------------------------------------
 
 test("POST /__e2e__/offline {offline:true} makes /api/ requests fail with a connection error, and {offline:false} restores them", async () => {

@@ -435,6 +435,23 @@ async function sendBufferThrottled(res, status, contentType, buf, chunkMs) {
 
 const COVER_PATH_RE = /^\/assets\/romm\/resources\/roms\/\d+\/cover\/(small|large)\.png$/;
 const SCREENSHOT_PATH_RE = /^\/assets\/romm\/resources\/roms\/\d+\/screenshots\/\d+\.png$/;
+// Unlike path_cover_small/large (roms/<rom id>/...), RomM's fanart_path and
+// path_video are relative to the resources root as roms/<platform id>/<rom
+// id>/..., which is what resolve_image_url actually joins onto the base URL
+// (grid-core/src/images/urls.rs, verified against a live server 2026-09-05)
+// — hence two \d+ segments here, not one.
+const FANART_PATH_RE = /^\/assets\/romm\/resources\/roms\/\d+\/\d+\/fanart\/fanart\.png$/;
+const VIDEO_PATH_RE =
+  /^\/assets\/romm\/resources\/roms\/\d+\/\d+\/video_normalized\/video-normalized\.mp4$/;
+// A minimal ISO-BMFF header: a 32-byte `ftyp` box (brand isom) and an empty
+// `mdat`. `ensure_video` gates on Content-Type and the `ftyp` magic at
+// offset 4, not on decodability, so the spec can assert the viewer got a
+// local .mp4 path without shipping a real clip.
+const MP4_BYTES = Buffer.concat([
+  Buffer.from([0x00, 0x00, 0x00, 0x20]), Buffer.from("ftypisom"),
+  Buffer.from([0x00, 0x00, 0x02, 0x00]), Buffer.from("isomiso2avc1mp41"),
+  Buffer.from([0x00, 0x00, 0x00, 0x08]), Buffer.from("mdat"),
+]);
 const ROM_ID_RE = /^\/api\/roms\/(\d+)$/;
 const ROM_CONTENT_RE = /^\/api\/roms\/(\d+)\/content\/(.+)$/;
 const SAVE_CONTENT_RE = /^\/api\/saves\/([^/]+)\/content$/;
@@ -587,6 +604,14 @@ async function handleRequest(req, res, state) {
   // mirrors RomM serving these images directly off disk.
   if (req.method === "GET" && (COVER_PATH_RE.test(pathname) || SCREENSHOT_PATH_RE.test(pathname))) {
     sendBuffer(res, 200, "image/png", state.pngBytes);
+    return;
+  }
+  if (req.method === "GET" && FANART_PATH_RE.test(pathname)) {
+    sendBuffer(res, 200, "image/png", state.pngBytes);
+    return;
+  }
+  if (req.method === "GET" && VIDEO_PATH_RE.test(pathname)) {
+    sendBuffer(res, 200, "video/mp4", MP4_BYTES);
     return;
   }
 

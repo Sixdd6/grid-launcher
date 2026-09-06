@@ -130,10 +130,12 @@ describe('images (a): cover, screenshots, install, library grid', () => {
     await expect($(testId('details-related-0'))).toHaveText('Chrono Trigger Similar');
     await expect($(testId('details-related-1'))).not.toExist();
 
-    // Media: two screenshots plus the YouTube trailer tile.
+    // Media: two screenshots, the YouTube trailer tile, and rom 101's
+    // hosted video tile (fixture path_video — see rom-details.json).
     await $(testId('details-tab-media')).click();
     await $(testId('details-media-0')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await expect($(testId('details-media-2'))).toExist();
+    await expect($(testId('details-media-3'))).toExist();
 
     await $(testId('details-media-0')).click();
     await $(testId('media-viewer')).waitForExist({
@@ -147,13 +149,30 @@ describe('images (a): cover, screenshots, install, library grid', () => {
     await expect($(testId('media-viewer-caption'))).toHaveText(
       'Super Mario World — screenshot 2',
     );
-    // Wrapping past the last item returns to the first (media.ts nextIndex).
     await $(testId('media-viewer-next')).click();
     await expect($(testId('media-viewer-caption'))).toHaveText('Super Mario World — trailer');
     await expect($(testId('media-viewer-youtube'))).toHaveAttribute(
       'src',
       'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
     );
+
+    // The gallery's fourth and last item: rom 101's hosted video
+    // (fixture path_video). `MediaViewer.svelte` resolves it through
+    // `ensure_video`, so a real `.mp4` `src` here proves the server-relative
+    // `path_video` ("roms/1/101/video_normalized/video-normalized.mp4")
+    // survived resolve_image_url's relative-path fix and was fetched,
+    // gated on its ftyp magic, and cached to a local file — not left as the
+    // bare relative string the pre-fix resolver would have produced.
+    await $(testId('media-viewer-next')).click();
+    await expect($(testId('media-viewer-caption'))).toHaveText('Super Mario World — video');
+    await $(testId('media-viewer-video')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the hosted video never resolved to a local file — check resolve_image_url',
+    });
+    expect(await $(testId('media-viewer-video')).getAttribute('src')).toMatch(/\.mp4$/);
+
+    // Wrapping past the last item (now the video) returns to the first
+    // (media.ts nextIndex).
     await $(testId('media-viewer-next')).click();
     await expect($(testId('media-viewer-caption'))).toHaveText(
       'Super Mario World — screenshot 1',
