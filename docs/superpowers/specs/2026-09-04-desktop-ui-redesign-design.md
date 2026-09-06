@@ -188,10 +188,13 @@ Dialog 1040×680 max, centred over a dimmed, blurred shell; Esc and ✕ close.
      the current details view shows. A native (PC) game's save FOLDERS still sync here;
      only save states have no equivalent to capture. Neither toggle appears when a
      native game is not yet installed, so this tab's own unsupported notice
-     (`details-cloud-unsupported`, `SavesTab.svelte`) is what names that directly ("Save
-     states are not available for PC games. Their save folders sync from the save
-     locations configured on this tab.") rather than the old, blanket "not available
-     unless emulator-based" wording (round 11).
+     (`details-cloud-unsupported`, `SavesTab.svelte`) is what a not-yet-installed PC
+     game shows instead: it says nothing about save states — that distinction is not
+     useful to an end user — and instead points the user at the native save-locations
+     panel this same tab shows once the game is installed, and tells them to add the
+     game's save folder manually if PCGamingWiki did not fill one in ("Save sync for
+     PC games uses the save locations shown here once the game is installed. If none
+     was filled in from PCGamingWiki, add the game's save folder.") (round 12).
   4. **Files**: `files[]` with name, size, `last_modified`; installed version vs server
      version per D-UI-10 with the Update button; PS4 / Xbox 360 content rows; firmware
      row for the platform. Native rows keep the merge-path confirm text.

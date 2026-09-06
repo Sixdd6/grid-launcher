@@ -324,7 +324,7 @@ describe('cloud-saves', () => {
     expect(result).toEqual({
       supported: false,
       block_reason:
-        'Save states are not available for PC games. Their save folders sync from the save locations configured on this tab.',
+        "Save sync for PC games uses the save locations shown here once the game is installed. If none was filled in from PCGamingWiki, add the game's save folder.",
       scope: 'per_game',
     });
   });

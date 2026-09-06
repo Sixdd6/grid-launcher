@@ -145,9 +145,11 @@ pub fn cloud_save_scope(
 /// all, since it never called them to begin with.
 ///
 /// Trigger chain: native platform and `save_type == State` (checked first)
-/// -> the fixed "save states are not available for PC games" message — a
-/// native (PC) game's save FOLDERS still sync fine, only save states have
-/// no equivalent to capture, so `Save` is never blocked on this ground;
+/// -> a fixed message pointing at the native save-locations panel (shown
+/// on the Saves tab only once the game is installed) and inviting a manual
+/// save folder when PCGamingWiki did not supply one — it says nothing
+/// about save states, which are simply not offered for PC games (`Save`
+/// is never blocked on this ground; only `State` reaches this branch);
 /// else, for `State`, RetroArch-gated `supports_save_states` then
 /// `cloud_sync_safe`; else, for `Save`, RetroArch-gated `supports_saves`;
 /// else `""`.
@@ -168,7 +170,7 @@ pub fn cloud_save_block_reason(
     core_flags: Option<&CoreFlags>,
 ) -> String {
     if is_native_executable_platform(platform) && save_type == SaveType::State {
-        return "Save states are not available for PC games. Their save folders sync from the save locations configured on this tab.".to_string();
+        return "Save sync for PC games uses the save locations shown here once the game is installed. If none was filled in from PCGamingWiki, add the game's save folder.".to_string();
     }
 
     let retroarch_gated = !emulator_name.is_empty() && is_retroarch_emulator_name(emulator_name);
@@ -333,7 +335,7 @@ mod tests {
         let reason = cloud_save_block_reason("Windows", SaveType::State, "RetroArch", Some(&SAFE));
         assert_eq!(
             reason,
-            "Save states are not available for PC games. Their save folders sync from the save locations configured on this tab."
+            "Save sync for PC games uses the save locations shown here once the game is installed. If none was filled in from PCGamingWiki, add the game's save folder."
         );
     }
 

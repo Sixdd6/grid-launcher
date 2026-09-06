@@ -1773,7 +1773,7 @@ fn restore_enabled_refuses_on_the_compatibility_block_reason() {
     assert!(!enabled);
     assert_eq!(
         text,
-        "Save states are not available for PC games. Their save folders sync from the save locations configured on this tab."
+        "Save sync for PC games uses the save locations shown here once the game is installed. If none was filled in from PCGamingWiki, add the game's save folder."
     );
 }
 
