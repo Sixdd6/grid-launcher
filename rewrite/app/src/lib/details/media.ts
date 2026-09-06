@@ -26,9 +26,17 @@ export function isYoutubeId(value: string): boolean {
   return /^[A-Za-z0-9_-]{11}$/.test(value.trim());
 }
 
-/** The privacy-preserving embed host; the only frame origin the CSP allows. */
-export function youtubeEmbedUrl(videoId: string): string {
-  return `https://www.youtube-nocookie.com/embed/${videoId}`;
+/**
+ * The trailer's watch page, opened in the system browser rather than
+ * embedded. An `<iframe>` to `youtube-nocookie.com` cannot play on Linux:
+ * the page origin is `tauri://localhost`, a "local scheme" under the W3C
+ * referrer policy, so no `Referer` header is ever sent and YouTube answers
+ * error 153 ("Video unavailable") for every embed (tauri-apps/tauri#14422).
+ * No markup fix works around that, so the trailer opens outside the app
+ * instead.
+ */
+export function youtubeWatchUrl(videoId: string): string {
+  return `https://www.youtube.com/watch?v=${videoId}`;
 }
 
 /**

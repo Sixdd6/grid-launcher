@@ -753,6 +753,7 @@
     onIndex={(i) => (viewerIndex = i)}
     failed={failedMedia}
     onScreenshotError={markMediaFailed}
+    coverUrl={coverLarge ?? coverSmall}
     onClose={() => {
       viewerIndex = null;
       // The viewer took focus off the panel; without handing it back, the

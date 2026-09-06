@@ -259,6 +259,39 @@ pub async fn ensure_video(state: State<'_, AppState>, url: String) -> Result<Str
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// The exact-length check a YouTube video id must pass before it is
+/// interpolated into a URL handed to the OS browser: exactly 11
+/// `[A-Za-z0-9_-]` characters, YouTube's fixed id format. Anything else — a
+/// path, an id with a query string tacked on, a full URL — must not build a
+/// URL at all. Surrounding whitespace is trimmed before the check (and the
+/// built URL uses the trimmed id), so a padded id is still accepted, but
+/// never as the untrimmed original.
+pub fn youtube_watch_url(id: &str) -> Option<String> {
+    let trimmed = id.trim();
+    let valid = trimmed.len() == 11
+        && trimmed
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    if valid {
+        Some(format!("https://www.youtube.com/watch?v={trimmed}"))
+    } else {
+        None
+    }
+}
+
+/// Opens a trailer's YouTube watch page in the system browser. An embedded
+/// `<iframe>` cannot play the video on Linux: the page origin is
+/// `tauri://localhost`, a "local scheme" under the W3C referrer policy, so
+/// no `Referer` header is ever sent and YouTube answers error 153 ("Video
+/// unavailable") for every embed (tauri-apps/tauri#14422) — no markup fix
+/// works around it. `video_id` is validated here before it reaches a URL
+/// handed to the OS opener.
+#[tauri::command]
+pub fn open_youtube_video(app: tauri::AppHandle, video_id: String) -> Result<(), String> {
+    let url = youtube_watch_url(&video_id).ok_or("not a YouTube video id")?;
+    app.opener().open_url(url, None::<&str>).map_err(err)
+}
+
 /// The local path of the shell background's pre-scaled variant of `url`,
 /// blurred at `blur` and built on a miss. The frontend passes the stored
 /// `ui.background_blur`; the sigma is part of the variant's file name, so a
@@ -2398,6 +2431,37 @@ mod ui_settings_tests {
         assert_eq!(browsable_server_url("romm.example"), None);
         assert_eq!(browsable_server_url("file:///etc/passwd"), None);
         assert_eq!(browsable_server_url("javascript:alert(1)"), None);
+    }
+}
+
+#[cfg(test)]
+mod youtube_watch_url_tests {
+    use super::*;
+
+    #[test]
+    fn a_valid_eleven_character_id_builds_the_watch_url() {
+        assert_eq!(
+            youtube_watch_url("dQw4w9WgXcQ"),
+            Some("https://www.youtube.com/watch?v=dQw4w9WgXcQ".to_string())
+        );
+    }
+
+    #[test]
+    fn a_path_is_never_interpolated_into_the_url() {
+        assert_eq!(youtube_watch_url("../evil"), None);
+    }
+
+    #[test]
+    fn a_trailing_query_string_is_refused_even_though_it_starts_with_a_valid_id() {
+        assert_eq!(youtube_watch_url("dQw4w9WgXcQ&list=x"), None);
+    }
+
+    #[test]
+    fn surrounding_whitespace_is_trimmed_before_the_length_check() {
+        assert_eq!(
+            youtube_watch_url("  dQw4w9WgXcQ  "),
+            Some("https://www.youtube.com/watch?v=dQw4w9WgXcQ".to_string())
+        );
     }
 }
 

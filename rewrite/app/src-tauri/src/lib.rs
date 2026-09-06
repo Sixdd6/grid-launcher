@@ -290,6 +290,7 @@ pub fn run() {
             commands::ensure_image,
             commands::ensure_video,
             commands::ensure_background_variant,
+            commands::open_youtube_video,
             commands::install_game,
             commands::cancel_install,
             commands::retry_install,

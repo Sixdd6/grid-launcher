@@ -29,7 +29,6 @@
         "default-src": "'self'",
         "img-src": "'self' asset: http://asset.localhost https://img.youtube.com",
         "media-src": "'self' asset: http://asset.localhost",
-        "frame-src": "https://www.youtube-nocookie.com",
         "connect-src": "ipc: http://ipc.localhost",
         "style-src": "'unsafe-inline' 'self'"
       }

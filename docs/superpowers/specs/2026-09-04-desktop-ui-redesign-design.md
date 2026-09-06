@@ -32,6 +32,7 @@ the options.
 | D-UI-8 | Theme = RomM v2 purple tokens (§4), dark first, with a light variant. Follows the OS setting; override in Settings › Appearance. |
 | D-UI-9 | Cards: hover scales 1.05 with a gradient overlay, a centred Play or Install, and a bottom action row (Details, Cloud sync, Favourite, More). Badges: installed dot top-right, UPDATE tag top-left, cloud icon bottom-right, platform chip bottom-left. Size control Small / Medium / Large per view, remembered. |
 | D-UI-10 | The Files tab shows a version for PC games: the parsed version tag when the file name carries one, else the file's `last_modified` date. |
+| D-UI-11 | Media tab trailers (2026-09-05): no `<iframe>` embed. On Linux the popup's page origin is `tauri://localhost`, a "local scheme" under the W3C referrer policy, so no `Referer` header is ever sent and YouTube answers error 153 ("Video unavailable") for every embed — no markup fix works around it (tauri-apps/tauri#14422). The trailer tile is a poster with a "Watch on YouTube" button that opens the system browser through a validated Tauri command (`open_youtube_video`); `path_video` is unaffected and still plays in-app from the local cache. |
 
 ## 3. Shell
 
@@ -127,8 +128,10 @@ Dialog 1040×680 max, centred over a dimmed, blurred shell; Esc and ✕ close.
      `merged_screenshots`), Related row (`igdb_metadata.similar_games`, remakes,
      remasters, dlcs, expansions) filtered to titles present on the server.
   2. **Media**: screenshot gallery (`merged_screenshots`, user screenshots), video
-     (`youtube_video_id` embedded, `path_video` when the server hosts one). Click opens
-     a fullscreen viewer with arrows, Esc, and a caption.
+     (`youtube_video_id` as a poster that opens the trailer in the system browser —
+     embedded players need an HTTP referrer that a `tauri://` page never sends (W3C
+     referrer policy, YouTube error 153); `path_video` played in-app from the local
+     cache). Click opens a fullscreen viewer with arrows, Esc, and a caption.
   3. **Saves**: user saves and states (`user_saves`, `user_states`) with timestamps and
      sizes, last cloud sync, Upload / Download / Sync now, and the cloud scope warning
      the current details view shows.

@@ -381,6 +381,11 @@ export const api = {
    *  "this URL has no art" — the caller falls through to the next image. */
   ensureBackgroundVariant: (url: string, blur: number) =>
     invoke<string>('ensure_background_variant', { url, blur }),
+  /** Opens a trailer's YouTube watch page in the system browser (the media
+   *  viewer's "Watch on YouTube" button). `videoId` is validated on the
+   *  Rust side before it reaches a URL; rejects with "not a YouTube video
+   *  id" for anything but an 11-character id. */
+  openYoutubeVideo: (videoId: string) => invoke<void>('open_youtube_video', { videoId }),
   installGame: (romId: number) => invoke<void>('install_game', { romId }),
   cancelInstall: (entryId: number) => invoke<void>('cancel_install', { entryId }),
   retryInstall: (entryId: number) => invoke<void>('retry_install', { entryId }),

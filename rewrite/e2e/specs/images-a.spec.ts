@@ -151,9 +151,11 @@ describe('images (a): cover, screenshots, install, library grid', () => {
     );
     await $(testId('media-viewer-next')).click();
     await expect($(testId('media-viewer-caption'))).toHaveText('Super Mario World — trailer');
-    await expect($(testId('media-viewer-youtube'))).toHaveAttribute(
-      'src',
-      'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+    // No embed: trailers open in the system browser (Task 5). Do NOT click
+    // this button here — it would launch a real browser on the host.
+    await expect($(testId('media-viewer-youtube-open'))).toBeExisting();
+    await expect($(testId('media-viewer-youtube-note'))).toHaveText(
+      'Trailers open in your browser.',
     );
 
     // The gallery's fourth and last item: rom 101's hosted video

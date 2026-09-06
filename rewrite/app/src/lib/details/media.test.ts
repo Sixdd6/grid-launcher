@@ -7,8 +7,8 @@ import {
   overviewStrip,
   prevIndex,
   trailerPoster,
-  youtubeEmbedUrl,
   youtubeThumbnailUrl,
+  youtubeWatchUrl,
   YOUTUBE_THUMBNAIL_BASE,
 } from './media';
 
@@ -50,11 +50,9 @@ describe('galleryItems', () => {
   });
 });
 
-describe('youtubeEmbedUrl', () => {
-  it('uses the no-cookie host', () => {
-    expect(youtubeEmbedUrl('dQw4w9WgXcQ')).toBe(
-      'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ'
-    );
+describe('youtubeWatchUrl', () => {
+  it('builds the public watch page, not an embed URL', () => {
+    expect(youtubeWatchUrl('dQw4w9WgXcQ')).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
   });
 });
 

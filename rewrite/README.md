@@ -157,8 +157,9 @@ These behaviors remain manual and require a desktop session + live RomM server
   Media and play it. Confirm it plays from the local cache (the file appears under the
   covers directory) and that the network request came from the app, not the webview.
 - **YouTube trailer**: with a game whose `youtube_video_id` is set, open the trailer in the
-  fullscreen viewer and confirm it plays. A blank frame means the `frame-src` CSP entry is
-  missing — the webview reports nothing for a blocked frame.
+  fullscreen viewer and confirm it shows a poster with a "Watch on YouTube" button, and that
+  the button opens the trailer in the system browser (not embedded in the app — Linux never
+  sends the `Referer` header an embed needs, so YouTube answers error 153 for every embed).
 - **Related row**: open a game whose IGDB metadata lists similar games and confirm only
   titles the server actually holds appear, and that clicking one is not offered (the row is
   informational until collections land).
