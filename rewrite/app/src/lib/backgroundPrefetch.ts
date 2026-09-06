@@ -60,3 +60,15 @@ export function prefetchBackground(subject: BackgroundSubject): void {
     .then((path) => rememberVariant(key, path))
     .catch(() => {});
 }
+
+/**
+ * Drops every memoised path. Call this whenever the blur sigma changes: the
+ * backend keeps ONE variant per source (`remove_stale_variants` in
+ * `images/background.rs` deletes the other sigmas after every successful
+ * build), so each path memoised at another sigma names a file that build has
+ * already deleted. Without this a blur value the user returns to would hit
+ * the memo and paint a background that is no longer on disk.
+ */
+export function clearVariantMemo(): void {
+  variantPaths.clear();
+}

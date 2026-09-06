@@ -945,13 +945,15 @@ covers/images design task (`docs/superpowers/specs/2026-09-02-covers-images-desi
    (`crates/grid-core/src/images/cache.rs:137`, `crates/grid-core/src/romm/mod.rs:133`), which
    attaches the same bearer token as every other authenticated request; there is no unauthenticated
    image path.
-3. **D3 — Bounded cache: 512 MiB cap, startup sweep, oldest-unpinned-first, installed rows' small
+3. **D3 — Bounded cache: 1 GiB cap, startup sweep, oldest-unpinned-first, installed rows' small
    and large covers pinned.** Uninstall deletes no files and cannot fail on image cleanup. Python
    never evicted and unlinked on uninstall with a protected-path set. `sweep`
    (`crates/grid-core/src/images/sweep.rs:43`) deletes the least-recently-modified unpinned files
-   under `IMAGE_CACHE_CAP_BYTES` (`crates/grid-core/src/images/sweep.rs:11`, 512 * 1024 * 1024);
-   `pinned_keys` (`crates/grid-core/src/images/sweep.rs:23`) pins every installed row's cover
-   paths. The sweep runs once, at startup — see the Rulings below.
+   under `IMAGE_CACHE_CAP_BYTES` (`crates/grid-core/src/images/sweep.rs`, 1024 * 1024 * 1024 since
+   2026-09-05 — the background tier pins full-size fanart, a few MB per installed game);
+   `pinned_keys` pins every installed row's cover paths and its background source, and `sweep`
+   warns when the pinned bytes alone reach the cap. The sweep runs once, at startup — see the
+   Rulings below.
 4. **D4 — At most 6 concurrent image downloads; 30 s per-fetch timeout on every path.** Python:
    unbounded async loads, 30 s only on blocking paths. `MAX_CONCURRENT_DOWNLOADS = 6`
    (`crates/grid-core/src/images/cache.rs:15`) bounds a `Semaphore` acquired before every fetch

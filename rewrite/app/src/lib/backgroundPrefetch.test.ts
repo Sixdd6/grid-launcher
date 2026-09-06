@@ -16,6 +16,7 @@ vi.mock('./stores/uiSettings.svelte', () => ({
 }));
 
 import {
+  clearVariantMemo,
   prefetchBackground,
   rememberVariant,
   VARIANT_MEMO_CAP,
@@ -107,5 +108,16 @@ describe('variantKey', () => {
   it('separates the sigma from the URL so two levels of one image differ', () => {
     expect(variantKey(12, 'https://romm/a.png')).not.toBe(variantKey(0, 'https://romm/a.png'));
     expect(variantKey(12, 'https://romm/a.png')).toBe(variantKey(12, 'https://romm/a.png'));
+  });
+});
+
+describe('clearVariantMemo', () => {
+  it('drops paths memoised at another sigma, so a returned-to blur re-fetches', () => {
+    rememberVariant(variantKey(12, 'https://romm/cover.png'), '/cache/a.bg12.jpg');
+    rememberVariant(variantKey(20, 'https://romm/cover.png'), '/cache/a.bg20.jpg');
+
+    clearVariantMemo();
+
+    expect(variantPaths.size).toBe(0);
   });
 });

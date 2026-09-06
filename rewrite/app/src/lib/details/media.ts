@@ -18,25 +18,18 @@ export type MediaGalleryInput = {
 };
 
 /**
- * An 11-character YouTube id and nothing else. The id is interpolated into
- * an iframe `src`, so anything that is not exactly an id — a path, a full
- * URL, an empty string — must not reach it.
+ * An 11-character YouTube id and nothing else. Nothing here builds a watch
+ * URL: an `<iframe>` to `youtube-nocookie.com` cannot play on Linux (the
+ * page origin is `tauri://localhost`, a "local scheme" under the W3C
+ * referrer policy, so no `Referer` is sent and YouTube answers error 153
+ * "Video unavailable" for every embed — tauri-apps/tauri#14422), so the
+ * trailer opens in the system browser through `open_youtube_video`, which
+ * validates the id again on the Rust side and builds the only URL. This
+ * guard decides whether a trailer tile exists at all and gates the
+ * thumbnail URL below.
  */
 export function isYoutubeId(value: string): boolean {
   return /^[A-Za-z0-9_-]{11}$/.test(value.trim());
-}
-
-/**
- * The trailer's watch page, opened in the system browser rather than
- * embedded. An `<iframe>` to `youtube-nocookie.com` cannot play on Linux:
- * the page origin is `tauri://localhost`, a "local scheme" under the W3C
- * referrer policy, so no `Referer` header is ever sent and YouTube answers
- * error 153 ("Video unavailable") for every embed (tauri-apps/tauri#14422).
- * No markup fix works around that, so the trailer opens outside the app
- * instead.
- */
-export function youtubeWatchUrl(videoId: string): string {
-  return `https://www.youtube.com/watch?v=${videoId}`;
 }
 
 /**

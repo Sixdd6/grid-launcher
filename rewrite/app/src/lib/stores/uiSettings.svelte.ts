@@ -3,6 +3,7 @@
 // remounts and every view reads one source.
 import { api } from '../api';
 import type { UiSettings } from '../api';
+import { clearVariantMemo } from '../backgroundPrefetch';
 import { normalizeCardSize, type CardSize } from '../cards/size';
 import { fadeForToggle, rememberFade } from '../settings/appearance';
 import {
@@ -183,8 +184,13 @@ export async function commitBackgroundFade(value: number): Promise<void> {
  * variant — previewing every intermediate drag position would build dozens of
  * images nobody sees. `BackgroundArt` re-fetches through its own effect once
  * this lands.
+ *
+ * The memo is cleared BEFORE the store value changes, so the effect's
+ * re-fetch — which the change triggers — can never read a path built at the
+ * old sigma and since deleted by `remove_stale_variants`.
  */
 export async function commitBackgroundBlur(value: number): Promise<void> {
+  clearVariantMemo();
   state.backgroundBlur = clampBlur(value);
   await api.setUiSettings(payload());
 }

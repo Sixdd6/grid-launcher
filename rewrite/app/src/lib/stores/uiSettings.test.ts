@@ -266,6 +266,19 @@ describe('background blur', () => {
     });
   });
 
+  // Finding 1 of the round-5 review: the backend keeps ONE variant per
+  // source, so a path memoised at the old sigma names a deleted file. The
+  // commit must drop the memo before the store change re-runs the fetch.
+  it('clears the variant memo so a returned-to sigma is re-fetched', async () => {
+    const { store } = await loadStore(12);
+    const prefetch = await import('../backgroundPrefetch');
+    prefetch.rememberVariant(prefetch.variantKey(12, 'https://romm/cover.png'), '/cache/a.bg12.jpg');
+
+    await store.commitBackgroundBlur(20);
+
+    expect(prefetch.variantPaths.size).toBe(0);
+  });
+
   it('keeps the sigma when another writer saves', async () => {
     const { store, setUiSettings } = await loadStore(12);
     await store.commitBackgroundBlur(18);

@@ -343,3 +343,50 @@ async fn plan_still_needs_a_variant_when_only_another_sigma_is_on_disk() {
         }]
     );
 }
+
+/// Rows installed before the 2026-09-05 resolver change hold a fanart URL of
+/// the old shape (`<origin>/roms/…`), which the server does not serve.
+/// Re-resolving a stored value is a no-op, so `plan` has to send the row back
+/// through `NeedsFields` to have all four image fields rewritten.
+#[tokio::test]
+async fn plan_refetches_a_row_whose_stored_fanart_has_the_old_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = ImageCache::new(dir.path().to_path_buf());
+    let mut old = row(Some(1), "/assets/1.png", "/assets/1l.png", "");
+    old.fanart_urls = "https://h/roms/20/194/fanart/fanart.png".to_string();
+
+    assert_eq!(
+        plan(&[old], &cache, "https://h", 12),
+        vec![ReplenishItem::NeedsFields { rom_id: 1 }]
+    );
+}
+
+/// The counterpart: a fanart URL the CURRENT resolver produced is under
+/// `/assets/`, so the row is left alone and only its missing files are
+/// planned.
+#[tokio::test]
+async fn plan_leaves_a_row_whose_stored_fanart_is_already_the_new_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = ImageCache::new(dir.path().to_path_buf());
+    let mut fresh = row(Some(2), "/assets/2.png", "/assets/2l.png", "");
+    fresh.fanart_urls = "https://h/assets/romm/resources/roms/20/194/fanart/fanart.png".to_string();
+
+    let items = plan(&[fresh], &cache, "https://h", 12);
+
+    assert!(!items
+        .iter()
+        .any(|i| matches!(i, ReplenishItem::NeedsFields { .. })));
+    assert_eq!(
+        items,
+        vec![
+            ReplenishItem::NeedsFile {
+                rom_id: 2,
+                url: "https://h/assets/2.png".into()
+            },
+            ReplenishItem::NeedsVariant {
+                rom_id: 2,
+                url: "https://h/assets/romm/resources/roms/20/194/fanart/fanart.png".into()
+            },
+        ]
+    );
+}

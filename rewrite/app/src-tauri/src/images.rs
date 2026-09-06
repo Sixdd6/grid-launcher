@@ -49,7 +49,7 @@ impl ImageService {
     }
 
     /// [`sweep_at_startup`](Self::sweep_at_startup) with the cap as an
-    /// argument, so a test can force an eviction without writing 512 MB.
+    /// argument, so a test can force an eviction without writing a gigabyte.
     pub fn sweep_at_startup_with_cap(
         cache: &ImageCache,
         rows: &[InstalledGame],

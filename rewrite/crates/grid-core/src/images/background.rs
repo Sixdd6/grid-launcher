@@ -136,10 +136,16 @@ pub fn build_background_variant(
 /// file, never a failed build.
 ///
 /// Matches `<key>.bg<digits>.jpg` and `<key>.bg.jpg` only, so a concurrent
-/// build's `<key>.bg.<pid>-<seq>.part` is never touched. Two sigmas of one
-/// source built at the same moment can still delete each other's output; the
-/// loser is simply rebuilt on the next miss, and the shell asks for one sigma
-/// at a time anyway.
+/// build's `<key>.bg.<pid>-<seq>.part` is never touched.
+///
+/// Two sigmas of one source CAN be in flight at once: the shell asks for one
+/// sigma at a time, but `replenish_once` reads its own sigma from
+/// `config.toml` and holds it for the whole pass, so a blur committed
+/// mid-pass puts the pass's sigma and the shell's sigma against the same
+/// source and each deletes the other's output. The names are deterministic,
+/// so the loser is rebuilt on its next miss. The frontend must not memoise
+/// across a sigma change or that rebuild never happens — see
+/// `clearVariantMemo` in `app/src/lib/backgroundPrefetch.ts`.
 fn remove_stale_variants(dir: &Path, key: &str, keep: &Path) {
     let prefix = format!("{key}.bg");
     let Ok(entries) = std::fs::read_dir(dir) else {

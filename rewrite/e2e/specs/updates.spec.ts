@@ -375,8 +375,10 @@ describe('updates', () => {
     };
 
     await setBlur('0');
-    // Leave the page and come back: the value is read from the store the
-    // config load filled, not from the DOM node left behind.
+    // `waitForConfigLine('background_blur = 0')` above is what proves the
+    // round trip: `Settings.svelte` renders every page in one `{#each}` with
+    // `hidden`, so the Appearance pane never unmounts and the assertion
+    // below reads the same DOM node, reflecting the in-memory store.
     await $(testId('settings-nav-updates')).click();
     await $(testId('settings-page-updates')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     await $(testId('settings-nav-appearance')).click();

@@ -57,9 +57,10 @@ function clean(urls: readonly (string | null | undefined)[]): string[] {
 }
 
 /** Shared, never mutated: the default `failed` set for every caller that has
- *  no failures to report. A module-level constant so the default argument is
- *  the SAME object on every call — a fresh `new Set()` per call would make a
- *  `$derived` reading this re-run forever. */
+ *  no failures to report. A module-level constant so the common case costs
+ *  one allocation for the whole module instead of one per call, and so the
+ *  default is a single object typed `ReadonlySet` that no caller can add to
+ *  behind another caller's back. */
 const EMPTY_SET: ReadonlySet<string> = new Set<string>();
 
 /**

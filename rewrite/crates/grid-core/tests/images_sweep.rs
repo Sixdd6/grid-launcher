@@ -86,14 +86,14 @@ fn missing_dir_is_a_noop() {
     assert_eq!(r, SweepReport::default());
 }
 
-/// `<key>.bg.jpg` has the file stem `<key>.bg`, so pinning by whole stem
+/// `<key>.bg12.jpg` has the file stem `<key>.bg12`, so pinning by whole stem
 /// would evict every background variant while keeping its source.
 #[test]
 fn a_background_variant_is_pinned_with_its_source() {
     let dir = tempfile::tempdir().unwrap();
     let key = image_key("https://h/assets/cover.png");
     write(dir.path(), &format!("{key}.png"), 4096, 300);
-    write(dir.path(), &format!("{key}.bg.jpg"), 4096, 300);
+    write(dir.path(), &format!("{key}.bg12.jpg"), 4096, 300);
     let victim = image_key("https://h/assets/other.png");
     write(dir.path(), &format!("{victim}.png"), 8192, 100);
 
@@ -102,7 +102,7 @@ fn a_background_variant_is_pinned_with_its_source() {
     let report = sweep(dir.path(), 8192, &pinned);
 
     assert!(dir.path().join(format!("{key}.png")).exists());
-    assert!(dir.path().join(format!("{key}.bg.jpg")).exists());
+    assert!(dir.path().join(format!("{key}.bg12.jpg")).exists());
     assert!(!dir.path().join(format!("{victim}.png")).exists());
     assert_eq!(report.deleted, 1);
 }
@@ -127,7 +127,7 @@ fn a_fanart_sourced_background_is_pinned_when_its_own_key_is_in_the_set() {
     assert_eq!(fanart, "https://h/assets/1f.png");
     let fanart_key = image_key(&fanart);
     write(dir.path(), &format!("{fanart_key}.png"), 4096, 300);
-    write(dir.path(), &format!("{fanart_key}.bg.jpg"), 4096, 300);
+    write(dir.path(), &format!("{fanart_key}.bg12.jpg"), 4096, 300);
     write(dir.path(), "loose.png", 8192, 100);
 
     // Covers alone: the fanart source and its variant are the oldest, so both
@@ -135,18 +135,18 @@ fn a_fanart_sourced_background_is_pinned_when_its_own_key_is_in_the_set() {
     let covers_only = pinned_keys(["/assets/1.png", "/assets/1l.png"], "https://h");
     let report = sweep(dir.path(), 8192, &covers_only);
     assert_eq!(report.deleted, 2);
-    assert!(!dir.path().join(format!("{fanart_key}.bg.jpg")).exists());
+    assert!(!dir.path().join(format!("{fanart_key}.bg12.jpg")).exists());
 
     // With the background source in the set, both survive.
     write(dir.path(), &format!("{fanart_key}.png"), 4096, 300);
-    write(dir.path(), &format!("{fanart_key}.bg.jpg"), 4096, 300);
+    write(dir.path(), &format!("{fanart_key}.bg12.jpg"), 4096, 300);
     let with_background = pinned_keys(
         ["/assets/1.png", "/assets/1l.png", fanart.as_str()],
         "https://h",
     );
     let report = sweep(dir.path(), 8192, &with_background);
     assert!(dir.path().join(format!("{fanart_key}.png")).exists());
-    assert!(dir.path().join(format!("{fanart_key}.bg.jpg")).exists());
+    assert!(dir.path().join(format!("{fanart_key}.bg12.jpg")).exists());
     assert!(!dir.path().join("loose.png").exists());
     assert_eq!(report.deleted, 1);
 }

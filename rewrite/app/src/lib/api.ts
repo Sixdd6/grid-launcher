@@ -378,7 +378,8 @@ export const api = {
   /** The 960px-wide background variant of `url`, blurred at `blur` sigma and
    *  built on demand. Same host filter as `ensureImage`; the sigma is part of
    *  the cached file's name, so each level is built once. A failure means
-   *  "this URL has no art" — the caller falls through to the next image. */
+   *  "this URL has no art" — `BackgroundArt` falls through to the next image;
+   *  the prefetch just drops it. */
   ensureBackgroundVariant: (url: string, blur: number) =>
     invoke<string>('ensure_background_variant', { url, blur }),
   /** Opens a trailer's YouTube watch page in the system browser (the media

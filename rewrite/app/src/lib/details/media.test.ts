@@ -8,7 +8,6 @@ import {
   prevIndex,
   trailerPoster,
   youtubeThumbnailUrl,
-  youtubeWatchUrl,
   YOUTUBE_THUMBNAIL_BASE,
 } from './media';
 
@@ -47,12 +46,6 @@ describe('galleryItems', () => {
     expect(
       galleryItems({ title: 'G', screenshotUrls: [], youtubeVideoId: '', videoPath: '' })
     ).toEqual([]);
-  });
-});
-
-describe('youtubeWatchUrl', () => {
-  it('builds the public watch page, not an embed URL', () => {
-    expect(youtubeWatchUrl('dQw4w9WgXcQ')).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
   });
 });
 

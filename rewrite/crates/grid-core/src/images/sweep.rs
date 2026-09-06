@@ -8,7 +8,14 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-pub const IMAGE_CACHE_CAP_BYTES: u64 = 512 * 1024 * 1024;
+/// 1 GiB, raised from 512 MB on 2026-09-05. The background-art tier now
+/// reaches full-size fanart, and every installed row's fanart source is
+/// pinned together with its blurred variant. Fanart is a few MB per game
+/// where a cover is tens of KB, so a large library's pinned set alone could
+/// pass the old cap — at which point each startup sweep deleted every
+/// unpinned cover and screenshot without ever getting under it. `sweep` warns
+/// when the pinned bytes reach the cap.
+pub const IMAGE_CACHE_CAP_BYTES: u64 = 1024 * 1024 * 1024;
 pub const STALE_PART_AGE: Duration = Duration::from_secs(3600);
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -81,6 +88,20 @@ pub fn sweep(dir: &Path, cap_bytes: u64, pinned: &HashSet<String>) -> SweepRepor
     if report.total_before <= cap_bytes {
         return report;
     }
+    // Pinned entries are never victims, so once they alone fill the cap the
+    // sweep deletes every unpinned file and still ends over it — the Server
+    // view's covers and screenshots are then re-downloaded on every launch.
+    // Counts only; no path or URL is logged.
+    let pinned_bytes: u64 = entries.iter().filter(|e| e.pinned).map(|e| e.size).sum();
+    if pinned_bytes >= cap_bytes {
+        tracing::warn!(
+            "image cache sweep: {} pinned files hold {} bytes, at or over the {} byte cap; \
+             the sweep cannot get under it and every unpinned file will be deleted",
+            entries.iter().filter(|e| e.pinned).count(),
+            pinned_bytes,
+            cap_bytes
+        );
+    }
     let mut victims: Vec<&Entry> = entries.iter().filter(|e| !e.pinned).collect();
     victims.sort_by_key(|e| e.mtime);
     for victim in victims {
@@ -93,7 +114,9 @@ pub fn sweep(dir: &Path, cap_bytes: u64, pinned: &HashSet<String>) -> SweepRepor
                 report.deleted += 1;
             }
             Err(_) => {
-                // Ignore deletion errors silently; tracing is not a grid-core dependency.
+                // Ignore deletion errors: a file that will not delete is a
+                // cache entry the next sweep tries again, never a failure.
+                // Not logged — the path would name a cached URL.
             }
         }
     }
