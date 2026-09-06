@@ -288,7 +288,7 @@ pub fn run() {
             commands::list_games,
             commands::get_rom_detail,
             commands::ensure_image,
-            commands::ensure_video,
+            commands::read_video,
             commands::ensure_background_variant,
             commands::open_youtube_video,
             commands::install_game,

@@ -240,12 +240,42 @@ pub async fn ensure_image(state: State<'_, AppState>, url: String) -> Result<Str
     Ok(path.to_string_lossy().into_owned())
 }
 
-/// The local path of a server-hosted game video, fetching it through the
-/// session client on a cache miss. Mirrors [`ensure_image`]'s resolution and
-/// host filter exactly, so a `path_video` pointing anywhere but the
-/// configured server is refused rather than fetched.
+/// The largest cached video the app will hand to the webview. The bytes
+/// cross IPC in one message and become a `Blob` in the page, so the file is
+/// held twice in memory while it plays; 64 MiB is far above any RomM
+/// `path_video` preview and still safe to copy.
+pub const MAX_INLINE_VIDEO_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Reads a cached video file, refusing anything above
+/// [`MAX_INLINE_VIDEO_BYTES`] by its metadata before a single byte is read.
+/// Split out of [`read_video`] so the cap is testable without an
+/// `AppState`. The error text is shown to the user verbatim, so it names
+/// only the video — never the path, the URL, or anything from the session.
+pub(crate) async fn read_cached_video(path: &std::path::Path) -> Result<Vec<u8>, String> {
+    let meta = tokio::fs::metadata(path).await.map_err(err)?;
+    if meta.len() > MAX_INLINE_VIDEO_BYTES {
+        return Err("video too large to play in-app".to_string());
+    }
+    tokio::fs::read(path).await.map_err(err)
+}
+
+/// The bytes of a server-hosted game video, fetched through the session
+/// client on a cache miss and returned as a raw IPC response. Mirrors
+/// [`ensure_image`]'s resolution and host filter exactly, so a `path_video`
+/// pointing anywhere but the configured server is refused rather than
+/// fetched.
+///
+/// The bytes travel over IPC rather than the file being played from a URL
+/// because WebKitGTK (2.52, the Linux webview) will not decode media served
+/// from a custom URI scheme: `asset:` answers correct 206 Range requests and
+/// the element still fails with `MEDIA_ERR_SRC_NOT_SUPPORTED`. The frontend
+/// wraps these bytes in a `Blob` and plays the resulting `blob:` URL, which
+/// WebKitGTK does decode.
 #[tauri::command]
-pub async fn ensure_video(state: State<'_, AppState>, url: String) -> Result<String, String> {
+pub async fn read_video(
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<tauri::ipc::Response, String> {
     let base = state.session.server_url();
     let resolved = filter_to_server_host(&resolve_image_url(&url, &base), &base);
     if resolved.is_empty() {
@@ -256,7 +286,8 @@ pub async fn ensure_video(state: State<'_, AppState>, url: String) -> Result<Str
         grid_core::images::video::ensure_video(state.session.cache(), client.as_deref(), &resolved)
             .await
             .map_err(err)?;
-    Ok(path.to_string_lossy().into_owned())
+    let bytes = read_cached_video(&path).await?;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 /// The exact-length check a YouTube video id must pass before it is
@@ -2489,5 +2520,49 @@ mod platform_firmware_tests {
         };
         let json = serde_json::to_string(&status).unwrap();
         assert_eq!(json, r#"{"file_count":4,"has_default_emulator":true}"#);
+    }
+}
+
+#[cfg(test)]
+mod read_cached_video_tests {
+    use super::{read_cached_video, MAX_INLINE_VIDEO_BYTES};
+
+    /// The bytes of a cached video cross IPC in one piece, so a huge file
+    /// would be copied whole into the webview. The cap refuses it with a
+    /// message the viewer shows verbatim — assert the exact text, and that
+    /// it names nothing but the video (no path, no URL, no credential).
+    #[tokio::test]
+    async fn a_file_above_the_cap_is_refused_by_its_size_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("huge.mp4");
+        let file = std::fs::File::create(&path).unwrap();
+        // `set_len` makes a sparse file: the cap reads metadata, not bytes,
+        // so the test costs no disk.
+        file.set_len(MAX_INLINE_VIDEO_BYTES + 1).unwrap();
+        drop(file);
+
+        let err = read_cached_video(&path).await.unwrap_err();
+        assert_eq!(err, "video too large to play in-app");
+        assert!(!err.contains("huge.mp4"));
+        assert!(!err.contains(&dir.path().to_string_lossy().into_owned()));
+    }
+
+    #[tokio::test]
+    async fn a_file_at_or_below_the_cap_comes_back_byte_for_byte() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("clip.mp4");
+        let bytes: Vec<u8> = (0u8..=255).cycle().take(4096).collect();
+        std::fs::write(&path, &bytes).unwrap();
+
+        assert_eq!(read_cached_video(&path).await.unwrap(), bytes);
+    }
+
+    #[tokio::test]
+    async fn a_missing_cached_file_is_an_error_rather_than_empty_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = read_cached_video(&dir.path().join("absent.mp4"))
+            .await
+            .unwrap_err();
+        assert!(!err.is_empty());
     }
 }

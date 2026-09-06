@@ -1099,8 +1099,25 @@ content gate (Content-Type, then the `ftyp` / EBML magic bytes), storing the fil
 video is an ordinary unpinned entry: evictable, and refetched on the next view.
 
 The bytes are fetched through the session's `RommClient`, exactly like a cover, and the
-frontend only ever receives the resulting local path. No video URL in the UI carries a
-token. `youtube_video_id` is a different case entirely — it is embedded, touches no
+frontend never sees the server URL. No video URL in the UI carries a token.
+
+The frontend receives the **bytes**, not the cached path. WebKitGTK 2.52 (the Linux
+webview) will not decode media served from a custom URI scheme. Probed outside the app
+with the real cached file: `file://` plays; a custom scheme fails with
+`MEDIA_ERR_SRC_NOT_SUPPORTED` even when the handler answers correct 206 Range requests
+(WebKit issues one `Range: bytes=0-1445` request and then errors); a `blob:` object URL
+created on a page whose scheme is registered secure and CORS-enabled plays. So the
+`read_video` command (`app/src-tauri/src/commands.rs`) resolves and host-filters the URL,
+calls `ensure_video` for the cached path, and returns the file as a raw
+`tauri::ipc::Response`; `MediaViewer.svelte` wraps the `ArrayBuffer` in a `Blob` typed by
+the URL's extension (`videoMimeType` in `details/media.ts`) and plays
+`URL.createObjectURL(...)`, revoking it on every teardown. The CSP therefore carries
+`blob:` in `media-src`. Because the bytes cross IPC in one message and are then held
+again as a `Blob`, `read_video` refuses a cached file larger than
+`MAX_INLINE_VIDEO_BYTES` (64 MiB) with "video too large to play in-app", checked against
+the file's metadata before anything is read.
+
+`youtube_video_id` is a different case entirely — it is embedded, touches no
 server bytes, and needs the `frame-src https://www.youtube-nocookie.com` CSP entry to
 render at all.
 

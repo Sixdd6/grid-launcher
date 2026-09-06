@@ -140,8 +140,10 @@ Dialog 1040×680 max, centred over a dimmed, blurred shell; Esc and ✕ close.
   2. **Media**: screenshot gallery (`merged_screenshots`, user screenshots), video
      (`youtube_video_id` as a poster that opens the trailer in the system browser —
      embedded players need an HTTP referrer that a `tauri://` page never sends (W3C
-     referrer policy, YouTube error 153); `path_video` played in-app from the local
-     cache). Click opens a fullscreen viewer with arrows, Esc, and a caption.
+     referrer policy, YouTube error 153); `path_video` played in-app from an object URL —
+     WebKitGTK cannot play media from a custom URI scheme, so the cached file's bytes
+     cross IPC and the page wraps them in a `Blob`). Click opens a fullscreen viewer with
+     arrows, Esc, and a caption.
   3. **Saves**: user saves and states (`user_saves`, `user_states`) with timestamps and
      sizes, last cloud sync, Upload / Download / Sync now, and the cloud scope warning
      the current details view shows.

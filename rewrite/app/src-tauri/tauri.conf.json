@@ -28,7 +28,7 @@
       "csp": {
         "default-src": "'self'",
         "img-src": "'self' asset: http://asset.localhost https://img.youtube.com",
-        "media-src": "'self' asset: http://asset.localhost",
+        "media-src": "'self' asset: http://asset.localhost blob:",
         "connect-src": "ipc: http://ipc.localhost",
         "style-src": "'unsafe-inline' 'self'"
       }

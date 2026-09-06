@@ -107,3 +107,23 @@ export const OVERVIEW_STRIP_LIMIT = 6;
 export function overviewStrip(urls: string[]): string[] {
   return urls.slice(0, OVERVIEW_STRIP_LIMIT);
 }
+
+/**
+ * The MIME type a hosted video's `Blob` is built with, read from the URL's
+ * own extension. The bytes reach the page over IPC with no headers, so the
+ * `<video>` element has nothing else to go on; a wrong type stops WebKitGTK
+ * from decoding the file at all.
+ *
+ * A query string is dropped first (RomM appends cache-busting parameters),
+ * and only the last path segment is examined, so a directory called
+ * `video.webm` never decides the type of the file inside it. Anything
+ * unrecognised is `video/mp4` — the container every RomM `path_video`
+ * preview uses.
+ */
+export function videoMimeType(url: string): string {
+  const path = url.split('?')[0].split('#')[0];
+  const name = path.slice(path.lastIndexOf('/') + 1).toLowerCase();
+  if (name.endsWith('.webm')) return 'video/webm';
+  if (name.endsWith('.mov')) return 'video/quicktime';
+  return 'video/mp4';
+}

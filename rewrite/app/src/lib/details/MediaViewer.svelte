@@ -1,9 +1,8 @@
 <script lang="ts">
-  import { convertFileSrc } from '@tauri-apps/api/core';
   import { api } from '../api';
   import Icon from '../Icon.svelte';
   import Image from '../Image.svelte';
-  import { nextIndex, prevIndex, trailerPoster, type MediaItem } from './media';
+  import { nextIndex, prevIndex, trailerPoster, videoMimeType, type MediaItem } from './media';
 
   let {
     items,
@@ -28,11 +27,21 @@
   let viewerEl = $state<HTMLElement | null>(null);
   let current = $derived(items[index] ?? null);
 
-  // A server-hosted video is fetched through the session client and played
-  // from the local cache (`ensure_video`, Task 4). The server URL never
-  // reaches the DOM, so no request from the page needs a token.
+  // A server-hosted video is fetched through the session client, cached by
+  // the backend, and handed to the page as raw bytes over IPC. The server
+  // URL never reaches the DOM, so no request from the page needs a token.
+  //
+  // Bytes rather than a file URL because WebKitGTK 2.52 (the Linux webview)
+  // will not decode media served from a custom URI scheme: `asset:` answers
+  // correct 206 Range requests and the element still fails with
+  // MEDIA_ERR_SRC_NOT_SUPPORTED. A `blob:` object URL built in the page
+  // plays. `videoSrc` is therefore an object URL, revoked on every teardown.
   let videoSrc = $state<string | null>(null);
+  /** The element could not decode the bytes it was given. */
   let videoError = $state(false);
+  /** The backend refused to supply the bytes — its message, shown verbatim
+   *  (e.g. the 64 MiB cap's "video too large to play in-app"). */
+  let videoLoadError = $state<string | null>(null);
 
   // A trailer never plays in-app (Task 5): the button opens the system
   // browser through a validated Tauri command, and any failure to launch
@@ -51,19 +60,32 @@
     const item = current;
     videoSrc = null;
     videoError = false;
+    videoLoadError = null;
     youtubeError = null;
     if (item === null || item.kind !== 'video') return;
     let cancelled = false;
+    // Created only on a resolve that is still wanted, so a read that lands
+    // after the user moved on never leaves an object URL behind.
+    let objectUrl: string | null = null;
     api
-      .ensureVideo(item.url)
-      .then((path) => {
-        if (!cancelled) videoSrc = convertFileSrc(path);
+      .readVideo(item.url)
+      .then((bytes) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(new Blob([bytes], { type: videoMimeType(item.url) }));
+        videoSrc = objectUrl;
       })
-      .catch(() => {
-        if (!cancelled) videoError = true;
+      .catch((e) => {
+        if (cancelled) return;
+        // Three lines, never interchangeable. This one means the bytes never
+        // arrived at all. The backend's own text is shown verbatim when it
+        // has one (the 64 MiB cap says "video too large to play in-app"); a
+        // rejection carrying no message falls back to the generic line.
+        const message = e instanceof Error ? e.message : String(e);
+        videoLoadError = message.trim() === '' ? 'This video could not be loaded' : message;
       });
     return () => {
       cancelled = true;
+      if (objectUrl !== null) URL.revokeObjectURL(objectUrl);
     };
   });
 
@@ -225,20 +247,24 @@
             onerror={() => (videoError = true)}
           ></video>
           {#if videoError}
-            <!-- The webview fetched and cached the file (`ensure_video`
-                 already gated it on Content-Type and its `ftyp` magic) but
-                 could not decode it — a bad codec, or a file truncated past
-                 the header check. Distinct from the fetch-failure text
-                 below: fetching worked here, so the element stays. -->
+            <!-- The backend fetched and cached the file (`read_video`
+                 already gated it on Content-Type and its `ftyp` magic) and
+                 the bytes reached the page, but the element could not decode
+                 them — a bad codec, or a file truncated past the header
+                 check. One of three distinct lines: this one means the bytes
+                 arrived, so the element stays on screen. -->
             <p class="pending" data-testid="media-viewer-video-error">
               This video could not be played
             </p>
           {/if}
         </div>
+      {:else if videoLoadError !== null}
+        <!-- The backend refused or failed to supply the bytes. Its own text
+             is shown verbatim; it names no path, URL or credential by
+             construction (`read_cached_video` in commands.rs asserts that). -->
+        <p class="pending" data-testid="media-viewer-video-load-error">{videoLoadError}</p>
       {:else}
-        <p class="pending" data-testid="media-viewer-video-pending">
-          {videoError ? 'This video could not be loaded' : 'Loading video…'}
-        </p>
+        <p class="pending" data-testid="media-viewer-video-pending">Loading video…</p>
       {/if}
     </div>
 
