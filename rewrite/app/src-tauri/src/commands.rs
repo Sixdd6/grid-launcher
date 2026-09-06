@@ -157,6 +157,43 @@ fn platform_id_entries(platforms: &[Platform]) -> BTreeMap<String, i64> {
         .collect()
 }
 
+/// The `label -> slug` map fed to `grid_core::launch::set_platform_slugs`
+/// (the process-wide registry `installed_core_resolver` reads via
+/// `slug_for_platform`) and used as the base of
+/// [`platform_slugs_for_install`]. Every real reader of that registry —
+/// `resolve_launch`'s `game.platform`, `GameFirmwareContext.platform`,
+/// `InstallService`'s PS3/Xenia helpers, the cloud-ops wrapper name — reads
+/// a rom's own display name (`RomDetail.platform_name`/`InstalledGame.
+/// platform`), so the slug has to be keyed the same way, not by the server's
+/// raw platform `name` (round 9 re-review HIGH item).
+fn platform_slugs_by_label(platforms: &[Platform]) -> BTreeMap<String, String> {
+    platforms
+        .iter()
+        .map(|p| (p.label().to_string(), p.slug.clone()))
+        .collect()
+}
+
+/// [`platform_slugs_by_label`], plus a `name`-keyed fallback entry for any
+/// platform whose custom name makes its label differ from its raw `name`.
+/// Fed to `install.set_platform_slugs`, which has two kinds of reader:
+/// `set_default_emulator` / `set_retroarch_core` below, which now key by the
+/// label like everything else above — and the autoconfig backfill's
+/// `SyncContext.platforms` (`install.known_platforms()` /
+/// `autoconfig_entry::assignable_platforms`, both built from the raw server
+/// `name`, deliberately out of scope for this round), which still iterates
+/// by name. The fallback keeps that second caller resolving a slug too,
+/// without requiring it to change.
+fn platform_slugs_for_install(platforms: &[Platform]) -> BTreeMap<String, String> {
+    let mut map = platform_slugs_by_label(platforms);
+    for p in platforms {
+        let label = p.label();
+        if p.name != label {
+            map.entry(p.name.clone()).or_insert_with(|| p.slug.clone());
+        }
+    }
+    map
+}
+
 #[tauri::command]
 pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>, String> {
     let client = state.session.client().ok_or("not connected")?;
@@ -174,19 +211,19 @@ pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>,
         install.set_platform_ids(platform_id_entries(&platforms));
         // Slug-first RetroArch core resolution (D-RC-2) needs the server's
         // own slug for each platform; like the ids above, this is recorded
-        // from the FULL list, not the assignable subset.
-        let slug_map: BTreeMap<String, String> = platforms
-            .iter()
-            .map(|p| (p.name.clone(), p.slug.clone()))
-            .collect();
-        install.set_platform_slugs(slug_map.clone());
-        // The same map again, into grid-core's process-wide registry: the
-        // launch resolver, cloud ops, firmware routing and the install
-        // service see only a platform NAME, and read the slug from there
-        // (`launch::selection::installed_core_resolver`). Without it those
-        // paths would fall back to fuzzy name matching and disagree with
-        // the Emulators panel about which platforms RetroArch supports.
-        grid_core::launch::set_platform_slugs(slug_map);
+        // from the FULL list, not the assignable subset. `install`'s copy
+        // keeps a name-keyed fallback (see `platform_slugs_for_install`) for
+        // the autoconfig backfill call below, which still iterates names.
+        install.set_platform_slugs(platform_slugs_for_install(&platforms));
+        // The label-keyed map again, into grid-core's process-wide registry:
+        // the launch resolver, cloud ops, firmware routing and the install
+        // service's PS3/Xenia helpers all read a rom's own display name
+        // (`launch::selection::installed_core_resolver`), never the server's
+        // raw platform `name` — so no name fallback belongs here. Without
+        // this those paths would fall back to fuzzy name matching and
+        // disagree with the Emulators panel about which platforms RetroArch
+        // supports.
+        grid_core::launch::set_platform_slugs(platform_slugs_by_label(&platforms));
 
         // Self-heal for the gap D3's own trigger policy leaves: an emulator
         // installed or added before the FIRST successful platform fetch got
@@ -2282,6 +2319,111 @@ mod merge_tests {
         assert_eq!(
             platform_id_entries(&platforms),
             BTreeMap::from([("Windows 9x".to_string(), 3)])
+        );
+    }
+
+    fn windows_9x_platform() -> Platform {
+        Platform {
+            id: 3,
+            name: "Windows".to_string(),
+            slug: "win".to_string(),
+            rom_count: 1,
+            custom_name: Some("Windows 9x".to_string()),
+            display_name: "Windows 9x".to_string(),
+        }
+    }
+
+    #[test]
+    fn platform_slugs_by_label_keys_by_the_display_label_not_the_raw_name() {
+        let platforms = vec![windows_9x_platform()];
+        assert_eq!(
+            platform_slugs_by_label(&platforms),
+            BTreeMap::from([("Windows 9x".to_string(), "win".to_string())])
+        );
+    }
+
+    #[test]
+    fn platform_slugs_for_install_keeps_a_name_fallback_when_it_differs_from_the_label() {
+        let platforms = vec![windows_9x_platform()];
+        // Both the label (what `set_default_emulator`/`set_retroarch_core`
+        // now pass) and the raw name (what the autoconfig backfill's
+        // `SyncContext.platforms` still iterates) resolve to the same slug.
+        assert_eq!(
+            platform_slugs_for_install(&platforms),
+            BTreeMap::from([
+                ("Windows".to_string(), "win".to_string()),
+                ("Windows 9x".to_string(), "win".to_string()),
+            ])
+        );
+    }
+
+    #[test]
+    fn platform_slugs_for_install_has_one_entry_when_the_label_matches_the_name() {
+        let platforms = vec![Platform {
+            id: 1,
+            name: "Super Nintendo Entertainment System".to_string(),
+            slug: "snes".to_string(),
+            rom_count: 3,
+            custom_name: None,
+            display_name: "Super Nintendo Entertainment System".to_string(),
+        }];
+        assert_eq!(
+            platform_slugs_for_install(&platforms),
+            BTreeMap::from([(
+                "Super Nintendo Entertainment System".to_string(),
+                "snes".to_string()
+            )])
+        );
+    }
+
+    /// Round 9 re-review HIGH item, reproduced end to end: `Emulators.svelte`
+    /// now sends the DISPLAY LABEL as `set_retroarch_core`'s `platform`
+    /// argument (`defaultEmulatorKey(p)`). Before this fix, `install`'s slug
+    /// map was keyed by the raw server `name`, so `slugs.get(&platform)`
+    /// missed for a custom-named platform, the resolved slug was `""`, and
+    /// `installed_compatible_cores` fell back to a fuzzy match on the label
+    /// text — which finds nothing for a platform absent from the bundled
+    /// compatibility map, wrongly rejecting a real, installed core. With the
+    /// label-keyed map, the slug resolves and the curated slug-first match
+    /// (D-RC-2) succeeds.
+    #[test]
+    fn saving_a_retroarch_core_resolves_the_slug_for_a_custom_named_platform() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = config_with_retroarch(temp.path(), &["snes9x"]);
+        let profiles = load_profiles();
+
+        // A platform whose real slug ("snes") has curated cores, but whose
+        // label is a made-up string nothing in the bundled compatibility map
+        // fuzzy-matches — isolating the slug-lookup fix from any accidental
+        // fuzzy-name success.
+        let platform = Platform {
+            id: 9,
+            name: "Retro Nintendo Box".to_string(),
+            slug: "snes".to_string(),
+            rom_count: 1,
+            custom_name: Some("Ultra Custom Console Turbo Edition".to_string()),
+            display_name: "Ultra Custom Console Turbo Edition".to_string(),
+        };
+        let label = platform.label().to_string();
+        assert_ne!(label, platform.name, "the test needs label != name");
+
+        // What the frontend now sends, and what `set_retroarch_core` does
+        // with it: resolve the slug from `install`'s map by that same key.
+        let slugs = platform_slugs_for_install(std::slice::from_ref(&platform));
+        let slug = slugs.get(&label).cloned().unwrap_or_default();
+        assert_eq!(slug, "snes", "the label must resolve the real slug");
+
+        assert!(
+            check_retroarch_core_installed(&config, profiles, &label, &slug, "snes9x").is_ok(),
+            "a label-keyed slug must let a real installed core through"
+        );
+
+        // Proves the discriminating power of the assertions above: with the
+        // pre-fix empty slug, the very same check falls back to a fuzzy
+        // match on the label and rejects the core.
+        assert!(
+            check_retroarch_core_installed(&config, profiles, &label, "", "snes9x").is_err(),
+            "an empty slug must NOT resolve through a fuzzy match on this made-up label"
         );
     }
 }
