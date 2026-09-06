@@ -522,18 +522,18 @@
       </div>
     </div>
   {/if}
-
-  {#if detailsGame}
-    {#key detailsGame.id}
-      <Details
-        subject={fromSummary(detailsGame, activePlatformName)}
-        initialCloudMode={detailsCloudMode}
-        onClose={closeDetails}
-        onLibraryPathUnset={() => { showLibraryBanner = true; }}
-      />
-    {/key}
-  {/if}
 </section>
+
+{#if detailsGame}
+  {#key detailsGame.id}
+    <Details
+      subject={fromSummary(detailsGame, activePlatformName)}
+      initialCloudMode={detailsCloudMode}
+      onClose={closeDetails}
+      onLibraryPathUnset={() => { showLibraryBanner = true; }}
+    />
+  {/key}
+{/if}
 
 <style>
   .server {
