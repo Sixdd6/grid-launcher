@@ -186,10 +186,12 @@ Dialog 1040×680 max, centred over a dimmed, blurred shell; Esc and ✕ close.
   3. **Saves**: user saves and states (`user_saves`, `user_states`) with timestamps and
      sizes, last cloud sync, Upload / Download / Sync now, and the cloud scope warning
      the current details view shows. A native (PC) game's save FOLDERS still sync here;
-     only save states have no equivalent to capture, so the state panel names that
-     directly ("Save states are not available for PC games; their save folders sync
-     from the Saves tab instead.") rather than the old, inaccurate "only available for
-     emulator-based games" wording (round 11).
+     only save states have no equivalent to capture. Neither toggle appears when a
+     native game is not yet installed, so this tab's own unsupported notice
+     (`details-cloud-unsupported`, `SavesTab.svelte`) is what names that directly ("Save
+     states are not available for PC games. Their save folders sync from the save
+     locations configured on this tab.") rather than the old, blanket "not available
+     unless emulator-based" wording (round 11).
   4. **Files**: `files[]` with name, size, `last_modified`; installed version vs server
      version per D-UI-10 with the Update button; PS4 / Xbox 360 content rows; firmware
      row for the platform. Native rows keep the merge-path confirm text.

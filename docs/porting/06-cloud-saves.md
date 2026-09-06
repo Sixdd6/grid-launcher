@@ -888,7 +888,7 @@ string when the operation is allowed, otherwise a user-facing sentence. Every re
 
 | Returned string | Trigger | Anchor |
 |---|---|---|
-| `Cloud save management is only available for emulator-based games.` | `is_native_executable_platform(game)` is true, i.e. the platform string starts with `windows`. Checked before anything else and for both save types. **Rust port deviation (D14, round 11): the port only blocks `State`, with a different message — see below.** | grid_launcher/emulator/selection.py:110, grid_launcher/emulator/selection.py:145 |
+| `Save states are not available for PC games. Their save folders sync from the save locations configured on this tab.` (Rust port only — see D14) | `is_native_executable_platform(game)` is true, i.e. the platform string starts with `windows`. The REFERENCE checks this before anything else and for both save types, with its own blanket sentence claiming cloud saves need an emulator at all (superseded — see D14). The Rust port checks it only for `save_type == "state"`. | grid_launcher/emulator/selection.py:110, grid_launcher/emulator/selection.py:145 |
 | `This core does not support save states.` | `save_type == "state"` **and** a non-empty emulator name **and** that emulator is RetroArch **and** a core-flags dict was supplied **and** `supports_save_states` is false | grid_launcher/emulator/selection.py:113 |
 | `Save state format for this core may not be stable across devices.` | Same preconditions, `supports_save_states` true but `cloud_sync_safe` false | grid_launcher/emulator/selection.py:122 |
 | `This core does not support battery saves.` | `save_type == "save"` **and** a non-empty emulator name **and** RetroArch **and** a core-flags dict was supplied **and** `supports_saves` is false | grid_launcher/emulator/selection.py:125 |
@@ -1512,26 +1512,44 @@ review.
     (`crates/grid-core/src/library/registry.rs`, resolved by
     `app/src-tauri/src/cloud_service.rs`'s `wine_prefix_from`/`wine_prefix_for`).
 14. **D14 — a native platform's `cloud_save_block_reason` only blocks `State`, with a
-    different message; the reference's "emulator-based games" wording was factually wrong
-    for `Save` and is dropped (round 11 product fix).** The reference blocks BOTH save
+    corrected message; the reference's old blanket wording (claiming cloud saves need an
+    emulator at all) was factually wrong for `Save` and is dropped (round 11 product
+    fix; reworded again after review — see below).** The reference blocks BOTH save
     types for a native (Windows) game with the same sentence
     (`grid_launcher/emulator/selection.py:110`), even though a PC game's save FOLDERS do
     sync via the native upload/restore path (`crates/grid-core/src/cloud/ops/native.rs`) —
     only save STATES have no native equivalent to capture. The port
     (`crates/grid-core/src/cloud/scope.rs:170`) now gates the native branch on
     `save_type == SaveType::State` and returns the corrected string `"Save states are not
-    available for PC games; their save folders sync from the Saves tab instead."`; `Save`
-    falls through to the normal (empty, i.e. allowed) result. This is the ONLY caller of
-    `cloud_save_block_reason` that could ever reach the native branch for `Save` in the
-    first place — `upload_cloud_files_for_game`/`restore_cloud_save_for_game`
-    (`crates/grid-core/src/cloud/ops/{upload,restore}.rs`) and
-    `details_cloud_mode_supported` (`crates/grid-core/src/cloud/ops/mod.rs:1023-1027`) all
-    delegate to the native save-folder flow (or gate on `installed`) for a native `Save`
-    BEFORE ever consulting `cloud_save_block_reason`, so none of those call sites' own
-    behavior changes — this was a dead/misleading message on the `Save` path, not a live
-    gate. The desktop popup's left-column cloud button (which only routed to the already
+    available for PC games. Their save folders sync from the save locations configured on
+    this tab."`; `Save` falls through to the normal (empty, i.e. allowed) result. This is
+    the ONLY caller of `cloud_save_block_reason` that could ever reach the native branch
+    for `Save` in the first place — `upload_cloud_files_for_game`/
+    `restore_cloud_save_for_game` (`crates/grid-core/src/cloud/ops/{upload,restore}.rs`)
+    and `details_cloud_mode_supported` (`crates/grid-core/src/cloud/ops/mod.rs:1023-1027`)
+    all delegate to the native save-folder flow (or gate on `installed`) for a native
+    `Save` BEFORE ever consulting `cloud_save_block_reason`, so none of those call sites'
+    own behavior changes.
+
+    The desktop popup's left-column cloud button (which only routed to the already
     one-click-away Saves tab) is also dropped in the same round —
     `app/src/lib/Details.svelte`, `app/src/lib/details/header.ts`'s `cloudStatusLabel`.
+
+    **Review correction:** the message is NOT surfaced through
+    `CloudPanel.svelte`'s state mode — that panel's `nativeStateBlocked` branch
+    (`app/src/lib/details/CloudPanel.svelte:279-281`) shows its own pre-existing,
+    unrelated hardcoded hint text instead, and the state toggle that would even open
+    that panel is never rendered for a native game
+    (`{#if statePanelInfo?.supported}`, `SavesTab.svelte`, always false for native
+    `State`). The place a user actually sees this string is the Saves tab's own
+    unsupported notice, `details-cloud-unsupported`
+    (`app/src/lib/details/SavesTab.svelte`), which previously read only
+    `savePanelInfo?.block_reason` — always empty for a native `Save` after this fix, so
+    the notice would have silently fallen back to the generic "Cloud saves are not
+    configured for this game." `SavesTab.svelte`'s fallback chain now also tries
+    `statePanelInfo?.block_reason` before that generic default, so a native game that
+    is not yet installed (the one case where neither toggle renders) shows this exact
+    sentence instead.
 
 ### Follow-the-code rulings (ported as-is)
 

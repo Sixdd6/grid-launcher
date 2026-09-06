@@ -323,7 +323,8 @@ describe('cloud-saves', () => {
 
     expect(result).toEqual({
       supported: false,
-      block_reason: 'Save states are not available for PC games; their save folders sync from the Saves tab instead.',
+      block_reason:
+        'Save states are not available for PC games. Their save folders sync from the save locations configured on this tab.',
       scope: 'per_game',
     });
   });

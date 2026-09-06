@@ -55,7 +55,9 @@
     </div>
   {:else}
     <p class="empty" data-testid="details-cloud-unsupported">
-      {savePanelInfo?.block_reason || 'Cloud saves are not configured for this game.'}
+      {savePanelInfo?.block_reason ||
+        statePanelInfo?.block_reason ||
+        'Cloud saves are not configured for this game.'}
     </p>
   {/if}
 

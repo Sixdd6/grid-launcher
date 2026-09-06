@@ -168,7 +168,7 @@ pub fn cloud_save_block_reason(
     core_flags: Option<&CoreFlags>,
 ) -> String {
     if is_native_executable_platform(platform) && save_type == SaveType::State {
-        return "Save states are not available for PC games; their save folders sync from the Saves tab instead.".to_string();
+        return "Save states are not available for PC games. Their save folders sync from the save locations configured on this tab.".to_string();
     }
 
     let retroarch_gated = !emulator_name.is_empty() && is_retroarch_emulator_name(emulator_name);
@@ -333,7 +333,7 @@ mod tests {
         let reason = cloud_save_block_reason("Windows", SaveType::State, "RetroArch", Some(&SAFE));
         assert_eq!(
             reason,
-            "Save states are not available for PC games; their save folders sync from the Saves tab instead."
+            "Save states are not available for PC games. Their save folders sync from the save locations configured on this tab."
         );
     }
 
