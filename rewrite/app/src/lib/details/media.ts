@@ -146,6 +146,24 @@ export function overviewStrip(urls: string[]): string[] {
   return urls.slice(0, OVERVIEW_STRIP_LIMIT);
 }
 
+/** The line the viewer shows when the bytes of a hosted video never arrive. */
+export const VIDEO_LOAD_FAILED = 'This video could not be loaded';
+
+/**
+ * The whole user-facing line for a failed video read. The generic sentence
+ * always leads, so the user is never shown a bare backend string as if it
+ * were the message; when the backend supplied a reason it follows in
+ * parentheses, verbatim apart from trimming and one redundant full stop.
+ *
+ * Distinct on purpose from the decode-failure line ("This video could not be
+ * played"): that one means the bytes DID arrive.
+ */
+export function videoLoadMessage(detail: string | null): string {
+  const trimmed = (detail ?? '').trim().replace(/\.$/, '').trim();
+  if (trimmed === '') return VIDEO_LOAD_FAILED;
+  return `${VIDEO_LOAD_FAILED} (${trimmed}).`;
+}
+
 /**
  * The MIME type a hosted video's `Blob` is built with, read from the URL's
  * own extension. The bytes reach the page over IPC with no headers, so the

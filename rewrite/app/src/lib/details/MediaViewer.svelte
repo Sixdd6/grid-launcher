@@ -2,7 +2,14 @@
   import { api } from '../api';
   import Icon from '../Icon.svelte';
   import Image from '../Image.svelte';
-  import { nextIndex, prevIndex, trailerPoster, videoMimeType, type MediaItem } from './media';
+  import {
+    nextIndex,
+    prevIndex,
+    trailerPoster,
+    videoLoadMessage,
+    videoMimeType,
+    type MediaItem,
+  } from './media';
 
   let {
     items,
@@ -28,6 +35,14 @@
   let viewerEl = $state<HTMLElement | null>(null);
   let current = $derived(items[index] ?? null);
 
+  // The hosted video's URL, or null for any other item. The read effect below
+  // keys on THIS and never on `current`: `items` is rebuilt object-by-object
+  // on every recompute in Details.svelte, so an identity-keyed effect would
+  // revoke the object URL, restart playback at 0, and repeat an up-to-64 MiB
+  // IPC read for the same file. A derived string settles by `===`, so the
+  // effect only reruns when the video actually changes.
+  let videoUrl = $derived(current !== null && current.kind === 'video' ? current.url : null);
+
   // A server-hosted video is fetched through the session client, cached by
   // the backend, and handed to the page as raw bytes over IPC. The server
   // URL never reaches the DOM, so no request from the page needs a token.
@@ -40,8 +55,9 @@
   let videoSrc = $state<string | null>(null);
   /** The element could not decode the bytes it was given. */
   let videoError = $state(false);
-  /** The backend refused to supply the bytes — its message, shown verbatim
-   *  (e.g. the 64 MiB cap's "video too large to play in-app"). */
+  /** The bytes never arrived. Holds the backend's reason, which `videoLoadMessage`
+   *  puts inside the generic line rather than showing on its own; `''` means
+   *  the rejection carried no reason. `null` means no failure. */
   let videoLoadError = $state<string | null>(null);
 
   // A trailer never plays in-app (Task 5): the button opens the system
@@ -57,32 +73,37 @@
     thumbnailFailed = { ...thumbnailFailed, [videoId]: true };
   }
 
+  // Any item change clears a stale "could not open in your browser" message
+  // from the previous trailer. Keyed on the item itself, which is cheap:
+  // unlike the video effect below there is nothing here to re-fetch.
   $effect(() => {
-    const item = current;
+    void current;
+    youtubeError = null;
+  });
+
+  $effect(() => {
+    const url = videoUrl;
     videoSrc = null;
     videoError = false;
     videoLoadError = null;
-    youtubeError = null;
-    if (item === null || item.kind !== 'video') return;
+    if (url === null) return;
     let cancelled = false;
     // Created only on a resolve that is still wanted, so a read that lands
     // after the user moved on never leaves an object URL behind.
     let objectUrl: string | null = null;
     api
-      .readVideo(item.url)
+      .readVideo(url)
       .then((bytes) => {
         if (cancelled) return;
-        objectUrl = URL.createObjectURL(new Blob([bytes], { type: videoMimeType(item.url) }));
+        objectUrl = URL.createObjectURL(new Blob([bytes], { type: videoMimeType(url) }));
         videoSrc = objectUrl;
       })
       .catch((e) => {
         if (cancelled) return;
-        // Three lines, never interchangeable. This one means the bytes never
-        // arrived at all. The backend's own text is shown verbatim when it
-        // has one (the 64 MiB cap says "video too large to play in-app"); a
-        // rejection carrying no message falls back to the generic line.
-        const message = e instanceof Error ? e.message : String(e);
-        videoLoadError = message.trim() === '' ? 'This video could not be loaded' : message;
+        // The bytes never arrived. Store the backend's reason only — the
+        // markup wraps it in the generic line, so an internal sentence is
+        // never shown to the user as the whole message.
+        videoLoadError = e instanceof Error ? e.message : String(e);
       });
     return () => {
       cancelled = true;
@@ -256,10 +277,14 @@
           {/if}
         </div>
       {:else if videoLoadError !== null}
-        <!-- The backend refused or failed to supply the bytes. Its own text
-             is shown verbatim; it names no path, URL or credential by
-             construction (`read_cached_video` in commands.rs asserts that). -->
-        <p class="pending" data-testid="media-viewer-video-load-error">{videoLoadError}</p>
+        <!-- The bytes never arrived. The generic sentence always leads and the
+             backend's reason follows in parentheses, so no internal string is
+             ever presented as the whole message. The reason names no path, URL
+             or credential by construction (`read_cached_video` in commands.rs
+             asserts that), and Svelte escapes it. -->
+        <p class="pending" data-testid="media-viewer-video-load-error">
+          {videoLoadMessage(videoLoadError)}
+        </p>
       {:else}
         <p class="pending" data-testid="media-viewer-video-pending">Loading video…</p>
       {/if}

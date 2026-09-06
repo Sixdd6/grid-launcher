@@ -9,6 +9,7 @@ import {
   trailerPoster,
   viewableIndex,
   viewableItems,
+  videoLoadMessage,
   videoMimeType,
   youtubeThumbnailUrl,
   YOUTUBE_THUMBNAIL_BASE,
@@ -251,5 +252,29 @@ describe('videoMimeType', () => {
     // A directory named ".webm" must not decide the type of a file that has
     // no extension of its own.
     expect(videoMimeType('http://romm/a.webm/clip')).toBe('video/mp4');
+  });
+});
+
+describe('videoLoadMessage', () => {
+  it('always leads with the generic line, so a backend sentence is never the whole message', () => {
+    expect(videoLoadMessage('video too large to play in-app')).toBe(
+      'This video could not be loaded (video too large to play in-app).'
+    );
+    expect(videoLoadMessage('the video is not hosted on the connected server')).toBe(
+      'This video could not be loaded (the video is not hosted on the connected server).'
+    );
+  });
+
+  it('is the generic line alone when the failure carries no detail', () => {
+    expect(videoLoadMessage(null)).toBe('This video could not be loaded');
+    expect(videoLoadMessage('')).toBe('This video could not be loaded');
+    expect(videoLoadMessage('   ')).toBe('This video could not be loaded');
+  });
+
+  it('does not double the sentence-ending punctuation of a detail that has its own', () => {
+    expect(videoLoadMessage('not connected.')).toBe('This video could not be loaded (not connected).');
+    expect(videoLoadMessage('  not connected  ')).toBe(
+      'This video could not be loaded (not connected).'
+    );
   });
 });

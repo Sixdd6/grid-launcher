@@ -228,7 +228,7 @@ pub async fn ensure_image(state: State<'_, AppState>, url: String) -> Result<Str
     let base = state.session.server_url();
     let resolved = filter_to_server_host(&resolve_image_url(&url, &base), &base);
     if resolved.is_empty() {
-        return Err("filtered".to_string());
+        return Err("the image is not hosted on the connected server".to_string());
     }
     let client = state.session.client();
     let path = state
@@ -249,8 +249,9 @@ pub const MAX_INLINE_VIDEO_BYTES: u64 = 64 * 1024 * 1024;
 /// Reads a cached video file, refusing anything above
 /// [`MAX_INLINE_VIDEO_BYTES`] by its metadata before a single byte is read.
 /// Split out of [`read_video`] so the cap is testable without an
-/// `AppState`. The error text is shown to the user verbatim, so it names
-/// only the video — never the path, the URL, or anything from the session.
+/// `AppState`. The error text reaches the user inside the viewer's generic
+/// "could not be loaded" line, so it names only the video — never the path,
+/// the URL, or anything from the session.
 pub(crate) async fn read_cached_video(path: &std::path::Path) -> Result<Vec<u8>, String> {
     let meta = tokio::fs::metadata(path).await.map_err(err)?;
     if meta.len() > MAX_INLINE_VIDEO_BYTES {
@@ -279,7 +280,9 @@ pub async fn read_video(
     let base = state.session.server_url();
     let resolved = filter_to_server_host(&resolve_image_url(&url, &base), &base);
     if resolved.is_empty() {
-        return Err("filtered".to_string());
+        // Shown to the user inside the viewer's generic line, so it is a
+        // sentence rather than the `"filtered"` sentinel it used to be.
+        return Err("the video is not hosted on the connected server".to_string());
     }
     let client = state.session.client();
     let path =
@@ -340,7 +343,7 @@ pub async fn ensure_background_variant(
     let base = state.session.server_url();
     let resolved = filter_to_server_host(&resolve_image_url(&url, &base), &base);
     if resolved.is_empty() {
-        return Err("filtered".to_string());
+        return Err("the image is not hosted on the connected server".to_string());
     }
     let client = state.session.client();
     let path = grid_core::images::background::ensure_background_variant(
