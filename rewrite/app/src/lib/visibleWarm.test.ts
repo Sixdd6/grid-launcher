@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { warmBackground } = vi.hoisted(() => ({ warmBackground: vi.fn() }));
-vi.mock('./backgroundPrefetch', () => ({ warmBackground }));
+const { warmBackground, setScrollIdle } = vi.hoisted(() => ({
+  warmBackground: vi.fn(),
+  setScrollIdle: vi.fn(),
+}));
+// `SCROLL_IDLE_MS` is a plain number here, so the timer assertions read in
+// terms of the real constant; `backgroundPrefetch.test.ts` pins its value.
+vi.mock('./backgroundPrefetch', () => ({ warmBackground, setScrollIdle, SCROLL_IDLE_MS: 250 }));
 
+import { SCROLL_IDLE_MS } from './backgroundPrefetch';
 import { createVisibleWarmer, scrollParent, WARM_ROOT_MARGIN } from './visibleWarm';
 
 /** The webview has `IntersectionObserver`; the node test runner does not.
@@ -58,6 +64,7 @@ beforeEach(() => {
   StubObserver.instances = [];
   warmBackground.mockReset();
   warmBackground.mockReturnValue(true);
+  setScrollIdle.mockReset();
   Reflect.set(globalThis, 'IntersectionObserver', StubObserver);
 });
 
@@ -234,5 +241,133 @@ describe('scrollParent', () => {
     withOverflow(new Map(), () => {
       expect(scrollParent(el)).toBe(null);
     });
+  });
+});
+
+describe('the scroll-idle gate', () => {
+  const originalStyle = Reflect.get(globalThis, 'getComputedStyle');
+
+  type Recorded = { type: string; fn: () => void; options?: unknown };
+
+  /** A grid inside a stand-in scroll container that records the listeners
+   *  put on it, so both the attach and the detach are observable. */
+  function scrollingGrid(): {
+    grid: HTMLElement;
+    added: Recorded[];
+    removed: Recorded[];
+    scroll: () => void;
+  } {
+    const added: Recorded[] = [];
+    const removed: Recorded[] = [];
+    const scroller = {
+      parentElement: null,
+      addEventListener: (type: string, fn: () => void, options?: unknown) => {
+        added.push({ type, fn, options });
+      },
+      removeEventListener: (type: string, fn: () => void, options?: unknown) => {
+        removed.push({ type, fn, options });
+      },
+    };
+    const grid = { children: [], parentElement: scroller } as unknown as HTMLElement;
+    Reflect.set(globalThis, 'getComputedStyle', (node: unknown) => ({
+      overflowY: node === scroller ? 'auto' : 'visible',
+    }));
+    return {
+      grid,
+      added,
+      removed,
+      scroll: () => {
+        for (const listener of added) if (listener.type === 'scroll') listener.fn();
+      },
+    };
+  }
+
+  const scrollListeners = (recorded: Recorded[]) => recorded.filter((l) => l.type === 'scroll');
+  const releases = () => setScrollIdle.mock.calls.filter(([idle]) => idle === true);
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    if (originalStyle === undefined) Reflect.deleteProperty(globalThis, 'getComputedStyle');
+    else Reflect.set(globalThis, 'getComputedStyle', originalStyle);
+  });
+
+  it('listens for scrolls on the scroll container, passively', () => {
+    const { grid, added } = scrollingGrid();
+    createVisibleWarmer(subject).observe(grid);
+
+    expect(scrollListeners(added)).toHaveLength(1);
+    // Passive: the handler never calls `preventDefault`, and a non-passive
+    // scroll listener is exactly what makes a scroll wait on the main thread.
+    expect(scrollListeners(added)[0].options).toEqual({ passive: true });
+  });
+
+  it('attaches one listener however often the grid is re-observed', () => {
+    const { grid, added } = scrollingGrid();
+    const warmer = createVisibleWarmer(subject);
+    warmer.observe(grid);
+    warmer.observe(grid);
+
+    expect(scrollListeners(added)).toHaveLength(1);
+  });
+
+  it('pauses the warm lane on a scroll and releases it once the grid is still', () => {
+    const { grid, scroll } = scrollingGrid();
+    createVisibleWarmer(subject).observe(grid);
+
+    scroll();
+    expect(setScrollIdle).toHaveBeenCalledExactlyOnceWith(false);
+
+    vi.advanceTimersByTime(SCROLL_IDLE_MS - 1);
+    expect(releases()).toHaveLength(0);
+
+    vi.advanceTimersByTime(1);
+    expect(setScrollIdle).toHaveBeenLastCalledWith(true);
+  });
+
+  it('re-arms the trailing timer on every scroll event', () => {
+    const { grid, scroll } = scrollingGrid();
+    createVisibleWarmer(subject).observe(grid);
+
+    scroll();
+    vi.advanceTimersByTime(SCROLL_IDLE_MS - 50);
+    scroll();
+    // The first timer would have fired here; the second scroll replaced it.
+    vi.advanceTimersByTime(SCROLL_IDLE_MS - 50);
+    expect(releases()).toHaveLength(0);
+
+    vi.advanceTimersByTime(50);
+    expect(releases()).toHaveLength(1);
+  });
+
+  it('stops listening and releases the gate when the view goes away', () => {
+    const { grid, added, removed, scroll } = scrollingGrid();
+    const warmer = createVisibleWarmer(subject);
+    warmer.observe(grid);
+    scroll();
+    warmer.disconnect();
+
+    expect(scrollListeners(removed)).toHaveLength(1);
+    expect(scrollListeners(removed)[0].fn).toBe(scrollListeners(added)[0].fn);
+    // Leaving mid-scroll must not leave the queue paused for the next view.
+    expect(setScrollIdle).toHaveBeenLastCalledWith(true);
+
+    // The pending timer went with it, so nothing releases the gate twice.
+    vi.advanceTimersByTime(SCROLL_IDLE_MS * 2);
+    expect(releases()).toHaveLength(1);
+  });
+
+  it('re-attaches the listener when the same warmer is observed again', () => {
+    const { grid, added, removed } = scrollingGrid();
+    const warmer = createVisibleWarmer(subject);
+    warmer.observe(grid);
+    warmer.disconnect();
+    warmer.observe(grid);
+
+    expect(scrollListeners(added)).toHaveLength(2);
+    expect(scrollListeners(removed)).toHaveLength(1);
   });
 });

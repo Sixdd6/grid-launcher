@@ -66,7 +66,11 @@ the options.
   scrolled past — including a card already waiting there as a scroll-warm, which is
   moved to the front rather than left in place. A refused build is dropped, not
   retried. The queue is 24 deep: past that the oldest warm is shed, never a hover
-  request, and leaving a view drops every warm still queued for it.
+  request, and leaving a view drops every warm still queued for it. Warming PAUSES
+  while the user scrolls (round 8): a scroll event on the view's scroll container
+  holds the warm lane, and the lane runs again 250ms after the last scroll event, so
+  a speculative download, decode and blur never competes with the frame being
+  scrolled. Hover requests are never held back, and leaving a view releases the lane.
 - Download footer strip, 28px, always mounted: hidden when nothing is live; otherwise
   "⬇ <title> · <percent> · <speed>" with a 60-sample sparkline and an "Open Downloads"
   link. Clicking anywhere on it opens the Downloads view.
@@ -123,7 +127,11 @@ Adopted from RomM v2 `tokens/index.ts`, defined once in `app.css` as CSS variabl
 - Grid: `repeat(auto-fill, minmax(<size>, 1fr))` with sizes 120 / 160 / 200px; cover
   fixed 3:4 frame; the cover is fitted inside it over a blurred, dimmed copy of itself
   (user decision 2026-09-05, replaces the image-ratio rule); title under the card, one
-  line, ellipsis.
+  line, ellipsis. The blurred copy is drawn at a QUARTER of the cover's size and scaled
+  up by four (round 8), so the upscale supplies most of the softening and the blur
+  touches one sixteenth of the pixels. Cards are not `content-visibility`-gated: with
+  real covers, laying out and painting each row as it scrolls in costs more per frame
+  than painting every card once when the platform opens.
 - Card click opens the details popup; the hover Play launches directly.
 
 ## 6. Server view

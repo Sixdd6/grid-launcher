@@ -216,12 +216,48 @@ export function warmBackground(subject: BackgroundSubject): boolean {
   return true;
 }
 
+/**
+ * How long the grid must hold still before the warm lane runs again.
+ * `visibleWarm.ts` owns the timer; the value lives here because the gate
+ * does.
+ */
+export const SCROLL_IDLE_MS = 250;
+
+/** `false` while the user is scrolling. Warming is speculative work for
+ *  cards the pointer has not stopped on, and each build is a download,
+ *  decode, blur and JPEG write: running one during a scroll steals the main
+ *  thread from the frame the user is actually looking at. */
+let scrollIdle = true;
+
+/**
+ * Pauses (`false`) or releases (`true`) the WARM lane. Hover requests are
+ * unaffected — the card under the pointer is never speculative, and a user
+ * who scrolls to a card and hovers it must not wait a quarter of a second
+ * for its art to start. Held warms stay queued, so releasing the gate starts
+ * them rather than losing them.
+ */
+export function setScrollIdle(idle: boolean): void {
+  if (idle === scrollIdle) return;
+  scrollIdle = idle;
+  if (idle) drainQueue();
+}
+
+/** The next entry the gate allows out of the queue, removed from it.
+ *  While scrolling that is the first FRONT-lane (hover) entry, if any; the
+ *  warms behind it keep their places and their order. */
+function nextTarget(): BuildTarget | undefined {
+  if (scrollIdle) return pending.shift();
+  const at = pending.findIndex((entry) => entry.front);
+  if (at < 0) return undefined;
+  return pending.splice(at, 1)[0];
+}
+
 /** Starts queued builds up to `PREFETCH_CONCURRENCY`, and again as each
  *  settles. A loop, not one recursion per item: a whole screen of cards
  *  arrives in a single observer callback. */
 function drainQueue(): void {
   while (inFlight < PREFETCH_CONCURRENCY) {
-    const target = pending.shift();
+    const target = nextTarget();
     if (target === undefined) return;
     // Re-checked here, not only at enqueue time: another build may have
     // memoised this exact key while the entry waited its turn. No slot is
@@ -237,12 +273,14 @@ function drainQueue(): void {
   }
 }
 
-/** Test seam: empties the queue and forgets what has been asked for. */
+/** Test seam: empties the queue, forgets what has been asked for, and
+ *  releases the scroll gate, so one test's pause cannot silence the next. */
 export function resetPrefetchQueue(): void {
   pending.length = 0;
   inFlight = 0;
   generation += 1;
   requested.clear();
+  scrollIdle = true;
 }
 
 /** Test seam: how many builds the queue currently has in flight. */

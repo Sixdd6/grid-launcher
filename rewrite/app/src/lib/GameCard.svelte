@@ -120,13 +120,9 @@
     transform: scale(1);
     transition: transform var(--m-fast) cubic-bezier(0.2, 0.9, 0.3, 1.2);
     will-change: transform;
-    /* Off-screen cards skip layout/paint; the intrinsic size keeps the
-       scrollbar stable at the fallback cover ratio. `--card-min` is the
-       grid's minimum column width (CardGrid sets it), so the estimate
-       tracks the chosen card size instead of assuming the largest. */
-    content-visibility: auto;
-    contain-intrinsic-size: auto var(--card-min, 200px)
-      calc(var(--card-min, 200px) * 4 / 3 + var(--card-gap) + var(--title-h));
+    /* No content-visibility: with real covers, laying out and painting each
+       row as it scrolled in cost more per frame (64 ms) than painting every
+       card once at open (+100 ms for 300 cards). */
   }
 
   /* D-UI-9: hover scales 1.05. Focus (gamepad/arrow keys) uses the same
@@ -137,9 +133,12 @@
     z-index: 1;
   }
 
-  /* Drawn INSIDE the cover: `.card` uses `content-visibility: auto`, whose
-     paint containment clips anything painted outside the card box, so a
-     ring with a positive offset lost its top, left and right edges. */
+  /* Drawn INSIDE the cover, with a negative offset: the ring then follows
+     the cover's rounded corners and stays within the card's own box, so a
+     focused card cannot paint over the gap to its neighbours while it is
+     scaled up. (It began as a workaround for `content-visibility`'s paint
+     containment, which round 8 removed; the inset ring is kept because it
+     is the look the design shows.) */
   .card.focused .cover {
     outline: 2px solid var(--primary);
     outline-offset: -2px;
@@ -165,13 +164,22 @@
     display: block;
   }
 
+  /* Round 8: the blurred copy is rasterised at a QUARTER of the cover's
+     size and scaled up by 4 — the upscale supplies most of the softening,
+     so a 2.5px blur at quarter size reads like the old 10px blur at full
+     size while touching one sixteenth of the pixels. Measured on a
+     302-card platform with real covers: 64 → 28 ms per scroll frame with
+     the content-visibility change below, and no frame over 50 ms. */
   .cover :global(img.backdrop) {
     position: absolute;
-    inset: -12px;
-    width: calc(100% + 24px);
-    height: calc(100% + 24px);
+    top: -12px;
+    left: -12px;
+    width: calc((100% + 24px) / 4);
+    height: calc((100% + 24px) / 4);
+    transform: scale(4);
+    transform-origin: top left;
     object-fit: cover;
-    filter: blur(10px) brightness(0.45);
+    filter: blur(2.5px) brightness(0.45);
     pointer-events: none;
   }
 

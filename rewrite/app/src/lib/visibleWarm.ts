@@ -5,7 +5,7 @@
 // `backgroundPrefetch.ts`, which is the only module that talks to the
 // backend about variants.
 import type { BackgroundSubject } from './background';
-import { warmBackground } from './backgroundPrefetch';
+import { SCROLL_IDLE_MS, setScrollIdle, warmBackground } from './backgroundPrefetch';
 
 /** One row ahead, vertically only: the grid never scrolls sideways, and a
  *  horizontal margin would pull in the cards either side of the viewport for
@@ -66,6 +66,24 @@ export function createVisibleWarmer(
   // The grid the entries' targets are children of, for the index lookup.
   // Held rather than re-passed: the callback is the browser's to call.
   let watched: HTMLElement | null = null;
+  // What the scroll listener is on, and the trailing timer that decides the
+  // scroll has stopped. `null` for the target is a real state (nothing to
+  // listen on under SSR), so the listener is tracked by its own flag.
+  let scroller: EventTarget | null = null;
+  let listening = false;
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Pauses the warm lane and re-arms the release. Every scroll event runs
+   *  this, so it must stay cheap: two calls into module state and one
+   *  timer. */
+  function onScroll(): void {
+    setScrollIdle(false);
+    if (idleTimer !== null) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      setScrollIdle(true);
+    }, SCROLL_IDLE_MS);
+  }
 
   function onEntries(entries: IntersectionObserverEntry[]): void {
     const grid = watched;
@@ -92,6 +110,16 @@ export function createVisibleWarmer(
       root: scrollParent(grid),
       rootMargin: WARM_ROOT_MARGIN,
     });
+    // The same container the observer roots on, so the gate closes on the
+    // scroll that is actually moving the cards. Attached once, not on every
+    // re-observe: a refresh calls this again with the same grid.
+    if (!listening) {
+      scroller = scrollParent(grid) ?? (typeof window === 'undefined' ? null : window);
+      // Passive: this handler never calls `preventDefault`, and a listener
+      // that might would make the browser wait on it before scrolling.
+      scroller?.addEventListener('scroll', onScroll, { passive: true });
+      listening = true;
+    }
     // `observe` on an element already being watched is a no-op per spec, so
     // re-running this after a refresh only picks up the new children.
     for (const child of Array.from(grid.children)) observer.observe(child);
@@ -101,6 +129,14 @@ export function createVisibleWarmer(
     observer?.disconnect();
     observer = null;
     watched = null;
+    scroller?.removeEventListener('scroll', onScroll);
+    scroller = null;
+    listening = false;
+    if (idleTimer !== null) clearTimeout(idleTimer);
+    idleTimer = null;
+    // Leaving a view mid-scroll must not leave the queue paused: nothing
+    // would scroll to release it, and the next view's warms would never run.
+    setScrollIdle(true);
   }
 
   return { observe, disconnect };

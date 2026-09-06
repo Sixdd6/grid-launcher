@@ -24,6 +24,8 @@ import {
   prefetchBackground,
   rememberVariant,
   resetPrefetchQueue,
+  SCROLL_IDLE_MS,
+  setScrollIdle,
   VARIANT_MEMO_CAP,
   variantKey,
   variantPaths,
@@ -475,5 +477,63 @@ describe('the shared build queue', () => {
     await settled();
 
     expect(inFlightBuilds()).toBe(0);
+  });
+});
+
+describe('the scroll-idle gate', () => {
+  it('waits a quarter of a second of stillness before warming again', () => {
+    expect(SCROLL_IDLE_MS).toBe(250);
+  });
+
+  it('starts no warm while the user is scrolling', () => {
+    setScrollIdle(false);
+    warmBackground(cover('https://romm/a.png'));
+
+    expect(ensureBackgroundVariant).not.toHaveBeenCalled();
+    expect(inFlightBuilds()).toBe(0);
+  });
+
+  it('starts the waiting warms once the scroll stops', () => {
+    setScrollIdle(false);
+    warmBackground(cover('https://romm/a.png'));
+    warmBackground(cover('https://romm/b.png'));
+    expect(ensureBackgroundVariant).not.toHaveBeenCalled();
+
+    setScrollIdle(true);
+    expect(ensureBackgroundVariant).toHaveBeenCalledTimes(2);
+  });
+
+  it('still starts a hover while the user is scrolling', () => {
+    setScrollIdle(false);
+    prefetchBackground(cover('https://romm/hovered.png'));
+
+    expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith('https://romm/hovered.png', 12);
+  });
+
+  it('does not let a hover drag the waiting warms out with it', () => {
+    setScrollIdle(false);
+    warmBackground(cover('https://romm/warm.png'));
+    prefetchBackground(cover('https://romm/hovered.png'));
+
+    expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith('https://romm/hovered.png', 12);
+  });
+
+  it('keeps the warms it held back, rather than dropping them', async () => {
+    setScrollIdle(false);
+    warmBackground(cover('https://romm/held.png'));
+    setScrollIdle(true);
+
+    await settled();
+    expect(variantPaths.get(variantKey(12, 'https://romm/held.png'))).toBe('/cache/a.bg.jpg');
+  });
+
+  it('a second pause changes nothing that is already in flight', () => {
+    const builds = deferredBuilds();
+    warmBackground(cover('https://romm/a.png'));
+    expect(inFlightBuilds()).toBe(1);
+
+    setScrollIdle(false);
+    expect(inFlightBuilds()).toBe(1);
+    builds.resolve(0);
   });
 });
