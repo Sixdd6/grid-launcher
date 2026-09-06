@@ -213,6 +213,20 @@ describe('the queue depth cap', () => {
     expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith(shed, 12);
   });
 
+  // A promoted warm IS a hover request: the pointer is on that card. It must
+  // survive the cap the same way a hover request queued from cold does.
+  it('never sheds a warm the hover path promoted', async () => {
+    const builds = deferredBuilds();
+    for (let i = 0; i < PREFETCH_CONCURRENCY; i += 1)
+      warmBackground(cover(`https://romm/busy-${i}.png`));
+    warmBackground(cover('https://romm/promoted.png'));
+    prefetchBackground(cover('https://romm/promoted.png')); // the pointer arrives
+    for (let i = 0; i < PENDING_CAP + 5; i += 1) warmBackground(cover(`https://romm/${i}.png`));
+
+    const built = await drainAll(builds);
+    expect(built).toContain('https://romm/promoted.png');
+  });
+
   it('never sheds a hover request, only warms', async () => {
     const builds = deferredBuilds();
     for (let i = 0; i < PREFETCH_CONCURRENCY; i += 1)
@@ -242,6 +256,21 @@ describe('dropPendingWarms', () => {
     expect(built).not.toContain('https://romm/warm-b.png');
     // In-flight builds are left to finish; their result is memoised.
     expect(built).toContain('https://romm/busy-0.png');
+  });
+
+  it('keeps a warm the hover path promoted', async () => {
+    const builds = deferredBuilds();
+    for (let i = 0; i < PREFETCH_CONCURRENCY; i += 1)
+      warmBackground(cover(`https://romm/busy-${i}.png`));
+    warmBackground(cover('https://romm/promoted.png'));
+    warmBackground(cover('https://romm/warm-a.png'));
+    prefetchBackground(cover('https://romm/promoted.png')); // the pointer arrives
+
+    dropPendingWarms();
+
+    const built = await drainAll(builds);
+    expect(built).toContain('https://romm/promoted.png');
+    expect(built).not.toContain('https://romm/warm-a.png');
   });
 
   it('lets a dropped warm be warmed again when its card comes back', async () => {

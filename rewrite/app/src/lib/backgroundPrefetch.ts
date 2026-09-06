@@ -171,10 +171,18 @@ export function dropPendingWarms(): void {
 }
 
 /** Moves the pending entry for `key` to the front of the queue, if it is
- *  still waiting. A no-op for a key that has already started or finished. */
+ *  still waiting, and marks it as a FRONT-lane entry. A no-op for a key that
+ *  has already started or finished.
+ *
+ *  The lane flag matters as much as the position: a promoted entry is the
+ *  card the pointer is on, so `dropOldestWarm` must not be able to shed it —
+ *  as a warm it would still be the oldest non-front entry in the queue and
+ *  the first thing a cap overflow or a view teardown threw away. */
 function promote(key: string): void {
   const at = pending.findIndex((entry) => entry.key === key);
-  if (at <= 0) return; // not waiting, or already first
+  if (at < 0) return; // not waiting: already started, or finished
+  pending[at].front = true;
+  if (at === 0) return; // already first
   const [entry] = pending.splice(at, 1);
   pending.unshift(entry);
 }
