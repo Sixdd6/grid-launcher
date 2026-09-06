@@ -323,7 +323,7 @@ describe('cloud-saves', () => {
 
     expect(result).toEqual({
       supported: false,
-      block_reason: 'Cloud save management is only available for emulator-based games.',
+      block_reason: 'Save states are not available for PC games; their save folders sync from the Saves tab instead.',
       scope: 'per_game',
     });
   });

@@ -38,7 +38,6 @@
     versionLabel,
   } from './details/version';
   import {
-    cloudStatusLabel,
     epochDate,
     flagList,
     headerLine,
@@ -403,14 +402,6 @@
     cloudMode = toggleCloudMode(cloudMode, saveType);
   }
 
-  /** The left column's cloud button: go to the Saves tab and open a panel. */
-  function openCloud() {
-    selectTab('saves');
-    if (cloudMode === 'overview') {
-      cloudMode = savePanelInfo?.supported ? 'save' : statePanelInfo?.supported ? 'state' : 'overview';
-    }
-  }
-
   function errorMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
   }
@@ -652,9 +643,6 @@
                 {pendingAction === 'install' ? 'Installing…' : installLabel(subject.platformName)}
               </button>
             {/if}
-            <button data-testid="details-cloud-status" class="secondary" onclick={openCloud}>
-              {cloudStatusLabel(savePanelInfo?.supported === true, statePanelInfo?.supported === true)}
-            </button>
           </div>
 
           {#if updateToast}

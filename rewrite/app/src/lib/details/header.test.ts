@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  cloudStatusLabel,
   developerOf,
   epochDate,
   flagList,
@@ -165,16 +164,5 @@ describe('launchTargetLine', () => {
 
   it('still names the emulator for an emulated platform', () => {
     expect(launchTargetLine(defaults({ snes: 'Snes9x' }), 'SNES')).toBe('Snes9x');
-  });
-});
-
-describe('cloudStatusLabel', () => {
-  it('offers the panel when either kind is supported', () => {
-    expect(cloudStatusLabel(true, false)).toBe('Cloud saves');
-    expect(cloudStatusLabel(false, true)).toBe('Cloud saves');
-  });
-
-  it('says so when neither is', () => {
-    expect(cloudStatusLabel(false, false)).toBe('Not configured');
   });
 });

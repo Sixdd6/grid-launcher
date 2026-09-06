@@ -1761,19 +1761,19 @@ fn restore_enabled_native_multi_dir_is_always_enabled_with_no_lookup() {
 
 #[test]
 fn restore_enabled_refuses_on_the_compatibility_block_reason() {
-    // A native-executable platform's own block reason fires regardless
-    // of the record's named emulator.
+    // A native-executable platform's own save-state block reason fires
+    // regardless of the record's named emulator.
     let fx = Fixture::new(Config::default());
     let mut caches = CloudCaches::default();
     let target = game("Alpha", "Windows", "7");
     let record = record_with_emulator("Dolphin");
 
     let (enabled, text) =
-        restore_enabled_for_record(&fx.ctx(), &mut caches, &target, SaveType::Save, &record);
+        restore_enabled_for_record(&fx.ctx(), &mut caches, &target, SaveType::State, &record);
     assert!(!enabled);
     assert_eq!(
         text,
-        "Cloud save management is only available for emulator-based games."
+        "Save states are not available for PC games; their save folders sync from the Saves tab instead."
     );
 }
 

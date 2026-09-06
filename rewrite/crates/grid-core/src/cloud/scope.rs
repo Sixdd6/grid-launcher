@@ -144,10 +144,13 @@ pub fn cloud_save_scope(
 /// unused (selection.py:107-108) — this port has no parameters for them at
 /// all, since it never called them to begin with.
 ///
-/// Trigger chain: native platform (checked first, for both save types) ->
-/// the fixed message; else, for `State`, RetroArch-gated
-/// `supports_save_states` then `cloud_sync_safe`; else, for `Save`,
-/// RetroArch-gated `supports_saves`; else `""`.
+/// Trigger chain: native platform and `save_type == State` (checked first)
+/// -> the fixed "save states are not available for PC games" message — a
+/// native (PC) game's save FOLDERS still sync fine, only save states have
+/// no equivalent to capture, so `Save` is never blocked on this ground;
+/// else, for `State`, RetroArch-gated `supports_save_states` then
+/// `cloud_sync_safe`; else, for `Save`, RetroArch-gated `supports_saves`;
+/// else `""`.
 ///
 /// The three RetroArch-gated reasons require: a non-empty `emulator_name`
 /// (bare `emulator_name`, NOT trimmed — selection.py's `and emulator_name`
@@ -164,8 +167,8 @@ pub fn cloud_save_block_reason(
     emulator_name: &str,
     core_flags: Option<&CoreFlags>,
 ) -> String {
-    if is_native_executable_platform(platform) {
-        return "Cloud save management is only available for emulator-based games.".to_string();
+    if is_native_executable_platform(platform) && save_type == SaveType::State {
+        return "Save states are not available for PC games; their save folders sync from the Saves tab instead.".to_string();
     }
 
     let retroarch_gated = !emulator_name.is_empty() && is_retroarch_emulator_name(emulator_name);
@@ -326,12 +329,18 @@ mod tests {
     }
 
     #[test]
-    fn native_platform_still_blocked_regardless_of_core_flags() {
-        let reason = cloud_save_block_reason("Windows", SaveType::Save, "RetroArch", Some(&SAFE));
+    fn native_platform_blocks_save_states_regardless_of_core_flags() {
+        let reason = cloud_save_block_reason("Windows", SaveType::State, "RetroArch", Some(&SAFE));
         assert_eq!(
             reason,
-            "Cloud save management is only available for emulator-based games."
+            "Save states are not available for PC games; their save folders sync from the Saves tab instead."
         );
+    }
+
+    #[test]
+    fn native_platform_does_not_block_save_folder_sync() {
+        let reason = cloud_save_block_reason("Windows", SaveType::Save, "RetroArch", Some(&SAFE));
+        assert_eq!(reason, "");
     }
 
     // --- brief's four extras ---

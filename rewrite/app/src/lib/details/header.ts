@@ -119,12 +119,3 @@ export function launchTargetLine(defaults: LaunchDefaults | null, platformName: 
   const core = (key ? cores[key] : '').trim();
   return core === '' ? `${name} · no core` : `${name} · ${core}`;
 }
-
-/**
- * The left column's cloud button. It routes to the Saves tab, which shows a
- * real per-record relative time; it deliberately does not claim one itself,
- * because the popup does not fetch cloud records until that tab opens.
- */
-export function cloudStatusLabel(saveSupported: boolean, stateSupported: boolean): string {
-  return saveSupported || stateSupported ? 'Cloud saves' : 'Not configured';
-}

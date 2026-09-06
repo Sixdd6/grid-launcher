@@ -159,9 +159,10 @@ Adopted from RomM v2 `tokens/index.ts`, defined once in `app.css` as CSS variabl
 Dialog 1040×680 max, centred over a dimmed, blurred shell; Esc and ✕ close.
 
 - Left column (240px): cover (`path_cover_large`), then Play / Install (primary), Update
-  when available, cloud status button (Synced 2h ago / Sync now / Not configured),
-  gear menu (native game settings, emulator override, remove), play time and the
-  emulator + core that will launch.
+  when available, gear menu (native game settings, emulator override, remove), play time
+  and the emulator + core that will launch. No standalone cloud status button — the Saves
+  tab is already one click away and shows the real per-record status; a second button
+  that only routed there was redundant (round 11).
 - Right header: title, platform, first release date, developer, genres, rating
   (`igdb_metadata.total_rating`), region / language flags, verification state.
 - Tabs (URL-less; last tab remembered per session):
@@ -184,7 +185,11 @@ Dialog 1040×680 max, centred over a dimmed, blurred shell; Esc and ✕ close.
      when none is left.
   3. **Saves**: user saves and states (`user_saves`, `user_states`) with timestamps and
      sizes, last cloud sync, Upload / Download / Sync now, and the cloud scope warning
-     the current details view shows.
+     the current details view shows. A native (PC) game's save FOLDERS still sync here;
+     only save states have no equivalent to capture, so the state panel names that
+     directly ("Save states are not available for PC games; their save folders sync
+     from the Saves tab instead.") rather than the old, inaccurate "only available for
+     emulator-based games" wording (round 11).
   4. **Files**: `files[]` with name, size, `last_modified`; installed version vs server
      version per D-UI-10 with the Update button; PS4 / Xbox 360 content rows; firmware
      row for the platform. Native rows keep the merge-path confirm text.
