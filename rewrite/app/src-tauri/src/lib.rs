@@ -157,9 +157,7 @@ pub fn run() {
             // cache itself uses. A bind failure is not fatal to the app: the
             // slot stays empty and `video_url` says so, in a line that names
             // no port, path or nonce.
-            match tauri::async_runtime::block_on(media_server::MediaServer::start(
-                state.session.cache().dir().to_path_buf(),
-            )) {
+            match media_server::MediaServer::start(state.session.cache().dir().to_path_buf()) {
                 Ok(server) => {
                     let _ = state.media_server.set(server);
                 }

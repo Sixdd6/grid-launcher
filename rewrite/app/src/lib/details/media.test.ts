@@ -316,8 +316,8 @@ describe('trailerPoster', () => {
 
 describe('videoLoadMessage', () => {
   it('always leads with the generic line, so a backend sentence is never the whole message', () => {
-    expect(videoLoadMessage('video too large to play in-app')).toBe(
-      'This video could not be loaded (video too large to play in-app).'
+    expect(videoLoadMessage('the media server did not start')).toBe(
+      'This video could not be loaded (the media server did not start).'
     );
     expect(videoLoadMessage('the video is not hosted on the connected server')).toBe(
       'This video could not be loaded (the video is not hosted on the connected server).'

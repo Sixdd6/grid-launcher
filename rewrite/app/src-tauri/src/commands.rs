@@ -270,12 +270,15 @@ pub async fn video_url(state: State<'_, AppState>, url: String) -> Result<String
         // sentence rather than the `"filtered"` sentinel it used to be.
         return Err("the video is not hosted on the connected server".to_string());
     }
-    // A failed server start must surface here rather than be swallowed:
-    // without it the viewer would sit on "Loading video…" forever.
+    // A failed server start — a refused bind, or an entropy source that
+    // would not produce a nonce — must surface here rather than be swallowed:
+    // without it the viewer would sit on "Loading video…" forever. Checked
+    // before `ensure_video`, so a dead server does not trigger a pointless
+    // download.
     let server = state
         .media_server
         .get()
-        .ok_or_else(|| "the local media server is not running".to_string())?
+        .ok_or_else(|| "the media server did not start".to_string())?
         .clone();
     let client = state.session.client();
     let path =

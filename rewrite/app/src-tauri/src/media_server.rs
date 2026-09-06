@@ -22,18 +22,28 @@
 //! set to exactly the cached videos.
 //!
 //! Exposure: the listener binds 127.0.0.1 only, on a kernel-chosen port, and
-//! serves nothing but files that sit DIRECTLY inside the image cache
-//! directory and end in a [`VIDEO_EXTENSIONS`] extension. Every request must
-//! also carry a per-launch nonce (32 random bytes, hex) in its path. The
-//! nonce is a loopback capability token, not a credential in the
-//! token-secrecy sense — but it is never logged, and neither is any media URL
-//! or path.
+//! serves nothing but REGULAR files that sit DIRECTLY inside the image cache
+//! directory and end in a [`VIDEO_EXTENSIONS`] extension. A symlink placed in
+//! that directory is refused rather than followed, so "directly inside" holds
+//! even against something with write access to the cache. Every request must
+//! also carry a per-launch nonce (32 random bytes, hex) in its path, compared
+//! in constant time. The nonce is a loopback capability token, not a
+//! credential in the token-secrecy sense — but it is never logged, and
+//! neither is any media URL or path.
+//!
+//! Availability is part of that exposure, because the port is discoverable by
+//! any local process (`ss -ltn`) and the head is read BEFORE the nonce is
+//! checked. So a connection cannot pin resources: [`Limits`] bounds the head
+//! read, every socket write, and the number of connections in flight, and the
+//! accept loop sheds rather than queues once the cap is reached.
 
 use grid_core::images::video::VIDEO_EXTENSIONS;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::sync::Semaphore;
 
 /// The most request-head bytes read before the connection is refused. A real
 /// request from the webview is a few hundred bytes; the cap stops a stuck or
@@ -44,12 +54,49 @@ const MAX_HEAD_BYTES: usize = 8 * 1024;
 /// first seconds of a long video must not pull the rest into memory.
 const CHUNK_BYTES: usize = 64 * 1024;
 
+/// How long the accept loop waits after an accept error before trying again.
+/// A transient `ECONNABORTED` costs one sleep; a persistent condition (EMFILE)
+/// no longer pegs a core, which `yield_now` did.
+const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
+
+/// The deadlines and the concurrency cap. Separated from the server so the
+/// tests can run the same code with millisecond timeouts and a cap of one.
+#[derive(Clone, Copy, Debug)]
+pub struct Limits {
+    /// The whole request head must arrive inside this. A peer that connects
+    /// and sends nothing is dropped here, before it can hold a task and a
+    /// descriptor indefinitely.
+    pub head_timeout: Duration,
+    /// Each individual socket write — the response head, and every body chunk
+    /// — must complete inside this. A client that stops reading is dropped
+    /// rather than pinning the task and its open file handle.
+    pub write_timeout: Duration,
+    /// Connections served at once. Reaching it SHEDS the next connection
+    /// (closed immediately, no response); queueing would let a local flood
+    /// grow the task list, which is the thing being bounded.
+    pub max_connections: usize,
+}
+
+impl Limits {
+    /// What `MediaServer::start` uses. Generous next to a real webview
+    /// request, tight next to "forever".
+    pub const DEFAULT: Limits = Limits {
+        head_timeout: Duration::from_secs(10),
+        write_timeout: Duration::from_secs(30),
+        max_connections: 16,
+    };
+}
+
 /// Serves cached video files to the webview over loopback HTTP/1.1 with
 /// Range support.
 pub struct MediaServer {
     port: u16,
     nonce: String,
     dir: PathBuf,
+    limits: Limits,
+    /// One permit per in-flight connection. Held by the accept loop's spawned
+    /// task and released when it ends; owned here so a test can observe it.
+    connections: Arc<Semaphore>,
 }
 
 /// What a `Range` header asks for, once resolved against the file length.
@@ -70,17 +117,30 @@ impl MediaServer {
     /// directory; only files directly inside it with a video extension are
     /// ever served.
     ///
+    /// Synchronous: the body binds, spawns and returns, so a caller in
+    /// `setup` needs no `block_on`. Every fallible step — the bind, the port
+    /// read, the entropy draw — is reported, never panicked, so a failure
+    /// degrades to "no video playback" instead of aborting startup.
+    pub fn start(dir: PathBuf) -> std::io::Result<Arc<MediaServer>> {
+        Self::start_with(dir, Limits::DEFAULT)
+    }
+
+    /// [`start`](Self::start) with explicit [`Limits`]. Tests use it to run
+    /// the real accept loop under millisecond deadlines and a cap of one.
+    ///
     /// The listener is bound synchronously and handed to the accept task as a
     /// std socket, so it registers with the runtime that will actually poll
     /// it rather than with whatever runtime happened to call `start`.
-    pub async fn start(dir: PathBuf) -> std::io::Result<Arc<MediaServer>> {
+    pub fn start_with(dir: PathBuf, limits: Limits) -> std::io::Result<Arc<MediaServer>> {
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0))?;
         let port = listener.local_addr()?.port();
         listener.set_nonblocking(true)?;
         let server = Arc::new(MediaServer {
             port,
-            nonce: random_nonce(),
+            nonce: random_nonce()?,
             dir,
+            limits,
+            connections: Arc::new(Semaphore::new(limits.max_connections)),
         });
         let accept = server.clone();
         tauri::async_runtime::spawn(async move {
@@ -94,16 +154,26 @@ impl MediaServer {
             loop {
                 match listener.accept().await {
                     Ok((stream, _peer)) => {
+                        // Shed, do not queue: past the cap the connection is
+                        // closed at once so a flood cannot grow the task list
+                        // or hold descriptors waiting for a slot.
+                        let Ok(permit) = accept.connections.clone().try_acquire_owned() else {
+                            drop(stream);
+                            continue;
+                        };
                         let server = accept.clone();
                         tauri::async_runtime::spawn(async move {
+                            // Held for the life of the connection; released
+                            // when this task ends, however it ends.
+                            let _permit = permit;
                             // A dropped connection is the normal end of a
                             // seek: never logged, never retried.
                             let _ = server.serve(stream).await;
                         });
                     }
-                    // EMFILE and friends: yielding rather than spinning keeps
-                    // the loop alive without a busy wait.
-                    Err(_) => tokio::task::yield_now().await,
+                    // EMFILE and friends: back off so a persistent error
+                    // cannot peg a core, and keep the loop alive.
+                    Err(_) => tokio::time::sleep(ACCEPT_BACKOFF).await,
                 }
             }
         });
@@ -142,13 +212,18 @@ impl MediaServer {
     /// close` on every response, so the webview opens a fresh socket per
     /// range request and no keep-alive state is kept here.
     async fn serve(&self, mut stream: TcpStream) -> std::io::Result<()> {
-        let head = match read_head(&mut stream).await? {
-            Some(head) => head,
-            None => return write_head(&mut stream, &not_found()).await,
-        };
+        // A peer that connects and sends nothing gets no response at all: the
+        // socket is simply dropped when the deadline passes. Answering it
+        // would cost a write to someone who never asked anything.
+        let head =
+            match tokio::time::timeout(self.limits.head_timeout, read_head(&mut stream)).await {
+                Ok(Ok(Some(head))) => head,
+                Ok(Ok(None)) | Ok(Err(_)) => return self.reply(&mut stream, &not_found()).await,
+                Err(_elapsed) => return Ok(()),
+            };
         let (method, target) = match request_line(&head) {
             Some(parsed) => parsed,
-            None => return write_head(&mut stream, &not_found()).await,
+            None => return self.reply(&mut stream, &not_found()).await,
         };
         // Anything that is not a read of a servable file gets the same empty
         // 404: a wrong nonce, a wrong method and a wrong name must not be
@@ -156,20 +231,25 @@ impl MediaServer {
         let body_wanted = match method {
             "GET" => true,
             "HEAD" => false,
-            _ => return write_head(&mut stream, &not_found()).await,
+            _ => return self.reply(&mut stream, &not_found()).await,
         };
         let path = match self.resolve(target) {
             Some(path) => path,
-            None => return write_head(&mut stream, &not_found()).await,
+            None => return self.reply(&mut stream, &not_found()).await,
         };
-        let len = match tokio::fs::metadata(&path).await {
+        // `symlink_metadata`, not `metadata`: it does NOT follow the final
+        // component, and `is_file()` is false for a symlink. So a link named
+        // `<hex>.mp4` dropped into the cache directory cannot make the server
+        // read its target — which is what lets the module doc say "directly
+        // inside" without a caveat.
+        let len = match tokio::fs::symlink_metadata(&path).await {
             Ok(meta) if meta.is_file() => meta.len(),
-            _ => return write_head(&mut stream, &not_found()).await,
+            _ => return self.reply(&mut stream, &not_found()).await,
         };
         let content_type = content_type_for(&path);
         match parse_range(header_value(&head, "range").as_deref(), len) {
             RangeSpec::Unsatisfiable => {
-                write_head(
+                self.reply(
                     &mut stream,
                     &format!(
                         "HTTP/1.1 416 Range Not Satisfiable\r\n\
@@ -183,7 +263,7 @@ impl MediaServer {
                 .await
             }
             RangeSpec::Whole => {
-                write_head(
+                self.reply(
                     &mut stream,
                     &format!(
                         "HTTP/1.1 200 OK\r\n\
@@ -196,7 +276,7 @@ impl MediaServer {
                 )
                 .await?;
                 if body_wanted && len > 0 {
-                    stream_body(&mut stream, &path, 0, len).await?;
+                    self.stream_body(&mut stream, &path, 0, len).await?;
                 }
                 Ok(())
             }
@@ -204,7 +284,7 @@ impl MediaServer {
                 // end is INCLUSIVE in both the header and the count, which is
                 // where a range server usually goes wrong by one byte.
                 let count = end - start + 1;
-                write_head(
+                self.reply(
                     &mut stream,
                     &format!(
                         "HTTP/1.1 206 Partial Content\r\n\
@@ -218,7 +298,7 @@ impl MediaServer {
                 )
                 .await?;
                 if body_wanted {
-                    stream_body(&mut stream, &path, start, count).await?;
+                    self.stream_body(&mut stream, &path, start, count).await?;
                 }
                 Ok(())
             }
@@ -231,11 +311,86 @@ impl MediaServer {
     fn resolve(&self, target: &str) -> Option<PathBuf> {
         let rest = target.strip_prefix('/')?;
         let (nonce, name) = rest.split_once('/')?;
-        if nonce != self.nonce || !is_servable_name(name) {
+        if !eq_constant_time(nonce, &self.nonce) || !is_servable_name(name) {
             return None;
         }
         Some(self.dir.join(name))
     }
+
+    /// One response head, written under the write deadline. A client that
+    /// stops reading cannot pin the task here.
+    async fn reply(&self, stream: &mut TcpStream, head: &str) -> std::io::Result<()> {
+        self.write_all(stream, head.as_bytes()).await?;
+        self.timed(stream.flush()).await
+    }
+
+    /// `count` bytes from `start`, in [`CHUNK_BYTES`] pieces, each write under
+    /// the same deadline. The file is opened per request and seeked, so
+    /// nothing here holds a whole video in memory.
+    async fn stream_body(
+        &self,
+        stream: &mut TcpStream,
+        path: &Path,
+        start: u64,
+        count: u64,
+    ) -> std::io::Result<()> {
+        let mut file = tokio::fs::File::open(path).await?;
+        if start > 0 {
+            file.seek(std::io::SeekFrom::Start(start)).await?;
+        }
+        let mut remaining = count;
+        let mut buf = vec![0u8; CHUNK_BYTES];
+        while remaining > 0 {
+            let want = remaining.min(CHUNK_BYTES as u64) as usize;
+            let n = file.read(&mut buf[..want]).await?;
+            if n == 0 {
+                // The file shrank under us: stop rather than pad. The declared
+                // Content-Length is now wrong, and closing the connection is
+                // how the client learns the body ended early.
+                break;
+            }
+            self.write_all(stream, &buf[..n]).await?;
+            remaining -= n as u64;
+        }
+        self.timed(stream.flush()).await
+    }
+
+    async fn write_all(&self, stream: &mut TcpStream, bytes: &[u8]) -> std::io::Result<()> {
+        self.timed(stream.write_all(bytes)).await
+    }
+
+    /// Runs one socket operation under [`Limits::write_timeout`], turning an
+    /// elapsed deadline into a plain `TimedOut` error. The error is never
+    /// logged or shown, so it carries no detail.
+    async fn timed<F>(&self, op: F) -> std::io::Result<()>
+    where
+        F: std::future::Future<Output = std::io::Result<()>>,
+    {
+        match tokio::time::timeout(self.limits.write_timeout, op).await {
+            Ok(result) => result,
+            Err(_elapsed) => Err(std::io::ErrorKind::TimedOut.into()),
+        }
+    }
+
+    #[cfg(test)]
+    fn available_connections(&self) -> usize {
+        self.connections.available_permits()
+    }
+}
+
+/// Byte equality that always looks at every byte of an equal-length pair, so
+/// the time it takes says nothing about WHERE two nonces first differ. A
+/// length mismatch is rejected outright — the nonce is fixed-length, so the
+/// length carries no secret.
+///
+/// The nonce is a capability token rather than a credential, and loopback
+/// timing is noisy, but the whole cost of closing the channel is this fold.
+fn eq_constant_time(a: &str, b: &str) -> bool {
+    a.len() == b.len()
+        && a.bytes()
+            .zip(b.bytes())
+            .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+            == 0
 }
 
 /// A file name the server will serve: one path segment of
@@ -275,12 +430,19 @@ fn content_type_for(path: &Path) -> &'static str {
 }
 
 /// 32 random bytes as hex. A failure to draw from the OS entropy source is
-/// unrecoverable for a capability token, so it panics rather than falling
-/// back to something guessable.
-fn random_nonce() -> String {
+/// unrecoverable for a capability token — there is no fallback that is not
+/// guessable — so it is reported as an error and the server does not start.
+/// Every other failure in this feature degrades the same way, and none of
+/// them aborts app startup.
+fn random_nonce() -> std::io::Result<String> {
     let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes).expect("the OS entropy source must be available");
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    // `getrandom::Error` is not a `std::error::Error`, so it cannot be boxed:
+    // keep the OS reason when there is one, and a fixed sentence otherwise.
+    getrandom::fill(&mut bytes).map_err(|e| match e.raw_os_error() {
+        Some(code) => std::io::Error::from_raw_os_error(code),
+        None => std::io::Error::other("the OS entropy source is unavailable"),
+    })?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// The request head as text, or `None` when the peer closed early or sent
@@ -387,47 +549,22 @@ fn not_found() -> String {
         .to_string()
 }
 
-async fn write_head(stream: &mut TcpStream, head: &str) -> std::io::Result<()> {
-    stream.write_all(head.as_bytes()).await?;
-    stream.flush().await
-}
-
-/// `count` bytes from `start`, in [`CHUNK_BYTES`] pieces. The file is opened
-/// per request and seeked, so nothing here holds a whole video in memory.
-async fn stream_body(
-    stream: &mut TcpStream,
-    path: &Path,
-    start: u64,
-    count: u64,
-) -> std::io::Result<()> {
-    let mut file = tokio::fs::File::open(path).await?;
-    if start > 0 {
-        file.seek(std::io::SeekFrom::Start(start)).await?;
-    }
-    let mut remaining = count;
-    let mut buf = vec![0u8; CHUNK_BYTES];
-    while remaining > 0 {
-        let want = remaining.min(CHUNK_BYTES as u64) as usize;
-        let n = file.read(&mut buf[..want]).await?;
-        if n == 0 {
-            // The file shrank under us: stop rather than pad. The declared
-            // Content-Length is now wrong, and closing the connection is how
-            // the client learns the body ended early.
-            break;
-        }
-        stream.write_all(&buf[..n]).await?;
-        remaining -= n as u64;
-    }
-    stream.flush().await
-}
-
 #[cfg(test)]
 mod tests {
-    use super::MediaServer;
+    use super::{eq_constant_time, Limits, MediaServer};
     use std::path::PathBuf;
     use std::sync::Arc;
+    use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
+
+    /// The real limits with millisecond deadlines, so a timeout test finishes
+    /// in a test's lifetime instead of ten seconds.
+    const FAST: Limits = Limits {
+        head_timeout: Duration::from_millis(200),
+        write_timeout: Duration::from_millis(200),
+        max_connections: 16,
+    };
 
     /// 4 KiB of known, non-repeating-per-byte content so a slice assertion
     /// fails loudly on an off-by-one.
@@ -436,11 +573,15 @@ mod tests {
     }
 
     async fn server() -> (tempfile::TempDir, Arc<MediaServer>, Vec<u8>) {
+        server_with(FAST).await
+    }
+
+    async fn server_with(limits: Limits) -> (tempfile::TempDir, Arc<MediaServer>, Vec<u8>) {
         let dir = tempfile::tempdir().unwrap();
         let bytes = fixture_bytes();
         std::fs::write(dir.path().join("a.mp4"), &bytes).unwrap();
         std::fs::write(dir.path().join("notes.txt"), b"not a video").unwrap();
-        let server = MediaServer::start(dir.path().to_path_buf()).await.unwrap();
+        let server = MediaServer::start_with(dir.path().to_path_buf(), limits).unwrap();
         (dir, server, bytes)
     }
 
@@ -610,6 +751,163 @@ mod tests {
         )
         .await;
         assert!(head.starts_with("HTTP/1.1 404 Not Found\r\n"), "{head}");
+    }
+
+    #[tokio::test]
+    async fn a_range_end_past_the_file_is_clamped_to_the_last_byte() {
+        let (_dir, server, bytes) = server().await;
+        let (head, body) = request(
+            server.port(),
+            &ranged(&server.test_path("a.mp4"), "bytes=0-99999"),
+        )
+        .await;
+        assert!(
+            head.starts_with("HTTP/1.1 206 Partial Content\r\n"),
+            "{head}"
+        );
+        assert!(
+            head.contains("Content-Range: bytes 0-4095/4096\r\n"),
+            "{head}"
+        );
+        assert!(head.contains("Content-Length: 4096\r\n"), "{head}");
+        assert_eq!(body, bytes);
+    }
+
+    #[tokio::test]
+    async fn a_multi_range_request_is_answered_with_the_whole_file() {
+        let (_dir, server, bytes) = server().await;
+        let (head, body) = request(
+            server.port(),
+            &ranged(&server.test_path("a.mp4"), "bytes=0-1,5-6"),
+        )
+        .await;
+        assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{head}");
+        assert!(!head.contains("Content-Range"), "{head}");
+        assert_eq!(body, bytes);
+    }
+
+    #[tokio::test]
+    async fn a_range_unit_other_than_bytes_is_ignored() {
+        let (_dir, server, bytes) = server().await;
+        let (head, body) = request(
+            server.port(),
+            &ranged(&server.test_path("a.mp4"), "items=0-1"),
+        )
+        .await;
+        assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{head}");
+        assert_eq!(body, bytes);
+    }
+
+    /// The name allowlist REFUSES percent escapes rather than decoding them,
+    /// so an encoded traversal never becomes a path, and a query string never
+    /// becomes part of a file name.
+    #[tokio::test]
+    async fn percent_escapes_and_query_strings_are_404() {
+        let (_dir, server, _bytes) = server().await;
+        let (head, _body) = request(server.port(), &get(&server.test_path("%2e%2e%2fa.mp4"))).await;
+        assert!(head.starts_with("HTTP/1.1 404 Not Found\r\n"), "{head}");
+        let (head, _body) = request(server.port(), &get(&server.test_path("a.mp4?x=1"))).await;
+        assert!(head.starts_with("HTTP/1.1 404 Not Found\r\n"), "{head}");
+    }
+
+    /// A symlink dropped into the cache directory must not become a way to
+    /// read a file outside it: `symlink_metadata` does not follow the final
+    /// component, so `is_file()` is false and the request is a plain 404.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_symlink_inside_the_directory_is_not_followed() {
+        let (dir, server, _bytes) = server().await;
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("secret.mp4");
+        std::fs::write(&target, b"not yours").unwrap();
+        std::os::unix::fs::symlink(&target, dir.path().join("link.mp4")).unwrap();
+        let (head, body) = request(server.port(), &get(&server.test_path("link.mp4"))).await;
+        assert!(head.starts_with("HTTP/1.1 404 Not Found\r\n"), "{head}");
+        assert!(body.is_empty());
+    }
+
+    /// A peer that connects and sends nothing must not hold a task and a
+    /// descriptor: the head deadline closes it, with no response at all.
+    #[tokio::test]
+    async fn a_silent_connection_is_closed_after_the_head_timeout() {
+        let (_dir, server, _bytes) = server().await;
+        let mut stream = TcpStream::connect(("127.0.0.1", server.port()))
+            .await
+            .unwrap();
+        let mut all = Vec::new();
+        // Well above the 200 ms test deadline and well below a hang.
+        let read = tokio::time::timeout(Duration::from_secs(5), stream.read_to_end(&mut all))
+            .await
+            .expect("the server closed the silent connection");
+        assert_eq!(read.unwrap(), 0);
+        assert!(all.is_empty());
+    }
+
+    /// Past the cap the next connection is SHED — closed at once with no
+    /// response — rather than queued behind the one in flight.
+    #[tokio::test]
+    async fn a_connection_past_the_cap_is_shed_and_the_permit_comes_back() {
+        let limits = Limits {
+            max_connections: 1,
+            ..FAST
+        };
+        let (_dir, server, _bytes) = server_with(limits).await;
+        // Hold the only permit: connect and send nothing, so the connection
+        // sits in `read_head` until its deadline.
+        let _holder = TcpStream::connect(("127.0.0.1", server.port()))
+            .await
+            .unwrap();
+        wait_for(&server, 0).await;
+
+        let mut shed = TcpStream::connect(("127.0.0.1", server.port()))
+            .await
+            .unwrap();
+        shed.write_all(get(&server.test_path("a.mp4")).as_bytes())
+            .await
+            .unwrap();
+        let mut all = Vec::new();
+        // Either outcome means "closed without a response": a clean EOF, or
+        // ECONNRESET because the socket was dropped with the request still
+        // unread in its receive buffer. What must NOT happen is a wait.
+        let read = tokio::time::timeout(Duration::from_secs(5), shed.read_to_end(&mut all))
+            .await
+            .expect("the shed connection was queued instead of closed");
+        match read {
+            Ok(n) => assert_eq!(n, 0, "a shed connection must get no response"),
+            Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::ConnectionReset, "{e}"),
+        }
+        assert!(all.is_empty(), "a shed connection must get no response");
+
+        // The holder's head deadline then returns the permit, so the cap is a
+        // bound on concurrency and not a one-way latch.
+        wait_for(&server, 1).await;
+    }
+
+    /// Polls until the server reports `want` free permits, so no test depends
+    /// on when the accept loop happens to run.
+    async fn wait_for(server: &Arc<MediaServer>, want: usize) {
+        for _ in 0..500 {
+            if server.available_connections() == want {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!(
+            "waited for {want} free permits, still {}",
+            server.available_connections()
+        );
+    }
+
+    #[test]
+    fn constant_time_equality_matches_ordinary_equality() {
+        assert!(eq_constant_time("abc", "abc"));
+        assert!(eq_constant_time("", ""));
+        assert!(!eq_constant_time("abc", "abd"));
+        // Differs in the FIRST byte, which a short-circuiting compare would
+        // answer faster than the case above.
+        assert!(!eq_constant_time("abc", "zbc"));
+        assert!(!eq_constant_time("abc", "abcd"));
+        assert!(!eq_constant_time("abc", ""));
     }
 
     #[tokio::test]

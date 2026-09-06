@@ -1129,14 +1129,23 @@ and renders, and the app owns a small server for it: `MediaServer`
 
 - Binds `127.0.0.1:0` — loopback only, on a kernel-chosen port. Nothing off the machine
   can reach it.
-- A per-launch nonce (32 random bytes, hex) is the first path segment. It is a loopback
-  capability token, not a credential in the token-secrecy sense, and it is never logged.
-- Serves only files that sit **directly inside** the image cache directory and end in a
-  `VIDEO_EXTENSIONS` extension (`mp4`, `webm`, `mov`). The name must be one segment of
-  `[A-Za-z0-9._-]` with no `..`, which is what rules out traversal and percent-encoded
-  separators.
+- A per-launch nonce (32 random bytes, hex) is the first path segment, compared in
+  constant time. It is a loopback capability token, not a credential in the token-secrecy
+  sense, and it is never logged.
+- Serves only **regular** files that sit **directly inside** the image cache directory and
+  end in a `VIDEO_EXTENSIONS` extension (`mp4`, `webm`, `mov`). The name must be one
+  segment of `[A-Za-z0-9._-]` with no `..`, which is what rules out traversal and
+  percent-encoded separators; percent escapes are refused, never decoded. The length check
+  uses `symlink_metadata`, so a symlink dropped into the cache directory is refused rather
+  than followed.
 - `GET` and `HEAD` only. Every rejection — wrong nonce, wrong method, wrong name, missing
   file — is the same empty `404`, so none is distinguishable from another.
+- Bounded, because the port is discoverable by any local process (`ss -ltn`) and the head
+  is read *before* the nonce is checked: the request head must arrive within 10 s, every
+  socket write must complete within 30 s, and at most 16 connections are served at once.
+  Past that cap the next connection is **shed** — closed at once with no response — rather
+  than queued. An accept error backs off 100 ms and the loop continues. The `Limits`
+  struct holds all three so the tests run the same code with millisecond deadlines.
 - Range support per RFC 9110 §14.1.2: `bytes=a-b`, `bytes=a-` and `bytes=-n` answer `206`
   with `Content-Range: bytes a-b/len`; a well-formed range past the end answers `416` with
   `Content-Range: bytes */len`; an unparseable Range header is ignored and the whole file
