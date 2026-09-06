@@ -70,10 +70,34 @@
        caller: without clearing `src` first, a caller that passes no
        `onerror` (the Library and Server cards) is left with the browser's
        broken-image glyph in the card. -->
+  <!-- Eager, not lazy: with `loading="lazy"` every cover was fetched and
+       decoded as it scrolled in, and the FIRST scroll through a freshly
+       opened 302-card platform averaged 84 ms per frame with 27 frames over
+       50 ms; eager + `decoding="async"` makes it 28.6 ms with none, the same
+       as a warm second pass. Fetching them all at open is cheap — a cover is
+       a local cache file served over the asset protocol, not a network
+       request — and decoding asynchronously keeps the open off the main
+       thread. -->
   {#if backdrop}
-    <img class="backdrop" src={src} alt="" aria-hidden="true" loading="lazy" draggable="false" />
+    <img
+      class="backdrop"
+      src={src}
+      alt=""
+      aria-hidden="true"
+      loading="eager"
+      decoding="async"
+      draggable="false"
+    />
   {/if}
-  <img {src} {alt} loading="lazy" draggable="false" onerror={handleImgError} {...rest} />
+  <img
+    {src}
+    {alt}
+    loading="eager"
+    decoding="async"
+    draggable="false"
+    onerror={handleImgError}
+    {...rest}
+  />
 {:else if status === 'loading'}
   <div class="skeleton" aria-hidden="true" {...rest}></div>
 {:else}

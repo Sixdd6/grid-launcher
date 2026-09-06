@@ -131,7 +131,11 @@ Adopted from RomM v2 `tokens/index.ts`, defined once in `app.css` as CSS variabl
   up by four (round 8), so the upscale supplies most of the softening and the blur
   touches one sixteenth of the pixels. Cards are not `content-visibility`-gated: with
   real covers, laying out and painting each row as it scrolls in costs more per frame
-  than painting every card once when the platform opens.
+  than painting every card once when the platform opens. Covers load EAGERLY and decode
+  asynchronously for the same reason: lazy loading pushed the fetch and decode of every
+  cover into the first scroll (84 ms per frame, 27 frames over 50 ms), and a cover is a
+  local cache file served over the asset protocol, so fetching them all when the
+  platform opens is cheap (28.6 ms per frame, no long frames).
 - Card click opens the details popup; the hover Play launches directly.
 
 ## 6. Server view
