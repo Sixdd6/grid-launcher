@@ -78,6 +78,7 @@
     --text: #ffffff;
     --text-h: #ffffff;
     --text-muted: #c8c8dc;
+    --danger: #ff5050;
     --text-halo:
       0 0 2px rgba(7, 7, 15, 0.85),
       0 0 8px rgba(7, 7, 15, 0.5);
@@ -96,6 +97,7 @@
   --text: #ffffff;
   --text-h: #ffffff;
   --text-muted: #c8c8dc;
+  --danger: #ff5050;
   --text-halo:
     0 0 2px rgba(7, 7, 15, 0.85),
     0 0 8px rgba(7, 7, 15, 0.5);

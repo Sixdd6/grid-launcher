@@ -47,6 +47,29 @@ describe('changed token values (ruling §3.1)', () => {
   });
 });
 
+// Fix round 1: `:root` is the light base (file header comment), so its
+// unconditional `--danger: #c62828;` also resolves for dark mode unless
+// both dark blocks restate the dark value — CSS custom-property cascade is
+// per-declaration, so a block that never mentions `--danger` does not
+// override it regardless of specificity. Mirrors how both dark blocks
+// already restate --text-muted, --primary, etc.
+describe('--danger stays theme-scoped (ruling §3.1/§3.2, fix round 1)', () => {
+  it('restates the dark value in both dark blocks', () => {
+    expect(prefersDark).toContain('--danger: #ff5050;');
+    expect(dataThemeDark).toContain('--danger: #ff5050;');
+  });
+
+  it('never resolves to the light value #c62828 in a dark block', () => {
+    expect(prefersDark).not.toContain('#c62828');
+    expect(dataThemeDark).not.toContain('#c62828');
+  });
+
+  it('only the light blocks (base and explicit) declare #c62828', () => {
+    expect(rootBase).toContain('--danger: #c62828;');
+    expect(dataThemeLight).toContain('--danger: #c62828;');
+  });
+});
+
 describe('--text-halo (ruling §3.1)', () => {
   it('is defined in every theme block that defines --text-muted', () => {
     for (const b of [rootBase, prefersDark, dataThemeDark, dataThemeLight]) {
