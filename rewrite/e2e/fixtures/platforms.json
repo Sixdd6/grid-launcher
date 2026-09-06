@@ -3,12 +3,25 @@
     "id": 1,
     "name": "Super Nintendo Entertainment System",
     "slug": "snes",
-    "rom_count": 3
+    "rom_count": 3,
+    "custom_name": null,
+    "display_name": "Super Nintendo Entertainment System"
   },
   {
     "id": 2,
     "name": "Arcade",
     "slug": "arcade",
-    "rom_count": 2
+    "rom_count": 2,
+    "custom_name": null,
+    "display_name": "Arcade"
+  },
+  {
+    "id": 3,
+    "name": "Windows",
+    "slug": "win",
+    "fs_slug": "win9x",
+    "custom_name": "Windows 9x",
+    "display_name": "Windows 9x",
+    "rom_count": 1
   }
 ]

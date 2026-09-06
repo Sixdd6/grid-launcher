@@ -144,5 +144,24 @@
       { "id": 3011, "file_name": "Big Arcade Game.zip", "file_size_bytes": 0, "is_top_level": true }
     ],
     "metadatum": null
+  },
+  "302": {
+    "id": 302,
+    "name": "Win9x Game",
+    "fs_name_no_ext": "Win9x Game",
+    "platform_id": 3,
+    "platform_display_name": "Windows 9x",
+    "fs_name": "Win9x Game.zip",
+    "summary": "A fixture rom for the custom-named Windows 9x platform.",
+    "regions": ["World"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      { "id": 3021, "file_name": "Win9x Game.zip", "file_size_bytes": 0, "is_top_level": true }
+    ],
+    "metadatum": null
   }
 }

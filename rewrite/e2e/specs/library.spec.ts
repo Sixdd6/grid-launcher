@@ -33,9 +33,16 @@ describe('library', () => {
     });
   });
 
-  it('renders both platforms from the fixtures', async () => {
+  it('renders the platforms from the fixtures', async () => {
     await expect($(testId('platform-btn-1'))).toExist();
     await expect($(testId('platform-btn-2'))).toExist();
+    // Platform 3's `name` is "Windows" but its `custom_name`/`display_name`
+    // is "Windows 9x" (RomM's platform settings) — the rail must show the
+    // display name, not the plain name, and platform 1 must not pick up a
+    // stray "Windows" substring from anywhere else on the page.
+    await expect($(testId('platform-btn-3'))).toHaveText(expect.stringContaining('Windows 9x'));
+    const platform1Text = await $(testId('platform-btn-1')).getText();
+    expect(platform1Text).not.toContain('Windows');
   });
 
   it('selecting platform 1 shows its games, including the null-name game rendering its fs_name_no_ext', async () => {

@@ -30,6 +30,7 @@
     platformCountsLine,
     type FirmwareChipState,
   } from './server/header';
+  import { platformLabel } from './server/platformLabel';
   import {
     firmwareInstallLabel,
     firmwarePassFinished,
@@ -83,7 +84,7 @@
   let libraryPathError = $state<string | null>(null);
 
   let activePlatformRow = $derived(platforms.find((p) => p.id === activePlatform) ?? null);
-  let activePlatformName = $derived(activePlatformRow?.name ?? '');
+  let activePlatformName = $derived(activePlatformRow ? platformLabel(activePlatformRow) : '');
   let visible = $derived(games.filter((game) => titleContains(game.name, search)));
   let installedCount = $derived(
     games.filter((game) => isInstalled(game, activePlatformName)).length,
@@ -100,7 +101,7 @@
         testId: `platform-btn-${p.id}`,
         countTestId: `server-rail-count-${p.id}`,
         dataRail: `server-rail-${p.id}`,
-        label: p.name,
+        label: platformLabel(p),
         count: p.rom_count,
         selected: p.id === activePlatform,
       }),

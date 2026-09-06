@@ -8,7 +8,17 @@ export type RestoreOutcome =
   | { kind: 'no_session' }
   | { kind: 'connected'; state: SessionState }
   | { kind: 'unreachable'; server_url: string; username: string; error: string };
-export type Platform = { id: number; name: string; slug: string; rom_count: number };
+export type Platform = {
+  id: number;
+  name: string;
+  slug: string;
+  rom_count: number;
+  /** User-set name from RomM's platform settings; `null` when unset. */
+  custom_name: string | null;
+  /** What RomM's web UI shows: the custom name when set, else `name`.
+   *  Older servers omit it, so it can come back empty. */
+  display_name: string;
+};
 /** One platform a batched emulator/core lookup is asking about. Field names
  *  match the backend's `PlatformRef` (app/src-tauri/src/commands.rs). */
 export type PlatformRef = { name: string; slug: string };

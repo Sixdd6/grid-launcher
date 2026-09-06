@@ -206,6 +206,27 @@ pub struct Platform {
     pub slug: String,
     #[serde(default)]
     pub rom_count: i64,
+    /// User-set name from RomM's platform settings; `None`/empty when unset.
+    #[serde(default)]
+    pub custom_name: Option<String>,
+    /// What RomM's web UI shows: the custom name when set, else `name`.
+    /// Read-only on the wire; older servers omit it (then it is empty).
+    #[serde(default)]
+    pub display_name: String,
+}
+
+impl Platform {
+    /// The label the UI shows — `display_name`, else `name`, else `slug`
+    /// (`grid_launcher/server/catalog.py`, docs/porting/01-romm-api.md:147).
+    pub fn label(&self) -> &str {
+        if !self.display_name.is_empty() {
+            &self.display_name
+        } else if !self.name.is_empty() {
+            &self.name
+        } else {
+            &self.slug
+        }
+    }
 }
 
 /// One firmware file the server offers for a platform. The wire schema
@@ -812,5 +833,51 @@ mod credential_stripping_tests {
         );
         assert_eq!(super::strip_userinfo("not-a-url"), "not-a-url");
         assert_eq!(super::strip_userinfo(""), "");
+    }
+}
+
+#[cfg(test)]
+mod platform_tests {
+    use super::Platform;
+
+    fn parse(value: serde_json::Value) -> Platform {
+        serde_json::from_value(value).expect("platform decodes")
+    }
+
+    #[test]
+    fn label_prefers_display_name_over_name() {
+        let platform = parse(serde_json::json!({
+            "id": 3,
+            "name": "Windows",
+            "slug": "win",
+            "custom_name": "Windows 9x",
+            "display_name": "Windows 9x"
+        }));
+        assert_eq!(platform.label(), "Windows 9x");
+    }
+
+    /// An older server that predates `custom_name`/`display_name` still
+    /// decodes — those fields default — and the label falls back to `name`.
+    #[test]
+    fn an_older_payload_still_decodes_and_labels_by_name() {
+        let platform = parse(serde_json::json!({
+            "id": 1,
+            "name": "Nintendo Switch",
+            "slug": "switch"
+        }));
+        assert_eq!(platform.custom_name, None);
+        assert_eq!(platform.display_name, "");
+        assert_eq!(platform.label(), "Nintendo Switch");
+    }
+
+    #[test]
+    fn an_empty_name_labels_by_slug() {
+        let platform = parse(serde_json::json!({
+            "id": 5,
+            "name": "",
+            "slug": "unknown-slug",
+            "display_name": ""
+        }));
+        assert_eq!(platform.label(), "unknown-slug");
     }
 }
