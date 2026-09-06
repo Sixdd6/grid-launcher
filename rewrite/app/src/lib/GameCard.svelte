@@ -169,7 +169,7 @@
      so a 2.5px blur at quarter size reads like the old 10px blur at full
      size while touching one sixteenth of the pixels. Measured on a
      302-card platform with real covers: 64 → 28 ms per scroll frame with
-     the content-visibility change below, and no frame over 50 ms. */
+     the content-visibility change above, and no frame over 50 ms. */
   .cover :global(img.backdrop) {
     position: absolute;
     top: -12px;

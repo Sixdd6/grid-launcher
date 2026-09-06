@@ -70,7 +70,10 @@ the options.
   while the user scrolls (round 8): a scroll event on the view's scroll container
   holds the warm lane, and the lane runs again 250ms after the last scroll event, so
   a speculative download, decode and blur never competes with the frame being
-  scrolled. Hover requests are never held back, and leaving a view releases the lane.
+  scrolled. Hover requests are never held back. The pause belongs to the view's
+  lifetime, not to its data: a rows refresh that re-observes the grid (a finished
+  install) must not release a pause the user is still scrolling through, and only
+  unmounting the view releases the lane.
 - Download footer strip, 28px, always mounted: hidden when nothing is live; otherwise
   "⬇ <title> · <percent> · <speed>" with a 60-sample sparkline and an "Open Downloads"
   link. Clicking anywhere on it opens the Downloads view.

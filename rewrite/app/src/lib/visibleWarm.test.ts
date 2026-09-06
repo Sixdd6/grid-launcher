@@ -9,7 +9,7 @@ const { warmBackground, setScrollIdle } = vi.hoisted(() => ({
 vi.mock('./backgroundPrefetch', () => ({ warmBackground, setScrollIdle, SCROLL_IDLE_MS: 250 }));
 
 import { SCROLL_IDLE_MS } from './backgroundPrefetch';
-import { createVisibleWarmer, scrollParent, WARM_ROOT_MARGIN } from './visibleWarm';
+import { attachScrollGate, createVisibleWarmer, scrollParent, WARM_ROOT_MARGIN } from './visibleWarm';
 
 /** The webview has `IntersectionObserver`; the node test runner does not.
  *  This stub records what was observed and lets a test deliver entries. */
@@ -244,15 +244,13 @@ describe('scrollParent', () => {
   });
 });
 
-describe('the scroll-idle gate', () => {
-  const originalStyle = Reflect.get(globalThis, 'getComputedStyle');
-
+describe('attachScrollGate', () => {
   type Recorded = { type: string; fn: () => void; options?: unknown };
 
-  /** A grid inside a stand-in scroll container that records the listeners
-   *  put on it, so both the attach and the detach are observable. */
-  function scrollingGrid(): {
-    grid: HTMLElement;
+  /** A stand-in scroll container that records the listeners put on it, so
+   *  both the attach and the detach are observable. */
+  function fakeScroller(): {
+    scroller: Element;
     added: Recorded[];
     removed: Recorded[];
     scroll: () => void;
@@ -260,20 +258,15 @@ describe('the scroll-idle gate', () => {
     const added: Recorded[] = [];
     const removed: Recorded[] = [];
     const scroller = {
-      parentElement: null,
       addEventListener: (type: string, fn: () => void, options?: unknown) => {
         added.push({ type, fn, options });
       },
       removeEventListener: (type: string, fn: () => void, options?: unknown) => {
         removed.push({ type, fn, options });
       },
-    };
-    const grid = { children: [], parentElement: scroller } as unknown as HTMLElement;
-    Reflect.set(globalThis, 'getComputedStyle', (node: unknown) => ({
-      overflowY: node === scroller ? 'auto' : 'visible',
-    }));
+    } as unknown as Element;
     return {
-      grid,
+      scroller,
       added,
       removed,
       scroll: () => {
@@ -291,13 +284,11 @@ describe('the scroll-idle gate', () => {
 
   afterEach(() => {
     vi.useRealTimers();
-    if (originalStyle === undefined) Reflect.deleteProperty(globalThis, 'getComputedStyle');
-    else Reflect.set(globalThis, 'getComputedStyle', originalStyle);
   });
 
-  it('listens for scrolls on the scroll container, passively', () => {
-    const { grid, added } = scrollingGrid();
-    createVisibleWarmer(subject).observe(grid);
+  it('listens for scrolls on the container it was given, passively', () => {
+    const { scroller, added } = fakeScroller();
+    attachScrollGate(scroller);
 
     expect(scrollListeners(added)).toHaveLength(1);
     // Passive: the handler never calls `preventDefault`, and a non-passive
@@ -305,18 +296,9 @@ describe('the scroll-idle gate', () => {
     expect(scrollListeners(added)[0].options).toEqual({ passive: true });
   });
 
-  it('attaches one listener however often the grid is re-observed', () => {
-    const { grid, added } = scrollingGrid();
-    const warmer = createVisibleWarmer(subject);
-    warmer.observe(grid);
-    warmer.observe(grid);
-
-    expect(scrollListeners(added)).toHaveLength(1);
-  });
-
   it('pauses the warm lane on a scroll and releases it once the grid is still', () => {
-    const { grid, scroll } = scrollingGrid();
-    createVisibleWarmer(subject).observe(grid);
+    const { scroller, scroll } = fakeScroller();
+    attachScrollGate(scroller);
 
     scroll();
     expect(setScrollIdle).toHaveBeenCalledExactlyOnceWith(false);
@@ -329,8 +311,8 @@ describe('the scroll-idle gate', () => {
   });
 
   it('re-arms the trailing timer on every scroll event', () => {
-    const { grid, scroll } = scrollingGrid();
-    createVisibleWarmer(subject).observe(grid);
+    const { scroller, scroll } = fakeScroller();
+    attachScrollGate(scroller);
 
     scroll();
     vi.advanceTimersByTime(SCROLL_IDLE_MS - 50);
@@ -343,16 +325,15 @@ describe('the scroll-idle gate', () => {
     expect(releases()).toHaveLength(1);
   });
 
-  it('stops listening and releases the gate when the view goes away', () => {
-    const { grid, added, removed, scroll } = scrollingGrid();
-    const warmer = createVisibleWarmer(subject);
-    warmer.observe(grid);
+  it('stops listening and releases the gate when detached', () => {
+    const { scroller, added, removed, scroll } = fakeScroller();
+    const detach = attachScrollGate(scroller);
     scroll();
-    warmer.disconnect();
+    detach();
 
     expect(scrollListeners(removed)).toHaveLength(1);
     expect(scrollListeners(removed)[0].fn).toBe(scrollListeners(added)[0].fn);
-    // Leaving mid-scroll must not leave the queue paused for the next view.
+    // Unmounting mid-scroll must not leave the queue paused.
     expect(setScrollIdle).toHaveBeenLastCalledWith(true);
 
     // The pending timer went with it, so nothing releases the gate twice.
@@ -360,14 +341,16 @@ describe('the scroll-idle gate', () => {
     expect(releases()).toHaveLength(1);
   });
 
-  it('re-attaches the listener when the same warmer is observed again', () => {
-    const { grid, added, removed } = scrollingGrid();
+  it('is independent of the warmer: observing and disconnecting never touch the gate', () => {
+    // The views re-observe and disconnect on every rows change — an install
+    // finishing mid-scroll — so the warmer must not be able to release a
+    // pause the user is still scrolling through.
+    const { grid } = fakeGrid(2);
     const warmer = createVisibleWarmer(subject);
     warmer.observe(grid);
-    warmer.disconnect();
     warmer.observe(grid);
+    warmer.disconnect();
 
-    expect(scrollListeners(added)).toHaveLength(2);
-    expect(scrollListeners(removed)).toHaveLength(1);
+    expect(setScrollIdle).not.toHaveBeenCalled();
   });
 });

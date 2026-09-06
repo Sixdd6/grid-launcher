@@ -21,7 +21,7 @@
   import { subjectFromInstalled } from './background';
   import { createHoverViewed } from './lastViewedHover';
   import { dropPendingWarms } from './backgroundPrefetch';
-  import { createVisibleWarmer } from './visibleWarm';
+  import { attachScrollGate, createVisibleWarmer, scrollParent } from './visibleWarm';
   import { noteViewed } from './stores/lastViewed.svelte';
   import { inputMode, noteDirectional } from './stores/inputMode.svelte';
 
@@ -177,6 +177,16 @@
     return () => focusDwell.end();
   });
 
+  /** The scroll gate's detach, held for the life of the component. */
+  let gateDetach: (() => void) | null = null;
+
+  // No reads, so this effect runs once and its teardown fires only when the
+  // view unmounts — the one moment the gate should be released.
+  $effect(() => () => {
+    gateDetach?.();
+    gateDetach = null;
+  });
+
   // Design §3: a card builds its background art as it scrolls into view, so
   // the first hover of a game the user has never opened is not the thing
   // that pays for the download, decode and blur. The queue in
@@ -197,6 +207,12 @@
     const el = grid?.element();
     if (!el) return;
     warmer.observe(el);
+    // The scroll gate is attached ONCE, the first time the grid element
+    // exists, and lives until the view unmounts. It deliberately does not
+    // follow this effect: the effect re-runs whenever the rows change — a
+    // finished install, a filter — and that happens while the user is
+    // scrolling, which is the one moment the pause must hold.
+    gateDetach ??= attachScrollGate(scrollParent(el) ?? window);
     return () => {
       warmer.disconnect();
       // Stop watching AND drop what is still queued for this grid: the view
