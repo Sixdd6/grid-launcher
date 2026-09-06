@@ -9,6 +9,12 @@ export type ResolvedTheme = 'dark' | 'light';
 export const FADE_DEFAULT = 25;
 export const FADE_MAX = 60;
 
+/** Design §3: the Appearance blur slider's range and its default sigma. The
+ *  blur is baked into the cached variant by the backend, so every distinct
+ *  value is a separate build — the slider commits on release, not on drag. */
+export const BLUR_DEFAULT = 12;
+export const BLUR_MAX = 40;
+
 const CHOICES: ThemeChoice[] = ['system', 'dark', 'light'];
 
 /**
@@ -39,6 +45,14 @@ export function themeAttribute(choice: ThemeChoice): ResolvedTheme | null {
 export function clampFade(value: number): number {
   if (!Number.isFinite(value)) return FADE_DEFAULT;
   return Math.min(FADE_MAX, Math.max(0, Math.round(value)));
+}
+
+/** The blur sigma the backend is asked for. Whole numbers only: the sigma is
+ *  part of the variant's file name, so a fractional value would multiply the
+ *  cache without changing what the user sees. */
+export function clampBlur(value: number): number {
+  if (!Number.isFinite(value)) return BLUR_DEFAULT;
+  return Math.min(BLUR_MAX, Math.max(0, Math.round(value)));
 }
 
 /**

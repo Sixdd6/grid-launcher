@@ -11,19 +11,28 @@ import { uiSettings } from './stores/uiSettings.svelte';
 export const VARIANT_MEMO_CAP = 64;
 
 /**
- * Resolved URL -> local variant path. MODULE scoped, unlike a `<script>`
- * const in the component, so a Shell remount (a reconnect) keeps it: the path
- * is stable — the cache is keyed by URL — and asking again costs an IPC round
- * trip, so re-selecting a card the user has already dwelled on must not pay
- * for it twice. Both the 150ms prefetch and `BackgroundArt`'s 500ms swap read
- * and fill it, which is the whole point of the prefetch.
+ * `variantKey(blur, url)` -> local variant path. MODULE scoped, unlike a
+ * `<script>` const in the component, so a Shell remount (a reconnect) keeps
+ * it: the path is stable — the backend's cache is keyed by URL and sigma —
+ * and asking again costs an IPC round trip, so re-selecting a card the user
+ * has already dwelled on must not pay for it twice. Both the 150ms prefetch
+ * and `BackgroundArt`'s 500ms swap read and fill it, which is the whole point
+ * of the prefetch.
  */
 export const variantPaths = new Map<string, string>();
 
-/** Records `path` for `url`, dropping the oldest entries past the cap.
- *  `Map` iterates in insertion order, so the oldest key comes out first. */
-export function rememberVariant(url: string, path: string): void {
-  variantPaths.set(url, path);
+/** The memo key. The sigma is baked into the variant's file name, so one URL
+ *  at two blur levels is two different files and must be two entries. The
+ *  newline cannot appear in a sigma, so the two halves cannot run together. */
+export function variantKey(blur: number, url: string): string {
+  return `${blur}\n${url}`;
+}
+
+/** Records `path` for `key` (from `variantKey`), dropping the oldest entries
+ *  past the cap. `Map` iterates in insertion order, so the oldest key comes
+ *  out first. */
+export function rememberVariant(key: string, path: string): void {
+  variantPaths.set(key, path);
   for (const oldest of variantPaths.keys()) {
     if (variantPaths.size <= VARIANT_MEMO_CAP) break;
     variantPaths.delete(oldest);
@@ -43,9 +52,11 @@ export function prefetchBackground(subject: BackgroundSubject): void {
   if (uiSettings.backgroundFade === 0) return;
   const url = backgroundUrls(subject)[0];
   if (url === undefined) return;
-  if (variantPaths.has(url)) return;
+  const blur = uiSettings.backgroundBlur;
+  const key = variantKey(blur, url);
+  if (variantPaths.has(key)) return;
   void api
-    .ensureBackgroundVariant(url)
-    .then((path) => rememberVariant(url, path))
+    .ensureBackgroundVariant(url, blur)
+    .then((path) => rememberVariant(key, path))
     .catch(() => {});
 }

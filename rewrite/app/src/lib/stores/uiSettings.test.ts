@@ -171,6 +171,7 @@ describe('setBackgroundEnabled', () => {
           Promise.resolve({
             theme: 'system',
             background_fade: fade,
+            background_blur: 12,
             card_size_library: 'medium',
             card_size_server: 'medium',
           }),
@@ -205,5 +206,70 @@ describe('setBackgroundEnabled', () => {
     await store.setBackgroundEnabled(false);
     await store.setBackgroundEnabled(true);
     expect(store.uiSettings.backgroundFade).toBe(55);
+  });
+});
+
+describe('background blur', () => {
+  async function loadStore(blur: unknown) {
+    // Fresh module per call: the store is module-scoped state, so two loads
+    // inside one test would otherwise share the first load's values.
+    vi.resetModules();
+    vi.stubGlobal('localStorage', fakeStorage());
+    vi.stubGlobal('document', { documentElement: { dataset: {} } });
+    vi.stubGlobal('window', { matchMedia: () => fakeMedia(false) });
+    const setUiSettings = vi.fn().mockResolvedValue(undefined);
+    vi.doMock('../api', () => ({
+      api: {
+        getUiSettings: () =>
+          Promise.resolve({
+            theme: 'system',
+            background_fade: 25,
+            background_blur: blur,
+            card_size_library: 'medium',
+            card_size_server: 'medium',
+          }),
+        setUiSettings,
+      },
+    }));
+    const store = await import('./uiSettings.svelte');
+    await store.initUiSettings();
+    return { store, setUiSettings };
+  }
+
+  it('loads the stored sigma', async () => {
+    const { store } = await loadStore(30);
+    expect(store.uiSettings.backgroundBlur).toBe(30);
+  });
+
+  it('clamps a stored value a newer build wrote out of range', async () => {
+    expect((await loadStore(99)).store.uiSettings.backgroundBlur).toBe(40);
+    expect((await loadStore(-3)).store.uiSettings.backgroundBlur).toBe(0);
+  });
+
+  it('falls back to the default when the config has no sigma at all', async () => {
+    const { store } = await loadStore(undefined);
+    expect(store.uiSettings.backgroundBlur).toBe(12);
+  });
+
+  // Commit-on-release: every distinct sigma is a full backend rebuild, so
+  // there is no drag preview to persist separately.
+  it('applies the new sigma and persists the whole payload', async () => {
+    const { store, setUiSettings } = await loadStore(12);
+    await store.commitBackgroundBlur(0);
+    expect(store.uiSettings.backgroundBlur).toBe(0);
+    expect(setUiSettings).toHaveBeenLastCalledWith({
+      theme: 'system',
+      background_fade: 25,
+      background_blur: 0,
+      card_size_library: 'medium',
+      card_size_server: 'medium',
+    });
+  });
+
+  it('keeps the sigma when another writer saves', async () => {
+    const { store, setUiSettings } = await loadStore(12);
+    await store.commitBackgroundBlur(18);
+    await store.setCardSize('library', 'large');
+    expect(setUiSettings).toHaveBeenLastCalledWith(expect.objectContaining({ background_blur: 18 }));
   });
 });

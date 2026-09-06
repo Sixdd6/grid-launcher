@@ -1,9 +1,12 @@
 <script lang="ts">
-  // Settings › Appearance (design §10): "theme, card size defaults,
-  // background art on/off, background fade slider 0–60% with a live preview
-  // behind the settings pane". The art reads the same store, so `oninput`
-  // previews and `onchange` persists.
+  // Settings › Appearance (design §10): theme, card size defaults, background
+  // art on/off, the fade slider 0–60% and the blur slider 0–40. The art reads
+  // the same store, so the FADE slider previews on `oninput` and persists on
+  // `onchange`. The BLUR slider persists on `onchange` only: each sigma is a
+  // separate variant the backend builds and caches, so a live drag preview
+  // would build an image per intermediate position.
   import {
+    commitBackgroundBlur,
     commitBackgroundFade,
     previewBackgroundFade,
     setBackgroundEnabled,
@@ -11,7 +14,7 @@
     setTheme,
     uiSettings,
   } from '../stores/uiSettings.svelte';
-  import { FADE_MAX, type ThemeChoice } from '../theme';
+  import { BLUR_MAX, FADE_MAX, type ThemeChoice } from '../theme';
   import { CARD_SIZES, cardSizeLabel, normalizeCardSize } from '../cards/size';
   import { backgroundEnabled, CARD_SIZE_VIEWS } from './appearance';
 
@@ -72,6 +75,23 @@
     }}
   />
   <span class="value">{uiSettings.backgroundFade}%</span>
+</div>
+
+<div class="field">
+  <label for="background-blur">Background art blur</label>
+  <input
+    data-testid="background-blur"
+    id="background-blur"
+    type="range"
+    min="0"
+    max={BLUR_MAX}
+    step="1"
+    value={uiSettings.backgroundBlur}
+    onchange={(e) => {
+      commitBackgroundBlur(Number((e.currentTarget as HTMLInputElement).value)).catch(() => {});
+    }}
+  />
+  <span class="value">{uiSettings.backgroundBlur}</span>
 </div>
 
 {#each CARD_SIZE_VIEWS as v (v.view)}

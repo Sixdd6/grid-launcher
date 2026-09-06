@@ -348,6 +348,46 @@ describe('updates', () => {
     await waitForConfigLine('theme = "dark"');
   });
 
+  // Design §3/§10: the blur sigma is baked into the cached variant's file
+  // name, so the slider commits on release only. This checks the surface and
+  // the round trip; `theme.test.ts` / `uiSettings.test.ts` own the clamping.
+  it('persists the Appearance background blur slider', async () => {
+    const blur = $(testId('background-blur'));
+    await blur.waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await expect(blur).toHaveAttribute('max', '40');
+    await expect(blur).toHaveValue('12');
+
+    // `setValue` does not move a range input under this driver: set the
+    // value and dispatch the two events the component listens for.
+    const setBlur = async (value: string) => {
+      await browser.execute(
+        (selector: string, next: string) => {
+          const el = document.querySelector(selector) as HTMLInputElement | null;
+          if (!el) throw new Error(`no element matched ${selector}`);
+          el.value = next;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        },
+        testId('background-blur'),
+        value,
+      );
+      await waitForConfigLine(`background_blur = ${value}`);
+    };
+
+    await setBlur('0');
+    // Leave the page and come back: the value is read from the store the
+    // config load filled, not from the DOM node left behind.
+    await $(testId('settings-nav-updates')).click();
+    await $(testId('settings-page-updates')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await $(testId('settings-nav-appearance')).click();
+    await $(testId('background-blur')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
+    await expect($(testId('background-blur'))).toHaveValue('0');
+
+    // Restore the default so the cases after this one see the shipped value.
+    await setBlur('12');
+    await expect($(testId('background-blur'))).toHaveValue('12');
+  });
+
   // Design §10: the four pages plan 1 left as placeholders. One pass over
   // the rail, reading one line each page owns; the pure rules live in
   // `settings/*.test.ts`.

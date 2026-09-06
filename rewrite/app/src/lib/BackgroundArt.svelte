@@ -2,8 +2,8 @@
   import { untrack } from 'svelte';
   import { convertFileSrc } from '@tauri-apps/api/core';
   import { api } from './api';
-  import { BACKGROUND_CYCLE_MS, CROSS_FADE_MS, cycleIndex, shouldCycle } from './background';
-  import { rememberVariant, variantPaths } from './backgroundPrefetch';
+  import { BACKGROUND_CYCLE_MS, backgroundUrls, CROSS_FADE_MS, cycleIndex, shouldCycle } from './background';
+  import { rememberVariant, variantKey, variantPaths } from './backgroundPrefetch';
   import { clearIfBottom, initialSlotState, outgoingSlot, withNextCover } from './backgroundSlots';
   import { lastViewed } from './stores/lastViewed.svelte';
   import { uiSettings } from './stores/uiSettings.svelte';
@@ -18,22 +18,37 @@
   // Which of the subject's images is showing. Reset whenever the subject
   // changes, so a new game always starts at its first image.
   let index = $state(0);
-  // Read once into a `$derived`: `lastViewed.urls` is a getter that builds a
-  // new array on every read, so reading it directly in an effect or a timer
-  // callback would churn arrays and never compare equal.
-  let urls = $derived(lastViewed.urls);
+  // URLs whose blurred variant the backend could not build. Always REPLACED,
+  // never mutated in place, so the `$derived` below sees the change: a failed
+  // fanart drops out of its tier, and once the tier is empty the art falls
+  // through to the screenshots and then to the cover.
+  let failed = $state(new Set<string>());
+
+  // Read once into a `$derived`: `backgroundUrls` builds a new array on every
+  // call, so calling it directly in an effect or a timer callback would churn
+  // arrays and never compare equal.
+  let urls = $derived(backgroundUrls(lastViewed.subject, failed));
 
   // Declared BEFORE the fetch effect on purpose: effects flush in creation
   // order, so `index` is back at 0 before the fetch effect below reads
   // `current` for the new subject. Swapped, the first frame of a new game
   // would be whatever image the previous game's cycle had reached.
   $effect(() => {
-    // Read only to subscribe. `noteViewed` gates a re-report of the same art,
-    // so this fires when the subject's art actually changes, not on every
-    // list refresh.
-    const subjectArt = urls;
-    void subjectArt;
+    // Depends on the SUBJECT, not on `urls`: `urls` also changes when a fetch
+    // fails, and resetting the index there would restart the cycle at the
+    // first image every time one URL fell through. `noteViewed` gates a
+    // re-report of the same art, so this fires when the subject's art
+    // actually changes, not on every list refresh.
+    const subject = lastViewed.subject;
+    void subject;
     index = 0;
+    // A new game starts with a clean slate — a URL that failed for the
+    // previous subject says nothing about this one. Guarded and untracked so
+    // this effect neither depends on `failed` nor re-derives `urls` in the
+    // usual case, where nothing has failed.
+    untrack(() => {
+      if (failed.size > 0) failed = new Set();
+    });
   });
 
   let current = $derived(urls[index % Math.max(urls.length, 1)] ?? null);
@@ -59,6 +74,9 @@
     if (uiSettings.backgroundFade === 0) return;
     const url = current;
     if (url === null) return;
+    // Part of the variant's file name, so a change of sigma re-runs this
+    // effect and asks the backend for a different file.
+    const blur = uiSettings.backgroundBlur;
     let cancelled = false;
     // The timeout handle is captured now and cleared on teardown: before
     // this, a rapid sequence of subjects left one pending `clearIfBottom` per
@@ -82,21 +100,27 @@
       }, CROSS_FADE_MS);
     }
 
-    const memoised = variantPaths.get(url);
+    const key = variantKey(blur, url);
+    const memoised = variantPaths.get(key);
     if (memoised !== undefined) {
       untrack(() => show(memoised));
     } else {
       api
-        .ensureBackgroundVariant(url)
+        .ensureBackgroundVariant(url, blur)
         .then((path) => {
-          rememberVariant(url, path);
+          rememberVariant(key, path);
           if (!cancelled) untrack(() => show(path));
         })
         .catch(() => {
           // Offline, missing, or a format this build cannot decode. User
           // ruling 2026-09-05: no raw-image fallback — the CSS blur is gone,
           // so the raw source would be a different effect, not a degraded
-          // one. Keep whatever is already showing.
+          // one. Record the URL instead: `urls` re-derives without it, which
+          // moves on to the next image or, once the tier empties, down to
+          // the screenshots and then the cover. Recorded even when the
+          // effect was cancelled — the URL is no better for the next
+          // subject that lists it.
+          failed = new Set([...failed, url]);
         });
     }
 

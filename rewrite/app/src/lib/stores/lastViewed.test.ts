@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InstalledGame } from '../api';
-import type { BackgroundSubject } from '../background';
+import { backgroundUrls, type BackgroundSubject } from '../background';
 
 // The store is module-scoped state, so each case re-imports it to start from
 // a clean "nothing viewed yet" module.
@@ -34,7 +34,7 @@ beforeEach(() => {
 describe('noteViewed', () => {
   it('starts with no art at all', async () => {
     const { lastViewed } = await freshStore();
-    expect(lastViewed.urls).toEqual([]);
+    expect(backgroundUrls(lastViewed.subject)).toEqual([]);
   });
 
   it('a subject with no art leaves the previous art alone', async () => {
@@ -42,7 +42,7 @@ describe('noteViewed', () => {
     noteViewed(subject({ cover: 'https://romm/first.png' }));
     noteViewed({ fanart: [], screenshots: [], cover: null });
     noteViewed({ fanart: ['  '], screenshots: [''], cover: '   ' });
-    expect(lastViewed.urls).toEqual(['https://romm/first.png']);
+    expect(backgroundUrls(lastViewed.subject)).toEqual(['https://romm/first.png']);
   });
 
   it('a re-report of the same art keeps the subject identity', async () => {
@@ -61,7 +61,7 @@ describe('noteViewed', () => {
     const before = lastViewed.subject;
     noteViewed(subject({ screenshots: ['https://romm/s2.png'] }));
     expect(lastViewed.subject).not.toBe(before);
-    expect(lastViewed.urls).toEqual(['https://romm/s2.png']);
+    expect(backgroundUrls(lastViewed.subject)).toEqual(['https://romm/s2.png']);
   });
 
   it('reports the chosen tier only, fanart first', async () => {
@@ -71,7 +71,7 @@ describe('noteViewed', () => {
       screenshots: ['https://romm/s1.png'],
       cover: 'https://romm/c.png',
     });
-    expect(lastViewed.urls).toEqual(['https://romm/f1.jpg']);
+    expect(backgroundUrls(lastViewed.subject)).toEqual(['https://romm/f1.jpg']);
   });
 });
 
@@ -82,14 +82,14 @@ describe('seedLastViewed', () => {
       row({ installed_at: 10, cover_large_path: 'https://romm/old.png' }),
       row({ installed_at: 20, cover_large_path: 'https://romm/new.png' }),
     ]);
-    expect(lastViewed.urls).toEqual(['https://romm/new.png']);
+    expect(backgroundUrls(lastViewed.subject)).toEqual(['https://romm/new.png']);
   });
 
   it('never overwrites a real view', async () => {
     const { lastViewed, noteViewed, seedLastViewed } = await freshStore();
     noteViewed(subject({ cover: 'https://romm/viewed.png' }));
     seedLastViewed([row({ installed_at: 99, cover_large_path: 'https://romm/newest.png' })]);
-    expect(lastViewed.urls).toEqual(['https://romm/viewed.png']);
+    expect(backgroundUrls(lastViewed.subject)).toEqual(['https://romm/viewed.png']);
   });
 
   // The seed is what a `noteViewed` that found no art must not undo: a blank
@@ -98,13 +98,13 @@ describe('seedLastViewed', () => {
     const { lastViewed, noteViewed, seedLastViewed } = await freshStore();
     noteViewed({ fanart: [], screenshots: [], cover: null });
     seedLastViewed([row({ installed_at: 1, cover_large_path: 'https://romm/seeded.png' })]);
-    expect(lastViewed.urls).toEqual(['https://romm/seeded.png']);
+    expect(backgroundUrls(lastViewed.subject)).toEqual(['https://romm/seeded.png']);
   });
 
   it('runs only once', async () => {
     const { lastViewed, seedLastViewed } = await freshStore();
     seedLastViewed([row({ installed_at: 1, cover_large_path: 'https://romm/first.png' })]);
     seedLastViewed([row({ installed_at: 2, cover_large_path: 'https://romm/second.png' })]);
-    expect(lastViewed.urls).toEqual(['https://romm/first.png']);
+    expect(backgroundUrls(lastViewed.subject)).toEqual(['https://romm/first.png']);
   });
 });

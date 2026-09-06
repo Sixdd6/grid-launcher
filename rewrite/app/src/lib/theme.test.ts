@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BLUR_DEFAULT,
+  BLUR_MAX,
+  clampBlur,
   clampFade,
   FADE_DEFAULT,
   normalizeTheme,
@@ -58,6 +61,23 @@ describe('clampFade', () => {
   it('rounds fractional slider values and falls back on garbage', () => {
     expect(clampFade(30.6)).toBe(31);
     expect(clampFade(Number.NaN)).toBe(FADE_DEFAULT);
+  });
+});
+
+describe('clampBlur', () => {
+  it('keeps values inside the design range', () => {
+    expect(clampBlur(0)).toBe(0);
+    expect(clampBlur(12)).toBe(12);
+    expect(clampBlur(BLUR_MAX)).toBe(40);
+  });
+  it('clamps out-of-range values instead of rejecting them', () => {
+    expect(clampBlur(-1)).toBe(0);
+    expect(clampBlur(41)).toBe(40);
+  });
+  it('rounds fractional slider values and falls back on garbage', () => {
+    expect(clampBlur(12.6)).toBe(13);
+    expect(clampBlur(Number.NaN)).toBe(BLUR_DEFAULT);
+    expect(BLUR_DEFAULT).toBe(12);
   });
 });
 

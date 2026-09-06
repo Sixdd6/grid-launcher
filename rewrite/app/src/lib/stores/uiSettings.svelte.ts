@@ -6,6 +6,8 @@ import type { UiSettings } from '../api';
 import { normalizeCardSize, type CardSize } from '../cards/size';
 import { fadeForToggle, rememberFade } from '../settings/appearance';
 import {
+  BLUR_DEFAULT,
+  clampBlur,
   clampFade,
   FADE_DEFAULT,
   normalizeTheme,
@@ -20,12 +22,14 @@ import {
 const state = $state<{
   theme: ThemeChoice;
   backgroundFade: number;
+  backgroundBlur: number;
   prefersDark: boolean;
   cardSizeLibrary: UiSettings['card_size_library'];
   cardSizeServer: UiSettings['card_size_server'];
 }>({
   theme: 'system',
   backgroundFade: FADE_DEFAULT,
+  backgroundBlur: BLUR_DEFAULT,
   prefersDark: false,
   cardSizeLibrary: 'medium',
   cardSizeServer: 'medium',
@@ -43,6 +47,7 @@ function payload(): UiSettings {
   return {
     theme: state.theme,
     background_fade: state.backgroundFade,
+    background_blur: state.backgroundBlur,
     card_size_library: state.cardSizeLibrary,
     card_size_server: state.cardSizeServer,
   };
@@ -54,6 +59,9 @@ export const uiSettings = {
   },
   get backgroundFade(): number {
     return state.backgroundFade;
+  },
+  get backgroundBlur(): number {
+    return state.backgroundBlur;
   },
   get resolved(): ResolvedTheme {
     return resolveTheme(state.theme, state.prefersDark);
@@ -130,6 +138,7 @@ export async function initUiSettings(): Promise<() => void> {
     const stored = await api.getUiSettings();
     state.theme = normalizeTheme(stored.theme);
     state.backgroundFade = clampFade(stored.background_fade);
+    state.backgroundBlur = clampBlur(stored.background_blur);
     rememberedFade = rememberFade(state.backgroundFade, rememberedFade);
     state.cardSizeLibrary = normalizeCardSize(stored.card_size_library);
     state.cardSizeServer = normalizeCardSize(stored.card_size_server);
@@ -165,6 +174,18 @@ export function previewBackgroundFade(value: number): void {
 /** Slider release: persists whatever the preview settled on. */
 export async function commitBackgroundFade(value: number): Promise<void> {
   previewBackgroundFade(value);
+  await api.setUiSettings(payload());
+}
+
+/**
+ * Slider release on the blur control. There is no preview half: the sigma is
+ * baked into a file the backend builds, so a distinct value means a distinct
+ * variant — previewing every intermediate drag position would build dozens of
+ * images nobody sees. `BackgroundArt` re-fetches through its own effect once
+ * this lands.
+ */
+export async function commitBackgroundBlur(value: number): Promise<void> {
+  state.backgroundBlur = clampBlur(value);
   await api.setUiSettings(payload());
 }
 

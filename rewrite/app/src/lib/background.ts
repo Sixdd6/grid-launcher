@@ -56,13 +56,32 @@ function clean(urls: readonly (string | null | undefined)[]): string[] {
   return out;
 }
 
-/** The URLs to show for `subject`, in order: the FIRST non-empty tier wins. */
-export function backgroundUrls(subject: BackgroundSubject): string[] {
-  const fanart = clean(subject.fanart);
+/** Shared, never mutated: the default `failed` set for every caller that has
+ *  no failures to report. A module-level constant so the default argument is
+ *  the SAME object on every call — a fresh `new Set()` per call would make a
+ *  `$derived` reading this re-run forever. */
+const EMPTY_SET: ReadonlySet<string> = new Set<string>();
+
+/**
+ * The URLs to show for `subject`, in order: the FIRST non-empty tier wins.
+ *
+ * `failed` holds URLs whose blurred variant the backend could not build. They
+ * are removed from each tier BEFORE the first-non-empty rule is applied, so a
+ * fanart that cannot be decoded falls through to the screenshots and then to
+ * the cover instead of leaving the shell blank — on the live server more than
+ * half the games have fanart, so this is the common path, not an edge case.
+ */
+export function backgroundUrls(
+  subject: BackgroundSubject,
+  failed: ReadonlySet<string> = EMPTY_SET
+): string[] {
+  const usable = (urls: readonly (string | null | undefined)[]) =>
+    clean(urls).filter((url) => !failed.has(url));
+  const fanart = usable(subject.fanart);
   if (fanart.length > 0) return fanart;
-  const screenshots = clean(subject.screenshots);
+  const screenshots = usable(subject.screenshots);
   if (screenshots.length > 0) return screenshots;
-  return clean([subject.cover]);
+  return usable([subject.cover]);
 }
 
 export function isEmptySubject(subject: BackgroundSubject): boolean {

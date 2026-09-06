@@ -20,6 +20,8 @@ export type CardSizeName = 'small' | 'medium' | 'large';
 export type UiSettings = {
   theme: 'system' | 'dark' | 'light';
   background_fade: number;
+  /** Blur sigma for the background variant, 0-40 (`ui.background_blur`). */
+  background_blur: number;
   card_size_library: CardSizeName;
   card_size_server: CardSizeName;
 };
@@ -373,10 +375,12 @@ export const api = {
   getRomDetail: (romId: number) => invoke<RomDetail>('get_rom_detail', { romId }),
   ensureImage: (url: string) => invoke<string>('ensure_image', { url }),
   ensureVideo: (url: string) => invoke<string>('ensure_video', { url }),
-  /** The blurred, 960px-wide background variant of `url`, built on demand.
-   *  Same host filter as `ensureImage`; a failure means "keep the current art". */
-  ensureBackgroundVariant: (url: string) =>
-    invoke<string>('ensure_background_variant', { url }),
+  /** The 960px-wide background variant of `url`, blurred at `blur` sigma and
+   *  built on demand. Same host filter as `ensureImage`; the sigma is part of
+   *  the cached file's name, so each level is built once. A failure means
+   *  "this URL has no art" — the caller falls through to the next image. */
+  ensureBackgroundVariant: (url: string, blur: number) =>
+    invoke<string>('ensure_background_variant', { url, blur }),
   installGame: (romId: number) => invoke<void>('install_game', { romId }),
   cancelInstall: (entryId: number) => invoke<void>('cancel_install', { entryId }),
   retryInstall: (entryId: number) => invoke<void>('retry_install', { entryId }),

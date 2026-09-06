@@ -70,6 +70,54 @@ describe('backgroundUrls', () => {
       backgroundUrls({ fanart: [], screenshots: [' https://romm/s1.png ', 'https://romm/s1.png'], cover: null })
     ).toEqual(['https://romm/s1.png']);
   });
+
+  // Task 4: a URL whose blurred variant could not be built is dropped BEFORE
+  // the first-non-empty-tier rule, so a fanart the backend cannot decode
+  // falls through to the screenshots instead of leaving the shell blank.
+  it('drops failed URLs from a tier and falls through when the tier empties', () => {
+    const subject = {
+      fanart: ['https://romm/f1.jpg', 'https://romm/f2.jpg'],
+      screenshots: ['https://romm/s1.png'],
+      cover: 'https://romm/cover.png',
+    };
+    expect(backgroundUrls(subject, new Set(['https://romm/f1.jpg']))).toEqual(['https://romm/f2.jpg']);
+    expect(backgroundUrls(subject, new Set(['https://romm/f1.jpg', 'https://romm/f2.jpg']))).toEqual([
+      'https://romm/s1.png',
+    ]);
+    expect(
+      backgroundUrls(subject, new Set(['https://romm/f1.jpg', 'https://romm/f2.jpg', 'https://romm/s1.png']))
+    ).toEqual(['https://romm/cover.png']);
+  });
+
+  it('is empty when every tier has failed', () => {
+    expect(
+      backgroundUrls(
+        { fanart: ['https://romm/f1.jpg'], screenshots: [], cover: 'https://romm/cover.png' },
+        new Set(['https://romm/f1.jpg', 'https://romm/cover.png'])
+      )
+    ).toEqual([]);
+  });
+
+  it('is unchanged when nothing has failed', () => {
+    const subject = {
+      fanart: ['https://romm/f1.jpg'],
+      screenshots: ['https://romm/s1.png'],
+      cover: 'https://romm/cover.png',
+    };
+    expect(backgroundUrls(subject, new Set())).toEqual(backgroundUrls(subject));
+    expect(backgroundUrls(subject, new Set(['https://romm/other.jpg']))).toEqual(['https://romm/f1.jpg']);
+  });
+
+  // The failed set is matched against the TRIMMED URL, the same form the
+  // fetch effect reports back after a rejection.
+  it('matches failures after trimming', () => {
+    expect(
+      backgroundUrls(
+        { fanart: [' https://romm/f1.jpg '], screenshots: ['https://romm/s1.png'], cover: null },
+        new Set(['https://romm/f1.jpg'])
+      )
+    ).toEqual(['https://romm/s1.png']);
+  });
 });
 
 describe('shouldCycle', () => {

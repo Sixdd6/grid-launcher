@@ -15,10 +15,6 @@ export const lastViewed = {
   get subject(): BackgroundSubject {
     return state.subject;
   },
-  /** The chosen tier's URLs, in cycle order. `[]` when there is no art. */
-  get urls(): string[] {
-    return backgroundUrls(state.subject);
-  },
 };
 
 /**
