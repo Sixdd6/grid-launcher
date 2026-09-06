@@ -28,6 +28,7 @@
     firmwareChipLabel,
     firmwareInstallable,
     platformCountsLine,
+    showsEmulatorChip,
     type FirmwareChipState,
   } from './server/header';
   import { platformLabel } from './server/platformLabel';
@@ -514,9 +515,11 @@
                 </button>
               {/if}
             </span>
-            <button data-testid="server-emulator-chip" class="chip link" onclick={onOpenEmulators}>
-              {emulatorChipLabel(defaultEmulator)}
-            </button>
+            {#if showsEmulatorChip(activePlatformName)}
+              <button data-testid="server-emulator-chip" class="chip link" onclick={onOpenEmulators}>
+                {emulatorChipLabel(defaultEmulator)}
+              </button>
+            {/if}
           </div>
           {#if headerError !== null}
             <p data-testid="server-header-error" class="header-error">{headerError}</p>

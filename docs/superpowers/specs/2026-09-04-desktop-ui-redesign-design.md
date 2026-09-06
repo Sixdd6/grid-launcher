@@ -146,7 +146,8 @@ Adopted from RomM v2 `tokens/index.ts`, defined once in `app.css` as CSS variabl
 - Rail: server platforms with ROM counts (RomM `/api/platforms`).
 - Platform header: display name, ROM count, installed count, firmware status chip with
   an Install action when the server offers firmware, and the platform's default emulator
-  chip linking to Emulators › Platform defaults.
+  chip linking to Emulators › Platform defaults; the emulator chip is omitted for native
+  platforms (Windows, Linux — prefix match on the display label).
 - Grid: the platform's ROMs; installed cards carry the installed dot, updatable cards the
   UPDATE tag, not-installed cards render at 60% until hover. Hover primary action is
   Install for not-installed, Play for installed.
@@ -213,7 +214,8 @@ Rail: Installed, Add from catalog, Platform defaults, Compat tools (hidden on Wi
 - Add from catalog: search box, catalog rows with provider and Install / Installed; a
   "Manual" button opens the manual form.
 - Platform defaults: the card list shipped on 2026-09-04 (emulator select, core select,
-  remembered "(none)").
+  remembered "(none)"); native platforms list as "Native — runs without an emulator" and
+  offer no selector.
 - Compat tools: the current `CompatTools` content.
 
 ## 10. Settings view

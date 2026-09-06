@@ -4,6 +4,7 @@ import {
   firmwareChipLabel,
   firmwareInstallable,
   platformCountsLine,
+  showsEmulatorChip,
 } from './header';
 import { NO_EMULATOR_MARKER } from '../emulators/defaults';
 
@@ -30,6 +31,18 @@ describe('emulatorChipLabel', () => {
   it('never prints the reserved <none> marker back at the user', () => {
     expect(emulatorChipLabel(NO_EMULATOR_MARKER)).toBe('No default emulator');
     expect(emulatorChipLabel(`  ${NO_EMULATOR_MARKER}  `)).toBe('No default emulator');
+  });
+});
+
+describe('showsEmulatorChip', () => {
+  it('is hidden for native launch platforms', () => {
+    expect(showsEmulatorChip('Windows 9x')).toBe(false);
+    expect(showsEmulatorChip('Windows')).toBe(false);
+    expect(showsEmulatorChip('Linux')).toBe(false);
+  });
+  it('shows for anything else, including empty', () => {
+    expect(showsEmulatorChip('Super Nintendo Entertainment System')).toBe(true);
+    expect(showsEmulatorChip('')).toBe(true);
   });
 });
 

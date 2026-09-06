@@ -1,6 +1,7 @@
 // Pure helpers for the Emulators panel's "Per-platform defaults" select.
 // No store/API imports here so this stays trivially unit-testable.
 import type { LaunchDefaults, Platform } from '../api';
+import { isNativeLaunchPlatform } from '../details/cloud';
 import { platformLabel } from '../server/platformLabel';
 
 /**
@@ -15,6 +16,16 @@ import { platformLabel } from '../server/platformLabel';
  */
 export function defaultEmulatorKey(p: Pick<Platform, 'display_name' | 'name' | 'slug'>): string {
   return platformLabel(p);
+}
+
+/**
+ * Whether the Emulators panel's Defaults pane offers `p` an emulator select
+ * at all (design §9). A native launch platform's games run as host
+ * executables, so it never needs a default emulator — the row states that
+ * fact instead of offering a choice.
+ */
+export function needsEmulator(p: Pick<Platform, 'display_name' | 'name' | 'slug'>): boolean {
+  return !isNativeLaunchPlatform(platformLabel(p));
 }
 
 /** The `<select>` value that means "no default emulator for this platform". */

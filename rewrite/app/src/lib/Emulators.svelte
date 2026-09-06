@@ -23,6 +23,7 @@
   import { filterCatalogEntries } from './emulators/catalog';
   import {
     defaultEmulatorKey,
+    needsEmulator,
     NO_CORE_VALUE,
     NO_DEFAULT_VALUE,
     platformCoreSelect,
@@ -167,7 +168,7 @@
   let counts = $derived<EmulatorPageCounts>({
     installed: emulators.length,
     catalog: catalog.length,
-    defaults: platforms.length,
+    defaults: platforms.filter(needsEmulator).length,
     compat: compatTools.tools.length,
   });
 
@@ -707,47 +708,53 @@
                 <div class="defaults-card-header">
                   <label class="platform-name" for={selectId}>{p.name}</label>
                 </div>
-                <div class="defaults-field">
-                  <span class="defaults-field-label">Emulator</span>
-                  <!-- `default-select-<platformId>` is the per-platform select's
-                       test id; its `id` (used by the label) is
-                       `default-emulator-<platformId>`. -->
-                  <select
-                    data-testid={`default-select-${p.id}`}
-                    id={selectId}
-                    disabled={choice.disabled}
-                    value={choice.selected}
-                    onchange={(e) => handleDefaultChange(defaultEmulatorKey(p), (e.currentTarget as HTMLSelectElement).value)}
-                  >
-                    {#if choice.disabled}
-                      <option value={NO_DEFAULT_VALUE}>No compatible emulator</option>
-                    {:else}
-                      <option value={NO_DEFAULT_VALUE}>(none)</option>
-                      {#each choice.options as name (name)}
-                        <option value={name}>{name}</option>
-                      {/each}
-                    {/if}
-                  </select>
-                </div>
-                {#if core.visible}
+                {#if needsEmulator(p)}
                   <div class="defaults-field">
-                    <label class="defaults-field-label" for={coreId}>Core</label>
+                    <span class="defaults-field-label">Emulator</span>
+                    <!-- `default-select-<platformId>` is the per-platform select's
+                         test id; its `id` (used by the label) is
+                         `default-emulator-<platformId>`. -->
                     <select
-                      data-testid={`default-core-${p.id}`}
-                      id={coreId}
-                      disabled={core.disabled}
-                      value={core.selected}
-                      onchange={(e) => handleCoreChange(defaultEmulatorKey(p), (e.currentTarget as HTMLSelectElement).value)}
+                      data-testid={`default-select-${p.id}`}
+                      id={selectId}
+                      disabled={choice.disabled}
+                      value={choice.selected}
+                      onchange={(e) => handleDefaultChange(defaultEmulatorKey(p), (e.currentTarget as HTMLSelectElement).value)}
                     >
-                      {#if core.disabled}
-                        <option value={NO_CORE_VALUE}>No installed core</option>
+                      {#if choice.disabled}
+                        <option value={NO_DEFAULT_VALUE}>No compatible emulator</option>
                       {:else}
-                        {#each core.options as id (id)}
-                          <option value={id}>{id}</option>
+                        <option value={NO_DEFAULT_VALUE}>(none)</option>
+                        {#each choice.options as name (name)}
+                          <option value={name}>{name}</option>
                         {/each}
                       {/if}
                     </select>
                   </div>
+                  {#if core.visible}
+                    <div class="defaults-field">
+                      <label class="defaults-field-label" for={coreId}>Core</label>
+                      <select
+                        data-testid={`default-core-${p.id}`}
+                        id={coreId}
+                        disabled={core.disabled}
+                        value={core.selected}
+                        onchange={(e) => handleCoreChange(defaultEmulatorKey(p), (e.currentTarget as HTMLSelectElement).value)}
+                      >
+                        {#if core.disabled}
+                          <option value={NO_CORE_VALUE}>No installed core</option>
+                        {:else}
+                          {#each core.options as id (id)}
+                            <option value={id}>{id}</option>
+                          {/each}
+                        {/if}
+                      </select>
+                    </div>
+                  {/if}
+                {:else}
+                  <p class="muted" data-testid={`emulator-default-native-${p.id}`}>
+                    Native — runs without an emulator
+                  </p>
                 {/if}
               </li>
             {/each}

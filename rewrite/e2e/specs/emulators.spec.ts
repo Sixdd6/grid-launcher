@@ -145,6 +145,17 @@ describe('emulators', () => {
     await showPage('defaults');
     await expect($(testId('default-select-1'))).toBeDisplayed();
 
+    // Platform 3 (Windows 9x) is a native launch platform (design §9): it
+    // lists as "Native — runs without an emulator" and offers no select at
+    // all, and the pane header's count excludes it (2 of the 3 fixture
+    // platforms need one).
+    await expect($(testId('emulator-default-native-3'))).toBeDisplayed();
+    await expect($(testId('emulator-default-native-3'))).toHaveText(
+      expect.stringContaining('Native — runs without an emulator'),
+    );
+    await expect($(testId('default-select-3'))).not.toExist();
+    await expect($(testId('emu-nav-count-defaults'))).toHaveText('2');
+
     // Linux host: Compat tools is on the rail (design §9 hides it on Windows).
     await showPage('compat');
     await expect($(testId('compat-tools-section'))).toBeDisplayed();

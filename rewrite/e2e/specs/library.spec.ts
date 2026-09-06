@@ -45,6 +45,17 @@ describe('library', () => {
     expect(platform1Text).not.toContain('Windows');
   });
 
+  it('omits the Server header emulator chip for a native platform, and shows it again for one that is not', async () => {
+    await $(testId('platform-btn-3')).click();
+    await expect($(testId('server-emulator-chip'))).not.toExist();
+
+    await $(testId('platform-btn-1')).click();
+    await expect($(testId('server-emulator-chip'))).toExist();
+    await expect($(testId('server-emulator-chip'))).toHaveText(
+      expect.stringContaining('No default emulator'),
+    );
+  });
+
   it('selecting platform 1 shows its games, including the null-name game rendering its fs_name_no_ext', async () => {
     await $(testId('platform-btn-1')).click();
 

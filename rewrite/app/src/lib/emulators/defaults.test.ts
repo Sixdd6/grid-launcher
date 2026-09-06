@@ -3,6 +3,7 @@ import type { LaunchDefaults } from '../api';
 import {
   defaultEmulatorKey,
   isRetroarchName,
+  needsEmulator,
   NO_CORE_VALUE,
   NO_DEFAULT_VALUE,
   NO_EMULATOR_MARKER,
@@ -20,6 +21,20 @@ describe('defaultEmulatorKey', () => {
 
   it('falls back to name for a platform without a display_name (older server)', () => {
     expect(defaultEmulatorKey({ display_name: '', name: 'SNES', slug: 'snes' })).toBe('SNES');
+  });
+});
+
+describe('needsEmulator', () => {
+  it('is false for a native launch platform, by display name', () => {
+    expect(
+      needsEmulator({ display_name: 'Windows 9x', name: 'Windows', slug: 'win9x' })
+    ).toBe(false);
+  });
+
+  it('is true for a platform that launches through an emulator', () => {
+    expect(
+      needsEmulator({ display_name: '', name: 'SNES', slug: 'snes' })
+    ).toBe(true);
   });
 });
 
