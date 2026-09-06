@@ -103,9 +103,49 @@ Uses `IntersectionObserver` with `rootMargin: '200px'` (warm one row ahead); on 
 
 ---
 
-### Task 3: Video rendering on the NVIDIA/Wayland stack
+### Task 3: Hosted video plays through a local HTTP range server (blob frames render corrupted)
 
-Defined from the research report appended below once it lands (the controller edits this section before dispatching Task 3). Until then this task is NOT dispatchable.
+**Evidence (2026-09-05, on-screen captures of a standalone WebKitGTK 2.52 window with the app's `WEBKIT_DISABLE_DMABUF_RENDERER=1`, NVIDIA RTX 4070 / driver 610 / Wayland):** the same H.264 file renders correctly from `file://` and from `http://127.0.0.1:<port>/…` (a range-capable server) inside the app's exact overlay layout (blurred backdrop + 90% scrim), and renders corrupted (green or dark, blocky) from a `blob:` object URL in EVERY layout, simple or overlaid. `WEBKIT_DISABLE_COMPOSITING_MODE=1`, `GST_PLUGIN_FEATURE_RANK=vah264dec:0`, `WEBKIT_GST_USE_VIDEOCONVERT_SCALE=1` and `__NV_DISABLE_EXPLICIT_SYNC=1` do not help; enabling the DMABUF renderer still crashes the window (Wayland protocol error 71). So the blob media path is the defect and a loopback HTTP source is the clean path.
+
+**Files:**
+- Create: `app/src-tauri/src/media_server.rs`
+- Modify: `app/src-tauri/src/lib.rs` (start the server in `setup`, keep its handle in `AppState`; register `video_url`, unregister `read_video`), `app/src-tauri/src/commands.rs` (replace `read_video`/`read_cached_video`/`MAX_INLINE_VIDEO_BYTES` with `video_url`), `app/src-tauri/tauri.conf.json` (`media-src`: `'self' http://127.0.0.1:*` — drop `blob:`, `asset:` and `http://asset.localhost`)
+- Modify: `app/src/lib/api.ts` (`readVideo` → `videoUrl`), `app/src/lib/details/MediaViewer.svelte` (video effect: `videoSrc = await api.videoUrl(item.url)`; no Blob, no object URL, no revoke), `app/src/lib/details/media.ts` + `media.test.ts` (delete `videoMimeType`; keep `videoLoadMessage`)
+- Modify: `e2e/specs/images-a.spec.ts` (`src` matches `/^http:\/\/127\.0\.0\.1:\d+\//`; the stub's decode error stays the expected outcome)
+- Modify: `docs/superpowers/specs/2026-09-04-desktop-ui-redesign-design.md` (§7: "`path_video` streamed from the app's loopback media server"), `docs/porting/07-covers-images.md` (replace the blob paragraph with the evidence above and the server contract)
+
+**Interfaces:**
+- `media_server.rs`:
+
+```rust
+/// Serves cached video files to the webview over loopback HTTP/1.1 with
+/// Range support. WebKitGTK plays http(s) media through its normal network
+/// path; `blob:` frames render corrupted on the NVIDIA/Wayland stack and a
+/// custom URI scheme is refused by the media player outright.
+pub struct MediaServer { port: u16, nonce: String, dir: PathBuf }
+impl MediaServer {
+    /// Binds 127.0.0.1:0 (kernel-chosen port), spawns the accept loop on the
+    /// Tauri async runtime, and returns the handle. `dir` is the image cache
+    /// directory; only files directly inside it with a video extension are
+    /// ever served.
+    pub async fn start(dir: PathBuf) -> std::io::Result<Arc<MediaServer>>;
+    /// `http://127.0.0.1:<port>/<nonce>/<file name>` for a file the server
+    /// will serve, `None` when `path` is not inside `dir` or has no video
+    /// extension.
+    pub fn url_for(&self, path: &Path) -> Option<String>;
+}
+```
+
+  Request handling (one task per connection, `Connection: close`): read up to 8 KiB of headers; accept only `GET` (and `HEAD`) with a path `/<nonce>/<name>` where `<name>` has no `/`, `..` or NUL and ends with one of `grid_core::images::video::VIDEO_EXTENSIONS`; anything else → `404 Not Found` with an empty body (never reveal why). Resolve `dir.join(name)`, `fs::metadata` for the length; parse `Range: bytes=a-b` / `bytes=a-` / `bytes=-n` (RFC 9110 §14.1.2): valid → `206 Partial Content` with `Content-Range: bytes a-b/len`, unsatisfiable → `416` with `Content-Range: bytes */len`, absent → `200`. Always `Accept-Ranges: bytes`, `Content-Length`, `Content-Type` from the extension (`video/mp4`, `video/webm`, `video/quicktime`), `Cache-Control: no-store`. Stream the body in 64 KiB chunks with `tokio::fs::File` + `seek`. The nonce is 32 random bytes hex (`rand` is already a workspace dependency — check `Cargo.lock`; otherwise `getrandom`) generated per launch; it is a loopback capability token, NOT a secret in the token-secrecy sense, but it must still never be logged.
+- Command `video_url(state, url: String) -> Result<String, String>`: same resolve + host filter as before, `ensure_video` to get the cached path, then `state.media_server.url_for(&path).ok_or("the video is not in the cache directory")`.
+- `api.videoUrl(url: string): Promise<string>`.
+
+- [ ] **Step 1: Rust tests** (`media_server.rs` `#[cfg(test)]`, tokio runtime): start with a temp dir holding `a.mp4` (4 KiB of known bytes) and `notes.txt`; GET `/<nonce>/a.mp4` → 200, full bytes, `Accept-Ranges`; `Range: bytes=100-199` → 206, `Content-Range: bytes 100-199/4096`, exactly those bytes; `bytes=4000-` → 206 with the tail; `bytes=5000-` → 416; wrong nonce → 404; `/<nonce>/notes.txt` → 404; `/<nonce>/../a.mp4` → 404; `POST` → 404; `url_for` on a path outside `dir` → `None`. Use a raw `tokio::net::TcpStream` client in the tests (no HTTP client dependency). Run → FAIL (module missing).
+- [ ] **Step 2: Implement** the server and the command; wire `setup` (`tauri::async_runtime::block_on(MediaServer::start(cache_dir))` or spawn + store in a `OnceLock` in `AppState` — pick what `AppState` construction allows; the command must fail with a clear message if the server did not start). Remove the old command, cap and helper. Rust gate list → PASS.
+- [ ] **Step 3: Frontend** — `api.ts`, viewer effect, delete `videoMimeType` + its tests. `npm run check`, `npx vitest run` → PASS.
+- [ ] **Step 4: CSP + E2E** — `media-src` per Files; `images-a.spec.ts` assertion; `bash rewrite/scripts/e2e.sh images` (full build).
+- [ ] **Step 5: Docs** — §7 sentence; porting doc paragraph with the evidence and the server contract (loopback only, random port, per-launch nonce, video files only, Range support).
+- [ ] **Step 6: Commit** — `git commit -m "rewrite: stream hosted videos from a loopback range server — blob frames render corrupted"`.
 
 ---
 
