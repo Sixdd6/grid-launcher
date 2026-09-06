@@ -347,58 +347,10 @@ async fn plan_still_needs_a_variant_when_only_another_sigma_is_on_disk() {
     );
 }
 
-/// Rows installed before the 2026-09-05 resolver change hold a fanart URL of
-/// the old shape (`<origin>/roms/…`), which the server does not serve.
-/// Re-resolving a stored value is a no-op, so `plan` has to send the row back
-/// through `NeedsFields` to have all four image fields rewritten.
-#[tokio::test]
-async fn plan_refetches_a_row_whose_stored_fanart_has_the_old_shape() {
-    let dir = tempfile::tempdir().unwrap();
-    let cache = ImageCache::new(dir.path().to_path_buf());
-    let mut old = row(Some(1), "/assets/1.png", "/assets/1l.png", "");
-    old.fanart_urls = "https://h/roms/20/194/fanart/fanart.png".to_string();
-
-    assert_eq!(
-        plan(&[old], &cache, "https://h", 12),
-        vec![ReplenishItem::NeedsFields { rom_id: 1 }]
-    );
-}
-
-/// The counterpart: a fanart URL the CURRENT resolver produced is under
-/// `/assets/`, so the row is left alone and only its missing files are
-/// planned.
-#[tokio::test]
-async fn plan_leaves_a_row_whose_stored_fanart_is_already_the_new_shape() {
-    let dir = tempfile::tempdir().unwrap();
-    let cache = ImageCache::new(dir.path().to_path_buf());
-    let mut fresh = row(Some(2), "/assets/2.png", "/assets/2l.png", "");
-    fresh.fanart_urls = "https://h/assets/romm/resources/roms/20/194/fanart/fanart.png".to_string();
-
-    let items = plan(&[fresh], &cache, "https://h", 12);
-
-    assert!(!items
-        .iter()
-        .any(|i| matches!(i, ReplenishItem::NeedsFields { .. })));
-    assert_eq!(
-        items,
-        vec![
-            ReplenishItem::NeedsFile {
-                rom_id: 2,
-                url: "https://h/assets/2.png".into()
-            },
-            ReplenishItem::NeedsVariant {
-                rom_id: 2,
-                url: "https://h/assets/romm/resources/roms/20/194/fanart/fanart.png".into()
-            },
-        ]
-    );
-}
-
-/// The empty-`fanart_urls` case `has_old_shape_fanart` cannot see: a row
-/// written before the v6 stamp whose covers are all present. Its fanart
-/// column is `""`, which is indistinguishable from "this game has no
-/// fanart", so the ONLY thing that marks it for repair is its
-/// `images_version`.
+/// The case no inspection of the stored fields could see: a row written
+/// before the v6 stamp whose covers are all present. Its fanart column is
+/// `""`, which is indistinguishable from "this game has no fanart", so the
+/// ONLY thing that marks it for repair is its `images_version`.
 #[tokio::test]
 async fn plan_refetches_a_row_below_the_current_images_version() {
     let dir = tempfile::tempdir().unwrap();
@@ -420,7 +372,8 @@ async fn plan_refetches_a_row_below_the_current_images_version() {
 
 /// The counterpart: once the stamp is current, a row with full covers and
 /// fanart is never re-fetched again, so the repair costs one detail request
-/// per row and no more.
+/// per row and no more. It is planned for its files instead, with the fanart
+/// as the background source.
 #[tokio::test]
 async fn plan_leaves_a_row_at_the_current_images_version() {
     let dir = tempfile::tempdir().unwrap();
@@ -435,9 +388,49 @@ async fn plan_leaves_a_row_at_the_current_images_version() {
     current.fanart_urls =
         "https://h/assets/romm/resources/roms/20/194/fanart/fanart.png".to_string();
 
-    let items = plan(&[current], &cache, "https://h", 12);
+    assert_eq!(
+        plan(&[current], &cache, "https://h", 12),
+        vec![
+            ReplenishItem::NeedsFile {
+                rom_id: 2,
+                url: "https://h/assets/2.png".into()
+            },
+            ReplenishItem::NeedsVariant {
+                rom_id: 2,
+                url: "https://h/assets/romm/resources/roms/20/194/fanart/fanart.png".into()
+            },
+        ]
+    );
+}
 
-    assert!(!items
-        .iter()
-        .any(|i| matches!(i, ReplenishItem::NeedsFields { .. })));
+/// A RomM behind a reverse proxy at `https://host/romm` resolves its images
+/// under `https://host/romm/assets/...`. Nothing about that path is special
+/// to `plan`: a stamped row on such a server is planned for its files like
+/// any other, never sent back through `NeedsFields`. Before the stamp became
+/// the only test, a literal `assets/` path check re-planned these rows on
+/// every pass forever and — because `NeedsFields` skips the rest of the loop
+/// body — left them without a `NeedsFile` or `NeedsVariant` item for good.
+#[tokio::test]
+async fn plan_leaves_a_stamped_row_on_a_server_served_under_a_sub_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = ImageCache::new(dir.path().to_path_buf());
+    // Covers are stored UNRESOLVED and resolved at plan time; fanart is
+    // stored already resolved, so it carries the proxy's `/romm` prefix.
+    let mut proxied = row(Some(3), "/assets/3.png", "/assets/3l.png", "");
+    proxied.images_version = IMAGES_VERSION;
+    proxied.fanart_urls = "https://h/romm/assets/romm/resources/f.png".to_string();
+
+    assert_eq!(
+        plan(&[proxied], &cache, "https://h/romm", 12),
+        vec![
+            ReplenishItem::NeedsFile {
+                rom_id: 3,
+                url: "https://h/romm/assets/3.png".into()
+            },
+            ReplenishItem::NeedsVariant {
+                rom_id: 3,
+                url: "https://h/romm/assets/romm/resources/f.png".into()
+            },
+        ]
+    );
 }

@@ -811,8 +811,9 @@ points:
   `installed_cover_cache_key` basis are never collected
   (grid_launcher/cover/manager.py:84 is the only deletion path). Should a port add a
   sweep, and if so keyed on what?
-  **RULED (milestone 7): yes — a bounded 512 MiB cache with an oldest-unpinned-first
-  startup sweep — see "Rust port deviations (milestone 7)" D3.**
+  **RULED (milestone 7): yes — a bounded swept cache with an oldest-unpinned-first
+  startup sweep; D3 carries the current cap — see "Rust port deviations (milestone 7)"
+  D3.**
 - `OPEN QUESTION:` The desktop async loader sends no `Authorization` header
   (grid_launcher/cover/loader.py:58) while the install-time path and the TV loader both do
   (grid_launcher/cover/cache.py:101, grid_launcher/tv/widgets/cover_loader.py:167). Is
@@ -948,7 +949,7 @@ covers/images design task (`docs/superpowers/specs/2026-09-02-covers-images-desi
 3. **D3 — Bounded cache: 1 GiB cap, startup sweep, oldest-unpinned-first, installed rows' small
    and large covers pinned.** Uninstall deletes no files and cannot fail on image cleanup. Python
    never evicted and unlinked on uninstall with a protected-path set. `sweep`
-   (`crates/grid-core/src/images/sweep.rs:43`) deletes the least-recently-modified unpinned files
+   (`crates/grid-core/src/images/sweep.rs`) deletes the least-recently-modified unpinned files
    under `IMAGE_CACHE_CAP_BYTES` (`crates/grid-core/src/images/sweep.rs`, 1024 * 1024 * 1024 since
    2026-09-05 — the background tier pins full-size fanart, a few MB per installed game);
    `pinned_keys` pins every installed row's cover paths and its background source, and `sweep`
@@ -1065,7 +1066,11 @@ behavior:
   the old rules could not resolve) is indistinguishable from "this game has no fanart" — the stamp
   is the only signal that survives. The cost of a bump is one `rom_detail` request per row on the
   next replenish pass; a row whose fetch fails keeps its old stamp and is retried on the next
-  pass. `e2e/seed/registry-schema.mjs` mirrors the column and `USER_VERSION`.
+  pass, and the FIRST pass after a bump warms no background variants at all (a `NeedsFields`
+  row contributes none) — the next connect warms them. The stamp is deliberately the ONLY
+  test: inspecting a stored URL's shape false-positives forever on a RomM served under a
+  reverse-proxy sub-path, where every resolved path carries the proxy prefix.
+  `e2e/seed/registry-schema.mjs` mirrors the column and `USER_VERSION`.
 - **The background art has a variant; the cover pipeline does not.** `ensure_image` still returns
   the raw cached bytes for every card and screenshot; only the shell background asks for
   `ensure_background_variant`. One extra variant per background source, not per image.

@@ -246,7 +246,7 @@ Cloud save/state sync exit gate: now automated by the E2E suite (`cloud-saves` s
 
 ## Manual test checklist — Milestone 7
 
-Covers/images exit gate: now automated by the E2E suite (`images` stage group) plus `cargo test --workspace`; milestone-specific residual items, neither reproducible against the mock: a real RomM server with LaunchBox/ScreenScraper screenshot metadata, to exercise foreign-host filtering and the type-token rules against real payloads instead of fixtures; and a cache directory grown past 512 MiB, to observe the startup sweep's log line. Residual items above also apply.
+Covers/images exit gate: now automated by the E2E suite (`images` stage group) plus `cargo test --workspace`; milestone-specific residual items, neither reproducible against the mock: a real RomM server with LaunchBox/ScreenScraper screenshot metadata, to exercise foreign-host filtering and the type-token rules against real payloads instead of fixtures; and a cache directory grown past 1 GiB, to observe the startup sweep's log line. Residual items above also apply.
 
 ## Manual test checklist — Milestone 8
 

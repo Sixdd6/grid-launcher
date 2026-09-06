@@ -78,8 +78,8 @@ port should not reproduce them silently:
 - The image cache has no eviction and uses two incompatible filename schemes in
   the same directory; the desktop async loader omits the auth header (doc 07;
   resolved by the Rust port — one filename scheme, every fetch authenticated,
-  a bounded 512 MiB swept cache — see doc 07 "Rust port deviations (milestone 7)"
-  D1/D2/D3).
+  a bounded swept cache, capped as D3 states — see doc 07 "Rust port deviations
+  (milestone 7)" D1/D2/D3).
 - The main window's server-game lookup does not use the canonical identity
   matcher, so match results depend on async load order (doc 10).
 - No worker drain on shutdown: an in-flight install is abandoned when the app

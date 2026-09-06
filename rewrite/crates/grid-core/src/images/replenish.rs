@@ -70,43 +70,31 @@ pub fn background_source_url(row: &InstalledGame, base_url: &str) -> String {
     )
 }
 
-/// True when `fanart_urls` holds a URL the OLD resolver produced, so the row
-/// must be re-fetched before its fanart can be found.
-///
-/// `fanart_urls` is stored already resolved and host-filtered. Before the
-/// 2026-09-05 resolver change a relative `fanart_path` such as
-/// `roms/20/194/fanart/fanart.png` resolved by joining it to the server
-/// origin — `http://host/roms/20/194/fanart/fanart.png` — which the server
-/// does not serve. The new resolver puts the same candidate under
-/// `/assets/romm/resources/`. Re-resolving a stored value cannot repair it:
-/// the stored value already carries a scheme, so the new arm never fires.
-///
-/// The test is exact. Every URL the CURRENT rules can store has a path under
-/// `/assets/`: a relative candidate lands in `/assets/romm/resources/...`, an
-/// already-absolute `fanart_path` from RomM is `/assets/...`, and a foreign
-/// `fanart_url` is dropped to `""` by the host filter. So nothing correct
-/// matches, and a match means the row predates the change.
-fn has_old_shape_fanart(fanart_urls: &str) -> bool {
-    fanart_urls.lines().map(str::trim).any(|url| {
-        !url.is_empty()
-            && url
-                .split_once("://")
-                .and_then(|(_, rest)| rest.split_once('/'))
-                .is_some_and(|(_, path)| !path.starts_with("assets/"))
-    })
-}
-
 /// A row whose `images_version` is below [`IMAGES_VERSION`] is planned as
-/// `NeedsFields` before anything else is looked at. That is the only way to
-/// repair a row whose stored `fanart_urls` is EMPTY because the rules of the
-/// day could not resolve the server's fanart — an empty column is otherwise
-/// indistinguishable from "this game has no fanart", so
-/// [`has_old_shape_fanart`] cannot see it. The cost is bounded: one
-/// `rom_detail` fetch per pre-stamp row, after which `update_images` writes
-/// the stamp and the row is never re-planned. A row whose detail fetch fails
-/// keeps its old stamp and is retried on the next replenish pass — an extra
-/// request per pass while the server is unhealthy, which is acceptable
-/// against never repairing the row.
+/// `NeedsFields` before anything else is looked at. The stamp is the ONLY
+/// test for a row written by older image rules, and it has to be: the image
+/// fields are stored already resolved, so a resolver change cannot be
+/// detected by inspecting the stored value. Inspecting it is also wrong —
+/// a URL's shape depends on the server's base URL (a RomM behind a reverse
+/// proxy at `https://host/romm` resolves to `https://host/romm/assets/...`)
+/// and on what `path_cover_*`/`fanart_path` the server chose, so any literal
+/// path test false-positives forever on a deployment that never matched it.
+/// The stamp also covers the case nothing else can see: a `fanart_urls` that
+/// is EMPTY because the rules of the day could not resolve the server's
+/// fanart, which is otherwise indistinguishable from "this game has no
+/// fanart".
+///
+/// The cost is bounded: one `rom_detail` fetch per pre-stamp row, after which
+/// `update_images` writes the stamp and the row is never re-planned. A row
+/// whose detail fetch fails keeps its old stamp and is retried on the next
+/// replenish pass — an extra request per pass while the server is unhealthy,
+/// which is acceptable against never repairing the row.
+///
+/// A `NeedsFields` row `continue`s, so it contributes no `NeedsVariant`: the
+/// FIRST pass after the v6 migration stamps the whole library and warms no
+/// background variants at all. The next connect sees every row stamped and
+/// warms the top [`BACKGROUND_VARIANT_LIMIT`] as designed; until then a
+/// background is built lazily the first time the shell shows it.
 ///
 /// `sigma` is the configured background blur: the variant's file name
 /// carries it, so a row whose art exists only at another sigma still needs a
@@ -126,7 +114,6 @@ pub fn plan(
             || (row.cover_small_path.is_empty()
                 && row.cover_large_path.is_empty()
                 && row.screenshot_urls.is_empty())
-            || has_old_shape_fanart(&row.fanart_urls)
         {
             items.push(ReplenishItem::NeedsFields { rom_id });
             continue;
