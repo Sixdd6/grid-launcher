@@ -61,8 +61,10 @@ the options.
   view, one row ahead of the view's scroll container. Hovering and warming share ONE
   queue, at most three builds in flight, so speculative art never takes more than half
   the backend's six download slots from the covers the grid is still fetching; a
-  hovered card is inserted at the front of that queue, ahead of every card the user has
-  only scrolled past. A refused build is dropped, not retried.
+  hovered card goes to the front of that queue, ahead of every card the user has only
+  scrolled past — including a card already waiting there as a scroll-warm, which is
+  moved to the front rather than left in place. A refused build is dropped, not
+  retried.
 - Download footer strip, 28px, always mounted: hidden when nothing is live; otherwise
   "⬇ <title> · <percent> · <speed>" with a 60-sample sparkline and an "Open Downloads"
   link. Clicking anywhere on it opens the Downloads view.
@@ -152,9 +154,10 @@ Dialog 1040×680 max, centred over a dimmed, blurred shell; Esc and ✕ close.
   2. **Media**: screenshot gallery (`merged_screenshots`, user screenshots), video
      (`youtube_video_id` as a poster that opens the trailer in the system browser —
      embedded players need an HTTP referrer that a `tauri://` page never sends (W3C
-     referrer policy, YouTube error 153); `path_video` played in-app from an object URL —
-     WebKitGTK cannot play media from a custom URI scheme, so the cached file's bytes
-     cross IPC and the page wraps them in a `Blob`). Click opens a fullscreen viewer with
+     referrer policy, YouTube error 153); `path_video` streamed from the app's loopback
+     media server — WebKitGTK cannot play media from a custom URI scheme and renders
+     every `blob:` frame corrupted on NVIDIA/Wayland, so the cached file is served over
+     `http://127.0.0.1:<port>/` with Range support). Click opens a fullscreen viewer with
      arrows, Esc, and a caption. The viewer walks the same viewable list as the gallery: a
      screenshot that failed to load is skipped. The viewer holds the position it
      is on as an index into the full list, so a screenshot that dies elsewhere in

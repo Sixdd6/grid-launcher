@@ -7,7 +7,6 @@
     prevIndex,
     trailerPoster,
     videoLoadMessage,
-    videoMimeType,
     type MediaItem,
   } from './media';
 
@@ -35,27 +34,28 @@
   let viewerEl = $state<HTMLElement | null>(null);
   let current = $derived(items[index] ?? null);
 
-  // The hosted video's URL, or null for any other item. The read effect below
-  // keys on THIS and never on `current`: `items` is rebuilt object-by-object
-  // on every recompute in Details.svelte, so an identity-keyed effect would
-  // revoke the object URL, restart playback at 0, and repeat an up-to-64 MiB
-  // IPC read for the same file. A derived string settles by `===`, so the
-  // effect only reruns when the video actually changes.
+  // The hosted video's URL, or null for any other item. The resolve effect
+  // below keys on THIS and never on `current`: `items` is rebuilt
+  // object-by-object on every recompute in Details.svelte, so an
+  // identity-keyed effect would restart playback at 0 on every unrelated
+  // recompute. A derived string settles by `===`, so the effect only reruns
+  // when the video actually changes.
   let videoUrl = $derived(current !== null && current.kind === 'video' ? current.url : null);
 
   // A server-hosted video is fetched through the session client, cached by
-  // the backend, and handed to the page as raw bytes over IPC. The server
-  // URL never reaches the DOM, so no request from the page needs a token.
+  // the backend, and played from the app's own loopback range server. The
+  // remote server URL never reaches the DOM and the loopback URL carries no
+  // credential, so no request from the page needs a token.
   //
-  // Bytes rather than a file URL because WebKitGTK 2.52 (the Linux webview)
-  // will not decode media served from a custom URI scheme: `asset:` answers
-  // correct 206 Range requests and the element still fails with
-  // MEDIA_ERR_SRC_NOT_SUPPORTED. A `blob:` object URL built in the page
-  // plays. `videoSrc` is therefore an object URL, revoked on every teardown.
+  // An http URL rather than bytes because WebKitGTK 2.52 (the Linux webview)
+  // renders every other source wrongly: a custom URI scheme (`asset:`) fails
+  // to decode with MEDIA_ERR_SRC_NOT_SUPPORTED, and a `blob:` object URL
+  // decodes but paints every frame corrupted on the NVIDIA/Wayland stack.
+  // See `media_server.rs` for the captured evidence.
   let videoSrc = $state<string | null>(null);
   /** The element could not decode the bytes it was given. */
   let videoError = $state(false);
-  /** The bytes never arrived. Holds the backend's reason, which `videoLoadMessage`
+  /** The URL never arrived. Holds the backend's reason, which `videoLoadMessage`
    *  puts inside the generic line rather than showing on its own; `''` means
    *  the rejection carried no reason. `null` means no failure. */
   let videoLoadError = $state<string | null>(null);
@@ -87,27 +87,24 @@
     videoError = false;
     videoLoadError = null;
     if (url === null) return;
+    // Set only on a resolve that is still wanted, so a URL that lands after
+    // the user paged on never swaps the element's source under them.
     let cancelled = false;
-    // Created only on a resolve that is still wanted, so a read that lands
-    // after the user moved on never leaves an object URL behind.
-    let objectUrl: string | null = null;
     api
-      .readVideo(url)
-      .then((bytes) => {
+      .videoUrl(url)
+      .then((src) => {
         if (cancelled) return;
-        objectUrl = URL.createObjectURL(new Blob([bytes], { type: videoMimeType(url) }));
-        videoSrc = objectUrl;
+        videoSrc = src;
       })
       .catch((e) => {
         if (cancelled) return;
-        // The bytes never arrived. Store the backend's reason only — the
+        // The URL never arrived. Store the backend's reason only — the
         // markup wraps it in the generic line, so an internal sentence is
         // never shown to the user as the whole message.
         videoLoadError = e instanceof Error ? e.message : String(e);
       });
     return () => {
       cancelled = true;
-      if (objectUrl !== null) URL.revokeObjectURL(objectUrl);
     };
   });
 
@@ -265,11 +262,11 @@
             onerror={() => (videoError = true)}
           ></video>
           {#if videoError}
-            <!-- The backend fetched and cached the file (`read_video`
+            <!-- The backend fetched and cached the file (`video_url`
                  already gated it on Content-Type and its `ftyp` magic) and
-                 the bytes reached the page, but the element could not decode
-                 them — a bad codec, or a file truncated past the header
-                 check. One of three distinct lines: this one means the bytes
+                 the media server served it, but the element could not decode
+                 it — a bad codec, or a file truncated past the header
+                 check. One of three distinct lines: this one means the file
                  arrived, so the element stays on screen. -->
             <p class="pending" data-testid="media-viewer-video-error">
               This video could not be played
@@ -277,11 +274,11 @@
           {/if}
         </div>
       {:else if videoLoadError !== null}
-        <!-- The bytes never arrived. The generic sentence always leads and the
+        <!-- The URL never arrived. The generic sentence always leads and the
              backend's reason follows in parentheses, so no internal string is
              ever presented as the whole message. The reason names no path, URL
-             or credential by construction (`read_cached_video` in commands.rs
-             asserts that), and Svelte escapes it. -->
+             or credential by construction (`video_url` in commands.rs returns
+             only fixed sentences), and Svelte escapes it. -->
         <p class="pending" data-testid="media-viewer-video-load-error">
           {videoLoadMessage(videoLoadError)}
         </p>

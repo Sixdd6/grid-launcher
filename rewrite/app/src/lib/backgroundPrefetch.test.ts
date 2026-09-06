@@ -230,6 +230,46 @@ describe('the shared build queue', () => {
     expect(ensureBackgroundVariant).toHaveBeenLastCalledWith('https://romm/hovered.png', 12);
   });
 
+  it('promotes a warm that has not started when the same card is hovered', async () => {
+    const builds = deferredBuilds();
+    // Three slots taken, so w4 and w5 are only queued.
+    for (const n of [1, 2, 3, 4, 5]) warmBackground(cover(`https://romm/w${n}.png`));
+    expect(asked()).toHaveLength(3);
+
+    // The user scrolled past w5 and is now looking at it, before its turn.
+    prefetchBackground(cover('https://romm/w5.png'));
+    expect(asked()).toHaveLength(3); // still nothing new asked for
+
+    builds.resolve(0);
+    await settled();
+    expect(ensureBackgroundVariant).toHaveBeenLastCalledWith('https://romm/w5.png', 12);
+  });
+
+  it('leaves a build already in flight where it is when it is hovered', () => {
+    deferredBuilds();
+    for (const n of [1, 2, 3, 4]) warmBackground(cover(`https://romm/w${n}.png`));
+
+    prefetchBackground(cover('https://romm/w1.png'));
+    // No second ask for a build already running, and the queue is untouched:
+    // w4 is still the next in line.
+    expect(asked()).toEqual([
+      'https://romm/w1.png',
+      'https://romm/w2.png',
+      'https://romm/w3.png',
+    ]);
+    expect(inFlightBuilds()).toBe(3);
+  });
+
+  it('does not retry a build that already failed, even on a hover', async () => {
+    const builds = deferredBuilds();
+    warmBackground(cover('https://romm/a.png'));
+    builds.reject(0);
+    await settled();
+
+    prefetchBackground(cover('https://romm/a.png'));
+    expect(ensureBackgroundVariant).toHaveBeenCalledOnce();
+  });
+
   it('starts the next build as one resolves, and memoises the finished path', async () => {
     const builds = deferredBuilds();
     for (const n of [1, 2, 3, 4]) warmBackground(cover(`https://romm/w${n}.png`));

@@ -1101,22 +1101,55 @@ video is an ordinary unpinned entry: evictable, and refetched on the next view.
 The bytes are fetched through the session's `RommClient`, exactly like a cover, and the
 frontend never sees the server URL. No video URL in the UI carries a token.
 
-The frontend receives the **bytes**, not the cached path. WebKitGTK 2.52 (the Linux
-webview) will not decode media served from a custom URI scheme. Probed outside the app
-with the real cached file: `file://` plays; a custom scheme fails with
-`MEDIA_ERR_SRC_NOT_SUPPORTED` even when the handler answers correct 206 Range requests
-(WebKit issues one `Range: bytes=0-1445` request and then errors); a `blob:` object URL
-created on a page whose scheme is registered secure and CORS-enabled plays. So the
-`read_video` command (`app/src-tauri/src/commands.rs`) resolves and host-filters the URL,
-calls `ensure_video` for the cached path, and returns the file as a raw
-`tauri::ipc::Response`; `MediaViewer.svelte` wraps the `ArrayBuffer` in a `Blob` typed by
-the URL's extension (`videoMimeType` in `details/media.ts`) and plays
-`URL.createObjectURL(...)`, revoking it on every teardown. The CSP therefore carries
-`blob:` in `media-src`. Because the bytes cross IPC in one message and are then held
-again as a `Blob`, `read_video` refuses a cached file larger than
-`MAX_INLINE_VIDEO_BYTES` with "video too large to play in-app", checked against the
-file's metadata before anything is read. The constant is the only place that size is
-written down.
+The frontend receives a **loopback URL**, not the cached path and not the bytes. Neither
+of the two sources a Tauri app reaches for first works on the Linux webview.
+
+**Evidence (2026-09-05, on-screen captures of a standalone WebKitGTK 2.52 window with the
+app's `WEBKIT_DISABLE_DMABUF_RENDERER=1`, NVIDIA RTX 4070 / driver 610 / Wayland).** The
+same H.264 file:
+
+- from a **custom URI scheme** (`asset:`) fails with `MEDIA_ERR_SRC_NOT_SUPPORTED` even
+  though the handler answers correct 206 Range requests — WebKit issues one
+  `Range: bytes=0-1445` request and then errors. WebKitGTK will not decode media from a
+  non-network scheme at all;
+- from a **`blob:` object URL** decodes, but every frame renders corrupted (green or
+  dark, blocky) in EVERY layout, simple or overlaid.
+  `WEBKIT_DISABLE_COMPOSITING_MODE=1`, `GST_PLUGIN_FEATURE_RANK=vah264dec:0`,
+  `WEBKIT_GST_USE_VIDEOCONVERT_SCALE=1` and `__NV_DISABLE_EXPLICIT_SYNC=1` do not help;
+  enabling the DMABUF renderer crashes the window (Wayland protocol error 71);
+- from `file://` **and** from a loopback `http://127.0.0.1:<port>/…` range server renders
+  perfectly, inside the app's exact overlay layout (blurred backdrop + 90% scrim).
+
+So http(s) — WebKitGTK's normal network media path — is the only source that both decodes
+and renders, and the app owns a small server for it: `MediaServer`
+(`app/src-tauri/src/media_server.rs`), started once in `lib.rs` `setup` and held in
+`AppState.media_server`.
+
+**Server contract.**
+
+- Binds `127.0.0.1:0` — loopback only, on a kernel-chosen port. Nothing off the machine
+  can reach it.
+- A per-launch nonce (32 random bytes, hex) is the first path segment. It is a loopback
+  capability token, not a credential in the token-secrecy sense, and it is never logged.
+- Serves only files that sit **directly inside** the image cache directory and end in a
+  `VIDEO_EXTENSIONS` extension (`mp4`, `webm`, `mov`). The name must be one segment of
+  `[A-Za-z0-9._-]` with no `..`, which is what rules out traversal and percent-encoded
+  separators.
+- `GET` and `HEAD` only. Every rejection — wrong nonce, wrong method, wrong name, missing
+  file — is the same empty `404`, so none is distinguishable from another.
+- Range support per RFC 9110 §14.1.2: `bytes=a-b`, `bytes=a-` and `bytes=-n` answer `206`
+  with `Content-Range: bytes a-b/len`; a well-formed range past the end answers `416` with
+  `Content-Range: bytes */len`; an unparseable Range header is ignored and the whole file
+  is sent. Every response carries `Accept-Ranges: bytes`, `Content-Length`,
+  `Content-Type` from the extension and `Cache-Control: no-store`. The body streams in
+  64 KiB chunks from a seeked file handle, so no video is ever held in memory and there is
+  no size cap.
+
+The `video_url` command (`app/src-tauri/src/commands.rs`) resolves and host-filters the
+URL exactly as `ensure_image` does, calls `ensure_video` for the cached path, and returns
+`MediaServer::url_for(path)`. `MediaViewer.svelte` puts that string straight in the
+`<video>` `src`. The CSP therefore carries `'self' http://127.0.0.1:*` in `media-src` and
+nothing else — no `blob:`, no `asset:`.
 
 `youtube_video_id` is a different case entirely — it is embedded, touches no
 server bytes, and needs the `frame-src https://www.youtube-nocookie.com` CSP entry to

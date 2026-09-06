@@ -32,12 +32,14 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 secrecy = "0.10.3"
 gilrs = "0.11.0"
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "sync", "time", "macros", "fs"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "sync", "time", "macros", "fs", "net", "io-util"] }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 tauri-plugin-wdio = { version = "1.3.0", optional = true }
 tauri-plugin-wdio-webdriver = { version = "1.3.0", optional = true }
 tauri-plugin-dialog = "2"
 tauri-plugin-window-state = "2"
+# The loopback media server's per-launch capability nonce (media_server.rs).
+getrandom = "0.3.4"
 
 [dev-dependencies]
 tempfile = "3.27.0"

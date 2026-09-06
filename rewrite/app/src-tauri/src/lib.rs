@@ -5,6 +5,7 @@ mod config_write;
 mod firmware_service;
 mod gamepad;
 mod images;
+mod media_server;
 mod update_service;
 
 use commands::AppState;
@@ -91,6 +92,7 @@ pub fn run() {
         firmware: firmware_service::FirmwareService::new(),
         updates: update_service::UpdateService::new(),
         app_update: app_update::AppUpdateState::new(),
+        media_server: std::sync::OnceLock::new(),
     });
     // Embedded WebDriver automation server, gated behind the `e2e` cargo
     // feature so it never ships in a release build (see
@@ -149,6 +151,20 @@ pub fn run() {
                 }
             }
             let state = app.state::<AppState>();
+            // The media viewer's video source. Started here rather than at
+            // `AppState` construction because it serves out of the image
+            // cache directory and must be handed exactly the directory the
+            // cache itself uses. A bind failure is not fatal to the app: the
+            // slot stays empty and `video_url` says so, in a line that names
+            // no port, path or nonce.
+            match tauri::async_runtime::block_on(media_server::MediaServer::start(
+                state.session.cache().dir().to_path_buf(),
+            )) {
+                Ok(server) => {
+                    let _ = state.media_server.set(server);
+                }
+                Err(e) => tracing::warn!("local media server did not start: {e}"),
+            }
             // R3: sweep synchronously before any image command can run.
             if let Ok(install) = &state.install {
                 // A registry read failure must never turn into an empty
@@ -288,7 +304,7 @@ pub fn run() {
             commands::list_games,
             commands::get_rom_detail,
             commands::ensure_image,
-            commands::read_video,
+            commands::video_url,
             commands::ensure_background_variant,
             commands::open_youtube_video,
             commands::install_game,

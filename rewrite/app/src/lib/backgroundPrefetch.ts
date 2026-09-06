@@ -96,14 +96,35 @@ let generation = 0;
 
 /** Adds `subject`'s first image to the queue. `front` puts it ahead of
  *  everything still waiting — the hover path, which is the card the user is
- *  actually looking at. */
+ *  actually looking at.
+ *
+ *  A key already asked for is not queued twice, but the front lane still
+ *  PROMOTES one that has not started: a card warmed on scroll and then
+ *  hovered before its turn came up would otherwise wait behind every other
+ *  card the user merely scrolled past, which is the one case the front lane
+ *  exists for. A key already in flight, already memoised, or already tried
+ *  and failed is left alone — there is nothing left to reorder, and a
+ *  failure is never retried. */
 function queueBuild(subject: BackgroundSubject, front: boolean): void {
   const target = buildTarget(subject);
-  if (target === null || requested.has(target.key)) return;
+  if (target === null) return;
+  if (requested.has(target.key)) {
+    if (front) promote(target.key);
+    return;
+  }
   requested.add(target.key);
   if (front) pending.unshift(target);
   else pending.push(target);
   drainQueue();
+}
+
+/** Moves the pending entry for `key` to the front of the queue, if it is
+ *  still waiting. A no-op for a key that has already started or finished. */
+function promote(key: string): void {
+  const at = pending.findIndex((entry) => entry.key === key);
+  if (at <= 0) return; // not waiting, or already first
+  const [entry] = pending.splice(at, 1);
+  pending.unshift(entry);
 }
 
 /**

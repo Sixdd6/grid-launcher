@@ -179,25 +179,29 @@ describe('images (a): cover, screenshots, install, library grid', () => {
     );
 
     // The gallery's fourth and last item: rom 101's hosted video
-    // (fixture path_video). `MediaViewer.svelte` reads it through
-    // `read_video`, so a `blob:` `src` here proves the server-relative
+    // (fixture path_video). `MediaViewer.svelte` resolves it through
+    // `video_url`, so a loopback `src` here proves the server-relative
     // `path_video` ("roms/1/101/video_normalized/video-normalized.mp4")
     // survived resolve_image_url's relative-path fix and was fetched,
-    // gated on its ftyp magic, cached, and delivered to the page as bytes —
-    // not left as the bare relative string the pre-fix resolver would have
-    // produced. A `blob:` URL rather than a file one because WebKitGTK will
-    // not decode media served from a custom URI scheme.
+    // gated on its ftyp magic, cached, and handed to the page as a URL on
+    // the app's own range server — not left as the bare relative string the
+    // pre-fix resolver would have produced. A loopback http URL rather than
+    // `asset:` or `blob:` because WebKitGTK will not decode media from a
+    // custom URI scheme and renders every blob frame corrupted
+    // (media_server.rs).
     await $(testId('media-viewer-next')).click();
     await expect($(testId('media-viewer-caption'))).toHaveText('Super Mario World — video');
     await $(testId('media-viewer-video')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'the hosted video never resolved to bytes — check resolve_image_url',
+      timeoutMsg: 'the hosted video never resolved to a URL — check resolve_image_url',
     });
-    expect(await $(testId('media-viewer-video')).getAttribute('src')).toMatch(/^blob:/);
+    expect(await $(testId('media-viewer-video')).getAttribute('src')).toMatch(
+      /^http:\/\/127\.0\.0\.1:\d+\//
+    );
 
     // EXPECTED, not a bug: the mock serves a 32-byte MP4 stub — a valid
-    // `ftyp` header and nothing else — so the bytes pass the backend's gate
-    // and then fail to decode in the element. The decode-failure line is the
+    // `ftyp` header and nothing else — so the file passes the backend's gate
+    // and then fails to decode in the element. The decode-failure line is the
     // right outcome for this fixture, and asserting it also proves the two
     // failure texts stay distinct: this is "could not be played" (bytes
     // arrived), never "could not be loaded" (bytes never arrived).

@@ -11,7 +11,6 @@ import {
   viewableIndex,
   viewableItems,
   videoLoadMessage,
-  videoMimeType,
   youtubeThumbnailUrl,
   YOUTUBE_THUMBNAIL_BASE,
   type MediaItem,
@@ -312,27 +311,6 @@ describe('trailerPoster', () => {
 
   it('reports a cover poster with no cover, which the tile renders as its placeholder', () => {
     expect(trailerPoster('', null, false)).toEqual({ kind: 'cover', url: null });
-  });
-});
-
-describe('videoMimeType', () => {
-  it('names the container the extension declares', () => {
-    expect(videoMimeType('http://romm/roms/1/101/video/clip.mp4')).toBe('video/mp4');
-    expect(videoMimeType('http://romm/roms/1/101/video/clip.webm')).toBe('video/webm');
-    expect(videoMimeType('http://romm/roms/1/101/video/clip.mov')).toBe('video/quicktime');
-  });
-
-  it('ignores case and any query string, which RomM adds for cache busting', () => {
-    expect(videoMimeType('http://romm/clip.WEBM?ts=17')).toBe('video/webm');
-    expect(videoMimeType('http://romm/clip.MOV')).toBe('video/quicktime');
-  });
-
-  it('falls back to mp4, the container every RomM preview uses', () => {
-    expect(videoMimeType('http://romm/clip')).toBe('video/mp4');
-    expect(videoMimeType('')).toBe('video/mp4');
-    // A directory named ".webm" must not decide the type of a file that has
-    // no extension of its own.
-    expect(videoMimeType('http://romm/a.webm/clip')).toBe('video/mp4');
   });
 });
 

@@ -374,13 +374,13 @@ export const api = {
   listGames: (platformId: number) => invoke<GameSummary[]>('list_games', { platformId }),
   getRomDetail: (romId: number) => invoke<RomDetail>('get_rom_detail', { romId }),
   ensureImage: (url: string) => invoke<string>('ensure_image', { url }),
-  /** The raw bytes of a server-hosted game video, fetched through the
-   *  session client and cached by the backend. Bytes rather than a path:
-   *  WebKitGTK will not decode media served from a custom URI scheme, so the
-   *  viewer wraps these in a `Blob` and plays the object URL. Rejects with
-   *  the backend's message — "video too large to play in-app" past the IPC
-   *  cap (`MAX_INLINE_VIDEO_BYTES`, the only place the size is written). */
-  readVideo: (url: string) => invoke<ArrayBuffer>('read_video', { url }),
+  /** The `http://127.0.0.1:<port>/…` URL of a server-hosted game video,
+   *  fetched through the session client and cached by the backend, then
+   *  served by the app's own loopback range server. A URL rather than bytes:
+   *  WebKitGTK will not decode media from a custom URI scheme, and renders
+   *  every frame of a `blob:` object URL corrupted on the NVIDIA/Wayland
+   *  stack (see `media_server.rs`). Rejects with the backend's message. */
+  videoUrl: (url: string) => invoke<string>('video_url', { url }),
   /** The 960px-wide background variant of `url`, blurred at `blur` sigma and
    *  built on demand. Same host filter as `ensureImage`; the sigma is part of
    *  the cached file's name, so each level is built once. A failure means
