@@ -7,7 +7,7 @@ use super::background::{background_variant_ext, ensure_background_variant};
 use super::cache::{image_key, ImageCache};
 use super::urls::{filter_to_server_host, resolve_image_url};
 use super::ImageFields;
-use crate::library::registry::{InstalledGame, Registry};
+use crate::library::registry::{InstalledGame, Registry, IMAGES_VERSION};
 use crate::romm::RommClient;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +96,18 @@ fn has_old_shape_fanart(fanart_urls: &str) -> bool {
     })
 }
 
+/// A row whose `images_version` is below [`IMAGES_VERSION`] is planned as
+/// `NeedsFields` before anything else is looked at. That is the only way to
+/// repair a row whose stored `fanart_urls` is EMPTY because the rules of the
+/// day could not resolve the server's fanart — an empty column is otherwise
+/// indistinguishable from "this game has no fanart", so
+/// [`has_old_shape_fanart`] cannot see it. The cost is bounded: one
+/// `rom_detail` fetch per pre-stamp row, after which `update_images` writes
+/// the stamp and the row is never re-planned. A row whose detail fetch fails
+/// keeps its old stamp and is retried on the next replenish pass — an extra
+/// request per pass while the server is unhealthy, which is acceptable
+/// against never repairing the row.
+///
 /// `sigma` is the configured background blur: the variant's file name
 /// carries it, so a row whose art exists only at another sigma still needs a
 /// build.
@@ -110,9 +122,10 @@ pub fn plan(
     let mut variants = Vec::new();
     for row in rows {
         let Some(rom_id) = row.rom_id else { continue };
-        if (row.cover_small_path.is_empty()
-            && row.cover_large_path.is_empty()
-            && row.screenshot_urls.is_empty())
+        if row.images_version < IMAGES_VERSION
+            || (row.cover_small_path.is_empty()
+                && row.cover_large_path.is_empty()
+                && row.screenshot_urls.is_empty())
             || has_old_shape_fanart(&row.fanart_urls)
         {
             items.push(ReplenishItem::NeedsFields { rom_id });

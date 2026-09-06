@@ -2,7 +2,7 @@ use grid_core::images::cache::{image_key, ImageCache};
 use grid_core::images::replenish::{
     plan, run, ReplenishItem, ReplenishReport, BACKGROUND_VARIANT_LIMIT,
 };
-use grid_core::library::registry::{InstalledGame, Registry};
+use grid_core::library::registry::{InstalledGame, Registry, IMAGES_VERSION};
 use grid_core::romm::RommClient;
 use grid_core::secrets::Credential;
 use secrecy::SecretString;
@@ -35,6 +35,9 @@ fn row(
         cover_small_path: cover_small.to_string(),
         cover_large_path: cover_large.to_string(),
         screenshot_urls: screenshots.to_string(),
+        // A row this build wrote. Tests that want a pre-v6 row set
+        // `images_version` back to 0 themselves.
+        images_version: IMAGES_VERSION,
         ..Default::default()
     }
 }
@@ -389,4 +392,52 @@ async fn plan_leaves_a_row_whose_stored_fanart_is_already_the_new_shape() {
             },
         ]
     );
+}
+
+/// The empty-`fanart_urls` case `has_old_shape_fanart` cannot see: a row
+/// written before the v6 stamp whose covers are all present. Its fanart
+/// column is `""`, which is indistinguishable from "this game has no
+/// fanart", so the ONLY thing that marks it for repair is its
+/// `images_version`.
+#[tokio::test]
+async fn plan_refetches_a_row_below_the_current_images_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = ImageCache::new(dir.path().to_path_buf());
+    let mut stale = row(
+        Some(1),
+        "/assets/1.png",
+        "/assets/1l.png",
+        "https://h/s.png",
+    );
+    stale.images_version = 0;
+    assert!(stale.fanart_urls.is_empty());
+
+    assert_eq!(
+        plan(&[stale], &cache, "https://h", 12),
+        vec![ReplenishItem::NeedsFields { rom_id: 1 }]
+    );
+}
+
+/// The counterpart: once the stamp is current, a row with full covers and
+/// fanart is never re-fetched again, so the repair costs one detail request
+/// per row and no more.
+#[tokio::test]
+async fn plan_leaves_a_row_at_the_current_images_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = ImageCache::new(dir.path().to_path_buf());
+    let mut current = row(
+        Some(2),
+        "/assets/2.png",
+        "/assets/2l.png",
+        "https://h/s.png",
+    );
+    current.images_version = IMAGES_VERSION;
+    current.fanart_urls =
+        "https://h/assets/romm/resources/roms/20/194/fanart/fanart.png".to_string();
+
+    let items = plan(&[current], &cache, "https://h", 12);
+
+    assert!(!items
+        .iter()
+        .any(|i| matches!(i, ReplenishItem::NeedsFields { .. })));
 }

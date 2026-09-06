@@ -50,13 +50,14 @@ CREATE TABLE installed_games (
     ra_id                    TEXT NOT NULL DEFAULT '',
     installed_at        INTEGER NOT NULL,
     last_played_at      INTEGER NOT NULL DEFAULT 0,
+    images_version      INTEGER NOT NULL DEFAULT 0,
     UNIQUE (title_key, platform_key)
 );
 ";
 
 /// The schema version this build understands. Bumped when a migration adds
 /// columns (see spec: later milestones add native/PS3/PS4 fields).
-const LATEST_USER_VERSION: i64 = 5;
+const LATEST_USER_VERSION: i64 = 6;
 
 /// The columns v1 -> v2 (milestone 7) adds to `installed_games`.
 const V2_IMAGE_COLUMNS: [&str; 3] = ["cover_small_path", "cover_large_path", "screenshot_urls"];
@@ -88,6 +89,23 @@ const V4_COLUMN: &str = "last_played_at";
 /// default, so an existing row simply has no fanart and the background falls
 /// back to its screenshots.
 const V5_COLUMN: &str = "fanart_urls";
+
+/// The column v5 -> v6 adds: which generation of the image-field rules wrote
+/// this row's `cover_*`/`screenshot_urls`/`fanart_urls`. An INTEGER with a
+/// `0` default, so every row that existed before v6 reads as "older than any
+/// stamp" and is re-fetched once.
+const V6_COLUMN: &str = "images_version";
+
+/// The generation of the image-field rules this build stores. Bump when the
+/// meaning or resolution of the stored image fields changes; rows below it
+/// are re-fetched by `images::replenish`.
+///
+/// `1` is the first stamp: it marks a row whose fields were resolved by the
+/// 2026-09-05 rules, which put a bare relative RomM path under
+/// `/assets/romm/resources/`. Rows written before that carry `0`, which is
+/// the only way to tell "this game has no fanart" from "this row was written
+/// before fanart could resolve".
+pub const IMAGES_VERSION: i64 = 1;
 
 /// The column names `installed_games` currently has.
 fn installed_games_columns(conn: &Connection) -> Result<Vec<String>, LibraryError> {
@@ -193,6 +211,25 @@ fn migrate_4_to_5(conn: &mut Connection) -> Result<(), LibraryError> {
     tx.commit().map_err(registry_err)
 }
 
+/// v5 -> v6 (round 5): adds `images_version`, the generation stamp
+/// [`IMAGES_VERSION`] describes. Defaults to `0`, so every existing row is
+/// below the current stamp and the replenish pass re-fetches its image
+/// fields once. Same transaction + idempotent-`ADD COLUMN` shape as every
+/// migration above it, for the same reasons.
+fn migrate_5_to_6(conn: &mut Connection) -> Result<(), LibraryError> {
+    let tx = conn.transaction().map_err(registry_err)?;
+    let existing = installed_games_columns(&tx)?;
+    if !existing.iter().any(|name| name == V6_COLUMN) {
+        tx.execute_batch(&format!(
+            "ALTER TABLE installed_games ADD COLUMN {V6_COLUMN} INTEGER NOT NULL DEFAULT 0;"
+        ))
+        .map_err(registry_err)?;
+    }
+    tx.pragma_update(None, "user_version", 6)
+        .map_err(registry_err)?;
+    tx.commit().map_err(registry_err)
+}
+
 /// Every column of `installed_games`, in the order selected/inserted below.
 const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_path, \
      extracted_path, extracted_dir, multi_file_game_dir, description, rating, genres, \
@@ -200,7 +237,7 @@ const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_pa
      server_updated_at, installed_at, cover_small_path, cover_large_path, screenshot_urls, \
      native_executable_path, native_launch_parameters, native_compat_tool, native_wineprefix, \
      native_game_dir, included_dlc, ps3_trophy_paths, ps3_game_id, ps3_iso_path, ps4_game_id, \
-     ps4_content, ra_id, last_played_at, fanart_urls";
+     ps4_content, ra_id, last_played_at, fanart_urls, images_version";
 
 /// One installed game, as persisted in the SQLite registry. `title_key` and
 /// `platform_key` are not part of this type: they are computed from `title`
@@ -266,6 +303,14 @@ pub struct InstalledGame {
     /// game the server has no fanart for.
     #[serde(default)]
     pub fanart_urls: String,
+    /// The generation of the image-field rules that wrote this row's
+    /// `cover_*`/`screenshot_urls`/`fanart_urls`. `0` for a row written
+    /// before v6; [`IMAGES_VERSION`] for a row written by this build.
+    /// `images::replenish` re-fetches anything below [`IMAGES_VERSION`].
+    /// Written by [`Registry::upsert`] and [`Registry::update_images`] only —
+    /// never carried in from a caller's record.
+    #[serde(default)]
+    pub images_version: i64,
 }
 
 impl InstalledGame {
@@ -308,6 +353,7 @@ impl InstalledGame {
             ra_id: row.get(34)?,
             last_played_at: row.get(35)?,
             fanart_urls: row.get(36)?,
+            images_version: row.get(37)?,
         })
     }
 }
@@ -375,6 +421,7 @@ impl Registry {
                 2 => migrate_2_to_3(&mut conn)?,
                 3 => migrate_3_to_4(&mut conn)?,
                 4 => migrate_4_to_5(&mut conn)?,
+                5 => migrate_5_to_6(&mut conn)?,
                 v => {
                     return Err(LibraryError::Registry(format!(
                         "no migration from user_version {v}"
@@ -394,6 +441,10 @@ impl Registry {
     /// with every field from `rec`. When `rec.extracted_path` is non-empty,
     /// `archive_path` is stored as `""` regardless of `rec.archive_path`
     /// (the two are mutually exclusive on disk).
+    ///
+    /// `images_version` is stamped with [`IMAGES_VERSION`], NOT taken from
+    /// `rec`: an install or reinstall resolves the image fields with this
+    /// build's rules, so the row is current by construction.
     pub fn upsert(&self, rec: &InstalledGame) -> Result<(), LibraryError> {
         let title_key = identity_key(&rec.title);
         let platform_key = identity_key(&rec.platform);
@@ -416,11 +467,11 @@ impl Registry {
                 installed_at, cover_small_path, cover_large_path, screenshot_urls, fanart_urls,
                 native_executable_path, native_launch_parameters, native_compat_tool,
                 native_wineprefix, native_game_dir, included_dlc, ps3_trophy_paths,
-                ps3_game_id, ps3_iso_path, ps4_game_id, ps4_content, ra_id
+                ps3_game_id, ps3_iso_path, ps4_game_id, ps4_content, ra_id, images_version
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
                 ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
-                ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38
+                ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39
             )
             ON CONFLICT(title_key, platform_key) DO UPDATE SET
                 title = excluded.title,
@@ -458,7 +509,8 @@ impl Registry {
                 ps3_iso_path = excluded.ps3_iso_path,
                 ps4_game_id = excluded.ps4_game_id,
                 ps4_content = excluded.ps4_content,
-                ra_id = excluded.ra_id",
+                ra_id = excluded.ra_id,
+                images_version = excluded.images_version",
             params![
                 rec.title,
                 rec.platform,
@@ -498,25 +550,31 @@ impl Registry {
                 ps4_game_id,
                 rec.ps4_content,
                 rec.ra_id,
+                IMAGES_VERSION,
             ],
         )
         .map_err(registry_err)?;
         Ok(())
     }
 
-    /// Sets the image columns on the row for `rom_id`. Returns whether a
-    /// row matched.
+    /// Sets the image columns on the row for `rom_id`, and stamps
+    /// `images_version` with [`IMAGES_VERSION`] — the fields were just
+    /// resolved by this build's rules, so the row is current and the
+    /// replenish pass must not pick it up again. Returns whether a row
+    /// matched.
     pub fn update_images(&self, rom_id: i64, fields: &ImageFields) -> Result<bool, LibraryError> {
         let conn = self.conn.lock().unwrap();
         let affected = conn
             .execute(
                 "UPDATE installed_games SET cover_small_path = ?1, cover_large_path = ?2, \
-                 screenshot_urls = ?3, fanart_urls = ?4 WHERE rom_id = ?5",
+                 screenshot_urls = ?3, fanart_urls = ?4, images_version = ?5 \
+                 WHERE rom_id = ?6",
                 params![
                     fields.cover_small_path,
                     fields.cover_large_path,
                     fields.screenshot_urls,
                     fields.fanart_urls,
+                    IMAGES_VERSION,
                     rom_id
                 ],
             )

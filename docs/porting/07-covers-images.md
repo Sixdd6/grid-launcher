@@ -1052,6 +1052,20 @@ behavior:
 - Replenish also treats a row that vanished between planning and running
   (`Registry::update_images` returning no matching row) as skipped, without attempting a fetch
   (`crates/grid-core/src/images/replenish.rs:69-72`).
+- **`images_version` — a generation stamp on the stored image fields.** Registry v6 adds
+  `images_version INTEGER NOT NULL DEFAULT 0` to `installed_games`
+  (`crates/grid-core/src/library/registry.rs`). It records which generation of the image rules
+  wrote that row's `cover_small_path`, `cover_large_path`, `screenshot_urls` and `fanart_urls`;
+  `IMAGES_VERSION` (currently `1`) is the generation this build writes. `Registry::upsert` and
+  `Registry::update_images` stamp it themselves — it is never carried in from a caller's record —
+  and `replenish::plan` emits `NeedsFields` for any row below it, so `run` re-fetches the detail
+  and rewrites all four fields once. **Bump `IMAGES_VERSION` whenever the meaning or the
+  resolution of a stored image field changes.** Those fields are stored ALREADY resolved and
+  host-filtered, so a resolver change cannot repair them in place, and an empty column (a fanart
+  the old rules could not resolve) is indistinguishable from "this game has no fanart" — the stamp
+  is the only signal that survives. The cost of a bump is one `rom_detail` request per row on the
+  next replenish pass; a row whose fetch fails keeps its old stamp and is retried on the next
+  pass. `e2e/seed/registry-schema.mjs` mirrors the column and `USER_VERSION`.
 - **The background art has a variant; the cover pipeline does not.** `ensure_image` still returns
   the raw cached bytes for every card and screenshot; only the shell background asks for
   `ensure_background_variant`. One extra variant per background source, not per image.

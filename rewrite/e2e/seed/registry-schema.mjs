@@ -13,13 +13,18 @@
  *
  * Deliberately NOT retrofitted onto `launch-seed.mjs`, `cloud-saves-seed.mjs`
  * or `images-seed.mjs`: those seed v1 databases on purpose (images-seed
- * exercises the v1 -> v2 -> v3 migration path), and rewriting them to v5
+ * exercises the v1 -> v2 -> v3 migration path), and rewriting them to v6
  * would delete that coverage.
+ *
+ * A row inserted through `writeRegistry` gets `images_version = 0`, which the
+ * replenish pass treats as "written before the current image rules" and
+ * re-fetches once. Seed `images_version = 1` on a row whose spec must see NO
+ * re-fetch.
  */
 
 import { execFileSync } from 'node:child_process';
 
-export const USER_VERSION = 5;
+export const USER_VERSION = 6;
 
 export const SCHEMA_SQL = `
 CREATE TABLE installed_games (
@@ -63,6 +68,7 @@ CREATE TABLE installed_games (
     ra_id                    TEXT NOT NULL DEFAULT '',
     installed_at        INTEGER NOT NULL,
     last_played_at      INTEGER NOT NULL DEFAULT 0,
+    images_version      INTEGER NOT NULL DEFAULT 0,
     UNIQUE (title_key, platform_key)
 );
 PRAGMA user_version = ${USER_VERSION};
