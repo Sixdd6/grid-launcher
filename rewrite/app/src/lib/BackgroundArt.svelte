@@ -9,7 +9,8 @@
   import { uiSettings } from './stores/uiSettings.svelte';
 
   // Two layers so a change cross-fades rather than popping (design §3:
-  // 360ms). A new image is written only into the slot about to become
+  // 220ms, the `--m-base` token below and `CROSS_FADE_MS`, which must agree).
+  // A new image is written only into the slot about to become
   // visible; the outgoing slot's image is left in place until the fade has
   // had time to finish, so both images sit on screen together while the
   // opacity transitions — see `backgroundSlots.ts` for the sequencing.
@@ -160,7 +161,7 @@
        instead of re-blurring ~2.4 Mpx per layer per frame for the whole
        fade. */
     opacity: 0;
-    transition: opacity var(--m-slow) ease;
+    transition: opacity var(--m-base) ease;
     /* Promotes each layer to its own compositor layer for the fade — the
        only property that animates here. */
     will-change: opacity;

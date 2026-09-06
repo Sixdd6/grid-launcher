@@ -57,20 +57,46 @@ describe('createHoverViewed', () => {
     expect(noteViewed).toHaveBeenCalledExactlyOnceWith(subject('https://romm/second.png'));
   });
 
-  it('defaults to the 500ms design dwell when no delay is given', () => {
+  it('defaults to the 120ms design dwell when no delay is given', () => {
     const hover = createHoverViewed();
     hover.start(subject('https://romm/cover.png'));
-    vi.advanceTimersByTime(499);
+    vi.advanceTimersByTime(119);
     expect(noteViewed).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
     expect(noteViewed).toHaveBeenCalledExactlyOnceWith(subject('https://romm/cover.png'));
   });
 
-  it('starts the fetch at 150ms but does not swap until 500ms', () => {
+  it('starts the fetch inside start(), before any timer runs, and swaps at 120ms', () => {
+    const hover = createHoverViewed();
+    hover.start(subject('https://romm/cover.png'));
+
+    // No `advanceTimersByTime` between the two: a zero prefetch delay must
+    // not cost the request a trip through the task queue.
+    expect(prefetchBackground).toHaveBeenCalledExactlyOnceWith(subject('https://romm/cover.png'));
+    expect(noteViewed).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(120);
+    expect(noteViewed).toHaveBeenCalledExactlyOnceWith(subject('https://romm/cover.png'));
+  });
+
+  it('fetches once per hover, not once per pending timer', () => {
+    const hover = createHoverViewed();
+    hover.start(subject('https://romm/first.png'));
+    hover.start(subject('https://romm/second.png'));
+    vi.advanceTimersByTime(1000);
+
+    expect(prefetchBackground).toHaveBeenCalledTimes(2);
+    expect(prefetchBackground).toHaveBeenLastCalledWith(subject('https://romm/second.png'));
+    expect(noteViewed).toHaveBeenCalledExactlyOnceWith(subject('https://romm/second.png'));
+  });
+
+  it('still holds the fetch back when a caller asks for a delay', () => {
     const hover = createHoverViewed(500, 150);
     hover.start(subject('https://romm/cover.png'));
 
-    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(149);
+    expect(prefetchBackground).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
     expect(prefetchBackground).toHaveBeenCalledExactlyOnceWith(subject('https://romm/cover.png'));
     expect(noteViewed).not.toHaveBeenCalled();
 

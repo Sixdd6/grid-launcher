@@ -15,6 +15,7 @@
   import { session, retry } from './stores/session.svelte';
   import { subjectFromSummary } from './background';
   import { createHoverViewed } from './lastViewedHover';
+  import { createVisibleWarmer } from './visibleWarm';
   import { noteViewed } from './stores/lastViewed.svelte';
   import { inputMode, noteInput } from './stores/inputMode.svelte';
   import { cloudPlatformSet } from './cards/badges';
@@ -273,10 +274,10 @@
   }
 
   // Design §3: a card becomes the background only after the pointer has
-  // rested on it for more than half a second.
+  // rested on it for more than 120ms.
   const hover = createHoverViewed();
 
-  // Keyboard/gamepad selection feeds the background through the SAME 500ms
+  // Keyboard/gamepad selection feeds the background through the SAME 120ms
   // dwell as the pointer, so holding an arrow key across the grid does not
   // start a fetch per card. A separate timer from `hover`: sharing one would
   // let a mouse move cancel a keyboard selection's pending swap.
@@ -306,6 +307,28 @@
     hover.end();
     focusDwell.start(selected);
     return () => focusDwell.end();
+  });
+
+  // Design §3: a card builds its background art as it scrolls into view, so
+  // the first hover of a game the user has never opened is not the thing
+  // that pays for the download, decode and blur. The queue in
+  // `backgroundPrefetch.ts` keeps this to two builds at a time, behind the
+  // covers the grid is still fetching.
+  const warmer = createVisibleWarmer((index) => {
+    const game = visible[index];
+    return game === undefined ? null : subjectFromSummary(game);
+  });
+
+  $effect(() => {
+    // `visible` is read as a dependency, not for its value: a search
+    // keystroke or a games reload replaces the grid's children, and the new
+    // ones have never been observed. `warmBackground` de-duplicates by URL,
+    // so re-observing a card already warmed costs no request.
+    void visible;
+    const el = grid?.element();
+    if (!el) return;
+    warmer.observe(el);
+    return () => warmer.disconnect();
   });
 
   /** The pointer only feeds the background while the overlay is closed —

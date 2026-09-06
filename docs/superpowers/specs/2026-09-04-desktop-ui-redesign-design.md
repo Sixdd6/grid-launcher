@@ -45,7 +45,7 @@ the options.
   directional input happens. A click moves the selection to the clicked card. The focus
   dwell feeds the background only while a directional input is the active mode.
 - Background art: the art of the last game the user viewed (opened in the details
-  popup, selected with the keyboard/gamepad, or hovered for more than 500ms), chosen
+  popup, selected with the keyboard/gamepad, or hovered for more than 120ms), chosen
   fanart → screenshots → large cover (user ruling 2026-09-05); more than one image
   rotates every 5000ms, and the rotation stops while the fade is 0. Falls back on
   startup to the most recently installed game that has any art. The image is scaled to
@@ -54,7 +54,12 @@ the options.
   cached variant's name) rather than by the compositor every frame; a tier whose images
   cannot be built falls through to the next tier; opacity comes from the Settings ›
   Appearance fade slider (0–60%, default 50%, stored as `ui.background_fade`);
-  cross-fades over 360ms.
+  cross-fades over 220ms (`--m-base`).
+- Background responsiveness (user ruling 2026-09-05): the 120ms dwell gates only the
+  visible swap. The image build starts the moment the pointer enters a card, with no
+  dwell of its own. Cards also warm their first background image as they scroll into
+  view (one row ahead), two builds at a time so the warming never outranks the covers
+  the grid is still downloading; a refused warm is dropped, not retried.
 - Download footer strip, 28px, always mounted: hidden when nothing is live; otherwise
   "⬇ <title> · <percent> · <speed>" with a 60-sample sparkline and an "Open Downloads"
   link. Clicking anywhere on it opens the Downloads view.

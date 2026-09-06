@@ -9,7 +9,7 @@ import { noteViewed } from './stores/lastViewed.svelte';
 
 /**
  * Design §3: a card becomes the background only after the pointer (or the
- * selection) has rested on it for more than `delayMs` (500ms by default).
+ * selection) has rested on it for more than `delayMs` (120ms by default).
  * Shorter dwells are pointer travel, or a held arrow key, not interest.
  */
 export function createHoverViewed(
@@ -31,14 +31,18 @@ export function createHoverViewed(
 
   function start(subject: BackgroundSubject): void {
     clearBoth();
-    // Two timers, not one: the fetch is the slow part (network, decode,
-    // blur), so it starts a third of the way into the dwell, while the visual
-    // swap still waits the full 500ms design §3 asks for. A dwell abandoned
-    // before 150ms costs nothing at all.
-    prefetchTimer = setTimeout(() => {
-      prefetchTimer = null;
-      prefetchBackground(subject);
-    }, prefetchMs);
+    // The fetch is the slow part (network, decode, blur), so it is not tied
+    // to the visual dwell: by default it leaves NOW, in the same task as the
+    // pointer event, while the swap still waits out `delayMs`. A zero timer
+    // would push it behind the next macrotask for nothing, so 0 means "call
+    // it", not "arm a timer". A caller that wants the fetch held back passes
+    // a `prefetchMs` above 0 and gets the old two-timer shape.
+    if (prefetchMs <= 0) prefetchBackground(subject);
+    else
+      prefetchTimer = setTimeout(() => {
+        prefetchTimer = null;
+        prefetchBackground(subject);
+      }, prefetchMs);
     timer = setTimeout(() => {
       timer = null;
       noteViewed(subject);

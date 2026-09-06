@@ -19,9 +19,12 @@ import {
   clearVariantMemo,
   prefetchBackground,
   rememberVariant,
+  resetWarmQueue,
   VARIANT_MEMO_CAP,
   variantKey,
   variantPaths,
+  WARM_CONCURRENCY,
+  warmBackground,
 } from './backgroundPrefetch';
 
 const settled = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -30,9 +33,24 @@ beforeEach(() => {
   ensureBackgroundVariant.mockReset();
   ensureBackgroundVariant.mockResolvedValue('/cache/a.bg.jpg');
   variantPaths.clear();
+  resetWarmQueue();
   fade.value = 40;
   blur.value = 12;
 });
+
+/** A build the test finishes by hand, so "two in flight" is observable. */
+function deferredBuilds(): { resolve: (index: number, path?: string) => void; reject: (index: number) => void } {
+  const settlers: { resolve: (path: string) => void; reject: (err: Error) => void }[] = [];
+  ensureBackgroundVariant.mockImplementation(
+    () => new Promise<string>((resolve, reject) => settlers.push({ resolve, reject }))
+  );
+  return {
+    resolve: (index, path = `/cache/${index}.bg.jpg`) => settlers[index].resolve(path),
+    reject: (index) => settlers[index].reject(new Error('offline')),
+  };
+}
+
+const cover = (url: string) => ({ fanart: [], screenshots: [], cover: url });
 
 describe('prefetchBackground', () => {
   it('warms the first URL of the winning tier and memoises the path', async () => {
@@ -119,5 +137,86 @@ describe('clearVariantMemo', () => {
     clearVariantMemo();
 
     expect(variantPaths.size).toBe(0);
+  });
+});
+
+describe('warmBackground', () => {
+  it('builds the first URL through the same memo key the hover prefetch uses', async () => {
+    warmBackground({
+      fanart: [],
+      screenshots: ['https://romm/shot-1.png'],
+      cover: 'https://romm/cover.png',
+    });
+    expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith('https://romm/shot-1.png', 12);
+    await settled();
+    expect(variantPaths.get(variantKey(12, 'https://romm/shot-1.png'))).toBe('/cache/a.bg.jpg');
+  });
+
+  it('asks once for a URL two cards share', () => {
+    deferredBuilds();
+    warmBackground(cover('https://romm/a.png'));
+    warmBackground(cover('https://romm/a.png'));
+    expect(ensureBackgroundVariant).toHaveBeenCalledOnce();
+  });
+
+  it('skips a URL the memo already holds', () => {
+    rememberVariant(variantKey(12, 'https://romm/a.png'), '/cache/a.bg.jpg');
+    warmBackground(cover('https://romm/a.png'));
+    expect(ensureBackgroundVariant).not.toHaveBeenCalled();
+  });
+
+  it('asks for nothing while the background art is switched off', () => {
+    fade.value = 0;
+    warmBackground(cover('https://romm/a.png'));
+    expect(ensureBackgroundVariant).not.toHaveBeenCalled();
+  });
+
+  it('asks for nothing when the subject has no art', () => {
+    warmBackground({ fanart: [], screenshots: [], cover: null });
+    expect(ensureBackgroundVariant).not.toHaveBeenCalled();
+  });
+
+  it('keeps at most WARM_CONCURRENCY builds in flight and starts the next as one resolves', async () => {
+    const builds = deferredBuilds();
+    warmBackground(cover('https://romm/a.png'));
+    warmBackground(cover('https://romm/b.png'));
+    warmBackground(cover('https://romm/c.png'));
+
+    expect(WARM_CONCURRENCY).toBe(2);
+    expect(ensureBackgroundVariant).toHaveBeenCalledTimes(2);
+    expect(ensureBackgroundVariant.mock.calls.map((c) => c[0])).toEqual([
+      'https://romm/a.png',
+      'https://romm/b.png',
+    ]);
+
+    builds.resolve(0);
+    await settled();
+    expect(ensureBackgroundVariant).toHaveBeenCalledTimes(3);
+    expect(ensureBackgroundVariant).toHaveBeenLastCalledWith('https://romm/c.png', 12);
+    expect(variantPaths.get(variantKey(12, 'https://romm/a.png'))).toBe('/cache/0.bg.jpg');
+  });
+
+  it('drops a refused warm instead of asking for it again', async () => {
+    const builds = deferredBuilds();
+    warmBackground(cover('https://romm/a.png'));
+    warmBackground(cover('https://romm/b.png'));
+    warmBackground(cover('https://romm/c.png'));
+
+    builds.reject(0);
+    await settled();
+    // The failure freed a slot for `c`, and nothing re-queued `a`.
+    expect(ensureBackgroundVariant).toHaveBeenCalledTimes(3);
+    expect(variantPaths.has(variantKey(12, 'https://romm/a.png'))).toBe(false);
+
+    warmBackground(cover('https://romm/a.png'));
+    expect(ensureBackgroundVariant).toHaveBeenCalledTimes(3);
+  });
+
+  it('forgets what it warmed when the memo is cleared, so a new sigma warms again', async () => {
+    warmBackground(cover('https://romm/a.png'));
+    await settled();
+    clearVariantMemo();
+    warmBackground(cover('https://romm/a.png'));
+    expect(ensureBackgroundVariant).toHaveBeenCalledTimes(2);
   });
 });

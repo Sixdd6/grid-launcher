@@ -2,24 +2,29 @@
 import type { GameSummary, InstalledGame } from './api';
 import type { DetailsSubject } from './details/subject';
 
-/** Design §3: a card must be hovered for MORE than half a second before it
- *  becomes the background. Shorter dwells are pointer travel, not interest. */
-export const HOVER_DELAY_MS = 500;
+/** Design §3: a card must be hovered for MORE than 120ms before it becomes
+ *  the background. Long enough that a pointer crossing the grid does not
+ *  drag the art behind it, short enough that resting on a card feels like it
+ *  answered at once. Was 500ms, which read as a lag rather than a filter. */
+export const HOVER_DELAY_MS = 120;
 
-/** Design §3's cross-fade duration, matching the `--m-slow` CSS token
+/** Design §3's cross-fade duration, matching the `--m-base` CSS token
  *  `BackgroundArt.svelte` transitions opacity with. Used on the JS side to
  *  time when the outgoing layer's image is safe to drop (see
  *  `backgroundSlots.ts`) — kept as a named constant, not a re-parsed CSS
  *  value, since the two must already agree for the fade to look right. */
-export const CROSS_FADE_MS = 360;
+export const CROSS_FADE_MS = 220;
 
 /**
- * How long a card must be dwelled on before its art is fetched — 150ms,
- * well under `HOVER_DELAY_MS`. The swap still happens at 500ms; this only
- * starts the (potentially slow: network + decode + blur) variant build early,
- * so the image is usually ready by the time the swap is allowed.
+ * How long a card must be dwelled on before its art is FETCHED: nothing.
+ * The build (network + decode + blur) is the slow half, so it starts the
+ * moment the pointer arrives, while the visual swap still waits out
+ * `HOVER_DELAY_MS`. `createHoverViewed` treats 0 as "call it now" rather
+ * than arming a zero-length timer, so the request leaves in the same task as
+ * the pointer event. A card the grid warmed on scroll (`visibleWarm.ts`) is
+ * already memoised by then and costs nothing at all.
  */
-export const PREFETCH_DELAY_MS = 150;
+export const PREFETCH_DELAY_MS = 0;
 
 /**
  * How long each background image is held before the next one

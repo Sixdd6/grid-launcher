@@ -3,8 +3,10 @@ import type { InstalledGame } from './api';
 import {
   BACKGROUND_CYCLE_MS,
   backgroundUrls,
+  CROSS_FADE_MS,
   cycleIndex,
   HOVER_DELAY_MS,
+  PREFETCH_DELAY_MS,
   shouldCycle,
   startupSubject,
   subjectFromInstalled,
@@ -28,8 +30,16 @@ function row(overrides: Partial<InstalledGame>): InstalledGame {
 }
 
 describe('background timings', () => {
-  it('holds the 500ms hover dwell from design section 3', () => {
-    expect(HOVER_DELAY_MS).toBe(500);
+  it('holds the 120ms hover dwell from design section 3', () => {
+    expect(HOVER_DELAY_MS).toBe(120);
+  });
+
+  it('starts the fetch on enter, with no dwell of its own', () => {
+    expect(PREFETCH_DELAY_MS).toBe(0);
+  });
+
+  it('cross-fades over the --m-base 220ms token BackgroundArt transitions with', () => {
+    expect(CROSS_FADE_MS).toBe(220);
   });
 
   it('holds the 5s cycle the TV shell already used', () => {
