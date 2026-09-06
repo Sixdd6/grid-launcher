@@ -16,6 +16,7 @@
   import { subjectFromSummary } from './background';
   import { createHoverViewed } from './lastViewedHover';
   import { noteViewed } from './stores/lastViewed.svelte';
+  import { inputMode, noteInput } from './stores/inputMode.svelte';
   import { cloudPlatformSet } from './cards/badges';
   import { CARD_SIZES, cardSizeLabel, type CardSize } from './cards/size';
   import { setCardSize, uiSettings } from './stores/uiSettings.svelte';
@@ -285,8 +286,13 @@
   // whichever timer fires last: the overlay blocks both writers while it is
   // open, and a selection change cancels any hover dwell still in flight.
   $effect(() => {
+    // Read FIRST and inside the effect, so switching to the keyboard arms the
+    // dwell for the current index and switching back to the pointer tears it
+    // down. Pointer users never have a keyboard selection; the grow and the
+    // art follow the hover instead (user ruling 2026-09-05).
+    const directional = inputMode.directional;
     const index = focusIndex;
-    if (!active || detailsGame !== null) return;
+    if (!active || detailsGame !== null || !directional) return;
     // `visible` is a fresh array on every games reload and every search
     // keystroke. Tracking it would re-arm this dwell on a refresh and, 500ms
     // later, snap the art to whatever sits at the current index. Only the
@@ -351,6 +357,7 @@
     const action = map[e.key];
     if (action) {
       e.preventDefault();
+      noteInput('keyboard');
       handleNav(action);
     }
   }
@@ -509,8 +516,15 @@
                 installed={isInstalled(game, activePlatformName)}
                 updateLabel={updates.labelFor(game.id)}
                 {cloudPlatforms}
-                focused={i === focusIndex}
-                onOpen={() => openDetails(game)}
+                focused={i === focusIndex && inputMode.directional}
+                onOpen={() => {
+                  // A click moves the selection, so keyboard navigation
+                  // resumes from the clicked card and the focus dwell that
+                  // re-arms when the popup closes targets the SAME game
+                  // (user ruling 2026-09-05) instead of reverting the art.
+                  focusIndex = i;
+                  openDetails(game);
+                }}
                 onPrimary={() => primary(game)}
                 onCloud={() => openDetails(game, 'save')}
                 onHoverStart={() => hoverStart(game)}

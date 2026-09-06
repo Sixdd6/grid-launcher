@@ -30,7 +30,7 @@ the options.
 | D-UI-6 | Downloads is a full view: Active / Queued / Completed segments with a legend; one row per transfer with a kind badge, progress, speed, ETA, a mini sparkline panel (network purple, disk teal) beside the buttons. The footer strip shows the current transfer with a tiny sparkline and opens the view. |
 | D-UI-7 | Content columns for lists (Downloads, Emulators, Settings, rail panes) cap at 1100px and centre. Grids may use the full width up to 1920px. |
 | D-UI-8 | Theme = RomM v2 purple tokens (§4), dark first, with a light variant. Follows the OS setting; override in Settings › Appearance. |
-| D-UI-9 | Cards: hover scales 1.05 with a gradient overlay, a centred Play or Install, and a bottom action row (Details, Cloud sync, Favourite, More). Badges: installed dot top-right, UPDATE tag top-left, cloud icon bottom-right, platform chip bottom-left. Size control Small / Medium / Large per view, remembered. |
+| D-UI-9 | Cards: hover scales 1.05 with a gradient overlay, a centred Play or Install, and a bottom action row (Details, Cloud sync, Favourite, More). Badges: installed dot top-right, UPDATE tag top-left, cloud icon bottom-right, platform chip bottom-left. Size control Small / Medium / Large per view, remembered; the selection grow follows the active input method. |
 | D-UI-10 | The Files tab shows a version for PC games: the parsed version tag when the file name carries one, else the file's `last_modified` date. |
 | D-UI-11 | Media tab trailers (2026-09-05): no `<iframe>` embed. On Linux the popup's page origin is `tauri://localhost`, a "local scheme" under the W3C referrer policy, so no `Referer` header is ever sent and YouTube answers error 153 ("Video unavailable") for every embed — no markup fix works around it (tauri-apps/tauri#14422). The trailer tile is a poster with a "Watch on YouTube" button that opens the system browser through a validated Tauri command (`open_youtube_video`); `path_video` is unaffected and still plays in-app from the local cache. |
 
@@ -40,6 +40,10 @@ the options.
   views; right cluster = connection status dot + server name menu (Reconnect, Disconnect,
   Open RomM in browser) and the app-update badge when a notice is stored.
 - Keyboard: `Ctrl+1..5` switch views; `Ctrl+F` focuses the current view's search.
+- Input mode (user ruling 2026-09-05): keyboard and gamepad input select a card (the
+  focus ring and grow); pointer input only hovers, and no card is selected until a
+  directional input happens. A click moves the selection to the clicked card. The focus
+  dwell feeds the background only while a directional input is the active mode.
 - Background art: the art of the last game the user viewed (opened in the details
   popup, selected with the keyboard/gamepad, or hovered for more than 500ms), chosen
   fanart → screenshots → large cover (user ruling 2026-09-05); more than one image

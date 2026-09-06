@@ -14,6 +14,7 @@
   import { appUpdate } from './stores/appUpdate.svelte';
   import { installed, refresh as refreshInstalled } from './stores/installed.svelte';
   import { seedLastViewed } from './stores/lastViewed.svelte';
+  import { noteInput } from './stores/inputMode.svelte';
   import { pushToast } from './stores/toasts.svelte';
   import { chipLabel, hostOf, initialView, VIEWS, viewForDigit, viewLabel, type View } from './shell';
   import type { NavDirection } from './focus/grid';
@@ -63,7 +64,15 @@
   }
 
   /** A click anywhere outside the session cluster closes the server menu. */
+  /** Every pointer move puts the app back in pointer mode. `noteInput` is a
+   *  no-op when the kind is unchanged, so the common case (moving the mouse
+   *  while already in pointer mode) costs one comparison and wakes nobody. */
+  function onWindowPointerMove() {
+    noteInput('pointer');
+  }
+
   function onWindowPointerDown(e: MouseEvent) {
+    noteInput('pointer');
     if (!serverMenuOpen) return;
     const target = e.target as Node | null;
     if (target !== null && sessionEl?.contains(target)) return;
@@ -110,7 +119,11 @@
   });
 </script>
 
-<svelte:window onkeydown={onKeydown} onpointerdown={onWindowPointerDown} />
+<svelte:window
+  onkeydown={onKeydown}
+  onpointerdown={onWindowPointerDown}
+  onpointermove={onWindowPointerMove}
+/>
 
 <BackgroundArt />
 

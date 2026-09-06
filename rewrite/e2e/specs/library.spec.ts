@@ -99,14 +99,16 @@ describe('library', () => {
     await $(testId('platform-btn-1')).click();
     await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
 
-    // The grid focuses index 0 (rom 101) whenever a platform is (re)selected.
-    await browser.waitUntil(
-      async () => ((await $(testId('game-card-101')).getAttribute('class')) ?? '').includes('focused'),
-      {
-        timeout: TRANSITION_TIMEOUT,
-        timeoutMsg: 'game-card-101 was never the initially focused card',
-      },
+    // User ruling 2026-09-05: selection follows the active input method. The
+    // cases above only ever clicked, so the app is in pointer mode and NO
+    // card carries the selection — `focusIndex` still points at index 0, but
+    // `inputMode.directional` is false, so the class is withheld.
+    const beforeAnyKey = await browser.execute(() =>
+      Array.from(document.querySelectorAll('[data-testid^="game-card-"]')).filter((el) =>
+        el.classList.contains('focused'),
+      ).length,
     );
+    expect(beforeAnyKey).toBe(0);
 
     await browser.keys(['ArrowRight']);
 
@@ -187,5 +189,46 @@ describe('library', () => {
 
     await $(testId('details-close')).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+  });
+
+  // Round 7 regression. Closing the popup re-arms the focus dwell, which 500ms
+  // later paints whatever card `focusIndex` points at. Before this change a
+  // click never moved `focusIndex`, so it still pointed at index 0 (rom 101)
+  // and the close reverted the art to rom 101's fanart — undoing the art of
+  // the game the user had just clicked. Two things now stop that: a click
+  // sets `focusIndex` to the clicked card, and the dwell only runs while a
+  // directional input (keyboard or gamepad) is the active mode.
+  it("closing details keeps that game's background", async () => {
+    await $(testId('platform-btn-1')).click();
+    await $(testId('game-card-103')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await $(testId('game-card-103')).click();
+    await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+
+    // Rom 103 has no fanart and no cover, so `subjectFromDetails` falls
+    // through to its screenshots — a different source image from rom 101's
+    // fanart, which is what the previous case left on screen. Same key
+    // derivation as that case: `ensure_background_variant` names the file
+    // `<sha256 of the resolved URL>.bg<sigma>.jpg`.
+    const shotKey = createHash('sha256')
+      .update(`${mockUrl()}/assets/romm/resources/roms/103/screenshots/1.png`)
+      .digest('hex');
+    const visibleLayers = async () =>
+      await browser.execute(() =>
+        Array.from(document.querySelectorAll('[data-testid="background-art"] .layer'))
+          .filter((el) => el.classList.contains('visible'))
+          .map((el) => (el as HTMLElement).style.backgroundImage)
+          .join(' '),
+      );
+    await browser.waitUntil(async () => (await visibleLayers()).includes(`${shotKey}.bg`), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: "the visible background layer never showed rom 103's screenshot variant",
+    });
+
+    await $(testId('details-close')).click();
+    await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+    // Longer than the 500ms dwell plus the 360ms cross-fade, so a revert
+    // would have completed by now rather than merely being in flight.
+    await browser.pause(1200);
+    expect(await visibleLayers()).toContain(`${shotKey}.bg`);
   });
 });

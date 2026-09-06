@@ -21,6 +21,7 @@
   import { subjectFromInstalled } from './background';
   import { createHoverViewed } from './lastViewedHover';
   import { noteViewed } from './stores/lastViewed.svelte';
+  import { inputMode, noteInput } from './stores/inputMode.svelte';
 
   let { active }: { active: boolean } = $props();
 
@@ -152,8 +153,13 @@
   // whichever timer fires last: the overlay blocks both writers while it is
   // open, and a selection change cancels any hover dwell still in flight.
   $effect(() => {
+    // Read FIRST and inside the effect, so switching to the keyboard arms the
+    // dwell for the current index and switching back to the pointer tears it
+    // down. Pointer users never have a keyboard selection; the grow and the
+    // art follow the hover instead (user ruling 2026-09-05).
+    const directional = inputMode.directional;
     const index = focusIndex;
-    if (!active || subject !== null) return;
+    if (!active || subject !== null || !directional) return;
     // `rows` is a fresh array on every `installed.list` refresh (replenish,
     // download and native-settings events all publish one). Tracking it here
     // would re-arm this dwell on a background refresh and, 500ms later, snap
@@ -218,6 +224,7 @@
     const action = map[e.key];
     if (action) {
       e.preventDefault();
+      noteInput('keyboard');
       handleNav(action);
     }
   }
@@ -304,8 +311,15 @@
             installed={true}
             updateLabel={updates.labelFor(row.rom_id)}
             {cloudPlatforms}
-            focused={i === focusIndex}
-            onOpen={() => openDetails(row)}
+            focused={i === focusIndex && inputMode.directional}
+            onOpen={() => {
+              // A click moves the selection, so keyboard navigation resumes
+              // from the clicked card and the focus dwell that re-arms when
+              // the popup closes targets the SAME game (user ruling
+              // 2026-09-05) instead of reverting the art to index 0.
+              focusIndex = i;
+              openDetails(row);
+            }}
             onPrimary={() => play(row)}
             onCloud={() => openDetails(row, 'save')}
             onHoverStart={() => hoverStart(row)}
