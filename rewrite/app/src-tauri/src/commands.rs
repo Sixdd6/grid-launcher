@@ -2309,7 +2309,7 @@ mod ui_settings_tests {
         for raw in ["", "SYSTEM", "solarized", "  dark  "] {
             let out = normalize_ui_settings(UiSettings {
                 theme: raw.to_string(),
-                background_fade: 25,
+                background_fade: 50,
                 ..Default::default()
             });
             let expected = if raw.trim() == "dark" {
@@ -2346,8 +2346,8 @@ mod ui_settings_tests {
         ] {
             let out = normalize_ui_settings(UiSettings {
                 theme: "system".to_string(),
-                background_fade: 25,
-                background_blur: 12,
+                background_fade: 50,
+                background_blur: 2,
                 card_size_library: raw.to_string(),
                 card_size_server: raw.to_string(),
             });
@@ -2367,7 +2367,7 @@ mod ui_settings_tests {
             .background_fade
         };
         assert_eq!(fade(0), 0);
-        assert_eq!(fade(25), 25);
+        assert_eq!(fade(50), 50);
         assert_eq!(fade(60), 60);
         assert_eq!(fade(61), 60);
         assert_eq!(fade(255), 60);
@@ -2385,7 +2385,7 @@ mod ui_settings_tests {
             .background_blur
         };
         assert_eq!(blur(0), 0);
-        assert_eq!(blur(12), 12);
+        assert_eq!(blur(2), 2);
         assert_eq!(blur(40), 40);
         assert_eq!(blur(41), 40);
         assert_eq!(blur(255), 40);
@@ -2397,8 +2397,8 @@ mod ui_settings_tests {
             normalize_ui_settings(UiSettings::default()),
             UiSettings {
                 theme: "system".to_string(),
-                background_fade: 25,
-                background_blur: 12,
+                background_fade: 50,
+                background_blur: 2,
                 card_size_library: "medium".to_string(),
                 card_size_server: "medium".to_string(),
             }

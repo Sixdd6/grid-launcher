@@ -355,7 +355,7 @@ describe('updates', () => {
     const blur = $(testId('background-blur'));
     await blur.waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     await expect(blur).toHaveAttribute('max', '40');
-    await expect(blur).toHaveValue('12');
+    await expect(blur).toHaveValue('2');
 
     // `setValue` does not move a range input under this driver: set the
     // value and dispatch the two events the component listens for.
@@ -386,8 +386,8 @@ describe('updates', () => {
     await expect($(testId('background-blur'))).toHaveValue('0');
 
     // Restore the default so the cases after this one see the shipped value.
-    await setBlur('12');
-    await expect($(testId('background-blur'))).toHaveValue('12');
+    await setBlur('2');
+    await expect($(testId('background-blur'))).toHaveValue('2');
   });
 
   // Design §10: the four pages plan 1 left as placeholders. One pass over

@@ -77,7 +77,7 @@ describe('clampBlur', () => {
   it('rounds fractional slider values and falls back on garbage', () => {
     expect(clampBlur(12.6)).toBe(13);
     expect(clampBlur(Number.NaN)).toBe(BLUR_DEFAULT);
-    expect(BLUR_DEFAULT).toBe(12);
+    expect(BLUR_DEFAULT).toBe(2);
   });
 });
 

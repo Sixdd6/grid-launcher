@@ -197,7 +197,7 @@ describe('setBackgroundEnabled', () => {
   it('on with a config that was already 0 uses the design default', async () => {
     const { store } = await loadStore(0);
     await store.setBackgroundEnabled(true);
-    expect(store.uiSettings.backgroundFade).toBe(25);
+    expect(store.uiSettings.backgroundFade).toBe(50);
   });
 
   it('a slider drag updates what "on" restores', async () => {
@@ -248,7 +248,7 @@ describe('background blur', () => {
 
   it('falls back to the default when the config has no sigma at all', async () => {
     const { store } = await loadStore(undefined);
-    expect(store.uiSettings.backgroundBlur).toBe(12);
+    expect(store.uiSettings.backgroundBlur).toBe(2);
   });
 
   // Commit-on-release: every distinct sigma is a full backend rebuild, so

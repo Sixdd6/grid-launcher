@@ -46,10 +46,10 @@ the options.
   rotates every 5000ms, and the rotation stops while the fade is 0. Falls back on
   startup to the most recently installed game that has any art. The image is scaled to
   960px and blurred by the backend once (`ensure_background_variant`) at the Settings ›
-  Appearance blur level (0–40, default 12, stored as `ui.background_blur`, baked into the
+  Appearance blur level (0–40, default 2, stored as `ui.background_blur`, baked into the
   cached variant's name) rather than by the compositor every frame; a tier whose images
   cannot be built falls through to the next tier; opacity comes from the Settings ›
-  Appearance fade slider (0–60%, default 25%, stored as `ui.background_fade`);
+  Appearance fade slider (0–60%, default 50%, stored as `ui.background_fade`);
   cross-fades over 360ms.
 - Download footer strip, 28px, always mounted: hidden when nothing is live; otherwise
   "⬇ <title> · <percent> · <speed>" with a 60-sample sparkline and an "Open Downloads"

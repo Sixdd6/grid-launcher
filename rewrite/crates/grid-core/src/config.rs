@@ -105,11 +105,11 @@ fn default_theme() -> String {
 }
 
 fn default_background_fade() -> u8 {
-    25
+    50
 }
 
 fn default_background_blur() -> u8 {
-    12
+    2
 }
 
 fn default_card_size() -> String {
@@ -332,11 +332,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ui_settings_default_to_system_and_a_25_percent_fade() {
+    fn ui_settings_default_to_system_and_a_50_percent_fade() {
         let ui = UiSettings::default();
         assert_eq!(ui.theme, "system");
-        assert_eq!(ui.background_fade, 25);
-        assert_eq!(ui.background_blur, 12);
+        assert_eq!(ui.background_fade, 50);
+        assert_eq!(ui.background_blur, 2);
         assert_eq!(Config::default().ui, ui);
     }
 
@@ -351,8 +351,8 @@ mod tests {
         .unwrap();
         let loaded = Config::load(&path).unwrap();
         assert_eq!(loaded.ui.theme, "system");
-        assert_eq!(loaded.ui.background_fade, 25);
-        assert_eq!(loaded.ui.background_blur, 12);
+        assert_eq!(loaded.ui.background_fade, 50);
+        assert_eq!(loaded.ui.background_blur, 2);
     }
 
     #[test]
@@ -960,7 +960,7 @@ mod tests {
         )
         .unwrap();
         let loaded = Config::load(&path).unwrap();
-        assert_eq!(loaded.ui.background_blur, 12);
+        assert_eq!(loaded.ui.background_blur, 2);
     }
 
     #[test]
@@ -991,8 +991,8 @@ mod tests {
         let cfg = Config {
             ui: UiSettings {
                 theme: "system".to_string(),
-                background_fade: 25,
-                background_blur: 12,
+                background_fade: 50,
+                background_blur: 2,
                 card_size_library: "large".to_string(),
                 card_size_server: "small".to_string(),
             },

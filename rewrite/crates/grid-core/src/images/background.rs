@@ -48,8 +48,9 @@ use std::sync::Arc;
 use tokio::sync::Notify;
 
 /// The default blur sigma when no setting can be read (`ui.background_blur`
-/// in `config.rs` defaults to the same value).
-pub const BACKGROUND_BLUR_DEFAULT: u8 = 12;
+/// in `config.rs` defaults to the same value). 2 keeps the art recognisable
+/// with a slight softening — user ruling 2026-09-05.
+pub const BACKGROUND_BLUR_DEFAULT: u8 = 2;
 /// The strongest blur the Appearance slider offers. The app layer clamps to
 /// this before any variant is built.
 pub const BACKGROUND_BLUR_MAX: u8 = 40;

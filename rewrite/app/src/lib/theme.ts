@@ -6,13 +6,13 @@ export type ThemeChoice = 'system' | 'dark' | 'light';
 export type ResolvedTheme = 'dark' | 'light';
 
 /** Design §3: the Appearance slider's range and its default. */
-export const FADE_DEFAULT = 25;
+export const FADE_DEFAULT = 50;
 export const FADE_MAX = 60;
 
 /** Design §3: the Appearance blur slider's range and its default sigma. The
  *  blur is baked into the cached variant by the backend, so every distinct
  *  value is a separate build — the slider commits on release, not on drag. */
-export const BLUR_DEFAULT = 12;
+export const BLUR_DEFAULT = 2;
 export const BLUR_MAX = 40;
 
 const CHOICES: ThemeChoice[] = ['system', 'dark', 'light'];
