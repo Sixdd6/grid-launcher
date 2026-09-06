@@ -96,9 +96,12 @@
         bind:value={cloudSettings.retention_limit}
       />
     </label>
-    <!-- grid-launcher.py:1733-1738, verbatim. -->
+    <!-- grid-launcher.py:1733-1738. The Python wording's emulator-only
+         clause is dropped here: the rewrite auto-syncs Windows/PC games
+         too (grid-core/src/cloud/ops/upload.rs:117-118,
+         ops/restore.rs:120-121 delegate to the native flows). -->
     <p data-testid="cloud-settings-autosync-hint" class="hint">
-      Auto-sync applies to emulator-based games and uses the latest server save record only.
+      Auto-sync uses the latest server save record only.
     </p>
     {#if cloudSettingsError}<p data-testid="cloud-settings-error" class="error" role="alert">{cloudSettingsError}</p>{/if}
     {#if cloudSettingsSavedLine}<p class="hint">{cloudSettingsSavedLine}</p>{/if}
