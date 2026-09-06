@@ -205,6 +205,17 @@ effectively dead — see "Open questions".
    `/%._-~`, the query is round-tripped through parse/urlencode with blank values kept,
    and the fragment is preserved (grid_launcher/cover/utils.py:40).
 
+**Rewrite-only: bare relative `*_path` values.** RomM's `*_path` metadata fields
+(`ss_metadata.fanart_path`, `path_video`) arrive as bare relative paths — no leading
+`/` — that are relative to the server's resources root, not its API root, unlike
+`path_cover_small`/`path_cover_large`, which arrive as absolute `/assets/...` paths.
+The rewrite's `resolve_image_url` (crates/grid-core/src/images/urls.rs) detects a
+candidate with no scheme and no leading `/` and joins it as
+`{base_url}/assets/romm/resources/{candidate}` instead of `{base_url}/{candidate}`.
+The Python app never consumed `path_video` or `fanart_path`, so step 2 above (as
+ported from `grid_launcher/cover/utils.py:32`) never had to handle this case — this
+is rewrite-only behavior, not a parity gap.
+
 `filter_to_server_host(url, base_url)` (grid_launcher/cover/utils.py:47):
 
 - Empty `url` or empty `base_url` → returned unchanged (permissive).

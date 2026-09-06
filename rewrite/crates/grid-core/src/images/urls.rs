@@ -182,7 +182,17 @@ pub fn resolve_image_url(value: &str, base_url: &str) -> String {
     } else if candidate.starts_with('/') {
         format!("{base_url}{candidate}")
     } else {
-        format!("{base_url}/{candidate}")
+        // RomM serves every `*_path` metadata value (`fanart_path`,
+        // `path_video`, `marquee_path`, …) from its resources root, and
+        // sends them WITHOUT the `/assets/romm/resources/` prefix that
+        // `path_cover_small`/`path_cover_large` carry. Joined onto the server
+        // root they hit the SPA's index.html (200 text/html) and fail every
+        // image/video gate downstream — verified against a live server
+        // 2026-09-05.
+        format!(
+            "{base}/assets/romm/resources/{candidate}",
+            base = base_url.trim_end_matches('/')
+        )
     };
     let split = urlsplit(&candidate);
     urlunsplit(&SplitUrl {
@@ -745,9 +755,23 @@ mod tests {
             resolve_image_url("/api/roms/123/cover", "https://my-romm-server"),
             "https://my-romm-server/api/roms/123/cover"
         );
+        // RomM's `*_path` metadata fields (`ss_metadata.fanart_path`,
+        // `path_video`) are relative to the resources root, unlike
+        // `path_cover_*`, which arrive as absolute `/assets/...` paths.
         assert_eq!(
             resolve_image_url("api/x.png", "https://h"),
-            "https://h/api/x.png"
+            "https://h/assets/romm/resources/api/x.png"
+        );
+        assert_eq!(
+            resolve_image_url("roms/20/194/fanart/fanart.png", "http://192.168.1.137:8092"),
+            "http://192.168.1.137:8092/assets/romm/resources/roms/20/194/fanart/fanart.png"
+        );
+        assert_eq!(
+            resolve_image_url(
+                "roms/20/194/video_normalized/video-normalized.mp4",
+                "https://h/"
+            ),
+            "https://h/assets/romm/resources/roms/20/194/video_normalized/video-normalized.mp4"
         );
         assert_eq!(resolve_image_url("/api/x.png", ""), "");
         assert_eq!(resolve_image_url("   ", "https://h"), "");
