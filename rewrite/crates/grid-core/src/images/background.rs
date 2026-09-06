@@ -177,8 +177,9 @@ fn remove_stale_variants(dir: &Path, key: &str, keep: &Path) {
 /// download semaphore) on a miss.
 ///
 /// Deduplicated per key the same way `ImageCache::ensure` deduplicates a
-/// fetch: the shell arms two dwell timers (150ms and 500ms) per hovered card,
-/// so a cold variant is asked for twice in a row and only one build must run.
+/// fetch: the shell asks once when the pointer enters a card and again at the
+/// 120ms swap, so a cold variant is asked for twice in a row and only one
+/// build must run.
 /// A [`ImageError::Decode`] is recorded for the session — the source will
 /// never decode, and rebuilding it on every hover would burn a full decode
 /// attempt each time.

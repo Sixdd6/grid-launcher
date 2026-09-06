@@ -58,8 +58,11 @@ the options.
 - Background responsiveness (user ruling 2026-09-05): the 120ms dwell gates only the
   visible swap. The image build starts the moment the pointer enters a card, with no
   dwell of its own. Cards also warm their first background image as they scroll into
-  view (one row ahead), two builds at a time so the warming never outranks the covers
-  the grid is still downloading; a refused warm is dropped, not retried.
+  view, one row ahead of the view's scroll container. Hovering and warming share ONE
+  queue, at most three builds in flight, so speculative art never takes more than half
+  the backend's six download slots from the covers the grid is still fetching; a
+  hovered card is inserted at the front of that queue, ahead of every card the user has
+  only scrolled past. A refused build is dropped, not retried.
 - Download footer strip, 28px, always mounted: hidden when nothing is live; otherwise
   "⬇ <title> · <percent> · <speed>" with a 60-sample sparkline and an "Open Downloads"
   link. Clicking anywhere on it opens the Downloads view.

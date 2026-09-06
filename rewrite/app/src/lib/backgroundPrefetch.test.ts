@@ -17,13 +17,14 @@ vi.mock('./stores/uiSettings.svelte', () => ({
 
 import {
   clearVariantMemo,
+  inFlightBuilds,
+  PREFETCH_CONCURRENCY,
   prefetchBackground,
   rememberVariant,
-  resetWarmQueue,
+  resetPrefetchQueue,
   VARIANT_MEMO_CAP,
   variantKey,
   variantPaths,
-  WARM_CONCURRENCY,
   warmBackground,
 } from './backgroundPrefetch';
 
@@ -33,7 +34,7 @@ beforeEach(() => {
   ensureBackgroundVariant.mockReset();
   ensureBackgroundVariant.mockResolvedValue('/cache/a.bg.jpg');
   variantPaths.clear();
-  resetWarmQueue();
+  resetPrefetchQueue();
   fade.value = 40;
   blur.value = 12;
 });
@@ -165,58 +166,123 @@ describe('warmBackground', () => {
     expect(ensureBackgroundVariant).not.toHaveBeenCalled();
   });
 
-  it('asks for nothing while the background art is switched off', () => {
+  it('reports the art as switched off, so the caller keeps watching the card', () => {
     fade.value = 0;
-    warmBackground(cover('https://romm/a.png'));
+    expect(warmBackground(cover('https://romm/a.png'))).toBe(false);
     expect(ensureBackgroundVariant).not.toHaveBeenCalled();
   });
 
-  it('asks for nothing when the subject has no art', () => {
-    warmBackground({ fanart: [], screenshots: [], cover: null });
+  it('reports a card with no art as dealt with — nothing will ever build', () => {
+    expect(warmBackground({ fanart: [], screenshots: [], cover: null })).toBe(true);
     expect(ensureBackgroundVariant).not.toHaveBeenCalled();
-  });
-
-  it('keeps at most WARM_CONCURRENCY builds in flight and starts the next as one resolves', async () => {
-    const builds = deferredBuilds();
-    warmBackground(cover('https://romm/a.png'));
-    warmBackground(cover('https://romm/b.png'));
-    warmBackground(cover('https://romm/c.png'));
-
-    expect(WARM_CONCURRENCY).toBe(2);
-    expect(ensureBackgroundVariant).toHaveBeenCalledTimes(2);
-    expect(ensureBackgroundVariant.mock.calls.map((c) => c[0])).toEqual([
-      'https://romm/a.png',
-      'https://romm/b.png',
-    ]);
-
-    builds.resolve(0);
-    await settled();
-    expect(ensureBackgroundVariant).toHaveBeenCalledTimes(3);
-    expect(ensureBackgroundVariant).toHaveBeenLastCalledWith('https://romm/c.png', 12);
-    expect(variantPaths.get(variantKey(12, 'https://romm/a.png'))).toBe('/cache/0.bg.jpg');
   });
 
   it('drops a refused warm instead of asking for it again', async () => {
     const builds = deferredBuilds();
     warmBackground(cover('https://romm/a.png'));
-    warmBackground(cover('https://romm/b.png'));
-    warmBackground(cover('https://romm/c.png'));
 
     builds.reject(0);
     await settled();
-    // The failure freed a slot for `c`, and nothing re-queued `a`.
-    expect(ensureBackgroundVariant).toHaveBeenCalledTimes(3);
     expect(variantPaths.has(variantKey(12, 'https://romm/a.png'))).toBe(false);
 
     warmBackground(cover('https://romm/a.png'));
-    expect(ensureBackgroundVariant).toHaveBeenCalledTimes(3);
+    expect(ensureBackgroundVariant).toHaveBeenCalledOnce();
   });
 
-  it('forgets what it warmed when the memo is cleared, so a new sigma warms again', async () => {
+  it('forgets what it asked for when the memo is cleared, so a new sigma builds again', async () => {
     warmBackground(cover('https://romm/a.png'));
     await settled();
     clearVariantMemo();
     warmBackground(cover('https://romm/a.png'));
     expect(ensureBackgroundVariant).toHaveBeenCalledTimes(2);
+  });
+});
+
+/** One queue serves both callers, so the cap is a real ceiling rather than a
+ *  per-caller suggestion. */
+describe('the shared build queue', () => {
+  const asked = () => ensureBackgroundVariant.mock.calls.map((c) => c[0] as string);
+
+  it('keeps at most PREFETCH_CONCURRENCY builds in flight across both callers', () => {
+    deferredBuilds();
+    expect(PREFETCH_CONCURRENCY).toBe(3);
+
+    warmBackground(cover('https://romm/w1.png'));
+    warmBackground(cover('https://romm/w2.png'));
+    prefetchBackground(cover('https://romm/h1.png'));
+    warmBackground(cover('https://romm/w3.png'));
+    prefetchBackground(cover('https://romm/h2.png'));
+
+    expect(inFlightBuilds()).toBe(3);
+    expect(asked()).toEqual(['https://romm/w1.png', 'https://romm/w2.png', 'https://romm/h1.png']);
+  });
+
+  it('lets a hover jump ahead of the warms still waiting', async () => {
+    const builds = deferredBuilds();
+    for (const n of [1, 2, 3, 4, 5]) warmBackground(cover(`https://romm/w${n}.png`));
+    prefetchBackground(cover('https://romm/hovered.png'));
+    expect(asked()).toHaveLength(3);
+
+    builds.resolve(0);
+    await settled();
+    // The hovered card, not w4 — it was pushed to the front of the pending
+    // list, ahead of every warm that had not started.
+    expect(ensureBackgroundVariant).toHaveBeenLastCalledWith('https://romm/hovered.png', 12);
+  });
+
+  it('starts the next build as one resolves, and memoises the finished path', async () => {
+    const builds = deferredBuilds();
+    for (const n of [1, 2, 3, 4]) warmBackground(cover(`https://romm/w${n}.png`));
+
+    builds.resolve(0);
+    await settled();
+    expect(asked()).toHaveLength(4);
+    expect(inFlightBuilds()).toBe(3);
+    expect(variantPaths.get(variantKey(12, 'https://romm/w1.png'))).toBe('/cache/0.bg.jpg');
+  });
+
+  it('returns to zero in flight once every build has settled, refusals included', async () => {
+    const builds = deferredBuilds();
+    warmBackground(cover('https://romm/a.png'));
+    prefetchBackground(cover('https://romm/b.png'));
+    expect(inFlightBuilds()).toBe(2);
+
+    builds.resolve(0);
+    builds.reject(1);
+    await settled();
+    expect(inFlightBuilds()).toBe(0);
+  });
+
+  it('takes no slot for an entry another build memoised while it waited', async () => {
+    const builds = deferredBuilds();
+    for (const n of [1, 2, 3]) warmBackground(cover(`https://romm/w${n}.png`));
+    warmBackground(cover('https://romm/queued.png'));
+
+    // The waiting entry's path arrives from somewhere else (the swap path
+    // memoises every build it makes) before its turn comes up.
+    rememberVariant(variantKey(12, 'https://romm/queued.png'), '/cache/queued.bg.jpg');
+    builds.resolve(0);
+    await settled();
+
+    expect(asked()).toEqual([
+      'https://romm/w1.png',
+      'https://romm/w2.png',
+      'https://romm/w3.png',
+    ]);
+    // w1 finished, w2 and w3 are still out; the memoised entry took no slot.
+    expect(inFlightBuilds()).toBe(2);
+  });
+
+  it('does not let builds outstanding across a reset drive the count negative', async () => {
+    const builds = deferredBuilds();
+    warmBackground(cover('https://romm/a.png'));
+    warmBackground(cover('https://romm/b.png'));
+
+    resetPrefetchQueue();
+    builds.resolve(0);
+    builds.resolve(1);
+    await settled();
+
+    expect(inFlightBuilds()).toBe(0);
   });
 });

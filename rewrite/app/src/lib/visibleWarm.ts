@@ -7,9 +7,32 @@
 import type { BackgroundSubject } from './background';
 import { warmBackground } from './backgroundPrefetch';
 
-/** One row ahead. Cards are 200px-ish tall at every size, so a card entering
- *  this margin is about to be scrolled onto, not merely near. */
-export const WARM_ROOT_MARGIN = '200px';
+/** One row ahead, vertically only: the grid never scrolls sideways, and a
+ *  horizontal margin would pull in the cards either side of the viewport for
+ *  nothing. Expands the SCROLL CONTAINER's rect, not the viewport's — see
+ *  `scrollParent`. */
+export const WARM_ROOT_MARGIN = '200px 0px';
+
+/**
+ * The nearest ancestor of `el` that actually scrolls, or `null` when nothing
+ * between `el` and the document does.
+ *
+ * `IntersectionObserver` applies every clipping ancestor's rect between the
+ * target and the root WITHOUT `rootMargin` — only the root's own rect is
+ * expanded. The grid scrolls inside the view's `.body` (`overflow-y: auto`),
+ * not inside the viewport, so observing against the default root would clip
+ * each card at `.body`'s edge and the 200px lookahead would buy nothing:
+ * cards would warm as they became visible, not a row early.
+ */
+export function scrollParent(el: Element): Element | null {
+  // A truthy test, not `!== null`: `parentElement` is `null` at the document
+  // root in a browser, but a plain stand-in object may simply not have it.
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY;
+    if (overflow === 'auto' || overflow === 'scroll') return node;
+  }
+  return null;
+}
 
 export type VisibleWarmer = {
   /** Observes every current child of `grid`. Call again after the list
@@ -53,14 +76,22 @@ export function createVisibleWarmer(
       if (index < 0) continue;
       const subject = subjectAt(index);
       if (subject === null) continue;
-      warmBackground(subject);
+      // Stop watching only once the card is DEALT WITH. With the background
+      // art switched off nothing is built, so the card stays observed and
+      // warms for real if the setting comes back.
+      if (!warmBackground(subject)) continue;
       observer?.unobserve(entry.target);
     }
   }
 
   function observe(grid: HTMLElement): void {
     watched = grid;
-    observer ??= new IntersectionObserver(onEntries, { rootMargin: WARM_ROOT_MARGIN });
+    // `null` means the viewport, which is the right answer when nothing
+    // between the grid and the document scrolls.
+    observer ??= new IntersectionObserver(onEntries, {
+      root: scrollParent(grid),
+      rootMargin: WARM_ROOT_MARGIN,
+    });
     // `observe` on an element already being watched is a no-op per spec, so
     // re-running this after a refresh only picks up the new children.
     for (const child of Array.from(grid.children)) observer.observe(child);

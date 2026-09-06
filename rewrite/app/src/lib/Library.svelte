@@ -179,8 +179,9 @@
   // Design §3: a card builds its background art as it scrolls into view, so
   // the first hover of a game the user has never opened is not the thing
   // that pays for the download, decode and blur. The queue in
-  // `backgroundPrefetch.ts` keeps this to two builds at a time, behind the
-  // covers the grid is still fetching.
+  // `backgroundPrefetch.ts` runs one queue for warming and hovering together,
+  // three builds at a time, with a hovered card jumping to the front — so
+  // speculative art never crowds out the covers the grid is still fetching.
   const warmer = createVisibleWarmer((index) => {
     const row = rows[index];
     return row === undefined ? null : subjectFromInstalled(row);

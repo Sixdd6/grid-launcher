@@ -70,73 +70,103 @@ function build(target: BuildTarget): Promise<void> {
 }
 
 /**
- * Starts building `subject`'s first background image, without waiting for it.
+ * How many builds may be in flight at once, hover and scroll warming
+ * TOGETHER. Three, out of the six download slots
+ * `images/cache.rs`'s `MAX_CONCURRENT_DOWNLOADS` shares with the covers the
+ * grid is still fetching: speculative background art must never be the reason
+ * a visible cover arrives late. One queue for both paths, not one each, so
+ * the cap is a real ceiling rather than a per-caller suggestion — at
+ * `PREFETCH_DELAY_MS` of 0 a pointer sweep across a row of cold cards would
+ * otherwise start a build per card with nothing to stop it.
+ */
+export const PREFETCH_CONCURRENCY = 3;
+
+/** Every key a build has been ASKED for, successful or not. Kept after the
+ *  build settles on purpose: a refused build is DROPPED, never retried, so an
+ *  offline session asks once per card instead of again on every re-observe or
+ *  every re-hover. `clearVariantMemo` empties it — that is the one event that
+ *  makes the memoised paths worth rebuilding. */
+const requested = new Set<string>();
+const pending: BuildTarget[] = [];
+let inFlight = 0;
+/** Bumped by `resetPrefetchQueue`, captured by each build. A build started
+ *  before a reset must not decrement the counter the reset zeroed, or the
+ *  queue would run more than `PREFETCH_CONCURRENCY` at once afterwards. */
+let generation = 0;
+
+/** Adds `subject`'s first image to the queue. `front` puts it ahead of
+ *  everything still waiting — the hover path, which is the card the user is
+ *  actually looking at. */
+function queueBuild(subject: BackgroundSubject, front: boolean): void {
+  const target = buildTarget(subject);
+  if (target === null || requested.has(target.key)) return;
+  requested.add(target.key);
+  if (front) pending.unshift(target);
+  else pending.push(target);
+  drainQueue();
+}
+
+/**
+ * Queues `subject`'s first background image AHEAD of any pending warm.
  * Called the moment the pointer enters a card, while the actual swap still
  * waits out `HOVER_DELAY_MS`, so the fetch + decode + blur has a head start
- * and the swap usually finds the path already memoised. A failure is silent:
- * the swap path asks again and, if that also fails, the current art stays.
+ * and the swap usually finds the path already memoised. Dropping one loses
+ * nothing visible: `BackgroundArt`'s swap path asks the backend directly, so
+ * the card the pointer actually stops on still gets its image.
  */
 export function prefetchBackground(subject: BackgroundSubject): void {
-  const target = buildTarget(subject);
-  if (target === null) return;
-  void build(target);
+  queueBuild(subject, true);
 }
 
 /**
- * How many warm builds may be in flight at once. Two: the warmer competes
- * with the covers the grid is still downloading for the same backend slots,
- * and a background nobody has hovered yet must never be the reason a visible
- * cover arrives late.
+ * Queues `subject`'s first background image BEHIND anything already waiting,
+ * so a card the user has only scrolled past already has its art on disk by
+ * the time it is hovered. Called by `visibleWarm.ts` as cards enter the
+ * viewport.
+ *
+ * Returns `false` only when the background art is switched off (design §10) —
+ * nothing would be shown, so nothing is worth building, and the caller should
+ * keep watching the card in case the setting comes back. `true` means the
+ * card is dealt with: queued, already queued, or already on disk.
  */
-export const WARM_CONCURRENCY = 2;
-
-/** Every key a warm has been started for, successful or not. Kept after the
- *  build settles on purpose: a refused warm is DROPPED, never retried, so an
- *  offline session asks once per card instead of again on every re-observe.
- *  `clearVariantMemo` empties it — that is the one event that makes the
- *  memoised paths worth rebuilding. */
-const warmed = new Set<string>();
-const warmQueue: BuildTarget[] = [];
-let warmInFlight = 0;
-
-/**
- * Queues `subject`'s first background image to be built ahead of any hover,
- * so a card the user has only scrolled past already has its art on disk.
- * Called by `visibleWarm.ts` as cards enter the viewport. Silent about
- * everything: nothing is on screen yet, so nothing can go visibly wrong.
- */
-export function warmBackground(subject: BackgroundSubject): void {
-  const target = buildTarget(subject);
-  if (target === null || warmed.has(target.key)) return;
-  warmed.add(target.key);
-  warmQueue.push(target);
-  drainWarmQueue();
+export function warmBackground(subject: BackgroundSubject): boolean {
+  if (uiSettings.backgroundFade === 0) return false;
+  queueBuild(subject, false);
+  return true;
 }
 
-/** Starts queued builds up to `WARM_CONCURRENCY`, and again as each settles.
- *  A loop, not one recursion per item: a whole screen of cards arrives in a
- *  single observer callback. */
-function drainWarmQueue(): void {
-  while (warmInFlight < WARM_CONCURRENCY) {
-    const target = warmQueue.shift();
+/** Starts queued builds up to `PREFETCH_CONCURRENCY`, and again as each
+ *  settles. A loop, not one recursion per item: a whole screen of cards
+ *  arrives in a single observer callback. */
+function drainQueue(): void {
+  while (inFlight < PREFETCH_CONCURRENCY) {
+    const target = pending.shift();
     if (target === undefined) return;
-    // Re-checked here, not only at enqueue time: an earlier warm — or the
-    // hover prefetch — may have memoised this exact key while the entry
-    // waited its turn.
+    // Re-checked here, not only at enqueue time: another build may have
+    // memoised this exact key while the entry waited its turn. No slot is
+    // taken, so the loop simply moves on to the next entry.
     if (variantPaths.has(target.key)) continue;
-    warmInFlight += 1;
+    const era = generation;
+    inFlight += 1;
     void build(target).then(() => {
-      warmInFlight -= 1;
-      drainWarmQueue();
+      if (era !== generation) return;
+      inFlight -= 1;
+      drainQueue();
     });
   }
 }
 
-/** Test seam: empties the queue and forgets what has been warmed. */
-export function resetWarmQueue(): void {
-  warmQueue.length = 0;
-  warmInFlight = 0;
-  warmed.clear();
+/** Test seam: empties the queue and forgets what has been asked for. */
+export function resetPrefetchQueue(): void {
+  pending.length = 0;
+  inFlight = 0;
+  generation += 1;
+  requested.clear();
+}
+
+/** Test seam: how many builds the queue currently has in flight. */
+export function inFlightBuilds(): number {
+  return inFlight;
 }
 
 /**
@@ -149,9 +179,9 @@ export function resetWarmQueue(): void {
  */
 export function clearVariantMemo(): void {
   variantPaths.clear();
-  // The warm set holds keys whose paths have just been dropped. Left alone,
-  // a blur level the user returns to could never warm again: the record of
-  // the earlier warm would block it, and the file that warm produced is the
-  // one this call exists to disown.
-  warmed.clear();
+  // The requested set holds keys whose paths have just been dropped. Left
+  // alone, a blur level the user returns to could never be built again: the
+  // record of the earlier ask would block it, and the file that ask produced
+  // is the one this call exists to disown.
+  requested.clear();
 }
