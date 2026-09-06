@@ -45,16 +45,16 @@ export function rememberVariant(key: string, path: string): void {
  *  already memoised. The single place the URL priority and the sigma are
  *  read, so the hover prefetch and the scroll warmer can never disagree about
  *  which file a card means. */
-type BuildTarget = { url: string; blur: number; key: string };
+type BuildTarget = { url: string; blur: number; key: string; front: boolean };
 
-function buildTarget(subject: BackgroundSubject): BuildTarget | null {
+function buildTarget(subject: BackgroundSubject, front: boolean): BuildTarget | null {
   if (uiSettings.backgroundFade === 0) return null;
   const url = backgroundUrls(subject)[0];
   if (url === undefined) return null;
   const blur = uiSettings.backgroundBlur;
   const key = variantKey(blur, url);
   if (variantPaths.has(key)) return null;
-  return { url, blur, key };
+  return { url, blur, key, front };
 }
 
 /** Asks the backend for one variant and memoises it. ALWAYS settles: a
@@ -78,6 +78,12 @@ function build(target: BuildTarget): Promise<void> {
  * the cap is a real ceiling rather than a per-caller suggestion — at
  * `PREFETCH_DELAY_MS` of 0 a pointer sweep across a row of cold cards would
  * otherwise start a build per card with nothing to stop it.
+ *
+ * The true ceiling is three QUEUED builds in flight, plus the visible swap,
+ * which asks the backend directly and never queues (`BackgroundArt.svelte`):
+ * the card the user actually stopped on must never wait behind three warms.
+ * That bypass is at most one build at a time, so it can neither starve the
+ * queue nor be starved by it.
  */
 export const PREFETCH_CONCURRENCY = 3;
 
@@ -88,6 +94,20 @@ export const PREFETCH_CONCURRENCY = 3;
  *  makes the memoised paths worth rebuilding. */
 const requested = new Set<string>();
 const pending: BuildTarget[] = [];
+
+/**
+ * The deepest the queue may get. A long scroll must not leave hundreds of
+ * speculative builds — each a full source download, decode, blur and JPEG
+ * write — running after the user has moved on. Past this the OLDEST WARM is
+ * dropped: the front lane is the card the pointer is on right now and is
+ * never shed, and among the warms the oldest is the one the user scrolled
+ * past longest ago. Dropping a warm costs nothing visible — the swap asks
+ * the backend directly.
+ *
+ * 24 is a screenful and a half at the largest card size, so a normal browse
+ * never reaches it and only a sustained scroll does.
+ */
+export const PENDING_CAP = 24;
 let inFlight = 0;
 /** Bumped by `resetPrefetchQueue`, captured by each build. A build started
  *  before a reset must not decrement the counter the reset zeroed, or the
@@ -106,7 +126,7 @@ let generation = 0;
  *  and failed is left alone — there is nothing left to reorder, and a
  *  failure is never retried. */
 function queueBuild(subject: BackgroundSubject, front: boolean): void {
-  const target = buildTarget(subject);
+  const target = buildTarget(subject, front);
   if (target === null) return;
   if (requested.has(target.key)) {
     if (front) promote(target.key);
@@ -115,7 +135,39 @@ function queueBuild(subject: BackgroundSubject, front: boolean): void {
   requested.add(target.key);
   if (front) pending.unshift(target);
   else pending.push(target);
+  // A queue of nothing but hover requests is left alone: it is bounded by
+  // how fast a hand can move, and shedding the card under the pointer is
+  // never the right answer.
+  while (pending.length > PENDING_CAP) {
+    if (!dropOldestWarm()) break;
+  }
   drainQueue();
+}
+
+/** Removes the warm that has waited longest, and forgets it was ever asked
+ *  for: a dropped warm is not a REFUSED build, so the card must be able to
+ *  warm again when it scrolls back into view. `false` when the queue holds
+ *  no warm at all. */
+function dropOldestWarm(): boolean {
+  const at = pending.findIndex((entry) => !entry.front);
+  if (at < 0) return false;
+  const [dropped] = pending.splice(at, 1);
+  requested.delete(dropped.key);
+  return true;
+}
+
+/**
+ * Drops every warm still waiting, keeping any hover request. Called from a
+ * view's warmer teardown — the view was left, or its rows were replaced — so
+ * the speculative work queued for a grid nobody is looking at stops instead
+ * of draining in the background. In-flight builds are left to finish: they
+ * hold a slot that the queue only gets back when they settle, and their
+ * result is memoised under its own key, which the next view may well want.
+ */
+export function dropPendingWarms(): void {
+  while (dropOldestWarm()) {
+    // `dropOldestWarm` does the work; this repeats until no warm is left.
+  }
 }
 
 /** Moves the pending entry for `key` to the front of the queue, if it is
@@ -200,6 +252,13 @@ export function inFlightBuilds(): number {
  */
 export function clearVariantMemo(): void {
   variantPaths.clear();
+  // Every queued target captured the OLD sigma at enqueue time. Draining one
+  // after a blur change would build a stale variant, and
+  // `remove_stale_variants` would then delete the new-sigma file the display
+  // path had just built and memoised — a background layer that goes blank
+  // seconds later. Builds already in flight are left alone: their result is
+  // recorded under their own (old) key, which nothing reads any more.
+  pending.length = 0;
   // The requested set holds keys whose paths have just been dropped. Left
   // alone, a blur level the user returns to could never be built again: the
   // record of the earlier ask would block it, and the file that ask produced

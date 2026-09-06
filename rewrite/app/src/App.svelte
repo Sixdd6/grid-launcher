@@ -10,7 +10,7 @@
   import { initAppUpdate } from './lib/stores/appUpdate.svelte';
   import { initReplenishListener } from './lib/stores/installed.svelte';
   import { initUiSettings } from './lib/stores/uiSettings.svelte';
-  import { noteInput } from './lib/stores/inputMode.svelte';
+  import { noteDirectional } from './lib/stores/inputMode.svelte';
 
   let shell = $state<ReturnType<typeof Shell> | null>(null);
   let restored = false; // restore() must fire once on mount, not on every phase change
@@ -56,7 +56,7 @@
     const un = listen<{ action: 'up' | 'down' | 'left' | 'right' | 'accept' | 'back' }>('nav', (e) => {
       // The gamepad moves a selection, so it puts the app in directional
       // mode — the grid views' own key handlers do the same for the keyboard.
-      noteInput('gamepad');
+      noteDirectional('gamepad');
       shell?.handleNav(e.payload.action);
     });
     const unDownloads = session.phase === 'shell' ? initDownloads() : undefined;

@@ -59,12 +59,14 @@ the options.
   visible swap. The image build starts the moment the pointer enters a card, with no
   dwell of its own. Cards also warm their first background image as they scroll into
   view, one row ahead of the view's scroll container. Hovering and warming share ONE
-  queue, at most three builds in flight, so speculative art never takes more than half
+  queue, at most three queued builds in flight, plus the visible swap, which asks the
+  backend directly and never queues, so speculative art never takes more than half
   the backend's six download slots from the covers the grid is still fetching; a
   hovered card goes to the front of that queue, ahead of every card the user has only
   scrolled past — including a card already waiting there as a scroll-warm, which is
   moved to the front rather than left in place. A refused build is dropped, not
-  retried.
+  retried. The queue is 24 deep: past that the oldest warm is shed, never a hover
+  request, and leaving a view drops every warm still queued for it.
 - Download footer strip, 28px, always mounted: hidden when nothing is live; otherwise
   "⬇ <title> · <percent> · <speed>" with a 60-sample sparkline and an "Open Downloads"
   link. Clicking anywhere on it opens the Downloads view.

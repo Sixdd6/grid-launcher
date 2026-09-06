@@ -15,9 +15,10 @@
   import { session, retry } from './stores/session.svelte';
   import { subjectFromSummary } from './background';
   import { createHoverViewed } from './lastViewedHover';
+  import { dropPendingWarms } from './backgroundPrefetch';
   import { createVisibleWarmer } from './visibleWarm';
   import { noteViewed } from './stores/lastViewed.svelte';
-  import { inputMode, noteInput } from './stores/inputMode.svelte';
+  import { inputMode, noteDirectional } from './stores/inputMode.svelte';
   import { cloudPlatformSet } from './cards/badges';
   import { CARD_SIZES, cardSizeLabel, type CardSize } from './cards/size';
   import { setCardSize, uiSettings } from './stores/uiSettings.svelte';
@@ -295,7 +296,7 @@
     const index = focusIndex;
     if (!active || detailsGame !== null || !directional) return;
     // `visible` is a fresh array on every games reload and every search
-    // keystroke. Tracking it would re-arm this dwell on a refresh and, 500ms
+    // keystroke. Tracking it would re-arm this dwell on a refresh and, 120ms
     // later, snap the art to whatever sits at the current index. Only the
     // SELECTION is a reason to change the background, so the game is read
     // untracked.
@@ -329,13 +330,25 @@
     const el = grid?.element();
     if (!el) return;
     warmer.observe(el);
-    return () => warmer.disconnect();
+    return () => {
+      warmer.disconnect();
+      // Stop watching AND drop what is still queued for this grid: the view
+      // was left, or its rows were replaced, so the cards those warms were
+      // for are not the cards anyone is looking at now.
+      dropPendingWarms();
+    };
   });
 
   /** The pointer only feeds the background while the overlay is closed —
-   *  the details popup owns the art for as long as it is open. */
+   *  the details popup owns the art for as long as it is open — and only
+   *  while the pointer IS the active input method: a card scrolling under a
+   *  stationary cursor during keyboard navigation must not take the art from
+   *  the selected card (user ruling 2026-09-05). A real mouse move switches
+   *  the mode back first (`notePointerAt`), so a mouse user is unaffected.
+   *  `hoverEnd` stays unconditional — ending a dwell that was never armed is
+   *  a no-op, and that is the safe direction. */
   function hoverStart(game: GameSummary) {
-    if (detailsGame !== null) return;
+    if (detailsGame !== null || inputMode.directional) return;
     hover.start(subjectFromSummary(game));
   }
 
@@ -381,7 +394,7 @@
     const action = map[e.key];
     if (action) {
       e.preventDefault();
-      noteInput('keyboard');
+      noteDirectional('keyboard');
       handleNav(action);
     }
   }

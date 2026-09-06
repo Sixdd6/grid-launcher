@@ -20,9 +20,10 @@
   import { moveFocus, type NavDirection } from './focus/grid';
   import { subjectFromInstalled } from './background';
   import { createHoverViewed } from './lastViewedHover';
+  import { dropPendingWarms } from './backgroundPrefetch';
   import { createVisibleWarmer } from './visibleWarm';
   import { noteViewed } from './stores/lastViewed.svelte';
-  import { inputMode, noteInput } from './stores/inputMode.svelte';
+  import { inputMode, noteDirectional } from './stores/inputMode.svelte';
 
   let { active }: { active: boolean } = $props();
 
@@ -163,7 +164,7 @@
     if (!active || subject !== null || !directional) return;
     // `rows` is a fresh array on every `installed.list` refresh (replenish,
     // download and native-settings events all publish one). Tracking it here
-    // would re-arm this dwell on a background refresh and, 500ms later, snap
+    // would re-arm this dwell on a background refresh and, 120ms later, snap
     // the art to whatever sits at the current index. Only the SELECTION is a
     // reason to change the background, so the row is read untracked.
     const selected = untrack(() => {
@@ -196,13 +197,25 @@
     const el = grid?.element();
     if (!el) return;
     warmer.observe(el);
-    return () => warmer.disconnect();
+    return () => {
+      warmer.disconnect();
+      // Stop watching AND drop what is still queued for this grid: the view
+      // was left, or its rows were replaced, so the cards those warms were
+      // for are not the cards anyone is looking at now.
+      dropPendingWarms();
+    };
   });
 
   /** The pointer only feeds the background while the overlay is closed —
-   *  the details popup owns the art for as long as it is open. */
+   *  the details popup owns the art for as long as it is open — and only
+   *  while the pointer IS the active input method: a card scrolling under a
+   *  stationary cursor during keyboard navigation must not take the art from
+   *  the selected card (user ruling 2026-09-05). A real mouse move switches
+   *  the mode back first (`notePointerAt`), so a mouse user is unaffected.
+   *  `hoverEnd` stays unconditional — ending a dwell that was never armed is
+   *  a no-op, and that is the safe direction. */
   function hoverStart(row: InstalledGame) {
-    if (subject !== null) return;
+    if (subject !== null || inputMode.directional) return;
     hover.start(subjectFromInstalled(row));
   }
 
@@ -248,7 +261,7 @@
     const action = map[e.key];
     if (action) {
       e.preventDefault();
-      noteInput('keyboard');
+      noteDirectional('keyboard');
       handleNav(action);
     }
   }

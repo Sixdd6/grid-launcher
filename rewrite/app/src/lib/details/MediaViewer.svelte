@@ -262,12 +262,13 @@
             onerror={() => (videoError = true)}
           ></video>
           {#if videoError}
-            <!-- The backend fetched and cached the file (`video_url`
-                 already gated it on Content-Type and its `ftyp` magic) and
-                 the media server served it, but the element could not decode
-                 it — a bad codec, or a file truncated past the header
-                 check. One of three distinct lines: this one means the file
-                 arrived, so the element stays on screen. -->
+            <!-- The backend fetched and cached the file (`video_url` calls
+                 `grid_core::images::video::ensure_video`, which gates it on
+                 Content-Type and its `ftyp` magic) and the media server
+                 served it, but the element could not decode it — a bad
+                 codec, or a file truncated past the header check. One of
+                 three distinct lines: this one means the file arrived, so
+                 the element stays on screen. -->
             <p class="pending" data-testid="media-viewer-video-error">
               This video could not be played
             </p>

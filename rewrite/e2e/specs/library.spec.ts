@@ -191,7 +191,7 @@ describe('library', () => {
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
   });
 
-  // Round 7 regression. Closing the popup re-arms the focus dwell, which 500ms
+  // Round 7 regression. Closing the popup re-arms the focus dwell, which 120ms
   // later paints whatever card `focusIndex` points at. Before this change a
   // click never moved `focusIndex`, so it still pointed at index 0 (rom 101)
   // and the close reverted the art to rom 101's fanart — undoing the art of
@@ -226,7 +226,7 @@ describe('library', () => {
 
     await $(testId('details-close')).click();
     await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
-    // Longer than the 500ms dwell plus the 360ms cross-fade, so a revert
+    // Longer than the 120ms dwell plus the 220ms cross-fade, so a revert
     // would have completed by now rather than merely being in flight.
     await browser.pause(1200);
     expect(await visibleLayers()).toContain(`${shotKey}.bg`);

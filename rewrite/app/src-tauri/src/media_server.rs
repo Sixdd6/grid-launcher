@@ -712,6 +712,93 @@ mod tests {
         assert!(body.is_empty());
     }
 
+    /// The three `trim()` calls in `parse_range`: a client that pads its
+    /// range spec still gets the slice it asked for.
+    #[tokio::test]
+    async fn a_range_with_internal_whitespace_is_parsed() {
+        let (_dir, server, bytes) = server().await;
+        let (head, body) = request(
+            server.port(),
+            &ranged(&server.test_path("a.mp4"), "bytes= 100 - 199 "),
+        )
+        .await;
+        assert!(
+            head.starts_with("HTTP/1.1 206 Partial Content\r\n"),
+            "{head}"
+        );
+        assert!(
+            head.contains("Content-Range: bytes 100-199/4096\r\n"),
+            "{head}"
+        );
+        assert_eq!(body, bytes[100..200]);
+    }
+
+    /// A suffix range of zero bytes names nothing, so it is unsatisfiable
+    /// rather than "the whole file".
+    #[tokio::test]
+    async fn a_zero_length_suffix_range_is_416() {
+        let (_dir, server, _bytes) = server().await;
+        let (head, body) = request(
+            server.port(),
+            &ranged(&server.test_path("a.mp4"), "bytes=-0"),
+        )
+        .await;
+        assert!(
+            head.starts_with("HTTP/1.1 416 Range Not Satisfiable\r\n"),
+            "{head}"
+        );
+        assert!(head.contains("Content-Range: bytes */4096\r\n"), "{head}");
+        assert!(body.is_empty());
+    }
+
+    /// A zero-length file has no byte to hand back, so every range against it
+    /// is unsatisfiable — and a plain GET is a 200 with no body at all.
+    #[tokio::test]
+    async fn an_empty_file_answers_416_to_a_range_and_200_to_a_get() {
+        let (dir, server, _bytes) = server().await;
+        std::fs::write(dir.path().join("empty.mp4"), b"").unwrap();
+
+        let (head, body) = request(
+            server.port(),
+            &ranged(&server.test_path("empty.mp4"), "bytes=0-"),
+        )
+        .await;
+        assert!(
+            head.starts_with("HTTP/1.1 416 Range Not Satisfiable\r\n"),
+            "{head}"
+        );
+        assert!(head.contains("Content-Range: bytes */0\r\n"), "{head}");
+        assert!(body.is_empty());
+
+        let (head, body) = request(server.port(), &get(&server.test_path("empty.mp4"))).await;
+        assert!(head.starts_with("HTTP/1.1 200 OK\r\n"), "{head}");
+        assert!(head.contains("Content-Length: 0\r\n"), "{head}");
+        assert!(body.is_empty());
+    }
+
+    /// A ranged HEAD is how a player asks whether seeking is supported: the
+    /// 206 headers of the slice, and no body.
+    #[tokio::test]
+    async fn head_with_a_range_sends_the_partial_headers_without_a_body() {
+        let (_dir, server, _bytes) = server().await;
+        let path = server.test_path("a.mp4");
+        let (head, body) = request(
+            server.port(),
+            &format!("HEAD {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nRange: bytes=100-199\r\n\r\n"),
+        )
+        .await;
+        assert!(
+            head.starts_with("HTTP/1.1 206 Partial Content\r\n"),
+            "{head}"
+        );
+        assert!(
+            head.contains("Content-Range: bytes 100-199/4096\r\n"),
+            "{head}"
+        );
+        assert!(head.contains("Content-Length: 100\r\n"), "{head}");
+        assert!(body.is_empty());
+    }
+
     #[tokio::test]
     async fn wrong_nonce_is_404() {
         let (_dir, server, _bytes) = server().await;

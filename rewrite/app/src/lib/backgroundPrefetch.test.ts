@@ -17,7 +17,9 @@ vi.mock('./stores/uiSettings.svelte', () => ({
 
 import {
   clearVariantMemo,
+  dropPendingWarms,
   inFlightBuilds,
+  PENDING_CAP,
   PREFETCH_CONCURRENCY,
   prefetchBackground,
   rememberVariant,
@@ -138,6 +140,126 @@ describe('clearVariantMemo', () => {
     clearVariantMemo();
 
     expect(variantPaths.size).toBe(0);
+  });
+
+  // Every queued target captured the sigma it was enqueued at. Building one
+  // after the slider moved would make `remove_stale_variants` delete the
+  // new-sigma file the display path had just built.
+  it('drops the queued builds, so none runs at the sigma the user left', async () => {
+    const builds = deferredBuilds();
+    for (let i = 0; i < PREFETCH_CONCURRENCY + 1; i += 1)
+      warmBackground(cover(`https://romm/${i}.png`));
+    expect(ensureBackgroundVariant).toHaveBeenCalledTimes(PREFETCH_CONCURRENCY);
+
+    blur.value = 20; // the slider was released
+    clearVariantMemo();
+
+    // The three in flight finish and record under their own old key, which
+    // is harmless — nothing reads it. The queued fourth never starts.
+    for (let i = 0; i < PREFETCH_CONCURRENCY; i += 1) builds.resolve(i);
+    await settled();
+    expect(ensureBackgroundVariant).toHaveBeenCalledTimes(PREFETCH_CONCURRENCY);
+    expect(ensureBackgroundVariant.mock.calls.map((call) => call[0])).not.toContain(
+      `https://romm/${PREFETCH_CONCURRENCY}.png`
+    );
+
+    // And the dropped warm is not remembered as refused: it builds at the
+    // new sigma when the card is warmed again.
+    warmBackground(cover(`https://romm/${PREFETCH_CONCURRENCY}.png`));
+    expect(ensureBackgroundVariant).toHaveBeenLastCalledWith(
+      `https://romm/${PREFETCH_CONCURRENCY}.png`,
+      20
+    );
+  });
+});
+
+/** Resolves every build the queue has started, and every build those starts,
+ *  until it settles. Returns the URLs that were actually built, in order. */
+async function drainAll(builds: ReturnType<typeof deferredBuilds>): Promise<string[]> {
+  for (let done = 0; done < ensureBackgroundVariant.mock.calls.length; done += 1) {
+    builds.resolve(done);
+    await settled();
+  }
+  return ensureBackgroundVariant.mock.calls.map((call) => call[0] as string);
+}
+
+describe('the queue depth cap', () => {
+  it('sheds the oldest waiting warm once the queue is full', async () => {
+    const builds = deferredBuilds();
+    // Three fill the in-flight slots, the cap's worth wait, five overflow.
+    const total = PREFETCH_CONCURRENCY + PENDING_CAP + 5;
+    for (let i = 0; i < total; i += 1) warmBackground(cover(`https://romm/${i}.png`));
+
+    const built = await drainAll(builds);
+    expect(built).toHaveLength(total - 5);
+    // The five oldest WAITING warms went; the three already in flight and
+    // the newest entries — the cards nearest the viewport — stayed.
+    for (let i = 0; i < PREFETCH_CONCURRENCY; i += 1)
+      expect(built).toContain(`https://romm/${i}.png`);
+    for (let i = PREFETCH_CONCURRENCY; i < PREFETCH_CONCURRENCY + 5; i += 1)
+      expect(built).not.toContain(`https://romm/${i}.png`);
+    expect(built).toContain(`https://romm/${total - 1}.png`);
+  });
+
+  it('lets a shed warm be warmed again — a drop is not a refusal', async () => {
+    const builds = deferredBuilds();
+    const total = PREFETCH_CONCURRENCY + PENDING_CAP + 5;
+    for (let i = 0; i < total; i += 1) warmBackground(cover(`https://romm/${i}.png`));
+    await drainAll(builds);
+
+    const shed = `https://romm/${PREFETCH_CONCURRENCY}.png`;
+    ensureBackgroundVariant.mockClear();
+    warmBackground(cover(shed));
+    expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith(shed, 12);
+  });
+
+  it('never sheds a hover request, only warms', async () => {
+    const builds = deferredBuilds();
+    for (let i = 0; i < PREFETCH_CONCURRENCY; i += 1)
+      warmBackground(cover(`https://romm/busy-${i}.png`));
+    prefetchBackground(cover('https://romm/hovered.png'));
+    for (let i = 0; i < PENDING_CAP + 5; i += 1) warmBackground(cover(`https://romm/${i}.png`));
+
+    const built = await drainAll(builds);
+    expect(built).toContain('https://romm/hovered.png');
+  });
+});
+
+describe('dropPendingWarms', () => {
+  it('drops the queued warms a view left behind, keeping the hover request', async () => {
+    const builds = deferredBuilds();
+    for (let i = 0; i < PREFETCH_CONCURRENCY; i += 1)
+      warmBackground(cover(`https://romm/busy-${i}.png`));
+    prefetchBackground(cover('https://romm/hovered.png'));
+    warmBackground(cover('https://romm/warm-a.png'));
+    warmBackground(cover('https://romm/warm-b.png'));
+
+    dropPendingWarms();
+
+    const built = await drainAll(builds);
+    expect(built).toContain('https://romm/hovered.png');
+    expect(built).not.toContain('https://romm/warm-a.png');
+    expect(built).not.toContain('https://romm/warm-b.png');
+    // In-flight builds are left to finish; their result is memoised.
+    expect(built).toContain('https://romm/busy-0.png');
+  });
+
+  it('lets a dropped warm be warmed again when its card comes back', async () => {
+    const builds = deferredBuilds();
+    for (let i = 0; i < PREFETCH_CONCURRENCY; i += 1)
+      warmBackground(cover(`https://romm/busy-${i}.png`));
+    warmBackground(cover('https://romm/warm-a.png'));
+
+    dropPendingWarms();
+    await drainAll(builds);
+    expect(inFlightBuilds()).toBe(0);
+    ensureBackgroundVariant.mockClear();
+
+    warmBackground(cover('https://romm/warm-a.png'));
+    expect(ensureBackgroundVariant).toHaveBeenCalledExactlyOnceWith(
+      'https://romm/warm-a.png',
+      12
+    );
   });
 });
 

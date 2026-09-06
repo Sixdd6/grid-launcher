@@ -203,8 +203,8 @@ describe('images (a): cover, screenshots, install, library grid', () => {
     // `ftyp` header and nothing else — so the file passes the backend's gate
     // and then fails to decode in the element. The decode-failure line is the
     // right outcome for this fixture, and asserting it also proves the two
-    // failure texts stay distinct: this is "could not be played" (bytes
-    // arrived), never "could not be loaded" (bytes never arrived).
+    // failure texts stay distinct: this is "could not be played" (the file
+    // was served), never "could not be loaded" (the URL never resolved).
     await $(testId('media-viewer-video-error')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the 32-byte stub decoded, or the decode-failure line never appeared',

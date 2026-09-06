@@ -14,7 +14,7 @@
   import { appUpdate } from './stores/appUpdate.svelte';
   import { installed, refresh as refreshInstalled } from './stores/installed.svelte';
   import { seedLastViewed } from './stores/lastViewed.svelte';
-  import { noteInput } from './stores/inputMode.svelte';
+  import { noteInput, notePointerAt } from './stores/inputMode.svelte';
   import { pushToast } from './stores/toasts.svelte';
   import { chipLabel, hostOf, initialView, VIEWS, viewForDigit, viewLabel, type View } from './shell';
   import type { NavDirection } from './focus/grid';
@@ -63,14 +63,18 @@
     view = next;
   }
 
-  /** A click anywhere outside the session cluster closes the server menu. */
-  /** Every pointer move puts the app back in pointer mode. `noteInput` is a
-   *  no-op when the kind is unchanged, so the common case (moving the mouse
-   *  while already in pointer mode) costs one comparison and wakes nobody. */
-  function onWindowPointerMove() {
-    noteInput('pointer');
+  /** A pointer move puts the app back in pointer mode only once the pointer
+   *  has actually MOVED: WebKit dispatches a synthetic `pointermove` at the
+   *  unchanged cursor position after any scroll, including the
+   *  `scrollIntoView` an arrow key triggers, and that must not take the
+   *  selection away from a keyboard user whose mouse merely rests on the
+   *  grid. The threshold and the anchor live in the store (`notePointerAt`),
+   *  which is where they can be tested. */
+  function onWindowPointerMove(e: PointerEvent) {
+    notePointerAt(e.clientX, e.clientY);
   }
 
+  /** A click anywhere outside the session cluster closes the server menu. */
   function onWindowPointerDown(e: MouseEvent) {
     noteInput('pointer');
     if (!serverMenuOpen) return;
