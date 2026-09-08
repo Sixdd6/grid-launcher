@@ -61,7 +61,7 @@ pub fn build_native_command(
     let name = archive_name(&row.rom_file_name, &row.title, &row.platform);
     let archives = candidate_archives(library, &row.platform, &row.archive_path, &name);
     let executable = install_dir(row, &archives)
-        .map(|dir| executable_candidates(&dir))
+        .map(|dir| executable_candidates(&dir, &row.title))
         .and_then(|candidates| resolved_executable(row, &candidates));
     let Some(executable) = executable else {
         return Err(

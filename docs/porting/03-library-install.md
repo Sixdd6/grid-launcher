@@ -1080,10 +1080,27 @@ existing candidate archive file, else nothing.
 
 Native executable candidates (install_paths.py:114): every regular file under the install
 directory whose suffix is `.exe .bat .cmd .ps1 .sh`
-(grid_launcher/emulator/launch.py:11), sorted by path-segment count then case-folded
-path. The resolved executable is the record's `native_executable_path` when it exists,
-is a file and is launchable; otherwise the first candidate
-(install_paths.py:130).
+(grid_launcher/emulator/launch.py:11). Python sorted these by path-segment count then
+case-folded path, which made `CrashReportClient.exe` the default over `Game.exe` at the
+same depth. The port deliberately ranks them (`specials/native.rs`
+`executable_candidates`), ascending on:
+
+1. junk: the normalized stem (lower-case alphanumerics) contains a crash-handler /
+   reporter / uninstaller / redistributable fragment (`crashhandler crashreport
+   crashsender crashpad crashuploader bugsplat bugreport bugtrap unins uninstall
+   vcredist dxsetup dxwebsetup directx dotnetfx ndp4 netfx oalinst physx easyanticheat
+   eacsetup battleye redist`), or any parent segment relative to the install directory
+   is one of `_commonredist commonredist _redist redist redists redistributables
+   prerequisites installers engine directx dotnet vcredist support`. Junk is demoted,
+   never dropped, so Game Settings can still pin it;
+2. path-segment count below the install directory (root first);
+3. title match, comparing normalized stem to normalized title: 0 equal, 1 one contains
+   the other (the shorter side at least 3 characters), 2 the stem contains a title word
+   of at least 3 characters, 3 otherwise;
+4. case-folded relative path.
+
+The resolved executable is the record's `native_executable_path` when it exists, is a
+file and is launchable; otherwise the first candidate (install_paths.py:130).
 
 ### 18. Firmware download and install
 

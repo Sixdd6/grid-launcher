@@ -254,20 +254,148 @@ pub fn install_dir(row: &InstalledGame, archive_candidates: &[PathBuf]) -> Optio
     None
 }
 
-/// Every launchable native file recursively under `install_dir`, sorted by
-/// (path component count, case-folded path). Matches
-/// `native_executable_candidates_for_game` (`install_paths.py:114`).
-pub fn executable_candidates(install_dir: &Path) -> Vec<PathBuf> {
+/// Fragments of a normalized file stem (lower-case alphanumerics only)
+/// that mark a launchable file as a crash handler or reporter, an
+/// uninstaller, or a redistributable installer — never the game itself.
+const JUNK_NAME_FRAGMENTS: &[&str] = &[
+    "crashhandler",
+    "crashreport",
+    "crashsender",
+    "crashpad",
+    "crashuploader",
+    "bugsplat",
+    "bugreport",
+    "bugtrap",
+    "unins",
+    "uninstall",
+    "vcredist",
+    "dxsetup",
+    "dxwebsetup",
+    "directx",
+    "dotnetfx",
+    "ndp4",
+    "netfx",
+    "oalinst",
+    "physx",
+    "easyanticheat",
+    "eacsetup",
+    "battleye",
+    "redist",
+];
+
+/// Directory names (case-folded, relative to the install directory) whose
+/// contents are engine tooling or bundled prerequisites rather than the
+/// game.
+const JUNK_DIRS: &[&str] = &[
+    "_commonredist",
+    "commonredist",
+    "_redist",
+    "redist",
+    "redists",
+    "redistributables",
+    "prerequisites",
+    "installers",
+    "engine",
+    "directx",
+    "dotnet",
+    "vcredist",
+    "support",
+];
+
+/// Shortest normalized string that counts as a meaningful title match:
+/// "go" inside "gothic" is noise, "hunt" inside "manhunt" is a signal.
+const MIN_MATCH_LEN: usize = 3;
+
+/// Every launchable native file recursively under `install_dir`, best
+/// default first. Ascending sort key:
+///
+/// 1. junk (crash handler / reporter / uninstaller / redistributable by
+///    name, or under a [`JUNK_DIRS`] directory) — never the default while
+///    anything else exists, but still listed so Game Settings can pin it;
+/// 2. path depth below `install_dir` — the game root beats subdirectories;
+/// 3. how well the file stem matches `title` ([`title_match_tier`]);
+/// 4. case-folded path, for a deterministic tie-break.
+///
+/// Deliberately diverges from `native_executable_candidates_for_game`
+/// (`install_paths.py:114`), which stopped at 2 and 4 and so picked
+/// `CrashReportClient.exe` over `Game.exe` at the same depth.
+pub fn executable_candidates(install_dir: &Path, title: &str) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     collect_files(install_dir, &mut candidates);
     candidates.retain(|path| is_launchable_native_file(path));
-    candidates.sort_by_key(|path| {
+    candidates.sort_by_cached_key(|path| {
+        let rel = path.strip_prefix(install_dir).unwrap_or(path);
+        let stem = rel
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
         (
-            path.components().count(),
-            path.to_string_lossy().to_lowercase(),
+            u8::from(is_junk(rel, &stem)),
+            rel.components().count(),
+            title_match_tier(&stem, title),
+            rel.to_string_lossy().to_lowercase(),
         )
     });
     candidates
+}
+
+/// Lower-cases `text` and drops every non-alphanumeric character, so
+/// "Dark Souls: III" and "darksoulsiii" compare equal.
+fn normalize(text: &str) -> String {
+    text.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// Whether a candidate at `rel` (relative to the install directory) with
+/// file stem `stem` is a crash handler, reporter, uninstaller or
+/// redistributable, by name or by directory.
+fn is_junk(rel: &Path, stem: &str) -> bool {
+    let name = normalize(stem);
+    if JUNK_NAME_FRAGMENTS.iter().any(|frag| name.contains(frag)) {
+        return true;
+    }
+    rel.parent()
+        .map(|parent| {
+            parent.components().any(|component| {
+                let segment = component.as_os_str().to_string_lossy().to_lowercase();
+                JUNK_DIRS.contains(&segment.as_str())
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// How closely `stem` names the game `title`, after [`normalize`]: `0`
+/// equal, `1` one contains the other (the shorter at least
+/// [`MIN_MATCH_LEN`] long), `2` the stem contains a title word of at least
+/// [`MIN_MATCH_LEN`] letters, `3` no relation or nothing to compare.
+fn title_match_tier(stem: &str, title: &str) -> u8 {
+    let s = normalize(stem);
+    let t = normalize(title);
+    if s.is_empty() || t.is_empty() {
+        return 3;
+    }
+    if s == t {
+        return 0;
+    }
+    let (short, long) = if s.len() <= t.len() {
+        (&s, &t)
+    } else {
+        (&t, &s)
+    };
+    if short.len() >= MIN_MATCH_LEN && long.contains(short.as_str()) {
+        return 1;
+    }
+    let shares_word = title
+        .split(|c: char| !c.is_alphanumeric())
+        .map(normalize)
+        .any(|word| word.len() >= MIN_MATCH_LEN && s.contains(&word));
+    if shares_word {
+        2
+    } else {
+        3
+    }
 }
 
 /// Recursively collects every regular file under `dir` into `out`.
@@ -626,36 +754,179 @@ mod tests {
 
     // -- executable_candidates ----------------------------------------------------
 
+    /// Creates each relative file under `dir` and returns the candidates
+    /// as paths relative to `dir`, for terse ordering assertions.
+    fn ranked(dir: &tempfile::TempDir, title: &str, files: &[&str]) -> Vec<String> {
+        for file in files {
+            let path = dir.path().join(file);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, b"x").unwrap();
+        }
+        executable_candidates(dir.path(), title)
+            .iter()
+            .map(|p| {
+                p.strip_prefix(dir.path())
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect()
+    }
+
     #[test]
     fn executable_candidates_orders_by_depth_then_casefold() {
         let dir = tempfile::tempdir().unwrap();
-        fs::create_dir_all(dir.path().join("a")).unwrap();
-        fs::create_dir_all(dir.path().join("b/c")).unwrap();
-        fs::write(dir.path().join("a/z.exe"), b"x").unwrap();
-        fs::write(dir.path().join("b/c/a.exe"), b"x").unwrap();
-
-        let candidates = executable_candidates(dir.path());
-        assert_eq!(
-            candidates,
-            vec![dir.path().join("a/z.exe"), dir.path().join("b/c/a.exe")]
-        );
+        let got = ranked(&dir, "", &["a/z.exe", "b/c/a.exe"]);
+        assert_eq!(got, vec!["a/z.exe", "b/c/a.exe"]);
     }
 
     #[test]
     fn executable_candidates_accepts_uppercase_suffix() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("Game.EXE"), b"x").unwrap();
-
-        let candidates = executable_candidates(dir.path());
-        assert_eq!(candidates, vec![dir.path().join("Game.EXE")]);
+        let got = ranked(&dir, "", &["Game.EXE"]);
+        assert_eq!(got, vec!["Game.EXE"]);
     }
 
     #[test]
     fn executable_candidates_ignores_non_launchable_extensions() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("readme.txt"), b"x").unwrap();
+        assert!(ranked(&dir, "", &["readme.txt"]).is_empty());
+    }
 
-        assert!(executable_candidates(dir.path()).is_empty());
+    // -- executable_candidates: junk demotion -----------------------------------
+
+    #[test]
+    fn crash_reporter_sorts_below_the_alphabetically_later_game_exe() {
+        let dir = tempfile::tempdir().unwrap();
+        let got = ranked(&dir, "", &["CrashReportClient.exe", "Zeta.exe"]);
+        assert_eq!(got, vec!["Zeta.exe", "CrashReportClient.exe"]);
+    }
+
+    #[test]
+    fn crash_handler_at_root_sorts_below_a_nested_game_exe() {
+        let dir = tempfile::tempdir().unwrap();
+        let got = ranked(
+            &dir,
+            "",
+            &["UnityCrashHandler64.exe", "Game_Data/Plugins/Game.exe"],
+        );
+        assert_eq!(
+            got,
+            vec!["Game_Data/Plugins/Game.exe", "UnityCrashHandler64.exe"]
+        );
+    }
+
+    #[test]
+    fn uninstaller_and_redist_installers_sort_last() {
+        let dir = tempfile::tempdir().unwrap();
+        let got = ranked(
+            &dir,
+            "",
+            &[
+                "unins000.exe",
+                "vc_redist.x64.exe",
+                "dxwebsetup.exe",
+                "Play.exe",
+            ],
+        );
+        assert_eq!(got[0], "Play.exe");
+        assert_eq!(got.len(), 4);
+    }
+
+    #[test]
+    fn files_under_redist_or_engine_dirs_sort_last() {
+        let dir = tempfile::tempdir().unwrap();
+        let got = ranked(
+            &dir,
+            "",
+            &[
+                "_CommonRedist/Tool.exe",
+                "Engine/Extras/Tool.exe",
+                "Game/Binaries/Win64/Game-Win64-Shipping.exe",
+            ],
+        );
+        assert_eq!(got[0], "Game/Binaries/Win64/Game-Win64-Shipping.exe");
+    }
+
+    #[test]
+    fn junk_is_still_listed_when_it_is_all_there_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let got = ranked(&dir, "", &["CrashHandler.exe"]);
+        assert_eq!(got, vec!["CrashHandler.exe"]);
+    }
+
+    // -- executable_candidates: title match ------------------------------------
+
+    #[test]
+    fn root_exe_beats_a_nested_title_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let got = ranked(
+            &dir,
+            "Hollow Knight",
+            &["Launcher.exe", "bin/HollowKnight.exe"],
+        );
+        assert_eq!(got, vec!["Launcher.exe", "bin/HollowKnight.exe"]);
+    }
+
+    #[test]
+    fn exact_title_match_beats_alphabetical_order_at_same_depth() {
+        let dir = tempfile::tempdir().unwrap();
+        let got = ranked(&dir, "Hollow Knight", &["Alpha.exe", "HollowKnight.exe"]);
+        assert_eq!(got, vec!["HollowKnight.exe", "Alpha.exe"]);
+    }
+
+    #[test]
+    fn title_match_ignores_case_and_punctuation() {
+        let dir = tempfile::tempdir().unwrap();
+        let got = ranked(&dir, "Dark Souls: III", &["Alpha.exe", "darksoulsiii.exe"]);
+        assert_eq!(got, vec!["darksoulsiii.exe", "Alpha.exe"]);
+    }
+
+    #[test]
+    fn containment_match_beats_no_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let got = ranked(&dir, "Celeste", &["Alpha.exe", "Celeste64.exe"]);
+        assert_eq!(got, vec!["Celeste64.exe", "Alpha.exe"]);
+    }
+
+    #[test]
+    fn shared_title_word_beats_no_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let got = ranked(
+            &dir,
+            "The Witcher 3: Wild Hunt",
+            &["bin/x64/aaa.exe", "bin/x64/witcher3.exe"],
+        );
+        assert_eq!(got, vec!["bin/x64/witcher3.exe", "bin/x64/aaa.exe"]);
+    }
+
+    #[test]
+    fn exact_match_beats_containment_beats_shared_word() {
+        let dir = tempfile::tempdir().unwrap();
+        let got = ranked(
+            &dir,
+            "Hollow Knight",
+            &[
+                "knight_tools.exe",
+                "HollowKnightLauncher.exe",
+                "hollowknight.exe",
+            ],
+        );
+        assert_eq!(
+            got,
+            vec![
+                "hollowknight.exe",
+                "HollowKnightLauncher.exe",
+                "knight_tools.exe"
+            ]
+        );
+    }
+
+    #[test]
+    fn short_title_words_do_not_count_as_shared() {
+        let dir = tempfile::tempdir().unwrap();
+        let got = ranked(&dir, "Go 3D", &["Alpha.exe", "go.exe"]);
+        assert_eq!(got, vec!["Alpha.exe", "go.exe"]);
     }
 
     // -- resolved_executable ----------------------------------------------------

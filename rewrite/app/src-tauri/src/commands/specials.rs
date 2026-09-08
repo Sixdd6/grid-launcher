@@ -117,7 +117,8 @@ pub struct NativeGameSettings {
     /// (`grid_launcher/ui/dialogs.py:211-214`).
     pub install_dir: String,
     /// Every launchable file under the install directory, as full paths, in
-    /// `native::executable_candidates` order (shallowest first).
+    /// `native::executable_candidates` order (best default first: junk
+    /// last, then shallowest, then closest title match).
     pub candidates: Vec<String>,
 }
 
@@ -146,7 +147,7 @@ pub async fn native_game_settings(
         };
         let dir = native::install_dir(&row, &archives);
         let candidates = match dir.as_ref() {
-            Some(dir) => native::executable_candidates(dir),
+            Some(dir) => native::executable_candidates(dir, &row.title),
             None => Vec::new(),
         };
         let executable = native::resolved_executable(&row, &candidates)
