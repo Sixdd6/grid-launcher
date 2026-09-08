@@ -38,7 +38,7 @@ use grid_core::cloud::native::{
 };
 use grid_core::cloud::ops::native::manual_paths_key;
 use grid_core::cloud::ops::{self, CloudCaches, CloudContext, CloudMessage};
-use grid_core::cloud::scope::SaveScope;
+use grid_core::cloud::scope::{is_native_executable_platform, SaveScope};
 use grid_core::cloud::state::{
     apply_sync_update, auto_cloud_upload_plan, game_key, games_match_identity,
     summarize_auto_cloud_upload_result, sync_entry_for, PerTypeResult, SyncStateUpdate,
@@ -169,8 +169,8 @@ fn lock_tolerant<T>(mutex: &StdMutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// [`CloudCaches`] owns (behind a `tokio` mutex so an `ops` call's
 /// internal `.await`s can hold it without blocking a whole OS thread —
 /// see [`Self::caches`]), the D5 [`AutoUploadPool`], and Task 18's
-/// PCGamingWiki client + per-title path cache (see [`Self::native_save_paths`]
-/// / [`Self::cached_pcgw_paths`]).
+/// PCGamingWiki client (see [`Self::ensure_pcgw_paths`], which persists
+/// each lookup into `Config::native_pcgw_save_paths`).
 pub struct CloudService {
     caches: AsyncMutex<CloudCaches>,
     pool: AutoUploadPool,
@@ -178,57 +178,110 @@ pub struct CloudService {
     /// the RomM token must never reach PCGamingWiki); built once by
     /// `grid_core::pcgw::build_http_client`.
     pcgw_client: reqwest::Client,
-    /// `title.trim() -> Vec<String>` for the process lifetime, matching
-    /// Python's `_pcgw_paths_cache` (`details_view_mixin.py`'s
-    /// `_pcgw_cache_key`, `:152-153`).
-    pcgw_cache: StdMutex<HashMap<String, Vec<String>>>,
+    /// The PCGamingWiki API base URL; the real host in production, a
+    /// `wiremock` server under test.
+    pcgw_base: String,
 }
 
 impl CloudService {
     pub fn new() -> Arc<Self> {
+        Self::with_pcgw_base(grid_core::pcgw::PCGW_API_BASE.to_string())
+    }
+
+    /// [`Self::new`] with the PCGamingWiki API pointed at `base`.
+    pub(crate) fn with_pcgw_base(base: String) -> Arc<Self> {
         Arc::new(Self {
             caches: AsyncMutex::new(CloudCaches::default()),
             pool: AutoUploadPool::new(MAX_CONCURRENT_AUTO_UPLOADS),
             pcgw_client: grid_core::pcgw::build_http_client(),
-            pcgw_cache: StdMutex::new(HashMap::new()),
+            pcgw_base: base,
         })
     }
 
-    // -- PCGamingWiki save-location cache (Task 18) ----------------------
+    // -- PCGamingWiki save locations (Task 18, persisted 2026-09-08) -----
 
-    /// `_pcgw_cache_key` + `_pcgw_paths_for_game` + `_start_pcgw_lookup_for_game`
-    /// (`details_view_mixin.py:152-182`): the ONLY place that ever triggers
-    /// a PCGamingWiki network fetch. A cache hit returns immediately; a
-    /// miss fetches, caches the result (success OR failure — a failure
-    /// caches an empty list, matching `_on_pcgw_paths_loaded` storing
-    /// `bundle.get("paths", [])`, which is `[]` on the worker's caught
-    /// exception path), and returns it. Called only from
-    /// [`Self::native_save_paths`] — the command behind the native-save
-    /// panel, matching `_refresh_native_save_panel`'s the only call site of
-    /// `_start_pcgw_lookup_for_game` (`:1166`).
-    async fn pcgw_paths_for_title(&self, title: &str) -> Vec<String> {
-        let key = title.trim().to_string();
-        if let Some(cached) = self.pcgw_cache.lock().unwrap().get(&key).cloned() {
-            return cached;
+    /// The native game's PCGamingWiki save locations, looked up once and
+    /// then served from `Config::native_pcgw_save_paths`. Replaces the
+    /// reference's in-memory `_pcgw_paths_cache` (`details_view_mixin.py:
+    /// 152-182`), which only the save panel ever filled, so the automatic
+    /// sync paths saw nothing until that panel was opened.
+    ///
+    /// - Not a native (Windows) platform: `[]`, no request — the wiki
+    ///   list is meaningless for an emulator game.
+    /// - Config already has an entry (even an empty one): that entry.
+    /// - Otherwise fetch; on success persist and return it; on failure
+    ///   return `[]` and persist nothing, so the next caller retries.
+    ///
+    /// Called from the install-finalized hook ([`Self::spawn_pcgw_lookup`]),
+    /// the save panel, auto-restore before launch and auto-upload after
+    /// exit — the latter two so a game installed before the lookup was
+    /// wired in still gets its directories on first play.
+    pub(crate) async fn ensure_pcgw_paths(
+        &self,
+        config_path: &Path,
+        game: &CloudGame,
+    ) -> Vec<String> {
+        if !is_native_executable_platform(&game.platform) {
+            return Vec::new();
         }
-        let fetched = grid_core::pcgw::fetch_windows_save_paths(&self.pcgw_client, &key)
-            .await
-            .unwrap_or_default();
-        self.pcgw_cache.lock().unwrap().insert(key, fetched.clone());
+        let key = manual_paths_key(game);
+        if let Ok(config) = blocking_load_config(config_path.to_path_buf()).await {
+            if let Some(paths) = config.native_pcgw_save_paths.get(&key) {
+                return paths.clone();
+            }
+        }
+        let fetched = match grid_core::pcgw::fetch_windows_save_paths_with_base(
+            &self.pcgw_client,
+            &self.pcgw_base,
+            game.title.trim(),
+        )
+        .await
+        {
+            Ok(paths) => paths,
+            Err(e) => {
+                tracing::debug!("pcgw lookup for {:?} failed: {e}", game.title);
+                return Vec::new();
+            }
+        };
+        let config_path = config_path.to_path_buf();
+        let to_store = fetched.clone();
+        let saved = tokio::task::spawn_blocking(move || {
+            modify_config(&config_path, |config| {
+                config.native_pcgw_save_paths.insert(key, to_store);
+                Ok(())
+            })
+        })
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r);
+        match saved {
+            Ok(()) => self.caches.lock().await.clear(),
+            Err(e) => tracing::debug!("pcgw paths for {:?} not saved: {e}", game.title),
+        }
         fetched
     }
 
+    /// Runs [`Self::ensure_pcgw_paths`] in the background for a freshly
+    /// finalized install. Hung off `InstallService::set_game_finalized_hook`
+    /// in `lib.rs`; a no-op for non-native platforms.
+    pub fn spawn_pcgw_lookup(self: &Arc<Self>, config_path: PathBuf, record: InstalledGame) {
+        let game = cloud_game_from_installed(&record);
+        if !is_native_executable_platform(&game.platform) {
+            return;
+        }
+        let cloud = self.clone();
+        tauri::async_runtime::spawn(async move {
+            cloud.ensure_pcgw_paths(&config_path, &game).await;
+        });
+    }
+
     /// `_pcgw_paths_for_game(game) or []` (`cloud_mixin.py:2136`, `:2687`):
-    /// a CACHE-ONLY read — never triggers a fetch. Every `ops` call site
-    /// that builds a `CloudContext` (panel info, records, upload, restore,
-    /// the auto-restore/auto-upload triggers) reads through here, exactly
-    /// like Python's upload/restore helpers read `self._pcgw_paths_cache`
-    /// directly rather than kicking off their own worker.
-    fn cached_pcgw_paths(&self, title: &str) -> Vec<String> {
-        self.pcgw_cache
-            .lock()
-            .unwrap()
-            .get(title.trim())
+    /// a read of the persisted lookup result — never a fetch. The `ops`
+    /// call sites that already hold a loaded `Config` read through here.
+    fn persisted_pcgw_paths(config: &Config, game: &CloudGame) -> Vec<String> {
+        config
+            .native_pcgw_save_paths
+            .get(&manual_paths_key(game))
             .cloned()
             .unwrap_or_default()
     }
@@ -277,7 +330,7 @@ impl CloudService {
             .all_games
             .iter()
             .any(|g| games_match_identity(g, &cloud_game));
-        let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
+        let pcgw_paths = Self::persisted_pcgw_paths(&inputs.config, &cloud_game);
         let wine_prefix = inputs.wine_prefix_for(&cloud_game);
         let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
         let mut caches = self.caches.lock().await;
@@ -305,7 +358,7 @@ impl CloudService {
         let client = session.client().ok_or("not connected")?;
         let inputs = Self::load_inputs(config_path, install, launch).await?;
         let cloud_game = cloud_game_from_input(&game);
-        let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
+        let pcgw_paths = Self::persisted_pcgw_paths(&inputs.config, &cloud_game);
         let wine_prefix = inputs.wine_prefix_for(&cloud_game);
         let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
         let mut caches = self.caches.lock().await;
@@ -353,7 +406,7 @@ impl CloudService {
                 messages: Vec::new(),
             });
         }
-        let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
+        let pcgw_paths = Self::persisted_pcgw_paths(&inputs.config, &cloud_game);
         let wine_prefix = inputs.wine_prefix_for(&cloud_game);
         let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
         let mut caches = self.caches.lock().await;
@@ -393,7 +446,7 @@ impl CloudService {
         let client = session.client().ok_or("not connected")?;
         let inputs = Self::load_inputs(config_path, install, launch).await?;
         let cloud_game = cloud_game_from_input(&game);
-        let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
+        let pcgw_paths = Self::persisted_pcgw_paths(&inputs.config, &cloud_game);
         let wine_prefix = inputs.wine_prefix_for(&cloud_game);
         let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
         let mut caches = self.caches.lock().await;
@@ -484,11 +537,10 @@ impl CloudService {
             .get(&key)
             .cloned()
             .unwrap_or_default();
-        // The only call site that ever fetches: see `pcgw_paths_for_title`'s
-        // doc comment. A fetch failure degrades to an empty list here (via
-        // that method's own `unwrap_or_default`) — never an error, so the
-        // panel still allows manual paths.
-        let pcgw = self.pcgw_paths_for_title(&cloud_game.title).await;
+        // A fetch failure degrades to an empty list (see
+        // `ensure_pcgw_paths`) — never an error, so the panel still allows
+        // manual paths.
+        let pcgw = self.ensure_pcgw_paths(config_path, &cloud_game).await;
         let (visible_pcgw, visible_manual) = visible_native_paths(&pcgw, &manual, &removed);
 
         // The row tooltips must state the directory this host would really
@@ -647,7 +699,10 @@ impl CloudService {
 
         let cloud_game = cloud_game_from_installed(installed_game);
         let skip_if_local_newer = inputs.config.auto_cloud_save_skip_download_if_local_newer;
-        let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
+        // Fallback lookup for games installed before the install-time
+        // hook existed (or whose lookup failed then): persisted answers
+        // return without a request.
+        let pcgw_paths = self.ensure_pcgw_paths(config_path, &cloud_game).await;
         let wine_prefix = inputs.wine_prefix_for(&cloud_game);
         let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
         let mut caches = self.caches.lock().await;
@@ -728,7 +783,7 @@ impl CloudService {
             }
         };
         let cloud_game = cloud_game_from_installed(installed_game);
-        let pcgw_paths = self.cached_pcgw_paths(&cloud_game.title);
+        let pcgw_paths = Self::persisted_pcgw_paths(&inputs.config, &cloud_game);
         let wine_prefix = inputs.wine_prefix_for(&cloud_game);
         let ctx = inputs.context(&pcgw_paths, wine_prefix.as_deref());
         let mut caches = self.caches.lock().await;
@@ -952,7 +1007,7 @@ impl CloudService {
         wine_prefix: Option<PathBuf>,
     ) -> Vec<CloudMessage> {
         let now = unix_now_f64();
-        let pcgw_paths = self.cached_pcgw_paths(&game.title);
+        let pcgw_paths = self.ensure_pcgw_paths(&config_path, &game).await;
         let ctx = CloudContext {
             config: &config,
             profiles: load_profiles(),
@@ -1084,7 +1139,7 @@ impl Inputs {
         wine_prefix_from(&self.installed, game)
     }
 
-    /// `pcgw_paths` is threaded in by the caller (Task 18: [`CloudService::cached_pcgw_paths`],
+    /// `pcgw_paths` is threaded in by the caller (Task 18: [`CloudService::persisted_pcgw_paths`],
     /// a cache-only read keyed on the specific game's title — `Inputs`
     /// itself is built once per command with no single game in view, so it
     /// cannot resolve this on its own). `wine_prefix` is threaded in the
@@ -1649,6 +1704,106 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use wiremock::matchers::{method, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn windows_game(title: &str) -> CloudGame {
+        CloudGame {
+            title: title.to_string(),
+            platform: "Windows".to_string(),
+            rom_id: "1".to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// Mounts the two-step page-id -> wikitext flow for `title`, each
+    /// step allowed exactly once, so a second lookup that hits the network
+    /// fails the test when the server verifies on drop.
+    async fn mount_pcgw_once(server: &MockServer, title: &str) {
+        Mock::given(method("GET"))
+            .and(query_param("action", "query"))
+            .and(query_param("titles", title))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "batchcomplete": "",
+                "query": {"pages": {"12345": {"pageid": 12345, "ns": 0, "title": title}}}
+            })))
+            .expect(1)
+            .mount(server)
+            .await;
+        Mock::given(method("GET"))
+            .and(query_param("action", "parse"))
+            .and(query_param("pageid", "12345"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "parse": {"wikitext": {"*": "{{Game data/saves|Windows|{{p|appdata}}\\MyGame\\saves}}"}}
+            })))
+            .expect(1)
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn ensure_pcgw_paths_persists_a_lookup_and_serves_it_from_config_afterwards() {
+        let server = MockServer::start().await;
+        mount_pcgw_once(&server, "My Game").await;
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let cloud = CloudService::with_pcgw_base(server.uri());
+        let game = windows_game("My Game");
+
+        let first = cloud.ensure_pcgw_paths(&config_path, &game).await;
+        assert_eq!(first, vec!["%APPDATA%\\MyGame\\saves".to_string()]);
+        let saved = Config::load(&config_path).unwrap();
+        assert_eq!(
+            saved.native_pcgw_save_paths.get(&manual_paths_key(&game)),
+            Some(&first)
+        );
+
+        // Second call: answered from config; the `.expect(1)` mocks fail
+        // the test on drop if this reached the server again.
+        let second = cloud.ensure_pcgw_paths(&config_path, &game).await;
+        assert_eq!(second, first);
+    }
+
+    #[tokio::test]
+    async fn ensure_pcgw_paths_leaves_config_untouched_when_the_lookup_fails() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let cloud = CloudService::with_pcgw_base(server.uri());
+        let game = windows_game("My Game");
+
+        let paths = cloud.ensure_pcgw_paths(&config_path, &game).await;
+        assert!(paths.is_empty());
+        let saved = Config::load(&config_path).unwrap_or_default();
+        assert!(saved.native_pcgw_save_paths.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ensure_pcgw_paths_never_looks_up_an_emulator_game() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        let cloud = CloudService::with_pcgw_base(server.uri());
+        let game = CloudGame {
+            title: "Metroid".to_string(),
+            platform: "NES".to_string(),
+            ..Default::default()
+        };
+
+        assert!(cloud
+            .ensure_pcgw_paths(&config_path, &game)
+            .await
+            .is_empty());
+    }
 
     #[test]
     fn format_size_matches_python_thresholds_and_precision() {

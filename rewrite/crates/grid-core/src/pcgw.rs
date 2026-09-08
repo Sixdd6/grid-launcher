@@ -33,7 +33,7 @@ use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use regex::Regex;
 use serde_json::Value;
 
-const PCGW_API_BASE: &str = "https://www.pcgamingwiki.com/w/api.php";
+pub const PCGW_API_BASE: &str = "https://www.pcgamingwiki.com/w/api.php";
 
 /// `Request(url, headers={"User-Agent": ...})` (pcgamingwiki.py:137).
 const USER_AGENT: &str = "grid-launcher/1.0 (pcgamingwiki-client)";
@@ -474,7 +474,7 @@ pub async fn fetch_windows_save_paths(
 
 /// [`fetch_windows_save_paths`] with an overridable API base, so tests can
 /// point it at a `wiremock` server instead of the real PCGamingWiki host.
-async fn fetch_windows_save_paths_with_base(
+pub async fn fetch_windows_save_paths_with_base(
     http: &reqwest::Client,
     base: &str,
     title: &str,

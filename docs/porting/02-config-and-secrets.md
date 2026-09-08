@@ -151,6 +151,7 @@ The defaults object is the schema: only keys present in it survive a load (grid-
 | `auto_cloud_save_skip_download_if_local_newer` | bool | `true` | Skip download when the local save is newer (grid-launcher.py:2217-2218). |
 | `auto_cloud_save_upload_delay_seconds` | int | `3` | Delay before the post-exit upload; clamped to `[0, 60]` on read; string values are parsed as integers, booleans are rejected (grid-launcher.py:2198-2209, grid-launcher.py:2220-2221). |
 | `cloud_sync_state` | object | `{}` | Sync bookkeeping keyed by game — see "Cloud sync state entry". |
+| `native_pcgw_save_paths` | object | `{}` | Rust port only: PCGamingWiki save locations per native game, keyed like `native_manual_save_paths`, written by the install-time lookup (doc 06 D15). |
 | `retroachievements_username` | string | `""` | RetroAchievements account name. |
 | `retroachievements_api_key` | string | `""` | RetroAchievements API key, in memory only; always blanked on write (grid_launcher/core/config.py:257). |
 | `retroachievements_token` | string | `""` | RetroAchievements session token, in memory only; always blanked on write (grid_launcher/core/config.py:256). |

@@ -212,6 +212,22 @@ pub struct Config {
     /// never permanent.
     #[serde(default)]
     pub native_removed_save_paths: BTreeMap<String, Vec<String>>,
+    /// PCGamingWiki-discovered save locations per native game, keyed
+    /// exactly like `native_manual_save_paths`. Written by the app's
+    /// `CloudService::ensure_pcgw_paths` after a successful lookup (an
+    /// empty result is stored too — it records that the wiki was asked),
+    /// and read by every cloud path that needs a native game's save
+    /// directories: the panel, upload, restore, auto-restore on launch and
+    /// auto-upload on exit.
+    ///
+    /// Deliberate improvement over the reference, whose lookup result lived
+    /// only in the details view's in-memory `_pcgw_paths_cache`, so the
+    /// automatic sync paths saw no directories until the user opened the
+    /// save panel once per session (user ruling 2026-09-08: install and
+    /// play must be enough). A failed lookup writes nothing, so it is
+    /// retried at the next opportunity.
+    #[serde(default)]
+    pub native_pcgw_save_paths: BTreeMap<String, Vec<String>>,
     /// The compat tool (by name) offered as the default for Windows-only
     /// content on Linux/macOS, e.g. `"GE-Proton"`. Blank when unset.
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -263,6 +279,7 @@ impl Default for Config {
             cloud_sync_state: toml::value::Table::new(),
             native_manual_save_paths: BTreeMap::new(),
             native_removed_save_paths: BTreeMap::new(),
+            native_pcgw_save_paths: BTreeMap::new(),
             default_compat_tool: String::new(),
             compat_tool_installs: Vec::new(),
             ui: UiSettings::default(),
@@ -687,6 +704,36 @@ mod tests {
             loaded.native_removed_save_paths.get("my game|windows"),
             Some(&vec!["%APPDATA%\\MyGame\\saves".to_string()])
         );
+    }
+
+    #[test]
+    fn native_pcgw_save_paths_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut pcgw = BTreeMap::new();
+        pcgw.insert(
+            "My Game__manual".to_string(),
+            vec!["%APPDATA%\\MyGame\\saves".to_string()],
+        );
+        let cfg = Config {
+            native_pcgw_save_paths: pcgw,
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(
+            loaded.native_pcgw_save_paths.get("My Game__manual"),
+            Some(&vec!["%APPDATA%\\MyGame\\saves".to_string()])
+        );
+    }
+
+    #[test]
+    fn native_pcgw_save_paths_defaults_to_empty_for_an_older_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "schema_version = 1\n").unwrap();
+        let cfg = Config::load(&path).unwrap();
+        assert!(cfg.native_pcgw_save_paths.is_empty());
     }
 
     #[test]

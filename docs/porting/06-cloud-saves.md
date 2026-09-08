@@ -790,6 +790,9 @@ as the label's tooltip, and a trash-can remove button (accessible name "Remove",
 "Remove this path") that calls `_pcgw_remove_path_for_game` and refreshes the panel
 (:1096-1126).
 
+In the rewrite the PCGamingWiki list is the persisted `native_pcgw_save_paths` entry,
+filled at install time (D15); the panel only triggers a fetch when no entry exists yet.
+
 `_refresh_native_save_panel` (:1143-1185) picks the status line, empty label and upload-button
 tooltip from the row count and the ROM id: no rows → status "No save locations found on
 PCGamingWiki.", upload disabled, tooltip "Add a save location to enable uploads."; rows present
@@ -1550,6 +1553,23 @@ review.
     `statePanelInfo?.block_reason` before that generic default, so a native game that
     is not yet installed (the one case where neither toggle renders) shows this exact
     sentence instead.
+
+15. **D15 — the PCGamingWiki lookup runs at install time and its result is persisted.**
+    Python fetched a native game's save locations only from the save panel
+    (`_start_pcgw_lookup_for_game`, `details_view_mixin.py:1166`) into the in-memory
+    `_pcgw_paths_cache`, which the auto-restore and auto-upload paths then read. Until
+    the panel was opened once per session those paths saw no directories, so "install
+    and play" silently synced nothing. The rewrite stores the lookup result in
+    `Config::native_pcgw_save_paths` (keyed like `native_manual_save_paths`) through
+    `CloudService::ensure_pcgw_paths` (`app/src-tauri/src/cloud_service.rs`), which
+    returns the stored entry when one exists (an empty successful lookup is stored too),
+    fetches and stores otherwise, and stores nothing on a failed fetch so the next caller
+    retries. It runs from the game-finalized install hook (`lib.rs`) for native platforms,
+    from the save panel, and as a fallback from auto-restore before launch and auto-upload
+    after exit, so a game installed before this existed still gets its directories on
+    first play. Every other cloud read (panel info, records, upload, restore, session
+    stamp) reads the stored entry. Removed rows keep applying through
+    `native_removed_save_paths` on every read (D12). User ruling 2026-09-08.
 
 ### Follow-the-code rulings (ported as-is)
 

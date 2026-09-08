@@ -221,7 +221,12 @@ pub fn run() {
                 let install_for_game = install.clone();
                 let updates = state.updates.clone();
                 let handle = app.handle().clone();
+                let cloud_for_game = state.cloud.clone();
                 install.set_game_finalized_hook(Arc::new(move |record| {
+                    // Native games: look up PCGamingWiki save locations now,
+                    // so auto-restore/auto-upload work from the first play
+                    // without the save panel ever being opened.
+                    cloud_for_game.spawn_pcgw_lookup(Config::default_path(), record.clone());
                     firmware.spawn_for_game(
                         handle.clone(),
                         session.clone(),
