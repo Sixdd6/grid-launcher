@@ -8,6 +8,7 @@ import {
   deleteConfirmText,
   isNativeExecutablePlatform,
   isNativeLaunchPlatform,
+  latestRecordText,
   recordsStatusLine,
   restoreConfirmText,
   sharedScopeWarning,
@@ -330,5 +331,20 @@ describe('recordsStatusLine', () => {
   it('says nothing when there are no records', () => {
     expect(recordsStatusLine(0, 'save')).toBe('');
     expect(recordsStatusLine(-1, 'state')).toBe('');
+  });
+});
+
+describe('latestRecordText', () => {
+  it('names the kind in the heading, loading, and empty copy', () => {
+    expect(latestRecordText('save')).toEqual({
+      heading: 'Latest cloud save',
+      loading: 'Checking cloud saves…',
+      empty: 'No cloud saves yet.',
+    });
+    expect(latestRecordText('state')).toEqual({
+      heading: 'Latest cloud state',
+      loading: 'Checking cloud states…',
+      empty: 'No cloud states yet.',
+    });
   });
 });

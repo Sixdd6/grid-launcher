@@ -718,7 +718,6 @@
               {cloudMode}
               infoError={cloudPanelInfoError}
               onToggle={handleCloudToggle}
-              onBack={() => (cloudMode = 'overview')}
             />
           {:else}
             <FilesTab

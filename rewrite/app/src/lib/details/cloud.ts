@@ -78,6 +78,20 @@ export function recordsStatusLine(count: number, saveType: SaveType): string {
   return `Showing ${count} cloud ${saveType === 'save' ? 'saves' : 'states'}.`;
 }
 
+/**
+ * Copy for the Saves tab's overview card that shows the newest cloud
+ * record of one kind (user ruling 2026-09-08: the tab was blank until
+ * "Manage Saves" was clicked). No Python counterpart.
+ */
+export function latestRecordText(saveType: SaveType): { heading: string; loading: string; empty: string } {
+  const kind = saveType === 'save' ? 'save' : 'state';
+  return {
+    heading: `Latest cloud ${kind}`,
+    loading: `Checking cloud ${kind}s…`,
+    empty: `No cloud ${kind}s yet.`,
+  };
+}
+
 /** `_details_cloud_uploaded_text` composed into its row line (:738-739). */
 export function uploadedLine(record: CloudRecord): string {
   return `Uploaded ${record.absolute_time} (${record.relative_time})`;

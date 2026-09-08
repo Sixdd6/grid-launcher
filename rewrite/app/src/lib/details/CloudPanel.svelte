@@ -36,14 +36,12 @@
     saveType,
     panelInfo,
     isNative,
-    onBack,
   }: {
     game: InstalledGame;
     gameTitle: string;
     saveType: SaveType;
     panelInfo: CloudPanelInfo;
     isNative: boolean;
-    onBack: () => void;
   } = $props();
 
   // Native saves bypass the emulator-resolution block reason entirely
@@ -265,14 +263,10 @@
 </script>
 
 <div data-testid="cloud-panel" class="cloud-panel">
+  <!-- No Back button: the toggle that opened this panel closes it again
+       (`toggleCloudMode`), so a second control for the same action only
+       took space (user ruling 2026-09-08). -->
   <div class="cloud-header">
-    <!-- No `aria-label`: it duplicated the visible word and overrode it, so
-         voice control ("click Back") did not match the button. The icon is
-         `aria-hidden`, so the visible text is the accessible name. -->
-    <button data-testid="cloud-back" class="back" onclick={onBack}>
-      <Icon name="arrowLeft" size={16} />
-      Back
-    </button>
     <h3>{panelLabel}</h3>
   </div>
 
@@ -450,19 +444,6 @@
     margin: 0;
     font-size: 16px;
     color: var(--text-h);
-  }
-
-  .back {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font: inherit;
-    padding: 4px 8px;
-    border-radius: var(--r-chip);
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
   }
 
   button.upload {
