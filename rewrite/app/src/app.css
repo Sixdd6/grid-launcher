@@ -166,7 +166,9 @@ h1 {
 }
 
 /* Anything that carries its own fill opts out — the halo is for text on the
-   art, and inside a filled control it would only bloom the label. */
+   art, and inside a filled control it would only bloom the label. The rail
+   (RailPane.svelte) is an opaque panel, so it opts out as a whole. */
+.over-art .rail,
 .over-art input,
 .over-art select,
 .over-art textarea,

@@ -57,7 +57,10 @@
 </nav>
 
 <style>
-  /* Design §5: the rail is 220px. */
+  /* Design §5: the rail is 220px. It is filled with the same opaque panel
+     as the top bar (Shell.svelte) so its labels read against a flat surface
+     instead of the background art; the `.over-art` halo is switched off
+     inside it in app.css for the same reason. */
   .rail {
     flex: 0 0 220px;
     display: flex;
@@ -65,6 +68,7 @@
     gap: 2px;
     padding: 16px 8px;
     box-sizing: border-box;
+    background: var(--surface-2);
     border-right: 1px solid var(--border);
     overflow-y: auto;
   }
