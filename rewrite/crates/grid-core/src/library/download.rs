@@ -196,3 +196,129 @@ fn existing_matching_size(target: &FileTarget) -> Option<u64> {
     let expected = target.expected_size as u64;
     (meta.len() == expected).then_some(expected)
 }
+
+#[cfg(test)]
+pub(crate) mod slow_server {
+    //! A single-connection HTTP/1.1 server that paces its response body,
+    //! for exercising read (inactivity) timeouts against a real socket.
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::Duration;
+
+    /// Serves one 200 response whose body arrives as `chunks` writes,
+    /// sleeping `gaps[i]` before write `i`. Returns the base URL.
+    pub(crate) fn serve(chunks: Vec<Vec<u8>>, gaps: Vec<Duration>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(sock.try_clone().unwrap());
+            let mut line = String::new();
+            while reader.read_line(&mut line).unwrap() > 0 && line != "\r\n" {
+                line.clear();
+            }
+            let total: usize = chunks.iter().map(Vec::len).sum();
+            let head =
+                format!("HTTP/1.1 200 OK\r\nContent-Length: {total}\r\nConnection: close\r\n\r\n");
+            sock.write_all(head.as_bytes()).unwrap();
+            for (chunk, gap) in chunks.iter().zip(gaps) {
+                thread::sleep(gap);
+                if sock.write_all(chunk).is_err() {
+                    return;
+                }
+                sock.flush().ok();
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    /// `n` 1 KiB chunks, each preceded by `gap`.
+    pub(crate) fn steady(n: usize, gap: Duration) -> (Vec<Vec<u8>>, Vec<Duration>) {
+        ((0..n).map(|_| vec![7u8; 1024]).collect(), vec![gap; n])
+    }
+
+    /// Two 1 KiB chunks with a `stall` before the second.
+    pub(crate) fn stalled(stall: Duration) -> (Vec<Vec<u8>>, Vec<Duration>) {
+        (
+            vec![vec![7u8; 1024], vec![7u8; 1024]],
+            vec![Duration::ZERO, stall],
+        )
+    }
+}
+
+#[cfg(test)]
+mod read_timeout_tests {
+    use super::slow_server;
+    use super::*;
+    use crate::secrets::Credential;
+    use secrecy::SecretString;
+
+    fn client(base: &str, read_timeout: Duration) -> RommClient {
+        RommClient::with_read_timeout(
+            base,
+            Credential::Token(SecretString::from("FAKE-TEST-TOKEN-not-real")),
+            read_timeout,
+        )
+        .unwrap()
+    }
+
+    fn target(dir: &tempfile::TempDir, size: i64) -> FileTarget {
+        FileTarget {
+            url_path: "/api/roms/1/content/rom.bin".into(),
+            query: vec![],
+            dest: dir.path().join("rom.bin"),
+            expected_size: size,
+        }
+    }
+
+    /// A transfer that takes far longer than the read timeout must succeed
+    /// as long as bytes keep arriving: the timeout is an inactivity limit,
+    /// not a cap on total transfer time.
+    #[tokio::test]
+    async fn long_transfer_survives_when_bytes_keep_arriving() {
+        let (chunks, gaps) = slow_server::steady(10, Duration::from_millis(100));
+        let base = slow_server::serve(chunks, gaps);
+        let client = client(&base, Duration::from_millis(300));
+        let dir = tempfile::tempdir().unwrap();
+        let t = target(&dir, 10 * 1024);
+
+        let result = download_targets(
+            &RommProvider(&client),
+            std::slice::from_ref(&t),
+            &AtomicBool::new(false),
+            &mut |_, _, _| {},
+        )
+        .await;
+
+        assert!(result.is_ok(), "expected success, got {result:?}");
+        assert_eq!(fs::metadata(&t.dest).unwrap().len(), 10 * 1024);
+    }
+
+    /// When the server stalls for longer than the read timeout the
+    /// download fails and the partial file is removed.
+    #[tokio::test]
+    async fn stalled_transfer_fails_after_read_timeout() {
+        let (chunks, gaps) = slow_server::stalled(Duration::from_millis(1500));
+        let base = slow_server::serve(chunks, gaps);
+        let client = client(&base, Duration::from_millis(200));
+        let dir = tempfile::tempdir().unwrap();
+        let t = target(&dir, 2 * 1024);
+
+        let started = Instant::now();
+        let result = download_targets(
+            &RommProvider(&client),
+            std::slice::from_ref(&t),
+            &AtomicBool::new(false),
+            &mut |_, _, _| {},
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(LibraryError::Romm(RommError::Connection(_)))),
+            "expected connection error, got {result:?}"
+        );
+        assert!(started.elapsed() < Duration::from_millis(1200));
+        assert!(!t.dest.exists());
+    }
+}

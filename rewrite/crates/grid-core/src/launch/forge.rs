@@ -52,13 +52,26 @@ pub struct ForgeClient {
 }
 
 const FORGE_USER_AGENT: &str = "grid-launcher";
-const FORGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+/// Upper bound on establishing a connection to a forge host.
+const FORGE_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Longest gap between two received bytes before a request is abandoned.
+/// No total-request timeout is applied: an emulator archive download must
+/// be allowed to run as long as bytes keep arriving.
+const FORGE_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 impl ForgeClient {
     pub fn new() -> Result<Self, SourceError> {
+        Self::with_read_timeout(FORGE_READ_TIMEOUT)
+    }
+
+    /// Like [`new`](Self::new) with an explicit inactivity limit.
+    pub(crate) fn with_read_timeout(
+        read_timeout: std::time::Duration,
+    ) -> Result<Self, SourceError> {
         let http = reqwest::Client::builder()
             .user_agent(FORGE_USER_AGENT)
-            .timeout(FORGE_TIMEOUT)
+            .connect_timeout(FORGE_CONNECT_TIMEOUT)
+            .read_timeout(read_timeout)
             .build()
             .map_err(|e| SourceError(format!("Failed to build forge HTTP client: {e}")))?;
         Ok(Self { http })
@@ -1102,5 +1115,45 @@ mod e2e_tests {
 
         let url = "https://api.github.com/repos/o/r/releases";
         assert_eq!(effective_url(url), url);
+    }
+}
+
+#[cfg(test)]
+mod read_timeout_tests {
+    use super::*;
+    use crate::library::download::slow_server;
+    use futures_util::StreamExt;
+    use std::time::Duration;
+
+    async fn drain(resp: reqwest::Response) -> Result<usize, reqwest::Error> {
+        let mut stream = resp.bytes_stream();
+        let mut n = 0;
+        while let Some(chunk) = stream.next().await {
+            n += chunk?.len();
+        }
+        Ok(n)
+    }
+
+    /// An emulator download that outlasts the read timeout must still
+    /// complete while bytes keep arriving.
+    #[tokio::test]
+    async fn long_transfer_survives_when_bytes_keep_arriving() {
+        let (chunks, gaps) = slow_server::steady(10, Duration::from_millis(100));
+        let base = slow_server::serve(chunks, gaps);
+        let client = ForgeClient::with_read_timeout(Duration::from_millis(300)).unwrap();
+        let resp = client.get(&format!("{base}/emu.zip"), false).await.unwrap();
+        assert_eq!(drain(resp).await.unwrap(), 10 * 1024);
+    }
+
+    /// A stall longer than the read timeout ends the transfer with an error.
+    #[tokio::test]
+    async fn stalled_transfer_fails_after_read_timeout() {
+        let (chunks, gaps) = slow_server::stalled(Duration::from_millis(1500));
+        let base = slow_server::serve(chunks, gaps);
+        let client = ForgeClient::with_read_timeout(Duration::from_millis(200)).unwrap();
+        let resp = client.get(&format!("{base}/emu.zip"), false).await.unwrap();
+        let started = std::time::Instant::now();
+        assert!(drain(resp).await.is_err());
+        assert!(started.elapsed() < Duration::from_millis(1200));
     }
 }

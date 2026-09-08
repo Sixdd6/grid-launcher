@@ -13,6 +13,13 @@ pub struct UserInfo {
     pub username: String,
 }
 
+/// Upper bound on establishing a connection to the server.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Longest gap between two received bytes before a request is abandoned.
+/// This replaces a total-request timeout, which would cut every download
+/// off at a fixed wall-clock time regardless of progress.
+const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 pub struct RommClient {
     http: reqwest::Client,
     /// Base URL with any trailing slash trimmed. Kept as a string (not a
@@ -58,6 +65,18 @@ impl RommClient {
     /// The ONLY place (besides KeyringStore serialization) where a secret is
     /// exposed. Builds the Authorization header value once.
     pub fn new(base_url: &str, cred: Credential) -> Result<Self, RommError> {
+        Self::with_read_timeout(base_url, cred, READ_TIMEOUT)
+    }
+
+    /// Like [`new`](Self::new) with an explicit inactivity limit. The
+    /// client never applies a total-request timeout: a multi-gigabyte ROM
+    /// download must be allowed to run as long as bytes keep arriving, so
+    /// only connecting and each individual read are bounded.
+    pub(crate) fn with_read_timeout(
+        base_url: &str,
+        cred: Credential,
+        read_timeout: std::time::Duration,
+    ) -> Result<Self, RommError> {
         let stripped = strip_userinfo(base_url);
         let parsed = url::Url::parse(&stripped).map_err(|_| RommError::InvalidUrl)?;
         let base = parsed.as_str().trim_end_matches('/').to_string();
@@ -75,7 +94,8 @@ impl RommClient {
             reqwest::header::HeaderValue::from_str(&raw).map_err(|_| RommError::InvalidUrl)?;
         auth.set_sensitive(true);
         let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(CONNECT_TIMEOUT)
+            .read_timeout(read_timeout)
             .build()
             .map_err(|e| RommError::Connection(e.to_string()))?;
         Ok(Self { http, base, auth })

@@ -268,7 +268,11 @@ helper — callers percent-encode path segments themselves before calling
 Empty base URL raises an explicit "Server URL is required" error before any I/O in every
 helper (`grid_launcher/core/api.py:70`, `:80`, `:133`, `:153`, `:173`, `:193`, `:213`).
 
-Timeouts, by helper:
+Timeouts, by helper. Every one of these is a `urllib` socket timeout: it bounds each
+connect and each individual read, so it fires only after that many seconds with no
+bytes arriving. None is a cap on total request time — a streamed download runs as long
+as bytes keep flowing. A port must use connect + read (inactivity) timeouts, never a
+total-request timeout, or every download is cut off at a fixed wall-clock time.
 
 - JSON GET: 10 seconds (`grid_launcher/core/api.py:74`).
 - Binary GET: 60 seconds (`grid_launcher/core/api.py:84`).
