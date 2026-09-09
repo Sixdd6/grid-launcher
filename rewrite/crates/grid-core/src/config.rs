@@ -238,6 +238,10 @@ pub struct Config {
     /// unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub compat_tool_installs: Vec<CompatToolInstall>,
+    /// Whether the app logs at `debug` rather than `info`
+    /// (`grid-launcher.py:2150-2156`). `RUST_LOG` wins when it is set.
+    #[serde(default = "default_true")]
+    pub debug_prints: bool,
     /// Desktop shell appearance. A TOML table, so it must stay after every
     /// scalar key in this struct.
     #[serde(default)]
@@ -282,6 +286,7 @@ impl Default for Config {
             native_pcgw_save_paths: BTreeMap::new(),
             default_compat_tool: String::new(),
             compat_tool_installs: Vec::new(),
+            debug_prints: true,
             ui: UiSettings::default(),
             extra: BTreeMap::new(),
         }
@@ -390,6 +395,27 @@ mod tests {
         let loaded = Config::load(&path).unwrap();
         assert_eq!(loaded.ui.theme, "dark");
         assert_eq!(loaded.ui.background_fade, 60);
+    }
+
+    #[test]
+    fn a_config_without_debug_prints_loads_true_and_save_writes_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "schema_version = 1\n").unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert!(loaded.debug_prints);
+
+        let off = Config {
+            debug_prints: false,
+            ..Default::default()
+        };
+        off.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("debug_prints = false"),
+            "written config:\n{text}"
+        );
+        assert!(!Config::load(&path).unwrap().debug_prints);
     }
 
     #[test]

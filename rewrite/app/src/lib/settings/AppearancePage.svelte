@@ -5,6 +5,7 @@
   // `onchange`. The BLUR slider persists on `onchange` only: each sigma is a
   // separate variant the backend builds and caches, so a live drag preview
   // would build an image per intermediate position.
+  import { api } from '../api';
   import {
     commitBackgroundBlur,
     commitBackgroundFade,
@@ -32,6 +33,28 @@
 
   function onCardSize(view: 'library' | 'server', e: Event) {
     setCardSize(view, normalizeCardSize((e.currentTarget as HTMLSelectElement).value)).catch(() => {});
+  }
+
+  // Page-local rather than a `uiSettings` slot: `debug_prints` is a scalar
+  // config key, not part of the `[ui]` table the store mirrors, and nothing
+  // outside this page reads it.
+  let debugPrints = $state(true);
+
+  $effect(() => {
+    api
+      .getDebugPrints()
+      .then((enabled) => {
+        debugPrints = enabled;
+      })
+      .catch(() => {
+        // The default (on) is already shown; a failed read is not worth a
+        // blocking error in a settings pane.
+      });
+  });
+
+  function onDebugPrints(e: Event) {
+    debugPrints = (e.currentTarget as HTMLInputElement).checked;
+    api.setDebugPrints(debugPrints).catch(() => {});
   }
 
   function sizeFor(view: 'library' | 'server') {
@@ -92,6 +115,18 @@
     }}
   />
   <span class="value">{uiSettings.backgroundBlur}</span>
+</div>
+
+<div class="field">
+  <label for="debug-prints-toggle">Debug</label>
+  <input
+    data-testid="debug-prints-toggle"
+    id="debug-prints-toggle"
+    type="checkbox"
+    checked={debugPrints}
+    onchange={onDebugPrints}
+  />
+  <span class="value">Enable debug prints</span>
 </div>
 
 {#each CARD_SIZE_VIEWS as v (v.view)}

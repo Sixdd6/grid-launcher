@@ -5,6 +5,7 @@ mod config_write;
 mod firmware_service;
 mod gamepad;
 mod images;
+mod logging;
 mod media_server;
 mod update_service;
 
@@ -41,12 +42,12 @@ pub fn run() {
     apply_webkit_workarounds();
     // Logging policy (spec, normative): default filter carries no request or
     // header data anywhere; secrets are structurally unloggable (SecretString).
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    // A config that cannot be read logs at the `debug_prints` default (true);
+    // `RUST_LOG` still wins over both.
+    let debug_prints = Config::load(&Config::default_path())
+        .map(|c| c.debug_prints)
+        .unwrap_or(true);
+    logging::init(debug_prints);
     let cache_dir = grid_core::config::data_dir_override()
         .map(|d| d.join("covers"))
         .unwrap_or_else(|| {
@@ -373,6 +374,8 @@ pub fn run() {
             commands::updates::app_version,
             commands::updates::app_update_notice,
             commands::updates::open_release_page,
+            commands::logging::get_debug_prints,
+            commands::logging::set_debug_prints,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

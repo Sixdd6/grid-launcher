@@ -1,4 +1,5 @@
 pub mod cloud;
+pub mod logging;
 pub mod specials;
 pub mod updates;
 

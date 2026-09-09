@@ -414,6 +414,10 @@ export const api = {
   setLibraryPath: (path: string) => invoke<void>('set_library_path', { path }),
   getUiSettings: () => invoke<UiSettings>('get_ui_settings'),
   setUiSettings: (settings: UiSettings) => invoke<void>('set_ui_settings', { settings }),
+  /** The `debug_prints` setting: `debug` rather than `info` logging.
+   *  `RUST_LOG` overrides it when set. */
+  getDebugPrints: () => invoke<boolean>('get_debug_prints'),
+  setDebugPrints: (enabled: boolean) => invoke<void>('set_debug_prints', { enabled }),
   /** Opens the configured RomM server in the browser. The URL comes from the
    *  backend's own config read — never from the frontend. */
   openServerPage: () => invoke<void>('open_server_page'),

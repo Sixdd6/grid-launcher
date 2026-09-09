@@ -428,5 +428,8 @@ describe('updates', () => {
     await $(testId('settings-page-appearance')).waitForDisplayed({ timeout: TRANSITION_TIMEOUT });
     await expect($(testId('background-art-toggle'))).toBeSelected();
     await expect($(testId('card-size-library'))).toHaveValue('medium');
+    // The debug-prints toggle (config `debug_prints`, default on) lives here,
+    // matching the Python Appearance form.
+    await expect($(testId('debug-prints-toggle'))).toBeSelected();
   });
 });
