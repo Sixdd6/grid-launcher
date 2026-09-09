@@ -823,6 +823,83 @@ pub async fn list_emulators() -> Result<Vec<EmulatorEntry>, String> {
     .map_err(|e| format!("list_emulators did not finish: {e}"))?
 }
 
+/// The owned halves of an [`autoconfig::SyncContext`], which borrows all
+/// three. A command reads them out of the install service before its
+/// blocking hop (`State` is not `Send`); a hook holding the service handle
+/// reads them on the far side. Either way they are read FRESH per sync, so
+/// a RetroAchievements credential or a platform list that arrived after
+/// startup reaches the next one.
+pub struct SyncInputs {
+    platforms: Vec<String>,
+    platform_slugs: BTreeMap<String, String>,
+    ra: Option<RaCredentials>,
+}
+
+impl SyncInputs {
+    /// An install service that failed to build (or has not connected)
+    /// simply contributes no platforms and no credentials.
+    pub fn from_install(install: Option<&Arc<InstallService>>) -> Self {
+        match install {
+            Some(install) => Self {
+                platforms: install.known_platforms(),
+                platform_slugs: install.platform_slugs(),
+                ra: install.ra_credentials(),
+            },
+            None => Self {
+                platforms: Vec::new(),
+                platform_slugs: BTreeMap::new(),
+                ra: None,
+            },
+        }
+    }
+}
+
+/// Runs the D1 autoconfig sync for ONE entry and logs its outcome — a sync
+/// never fails its caller. `library_path` feeds RPCS3's PS3 library path
+/// only. Blocking: the writers touch emulator config files.
+pub fn run_emulator_sync(entry_name: &str, library_path: &str, inputs: SyncInputs) {
+    let SyncInputs {
+        platforms,
+        platform_slugs,
+        ra,
+    } = inputs;
+    let config_path = Config::default_path();
+    let ctx = autoconfig::SyncContext {
+        config_path: &config_path,
+        platforms: &platforms,
+        platform_slugs: &platform_slugs,
+        ps3_library_path: autoconfig::ps3_library_path(library_path),
+        ra,
+        profiles: load_profiles(),
+    };
+    // Warnings name the emulator and the writer only — never a path, never
+    // a secret (`autoconfig::record`); the RA token is a `SecretString`.
+    match autoconfig::sync_new_emulator(entry_name, &ctx) {
+        Ok(report) => {
+            for warning in report.warnings {
+                tracing::warn!("emulator autoconfig: {warning}");
+            }
+        }
+        Err(e) => tracing::warn!("emulator autoconfig: {entry_name}: {e}"),
+    }
+}
+
+/// The two LAUNCH-time call sites' sync (doc 05 call-site table): the
+/// pre-launch hook `lib.rs` installs on `LaunchService`, and
+/// [`launch_emulator`]. Loads the library path itself, because neither call
+/// site has one in hand. Blocking; logs everything and returns nothing, so
+/// a failing sync can never stop a launch.
+pub fn sync_emulator_settings(entry_name: &str, install: Option<&Arc<InstallService>>) {
+    let library_path = match Config::load(&Config::default_path()) {
+        Ok(config) => config.library_path,
+        Err(e) => {
+            tracing::warn!("emulator autoconfig: {entry_name}: {e}");
+            return;
+        }
+    };
+    run_emulator_sync(entry_name, &library_path, SyncInputs::from_install(install));
+}
+
 /// D1 call site B. An ADD (a blank `original_name`, or one naming no current
 /// entry) gets the matched profile's defaults applied before the merge and a
 /// full autoconfig sync after the save; an EDIT gets neither. The command's
@@ -835,16 +912,8 @@ pub async fn save_emulator(
     entry: EmulatorEntry,
 ) -> Result<(), String> {
     // Read out of the install service before the blocking hop: `State` is not
-    // `Send`. An install service that failed to build simply contributes no
-    // platforms and no credentials.
-    let (platforms, platform_slugs, ra) = match state.install.as_ref() {
-        Ok(install) => (
-            install.known_platforms(),
-            install.platform_slugs(),
-            install.ra_credentials(),
-        ),
-        Err(_) => (Vec::new(), std::collections::BTreeMap::new(), None),
-    };
+    // `Send`.
+    let inputs = SyncInputs::from_install(state.install.as_ref().ok());
 
     let session = state.session.clone();
     let install_for_firmware = state.install.as_ref().ok().cloned();
@@ -872,23 +941,7 @@ pub async fn save_emulator(
                 })?;
 
             if is_add {
-                let ctx = autoconfig::SyncContext {
-                    config_path: &config_path,
-                    platforms: &platforms,
-                    platform_slugs: &platform_slugs,
-                    ps3_library_path: autoconfig::ps3_library_path(&library_path),
-                    ra,
-                    profiles,
-                };
-                // Warnings name emulators and file paths only — never a secret.
-                match autoconfig::sync_new_emulator(&saved_name, &ctx) {
-                    Ok(report) => {
-                        for warning in report.warnings {
-                            tracing::warn!("emulator autoconfig: {warning}");
-                        }
-                    }
-                    Err(e) => tracing::warn!("emulator autoconfig: {e}"),
-                }
+                run_emulator_sync(&saved_name, &library_path, inputs);
             }
             // D2/D17: adding an RPCS3 entry by hand kicks off the PS3 firmware
             // fetch, the same as installing RPCS3 from the catalog does. An EDIT
@@ -922,12 +975,20 @@ pub async fn delete_emulator(name: String) -> Result<(), String> {
 /// up (`_launch_emulator_at_index`, emulator_ui_mixin.py:1635-1665). Returns
 /// as soon as the process has started; every failure is a plain, path-only
 /// message the Emulators view shows as a toast.
+///
+/// A RetroArch entry gets its settings sync first (:1653), in the
+/// reference's order: validate, sync, spawn.
 #[tauri::command]
-pub async fn launch_emulator(name: String) -> Result<(), String> {
+pub async fn launch_emulator(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    // `State` is not `Send`; the service handle crosses the hop instead.
+    let install = state.install.as_ref().ok().cloned();
     tokio::task::spawn_blocking(move || {
         let config = Config::load(&Config::default_path()).map_err(err)?;
         let entry = emulator_entry_by_name(&config.emulators, &name);
         let (argv, working_dir) = prepare_standalone_emulator_launch(&name, entry)?;
+        if entry.is_some_and(|entry| entry_is_retroarch(entry, load_profiles())) {
+            sync_emulator_settings(&name, install.as_ref());
+        }
         spawn_standalone_emulator(&argv, &working_dir)
     })
     .await

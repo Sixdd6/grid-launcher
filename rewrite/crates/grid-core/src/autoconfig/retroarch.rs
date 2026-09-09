@@ -819,8 +819,15 @@ mod tests {
         let first = ensure_settings(&emulator_path, true, "six", Some(&ra));
         assert!(first.changed);
 
+        let after_first = std::fs::read(&config_path).unwrap();
+
         let second = ensure_settings(&emulator_path, true, "six", Some(&ra));
         assert!(!second.changed, "a second identical run must be a no-op");
+        assert_eq!(
+            std::fs::read(&config_path).unwrap(),
+            after_first,
+            "a second identical run must not rewrite a single byte"
+        );
     }
 
     #[test]

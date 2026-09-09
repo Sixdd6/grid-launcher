@@ -310,14 +310,22 @@ RPCS3 additionally ORs in a standalone name check
 
 **Call sites** (all synchronous, on the UI thread):
 
-| Trigger | Anchor |
-|---|---|
-| Before launching a game | grid_launcher/ui/mixins/details_view_mixin.py:1457 |
-| Before launching an emulator standalone | grid_launcher/ui/mixins/emulator_ui_mixin.py:1655 |
-| On saving an emulator entry in the dialog | grid_launcher/ui/mixins/emulator_ui_mixin.py:1537 |
-| While resolving cloud sync directories | grid_launcher/ui/mixins/cloud_mixin.py:646 |
-| After a successful RetroAchievements login, for every registered emulator | grid-launcher.py:2755 |
-| After entry autoconfig from a downloaded executable | grid-launcher.py:3663 |
+| Trigger | Anchor | Rewrite |
+|---|---|---|
+| Before launching a game | grid_launcher/ui/mixins/details_view_mixin.py:1457 | Ported, RetroArch only: `LaunchService`'s pre-launch hook (`crates/grid-core/src/launch/mod.rs`, `set_pre_launch_hook`), installed in `app/src-tauri/src/lib.rs` and running `commands::sync_emulator_settings` |
+| Before launching an emulator standalone | grid_launcher/ui/mixins/emulator_ui_mixin.py:1655 | Ported, RetroArch only: `commands::launch_emulator` syncs between `prepare_standalone_emulator_launch` and `spawn_standalone_emulator` |
+| On saving an emulator entry in the dialog | grid_launcher/ui/mixins/emulator_ui_mixin.py:1537 | Ported for an ADD only: `commands::save_emulator` |
+| While resolving cloud sync directories | grid_launcher/ui/mixins/cloud_mixin.py:646 | Not ported (deviation 1) |
+| After a successful RetroAchievements login, for every registered emulator | grid-launcher.py:2755 | Narrow RA fan-out instead (deviation 2) |
+| After entry autoconfig from a downloaded executable | grid-launcher.py:3663 | Ported: catalog install calls `sync_autoconfig` |
+
+Both launch triggers run the FULL `sync_new_emulator` pass for the resolved
+entry, gated on `entry_is_retroarch`. Python's per-process `"{name}::{path}"`
+memo is deliberately NOT ported: the writers are idempotent (a second run
+reports `changed: false` and rewrites no byte), and a fresh sync per launch is
+what makes a RetroAchievements credential or RomM username changed since the
+entry was added reach `retroarch.cfg`. The hooks cannot fail a launch — they
+return `()` and log their own errors, naming the emulator and the writer only.
 
 ### Section-writer helpers and the overwrite question
 
@@ -1417,18 +1425,20 @@ Deliberate deviations from the reference when porting emulator autoconfig (setti
 entry/defaults autoconfig, RetroAchievements credential fan-out) to Rust (grid-core). Rust paths
 are relative to `rewrite/`.
 
-1. **Trigger policy.** `ensure_*` writers and entry autoconfig run only when a NEW emulator
-   entry is created — catalog install
+1. **Trigger policy.** `ensure_*` writers and entry autoconfig run when a NEW emulator
+   entry is created, and — for RetroArch entries only — before every launch
+   (see the call-site table above: the `LaunchService` pre-launch hook and
+   `commands::launch_emulator`). New entries: catalog install
    (`crates/grid-core/src/library/mod.rs:961` calls `sync_autoconfig`, itself calling
    `autoconfig::sync_new_emulator` at `crates/grid-core/src/library/mod.rs:995`) or manual add
-   (`app/src-tauri/src/commands.rs:225`, `save_emulator`, on an ADD). Never on edits, launches
-   or view refreshes — the reference's six call sites (launch, standalone launch, entry-dialog
-   save, cloud-sync directory resolution, post-RA-login for every registered emulator, and
-   post-entry-autoconfig) collapse to these two. The `name::path` session cache
-   (`grid_launcher/ui/mixins/emulator_ui_mixin.py:379`) is gone —
-   `crates/grid-core/src/autoconfig/mod.rs:479` notes there is nothing left to deduplicate once
-   the writers only ever run once per entry, which also moots the "stronger invalidation"
-   open question.
+   (`app/src-tauri/src/commands.rs`, `save_emulator`, on an ADD). Never on edits or view
+   refreshes, and never on a launch of a non-RetroArch emulator — the reference's six call
+   sites collapse to four (the two adds, plus the two RetroArch launch triggers), with
+   cloud-sync directory resolution dropped and post-RA-login served by the narrow fan-out in
+   deviation 2. The `name::path` session cache
+   (`grid_launcher/ui/mixins/emulator_ui_mixin.py:379`) is gone: the writers are idempotent,
+   so re-running one costs a read and no write, and dropping the memo is what lets a
+   credential changed mid-session reach the next launch.
 2. **RA credential fan-out.** Saving credentials runs a dedicated narrow writer per RA-capable
    module — `ensure_*_ra_credentials`, dispatched by `fan_out_ra_credentials`
    (`crates/grid-core/src/autoconfig/mod.rs:334`) — that touches only the RA keys

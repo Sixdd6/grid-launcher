@@ -114,8 +114,9 @@ pub fn prepare_emulator_launch(
 ///    found:\n<path>" (:1650)
 ///
 /// Python also calls `_ensure_emulator_sync_settings` before spawning
-/// (:1653); the rewrite does not — the autoconfig sync runs at add/install
-/// time (D1 call site B) and `launch_game` does not re-run it either.
+/// (:1653). The rewrite runs that sync for a RetroArch entry in its caller
+/// (`commands::launch_emulator`), between this function and
+/// [`spawn_standalone_emulator`], so this one stays pure.
 pub fn prepare_standalone_emulator_launch(
     emulator_name: &str,
     entry: Option<&EmulatorEntry>,

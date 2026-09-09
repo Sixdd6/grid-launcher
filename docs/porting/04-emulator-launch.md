@@ -521,11 +521,14 @@ behind the `launch_emulator` command and the per-row Launch button in the
 Installed list. Same argv, same working directory, same cleaned environment,
 same error texts, and a missing entry (a click on a row that has just been
 deleted) reports "Emulator '<name>' was not found." where Python's index guard
-returns silently. Two recorded deviations:
+returns silently. The `_ensure_emulator_sync_settings` pre-pass (:1653) is ported for RetroArch
+entries only: `commands::launch_emulator` runs `sync_emulator_settings` between
+`prepare_standalone_emulator_launch` and `spawn_standalone_emulator`, and
+`LaunchService` does the same for an emulated `launch_game` through the
+pre-launch hook `lib.rs` installs (`set_pre_launch_hook`, fired only when the
+resolved entry is a RetroArch build). Both log their own failures and can never
+fail a launch. See doc 05's call-site table. One recorded deviation:
 
-- No `_ensure_emulator_sync_settings` pre-pass (:1653) — the rewrite runs the
-  autoconfig sync at add/install time, and `launch_game` does not re-run it
-  either.
 - No 500 ms early-exit warning (:1662) — deferred, not unported for lack of a
   surface (the toast surface exists). `spawn_standalone_emulator` returns as
   soon as the process starts and keeps no handle to it, so porting

@@ -802,3 +802,97 @@ async fn ps3_launch_target_prefers_the_iso_path_when_set() {
 
     service.stop(session.id);
 }
+
+// --- pre-launch RetroArch sync hook -----------------------------------------
+
+/// A RetroArch entry that `default_emulator_name_for_platform` accepts: the
+/// D-RC-1 core gate needs a real core file beside the stub, and the bundled
+/// compatibility map only recognises the full platform name.
+const RA_PLATFORM: &str = "Super Nintendo Entertainment System";
+
+fn install_snes_core(h: &Harness) {
+    let cores = h.root.join("cores");
+    fs::create_dir_all(&cores).unwrap();
+    fs::write(cores.join("snes9x_libretro.so"), b"core bytes").unwrap();
+}
+
+/// Installs a hook that records `(name, path)` per call and returns the log.
+fn record_pre_launch(service: &Arc<LaunchService>) -> Arc<Mutex<Vec<(String, String)>>> {
+    let log: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = log.clone();
+    service.set_pre_launch_hook(Arc::new(move |name: &str, path: &str| {
+        sink.lock()
+            .unwrap()
+            .push((name.to_string(), path.to_string()));
+    }));
+    log
+}
+
+#[tokio::test]
+async fn the_pre_launch_hook_fires_once_for_a_retroarch_entry() {
+    // The RetroArch settings sync (installed by the app layer) must run
+    // before the emulator starts, with the entry's stored name and path.
+    let h = Harness::new();
+    let exe = h.stub("retroarch", "sleep 30");
+    install_snes_core(&h);
+    h.write_config(
+        vec![entry("RetroArch", &exe, "%rom%")],
+        &[(RA_PLATFORM, "RetroArch")],
+    );
+    h.install_game(7, "Chrono", RA_PLATFORM);
+
+    let service = h.service();
+    let log = record_pre_launch(&service);
+    let session = service.launch(7).await.unwrap();
+
+    assert_eq!(
+        *log.lock().unwrap(),
+        vec![("RetroArch".to_string(), exe.to_string_lossy().into_owned())],
+        "the hook must fire exactly once, with the entry name and path"
+    );
+
+    service.stop(session.id);
+}
+
+#[tokio::test]
+async fn the_pre_launch_hook_never_fires_for_a_non_retroarch_emulator() {
+    let h = Harness::new();
+    let exe = h.stub("dolphin-emu", "sleep 30");
+    h.write_config(
+        vec![entry("Dolphin", &exe, "%rom%")],
+        &[("GameCube", "Dolphin")],
+    );
+    h.install_game(7, "Chrono", "GameCube");
+
+    let service = h.service();
+    let log = record_pre_launch(&service);
+    let session = service.launch(7).await.unwrap();
+
+    assert!(
+        log.lock().unwrap().is_empty(),
+        "only RetroArch entries get the settings sync"
+    );
+
+    service.stop(session.id);
+}
+
+#[tokio::test]
+async fn a_panicking_pre_launch_hook_still_registers_the_session() {
+    // The hook can never fail a launch: it reports its own errors, and even
+    // a panic inside it is contained (the hook runs on the blocking pool).
+    let h = Harness::new();
+    let exe = h.stub("retroarch", "sleep 30");
+    install_snes_core(&h);
+    h.write_config(
+        vec![entry("RetroArch", &exe, "%rom%")],
+        &[(RA_PLATFORM, "RetroArch")],
+    );
+    h.install_game(7, "Chrono", RA_PLATFORM);
+
+    let service = h.service();
+    service.set_pre_launch_hook(Arc::new(|_name, _path| panic!("hook blew up")));
+    let session = service.launch(7).await.unwrap();
+
+    assert_eq!(service.snapshot().sessions.len(), 1);
+    service.stop(session.id);
+}

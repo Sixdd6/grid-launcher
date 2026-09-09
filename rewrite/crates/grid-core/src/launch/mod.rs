@@ -73,6 +73,9 @@ type Listener = Arc<dyn Fn(SessionsSnapshot) + Send + Sync>;
 /// Fired once per reaped session, after that reap's snapshot emit(s), with
 /// no lock held — see [`LaunchService::set_session_finished_hook`].
 type SessionFinishedHook = Arc<dyn Fn(GameSession) + Send + Sync>;
+/// Fired with the emulator's name and path just before a RetroArch game is
+/// spawned — see [`LaunchService::set_pre_launch_hook`].
+pub type PreLaunchHook = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
 /// Owns the running-game sessions: resolves a launch, spawns the emulator,
 /// tracks the child, and reaps it when it exits.
@@ -90,6 +93,12 @@ pub struct LaunchService {
     /// `RommClient`, config, and the cloud `ops` layer). `None` in every
     /// grid-core test that does not opt in.
     session_finished_hook: RwLock<Option<SessionFinishedHook>>,
+    /// The RetroArch settings sync, installed once by the app layer for the
+    /// same reason as `session_finished_hook`: it needs the server platform
+    /// list and the RetroAchievements credentials, neither of which
+    /// grid-core's launch path holds. `None` in every grid-core test that
+    /// does not opt in.
+    pre_launch_hook: RwLock<Option<PreLaunchHook>>,
     next_id: AtomicU64,
     /// Guards [`Self::spawn_poll_loop`] so at most one loop ever runs.
     poll_started: AtomicBool,
@@ -136,6 +145,7 @@ impl LaunchService {
             config_path,
             notify: RwLock::new(None),
             session_finished_hook: RwLock::new(None),
+            pre_launch_hook: RwLock::new(None),
             next_id: AtomicU64::new(1),
             poll_started: AtomicBool::new(false),
             poll_interval,
@@ -158,6 +168,38 @@ impl LaunchService {
         *self.session_finished_hook.write().unwrap() = Some(f);
     }
 
+    /// Installs the RetroArch settings sync. Called once by the app layer;
+    /// a second call replaces the first. Fired with the resolved emulator's
+    /// name and path, and awaited, immediately before an EMULATED launch of
+    /// a RetroArch entry spawns — never for a native launch or for any
+    /// other emulator (doc 05 call-site table).
+    ///
+    /// The hook cannot fail a launch: it returns `()` and logs its own
+    /// errors, and even a panic inside it is contained (see
+    /// [`Self::run_pre_launch_hook`]).
+    pub fn set_pre_launch_hook(&self, f: PreLaunchHook) {
+        *self.pre_launch_hook.write().unwrap() = Some(f);
+    }
+
+    /// Runs the pre-launch hook to completion, if one is installed. It goes
+    /// on the blocking pool because the app's hook writes emulator config
+    /// files; that also contains a panicking hook as a join error, so the
+    /// launch proceeds either way.
+    async fn run_pre_launch_hook(&self, name: String, path: String) {
+        let hook = self.pre_launch_hook.read().unwrap().clone();
+        let Some(hook) = hook else {
+            return;
+        };
+        // The emulator name only — the hook's own failures are its to log.
+        let label = name.clone();
+        if tokio::task::spawn_blocking(move || hook(&name, &path))
+            .await
+            .is_err()
+        {
+            tracing::warn!("emulator autoconfig: pre-launch sync failed for {label}");
+        }
+    }
+
     /// The running games, newest-first (mirrors [`crate::library::queue::QueueState::snapshot`]).
     /// `warning` is always `None` here — a warning only ever reaches the
     /// listener, attached to the snapshot that reports the early exit that
@@ -177,7 +219,9 @@ impl LaunchService {
     /// either the native branch ([`build_native_command`], doc 04 §9) for a
     /// `windows*`/`linux*` platform row, or emulator selection, placeholder build,
     /// and the validation chain in [`prepare_emulator_launch`] for
-    /// everything else; either way the result is spawned the same way.
+    /// everything else; either way the result is spawned the same way. A
+    /// RetroArch entry also gets the pre-launch settings sync
+    /// ([`Self::set_pre_launch_hook`]) between resolution and the spawn.
     pub async fn launch(self: &Arc<Self>, rom_id: i64) -> Result<GameSession, LaunchError> {
         let game = self.installed_game(rom_id).await?;
 
@@ -189,35 +233,54 @@ impl LaunchService {
 
         let config = Config::load(&self.config_path)?;
 
-        let (emulator_name, argv, working_dir, extra_env) = if is_native_platform(&game.platform) {
-            // Blank on a Windows host: no compat tool makes sense there.
-            // `build_native_command` applies the same gate on `default_compat_tool`
-            // itself (and blanks the tool entirely for a linux-platform row),
-            // so this is belt-and-suspenders, not load-bearing.
-            let default_compat_tool = if host_os().starts_with("win") {
-                ""
+        let (emulator_name, argv, working_dir, extra_env, pre_launch_sync) =
+            if is_native_platform(&game.platform) {
+                // Blank on a Windows host: no compat tool makes sense there.
+                // `build_native_command` applies the same gate on `default_compat_tool`
+                // itself (and blanks the tool entirely for a linux-platform row),
+                // so this is belt-and-suspenders, not load-bearing.
+                let default_compat_tool = if host_os().starts_with("win") {
+                    ""
+                } else {
+                    config.default_compat_tool.as_str()
+                };
+                let library = expand_home(&config.library_path);
+                let native = build_native_command(
+                    &game,
+                    &library,
+                    default_compat_tool,
+                    host_os(),
+                    &which_on_path,
+                )
+                .map_err(LaunchError::Validation)?;
+                let emulator_name = if native.tool_label.is_empty() {
+                    "native".to_string()
+                } else {
+                    native.tool_label
+                };
+                (emulator_name, native.argv, native.cwd, native.env, None)
             } else {
-                config.default_compat_tool.as_str()
+                let plan = resolve_launch(&game, &config)?;
+                // `Some` only for a RetroArch entry: the settings sync's one
+                // call site, matching Python's pre-launch
+                // `_ensure_emulator_sync_settings` (details_view_mixin.py:1457).
+                let sync = plan
+                    .is_retroarch
+                    .then(|| (plan.emulator_name.clone(), plan.emulator_path));
+                (
+                    plan.emulator_name,
+                    plan.argv,
+                    plan.working_dir,
+                    Vec::new(),
+                    sync,
+                )
             };
-            let library = expand_home(&config.library_path);
-            let native = build_native_command(
-                &game,
-                &library,
-                default_compat_tool,
-                host_os(),
-                &which_on_path,
-            )
-            .map_err(LaunchError::Validation)?;
-            let emulator_name = if native.tool_label.is_empty() {
-                "native".to_string()
-            } else {
-                native.tool_label
-            };
-            (emulator_name, native.argv, native.cwd, native.env)
-        } else {
-            let plan = resolve_launch(&game, &config)?;
-            (plan.emulator_name, plan.argv, plan.working_dir, Vec::new())
-        };
+
+        // Before the spawn, so a changed RetroAchievements credential or
+        // RomM username reaches retroarch.cfg for THIS run.
+        if let Some((name, path)) = pre_launch_sync {
+            self.run_pre_launch_hook(name, path).await;
+        }
 
         let title = game.title.clone();
         let joined_command = argv.join(" ");
@@ -446,6 +509,13 @@ fn early_exit_message(status: Option<ExitStatus>, joined_command: &str) -> Strin
 /// Everything the spawn step needs, once resolution has succeeded.
 struct LaunchPlan {
     emulator_name: String,
+    /// The resolved entry's stored path, for the pre-launch hook. Blank
+    /// when no entry matched the name (validation rejects that first).
+    emulator_path: String,
+    /// Whether the resolved entry is a RetroArch build — the pre-launch
+    /// settings sync's gate, decided here because this is where the entry
+    /// and the profile list are already in hand.
+    is_retroarch: bool,
     argv: Vec<String>,
     working_dir: PathBuf,
 }
@@ -513,6 +583,8 @@ fn resolve_launch(game: &InstalledGame, config: &Config) -> Result<LaunchPlan, L
 
     Ok(LaunchPlan {
         emulator_name,
+        emulator_path: entry.map(|e| e.path.trim().to_string()).unwrap_or_default(),
+        is_retroarch,
         argv,
         working_dir,
     })

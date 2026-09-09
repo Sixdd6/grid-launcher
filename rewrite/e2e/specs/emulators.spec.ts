@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   APP_START_TIMEOUT,
@@ -267,14 +267,25 @@ describe('emulators', () => {
     await $(testId('emu-form-cancel')).click();
   });
 
-  it('launches an installed emulator with no ROM', async () => {
+  it('launches an installed emulator with no ROM and syncs its settings first', async () => {
     await showPage('installed');
+    // The autoconfig sync also runs at ADD time, so the cfg the add wrote is
+    // removed here: only the pre-launch sync can put it back.
+    // `retroarch::config_path_candidates` targets `<dir>/retroarch.cfg` for a
+    // bare executable with no portable `.home` sibling.
+    const raConfig = path.join(path.dirname(stubPath), 'retroarch.cfg');
+    rmSync(raConfig, { force: true });
+
     const launch = $(testId(`emulator-launch-${sanitize('RetroArch (Multi-System)')}`));
     await expect(launch).toBeDisplayed();
     await launch.click();
     await browser.waitUntil(() => existsSync(launchMarker), {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the standalone launch never ran the emulator stub',
+    });
+    await browser.waitUntil(() => existsSync(raConfig), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the standalone launch never re-wrote retroarch.cfg',
     });
   });
 
