@@ -27,6 +27,9 @@ import {
   PCSX2_DOWNLOAD_URL,
   PCSX2_RELEASE_PATH,
   PCSX2_TAG,
+  PCSX2_UPDATED_APPIMAGE_BYTES,
+  PCSX2_UPDATED_DOWNLOAD_PATH,
+  PCSX2_UPDATED_TAG,
   REDREAM_DOWNLOAD_PATH,
   REDREAM_DOWNLOAD_URL,
   REDREAM_MEMBER_NAME,
@@ -220,4 +223,34 @@ test("appends every request to the log file as it arrives", async () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// --- the PCSX2 release bump (the emulator-catalog update case) -----------------
+
+test("POST /__e2e__/pcsx2-release/updated serves a newer PCSX2 release", async () => {
+  await withForge(async ({ url }) => {
+    const before = await (await fetch(`${url}${PCSX2_RELEASE_PATH}`)).json();
+    assert.equal(before.tag_name, PCSX2_TAG);
+
+    const bump = await fetch(`${url}/__e2e__/pcsx2-release/updated`, { method: "POST" });
+    assert.equal(bump.status, 200);
+    assert.deepEqual(await bump.json(), { tag: PCSX2_UPDATED_TAG });
+
+    const after = await (await fetch(`${url}${PCSX2_RELEASE_PATH}`)).json();
+    assert.equal(after.tag_name, PCSX2_UPDATED_TAG);
+    // Same asset NAME (so the installed file path does not move) at a new
+    // URL, with different bytes — a same-size asset would be skipped by the
+    // downloader's "already on disk" rule and never re-fetched.
+    assert.equal(after.assets[0].name, PCSX2_ASSET_NAME);
+    assert.match(after.assets[0].browser_download_url, new RegExp(`/${PCSX2_UPDATED_TAG}/`));
+    assert.equal(after.assets[0].size, PCSX2_UPDATED_APPIMAGE_BYTES.length);
+    assert.notEqual(PCSX2_UPDATED_APPIMAGE_BYTES.length, PCSX2_APPIMAGE_BYTES.length);
+
+    const asset = await fetch(`${url}${PCSX2_UPDATED_DOWNLOAD_PATH}`);
+    assert.equal(asset.status, 200);
+    const body = Buffer.from(await asset.arrayBuffer());
+    assert.deepEqual(body, PCSX2_UPDATED_APPIMAGE_BYTES);
+    // Still the same stub contract: it records its argv and stays alive.
+    assert.match(body.toString("utf8"), /mock forge stub: pcsx2/);
+  });
 });

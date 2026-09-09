@@ -19,6 +19,11 @@
 //   /redream.io/download                                → the download page
 //   /redream.io/download/redream.x86_64-linux-…tar.gz   → the tar.gz stub
 //
+// Plus one control route, mirroring the RomM mock's `POST /__e2e__/offline`:
+//   POST /__e2e__/pcsx2-release/updated → from here on, PCSX2's
+//   `releases/latest` reports a NEWER tag, so the emulator-catalog spec can
+//   exercise "Update from Source" against a real second release.
+//
 // Two rules this server exists to enforce at runtime:
 //   * NO credential ever reaches a forge. Any request carrying an
 //     `Authorization` header is answered 500 and logged as
@@ -56,6 +61,20 @@ export const PCSX2_ASSET_NAME = `pcsx2-${PCSX2_TAG}-linux-appimage-x64-Qt.AppIma
 export const PCSX2_RELEASE_PATH = "/api.github.com/repos/PCSX2/pcsx2/releases/latest";
 export const PCSX2_DOWNLOAD_URL = `https://github.com/PCSX2/pcsx2/releases/download/${PCSX2_TAG}/${PCSX2_ASSET_NAME}`;
 export const PCSX2_DOWNLOAD_PATH = `/github.com/PCSX2/pcsx2/releases/download/${PCSX2_TAG}/${PCSX2_ASSET_NAME}`;
+
+/**
+ * The release `POST /__e2e__/pcsx2-release/updated` switches PCSX2's
+ * `releases/latest` to. The ASSET NAME is deliberately unchanged: an
+ * AppImage keeps its asset name as its installed file name
+ * (grid-core `emu_install::archive_file_name`), so the update lands on the
+ * same path inside the same `…-latest/` directory — which is the property
+ * the update case exists to prove. Only the tag in the download URL and the
+ * bytes differ, and the bytes MUST differ in length: `download_targets`
+ * skips a target whose file is already on disk at the expected size.
+ */
+export const PCSX2_UPDATED_TAG = "v9.9.1-e2e";
+export const PCSX2_UPDATED_DOWNLOAD_URL = `https://github.com/PCSX2/pcsx2/releases/download/${PCSX2_UPDATED_TAG}/${PCSX2_ASSET_NAME}`;
+export const PCSX2_UPDATED_DOWNLOAD_PATH = `/github.com/PCSX2/pcsx2/releases/download/${PCSX2_UPDATED_TAG}/${PCSX2_ASSET_NAME}`;
 
 /**
  * GRID Launcher's OWN `releases/latest`, for the `updates` group's
@@ -115,23 +134,31 @@ function stubEmulatorScript(label) {
 }
 
 export const PCSX2_APPIMAGE_BYTES = stubEmulatorScript("pcsx2");
+export const PCSX2_UPDATED_APPIMAGE_BYTES = stubEmulatorScript(
+  `pcsx2 (${PCSX2_UPDATED_TAG})`,
+);
 export const REDREAM_MEMBER_BYTES = stubEmulatorScript("redream");
 export const REDREAM_TAR_GZ_BYTES = buildTarGz([
   { name: REDREAM_MEMBER_NAME, data: REDREAM_MEMBER_BYTES, mode: 0o755 },
 ]);
 
-/** The GitHub "latest release" payload for PCSX2. */
-export function pcsx2Release() {
+/**
+ * The GitHub "latest release" payload for PCSX2. `updated` serves the
+ * bumped release the control route switches to.
+ */
+export function pcsx2Release(updated = false) {
+  const tag = updated ? PCSX2_UPDATED_TAG : PCSX2_TAG;
+  const bytes = updated ? PCSX2_UPDATED_APPIMAGE_BYTES : PCSX2_APPIMAGE_BYTES;
   return {
-    tag_name: PCSX2_TAG,
-    name: `PCSX2 ${PCSX2_TAG}`,
+    tag_name: tag,
+    name: `PCSX2 ${tag}`,
     draft: false,
     prerelease: false,
     assets: [
       {
         name: PCSX2_ASSET_NAME,
-        browser_download_url: PCSX2_DOWNLOAD_URL,
-        size: PCSX2_APPIMAGE_BYTES.length,
+        browser_download_url: updated ? PCSX2_UPDATED_DOWNLOAD_URL : PCSX2_DOWNLOAD_URL,
+        size: bytes.length,
         state: "uploaded",
       },
     ],
@@ -205,13 +232,27 @@ function handleRequest(req, res, state) {
 
   state.log({ method: req.method, path: req.url });
 
+  // The one control route (the RomM mock's `POST /__e2e__/offline` pattern):
+  // the spec runs in a different process from this server, so steering it
+  // WHILE it runs is only possible over HTTP.
+  if (req.method === "POST" && pathname === "/__e2e__/pcsx2-release/updated") {
+    state.pcsx2Updated = true;
+    sendJson(res, 200, { tag: PCSX2_UPDATED_TAG });
+    return;
+  }
+
   if (req.method === "GET" && pathname === PCSX2_RELEASE_PATH) {
-    sendJson(res, 200, pcsx2Release());
+    sendJson(res, 200, pcsx2Release(state.pcsx2Updated));
     return;
   }
 
   if (req.method === "GET" && pathname === PCSX2_DOWNLOAD_PATH) {
     sendBuffer(res, 200, "application/octet-stream", PCSX2_APPIMAGE_BYTES);
+    return;
+  }
+
+  if (req.method === "GET" && pathname === PCSX2_UPDATED_DOWNLOAD_PATH) {
+    sendBuffer(res, 200, "application/octet-stream", PCSX2_UPDATED_APPIMAGE_BYTES);
     return;
   }
 
@@ -244,6 +285,8 @@ function handleRequest(req, res, state) {
 export async function startMockForge({ port = 0, logPath = DEFAULT_LOG_PATH } = {}) {
   const requestLog = [];
   const state = {
+    /** Flipped by the control route: PCSX2's latest release is bumped. */
+    pcsx2Updated: false,
     log(entry) {
       requestLog.push(entry);
       if (!logPath) return;

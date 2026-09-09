@@ -22,6 +22,13 @@ function required(name: string): string {
 /** Base URL of this stage's mock RomM server, e.g. `http://127.0.0.1:41235`. */
 export const mockUrl = (): string => required('E2E_MOCK_URL');
 
+/**
+ * Base URL of this stage's mock FORGE server (the emulator-catalog group
+ * only): what `GRID_LAUNCHER_E2E_FORGE_BASE` points the app at, and where
+ * the mock's `/__e2e__/` control routes live.
+ */
+export const forgeUrl = (): string => required('E2E_FORGE_URL');
+
 /** This stage's `GRID_LAUNCHER_DATA_DIR` (config.toml, the db and covers/ live here). */
 export const dataDir = (): string => required('E2E_DATA_DIR');
 

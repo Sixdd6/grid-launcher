@@ -6,6 +6,7 @@ import {
   configPath,
   dataDir,
   FIXTURE_TOKEN,
+  forgeUrl,
   mockUrl,
   REAP_TIMEOUT,
   TRANSITION_TIMEOUT,
@@ -413,6 +414,74 @@ describe('emulator-catalog', () => {
     // The archive is deleted once its contents are merged in.
     expect(existsSync(path.join(emulatorsDir(), `${REDREAM_NAME}-nightly`, `${REDREAM_NAME}-nightly.gz`))).toBe(false);
     await closeEmulators();
+  });
+
+  it('checks PCSX2 for a newer release and updates it in place', async () => {
+    await openEmulators();
+    await showPage('installed');
+
+    // From here on the mock forge serves a NEWER PCSX2 release than the one
+    // installed above, with the same asset name and different bytes.
+    const bump = await fetch(`${forgeUrl()}/__e2e__/pcsx2-release/updated`, { method: 'POST' });
+    expect(bump.status).toBe(200);
+    const logBeforeCheck = readForgeLog();
+
+    // The check runs ON CLICK (never on view open), and its answer becomes
+    // the confirmation the second click accepts — the same two-click confirm
+    // the Delete button uses.
+    const updateBtn = $(testId(`emulator-update-${sanitize(PCSX2_NAME)}`));
+    await updateBtn.click();
+    const prompt = $(testId(`emulator-update-prompt-${sanitize(PCSX2_NAME)}`));
+    await prompt.waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the version check never produced an update confirmation',
+    });
+    const promptText = await prompt.getText();
+    expect(promptText).toContain(`Update ${PCSX2_NAME}?`);
+    expect(promptText).toContain('Installed: v9.9-e2e');
+    expect(promptText).toContain('Available: v9.9.1-e2e');
+    await expect(updateBtn).toHaveText('Confirm update');
+
+    await updateBtn.click();
+    // The completion toast is worded for an UPDATE, not a first install.
+    await browser.waitUntil(
+      async () =>
+        (await $(testId('toast-region')).isExisting()) &&
+        (await $(testId('toast-region')).getText()).includes(
+          `Updated emulator '${PCSX2_NAME}' from source.`,
+        ),
+      {
+        timeout: EMULATOR_INSTALL_TIMEOUT,
+        timeoutMsg: 'the update never produced its completion toast',
+      },
+    );
+    await waitForCompleted(3);
+    // The update is one drawer row of its own, and nothing else: an update
+    // reports `fresh == false`, which suppresses the firmware pass.
+    await expect($(testId('download-row-4'))).not.toExist();
+
+    // Same install directory, same file: the new AppImage replaced the old
+    // one in place rather than landing in a per-release directory.
+    await waitForConfigLine('source_installed_tag = "v9.9.1-e2e"');
+    expect(readFileSync(pcsx2Path(), 'utf-8')).toContain('mock forge stub: pcsx2 (v9.9.1-e2e)');
+    // Autoconfig ran again and its marker survived the merge.
+    expect(existsSync(path.join(pcsx2Dir(), 'portable.ini'))).toBe(true);
+
+    const config = readFileSync(configPath(), 'utf-8');
+    // The user-owned fields and the platform default are untouched.
+    expect(config).toContain('-portable -fullscreen -batch');
+    expect(config).toContain(`"${PLATFORM}" = "${PCSX2_NAME}"`);
+    expect(config).toContain('source_release_tag = "latest"');
+
+    // One release request for the check, one for the install's own resolve,
+    // and one download of the new tag's asset.
+    const added = readForgeLog().slice(logBeforeCheck.length);
+    const occurrences = (haystack: string, needle: string) => haystack.split(needle).length - 1;
+    expect(occurrences(added, '/api.github.com/repos/PCSX2/pcsx2/releases/latest')).toBe(2);
+    expect(
+      occurrences(added, `/github.com/PCSX2/pcsx2/releases/download/v9.9.1-e2e/${PCSX2_ASSET}`),
+    ).toBe(1);
+    expect(added).not.toContain('AUTH-HEADER-SEEN');
   });
 
   it('reached the forge with no credential, and installed only forge-served bytes', async () => {

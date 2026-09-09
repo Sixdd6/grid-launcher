@@ -491,7 +491,10 @@ check, no request to `api.github.com` about this repository, and no `releases/la
 call for the launcher itself. The `releases/latest` requests in
 `grid_launcher/background/workers.py:214`, `:475`, `:479` belong to the **emulator source**
 version check (doc 04), and the single "Could not check for updates" message
-(grid_launcher/ui/mixins/emulator_ui_mixin.py:1332) is that same emulator flow. Launcher
+(grid_launcher/ui/mixins/emulator_ui_mixin.py:1332) is that same emulator flow. The port keeps
+them apart the same way: `check_emulator_update` is the emulator flow (on click of a row's
+`Update from Source` button, one release request against that entry's own source), while the
+launcher's own optional self-update check lives in `app/src-tauri/src/app_update.rs`. Launcher
 self-update is delegated entirely to external AppImage tooling via the embedded
 `update_info`/zsync metadata described under External surfaces.
 
@@ -550,7 +553,7 @@ self-update is delegated entirely to external AppImage tooling via the embedded
 
 | Platform group | Predicate | What "update" means |
 | --- | --- | --- |
-| `Emulators` | `platform == "emulators"` (casefolded) — grid_launcher/emulator/selection.py:138–142 | Nothing here. Excluded from `game_has_server_update` and from the refresh loop. Emulator updates use the source release-tag check (doc 04, `_install_mode = "source_emulator_update"`). |
+| `Emulators` | `platform == "emulators"` (casefolded) — grid_launcher/emulator/selection.py:138–142 | Nothing here. Excluded from `game_has_server_update` and from the refresh loop. Emulator updates use the source release-tag check (doc 04, `_install_mode = "source_emulator_update"`; in the port, `check_emulator_update` + a re-run of `install_emulator`, compared against the resolved `source_installed_tag`). |
 | Windows / PC | `"windows" in platform or platform == "pc"` (casefolded) — update_detection.py:73–80 | Filename version tag first, then the timestamp rule. Update is applied as an in-place **merge** into `extracted_dir`, preserving files not present in the new archive. |
 | Native executable (install pipeline) | `platform.startswith("windows")` — grid_launcher/emulator/selection.py:145–150 | Selects the `native_update` install mode and the merge path. **Note the mismatch**: a game on a platform literally named `PC` satisfies the version-tag branch of update *detection* but not the native-executable branch of update *application*, so it would be updated by plain reinstall. |
 | PS4 | `platform in {"ps4", "playstation 4", "playstation4", "sony playstation 4"}` — grid-launcher.py:3252–3255 | Two unrelated concepts share the word "update". (a) The generic server-side newer-build check above. (b) **Patch content**: the server exposes per-file `category` values; entries categorized `update` or `dlc` are collected into `ps4_file_ids_by_category` and flagged as `ps4_has_update` / `ps4_has_dlc` (grid_launcher/server/catalog.py:296–301, `:360–362`). These are installed through a separate action with `_install_mode = "ps4_content"` and a kind of `update` or `dlc` (details_view_mixin.py:1525–1568), producing button text `Install Update` / `Install DLC` / `Install Update/DLC` (install_mixin.py:271–279, with the available-kind probe at install_mixin.py:263–268). Installing PS4 patch content does **not** go through `game_has_server_update` and does not clear `update_available`. |

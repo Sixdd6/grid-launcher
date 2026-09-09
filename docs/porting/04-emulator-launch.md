@@ -802,6 +802,19 @@ The archive is downloaded to `install_path / archive_name`
 (grid_launcher/ui/mixins/emulator_ui_mixin.py:1187). Concurrent installs are queued by game
 key (grid_launcher/ui/mixins/install_mixin.py:1462).
 
+**Rust port: an update is the same install.** "Update from Source" needs no install mode of
+its own. The install directory is `<library>/Emulators/<stem of "<name>-<configured tag>">`,
+computed from the CONFIGURED tag, so a re-run of the same source lands in the SAME directory
+and `merge_tree_into` merges the new release over the old tree. `write_emulator_entry`
+(`rewrite/crates/grid-core/src/library/mod.rs`) then replaces the existing entry AT ITS INDEX,
+starting from that entry, so everything the user owns — their edited `args` and the
+`save_*`/`ignore_*`/`state_paths` cloud-save fields — survives; only `path`, the `source_*`
+provenance and `source_installed_tag` are rewritten. Autoconfig runs on every install,
+update included; the firmware pass does not, because it is gated on `fresh == true`
+(`app/src-tauri/src/lib.rs`) and a replace reports `fresh == false`. That same hook emits the
+completion toast, worded `Updated emulator '{name}' from source.` for a replace and
+`Installed emulator '{name}' from source.` for a first install.
+
 **Extraction and post-install.** Extraction itself is doc 03. Afterwards
 `InstallFinalizeWorker` (grid_launcher/background/workers.py:546):
 
@@ -857,6 +870,30 @@ emits a single `{installed_tag, available_tag, error}` dict:
 - non-dict payload or missing `tag_name` → raises internally and is reported as an error
   string with both tags blank (grid_launcher/background/workers.py:490,
   grid_launcher/background/workers.py:500).
+
+**Rust port (release parity pass): ported, with one recorded-version deviation.**
+`ForgeClient::check_release_tag` (`rewrite/crates/grid-core/src/launch/forge.rs`) makes the
+same single request — `direct` answers `"direct"` with no network call, `github` and `gitea`
+ask the endpoint the pin selects — and reports the two payload complaints verbatim ("Source
+release API returned an unsupported payload shape." / "Source release API response did not
+include tag_name."), as it does an unknown provider ("Unsupported provider: <p>"). The pure
+`version_check_outcome(installed, available)` mirrors the reference's result dialog: a blank
+or `latest` installed tag reads `unknown`, a `direct` source reads `Unknown (direct source)`
+and is never "up to date", and the comparison is plain string equality.
+
+The check runs ON CLICK of the row's `Update from Source` button (`check_emulator_update`),
+never on view open and never cached, exactly as the reference does — so simply looking at the
+Emulators view spends no GitHub rate-limit budget. Its answer becomes the row's two-click
+confirm (`Update {name}?\n\nInstalled: …\nAvailable: …`, the reference's question text) or a
+toast (`Already up to date ({available}).`); accepting it calls `update_emulator`, which is a
+plain re-run of `install_emulator` for the entry's own `source_id`.
+
+*Deviation:* the port records `EmulatorEntry.source_installed_tag` — the RESOLVED tag the
+forge served at install time — alongside `source_release_tag` (still the configured pin). The
+reference has only the pin, so a `latest`-pinned emulator can never show an installed version
+and its check always offers the reinstall; the port compares the real installed tag instead,
+so a `latest` pin can legitimately report "Already up to date". `source_release_tag` keeps
+recording the pin, so nothing about which release is tracked changes.
 
 ## Invariants and error handling
 
@@ -1101,7 +1138,11 @@ download, install) to Rust (grid-core):
    listed them in a separate dialog).~~ **Amended (milestone 8, D10):** compat-tool profiles
    are no longer excluded — the Emulators screen's CompatTools panel lists and installs them,
    separately from the emulator catalog, matching the reference's separate-dialog shape.
-3. Version checks deferred; `source_*` fields recorded now.
+3. ~~Version checks deferred; `source_*` fields recorded now.~~ **Closed (release parity
+   pass):** `ForgeClient::check_release_tag` + `version_check_outcome` back the Emulators
+   row's `Update from Source` button (see "Version check" above). One deviation remains
+   inside it: the port also records the resolved tag as `source_installed_tag`, which the
+   reference has no equivalent of.
 4. Supplemental failures fail the install (visible) rather than partially succeeding.
 5. ~~No firmware step after emulator install (firmware subsystem deferred).~~ **Closed
    (milestone 8, D10):** `FirmwareService::spawn_for_emulator`
