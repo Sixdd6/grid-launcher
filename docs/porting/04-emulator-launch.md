@@ -692,6 +692,15 @@ Missing-firmware conditions surface as advisory UI text, not gates: Eden shows n
 grid_launcher/ui/mixins/emulator_ui_mixin.py:741), and RPCS3 offers an "Install PS3 Firmware"
 button when a `.PUP` is present (grid_launcher/ui/mixins/emulator_ui_mixin.py:779).
 
+The Eden pair is ported: the `emulator_facts` command
+(`rewrite/app/src-tauri/src/commands.rs`) answers
+`{ eden_keys_present, eden_firmware_present }` for one entry from
+`autoconfig::readers::eden_keys_path` / `eden_has_firmware`, and both `true` for any entry
+that is not Eden by `autoconfig::is_eden`. The Emulators pane renders the two verbatim notes
+from the pure `dynamicEmulatorNotes(name, facts)` helper
+(`rewrite/app/src/lib/emulators/notes.ts`), re-probing when the pane comes forward, when an
+emulator install finishes, and when the entry list changes.
+
 **Rust port (milestone 8): confirmed parity, plus one process-lifetime deviation.** The RPCS3
 card's firmware note and "Install PS3 Firmware" button render under the same condition — a
 `PS3UPDAT.PUP` present beside the emulator — with no behavior change. Clicking it spawns

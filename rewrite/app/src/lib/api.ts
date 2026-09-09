@@ -315,6 +315,11 @@ export type NativeGameSettings = {
 /// `'managed'`.
 export type CompatTool = { name: string; kind: string; path: string; source: string };
 
+/// The per-entry file probes behind the Eden advisory notes
+/// (`emulator_facts`). Both `true` for any non-Eden entry, which is the
+/// "nothing to advise" answer — see `app/src-tauri/src/commands.rs`.
+export type EmulatorFacts = { eden_keys_present: boolean; eden_firmware_present: boolean };
+
 export type CompatToolsDto = { tools: CompatTool[]; default_tool: string };
 
 /// `pup_path` is the `PS3UPDAT.PUP` beside the RPCS3 executable, or `null`
@@ -427,6 +432,7 @@ export const api = {
   stopGame: (sessionId: number) => invoke<void>('stop_game', { sessionId }),
   listSessions: () => invoke<SessionsSnapshot>('list_sessions'),
   listEmulators: () => invoke<EmulatorEntry[]>('list_emulators'),
+  emulatorFacts: (name: string) => invoke<EmulatorFacts>('emulator_facts', { name }),
   saveEmulator: (originalName: string, entry: EmulatorEntry) =>
     invoke<void>('save_emulator', { originalName, entry }),
   deleteEmulator: (name: string) => invoke<void>('delete_emulator', { name }),

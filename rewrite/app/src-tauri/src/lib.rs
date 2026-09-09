@@ -338,6 +338,7 @@ pub fn run() {
             commands::stop_game,
             commands::list_sessions,
             commands::list_emulators,
+            commands::emulator_facts,
             commands::save_emulator,
             commands::delete_emulator,
             commands::launch_emulator,

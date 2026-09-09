@@ -386,6 +386,41 @@ describe('emulators', () => {
     });
   });
 
+  it('shows both Eden advisory notes when keys and firmware are missing', async () => {
+    await $(testId('emulator-add')).click();
+    await $(testId('emu-add-tab-manual')).click();
+    await $(testId('emu-form-name')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await $(testId('emu-form-name')).setValue('Eden');
+    await $(testId('emu-form-path')).setValue('/nonexistent/eden/eden.exe');
+    await $(testId('emu-form-save')).click();
+    await $(testId(`emulator-row-${sanitize('Eden')}`)).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the Eden row never appeared',
+    });
+
+    // The probes run in the backend, so the notes arrive a tick after the row.
+    await $(testId('emulator-note-eden-keys-eden')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the Eden keys note never appeared',
+    });
+    await expect($(testId('emulator-note-eden-keys-eden'))).toHaveText(
+      'Switch keys (prod.keys) must be placed in user/keys/ before playing games.',
+    );
+    await expect($(testId('emulator-note-eden-firmware-eden'))).toHaveText(
+      'Switch firmware must be installed via Emulation → Install Firmware before playing games.',
+    );
+
+    // Clean up so the defaults cases below still see the single RetroArch row.
+    const deleteBtn = $(testId(`emulator-delete-${sanitize('Eden')}`));
+    await deleteBtn.click();
+    await deleteBtn.click();
+    await $(testId(`emulator-row-${sanitize('Eden')}`)).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      reverse: true,
+      timeoutMsg: 'the Eden row was not removed',
+    });
+  });
+
   /** The `<option>` values of a select, in DOM order. */
   async function optionValues(testIdName: string): Promise<string[]> {
     return browser.execute((selector) => {

@@ -9,6 +9,7 @@
     api,
     type CatalogEntry,
     type EmulatorEntry,
+    type EmulatorFacts,
     type LaunchDefaults,
     type Platform,
     type PlatformRef,
@@ -43,7 +44,7 @@
   } from './emulators/pages';
   import CompatTools from './emulators/CompatTools.svelte';
   import EmulatorForm from './emulators/EmulatorForm.svelte';
-  import { emulatorNotes } from './emulators/notes';
+  import { dynamicEmulatorNotes, emulatorNotes } from './emulators/notes';
 
   // Mounted for the whole session now that Emulators is a view, so the
   // refresh below is gated on being the visible view: navigating away and
@@ -205,6 +206,25 @@
     await Promise.all(emulators.filter((e) => isRpcs3(e.name)).map((e) => refreshRpcs3StatusFor(e.name)));
   }
 
+  // The Eden advisory notes' backend probes, per entry name. A name missing
+  // from the map has not been probed yet, and `dynamicEmulatorNotes` then
+  // renders nothing rather than a note that may be wrong.
+  let emulatorFacts = $state<Map<string, EmulatorFacts>>(new Map());
+
+  async function refreshAllEmulatorFacts() {
+    const answers = await Promise.all(
+      emulators.map(async (e) => {
+        try {
+          return [e.name, await api.emulatorFacts(e.name)] as const;
+        } catch {
+          // Best-effort only — an unprobed row just shows no advisory note.
+          return null;
+        }
+      }),
+    );
+    emulatorFacts = new Map(answers.filter((a) => a !== null));
+  }
+
   $effect(() => {
     const signature = firmwareCompletedSignature;
     void signature;
@@ -283,6 +303,19 @@
     void signature;
     if (!active) return;
     refreshCatalog();
+  });
+
+  // The Eden probes are file stats, so they are re-read on the same trigger
+  // as the catalog (pane forward, or an install finishing) plus any change
+  // to the entry list — dropping a prod.keys file in and coming back to the
+  // pane clears the note.
+  $effect(() => {
+    const signature = emulatorTerminalSignature;
+    const names = emulators.map((e) => e.name).join(',');
+    void signature;
+    void names;
+    if (!active) return;
+    refreshAllEmulatorFacts();
   });
 
   function errorMessage(err: unknown): string {
@@ -562,6 +595,11 @@
                         </div>
                       </div>
                       {#each emulatorNotes(e.name) as note (note.key)}
+                        <p data-testid={`emulator-note-${note.key}-${sanitizeName(e.name)}`} class="note">
+                          {note.text}
+                        </p>
+                      {/each}
+                      {#each dynamicEmulatorNotes(e.name, emulatorFacts.get(e.name)) as note (note.key)}
                         <p data-testid={`emulator-note-${note.key}-${sanitizeName(e.name)}`} class="note">
                           {note.text}
                         </p>

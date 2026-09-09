@@ -823,6 +823,43 @@ pub async fn list_emulators() -> Result<Vec<EmulatorEntry>, String> {
     .map_err(|e| format!("list_emulators did not finish: {e}"))?
 }
 
+/// The per-entry file probes the Emulators pane's Eden advisory notes read
+/// (emulator_ui_mixin.py:729-748). Booleans only — never a path, so a
+/// user's directory layout stays out of the IPC payload.
+#[derive(Debug, Serialize)]
+pub struct EmulatorFacts {
+    pub eden_keys_present: bool,
+    pub eden_firmware_present: bool,
+}
+
+/// `emulator_facts`: `<emulator_dir>/user/keys/prod.keys` and a non-empty
+/// `<emulator_dir>/user/nand/system/Contents/registered` for ONE entry.
+/// Both `true` — "nothing to advise" — for an unknown name and for any
+/// entry that is not Eden by the same [`autoconfig::is_eden`] test
+/// `sync_new_emulator` dispatches on, so the frontend renders no note.
+/// Blocking: it stats files.
+#[tauri::command]
+pub async fn emulator_facts(name: String) -> Result<EmulatorFacts, String> {
+    tokio::task::spawn_blocking(move || {
+        let config = Config::load(&Config::default_path()).map_err(err)?;
+        let profiles = load_profiles();
+        let Some(entry) = emulator_entry_by_name(&config.emulators, &name)
+            .filter(|entry| autoconfig::is_eden(entry, profiles))
+        else {
+            return Ok(EmulatorFacts {
+                eden_keys_present: true,
+                eden_firmware_present: true,
+            });
+        };
+        Ok(EmulatorFacts {
+            eden_keys_present: autoconfig::readers::eden_keys_path(&entry.path).is_some(),
+            eden_firmware_present: autoconfig::readers::eden_has_firmware(&entry.path),
+        })
+    })
+    .await
+    .map_err(|e| format!("emulator_facts did not finish: {e}"))?
+}
+
 /// The owned halves of an [`autoconfig::SyncContext`], which borrows all
 /// three. A command reads them out of the install service before its
 /// blocking hop (`State` is not `Send`); a hook holding the service handle

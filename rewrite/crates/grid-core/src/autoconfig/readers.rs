@@ -5128,6 +5128,75 @@ mod tests {
         assert_eq!(overrides, vec![resolve_best_effort(&save_root)]);
     }
 
+    // The two advisory probes the Emulators pane's Eden notes read
+    // (eden.py:372-391). Portable layout only — neither probe consults the
+    // XDG/AppData roots `eden_user_root_candidates` builds.
+
+    #[test]
+    fn eden_keys_path_finds_the_portable_prod_keys() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path(), "Eden", "eden.exe");
+        let keys = dir.join("user").join("keys").join("prod.keys");
+        std::fs::create_dir_all(keys.parent().unwrap()).unwrap();
+        std::fs::write(&keys, b"").unwrap();
+
+        assert_eq!(eden_keys_path(&exe), Some(resolve_best_effort(&keys)));
+        // A directory path stands in for the executable.
+        assert_eq!(
+            eden_keys_path(dir.to_str().unwrap()),
+            Some(resolve_best_effort(&keys))
+        );
+    }
+
+    #[test]
+    fn eden_keys_path_is_none_without_a_prod_keys_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path(), "Eden", "eden.exe");
+
+        assert_eq!(eden_keys_path(&exe), None);
+        assert_eq!(eden_keys_path("   "), None);
+
+        // A DIRECTORY named prod.keys is not the key file.
+        std::fs::create_dir_all(dir.join("user").join("keys").join("prod.keys")).unwrap();
+        assert_eq!(eden_keys_path(&exe), None);
+    }
+
+    #[test]
+    fn eden_has_firmware_when_registered_holds_any_entry() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path(), "Eden", "eden.exe");
+        let registered = dir
+            .join("user")
+            .join("nand")
+            .join("system")
+            .join("Contents")
+            .join("registered");
+        std::fs::create_dir_all(&registered).unwrap();
+        std::fs::write(registered.join("0100000000000819.nca"), b"").unwrap();
+
+        assert!(eden_has_firmware(&exe));
+        assert!(eden_has_firmware(dir.to_str().unwrap()));
+    }
+
+    #[test]
+    fn eden_has_no_firmware_when_registered_is_absent_or_empty() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path(), "Eden", "eden.exe");
+
+        assert!(!eden_has_firmware(&exe));
+        assert!(!eden_has_firmware("   "));
+
+        std::fs::create_dir_all(
+            dir.join("user")
+                .join("nand")
+                .join("system")
+                .join("Contents")
+                .join("registered"),
+        )
+        .unwrap();
+        assert!(!eden_has_firmware(&exe));
+    }
+
     /// Same divergence as `azahar_blank_path_does_not_probe_cwd`, pinned
     /// for Eden's own `eden_user_root_candidates`.
     #[test]

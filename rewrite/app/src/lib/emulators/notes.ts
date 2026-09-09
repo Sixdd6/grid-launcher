@@ -14,9 +14,9 @@
 // Emulators.svelte's `isRpcs3`.
 //
 // The reference's dynamic Eden notes (prod.keys and Switch firmware
-// presence, emulator_ui_mixin.py:729-748) are deliberately NOT here: they
-// need backend file probes that do not exist yet, and are deferred by the
-// 2026-09-05 controller rulings.
+// presence, emulator_ui_mixin.py:729-748) live in `dynamicEmulatorNotes`
+// below: they depend on backend file probes, so they take the
+// `emulator_facts` answer as a parameter and stay pure here.
 
 export type EmulatorNote = { key: string; text: string };
 
@@ -42,4 +42,31 @@ export function emulatorNotes(name: string): EmulatorNote[] {
   const haystack = name.trim().toLowerCase();
   if (haystack === '') return [];
   return NOTES.filter((note) => haystack.includes(note.key));
+}
+
+/** The `emulator_facts` answer for one entry (api.ts's `EmulatorFacts`). */
+type EdenFacts = { eden_keys_present: boolean; eden_firmware_present: boolean };
+
+/** The two advisory Eden notes (emulator_ui_mixin.py:729-748), verbatim and
+ *  in reference order. Empty for a non-Eden name, for an Eden entry whose
+ *  keys and firmware are both present, and while `facts` is still
+ *  undefined (the probe answer has not arrived — say nothing rather than
+ *  flash a warning that a moment later turns out to be wrong). */
+export function dynamicEmulatorNotes(name: string, facts?: EdenFacts): EmulatorNote[] {
+  if (!facts) return [];
+  if (!name.trim().toLowerCase().includes('eden')) return [];
+  const notes: EmulatorNote[] = [];
+  if (!facts.eden_keys_present) {
+    notes.push({
+      key: 'eden-keys',
+      text: 'Switch keys (prod.keys) must be placed in user/keys/ before playing games.',
+    });
+  }
+  if (!facts.eden_firmware_present) {
+    notes.push({
+      key: 'eden-firmware',
+      text: 'Switch firmware must be installed via Emulation → Install Firmware before playing games.',
+    });
+  }
+  return notes;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { emulatorNotes } from './notes';
+import { dynamicEmulatorNotes, emulatorNotes } from './notes';
 
 describe('emulatorNotes', () => {
   it('returns the Azahar note verbatim', () => {
@@ -53,5 +53,59 @@ describe('emulatorNotes', () => {
 
   it('keeps the reference order when a name matches more than one token', () => {
     expect(emulatorNotes('Eden and xemu combo').map((n) => n.key)).toEqual(['eden', 'xemu']);
+  });
+});
+
+describe('dynamicEmulatorNotes', () => {
+  const KEYS_NOTE = {
+    key: 'eden-keys',
+    text: 'Switch keys (prod.keys) must be placed in user/keys/ before playing games.',
+  };
+  const FIRMWARE_NOTE = {
+    key: 'eden-firmware',
+    text: 'Switch firmware must be installed via Emulation → Install Firmware before playing games.',
+  };
+
+  it('returns both notes verbatim, keys first, when both facts are false', () => {
+    expect(
+      dynamicEmulatorNotes('Eden', { eden_keys_present: false, eden_firmware_present: false }),
+    ).toEqual([KEYS_NOTE, FIRMWARE_NOTE]);
+  });
+
+  it('returns only the missing half', () => {
+    expect(
+      dynamicEmulatorNotes('Eden', { eden_keys_present: true, eden_firmware_present: false }),
+    ).toEqual([FIRMWARE_NOTE]);
+    expect(
+      dynamicEmulatorNotes('Eden', { eden_keys_present: false, eden_firmware_present: true }),
+    ).toEqual([KEYS_NOTE]);
+  });
+
+  it('returns nothing when both facts are true', () => {
+    expect(
+      dynamicEmulatorNotes('Eden', { eden_keys_present: true, eden_firmware_present: true }),
+    ).toEqual([]);
+  });
+
+  it('returns nothing for a non-Eden emulator, whatever the facts say', () => {
+    expect(
+      dynamicEmulatorNotes('RPCS3', { eden_keys_present: false, eden_firmware_present: false }),
+    ).toEqual([]);
+    expect(
+      dynamicEmulatorNotes('', { eden_keys_present: false, eden_firmware_present: false }),
+    ).toEqual([]);
+  });
+
+  it('returns nothing when the facts have not arrived yet', () => {
+    expect(dynamicEmulatorNotes('Eden', undefined)).toEqual([]);
+  });
+
+  it('matches the Eden token case-insensitively anywhere in the name', () => {
+    expect(
+      dynamicEmulatorNotes('  My eden nightly  ', {
+        eden_keys_present: false,
+        eden_firmware_present: true,
+      }).map((n) => n.key),
+    ).toEqual(['eden-keys']);
   });
 });
