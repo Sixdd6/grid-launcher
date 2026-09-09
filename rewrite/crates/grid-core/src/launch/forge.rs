@@ -140,6 +140,45 @@ impl ForgeClient {
         response.error_for_status().map_err(|e| http_error(url, e))
     }
 
+    /// The tag of the release `configured_tag` selects, for the Emulators
+    /// view's "Update from Source" check (`SourceVersionCheckWorker`,
+    /// `workers.py:439-510`). Runs ON CLICK and is never cached, so a
+    /// pinned tag asks `/releases/tags/{tag}` and everything else asks
+    /// `/releases/latest`.
+    ///
+    /// A `direct` source has no release API: it answers `"direct"` without
+    /// making a request at all, which the caller renders as "unknown".
+    /// `base_url` is read for `gitea` only.
+    pub async fn check_release_tag(
+        &self,
+        provider: &str,
+        owner: &str,
+        repo: &str,
+        base_url: &str,
+        configured_tag: &str,
+    ) -> Result<String, SourceError> {
+        if provider == "direct" {
+            return Ok("direct".to_string());
+        }
+        let (endpoint, github_headers) =
+            check_endpoint(provider, owner, repo, base_url, configured_tag)?;
+        let response = self.get(&endpoint, github_headers).await?;
+        let text = response
+            .text()
+            .await
+            .map_err(|e| http_error(&endpoint, e))?;
+        let payload: Value = serde_json::from_str(&text)
+            .map_err(|_| SourceError(UNSUPPORTED_PAYLOAD_SHAPE.to_string()))?;
+        let Some(release) = payload.as_object() else {
+            return Err(SourceError(UNSUPPORTED_PAYLOAD_SHAPE.to_string()));
+        };
+        let tag_name = str_field(release, "tag_name");
+        if tag_name.is_empty() {
+            return Err(SourceError(NO_TAG_NAME.to_string()));
+        }
+        Ok(tag_name)
+    }
+
     /// The `github`/`gitea` branch of [`Self::resolve`]: fetch the release
     /// endpoint `release_tag` selects, then hand the parsed payload to
     /// [`select_release`] and [`select_asset`] (`workers.py:188-242`).
@@ -453,6 +492,75 @@ fn release_endpoint(api_base: &str, release_tag: &str) -> String {
     } else {
         format!("{api_base}/releases")
     }
+}
+
+// --- version check ------------------------------------------------------------
+
+/// The two payload complaints `check_release_tag` reports verbatim, exactly
+/// as the reference's `SourceVersionCheckWorker` words them
+/// (`workers.py:439-510`).
+const UNSUPPORTED_PAYLOAD_SHAPE: &str = "Source release API returned an unsupported payload shape.";
+const NO_TAG_NAME: &str = "Source release API response did not include tag_name.";
+
+/// What a source's newest release looks like next to what is installed:
+/// the two strings the confirmation text shows, and whether there is
+/// nothing to do (`_show_version_check_result`, emulator_ui_mixin.py:1334-1349).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct VersionCheck {
+    pub installed_display: String,
+    pub available_display: String,
+    pub up_to_date: bool,
+}
+
+/// Compares an installed tag with the one the forge reports.
+///
+/// A blank or `latest` installed tag has no version to show, so it reads
+/// `unknown` and can never be up to date; a `direct` source has no version
+/// at all, so it reads `Unknown (direct source)` and its confirmation
+/// always offers the reinstall. Everything else is plain string equality —
+/// the reference does no semver ordering, and neither does this.
+pub fn version_check_outcome(installed: &str, available: &str) -> VersionCheck {
+    let real_pin = !installed.trim().is_empty() && !installed.eq_ignore_ascii_case("latest");
+    let direct = available == "direct";
+    VersionCheck {
+        installed_display: if real_pin {
+            installed.to_string()
+        } else {
+            "unknown".to_string()
+        },
+        available_display: if direct {
+            "Unknown (direct source)".to_string()
+        } else {
+            available.to_string()
+        },
+        up_to_date: real_pin && !direct && installed == available,
+    }
+}
+
+/// The endpoint a version check asks, and whether it carries the GitHub
+/// header set. `direct` never gets here: [`ForgeClient::check_release_tag`]
+/// answers it without a request.
+fn check_endpoint(
+    provider: &str,
+    owner: &str,
+    repo: &str,
+    base_url: &str,
+    configured_tag: &str,
+) -> Result<(String, bool), SourceError> {
+    let api_base = match provider {
+        "github" => format!("https://api.github.com/repos/{owner}/{repo}"),
+        "gitea" => format!("{base_url}/api/v1/repos/{owner}/{repo}"),
+        other => return Err(SourceError(format!("Unsupported provider: {other}"))),
+    };
+    // An unpinned check asks for the newest release, never the plain
+    // `/releases` list `release_endpoint` would otherwise choose: there is
+    // one tag to compare against, not a page of them.
+    let tag = if configured_tag.trim().is_empty() {
+        "latest"
+    } else {
+        configured_tag
+    };
+    Ok((release_endpoint(&api_base, tag), provider == "github"))
 }
 
 // --- HTTP error formatting ----------------------------------------------------
@@ -1051,6 +1159,183 @@ mod tests {
     fn map_of_helper_roundtrips() {
         let m = map_of(json!({"a": 1}));
         assert_eq!(m.get("a"), Some(&json!(1)));
+    }
+    // --- version check: endpoint choice, payload rules, comparison --------
+
+    #[test]
+    fn check_endpoint_github_latest_uses_the_public_api_with_github_headers() {
+        let (endpoint, github_headers) = check_endpoint("github", "o", "r", "", "latest").unwrap();
+        assert_eq!(endpoint, "https://api.github.com/repos/o/r/releases/latest");
+        assert!(github_headers);
+    }
+
+    #[test]
+    fn check_endpoint_blank_tag_is_treated_as_latest() {
+        let (endpoint, _) = check_endpoint("github", "o", "r", "", "").unwrap();
+        assert_eq!(endpoint, "https://api.github.com/repos/o/r/releases/latest");
+    }
+
+    #[test]
+    fn check_endpoint_pinned_tag_goes_to_the_tags_path() {
+        let (endpoint, _) = check_endpoint("github", "o", "r", "", "v1.2.3").unwrap();
+        assert_eq!(
+            endpoint,
+            "https://api.github.com/repos/o/r/releases/tags/v1.2.3"
+        );
+    }
+
+    #[test]
+    fn check_endpoint_gitea_uses_the_configured_base_url_without_github_headers() {
+        let (endpoint, github_headers) = check_endpoint(
+            "gitea",
+            "acme",
+            "widget",
+            "https://git.example.com",
+            "latest",
+        )
+        .unwrap();
+        assert_eq!(
+            endpoint,
+            "https://git.example.com/api/v1/repos/acme/widget/releases/latest"
+        );
+        assert!(!github_headers);
+    }
+
+    #[test]
+    fn check_endpoint_rejects_an_unknown_provider_verbatim() {
+        let err = check_endpoint("sourceforge", "o", "r", "", "latest").unwrap_err();
+        assert_eq!(err.0, "Unsupported provider: sourceforge");
+    }
+
+    #[tokio::test]
+    async fn check_release_tag_reads_tag_name_off_the_latest_release() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/acme/widget/releases/latest"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"tag_name": "v3.1"})))
+            .mount(&mock_server)
+            .await;
+
+        let client = ForgeClient::new().unwrap();
+        let tag = client
+            .check_release_tag("gitea", "acme", "widget", &mock_server.uri(), "latest")
+            .await
+            .unwrap();
+        assert_eq!(tag, "v3.1");
+    }
+
+    #[tokio::test]
+    async fn check_release_tag_asks_for_a_pinned_tag_by_path() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/acme/widget/releases/tags/v2.0"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"tag_name": "v2.0"})))
+            .mount(&mock_server)
+            .await;
+
+        let client = ForgeClient::new().unwrap();
+        let tag = client
+            .check_release_tag("gitea", "acme", "widget", &mock_server.uri(), "v2.0")
+            .await
+            .unwrap();
+        assert_eq!(tag, "v2.0");
+        let received = mock_server.received_requests().await.unwrap();
+        assert_eq!(received.len(), 1);
+        assert_eq!(
+            received[0].url.path(),
+            "/api/v1/repos/acme/widget/releases/tags/v2.0"
+        );
+    }
+
+    #[tokio::test]
+    async fn check_release_tag_turns_a_404_into_an_error_naming_the_host() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let client = ForgeClient::new().unwrap();
+        let err = client
+            .check_release_tag("gitea", "acme", "widget", &mock_server.uri(), "latest")
+            .await
+            .unwrap_err();
+        assert!(err.0.contains("127.0.0.1"), "error was: {}", err.0);
+    }
+
+    #[tokio::test]
+    async fn check_release_tag_rejects_a_non_object_payload_verbatim() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([{"tag_name": "v1"}])))
+            .mount(&mock_server)
+            .await;
+
+        let client = ForgeClient::new().unwrap();
+        let err = client
+            .check_release_tag("gitea", "acme", "widget", &mock_server.uri(), "latest")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.0,
+            "Source release API returned an unsupported payload shape."
+        );
+    }
+
+    #[tokio::test]
+    async fn check_release_tag_rejects_a_payload_without_tag_name_verbatim() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"name": "v1"})))
+            .mount(&mock_server)
+            .await;
+
+        let client = ForgeClient::new().unwrap();
+        let err = client
+            .check_release_tag("gitea", "acme", "widget", &mock_server.uri(), "latest")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.0,
+            "Source release API response did not include tag_name."
+        );
+    }
+
+    #[tokio::test]
+    async fn check_release_tag_answers_direct_without_any_request() {
+        let mock_server = MockServer::start().await;
+        let client = ForgeClient::new().unwrap();
+        let tag = client
+            .check_release_tag("direct", "", "", &mock_server.uri(), "nightly")
+            .await
+            .unwrap();
+        assert_eq!(tag, "direct");
+        assert!(mock_server.received_requests().await.unwrap().is_empty());
+    }
+
+    #[test]
+    fn version_check_outcome_shows_unknown_for_a_blank_or_latest_installed_tag() {
+        for installed in ["", "latest", "Latest"] {
+            let check = version_check_outcome(installed, "v2.0");
+            assert_eq!(check.installed_display, "unknown");
+            assert_eq!(check.available_display, "v2.0");
+            assert!(!check.up_to_date);
+        }
+    }
+
+    #[test]
+    fn version_check_outcome_labels_a_direct_source_and_never_calls_it_up_to_date() {
+        let check = version_check_outcome("direct", "direct");
+        assert_eq!(check.available_display, "Unknown (direct source)");
+        assert!(!check.up_to_date);
+    }
+
+    #[test]
+    fn version_check_outcome_is_up_to_date_only_for_an_equal_real_pin() {
+        let same = version_check_outcome("v2.0", "v2.0");
+        assert_eq!(same.installed_display, "v2.0");
+        assert!(same.up_to_date);
+        assert!(!version_check_outcome("v1.9", "v2.0").up_to_date);
     }
 }
 

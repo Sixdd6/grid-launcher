@@ -814,7 +814,9 @@ async fn an_existing_config_entry_with_the_same_name_is_replaced_at_its_index() 
             .join("bin/testemu.sh")
             .to_string_lossy()
     );
-    assert_eq!(config.emulators[0].args, "-f %rom%");
+    // A replace keeps the user's own args (Task 3): only the path and the
+    // source provenance are rewritten by the install.
+    assert_eq!(config.emulators[0].args, "old-args");
     assert_eq!(config.emulators[1].name, "Other");
     assert_eq!(config.emulators[1].path, "/other/emu.sh");
 }
@@ -1059,5 +1061,124 @@ async fn emulator_installed_hook_reports_fresh_true_then_false() {
             fresh: false,
             compat_tool: false,
         }
+    );
+}
+
+// --- (k) update from source (Task 3) ------------------------------------------
+
+/// "Update from Source" is a plain re-run of `install_emulator` for the
+/// entry's `source_id`: it lands in the SAME directory, merges over what is
+/// there, records the newly resolved tag, and leaves every field the user
+/// owns (args, the cloud-save paths) exactly as it found them.
+#[tokio::test]
+async fn updating_a_source_installed_emulator_preserves_user_fields_and_records_the_new_tag() {
+    let staging = tempfile::tempdir().unwrap();
+    let first = zip_bytes(&staging, "first.zip", &[("pcsx2.sh", b"FIRST")]);
+    let second = zip_bytes(
+        &staging,
+        "second.zip",
+        &[("pcsx2.sh", b"SECOND"), ("data/new.txt", b"NEW")],
+    );
+
+    let harness = Harness::new(|uri| {
+        let mut source = gitea_source(uri);
+        source["release_tag"] = json!("latest");
+        vec![profile("PCSX2", source)]
+    })
+    .await;
+    harness
+        .mount_widget_at(
+            "/api/v1/repos/acme/widget/releases/latest",
+            "v3.2.1",
+            "widget-linux.zip",
+            first,
+            0,
+        )
+        .await;
+
+    let events: Arc<Mutex<Vec<EmulatorInstalled>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorder = events.clone();
+    harness
+        .service
+        .set_emulator_installed_hook(Arc::new(move |installed| {
+            recorder.lock().unwrap().push(installed);
+        }));
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+    assert_eq!(
+        harness.config().emulators[0].source_installed_tag,
+        "v3.2.1",
+        "the RESOLVED tag is recorded alongside the configured pin"
+    );
+
+    // What the user owns after the install: their own args, and the
+    // cloud-save fields autoconfig/the save panel fill in.
+    let mut config = harness.config();
+    config.emulators[0].args = "-custom %rom%".to_string();
+    config.emulators[0].save_paths = "~/saves/pcsx2".to_string();
+    config.emulators[0].save_strategy = "folder".to_string();
+    config.save(&harness.config_path).unwrap();
+
+    harness.server.reset().await;
+    harness
+        .mount_widget_at(
+            "/api/v1/repos/acme/widget/releases/latest",
+            "v4.0.0",
+            "widget-linux.zip",
+            second,
+            0,
+        )
+        .await;
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let second_id = harness.newest_entry_id();
+    let second_entry = harness.wait_terminal(second_id).await;
+    assert_eq!(
+        second_entry.status,
+        DownloadStatus::Completed,
+        "{}",
+        second_entry.error
+    );
+
+    // Same directory, merged in place — no per-release directory.
+    let install_dir = harness.install_dir("PCSX2-latest");
+    let exe = install_dir.join("pcsx2.sh");
+    assert_eq!(fs::read(&exe).unwrap(), b"SECOND");
+    assert!(install_dir.join("data/new.txt").is_file());
+    assert!(!harness.install_dir("PCSX2-v4.0.0").exists());
+
+    let config = harness.config();
+    assert_eq!(
+        config.emulators.len(),
+        1,
+        "the entry is replaced, not added"
+    );
+    let saved = &config.emulators[0];
+    assert_eq!(saved.path, exe.to_string_lossy());
+    assert_eq!(saved.source_release_tag, "latest");
+    assert_eq!(saved.source_installed_tag, "v4.0.0");
+    assert_eq!(saved.args, "-custom %rom%");
+    assert_eq!(saved.save_paths, "~/saves/pcsx2");
+    assert_eq!(saved.save_strategy, "folder");
+
+    // Autoconfig runs on an update too (it is not gated on `fresh`).
+    assert!(install_dir.join("portable.ini").is_file());
+
+    let recorded = events.lock().unwrap().clone();
+    assert_eq!(
+        recorded.iter().map(|e| e.fresh).collect::<Vec<_>>(),
+        vec![true, false],
+        "an update reports fresh == false, which suppresses the firmware pass"
     );
 }

@@ -408,6 +408,7 @@ pub fn auto_configure_emulator_settings(
                 source_owner: existing.source_owner.clone(),
                 source_repo: existing.source_repo.clone(),
                 source_release_tag: existing.source_release_tag.clone(),
+                source_installed_tag: existing.source_installed_tag.clone(),
             };
             resolved_emulators[index] = rebuilt;
         }

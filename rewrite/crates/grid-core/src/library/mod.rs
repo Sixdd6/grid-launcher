@@ -2198,27 +2198,34 @@ impl InstallService {
         exe: &Path,
     ) -> Result<bool, LibraryError> {
         let mut config = Config::load(&self.config_path)?;
-        let entry = EmulatorEntry {
-            name: job.profile_name.clone(),
-            path: path_string(exe),
-            args: job.profile_args.clone(),
-            source_id: job.source_id.clone(),
-            source_provider: resolved.provider.clone(),
-            source_owner: resolved.owner.clone(),
-            source_repo: resolved.repo.clone(),
-            // The CONFIGURED tag, not the resolved one — a `latest` pin is
-            // recorded as `latest` so the entry keeps meaning "track the
-            // newest release" (emulator_ui_mixin.py:1168-1175).
-            source_release_tag: job.configured_tag.clone(),
-            // The layer-1 autoconfig fields are not this writer's concern:
-            // `autoconfig::entry` fills them on the next configure pass.
-            ..Default::default()
-        };
-        let fresh = match config
+        let position = config
             .emulators
             .iter()
-            .position(|existing| existing.name == entry.name)
-        {
+            .position(|existing| existing.name == job.profile_name);
+        // An update starts from the EXISTING entry, so everything the user
+        // owns — their edited `args`, and the cloud-save fields
+        // `autoconfig::entry` and the save panel fill in — survives it.
+        // Only the fields the install itself decides are overwritten.
+        let mut entry = match position {
+            Some(index) => config.emulators[index].clone(),
+            None => EmulatorEntry {
+                args: job.profile_args.clone(),
+                ..Default::default()
+            },
+        };
+        entry.name = job.profile_name.clone();
+        entry.path = path_string(exe);
+        entry.source_id = job.source_id.clone();
+        entry.source_provider = resolved.provider.clone();
+        entry.source_owner = resolved.owner.clone();
+        entry.source_repo = resolved.repo.clone();
+        // The CONFIGURED tag, not the resolved one — a `latest` pin is
+        // recorded as `latest` so the entry keeps meaning "track the
+        // newest release" (emulator_ui_mixin.py:1168-1175). The resolved
+        // tag is recorded beside it, as the version actually on disk.
+        entry.source_release_tag = job.configured_tag.clone();
+        entry.source_installed_tag = resolved.release_tag.clone();
+        let fresh = match position {
             Some(index) => {
                 config.emulators[index] = entry;
                 false

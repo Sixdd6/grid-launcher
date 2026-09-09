@@ -31,6 +31,14 @@ pub struct EmulatorEntry {
     pub source_repo: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub source_release_tag: String,
+    /// The tag that is actually ON DISK — the release the forge resolved
+    /// `source_release_tag` to at install time
+    /// (`ResolvedDownload::release_tag`). A `latest` pin therefore still has
+    /// a concrete version to compare a newer release against, which the
+    /// reference cannot do (it shows `unknown` for a `latest` pin); see the
+    /// deviation note in `docs/porting/04-emulator-launch.md`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source_installed_tag: String,
     /// The five fields below are written by `autoconfig::entry`'s layer-1
     /// pass (autoconfig.py:524-554) and read by the cloud-save code. They
     /// follow the `source_*` serde pattern — defaulted on load, omitted on
