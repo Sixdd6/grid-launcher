@@ -430,12 +430,14 @@
     catalogError = null;
     catalogSearch = '';
     confirmingDelete = null;
+    updatePrompt = null;
   }
 
   function openEdit(entry: EmulatorEntry) {
     page = 'installed';
     editing = { name: entry.name, entry };
     confirmingDelete = null;
+    updatePrompt = null;
   }
 
   function closeSheet() {
