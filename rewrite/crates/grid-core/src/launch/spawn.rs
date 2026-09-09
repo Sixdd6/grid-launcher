@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::process::{Child, ExitStatus};
 
 use crate::config::EmulatorEntry;
 use crate::library::paths::expand_home;
@@ -150,26 +151,16 @@ pub fn prepare_standalone_emulator_launch(
     Ok((vec![executable.to_string_lossy().into_owned()], working_dir))
 }
 
-/// Spawns a standalone emulator and returns as soon as it has started —
+/// Spawns a standalone emulator and hands the caller its [`Child`] —
 /// Python's bare `subprocess.Popen` (emulator_ui_mixin.py:1655-1661). The
 /// child gets [`clean_env`] and, on Windows, its own process group, exactly
 /// like `spawn_child` in `launch/mod.rs` and Python's
 /// `CREATE_NEW_PROCESS_GROUP` (:1660).
 ///
-/// A detached thread owns the [`std::process::Child`] and blocks in `wait()`
-/// purely so the process is reaped when the emulator exits — the same
-/// arrangement (and the same reason) as
-/// [`crate::firmware::rpcs3::spawn_rpcs3_installfw`]. There is no session
-/// row for a ROM-less launch, so nothing else is watching it.
-///
-/// Python then warns 500ms later if the process already died
-/// (`_warn_if_process_exited_early`, :1662). That is deferred, not
-/// unported for lack of a surface — the toast surface exists. This command
-/// returns as soon as the process starts and keeps no handle to it, so
-/// porting `process_exited_early_message` needs either a 500ms hold here or
-/// an event fired from the reaper thread; both are out of scope for parity
-/// pass 1.
-pub fn spawn_standalone_emulator(argv: &[String], working_dir: &Path) -> Result<(), String> {
+/// The caller owns the child and must hand it to [`wait_for_early_exit`],
+/// which runs Python's 500 ms check (`_warn_if_process_exited_early`,
+/// :1662) and takes over reaping.
+pub fn spawn_standalone_emulator(argv: &[String], working_dir: &Path) -> Result<Child, String> {
     let Some(program) = argv.first() else {
         return Err("Failed to launch emulator:\nno executable to run".to_string());
     };
@@ -187,15 +178,58 @@ pub fn spawn_standalone_emulator(argv: &[String], working_dir: &Path) -> Result<
         command.creation_flags(CREATE_NEW_PROCESS_GROUP);
     }
 
-    match command.spawn() {
-        Ok(mut child) => {
-            std::thread::spawn(move || {
-                let _ = child.wait();
-            });
-            Ok(())
-        }
-        Err(e) => Err(format!("Failed to launch emulator:\n{e}")),
+    command
+        .spawn()
+        .map_err(|e| format!("Failed to launch emulator:\n{e}"))
+}
+
+/// Blocks for the early-exit window and reports a child that is already
+/// gone by the end of it — Python's `QTimer.singleShot(500, …)` around
+/// `_warn_if_process_exited_early` (emulator_ui_mixin.py:1662), run inline
+/// because this path has no event loop to defer onto and its caller is
+/// already on the blocking pool.
+///
+/// A child still running when the window closes is handed to a detached
+/// thread that blocks in `wait()` purely so the process is reaped when the
+/// emulator eventually exits — the same arrangement (and the same reason) as
+/// [`crate::firmware::rpcs3::spawn_rpcs3_installfw`]. There is no session
+/// row for a ROM-less launch, so nothing else is watching it.
+pub fn wait_for_early_exit(mut child: Child, argv: &[String]) -> Option<String> {
+    std::thread::sleep(super::EARLY_EXIT_DELAY);
+    // A `try_wait` error means no status was ever available; treat the child
+    // as running and let the reaper thread deal with it.
+    if let Ok(Some(status)) = child.try_wait() {
+        return Some(process_exited_early_message(Some(status), argv));
     }
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    None
+}
+
+/// The message for a process that died inside its early-exit window, shared
+/// by both surfaces: the Details strip for a game launch and the Emulators
+/// toast for a standalone one. Verbatim from Python's
+/// `process_exited_early_message` (`grid_launcher/emulator/launch.py:320`),
+/// which space-joins the command.
+///
+/// `status` is `None` only when `try_wait` itself failed, so no exit code was
+/// ever available; the process is gone either way and the user still needs to
+/// be told, so the code reads "unknown".
+pub fn process_exited_early_message(status: Option<ExitStatus>, argv: &[String]) -> String {
+    let detail = match status {
+        // No exit code: killed by a signal. The `ExitStatus` display already
+        // reads as "signal: 9 (SIGKILL)".
+        Some(status) => match status.code() {
+            Some(code) => format!("code {code}"),
+            None => status.to_string(),
+        },
+        None => "unknown".to_string(),
+    };
+    format!(
+        "Process exited immediately ({detail}).\nCommand:\n{}",
+        argv.join(" ")
+    )
 }
 
 /// The environment a spawned host binary gets: a copy of this process's
@@ -486,26 +520,75 @@ mod tests {
         assert_eq!(working_dir, dir.path());
     }
 
+    /// Writes an executable `#!/bin/sh` stub and returns its path.
+    #[cfg(unix)]
+    fn shell_stub(dir: &Path, name: &str, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let exe = dir.join(name);
+        std::fs::write(&exe, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        exe
+    }
+
     #[cfg(unix)]
     #[test]
     fn spawn_standalone_runs_the_executable() {
-        use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join("ran");
-        let exe = dir.path().join("stub.sh");
-        std::fs::write(&exe, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
-        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let exe = shell_stub(
+            dir.path(),
+            "stub.sh",
+            &format!("touch '{}'", marker.display()),
+        );
 
         let argv = vec![exe.to_string_lossy().into_owned()];
-        spawn_standalone_emulator(&argv, dir.path()).unwrap();
-
-        // The reaper thread owns the child; poll for the marker rather than
-        // waiting on a handle this API deliberately does not hand back.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while !marker.exists() && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
+        let mut child = spawn_standalone_emulator(&argv, dir.path()).unwrap();
+        // The caller owns the child now, so the stub can simply be waited on.
+        child.wait().unwrap();
         assert!(marker.exists(), "the stub never ran");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_for_early_exit_reports_a_stub_that_exits_immediately() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = shell_stub(dir.path(), "instant-exit.sh", "exit 3");
+
+        let argv = vec![exe.to_string_lossy().into_owned()];
+        let child = spawn_standalone_emulator(&argv, dir.path()).unwrap();
+        assert_eq!(
+            wait_for_early_exit(child, &argv),
+            Some(format!(
+                "Process exited immediately (code 3).\nCommand:\n{}",
+                exe.display()
+            ))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wait_for_early_exit_says_nothing_about_a_process_that_is_still_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = shell_stub(dir.path(), "long-runner.sh", "sleep 2");
+
+        let argv = vec![exe.to_string_lossy().into_owned()];
+        let child = spawn_standalone_emulator(&argv, dir.path()).unwrap();
+        let started = std::time::Instant::now();
+        assert_eq!(wait_for_early_exit(child, &argv), None);
+        // It waited for the window, not for the process.
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(1500),
+            "wait_for_early_exit blocked until the child exited"
+        );
+    }
+
+    #[test]
+    fn the_early_exit_message_joins_the_command_with_spaces() {
+        let argv = vec!["/emu/run".to_string(), "--flag".to_string()];
+        assert_eq!(
+            process_exited_early_message(None, &argv),
+            "Process exited immediately (unknown).\nCommand:\n/emu/run --flag"
+        );
     }
 
     #[test]

@@ -529,14 +529,19 @@ pre-launch hook `lib.rs` installs (`set_pre_launch_hook`, fired only when the
 resolved entry is a RetroArch build). Both run the RetroArch writer alone
 (`autoconfig::sync_retroarch_settings_only`): a launch rewrites `retroarch.cfg`
 and nothing else — never the emulator entry, never config.toml. Both log their
-own failures and can never fail a launch. See doc 05's call-site table. One
-recorded deviation:
+own failures and can never fail a launch. See doc 05's call-site table.
 
-- No 500 ms early-exit warning (:1662) — deferred, not unported for lack of a
-  surface (the toast surface exists). `spawn_standalone_emulator` returns as
-  soon as the process starts and keeps no handle to it, so porting
-  `process_exited_early_message` needs either a 500 ms hold or an event;
-  scoped out of parity pass 1.
+The 500 ms early-exit warning (:1662) is ported too: `spawn_standalone_emulator`
+hands its `Child` back and `wait_for_early_exit` holds for the window on the
+blocking pool, so `launch_emulator` returns the warning text when the process is
+already gone (`Some`) or nothing when it is still running (`None`). The
+Emulators view toasts that text as an error. Both early-exit surfaces — the
+Details strip for a game launch, this toast for a standalone one — build their
+message with the one shared `process_exited_early_message`
+(`launch/spawn.rs`), which is Python's verbatim
+`Process exited immediately (code {code}).\nCommand:\n{command}`
+(grid_launcher/emulator/launch.py:320-322) with `(signal: …)` / `(unknown)` in
+place of the code when there is none.
 
 ### 9. Native (non-emulated) launch details
 

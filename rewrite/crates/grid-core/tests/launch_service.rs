@@ -324,7 +324,7 @@ async fn an_instant_exit_removes_the_session_and_warns() {
     assert_eq!(
         warnings[0],
         format!(
-            "Game exited immediately (code 3): {} {}",
+            "Process exited immediately (code 3).\nCommand:\n{} {}",
             exe.to_string_lossy(),
             rom.to_string_lossy()
         )
@@ -375,7 +375,7 @@ async fn a_siblings_check_still_reports_this_games_early_exit() {
     assert_eq!(
         warnings[0],
         format!(
-            "Game exited immediately (code 3): {} {}",
+            "Process exited immediately (code 3).\nCommand:\n{} {}",
             quitter.to_string_lossy(),
             dying_rom.to_string_lossy()
         )
@@ -434,7 +434,7 @@ async fn a_running_poll_loop_does_not_swallow_the_early_exit_warning() {
     assert_eq!(
         recorder.warnings()[0],
         format!(
-            "Game exited immediately (code 3): {} {}",
+            "Process exited immediately (code 3).\nCommand:\n{} {}",
             exe.to_string_lossy(),
             rom.to_string_lossy()
         )

@@ -37,7 +37,7 @@ use selection::{
     installed_core_resolver, mapping_value_for_platform,
 };
 use sessions::SessionStore;
-use spawn::{clean_env, prepare_emulator_launch};
+use spawn::{clean_env, prepare_emulator_launch, process_exited_early_message};
 use template::{host_os, retroarch_core_argument_path, Placeholders};
 
 pub use platform_slugs::{set_platform_slugs, slug_for_platform};
@@ -110,9 +110,9 @@ pub struct LaunchService {
     /// order is always this gate first, the session store second — never the
     /// reverse — and no listener is ever called while it is held.
     reap_gate: Mutex<()>,
-    /// Sessions still inside their early-exit window, mapped to the command
-    /// line to quote if they die there. An entry is added at spawn and taken
-    /// out by whichever event comes first: the session being reaped (which
+    /// Sessions still inside their early-exit window, mapped to the argv to
+    /// quote if they die there. An entry is added at spawn and taken out by
+    /// whichever event comes first: the session being reaped (which
     /// emits the warning), the session's own 500 ms check finding it still
     /// alive (the window is over — a later exit is a normal quit), or a
     /// [`Self::stop`] for it (the user asked; that is not a failure).
@@ -122,7 +122,7 @@ pub struct LaunchService {
     /// *sibling's* check running while this session is young — can be the one
     /// that finds the dead child, and the warning has to survive whichever it
     /// is. Bounded by the number of launches in flight.
-    early_exit_watch: Mutex<HashMap<u64, String>>,
+    early_exit_watch: Mutex<HashMap<u64, Vec<String>>>,
 }
 
 impl LaunchService {
@@ -283,7 +283,7 @@ impl LaunchService {
         }
 
         let title = game.title.clone();
-        let joined_command = argv.join(" ");
+        let watched_argv = argv.clone();
         let child = spawn_child(argv, working_dir, extra_env).await?;
         let pid = child.id();
 
@@ -311,7 +311,7 @@ impl LaunchService {
         self.early_exit_watch
             .lock()
             .unwrap()
-            .insert(session.id, joined_command);
+            .insert(session.id, watched_argv);
 
         self.emit(None);
         self.schedule_early_exit_check(session.id);
@@ -444,7 +444,7 @@ impl LaunchService {
                 .filter_map(|(session, status)| {
                     watch
                         .remove(&session.id)
-                        .map(|command| early_exit_message(*status, &command))
+                        .map(|argv| process_exited_early_message(*status, &argv))
                 })
                 .collect()
         };
@@ -488,23 +488,6 @@ impl LaunchService {
 }
 
 // --- resolution -------------------------------------------------------------
-
-/// The message for a game that died inside its early-exit window.
-///
-/// `status` is `None` only when `try_wait` itself failed, so no exit code was
-/// ever available; the process is gone either way and the user still needs to
-/// be told, so the code reads "unknown".
-fn early_exit_message(status: Option<ExitStatus>, joined_command: &str) -> String {
-    match status {
-        Some(status) => match status.code() {
-            Some(code) => format!("Game exited immediately (code {code}): {joined_command}"),
-            // No exit code: killed by a signal. The `ExitStatus` display
-            // already reads as "signal: 9 (SIGKILL)".
-            None => format!("Game exited immediately ({status}): {joined_command}"),
-        },
-        None => format!("Game exited immediately (unknown): {joined_command}"),
-    }
-}
 
 /// Everything the spawn step needs, once resolution has succeeded.
 struct LaunchPlan {

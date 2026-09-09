@@ -18,7 +18,9 @@ use grid_core::launch::selection::{
     compatible_emulator_names_for_platform, emulator_entry_by_name, emulator_supports_platform,
     entry_is_retroarch, mapping_value_for_platform, slug_core_resolver, NO_EMULATOR,
 };
-use grid_core::launch::spawn::{prepare_standalone_emulator_launch, spawn_standalone_emulator};
+use grid_core::launch::spawn::{
+    prepare_standalone_emulator_launch, spawn_standalone_emulator, wait_for_early_exit,
+};
 use grid_core::launch::{GameSession, LaunchService, SessionsSnapshot};
 use grid_core::library::extract::is_extractable_archive;
 use grid_core::library::paths::library_root;
@@ -1079,14 +1081,21 @@ pub async fn delete_emulator(name: String) -> Result<(), String> {
 }
 
 /// Opens a configured emulator with no ROM, so the user can set its controls
-/// up (`_launch_emulator_at_index`, emulator_ui_mixin.py:1635-1665). Returns
-/// as soon as the process has started; every failure is a plain, path-only
-/// message the Emulators view shows as a toast.
+/// up (`_launch_emulator_at_index`, emulator_ui_mixin.py:1635-1665). Every
+/// failure is a plain, path-only message the Emulators view shows as a toast.
 ///
 /// A RetroArch entry gets its settings sync first (:1653), in the
 /// reference's order: validate, sync, spawn.
+///
+/// Returns 500 ms after the spawn (Python's `QTimer.singleShot(500, …)`,
+/// :1662) with `Some(message)` when the process is already gone by then —
+/// the caller toasts it — and `None` when it is still running. The hold is
+/// on the blocking pool, so it never stalls the UI thread.
 #[tauri::command]
-pub async fn launch_emulator(state: State<'_, AppState>, name: String) -> Result<(), String> {
+pub async fn launch_emulator(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<Option<String>, String> {
     // `State` is not `Send`; the service handle crosses the hop instead.
     let install = state.install.as_ref().ok().cloned();
     tokio::task::spawn_blocking(move || {
@@ -1096,7 +1105,8 @@ pub async fn launch_emulator(state: State<'_, AppState>, name: String) -> Result
         if entry.is_some_and(|entry| entry_is_retroarch(entry, load_profiles())) {
             sync_emulator_settings(&name, install.as_ref());
         }
-        spawn_standalone_emulator(&argv, &working_dir)
+        let child = spawn_standalone_emulator(&argv, &working_dir)?;
+        Ok(wait_for_early_exit(child, &argv))
     })
     .await
     .map_err(|e| format!("launch_emulator did not finish: {e}"))?

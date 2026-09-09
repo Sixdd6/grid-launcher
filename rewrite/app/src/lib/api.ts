@@ -436,8 +436,12 @@ export const api = {
   saveEmulator: (originalName: string, entry: EmulatorEntry) =>
     invoke<void>('save_emulator', { originalName, entry }),
   deleteEmulator: (name: string) => invoke<void>('delete_emulator', { name }),
-  /** Opens the emulator with no ROM, so its own settings UI can be reached. */
-  launchEmulator: (name: string) => invoke<void>('launch_emulator', { name }),
+  /**
+   * Opens the emulator with no ROM, so its own settings UI can be reached.
+   * Resolves 500 ms later with the warning text when the process is already
+   * gone by then, or `null` when it is still running.
+   */
+  launchEmulator: (name: string) => invoke<string | null>('launch_emulator', { name }),
   listProfiles: () => invoke<ProfileSummary[]>('list_profiles'),
   matchProfile: (executablePath: string) =>
     invoke<ProfileSummary | null>('match_profile', { executablePath }),

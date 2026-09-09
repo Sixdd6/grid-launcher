@@ -210,6 +210,23 @@ describe('launch', () => {
     await $(testId('details-close')).click();
   });
 
+  it('toasts the early exit when the instant-exit stub is launched from Emulators', async () => {
+    // The ROM-less "open the emulator so I can configure it" launch: same
+    // 500 ms check as the Play path above, reported as a toast instead of
+    // the Details strip.
+    await openEmulators();
+    await showPage('installed');
+    await $(testId('emulator-launch-instantexit')).click();
+    await $(testId('toast')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'no toast appeared after launching the instant-exit stub',
+    });
+    await expect($(testId('toast'))).toHaveText('Process exited immediately (code 3).', {
+      containing: true,
+    });
+    await closeEmulators();
+  });
+
   it('shows the verbatim "Emulator executable not found:" error when the default\'s path is broken', async () => {
     await openEmulators();
     await showPage('installed');

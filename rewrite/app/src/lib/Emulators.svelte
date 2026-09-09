@@ -486,14 +486,17 @@
   }
 
   // Set for the row whose launch is in flight, so its button disables and
-  // says "Launching…" — the click spawns a process and gives no other
-  // feedback until it fails.
+  // says "Launching…" — the click spawns a process, then holds for the
+  // 500 ms early-exit window, and gives no other feedback unless it fails.
   let launchPending = $state<string | null>(null);
 
   async function handleLaunchClick(name: string) {
     launchPending = name;
     try {
-      await api.launchEmulator(name);
+      // A string back means the process died inside the early-exit window
+      // (emulator_ui_mixin.py:1662); it reads like the launch failure it is.
+      const warning = await api.launchEmulator(name);
+      if (warning) pushToast(warning, 'error');
     } catch (err) {
       pushToast(errorMessage(err), 'error');
     } finally {
