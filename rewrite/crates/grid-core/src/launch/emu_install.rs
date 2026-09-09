@@ -17,7 +17,14 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::library::extract::extract_archive;
 use crate::library::paths::sanitize_component;
+
+/// `_extract_emulator_archive`'s message when extraction finished but no
+/// launchable file turned up (emulator_ui_mixin.py:1394). Verbatim — the
+/// Emulators view shows it unchanged.
+pub const NO_LAUNCHABLE_AFTER_EXTRACT: &str = "Archive extraction finished, but no launchable \
+     executable was detected. Open Config to set the executable path manually.";
 
 /// `<library>/Emulators/<sanitize_component(archive_stem, "emulator")>`
 /// (`emulator_install_directory`, autoconfig.py:14-17).
@@ -34,6 +41,45 @@ pub fn emulator_install_dir(library: &Path, archive_stem: &str) -> PathBuf {
 pub fn compat_tool_install_dir(root: &Path, archive_stem: &str) -> PathBuf {
     root.join(sanitize_component(archive_stem, "compat-tool"))
 }
+
+/// Extracts a manually entered emulator archive and returns the executable
+/// to store as the entry's path (`_extract_emulator_archive`,
+/// emulator_ui_mixin.py:1371-1404). The caller decides that `archive` IS an
+/// archive ([`crate::library::extract::is_extractable_archive`]) and that a
+/// library path exists.
+///
+/// The destination is [`emulator_install_dir`] under the ENTRY name, not the
+/// archive stem, matching the reference. Blocking.
+pub fn install_manual_archive(
+    library: &Path,
+    entry_name: &str,
+    archive: &Path,
+) -> Result<PathBuf, String> {
+    if !archive.is_file() {
+        return Err(format!(
+            "Archive file was not found:\n{}",
+            archive.display()
+        ));
+    }
+    let dest = emulator_install_dir(library, entry_name);
+    extract_archive(archive, &dest, &mut |_, _| {})
+        .map_err(|e| format!("Failed to extract emulator archive: {e}"))?;
+    let executable = select_executable(entry_name, &dest, archive)
+        .ok_or_else(|| NO_LAUNCHABLE_AFTER_EXTRACT.to_string())?;
+    // Python's `os.chmod(path, 0o755)` off win32 (emulator_ui_mixin.py:1399).
+    make_executable(&executable);
+    Ok(executable)
+}
+
+/// Marks `path` `0o755`. A no-op on Windows, which has no executable bit.
+#[cfg(unix)]
+pub fn make_executable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o755));
+}
+
+#[cfg(not(unix))]
+pub fn make_executable(_path: &Path) {}
 
 /// Splits `name` (a bare file name, no directory component) into
 /// `(stem, suffix)` matching `pathlib.Path.stem` / `.suffix`: the suffix is
@@ -627,5 +673,108 @@ mod tests {
         touch(&archive);
 
         assert!(select_executable("Emu", &install_dir, &archive).is_none());
+    }
+
+    // --- install_manual_archive -------------------------------------------
+
+    /// Writes a zip at `path` holding `(name, contents, unix mode)` entries.
+    fn write_zip(path: &Path, entries: &[(&str, &str, u32)]) {
+        use zip::write::SimpleFileOptions;
+        use zip::ZipWriter;
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut writer = ZipWriter::new(fs::File::create(path).unwrap());
+        for (name, contents, mode) in entries {
+            writer
+                .start_file(*name, SimpleFileOptions::default().unix_permissions(*mode))
+                .unwrap();
+            std::io::Write::write_all(&mut writer, contents.as_bytes()).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+
+    /// Writes a gzipped tar at `path` holding `(name, contents)` entries.
+    fn write_tar_gz(path: &Path, entries: &[(&str, &str)]) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let encoder = flate2::write::GzEncoder::new(
+            fs::File::create(path).unwrap(),
+            flate2::Compression::fast(),
+        );
+        let mut builder = tar::Builder::new(encoder);
+        for (name, contents) in entries {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(contents.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, name, contents.as_bytes())
+                .unwrap();
+        }
+        builder.into_inner().unwrap().finish().unwrap();
+    }
+
+    #[cfg(unix)]
+    fn mode_of(path: &Path) -> u32 {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_manual_archive_extracts_under_the_entry_name_and_marks_the_executable() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("library");
+        let archive = dir.path().join("downloads/emu-v1.zip");
+        write_zip(
+            &archive,
+            &[
+                ("bin/emu.sh", "#!/bin/sh\n", 0o644),
+                ("readme.txt", "hello", 0o644),
+            ],
+        );
+
+        let executable = install_manual_archive(&library, "My Emu", &archive).unwrap();
+
+        // The ENTRY name names the directory, not the archive stem.
+        assert_eq!(executable, library.join("Emulators/My Emu/bin/emu.sh"));
+        assert_eq!(mode_of(&executable) & 0o111, 0o111);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_manual_archive_handles_a_tar_gz() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("library");
+        let archive = dir.path().join("emu.tar.gz");
+        write_tar_gz(&archive, &[("emu.sh", "#!/bin/sh\n")]);
+
+        let executable = install_manual_archive(&library, "Tarred", &archive).unwrap();
+
+        assert_eq!(executable, library.join("Emulators/Tarred/emu.sh"));
+        assert_eq!(mode_of(&executable) & 0o111, 0o111);
+    }
+
+    #[test]
+    fn install_manual_archive_reports_a_missing_archive_verbatim() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = dir.path().join("gone.zip");
+
+        let err = install_manual_archive(&dir.path().join("library"), "Emu", &archive).unwrap_err();
+
+        assert_eq!(
+            err,
+            format!("Archive file was not found:\n{}", archive.display())
+        );
+    }
+
+    #[test]
+    fn install_manual_archive_reports_no_launchable_file_verbatim() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("library");
+        let archive = dir.path().join("docs.zip");
+        write_zip(&archive, &[("readme.txt", "hello", 0o644)]);
+
+        let err = install_manual_archive(&library, "Emu", &archive).unwrap_err();
+
+        assert_eq!(err, NO_LAUNCHABLE_AFTER_EXTRACT);
     }
 }

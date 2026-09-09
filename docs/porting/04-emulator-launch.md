@@ -816,6 +816,25 @@ install for first-time source emulator installs
 (grid_launcher/ui/mixins/install_mixin.py:1698). Manual archive adds mark the detected
 executable `0o755` on non-`win32` (grid_launcher/ui/mixins/emulator_ui_mixin.py:1399).
 
+**Rust port — a manual entry whose path is an archive.** The Emulators form has ONE
+path field, which accepts an executable or an archive. `save_emulator`
+(`app/src-tauri/src/commands.rs`) tests the trimmed path with
+`library::extract::is_extractable_archive` (the same seven suffixes the reference's
+config dialog treats as archives, dialogs.py:325); when it matches, the save requires a
+library path (else the verbatim `Set a Library Path in Settings before adding an emulator
+archive.`) and calls `launch::emu_install::install_manual_archive(library, entry_name,
+archive)` BEFORE the config merge, storing the returned executable as `entry.path`. The
+helper reports a missing archive as `Archive file was not found:\n{path}`, extracts into
+`<library>/Emulators/<sanitize(ENTRY NAME)>` — the entry name, not the archive stem —
+maps an extraction failure to `Failed to extract emulator archive: {error}`, picks the
+executable with `emu_install::select_executable`, reports
+`Archive extraction finished, but no launchable executable was detected. Open Config to
+set the executable path manually.` when there is none, and marks the winner `0o755`
+(`emu_install::make_executable`, the one copy of that step). Unlike the reference, whose
+edit browser offers executables only, this routes on ADD and on EDIT alike — the
+reference's edit path also routes a TYPED archive. Autoconfig then runs on the stored
+executable as usual.
+
 **Version check.** `SourceVersionCheckWorker.run` (grid_launcher/background/workers.py:447)
 emits a single `{installed_tag, available_tag, error}` dict:
 

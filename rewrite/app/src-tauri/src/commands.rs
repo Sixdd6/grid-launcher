@@ -9,6 +9,7 @@ use grid_core::autoconfig::{self, entry as autoconfig_entry, RaCredentials};
 use grid_core::config::{Config, ConfigError, EmulatorEntry, UiSettings};
 use grid_core::images::urls::{filter_to_server_host, resolve_image_url};
 use grid_core::launch::catalog::{catalog_entries, mark_installed, CatalogEntry};
+use grid_core::launch::emu_install::install_manual_archive;
 use grid_core::launch::profiles::{
     load_profiles, profile_for_entry, visible_profiles, EmulatorProfile,
 };
@@ -18,6 +19,7 @@ use grid_core::launch::selection::{
 };
 use grid_core::launch::spawn::{prepare_standalone_emulator_launch, spawn_standalone_emulator};
 use grid_core::launch::{GameSession, LaunchService, SessionsSnapshot};
+use grid_core::library::extract::is_extractable_archive;
 use grid_core::library::queue::DownloadsSnapshot;
 use grid_core::library::registry::InstalledGame;
 use grid_core::library::InstallService;
@@ -27,6 +29,7 @@ use grid_core::session::{RestoreOutcome, SessionManager, SessionState};
 use secrecy::SecretString;
 use serde::Serialize;
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tauri::State;
@@ -951,6 +954,28 @@ pub fn sync_emulator_settings(entry_name: &str, install: Option<&Arc<InstallServ
     );
 }
 
+/// [`save_emulator`]'s message when an archive is entered with no library
+/// path configured (`_extract_emulator_archive`,
+/// emulator_ui_mixin.py:1375). Verbatim.
+const ARCHIVE_NEEDS_LIBRARY_PATH: &str =
+    "Set a Library Path in Settings before adding an emulator archive.";
+
+/// The archive `entry.path` names, when it names one at all: the path field
+/// accepts an archive as well as an executable (the reference's config
+/// dialog does the same for a new entry, dialogs.py:325), and an archive is
+/// extracted before the entry is stored. `None` leaves `entry.path` alone.
+///
+/// A blank name yields `None` too: the install directory is named after the
+/// entry, so extracting one would create a fallback-named directory for a
+/// save [`apply_save_emulator`] is about to reject anyway.
+fn archive_path_to_extract(entry: &EmulatorEntry) -> Option<PathBuf> {
+    if entry.name.trim().is_empty() {
+        return None;
+    }
+    let path = PathBuf::from(entry.path.trim());
+    is_extractable_archive(&path).then_some(path)
+}
+
 /// D1 call site B. An ADD (a blank `original_name`, or one naming no current
 /// entry) gets the matched profile's defaults applied before the merge and a
 /// full autoconfig sync after the save; an EDIT gets neither. The command's
@@ -977,6 +1002,21 @@ pub async fn save_emulator(
         tokio::task::spawn_blocking(move || -> Result<Option<EmulatorEntry>, String> {
             let config_path = Config::default_path();
             let profiles = load_profiles();
+            // An archive path is extracted BEFORE the merge, and the entry
+            // stores the detected executable instead. Applies to an edit as
+            // well as an add — the reference's edit path routes a typed
+            // archive the same way. Outside `modify_config` so the config
+            // write lock is not held across the extraction.
+            let mut entry = entry;
+            if let Some(archive) = archive_path_to_extract(&entry) {
+                let library = Config::load(&config_path).map_err(err)?.library_path;
+                if library.trim().is_empty() {
+                    return Err(ARCHIVE_NEEDS_LIBRARY_PATH.to_string());
+                }
+                let executable =
+                    install_manual_archive(Path::new(library.trim()), entry.name.trim(), &archive)?;
+                entry.path = executable.to_string_lossy().into_owned();
+            }
             // The autoconfig sync below reads no config.json and can be slow
             // (it writes emulator config files), so it runs AFTER the write
             // lock is released, on the three values the closure hands back.
@@ -2012,6 +2052,48 @@ mod merge_tests {
             config.retroarch_cores.get(platform).map(String::as_str),
             Some("bsnes")
         );
+    }
+
+    // --- archive_path_to_extract ---------------------------------------------
+
+    /// [`entry`] with `path` replaced.
+    fn entry_at(path: &str) -> EmulatorEntry {
+        EmulatorEntry {
+            path: path.to_string(),
+            ..entry("Emu")
+        }
+    }
+
+    #[test]
+    fn archive_path_to_extract_matches_an_archive_suffix() {
+        assert_eq!(
+            archive_path_to_extract(&entry_at("  /downloads/emu.zip  ")),
+            Some(PathBuf::from("/downloads/emu.zip"))
+        );
+        assert_eq!(
+            archive_path_to_extract(&entry_at("/downloads/emu.TAR")),
+            Some(PathBuf::from("/downloads/emu.TAR"))
+        );
+    }
+
+    #[test]
+    fn archive_path_to_extract_ignores_executables_and_blanks() {
+        assert_eq!(
+            archive_path_to_extract(&entry_at("/apps/Emu.AppImage")),
+            None
+        );
+        assert_eq!(archive_path_to_extract(&entry_at("/apps/emu.exe")), None);
+        assert_eq!(archive_path_to_extract(&entry_at("/apps/emu")), None);
+        assert_eq!(archive_path_to_extract(&entry_at("   ")), None);
+    }
+
+    #[test]
+    fn archive_path_to_extract_ignores_an_archive_under_a_blank_name() {
+        let entry = EmulatorEntry {
+            name: "  ".to_string(),
+            ..entry_at("/downloads/emu.zip")
+        };
+        assert_eq!(archive_path_to_extract(&entry), None);
     }
 
     // --- apply_save_emulator -------------------------------------------------

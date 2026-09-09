@@ -37,6 +37,7 @@ use crate::autoconfig::{self, RaCredentials};
 use crate::config::{CompatToolInstall, Config, EmulatorEntry};
 use crate::images::ImageFields;
 use crate::launch::compat;
+use crate::launch::emu_install::make_executable;
 use crate::launch::forge::{ForgeClient, ForgeProvider, ResolvedDownload};
 use crate::launch::profiles::{
     load_profiles, profile_available_on_host, profile_for_entry, EmulatorProfile,
@@ -2836,15 +2837,6 @@ fn is_appimage(path: &Path) -> bool {
     path.extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("appimage"))
 }
-
-#[cfg(unix)]
-fn make_executable(path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o755));
-}
-
-#[cfg(not(unix))]
-fn make_executable(_path: &Path) {}
 
 /// Deletes `path`, retrying every [`ARCHIVE_DELETE_PAUSE`] for up to
 /// [`ARCHIVE_DELETE_ATTEMPTS`] attempts. Returns whether the file is gone.
