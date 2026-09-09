@@ -50,6 +50,7 @@ use grid_core::launch::profiles::{load_profiles, EmulatorProfile};
 use grid_core::launch::{GameSession, LaunchService};
 use grid_core::library::registry::InstalledGame;
 use grid_core::library::InstallService;
+use grid_core::platform::windows_documents_dir;
 use grid_core::romm::RommClient;
 use grid_core::session::SessionManager;
 use serde::{Deserialize, Serialize};
@@ -311,6 +312,7 @@ impl CloudService {
             config_dir,
             active_sessions,
             now: unix_now_f64(),
+            windows_documents: windows_documents_dir(),
         })
     }
 
@@ -549,9 +551,18 @@ impl CloudService {
         let installed = blocking_installed(install).await?;
         let wine_prefix = wine_prefix_from(&installed, &cloud_game);
 
+        let windows_documents = windows_documents_dir();
         Ok(NativeSavePathsDto {
-            pcgw: native_path_entries(&visible_pcgw, wine_prefix.as_deref()),
-            manual: native_path_entries(&visible_manual, wine_prefix.as_deref()),
+            pcgw: native_path_entries(
+                &visible_pcgw,
+                windows_documents.as_deref(),
+                wine_prefix.as_deref(),
+            ),
+            manual: native_path_entries(
+                &visible_manual,
+                windows_documents.as_deref(),
+                wine_prefix.as_deref(),
+            ),
         })
     }
 
@@ -1008,6 +1019,7 @@ impl CloudService {
     ) -> Vec<CloudMessage> {
         let now = unix_now_f64();
         let pcgw_paths = self.ensure_pcgw_paths(&config_path, &game).await;
+        let windows_documents = windows_documents_dir();
         let ctx = CloudContext {
             config: &config,
             profiles: load_profiles(),
@@ -1016,7 +1028,7 @@ impl CloudService {
                 emulator_dir: None,
                 library_dir: &config.library_path,
                 config_dir: &config_dir,
-                windows_documents: None,
+                windows_documents: windows_documents.as_deref(),
                 retroarch_portable_home: None,
             },
             // This game's own session already ended; no live session
@@ -1121,6 +1133,9 @@ struct Inputs {
     config_dir: PathBuf,
     active_sessions: Vec<grid_core::cloud::window::ActiveSessionRef>,
     now: f64,
+    /// The Shell-resolved Windows Documents folder, read once per
+    /// operation in [`CloudService::load_inputs`] — `None` off Windows.
+    windows_documents: Option<PathBuf>,
 }
 
 impl Inputs {
@@ -1157,7 +1172,7 @@ impl Inputs {
                 emulator_dir: None,
                 library_dir: &self.config.library_path,
                 config_dir: &self.config_dir,
-                windows_documents: None,
+                windows_documents: self.windows_documents.as_deref(),
                 retroarch_portable_home: None,
             },
             active_sessions: &self.active_sessions,
@@ -1675,15 +1690,19 @@ fn wine_prefix_from(installed: &[InstalledGame], game: &CloudGame) -> Option<Pat
 }
 
 /// Builds the DTO rows for `paths`, resolving each one for display.
+/// `windows_documents` is the Shell-resolved Documents folder
+/// ([`grid_core::platform::windows_documents_dir`], `None` off Windows) —
+/// a parameter so tests can inject a redirected folder.
 fn native_path_entries(
     paths: &[String],
+    windows_documents: Option<&Path>,
     wine_prefix: Option<&Path>,
 ) -> Vec<NativeSavePathEntryDto> {
     paths
         .iter()
         .map(|raw| NativeSavePathEntryDto {
             raw: raw.clone(),
-            expanded: resolve_native_save_dir(raw, None, wine_prefix)
+            expanded: resolve_native_save_dir(raw, windows_documents, wine_prefix)
                 .to_string_lossy()
                 .into_owned(),
         })
@@ -1840,6 +1859,7 @@ mod tests {
             config_dir: dir.path().to_path_buf(),
             active_sessions: Vec::new(),
             now: 1_800_000_000.0,
+            windows_documents: None,
         };
 
         let game = CloudGame {
@@ -1862,6 +1882,27 @@ mod tests {
         assert_eq!(inputs.wine_prefix_for(&other), None);
     }
 
+    /// The panel's tooltips must show the Shell-resolved Documents
+    /// folder on a redirected Windows profile, so the resolver's
+    /// Documents argument has to reach `native_path_entries`.
+    #[test]
+    fn native_path_entries_resolve_under_the_injected_documents_dir() {
+        let docs = tempfile::tempdir().unwrap();
+        let paths = vec!["%USERPROFILE%\\Documents\\Game\\saves".to_string()];
+
+        let entries = native_path_entries(&paths, Some(docs.path()), None);
+
+        assert_eq!(entries.len(), 1);
+        assert!(
+            entries[0]
+                .expanded
+                .starts_with(&docs.path().to_string_lossy().into_owned()),
+            "expanded path {} is not under {}",
+            entries[0].expanded,
+            docs.path().display()
+        );
+    }
+
     #[test]
     fn context_threads_the_wine_prefix_into_the_cloud_context() {
         let dir = tempfile::tempdir().unwrap();
@@ -1873,11 +1914,34 @@ mod tests {
             config_dir: dir.path().to_path_buf(),
             active_sessions: Vec::new(),
             now: 1_800_000_000.0,
+            windows_documents: None,
         };
         let pcgw: Vec<String> = Vec::new();
         let prefix = PathBuf::from("/prefix");
         let ctx = inputs.context(&pcgw, Some(prefix.as_path()));
         assert_eq!(ctx.wine_prefix, Some(prefix.as_path()));
+    }
+
+    /// Every cloud op resolves `%DOCUMENTS%` and redirected save paths
+    /// against the value read once in `load_inputs`, so the context must
+    /// carry it rather than the hardcoded `None` it used to.
+    #[test]
+    fn context_threads_the_windows_documents_dir_into_the_cloud_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let docs = tempfile::tempdir().unwrap();
+        let inputs = Inputs {
+            config: Config::default(),
+            profiles: &[],
+            all_games: Vec::new(),
+            installed: Vec::new(),
+            config_dir: dir.path().to_path_buf(),
+            active_sessions: Vec::new(),
+            now: 1_800_000_000.0,
+            windows_documents: Some(docs.path().to_path_buf()),
+        };
+        let pcgw: Vec<String> = Vec::new();
+        let ctx = inputs.context(&pcgw, None);
+        assert_eq!(ctx.resolve_ctx.windows_documents, Some(docs.path()));
     }
 
     /// Final-review fix wave: the server's own order must not reach the
@@ -1894,6 +1958,7 @@ mod tests {
             config_dir: dir.path().to_path_buf(),
             active_sessions: Vec::new(),
             now: 1_800_000_000.0,
+            windows_documents: None,
         };
         let pcgw: Vec<String> = Vec::new();
         let ctx = inputs.context(&pcgw, None);

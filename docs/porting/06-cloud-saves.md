@@ -1112,6 +1112,13 @@ not installed (grid_launcher/ui/mixins/cloud_mixin.py:2783).
   `%DOCUMENTS%` token in emulator sync paths
   (grid_launcher/ui/mixins/cloud_mixin.py:935) and for native game paths
   (grid_launcher/library/cloud_transfer.py:517). No adjustment happens off Windows.
+  The rewrite reads that folder in `grid_core::platform::windows_documents_dir`, which
+  resolves `FOLDERID_Documents` through the Windows Known Folder API
+  (`directories` 6.0 -> `dirs-sys` 0.5 -> `SHGetKnownFolderPath`) and so honours User
+  Shell Folders redirection; off Windows it returns `None`. The Python win32 gate is
+  implicit in that `None` — every resolver treats it as "no redirection to correct
+  for". `cloud_service.rs` reads it once per operation and borrows it into
+  `ResolveContext` and into the save-location panel's path rows.
 - **Wine prefix translation.** On non-Windows, a native game with a `native_wineprefix`
   resolves its Windows-style save paths inside that prefix before anything else
   (grid_launcher/library/cloud_transfer.py:506,
@@ -1204,7 +1211,9 @@ signal surface is `slotsLoaded`, `slotsError`, `restoreComplete`, `deleteComplet
 `tests/test_cloud_transfer.py` (889 lines) — the largest oracle.
 
 - `resolve_native_save_dir`: plain expansion with no Shell Documents; no-redirection case;
-  redirected Documents; non-Documents paths unaffected (lines 30, 45, 62, 82).
+  redirected Documents; non-Documents paths unaffected (lines 30, 45, 62, 82). The rewrite
+  adds `platform::windows_documents_dir` returning `None` off Windows, and an app-layer
+  test injecting a redirected Documents folder into the panel's path rows.
 - `normalize_manual_save_path`: `%APPDATA%`, `%LOCALAPPDATA%`, LocalLow, Documents, other
   `%USERPROFILE%` subpaths, unrecognised paths unchanged, forward slashes normalised
   (lines 98–188).

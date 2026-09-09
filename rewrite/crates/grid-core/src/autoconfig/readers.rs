@@ -289,13 +289,11 @@ fn resolve_setting_or_default(base: &Path, raw_value: &str, default_value: &str)
 }
 
 /// Windows Shell `SHGetKnownFolderPath(FOLDERID_Documents)`
-/// (`pcsx2.py:10-49`) is not ported — this crate has no Windows Shell API
-/// bindings. Always `None`, matching the Python reference's own behavior on
-/// every platform this crate is tested on (`pcsx2.py:17-18`: `None` when
-/// `sys.platform != "win32"`); every caller already falls through to the
-/// next candidate.
+/// (`pcsx2.py:10-49`), via [`crate::platform::windows_documents_dir`]:
+/// the redirected Documents folder on Windows, `None` everywhere else
+/// (where every caller falls through to the next candidate).
 fn windows_documents_folder() -> Option<PathBuf> {
-    None
+    crate::platform::windows_documents_dir()
 }
 
 // =======================================================================

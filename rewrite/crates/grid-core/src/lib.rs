@@ -10,6 +10,7 @@ pub mod images;
 pub mod launch;
 pub mod library;
 pub mod pcgw;
+pub mod platform;
 pub mod retroachievements;
 pub mod romm;
 pub mod secrets;
