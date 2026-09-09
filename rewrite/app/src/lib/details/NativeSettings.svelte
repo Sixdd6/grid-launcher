@@ -253,6 +253,11 @@
     color: var(--text);
   }
 
+  .close:hover,
+  .close:focus-visible {
+    color: var(--primary);
+  }
+
   h3 {
     margin: 0;
     padding-right: 28px;

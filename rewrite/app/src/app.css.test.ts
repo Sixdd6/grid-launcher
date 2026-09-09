@@ -127,3 +127,11 @@ describe('.over-art utility (ruling §3.3)', () => {
     }
   });
 });
+
+describe('.icon-btn hover/focus colour (user ruling (b))', () => {
+  it('turns the background to --surface and the glyph to --primary', () => {
+    const rule = block(css, /\.icon-btn:hover,\s*\n\.icon-btn:focus-visible\s*\{([\s\S]*?)\n\}/);
+    expect(rule).toContain('background: var(--surface);');
+    expect(rule).toContain('color: var(--primary);');
+  });
+});

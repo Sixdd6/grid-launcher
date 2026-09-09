@@ -831,12 +831,19 @@
   }
 
   /* Box, radius and reset come from `.icon-btn` in app.css. Only the
-     placement and the colour are this dialog's own. */
+     placement and the colour are this dialog's own. Hover/focus repeats
+     app.css's `--primary` because this scoped `color` would otherwise win
+     over the global hover rule at equal specificity. */
   .close {
     position: absolute;
     top: 8px;
     right: 8px;
     color: var(--text);
+  }
+
+  .close:hover,
+  .close:focus-visible {
+    color: var(--primary);
   }
 
   .cover {

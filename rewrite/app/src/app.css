@@ -214,5 +214,6 @@ h1 {
 
 .icon-btn:hover,
 .icon-btn:focus-visible {
-  background: var(--border);
+  background: var(--surface);
+  color: var(--primary);
 }

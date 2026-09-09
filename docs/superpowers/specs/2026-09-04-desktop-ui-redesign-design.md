@@ -116,7 +116,10 @@ Adopted from RomM v2 `tokens/index.ts`, defined once in `app.css` as CSS variabl
   `.icon-btn` class in `app.css` and are at least 28×28. An icon paired with visible text
   is `aria-hidden="true" focusable="false"`; an icon that IS the label takes `role="img"`
   plus `aria-label`. No Unicode character is used as an icon anywhere in the UI (added
-  2026-09-05, parity-3).
+  2026-09-05, parity-3). Hover/focus-visible turns the `.icon-btn` background `--surface`
+  and the glyph `--primary`; the two danger icon buttons (`Details.svelte` `.dismiss`,
+  `CloudPanel.svelte` `.remove`) keep `--danger` on hover instead (added 2026-09-08,
+  release-parity-pass).
 - Theme resolution: `prefers-color-scheme` unless Settings › Appearance overrides (stored
   in config as `ui.theme = "system" | "dark" | "light"`).
 
