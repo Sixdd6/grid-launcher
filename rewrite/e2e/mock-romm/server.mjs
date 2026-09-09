@@ -177,6 +177,15 @@ function buildContentFixtures() {
     },
     { name: "readme.txt", data: Buffer.from("read me first\n", "utf8") },
   ]);
+  // Linux / native (`native` group). A Linux-PLATFORM game is native too
+  // (user ruling 2026-09-08) but takes no compat tool at all, so the app
+  // spawns this script itself — the install's own `make_executable` on the
+  // selected launch file (library/mod.rs) is what makes that possible, since
+  // this writer stores no Unix mode. It sleeps so the session stays alive
+  // long enough for the spec to see the playing state and press Stop.
+  const linuxZipBytes = buildZip([
+    { name: "TuxGame/tuxgame.sh", data: Buffer.from("#!/bin/sh\nsleep 30\n", "utf8") },
+  ]);
   const gameJsonBytes = Buffer.from(
     JSON.stringify({ version: "1.0", year: 2004, tags: ["indie"] }),
     "utf8",
@@ -199,6 +208,7 @@ function buildContentFixtures() {
     x360ZipBytes,
     x360UpdateZipBytes,
     nativeZipBytes,
+    linuxZipBytes,
     gameJsonBytes,
     ps1ZipBytes,
   };
@@ -227,6 +237,7 @@ function contentForFile(fileName, content) {
   if (lower === "x360.zip") return content.x360ZipBytes;
   if (lower === "x360-update.zip") return content.x360UpdateZipBytes;
   if (lower === "mygame.zip") return content.nativeZipBytes;
+  if (lower === "tuxgame.zip") return content.linuxZipBytes;
   // The `updates` group's native update archive: the same Windows payload,
   // under the version-tagged name that makes it NEWER than the seeded
   // install (`mygame (v1.0.0).zip`). It has to carry `MyGame/mygame.exe`,

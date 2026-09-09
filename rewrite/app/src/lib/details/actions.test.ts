@@ -5,14 +5,29 @@ import {
   installDirOf,
   installLabel,
   isContentPlatform,
+  compatToolNotice,
   isNativePlatform,
   isWindowsHost,
 } from './actions';
 
+describe('compatToolNotice', () => {
+  it('explains why a Linux game has no compatibility tool', () => {
+    expect(compatToolNotice('Linux')).toBe('Linux games run directly.');
+    expect(compatToolNotice(' linux x86_64')).toBe('Linux games run directly.');
+  });
+
+  it('is blank for a Windows game, which still picks a compatibility tool', () => {
+    expect(compatToolNotice('Windows')).toBe('');
+    expect(compatToolNotice('')).toBe('');
+  });
+});
+
 describe('isNativePlatform', () => {
-  it('matches Windows case- and whitespace-insensitively', () => {
+  it('matches Windows and Linux case- and whitespace-insensitively', () => {
     expect(isNativePlatform('Windows')).toBe(true);
     expect(isNativePlatform(' windows 10')).toBe(true);
+    expect(isNativePlatform('Linux')).toBe(true);
+    expect(isNativePlatform(' linux x86_64')).toBe(true);
   });
 
   it('does not match other platforms', () => {

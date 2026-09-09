@@ -716,6 +716,15 @@ mod tests {
     }
 
     #[test]
+    fn install_block_reason_is_empty_for_a_linux_platform() {
+        assert_eq!(install_block_reason("Linux", &[], &[], &no_cores), "");
+        assert_eq!(
+            install_block_reason(" linux x86_64", &[], &[], &no_cores),
+            ""
+        );
+    }
+
+    #[test]
     fn install_block_reason_names_a_missing_platform_value() {
         assert_eq!(
             install_block_reason("   ", &[], &[], &no_cores),

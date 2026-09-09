@@ -539,6 +539,15 @@ A game is "native" when its platform, casefolded and stripped, starts with `wind
 host OS — a Windows-platform title on Linux still takes this branch, which is why the compat
 tool exists.
 
+**Rust port ruling (2026-09-08):** the rewrite widens that to `windows` OR `linux`
+(`is_native_platform`, `crates/grid-core/src/library/platforms.rs`) — see doc 03 "Ruling
+(2026-09-08) — Linux platforms are native everywhere". The compat tool applies to
+windows-platform rows ONLY (`is_windows_platform`): for any other native row
+`build_native_command` forces the tool blank, so the argv is the executable alone, the env is
+empty, no `WINEPREFIX` is created, and `tool_label` is `""` — the row's own
+`native_compat_tool` and the configured `default_compat_tool` are both ignored, and neither
+`wine` nor `umu-run` is looked up on PATH.
+
 **Rust port (milestone 8):** the Details "Install" button reads "Install App" for native
 platforms only; every other platform keeps the existing milestone 2 label "Install" (Python:
 "Install Game"). `installLabel` (`app/src/lib/details/actions.ts:77-78`) returns `'Install

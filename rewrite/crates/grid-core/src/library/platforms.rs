@@ -4,9 +4,23 @@ use regex::Regex;
 use std::sync::OnceLock;
 
 /// A game is "native" when its platform, trimmed and casefolded, starts with
-/// `windows` (`is_native_executable_platform`, selection.py:145). This is the
-/// *server* platform name, not the host OS.
+/// `windows` or `linux` (widening `is_native_executable_platform`,
+/// selection.py:145). This is the *server* platform name, not the host OS.
+///
+/// User ruling 2026-09-08: linux platforms are native everywhere — install
+/// block reason, launch routing, and cloud save scope/block reasons all use
+/// this one predicate. Only the compat-tool decision is narrower; that reads
+/// [`is_windows_platform`].
 pub fn is_native_platform(platform: &str) -> bool {
+    let folded = platform.trim().to_lowercase();
+    folded.starts_with("windows") || folded.starts_with("linux")
+}
+
+/// Whether `platform`, trimmed and casefolded, starts with `windows`. This is
+/// the narrower half of [`is_native_platform`] and exists for exactly one
+/// decision: whether a native game needs a Wine/Proton compat tool. A Linux
+/// platform row is native but runs its own executable directly.
+pub fn is_windows_platform(platform: &str) -> bool {
     platform.trim().to_lowercase().starts_with("windows")
 }
 
@@ -72,6 +86,21 @@ mod tests {
         assert!(is_native_platform(" windows 10"));
         assert!(!is_native_platform("Nintendo Wii"));
         assert!(!is_native_platform(""));
+    }
+
+    #[test]
+    fn native_platform_also_matches_linux() {
+        assert!(is_native_platform("Linux"));
+        assert!(is_native_platform(" linux x86_64"));
+        assert!(!is_native_platform("Nintendo Linux"));
+    }
+
+    #[test]
+    fn windows_platform_excludes_linux() {
+        assert!(is_windows_platform("Windows"));
+        assert!(is_windows_platform("  windows 10 "));
+        assert!(!is_windows_platform("Linux"));
+        assert!(!is_windows_platform(""));
     }
 
     #[test]

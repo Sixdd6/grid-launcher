@@ -342,7 +342,7 @@ fn plan_install(
 ) -> Result<InstallJob, LibraryError> {
     let platform_root = platform_dir(library, &detail.platform_name);
 
-    // A native (Windows) game never becomes a multi-file install: the
+    // A native (Windows or Linux) game never becomes a multi-file install: the
     // server lists its archive next to a `game.json` sidecar and any number
     // of extras, and exactly one of those is the game. Everything lands in
     // one per-game directory instead of the platform root.

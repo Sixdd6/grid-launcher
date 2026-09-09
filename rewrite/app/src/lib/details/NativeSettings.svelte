@@ -6,16 +6,18 @@
   // dismissal) so it reads as the same design language stacked on top.
   import { api, type CompatTool, type NativeGameSettings } from '../api';
   import Icon from '../Icon.svelte';
-  import { candidateLabel, installDirOf, isWindowsHost } from './actions';
+  import { candidateLabel, compatToolNotice, installDirOf, isWindowsHost } from './actions';
 
   let {
     romId,
     title,
+    platform,
     onClose,
     onSaved,
   }: {
     romId: number;
     title: string;
+    platform: string;
     onClose: () => void;
     onSaved: () => void;
   } = $props();
@@ -25,6 +27,11 @@
   // `navigator.platform` is read once per mount through the pure
   // `isWindowsHost` seam rather than branched on inline.
   const windowsHost = isWindowsHost(navigator.platform);
+
+  // A Linux-platform game runs its own executable, so it has no compat tool
+  // and no Wine prefix (user ruling 2026-09-08). The reason is worded once,
+  // in `compatToolNotice`.
+  let noCompatReason = $derived(compatToolNotice(platform));
 
   let loading = $state(true);
   let loadError = $state<string | null>(null);
@@ -60,7 +67,7 @@
       selectedExecutable = result.executable || result.candidates[0] || '';
       parameters = result.parameters;
 
-      if (!windowsHost) {
+      if (!windowsHost && !noCompatReason) {
         try {
           const dto = await api.listCompatTools();
           compatTools = dto.tools;
@@ -162,7 +169,9 @@
         </p>
       </div>
 
-      {#if !windowsHost}
+      {#if noCompatReason}
+        <p data-testid="native-settings-no-compat" class="hint">{noCompatReason}</p>
+      {:else if !windowsHost}
         <label>
           Compatibility tool
           <select data-testid="native-settings-compat" bind:value={selectedCompat}>
@@ -178,7 +187,7 @@
       <!-- dialogs.py:249-251: the prefix row is built ONLY on a non-Windows
            host — a Windows host runs the .exe directly and has no prefix —
            and reads "(will be created at install)" before one exists. -->
-      {#if !windowsHost}
+      {#if !windowsHost && !noCompatReason}
         <div class="row">
           <span class="row-label">Wine Prefix (read-only)</span>
           <p data-testid="native-settings-prefix" class="row-value">

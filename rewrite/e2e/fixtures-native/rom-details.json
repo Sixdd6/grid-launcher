@@ -43,5 +43,24 @@
       }
     ],
     "metadatum": null
+  },
+  "703": {
+    "id": 703,
+    "name": "Tux Game",
+    "fs_name_no_ext": "tuxgame",
+    "platform_id": 2,
+    "platform_display_name": "Linux",
+    "fs_name": "tuxgame.zip",
+    "summary": "A Linux fixture: one archive holding TuxGame/tuxgame.sh, spawned directly with no compat tool.",
+    "regions": ["USA"],
+    "languages": ["en"],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      { "id": 4004, "file_name": "tuxgame.zip", "file_size_bytes": 0, "is_top_level": true }
+    ],
+    "metadatum": null
   }
 }

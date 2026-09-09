@@ -4,16 +4,22 @@
 // so this stays trivially unit-testable — Details.svelte and
 // NativeSettings.svelte own the fetching/wiring.
 
+// `is_native_platform` (grid-core's library/platforms.rs) — one predicate,
+// re-exported so Details has a single source for it. This is the SERVER's
+// platform name, not the host OS the app itself runs on — see `isWindowsHost`
+// below for that.
+import { isNativePlatform } from './cloud';
+export { isNativePlatform };
+
 /**
- * `is_native_platform` (grid-core's launch/native.rs, ported from
- * `grid_launcher/emulator/selection.py:11-52`) — the same rule Details
- * already uses for cloud saves (`isNativeExecutablePlatform`,
- * details/cloud.ts): trimmed, case-folded platform string starting with
- * "windows". This is the SERVER's platform name, not the host OS the app
- * itself runs on — see `isWindowsHost` below for that.
+ * Why the compatibility-tool picker is not offered, or `''` when it is.
+ * User ruling 2026-09-08: a Linux-platform game runs its own executable
+ * directly, so no Wine/Proton tool applies (grid-core's
+ * `build_native_command` blanks the tool for the same rows).
  */
-export function isNativePlatform(platform: string): boolean {
-  return platform.trim().toLowerCase().startsWith('windows');
+export function compatToolNotice(platform: string): string {
+  const isWindowsGame = platform.trim().toLowerCase().startsWith('windows');
+  return isNativePlatform(platform) && !isWindowsGame ? 'Linux games run directly.' : '';
 }
 
 /**

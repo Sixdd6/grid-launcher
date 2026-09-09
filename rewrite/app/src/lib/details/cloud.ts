@@ -98,33 +98,29 @@ export function uploadedLine(record: CloudRecord): string {
 }
 
 /**
- * `is_native_executable_platform` (selection.py:145-150 /
- * grid-core cloud::scope::is_native_executable_platform): trimmed,
- * case-folded platform string starting with "windows".
- */
-export function isNativeExecutablePlatform(platform: string): boolean {
-  return platform.trim().toLowerCase().startsWith('windows');
-}
-
-/**
  * Whether `platform` names a platform whose games run as native HOST
  * executables — trimmed, case-folded, starting with "windows" or "linux".
  *
- * Deliberately NOT the same function as [`isNativeExecutablePlatform`]
- * above. That one is a mirror of grid-core's
- * `cloud::scope::is_native_executable_platform`
- * (`crates/grid-core/src/cloud/scope.rs:68`), which is windows-only and
- * decides the cloud save SCOPE and BLOCK REASONS the backend computes;
- * widening it would desync the panel from the answers the backend gives it.
- * This one is display-only: it decides whether the details popup claims an
- * emulator launch target at all (user ruling 2026-09-05 — a native game
- * launches its own executable through a compat tool, so "No default
- * emulator" was never a true statement about it).
+ * Mirrors grid-core's `library::platforms::is_native_platform`
+ * (`crates/grid-core/src/library/platforms.rs`). User ruling 2026-09-08:
+ * there is now exactly ONE native predicate. The old scope/launch split
+ * (a windows-only `isNativeExecutablePlatform` for cloud save scope and
+ * block reasons, a wider `isNativeLaunchPlatform` — kept below as an alias —
+ * for the launch-target line) is gone — a Linux game installs, launches, and syncs saves exactly
+ * like a Windows one. Only the compat-tool decision stays windows-only, and
+ * that lives in `details/actions.ts` (`compatToolNotice`).
  */
-export function isNativeLaunchPlatform(platform: string): boolean {
+export function isNativePlatform(platform: string): boolean {
   const folded = platform.trim().toLowerCase();
   return folded.startsWith('windows') || folded.startsWith('linux');
 }
+
+/**
+ * Alias of [`isNativePlatform`] kept for its existing callers
+ * (`details/header.ts`, `server/header.ts`, `emulators/defaults.ts`), which
+ * ask it about the launch-target line specifically.
+ */
+export const isNativeLaunchPlatform = isNativePlatform;
 
 /**
  * Builds an `InstalledGame`-shaped object for a game that has no registry

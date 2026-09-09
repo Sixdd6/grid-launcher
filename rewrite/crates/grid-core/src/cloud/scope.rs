@@ -60,13 +60,19 @@ impl SaveScope {
     }
 }
 
-/// `is_native_executable_platform` (selection.py:138-143): trimmed,
-/// case-folded `platform` starting with `"windows"`. The Python function
+/// `is_native_executable_platform` (selection.py:138-143): whether the game
+/// runs its own executable rather than an emulator. The Python function
 /// takes the whole `game` dict and reads `game.get("platform", "")`; this
 /// port takes the already-extracted platform string directly, matching this
 /// module's other pure functions.
+///
+/// User ruling 2026-09-08: this is no longer a windows-only rule of its own.
+/// It delegates to [`crate::library::platforms::is_native_platform`]
+/// (windows OR linux) so cloud save scope, block reasons, install blocking,
+/// and launch routing can never disagree about a linux platform. The name
+/// stays for its callers.
 pub fn is_native_executable_platform(platform: &str) -> bool {
-    platform.trim().to_lowercase().starts_with("windows")
+    crate::library::platforms::is_native_platform(platform)
 }
 
 /// `is_emulators_platform` (selection.py:138-142): trimmed, case-folded
@@ -466,6 +472,26 @@ mod tests {
         assert_eq!(
             shared_sync_owner("xemu", std::slice::from_ref(&padded_case)),
             Some(&padded_case)
+        );
+    }
+
+    #[test]
+    fn native_executable_platform_covers_linux() {
+        assert!(is_native_executable_platform("Linux"));
+        assert!(is_native_executable_platform(" linux x86_64"));
+        assert!(is_native_executable_platform("Windows"));
+        assert!(!is_native_executable_platform("SNES"));
+    }
+
+    #[test]
+    fn a_linux_game_blocks_states_and_allows_saves() {
+        assert_eq!(
+            cloud_save_block_reason("Linux", SaveType::State, "", None),
+            "Save sync for PC games uses the save locations shown here once the game is installed. If none was filled in from PCGamingWiki, add the game's save folder."
+        );
+        assert_eq!(
+            cloud_save_block_reason("Linux", SaveType::Save, "", None),
+            ""
         );
     }
 

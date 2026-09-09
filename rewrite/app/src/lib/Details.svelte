@@ -28,7 +28,7 @@
   import FilesTab from './details/FilesTab.svelte';
   import { fullIndex, galleryItems, viewableIndex, viewableItems } from './details/media';
   import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
-  import { isNativeExecutablePlatform, syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
+  import { syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
   import { contentButtons, installLabel, isContentPlatform, isNativePlatform } from './details/actions';
   import { contentBlockReason } from './details/blocked';
   import {
@@ -271,7 +271,10 @@
   let liveSession = $derived(subject.romId !== null ? sessions.sessionFor(subject.romId) : undefined);
 
   let isContent = $derived(isContentPlatform(subject.platformName));
-  let isNativeInstall = $derived(isNativePlatform(subject.platformName));
+  // One native predicate for the whole popup (user ruling 2026-09-08): the
+  // install label, the native Game Settings button, and the Saves tab's PC
+  // save-folder mode all read the same answer.
+  let isNative = $derived(isNativePlatform(subject.platformName));
   let buttons = $derived(contentButtons(contentAvailability, installedNow, liveEntry !== undefined));
 
   // The primary button's reason needs the configured emulator list, so it
@@ -320,7 +323,6 @@
   // subject.
   let installedRow = $derived(installed.list.find((row) => matchesInstalled(row, summary, subject.platformName)) ?? null);
   let cloudGame = $derived(installedRow ?? syntheticCloudGame(summary, subject.platformName));
-  let isNative = $derived(isNativeExecutablePlatform(subject.platformName));
   // `''` from `launchTargetLine` means "no launch target to state" — today
   // only a native platform, whose game runs its own executable.
   let launchTarget = $derived(launchTargetLine(launchDefaults, subject.platformName));
@@ -444,7 +446,7 @@
   // Two-click confirm for native installs only (doc 10).
   async function handleUpdateClick() {
     if (subject.romId === null) return;
-    if (isNativeInstall && !confirmingUpdate) {
+    if (isNative && !confirmingUpdate) {
       confirmingUpdate = true;
       return;
     }
@@ -624,7 +626,7 @@
                   {contentActionKind === 'dlc' ? 'Installing…' : 'Install DLC'}
                 </button>
               {/if}
-              {#if isNativeInstall}
+              {#if isNative}
                 <button data-testid="details-game-settings" class="secondary" onclick={() => (showNativeSettings = true)}>
                   Game Settings
                 </button>
@@ -751,6 +753,7 @@
   <NativeSettings
     romId={subject.romId}
     title={subject.name}
+    platform={subject.platformName}
     onClose={() => (showNativeSettings = false)}
     onSaved={refreshInstalled}
   />

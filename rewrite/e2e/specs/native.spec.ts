@@ -40,11 +40,17 @@ const PCGW_LOOKUP_TIMEOUT = 30_000;
  * ONE download streams slowly enough to be cancelled mid-flight while every
  * other install in this group still runs at full speed.
  *
+ * Rom 703 is on the `Linux` platform: native too (user ruling 2026-09-08),
+ * but it takes no compat tool, so its payload is a real `#!/bin/sh` script
+ * that the app spawns directly (the install chmods the selected launch file
+ * itself) — the `wine` stub must stay untouched for it.
+ *
  * Queue ids across this spec's single app instance: 1 = rom 701's install,
- * 2 = rom 702's.
+ * 2 = rom 702's, 3 = rom 703's.
  */
 describe('native', () => {
   const gameDir = () => path.join(dataDir(), 'library', 'Windows', 'My Game');
+  const linuxGameDir = () => path.join(dataDir(), 'library', 'Linux', 'Tux Game');
   const wineArgvLog = () => path.join(dataDir(), 'wine-argv.log');
 
   async function openDetails(romId: number) {
@@ -309,5 +315,53 @@ describe('native', () => {
         timeoutMsg: 'the cancelled install never showed the Cancelled status',
       },
     );
+  });
+
+  // User ruling 2026-09-08: a Linux-PLATFORM game is native exactly like a
+  // Windows one — same install layout, same "Install App" label, no install
+  // block reason — but it takes NO compat tool, so Play spawns its own
+  // executable and the `wine` stub is never reached.
+  it('installs a Linux-platform game the same way', async () => {
+    await showServer();
+    await $(testId('platform-btn-2')).click();
+    await openDetails(703);
+    await expect($(testId('details-install'))).toHaveText('Install App');
+
+    await $(testId('details-install')).click();
+    await showDownloads();
+    await browser.waitUntil(
+      async () => (await $(testId('download-detail-3')).getText()).startsWith('Completed'),
+      { timeout: INSTALL_TIMEOUT, timeoutMsg: 'the Linux install never reached Completed' },
+    );
+    await showServer();
+    await $(`${testId('server-view')} ${testId('installed-badge-703')}`).waitForExist({
+      timeout: INSTALL_TIMEOUT,
+      timeoutMsg: "the installed badge never appeared on rom 703's card",
+    });
+
+    expect(existsSync(path.join(linuxGameDir(), 'game', 'TuxGame', 'tuxgame.sh'))).toBe(true);
+  });
+
+  it('launches the Linux game directly, with no wine stub in between', async () => {
+    const before = existsSync(wineArgvLog()) ? readFileSync(wineArgvLog(), 'utf-8') : '';
+
+    await $(testId('details-play')).click();
+    await $(testId('details-playing-chip')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'details-playing-chip never appeared after Play on the Linux game',
+    });
+
+    // The spawned process IS tuxgame.sh: if a compat tool had been applied,
+    // the seeded `wine` stub would have appended its argv to this log.
+    const after = existsSync(wineArgvLog()) ? readFileSync(wineArgvLog(), 'utf-8') : '';
+    expect(after).toBe(before);
+    expect(after).not.toContain('tuxgame.sh');
+
+    await $(testId('details-stop')).click();
+    await $(testId('details-playing-chip')).waitForExist({
+      timeout: REAP_TIMEOUT,
+      reverse: true,
+      timeoutMsg: 'details-playing-chip never cleared after Stop on the Linux game',
+    });
   });
 });

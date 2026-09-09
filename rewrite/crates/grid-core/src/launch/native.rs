@@ -9,6 +9,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::library::paths::{archive_name, candidate_archives};
+use crate::library::platforms::is_windows_platform;
 use crate::library::registry::InstalledGame;
 use crate::library::specials::native::{executable_candidates, install_dir, resolved_executable};
 
@@ -40,7 +41,10 @@ pub struct NativeLaunch {
 ///    when `host` starts with `"win"`, matching the caller's own gate
 ///    defensively (`LaunchService::launch` computes the same thing before
 ///    calling this) so this function is safe to call directly with an
-///    unblanked config value too.
+///    unblanked config value too. Both are blanked outright when the row's
+///    platform is not a windows one ([`is_windows_platform`]) — user ruling
+///    2026-09-08: a linux-platform game runs its own executable directly,
+///    with no wrapper, no `WINEPREFIX`, and a blank `tool_label`.
 /// 4. `"wine"` prepends `which("wine")` (falling back to the literal
 ///    `"wine"` when not found); any other non-blank value requires
 ///    `which("umu-run")` (missing -> the verbatim umu-run message) and sets
@@ -79,7 +83,9 @@ pub fn build_native_command(
         default_compat_tool.trim()
     };
     let row_tool = row.native_compat_tool.trim();
-    let tool = if !row_tool.is_empty() {
+    let tool = if !is_windows_platform(&row.platform) {
+        ""
+    } else if !row_tool.is_empty() {
         row_tool
     } else {
         default_compat_tool
@@ -381,6 +387,43 @@ mod tests {
         let result = build_native_command(&g, dir.path(), "wine", "windows", &no_which).unwrap();
         assert_eq!(result.argv, vec![exe.to_string_lossy().into_owned()]);
         assert_eq!(result.tool_label, "");
+    }
+
+    // --- linux platform rows -------------------------------------------------
+
+    #[test]
+    fn a_linux_platform_row_ignores_every_compat_tool() {
+        let (dir, install, exe) = fixture();
+        let mut g = row("Game", &install);
+        g.platform = "Linux".to_string();
+        g.native_compat_tool = "wine".to_string();
+        g.native_wineprefix = dir.path().join("prefix").to_string_lossy().into_owned();
+
+        let which = |name: &str| -> Option<PathBuf> {
+            panic!("a linux-platform row must not look up {name}");
+        };
+        let result = build_native_command(&g, dir.path(), "GE-Proton9", "linux", &which).unwrap();
+        assert_eq!(result.argv, vec![exe.to_string_lossy().into_owned()]);
+        assert!(result.env.is_empty());
+        assert_eq!(result.tool_label, "");
+        assert!(
+            !dir.path().join("prefix").exists(),
+            "a linux-platform row must not create a Wine prefix"
+        );
+    }
+
+    #[test]
+    fn a_windows_platform_row_still_takes_the_default_compat_tool() {
+        let (dir, install, exe) = fixture();
+        let mut g = row("Game", &install);
+        g.platform = "Windows 10".to_string();
+
+        let result = build_native_command(&g, dir.path(), "wine", "linux", &no_which).unwrap();
+        assert_eq!(
+            result.argv,
+            vec!["wine".to_string(), exe.to_string_lossy().into_owned()]
+        );
+        assert_eq!(result.tool_label, "wine");
     }
 
     // --- invalid custom launch parameters ------------------------------------

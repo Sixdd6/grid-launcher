@@ -1558,18 +1558,26 @@ Rulings below are new to this milestone's review.
     exists on disk (`selection.py:310-315`). A configured-but-missing emulator therefore reports
     no block reason and fails at launch instead.
 
-**Open decision — launch-target line vs. install block reason disagree on Linux platforms.**
-The details popup hides the launch-target line (the "No default emulator" / emulator-name line)
-for any platform whose name starts with `"windows"` OR `"linux"` (`isNativeLaunchPlatform`,
-`app/src/lib/details/cloud.ts`, user ruling 2026-09-05) — both run as native host executables, so
-naming an emulator would be false for either. `install_block_reason`
-(`crates/grid-core/src/launch/selection.rs`) still calls `is_native_executable_platform`
-(`crates/grid-core/src/cloud/scope.rs:68`), which is windows-only and unchanged from Python
-(`selection.py:138-143`). The result: a `"Linux"`-platform game shows no launch target in the
-popup body, yet its Install button's tooltip still asks for a configured emulator, because the
-block-reason predicate does not know Linux is native either. Left as-is pending user direction —
-narrowing `is_native_executable_platform` would also change cloud save scope and block reasons,
-which is a larger surface than the display-only line above.
+**Ruling (2026-09-08) — Linux platforms are native everywhere.** A platform whose display
+label, trimmed and casefolded, starts with `"windows"` OR `"linux"` is native: it installs, it
+launches its own executable, it blocks nothing at install time, and its cloud saves use the PC
+scope and PC block reasons. There is exactly ONE predicate for this,
+`library::platforms::is_native_platform` (`crates/grid-core/src/library/platforms.rs`);
+`cloud::scope::is_native_executable_platform` now delegates to it, and the frontend's
+`isNativePlatform` (`app/src/lib/details/cloud.ts`, re-exported from `details/actions.ts`) is
+its mirror, with `isNativeLaunchPlatform` kept as an alias for the launch-target line's
+callers. This
+replaces the earlier open decision, where the popup hid the launch-target line for a Linux
+platform (user ruling 2026-09-05) while `install_block_reason` still asked for a configured
+emulator, because its predicate was windows-only.
+
+Only ONE decision stays windows-only: whether a native game needs a Wine/Proton compat tool.
+That reads `library::platforms::is_windows_platform`. A Linux-platform row runs its executable
+directly — no `wine`, no `umu-run`, no `WINEPREFIX`, a blank `tool_label` — regardless of the
+row's `native_compat_tool` or the configured default (`build_native_command`,
+`crates/grid-core/src/launch/native.rs`; doc 04 §9). The Native Game Settings dialog hides the
+compat-tool picker and the Wine-prefix row for such a game and states "Linux games run
+directly." (`compatToolNotice`, `app/src/lib/details/actions.ts`).
 
 ### Rulings on open questions
 

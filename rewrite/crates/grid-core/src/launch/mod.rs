@@ -175,7 +175,7 @@ impl LaunchService {
     ///
     /// Order (doc 04 §8): registry lookup, duplicate gate, config load, then
     /// either the native branch ([`build_native_command`], doc 04 §9) for a
-    /// `windows*` platform row, or emulator selection, placeholder build,
+    /// `windows*`/`linux*` platform row, or emulator selection, placeholder build,
     /// and the validation chain in [`prepare_emulator_launch`] for
     /// everything else; either way the result is spawned the same way.
     pub async fn launch(self: &Arc<Self>, rom_id: i64) -> Result<GameSession, LaunchError> {
@@ -192,7 +192,8 @@ impl LaunchService {
         let (emulator_name, argv, working_dir, extra_env) = if is_native_platform(&game.platform) {
             // Blank on a Windows host: no compat tool makes sense there.
             // `build_native_command` applies the same gate on `default_compat_tool`
-            // itself, so this is belt-and-suspenders, not load-bearing.
+            // itself (and blanks the tool entirely for a linux-platform row),
+            // so this is belt-and-suspenders, not load-bearing.
             let default_compat_tool = if host_os().starts_with("win") {
                 ""
             } else {

@@ -6,8 +6,8 @@ import {
   cloudRecordTitle,
   createRequestGuard,
   deleteConfirmText,
-  isNativeExecutablePlatform,
   isNativeLaunchPlatform,
+  isNativePlatform,
   latestRecordText,
   recordsStatusLine,
   restoreConfirmText,
@@ -162,44 +162,35 @@ describe('uploadButtonLabel', () => {
   });
 });
 
-describe('isNativeExecutablePlatform', () => {
-  it('is true for a platform string starting with "windows"', () => {
-    expect(isNativeExecutablePlatform('Windows')).toBe(true);
-    expect(isNativeExecutablePlatform('windows')).toBe(true);
+describe('isNativePlatform', () => {
+  it('is true for a platform string starting with "windows" or "linux"', () => {
+    expect(isNativePlatform('Windows')).toBe(true);
+    expect(isNativePlatform('windows')).toBe(true);
+    expect(isNativePlatform('Linux')).toBe(true);
+    expect(isNativePlatform('linux x86_64')).toBe(true);
   });
 
   it('is case-insensitive and trims surrounding whitespace', () => {
-    expect(isNativeExecutablePlatform('  WINDOWS  ')).toBe(true);
+    expect(isNativePlatform('  WINDOWS  ')).toBe(true);
+    expect(isNativePlatform('  LINUX  ')).toBe(true);
   });
 
   it('is false for an emulated platform', () => {
-    expect(isNativeExecutablePlatform('SNES')).toBe(false);
+    expect(isNativePlatform('SNES')).toBe(false);
+    expect(isNativePlatform('')).toBe(false);
   });
 
-  it('is false for a platform that merely contains "windows" mid-string', () => {
-    expect(isNativeExecutablePlatform('Not Windows')).toBe(false);
-  });
-});
-
-describe('isNativeLaunchPlatform', () => {
-  it('accepts Windows and Linux platform names case-insensitively', () => {
-    expect(isNativeLaunchPlatform('Windows')).toBe(true);
-    expect(isNativeLaunchPlatform('  WINDOWS  ')).toBe(true);
-    expect(isNativeLaunchPlatform('Linux')).toBe(true);
-    expect(isNativeLaunchPlatform('linux')).toBe(true);
-    expect(isNativeLaunchPlatform('Windows PC')).toBe(true);
+  it('is false for a platform that merely contains the word mid-string', () => {
+    expect(isNativePlatform('Not Windows')).toBe(false);
+    expect(isNativePlatform('Nintendo Linux')).toBe(false);
   });
 
-  it('rejects emulated platforms', () => {
-    expect(isNativeLaunchPlatform('SNES')).toBe(false);
-    expect(isNativeLaunchPlatform('Not Windows')).toBe(false);
-    expect(isNativeLaunchPlatform('')).toBe(false);
-  });
-
-  // The scope predicate mirrors grid-core and must stay windows-only.
-  it('is wider than isNativeExecutablePlatform, which stays windows-only', () => {
-    expect(isNativeExecutablePlatform('Linux')).toBe(false);
-    expect(isNativeLaunchPlatform('Linux')).toBe(true);
+  // User ruling 2026-09-08: the scope/launch split is gone, so the name the
+  // launch-target line still imports answers exactly the same question.
+  it('is the same predicate isNativeLaunchPlatform now points at', () => {
+    for (const platform of ['Windows', 'Linux', 'SNES', '']) {
+      expect(isNativeLaunchPlatform(platform)).toBe(isNativePlatform(platform));
+    }
   });
 });
 
