@@ -6,7 +6,7 @@ pub mod updates;
 use crate::config_write::modify_config;
 use crate::images::ImageService;
 use grid_core::autoconfig::{self, entry as autoconfig_entry, RaCredentials};
-use grid_core::config::{Config, EmulatorEntry, UiSettings};
+use grid_core::config::{Config, ConfigError, EmulatorEntry, UiSettings};
 use grid_core::images::urls::{filter_to_server_host, resolve_image_url};
 use grid_core::launch::catalog::{catalog_entries, mark_installed, CatalogEntry};
 use grid_core::launch::profiles::{
@@ -854,10 +854,17 @@ impl SyncInputs {
     }
 }
 
-/// Runs the D1 autoconfig sync for ONE entry and logs its outcome — a sync
-/// never fails its caller. `library_path` feeds RPCS3's PS3 library path
-/// only. Blocking: the writers touch emulator config files.
-pub fn run_emulator_sync(entry_name: &str, library_path: &str, inputs: SyncInputs) {
+/// One autoconfig pass over ONE entry: `autoconfig::sync_new_emulator` for
+/// an add (entry defaults, backfill, every writer, one config save), or
+/// `autoconfig::sync_retroarch_settings_only` for a launch (the RetroArch
+/// writer alone, no entry mutation, no config save). Both have this exact
+/// signature, so the caller names which pass it wants.
+type SyncPass = fn(&str, &autoconfig::SyncContext) -> Result<autoconfig::SyncReport, ConfigError>;
+
+/// Runs `pass` for one entry and logs its outcome — a sync never fails its
+/// caller. `library_path` feeds RPCS3's PS3 library path only. Blocking:
+/// the writers touch emulator config files.
+pub fn run_emulator_sync(entry_name: &str, library_path: &str, inputs: SyncInputs, pass: SyncPass) {
     let SyncInputs {
         platforms,
         platform_slugs,
@@ -874,7 +881,7 @@ pub fn run_emulator_sync(entry_name: &str, library_path: &str, inputs: SyncInput
     };
     // Warnings name the emulator and the writer only — never a path, never
     // a secret (`autoconfig::record`); the RA token is a `SecretString`.
-    match autoconfig::sync_new_emulator(entry_name, &ctx) {
+    match pass(entry_name, &ctx) {
         Ok(report) => {
             for warning in report.warnings {
                 tracing::warn!("emulator autoconfig: {warning}");
@@ -886,9 +893,11 @@ pub fn run_emulator_sync(entry_name: &str, library_path: &str, inputs: SyncInput
 
 /// The two LAUNCH-time call sites' sync (doc 05 call-site table): the
 /// pre-launch hook `lib.rs` installs on `LaunchService`, and
-/// [`launch_emulator`]. Loads the library path itself, because neither call
-/// site has one in hand. Blocking; logs everything and returns nothing, so
-/// a failing sync can never stop a launch.
+/// [`launch_emulator`]. Writers only — a launch must never rewrite the
+/// entry or config.toml (see `autoconfig::sync_retroarch_settings_only`).
+/// Loads the library path itself, because neither call site has one in
+/// hand. Blocking; logs everything and returns nothing, so a failing sync
+/// can never stop a launch.
 pub fn sync_emulator_settings(entry_name: &str, install: Option<&Arc<InstallService>>) {
     let library_path = match Config::load(&Config::default_path()) {
         Ok(config) => config.library_path,
@@ -897,7 +906,12 @@ pub fn sync_emulator_settings(entry_name: &str, install: Option<&Arc<InstallServ
             return;
         }
     };
-    run_emulator_sync(entry_name, &library_path, SyncInputs::from_install(install));
+    run_emulator_sync(
+        entry_name,
+        &library_path,
+        SyncInputs::from_install(install),
+        autoconfig::sync_retroarch_settings_only,
+    );
 }
 
 /// D1 call site B. An ADD (a blank `original_name`, or one naming no current
@@ -941,7 +955,12 @@ pub async fn save_emulator(
                 })?;
 
             if is_add {
-                run_emulator_sync(&saved_name, &library_path, inputs);
+                run_emulator_sync(
+                    &saved_name,
+                    &library_path,
+                    inputs,
+                    autoconfig::sync_new_emulator,
+                );
             }
             // D2/D17: adding an RPCS3 entry by hand kicks off the PS3 firmware
             // fetch, the same as installing RPCS3 from the catalog does. An EDIT

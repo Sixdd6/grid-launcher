@@ -526,8 +526,11 @@ entries only: `commands::launch_emulator` runs `sync_emulator_settings` between
 `prepare_standalone_emulator_launch` and `spawn_standalone_emulator`, and
 `LaunchService` does the same for an emulated `launch_game` through the
 pre-launch hook `lib.rs` installs (`set_pre_launch_hook`, fired only when the
-resolved entry is a RetroArch build). Both log their own failures and can never
-fail a launch. See doc 05's call-site table. One recorded deviation:
+resolved entry is a RetroArch build). Both run the RetroArch writer alone
+(`autoconfig::sync_retroarch_settings_only`): a launch rewrites `retroarch.cfg`
+and nothing else — never the emulator entry, never config.toml. Both log their
+own failures and can never fail a launch. See doc 05's call-site table. One
+recorded deviation:
 
 - No 500 ms early-exit warning (:1662) — deferred, not unported for lack of a
   surface (the toast surface exists). `spawn_standalone_emulator` returns as

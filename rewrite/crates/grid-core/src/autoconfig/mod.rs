@@ -662,6 +662,65 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
     Ok(report)
 }
 
+/// The LAUNCH-time entry point (doc 05 call-site table): the RetroArch
+/// settings writer ALONE for `entry_name`, run before every game and
+/// standalone launch of a RetroArch entry so a RetroAchievements credential
+/// or RomM username changed since the entry was added reaches
+/// `retroarch.cfg`.
+///
+/// Deliberately NOT [`sync_new_emulator`]: this pass never applies profile
+/// defaults to the entry, never runs [`entry::backfill_missing_defaults`],
+/// and never saves config.toml — it only READS it (for the entry's path and
+/// the netplay nickname). That matches the reference, whose
+/// `_ensure_emulator_sync_settings` runs writers only, and it keeps a
+/// launch from reverting a user's entry edits or racing a settings save.
+///
+/// A missing entry, a blank path, or a non-RetroArch entry all return an
+/// empty report. The only `Err` is a config load failure.
+pub fn sync_retroarch_settings_only(
+    entry_name: &str,
+    ctx: &SyncContext,
+) -> Result<SyncReport, ConfigError> {
+    let mut report = SyncReport::default();
+    let config = Config::load(ctx.config_path)?;
+
+    let Some(entry) = config
+        .emulators
+        .iter()
+        .find(|existing| existing.name == entry_name)
+    else {
+        return Ok(report);
+    };
+    let path_text = entry.path.trim();
+    if path_text.is_empty() {
+        return Ok(report);
+    }
+
+    // The same synthetic `{"name", "path"}` subject the predicates take in
+    // `sync_new_emulator` (emulator_ui_mixin.py:385).
+    let subject = EmulatorEntry {
+        name: entry.name.clone(),
+        path: path_text.to_string(),
+        ..Default::default()
+    };
+    if !is_retroarch(&subject, ctx.profiles) {
+        return Ok(report);
+    }
+
+    record(
+        &mut report,
+        &subject.name,
+        "retroarch",
+        retroarch::ensure_settings(
+            path_text,
+            true,
+            config.username.trim(),
+            ctx.ra.as_ref().and_then(RaCredentials::usable),
+        ),
+    );
+    Ok(report)
+}
+
 /// The D3-only entry point: re-runs the defaults backfill
 /// ([`entry::backfill_missing_defaults`]) across every registered emulator,
 /// without the entry autoconfig layer or the `ensure_*` writers
@@ -776,6 +835,82 @@ mod tests {
             emulators: entries,
             ..Default::default()
         }
+    }
+
+    /// Fix round 1: the launch-time sync is writers-only. It must write
+    /// retroarch.cfg and leave BOTH the entry (a user's `args = "%rom%"`
+    /// and `save_strategy = "auto"` are exactly what the entry autoconfig
+    /// would overwrite) and config.toml's bytes alone.
+    #[test]
+    fn the_launch_time_sync_writes_retroarch_cfg_without_touching_the_config() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated(temp.path());
+
+        let exe = temp.path().join("RetroArch").join("retroarch");
+        touch(&exe);
+        let mut retroarch = entry("RetroArch", exe.to_str().unwrap());
+        retroarch.args = "%rom%".to_string();
+        retroarch.save_strategy = "auto".to_string();
+        let config = config_with(temp.path(), vec![retroarch]);
+        let config_path = write_config(temp.path(), &config);
+        let before = std::fs::read_to_string(&config_path).unwrap();
+
+        let ctx = SyncContext {
+            config_path: &config_path,
+            platforms: &[],
+            platform_slugs: &no_slugs(),
+            ps3_library_path: String::new(),
+            ra: None,
+            profiles: crate::launch::profiles::load_profiles(),
+        };
+        let report = sync_retroarch_settings_only("RetroArch", &ctx).unwrap();
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+
+        assert!(
+            exe.parent().unwrap().join("retroarch.cfg").is_file(),
+            "the RetroArch writer must still run"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&config_path).unwrap(),
+            before,
+            "a launch must not rewrite config.toml"
+        );
+        let reloaded = Config::load(&config_path).unwrap();
+        assert_eq!(reloaded.emulators[0].args, "%rom%");
+        assert_eq!(reloaded.emulators[0].save_strategy, "auto");
+    }
+
+    /// The same entry through `sync_new_emulator` DOES get the profile's
+    /// defaults — the contrast that makes the narrowing above meaningful.
+    #[test]
+    fn the_add_time_sync_still_applies_profile_defaults_to_the_entry() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated(temp.path());
+
+        let exe = temp.path().join("RetroArch").join("retroarch");
+        touch(&exe);
+        let mut retroarch = entry("RetroArch", exe.to_str().unwrap());
+        retroarch.args = "%rom%".to_string();
+        let config = config_with(temp.path(), vec![retroarch]);
+        let config_path = write_config(temp.path(), &config);
+
+        let ctx = SyncContext {
+            config_path: &config_path,
+            platforms: &[],
+            platform_slugs: &no_slugs(),
+            ps3_library_path: String::new(),
+            ra: None,
+            profiles: crate::launch::profiles::load_profiles(),
+        };
+        sync_new_emulator("RetroArch", &ctx).unwrap();
+
+        let reloaded = Config::load(&config_path).unwrap();
+        assert_ne!(
+            reloaded.emulators[0].args, "%rom%",
+            "the add-time pass applies the matched profile's args"
+        );
     }
 
     #[test]
