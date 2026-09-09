@@ -1079,8 +1079,14 @@ else the parent of `extracted_path` if that is a file, else the parent of the fi
 existing candidate archive file, else nothing.
 
 Native executable candidates (install_paths.py:114): every regular file under the install
-directory whose suffix is `.exe .bat .cmd .ps1 .sh`
-(grid_launcher/emulator/launch.py:11). Python sorted these by path-segment count then
+directory that is launchable — its suffix is `.exe .bat .cmd .ps1 .sh`
+(grid_launcher/emulator/launch.py:11), OR its first four bytes are the ELF magic
+(`\x7fELF`), OR (unix) any execute bit is set. The suffix list alone was written for
+Windows-only natives; Linux platforms are native in the port (see "Ruling (2026-09-08) —
+Linux platforms are native everywhere"), and a Linux game ships a bare ELF or a
+`Game.x86_64`, so without the ELF/exec-bit acceptance those installs report "No launchable
+native executable". The same rule decides whether a pinned `native_executable_path` counts
+as launchable. Python sorted these by path-segment count then
 case-folded path, which made `CrashReportClient.exe` the default over `Game.exe` at the
 same depth. The port deliberately ranks them (`specials/native.rs`
 `executable_candidates`), ascending on:

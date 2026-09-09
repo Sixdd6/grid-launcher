@@ -69,8 +69,9 @@ export const PCSX2_DOWNLOAD_PATH = `/github.com/PCSX2/pcsx2/releases/download/${
  * (grid-core `emu_install::archive_file_name`), so the update lands on the
  * same path inside the same `…-latest/` directory — which is the property
  * the update case exists to prove. Only the tag in the download URL and the
- * bytes differ, and the bytes MUST differ in length: `download_targets`
- * skips a target whose file is already on disk at the expected size.
+ * bytes differ. The differing LENGTH is no longer load-bearing — grid-core
+ * unlinks a non-archive primary before downloading it — but the bytes must
+ * still differ so the spec can tell the two releases apart on disk.
  */
 export const PCSX2_UPDATED_TAG = "v9.9.1-e2e";
 export const PCSX2_UPDATED_DOWNLOAD_URL = `https://github.com/PCSX2/pcsx2/releases/download/${PCSX2_UPDATED_TAG}/${PCSX2_ASSET_NAME}`;

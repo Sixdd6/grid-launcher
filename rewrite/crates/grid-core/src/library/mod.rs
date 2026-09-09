@@ -2374,6 +2374,19 @@ async fn download_emulator(
         emu_install::archive_file_name(&job.profile_name, &job.configured_tag, &primary.asset_name);
     let archive = install_dir.join(safe_file_name(&archive_name, &primary.asset_name)?);
 
+    // A primary that is not an archive (an AppImage) IS the install: it stays
+    // at this path, and an update of the same source reuses this directory and
+    // this file name. Left in place it would make `download_targets` skip the
+    // download whenever the new asset happens to have the same length, so the
+    // old binary would silently be recorded under the new tag. Unlinking first
+    // also keeps a RUNNING AppImage on its old inode while the new bytes are
+    // written beside it. An extractable primary is left alone: finalize deletes
+    // it after extraction, so a leftover one means the previous run failed and
+    // skipping it is the retry shortcut of doc 03 invariant 5.
+    if !should_extract(EMULATOR_PLATFORM, &archive) {
+        let _ = fs::remove_file(&archive);
+    }
+
     // Every destination name is validated before ANY request goes out, so a
     // hostile asset name cannot write a byte anywhere.
     let mut supplemental_paths = Vec::new();

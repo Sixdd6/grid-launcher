@@ -585,6 +585,66 @@ async fn an_appimage_primary_is_kept_in_place_made_executable_and_recorded() {
     );
 }
 
+/// Re-installing an AppImage source whose new asset has the SAME byte length
+/// as the installed one must still land the new bytes: the AppImage IS the
+/// install, so its destination is unlinked before the download rather than
+/// being treated as an already-finished target (doc 04, "an update is the
+/// same install").
+#[tokio::test]
+async fn a_reinstalled_appimage_of_the_same_length_is_replaced_on_disk() {
+    let harness = Harness::new(|uri| vec![profile("Test Emu", gitea_source(uri))]).await;
+    let asset = "TestEmu-x86_64.AppImage";
+    let first = b"APPIMAGE-BYTES-1".to_vec();
+    let second = b"APPIMAGE-BYTES-2".to_vec();
+    assert_eq!(first.len(), second.len(), "the lengths must match");
+
+    let url = format!("{}/dl/{asset}", harness.uri());
+    harness
+        .mount_json(
+            WIDGET_RELEASE,
+            release_json("v1.0", asset, &url, first.len()),
+        )
+        .await;
+    // Same priority means insertion order decides, and `up_to_n_times(1)`
+    // retires the first mock after the first install has taken its bytes.
+    Mock::given(method("GET"))
+        .and(path(format!("/dl/{asset}")))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(first))
+        .up_to_n_times(1)
+        .mount(&harness.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/dl/{asset}")))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(second.clone()))
+        .mount(&harness.server)
+        .await;
+
+    for pass in 0..2 {
+        harness
+            .service
+            .install_emulator("acme/widget".to_string())
+            .await
+            .unwrap();
+        let id = harness.newest_entry_id();
+        let entry = harness.wait_terminal(id).await;
+        assert_eq!(
+            entry.status,
+            DownloadStatus::Completed,
+            "pass {pass}: {}",
+            entry.error
+        );
+    }
+
+    let appimage = harness.install_dir("Test Emu-v1.0").join(asset);
+    assert_eq!(
+        fs::read(&appimage).unwrap(),
+        second,
+        "the second install must overwrite the AppImage, not skip the download"
+    );
+    assert_eq!(harness.config().emulators.len(), 1);
+    assert_eq!(harness.config().emulators[0].source_installed_tag, "v1.0");
+}
+
 // --- (g) extensionless executable-bit member ------------------------------------------
 
 /// A tar.gz whose only launchable member is a bare, executable-bit binary —

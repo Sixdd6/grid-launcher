@@ -208,16 +208,52 @@ pub fn apply_game_json(row: &mut InstalledGame, parsed: &GameJson) {
 // Install directory / executable resolution
 // ---------------------------------------------------------------------------
 
-/// Whether `path`'s extension (case-folded) identifies a launchable native
-/// game file. Matches `launchable_native_game_file` (`emulator/launch.py:
-/// 23`).
+/// Whether `path` is a launchable native game file: its extension
+/// (case-folded) is one of [`NATIVE_GAME_SUFFIXES`], OR its first four bytes
+/// are the ELF magic, OR (unix) any execute bit is set.
+///
+/// Widens `launchable_native_game_file` (`emulator/launch.py:23`), which
+/// only ever saw Windows platforms. Linux platforms are native in the port
+/// (doc 03, "Linux platforms are native everywhere"), and a Linux game ships
+/// a bare ELF or a `Game.x86_64` — neither of which carries a suffix from
+/// the list.
 pub fn is_launchable_native_file(path: &Path) -> bool {
-    path.extension()
+    let suffix_match = path
+        .extension()
         .map(|ext| {
             let ext = ext.to_string_lossy().to_lowercase();
             NATIVE_GAME_SUFFIXES.iter().any(|suf| *suf == ext)
         })
+        .unwrap_or(false);
+    suffix_match || is_elf(path) || has_exec_bit(path)
+}
+
+/// Whether `path` starts with the four-byte ELF magic. An unreadable or
+/// shorter file is not an ELF.
+fn is_elf(path: &Path) -> bool {
+    use std::io::Read;
+
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut magic = [0u8; 4];
+    file.read_exact(&mut magic).is_ok() && magic == *b"\x7fELF"
+}
+
+/// Whether `path` has any execute bit set. Always `false` off unix, where
+/// the mode carries no such meaning.
+#[cfg(unix)]
+fn has_exec_bit(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::metadata(path)
+        .map(|meta| meta.permissions().mode() & 0o111 != 0)
         .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn has_exec_bit(_path: &Path) -> bool {
+    false
 }
 
 /// The installed native game's directory: `extracted_dir` if it exists as a
@@ -791,6 +827,51 @@ mod tests {
     fn executable_candidates_ignores_non_launchable_extensions() {
         let dir = tempfile::tempdir().unwrap();
         assert!(ranked(&dir, "", &["readme.txt"]).is_empty());
+    }
+
+    /// Writes `bytes` to `dir/name` with unix mode `mode` and returns the path.
+    fn write_mode(dir: &Path, name: &str, bytes: &[u8], mode: u32) -> PathBuf {
+        let path = dir.join(name);
+        fs::write(&path, bytes).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+        }
+        let _ = mode;
+        path
+    }
+
+    #[test]
+    fn extensionless_elf_is_launchable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_mode(dir.path(), "Game", b"\x7fELF\x02\x01", 0o644);
+        assert!(is_launchable_native_file(&path));
+        assert_eq!(executable_candidates(dir.path(), "").len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unknown_suffix_with_the_exec_bit_is_launchable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_mode(dir.path(), "Game.x86_64", b"anything", 0o755);
+        assert!(is_launchable_native_file(&path));
+        assert_eq!(executable_candidates(dir.path(), "").len(), 1);
+    }
+
+    #[test]
+    fn extensionless_non_elf_data_file_is_not_launchable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_mode(dir.path(), "LICENSE", b"plain text", 0o644);
+        assert!(!is_launchable_native_file(&path));
+        assert!(executable_candidates(dir.path(), "").is_empty());
+    }
+
+    #[test]
+    fn readme_text_file_is_not_launchable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_mode(dir.path(), "readme.txt", b"plain text", 0o644);
+        assert!(!is_launchable_native_file(&path));
     }
 
     // -- executable_candidates: junk demotion -----------------------------------

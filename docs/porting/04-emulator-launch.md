@@ -567,8 +567,10 @@ App'` for a native platform and `'Install'` otherwise.
 Executable resolution, `resolved_native_executable_path_for_game`
 (grid_launcher/library/install_paths.py:130):
 
-1. If `game["native_executable_path"]` is set, exists, is a file, and has a launchable
-   suffix, use it (grid_launcher/library/install_paths.py:139).
+1. If `game["native_executable_path"]` is set, exists, is a file, and is launchable, use it
+   (grid_launcher/library/install_paths.py:139). **Rust port:** "launchable" is a suffix of
+   `.exe .bat .cmd .ps1 .sh`, OR the ELF magic in the first four bytes, OR (unix) any execute
+   bit — see doc 03 "Native executable candidates".
 2. Otherwise use the first entry of the candidate list
    (grid_launcher/library/install_paths.py:142).
 3. Otherwise `None` → `prepare_native_launch_command` raises "No launchable native
@@ -807,9 +809,16 @@ its own. The install directory is `<library>/Emulators/<stem of "<name>-<configu
 computed from the CONFIGURED tag, so a re-run of the same source lands in the SAME directory
 and `merge_tree_into` merges the new release over the old tree. An update is never refused because the emulator is running: the
 extract-and-merge path replaces each file by `rename` after unlinking the old one, so on
-Linux a running process keeps its old inode and the update lands cleanly (a bare AppImage,
-which is written in place by the download rather than merged, is the exception — the kernel
-refuses to write a running executable). `write_emulator_entry`
+Linux a running process keeps its old inode and the update lands cleanly. A bare AppImage,
+which the download writes in place rather than merging, gets the same treatment explicitly:
+the planning step unlinks the primary destination before the download whenever the primary is
+not an extractable archive, so a running AppImage keeps its old inode and the new bytes are
+written beside it. That unlink is also what makes an AppImage update land at all — without it
+`download_targets` skips a destination that already exists at the expected size, so a new
+release whose AppImage has the SAME byte length would leave the old binary on disk while
+`source_installed_tag` recorded the new tag. An extractable primary is deliberately NOT
+unlinked: finalize deletes it after extraction, so one still on disk means the previous run
+failed and skipping it is the retry shortcut of doc 03 invariant 5. `write_emulator_entry`
 (`rewrite/crates/grid-core/src/library/mod.rs`) then replaces the existing entry AT ITS INDEX,
 starting from that entry, so everything the user owns — their edited `args` and the
 `save_*`/`ignore_*`/`state_paths` cloud-save fields — survives; only `path`, the `source_*`
@@ -855,7 +864,13 @@ maps an extraction failure to `Failed to extract emulator archive: {error}`, pic
 executable with `emu_install::select_executable`, reports
 `Archive extraction finished, but no launchable executable was detected. Open Config to
 set the executable path manually.` when there is none, and marks the winner `0o755`
-(`emu_install::make_executable`, the one copy of that step). Unlike the reference, whose
+(`emu_install::make_executable`, the one copy of that step). **The destination is WIPED
+before extraction** (`library::extract::extract_archive` → `wipe_and_recreate`), and a failed
+extraction deletes it as well: re-entering an archive path on an EDIT therefore discards
+everything a portable install keeps under `<library>/Emulators/<entry name>` — Eden's
+`user/keys/prod.keys`, its firmware, its configs — not just the previous copy of the program.
+An extraction failure or a blank library path also ABORTS the save with that error, so no
+part of the edit is written; the reference instead warned and saved the entry anyway. Unlike the reference, whose
 edit browser offers executables only, this routes on ADD and on EDIT alike — the
 reference's edit path also routes a TYPED archive. Autoconfig then runs on the stored
 executable as usual.
