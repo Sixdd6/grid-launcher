@@ -540,6 +540,14 @@ pub fn version_check_outcome(installed: &str, available: &str) -> VersionCheck {
 /// The endpoint a version check asks, and whether it carries the GitHub
 /// header set. `direct` never gets here: [`ForgeClient::check_release_tag`]
 /// answers it without a request.
+///
+/// DEVIATION (doc 04, deviation 14): a pinned tag asks its own
+/// `/releases/tags/{tag}` endpoint on GITEA too, where the reference ignores
+/// the pin and always asks `/releases/latest`
+/// (`workers.py:476-480`). This asks what an update would actually fetch —
+/// the install path re-resolves the same pinned endpoint — so a pinned gitea
+/// emulator reads "Already up to date" instead of being offered an "update"
+/// that would reinstall the pin it already has.
 fn check_endpoint(
     provider: &str,
     owner: &str,

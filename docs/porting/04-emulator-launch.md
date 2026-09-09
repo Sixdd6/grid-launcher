@@ -805,7 +805,11 @@ key (grid_launcher/ui/mixins/install_mixin.py:1462).
 **Rust port: an update is the same install.** "Update from Source" needs no install mode of
 its own. The install directory is `<library>/Emulators/<stem of "<name>-<configured tag>">`,
 computed from the CONFIGURED tag, so a re-run of the same source lands in the SAME directory
-and `merge_tree_into` merges the new release over the old tree. `write_emulator_entry`
+and `merge_tree_into` merges the new release over the old tree. An update is never refused because the emulator is running: the
+extract-and-merge path replaces each file by `rename` after unlinking the old one, so on
+Linux a running process keeps its old inode and the update lands cleanly (a bare AppImage,
+which is written in place by the download rather than merged, is the exception — the kernel
+refuses to write a running executable). `write_emulator_entry`
 (`rewrite/crates/grid-core/src/library/mod.rs`) then replaces the existing entry AT ITS INDEX,
 starting from that entry, so everything the user owns — their edited `args` and the
 `save_*`/`ignore_*`/`state_paths` cloud-save fields — survives; only `path`, the `source_*`
@@ -863,7 +867,9 @@ emits a single `{installed_tag, available_tag, error}` dict:
   (grid_launcher/background/workers.py:461);
 - `github` → `/releases/tags/{tag}` for an explicit non-`latest` tag, else `/releases/latest`
   (grid_launcher/background/workers.py:471);
-- `gitea` → `{base_url}/api/v1/repos/{owner}/{repo}/releases/latest`
+- `gitea` → `{base_url}/api/v1/repos/{owner}/{repo}/releases/latest` ALWAYS — unlike the
+  `github` branch above, the configured `release_tag` is ignored here, so a pinned gitea
+  emulator is always compared against the newest release
   (grid_launcher/background/workers.py:478);
 - unknown provider → `{"installed_tag": "", "available_tag": "", "error": "Unsupported
   provider: <p>"}` (grid_launcher/background/workers.py:487);
@@ -873,8 +879,10 @@ emits a single `{installed_tag, available_tag, error}` dict:
 
 **Rust port (release parity pass): ported, with one recorded-version deviation.**
 `ForgeClient::check_release_tag` (`rewrite/crates/grid-core/src/launch/forge.rs`) makes the
-same single request — `direct` answers `"direct"` with no network call, `github` and `gitea`
-ask the endpoint the pin selects — and reports the two payload complaints verbatim ("Source
+same single request — `direct` answers `"direct"` with no network call, while `github` AND
+`gitea` both ask the endpoint the pin selects (`/releases/tags/{tag}` for an explicit
+non-`latest` tag, `/releases/latest` for `latest` or a blank tag; deviation 14 below covers
+the gitea half) — and reports the two payload complaints verbatim ("Source
 release API returned an unsupported payload shape." / "Source release API response did not
 include tag_name."), as it does an unknown provider ("Unsupported provider: <p>"). The pure
 `version_check_outcome(installed, available)` mirrors the reference's result dialog: a blank
@@ -1200,6 +1208,18 @@ download, install) to Rust (grid-core):
     extraction-time preservation is therefore a strict superset for zip: it is the only code
     path (reference or port) that leaves *companion* files — helper scripts, other binaries in
     the extracted tree, not just the one selected launch file — with a meaningful exec bit.
+14. The version check asks a PINNED tag's own endpoint (`/releases/tags/{tag}`) on **gitea**
+    as well as on github; `latest` and a blank tag ask `/releases/latest` on both. The
+    reference ignores the pin on gitea and always asks `/releases/latest`
+    (grid_launcher/background/workers.py:476-480), which makes a pinned gitea emulator report
+    the newest release as "available" and then, if accepted, reinstall the pin it already has
+    — the install path re-resolves `/releases/tags/{tag}`, so the update cannot actually move
+    off the pin. The port asks what the install would actually fetch, so a pinned gitea
+    emulator whose pin exists correctly reads "Already up to date", and the check only offers
+    an update when accepting it would change what is on disk. Consequence to be aware of: a
+    pinned gitea emulator no longer surfaces that a newer release exists — repinning is an
+    edit to the catalog profile, not an update. Same rule, same code path, for both providers
+    (`check_endpoint`, `rewrite/crates/grid-core/src/launch/forge.rs`).
 
 ## Rust port deviations (milestone 8)
 
