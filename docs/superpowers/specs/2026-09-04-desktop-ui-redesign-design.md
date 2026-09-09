@@ -243,6 +243,11 @@ release link, "check-only" note), Appearance (theme, card size defaults, backgro
 on/off, background fade slider 0–60% with a live preview behind the settings pane,
 background blur slider 0–40 (commits on release)).
 
+Every Browse button (library path, save path, emulator path) is additive to the text
+input beside it; when the native file dialog fails to open (no desktop portal), the
+picker falls back to `null` like a cancel and reports it once per process with an error
+toast — "Could not open a file dialog. Enter the path by hand." — never in the E2E build.
+
 ## 11. Test ids and E2E
 
 - Test ids that survive unchanged: `nav-library`, `nav-server`, `nav-downloads`,
