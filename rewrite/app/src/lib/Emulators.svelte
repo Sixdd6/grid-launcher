@@ -5,15 +5,19 @@
   // `hidden`, the rule the shell applies to views: the catalog's refresh on
   // a finished install and the defaults' compatibility fetch keep running
   // whichever pane is in front. Each pane's column caps at 1100px (D-UI-7).
+  import { listen } from '@tauri-apps/api/event';
   import {
     api,
+    EMULATOR_INSTALLED_EVENT,
     type CatalogEntry,
+    type EmulatorInstalledEvent,
     type EmulatorEntry,
     type EmulatorFacts,
     type LaunchDefaults,
     type Platform,
     type PlatformRef,
     type ProfileSummary,
+    type VersionCheck,
   } from './api';
   import { tick } from 'svelte';
   import { chordContext, shouldFocusSearch } from './views/searchKeys';
@@ -45,6 +49,7 @@
   import CompatTools from './emulators/CompatTools.svelte';
   import EmulatorForm from './emulators/EmulatorForm.svelte';
   import { dynamicEmulatorNotes, emulatorNotes } from './emulators/notes';
+  import { installedToastText, updateConfirmText, upToDateText } from './emulators/update';
 
   // Mounted for the whole session now that Emulators is a view, so the
   // refresh below is gated on being the visible view: navigating away and
@@ -126,6 +131,14 @@
 
   let confirmingDelete = $state<string | null>(null);
   let deletePending = $state<string | null>(null);
+
+  // "Update from Source", one row at a time: the check runs on click (never
+  // on view open, so nothing spends a GitHub rate-limit budget by looking),
+  // and its answer becomes the same two-click confirm the Delete button
+  // uses — the second click starts the update.
+  let updateChecking = $state<string | null>(null);
+  let updatePending = $state<string | null>(null);
+  let updatePrompt = $state<{ name: string; text: string } | null>(null);
 
   // Catalog pane state.
   let catalog = $state<CatalogEntry[]>([]);
@@ -485,6 +498,48 @@
     }
   }
 
+  async function handleUpdateClick(name: string) {
+    // Second click on the row that is already showing its confirm text.
+    if (updatePrompt?.name === name) {
+      updatePrompt = null;
+      updatePending = name;
+      try {
+        await api.updateEmulator(name);
+      } catch (err) {
+        pushToast(errorMessage(err), 'error');
+      } finally {
+        updatePending = null;
+      }
+      return;
+    }
+    updatePrompt = null;
+    updateChecking = name;
+    try {
+      const check: VersionCheck = await api.checkEmulatorUpdate(name);
+      if (check.up_to_date) {
+        pushToast(upToDateText(check));
+      } else {
+        updatePrompt = { name, text: updateConfirmText(name, check) };
+      }
+    } catch (err) {
+      pushToast(errorMessage(err), 'error');
+    } finally {
+      updateChecking = null;
+    }
+  }
+
+  // The completion toast for an install OR an update, worded by the backend's
+  // `fresh` flag. Mounted once for the session: the install runs in the
+  // background, so the view it started from may be long gone by then.
+  $effect(() => {
+    const pending = listen<EmulatorInstalledEvent>(EMULATOR_INSTALLED_EVENT, (event) => {
+      pushToast(installedToastText(event.payload.name, event.payload.fresh));
+    });
+    return () => {
+      pending.then((unlisten) => unlisten());
+    };
+  });
+
   // Set for the row whose launch is in flight, so its button disables and
   // says "Launching…" — the click spawns a process, then holds for the
   // 500 ms early-exit window, and gives no other feedback unless it fails.
@@ -586,6 +641,25 @@
                           >
                             {launchPending === e.name ? 'Launching…' : 'Launch'}
                           </button>
+                          {#if e.source_id}
+                            <button
+                              data-testid={`emulator-update-${sanitizeName(e.name)}`}
+                              title="Update from Source"
+                              class:confirm={updatePrompt?.name === e.name}
+                              disabled={updateChecking === e.name || updatePending === e.name}
+                              onclick={() => handleUpdateClick(e.name)}
+                            >
+                              {#if updateChecking === e.name}
+                                Checking…
+                              {:else if updatePending === e.name}
+                                Updating…
+                              {:else if updatePrompt?.name === e.name}
+                                Confirm update
+                              {:else}
+                                Update
+                              {/if}
+                            </button>
+                          {/if}
                           <button data-testid={`emulator-edit-${sanitizeName(e.name)}`} onclick={() => openEdit(e)}>Edit</button>
                           <button
                             data-testid={`emulator-delete-${sanitizeName(e.name)}`}
@@ -597,6 +671,11 @@
                           </button>
                         </div>
                       </div>
+                      {#if updatePrompt?.name === e.name}
+                        <p data-testid={`emulator-update-prompt-${sanitizeName(e.name)}`} class="update-prompt note">
+                          {updatePrompt.text}
+                        </p>
+                      {/if}
                       {#each emulatorNotes(e.name) as note (note.key)}
                         <p data-testid={`emulator-note-${note.key}-${sanitizeName(e.name)}`} class="note">
                           {note.text}
@@ -1070,6 +1149,12 @@
      `rowNames()` reads `[data-testid^="emulator-row-"] .name`, and a second
      match per row would break it. Wraps, unlike `.args`, because the notes
      are sentences. */
+  /* The update confirmation's two lines are one string with newlines in it
+     (the reference's dialog body), so they must render as written. */
+  .update-prompt {
+    white-space: pre-line;
+  }
+
   .note {
     margin: 0;
     color: var(--text-muted);

@@ -9,8 +9,9 @@ use grid_core::autoconfig::paths::expand_user;
 use grid_core::autoconfig::{self, entry as autoconfig_entry, RaCredentials};
 use grid_core::config::{Config, ConfigError, EmulatorEntry, UiSettings};
 use grid_core::images::urls::{filter_to_server_host, resolve_image_url};
-use grid_core::launch::catalog::{catalog_entries, mark_installed, CatalogEntry};
+use grid_core::launch::catalog::{catalog_entries, find_profile, mark_installed, CatalogEntry};
 use grid_core::launch::emu_install::install_manual_archive;
+use grid_core::launch::forge::{version_check_outcome, ForgeClient, VersionCheck};
 use grid_core::launch::profiles::{
     load_profiles, profile_for_entry, visible_profiles, EmulatorProfile,
 };
@@ -18,6 +19,7 @@ use grid_core::launch::selection::{
     compatible_emulator_names_for_platform, emulator_entry_by_name, emulator_supports_platform,
     entry_is_retroarch, mapping_value_for_platform, slug_core_resolver, NO_EMULATOR,
 };
+use grid_core::launch::source::{merge_platform_override, normalize_source, str_field, SourceMap};
 use grid_core::launch::spawn::{
     prepare_standalone_emulator_launch, spawn_standalone_emulator, wait_for_early_exit,
 };
@@ -1621,6 +1623,92 @@ pub fn list_emulator_catalog(state: State<'_, AppState>) -> Result<Vec<CatalogEn
 #[tauri::command]
 pub async fn install_emulator(state: State<'_, AppState>, source_id: String) -> Result<(), String> {
     let install = state.install.as_ref().map_err(Clone::clone)?;
+    install.install_emulator(source_id).await.map_err(err)
+}
+
+/// Event emitted once an emulator install (or update) has written its
+/// config entry: the frontend turns it into the completion toast, which is
+/// worded differently for a first install and an update
+/// (`install_mixin.py:1690-1716`).
+pub const EMULATOR_INSTALLED_EVENT: &str = "emulator-installed";
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EmulatorInstalledEvent {
+    pub name: String,
+    /// `false` when this write replaced an existing entry — i.e. it was an
+    /// update, not a first install.
+    pub fresh: bool,
+}
+
+/// `No source download configured for this emulator.`
+/// (emulator_ui_mixin.py:1235-1293): the answer for a row whose entry has
+/// no catalog source to check or update from.
+const NO_SOURCE_DOWNLOAD: &str = "No source download configured for this emulator.";
+
+/// The source an update would install from: the catalog profile the entry's
+/// `source_id` names, normalized the same way the install itself normalizes
+/// it, plus the tag currently on disk.
+fn update_source_for(name: &str) -> Result<(String, SourceMap), String> {
+    let config = Config::load(&Config::default_path()).map_err(err)?;
+    let entry = emulator_entry_by_name(&config.emulators, name).ok_or(NO_SOURCE_DOWNLOAD)?;
+    if entry.source_id.trim().is_empty() {
+        return Err(NO_SOURCE_DOWNLOAD.to_string());
+    }
+    let profile = find_profile(load_profiles(), &entry.source_id)
+        .ok_or_else(|| format!("unknown emulator source: {}", entry.source_id))?;
+    let raw = profile.source.clone().ok_or(NO_SOURCE_DOWNLOAD)?;
+    let mut source = normalize_source(&raw).map_err(|e| e.0)?;
+    merge_platform_override(&mut source);
+    // The RESOLVED tag when there is one (what is actually on disk); the
+    // configured pin otherwise, for an entry installed before that field
+    // existed.
+    let installed = if entry.source_installed_tag.trim().is_empty() {
+        entry.source_release_tag.clone()
+    } else {
+        entry.source_installed_tag.clone()
+    };
+    Ok((installed, source))
+}
+
+/// The Emulators view's `Update from Source` check, run ON CLICK and never
+/// cached (`SourceVersionCheckWorker`, workers.py:439-510): one release
+/// request against the entry's own source, compared with the tag on disk.
+#[tauri::command]
+pub async fn check_emulator_update(name: String) -> Result<VersionCheck, String> {
+    let (installed, source) = tokio::task::spawn_blocking(move || update_source_for(&name))
+        .await
+        .map_err(|e| format!("check_emulator_update did not finish: {e}"))??;
+    let forge = ForgeClient::new().map_err(|e| e.0)?;
+    let available = forge
+        .check_release_tag(
+            &str_field(&source, "provider"),
+            &str_field(&source, "owner"),
+            &str_field(&source, "repo"),
+            &str_field(&source, "base_url"),
+            &str_field(&source, "release_tag"),
+        )
+        .await
+        .map_err(|e| format!("Could not check for updates:\n{}", e.0))?;
+    Ok(version_check_outcome(&installed, &available))
+}
+
+/// Runs the update the check offered: a plain re-install of the entry's own
+/// `source_id`, which lands in the same directory and merges over it
+/// (`_install_mode = "source_emulator_update"`, install_mixin.py:1399-1499).
+/// Progress shows up on the downloads drawer row, like every other install.
+#[tauri::command]
+pub async fn update_emulator(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    let install = state.install.as_ref().map_err(Clone::clone)?.clone();
+    let source_id = tokio::task::spawn_blocking(move || {
+        let config = Config::load(&Config::default_path()).map_err(err)?;
+        let entry = emulator_entry_by_name(&config.emulators, &name).ok_or(NO_SOURCE_DOWNLOAD)?;
+        if entry.source_id.trim().is_empty() {
+            return Err(NO_SOURCE_DOWNLOAD.to_string());
+        }
+        Ok(entry.source_id.clone())
+    })
+    .await
+    .map_err(|e| format!("update_emulator did not finish: {e}"))??;
     install.install_emulator(source_id).await.map_err(err)
 }
 

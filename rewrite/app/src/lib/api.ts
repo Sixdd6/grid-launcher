@@ -152,6 +152,13 @@ export type SessionsSnapshot = { sessions: GameSession[]; warning: string | null
 /// `source_*` install provenance and the five layer-1 autoconfig fields.
 /// They are optional here and passed straight back through `saveEmulator`,
 /// so editing an entry never drops them.
+/** `check_emulator_update`'s answer (grid-core `launch::forge::VersionCheck`). */
+export type VersionCheck = {
+  installed_display: string;
+  available_display: string;
+  up_to_date: boolean;
+};
+
 export type EmulatorEntry = {
   name: string;
   path: string;
@@ -161,6 +168,7 @@ export type EmulatorEntry = {
   source_owner?: string;
   source_repo?: string;
   source_release_tag?: string;
+  source_installed_tag?: string;
   save_strategy?: string;
   ignore_files?: string;
   ignore_extensions?: string;
@@ -348,6 +356,15 @@ export const FIRMWARE_PASS_FINISHED_EVENT = 'firmware-pass-finished';
 /// install finalizes in the background. Re-run `listCompatTools` on it.
 export const COMPAT_TOOLS_CHANGED_EVENT = 'compat-tools-changed';
 
+/** Emitted once an emulator install or update has written its config entry. */
+export const EMULATOR_INSTALLED_EVENT = 'emulator-installed';
+
+export type EmulatorInstalledEvent = {
+  name: string;
+  /** `false` when the write replaced an existing entry — i.e. an update. */
+  fresh: boolean;
+};
+
 /// The `cloud-upload-finished` payload (`app/src-tauri/src/cloud_service.rs`'s
 /// `CloudUploadFinished`). `message` is the completion text
 /// `upload_completion_message` produced for this run; `failed` is true for a
@@ -458,6 +475,13 @@ export const api = {
     invoke<void>('set_retroarch_core', { platform, core }),
   listEmulatorCatalog: () => invoke<CatalogEntry[]>('list_emulator_catalog'),
   installEmulator: (sourceId: string) => invoke<void>('install_emulator', { sourceId }),
+  /**
+   * The row's "Update from Source" check. Runs one release request against
+   * the entry's own source, on click and uncached, like the reference.
+   */
+  checkEmulatorUpdate: (name: string) => invoke<VersionCheck>('check_emulator_update', { name }),
+  /** Re-installs the entry's source over its existing install directory. */
+  updateEmulator: (name: string) => invoke<void>('update_emulator', { name }),
   setRetroachievementsCredentials: (username: string, token: string) =>
     invoke<RaFanOutRow[]>('set_retroachievements_credentials', { username, token }),
   /**

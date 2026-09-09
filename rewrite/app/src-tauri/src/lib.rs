@@ -245,7 +245,18 @@ pub fn run() {
                 let firmware = state.firmware.clone();
                 let session = state.session.clone();
                 let install_for_emulator = install.clone();
+                let handle = app.handle().clone();
                 install.set_emulator_installed_hook(Arc::new(move |installed| {
+                    // The completion toast, worded per `fresh` by the
+                    // frontend: this is the only signal an install/update
+                    // finished writing its entry.
+                    let _ = handle.emit(
+                        commands::EMULATOR_INSTALLED_EVENT,
+                        commands::EmulatorInstalledEvent {
+                            name: installed.name.clone(),
+                            fresh: installed.fresh,
+                        },
+                    );
                     // A REINSTALL over an existing entry keeps whatever
                     // firmware is already there; a managed compat tool has
                     // no firmware at all.
@@ -351,6 +362,8 @@ pub fn run() {
             commands::set_retroarch_core,
             commands::list_emulator_catalog,
             commands::install_emulator,
+            commands::check_emulator_update,
+            commands::update_emulator,
             commands::set_retroachievements_credentials,
             commands::retroachievements_login,
             commands::get_retroachievements_status,
