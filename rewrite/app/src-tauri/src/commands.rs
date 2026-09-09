@@ -1675,6 +1675,25 @@ fn update_source_for(name: &str) -> Result<(String, SourceMap), String> {
 /// request against the entry's own source, compared with the tag on disk.
 #[tauri::command]
 pub async fn check_emulator_update(name: String) -> Result<VersionCheck, String> {
+    run_emulator_update_check(name)
+        .await
+        .map_err(update_check_error)
+}
+
+/// The toast text for a failed check. `NO_SOURCE_DOWNLOAD` is an ANSWER, not
+/// a failure, so it is passed through verbatim; every other reason the check
+/// could not run — an unknown catalog source, an unusable source block, a
+/// client that would not build, the network itself — carries the same prefix
+/// the network path used to carry alone.
+fn update_check_error(error: String) -> String {
+    if error == NO_SOURCE_DOWNLOAD {
+        error
+    } else {
+        format!("Could not check for updates:\n{error}")
+    }
+}
+
+async fn run_emulator_update_check(name: String) -> Result<VersionCheck, String> {
     let (installed, source) = tokio::task::spawn_blocking(move || update_source_for(&name))
         .await
         .map_err(|e| format!("check_emulator_update did not finish: {e}"))??;
@@ -1688,7 +1707,7 @@ pub async fn check_emulator_update(name: String) -> Result<VersionCheck, String>
             &str_field(&source, "release_tag"),
         )
         .await
-        .map_err(|e| format!("Could not check for updates:\n{}", e.0))?;
+        .map_err(|e| e.0)?;
     Ok(version_check_outcome(&installed, &available))
 }
 
@@ -2847,6 +2866,27 @@ mod retroachievements_tests {
         assert_eq!(
             before, after,
             "clear must never touch an emulator config file"
+        );
+    }
+}
+
+#[cfg(test)]
+mod update_check_error_tests {
+    use super::*;
+
+    #[test]
+    fn the_no_source_answer_is_passed_through_verbatim() {
+        assert_eq!(
+            update_check_error(NO_SOURCE_DOWNLOAD.to_string()),
+            NO_SOURCE_DOWNLOAD
+        );
+    }
+
+    #[test]
+    fn every_other_failure_carries_the_prefix() {
+        assert_eq!(
+            update_check_error("unknown emulator source: acme".to_string()),
+            "Could not check for updates:\nunknown emulator source: acme"
         );
     }
 }

@@ -22,6 +22,17 @@ pub fn filter_directive(rust_log: Option<&str>, debug_prints: bool) -> String {
     }
 }
 
+/// The [`EnvFilter`] to run with. `EnvFilter::new` is LOSSY: it drops the
+/// directives it cannot parse, so a malformed `RUST_LOG` would leave a
+/// near-silent filter instead of the level the user expects. A parse failure
+/// therefore falls back to the directive we would have used with no
+/// `RUST_LOG` set at all.
+fn env_filter(rust_log: Option<&str>, debug_prints: bool) -> EnvFilter {
+    let directive = filter_directive(rust_log, debug_prints);
+    EnvFilter::try_new(&directive)
+        .unwrap_or_else(|_| EnvFilter::new(filter_directive(None, debug_prints)))
+}
+
 fn current_rust_log() -> Option<String> {
     std::env::var("RUST_LOG").ok()
 }
@@ -29,8 +40,8 @@ fn current_rust_log() -> Option<String> {
 /// Installs the global subscriber with a reloadable filter. Called once, at
 /// startup, before anything else can log.
 pub fn init(debug_prints: bool) {
-    let directive = filter_directive(current_rust_log().as_deref(), debug_prints);
-    let (layer, handle) = reload::Layer::new(EnvFilter::new(directive));
+    let (layer, handle) =
+        reload::Layer::new(env_filter(current_rust_log().as_deref(), debug_prints));
     let _ = RELOAD_HANDLE.set(handle);
     tracing_subscriber::registry()
         .with(layer)
@@ -42,15 +53,29 @@ pub fn init(debug_prints: bool) {
 /// live filter. A missing handle (never initialized, e.g. in tests) or a
 /// reload error is ignored: a settings toggle must not fail the command.
 pub fn apply_debug_prints(enabled: bool) {
-    let directive = filter_directive(current_rust_log().as_deref(), enabled);
     if let Some(handle) = RELOAD_HANDLE.get() {
-        let _ = handle.reload(EnvFilter::new(directive));
+        let _ = handle.reload(env_filter(current_rust_log().as_deref(), enabled));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn env_filter_falls_back_to_info_when_rust_log_is_unparseable() {
+        assert_eq!(env_filter(Some("=,,="), false).to_string(), "info");
+    }
+
+    #[test]
+    fn env_filter_falls_back_to_debug_when_the_toggle_is_on() {
+        assert_eq!(env_filter(Some("=,,="), true).to_string(), "debug");
+    }
+
+    #[test]
+    fn env_filter_keeps_a_valid_rust_log() {
+        assert_eq!(env_filter(Some("warn"), true).to_string(), "warn");
+    }
 
     #[test]
     fn rust_log_wins_over_the_toggle() {
