@@ -203,6 +203,10 @@ Dialog 1040×680 max, centred over a dimmed, blurred shell; Esc and ✕ close.
      row for the platform. Native rows keep the merge-path confirm text.
 - All strings that E2E asserts today (update toast, confirm text, launch errors) stay
   verbatim.
+- Error toasts are announced assertively: `Toast.svelte` wraps `level === 'error'` toasts
+  in `role="alert"` (rather than the `role="status"`/`aria-live="polite"` region used for
+  other toasts) and prefixes the text with a visually-hidden "Error:" so a screen reader
+  interrupts to read a failure instead of queuing it.
 
 ## 8. Downloads view
 
