@@ -820,9 +820,12 @@ executable `0o755` on non-`win32` (grid_launcher/ui/mixins/emulator_ui_mixin.py:
 path field, which accepts an executable or an archive. `save_emulator`
 (`app/src-tauri/src/commands.rs`) tests the trimmed path with
 `library::extract::is_extractable_archive` (the same seven suffixes the reference's
-config dialog treats as archives, dialogs.py:325); when it matches, the save requires a
-library path (else the verbatim `Set a Library Path in Settings before adding an emulator
-archive.`) and calls `launch::emu_install::install_manual_archive(library, entry_name,
+config dialog treats as archives, dialogs.py:325); when it matches, the typed path is `~`-expanded
+(`autoconfig::paths::expand_user`, matching emulator_ui_mixin.py:1461), the save derives the
+library root through `library::paths::library_root` — the same `~`-expanded root
+`InstallService` installs into, matching install_mixin.py:947 — requiring it to be non-blank
+(else the verbatim `Set a Library Path in Settings before adding an emulator archive.`), and
+calls `launch::emu_install::install_manual_archive(library, entry_name,
 archive)` BEFORE the config merge, storing the returned executable as `entry.path`. The
 helper reports a missing archive as `Archive file was not found:\n{path}`, extracts into
 `<library>/Emulators/<sanitize(ENTRY NAME)>` — the entry name, not the archive stem —

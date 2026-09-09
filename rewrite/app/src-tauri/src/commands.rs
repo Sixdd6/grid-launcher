@@ -5,6 +5,7 @@ pub mod updates;
 
 use crate::config_write::modify_config;
 use crate::images::ImageService;
+use grid_core::autoconfig::paths::expand_user;
 use grid_core::autoconfig::{self, entry as autoconfig_entry, RaCredentials};
 use grid_core::config::{Config, ConfigError, EmulatorEntry, UiSettings};
 use grid_core::images::urls::{filter_to_server_host, resolve_image_url};
@@ -20,6 +21,7 @@ use grid_core::launch::selection::{
 use grid_core::launch::spawn::{prepare_standalone_emulator_launch, spawn_standalone_emulator};
 use grid_core::launch::{GameSession, LaunchService, SessionsSnapshot};
 use grid_core::library::extract::is_extractable_archive;
+use grid_core::library::paths::library_root;
 use grid_core::library::queue::DownloadsSnapshot;
 use grid_core::library::registry::InstalledGame;
 use grid_core::library::InstallService;
@@ -29,7 +31,7 @@ use grid_core::session::{RestoreOutcome, SessionManager, SessionState};
 use secrecy::SecretString;
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tauri::State;
@@ -968,12 +970,25 @@ const ARCHIVE_NEEDS_LIBRARY_PATH: &str =
 /// A blank name yields `None` too: the install directory is named after the
 /// entry, so extracting one would create a fallback-named directory for a
 /// save [`apply_save_emulator`] is about to reject anyway.
+///
+/// A leading `~` is expanded, as the reference does
+/// (`Path(archive_path_text).expanduser()`, emulator_ui_mixin.py:1461) —
+/// otherwise a typed `~/Downloads/emu.zip` is reported as missing.
 fn archive_path_to_extract(entry: &EmulatorEntry) -> Option<PathBuf> {
     if entry.name.trim().is_empty() {
         return None;
     }
-    let path = PathBuf::from(entry.path.trim());
+    let path = expand_user(entry.path.trim());
     is_extractable_archive(&path).then_some(path)
+}
+
+/// The library root a manual archive extracts under: `Config::library_path`
+/// with a leading `~/` expanded, via `library::paths::library_root` — the
+/// one public way the app layer derives the same root `InstallService`
+/// installs into, so an extracted emulator never lands in a literal `~`
+/// directory the launcher then fails to find. Blank → the verbatim message.
+fn archive_library_root(config: &Config) -> Result<PathBuf, String> {
+    library_root(config).ok_or_else(|| ARCHIVE_NEEDS_LIBRARY_PATH.to_string())
 }
 
 /// D1 call site B. An ADD (a blank `original_name`, or one naming no current
@@ -1009,12 +1024,8 @@ pub async fn save_emulator(
             // write lock is not held across the extraction.
             let mut entry = entry;
             if let Some(archive) = archive_path_to_extract(&entry) {
-                let library = Config::load(&config_path).map_err(err)?.library_path;
-                if library.trim().is_empty() {
-                    return Err(ARCHIVE_NEEDS_LIBRARY_PATH.to_string());
-                }
-                let executable =
-                    install_manual_archive(Path::new(library.trim()), entry.name.trim(), &archive)?;
+                let library = archive_library_root(&Config::load(&config_path).map_err(err)?)?;
+                let executable = install_manual_archive(&library, entry.name.trim(), &archive)?;
                 entry.path = executable.to_string_lossy().into_owned();
             }
             // The autoconfig sync below reads no config.json and can be slow
@@ -2085,6 +2096,47 @@ mod merge_tests {
         assert_eq!(archive_path_to_extract(&entry_at("/apps/emu.exe")), None);
         assert_eq!(archive_path_to_extract(&entry_at("/apps/emu")), None);
         assert_eq!(archive_path_to_extract(&entry_at("   ")), None);
+    }
+
+    /// `~/Downloads/emu.zip` must expand, or the archive is reported missing.
+    #[test]
+    fn archive_path_to_extract_expands_a_leading_tilde() {
+        let Some(home) = grid_core::autoconfig::paths::home_dir() else {
+            return;
+        };
+        assert_eq!(
+            archive_path_to_extract(&entry_at("~/Downloads/emu.zip")),
+            Some(home.join("Downloads/emu.zip"))
+        );
+    }
+
+    // --- archive_library_root -------------------------------------------------
+
+    /// The extraction root must be the EXPANDED library path: a literal `~`
+    /// directory would put the files somewhere the stored entry path (which
+    /// `launch::spawn` expands) never resolves to.
+    #[test]
+    fn archive_library_root_expands_a_leading_tilde() {
+        let Some(home) = grid_core::autoconfig::paths::home_dir() else {
+            return;
+        };
+        let config = Config {
+            library_path: "~/Games".to_string(),
+            ..Config::default()
+        };
+        assert_eq!(archive_library_root(&config).unwrap(), home.join("Games"));
+    }
+
+    #[test]
+    fn archive_library_root_reports_a_blank_library_path_verbatim() {
+        let config = Config {
+            library_path: "   ".to_string(),
+            ..Config::default()
+        };
+        assert_eq!(
+            archive_library_root(&config).unwrap_err(),
+            "Set a Library Path in Settings before adding an emulator archive."
+        );
     }
 
     #[test]
