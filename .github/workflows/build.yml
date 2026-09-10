@@ -113,6 +113,7 @@ jobs:
     name: Version
     # One job so the semver rules live in exactly one place; both build jobs
     # read `needs.version.outputs.version`. Seconds on a plain runner.
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}

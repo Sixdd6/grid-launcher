@@ -16,6 +16,11 @@
 #                                             # Rust crates has changed
 #   E2E_KEEP=1 rewrite/scripts/e2e.sh   # keep the temp run directory
 #
+# When naming groups, list `python-import` FIRST: it asserts the Connect form,
+# and a group that connected earlier leaves a RomM credential in the run's
+# private keyring. The runner also clears that item with `secret-tool` before
+# the group (a silent no-op when libsecret-tools is missing).
+#
 # Exit codes: 0 pass, 1 a stage group failed, 2 a prerequisite is missing or
 # the binary cannot be trusted to be an e2e build.
 #
