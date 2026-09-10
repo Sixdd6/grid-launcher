@@ -8,6 +8,7 @@
   import { init as initCompatTools } from './lib/stores/compatTools.svelte';
   import { init as initUpdates } from './lib/stores/updates.svelte';
   import { initAppUpdate } from './lib/stores/appUpdate.svelte';
+  import { initPythonImport } from './lib/stores/pythonImport.svelte';
   import { initReplenishListener } from './lib/stores/installed.svelte';
   import { initUiSettings } from './lib/stores/uiSettings.svelte';
   import { noteDirectional } from './lib/stores/inputMode.svelte';
@@ -36,6 +37,13 @@
     return () => {
       un.then((f) => f());
     };
+  });
+
+  // The import ran before the window existed, so its notice is a pull with
+  // nothing to unsubscribe from — but it belongs with the other pre-shell
+  // effects so the toast appears at the first paint, not after a connect.
+  $effect(() => {
+    initPythonImport();
   });
 
   // The theme must be on `<html>` before the first paint the user sees, so

@@ -3,6 +3,7 @@
 //! banner. Thin wrappers — every rule lives in `update_service`,
 //! `app_update`, or grid-core.
 
+use grid_core::import_python::ImportReport;
 use grid_core::library::platforms::is_native_platform;
 use grid_core::library::update_detection::{game_has_server_update, ServerVersion};
 use tauri::{AppHandle, State};
@@ -85,6 +86,15 @@ pub async fn update_game(
 #[tauri::command]
 pub fn app_update_notice(state: State<'_, AppState>) -> AppUpdateStatus {
     state.app_update.status()
+}
+
+/// The startup import's report, or `null` when nothing was imported. The
+/// frontend pulls this once on mount, the same late-mount pattern as
+/// `app_update_notice` — there is no event, because the import is finished
+/// before the webview exists.
+#[tauri::command]
+pub fn python_import_notice(state: State<'_, AppState>) -> Option<ImportReport> {
+    state.python_import
 }
 
 #[tauri::command]

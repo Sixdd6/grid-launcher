@@ -7,6 +7,7 @@ mod gamepad;
 mod images;
 mod logging;
 mod media_server;
+mod python_import;
 mod update_service;
 
 use commands::AppState;
@@ -79,6 +80,20 @@ pub fn run() {
     let registry = Registry::open(&db_path)
         .map(Arc::new)
         .map_err(|e| e.to_string());
+    // Carry a Python user's settings and library across on the first start
+    // (spec 2026-09-10, Part 3). Before any service reads the config, and
+    // after the registry is open because the import writes rows into it.
+    // Counts only reach the log; no token is ever read.
+    let python_import = match (&registry, python_import::python_config_path()) {
+        (Ok(registry), Some(python_config)) => {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            python_import::startup_import(&config_path, &python_config, registry, now)
+        }
+        _ => None,
+    };
     let install = registry
         .clone()
         .map(|registry| InstallService::new(registry, config_path.clone()));
@@ -94,6 +109,7 @@ pub fn run() {
         updates: update_service::UpdateService::new(),
         app_update: app_update::AppUpdateState::new(),
         media_server: std::sync::OnceLock::new(),
+        python_import,
     });
     // Embedded WebDriver automation server, gated behind the `e2e` cargo
     // feature so it never ships in a release build (see
@@ -395,6 +411,7 @@ pub fn run() {
             commands::updates::update_game,
             commands::updates::app_version,
             commands::updates::app_update_notice,
+            commands::updates::python_import_notice,
             commands::updates::open_release_page,
             commands::logging::get_debug_prints,
             commands::logging::set_debug_prints,

@@ -9,6 +9,7 @@ use grid_core::autoconfig::paths::expand_user;
 use grid_core::autoconfig::{self, entry as autoconfig_entry, RaCredentials};
 use grid_core::config::{Config, ConfigError, EmulatorEntry, UiSettings};
 use grid_core::images::urls::{filter_to_server_host, resolve_image_url};
+use grid_core::import_python::ImportReport;
 use grid_core::launch::catalog::{catalog_entries, find_profile, mark_installed, CatalogEntry};
 use grid_core::launch::emu_install::install_manual_archive;
 use grid_core::launch::forge::{version_check_outcome, ForgeClient, VersionCheck};
@@ -68,6 +69,11 @@ pub struct AppState {
     /// exists after `AppState` is built) and left empty if the bind failed —
     /// `video_url` then reports that instead of hanging the viewer.
     pub media_server: OnceLock<Arc<crate::media_server::MediaServer>>,
+    /// What the one-shot Python-config import did at startup, or `None`
+    /// when there was nothing to import. Counts only — never a value out of
+    /// the imported file. Pulled once by the frontend through
+    /// `commands::updates::python_import_notice`.
+    pub python_import: Option<ImportReport>,
 }
 
 pub(crate) fn err(e: impl std::fmt::Display) -> String {
