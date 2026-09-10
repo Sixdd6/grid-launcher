@@ -160,3 +160,7 @@ any level, an error message, an IPC payload, a test fixture, or console output.
 allowed only at a fixed list of call sites, and committed fixtures must not contain
 anything that looks like a real bearer token. The judgement half is on you — a new log
 line that formats a URL, a header, or an error body is the usual way this rule breaks.
+
+## Bundled tools
+
+`app/src-tauri/tauri.windows.conf.json` ships `assets/tools/7z/` (7z.exe, 7z.dll, License.txt) as Tauri resources on Windows only. The NSIS installer places them beside the executable, where `library::extract::bundled_7z_windows_path` finds them before falling back to a 7-Zip on `PATH`. The AppImage carries no bundled tools.

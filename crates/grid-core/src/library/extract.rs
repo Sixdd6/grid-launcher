@@ -624,6 +624,9 @@ const SYSTEM_7Z_CANDIDATES: &[&str] = &[
 ];
 
 fn find_system_7z() -> Option<PathBuf> {
+    if let Some(bundled) = bundled_7z_windows_path().filter(|path| path.is_file()) {
+        return Some(bundled);
+    }
     for name in ["7z", "7za", "7zz"] {
         if let Some(path) = which_on_path(name) {
             return Some(path);
@@ -633,6 +636,30 @@ fn find_system_7z() -> Option<PathBuf> {
         .iter()
         .map(PathBuf::from)
         .find(|path| path.is_file())
+}
+
+/// The bundled 7-Zip executable's location on Windows: `assets/tools/7z/7z.exe`
+/// next to the running binary. `app/src-tauri/tauri.windows.conf.json`
+/// ships `assets/tools/7z/` (7z.exe, 7z.dll, License.txt) as Tauri
+/// resources, which the NSIS installer places beside the executable, so the
+/// path resolves on an installed Windows build and nowhere else. Checked
+/// before `PATH` by both this module and `cloud::archive`, mirroring the
+/// Python app's `_BUNDLED_7Z_PATH`. Always `None` off Windows.
+#[cfg(windows)]
+pub(crate) fn bundled_7z_windows_path() -> Option<PathBuf> {
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    Some(
+        exe_dir
+            .join("assets")
+            .join("tools")
+            .join("7z")
+            .join("7z.exe"),
+    )
+}
+
+#[cfg(not(windows))]
+pub(crate) fn bundled_7z_windows_path() -> Option<PathBuf> {
+    None
 }
 
 /// `pub(crate)`: reused by `cloud::archive`'s system-7z fallback so it can

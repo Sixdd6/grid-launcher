@@ -641,7 +641,7 @@ pub fn extract_payload_zip(
 /// task report for why the two aren't unified.
 fn run_system_7z_extract(archive: &Path, dest: &Path) -> Result<(), String> {
     let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Some(bundled) = bundled_7z_windows_path() {
+    if let Some(bundled) = crate::library::extract::bundled_7z_windows_path() {
         if bundled.is_file() {
             candidates.push(bundled);
         }
@@ -678,30 +678,6 @@ fn run_system_7z_extract(archive: &Path, dest: &Path) -> Result<(), String> {
     }
 
     Err("No 7-Zip found to extract this archive.".to_string())
-}
-
-/// The bundled 7-Zip executable's expected location on Windows, next to
-/// the running binary (`assets/tools/7z/7z.exe`, mirroring
-/// `cloud_transfer.py`'s `_BUNDLED_7Z_PATH`, which is relative to the
-/// installed package root). No such bundling convention exists yet
-/// elsewhere in this rewrite; this is inert on every platform this crate
-/// currently ships for (non-Windows), so it's a documented placeholder
-/// pending that convention rather than a verified path.
-#[cfg(windows)]
-fn bundled_7z_windows_path() -> Option<PathBuf> {
-    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-    Some(
-        exe_dir
-            .join("assets")
-            .join("tools")
-            .join("7z")
-            .join("7z.exe"),
-    )
-}
-
-#[cfg(not(windows))]
-fn bundled_7z_windows_path() -> Option<PathBuf> {
-    None
 }
 
 /// The system-7z fallback used from within [`extract_payload_zip`]:
