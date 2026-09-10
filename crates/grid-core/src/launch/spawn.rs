@@ -233,13 +233,24 @@ pub fn process_exited_early_message(status: Option<ExitStatus>, argv: &[String])
 }
 
 /// The environment a spawned host binary gets: a copy of this process's
-/// environment with `LD_LIBRARY_PATH` restored from `LD_LIBRARY_PATH_ORIG`
-/// when that variable is present.
+/// environment with the bundle's own library and GTK setup removed.
 ///
 /// A bundled build points `LD_LIBRARY_PATH` at its own private library
-/// directory. A host binary started with that value can resolve its C++
-/// runtime against the bundle's older libraries and fail to start, so the
-/// bundler's saved original wins for children.
+/// directories. A host binary started with that value resolves shared
+/// libraries against the bundle's older copies and fails to start: umu-run
+/// is a system Python script whose pyzstd module refuses the bundled
+/// libzstd, so it exits 1 before Proton runs (2026-09-10). Two bundlers,
+/// two conventions:
+///
+/// - PyInstaller saves the original in `LD_LIBRARY_PATH_ORIG`; when that is
+///   present it wins outright.
+/// - The linuxdeploy AppRun inside the Tauri AppImage saves nothing, but
+///   exports `APPDIR`. Every `LD_LIBRARY_PATH` and `XDG_DATA_DIRS` entry
+///   under that directory is dropped, and the variables its GTK hook
+///   exports ([`APPIMAGE_GTK_HOOK_VARS`]) are removed, so a GTK-based
+///   emulator loads the host's modules rather than the bundle's.
+///
+/// Outside a bundle the environment passes through untouched.
 ///
 /// The returned map contains the whole parent environment and must never be
 /// logged or put in an error message.
@@ -247,13 +258,59 @@ pub fn clean_env() -> HashMap<String, String> {
     clean_env_from(std::env::vars().collect())
 }
 
+/// The variables `linuxdeploy-plugin-gtk.sh` exports for the bundled GTK,
+/// none of which a child should inherit.
+const APPIMAGE_GTK_HOOK_VARS: [&str; 9] = [
+    "GTK_PATH",
+    "GIO_EXTRA_MODULES",
+    "GDK_PIXBUF_MODULE_FILE",
+    "GSETTINGS_SCHEMA_DIR",
+    "GTK_EXE_PREFIX",
+    "GTK_IM_MODULE_FILE",
+    "GTK_DATA_PREFIX",
+    "GDK_BACKEND",
+    "GTK_THEME",
+];
+
 /// The pure half of [`clean_env`], so the rule can be tested without mutating
 /// the process environment (which is racy across parallel tests).
 fn clean_env_from(mut env: HashMap<String, String>) -> HashMap<String, String> {
     if let Some(original) = env.get("LD_LIBRARY_PATH_ORIG").cloned() {
         env.insert("LD_LIBRARY_PATH".to_string(), original);
+        return env;
+    }
+    let Some(appdir) = env.get("APPDIR").cloned() else {
+        return env;
+    };
+    for key in ["LD_LIBRARY_PATH", "XDG_DATA_DIRS"] {
+        if let Some(value) = env.get(key) {
+            let kept = without_entries_under(value, &appdir);
+            if kept.is_empty() {
+                env.remove(key);
+            } else {
+                env.insert(key.to_string(), kept);
+            }
+        }
+    }
+    for key in APPIMAGE_GTK_HOOK_VARS {
+        env.remove(key);
     }
     env
+}
+
+/// `value` as a `:`-separated list minus blank entries and entries that
+/// name `root` or something inside it.
+fn without_entries_under(value: &str, root: &str) -> String {
+    let root = root.trim_end_matches('/');
+    value
+        .split(':')
+        .filter(|entry| !entry.is_empty())
+        .filter(|entry| {
+            let entry = entry.trim_end_matches('/');
+            entry != root && !entry.starts_with(&format!("{root}/"))
+        })
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 #[cfg(test)]
@@ -309,9 +366,112 @@ mod tests {
     }
 
     #[test]
-    fn clean_env_without_the_saved_original_passes_the_environment_through() {
+    fn clean_env_without_the_saved_original_or_appdir_passes_the_environment_through() {
         let base = env_of(&[("LD_LIBRARY_PATH", "/bundle/lib"), ("PATH", "/usr/bin")]);
         assert_eq!(clean_env_from(base.clone()), base);
+    }
+
+    #[test]
+    fn clean_env_strips_the_appimage_library_dirs_from_the_library_path() {
+        let env = clean_env_from(env_of(&[
+            ("APPDIR", "/tmp/.mount_grid"),
+            (
+                "LD_LIBRARY_PATH",
+                "/tmp/.mount_grid/usr/lib/:/tmp/.mount_grid/usr/lib64/:/opt/lib:",
+            ),
+            ("PATH", "/usr/bin"),
+        ]));
+        assert_eq!(env.get("LD_LIBRARY_PATH").unwrap(), "/opt/lib");
+        assert_eq!(env.get("PATH").unwrap(), "/usr/bin");
+    }
+
+    #[test]
+    fn clean_env_drops_the_library_path_when_only_appimage_dirs_remain() {
+        let env = clean_env_from(env_of(&[
+            ("APPDIR", "/tmp/.mount_grid"),
+            (
+                "LD_LIBRARY_PATH",
+                "/tmp/.mount_grid/usr/lib/:/tmp/.mount_grid/lib64/:",
+            ),
+        ]));
+        assert!(!env.contains_key("LD_LIBRARY_PATH"));
+    }
+
+    #[test]
+    fn clean_env_drops_the_appimage_gtk_hook_variables() {
+        let env = clean_env_from(env_of(&[
+            ("APPDIR", "/tmp/.mount_grid"),
+            (
+                "GTK_PATH",
+                "/tmp/.mount_grid//usr/lib/x86_64-linux-gnu/gtk-3.0",
+            ),
+            (
+                "GIO_EXTRA_MODULES",
+                "/tmp/.mount_grid/usr/lib/x86_64-linux-gnu/gio/modules",
+            ),
+            (
+                "GDK_PIXBUF_MODULE_FILE",
+                "/tmp/.mount_grid//usr/lib/loaders.cache",
+            ),
+            (
+                "GSETTINGS_SCHEMA_DIR",
+                "/tmp/.mount_grid//usr/share/glib-2.0/schemas",
+            ),
+            ("GTK_EXE_PREFIX", "/tmp/.mount_grid//usr"),
+            (
+                "GTK_IM_MODULE_FILE",
+                "/tmp/.mount_grid//usr/lib/immodules.cache",
+            ),
+            ("GTK_DATA_PREFIX", "/tmp/.mount_grid"),
+            ("GDK_BACKEND", "x11"),
+            ("GTK_THEME", "Adwaita:dark"),
+            ("PATH", "/usr/bin"),
+        ]));
+        for key in [
+            "GTK_PATH",
+            "GIO_EXTRA_MODULES",
+            "GDK_PIXBUF_MODULE_FILE",
+            "GSETTINGS_SCHEMA_DIR",
+            "GTK_EXE_PREFIX",
+            "GTK_IM_MODULE_FILE",
+            "GTK_DATA_PREFIX",
+            "GDK_BACKEND",
+            "GTK_THEME",
+        ] {
+            assert!(!env.contains_key(key), "{key} leaked");
+        }
+        assert_eq!(env.get("PATH").unwrap(), "/usr/bin");
+    }
+
+    #[test]
+    fn clean_env_keeps_gtk_variables_outside_an_appimage() {
+        let base = env_of(&[("GDK_BACKEND", "wayland"), ("GTK_THEME", "Breeze")]);
+        assert_eq!(clean_env_from(base.clone()), base);
+    }
+
+    #[test]
+    fn clean_env_removes_the_appimage_share_dir_from_xdg_data_dirs() {
+        let env = clean_env_from(env_of(&[
+            ("APPDIR", "/tmp/.mount_grid"),
+            (
+                "XDG_DATA_DIRS",
+                "/tmp/.mount_grid/usr/share:/usr/share:/usr/local/share",
+            ),
+        ]));
+        assert_eq!(
+            env.get("XDG_DATA_DIRS").unwrap(),
+            "/usr/share:/usr/local/share"
+        );
+    }
+
+    #[test]
+    fn clean_env_prefers_the_saved_original_over_appdir_stripping() {
+        let env = clean_env_from(env_of(&[
+            ("APPDIR", "/tmp/.mount_grid"),
+            ("LD_LIBRARY_PATH", "/tmp/.mount_grid/usr/lib/"),
+            ("LD_LIBRARY_PATH_ORIG", "/usr/lib"),
+        ]));
+        assert_eq!(env.get("LD_LIBRARY_PATH").unwrap(), "/usr/lib");
     }
 
     #[test]
