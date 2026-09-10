@@ -2270,14 +2270,26 @@ mod tests {
         use wiremock::{Mock, MockServer, ResponseTemplate};
 
         let server = MockServer::start().await;
-        const DELAY: Duration = Duration::from_millis(200);
-        Mock::given(method("POST"))
-            .and(wm_path("/api/saves"))
-            .respond_with(
+        const DELAY: Duration = Duration::from_millis(500);
+
+        /// Stamps the arrival of every POST before answering it after
+        /// `DELAY`. Overlap is proven by ARRIVAL order, not by wall-clock
+        /// duration: a loaded CI runner stretches the total time freely,
+        /// but a serialized second upload can only arrive after the first
+        /// response, i.e. at least `DELAY` after the first arrival.
+        struct StampedDelay(Arc<std::sync::Mutex<Vec<std::time::Instant>>>);
+        impl wiremock::Respond for StampedDelay {
+            fn respond(&self, _request: &wiremock::Request) -> ResponseTemplate {
+                self.0.lock().unwrap().push(std::time::Instant::now());
                 ResponseTemplate::new(200)
                     .set_delay(DELAY)
-                    .set_body_json(serde_json::json!({})),
-            )
+                    .set_body_json(serde_json::json!({}))
+            }
+        }
+        let arrivals = Arc::new(std::sync::Mutex::new(Vec::new()));
+        Mock::given(method("POST"))
+            .and(wm_path("/api/saves"))
+            .respond_with(StampedDelay(arrivals.clone()))
             .mount(&server)
             .await;
         // Retention refetch after a successful upload: empty, so pruning
@@ -2350,7 +2362,6 @@ mod tests {
 
         let cloud = CloudService::new();
 
-        let start = std::time::Instant::now();
         let a = cloud.clone().run_auto_upload(
             client.clone(),
             game_a.clone(),
@@ -2372,7 +2383,6 @@ mod tests {
             None,
         );
         tokio::join!(a, b);
-        let elapsed = start.elapsed();
 
         let saves_posts = server
             .received_requests()
@@ -2386,11 +2396,15 @@ mod tests {
             "both games' uploads must have actually reached the network"
         );
 
-        // Serialized (the old shared-lock behavior), this would take
-        // roughly 2x DELAY; overlapping, it stays close to one.
+        // Serialized (the old shared-lock behavior), the second POST could
+        // only be sent after the first response, so it would arrive at
+        // least DELAY after the first; overlapping, both arrive together.
+        let arrivals = arrivals.lock().unwrap();
+        assert_eq!(arrivals.len(), 2);
+        let gap = arrivals[1].duration_since(arrivals[0]);
         assert!(
-            elapsed < DELAY * 2 - Duration::from_millis(50),
-            "expected the two auto-uploads to overlap, took {elapsed:?} for a {DELAY:?} mock delay"
+            gap < DELAY,
+            "expected the two auto-uploads to overlap, but the second POST arrived {gap:?} after the first ({DELAY:?} mock delay)"
         );
     }
 
