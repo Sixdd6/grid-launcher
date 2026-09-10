@@ -31,6 +31,7 @@ use std::path::{Path, PathBuf};
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::config::{Config, ConfigError, EmulatorEntry};
+use crate::firmware::routing::{config_dir_of, targets_for_entry};
 use crate::launch::profiles::{profile_for_entry, EmulatorProfile};
 use crate::launch::selection::emulator_entry_by_name;
 
@@ -613,23 +614,20 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
         record(&mut report, name, "xemu", xemu::ensure_settings(path));
     }
     if is_pcsx2(&subject, profiles) {
-        // `[Folders] Bios` takes the FIRST firmware target of the REGISTERED
-        // entry — not the synthetic `subject` — so `%EMULATOR_DIR%` and the
-        // profile match see the entry as saved (emulator_ui_mixin.py:403-416).
-        // No profile, or a profile with no firmware directories, leaves it
-        // blank, which makes the step a no-op.
-        let entry = &config.emulators[index];
-        let config_dir = crate::firmware::routing::config_dir_of(ctx.config_path);
-        let profile = profile_for_entry(&entry.name, &entry.path, profiles);
-        let bios_directory = crate::firmware::routing::targets_for_entry(
-            entry,
-            profile,
-            &config.library_path,
-            &config_dir,
-        )
-        .first()
-        .map(|target| target.path.to_string_lossy().to_string())
-        .unwrap_or_default();
+        // `[Folders] Bios` takes the FIRST firmware target of the SYNTHETIC
+        // `subject` — the registered name with the TRIMMED path — which is
+        // the same entry the reference routes with
+        // (emulator_ui_mixin.py:383,405) and the same one `is_pcsx2` just
+        // checked. A padded `entry.path` would otherwise move `%EMULATOR_DIR%`
+        // and could miss the profile match. No profile, or a profile with no
+        // firmware directories, leaves it blank, which makes the step a no-op.
+        let config_dir = config_dir_of(ctx.config_path);
+        let profile = profile_for_entry(name, path, profiles);
+        let bios_directory =
+            targets_for_entry(&subject, profile, &config.library_path, &config_dir)
+                .first()
+                .map(|target| target.path.to_string_lossy().to_string())
+                .unwrap_or_default();
         record(
             &mut report,
             name,
@@ -933,9 +931,7 @@ mod tests {
     /// firmware target of the matched profile (doc 05 step 15).
     #[test]
     fn the_add_time_sync_writes_the_pcsx2_bios_folder_from_the_first_target() {
-        // No `isolated()` here on purpose: every path in this test is
-        // absolute under `temp`, so nothing reads `HOME`, and swapping it
-        // would race the env-reading tests that do not take `lock()`.
+        let _lock = lock();
         let temp = tempfile::tempdir().unwrap();
 
         let exe = temp.path().join("PCSX2").join("pcsx2-qt");
@@ -969,11 +965,11 @@ mod tests {
 
         // The expected value is the routing module's own first target, so
         // this pins the wiring rather than re-implementing path resolution.
-        let expected = crate::firmware::routing::targets_for_entry(
+        let expected = targets_for_entry(
             &pcsx2,
             Some(&pcsx2_profile),
             &config.library_path,
-            &crate::firmware::routing::config_dir_of(&config_path),
+            &config_dir_of(&config_path),
         )[0]
         .path
         .to_string_lossy()
@@ -985,6 +981,46 @@ mod tests {
             "missing Bios = {expected} in:\n{text}"
         );
         assert!(!text.contains("second"), "only the FIRST target is written");
+    }
+
+    /// The routing entry is the TRIMMED one: a padded `entry.path` must not
+    /// move `%EMULATOR_DIR%` (emulator_ui_mixin.py:383,405).
+    #[test]
+    fn the_add_time_sync_trims_the_entry_path_before_routing_the_bios_folder() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+
+        let exe = temp.path().join("PCSX2").join("pcsx2-qt");
+        touch(&exe);
+        let padded = entry("PCSX2", &format!("  {}  ", exe.to_str().unwrap()));
+        let config = config_with(temp.path(), vec![padded]);
+        let config_path = write_config(temp.path(), &config);
+
+        let mut pcsx2_profile = profile("PCSX2", &["pcsx2"]);
+        pcsx2_profile.firmware_directories = vec![crate::launch::profiles::FirmwareDirSpec {
+            path: "%EMULATOR_DIR%/bios".to_string(),
+            keywords: None,
+        }];
+        let profiles = vec![pcsx2_profile];
+
+        let ctx = SyncContext {
+            config_path: &config_path,
+            platforms: &[],
+            platform_slugs: &no_slugs(),
+            ps3_library_path: String::new(),
+            ra: None,
+            profiles: &profiles,
+        };
+        sync_new_emulator("PCSX2", &ctx).unwrap();
+
+        let text =
+            std::fs::read_to_string(exe.parent().unwrap().join("inis").join("PCSX2.ini")).unwrap();
+        let expected = exe.parent().unwrap().join("bios");
+        assert!(
+            text.contains(&format!("Bios = {}", expected.to_string_lossy())),
+            "missing Bios = {} in:\n{text}",
+            expected.to_string_lossy()
+        );
     }
 
     #[test]
