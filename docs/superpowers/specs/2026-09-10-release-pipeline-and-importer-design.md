@@ -53,7 +53,7 @@ pre-release identifiers. The first release tag must sort above the last Python t
 
 1. Checkout, apt deps as in `check`, Rust stable, `Swatinem/rust-cache`, Node 22, `npm ci`.
 2. `npx tauri build --bundles appimage --config '{"version":"<VERSION>"}'` from `app`.
-   Output: `rewrite/app/src-tauri/target/release/bundle/appimage/GRID Launcher_<VERSION>_amd64.AppImage`.
+   Output: `rewrite/target/release/bundle/appimage/GRID Launcher_<VERSION>_amd64.AppImage`.
 3. Repack for update information. Tauri's bundler embeds none, and AppImageUpdate reads it
    from the ELF section appimagetool writes:
    - `./"GRID Launcher_<VERSION>_amd64.AppImage" --appimage-extract` → `squashfs-root/`
@@ -72,7 +72,7 @@ AppImageUpdate. Part 3 exists so that switch costs the user nothing but their to
 
 1. Checkout, Rust stable, `rust-cache`, Node 22, `npm ci`.
 2. `npx tauri build --bundles nsis --config '{"version":"<VERSION>"}'`.
-   Output: `target/release/bundle/nsis/GRID Launcher_<VERSION>_x64-setup.exe`.
+   Output: `rewrite/target/release/bundle/nsis/GRID Launcher_<VERSION>_x64-setup.exe`.
 3. Rename to `grid-launcher-<VERSION>-windows-x86_64-setup.exe`.
 4. Upload artifact; on `release`, attach.
 

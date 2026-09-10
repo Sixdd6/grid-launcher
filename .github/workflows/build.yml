@@ -158,7 +158,7 @@ jobs:
         run: npx tauri build --bundles appimage --config "{\"version\":\"$VERSION\"}"
 
       - name: Repack with update information
-        working-directory: rewrite/app/src-tauri/target/release/bundle/appimage
+        working-directory: rewrite/target/release/bundle/appimage
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -189,6 +189,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: grid-launcher-linux-appimage
+          if-no-files-found: error
           path: |
             dist/grid-launcher-*-x86_64.AppImage
             dist/grid-launcher-*-x86_64.AppImage.zsync
@@ -259,7 +260,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          mv "rewrite/app/src-tauri/target/release/bundle/nsis/GRID Launcher_${VERSION}_x64-setup.exe" \
+          mv "rewrite/target/release/bundle/nsis/GRID Launcher_${VERSION}_x64-setup.exe" \
              "dist/grid-launcher-${VERSION}-windows-x86_64-setup.exe"
           ls -l dist
 
@@ -267,6 +268,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: grid-launcher-windows-setup
+          if-no-files-found: error
           path: dist/grid-launcher-*-windows-x86_64-setup.exe
 
       - name: Attach to release
