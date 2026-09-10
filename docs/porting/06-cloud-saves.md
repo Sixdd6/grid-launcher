@@ -1342,9 +1342,11 @@ Related coverage outside the cloud files: `tests/test_flycast_vmu.py` pins
   filename (grid_launcher/ui/mixins/cloud_mixin.py:392). Is a substring match on free text
   the intended contract, or should this key off an explicit field?
   **RULED (milestone 6): ported as-is, gated on the `Emulators` platform — see "Rust port
-  deviations (milestone 6)", follow-the-code rulings. The install-path last resort
+  deviations (milestone 6)", follow-the-code rulings. ~~The install-path last resort
   (`_matching_installed_emulator_games`) this function also falls back to is deferred — see
-  "Other recorded deviations and gaps".**
+  "Other recorded deviations and gaps".~~ **Closed (release parity pass):** the install-path
+  last resort is ported in `crates/grid-core/src/cloud/install_match.rs` and runs from
+  `shared_cloud_sync_owner` whenever the free-text search finds nothing.**
 - `OPEN QUESTION:` `filter_upload_jobs_by_session_window` accepts a job when **any** payload
   path is in-window (grid_launcher/library/cloud_transfer.py:677). A stale state file with a
   freshly written screenshot sidecar therefore uploads. Should the state file itself be
@@ -1684,13 +1686,19 @@ and none of them is fixed:
   token sets are built from these fields, therefore match EVERY candidate directory (an empty
   token set matches everything — see the follow-the-code ruling above) rather than narrowing
   by id, until a future milestone adds the columns and populates them.
-- **The shared-owner install-path last resort is deferred.** The reference's
+- ~~**The shared-owner install-path last resort is deferred.** The reference's
   `_shared_cloud_sync_owner_game` falls back to `_matching_installed_emulator_games`
   (`install_mixin.py:1106` -> `install_registry.py:65`) when no title/description/filename
   substring match is found; the port's `shared_cloud_sync_owner`
   (`crates/grid-core/src/cloud/ops/mod.rs:645-661`) has no equivalent fallback yet — it needs
   `candidate_archive_paths_for_game`/`candidate_extracted_paths_for_game`/
-  `candidate_extracted_dirs_for_game`, none built by this milestone.
+  `candidate_extracted_dirs_for_game`, none built by this milestone.~~ **Closed (release
+  parity pass):** all three candidate builders and the two path comparisons (`path_key`,
+  `path_within_path`) are ported in `crates/grid-core/src/cloud/install_match.rs`, and
+  `shared_cloud_sync_owner` runs `matching_installed_emulator_games` over `ctx.all_games`
+  with the entry's path when the free-text search returns nothing, taking the first match
+  with a non-blank ROM id. `CloudGame` gained `extracted_dir` and `native_game_dir` to feed
+  the candidate builders.
 - **The PPSSPP and RetroArch state job builders take the already-resolved ignore sets.**
   `ppsspp_state_upload_jobs` (`crates/grid-core/src/cloud/transfer.rs:622`) and
   `retroarch_state_upload_jobs` (`crates/grid-core/src/cloud/transfer.rs:713`) both receive an

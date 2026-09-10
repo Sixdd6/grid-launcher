@@ -1618,6 +1618,93 @@ fn shared_owner_rom_id_applies_to_saves_only() {
     );
 }
 
+/// Doc 06 "Save scope": the shared-owner install-path last resort
+/// (`_shared_cloud_sync_owner_game`'s `_matching_installed_emulator_games`
+/// branch, cloud_mixin.py:419-424). No `Emulators` row names "xemu" in its
+/// text, but one IS installed as the binary the entry points at, so its
+/// ROM id owns the shared saves.
+#[test]
+fn shared_owner_falls_back_to_the_install_path_match() {
+    let root = TempDir::new().unwrap();
+    let entry = xemu_fixture(root.path(), true);
+    let installed_at = entry.path.clone();
+    let mut fx = Fixture::new(config_with(entry, "Xbox"));
+
+    // No free-text match: nothing in title/platform/description/file name
+    // contains "xemu". Skipped first for its blank rom id, then matched.
+    fx.games = vec![
+        CloudGame {
+            title: "Console emulator".to_string(),
+            platform: "Emulators".to_string(),
+            rom_id: String::new(),
+            archive_path: installed_at.clone(),
+            ..Default::default()
+        },
+        CloudGame {
+            title: "Console emulator".to_string(),
+            platform: "Emulators".to_string(),
+            rom_id: "555".to_string(),
+            archive_path: installed_at,
+            ..Default::default()
+        },
+    ];
+
+    let mut caches = CloudCaches::default();
+    let target = game("Halo", "Xbox", "7");
+    assert_eq!(
+        cloud_sync_rom_id(&fx.ctx(), &mut caches, &target, SaveType::Save),
+        Some("555".to_string()),
+        "the install-path match with a rom id owns the shared saves"
+    );
+}
+
+/// The last resort is exactly that: a free-text match still wins, and an
+/// entry with no path has nothing to match against.
+#[test]
+fn install_path_fallback_yields_to_free_text_and_needs_a_path() {
+    let root = TempDir::new().unwrap();
+    let entry = xemu_fixture(root.path(), true);
+    let installed_at = entry.path.clone();
+
+    let by_text = CloudGame {
+        title: "xemu".to_string(),
+        platform: "Emulators".to_string(),
+        rom_id: "999".to_string(),
+        ..Default::default()
+    };
+    let by_install_path = CloudGame {
+        title: "Console emulator".to_string(),
+        platform: "Emulators".to_string(),
+        rom_id: "555".to_string(),
+        archive_path: installed_at,
+        ..Default::default()
+    };
+
+    let mut fx = Fixture::new(config_with(entry.clone(), "Xbox"));
+    // Ordered install-path row first, to prove precedence is by rule and
+    // not by pool position.
+    fx.games = vec![by_install_path.clone(), by_text];
+    let mut caches = CloudCaches::default();
+    let target = game("Halo", "Xbox", "7");
+    assert_eq!(
+        cloud_sync_rom_id(&fx.ctx(), &mut caches, &target, SaveType::Save),
+        Some("999".to_string()),
+        "the free-text owner wins whenever there is one"
+    );
+
+    // Same install-path row, but the entry has no path: no fallback, so
+    // the game's own rom id stands.
+    let mut pathless = entry;
+    pathless.path = "   ".to_string();
+    let mut fx = Fixture::new(config_with(pathless, "Xbox"));
+    fx.games = vec![by_install_path];
+    let mut caches = CloudCaches::default();
+    assert_eq!(
+        cloud_sync_rom_id(&fx.ctx(), &mut caches, &target, SaveType::Save),
+        Some("7".to_string())
+    );
+}
+
 /// Fix round 1 (FIX 1, ruling: Python wins): the generic state branch
 /// guards only on "no candidates" (`cloud_mixin.py:2565`), so a run that
 /// builds zero jobs must still fall through to the completion table and

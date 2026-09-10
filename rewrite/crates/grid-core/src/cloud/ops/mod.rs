@@ -44,6 +44,7 @@ use super::candidates::{
     ppsspp_save_directories, resolved_ignore_sets, resolved_save_strategy, rpcs3_save_directories,
 };
 use super::dirs::{self, PathKey, ResolveContext};
+use super::install_match::matching_installed_emulator_games;
 use super::scope::{
     cloud_save_block_reason, is_emulators_platform, is_native_executable_platform,
     shared_sync_owner, SaveScope,
@@ -680,22 +681,17 @@ fn cloud_sync_rom_id_with(
     (!own.is_empty()).then(|| own.to_string())
 }
 
-/// `_shared_cloud_sync_owner_game` (cloud_mixin.py:398-437), minus the
-/// `_matching_installed_emulator_games` last resort
-/// (install_mixin.py:1106 -> install_registry.py:65).
+/// `_shared_cloud_sync_owner_game` (cloud_mixin.py:398-437), in full.
 ///
-/// Fix round 1 — the real blocker, corrected: that last resort scans the
-/// SAME pool this function already walks (`self.library_games`, i.e.
-/// `ctx.all_games`); what it does differently is match by INSTALL PATH
-/// rather than by free text — it looks for the library game whose own
-/// archive/extracted files ARE the emulator binary at `entry.path`, via
-/// `candidate_archive_paths_for_game` /
-/// `candidate_extracted_paths_for_game` /
-/// `candidate_extracted_dirs_for_game`. Those three install-path
-/// derivations are not ported into this crate, so the fallback cannot be
-/// expressed here yet. It only matters when no `Emulators`-platform row
-/// matches the emulator by free text but one is installed AS that
-/// emulator.
+/// The free-text scan ([`shared_sync_owner`]) runs first. When it finds
+/// nothing and the resolved emulator `entry` has a non-blank path, the
+/// install-path last resort runs
+/// ([`crate::cloud::install_match::matching_installed_emulator_games`],
+/// install_registry.py:65): the same `ctx.all_games` pool, matched by
+/// INSTALL PATH instead of free text — the library game whose own
+/// archive/extracted files ARE the emulator binary at `entry.path`. The
+/// first such game with a non-blank `rom_id` wins, mirroring Python's
+/// dedup-then-first-resolvable-rom-id loop.
 fn shared_cloud_sync_owner<'a>(
     ctx: &'a CloudContext,
     game: &CloudGame,
@@ -707,7 +703,22 @@ fn shared_cloud_sync_owner<'a>(
         return None;
     }
     let token = shared_sync_token(ctx, name, entry)?;
-    shared_sync_owner(token, ctx.all_games)
+    if let Some(owner) = shared_sync_owner(token, ctx.all_games) {
+        return Some(owner);
+    }
+
+    let emulator_path = entry.map(|entry| entry.path.trim()).unwrap_or("");
+    if emulator_path.is_empty() {
+        return None;
+    }
+    let library = crate::library::paths::library_root(ctx.config);
+    matching_installed_emulator_games(
+        ctx.all_games,
+        &PathBuf::from(emulator_path),
+        library.as_deref(),
+    )
+    .into_iter()
+    .find(|game| !game.rom_id.trim().is_empty())
 }
 
 // ---------------------------------------------------------------------

@@ -1313,13 +1313,21 @@ pub struct CloudGameInput {
     pub archive_path: String,
     #[serde(default)]
     pub extracted_path: String,
+    /// Both install-path fields the shared-owner last resort needs
+    /// (`cloud::install_match`); `serde(default)` because the frontend
+    /// already sends whole `InstalledGame`-shaped objects, and a server
+    /// game has neither.
+    #[serde(default)]
+    pub extracted_dir: String,
+    #[serde(default)]
+    pub native_game_dir: String,
     #[serde(default)]
     pub description: String,
 }
 
 /// `CloudGame` from an `InstalledGame` registry row (task ruling):
 /// title/platform/rom_id (string form, `""` when `None`)/rom_file_name/
-/// archive_path/extracted_path/description; `title_id`/`base_title_id`/
+/// archive_path/extracted_path/extracted_dir/native_game_dir/description; `title_id`/`base_title_id`/
 /// `ps3_game_id` stay blank — the registry does not carry them yet (same
 /// documented gap `CloudGame`'s own doc comment records).
 pub fn cloud_game_from_installed(game: &InstalledGame) -> CloudGame {
@@ -1329,7 +1337,9 @@ pub fn cloud_game_from_installed(game: &InstalledGame) -> CloudGame {
         rom_id: game.rom_id.map(|id| id.to_string()).unwrap_or_default(),
         rom_file_name: game.rom_file_name.clone(),
         extracted_path: game.extracted_path.clone(),
+        extracted_dir: game.extracted_dir.clone(),
         archive_path: game.archive_path.clone(),
+        native_game_dir: game.native_game_dir.clone(),
         description: game.description.clone(),
         title_id: String::new(),
         base_title_id: String::new(),
@@ -1344,7 +1354,9 @@ fn cloud_game_from_input(game: &CloudGameInput) -> CloudGame {
         rom_id: game.rom_id.map(|id| id.to_string()).unwrap_or_default(),
         rom_file_name: game.rom_file_name.clone(),
         extracted_path: game.extracted_path.clone(),
+        extracted_dir: game.extracted_dir.clone(),
         archive_path: game.archive_path.clone(),
+        native_game_dir: game.native_game_dir.clone(),
         description: game.description.clone(),
         title_id: String::new(),
         base_title_id: String::new(),

@@ -7,6 +7,7 @@
 pub mod archive;
 pub mod candidates;
 pub mod dirs;
+pub mod install_match;
 pub mod native;
 pub mod ops;
 pub mod restore;
@@ -64,7 +65,9 @@ pub struct CloudGame {
     pub rom_id: String, // string form, "" when absent (Python parity)
     pub rom_file_name: String,
     pub extracted_path: String,
+    pub extracted_dir: String,
     pub archive_path: String,
+    pub native_game_dir: String,
     pub description: String,
     pub title_id: String,      // data-availability gap: the rewrite's
     pub base_title_id: String, // registry does not carry these three yet;
