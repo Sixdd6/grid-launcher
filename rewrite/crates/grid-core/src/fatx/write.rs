@@ -591,7 +591,7 @@ impl<S: Read + Write + Seek + DurableWrite> FatxPartition<S> {
         let mut free: Option<(Slot, bool)> = None;
         'outer: for cluster in &chain {
             let bytes = self.read_cluster(*cluster)?;
-            for (index, raw) in bytes.chunks_exact(DIR_ENTRY_SIZE).enumerate() {
+            for (index, raw) in bytes.as_chunks::<DIR_ENTRY_SIZE>().0.iter().enumerate() {
                 let slot = Slot {
                     cluster: *cluster,
                     offset: index * DIR_ENTRY_SIZE,

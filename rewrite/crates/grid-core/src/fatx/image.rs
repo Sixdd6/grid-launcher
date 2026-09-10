@@ -59,7 +59,9 @@ pub(super) fn read_superblock(
 /// further cluster of the chain carries entries.
 pub(super) fn cluster_terminated(bytes: &[u8]) -> bool {
     bytes
-        .chunks_exact(DIR_ENTRY_SIZE)
+        .as_chunks::<DIR_ENTRY_SIZE>()
+        .0
+        .iter()
         .any(|slot| slot[0] == END_OF_DIRECTORY || slot[0] == 0)
 }
 

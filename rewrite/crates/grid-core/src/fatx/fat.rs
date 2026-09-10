@@ -49,11 +49,15 @@ impl Fat {
         io.seek(SeekFrom::Start(base + geo.fat_offset))?;
         io.read_exact(&mut raw)?;
         let entries = if geo.fat32 {
-            raw.chunks_exact(4)
+            raw.as_chunks::<4>()
+                .0
+                .iter()
                 .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
                 .collect()
         } else {
-            raw.chunks_exact(2)
+            raw.as_chunks::<2>()
+                .0
+                .iter()
                 .map(|c| u32::from(u16::from_le_bytes([c[0], c[1]])))
                 .collect()
         };

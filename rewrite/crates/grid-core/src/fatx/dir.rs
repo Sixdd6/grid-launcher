@@ -145,7 +145,7 @@ pub fn name_is_valid(name: &[u8]) -> bool {
 /// are never interpreted.
 pub fn parse_dir_cluster(bytes: &[u8]) -> Vec<(usize, DirEntry)> {
     let mut out = Vec::new();
-    for (index, slot) in bytes.chunks_exact(DIR_ENTRY_SIZE).enumerate() {
+    for (index, slot) in bytes.as_chunks::<DIR_ENTRY_SIZE>().0.iter().enumerate() {
         let name_len = slot[0];
         if name_len == END_OF_DIRECTORY || name_len == 0 {
             break;
