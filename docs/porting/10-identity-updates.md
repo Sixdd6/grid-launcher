@@ -59,8 +59,11 @@ Two surfaces belong to the app-version concern:
   build; the Python-config importer (doc 02, "Rust port deviations — importer") is what
   makes that switch cost the user nothing but their tokens.
 
-- **Release assets** (rewrite) — a created GitHub release attaches exactly three files,
-  built by `.github/workflows/build.yml`:
+- **Release assets** (rewrite) — a PUBLISHED GitHub release attaches exactly three files,
+  built by `.github/workflows/build.yml` (its trigger is `release: types: [published]`,
+  which covers both a direct publish and a draft published later; the build jobs first
+  wait on the `version`, `check` and `check-windows` jobs, which run on release events
+  too):
 
   | Asset | Job | Built from |
   | --- | --- | --- |

@@ -578,8 +578,13 @@ Part 3). The trigger is file presence, checked in
 `rewrite/app/src-tauri/src/python_import.rs` before any service reads the
 config: no `config.toml` and a `~/.grid-launcher/config.json`. `config.toml`
 is written whether or not every row converted, so the import never repeats.
-`GRID_LAUNCHER_DATA_DIR` moves the Rust config only — the Python path is
-fixed on every platform.
+`GRID_LAUNCHER_DATA_DIR` moves the Rust config only. The Python path is
+`<home>/.grid-launcher/config.json` on every platform unless
+`GRID_LAUNCHER_PYTHON_CONFIG` is set and non-empty, in which case that path
+is read instead — in every build, `e2e` included. `scripts/e2e.sh` exports a
+non-existent path for every stage so no throwaway profile can read a
+developer's real Python settings, and points its `python-import` stage group
+at a fixture.
 
 Every value passes through the same normalizers Python applied when it wrote
 the file: trim; a blank emulator name drops the entry; a blank title or
@@ -655,6 +660,20 @@ mount (`app/src/lib/stores/pythonImport.svelte.ts`) and shows one toast:
 "Imported N emulators and M games from the previous version. Enter your
 RomM token to reconnect.", with "Enter your RetroAchievements token as
 well." appended only when a username was imported. Tokens are never
-imported, so the toast always asks for the RomM token. Same late-mount
+imported, so the toast always asks for the RomM token. Each count is
+pluralised (`app/src/lib/pythonImport.ts`): `0` renders as "no emulators" /
+"no games", `1` as "1 emulator" / "1 game". Same late-mount
 pattern as the app-update notice (doc 10 D-10-k), with no event: the import
 finishes before the window is created.
+
+The toast host is `App.svelte`, above the phase branch — an imported profile
+has no credential, so the app comes up on `Connect`, and a host inside
+`Shell.svelte` would never render this notice at all. It is pushed with an
+explicit 20 s duration instead of the routine 4 s: it is a one-time
+instruction to go and fetch two tokens.
+
+`RestoreOutcome::NoSession` carries the config's `server_url` and `username`
+(blank when there is no config) through `restore_session` and `applyRestore`,
+so `Connect` opens with both fields prefilled and only the token left to
+type. `library_path` is deliberately NOT prefilled: an imported path is
+already stored, and `Connect` writes only a non-blank one.

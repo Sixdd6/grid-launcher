@@ -21,13 +21,23 @@ Python reference; nothing runs them.
 
 ### Triggers
 
-| Job | `push` to `main` | `pull_request` | `release: created` | `workflow_dispatch` |
+| Job | `push` to `main` | `pull_request` | `release: published` | `workflow_dispatch` |
 | --- | --- | --- | --- | --- |
-| `check` (existing Linux gate) | yes | yes | no | yes |
-| `check-windows` (new) | yes | yes | no | yes |
+| `version` (new) | no | no | yes | yes |
+| `check` (existing Linux gate) | yes | yes | yes | yes |
+| `check-windows` (new) | yes | yes | yes | yes |
 | `e2e` (existing) | yes | no | no | yes |
 | `build-linux` (new) | no | no | yes | yes |
 | `build-windows` (new) | no | no | yes | yes |
+
+Two rulings from the whole-branch review changed this table from the original design.
+**The release event is `types: [published]`, not `created`** — a release drafted first and
+published later fires only `published`, so `created` would build nothing for the flow that
+writes the notes before shipping; listing both would build a direct publish twice. **The
+two check jobs run on `release` too, and `build-linux`/`build-windows` declare
+`needs: [version, check, check-windows]`**, so a tag can never ship artifacts from a tree
+CI has not tested. `e2e` still does not run on `release`. Every `if:` in the workflow
+tests `github.event_name == 'release'` only, never the release type.
 
 `check-windows` runs on `windows-latest`: Rust stable, Node 22, `npm ci`, `npm run build`
 in `app`, then `cargo check --workspace --all-targets` from `rewrite`. It compiles the
@@ -35,7 +45,9 @@ Windows code paths that have never been built; it runs no tests.
 
 ### Version
 
-A `version` step at the top of both build jobs:
+One `version` job (`ubuntu-latest`, seconds) with `outputs.version`; both build jobs
+`needs` it and read `${{ needs.version.outputs.version }}`. It was a duplicated step in
+both build jobs in the original design — the semver rules now live in exactly one place:
 
 - On `release`: `VERSION="${GITHUB_REF_NAME#v}"`. The job fails unless `VERSION` matches
   `^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`. The tag itself must start with `v`.
@@ -167,6 +179,37 @@ report and every log line carry counts only.
 reconnect." with the RetroAchievements sentence appended only when a username was imported.
 Same late-mount pattern as the app-update notice (doc 10 D-10-k), no event.
 
+Each count is pluralised (`app/src/lib/pythonImport.ts`): `0` renders as "no emulators" /
+"no games", `1` as "1 emulator" / "1 game", anything else as "N emulators" / "N games".
+The original fixed string is otherwise unchanged. `skipped_games` is never shown.
+
+The toast host is `App.svelte`, above the phase branch — not `Shell.svelte`. An imported
+profile has no credential, so the app comes up on `Connect`, which is exactly where this
+notice has to be readable (review H1). It is pushed with an explicit 20 s duration rather
+than the routine `TOAST_DURATION_MS` of 4 s: it is a one-time instruction to go and fetch
+two tokens (review L4).
+
+`RestoreOutcome::NoSession` carries the config's `server_url` and `username` (blank when
+there is no config), threaded through `restore_session` and `applyRestore` so `Connect`
+starts with both fields prefilled — the toast promises that only the tokens are missing
+(review M1). `libraryPath` stays blank: an imported path is already stored, and `Connect`
+writes only a non-blank one.
+
+### The Python config path
+
+`python_import::python_config_path()` is `<home>/.grid-launcher/config.json` unless
+`GRID_LAUNCHER_PYTHON_CONFIG` is set and non-empty, in which case that path is used — in
+every build, not just `e2e`. The original design compiled the import out of `e2e` builds,
+which left the whole startup path without end-to-end coverage (review M3). `scripts/e2e.sh`
+now exports a non-existent path for every stage, so no throwaway profile can read a
+developer's real `~/.grid-launcher/config.json`, and points the `python-import` stage group
+at a fixture written with that stage's mock RomM URL.
+
+That stage group is listed FIRST and clears the RomM keyring item before it starts
+(`secret-tool`, best effort). A run's private gnome-keyring is shared by every stage and
+its item is keyed by a fixed service/account, so a credential an earlier group saved would
+let the app reconnect and never render the Connect screen the stage asserts on.
+
 ### Tests
 
 grid-core: `plan` from a fixture that covers every row of the mapping table, including a
@@ -175,8 +218,13 @@ delay of `900`, an unknown top-level key, and the three secret keys set to non-e
 (assert they appear nowhere in the output config's TOML text). `import` against a tempdir:
 writes config and rows; second call is not reached because the caller's presence check
 fails (tested at the app layer); malformed JSON writes nothing; `GRID_LAUNCHER_DATA_DIR`
-is honoured for the Rust path only. App layer: a startup test with a Python file present
-and no Rust config yields a notice; with a Rust config present yields none.
+is honoured for the Rust path only, and `GRID_LAUNCHER_PYTHON_CONFIG` overrides the Python
+path (set, empty, and unset). App layer: a startup test with a Python file present
+and no Rust config yields a notice; with a Rust config present yields none. Frontend:
+`App` in phase `none` renders a toast pushed into the store; `Connect` prefills the server
+URL from the restored session and leaves the library path blank; `pushToast` honours an
+explicit duration. E2E: the `python-import` stage group starts the app on an empty data dir
+with a fixture Python config and asserts both the notice and the prefilled form.
 
 ## Docs
 
