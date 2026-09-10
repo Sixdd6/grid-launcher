@@ -1483,10 +1483,14 @@ are relative to `rewrite/`.
    in `read_guarded` (`crates/grid-core/src/autoconfig/ppsspp.rs:60-65`, doc comment at
    `:8-13`): an unreadable INI yields `changed=false` instead of propagating, exactly like
    every other writer's I/O failure.
-6. **PCSX2 `[Folders] Bios` is not written** (`crates/grid-core/src/autoconfig/pcsx2.rs:16`
-   declares D6; the call site at `crates/grid-core/src/autoconfig/mod.rs:579` is a bare
-   comment, no code) — the firmware subsystem is deferred to its own milestone, which also
-   owns closing this.
+6. ~~**PCSX2 `[Folders] Bios` is not written** — the firmware subsystem is deferred to its
+   own milestone, which also owns closing this.~~ **Closed (release parity pass):**
+   `pcsx2::ensure_settings` takes `bios_directory` and writes `[Folders] Bios` when it is
+   non-blank and the key is absent; `sync_new_emulator` fills it with the FIRST
+   `firmware::routing::targets_for_entry` target for the registered entry (profile matched by
+   `profile_for_entry`, `%CONFIG_DIR%` from the config file's directory via
+   `routing::config_dir_of`), or `""` when the entry has no profile or no firmware
+   directories.
 7. **The RPCS3 background firmware download** (`PS3UPDAT.PUP` fetch and the `--installfw`
    spawn, `grid_launcher/emulator/rpcs3.py:365` `trigger_rpcs3_firmware_install`) **is out**,
    same deferral (`crates/grid-core/src/autoconfig/mod.rs:597`).

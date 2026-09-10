@@ -13,9 +13,6 @@
 //! the home directory. That mismatch (the executable-existence check two
 //! lines above it already uses the expanded path) is a bug, fixed here.
 //!
-//! Spec deviation D6 (binding): `bios_directory`/`[Folders] Bios` is
-//! OMITTED this milestone — firmware wiring is deferred to a later task.
-//!
 //! Spec deviation D2 (RA-keys-only fan-out) — no direct Python counterpart:
 //! [`ensure_ra_credentials`] is a narrow writer for just the three
 //! `[Achievements]` keys, mirroring `retroarch::ensure_ra_credentials`.
@@ -75,7 +72,7 @@ fn apply_section(
     *changed = *changed || section_changed;
 }
 
-/// `ensure_pcsx2_settings` (pcsx2.py:170-380), minus `bios_directory` (D6).
+/// `ensure_pcsx2_settings` (pcsx2.py:170-380).
 ///
 /// The whole read-transform-write pass is guarded as one unit: any I/O
 /// error along the way (an unreadable existing file, a `create_dir_all` or
@@ -89,6 +86,7 @@ pub fn ensure_settings(
     emulator_path: &str,
     enable_fullscreen: bool,
     ra: Option<&RaCredentials>,
+    bios_directory: &str,
 ) -> EnsureResult {
     let Some(config_path) = resolve_target(emulator_path) else {
         return EnsureResult::unchanged();
@@ -302,7 +300,17 @@ pub fn ensure_settings(
         );
     }
 
-    // 15 ([Folders] Bios) is OMITTED — D6.
+    // 15: [Folders] Bios, gated on absence, and only for a non-blank
+    // directory (pcsx2.py:367-371).
+    let bios_dir = bios_directory.trim();
+    if !bios_dir.is_empty() && !writers::section_has_key(&content, "Folders", "Bios") {
+        apply_section(
+            &mut content,
+            &mut changed,
+            "Folders",
+            &crate::desired![("Bios", bios_dir)],
+        );
+    }
 
     if changed {
         if let Some(parent) = config_path.parent() {
@@ -389,7 +397,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let (emulator_path, dir, _) = setup_emulator(temp.path());
 
-        ensure_settings(&emulator_path, false, None);
+        ensure_settings(&emulator_path, false, None, "");
 
         assert!(dir.join("portable.ini").exists());
     }
@@ -400,7 +408,7 @@ mod tests {
         let (emulator_path, dir, _) = setup_emulator(temp.path());
         std::fs::write(dir.join("portable.ini"), "custom").unwrap();
 
-        ensure_settings(&emulator_path, false, None);
+        ensure_settings(&emulator_path, false, None, "");
 
         assert_eq!(
             std::fs::read_to_string(dir.join("portable.ini")).unwrap(),
@@ -417,7 +425,7 @@ mod tests {
         // Missing entirely.
         let missing = dir.join("pcsx2-qt.exe");
         assert_eq!(
-            ensure_settings(missing.to_str().unwrap(), false, None),
+            ensure_settings(missing.to_str().unwrap(), false, None, ""),
             EnsureResult::unchanged()
         );
 
@@ -425,13 +433,16 @@ mod tests {
         let as_dir = dir.join("pcsx2-qt-dir");
         std::fs::create_dir_all(&as_dir).unwrap();
         assert_eq!(
-            ensure_settings(as_dir.to_str().unwrap(), false, None),
+            ensure_settings(as_dir.to_str().unwrap(), false, None, ""),
             EnsureResult::unchanged()
         );
 
-        assert_eq!(ensure_settings("", false, None), EnsureResult::unchanged());
         assert_eq!(
-            ensure_settings("   ", false, None),
+            ensure_settings("", false, None, ""),
+            EnsureResult::unchanged()
+        );
+        assert_eq!(
+            ensure_settings("   ", false, None, ""),
             EnsureResult::unchanged()
         );
     }
@@ -449,7 +460,7 @@ mod tests {
         let exe = dir.join("pcsx2-qt.exe");
         std::fs::write(&exe, b"").unwrap();
 
-        let result = ensure_settings("~/PCSX2/pcsx2-qt.exe", false, None);
+        let result = ensure_settings("~/PCSX2/pcsx2-qt.exe", false, None, "");
 
         assert!(result.changed);
         assert_eq!(result.config_path, Some(dir.join("inis").join("PCSX2.ini")));
@@ -466,7 +477,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let (emulator_path, _, config_path) = setup_emulator(temp.path());
 
-        let result = ensure_settings(&emulator_path, false, None);
+        let result = ensure_settings(&emulator_path, false, None, "");
         let text = std::fs::read_to_string(&config_path).unwrap();
 
         assert!(result.changed);
@@ -484,13 +495,13 @@ mod tests {
     fn pcsx2_fullscreen_key_only_when_enabled() {
         let temp = tempfile::tempdir().unwrap();
         let (emulator_path, _, config_path) = setup_emulator(temp.path());
-        ensure_settings(&emulator_path, false, None);
+        ensure_settings(&emulator_path, false, None, "");
         let text = std::fs::read_to_string(&config_path).unwrap();
         assert!(!text.contains("StartFullscreen"));
 
         let temp2 = tempfile::tempdir().unwrap();
         let (emulator_path2, _, config_path2) = setup_emulator(temp2.path());
-        let result = ensure_settings(&emulator_path2, true, None);
+        let result = ensure_settings(&emulator_path2, true, None, "");
         let text2 = std::fs::read_to_string(&config_path2).unwrap();
         assert!(result.changed);
         assert!(text2.contains("StartFullscreen = true"));
@@ -502,21 +513,21 @@ mod tests {
         let (emulator_path, _, config_path) = setup_emulator(temp.path());
 
         let blank_token = RaCredentials::new("user", "");
-        ensure_settings(&emulator_path, false, Some(&blank_token));
+        ensure_settings(&emulator_path, false, Some(&blank_token), "");
         let text = std::fs::read_to_string(&config_path).unwrap();
         assert!(!text.contains("[Achievements]"));
 
         let temp2 = tempfile::tempdir().unwrap();
         let (emulator_path2, _, config_path2) = setup_emulator(temp2.path());
         let blank_username = RaCredentials::new("", "tok");
-        ensure_settings(&emulator_path2, false, Some(&blank_username));
+        ensure_settings(&emulator_path2, false, Some(&blank_username), "");
         let text2 = std::fs::read_to_string(&config_path2).unwrap();
         assert!(!text2.contains("[Achievements]"));
 
         let temp3 = tempfile::tempdir().unwrap();
         let (emulator_path3, _, config_path3) = setup_emulator(temp3.path());
         let both = RaCredentials::new("retro_user", "retro_token");
-        let result = ensure_settings(&emulator_path3, false, Some(&both));
+        let result = ensure_settings(&emulator_path3, false, Some(&both), "");
         let text3 = std::fs::read_to_string(&config_path3).unwrap();
         assert!(result.changed);
         assert!(text3.contains("[Achievements]"));
@@ -532,7 +543,7 @@ mod tests {
         std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
         std::fs::write(&config_path, "[Pad1]\nType = DigitalController\n").unwrap();
 
-        ensure_settings(&emulator_path, false, None);
+        ensure_settings(&emulator_path, false, None, "");
         let text = std::fs::read_to_string(&config_path).unwrap();
 
         assert!(text.contains("Type = DigitalController"));
@@ -558,7 +569,7 @@ mod tests {
         )
         .unwrap();
 
-        ensure_settings(&emulator_path, false, None);
+        ensure_settings(&emulator_path, false, None, "");
         let text = std::fs::read_to_string(&config_path).unwrap();
 
         assert!(text.contains("OpenPauseMenu = Keyboard/Escape"));
@@ -574,7 +585,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let (emulator_path, _, config_path) = setup_emulator(temp.path());
 
-        ensure_settings(&emulator_path, false, None);
+        ensure_settings(&emulator_path, false, None, "");
         let text = std::fs::read_to_string(&config_path).unwrap();
 
         for line in [
@@ -594,11 +605,44 @@ mod tests {
     }
 
     #[test]
-    fn pcsx2_never_writes_folders_bios() {
+    fn pcsx2_writes_folders_bios_when_absent() {
         let temp = tempfile::tempdir().unwrap();
         let (emulator_path, _, config_path) = setup_emulator(temp.path());
 
-        ensure_settings(&emulator_path, true, None);
+        ensure_settings(&emulator_path, true, None, "  /srv/bios  ");
+        let text = std::fs::read_to_string(&config_path).unwrap();
+
+        assert!(text.contains("[Folders]"), "missing [Folders] in:\n{text}");
+        assert!(
+            text.contains("Bios = /srv/bios"),
+            "missing Bios in:\n{text}"
+        );
+    }
+
+    /// Preserve-if-present: a user's own BIOS folder survives the pass.
+    #[test]
+    fn pcsx2_keeps_an_existing_folders_bios() {
+        let temp = tempfile::tempdir().unwrap();
+        let (emulator_path, _, config_path) = setup_emulator(temp.path());
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        std::fs::write(&config_path, "[Folders]\nBios = /mine\n").unwrap();
+
+        ensure_settings(&emulator_path, true, None, "/srv/bios");
+        let text = std::fs::read_to_string(&config_path).unwrap();
+
+        assert!(text.contains("Bios = /mine"), "overwrote Bios in:\n{text}");
+        assert!(
+            !text.contains("/srv/bios"),
+            "wrote a second Bios in:\n{text}"
+        );
+    }
+
+    #[test]
+    fn pcsx2_writes_no_folders_bios_for_a_blank_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let (emulator_path, _, config_path) = setup_emulator(temp.path());
+
+        ensure_settings(&emulator_path, true, None, "   ");
         let text = std::fs::read_to_string(&config_path).unwrap();
 
         assert!(!text.contains("[Folders]"));
@@ -611,10 +655,10 @@ mod tests {
         let (emulator_path, _, _) = setup_emulator(temp.path());
         let ra = RaCredentials::new("retro_user", "retro_token");
 
-        let first = ensure_settings(&emulator_path, true, Some(&ra));
+        let first = ensure_settings(&emulator_path, true, Some(&ra), "");
         assert!(first.changed);
 
-        let second = ensure_settings(&emulator_path, true, Some(&ra));
+        let second = ensure_settings(&emulator_path, true, Some(&ra), "");
         assert!(!second.changed, "a second identical run must be a no-op");
     }
 

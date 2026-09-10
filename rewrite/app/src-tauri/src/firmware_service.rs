@@ -56,7 +56,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use grid_core::config::{Config, EmulatorEntry};
 use grid_core::firmware::routing::{
-    emulator_dir_of, install_for_game, platform_ids_for_profile, targets_for_entry,
+    config_dir_of, emulator_dir_of, install_for_game, platform_ids_for_profile, targets_for_entry,
     GameFirmwareContext,
 };
 use grid_core::firmware::rpcs3::{ps3_platform_id, rpcs3_pup_path};
@@ -576,14 +576,6 @@ pub(crate) fn default_entry_for_platform<'a>(
         &grid_core::launch::selection::installed_core_resolver,
     );
     grid_core::launch::selection::emulator_entry_by_name(&config.emulators, &name)
-}
-
-/// The `%CONFIG_DIR%` token's value: the directory holding `config.json`.
-fn config_dir_of(config_path: &Path) -> PathBuf {
-    config_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

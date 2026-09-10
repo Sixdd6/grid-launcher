@@ -104,6 +104,15 @@ pub fn emulator_dir_of(entry: &EmulatorEntry) -> PathBuf {
     paths::emulator_dir(&expand_user(&entry.path)).unwrap_or_default()
 }
 
+/// The `%CONFIG_DIR%` token's value: the directory holding the config file.
+/// An empty `PathBuf` when the path has no parent at all.
+pub fn config_dir_of(config_path: &Path) -> PathBuf {
+    config_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default()
+}
+
 /// The firmware target directories for one emulator entry
 /// (`_resolved_firmware_directories`, cloud_mixin.py:1032-1105).
 ///

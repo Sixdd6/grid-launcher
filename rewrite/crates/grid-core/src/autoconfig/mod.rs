@@ -613,12 +613,28 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
         record(&mut report, name, "xemu", xemu::ensure_settings(path));
     }
     if is_pcsx2(&subject, profiles) {
-        // No `bios_directory` — D6.
+        // `[Folders] Bios` takes the FIRST firmware target of the REGISTERED
+        // entry — not the synthetic `subject` — so `%EMULATOR_DIR%` and the
+        // profile match see the entry as saved (emulator_ui_mixin.py:403-416).
+        // No profile, or a profile with no firmware directories, leaves it
+        // blank, which makes the step a no-op.
+        let entry = &config.emulators[index];
+        let config_dir = crate::firmware::routing::config_dir_of(ctx.config_path);
+        let profile = profile_for_entry(&entry.name, &entry.path, profiles);
+        let bios_directory = crate::firmware::routing::targets_for_entry(
+            entry,
+            profile,
+            &config.library_path,
+            &config_dir,
+        )
+        .first()
+        .map(|target| target.path.to_string_lossy().to_string())
+        .unwrap_or_default();
         record(
             &mut report,
             name,
             "pcsx2",
-            pcsx2::ensure_settings(path, true, ra),
+            pcsx2::ensure_settings(path, true, ra, &bios_directory),
         );
     }
     if is_dolphin(&subject, profiles) {
@@ -911,6 +927,64 @@ mod tests {
             reloaded.emulators[0].args, "%rom%",
             "the add-time pass applies the matched profile's args"
         );
+    }
+
+    /// The add-time pass feeds PCSX2's `[Folders] Bios` from the FIRST
+    /// firmware target of the matched profile (doc 05 step 15).
+    #[test]
+    fn the_add_time_sync_writes_the_pcsx2_bios_folder_from_the_first_target() {
+        // No `isolated()` here on purpose: every path in this test is
+        // absolute under `temp`, so nothing reads `HOME`, and swapping it
+        // would race the env-reading tests that do not take `lock()`.
+        let temp = tempfile::tempdir().unwrap();
+
+        let exe = temp.path().join("PCSX2").join("pcsx2-qt");
+        touch(&exe);
+        let pcsx2 = entry("PCSX2", exe.to_str().unwrap());
+        let config = config_with(temp.path(), vec![pcsx2.clone()]);
+        let config_path = write_config(temp.path(), &config);
+
+        let mut pcsx2_profile = profile("PCSX2", &["pcsx2"]);
+        pcsx2_profile.firmware_directories = vec![
+            crate::launch::profiles::FirmwareDirSpec {
+                path: "%EMULATOR_DIR%/bios".to_string(),
+                keywords: None,
+            },
+            crate::launch::profiles::FirmwareDirSpec {
+                path: "%EMULATOR_DIR%/second".to_string(),
+                keywords: None,
+            },
+        ];
+        let profiles = vec![pcsx2_profile.clone()];
+
+        let ctx = SyncContext {
+            config_path: &config_path,
+            platforms: &[],
+            platform_slugs: &no_slugs(),
+            ps3_library_path: String::new(),
+            ra: None,
+            profiles: &profiles,
+        };
+        sync_new_emulator("PCSX2", &ctx).unwrap();
+
+        // The expected value is the routing module's own first target, so
+        // this pins the wiring rather than re-implementing path resolution.
+        let expected = crate::firmware::routing::targets_for_entry(
+            &pcsx2,
+            Some(&pcsx2_profile),
+            &config.library_path,
+            &crate::firmware::routing::config_dir_of(&config_path),
+        )[0]
+        .path
+        .to_string_lossy()
+        .to_string();
+        let text =
+            std::fs::read_to_string(exe.parent().unwrap().join("inis").join("PCSX2.ini")).unwrap();
+        assert!(
+            text.contains(&format!("Bios = {expected}")),
+            "missing Bios = {expected} in:\n{text}"
+        );
+        assert!(!text.contains("second"), "only the FIRST target is written");
     }
 
     #[test]
@@ -1362,10 +1436,10 @@ mod tests {
         assert_eq!(ps3_library_path("   "), "");
     }
 
-    /// Spec deviation D6: PCSX2's `[Folders] Bios` is not written this
-    /// milestone, so the orchestrator passes no BIOS directory at all.
+    /// No matched profile means no firmware targets, so the orchestrator
+    /// passes a blank BIOS directory and step 15 writes nothing.
     #[test]
-    fn sync_omits_pcsx2_bios_directory() {
+    fn sync_writes_no_pcsx2_bios_directory_without_a_profile() {
         let _lock = lock();
         let temp = tempfile::tempdir().unwrap();
         let _env = isolated(temp.path());
@@ -1389,9 +1463,9 @@ mod tests {
             std::fs::read_to_string(exe.parent().unwrap().join("inis").join("PCSX2.ini")).unwrap();
         assert!(
             !ini.contains("[Folders]"),
-            "D6: no [Folders] section:\n{ini}"
+            "no profile, so no [Folders] section:\n{ini}"
         );
-        assert!(!ini.contains("Bios"), "D6: no Bios key:\n{ini}");
+        assert!(!ini.contains("Bios"), "no profile, so no Bios key:\n{ini}");
     }
 
     // --- backfill_all_defaults ------------------------------------------------
