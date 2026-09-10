@@ -18,10 +18,12 @@ let shown = false;
  */
 export async function initPythonImport(): Promise<void> {
   if (shown) return;
+  // Claimed before the await, so two calls in the same tick cannot both get
+  // past the guard and push the toast twice.
+  shown = true;
   try {
     const report = await api.pythonImportNotice();
     if (report === null) return;
-    shown = true;
     pushToast(importToastText(report));
   } catch {
     // A failed read is never surfaced: the import either happened or did

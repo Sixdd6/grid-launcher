@@ -393,6 +393,8 @@ export type AppUpdateNotice = { tag: string; url: string };
 /** `app_update_notice`'s payload: the notice, if any, and when the startup
  *  check completed (RFC 3339 UTC) — `null` when it was skipped or failed. */
 export type AppUpdateStatus = { notice: AppUpdateNotice | null; checked_at: string | null };
+/// Emitted at most once per process when a newer launcher release exists.
+export const APP_UPDATE_EVENT = 'app-update-available';
 
 /** `python_import_notice`'s payload: what the one-shot Python-config import
  *  did at startup, or `null` when nothing was imported. Counts only. */
@@ -402,8 +404,6 @@ export type PythonImportReport = {
   skipped_games: number;
   retroachievements: boolean;
 };
-/// Emitted at most once per process when a newer launcher release exists.
-export const APP_UPDATE_EVENT = 'app-update-available';
 
 export const api = {
   connect: (serverUrl: string, username: string, secret: string, useToken: boolean) =>
@@ -552,6 +552,6 @@ export const api = {
   updateGame: (romId: number) => invoke<void>('update_game', { romId }),
   appVersion: () => invoke<string>('app_version'),
   appUpdateNotice: () => invoke<AppUpdateStatus>('app_update_notice'),
-  pythonImportNotice: () => invoke<PythonImportReport | null>('python_import_notice'),
   openReleasePage: (url: string) => invoke<void>('open_release_page', { url }),
+  pythonImportNotice: () => invoke<PythonImportReport | null>('python_import_notice'),
 };

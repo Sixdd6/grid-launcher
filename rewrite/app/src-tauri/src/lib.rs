@@ -84,8 +84,15 @@ pub fn run() {
     // (spec 2026-09-10, Part 3). Before any service reads the config, and
     // after the registry is open because the import writes rows into it.
     // Counts only reach the log; no token is ever read.
+    //
+    // The logging filter above read `debug_prints` before this ran, from a
+    // config that did not exist yet, so an imported `debug_prints = false`
+    // takes effect from the next start — not this one. Intended, not a bug.
+    //
+    // Skipped in `e2e` builds: the harness runs on throwaway profiles and
+    // must never read a developer's real `~/.grid-launcher/config.json`.
     let python_import = match (&registry, python_import::python_config_path()) {
-        (Ok(registry), Some(python_config)) => {
+        (Ok(registry), Some(python_config)) if !cfg!(feature = "e2e") => {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
