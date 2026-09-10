@@ -1148,7 +1148,11 @@ Deliberate deviations from the reference when porting the launch module to Rust 
 4. ~~RetroArch platform support = a non-blank `retroarch_cores` config entry, not a scan of installed core files.~~ **Closed (RetroArch cores, D-RC-1):** support is now a scan of the core files installed beside the executable, resolved slug-first; the `retroarch_cores` config map is no longer an input to the predicate.
 5. ~~The per-platform default picker lists all emulators rather than filtering by the supports-platform test; the test still gates automatic selection.~~ **Closed (dd67683):** the picker offers only the names `compatible_emulator_names_for_platform` returns.
 6. Desktop UI gains a Stop button (reference desktop had none).
-7. No `_ensure_emulator_sync_settings` call before spawn (doc 05 deferred).
+7. ~~No `_ensure_emulator_sync_settings` call before spawn (doc 05 deferred).~~ **Closed (release parity
+   pass):** `LaunchService`'s pre-launch hook (`set_pre_launch_hook`) runs
+   `autoconfig::sync_retroarch_settings_only` before every game and standalone launch — the
+   RetroArch writer only, no entry defaults and no config save (see §8b above and doc 05's
+   call-site table).
 
 ## Rust port deviations (milestone 4)
 
