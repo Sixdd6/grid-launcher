@@ -32,9 +32,10 @@
 
 use crate::autoconfig::entry::normalize_save_strategy;
 use crate::config::{CompatToolInstall, Config, EmulatorEntry};
-use crate::library::registry::InstalledGame;
+use crate::library::registry::{InstalledGame, Registry};
 use serde::{Deserialize, Deserializer};
 use std::collections::BTreeMap;
+use std::path::Path;
 
 /// What an import did, in counts only. Serialized straight to the frontend
 /// by `python_import_notice`.
@@ -630,6 +631,50 @@ pub fn plan(python_json: &str) -> Result<(Config, Vec<InstalledGame>, usize), Im
     Ok((config, games, skipped_games))
 }
 
+/// Reads the Python config at `python_json`, converts it with [`plan`],
+/// writes the registry rows and saves the Rust config at `config_path`.
+///
+/// `now` is stamped onto every row's `installed_at`: the Python config
+/// records no install time, and a row with `installed_at == 0` would sort
+/// to the bottom of every recency view forever.
+///
+/// The config is saved LAST. The caller's "no Rust config yet" check is what
+/// makes this a one-shot, so the file that ends the import must not exist
+/// before the rows it describes do.
+///
+/// A [`ImportError::Write`] leaves the caller free to start anyway: whether
+/// or not `config.toml` landed, the next start is consistent — either the
+/// import is done, or it is retried from an unchanged Python file.
+pub fn import(
+    python_json: &Path,
+    config_path: &Path,
+    registry: &Registry,
+    now: i64,
+) -> Result<ImportReport, ImportError> {
+    let text = std::fs::read_to_string(python_json).map_err(|_| ImportError::Unreadable)?;
+    let (config, games, skipped_games) = plan(&text)?;
+
+    let report = ImportReport {
+        emulators: config.emulators.len(),
+        games: games.len(),
+        skipped_games,
+        retroachievements: !config.retroachievements_username.is_empty(),
+    };
+
+    for game in &games {
+        let mut row = game.clone();
+        row.installed_at = now;
+        registry
+            .upsert(&row)
+            .map_err(|e| ImportError::Write(e.to_string()))?;
+    }
+    config
+        .save(config_path)
+        .map_err(|e| ImportError::Write(e.to_string()))?;
+
+    Ok(report)
+}
+
 #[cfg(test)]
 mod tests {
     /// The RetroAchievements token key, assembled from two pieces so the
@@ -1090,5 +1135,139 @@ mod tests {
         assert!(config.cloud_sync_state.is_empty());
         assert!(games.is_empty());
         assert_eq!(skipped, 0);
+    }
+
+    use std::path::PathBuf;
+
+    /// A tempdir holding a Python config, a Rust config path and an open
+    /// registry — the three things `import` touches.
+    struct Scratch {
+        _dir: tempfile::TempDir,
+        python: PathBuf,
+        config: PathBuf,
+        registry: Registry,
+    }
+
+    fn scratch(python_json: &str) -> Scratch {
+        let dir = tempfile::tempdir().expect("a tempdir");
+        let python = dir.path().join("config.json");
+        std::fs::write(&python, python_json).expect("the fixture writes");
+        let registry = Registry::open(&dir.path().join("grid-launcher.db")).expect("a registry");
+        Scratch {
+            python,
+            config: dir.path().join("config.toml"),
+            registry,
+            _dir: dir,
+        }
+    }
+
+    #[test]
+    fn import_writes_the_config_and_the_rows() {
+        let s = scratch(&python_config());
+        let report = import(&s.python, &s.config, &s.registry, 1_757_500_000).unwrap();
+
+        assert_eq!(report.emulators, 3);
+        assert_eq!(report.games, 4);
+        assert_eq!(report.skipped_games, 3);
+        assert!(report.retroachievements);
+
+        let saved = Config::load(&s.config).expect("the config loads back");
+        assert_eq!(saved.server_url, "https://romm.example.test");
+        assert_eq!(saved.emulators.len(), 3);
+        assert_eq!(saved.ui.theme, "dark");
+
+        let mut rows = s.registry.all().expect("the registry reads back");
+        rows.sort_by(|a, b| a.title.cmp(&b.title));
+        let titles: Vec<&str> = rows.iter().map(|r| r.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            vec![
+                "Chrono Trigger",
+                "Placeholder Pete",
+                "Portal 2",
+                "Ratchet & Clank"
+            ]
+        );
+        // `import` supplies the clock `plan` does not have.
+        assert!(rows.iter().all(|r| r.installed_at == 1_757_500_000));
+        assert!(rows.iter().all(|r| r.last_played_at == 0));
+    }
+
+    #[test]
+    fn no_token_reaches_the_written_config_file() {
+        let s = scratch(&python_config());
+        import(&s.python, &s.config, &s.registry, 1).unwrap();
+        let text = std::fs::read_to_string(&s.config).expect("the config file reads");
+        for needle in [
+            "SECRET-ROMM-TOKEN-NOT-REAL",
+            "SECRET-RA-KEY-NOT-REAL",
+            "SECRET-RA-TOKEN-NOT-REAL",
+            "api_token",
+            "retroachievements_api_key",
+            RA_TOKEN_KEY,
+        ] {
+            assert!(!text.contains(needle), "{needle} leaked into config.toml");
+        }
+    }
+
+    #[test]
+    fn malformed_json_writes_nothing() {
+        let s = scratch("{ this is not json");
+        let error = import(&s.python, &s.config, &s.registry, 1).unwrap_err();
+        assert!(matches!(error, ImportError::Malformed));
+        assert!(!s.config.exists());
+        assert!(s.registry.all().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_absent_python_file_is_unreadable() {
+        let s = scratch("{}");
+        std::fs::remove_file(&s.python).unwrap();
+        let error = import(&s.python, &s.config, &s.registry, 1).unwrap_err();
+        assert!(matches!(error, ImportError::Unreadable));
+        assert!(!s.config.exists());
+    }
+
+    #[test]
+    fn an_empty_python_config_still_writes_a_rust_config() {
+        // The caller's presence check keys on the Rust file existing, so a
+        // config with nothing worth importing must still leave one behind
+        // or the import would run again on every start.
+        let s = scratch("{}");
+        let report = import(&s.python, &s.config, &s.registry, 1).unwrap();
+        assert_eq!(report, ImportReport::default());
+        assert!(s.config.exists());
+    }
+
+    #[test]
+    fn error_text_names_no_path_and_no_file_content() {
+        let s = scratch("{ this is not json");
+        let error = import(&s.python, &s.config, &s.registry, 1).unwrap_err();
+        let text = error.to_string();
+        assert!(!text.contains("config.json"));
+        assert!(!text.contains("this is not json"));
+    }
+
+    /// `GRID_LAUNCHER_DATA_DIR` moves the Rust side only: the Python path is
+    /// `~/.grid-launcher/config.json` on every platform and the override
+    /// never touches it. Here that is `Config::default_path()` following the
+    /// override while `import`'s `python_json` argument does not.
+    #[test]
+    fn the_data_dir_override_moves_only_the_rust_config() {
+        let _lock = crate::test_env::lock();
+        let dir = tempfile::tempdir().expect("a tempdir");
+        let _guard = crate::test_env::EnvGuard::set(&[(
+            "GRID_LAUNCHER_DATA_DIR",
+            Some(dir.path().to_str().unwrap()),
+        )]);
+        assert_eq!(Config::default_path(), dir.path().join("config.toml"));
+
+        let python = dir.path().join("python-home").join("config.json");
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        std::fs::write(&python, python_config()).unwrap();
+        let registry = Registry::open(&dir.path().join("grid-launcher.db")).unwrap();
+        import(&python, &Config::default_path(), &registry, 7).unwrap();
+
+        assert!(dir.path().join("config.toml").exists());
     }
 }
