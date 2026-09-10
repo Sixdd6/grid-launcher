@@ -253,7 +253,9 @@ pub fn process_exited_early_message(status: Option<ExitStatus>, argv: &[String])
 ///   nothing left is removed, and the flag-style variables the bundle sets
 ///   ([`APPIMAGE_FLAG_VARS`]) are removed too.
 ///
-/// Outside a bundle the environment passes through untouched.
+/// Independently of either bundler, a `DBUS_SESSION_BUS_ADDRESS` whose
+/// socket does not exist is repaired ([`repair_leaked_bus_address`]).
+/// Otherwise, outside a bundle, the environment passes through untouched.
 ///
 /// The returned map contains the whole parent environment and must never be
 /// logged or put in an error message.
@@ -267,13 +269,30 @@ const APPIMAGE_FLAG_VARS: [&str; 3] = ["PYTHONDONTWRITEBYTECODE", "GDK_BACKEND",
 
 /// The pure half of [`clean_env`], so the rule can be tested without mutating
 /// the process environment (which is racy across parallel tests).
-fn clean_env_from(mut env: HashMap<String, String>) -> HashMap<String, String> {
+fn clean_env_from(env: HashMap<String, String>) -> HashMap<String, String> {
+    clean_env_with(env, &|path| path.exists())
+}
+
+/// [`clean_env_from`] with the filesystem check injected, so the bus-address
+/// repair can be tested against paths that do not exist on the test host.
+fn clean_env_with(
+    mut env: HashMap<String, String>,
+    exists: &dyn Fn(&Path) -> bool,
+) -> HashMap<String, String> {
+    strip_bundle_paths(&mut env);
+    repair_leaked_bus_address(&mut env, exists);
+    env
+}
+
+/// The bundle half of [`clean_env`]: the PyInstaller restore, else the
+/// AppImage strip.
+fn strip_bundle_paths(env: &mut HashMap<String, String>) {
     if let Some(original) = env.get("LD_LIBRARY_PATH_ORIG").cloned() {
         env.insert("LD_LIBRARY_PATH".to_string(), original);
-        return env;
+        return;
     }
     let Some(appdir) = env.get("APPDIR").cloned() else {
-        return env;
+        return;
     };
     let keys: Vec<String> = env.keys().cloned().collect();
     for key in keys {
@@ -290,7 +309,52 @@ fn clean_env_from(mut env: HashMap<String, String>) -> HashMap<String, String> {
     for key in APPIMAGE_FLAG_VARS {
         env.remove(key);
     }
-    env
+}
+
+/// Variables a flatpak sandbox sets for itself; meaningless on the host.
+const FLATPAK_SANDBOX_VARS: [&str; 3] = ["FLATPAK_ID", "FLATPAK_SANDBOX_DIR", "container"];
+
+/// Repairs a `DBUS_SESSION_BUS_ADDRESS` whose socket does not exist.
+///
+/// A launcher started from inside a flatpak (Gear Lever's Launch button
+/// runs the AppImage through `flatpak-spawn --host`) inherits the sandbox's
+/// own bus address, `unix:path=/run/flatpak/bus`, which exists only inside
+/// that sandbox. pressure-vessel bind-mounts the session bus socket into
+/// Proton's container and fails on the missing path, so the game dies one
+/// second in, mid prefix creation (2026-09-10). The address is repointed at
+/// `$XDG_RUNTIME_DIR/bus` when that socket exists, else removed so D-Bus
+/// falls back to its own default; the sandbox's marker variables go with
+/// it. A live socket, or a non-socket address, is left alone.
+fn repair_leaked_bus_address(env: &mut HashMap<String, String>, exists: &dyn Fn(&Path) -> bool) {
+    let Some(address) = env.get("DBUS_SESSION_BUS_ADDRESS") else {
+        return;
+    };
+    let Some(path) = address.strip_prefix("unix:path=") else {
+        return;
+    };
+    // An address may carry `,guid=...` after the path.
+    let path = path.split(',').next().unwrap_or_default();
+    if exists(Path::new(path)) {
+        return;
+    }
+    let fallback = env
+        .get("XDG_RUNTIME_DIR")
+        .map(|dir| Path::new(dir).join("bus"))
+        .filter(|bus| exists(bus));
+    match fallback {
+        Some(bus) => {
+            env.insert(
+                "DBUS_SESSION_BUS_ADDRESS".to_string(),
+                format!("unix:path={}", bus.display()),
+            );
+        }
+        None => {
+            env.remove("DBUS_SESSION_BUS_ADDRESS");
+        }
+    }
+    for key in FLATPAK_SANDBOX_VARS {
+        env.remove(key);
+    }
 }
 
 /// `value` unchanged when no entry is under `root`; otherwise `value` as a
@@ -492,6 +556,91 @@ mod tests {
         let env = clean_env_from(base);
         assert_eq!(env.get("PYTHONPATH").unwrap(), "/home/me/lib");
         assert_eq!(env.get("PYTHONHOME").unwrap(), "/opt/py");
+    }
+
+    // --- a D-Bus address leaked from a flatpak sandbox ------------------------
+
+    fn exists_only<'a>(paths: &'a [&'a str]) -> impl Fn(&Path) -> bool + 'a {
+        move |p| paths.iter().any(|known| Path::new(known) == p)
+    }
+
+    #[test]
+    fn clean_env_repoints_a_dead_bus_address_at_the_runtime_dir_bus() {
+        // Gear Lever launches the AppImage through `flatpak-spawn --host`,
+        // which forwards its sandbox's bus address. pressure-vessel then
+        // fails to bind that socket and Proton dies mid prefix creation
+        // (2026-09-10).
+        let env = clean_env_with(
+            env_of(&[
+                ("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/flatpak/bus"),
+                ("XDG_RUNTIME_DIR", "/run/user/1000"),
+                ("FLATPAK_ID", "it.mijorus.gearlever"),
+                (
+                    "FLATPAK_SANDBOX_DIR",
+                    "/home/me/.var/app/it.mijorus.gearlever/sandbox",
+                ),
+                ("container", "flatpak"),
+                ("PATH", "/usr/bin"),
+            ]),
+            &exists_only(&["/run/user/1000/bus"]),
+        );
+        assert_eq!(
+            env.get("DBUS_SESSION_BUS_ADDRESS").unwrap(),
+            "unix:path=/run/user/1000/bus"
+        );
+        for key in ["FLATPAK_ID", "FLATPAK_SANDBOX_DIR", "container"] {
+            assert!(!env.contains_key(key), "{key} leaked");
+        }
+        assert_eq!(env.get("PATH").unwrap(), "/usr/bin");
+    }
+
+    #[test]
+    fn clean_env_drops_a_dead_bus_address_when_there_is_no_runtime_dir_bus() {
+        let env = clean_env_with(
+            env_of(&[
+                ("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/flatpak/bus"),
+                ("XDG_RUNTIME_DIR", "/run/user/1000"),
+            ]),
+            &exists_only(&[]),
+        );
+        assert!(!env.contains_key("DBUS_SESSION_BUS_ADDRESS"));
+    }
+
+    #[test]
+    fn clean_env_keeps_a_live_bus_address_and_the_flatpak_markers() {
+        let base = env_of(&[
+            (
+                "DBUS_SESSION_BUS_ADDRESS",
+                "unix:path=/run/user/1000/bus,guid=abc",
+            ),
+            ("FLATPAK_ID", "org.example.App"),
+            ("container", "flatpak"),
+        ]);
+        let env = clean_env_with(base.clone(), &exists_only(&["/run/user/1000/bus"]));
+        assert_eq!(env, base);
+    }
+
+    #[test]
+    fn clean_env_leaves_a_non_socket_bus_address_alone() {
+        let base = env_of(&[("DBUS_SESSION_BUS_ADDRESS", "tcp:host=localhost,port=1234")]);
+        assert_eq!(clean_env_with(base.clone(), &exists_only(&[])), base);
+    }
+
+    #[test]
+    fn clean_env_repairs_the_bus_address_even_with_the_saved_original_present() {
+        let env = clean_env_with(
+            env_of(&[
+                ("LD_LIBRARY_PATH_ORIG", "/usr/lib"),
+                ("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/flatpak/bus"),
+                ("XDG_RUNTIME_DIR", "/run/user/1000"),
+            ]),
+            &exists_only(&["/run/user/1000/bus"]),
+        );
+        assert_eq!(env.get("LD_LIBRARY_PATH").unwrap(), "/usr/lib");
+        assert_eq!(
+            env.get("DBUS_SESSION_BUS_ADDRESS").unwrap(),
+            "unix:path=/run/user/1000/bus"
+        );
     }
 
     #[test]
