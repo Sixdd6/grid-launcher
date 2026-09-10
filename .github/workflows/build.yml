@@ -24,9 +24,6 @@ jobs:
     # Runs on release events too: both build jobs `needs` it, so a tag can
     # never ship artifacts from a tree CI has not tested.
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: rewrite
     steps:
       - uses: actions/checkout@v4
       - name: System dependencies (Tauri on Linux)
@@ -38,7 +35,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rewrite
+          workspaces: .
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -67,13 +64,12 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: rewrite
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rewrite
+          workspaces: .
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -86,9 +82,6 @@ jobs:
     name: End-to-end
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: rewrite
     steps:
       - uses: actions/checkout@v4
       - name: System dependencies (Tauri on Linux + E2E harness)
@@ -98,14 +91,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rewrite
+          workspaces: .
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: |
-            rewrite/app/package-lock.json
-            rewrite/e2e/package-lock.json
+            app/package-lock.json
+            e2e/package-lock.json
       - name: End-to-end tests
         run: scripts/e2e.sh
 
@@ -159,25 +152,25 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rewrite
+          workspaces: .
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: rewrite/app/package-lock.json
+          cache-dependency-path: app/package-lock.json
 
       - name: Install frontend dependencies
-        working-directory: rewrite/app
+        working-directory: app
         run: npm ci
 
       - name: Build the AppImage
-        working-directory: rewrite/app
+        working-directory: app
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: npx tauri build --bundles appimage --config "{\"version\":\"$VERSION\"}"
 
       - name: Repack with update information
-        working-directory: rewrite/target/release/bundle/appimage
+        working-directory: target/release/bundle/appimage
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
@@ -237,19 +230,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rewrite
+          workspaces: .
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: rewrite/app/package-lock.json
+          cache-dependency-path: app/package-lock.json
 
       - name: Install frontend dependencies
-        working-directory: rewrite/app
+        working-directory: app
         run: npm ci
 
       - name: Build the NSIS installer
-        working-directory: rewrite/app
+        working-directory: app
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: npx tauri build --bundles nsis --config "{\"version\":\"$VERSION\"}"
@@ -260,7 +253,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          mv "rewrite/target/release/bundle/nsis/GRID Launcher_${VERSION}_x64-setup.exe" \
+          mv "target/release/bundle/nsis/GRID Launcher_${VERSION}_x64-setup.exe" \
              "dist/grid-launcher-${VERSION}-windows-x86_64-setup.exe"
           ls -l dist
 

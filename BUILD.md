@@ -1,191 +1,141 @@
 # Building GRID Launcher
 
-Build scripts are provided for easy building on Windows and Linux.
+The repository is a Cargo workspace with a Svelte frontend:
 
-## Quick Start
+- `Cargo.toml` — workspace root; members are `crates/grid-core` and `app/src-tauri`.
+- `crates/grid-core` — UI-agnostic core. Never depends on Tauri.
+- `app/` — Tauri 2 shell (`app/src-tauri`) plus the Svelte 5 frontend (`app/src`).
+  The Tauri package is named `app`.
+- `e2e/` — WebdriverIO end-to-end harness, its mock RomM server and mock forge.
+- `scripts/` — `e2e.sh` (end-to-end runner) and `check_secret_hygiene.sh` (secret rules).
+- `.github/workflows/build.yml` — the one pipeline: gates, end-to-end, release artifacts.
+- `emulator-autoprofiles.json`, `retroarch-core-list.json`, `romm-platform-cores.json` —
+  data files compiled into `grid-core` with `include_str!`.
+- `openapi.json` — the RomM server API contract.
+- `SPEC.md` — product behavior. `ARCHITECTURE.md` — module map.
 
-### Windows
+## Prerequisites
 
-#### Option 1: PowerShell (Recommended)
-```powershell
-.\build.ps1
-```
+- Rust stable, with `rustfmt` and `clippy`.
+- Node 22.
+- On Linux, the Tauri system libraries (Debian/Ubuntu names, as installed in
+  `build.yml`):
 
-#### Option 2: Command Prompt / Batch
-```cmd
-build.bat
-```
+      libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libudev-dev
 
-### Linux
+- For the end-to-end suite, additionally:
 
-```bash
-chmod +x build.sh   # one-time
-./build.sh
-```
+      xvfb gnome-keyring libsecret-tools dbus-x11 at-spi2-core sqlite3
 
-`build.sh` accepts one or more build targets:
+  `libsecret-tools` supplies `secret-tool`, which the runner uses to clear a stage's
+  keyring item; without it that step is a silent no-op.
+- For a local AppImage bundle: `zsync`.
 
-| Command | Result |
-| --- | --- |
-| `./build.sh` | Default — builds the single-file `dist/grid-launcher` binary (backward compatible) |
-| `./build.sh --onefile` | Same as the default — builds the single-file binary explicitly |
-| `./build.sh --appimage` | Builds only the AppImage package |
-| `./build.sh --onefile --appimage` | Builds both targets sequentially |
+Install the frontend dependencies once:
 
-**Sequential execution and exit codes:** When multiple targets are given, they run one after another in the order listed. If any target fails, the script stops and exits with a non-zero status; it exits `0` only when all requested targets succeed. Unknown flags (and the unsupported `--windows` flag) cause the script to print usage and exit non-zero without building.
+    cd app && npm ci
 
-> **Windows cross-compilation is not supported.** `build.sh` only produces Linux artifacts. To build for Windows, run `build.bat` or `build.ps1` on a Windows machine.
+## Develop
 
-## What the Scripts Do
+    cd app && npx tauri dev
 
-This applies to all three scripts (`build.ps1`, `build.bat`, `build.sh`):
+That runs `npm run dev` (Vite on :5173) and the Tauri shell against it. A dev build
+never checks for its own updates.
 
-1. **Verify Setup** — Checks that the virtual environment exists
-2. **Activate Environment** — Sets up the Python environment with required dependencies (the Linux script activates via `.venv/bin/activate` instead of `.venv\Scripts\Activate.ps1`)
-3. **Install Dependencies** — Ensures PyInstaller is installed
-4. **Stage Assets** — Runs `scripts/stage_assets.py` to copy only the assets the app actually references into `build/bundle-assets`
-5. **Build Executable** — Creates a standalone `grid-launcher` executable with the staged assets bundled
-6. **Report Status** — Shows success/failure and output location
+## Gate
 
-### Asset staging (`scripts/stage_assets.py`)
+The commands below are exactly what `.github/workflows/build.yml`'s `check` job runs,
+in its order. All of them must pass before work is considered done.
 
-The full `assets/` tree stays in the repo for development, but builds bundle only the reachable subset. The script derives that subset from the source code on every run, so it cannot drift:
+    scripts/check_secret_hygiene.sh
+    cargo fmt --check
+    cd app && npm ci && npx svelte-check && npm run build
+    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy -p app --all-targets --features e2e -- -D warnings
+    cargo test --workspace
+    cd app && npm test
 
-- **Platform logos** — imported from `PLATFORM_LOGO_FILES` in `grid_launcher/server/platform_metadata.py`
-- **Gamepad glyphs** — `input_*` PNG stems found in `grid_launcher/` and `grid-launcher.py`
-- **SVG icons** — `svg/<name>` literals found in `grid_launcher/`, `grid-launcher.py`, and `tests/`
-- **`tools/7z`** — copied for `--platform windows` only (7z.exe/7z.dll are unused on Linux)
+A second job, `check-windows`, compiles the Windows code paths with
+`cargo check --workspace --all-targets` on `windows-latest`. It runs no tests; it exists
+so a Windows-only compile error is caught on the pull request rather than on a tag.
 
-The script recreates its output directory each run and exits non-zero if a derived file is missing from `assets/`. Builds then pass `--add-data "build/bundle-assets:assets"` (`;` on Windows), so runtime asset paths are unchanged. Run it manually with:
+## End-to-end tests
 
-```bash
-python scripts/stage_assets.py --platform linux --output build/bundle-assets
-```
+`scripts/e2e.sh` drives a real, locally built Tauri binary with WebdriverIO against a
+mock RomM server. CI runs it on pushes to `main` and on manual dispatch.
 
-`assets/icons/grid-launcher.ico` (Windows `--icon`) and `assets/svg/io.github.Sixdd6.GRIDLauncher.svg` (AppImage icon rasterization) are read from the source tree and are intentionally not staged.
+    scripts/e2e.sh                   # build, then run every stage group
+    scripts/e2e.sh connect           # run only the named stage groups
+    scripts/e2e.sh library install   # any number of names
+    E2E_SKIP_BUILD=1 scripts/e2e.sh  # skip the Rust AND frontend builds
+    E2E_KEEP=1 scripts/e2e.sh        # keep the temp run directory
 
-## Output
+`E2E_SKIP_BUILD=1` is safe only when nothing under `app/src` or the Rust crates has
+changed, and it requires a build stamp written by a previous `e2e.sh` build.
 
-On successful build, the executable will be located at:
-```
-.\dist\grid-launcher.exe
-```
+Exit codes: 0 pass, 1 a stage group failed, 2 a prerequisite is missing or the binary
+cannot be trusted to be an e2e build.
 
-The executable is self-contained and can be:
-- Run directly: Double-click `grid-launcher.exe`
-- Moved anywhere on your system
-- Distributed to others (single file, no dependencies needed)
+When naming groups, list `python-import` first. It asserts the Connect form, and a group
+that connected earlier leaves a RomM credential in the run's private keyring.
 
-### Linux
+A failed stage group is reset (fresh data directory, fresh mock server) and rerun once
+before it counts as failed. A failing group does not stop the run — later groups still
+execute and the script exits nonzero at the end, so one pass shows every group's result.
 
-On successful build, the binary will be located at:
-```
-./dist/grid-launcher
-```
+Nothing touches your machine outside a temp directory: every stage gets its own
+`GRID_LAUNCHER_DATA_DIR`, and the run happens inside a private D-Bus session with its own
+gnome-keyring, `XDG_DATA_HOME` and `XDG_RUNTIME_DIR`. No `tauri-driver` is needed — the
+app embeds its own WebDriver server behind the `e2e` cargo feature. `e2e/node_modules`
+installs itself on the first run.
 
-The executable bit is already set by PyInstaller, so it can be run directly:
-```bash
-./dist/grid-launcher
-```
+Stage groups are defined in `scripts/e2e.sh` (`STAGE_GROUPS`); their specs live in
+`e2e/specs/`, fixtures in `e2e/fixtures*/`, seeds in `e2e/seed/`, and the mock servers in
+`e2e/mock-romm/`.
 
-#### AppImage
+## Local bundles
 
-To package GRID Launcher as a portable AppImage instead of a single binary, run:
-```bash
-./build.sh --appimage
-```
+    cd app && npx tauri build --bundles appimage    # Linux
+    cd app && npx tauri build --bundles nsis        # Windows
 
-**Prerequisites:** In addition to the same Python 3.12+/venv prerequisites as the regular Linux build, the AppImage build needs:
-- `wget` — to download `appimagetool`
-- `rsvg-convert` — to rasterize the app icon (apt: `librsvg2-bin`; dnf: `librsvg2-tools`)
+Output lands under `target/release/bundle/` (the workspace shares one `target/` at the
+repository root).
 
-**Runtime dependency (7z):** At runtime, extracting downloaded RetroArch/emulator archives uses the system `7z` binary when available (`7zip` on apt/dnf, or the legacy `p7zip-full`/`p7zip` packages on older distros), falling back to the bundled pure-Python `py7zr`. Installing `7zip` is recommended for faster, more reliable extraction. **Flatpak is not required** — GRID Launcher ships as an AppImage/native binary and auto-installs native/AppImage emulator builds only.
+If bundling fails with `strip: ... unknown type [0x13] section '.relr.dyn'`, the AppImage
+tooling's bundled `strip` predates your system libraries' RELR relocations (seen on
+Fedora/Nobara). Work around it with `NO_STRIP=1 npx tauri build`.
 
-**Output:** On successful build, the AppImage will be located at:
-```
-./dist/grid-launcher-<version>-x86_64.AppImage
-```
+On some NVIDIA/Wayland stacks WebKitGTK's DMABUF renderer cannot allocate GBM buffers
+("Failed to create GBM buffer ... Invalid argument"), which leaves the window blank
+white. The app sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` at startup on Linux; export the
+variable yourself to override it.
 
-The `<version>` is detected automatically from `git describe --tags --always --dirty` (a leading `v` is stripped, e.g. `v0.7.0` → `0.7.0`). The build also generates `grid_launcher/version.py` so the running app reports the same version (shown in the window title). On a checkout with no tags the version falls back to `0.0.0-dev`.
+## Release
 
-The desktop entry embeds `X-AppImage-UpdateInformation` (GitHub releases zsync), so AppImages built by CI can self-update via tools like `AppImageUpdate`. CI also publishes the matching `.zsync` file next to the AppImage.
+Version numbers come from the tag, not from the tree. `app/src-tauri/tauri.conf.json`
+keeps `0.9.0-dev`; each build job passes the real version with
+`npx tauri build --config '{"version":"<VERSION>"}'`.
 
-> **Note:** `appimagetool` is downloaded automatically to the project root on first use, so no manual installation is required.
->
-> The standard `./build.sh` (no flags) still produces `dist/grid-launcher` (a single self-contained binary) — that path is unchanged.
+1. Tag `vX.Y.Z` (or `vX.Y.Z-pre`, any semver pre-release) and publish a GitHub release
+   for it. `build.yml` triggers on `release: [published]` only, which covers both a
+   direct publish and a draft published later.
+2. The `version` job strips the leading `v` and rejects a tag that is not semver.
+3. `check` and `check-windows` must pass; both build jobs `need` them, so a tag can never
+   ship artifacts from an untested tree.
+4. `build-linux` builds the AppImage, extracts its AppDir, and repacks it with
+   `appimagetool -u "gh-releases-zsync|Sixdd6|grid-launcher|latest|grid-launcher-*-x86_64.AppImage.zsync"`,
+   because Tauri's bundler embeds no update information. It attaches
+   `grid-launcher-<version>-x86_64.AppImage` and its `.zsync`.
+5. `build-windows` builds the NSIS installer and attaches
+   `grid-launcher-<version>-windows-x86_64-setup.exe`.
 
-## Troubleshooting
+A `workflow_dispatch` run is a dry run: it builds version `0.0.0-dev`, uploads both
+artifacts to the run, and attaches nothing to any release. A version containing `dev`
+also suppresses the app's own update check.
 
-### Virtual Environment Not Found
-If you see "Virtual environment not found", initialize it first:
-```powershell
-python -m venv .venv
-```
+## Secret handling
 
-On Linux:
-```bash
-python3 -m venv .venv
-```
-
-### PowerShell Execution Policy
-If PowerShell refuses to run the script, you can either:
-1. Temporarily allow script execution:
-   ```powershell
-   Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
-   .\build.ps1
-   ```
-
-2. Or use the batch file instead:
-   ```cmd
-   build.bat
-   ```
-
-### "Permission denied" running ./build.sh
-Make the script executable first:
-```bash
-chmod +x build.sh
-```
-
-### Build Fails
-Check the output for specific errors. Common issues:
-- Missing Python 3.12+ — Update Python
-- Missing dependencies — Try: `python -m pip install -r requirements.txt`
-- Disk space — Ensure ~2GB free space for build artifacts
-
-### Linux: Missing Shared Library at Runtime
-If the packaged Linux binary fails at runtime with missing shared library errors (e.g. `libEGL`, `libxcb`, `libxkbcommon-x11`), install the corresponding package from your distro's package manager. This is an environment issue, not a code bug.
-
-### Linux: ImportError for py7zr Compression Backend
-`py7zr` uses dynamic/lazy imports for its compression backends (bz2/lzma/zstd/brotli/ppmd). If the built Linux binary throws an `ImportError` for one of these during archive extraction, add explicit `--hidden-import` flags to `build.sh` (e.g. `--hidden-import brotli --hidden-import pyzstd --hidden-import pyppmd`).
-
-## Manual Build (if scripts don't work)
-
-### Windows
-```powershell
-# Activate virtual environment
-.\.venv\Scripts\Activate.ps1
-
-# Install PyInstaller
-python -m pip install pyinstaller
-
-# Stage the bundled asset subset
-python scripts\stage_assets.py --platform windows --output build\bundle-assets
-
-# Run build
-python -m PyInstaller --noconfirm --clean --windowed --onefile --name grid-launcher --add-data "build\bundle-assets;assets" --add-data "retroarch-core-list.json;." --add-data "emulator-autoprofiles.json;." --add-data "romm-platform-cores.json;." grid-launcher.py
-```
-
-### Linux
-```bash
-# Activate virtual environment
-source .venv/bin/activate
-
-# Install PyInstaller
-python -m pip install pyinstaller
-
-# Stage the bundled asset subset
-python scripts/stage_assets.py --platform linux --output build/bundle-assets
-
-# Run build
-python -m PyInstaller --noconfirm --clean --windowed --onefile --name grid-launcher --add-data "build/bundle-assets:assets" --add-data "retroarch-core-list.json:." --add-data "emulator-autoprofiles.json:." --add-data "romm-platform-cores.json:." grid-launcher.py
-```
+Credentials live only in the OS keyring and in redacting in-memory types. They never
+appear in config files, logs, IPC payloads, or fixtures. `scripts/check_secret_hygiene.sh`
+enforces the rule mechanically: `expose_secret()` is allowed only at a fixed list of call
+sites, and committed fixtures must contain nothing that looks like a real bearer token.

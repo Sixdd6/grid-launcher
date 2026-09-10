@@ -1,6 +1,6 @@
 # Overview
 The application is a game launcher and manager for RomM which connects to the server API specified in `openapi.json`.
-It is built using Python + PySide6 and ships as a self-contained executable on Windows and a self-contained AppImage on Linux.
+It is built in Rust with Tauri 2 and a Svelte 5 frontend, and ships as a Windows installer and a self-contained AppImage on Linux.
 
 # Top Bar
 The top bar is 58px tall: the GRID logo and wordmark on the left, a centred pill

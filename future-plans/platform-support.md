@@ -1,5 +1,7 @@
 # Platform Support — Status & Plans
 
+> Historical: written for the Python/PyInstaller app before the 2026-09-10 move to the Rust codebase. Build and packaging details below no longer apply; see BUILD.md.
+
 This document records what each operating system target looks like today, what shipped to get
 there, and what is still open. It covers all OS support topics; it was previously scoped to
 Linux only.
