@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -337,11 +337,14 @@ describe('emulator-catalog', () => {
     expect(ini).toContain('pcrtc_antiblur = true');
     expect(ini).toContain('StartFullscreen = true');
 
-    // No RA credentials are configured in this E2E run (gates the whole
-    // [Achievements] block off), and D6 dropped the [Folders] Bios write
-    // entirely — the firmware subsystem is a later milestone's job.
+    // No RA credentials are configured in this E2E run, which gates the
+    // whole [Achievements] block off.
     expect(ini).not.toContain('[Achievements]');
-    expect(ini).not.toContain('Bios');
+    // [Folders] Bios is the profile's FIRST firmware directory ("bios" in
+    // emulator-autoprofiles.json), resolved against the emulator directory
+    // (autoconfig/mod.rs `sync_new_emulator`, doc 05 step 15).
+    expect(ini).toContain('[Folders]');
+    expect(ini).toContain(`Bios = ${path.join(realpathSync(pcsx2Dir()), 'bios')}`);
   });
 
   it('plays the seeded PS2 game with the installed PCSX2 as the platform default', async () => {

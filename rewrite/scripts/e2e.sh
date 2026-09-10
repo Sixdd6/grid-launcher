@@ -49,6 +49,12 @@ BUILD_STAMP="$REWRITE_DIR/target/debug/.e2e-build-stamp"
 # (and therefore a separate app process) sharing that state. That is how the
 # restore pair works: (a) connects, (b) relaunches and must find the session.
 STAGE_GROUPS=(
+  # First on purpose: the run's gnome-keyring is shared by every stage, and
+  # this is the one stage that needs it EMPTY (an imported profile has no
+  # credential, so the app must come up on Connect). `run_group_attempt`
+  # also clears the item when secret-tool is available, which is what makes
+  # `e2e.sh connect python-import` work too.
+  "python-import:specs/python-import.spec.ts"
   "connect:specs/connect.spec.ts"
   "connect-restore:specs/connect-restore-a.spec.ts specs/connect-restore-b.spec.ts"
   "library:specs/library.spec.ts specs/library-grid.spec.ts"
@@ -241,6 +247,13 @@ run_dir_is_safe() {
 # and hide the Wayland socket so the run is genuinely headless.
 unset WAYLAND_DISPLAY
 export GDK_BACKEND=x11
+
+# The startup Python-config importer reads `~/.grid-launcher/config.json`
+# unless GRID_LAUNCHER_PYTHON_CONFIG names a different file (app
+# python_import::python_config_path). Every stage gets a path that does not
+# exist, so a throwaway profile can never import a developer's real Python
+# settings; the `python-import` group overrides it with its own fixture.
+export GRID_LAUNCHER_PYTHON_CONFIG="/nonexistent/python-config.json"
 
 # Never signal ourselves or anything we are running inside.
 protected_pids() {
@@ -524,6 +537,41 @@ run_group_attempt() {
   fi
   printf 'e2e: mock RomM at %s, data dir %s\n' "$mock_url" "$data_dir"
 
+  # The `python-import` group is the only stage that gives the app something
+  # to import. The fixture is written HERE rather than in a seed script
+  # because `server_url` has to be this attempt's mock URL, which does not
+  # exist until the server above is listening. It carries no `api_token` and
+  # no RetroAchievements keys — the importer has no field for them, and
+  # check_secret_hygiene.sh must stay clean.
+  local python_config=""
+  if [[ "$name" == "python-import" ]]; then
+    # The keyring item is keyed by a FIXED service/account
+    # (crates/grid-core/src/secrets.rs), so a credential an earlier group
+    # saved into this run's shared gnome-keyring would let the app
+    # reconnect and never render the Connect screen this stage asserts on.
+    # Best effort — the group is also listed first, which covers a machine
+    # with no secret-tool installed.
+    if command -v secret-tool >/dev/null 2>&1; then
+      secret-tool clear service grid-launcher username romm-credential >/dev/null 2>&1 || true
+    fi
+    python_config="$RUN_DIR/$name/attempt-$attempt/python-config.json"
+    cat >"$python_config" <<EOF
+{
+  "server_url": "$mock_url",
+  "username": "importer",
+  "library_path": "$data_dir/library",
+  "theme": "dark",
+  "emulators": [
+    { "name": "RetroArch", "path": "$data_dir/library/Emulators/retroarch", "args": "-L core \"%rom%\"" }
+  ],
+  "installed_games": [
+    { "title": "Chrono Trigger", "platform": "SNES", "rom_id": "401" },
+    { "title": "Super Metroid", "platform": "SNES", "rom_id": "402" }
+  ]
+}
+EOF
+  fi
+
   # The mock forge, for the groups that install emulators. Same lifecycle as
   # the mock RomM above: started per attempt, its URL scraped off stdout, and
   # stopped at the end of the attempt. It also inherits E2E_RUN_DIR, so the
@@ -599,6 +647,12 @@ run_group_attempt() {
       fi
       if [[ -d "$data_dir/xdg-config" ]]; then
         export E2E_XDG_CONFIG_HOME="$data_dir/xdg-config"
+      fi
+      # Only the `python-import` group sets this; wdio.conf.ts turns it into
+      # the app's GRID_LAUNCHER_PYTHON_CONFIG. Every other stage keeps the
+      # non-existent default exported at the top of this script.
+      if [[ -n "$python_config" ]]; then
+        export E2E_PYTHON_CONFIG="$python_config"
       fi
       exec xvfb-run -a npx wdio run wdio.conf.ts
     ) 2>&1 | tee "$wdio_log"

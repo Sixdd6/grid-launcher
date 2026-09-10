@@ -73,6 +73,14 @@ const appEnv: Record<string, string> = {
         RPCS3_CONFIG_DIR: process.env.E2E_XDG_CONFIG_HOME,
       }
     : {}),
+  // The startup Python-config importer's source file. e2e.sh exports a
+  // non-existent path for the whole run so no stage can import a
+  // developer's real ~/.grid-launcher/config.json, and sets
+  // E2E_PYTHON_CONFIG for the one group that has a fixture to import.
+  GRID_LAUNCHER_PYTHON_CONFIG:
+    process.env.E2E_PYTHON_CONFIG ??
+    process.env.GRID_LAUNCHER_PYTHON_CONFIG ??
+    '/nonexistent/python-config.json',
 };
 
 export const config: WebdriverIO.Config = {
