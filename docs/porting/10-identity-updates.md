@@ -47,10 +47,38 @@ Two surfaces belong to the app-version concern:
 - **AppImage update metadata** — an `update_info` string embedded in the AppImage by
   `appimagetool`, of the form
   `gh-releases-zsync|Sixdd6|grid-launcher|latest|grid-launcher-*-x86_64.AppImage.zsync`
-  (build.sh:228, .github/workflows/appimage-linux.yml:89). A companion `.zsync` file is
-  produced only when `zsyncmake` is available (build.sh:229–238). This is consumed by
-  external tooling (AppImageUpdate); **the application itself never reads it and never
-  contacts GitHub about its own version** — see Behavior, "App version flow".
+  (build.sh:228 for the Python reference). A companion `.zsync` file is produced beside it.
+  This is consumed by external tooling (AppImageUpdate); **the application itself never
+  reads it** — see Behavior, "App version flow".
+
+  **rewrite**: Tauri's AppImage bundler embeds no update information, so
+  `.github/workflows/build.yml`'s `build-linux` job repacks: it runs
+  `--appimage-extract` on the bundler's output and rebuilds the AppDir with
+  `appimagetool -u "<the same update string>"`. The string and the asset names are
+  unchanged from the Python releases, so a Python AppImage updates itself to the Rust
+  build; the Python-config importer (doc 02, "Rust port deviations — importer") is what
+  makes that switch cost the user nothing but their tokens.
+
+- **Release assets** (rewrite) — a created GitHub release attaches exactly three files,
+  built by `.github/workflows/build.yml`:
+
+  | Asset | Job | Built from |
+  | --- | --- | --- |
+  | `grid-launcher-<VERSION>-x86_64.AppImage` | `build-linux` (`ubuntu-22.04`) | `npx tauri build --bundles appimage`, then the `appimagetool -u` repack |
+  | `grid-launcher-<VERSION>-x86_64.AppImage.zsync` | `build-linux` | written by the same `appimagetool` run |
+  | `grid-launcher-<VERSION>-windows-x86_64-setup.exe` | `build-windows` (`windows-latest`) | `npx tauri build --bundles nsis`, renamed from `GRID Launcher_<VERSION>_x64-setup.exe` |
+
+  The NSIS installer installs per user (`bundle.windows.nsis.installMode = "currentUser"`)
+  and pulls WebView2 with the default `downloadBootstrapper`. Nothing is code-signed.
+
+- **The version a release build reports** (rewrite) — `tauri.conf.json` keeps
+  `"version": "0.9.0-dev"` in the source tree. Each build job passes the real version with
+  `npx tauri build --config '{"version":"<VERSION>"}'`, and that is what
+  `app.package_info().version` returns at runtime. On a `release` event `VERSION` is the tag
+  with its leading `v` stripped, and the job fails unless it matches
+  `^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$`. A `workflow_dispatch` run is a dry run at
+  `0.0.0-dev`: it attaches nothing to any release, and the `dev` in the version suppresses
+  the app's own update check (`app_update::is_dev_build`).
 
 ---
 

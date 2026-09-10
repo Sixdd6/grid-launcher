@@ -567,3 +567,94 @@ covers/images milestone (`docs/superpowers/specs/2026-09-02-covers-images-design
   either way, with `session.connected` driving the "Not connected" chip and Retry button
   (`app/src/lib/Shell.svelte:53-56`). `retry()` (`app/src/lib/stores/session.svelte.ts:27-34`) is
   the only other place a connection is attempted; nothing calls it automatically.
+
+## Rust port deviations — importer
+
+The rewrite reads a Python-era `~/.grid-launcher/config.json` exactly once per
+profile and converts it into `config.toml` plus registry rows
+(`rewrite/crates/grid-core/src/import_python.rs`, spec
+`docs/superpowers/specs/2026-09-10-release-pipeline-and-importer-design.md`
+Part 3). The trigger is file presence, checked in
+`rewrite/app/src-tauri/src/python_import.rs` before any service reads the
+config: no `config.toml` and a `~/.grid-launcher/config.json`. `config.toml`
+is written whether or not every row converted, so the import never repeats.
+`GRID_LAUNCHER_DATA_DIR` moves the Rust config only — the Python path is
+fixed on every platform.
+
+Every value passes through the same normalizers Python applied when it wrote
+the file: trim; a blank emulator name drops the entry; a blank title or
+platform drops the game; the save-strategy alias table
+(`grid_launcher/emulator/profiles.py:141-156`); lenient booleans
+(`grid-launcher.py:2185-2196`); the upload delay clamped to `[0, 60]`
+(`grid-launcher.py:2221`).
+
+### Mapping
+
+| Python key | Rust destination |
+| --- | --- |
+| `server_url`, `username`, `library_path`, `launch_args` | `Config` fields of the same name |
+| `debug_prints` | `Config.debug_prints` |
+| `theme` (`system`/`dark`/`light`, else `system`) | `Config.ui.theme` — the Rust config has no top-level `theme` |
+| `emulators[]` (`name`, `path`, `args`, `save_strategy`, `ignore_files`, `ignore_extensions`, `save_paths`, `state_paths`, `source_id`, `source_provider`, `source_owner`, `source_repo`, `source_release_tag`) | `Config.emulators[]`, same names; `source_installed_tag` blank; sorted by case-folded name |
+| `default_emulators` | `Config.default_emulators`, values kept verbatim |
+| `default_retroarch_cores` | `Config.retroarch_cores`, values trimmed |
+| `default_compat_tool` | `Config.default_compat_tool` |
+| `compat_tool_installs{id: {name, compat_tool_type, install_path}}` | `Config.compat_tool_installs[]` with `source_id = id`, `name`, `path = install_path`, `release_tag` blank; `compat_tool_type` dropped |
+| the four `auto_cloud_save_*` keys | `Config` fields of the same name |
+| `retroachievements_username` | `Config.retroachievements_username` |
+| `native_manual_save_paths` (`<title>__manual` -> list) | `Config.native_manual_save_paths`, keys unchanged |
+| `cloud_sync_state` | `Config.cloud_sync_state` as a TOML table; an unconvertible leaf (a JSON `null`) is dropped and the rest of the subtree kept |
+| `installed_games[]` | one `InstalledGame` each: `rom_id` parsed as `i64` else `None`; `filesize_bytes` parsed else `0`; `installed_at = now`; `last_played_at = 0`; `cover_small_path`/`cover_large_path`/`fanart_urls` blank (images refetch from the server); `screenshot_urls`, `genres`, `regions`, `rating`, `description`, `rom_file_name`, `archive_path`, `extracted_path`, `extracted_dir`, `multi_file_game_dir`, `native_*`, `included_dlc`, `ps3_*`, `ps4_*`, `ra_id`, `server_updated_at` copied; `languages`, `tags`, `revision`, `companies`, `first_release_date` blank (Python stores none of them) |
+
+A game with no `rom_id` is still imported: the registry keys on title and
+platform, and `installed_match` accepts a `None` rom id.
+
+Games are deduplicated on the case-folded `(title, platform)` pair — the
+first row wins and a later duplicate is dropped silently, matching
+`config.py:185-188`. A dropped duplicate does not count toward
+`skipped_games`: nothing was lost, since the earlier row already carries
+that identity. A row that is not a JSON object at all still deserializes
+(to a blank title) and is counted in `skipped_games`, where Python drops it
+without a count.
+
+### Deviation D-IMP-1 — display placeholders are not imported
+
+Python substitutes the literal string `N/A` for a blank rating and
+`No description available.` for a blank description at load time
+(`config.py:155-156`), because its views print those fields raw. The
+rewrite renders a blank rating and a blank description as "no rating" /
+"no description" in the UI, so an imported `N/A` would show as a literal
+star value instead. A rating of `N/A` (case-insensitive, trimmed) and a
+description of exactly `No description available.` are mapped back to
+`""` on the way in; every other value passes through trimmed.
+
+### Skipped on purpose
+
+`api_token`, `retroachievements_api_key`, `retroachievements_token` — the user
+enters tokens again, and the Python keyring entries under service
+`GRIDLauncher` are never read. `first_run_completed`, `window_geometry`,
+`window_state` (see the top-level table above), `emulator_source_installs`
+(the entry-level `source_*` fields already carry provenance), the three `tv_*`
+keys and `tv_mode_last_active`, `cached_cover_path`, `cover_url`,
+`local_path`. Unknown keys are ignored — never copied into `Config::extra`.
+
+### Secrets
+
+The importer deserializes into a struct that has **no field** for the three
+secret keys, so `serde_json` drops those values while parsing and no token is
+ever held, logged or written. The `ImportReport` and every log line carry
+counts only. `plan`'s fixture test asserts that none of the three values, and
+none of the three key names, appears in the serialized config.
+
+### Surfacing
+
+`AppState.python_import: Option<ImportReport>` is set once at startup, inside
+`run()` right after `Registry::open` and only when the trigger above holds;
+the `python_import_notice` command returns it; the frontend pulls it on
+mount (`app/src/lib/stores/pythonImport.svelte.ts`) and shows one toast:
+"Imported N emulators and M games from the previous version. Enter your
+RomM token to reconnect.", with "Enter your RetroAchievements token as
+well." appended only when a username was imported. Tokens are never
+imported, so the toast always asks for the RomM token. Same late-mount
+pattern as the app-update notice (doc 10 D-10-k), with no event: the import
+finishes before the window is created.
