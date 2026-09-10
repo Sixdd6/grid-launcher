@@ -20,10 +20,14 @@
       }
     ],
     "security": {
-      "capabilities": ["default"],
+      "capabilities": [
+        "default"
+      ],
       "assetProtocol": {
         "enable": true,
-        "scope": ["$CACHE/grid-launcher/covers/**/*"]
+        "scope": [
+          "$CACHE/grid-launcher/covers/**/*"
+        ]
       },
       "csp": {
         "default-src": "'self'",
@@ -36,7 +40,15 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["appimage", "nsis"],
+    "targets": [
+      "appimage",
+      "nsis"
+    ],
+    "shortDescription": "Game Repository Interface & Downloader",
+    "longDescription": "A game launcher and library manager for RomM servers: browse the server library, install and launch games and emulators, and keep saves in sync.",
+    "category": "Game",
+    "publisher": "Sixdd6",
+    "homepage": "https://github.com/Sixdd6/grid-launcher",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

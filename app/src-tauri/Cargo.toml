@@ -1,10 +1,10 @@
 [package]
 name = "app"
 version = "0.9.0-dev"
-description = "A Tauri App"
-authors = ["you"]
+description = "Game Repository Interface & Downloader — a game launcher for RomM"
+authors = ["Sixdd6"]
 license.workspace = true
-repository = ""
+repository = "https://github.com/Sixdd6/grid-launcher"
 edition = "2021"
 rust-version = "1.77.2"
 
