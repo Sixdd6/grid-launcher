@@ -233,22 +233,25 @@ pub fn process_exited_early_message(status: Option<ExitStatus>, argv: &[String])
 }
 
 /// The environment a spawned host binary gets: a copy of this process's
-/// environment with the bundle's own library and GTK setup removed.
+/// environment with the bundle's own setup removed.
 ///
-/// A bundled build points `LD_LIBRARY_PATH` at its own private library
-/// directories. A host binary started with that value resolves shared
-/// libraries against the bundle's older copies and fails to start: umu-run
-/// is a system Python script whose pyzstd module refuses the bundled
-/// libzstd, so it exits 1 before Proton runs (2026-09-10). Two bundlers,
-/// two conventions:
+/// A bundled build rewrites the environment to point at its own private
+/// copies of libraries, Python, Perl, Qt, GStreamer and GTK. A host binary
+/// started with those values resolves against the bundle's older copies
+/// and fails to start: umu-run is a system Python script, and with the
+/// AppImage's `PYTHONHOME` it cannot find its own standard library, so it
+/// exits 1 before Proton runs (2026-09-10). Two bundlers, two conventions:
 ///
 /// - PyInstaller saves the original in `LD_LIBRARY_PATH_ORIG`; when that is
 ///   present it wins outright.
 /// - The linuxdeploy AppRun inside the Tauri AppImage saves nothing, but
-///   exports `APPDIR`. Every `LD_LIBRARY_PATH` and `XDG_DATA_DIRS` entry
-///   under that directory is dropped, and the variables its GTK hook
-///   exports ([`APPIMAGE_GTK_HOOK_VARS`]) are removed, so a GTK-based
-///   emulator loads the host's modules rather than the bundle's.
+///   exports `APPDIR`. Every `:`-separated entry under that directory is
+///   dropped from every variable (`LD_LIBRARY_PATH`, `PATH`, `PYTHONHOME`,
+///   `PYTHONPATH`, `XDG_DATA_DIRS`, `PERLLIB`, `QT_PLUGIN_PATH`,
+///   `GST_PLUGIN_SYSTEM_PATH*`, `GSETTINGS_SCHEMA_DIR`, the GTK hook's
+///   module paths, and whatever a newer AppRun adds), a variable with
+///   nothing left is removed, and the flag-style variables the bundle sets
+///   ([`APPIMAGE_FLAG_VARS`]) are removed too.
 ///
 /// Outside a bundle the environment passes through untouched.
 ///
@@ -258,19 +261,9 @@ pub fn clean_env() -> HashMap<String, String> {
     clean_env_from(std::env::vars().collect())
 }
 
-/// The variables `linuxdeploy-plugin-gtk.sh` exports for the bundled GTK,
-/// none of which a child should inherit.
-const APPIMAGE_GTK_HOOK_VARS: [&str; 9] = [
-    "GTK_PATH",
-    "GIO_EXTRA_MODULES",
-    "GDK_PIXBUF_MODULE_FILE",
-    "GSETTINGS_SCHEMA_DIR",
-    "GTK_EXE_PREFIX",
-    "GTK_IM_MODULE_FILE",
-    "GTK_DATA_PREFIX",
-    "GDK_BACKEND",
-    "GTK_THEME",
-];
+/// Non-path variables the AppRun and its `linuxdeploy-plugin-gtk.sh` hook
+/// export for the bundled runtime, none of which a child should inherit.
+const APPIMAGE_FLAG_VARS: [&str; 3] = ["PYTHONDONTWRITEBYTECODE", "GDK_BACKEND", "GTK_THEME"];
 
 /// The pure half of [`clean_env`], so the rule can be tested without mutating
 /// the process environment (which is racy across parallel tests).
@@ -282,33 +275,40 @@ fn clean_env_from(mut env: HashMap<String, String>) -> HashMap<String, String> {
     let Some(appdir) = env.get("APPDIR").cloned() else {
         return env;
     };
-    for key in ["LD_LIBRARY_PATH", "XDG_DATA_DIRS"] {
-        if let Some(value) = env.get(key) {
-            let kept = without_entries_under(value, &appdir);
-            if kept.is_empty() {
-                env.remove(key);
-            } else {
-                env.insert(key.to_string(), kept);
-            }
+    let keys: Vec<String> = env.keys().cloned().collect();
+    for key in keys {
+        let kept = without_entries_under(&env[&key], &appdir);
+        if kept == env[&key] {
+            continue;
+        }
+        if kept.is_empty() {
+            env.remove(&key);
+        } else {
+            env.insert(key, kept);
         }
     }
-    for key in APPIMAGE_GTK_HOOK_VARS {
+    for key in APPIMAGE_FLAG_VARS {
         env.remove(key);
     }
     env
 }
 
-/// `value` as a `:`-separated list minus blank entries and entries that
-/// name `root` or something inside it.
+/// `value` unchanged when no entry is under `root`; otherwise `value` as a
+/// `:`-separated list minus blank entries and entries that name `root` or
+/// something inside it.
 fn without_entries_under(value: &str, root: &str) -> String {
     let root = root.trim_end_matches('/');
+    let under_root = |entry: &str| {
+        let entry = entry.trim_end_matches('/');
+        entry == root || entry.starts_with(&format!("{root}/"))
+    };
+    if !value.split(':').any(under_root) {
+        return value.to_string();
+    }
     value
         .split(':')
         .filter(|entry| !entry.is_empty())
-        .filter(|entry| {
-            let entry = entry.trim_end_matches('/');
-            entry != root && !entry.starts_with(&format!("{root}/"))
-        })
+        .filter(|entry| !under_root(entry))
         .collect::<Vec<_>>()
         .join(":")
 }
@@ -441,6 +441,57 @@ mod tests {
             assert!(!env.contains_key(key), "{key} leaked");
         }
         assert_eq!(env.get("PATH").unwrap(), "/usr/bin");
+    }
+
+    #[test]
+    fn clean_env_drops_the_appimage_python_home_and_path() {
+        // The wrapped AppRun exports these; the system Python that runs
+        // umu-run then cannot find its own standard library (2026-09-10).
+        let env = clean_env_from(env_of(&[
+            ("APPDIR", "/tmp/.mount_grid"),
+            ("PYTHONHOME", "/tmp/.mount_grid/usr/"),
+            ("PYTHONPATH", "/tmp/.mount_grid/usr/share/pyshared/:"),
+            ("PYTHONDONTWRITEBYTECODE", "1"),
+            (
+                "PATH",
+                "/tmp/.mount_grid/usr/bin/:/tmp/.mount_grid/usr/sbin/:/usr/bin:/bin",
+            ),
+            (
+                "PERLLIB",
+                "/tmp/.mount_grid/usr/share/perl5/:/tmp/.mount_grid/usr/lib/perl5/:",
+            ),
+            (
+                "QT_PLUGIN_PATH",
+                "/tmp/.mount_grid/usr/lib/qt5/plugins/:/usr/lib64/qt5/plugins",
+            ),
+            (
+                "GST_PLUGIN_SYSTEM_PATH_1_0",
+                "/tmp/.mount_grid/usr/lib/gstreamer-1.0:",
+            ),
+        ]));
+        for key in [
+            "PYTHONHOME",
+            "PYTHONPATH",
+            "PYTHONDONTWRITEBYTECODE",
+            "PERLLIB",
+            "GST_PLUGIN_SYSTEM_PATH_1_0",
+        ] {
+            assert!(!env.contains_key(key), "{key} leaked");
+        }
+        assert_eq!(env.get("PATH").unwrap(), "/usr/bin:/bin");
+        assert_eq!(env.get("QT_PLUGIN_PATH").unwrap(), "/usr/lib64/qt5/plugins");
+    }
+
+    #[test]
+    fn clean_env_keeps_a_users_own_python_path_outside_the_appimage() {
+        let base = env_of(&[
+            ("APPDIR", "/tmp/.mount_grid"),
+            ("PYTHONPATH", "/home/me/lib"),
+            ("PYTHONHOME", "/opt/py"),
+        ]);
+        let env = clean_env_from(base);
+        assert_eq!(env.get("PYTHONPATH").unwrap(), "/home/me/lib");
+        assert_eq!(env.get("PYTHONHOME").unwrap(), "/opt/py");
     }
 
     #[test]
