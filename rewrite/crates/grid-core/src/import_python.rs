@@ -1270,4 +1270,29 @@ mod tests {
 
         assert!(dir.path().join("config.toml").exists());
     }
+
+    /// The write path has to fail visibly: a `Write` error is what tells the
+    /// caller the import did not finish, and the caller logs its text.
+    /// `Config::save` starts with `create_dir_all(parent)`, so a parent that
+    /// is a regular file makes the save — and only the save — fail.
+    #[test]
+    fn a_config_that_cannot_be_written_is_a_write_error() {
+        let s = scratch(&python_config());
+        let blocker = s.config.parent().unwrap().join("blocker");
+        std::fs::write(&blocker, "not a directory").expect("the blocker writes");
+
+        let error = import(&s.python, &blocker.join("config.toml"), &s.registry, 1).unwrap_err();
+        assert!(matches!(error, ImportError::Write(_)));
+        // The rows landed first, so the failure is the save.
+        assert_eq!(s.registry.all().unwrap().len(), 4);
+
+        let text = format!("{error} {error:?}");
+        for needle in [
+            "SECRET-ROMM-TOKEN-NOT-REAL",
+            "SECRET-RA-KEY-NOT-REAL",
+            "SECRET-RA-TOKEN-NOT-REAL",
+        ] {
+            assert!(!text.contains(needle), "{needle} leaked into a Write error");
+        }
+    }
 }
