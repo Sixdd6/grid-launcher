@@ -1,21 +1,28 @@
 name: Build
 
-# One pipeline for the Rust app: gates on every push and pull request, the
-# end-to-end suite on pushes to main, and the release artifacts when a
-# release is created. A workflow_dispatch run does everything as a dry run —
-# it builds version 0.0.0-dev, uploads to the run, and attaches nothing.
+# One pipeline for the Rust app: gates on every push, pull request AND
+# release, the end-to-end suite on pushes to main, and the release artifacts
+# when a release is published. A workflow_dispatch run does everything as a
+# dry run — it builds version 0.0.0-dev, uploads to the run, and attaches
+# nothing.
+#
+# `types: [published]` only. It fires both for a release published directly
+# and for a draft that is later published, which is the flow that writes the
+# notes first; `created` misses the draft flow, and listing both would build
+# a direct publish twice.
 on:
   push:
     branches: [main]
   pull_request:
   release:
-    types: [created]
+    types: [published]
   workflow_dispatch:
 
 jobs:
   check:
     name: Check (Linux)
-    if: github.event_name != 'release'
+    # Runs on release events too: both build jobs `needs` it, so a tag can
+    # never ship artifacts from a tree CI has not tested.
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -42,7 +49,9 @@ jobs:
       - name: Frontend install and build
         run: cd app && npm ci && npx svelte-check && npm run build
       - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: |
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo clippy -p app --all-targets --features e2e -- -D warnings
       - name: Tests
         run: cargo test --workspace
       - name: Frontend tests
@@ -52,8 +61,8 @@ jobs:
     name: Check (Windows)
     # Compiles the Windows code paths. No tests: this job exists so a
     # Windows-only compile error is caught on the pull request that
-    # introduces it rather than on the release tag.
-    if: github.event_name != 'release'
+    # introduces it rather than on the release tag. Runs on release events
+    # too — it gates `build-windows`.
     runs-on: windows-latest
     defaults:
       run:
@@ -100,15 +109,14 @@ jobs:
       - name: End-to-end tests
         run: scripts/e2e.sh
 
-  build-linux:
-    name: AppImage
-    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-22.04
-    permissions:
-      contents: write
+  version:
+    name: Version
+    # One job so the semver rules live in exactly one place; both build jobs
+    # read `needs.version.outputs.version`. Seconds on a plain runner.
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-
       - name: Version
         id: version
         shell: bash
@@ -132,6 +140,16 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Building version: $VERSION"
 
+  build-linux:
+    name: AppImage
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    needs: [version, check, check-windows]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
       - name: System dependencies (Tauri on Linux + appimagetool)
         run: |
           sudo apt-get update
@@ -154,13 +172,13 @@ jobs:
       - name: Build the AppImage
         working-directory: rewrite/app
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: npx tauri build --bundles appimage --config "{\"version\":\"$VERSION\"}"
 
       - name: Repack with update information
         working-directory: rewrite/target/release/bundle/appimage
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
           SRC="GRID Launcher_${VERSION}_amd64.AppImage"
@@ -205,6 +223,7 @@ jobs:
   build-windows:
     name: Windows installer
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    needs: [version, check, check-windows]
     runs-on: windows-latest
     permissions:
       contents: write
@@ -213,26 +232,6 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-
-      - name: Version
-        id: version
-        run: |
-          set -euo pipefail
-          if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-            if [ "$VERSION" = "${GITHUB_REF_NAME}" ]; then
-              echo "release tag must start with v (got ${GITHUB_REF_NAME})" >&2
-              exit 1
-            fi
-            if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
-              echo "version '$VERSION' is not semver" >&2
-              exit 1
-            fi
-          else
-            VERSION=0.0.0-dev
-          fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Building version: $VERSION"
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -251,12 +250,12 @@ jobs:
       - name: Build the NSIS installer
         working-directory: rewrite/app
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: npx tauri build --bundles nsis --config "{\"version\":\"$VERSION\"}"
 
       - name: Rename the installer
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p dist
