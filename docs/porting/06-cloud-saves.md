@@ -1694,10 +1694,14 @@ and none of them is fixed:
   `candidate_archive_paths_for_game`/`candidate_extracted_paths_for_game`/
   `candidate_extracted_dirs_for_game`, none built by this milestone.~~ **Closed (release
   parity pass):** all three candidate builders and the two path comparisons (`path_key`,
-  `path_within_path`) are ported in `crates/grid-core/src/cloud/install_match.rs`, and
+  `path_within_path`) are ported in `crates/grid-core/src/cloud/install_match.rs` — `path_key`
+  reproduces `resolve(strict=False)` by canonicalizing the longest existing ancestor and
+  re-appending the rest, so a candidate that does not exist yet still compares equal through a
+  symlinked prefix — and
   `shared_cloud_sync_owner` runs `matching_installed_emulator_games` over `ctx.all_games`
-  with the entry's path when the free-text search returns nothing, taking the first match
-  with a non-blank ROM id. `CloudGame` gained `extracted_dir` and `native_game_dir` to feed
+  with the entry's path when the free-text CANDIDATE list is empty (the text predicate
+  without the ROM-id filter, matching `cloud_mixin.py:417`), taking the first match with a
+  non-blank ROM id. `CloudGame` gained `extracted_dir` and `native_game_dir` to feed
   the candidate builders.
 - **The PPSSPP and RetroArch state job builders take the already-resolved ignore sets.**
   `ppsspp_state_upload_jobs` (`crates/grid-core/src/cloud/transfer.rs:622`) and

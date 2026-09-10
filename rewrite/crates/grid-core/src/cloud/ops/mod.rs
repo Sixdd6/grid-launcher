@@ -46,8 +46,8 @@ use super::candidates::{
 use super::dirs::{self, PathKey, ResolveContext};
 use super::install_match::matching_installed_emulator_games;
 use super::scope::{
-    cloud_save_block_reason, is_emulators_platform, is_native_executable_platform,
-    shared_sync_owner, SaveScope,
+    cloud_save_block_reason, has_shared_sync_candidate, is_emulators_platform,
+    is_native_executable_platform, shared_sync_owner, SaveScope,
 };
 use super::state::{game_key, sync_entry_for};
 use super::tokens::{game_save_match_tokens, ps2_serial_tokens, ps3_id_tokens, psp_id_tokens};
@@ -685,7 +685,9 @@ fn cloud_sync_rom_id_with(
 ///
 /// The free-text scan ([`shared_sync_owner`]) runs first. When it finds
 /// nothing and the resolved emulator `entry` has a non-blank path, the
-/// install-path last resort runs
+/// install-path last resort runs — but only when the free-text CANDIDATE
+/// list is empty too ([`has_shared_sync_candidate`], the same predicate
+/// without the rom-id filter; cloud_mixin.py:417)
 /// ([`crate::cloud::install_match::matching_installed_emulator_games`],
 /// install_registry.py:65): the same `ctx.all_games` pool, matched by
 /// INSTALL PATH instead of free text — the library game whose own
@@ -705,6 +707,14 @@ fn shared_cloud_sync_owner<'a>(
     let token = shared_sync_token(ctx, name, entry)?;
     if let Some(owner) = shared_sync_owner(token, ctx.all_games) {
         return Some(owner);
+    }
+
+    // Python falls back only when the CANDIDATE list is empty
+    // (cloud_mixin.py:417), and candidates are not rom-id filtered: a
+    // blank-rom-id "xemu" row blocks the fallback and leaves the game on
+    // its own rom id.
+    if has_shared_sync_candidate(token, ctx.all_games) {
+        return None;
     }
 
     let emulator_path = entry.map(|entry| entry.path.trim()).unwrap_or("");

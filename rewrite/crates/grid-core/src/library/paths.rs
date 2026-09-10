@@ -112,7 +112,7 @@ pub fn library_root(config: &crate::config::Config) -> Option<PathBuf> {
 
 /// Deduplicate paths by their string form, keeping the first occurrence of
 /// each and preserving overall order.
-fn dedup_by_string(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+pub(crate) fn dedup_by_string(paths: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut seen = std::collections::HashSet::new();
     paths
         .into_iter()

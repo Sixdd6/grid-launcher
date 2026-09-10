@@ -230,31 +230,48 @@ pub fn cloud_save_block_reason(
 /// literal ("xemu"/"redream"), so "   ".contains(token) is false regardless
 /// — the guard's absence here changes nothing observable.
 pub fn shared_sync_owner<'a>(token: &str, games: &'a [CloudGame]) -> Option<&'a CloudGame> {
+    games
+        .iter()
+        .find(|game| matches_shared_sync(token, game) && !game.rom_id.is_empty())
+}
+
+/// `_emulator_game_matches_shared_sync` (cloud_mixin.py:376-395) on its
+/// own: the `Emulators`-platform gate plus the free-text substring test,
+/// WITHOUT [`shared_sync_owner`]'s rom-id filter — this is exactly what
+/// fills Python's `candidates` list (cloud_mixin.py:411-416).
+///
+/// Split out because the two uses differ: the owner search wants a game it
+/// can take a ROM id from, while `ops`'s install-path last resort runs only
+/// when `candidates` is EMPTY (cloud_mixin.py:417). A locally installed
+/// emulator row with a blank ROM id makes `candidates` non-empty, so Python
+/// returns `None` rather than falling back — [`has_shared_sync_candidate`]
+/// is that gate.
+pub fn matches_shared_sync(token: &str, game: &CloudGame) -> bool {
     let token = token.trim().to_lowercase();
     if token.is_empty() {
-        return None;
+        return false;
     }
+    if !is_emulators_platform(&game.platform) {
+        return false;
+    }
+    let candidate_text = [
+        game.title.as_str(),
+        game.platform.as_str(),
+        game.description.as_str(),
+        game.rom_file_name.as_str(),
+    ]
+    .iter()
+    .map(|field| field.trim())
+    .collect::<Vec<_>>()
+    .join(" ")
+    .to_lowercase();
+    candidate_text.contains(&token)
+}
 
-    games.iter().find(|game| {
-        if !is_emulators_platform(&game.platform) {
-            return false;
-        }
-        if game.rom_id.is_empty() {
-            return false;
-        }
-        let candidate_text = [
-            game.title.as_str(),
-            game.platform.as_str(),
-            game.description.as_str(),
-            game.rom_file_name.as_str(),
-        ]
-        .iter()
-        .map(|field| field.trim())
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase();
-        candidate_text.contains(&token)
-    })
+/// Whether any game in `games` is a free-text candidate
+/// ([`matches_shared_sync`]) — Python's `if not candidates:` test.
+pub fn has_shared_sync_candidate(token: &str, games: &[CloudGame]) -> bool {
+    games.iter().any(|game| matches_shared_sync(token, game))
 }
 
 #[cfg(test)]

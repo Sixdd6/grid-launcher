@@ -12,21 +12,51 @@
 use std::path::{Path, PathBuf};
 
 use crate::library::launch_select::select_launch_file;
-use crate::library::paths::{archive_name, expand_home, extraction_dir, platform_dir};
+use crate::library::paths::{
+    archive_name, dedup_by_string, expand_home, extraction_dir, platform_dir,
+};
 
 use super::scope::is_emulators_platform;
 use super::CloudGame;
 
+/// `resolve(strict=False)`'s shape: canonicalize the longest existing
+/// ancestor of `path` and re-append the components below it lexically.
+/// `Path::canonicalize` alone errors on a missing path, which would leave
+/// a not-yet-installed candidate keyed by literal text while the emulator
+/// binary it should match is keyed by its real location — under a
+/// symlinked prefix (`/home` -> `/var/home`, a symlinked library mount)
+/// the two would never compare equal. A path whose every ancestor is
+/// missing is returned unchanged, as Python's `OSError` fallback does.
+fn resolve_lenient(path: &Path) -> PathBuf {
+    if let Ok(resolved) = path.canonicalize() {
+        return resolved;
+    }
+    let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
+    let mut ancestor = path;
+    while let Some(parent) = ancestor.parent() {
+        match ancestor.file_name() {
+            // A trailing `..`/`.`: nothing lexical to re-append onto, so
+            // stop and keep the literal path.
+            None => break,
+            Some(name) => tail.push(name),
+        }
+        if let Ok(resolved) = parent.canonicalize() {
+            let mut out = resolved;
+            for name in tail.iter().rev() {
+                out.push(name);
+            }
+            return out;
+        }
+        ancestor = parent;
+    }
+    path.to_path_buf()
+}
+
 /// `path_key` (path.py:15-21): `~`-expand, resolve without requiring the
-/// path to exist, case-fold. `Path::canonicalize` is the resolve step and
-/// fails for missing paths, where Python's `resolve(strict=False)` would
-/// still normalize; falling back to the expanded path (what Python does on
-/// `OSError`) keeps non-existent candidates comparable by their literal
-/// text, which is all the callers below need.
+/// path to exist ([`resolve_lenient`]), case-fold.
 fn path_key(path: &Path) -> String {
     let expanded = expand_home(&path.to_string_lossy());
-    let resolved = expanded.canonicalize().unwrap_or(expanded);
-    resolved.to_string_lossy().to_lowercase()
+    resolve_lenient(&expanded).to_string_lossy().to_lowercase()
 }
 
 /// `path_within_path` (path.py:24-31): equal keys, or `path`'s key starts
@@ -41,15 +71,6 @@ fn path_within_path(path: &Path, root: &Path) -> bool {
     target == root_key
         || target.starts_with(&format!("{root_key}/"))
         || target.starts_with(&format!("{root_key}\\"))
-}
-
-/// Keep the first occurrence of each path, by string form.
-fn dedup(paths: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut seen = std::collections::HashSet::new();
-    paths
-        .into_iter()
-        .filter(|p| seen.insert(p.to_string_lossy().into_owned()))
-        .collect()
 }
 
 /// `candidate_archive_paths_for_game` (install_paths.py:19-43): the
@@ -71,7 +92,7 @@ fn archive_candidates(game: &CloudGame, library: Option<&Path>) -> Vec<PathBuf> 
     if !game.native_game_dir.trim().is_empty() {
         candidates.push(expand_home(&game.native_game_dir).join(&name));
     }
-    dedup(candidates)
+    dedup_by_string(candidates)
 }
 
 /// `candidate_extracted_paths_for_game` (install_paths.py:46-65): the
@@ -104,7 +125,7 @@ fn extracted_file_candidates(game: &CloudGame) -> Vec<PathBuf> {
             candidates.push(path);
         }
     }
-    dedup(candidates)
+    dedup_by_string(candidates)
 }
 
 /// `candidate_extracted_dirs_for_game` (install_paths.py:68-89): the
@@ -120,14 +141,14 @@ fn extracted_dir_candidates(game: &CloudGame, archives: &[PathBuf]) -> Vec<PathB
         (!game.native_game_dir.trim().is_empty()).then(|| expand_home(&game.native_game_dir));
     for archive in archives {
         let extracted = extraction_dir(archive);
-        if let (Some(native), Some(name)) = (native_game_dir.as_ref(), extracted.file_name()) {
-            candidates.push(extracted.clone());
-            candidates.push(native.join(name));
-        } else {
-            candidates.push(extracted);
-        }
+        let native_sibling = native_game_dir
+            .as_ref()
+            .zip(extracted.file_name())
+            .map(|(native, name)| native.join(name));
+        candidates.push(extracted);
+        candidates.extend(native_sibling);
     }
-    dedup(candidates)
+    dedup_by_string(candidates)
 }
 
 /// `matching_installed_emulator_games` (install_registry.py:65): every
@@ -309,10 +330,12 @@ mod tests {
 
     #[test]
     fn compares_case_insensitively_and_expands_a_leading_tilde() {
-        let home = directories::BaseDirs::new()
-            .unwrap()
-            .home_dir()
-            .to_path_buf();
+        // HOME is process-global: hold the crate-wide env lock (test_env)
+        // so this never races another module's HOME override.
+        let _lock = crate::test_env::lock();
+        let home = TempDir::new().unwrap();
+        let _env = crate::test_env::EnvGuard::set(&[("HOME", home.path().to_str())]);
+
         let mut game = emulator_game("xemu build");
         game.archive_path = "~/GridLauncherTest/XEMU.AppImage".to_string();
         let games = vec![game];
@@ -320,11 +343,67 @@ mod tests {
         assert_eq!(
             matching_installed_emulator_games(
                 &games,
-                &home.join("GridLauncherTest/xemu.appimage"),
+                &home.path().join("GridLauncherTest/xemu.appimage"),
                 None
             ),
             vec![&games[0]],
             "~ expands and the comparison is case-folded"
+        );
+    }
+
+    #[test]
+    fn matches_the_recorded_extracted_path_only_when_it_is_a_file() {
+        let root = TempDir::new().unwrap();
+        let binary = root.path().join("xemu.AppImage");
+        fs::write(&binary, b"").unwrap();
+
+        let mut game = emulator_game("xemu build");
+        game.extracted_path = binary.to_string_lossy().into_owned();
+        let games = vec![game];
+        assert_eq!(
+            matching_installed_emulator_games(&games, &binary, None),
+            vec![&games[0]]
+        );
+
+        // install_paths.py:60-63 gates on `is_file()`: an extracted_path
+        // that exists as a DIRECTORY is not a file candidate, and nothing
+        // else in this row points at it either.
+        let dir = root.path().join("xemu-dir");
+        fs::create_dir(&dir).unwrap();
+        let mut as_dir = emulator_game("xemu build");
+        as_dir.extracted_path = dir.to_string_lossy().into_owned();
+        let games = vec![as_dir];
+        assert!(matching_installed_emulator_games(&games, &dir, None).is_empty());
+    }
+
+    #[test]
+    fn resolves_a_missing_path_through_a_symlinked_directory() {
+        let root = TempDir::new().unwrap();
+        let real = root.path().join("real");
+        fs::create_dir(&real).unwrap();
+        let link = root.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        // Neither file exists; only the parent directory does. Python's
+        // resolve(strict=False) still collapses the symlink, so the two
+        // spellings are the same path.
+        let mut game = emulator_game("xemu build");
+        game.archive_path = link.join("xemu.AppImage").to_string_lossy().into_owned();
+        let games = vec![game];
+
+        assert_eq!(
+            matching_installed_emulator_games(&games, &real.join("xemu.AppImage"), None),
+            vec![&games[0]],
+            "a missing candidate under a symlinked directory still matches its real path"
+        );
+
+        // Containment sees through the symlink the same way.
+        let mut nested = emulator_game("xemu build");
+        nested.extracted_dir = link.to_string_lossy().into_owned();
+        let games = vec![nested];
+        assert_eq!(
+            matching_installed_emulator_games(&games, &real.join("bin").join("xemu"), None),
+            vec![&games[0]]
         );
     }
 

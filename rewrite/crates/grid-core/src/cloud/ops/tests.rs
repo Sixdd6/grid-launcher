@@ -1658,6 +1658,44 @@ fn shared_owner_falls_back_to_the_install_path_match() {
     );
 }
 
+/// Fix round 1, finding 1: the fallback is gated on Python's `candidates`
+/// list being EMPTY (cloud_mixin.py:417), and that list is not rom-id
+/// filtered. An `Emulators` row whose text names "xemu" but which carries
+/// no ROM id (a locally installed emulator with no server rom) therefore
+/// blocks the install-path last resort entirely — Python leaves the game
+/// on its own ROM id.
+#[test]
+fn a_blank_rom_id_free_text_candidate_blocks_the_install_path_fallback() {
+    let root = TempDir::new().unwrap();
+    let entry = xemu_fixture(root.path(), true);
+    let installed_at = entry.path.clone();
+    let mut fx = Fixture::new(config_with(entry, "Xbox"));
+
+    fx.games = vec![
+        CloudGame {
+            title: "xemu".to_string(),
+            platform: "Emulators".to_string(),
+            rom_id: String::new(),
+            ..Default::default()
+        },
+        CloudGame {
+            title: "Console emulator".to_string(),
+            platform: "Emulators".to_string(),
+            rom_id: "555".to_string(),
+            archive_path: installed_at,
+            ..Default::default()
+        },
+    ];
+
+    let mut caches = CloudCaches::default();
+    let target = game("Halo", "Xbox", "7");
+    assert_eq!(
+        cloud_sync_rom_id(&fx.ctx(), &mut caches, &target, SaveType::Save),
+        Some("7".to_string()),
+        "a text candidate with no rom id still empties the fallback's gate"
+    );
+}
+
 /// The last resort is exactly that: a free-text match still wins, and an
 /// entry with no path has nothing to match against.
 #[test]
