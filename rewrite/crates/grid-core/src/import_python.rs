@@ -14,6 +14,17 @@
 //! parsing and nothing here can log, copy or write them. [`ImportReport`] carries counts only, and
 //! [`ImportError`] carries no path and no file content.
 //!
+//! # Deviation D-IMP-1 — display placeholders are not imported
+//!
+//! The reference substitutes `"N/A"` for a blank rating and
+//! `"No description available."` for a blank description at load time
+//! (`config.py:155-156`), because its views print those fields raw. The
+//! rewrite renders a blank rating as "no rating" and a blank description
+//! as "no description" (`library/mod.rs:2969`, `app/src/lib/details/`),
+//! and would show an imported `"N/A"` as a literal star value. So those
+//! two placeholders are mapped BACK to `""` on the way in; every other
+//! value passes through trimmed.
+//!
 //! The conversion mirrors the reference's own load-time normalizers —
 //! `grid_launcher/core/config.py:8-212`, `grid-launcher.py:2185-2221`,
 //! `grid_launcher/ui/theme.py:140-146` — because those are what produced
@@ -333,11 +344,15 @@ fn normalize_theme(value: &str) -> String {
 }
 
 /// `normalize_default_emulators` (`config.py:81-90`) and
-/// `normalize_default_retroarch_cores` (`config.py:92-102`). Keys are
-/// trimmed and blank keys dropped; a non-string value drops the pair. When
-/// `require_value` is set, a blank value drops the pair too — the cores map
-/// requires one, the default-emulators map does not.
-fn string_map(raw: &JsonMap, require_value: bool) -> BTreeMap<String, String> {
+/// `normalize_default_retroarch_cores` (`config.py:92-102`). Both trim the
+/// key and drop a blank key or a non-string value; they differ in what they
+/// do with the value, and `trim_values` selects between them.
+///
+/// - `false` — the default-emulators map: the value is stored VERBATIM,
+///   untrimmed, and a blank one is kept (`config.py:88` stores `item`).
+/// - `true` — the RetroArch-cores map: the value is trimmed and a blank one
+///   drops the pair (`config.py:98`).
+fn string_map(raw: &JsonMap, trim_values: bool) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     for (key, value) in raw {
         let key = key.trim();
@@ -345,13 +360,40 @@ fn string_map(raw: &JsonMap, require_value: bool) -> BTreeMap<String, String> {
             continue;
         }
         let Some(text) = value.as_str() else { continue };
+        if !trim_values {
+            out.insert(key.to_string(), text.to_string());
+            continue;
+        }
         let text = text.trim();
-        if require_value && text.is_empty() {
+        if text.is_empty() {
             continue;
         }
         out.insert(key.to_string(), text.to_string());
     }
     out
+}
+
+/// Deviation D-IMP-1: the reference's blank-rating placeholder comes back
+/// out as `""`. Matched case-insensitively because the value was typed by
+/// no one — it is the reference's own constant — but a hand-edited config
+/// could carry `"n/a"`.
+fn strip_rating_placeholder(value: &str) -> String {
+    if value.eq_ignore_ascii_case("N/A") {
+        String::new()
+    } else {
+        value.to_string()
+    }
+}
+
+/// Deviation D-IMP-1: the reference's blank-description placeholder comes
+/// back out as `""`. Matched exactly — a real description could plausibly
+/// differ from it only in case, and losing a real one is the worse error.
+fn strip_description_placeholder(value: &str) -> String {
+    if value == "No description available." {
+        String::new()
+    } else {
+        value.to_string()
+    }
 }
 
 /// `native_manual_save_paths`: `"<title>__manual"` -> a list of directories.
@@ -492,12 +534,20 @@ pub fn plan(python_json: &str) -> Result<(Config, Vec<InstalledGame>, usize), Im
 
     let mut games: Vec<InstalledGame> = Vec::new();
     let mut skipped_games = 0usize;
+    // `config.py:185-188` keeps the FIRST row for a `(title, platform)` pair
+    // and drops later ones; `game_key` (`library/identity.py:4-5`) folds both
+    // to lowercase, exactly like the registry's `title_key`/`platform_key`.
+    // A dropped duplicate is not a skipped row — nothing was lost.
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
     for row in raw.installed_games.0 {
         let row = row.0;
         let title = row.title.into_string();
         let platform = row.platform.into_string();
         if title.is_empty() || platform.is_empty() {
             skipped_games += 1;
+            continue;
+        }
+        if !seen.insert((title.to_lowercase(), platform.to_lowercase())) {
             continue;
         }
         games.push(InstalledGame {
@@ -512,8 +562,8 @@ pub fn plan(python_json: &str) -> Result<(Config, Vec<InstalledGame>, usize), Im
             extracted_path: row.extracted_path.into_string(),
             extracted_dir: row.extracted_dir.into_string(),
             multi_file_game_dir: row.multi_file_game_dir.into_string(),
-            description: row.description.into_string(),
-            rating: row.rating.into_string(),
+            description: strip_description_placeholder(row.description.as_str()),
+            rating: strip_rating_placeholder(row.rating.as_str()),
             genres: row.genres.into_string(),
             regions: row.regions.into_string(),
             filesize_bytes: row.filesize_bytes.as_str().parse::<i64>().unwrap_or(0),
@@ -621,9 +671,10 @@ mod tests {
       "source_release_tag": "latest"
     },
     { "name": "   ", "path": "/opt/ghost" },
-    { "name": "PCSX2", "path": "/opt/pcsx2/pcsx2" }
+    { "name": "PCSX2", "path": "/opt/pcsx2/pcsx2" },
+    { "name": "Dolphin", "path": 7, "args": "   " }
   ],
-  "default_emulators": { " Nintendo 64 ": "RetroArch", "PlayStation 2": "PCSX2" },
+  "default_emulators": { " Nintendo 64 ": "  RetroArch  ", "PlayStation 2": "PCSX2" },
   "default_retroarch_cores": { " n64 ": "  mupen64plus_next  ", "empty": "   " },
   "installed_games": [
     {
@@ -673,7 +724,16 @@ mod tests {
       "multi_file_game_dir": "/games/PS3/Ratchet"
     },
     { "title": "Demon's Souls", "platform": "   ", "rom_id": "77" },
-    { "title": "   ", "platform": "PS3" }
+    { "title": "   ", "platform": "PS3" },
+    { "title": "chrono trigger", "platform": "snes", "rom_id": "9999" },
+    {
+      "title": "Placeholder Pete",
+      "platform": "NES",
+      "rating": " N/A ",
+      "description": "No description available.",
+      "rom_file_name": 7
+    },
+    "not an object at all"
   ],
   "emulator_source_installs": { "retroarch": { "tag": "v1.19.1" } },
   "compat_tool_installs": {
@@ -765,9 +825,9 @@ mod tests {
     fn emulators_drop_blank_names_normalize_and_sort() {
         let (config, _, _) = planned();
         let names: Vec<&str> = config.emulators.iter().map(|e| e.name.as_str()).collect();
-        assert_eq!(names, vec!["PCSX2", "RetroArch"]);
+        assert_eq!(names, vec!["Dolphin", "PCSX2", "RetroArch"]);
 
-        let retroarch = &config.emulators[1];
+        let retroarch = &config.emulators[2];
         assert_eq!(retroarch.path, "/opt/retroarch/retroarch");
         assert_eq!(retroarch.args, "-L %core% %rom%");
         assert_eq!(retroarch.save_strategy, "single_file");
@@ -783,9 +843,15 @@ mod tests {
         // Nothing on disk vouches for the installed tag, so it starts blank.
         assert_eq!(retroarch.source_installed_tag, "");
 
-        let pcsx2 = &config.emulators[0];
+        let pcsx2 = &config.emulators[1];
         assert_eq!(pcsx2.args, "%rom%"); // missing args default, config.py:36-37
         assert_eq!(pcsx2.save_strategy, "auto");
+
+        let dolphin = &config.emulators[0];
+        // An all-whitespace `args` is the placeholder too (config.py:61), and
+        // a non-string where a string belongs reads as blank.
+        assert_eq!(dolphin.args, "%rom%");
+        assert_eq!(dolphin.path, "");
     }
 
     #[test]
@@ -796,7 +862,7 @@ mod tests {
                 .default_emulators
                 .get("Nintendo 64")
                 .map(String::as_str),
-            Some("RetroArch")
+            Some("  RetroArch  ") // config.py:88 stores the value verbatim
         );
         assert_eq!(
             config
@@ -807,7 +873,7 @@ mod tests {
         );
         assert_eq!(
             config.retroarch_cores.get("n64").map(String::as_str),
-            Some("mupen64plus_next")
+            Some("mupen64plus_next") // ...while config.py:98 trims this one
         );
         assert!(!config.retroarch_cores.contains_key("empty"));
     }
@@ -857,11 +923,19 @@ mod tests {
     #[test]
     fn games_convert_and_blank_identity_rows_are_counted_as_skipped() {
         let (_, games, skipped) = planned();
-        assert_eq!(skipped, 2);
+        // Blank platform, blank title, and the row that is not an object at
+        // all (plan ruling 6). The `(title, platform)` duplicate is NOT here:
+        // nothing was lost when it was dropped.
+        assert_eq!(skipped, 3);
         let titles: Vec<&str> = games.iter().map(|g| g.title.as_str()).collect();
         assert_eq!(
             titles,
-            vec!["Chrono Trigger", "Portal 2", "Ratchet & Clank"]
+            vec![
+                "Chrono Trigger",
+                "Portal 2",
+                "Ratchet & Clank",
+                "Placeholder Pete"
+            ]
         );
 
         let ct = &games[0];
@@ -873,7 +947,7 @@ mod tests {
         assert_eq!(ct.rom_file_name, "Chrono Trigger.sfc");
         assert_eq!(ct.archive_path, "/games/SNES/Chrono Trigger.zip");
         assert_eq!(ct.description, "A time-travel RPG.");
-        assert_eq!(ct.rating, "9.5");
+        assert_eq!(ct.rating, "9.5"); // a real rating survives untouched
         assert_eq!(ct.genres, "RPG");
         assert_eq!(ct.regions, "USA");
         assert_eq!(ct.screenshot_urls, "https://img.example.test/a.png");
@@ -919,6 +993,9 @@ mod tests {
     /// into anything the importer writes.
     #[test]
     fn secrets_never_reach_the_imported_config() {
+        // Guards the fixture itself: if the placeholder splice ever stops
+        // matching, this test would otherwise pass while testing nothing.
+        assert!(python_config().contains(RA_TOKEN_KEY));
         let (config, games, _) = planned();
         let text = toml::to_string_pretty(&config).expect("the config serializes");
         for needle in [
@@ -942,6 +1019,44 @@ mod tests {
                 "{needle} leaked into a registry row"
             );
         }
+    }
+
+    /// Deviation D-IMP-1: the reference's display placeholders are blanked
+    /// on the way in, because the rewrite renders blank as "no rating" /
+    /// "no description" and would print an imported `"N/A"` verbatim.
+    #[test]
+    fn python_display_placeholders_become_blank() {
+        let (_, games, _) = planned();
+        let pete = games
+            .iter()
+            .find(|game| game.title == "Placeholder Pete")
+            .expect("the placeholder row imports");
+        assert_eq!(pete.rating, "");
+        assert_eq!(pete.description, "");
+        // The same row's non-string `rom_file_name` reads as blank.
+        assert_eq!(pete.rom_file_name, "");
+    }
+
+    #[test]
+    fn duplicate_title_and_platform_rows_collapse_to_the_first() {
+        let (_, games, _) = planned();
+        let chrono: Vec<&InstalledGame> = games
+            .iter()
+            .filter(|game| game.title.eq_ignore_ascii_case("chrono trigger"))
+            .collect();
+        assert_eq!(chrono.len(), 1);
+        // The kept row is the first one, cased as it was written, and it
+        // keeps its own rom id (config.py:185-188).
+        assert_eq!(chrono[0].title, "Chrono Trigger");
+        assert_eq!(chrono[0].platform, "SNES");
+        assert_eq!(chrono[0].rom_id, Some(4321));
+    }
+
+    #[test]
+    fn a_non_object_game_row_counts_as_skipped() {
+        let (_, games, skipped) = plan(r#"{"installed_games": ["nope", 5, null]}"#).unwrap();
+        assert!(games.is_empty());
+        assert_eq!(skipped, 3);
     }
 
     #[test]
