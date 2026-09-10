@@ -694,6 +694,10 @@ fn run_7z_extract(executable: &Path, archive: &Path, dest: &Path) -> Result<(), 
         .arg("-y")
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
+        // A system 7z must not inherit the AppImage's private library and
+        // runtime paths, for the same reason a game child does not.
+        .env_clear()
+        .envs(crate::launch::spawn::clean_env())
         .output()
         .map_err(|e| format!("failed to run {}: {e}", executable.display()))?;
 

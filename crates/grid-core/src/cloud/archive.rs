@@ -22,6 +22,7 @@ use std::process::{Command, Stdio};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
+use crate::launch::spawn::clean_env;
 use crate::library::extract::which_on_path;
 use crate::library::paths::sanitize_component;
 
@@ -658,7 +659,11 @@ fn run_system_7z_extract(archive: &Path, dest: &Path) -> Result<(), String> {
             .arg(format!("-o{}", dest.display()))
             .arg("-y")
             .stdout(Stdio::null())
-            .stderr(Stdio::piped());
+            .stderr(Stdio::piped())
+            // A system 7z must not inherit the AppImage's private library
+            // and runtime paths, for the same reason a game child does not.
+            .env_clear()
+            .envs(clean_env());
         // Mirrors `subprocess.CREATE_NO_WINDOW` in `cloud_transfer.py`'s
         // `_extract_zip_with_7z` (:159-160): suppresses the console window
         // a spawned Windows process would otherwise briefly flash open.
