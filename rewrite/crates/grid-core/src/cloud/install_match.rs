@@ -376,6 +376,7 @@ mod tests {
         assert!(matching_installed_emulator_games(&games, &dir, None).is_empty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn resolves_a_missing_path_through_a_symlinked_directory() {
         let root = TempDir::new().unwrap();

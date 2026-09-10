@@ -5,6 +5,10 @@ import { api } from '../api';
 import { importToastText } from '../pythonImport';
 import { pushToast } from './toasts.svelte';
 
+/** The notice is a one-time instruction to re-enter two tokens, so it stays
+ *  up far longer than a routine 4 s toast. */
+export const IMPORT_TOAST_DURATION_MS = 20000;
+
 let shown = false;
 
 /**
@@ -24,7 +28,7 @@ export async function initPythonImport(): Promise<void> {
   try {
     const report = await api.pythonImportNotice();
     if (report === null) return;
-    pushToast(importToastText(report));
+    pushToast(importToastText(report), 'success', IMPORT_TOAST_DURATION_MS);
   } catch {
     // A failed read is never surfaced: the import either happened or did
     // not, and the user finds their library either way.

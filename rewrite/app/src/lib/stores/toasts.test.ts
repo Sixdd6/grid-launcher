@@ -1,5 +1,14 @@
-import { describe, expect, it } from 'vitest';
-import { appendToast, removeToast, TOAST_LIMIT, type Toast } from './toasts.svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  appendToast,
+  dismissToast,
+  pushToast,
+  removeToast,
+  toasts,
+  TOAST_DURATION_MS,
+  TOAST_LIMIT,
+  type Toast,
+} from './toasts.svelte';
 
 const toast = (id: number, text: string): Toast => ({ id, text, level: 'success' });
 
@@ -42,5 +51,32 @@ describe('removeToast', () => {
   it('is a no-op for an unknown id', () => {
     const list = removeToast([toast(1, 'a')], 99);
     expect(list.map((t) => t.id)).toEqual([1]);
+  });
+});
+
+describe('pushToast duration', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    for (const t of [...toasts.list]) dismissToast(t.id);
+    vi.useRealTimers();
+  });
+
+  it('dismisses after TOAST_DURATION_MS by default', () => {
+    pushToast('routine');
+    vi.advanceTimersByTime(TOAST_DURATION_MS - 1);
+    expect(toasts.list.map((t) => t.text)).toEqual(['routine']);
+    vi.advanceTimersByTime(1);
+    expect(toasts.list).toEqual([]);
+  });
+
+  it('honours an explicit longer duration', () => {
+    pushToast('one-time upgrade notice', 'success', 20000);
+    vi.advanceTimersByTime(TOAST_DURATION_MS);
+    expect(toasts.list.map((t) => t.text)).toEqual(['one-time upgrade notice']);
+    vi.advanceTimersByTime(20000 - TOAST_DURATION_MS);
+    expect(toasts.list).toEqual([]);
   });
 });

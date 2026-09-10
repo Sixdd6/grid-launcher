@@ -2,6 +2,7 @@
   import { listen } from '@tauri-apps/api/event';
   import Connect from './lib/Connect.svelte';
   import Shell from './lib/Shell.svelte';
+  import Toast from './lib/Toast.svelte';
   import { session, restore } from './lib/stores/session.svelte';
   import { init as initDownloads } from './lib/stores/downloads.svelte';
   import { init as initSessions } from './lib/stores/sessions.svelte';
@@ -86,3 +87,9 @@
 {:else if session.phase === 'none'}
   <Connect />
 {/if}
+
+<!-- Outside the phase branch: the startup Python-import notice is pushed
+     before any session exists, and the user it was written for sees the
+     Connect form, not the shell. `position: fixed` global chrome, so it
+     needs no layout slot of its own. -->
+<Toast />

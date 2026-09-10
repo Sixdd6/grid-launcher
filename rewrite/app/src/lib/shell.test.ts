@@ -3,7 +3,12 @@ import { applyRestore, chipLabel, hostOf, initialView, viewForDigit, viewLabel }
 
 describe('applyRestore', () => {
   it('maps no_session to the connect screen', () => {
-    expect(applyRestore({ kind: 'no_session' }).phase).toBe('none');
+    expect(applyRestore({ kind: 'no_session', server_url: '', username: '' }).phase).toBe('none');
+  });
+  it('carries a no_session server url and username through for the connect form', () => {
+    expect(applyRestore({ kind: 'no_session', server_url: 'https://romm.example.test', username: 'importer' })).toEqual({
+      phase: 'none', connected: false, serverUrl: 'https://romm.example.test', username: 'importer', lastError: null,
+    });
   });
   it('maps connected to the shell, connected', () => {
     const s = applyRestore({ kind: 'connected', state: { connected: true, username: 'u', server_url: 'https://h:1' } });

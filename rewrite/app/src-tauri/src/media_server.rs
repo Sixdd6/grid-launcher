@@ -901,6 +901,7 @@ mod tests {
     /// read a file outside it: `symlink_metadata` does not follow the final
     /// component, so `is_file()` is false and the request is a plain 404.
     #[cfg(unix)]
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_symlink_inside_the_directory_is_not_followed() {
         let (dir, server, _bytes) = server().await;

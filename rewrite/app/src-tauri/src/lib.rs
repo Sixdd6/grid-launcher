@@ -8,6 +8,7 @@ mod images;
 mod logging;
 mod media_server;
 mod python_import;
+pub(crate) mod test_env;
 mod update_service;
 
 use commands::AppState;
@@ -89,10 +90,12 @@ pub fn run() {
     // config that did not exist yet, so an imported `debug_prints = false`
     // takes effect from the next start — not this one. Intended, not a bug.
     //
-    // Skipped in `e2e` builds: the harness runs on throwaway profiles and
-    // must never read a developer's real `~/.grid-launcher/config.json`.
+    // `GRID_LAUNCHER_PYTHON_CONFIG` redirects the source file (see
+    // `python_import::python_config_path`); the e2e harness sets it on every
+    // stage so a throwaway profile never reads a developer's real
+    // `~/.grid-launcher/config.json`.
     let python_import = match (&registry, python_import::python_config_path()) {
-        (Ok(registry), Some(python_config)) if !cfg!(feature = "e2e") => {
+        (Ok(registry), Some(python_config)) => {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)

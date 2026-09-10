@@ -2,8 +2,13 @@
   import { api } from './api';
   import { session, connect } from './stores/session.svelte';
   import { pickFolder } from './pickers';
-  let serverUrl = $state('');
-  let username = $state('');
+  // Seeded from the restored config (blank when there is none): a Python
+  // import carries `server_url`/`username` across without a credential, so
+  // the only thing left to type is the token. `libraryPath` stays blank —
+  // an imported path is already stored, and the submit below writes only a
+  // non-blank one.
+  let serverUrl = $state(session.serverUrl);
+  let username = $state(session.username);
   let secret = $state('');
   let useToken = $state(true);
   // `FirstRunDialog` asks for the library path alongside the server details

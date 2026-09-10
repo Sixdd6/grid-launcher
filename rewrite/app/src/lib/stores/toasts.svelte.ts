@@ -48,16 +48,22 @@ export const toasts = {
 };
 
 /**
- * Shows `text` for [`TOAST_DURATION_MS`]. Returns the new toast's id, or
- * `null` when the message was blank and nothing was shown.
+ * Shows `text` for `durationMs` (default [`TOAST_DURATION_MS`]). Returns the
+ * new toast's id, or `null` when the message was blank and nothing was
+ * shown. A one-time upgrade instruction passes a longer duration — four
+ * seconds is not enough to read "re-enter your tokens" and act on it.
  */
-export function pushToast(text: string, level: ToastLevel = 'success'): number | null {
+export function pushToast(
+  text: string,
+  level: ToastLevel = 'success',
+  durationMs: number = TOAST_DURATION_MS,
+): number | null {
   const trimmed = text.trim();
   if (trimmed === '') return null;
   nextId += 1;
   const id = nextId;
   state.list = appendToast(state.list, { id, text: trimmed, level });
-  setTimeout(() => dismissToast(id), TOAST_DURATION_MS);
+  setTimeout(() => dismissToast(id), durationMs);
   return id;
 }
 

@@ -16,7 +16,9 @@ export type ShellSession = {
 export function applyRestore(outcome: RestoreOutcome): ShellSession {
   switch (outcome.kind) {
     case 'no_session':
-      return { phase: 'none', connected: false, serverUrl: '', username: '', lastError: null };
+      // Carried through so `Connect` can prefill them: a config written by
+      // the Python importer holds a server and a username but no credential.
+      return { phase: 'none', connected: false, serverUrl: outcome.server_url, username: outcome.username, lastError: null };
     case 'connected':
       return { phase: 'shell', connected: true, serverUrl: outcome.state.server_url, username: outcome.state.username, lastError: null };
     case 'unreachable':

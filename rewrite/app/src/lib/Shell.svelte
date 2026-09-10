@@ -7,7 +7,6 @@
   import BackgroundArt from './BackgroundArt.svelte';
   import Icon from './Icon.svelte';
   import Settings from './Settings.svelte';
-  import Toast from './Toast.svelte';
   import { listen } from '@tauri-apps/api/event';
   import { api, CLOUD_UPLOAD_FINISHED_EVENT, type CloudUploadFinished } from './api';
   import { session, retry, disconnect } from './stores/session.svelte';
@@ -111,7 +110,8 @@
   // The only report an auto upload has: it runs after the game has exited,
   // with no command in flight and usually no popup open. Mounted here, not
   // in Details.svelte, because the Shell is mounted exactly once and is
-  // never `hidden` — the same reason `Toast.svelte` lives here.
+  // never `hidden`. (`Toast.svelte` itself hosts in `App.svelte`, above the
+  // phase branch, so the startup import notice shows in Connect too.)
   $effect(() => {
     const unlisten = listen<CloudUploadFinished>(CLOUD_UPLOAD_FINISHED_EVENT, (e) => {
       const { title, message, failed } = e.payload;
@@ -241,9 +241,6 @@
      other view. -->
 <DownloadsFooter onOpen={() => (view = 'downloads')} />
 
-<!-- Mounted here for the same reason as the footer strip: `position: fixed`
-     global chrome inside a `hidden` view root would vanish with that view. -->
-<Toast />
 
 <style>
   .topbar {

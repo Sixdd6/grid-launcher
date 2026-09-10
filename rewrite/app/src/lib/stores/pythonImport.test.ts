@@ -29,6 +29,28 @@ describe('initPythonImport', () => {
     ]);
   });
 
+  it('shows the notice for the long import duration, not the routine one', async () => {
+    const calls: unknown[][] = [];
+    vi.doMock('../api', () => ({
+      api: {
+        pythonImportNotice: () =>
+          Promise.resolve({ emulators: 1, games: 2, skipped_games: 0, retroachievements: false }),
+      },
+    }));
+    vi.doMock('./toasts.svelte', () => ({
+      pushToast: (...args: unknown[]) => calls.push(args),
+      TOAST_DURATION_MS: 4000,
+    }));
+
+    const { initPythonImport, IMPORT_TOAST_DURATION_MS } = await import('./pythonImport.svelte');
+    await initPythonImport();
+
+    expect(IMPORT_TOAST_DURATION_MS).toBe(20000);
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toBe('success');
+    expect(calls[0][2]).toBe(20000);
+  });
+
   it('pushes one toast when two callers race in the same tick', async () => {
     const shown: string[] = [];
     vi.doMock('../api', () => ({

@@ -17,7 +17,20 @@ use std::path::{Path, PathBuf};
 ///
 /// `GRID_LAUNCHER_DATA_DIR` deliberately does NOT apply: it redirects the
 /// Rust side's own state, and the Python app never read it.
+///
+/// `GRID_LAUNCHER_PYTHON_CONFIG` does: when set and non-empty, that path IS
+/// the Python config path, in every build. The e2e harness points it at a
+/// fixture (and, for every other stage, at a path that does not exist) so a
+/// throwaway profile never reads a developer's real `~/.grid-launcher`.
+/// Presence is still decided by [`should_import`], so a missing override
+/// path simply means "nothing to import".
 pub fn python_config_path() -> Option<PathBuf> {
+    if let Some(override_path) = std::env::var("GRID_LAUNCHER_PYTHON_CONFIG")
+        .ok()
+        .filter(|value| !value.is_empty())
+    {
+        return Some(PathBuf::from(override_path));
+    }
     grid_core::autoconfig::paths::home_dir()
         .map(|home| home.join(".grid-launcher").join("config.json"))
 }
@@ -145,6 +158,29 @@ mod tests {
 
     #[test]
     fn the_python_path_is_the_fixed_dot_directory() {
+        let _lock = crate::test_env::lock();
+        let _env = crate::test_env::EnvGuard::set(&[("GRID_LAUNCHER_PYTHON_CONFIG", None)]);
+        let path = python_config_path().expect("a home directory");
+        assert!(path.ends_with(".grid-launcher/config.json"));
+    }
+
+    #[test]
+    fn the_env_override_replaces_the_python_path() {
+        let _lock = crate::test_env::lock();
+        let _env = crate::test_env::EnvGuard::set(&[(
+            "GRID_LAUNCHER_PYTHON_CONFIG",
+            Some("/nonexistent/python-config.json"),
+        )]);
+        assert_eq!(
+            python_config_path(),
+            Some(PathBuf::from("/nonexistent/python-config.json"))
+        );
+    }
+
+    #[test]
+    fn an_empty_env_override_falls_back_to_the_dot_directory() {
+        let _lock = crate::test_env::lock();
+        let _env = crate::test_env::EnvGuard::set(&[("GRID_LAUNCHER_PYTHON_CONFIG", Some(""))]);
         let path = python_config_path().expect("a home directory");
         assert!(path.ends_with(".grid-launcher/config.json"));
     }

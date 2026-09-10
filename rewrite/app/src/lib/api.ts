@@ -5,7 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 // cosmetic renames.
 export type SessionState = { connected: boolean; username: string; server_url: string };
 export type RestoreOutcome =
-  | { kind: 'no_session' }
+  | { kind: 'no_session'; server_url: string; username: string }
   | { kind: 'connected'; state: SessionState }
   | { kind: 'unreachable'; server_url: string; username: string; error: string };
 export type Platform = {

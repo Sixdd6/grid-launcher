@@ -1,5 +1,6 @@
 <script lang="ts">
-  // The single toast surface, mounted once by Shell.svelte. Bottom-centred
+  // The single toast surface, mounted once by App.svelte (above the phase
+  // branch, so the startup import notice shows on Connect too). Bottom-centred
   // above the download strip, exactly where `ToastWidget._reposition`
   // (toast.py:90-95) puts Python's: horizontally centred, 24px above the
   // bottom edge. Pointer-events are off, matching

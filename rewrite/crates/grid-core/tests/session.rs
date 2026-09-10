@@ -135,10 +135,44 @@ async fn restore_reports_no_session_without_stored_server() {
         dir.path().join("covers"),
         Arc::new(MemoryStore::default()),
     );
-    assert!(matches!(
-        mgr.restore().await.unwrap(),
-        RestoreOutcome::NoSession
-    ));
+    let RestoreOutcome::NoSession {
+        server_url,
+        username,
+    } = mgr.restore().await.unwrap()
+    else {
+        panic!("expected NoSession")
+    };
+    assert_eq!(server_url, "");
+    assert_eq!(username, "");
+}
+
+/// A Python import writes `server_url`/`username` into config.toml but no
+/// credential, so restore is `NoSession` — and must hand both fields back
+/// for the Connect form to prefill.
+#[tokio::test]
+async fn restore_reports_no_session_with_the_stored_server_when_no_credential_is_stored() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config.toml");
+    let cfg = grid_core::config::Config {
+        server_url: "https://romm.example.test".into(),
+        username: "importer".into(),
+        ..Default::default()
+    };
+    cfg.save(&config_path).unwrap();
+    let mgr = SessionManager::new(
+        config_path,
+        dir.path().join("covers"),
+        Arc::new(MemoryStore::default()),
+    );
+    let RestoreOutcome::NoSession {
+        server_url,
+        username,
+    } = mgr.restore().await.unwrap()
+    else {
+        panic!("expected NoSession")
+    };
+    assert_eq!(server_url, "https://romm.example.test");
+    assert_eq!(username, "importer");
 }
 
 #[tokio::test]

@@ -31,10 +31,18 @@ pub struct SessionState {
 /// The three-way outcome of [`SessionManager::restore`] (spec "App layer"):
 /// no stored session, a live reconnect, or a stored session whose server the
 /// probe could not reach.
+///
+/// `NoSession` still carries whatever the config holds so the Connect form
+/// can prefill them — the Python importer writes `server_url`/`username`
+/// but no credential, and that user must retype nothing but their token.
+/// Both are blank when there is no config at all.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RestoreOutcome {
-    NoSession,
+    NoSession {
+        server_url: String,
+        username: String,
+    },
     Connected {
         state: SessionState,
     },
@@ -142,10 +150,16 @@ impl SessionManager {
     pub async fn restore(&self) -> Result<RestoreOutcome, SessionError> {
         let cfg = Config::load(&self.config_path)?;
         if cfg.server_url.is_empty() {
-            return Ok(RestoreOutcome::NoSession);
+            return Ok(RestoreOutcome::NoSession {
+                server_url: String::new(),
+                username: cfg.username,
+            });
         }
         let Some(cred) = self.secrets.load()? else {
-            return Ok(RestoreOutcome::NoSession);
+            return Ok(RestoreOutcome::NoSession {
+                server_url: strip_userinfo(&cfg.server_url),
+                username: cfg.username,
+            });
         };
         // A config written by an older build may still carry userinfo.
         let server_url = strip_userinfo(&cfg.server_url);
