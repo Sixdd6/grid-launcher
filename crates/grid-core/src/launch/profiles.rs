@@ -677,6 +677,23 @@ mod tests {
     }
 
     #[test]
+    fn embedded_kyty_profile_launches_fullscreen_and_names_the_ps5_platform() {
+        let profile = load_profiles()
+            .iter()
+            .find(|p| p.name == "KytyPS5 (Playstation 5)")
+            .expect("the catalog ships a KytyPS5 profile");
+        assert_eq!(profile.args, "--fullscreen --game \"%rom%\"");
+        assert!(platform_matches_keywords(
+            "Sony PlayStation 5",
+            &profile.platform_keywords
+        ));
+        assert!(!platform_matches_keywords(
+            "PlayStation 4",
+            &profile.platform_keywords
+        ));
+    }
+
+    #[test]
     fn embedded_json_has_at_least_one_compat_tool() {
         let profiles = load_profiles();
         assert!(profiles.iter().any(|p| p.is_compat_tool));
@@ -728,6 +745,16 @@ mod tests {
         assert_eq!(
             found.map(|p| p.name.as_str()),
             Some("RetroArch (Multi-System)")
+        );
+    }
+
+    #[test]
+    fn kyty_emulator_basename_resolves_to_the_kyty_profile() {
+        let profiles = load_profiles();
+        let found = profile_for_entry("", "/x/kyty_emulator", profiles);
+        assert_eq!(
+            found.map(|p| p.name.as_str()),
+            Some("KytyPS5 (Playstation 5)")
         );
     }
 

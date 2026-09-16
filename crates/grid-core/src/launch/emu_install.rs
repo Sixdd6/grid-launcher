@@ -11,7 +11,10 @@
 //!
 //! Parity note: several catalog `source` blocks carry a `launch_executable`
 //! key. The Python reference never reads it — executable choice is only the
-//! scoring ported here — so this module never reads it either.
+//! scoring ported here — so this module never reads it either. The
+//! preferred-name rules in [`select_executable`] for KytyPS5 and ShadPS4 are
+//! GRID additions, not parity: the reference only had the Eden and Azahar
+//! ones.
 
 use std::collections::HashSet;
 use std::fs;
@@ -307,6 +310,16 @@ pub fn select_executable(title: &str, install_dir: &Path, archive: &Path) -> Opt
     if title_casefold.contains("nintendo 3ds") || title_casefold.contains("3ds") {
         preferred_names.insert("azahar.exe");
     }
+    if title_casefold.contains("kyty") {
+        // KytyPS5 ships `launcher` next to the emulator; without this the
+        // pick would rest on the casefolded-path tie-break.
+        preferred_names.insert("kyty_emulator");
+        preferred_names.insert("kyty_emulator.exe");
+    }
+    if title_casefold.contains("shadps4") && !title_casefold.contains("launcher") {
+        preferred_names.insert("shadps4.exe");
+        preferred_names.insert("shadps4-sdl.appimage");
+    }
 
     if install_dir.is_dir() {
         let mut candidates = Vec::new();
@@ -511,6 +524,109 @@ mod tests {
         )
         .unwrap();
         assert_eq!(picked, install_dir.join("eden.exe"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn select_executable_prefers_kyty_emulator_over_the_bundled_launcher() {
+        let dir = tempfile::tempdir().unwrap();
+        let install_dir = dir.path().join("install");
+        touch_with_mode(&install_dir.join("kyty_emulator"), 0o755);
+        touch_with_mode(&install_dir.join("launcher"), 0o755);
+
+        let picked = select_executable(
+            "KytyPS5 (Playstation 5)",
+            &install_dir,
+            &dir.path().join("archive.gz"),
+        )
+        .unwrap();
+        assert_eq!(picked, install_dir.join("kyty_emulator"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn select_executable_prefers_kyty_emulator_even_when_a_decoy_sorts_first() {
+        // Without the preferred name, the casefolded-path tie-break would
+        // pick `aaa_launcher`: both files are bare executables, equally
+        // deep, with no token hit.
+        let dir = tempfile::tempdir().unwrap();
+        let install_dir = dir.path().join("install");
+        touch_with_mode(&install_dir.join("kyty_emulator"), 0o755);
+        touch_with_mode(&install_dir.join("aaa_launcher"), 0o755);
+
+        let picked = select_executable(
+            "KytyPS5 (Playstation 5)",
+            &install_dir,
+            &dir.path().join("archive.gz"),
+        )
+        .unwrap();
+        assert_eq!(picked, install_dir.join("kyty_emulator"));
+    }
+
+    #[test]
+    fn select_executable_prefers_kyty_emulator_exe_over_launcher_exe() {
+        let dir = tempfile::tempdir().unwrap();
+        let install_dir = dir.path().join("install");
+        touch(&install_dir.join("kyty_emulator.exe"));
+        touch(&install_dir.join("launcher.exe"));
+
+        let picked = select_executable(
+            "KytyPS5 (Playstation 5)",
+            &install_dir,
+            &dir.path().join("archive.zip"),
+        )
+        .unwrap();
+        assert_eq!(picked, install_dir.join("kyty_emulator.exe"));
+    }
+
+    #[test]
+    fn select_executable_prefers_shadps4_exe_for_the_shadps4_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let install_dir = dir.path().join("install");
+        touch(&install_dir.join("shadps4.exe"));
+        // Two token hits ("shadps4", "playstation") against shadps4.exe's
+        // one: only the preferred name keeps the real emulator on top.
+        touch(&install_dir.join("shadps4-playstation-updater.exe"));
+
+        let picked = select_executable(
+            "ShadPS4 (Playstation 4)",
+            &install_dir,
+            &dir.path().join("archive.zip"),
+        )
+        .unwrap();
+        assert_eq!(picked, install_dir.join("shadps4.exe"));
+    }
+
+    #[test]
+    fn select_executable_prefers_the_shadps4_sdl_appimage_case_insensitively() {
+        let dir = tempfile::tempdir().unwrap();
+        let install_dir = dir.path().join("install");
+        touch(&install_dir.join("Shadps4-sdl.AppImage"));
+        touch(&install_dir.join("shadps4-playstation-tools.sh"));
+
+        let picked = select_executable(
+            "ShadPS4 (Playstation 4)",
+            &install_dir,
+            &dir.path().join("archive.zip"),
+        )
+        .unwrap();
+        assert_eq!(picked, install_dir.join("Shadps4-sdl.AppImage"));
+    }
+
+    #[test]
+    fn select_executable_does_not_apply_the_shadps4_names_to_the_qt_launcher_title() {
+        let dir = tempfile::tempdir().unwrap();
+        let install_dir = dir.path().join("install");
+        touch(&install_dir.join("shadPS4QtLauncher.exe"));
+        touch(&install_dir.join("shadps4.exe"));
+
+        let picked = select_executable(
+            "ShadPS4 Qt Launcher",
+            &install_dir,
+            &dir.path().join("archive.zip"),
+        )
+        .unwrap();
+        assert_eq!(picked, install_dir.join("shadPS4QtLauncher.exe"));
     }
 
     #[test]

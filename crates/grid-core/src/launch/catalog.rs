@@ -347,6 +347,10 @@ mod tests {
         let pcsx2 = by_name("PCSX2 (Playstation 2)");
         assert_eq!(pcsx2.provider, "github");
         assert_eq!(pcsx2.source_id, "PCSX2/pcsx2");
+
+        let kyty = by_name("KytyPS5 (Playstation 5)");
+        assert_eq!(kyty.provider, "github");
+        assert_eq!(kyty.source_id, "KytyPS5/KytyPS5");
     }
 
     #[test]

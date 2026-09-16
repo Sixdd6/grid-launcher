@@ -36,6 +36,10 @@ const NOTES: readonly EmulatorNote[] = [
     text: 'RetroAchievements: Configure login via Emulator Settings → Achievements (tokens are machine-encrypted)',
   },
   { key: 'rpcs3', text: 'Controller setup: Configure controllers via Config → Pads' },
+  {
+    key: 'kyty',
+    text: 'Requires a Vulkan 1.3 GPU  ·  Early emulator — expect limited game compatibility',
+  },
 ];
 
 export function emulatorNotes(name: string): EmulatorNote[] {

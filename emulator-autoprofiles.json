@@ -271,6 +271,32 @@
     "state_directories": []
   },
   {
+    "match_tokens": ["kyty_emulator.exe", "kyty_emulator"],
+    "source": {
+      "provider": "github-release",
+      "owner": "KytyPS5",
+      "repo": "KytyPS5",
+      "release_tag": "latest",
+      "asset_patterns": ["KytyPS5-*-Windows-x64.zip"],
+      "platform_overrides": {
+        "linux": {
+          "asset_patterns": ["KytyPS5-*-Linux-x86_64.tar.gz"]
+        },
+        "darwin": {
+          "asset_patterns": ["KytyPS5-*-macOS-x86_64.zip"]
+        }
+      }
+    },
+    "name": "KytyPS5 (Playstation 5)",
+    "args": "--fullscreen --game \"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["playstation 5", "ps5"],
+    "use_game_title_as_name": false,
+    "save_strategy": "folder",
+    "save_directories": ["_SaveData"],
+    "state_directories": []
+  },
+  {
     "match_tokens": ["cemu.exe", "Cemu-*-x86_64.AppImage", "cemu*.appimage"],
     "source": {
       "provider": "github-release",

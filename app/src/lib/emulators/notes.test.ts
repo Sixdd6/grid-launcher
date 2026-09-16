@@ -41,6 +41,15 @@ describe('emulatorNotes', () => {
     ]);
   });
 
+  it('returns the KytyPS5 note verbatim', () => {
+    expect(emulatorNotes('KytyPS5 (Playstation 5)')).toEqual([
+      {
+        key: 'kyty',
+        text: 'Requires a Vulkan 1.3 GPU  ·  Early emulator — expect limited game compatibility',
+      },
+    ]);
+  });
+
   it('matches case-insensitively anywhere in the name, like the reference token test', () => {
     expect(emulatorNotes('My DuckStation build').map((n) => n.key)).toEqual(['duckstation']);
     expect(emulatorNotes('  rpcs3-nightly  ').map((n) => n.key)).toEqual(['rpcs3']);

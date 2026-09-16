@@ -59,7 +59,9 @@ use paths::{
     archive_name, candidate_archives, candidate_extracted_dirs, extraction_dir, platform_dir,
     sanitize_component,
 };
-use platforms::{is_native_platform, is_ps3_platform, is_ps4_platform, is_xbox360_platform};
+use platforms::{
+    is_native_platform, is_ps3_platform, is_ps4_platform, is_ps5_platform, is_xbox360_platform,
+};
 use queue::{Admission, CancelAction, DownloadStatus, DownloadsSnapshot, JobKey, QueueState};
 use registry::{installed_match, InstalledGame, Registry};
 use specials::ps3::Ps3Roots;
@@ -482,6 +484,42 @@ fn plan_native_install(
         game_json_target,
         client,
     })
+}
+
+/// Which finalize path a `Base`/`Update` job takes once the multi-file case
+/// (which depends on the job, not the platform) has been ruled out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BaseRoute {
+    /// A Windows/Linux game: [`InstallService::finalize_native_base`].
+    Native,
+    /// A PS3 install routed into RPCS3's VFS.
+    Ps3,
+    /// Extract, then rank `eboot.bin` first. `ps4` also records the title id
+    /// the PS4 content flow needs; PS5 never does, so a PS5 row can never
+    /// offer update/DLC content (see [`content_mode`]).
+    Eboot { ps4: bool },
+    /// Extract and pick the launch file by the generic ranking.
+    Extract,
+    /// Nothing to extract: the downloaded file is the install.
+    Downloaded,
+}
+
+/// [`BaseRoute`] for `platform` and the downloaded `archive`. Pure, so the
+/// routing decision is testable without a filesystem.
+fn base_finalize_route(platform: &str, archive: &Path) -> BaseRoute {
+    if is_native_platform(platform) {
+        BaseRoute::Native
+    } else if is_ps3_platform(platform) {
+        BaseRoute::Ps3
+    } else if is_ps4_platform(platform) && should_extract(platform, archive) {
+        BaseRoute::Eboot { ps4: true }
+    } else if is_ps5_platform(platform) && should_extract(platform, archive) {
+        BaseRoute::Eboot { ps4: false }
+    } else if should_extract(platform, archive) {
+        BaseRoute::Extract
+    } else {
+        BaseRoute::Downloaded
+    }
 }
 
 /// The install mode an update/DLC job for `platform` runs in, or `None`
@@ -1553,31 +1591,43 @@ impl InstallService {
             record.multi_file_game_dir = path_string(game_dir);
             record.extracted_path = path_string(&job.primary_archive);
             archive_to_delete = None;
-        } else if is_native_platform(platform) {
-            archive_to_delete = self.finalize_native_base(id, job, &mut record)?;
-        } else if is_ps3_platform(platform) {
-            archive_to_delete = self.finalize_ps3_base(id, job, &mut record)?;
-        } else if is_ps4_platform(platform) && should_extract(platform, archive) {
-            archive_to_delete = self.finalize_ps4_base(id, job, &mut record)?;
-        } else if should_extract(platform, archive) {
-            let dest = extraction_dir(archive);
-            let mut progress = |processed, total| self.on_install_progress(id, processed, total);
-            extract_archive(archive, &dest, &mut progress)?;
-            let Some(launch) = select_launch_file(&dest, &archive_stem(archive)) else {
-                let _ = fs::remove_dir_all(&dest);
-                return Err(LibraryError::NoLaunchFile);
-            };
-            make_executable(&launch);
-            record.extracted_path = path_string(&launch);
-            record.extracted_dir = path_string(&dest);
-            archive_to_delete = Some(archive);
         } else {
-            // Nothing to extract: the downloaded file is the install.
-            if is_appimage(archive) {
-                make_executable(archive);
+            match base_finalize_route(platform, archive) {
+                BaseRoute::Native => {
+                    archive_to_delete = self.finalize_native_base(id, job, &mut record)?;
+                }
+                BaseRoute::Ps3 => {
+                    archive_to_delete = self.finalize_ps3_base(id, job, &mut record)?;
+                }
+                BaseRoute::Eboot { ps4: true } => {
+                    archive_to_delete = self.finalize_ps4_base(id, job, &mut record)?;
+                }
+                BaseRoute::Eboot { ps4: false } => {
+                    archive_to_delete = self.finalize_ps5_base(id, job, &mut record)?;
+                }
+                BaseRoute::Extract => {
+                    let dest = extraction_dir(archive);
+                    let mut progress =
+                        |processed, total| self.on_install_progress(id, processed, total);
+                    extract_archive(archive, &dest, &mut progress)?;
+                    let Some(launch) = select_launch_file(&dest, &archive_stem(archive)) else {
+                        let _ = fs::remove_dir_all(&dest);
+                        return Err(LibraryError::NoLaunchFile);
+                    };
+                    make_executable(&launch);
+                    record.extracted_path = path_string(&launch);
+                    record.extracted_dir = path_string(&dest);
+                    archive_to_delete = Some(archive);
+                }
+                BaseRoute::Downloaded => {
+                    // Nothing to extract: the downloaded file is the install.
+                    if is_appimage(archive) {
+                        make_executable(archive);
+                    }
+                    record.archive_path = path_string(archive);
+                    archive_to_delete = None;
+                }
             }
-            record.archive_path = path_string(archive);
-            archive_to_delete = None;
         }
 
         self.registry.upsert(&record)?;
@@ -1991,6 +2041,38 @@ impl InstallService {
         record: &mut InstalledGame,
     ) -> Result<Option<&'a Path>, LibraryError> {
         let archive = job.primary_archive.as_path();
+        let (dest, launch) = self.finalize_eboot_base(id, job, record)?;
+        record.ps4_game_id = specials::ps4::detect_title_id(&dest, &launch, archive);
+        Ok(Some(archive))
+    }
+
+    /// A PS5 base install: the same extract-and-rank as PS4, with no title
+    /// id. `ps4_game_id` stays blank on purpose — [`content_mode`] has no
+    /// PS5 arm, so a PS5 row never enters update/DLC content mode and
+    /// nothing would read the id.
+    fn finalize_ps5_base<'a>(
+        &self,
+        id: u64,
+        job: &'a InstallJob,
+        record: &mut InstalledGame,
+    ) -> Result<Option<&'a Path>, LibraryError> {
+        self.finalize_eboot_base(id, job, record)?;
+        Ok(Some(job.primary_archive.as_path()))
+    }
+
+    /// The body PS4 and PS5 base installs share: extract the archive, pick
+    /// the launch file with the `eboot.bin`-first ranking (falling back to
+    /// the generic one), mark it executable and fill `record`'s
+    /// `extracted_path`/`extracted_dir`. Returns `(extraction dir, launch
+    /// file)` for the PS4 caller's title-id detection. On no launch file the
+    /// extraction is removed and `NoLaunchFile` is returned.
+    fn finalize_eboot_base(
+        &self,
+        id: u64,
+        job: &InstallJob,
+        record: &mut InstalledGame,
+    ) -> Result<(PathBuf, PathBuf), LibraryError> {
+        let archive = job.primary_archive.as_path();
         let dest = extraction_dir(archive);
         let mut progress = |processed, total| self.on_install_progress(id, processed, total);
         extract_archive(archive, &dest, &mut progress)?;
@@ -2006,8 +2088,7 @@ impl InstallService {
         make_executable(&launch);
         record.extracted_path = path_string(&launch);
         record.extracted_dir = path_string(&dest);
-        record.ps4_game_id = specials::ps4::detect_title_id(&dest, &launch, archive);
-        Ok(Some(archive))
+        Ok((dest, launch))
     }
 
     /// The RPCS3 VFS roots a PS3 install for `platform` routes into.
@@ -3494,6 +3575,25 @@ mod tests {
         );
         assert_eq!(content_mode("SNES"), None);
         assert_eq!(content_mode(""), None);
+    }
+
+    #[test]
+    fn base_route_sends_ps5_through_the_eboot_branch_without_a_title_id() {
+        assert_eq!(
+            base_finalize_route("PlayStation 5", Path::new("game.zip")),
+            BaseRoute::Eboot { ps4: false }
+        );
+        assert_eq!(
+            base_finalize_route("PlayStation 4", Path::new("game.zip")),
+            BaseRoute::Eboot { ps4: true }
+        );
+        // Nothing to extract: the download itself is the install.
+        assert_eq!(
+            base_finalize_route("PlayStation 5", Path::new("game.bin")),
+            BaseRoute::Downloaded
+        );
+        // A PS5 row never offers update/DLC content.
+        assert_eq!(content_mode("PlayStation 5"), None);
     }
 
     #[test]

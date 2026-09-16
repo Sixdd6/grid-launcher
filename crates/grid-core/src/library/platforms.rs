@@ -62,6 +62,23 @@ pub fn is_ps4_platform(platform: &str) -> bool {
     compact.contains("playstation4")
 }
 
+/// Whether `platform` names a PlayStation 5, matching "playstation 5", "ps5"
+/// (as a whole token), or a compact "playstation5" run — the same rule as
+/// [`is_ps4_platform`].
+pub fn is_ps5_platform(platform: &str) -> bool {
+    let (normalized, compact, tokens) = normalized_tokens(platform);
+    if normalized.is_empty() {
+        return false;
+    }
+    if normalized == "playstation 5" || normalized == "ps5" {
+        return true;
+    }
+    if tokens.iter().any(|t| t == "ps5") {
+        return true;
+    }
+    compact.contains("playstation5")
+}
+
 /// Whether `platform` names an Xbox 360: it must mention "xbox" (as a token
 /// or within a compact "xbox360" run) and separately carry a "360" marker.
 pub fn is_xbox360_platform(platform: &str) -> bool {
@@ -118,6 +135,17 @@ mod tests {
         assert!(is_ps4_platform("PlayStation4"));
         assert!(!is_ps4_platform("PlayStation 3"));
         assert!(!is_ps4_platform(""));
+    }
+
+    #[test]
+    fn ps5_platform_matches_common_spellings() {
+        assert!(is_ps5_platform("PlayStation 5"));
+        assert!(is_ps5_platform("Sony PS5"));
+        assert!(is_ps5_platform("PlayStation5"));
+        assert!(is_ps5_platform("PS5 Pro"));
+        assert!(!is_ps5_platform("PlayStation 4"));
+        assert!(!is_ps5_platform("PS4"));
+        assert!(!is_ps5_platform(""));
     }
 
     #[test]

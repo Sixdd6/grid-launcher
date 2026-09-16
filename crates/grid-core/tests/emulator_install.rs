@@ -684,6 +684,48 @@ async fn a_bare_executable_bit_member_is_selected_as_the_emulator() {
     assert_eq!(harness.config().emulators[0].path, exe.to_string_lossy());
 }
 
+/// A KytyPS5-shaped tar.gz: two bare executables at the top level, one of
+/// them the emulator and one the bundled launcher. The install must pick
+/// `kyty_emulator` (the preferred name), keep its executable bit, and cope
+/// with the `.gz` archive name the naming rule produces for a `.tar.gz`
+/// asset.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_kyty_shaped_tar_gz_selects_kyty_emulator_over_launcher() {
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_tar_gz(
+        &staging.path().join("kyty.tar.gz"),
+        &[
+            ("kyty_emulator", b"#!/bin/sh\n" as &[u8], 0o755),
+            ("launcher", b"#!/bin/sh\n", 0o755),
+            ("lib/libQt6Core.so.6", b"elf", 0o755),
+            ("qt.conf", b"[Paths]\n", 0o644),
+        ],
+    );
+
+    let harness =
+        Harness::new(|uri| vec![profile("KytyPS5 (Playstation 5)", gitea_source(uri))]).await;
+    harness
+        .mount_widget("KytyPS5-2026-09-01-abc-Linux-x86_64.tar.gz", bytes, 0)
+        .await;
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let exe = harness
+        .install_dir("KytyPS5 (Playstation 5)-v1.0")
+        .join("kyty_emulator");
+    assert!(exe.is_file(), "extracted tree missing: {}", exe.display());
+    assert_eq!(mode_of(&exe), 0o755);
+    assert_eq!(harness.config().emulators[0].path, exe.to_string_lossy());
+}
+
 /// A zip whose only launchable member is a bare, executable-bit binary —
 /// the zip counterpart of the tar.gz test above. The install must select
 /// it, which also proves the zip extractor keeps the stored Unix
