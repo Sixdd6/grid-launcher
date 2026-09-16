@@ -168,8 +168,8 @@ the config at an existing legacy library sets it to 0 so the migration runs on n
 - Emulators view rows show the new install path from config; no component changes.
 - One startup notice component for a failed migration (reuse the existing self-update
   notice pattern).
-- The delete confirm keeps its two-click flow; the button label becomes
-  "Confirm delete (keeps saves)".
+- The delete confirm keeps its two-click flow and its label. Saves surviving a delete is a
+  silent given, not something the UI announces.
 
 ## Testing
 
