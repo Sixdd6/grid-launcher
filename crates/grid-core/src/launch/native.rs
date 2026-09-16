@@ -198,6 +198,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn executable_resolution_falls_back_to_the_legacy_platform_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        // Only the legacy (pre-v1) `<library>/<Platform>/` archive and
+        // executable exist — no `games/` directory, no extracted_dir/path
+        // recorded, so install_dir must fall back to candidate_archives'
+        // legacy entry.
+        let legacy_dir = dir.path().join("Windows");
+        fs::create_dir_all(&legacy_dir).unwrap();
+        fs::write(legacy_dir.join("Legacy Game.zip"), b"archive bytes").unwrap();
+        let exe = legacy_dir.join("Legacy Game.exe");
+        fs::write(&exe, b"exe bytes").unwrap();
+
+        let g = InstalledGame {
+            title: "Legacy Game".to_string(),
+            platform: "Windows".to_string(),
+            rom_file_name: "Legacy Game.zip".to_string(),
+            ..Default::default()
+        };
+
+        let result = build_native_command(&g, dir.path(), "", "linux", &no_which).unwrap();
+        assert_eq!(result.argv[0], exe.to_string_lossy());
+        assert_eq!(result.cwd, legacy_dir);
+    }
+
     // --- plain (no compat tool) -------------------------------------------
 
     #[test]

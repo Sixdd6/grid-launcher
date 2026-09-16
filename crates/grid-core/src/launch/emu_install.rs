@@ -20,7 +20,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::library::extract::extract_archive;
-use crate::library::paths::sanitize_component;
+use crate::library::paths::{sanitize_component, EMULATORS_DIR};
 
 /// `_extract_emulator_archive`'s message when extraction finished but no
 /// launchable file turned up (emulator_ui_mixin.py:1394). Verbatim — the
@@ -28,18 +28,19 @@ use crate::library::paths::sanitize_component;
 pub const NO_LAUNCHABLE_AFTER_EXTRACT: &str = "Archive extraction finished, but no launchable \
      executable was detected. Open Config to set the executable path manually.";
 
-/// `<library>/Emulators/<sanitize_component(archive_stem, "emulator")>`
-/// (`emulator_install_directory`, autoconfig.py:14-17).
-pub fn emulator_install_dir(library: &Path, archive_stem: &str) -> PathBuf {
+/// `<library>/emulators/<sanitize_component(name, "emulator")>` — no release
+/// tag in the directory name (v1 library layout; `emulator_install_directory`,
+/// autoconfig.py:14-17, predates the tag being dropped).
+pub fn emulator_install_dir(library: &Path, name: &str) -> PathBuf {
     library
-        .join("Emulators")
-        .join(sanitize_component(archive_stem, "emulator"))
+        .join(EMULATORS_DIR)
+        .join(sanitize_component(name, "emulator"))
 }
 
 /// `<root>/<sanitize_component(archive_stem, "compat-tool")>` — the managed
 /// compat-tool counterpart of [`emulator_install_dir`]. `root` is the compat
 /// tools managed root ([`super::compat::managed_root`]), so, unlike
-/// `emulator_install_dir`, there is no `Emulators` subdirectory to join.
+/// `emulator_install_dir`, there is no `emulators` subdirectory to join.
 pub fn compat_tool_install_dir(root: &Path, archive_stem: &str) -> PathBuf {
     root.join(sanitize_component(archive_stem, "compat-tool"))
 }
@@ -364,13 +365,13 @@ mod tests {
     #[test]
     fn install_dir_joins_library_emulators_and_sanitized_stem() {
         let dir = emulator_install_dir(Path::new("/lib"), "PCSX2");
-        assert_eq!(dir, Path::new("/lib/Emulators/PCSX2"));
+        assert_eq!(dir, Path::new("/lib/emulators/PCSX2"));
     }
 
     #[test]
     fn install_dir_sanitizes_illegal_characters() {
         let dir = emulator_install_dir(Path::new("/lib"), "Emu: <bad>*chars");
-        assert_eq!(dir, Path::new("/lib/Emulators/Emu_ _bad__chars"));
+        assert_eq!(dir, Path::new("/lib/emulators/Emu_ _bad__chars"));
     }
 
     // --- compat_tool_install_dir -----------------------------------------
@@ -429,7 +430,7 @@ mod tests {
 
     #[test]
     fn supplemental_file_name_naming_table() {
-        let primary = Path::new("/lib/Emulators/PCSX2/PCSX2-v2.1.0.zip");
+        let primary = Path::new("/lib/emulators/PCSX2/PCSX2-v2.1.0.zip");
         let cases: &[(usize, &str, &str)] = &[
             // AppImage form: primary stem + asset name verbatim.
             (
@@ -453,7 +454,7 @@ mod tests {
 
     #[test]
     fn supplemental_file_name_falls_back_to_zip_when_neither_has_a_suffix() {
-        let primary = Path::new("/lib/Emulators/PCSX2/PCSX2-nosuffix");
+        let primary = Path::new("/lib/emulators/PCSX2/PCSX2-nosuffix");
         assert_eq!(
             supplemental_file_name(primary, 1, "nosuffix"),
             "PCSX2-nosuffix-supplemental-1.zip"
@@ -850,7 +851,7 @@ mod tests {
         let executable = install_manual_archive(&library, "My Emu", &archive).unwrap();
 
         // The ENTRY name names the directory, not the archive stem.
-        assert_eq!(executable, library.join("Emulators/My Emu/bin/emu.sh"));
+        assert_eq!(executable, library.join("emulators/My Emu/bin/emu.sh"));
         assert_eq!(mode_of(&executable) & 0o111, 0o111);
     }
 
@@ -864,7 +865,7 @@ mod tests {
 
         let executable = install_manual_archive(&library, "Tarred", &archive).unwrap();
 
-        assert_eq!(executable, library.join("Emulators/Tarred/emu.sh"));
+        assert_eq!(executable, library.join("emulators/Tarred/emu.sh"));
         assert_eq!(mode_of(&executable) & 0o111, 0o111);
     }
 

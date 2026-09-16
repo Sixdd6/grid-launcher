@@ -258,7 +258,17 @@ impl Harness {
     }
 
     fn install_dir(&self, name: &str) -> PathBuf {
-        self.library.join("Emulators").join(name)
+        self.library.join("emulators").join(name)
+    }
+
+    /// The directory names directly under `<library>/emulators`, in
+    /// filesystem order — used to assert a directory-per-resolved-tag never
+    /// appears alongside the one stable, tag-less install directory.
+    fn emulator_dir_names(&self) -> Vec<String> {
+        fs::read_dir(self.library.join("emulators"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect()
     }
 
     /// Fails when any request the mock forge received carried an
@@ -338,7 +348,7 @@ async fn zip_install_extracts_writes_config_entry_and_deletes_the_archive() {
     assert_eq!(entry.title, "Test Emu");
     assert_eq!(entry.platform, "Emulator");
 
-    let install_dir = harness.install_dir("Test Emu-v1.0");
+    let install_dir = harness.install_dir("Test Emu");
     let exe = install_dir.join("bin/testemu.sh");
     assert!(exe.is_file(), "extracted tree missing: {}", exe.display());
     assert!(install_dir.join("data/readme.txt").is_file());
@@ -395,7 +405,7 @@ async fn removing_an_installed_emulator_deletes_its_install_directory() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let install_dir = harness.install_dir("Test Emu-v1.0");
+    let install_dir = harness.install_dir("Test Emu");
     assert!(install_dir.is_dir());
 
     let config = harness.config();
@@ -474,7 +484,7 @@ async fn a_resolution_failure_fails_the_row_with_the_source_error_and_writes_not
         "Unsupported source provider 'carrier-pigeon'. Supported providers: github, gitea, direct."
     );
     assert!(
-        !harness.library.join("Emulators").exists(),
+        !harness.library.join("emulators").exists(),
         "nothing should be written when resolution fails"
     );
     assert!(harness.config().emulators.is_empty());
@@ -535,7 +545,7 @@ async fn a_supplemental_archive_merges_over_the_primary_and_is_deleted() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let install_dir = harness.install_dir("Test Emu-v1.0");
+    let install_dir = harness.install_dir("Test Emu");
     assert_eq!(
         fs::read(install_dir.join("bin/testemu.sh")).unwrap(),
         b"SUPPLEMENTAL",
@@ -586,7 +596,7 @@ async fn a_failed_supplemental_download_fails_the_row_and_keeps_the_primary_arch
 
     assert_eq!(entry.status, DownloadStatus::Failed);
     assert!(!entry.error.is_empty());
-    let install_dir = harness.install_dir("Test Emu-v1.0");
+    let install_dir = harness.install_dir("Test Emu");
     assert!(
         install_dir.join("Test Emu-v1.0.zip").is_file(),
         "the finished primary archive must survive so a retry can skip it"
@@ -615,7 +625,7 @@ async fn an_appimage_primary_is_kept_in_place_made_executable_and_recorded() {
     // The asset name renames the FILE, never the directory: the install dir
     // is still <profile name>-<configured tag> (install_mixin.py:1444).
     let appimage = harness
-        .install_dir("Test Emu-v1.0")
+        .install_dir("Test Emu")
         .join("TestEmu-x86_64.AppImage");
     assert!(appimage.is_file(), "the AppImage is the install; keep it");
     assert!(
@@ -680,7 +690,7 @@ async fn a_reinstalled_appimage_of_the_same_length_is_replaced_on_disk() {
         );
     }
 
-    let appimage = harness.install_dir("Test Emu-v1.0").join(asset);
+    let appimage = harness.install_dir("Test Emu").join(asset);
     assert_eq!(
         fs::read(&appimage).unwrap(),
         second,
@@ -722,7 +732,7 @@ async fn a_bare_executable_bit_member_is_selected_as_the_emulator() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let install_dir = harness.install_dir("Redream-v1.0");
+    let install_dir = harness.install_dir("Redream");
     let exe = install_dir.join("redream");
     assert!(exe.is_file(), "extracted tree missing: {}", exe.display());
     assert_eq!(mode_of(&exe), 0o755);
@@ -764,7 +774,7 @@ async fn a_kyty_shaped_tar_gz_selects_kyty_emulator_over_launcher() {
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
     let exe = harness
-        .install_dir("KytyPS5 (Playstation 5)-v1.0")
+        .install_dir("KytyPS5 (Playstation 5)")
         .join("kyty_emulator");
     assert!(exe.is_file(), "extracted tree missing: {}", exe.display());
     assert_eq!(mode_of(&exe), 0o755);
@@ -801,7 +811,7 @@ async fn a_bare_executable_bit_zip_member_is_selected_as_the_emulator() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let install_dir = harness.install_dir("Redream-v1.0");
+    let install_dir = harness.install_dir("Redream");
     let exe = install_dir.join("redream");
     assert!(exe.is_file(), "extracted tree missing: {}", exe.display());
     assert_eq!(mode_of(&exe), 0o755);
@@ -842,12 +852,16 @@ async fn a_latest_pinned_source_reuses_one_install_directory_across_releases() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let install_dir = harness.install_dir("Test Emu-latest");
+    let install_dir = harness.install_dir("Test Emu");
     assert!(
         install_dir.join("bin/testemu.sh").is_file(),
         "a 'latest' pin installs into one stable directory, not one per resolved tag"
     );
-    assert!(!harness.install_dir("Test Emu-v3.2.1").exists());
+    assert_eq!(
+        harness.emulator_dir_names(),
+        vec!["Test Emu".to_string()],
+        "no per-resolved-tag directory must exist alongside the stable one"
+    );
     assert_eq!(
         harness.config().emulators[0].source_release_tag,
         "latest",
@@ -880,11 +894,7 @@ async fn a_latest_pinned_source_reuses_one_install_directory_across_releases() {
         fs::read(install_dir.join("bin/testemu.sh")).unwrap(),
         b"SECOND"
     );
-    let dirs: Vec<String> = fs::read_dir(harness.library.join("Emulators"))
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    assert_eq!(dirs, vec!["Test Emu-latest".to_string()]);
+    assert_eq!(harness.emulator_dir_names(), vec!["Test Emu".to_string()]);
     assert_eq!(harness.config().emulators.len(), 1);
 }
 
@@ -917,7 +927,7 @@ async fn an_asset_name_that_is_not_a_plain_file_name_fails_before_anything_is_wr
         "the escaped path must never be written"
     );
     assert!(
-        !harness.library.join("Emulators").exists(),
+        !harness.library.join("emulators").exists(),
         "the name is rejected before any request goes out"
     );
     assert!(harness.config().emulators.is_empty());
@@ -957,7 +967,7 @@ async fn an_existing_config_entry_with_the_same_name_is_replaced_at_its_index() 
     assert_eq!(
         config.emulators[0].path,
         harness
-            .install_dir("Test Emu-v1.0")
+            .install_dir("Test Emu")
             .join("bin/testemu.sh")
             .to_string_lossy()
     );
@@ -1006,7 +1016,7 @@ async fn retrying_a_failed_emulator_row_reinstalls_without_a_romm_client() {
         .iter()
         .all(|e| e.id != failed_id));
     assert!(harness
-        .install_dir("Test Emu-v1.0")
+        .install_dir("Test Emu")
         .join("bin/testemu.sh")
         .is_file());
 }
@@ -1088,7 +1098,7 @@ async fn emulator_install_runs_autoconfig_after_writing_the_entry() {
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
     assert_eq!(entry.error, "", "a clean autoconfig adds no warning");
 
-    let install_dir = harness.install_dir("PCSX2-v1.0");
+    let install_dir = harness.install_dir("PCSX2");
     assert!(
         install_dir.join("portable.ini").is_file(),
         "autoconfig must have run next to the installed executable"
@@ -1299,11 +1309,15 @@ async fn updating_a_source_installed_emulator_preserves_user_fields_and_records_
     );
 
     // Same directory, merged in place — no per-release directory.
-    let install_dir = harness.install_dir("PCSX2-latest");
+    let install_dir = harness.install_dir("PCSX2");
     let exe = install_dir.join("pcsx2.sh");
     assert_eq!(fs::read(&exe).unwrap(), b"SECOND");
     assert!(install_dir.join("data/new.txt").is_file());
-    assert!(!harness.install_dir("PCSX2-v4.0.0").exists());
+    assert_eq!(
+        harness.emulator_dir_names(),
+        vec!["PCSX2".to_string()],
+        "no per-resolved-tag directory must exist alongside the stable one"
+    );
 
     let config = harness.config();
     assert_eq!(
@@ -1426,7 +1440,7 @@ async fn a_companion_profile_is_queued_behind_the_primary() {
         .collect();
     assert_eq!(names, vec!["Test Emu", "Companion Emu"]);
     assert!(harness
-        .install_dir("Companion Emu-v9")
+        .install_dir("Companion Emu")
         .join("bin/companionemu.sh")
         .is_file());
 }

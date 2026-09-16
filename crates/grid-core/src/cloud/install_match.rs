@@ -233,7 +233,10 @@ mod tests {
         game.rom_file_name = "xemu.AppImage".to_string();
         let games = vec![game];
 
-        let in_platform_dir = library.join("Emulators").join("xemu.AppImage");
+        let in_platform_dir = library
+            .join("games")
+            .join("Emulators")
+            .join("xemu.AppImage");
         assert_eq!(
             matching_installed_emulator_games(&games, &in_platform_dir, Some(&library)),
             vec![&games[0]]

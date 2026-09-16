@@ -429,16 +429,15 @@ pub struct SyncReport {
     pub warnings: Vec<String>,
 }
 
-/// The RPCS3 PS3 library path: `<library_path>/PlayStation 3` with `~`
-/// expanded, or `""` when no library path is configured
-/// (emulator_ui_mixin.py:424).
+/// The RPCS3 PS3 library path: `<library_path>/games/PlayStation 3` with `~`
+/// expanded, or `""` when no library path is configured (v1 library layout;
+/// emulator_ui_mixin.py:424).
 pub fn ps3_library_path(library_path: &str) -> String {
     let trimmed = library_path.trim();
     if trimmed.is_empty() {
         return String::new();
     }
-    paths::expand_user(trimmed)
-        .join("PlayStation 3")
+    crate::library::paths::platform_dir(&paths::expand_user(trimmed), "PlayStation 3")
         .to_string_lossy()
         .into_owned()
 }
@@ -1578,6 +1577,11 @@ mod tests {
     fn ps3_library_path_is_empty_without_a_library() {
         assert_eq!(ps3_library_path(""), "");
         assert_eq!(ps3_library_path("   "), "");
+    }
+
+    #[test]
+    fn ps3_library_path_lives_under_games() {
+        assert_eq!(ps3_library_path("/library"), "/library/games/PlayStation 3");
     }
 
     /// No matched profile means no firmware targets, so the orchestrator

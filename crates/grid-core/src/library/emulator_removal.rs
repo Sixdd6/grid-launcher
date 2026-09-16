@@ -2,22 +2,25 @@
 //!
 //! Deleting an emulator entry from the Emulators page removes its config
 //! entry; this module removes the bytes that entry owns. Only a MANAGED
-//! install is touched: a directory one level below `<library>/Emulators`,
-//! which is where [`crate::launch::emu_install::emulator_install_dir`] and
-//! `install_manual_archive` put everything they extract. A hand-configured
-//! path (`/usr/bin/retroarch`, `~/Applications/Foo.AppImage`) is never
-//! removed, and neither is a directory two entries share — Dolphin installs
-//! one binary but is recorded as "Dolphin (GameCube)" and "Dolphin (Wii)".
+//! install is touched: a directory one level below `<library>/emulators` or
+//! the legacy `<library>/Emulators`, which is where
+//! [`crate::launch::emu_install::emulator_install_dir`] and
+//! `install_manual_archive` put everything they extract — the new root is
+//! checked first, the legacy one second, so an unmigrated library's installs
+//! are still found. A hand-configured path (`/usr/bin/retroarch`,
+//! `~/Applications/Foo.AppImage`) is never removed, and neither is a
+//! directory two entries share — Dolphin installs one binary but is recorded
+//! as "Dolphin (GameCube)" and "Dolphin (Wii)".
 
 use std::path::{Path, PathBuf};
 
-use super::paths::{expand_home, library_root};
+use super::paths::{emulators_dir, expand_home, legacy_emulators_dir, library_root};
 use super::{apply_removal, run_removals, LibraryError, Removal, RemovalLabel};
 use crate::config::{Config, EmulatorEntry};
 
 /// The removal plan for `entry`: at most one [`RemovalLabel::Folder`] step
-/// for the `<library>/Emulators/<X>` directory the entry's executable lives
-/// in.
+/// for the `<root>/<X>` directory the entry's executable lives in, under
+/// whichever of [`emulator_roots`] holds it.
 ///
 /// `others` is every config entry — the one being deleted is skipped by
 /// name (case-insensitively), so the caller can pass the whole list. Any
@@ -25,14 +28,15 @@ use crate::config::{Config, EmulatorEntry};
 /// would go with it.
 ///
 /// An empty plan is the normal answer for anything unmanaged: a missing
-/// executable, a path outside `<library>/Emulators/`, or `Emulators` itself.
+/// executable, a path outside both emulator roots, or a root directory
+/// itself.
 pub(crate) fn emulator_removal_steps(
     entry: &EmulatorEntry,
     others: &[EmulatorEntry],
     library: &Path,
 ) -> Vec<Removal> {
-    let root = emulators_root(library);
-    let Some(target) = managed_install_dir(entry, &root) else {
+    let roots = emulator_roots(library);
+    let Some(target) = managed_install_dir(entry, &roots) else {
         return Vec::new();
     };
     let folded = entry.name.trim().to_lowercase();
@@ -40,7 +44,7 @@ pub(crate) fn emulator_removal_steps(
         if other.name.trim().to_lowercase() == folded {
             continue;
         }
-        if managed_install_dir(other, &root).is_some_and(|dir| dir == target) {
+        if managed_install_dir(other, &roots).is_some_and(|dir| dir == target) {
             return Vec::new();
         }
     }
@@ -81,21 +85,41 @@ pub fn remove_emulator_files(config: &Config, name: &str) -> Result<(), LibraryE
 
 // --- internals --------------------------------------------------------------
 
-/// `<library>/Emulators`, canonicalized when it exists so it compares equal
-/// to a canonicalized entry path.
-fn emulators_root(library: &Path) -> PathBuf {
-    let root = library.join("Emulators");
-    root.canonicalize().unwrap_or(root)
+/// The two roots a managed emulator install may live under: `emulators/`
+/// (v1 layout) first, then the legacy `Emulators/`. Each is canonicalized
+/// when it exists, so it compares equal to a canonicalized entry path.
+fn emulator_roots(library: &Path) -> [PathBuf; 2] {
+    let canon = |root: PathBuf| root.canonicalize().unwrap_or(root);
+    [
+        canon(emulators_dir(library)),
+        canon(legacy_emulators_dir(library)),
+    ]
 }
 
-/// The first directory level below `root` that contains `entry`'s
+/// The first directory level below whichever of `roots` contains `entry`'s
 /// executable, or `None` when the executable is missing, blank, or not
-/// strictly inside `root`.
-fn managed_install_dir(entry: &EmulatorEntry, root: &Path) -> Option<PathBuf> {
+/// strictly inside either root.
+fn managed_install_dir(entry: &EmulatorEntry, roots: &[PathBuf; 2]) -> Option<PathBuf> {
     let dir = resolved_entry_dir(entry)?;
-    let relative = dir.strip_prefix(root).ok()?;
-    let first = relative.components().next()?;
-    Some(root.join(first))
+    for root in roots {
+        if let Ok(relative) = dir.strip_prefix(root) {
+            if let Some(first) = relative.components().next() {
+                return Some(root.join(first));
+            }
+        }
+    }
+    None
+}
+
+/// The canonical `<root>/<X>` directory `entry`'s executable lives under —
+/// the same lookup [`emulator_removal_steps`] plans a removal for, exposed
+/// separately for the salvage step.
+///
+/// Still `pub(crate)` and exercised only by its own unit test today — no
+/// salvage caller wires it up yet; that lands in a later task.
+#[allow(dead_code)]
+pub(crate) fn managed_install_dir_for(entry: &EmulatorEntry, library: &Path) -> Option<PathBuf> {
+    managed_install_dir(entry, &emulator_roots(library))
 }
 
 /// The canonical directory `entry`'s path points at: the path itself when it
@@ -134,10 +158,10 @@ mod tests {
         }
     }
 
-    /// Creates `<library>/Emulators/<install>/<relative>` as an empty file
-    /// and returns it.
-    fn touch_install(library: &Path, install: &str, relative: &str) -> PathBuf {
-        let file = library.join("Emulators").join(install).join(relative);
+    /// Creates `<library>/<root>/<install>/<relative>` as an empty file and
+    /// returns it. `root` is `"emulators"` or `"Emulators"`.
+    fn touch_install(library: &Path, root: &str, install: &str, relative: &str) -> PathBuf {
+        let file = library.join(root).join(install).join(relative);
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(&file, b"stub").unwrap();
         file
@@ -155,12 +179,8 @@ mod tests {
 
     /// The install directory as the planner reports it: canonicalized, so a
     /// symlinked temp root (`/tmp` on some systems) still compares equal.
-    fn expected_dir(library: &Path, install: &str) -> PathBuf {
-        library
-            .join("Emulators")
-            .join(install)
-            .canonicalize()
-            .unwrap()
+    fn expected_dir(library: &Path, root: &str, install: &str) -> PathBuf {
+        library.join(root).join(install).canonicalize().unwrap()
     }
 
     // (a)
@@ -168,12 +188,12 @@ mod tests {
     fn a_catalog_install_yields_its_install_directory() {
         let dir = tempfile::tempdir().unwrap();
         let library = dir.path();
-        let exe = touch_install(library, "PCSX2 (Playstation 2)-latest", "pcsx2-qt");
+        let exe = touch_install(library, "emulators", "PCSX2 (Playstation 2)", "pcsx2-qt");
 
         let steps = emulator_removal_steps(&entry("PCSX2 (Playstation 2)", &exe), &[], library);
         assert_eq!(
             folder_steps(&steps),
-            vec![expected_dir(library, "PCSX2 (Playstation 2)-latest").as_path()]
+            vec![expected_dir(library, "emulators", "PCSX2 (Playstation 2)").as_path()]
         );
     }
 
@@ -182,12 +202,17 @@ mod tests {
     fn an_appimage_kept_in_place_yields_its_install_directory() {
         let dir = tempfile::tempdir().unwrap();
         let library = dir.path();
-        let exe = touch_install(library, "Cemu (Wii U)-latest", "Cemu-2.6-x86_64.AppImage");
+        let exe = touch_install(
+            library,
+            "emulators",
+            "Cemu (Wii U)",
+            "Cemu-2.6-x86_64.AppImage",
+        );
 
         let steps = emulator_removal_steps(&entry("Cemu (Wii U)", &exe), &[], library);
         assert_eq!(
             folder_steps(&steps),
-            vec![expected_dir(library, "Cemu (Wii U)-latest").as_path()]
+            vec![expected_dir(library, "emulators", "Cemu (Wii U)").as_path()]
         );
     }
 
@@ -196,12 +221,12 @@ mod tests {
     fn a_nested_executable_still_yields_the_top_install_directory() {
         let dir = tempfile::tempdir().unwrap();
         let library = dir.path();
-        let exe = touch_install(library, "X", "bin/foo");
+        let exe = touch_install(library, "emulators", "X", "bin/foo");
 
         let steps = emulator_removal_steps(&entry("X", &exe), &[], library);
         assert_eq!(
             folder_steps(&steps),
-            vec![expected_dir(library, "X").as_path()]
+            vec![expected_dir(library, "emulators", "X").as_path()]
         );
     }
 
@@ -210,9 +235,9 @@ mod tests {
     fn an_unmanaged_path_yields_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let library = dir.path();
-        // Something managed has to exist, or `<library>/Emulators` would be
+        // Something managed has to exist, or `<library>/emulators` would be
         // missing and every case below would pass for the wrong reason.
-        touch_install(library, "Keep", "keep");
+        touch_install(library, "emulators", "Keep", "keep");
 
         let system = raw_entry("RetroArch", "/usr/bin/retroarch");
         assert!(emulator_removal_steps(&system, &[], library).is_empty());
@@ -222,10 +247,10 @@ mod tests {
         fs::write(&elsewhere, b"stub").unwrap();
         assert!(emulator_removal_steps(&entry("Elsewhere", &elsewhere), &[], library).is_empty());
 
-        let root = library.join("Emulators");
+        let root = library.join("emulators");
         assert!(
             emulator_removal_steps(&entry("Root", &root), &[], library).is_empty(),
-            "the Emulators root itself is never a removal target"
+            "the emulators root itself is never a removal target"
         );
     }
 
@@ -238,13 +263,13 @@ mod tests {
         let _env = crate::test_env::EnvGuard::set(&[("HOME", Some(&home.to_string_lossy()))]);
 
         let library = home.join("GRID");
-        touch_install(&library, "Redream-nightly", "redream");
+        touch_install(&library, "emulators", "Redream", "redream");
 
-        let tilde = raw_entry("Redream", "~/GRID/Emulators/Redream-nightly/redream");
+        let tilde = raw_entry("Redream", "~/GRID/emulators/Redream/redream");
         let steps = emulator_removal_steps(&tilde, &[], &library);
         assert_eq!(
             folder_steps(&steps),
-            vec![expected_dir(&library, "Redream-nightly").as_path()]
+            vec![expected_dir(&library, "emulators", "Redream").as_path()]
         );
     }
 
@@ -253,7 +278,7 @@ mod tests {
     fn two_entries_sharing_one_install_directory_remove_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let library = dir.path();
-        let exe = touch_install(library, "Dolphin-latest", "dolphin-emu");
+        let exe = touch_install(library, "emulators", "Dolphin", "dolphin-emu");
         let entries = vec![
             entry("Dolphin (GameCube)", &exe),
             entry("Dolphin (Wii)", &exe),
@@ -268,8 +293,8 @@ mod tests {
     fn a_missing_executable_yields_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let library = dir.path();
-        touch_install(library, "Keep", "keep");
-        let gone = library.join("Emulators").join("Gone-latest").join("gone");
+        touch_install(library, "emulators", "Keep", "keep");
+        let gone = library.join("emulators").join("Gone").join("gone");
 
         assert!(emulator_removal_steps(&entry("Gone", &gone), &[], library).is_empty());
         assert!(emulator_removal_steps(&raw_entry("Blank", "  "), &[], library).is_empty());
@@ -280,8 +305,8 @@ mod tests {
     fn remove_emulator_files_deletes_the_tree_and_leaves_siblings_alone() {
         let dir = tempfile::tempdir().unwrap();
         let library = dir.path();
-        let pcsx2 = touch_install(library, "PCSX2-latest", "pcsx2-qt");
-        let redream = touch_install(library, "Redream-nightly", "redream");
+        let pcsx2 = touch_install(library, "emulators", "PCSX2", "pcsx2-qt");
+        let redream = touch_install(library, "emulators", "Redream", "redream");
         let config = Config {
             library_path: library.to_string_lossy().into_owned(),
             emulators: vec![entry("PCSX2", &pcsx2), entry("Redream", &redream)],
@@ -290,7 +315,7 @@ mod tests {
 
         remove_emulator_files(&config, "pcsx2").unwrap();
 
-        assert!(!library.join("Emulators").join("PCSX2-latest").exists());
+        assert!(!library.join("emulators").join("PCSX2").exists());
         assert!(redream.is_file(), "the other install must survive");
         assert_eq!(
             config.emulators.len(),
@@ -304,7 +329,7 @@ mod tests {
     fn a_blank_library_or_an_unknown_name_is_a_no_op() {
         let dir = tempfile::tempdir().unwrap();
         let library = dir.path();
-        let exe = touch_install(library, "PCSX2-latest", "pcsx2-qt");
+        let exe = touch_install(library, "emulators", "PCSX2", "pcsx2-qt");
 
         let no_library = Config {
             library_path: String::new(),
@@ -321,5 +346,53 @@ mod tests {
         };
         remove_emulator_files(&config, "Nothing Like This").unwrap();
         assert!(exe.is_file());
+    }
+
+    // (j)
+    #[test]
+    fn a_legacy_emulators_root_install_is_still_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path();
+        let exe = touch_install(library, "Emulators", "PCSX2-latest", "pcsx2-qt");
+
+        let steps = emulator_removal_steps(&entry("PCSX2", &exe), &[], library);
+        assert_eq!(
+            folder_steps(&steps),
+            vec![expected_dir(library, "Emulators", "PCSX2-latest").as_path()]
+        );
+    }
+
+    #[test]
+    fn managed_install_dir_for_matches_emulator_removal_steps() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path();
+        let exe = touch_install(library, "emulators", "PCSX2", "pcsx2-qt");
+
+        assert_eq!(
+            managed_install_dir_for(&entry("PCSX2", &exe), library),
+            Some(expected_dir(library, "emulators", "PCSX2"))
+        );
+    }
+
+    // (k)
+    #[test]
+    fn two_roots_never_both_match_one_executable() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path();
+        let new_exe = touch_install(library, "emulators", "PCSX2", "pcsx2-qt");
+        let legacy_exe = touch_install(library, "Emulators", "PCSX2-latest", "pcsx2-qt");
+
+        let new_steps = emulator_removal_steps(&entry("PCSX2 New", &new_exe), &[], library);
+        assert_eq!(
+            folder_steps(&new_steps),
+            vec![expected_dir(library, "emulators", "PCSX2").as_path()]
+        );
+
+        let legacy_steps =
+            emulator_removal_steps(&entry("PCSX2 Legacy", &legacy_exe), &[], library);
+        assert_eq!(
+            folder_steps(&legacy_steps),
+            vec![expected_dir(library, "Emulators", "PCSX2-latest").as_path()]
+        );
     }
 }

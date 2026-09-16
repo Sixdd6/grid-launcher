@@ -2510,20 +2510,23 @@ async fn download_emulator(
 
     let supplementals = resolve_supplementals(&forge, job).await?;
 
-    // The install directory is named from the profile name and the
-    // CONFIGURED tag, fixed before the asset is known — `_archive_name_override`
-    // with no asset suffix applied, then its stem (emulator_ui_mixin.py:1186-1190
-    // + install_mixin.py:1444). The asset-suffix rewrite below renames only
-    // the file INSIDE that already-fixed directory.
-    let dir_name = emu_install::archive_file_name(&job.profile_name, &job.configured_tag, "");
-    let stem = file_stem_of(&dir_name);
+    // An ordinary emulator's install directory is named from the PROFILE
+    // alone (v1 library layout: no release tag in the directory name under
+    // `<library>/emulators`). A compat tool is unaffected — it lives under
+    // `compat::managed_root`, entirely outside the library's games/emulators/
+    // saves split — so it keeps the CONFIGURED-tag-qualified name
+    // (`_archive_name_override` with no asset suffix applied, then its stem;
+    // emulator_ui_mixin.py:1186-1190 + install_mixin.py:1444). Either way,
+    // the asset-suffix rewrite below renames only the file INSIDE that
+    // already-fixed directory.
     // `job.library` already IS the managed compat-tools root for a compat
     // job ([`InstallService::install_compat_tool`]), so only the directory
     // FUNCTION differs — never an extra path segment on top.
     let install_dir = if job.compat_tool {
-        emu_install::compat_tool_install_dir(&job.library, &stem)
+        let dir_name = emu_install::archive_file_name(&job.profile_name, &job.configured_tag, "");
+        emu_install::compat_tool_install_dir(&job.library, &file_stem_of(&dir_name))
     } else {
-        emu_install::emulator_install_dir(&job.library, &stem)
+        emu_install::emulator_install_dir(&job.library, &job.profile_name)
     };
 
     let archive_name =
@@ -3185,7 +3188,7 @@ mod tests {
         assert_eq!(job.launch_entry, "chrono.zip");
         assert_eq!(
             job.primary_archive,
-            PathBuf::from("/library/SNES/chrono.zip")
+            PathBuf::from("/library/games/SNES/chrono.zip")
         );
         assert_eq!(job.targets.len(), 1);
         assert_eq!(job.targets[0].url_path, "/api/roms/42/content/chrono.zip");
@@ -3214,7 +3217,7 @@ mod tests {
         ]);
         let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
 
-        let game_dir = PathBuf::from("/library/SNES/Chrono Trigger");
+        let game_dir = PathBuf::from("/library/games/SNES/Chrono Trigger");
         assert_eq!(job.multi_file_game_dir, Some(game_dir.clone()));
         assert_eq!(job.launch_entry, "Game.M3U");
         assert_eq!(job.primary_archive, game_dir.join("Game.M3U"));
@@ -3262,7 +3265,7 @@ mod tests {
         ]);
         let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
 
-        let game_dir = PathBuf::from("/library/Windows/My Game");
+        let game_dir = PathBuf::from("/library/games/Windows/My Game");
         assert_eq!(job.mode, InstallMode::Base);
         assert_eq!(job.native_game_dir, Some(game_dir.clone()));
         assert!(job.multi_file_game_dir.is_none());
@@ -3285,7 +3288,7 @@ mod tests {
         ]);
         let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
 
-        let game_dir = PathBuf::from("/library/Windows/My Game");
+        let game_dir = PathBuf::from("/library/games/Windows/My Game");
         assert_eq!(job.game_json_target, Some(game_dir.join("game.json")));
         assert_eq!(job.file_ids, vec![1, 2]);
         assert_eq!(job.targets.len(), 2);
@@ -3726,7 +3729,7 @@ mod tests {
         );
         assert_eq!(
             job.targets[0].dest,
-            Path::new("/lib/PlayStation 4/Chrono Trigger-update.zip")
+            Path::new("/lib/games/PlayStation 4/Chrono Trigger-update.zip")
         );
         assert_eq!(job.primary_archive, job.targets[0].dest);
         assert!(job.multi_file_game_dir.is_none());
@@ -3752,7 +3755,7 @@ mod tests {
         };
         assert_eq!(
             job.targets[0].dest,
-            Path::new("/lib/Xbox 360/Chrono Trigger-dlc.zip")
+            Path::new("/lib/games/Xbox 360/Chrono Trigger-dlc.zip")
         );
         assert_eq!(
             job.targets[0].expected_size, 0,

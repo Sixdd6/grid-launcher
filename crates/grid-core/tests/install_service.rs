@@ -333,8 +333,8 @@ async fn single_file_zip_install_extracts_deletes_archive_and_records_row() {
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
     assert_eq!(entry.error, "");
 
-    let archive = harness.library.join("SNES/chrono.zip");
-    let extracted_dir = harness.library.join("SNES/chrono");
+    let archive = harness.library.join("games/SNES/chrono.zip");
+    let extracted_dir = harness.library.join("games/SNES/chrono");
     assert!(!archive.exists(), "archive should be deleted after extract");
     assert!(extracted_dir.join("game.sfc").is_file());
 
@@ -401,9 +401,9 @@ async fn arcade_zip_is_not_extracted_and_keeps_archive_path() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let archive = harness.library.join("Arcade/mslug.zip");
+    let archive = harness.library.join("games/Arcade/mslug.zip");
     assert!(archive.is_file(), "arcade archive must be kept");
-    assert!(!harness.library.join("Arcade/mslug").exists());
+    assert!(!harness.library.join("games/Arcade/mslug").exists());
 
     let row = harness.registry.find(Some(9), "", "").unwrap().unwrap();
     assert_eq!(row.archive_path, archive.to_string_lossy());
@@ -448,7 +448,7 @@ async fn update_category_file_is_excluded_and_never_requested() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let extracted_dir = harness.library.join("SNES/game");
+    let extracted_dir = harness.library.join("games/SNES/game");
     assert!(extracted_dir.join("game.sfc").is_file());
 
     let row = harness.registry.find(Some(12), "", "").unwrap().unwrap();
@@ -524,7 +524,7 @@ async fn multi_file_install_keeps_both_files_and_points_at_the_m3u() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let game_dir = harness.library.join("PlayStation/Final Fantasy VII");
+    let game_dir = harness.library.join("games/PlayStation/Final Fantasy VII");
     assert!(game_dir.join("disc1.bin").is_file());
     assert!(game_dir.join("game.m3u").is_file());
     // Filtered candidates were never fetched.
@@ -646,8 +646,8 @@ async fn second_install_queues_then_runs_after_the_first() {
         second_entry.error
     );
 
-    assert!(harness.library.join("SNES/one/one.sfc").is_file());
-    assert!(harness.library.join("SNES/two/two.sfc").is_file());
+    assert!(harness.library.join("games/SNES/one/one.sfc").is_file());
+    assert!(harness.library.join("games/SNES/two/two.sfc").is_file());
     assert_eq!(harness.service.installed().unwrap().len(), 2);
 }
 
@@ -751,8 +751,8 @@ async fn already_installed_rom_completes_without_finalizing() {
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
     // Downloaded once, but never finalized: no extraction, row untouched.
-    assert!(harness.library.join("SNES/chrono.zip").is_file());
-    assert!(!harness.library.join("SNES/chrono").exists());
+    assert!(harness.library.join("games/SNES/chrono.zip").is_file());
+    assert!(!harness.library.join("games/SNES/chrono").exists());
     let row = harness.registry.find(Some(1), "", "").unwrap().unwrap();
     assert_eq!(row.archive_path, "/somewhere/chrono.zip");
     assert_eq!(row.installed_at, 1);
@@ -806,8 +806,8 @@ async fn a_same_title_platform_row_with_a_different_rom_id_does_not_skip_finaliz
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
     // Finalize actually ran: the archive was extracted, not left in place.
-    let archive = harness.library.join("SNES/chrono.zip");
-    let extracted_dir = harness.library.join("SNES/chrono");
+    let archive = harness.library.join("games/SNES/chrono.zip");
+    let extracted_dir = harness.library.join("games/SNES/chrono");
     assert!(
         !archive.exists(),
         "archive should be deleted after extract, not skipped as already-installed"
@@ -871,7 +871,7 @@ async fn install_update_re_extracts_and_replaces_the_row() {
     assert_eq!(entry.kind, "update");
 
     // Unlike a base install of an installed rom, the update DID finalize.
-    let extracted = harness.library.join("SNES/chrono (v00002)/game.sfc");
+    let extracted = harness.library.join("games/SNES/chrono (v00002)/game.sfc");
     assert_eq!(std::fs::read(&extracted).unwrap(), b"NEWDATA");
     let row = harness.registry.find(Some(1), "", "").unwrap().unwrap();
     assert_eq!(row.rom_file_name, "chrono (v00002).zip");
@@ -880,7 +880,7 @@ async fn install_update_re_extracts_and_replaces_the_row() {
         row.extracted_dir,
         harness
             .library
-            .join("SNES/chrono (v00002)")
+            .join("games/SNES/chrono (v00002)")
             .to_string_lossy()
             .into_owned()
     );
@@ -959,7 +959,7 @@ async fn finalize_failure_marks_failed_and_keeps_the_archive() {
     assert_eq!(entry.status, DownloadStatus::Failed);
     assert!(!entry.error.is_empty());
     assert!(
-        harness.library.join("SNES/corrupt.zip").is_file(),
+        harness.library.join("games/SNES/corrupt.zip").is_file(),
         "a finalize failure must keep the archive for a cheap retry"
     );
     assert!(harness.service.installed().unwrap().is_empty());
@@ -995,7 +995,7 @@ async fn cancel_mid_download_marks_cancelled_and_removes_the_partial() {
 
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Cancelled);
-    assert!(!harness.library.join("SNES/slow.zip").exists());
+    assert!(!harness.library.join("games/SNES/slow.zip").exists());
     assert!(harness.service.installed().unwrap().is_empty());
 }
 
@@ -1057,7 +1057,7 @@ async fn cancelling_a_queued_entry_removes_it_and_lets_the_rest_run() {
         "{}",
         first_entry.error
     );
-    assert!(!harness.library.join("SNES/two.zip").exists());
+    assert!(!harness.library.join("games/SNES/two.zip").exists());
     assert_eq!(harness.service.installed().unwrap().len(), 1);
 }
 
@@ -1165,7 +1165,7 @@ async fn retry_after_failure_dismisses_the_old_entry_and_starts_a_new_one() {
         .entries
         .iter()
         .all(|e| e.id != failed_id));
-    assert!(harness.library.join("SNES/retry/retry.sfc").is_file());
+    assert!(harness.library.join("games/SNES/retry/retry.sfc").is_file());
 }
 
 #[tokio::test]
@@ -1238,7 +1238,7 @@ async fn a_panicking_notify_listener_fails_the_entry_without_wedging_the_queue()
     let after_id = harness.newest_entry_id();
     let entry = harness.wait_terminal(after_id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
-    assert!(harness.library.join("SNES/after/after.sfc").is_file());
+    assert!(harness.library.join("games/SNES/after/after.sfc").is_file());
 }
 
 // --- uninstall --------------------------------------------------------------
@@ -1272,7 +1272,7 @@ async fn uninstall_removes_the_extracted_dir_and_the_row() {
     let id = harness.newest_entry_id();
     harness.wait_terminal(id).await;
 
-    let extracted_dir = harness.library.join("SNES/chrono");
+    let extracted_dir = harness.library.join("games/SNES/chrono");
     assert!(extracted_dir.is_dir());
 
     harness.service.uninstall(1).unwrap();
@@ -1309,7 +1309,7 @@ async fn uninstall_removes_a_multi_file_game_dir() {
     let id = harness.newest_entry_id();
     harness.wait_terminal(id).await;
 
-    let game_dir = harness.library.join("PlayStation/Final Fantasy VII");
+    let game_dir = harness.library.join("games/PlayStation/Final Fantasy VII");
     assert!(game_dir.is_dir());
     harness.service.uninstall(2).unwrap();
     assert!(!game_dir.exists());
@@ -1346,7 +1346,7 @@ async fn uninstall_succeeds_when_a_subdirectory_is_read_only() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let extracted_dir = harness.library.join("SNES/locked");
+    let extracted_dir = harness.library.join("games/SNES/locked");
     let sub = extracted_dir.join("sub");
     assert!(sub.join("game.sfc").is_file());
     #[cfg(unix)]
@@ -1569,7 +1569,7 @@ async fn native_install_lays_out_game_dir_prefix_and_game_json() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let game_dir = harness.library.join("Windows/My Game");
+    let game_dir = harness.library.join("games/Windows/My Game");
     let extracted_dir = game_dir.join("game");
     assert!(extracted_dir.join("MyGame/mygame.exe").is_file());
     assert!(
@@ -1628,7 +1628,7 @@ async fn native_non_archive_payload_installs_as_direct_file() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let game_dir = harness.library.join("Windows/Disc Game");
+    let game_dir = harness.library.join("games/Windows/Disc Game");
     let archive = game_dir.join("game.iso");
     assert!(archive.is_file(), "D13: the payload IS the install");
     assert!(!game_dir.join("game").exists(), "nothing was extracted");
@@ -1671,7 +1671,7 @@ async fn uninstall_native_removes_the_game_dir() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let game_dir = harness.library.join("Windows/My Game");
+    let game_dir = harness.library.join("games/Windows/My Game");
     assert!(game_dir.is_dir());
 
     harness.service.uninstall(7).unwrap();
@@ -1785,10 +1785,13 @@ async fn ps3_install_routes_into_the_configured_vfs() {
     let routed = vfs.dev_hdd0.join("game/BLUS30336");
     assert!(routed.join("PS3_GAME/USRDIR/EBOOT.BIN").is_file());
     assert!(
-        !harness.library.join("PlayStation 3/demons").exists(),
+        !harness.library.join("games/PlayStation 3/demons").exists(),
         "the staging directory is removed once routing succeeded"
     );
-    assert!(!harness.library.join("PlayStation 3/demons.zip").exists());
+    assert!(!harness
+        .library
+        .join("games/PlayStation 3/demons.zip")
+        .exists());
 
     let row = harness.registry.find(Some(10), "", "").unwrap().unwrap();
     assert_eq!(row.ps3_game_id, "BLUS30336");
@@ -1828,10 +1831,13 @@ async fn ps3_iso_only_archive_short_circuits() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let iso = harness.library.join("PlayStation 3/game.iso");
+    let iso = harness.library.join("games/PlayStation 3/game.iso");
     assert!(iso.is_file(), "the ISO is moved next to the archive");
-    assert!(!harness.library.join("PlayStation 3/disc").exists());
-    assert!(!harness.library.join("PlayStation 3/disc.zip").exists());
+    assert!(!harness.library.join("games/PlayStation 3/disc").exists());
+    assert!(!harness
+        .library
+        .join("games/PlayStation 3/disc.zip")
+        .exists());
 
     let row = harness.registry.find(Some(11), "", "").unwrap().unwrap();
     assert_eq!(row.ps3_iso_path, iso.to_string_lossy());
@@ -1877,7 +1883,10 @@ async fn ps3_game_id_missing_fails() {
         "No PS3 game ID found in archive for Mystery Disc"
     );
     assert!(
-        harness.library.join("PlayStation 3/junk.zip").is_file(),
+        harness
+            .library
+            .join("games/PlayStation 3/junk.zip")
+            .is_file(),
         "a failed finalize keeps the archive so a retry skips the download"
     );
     assert!(harness.service.installed().unwrap().is_empty());
@@ -1913,7 +1922,7 @@ async fn ps3_archive_of_empty_directories_reports_no_rom_file() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Failed);
     assert_eq!(entry.error, "Archive extracted but no ROM file was found");
-    assert!(!harness.library.join("PlayStation 3/hollow").exists());
+    assert!(!harness.library.join("games/PlayStation 3/hollow").exists());
 }
 
 #[tokio::test]
@@ -1964,7 +1973,7 @@ async fn uninstall_ps3_removes_iso_trophies_and_the_routed_dir() {
     );
 
     // A stale ISO recorded on the row is removed too.
-    let iso = harness.library.join("PlayStation 3/stale.iso");
+    let iso = harness.library.join("games/PlayStation 3/stale.iso");
     fs::write(&iso, b"ISO!").unwrap();
     let mut updated = row.clone();
     updated.ps3_iso_path = iso.to_string_lossy().into_owned();
@@ -2062,7 +2071,7 @@ async fn ps4_install_detects_title_id_and_prefers_eboot() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let extracted_dir = harness.library.join("PlayStation 4/ps4game");
+    let extracted_dir = harness.library.join("games/PlayStation 4/ps4game");
     let row = harness.registry.find(Some(16), "", "").unwrap().unwrap();
     assert_eq!(row.ps4_game_id, "CUSA12345");
     assert_eq!(row.extracted_dir, extracted_dir.to_string_lossy());
@@ -2071,7 +2080,10 @@ async fn ps4_install_detects_title_id_and_prefers_eboot() {
         "eboot.bin wins over the generic ranking: {}",
         row.extracted_path
     );
-    assert!(!harness.library.join("PlayStation 4/ps4game.zip").exists());
+    assert!(!harness
+        .library
+        .join("games/PlayStation 4/ps4game.zip")
+        .exists());
 }
 
 // --- post-install hook -------------------------------------------------------
@@ -2119,7 +2131,7 @@ async fn the_game_finalized_hook_sees_the_written_row() {
     assert_eq!(seen[0].rom_id, Some(17));
     assert_eq!(
         seen[0].extracted_dir,
-        harness.library.join("SNES/chrono").to_string_lossy(),
+        harness.library.join("games/SNES/chrono").to_string_lossy(),
         "the hook sees the finished row, not a half-filled one"
     );
 }
@@ -2326,7 +2338,7 @@ async fn ps4_update_applies_and_records_content() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let extracted_dir = harness.library.join("PlayStation 4/ps4game");
+    let extracted_dir = harness.library.join("games/PlayStation 4/ps4game");
     assert_eq!(
         fs::read_to_string(extracted_dir.join("CUSA12345/patch.txt")).unwrap(),
         "PATCHED",
@@ -2335,7 +2347,7 @@ async fn ps4_update_applies_and_records_content() {
     assert!(
         !harness
             .library
-            .join("PlayStation 4/PS4 Game-update.zip")
+            .join("games/PlayStation 4/PS4 Game-update.zip")
             .exists(),
         "the content archive is deleted once it has been applied"
     );
@@ -2444,7 +2456,7 @@ async fn content_retry_restarts_a_failed_content_job() {
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
     assert!(harness
         .library
-        .join("PlayStation 4/ps4game/CUSA12345/patch.txt")
+        .join("games/PlayStation 4/ps4game/CUSA12345/patch.txt")
         .is_file());
 }
 
@@ -2596,9 +2608,12 @@ async fn xbox360_base_install_queues_update_then_dlc_silently() {
     );
     assert!(!harness
         .library
-        .join("Xbox 360/Xbox Game-update.zip")
+        .join("games/Xbox 360/Xbox Game-update.zip")
         .exists());
-    assert!(!harness.library.join("Xbox 360/Xbox Game-dlc.zip").exists());
+    assert!(!harness
+        .library
+        .join("games/Xbox 360/Xbox Game-dlc.zip")
+        .exists());
 }
 
 #[cfg(unix)]
@@ -2722,7 +2737,7 @@ async fn native_update_merges_and_keeps_pinned_executable() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let extracted_dir = harness.library.join("Windows/My Game/game");
+    let extracted_dir = harness.library.join("games/Windows/My Game/game");
     assert_eq!(
         fs::read_to_string(extracted_dir.join("data/new.txt")).unwrap(),
         "new"
@@ -2740,11 +2755,11 @@ async fn native_update_merges_and_keeps_pinned_executable() {
     assert_eq!(row.rom_file_name, "mygame-update.zip");
     assert!(!harness
         .library
-        .join("Windows/My Game/mygame-update.zip")
+        .join("games/Windows/My Game/mygame-update.zip")
         .exists());
     assert!(!harness
         .library
-        .join("Windows/My Game/My Game-temp")
+        .join("games/Windows/My Game/My Game-temp")
         .exists());
 }
 

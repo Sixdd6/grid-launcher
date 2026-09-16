@@ -88,9 +88,37 @@ pub fn extraction_dir(archive: &Path) -> PathBuf {
     }
 }
 
-/// The platform-scoped directory under the library root.
+/// The platform-scoped directory under the library root's `games/` tree
+/// (v1 library layout).
 pub fn platform_dir(library: &Path, platform: &str) -> PathBuf {
+    library
+        .join(GAMES_DIR)
+        .join(sanitize_component(platform, "Platform"))
+}
+
+/// The pre-v1 platform-scoped directory directly under the library root,
+/// kept as a fallback so an existing (unmigrated) install is still found.
+pub fn legacy_platform_dir(library: &Path, platform: &str) -> PathBuf {
     library.join(sanitize_component(platform, "Platform"))
+}
+
+/// `<library>/emulators` (v1 library layout).
+pub fn emulators_dir(library: &Path) -> PathBuf {
+    library.join(EMULATORS_DIR)
+}
+
+/// `<library>/Emulators` — the pre-v1 emulator root, kept as a removal-guard
+/// and lookup fallback.
+pub fn legacy_emulators_dir(library: &Path) -> PathBuf {
+    library.join(LEGACY_EMULATORS_DIR)
+}
+
+/// `<library>/saves/<sanitize_component(emulator_name, "emulator")>` — the
+/// per-emulator cloud-save directory (v1 library layout).
+pub fn saves_dir(library: &Path, emulator_name: &str) -> PathBuf {
+    library
+        .join(SAVES_DIR)
+        .join(sanitize_component(emulator_name, "emulator"))
 }
 
 /// Expand a leading `~/` in `raw` to the user's home directory. Any other
@@ -170,8 +198,9 @@ pub(crate) fn dedup_by_string(paths: Vec<PathBuf>) -> Vec<PathBuf> {
 }
 
 /// The ordered, deduplicated set of archive locations a game might be found
-/// at: the recorded `archive_path` (`~`-expanded) first when non-blank,
-/// then `<platform dir>/<archive_name>`, then `<library>/<archive_name>`.
+/// at: the recorded `archive_path` (`~`-expanded) first when non-blank, then
+/// `<games platform dir>/<archive_name>`, then the legacy (pre-v1)
+/// `<platform dir>/<archive_name>`, then `<library>/<archive_name>`.
 ///
 /// This takes plain parameters rather than an `InstalledGame` record because
 /// the registry type is introduced in a later task; a `library::registry`
@@ -187,6 +216,7 @@ pub fn candidate_archives(
         candidates.push(expand_home(archive_path));
     }
     candidates.push(platform_dir(library, platform).join(archive_name));
+    candidates.push(legacy_platform_dir(library, platform).join(archive_name));
     candidates.push(library.join(archive_name));
     dedup_by_string(candidates)
 }
@@ -344,14 +374,14 @@ mod tests {
         assert_eq!(extraction_dir(&archive), dir.path().join("Game"));
     }
 
-    // --- platform_dir ----------------------------------------------------
+    // --- platform_dir / legacy_platform_dir -------------------------------
 
     #[test]
     fn platform_dir_joins_sanitized_platform() {
         let library = Path::new("/library");
         assert_eq!(
             platform_dir(library, "Sony PlayStation"),
-            PathBuf::from("/library/Sony PlayStation")
+            PathBuf::from("/library/games/Sony PlayStation")
         );
     }
 
@@ -360,7 +390,33 @@ mod tests {
         let library = Path::new("/library");
         assert_eq!(
             platform_dir(library, "Arcade: MAME"),
-            PathBuf::from("/library/Arcade_ MAME")
+            PathBuf::from("/library/games/Arcade_ MAME")
+        );
+    }
+
+    #[test]
+    fn legacy_platform_dir_is_the_bare_platform_directory() {
+        let library = Path::new("/library");
+        assert_eq!(
+            legacy_platform_dir(library, "Sony PlayStation"),
+            PathBuf::from("/library/Sony PlayStation")
+        );
+    }
+
+    // --- emulators_dir / saves_dir -----------------------------------------
+
+    #[test]
+    fn emulators_dir_is_lowercase() {
+        let library = Path::new("/library");
+        assert_eq!(emulators_dir(library), PathBuf::from("/library/emulators"));
+    }
+
+    #[test]
+    fn saves_dir_sanitizes_the_emulator_name() {
+        let library = Path::new("/library");
+        assert_eq!(
+            saves_dir(library, "PCSX2: <bad>"),
+            PathBuf::from("/library/saves/PCSX2_ _bad_")
         );
     }
 
@@ -374,6 +430,7 @@ mod tests {
             candidates,
             vec![
                 PathBuf::from("/other/Game.zip"),
+                PathBuf::from("/library/games/Platform/Game.zip"),
                 PathBuf::from("/library/Platform/Game.zip"),
                 PathBuf::from("/library/Game.zip"),
             ]
@@ -387,6 +444,7 @@ mod tests {
         assert_eq!(
             candidates,
             vec![
+                PathBuf::from("/library/games/Platform/Game.zip"),
                 PathBuf::from("/library/Platform/Game.zip"),
                 PathBuf::from("/library/Game.zip"),
             ]
@@ -395,20 +453,19 @@ mod tests {
 
     #[test]
     fn candidate_archives_dedups_by_string() {
-        // library/Platform/Game.zip and library/Game.zip collapse to the
-        // same string when the platform sanitizes to empty-ish... use an
-        // explicit duplicate instead: archive_path already points at the
-        // platform-dir candidate.
+        // archive_path already points at the games-platform-dir candidate,
+        // so it collapses into one entry instead of appearing twice.
         let library = Path::new("/library");
         let candidates = candidate_archives(
             library,
             "Platform",
-            "/library/Platform/Game.zip",
+            "/library/games/Platform/Game.zip",
             "Game.zip",
         );
         assert_eq!(
             candidates,
             vec![
+                PathBuf::from("/library/games/Platform/Game.zip"),
                 PathBuf::from("/library/Platform/Game.zip"),
                 PathBuf::from("/library/Game.zip"),
             ]

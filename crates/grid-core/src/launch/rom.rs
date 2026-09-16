@@ -73,7 +73,7 @@ mod tests {
     #[test]
     fn extracted_candidate_wins_over_archive_for_normal_platform() {
         let library = tempfile::tempdir().unwrap();
-        let platform_dir = library.path().join("SNES");
+        let platform_dir = library.path().join("games").join("SNES");
         fs::create_dir_all(&platform_dir).unwrap();
 
         // Archive also exists on disk, to prove extracted is preferred over
@@ -97,7 +97,7 @@ mod tests {
     #[test]
     fn arcade_returns_archive_even_when_extracted_exists() {
         let library = tempfile::tempdir().unwrap();
-        let platform_dir = library.path().join("Arcade");
+        let platform_dir = library.path().join("games").join("Arcade");
         fs::create_dir_all(&platform_dir).unwrap();
 
         let archive = platform_dir.join("Game.zip");
@@ -112,6 +112,44 @@ mod tests {
 
         let resolved = resolve_rom_path(&g, library.path());
         assert_eq!(resolved, archive.to_string_lossy());
+    }
+
+    // --- dual-shape fallback: games/ vs the legacy platform directory ------
+
+    #[test]
+    fn resolve_rom_path_falls_back_to_the_legacy_platform_directory() {
+        let library = tempfile::tempdir().unwrap();
+        // Only the legacy (pre-v1) `<library>/<Platform>/` archive exists —
+        // no `games/` directory at all.
+        let legacy_dir = library.path().join("SNES");
+        fs::create_dir_all(&legacy_dir).unwrap();
+        let archive = legacy_dir.join("Game.zip");
+        fs::write(&archive, b"archive bytes").unwrap();
+
+        let mut g = game("Some Game", "SNES");
+        g.rom_file_name = "Game.zip".to_string();
+
+        let resolved = resolve_rom_path(&g, library.path());
+        assert_eq!(resolved, archive.to_string_lossy());
+    }
+
+    #[test]
+    fn resolve_rom_path_prefers_the_games_directory() {
+        let library = tempfile::tempdir().unwrap();
+        let games_dir = library.path().join("games").join("SNES");
+        fs::create_dir_all(&games_dir).unwrap();
+        let games_archive = games_dir.join("Game.zip");
+        fs::write(&games_archive, b"games bytes").unwrap();
+
+        let legacy_dir = library.path().join("SNES");
+        fs::create_dir_all(&legacy_dir).unwrap();
+        fs::write(legacy_dir.join("Game.zip"), b"legacy bytes").unwrap();
+
+        let mut g = game("Some Game", "SNES");
+        g.rom_file_name = "Game.zip".to_string();
+
+        let resolved = resolve_rom_path(&g, library.path());
+        assert_eq!(resolved, games_archive.to_string_lossy());
     }
 
     // --- multi-file row resolves extracted_path (the .m3u) -----------------
