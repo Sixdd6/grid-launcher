@@ -29,7 +29,7 @@ use grid_core::launch::spawn::{
 use grid_core::launch::{GameSession, LaunchService, SessionsSnapshot};
 use grid_core::library::emulator_removal::remove_emulator_files;
 use grid_core::library::extract::is_extractable_archive;
-use grid_core::library::paths::library_root;
+use grid_core::library::paths::{layout_version_for_library_path, library_root};
 use grid_core::library::queue::DownloadsSnapshot;
 use grid_core::library::registry::InstalledGame;
 use grid_core::library::InstallService;
@@ -500,6 +500,11 @@ pub async fn get_library_path() -> Result<String, String> {
 pub async fn set_library_path(path: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         modify_config(&Config::default_path(), |config| {
+            // The layout decision (flat legacy vs. the games/emulators/saves
+            // split) is a pure function of the directory's own contents, not
+            // Tauri state, so it lives in grid-core where library-root
+            // callers on both sides of the IPC boundary can share it.
+            config.library_layout_version = layout_version_for_library_path(&path);
             config.library_path = path;
             Ok(())
         })

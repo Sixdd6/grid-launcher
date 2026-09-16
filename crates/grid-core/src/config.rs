@@ -250,6 +250,13 @@ pub struct Config {
     /// (`grid-launcher.py:2150-2156`). `RUST_LOG` wins when it is set.
     #[serde(default = "default_true")]
     pub debug_prints: bool,
+    /// The library root layout version: `0` is the flat legacy layout
+    /// (games and emulator installs share the library root), `1` is the
+    /// `games/`/`emulators/`/`saves/` split. Set by `set_library_path` via
+    /// `library::paths::layout_version_for_library_path`; defaults to `0`
+    /// so an older config keeps behaving as it always has.
+    #[serde(default)]
+    pub library_layout_version: u32,
     /// Desktop shell appearance. A TOML table, so it must stay after every
     /// scalar key in this struct.
     #[serde(default)]
@@ -295,6 +302,7 @@ impl Default for Config {
             default_compat_tool: String::new(),
             compat_tool_installs: Vec::new(),
             debug_prints: true,
+            library_layout_version: 0,
             ui: UiSettings::default(),
             extra: BTreeMap::new(),
         }
@@ -477,6 +485,28 @@ mod tests {
         Config::default().save(&path).unwrap();
         assert!(!dir.path().join("config.toml.tmp").exists());
         assert!(path.exists());
+    }
+
+    #[test]
+    fn library_layout_version_defaults_to_zero_and_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "schema_version = 1\n").unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.library_layout_version, 0);
+
+        let cfg = Config {
+            library_layout_version: 1,
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let ui_pos = text.find("[ui]").expect("written config:\n{text}");
+        let field_pos = text
+            .find("library_layout_version = 1")
+            .unwrap_or_else(|| panic!("written config:\n{text}"));
+        assert!(field_pos < ui_pos, "written config:\n{text}");
+        assert_eq!(Config::load(&path).unwrap().library_layout_version, 1);
     }
 
     #[test]

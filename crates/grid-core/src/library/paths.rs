@@ -7,6 +7,16 @@ use std::path::{Path, PathBuf};
 
 const ILLEGAL_CHARACTERS: &str = "<>:\"/\\|?*";
 
+/// Top-level directory names in the v1 library layout.
+pub const GAMES_DIR: &str = "games";
+pub const EMULATORS_DIR: &str = "emulators";
+/// The flat layout's emulator install directory name (capitalized, matching
+/// the reference app), used only to detect a pre-v1 library root.
+pub const LEGACY_EMULATORS_DIR: &str = "Emulators";
+pub const SAVES_DIR: &str = "saves";
+/// `Config::library_layout_version` for the `games`/`emulators`/`saves` split.
+pub const LAYOUT_VERSION_V1: u32 = 1;
+
 /// Sanitize one path component (a title, platform, or emulator name) for use
 /// as a file/directory name.
 ///
@@ -108,6 +118,45 @@ pub fn library_root(config: &crate::config::Config) -> Option<PathBuf> {
         return None;
     }
     Some(expand_home(&config.library_path))
+}
+
+/// Decide which library layout a path (new or existing) should use.
+///
+/// Returns `LAYOUT_VERSION_V1` (`1`) when `raw` is blank, does not exist, is
+/// not a directory, or is empty (no entries other than dot-entries) — i.e.
+/// whenever it is safe to start fresh in the new layout. Also returns `1`
+/// when the directory already has a top-level `games`, `emulators`, or
+/// `saves` entry (already v1). Returns `0` for any other non-empty
+/// directory, which is treated as an existing flat/legacy library root that
+/// must not be reorganized silently.
+pub fn layout_version_for_library_path(raw: &str) -> u32 {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return LAYOUT_VERSION_V1;
+    }
+    let path = expand_home(trimmed);
+    if !path.is_dir() {
+        return LAYOUT_VERSION_V1;
+    }
+    let Ok(entries) = std::fs::read_dir(&path) else {
+        return LAYOUT_VERSION_V1;
+    };
+    let mut saw_entry = false;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with('.') {
+            continue;
+        }
+        if name == GAMES_DIR || name == EMULATORS_DIR || name == SAVES_DIR {
+            return LAYOUT_VERSION_V1;
+        }
+        saw_entry = true;
+    }
+    if saw_entry {
+        0
+    } else {
+        LAYOUT_VERSION_V1
+    }
 }
 
 /// Deduplicate paths by their string form, keeping the first occurrence of
@@ -412,6 +461,90 @@ mod tests {
                 PathBuf::from("/library/Platform/Game"),
                 PathBuf::from("/library/Game"),
             ]
+        );
+    }
+
+    // --- layout_version_for_library_path -----------------------------------
+
+    #[test]
+    fn layout_version_for_library_path_table() {
+        let dir = tempfile::tempdir().unwrap();
+
+        assert_eq!(layout_version_for_library_path(""), 1, "blank");
+        assert_eq!(
+            layout_version_for_library_path(&dir.path().join("nope").to_string_lossy()),
+            1,
+            "nonexistent"
+        );
+
+        let file_path = dir.path().join("a_file");
+        std::fs::write(&file_path, b"x").unwrap();
+        assert_eq!(
+            layout_version_for_library_path(&file_path.to_string_lossy()),
+            1,
+            "a file path"
+        );
+
+        let empty = dir.path().join("empty");
+        std::fs::create_dir(&empty).unwrap();
+        assert_eq!(
+            layout_version_for_library_path(&empty.to_string_lossy()),
+            1,
+            "empty temp dir"
+        );
+
+        let only_hidden = dir.path().join("only_hidden");
+        std::fs::create_dir(&only_hidden).unwrap();
+        std::fs::write(only_hidden.join(".hidden"), b"x").unwrap();
+        assert_eq!(
+            layout_version_for_library_path(&only_hidden.to_string_lossy()),
+            1,
+            "dir with only .hidden"
+        );
+
+        let with_games = dir.path().join("with_games");
+        std::fs::create_dir(&with_games).unwrap();
+        std::fs::create_dir(with_games.join("games")).unwrap();
+        assert_eq!(
+            layout_version_for_library_path(&with_games.to_string_lossy()),
+            1,
+            "dir with games/"
+        );
+
+        let with_saves = dir.path().join("with_saves");
+        std::fs::create_dir(&with_saves).unwrap();
+        std::fs::create_dir(with_saves.join("saves")).unwrap();
+        assert_eq!(
+            layout_version_for_library_path(&with_saves.to_string_lossy()),
+            1,
+            "dir with saves/ only"
+        );
+
+        let with_legacy_emulators = dir.path().join("with_legacy_emulators");
+        std::fs::create_dir(&with_legacy_emulators).unwrap();
+        std::fs::create_dir(with_legacy_emulators.join("Emulators")).unwrap();
+        assert_eq!(
+            layout_version_for_library_path(&with_legacy_emulators.to_string_lossy()),
+            0,
+            "dir with Emulators/"
+        );
+
+        let with_platform = dir.path().join("with_platform");
+        std::fs::create_dir(&with_platform).unwrap();
+        std::fs::create_dir(with_platform.join("Sony PlayStation 2")).unwrap();
+        assert_eq!(
+            layout_version_for_library_path(&with_platform.to_string_lossy()),
+            0,
+            "dir with Sony PlayStation 2/"
+        );
+
+        let with_loose_archive = dir.path().join("with_loose_archive");
+        std::fs::create_dir(&with_loose_archive).unwrap();
+        std::fs::write(with_loose_archive.join("foo.zip"), b"x").unwrap();
+        assert_eq!(
+            layout_version_for_library_path(&with_loose_archive.to_string_lossy()),
+            0,
+            "dir with a loose foo.zip file and no directories"
         );
     }
 
