@@ -1029,6 +1029,12 @@ impl InstallService {
     ///
     /// Nothing here touches the SQLite registry: an installed emulator is a
     /// config entry only.
+    ///
+    /// After the primary is admitted, every profile named by the catalog
+    /// entry's `companions` that has no config entry yet is admitted behind
+    /// it. A companion never affects this `Result`. [`Self::update_emulator`]
+    /// re-installs through here, so an update also enqueues a missing
+    /// companion.
     pub async fn install_emulator(self: &Arc<Self>, source_id: String) -> Result<(), LibraryError> {
         let library = self.library_root()?;
         fn unknown(source_id: &str) -> LibraryError {
@@ -1037,10 +1043,26 @@ impl InstallService {
 
         let profile =
             catalog::find_profile(&self.profiles, &source_id).ok_or_else(|| unknown(&source_id))?;
-        // `find_profile` only matches a profile whose `source` is an object
-        // carrying an owner and a repo, so this clone always succeeds; the
-        // fallback keeps that assumption from turning into a panic.
-        let raw_source = profile.source.clone().ok_or_else(|| unknown(&source_id))?;
+        self.admit_emulator_profile(profile, source_id.clone(), library.clone())?;
+        self.admit_companions(profile, &library);
+        Ok(())
+    }
+
+    /// Builds the [`EmulatorJob`] for `profile` and admits it. `Err` only
+    /// before admission: a profile carrying no object `source` (impossible
+    /// for a profile that came out of [`catalog::find_profile`], which
+    /// requires an owner and a repo — the check keeps that assumption from
+    /// turning into a panic) or a forge client that cannot be built.
+    fn admit_emulator_profile(
+        self: &Arc<Self>,
+        profile: &EmulatorProfile,
+        source_id: String,
+        library: PathBuf,
+    ) -> Result<(), LibraryError> {
+        let raw_source = profile
+            .source
+            .clone()
+            .ok_or_else(|| LibraryError::Registry(format!("unknown emulator: {source_id}")))?;
         let configured_tag = raw_source
             .as_object()
             .map(catalog::configured_tag)
@@ -1066,6 +1088,54 @@ impl InstallService {
             JobPayload::Emulator(job),
         );
         Ok(())
+    }
+
+    /// Admits every companion `profile` names that is not installed yet.
+    ///
+    /// The catalog rows apply the host `platforms` gate, so a companion that
+    /// does not run on this host has no row and is skipped. A missing row, an
+    /// unreadable config or a profile miss warns once (naming only the
+    /// companion profile name) and continues: a companion never fails the
+    /// primary's install.
+    fn admit_companions(self: &Arc<Self>, profile: &EmulatorProfile, library: &Path) {
+        if profile.companions.is_empty() {
+            return;
+        }
+        let config = match Config::load(&self.config_path) {
+            Ok(config) => config,
+            Err(_) => {
+                tracing::warn!(
+                    companions = ?profile.companions,
+                    "companion enqueue skipped: the config could not be loaded"
+                );
+                return;
+            }
+        };
+        let rows = catalog::catalog_entries(&self.profiles);
+        for name in &profile.companions {
+            let Some(row) = rows.iter().find(|row| &row.name == name) else {
+                tracing::warn!(companion = %name, "companion has no catalog row on this host");
+                continue;
+            };
+            let mut row = [row.clone()];
+            catalog::mark_installed(&mut row, &config);
+            if row[0].installed {
+                continue;
+            }
+            let source_id = row[0].source_id.clone();
+            match catalog::find_profile(&self.profiles, &source_id) {
+                Some(companion) => {
+                    if let Err(error) =
+                        self.admit_emulator_profile(companion, source_id, library.to_path_buf())
+                    {
+                        tracing::warn!(companion = %name, %error, "companion could not be admitted");
+                    }
+                }
+                None => {
+                    tracing::warn!(companion = %name, "companion profile could not be resolved")
+                }
+            }
+        }
     }
 
     /// Starts (or queues) a managed compat-tool acquisition for the

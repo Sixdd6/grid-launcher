@@ -1284,3 +1284,168 @@ async fn updating_a_source_installed_emulator_preserves_user_fields_and_records_
         "an update reports fresh == false, which suppresses the firmware pass"
     );
 }
+
+// --- (l) companion enqueue (Task 5) --------------------------------------------
+
+/// Builds the primary profile plus the companion profile it names, both
+/// served by the mock forge: `acme/widget` (tag `v1.0`) and `acme/extras`
+/// (tag `v9`).
+fn companion_profiles(uri: &str, companions: Vec<String>) -> Vec<EmulatorProfile> {
+    let mut primary = profile("Test Emu", gitea_source(uri));
+    primary.companions = companions;
+    vec![primary, profile("Companion Emu", gitea_extras_source(uri))]
+}
+
+/// A `gitea` source block for `acme/extras`, tag `v9`, served by `base` —
+/// the second repo the mock forge exposes ([`EXTRAS_RELEASE`]).
+fn gitea_extras_source(base: &str) -> Value {
+    json!({
+        "provider": "gitea",
+        "owner": "acme",
+        "repo": "extras",
+        "base_url": base,
+        "release_tag": "v9",
+    })
+}
+
+/// The queue entry for `source_id`. Entries are selected by source, never by
+/// position: a companion admission makes "newest" ambiguous.
+fn entry_id_for(entries: &[DownloadEntry], source_id: &str) -> u64 {
+    entries
+        .iter()
+        .find(|entry| entry.source_id == source_id)
+        .unwrap_or_else(|| panic!("no queue entry for {source_id}: {entries:?}"))
+        .id
+}
+
+#[tokio::test]
+async fn a_companion_profile_is_queued_behind_the_primary() {
+    let staging = tempfile::tempdir().unwrap();
+    let primary = zip_bytes(&staging, "widget.zip", &[("bin/testemu.sh", b"PRIMARY")]);
+    let companion = zip_bytes(
+        &staging,
+        "extras.zip",
+        &[("bin/companionemu.sh", b"COMPANION")],
+    );
+
+    let harness =
+        Harness::new(|uri| companion_profiles(uri, vec!["Companion Emu".to_string()])).await;
+    harness.mount_widget("widget-linux.zip", primary, 0).await;
+    let url = format!("{}/dl/extras.zip", harness.uri());
+    harness
+        .mount_json(
+            EXTRAS_RELEASE,
+            release_json("v9", "extras.zip", &url, companion.len()),
+        )
+        .await;
+    harness.mount_bytes("/dl/extras.zip", companion, 0).await;
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+
+    let entries = harness.service.snapshot().entries;
+    assert_eq!(entries.len(), 2, "{entries:?}");
+    let primary_id = entry_id_for(&entries, "acme/widget");
+    let companion_id = entry_id_for(&entries, "acme/extras");
+    assert!(
+        primary_id < companion_id,
+        "the companion must be admitted after the primary"
+    );
+
+    let primary_entry = harness.wait_terminal(primary_id).await;
+    assert_eq!(
+        primary_entry.status,
+        DownloadStatus::Completed,
+        "{}",
+        primary_entry.error
+    );
+    let companion_entry = harness.wait_terminal(companion_id).await;
+    assert_eq!(
+        companion_entry.status,
+        DownloadStatus::Completed,
+        "{}",
+        companion_entry.error
+    );
+    assert_eq!(companion_entry.title, "Companion Emu");
+
+    // The queue is serial, so the companion's finalize always follows the
+    // primary's: the config order is the admission order.
+    let config = harness.config();
+    let names: Vec<&str> = config
+        .emulators
+        .iter()
+        .map(|emulator| emulator.name.as_str())
+        .collect();
+    assert_eq!(names, vec!["Test Emu", "Companion Emu"]);
+    assert!(harness
+        .install_dir("Companion Emu-v9")
+        .join("bin/companionemu.sh")
+        .is_file());
+}
+
+#[tokio::test]
+async fn a_companion_already_in_config_is_not_queued() {
+    let staging = tempfile::tempdir().unwrap();
+    let primary = zip_bytes(&staging, "widget.zip", &[("bin/testemu.sh", b"PRIMARY")]);
+
+    let extra = "\n[[emulators]]\nname = \"Companion Emu\"\npath = \"/old/companion.sh\"\nargs = \"%rom%\"\n";
+    let harness = Harness::with_config(
+        |uri| companion_profiles(uri, vec!["Companion Emu".to_string()]),
+        extra,
+    )
+    .await;
+    harness.mount_widget("widget-linux.zip", primary, 0).await;
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+
+    let entries = harness.service.snapshot().entries;
+    assert_eq!(
+        entries.len(),
+        1,
+        "an already-installed companion must not be queued: {entries:?}"
+    );
+    let entry = harness
+        .wait_terminal(entry_id_for(&entries, "acme/widget"))
+        .await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+    let config = harness.config();
+    let companion = config
+        .emulators
+        .iter()
+        .find(|emulator| emulator.name == "Companion Emu")
+        .expect("the seeded companion entry survives");
+    assert_eq!(
+        companion.path, "/old/companion.sh",
+        "the existing companion entry is left alone"
+    );
+}
+
+#[tokio::test]
+async fn an_unknown_companion_name_is_ignored() {
+    let staging = tempfile::tempdir().unwrap();
+    let primary = zip_bytes(&staging, "widget.zip", &[("bin/testemu.sh", b"PRIMARY")]);
+
+    let harness =
+        Harness::new(|uri| companion_profiles(uri, vec!["No Such Emu".to_string()])).await;
+    harness.mount_widget("widget-linux.zip", primary, 0).await;
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+
+    let entries = harness.service.snapshot().entries;
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    let entry = harness
+        .wait_terminal(entry_id_for(&entries, "acme/widget"))
+        .await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+}
