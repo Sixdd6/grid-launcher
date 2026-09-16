@@ -84,6 +84,14 @@ pub struct EmulatorProfile {
     /// as `companions`: the IPC `ProfileSummary` shape must not change.
     #[serde(skip_serializing)]
     pub legacy_args: Vec<String>,
+    /// Directory names, one path component each, that this emulator writes
+    /// beside its own binary (saves, states, config, screenshots, and so
+    /// on) — the library-layout-v1 catalog key later tasks use to move
+    /// those directories under `saves/` and replace them with links.
+    /// `skip_serializing` for the same reason as `companions`: the IPC
+    /// `ProfileSummary` shape must not change.
+    #[serde(skip_serializing)]
+    pub user_data: Vec<String>,
 }
 
 /// Emulator autoprofile slugs that ship a Windows-only build and therefore
@@ -145,6 +153,8 @@ struct RawProfile {
     companions: Vec<String>,
     #[serde(default)]
     legacy_args: Vec<String>,
+    #[serde(default)]
+    user_data: Vec<String>,
 }
 
 /// The parsed, normalized autoprofile catalog, embedded at build time and
@@ -219,6 +229,7 @@ fn normalize_one(raw: RawProfile) -> Option<EmulatorProfile> {
         compat_tool_type: raw.compat_tool_type,
         companions: trimmed_non_blank(&raw.companions),
         legacy_args: trimmed_non_blank(&raw.legacy_args),
+        user_data: trimmed_non_blank(&raw.user_data),
     })
 }
 
@@ -978,6 +989,82 @@ mod tests {
         let profile = normalize_one(entry).unwrap();
         assert_eq!(profile.companions, vec!["Companion Emu".to_string()]);
         assert_eq!(profile.legacy_args, vec!["-g \"%rom%\"".to_string()]);
+    }
+
+    #[test]
+    fn user_data_is_trimmed_and_blank_free() {
+        let mut entry = raw("Name", &["x.exe"], "", false, &[]);
+        entry.user_data = vec!["  saves  ".into(), "".into(), "   ".into(), "states".into()];
+        let profile = normalize_one(entry).unwrap();
+        assert_eq!(
+            profile.user_data,
+            vec!["saves".to_string(), "states".to_string()]
+        );
+    }
+
+    #[test]
+    fn user_data_entries_are_single_path_components() {
+        for profile in load_profiles() {
+            for entry in &profile.user_data {
+                assert!(!entry.is_empty(), "{}: blank user_data entry", profile.name);
+                assert_ne!(entry, ".", "{}: user_data entry is '.'", profile.name);
+                assert_ne!(entry, "..", "{}: user_data entry is '..'", profile.name);
+                assert!(
+                    !entry.contains('/') && !entry.contains('\\'),
+                    "{}: user_data entry {entry:?} is not a single path component",
+                    profile.name
+                );
+                assert_eq!(
+                    std::path::Path::new(entry).components().count(),
+                    1,
+                    "{}: user_data entry {entry:?} is not a single path component",
+                    profile.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pcsx2_profile_lists_its_seven_user_data_dirs() {
+        let profile = load_profiles()
+            .iter()
+            .find(|p| p.name == "PCSX2 (Playstation 2)")
+            .unwrap();
+        assert_eq!(
+            profile.user_data,
+            vec!["inis", "bios", "memcards", "sstates", "snaps", "cheats", "textures",]
+        );
+    }
+
+    #[test]
+    fn redream_and_vita3k_have_no_user_data() {
+        let profiles = load_profiles();
+        let redream = profiles
+            .iter()
+            .find(|p| p.name == "Redream (Sega Dreamcast)")
+            .unwrap();
+        assert!(redream.user_data.is_empty());
+        let vita3k = profiles
+            .iter()
+            .find(|p| p.name == "Vita3K (Playstation Vita)")
+            .unwrap();
+        assert!(vita3k.user_data.is_empty());
+    }
+
+    #[test]
+    fn profile_names_sanitize_uniquely() {
+        // Two profiles whose names sanitize to the same string would share
+        // one emulators/<N> and saves/<N> folder — a silent data merge.
+        let profiles = load_profiles();
+        let mut seen: HashSet<String> = HashSet::new();
+        for profile in profiles.iter().filter(|p| !p.is_compat_tool) {
+            let sanitized = crate::library::paths::sanitize_component(&profile.name, "emulator");
+            assert!(
+                seen.insert(sanitized.clone()),
+                "{} sanitizes to {sanitized:?}, colliding with another profile",
+                profile.name
+            );
+        }
     }
 
     #[test]

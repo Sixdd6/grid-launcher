@@ -43,6 +43,7 @@
     "save_strategy": "single_file",
     "save_directories": ["saves", "savefiles"],
     "state_directories": ["states", "savestates"],
+    "user_data": ["saves", "states", "system", "screenshots", "config"],
     "firmware_directories": ["system"]
   },
   {
@@ -67,6 +68,7 @@
     "save_strategy": "single_file",
     "save_directories": ["memcards"],
     "state_directories": ["savestates"],
+    "user_data": ["bios", "memcards", "savestates", "screenshots", "inputprofiles"],
     "screenshot_directories": ["screenshots"],
     "firmware_directories": ["bios"]
   },
@@ -96,6 +98,7 @@
       "memcards"
     ],
     "state_directories": ["sstates"],
+    "user_data": ["inis", "bios", "memcards", "sstates", "snaps", "cheats", "textures"],
     "screenshot_directories": ["snaps"],
     "firmware_directories": ["bios"]
   },
@@ -121,7 +124,8 @@
     "save_strategy": "folder",
     "ignore_files": ["load_undo.ppst"],
     "save_directories": ["memstick/PSP/SAVEDATA"],
-    "state_directories": ["memstick/PSP/PPSSPP_STATE"]
+    "state_directories": ["memstick/PSP/PPSSPP_STATE"],
+    "user_data": ["memstick"]
   },
   {
     "match_tokens": ["rpcs3.exe", "rpcs3-v*_linux64.AppImage", "rpcs3*.appimage"],
@@ -151,6 +155,7 @@
     ],
     "firmware_directories": ["."],
     "state_directories": [],
+    "user_data": ["portable"],
     "screenshot_directories": []
   },
   {
@@ -201,7 +206,8 @@
     "use_game_title_as_name": false,
     "save_strategy": "folder",
     "save_directories": ["user/home/1000/savedata"],
-    "state_directories": []
+    "state_directories": [],
+    "user_data": ["user"]
   },
   {
     "match_tokens": [
@@ -232,7 +238,8 @@
     "use_game_title_as_name": false,
     "save_strategy": "folder",
     "save_directories": [],
-    "state_directories": []
+    "state_directories": [],
+    "user_data": ["launcher", "user"]
   },
   {
     "match_tokens": ["kyty_emulator.exe", "kyty_emulator"],
@@ -258,7 +265,8 @@
     "use_game_title_as_name": false,
     "save_strategy": "folder",
     "save_directories": ["_SaveData"],
-    "state_directories": []
+    "state_directories": [],
+    "user_data": ["_SaveData"]
   },
   {
     "match_tokens": ["cemu.exe", "Cemu-*-x86_64.AppImage", "cemu*.appimage"],
@@ -286,6 +294,7 @@
       "mlc01/usr/save"
     ],
     "state_directories": [],
+    "user_data": ["portable"],
     "screenshot_directories": ["mlc01/screenshots", "portable/mlc01/screenshots"],
     "firmware_directories": ["portable"]
   },
@@ -316,6 +325,7 @@
     "state_directories": [
       "user/states"
     ],
+    "user_data": ["user"],
     "screenshot_directories": ["user/screenshots"]
   },
   {
@@ -387,6 +397,7 @@
       "user/nand/user/save/0000000000000000"
     ],
     "state_directories": [],
+    "user_data": ["user"],
     "screenshot_directories": ["user/screenshots"],
     "firmware_directories": [
       {"path": "user/keys", "match": ["keys"]},
@@ -436,7 +447,8 @@
     "use_game_title_as_name": false,
     "save_strategy": "single_file",
     "save_directories": ["Saves"],
-    "state_directories": []
+    "state_directories": [],
+    "user_data": ["Saves", "NVRAM", "Config"]
   },
   {
     "match_tokens": [
@@ -469,6 +481,7 @@
       "content"
     ],
     "state_directories": [],
+    "user_data": ["content", "cache"],
     "screenshot_directories": ["screenshots"]
   },
   {
@@ -483,6 +496,7 @@
       "content"
     ],
     "state_directories": [],
+    "user_data": ["content", "cache"],
     "screenshot_directories": ["screenshots"]
   },
   {
@@ -509,6 +523,7 @@
       "content"
     ],
     "state_directories": [],
+    "user_data": ["content", "cache"],
     "screenshot_directories": ["screenshots"]
   },
   {
