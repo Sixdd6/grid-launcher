@@ -324,11 +324,14 @@ mod tests {
     }
 
     #[test]
-    fn real_catalog_offers_the_qt_launcher_but_not_the_win32_only_profiles() {
+    fn real_catalog_offers_the_qt_launcher_and_xenia_canary_but_not_xenia_master() {
         let entries = catalog_entries(load_profiles());
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
         assert!(names.contains(&"ShadPS4 Qt Launcher"));
-        assert!(!names.contains(&"Xenia Canary (Xbox 360)"));
+        // Canary ships a Linux AppImage, so it is installable here.
+        assert!(names.contains(&"Xenia Canary (Xbox 360)"));
+        // Xenia master has no source block at all and stays Windows-only.
+        assert!(!names.contains(&"Xenia (Xbox 360)"));
     }
 
     #[test]

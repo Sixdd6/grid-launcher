@@ -90,10 +90,14 @@ pub struct EmulatorProfile {
 /// must not appear in the UI on non-Windows platforms
 /// (`_WINDOWS_ONLY_EMULATOR_SLUGS`, profiles.py:13).
 ///
-/// DEVIATION: the reference also gated `shadps4 qt launcher`. The launcher
-/// now publishes Linux and macOS assets, so its catalog entry carries
-/// per-OS `asset_patterns` instead and is installable everywhere.
-pub const WINDOWS_ONLY_SLUGS: [&str; 2] = ["xenia canary (xbox 360)", "xenia (xbox 360)"];
+/// DEVIATION: the reference also gated `shadps4 qt launcher` and
+/// `xenia canary (xbox 360)`. Both now publish non-Windows assets — the
+/// launcher ships Linux and macOS builds, Xenia Canary ships
+/// `xenia_canary_linux.AppImage` — so their catalog entries carry per-OS
+/// `asset_patterns` instead and are installable everywhere. Only Xenia
+/// master, which has no source block and no Linux build at all, is still
+/// gated here.
+pub const WINDOWS_ONLY_SLUGS: [&str; 1] = ["xenia (xbox 360)"];
 
 const AUTOPROFILES_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -778,6 +782,18 @@ mod tests {
         );
     }
 
+    /// The Linux release asset must land on Canary, not on the Windows-only
+    /// Xenia master profile (`xenia.exe`) and not on Edge.
+    #[test]
+    fn xenia_canary_appimage_resolves_to_the_canary_profile() {
+        let profiles = load_profiles();
+        let found = profile_for_entry("", "/x/xenia_canary_linux.AppImage", profiles);
+        assert_eq!(
+            found.map(|p| p.name.as_str()),
+            Some("Xenia Canary (Xbox 360)")
+        );
+    }
+
     #[test]
     fn stem_match_when_basename_has_no_extension() {
         let profiles = load_profiles();
@@ -1202,24 +1218,32 @@ mod tests {
 
     // --- profile_available_on_host ------------------------------------------
 
+    /// Canary ships `xenia_canary_linux.AppImage`, so it is no longer a
+    /// Windows-only slug. Its source keeps a `platforms` allowlist of
+    /// `win32` and `linux`: there is no macOS build, and without the list a
+    /// darwin host would be offered the Windows archive.
     #[test]
-    fn xenia_canary_unavailable_on_linux() {
+    fn xenia_canary_available_on_windows_and_linux_only() {
         let profiles = load_profiles();
         let xenia_canary = profiles
             .iter()
             .find(|p| p.name == "Xenia Canary (Xbox 360)")
             .unwrap();
-        assert!(!profile_available_on_host(xenia_canary, "linux"));
+        assert!(profile_available_on_host(xenia_canary, "linux"));
+        assert!(profile_available_on_host(xenia_canary, "win32"));
+        assert!(!profile_available_on_host(xenia_canary, "darwin"));
     }
 
+    /// Xenia master is the one remaining Windows-only slug.
     #[test]
-    fn xenia_canary_available_on_windows() {
+    fn xenia_master_unavailable_on_linux() {
         let profiles = load_profiles();
-        let xenia_canary = profiles
+        let xenia = profiles
             .iter()
-            .find(|p| p.name == "Xenia Canary (Xbox 360)")
+            .find(|p| p.name == "Xenia (Xbox 360)")
             .unwrap();
-        assert!(profile_available_on_host(xenia_canary, "win32"));
+        assert!(!profile_available_on_host(xenia, "linux"));
+        assert!(profile_available_on_host(xenia, "win32"));
     }
 
     #[test]
@@ -1234,8 +1258,9 @@ mod tests {
 
     #[test]
     fn windows_host_always_available_regardless_of_slug() {
-        let p = profile("Xenia Canary (Xbox 360)", &["xenia"], false);
+        let p = profile("Xenia (Xbox 360)", &["xenia"], false);
         assert!(profile_available_on_host(&p, "win32"));
+        assert!(!profile_available_on_host(&p, "linux"));
     }
 
     #[test]

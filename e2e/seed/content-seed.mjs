@@ -9,11 +9,12 @@
  *
  * - `profile_for_entry` (grid-core/src/launch/profiles.rs) matches the
  *   basename `xenia_edge` against the `Xenia Edge (Xbox 360)` profile's
- *   `xenia_edge` token. Naming it `xenia_canary` instead would match
- *   `Xenia Canary (Xbox 360)`, which is in `WINDOWS_ONLY_SLUGS` — and
- *   `InstallService::xenia_content_root` refuses a Windows-only profile on
- *   a Linux host with "The configured Xbox 360 emulator only runs on
- *   Windows.", so the whole content flow would fail before it started.
+ *   `xenia_edge` token, which is the emulator this stage group is about.
+ *   (Xenia Canary now installs on Linux too, so its name would also pass
+ *   `InstallService::xenia_content_root`'s host gate — only `Xenia
+ *   (Xbox 360)`, the master build, is still in `WINDOWS_ONLY_SLUGS` and
+ *   would fail the content flow with "The configured Xbox 360 emulator only
+ *   runs on Windows.")
  * - `portable.txt` next to the executable is what makes
  *   `readers::xenia_directory_settings` treat the install as portable, which
  *   sets `storage_root` to the emulator directory and therefore

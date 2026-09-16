@@ -439,14 +439,25 @@
     "state_directories": []
   },
   {
-    "match_tokens": ["xenia_canary.exe", "xenia-canary.exe"],
+    "match_tokens": [
+      "xenia_canary.exe",
+      "xenia-canary.exe",
+      "xenia_canary_linux.AppImage",
+      "xenia*canary*.appimage",
+      "xenia_canary"
+    ],
     "source": {
       "provider": "github-release",
       "owner": "xenia-canary",
       "repo": "xenia-canary",
       "release_tag": "latest",
-      "platforms": ["win32"],
-      "asset_patterns": ["xenia_canary_windows.*"]
+      "platforms": ["win32", "linux"],
+      "asset_patterns": ["xenia_canary_windows.*"],
+      "platform_overrides": {
+        "linux": {
+          "asset_patterns": ["xenia_canary_linux.AppImage"]
+        }
+      }
     },
     "name": "Xenia Canary (Xbox 360)",
     "args": "\"%rom%\"",

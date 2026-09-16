@@ -128,18 +128,22 @@ const UNKNOWN_COMPAT_TOOL_SOURCE: &str = "unknown compat tool source";
 const EXTRACT_TMP_DIR: &str = ".extract-tmp";
 const NO_EMULATOR_EXECUTABLE: &str = "No launchable emulator executable was found after install";
 
-/// The verbatim messages the update/DLC flows show. Worded exactly as
-/// the reference does (`install_mixin.py:364-383`,
+/// The verbatim messages the update/DLC flows show. Worded as the
+/// reference does (`install_mixin.py:364-383`,
 /// `details_view_mixin.py:1559`, `:1849`); the drawer row shows them
 /// unchanged, so they must not drift.
+///
+/// DEVIATION: the two Xbox 360 messages name "Xenia Canary or Xenia Edge"
+/// rather than only Xenia Edge — Xenia Canary now ships a Linux AppImage
+/// and is installable from the catalog here.
 const XENIA_CONTENT_ROOT_UNKNOWN: &str =
     "Could not determine Xenia content directory. Is Xenia configured?";
 const XBOX360_NEEDS_LINUX_EMULATOR: &str =
-    "Xbox 360 content requires a Linux-compatible emulator such as Xenia Edge. \
-     Install and configure Xenia Edge, then try again.";
+    "Xbox 360 content requires a Linux-compatible emulator such as Xenia Canary or Xenia Edge. \
+     Install and configure one, then try again.";
 const XBOX360_EMULATOR_WINDOWS_ONLY: &str =
     "The configured Xbox 360 emulator only runs on Windows. Install a \
-     Linux-compatible emulator such as Xenia Edge to apply content.";
+     Linux-compatible emulator such as Xenia Canary or Xenia Edge to apply content.";
 const CONTENT_UNSUPPORTED_PLATFORM: &str =
     "Update/DLC content is only supported for PS4 and Xbox 360 games";
 /// A native update needs the directory it merges into.
@@ -3802,8 +3806,8 @@ mod tests {
         };
         assert_eq!(
             message,
-            "Xbox 360 content requires a Linux-compatible emulator such as Xenia Edge. \
-             Install and configure Xenia Edge, then try again."
+            "Xbox 360 content requires a Linux-compatible emulator such as Xenia Canary or Xenia Edge. \
+             Install and configure one, then try again."
         );
     }
 
@@ -3814,16 +3818,17 @@ mod tests {
     #[test]
     fn xenia_content_root_rejects_a_windows_only_emulator() {
         let dir = tempfile::tempdir().unwrap();
-        let executable = dir.path().join("xenia_canary.exe");
+        let executable = dir.path().join("xenia.exe");
         fs::write(&executable, b"MZ").unwrap();
+        // Xenia master is the one profile still in `WINDOWS_ONLY_SLUGS`.
         // `portable.txt` would make the reader resolve a content root, which
         // this test must NOT reach: the host gate comes first.
         let service = service_with_config(
             dir.path(),
             &format!(
                 "schema_version = 1\n\n\
-                 [default_emulators]\n\"Xbox 360\" = \"Xenia Canary (Xbox 360)\"\n\n\
-                 [[emulators]]\nname = \"Xenia Canary (Xbox 360)\"\npath = {:?}\nargs = \"\"\n",
+                 [default_emulators]\n\"Xbox 360\" = \"Xenia (Xbox 360)\"\n\n\
+                 [[emulators]]\nname = \"Xenia (Xbox 360)\"\npath = {:?}\nargs = \"\"\n",
                 executable.to_string_lossy()
             ),
         );
@@ -3834,7 +3839,47 @@ mod tests {
         assert_eq!(
             message,
             "The configured Xbox 360 emulator only runs on Windows. Install a \
-             Linux-compatible emulator such as Xenia Edge to apply content."
+             Linux-compatible emulator such as Xenia Canary or Xenia Edge to apply content."
+        );
+    }
+
+    /// Xenia Canary's Linux AppImage passes the host gate and resolves its
+    /// content root under the XDG data root: the AppImage's own directory is
+    /// a read-only squashfs mount, so Canary is never portable on Linux.
+    // linux-only: the XDG storage root is a Linux branch of
+    // `xenia_default_user_storage_root` (macOS uses Application Support).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn xenia_content_root_accepts_a_linux_canary_appimage() {
+        let _lock = crate::test_env::lock();
+        let dir = tempfile::tempdir().unwrap();
+        let xdg = dir.path().join("xdg");
+        fs::create_dir_all(&xdg).unwrap();
+        let _env = crate::test_env::EnvGuard::set(&[
+            ("XDG_DATA_HOME", Some(&xdg.to_string_lossy())),
+            ("HOME", Some(&dir.path().to_string_lossy())),
+        ]);
+        let executable = dir.path().join("xenia_canary_linux.AppImage");
+        fs::write(&executable, b"\x7fELF").unwrap();
+        let service = service_with_config(
+            dir.path(),
+            &format!(
+                "schema_version = 1\n\n\
+                 [default_emulators]\n\"Xbox 360\" = \"Xenia Canary (Xbox 360)\"\n\n\
+                 [[emulators]]\nname = \"Xenia Canary (Xbox 360)\"\npath = {:?}\nargs = \"\"\n",
+                executable.to_string_lossy()
+            ),
+        );
+
+        let content_root = service
+            .xenia_content_root("Xbox 360")
+            .expect("a Linux Canary AppImage resolves a content root");
+
+        assert_eq!(
+            content_root,
+            crate::autoconfig::paths::resolve_best_effort(&xdg)
+                .join("Xenia")
+                .join("content")
         );
     }
 

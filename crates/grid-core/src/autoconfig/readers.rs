@@ -5401,6 +5401,66 @@ mod tests {
         }
     }
 
+    /// Xenia Canary's Linux release is a single AppImage whose `AppRun` is a
+    /// symlink to `usr/bin/xenia_canary` — no wrapper, no env setup. Xenia's
+    /// own `storage_root` logic (xenia_main.cc) only uses the executable's
+    /// folder when `--portable` is passed or `portable.txt` sits beside it,
+    /// and the `portable` cvar defaults to false off Windows. The AppImage's
+    /// folder is a read-only squashfs mount, so the real thing always lands
+    /// on `$XDG_DATA_HOME/Xenia`.
+    // linux-only: the XDG storage root is a Linux branch of
+    // `xenia_default_user_storage_root` (macOS uses Application Support).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn xenia_canary_appimage_on_linux_is_not_portable_and_uses_the_xdg_storage_root() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let xdg = temp.path().join("xdg");
+        std::fs::create_dir_all(&xdg).unwrap();
+        let _xdg_guard = EnvGuard::set(&[("XDG_DATA_HOME", Some(&xdg.to_string_lossy()))]);
+        let (exe, dir) = make_exe(
+            temp.path(),
+            "Xenia Canary (Xbox 360)-latest",
+            "xenia_canary_linux.AppImage",
+        );
+        let xenia_root = resolve_best_effort(&xdg).join("Xenia");
+
+        let settings = xenia_directory_settings(&exe, &[]);
+
+        assert_eq!(settings.variant, "canary");
+        assert!(!settings.portable, "an AppImage can never run portable");
+        assert_eq!(settings.storage_root, xenia_root.to_string_lossy());
+        assert_eq!(
+            settings.content_root,
+            xenia_root.join("content").to_string_lossy()
+        );
+        assert_eq!(
+            settings.cache_root,
+            xenia_root.join("cache_host").to_string_lossy()
+        );
+
+        // The canary config name under the storage root is a candidate, so
+        // an existing file there is the one that gets read.
+        std::fs::create_dir_all(&xenia_root).unwrap();
+        let config = xenia_root.join("xenia-canary.config.toml");
+        std::fs::write(&config, "[Storage]\n").unwrap();
+        assert_eq!(
+            xenia_directory_settings(&exe, &[]).config_path,
+            resolve_best_effort(&config).to_string_lossy()
+        );
+
+        // GRID still honours a `portable.txt` dropped beside the executable:
+        // a user may extract the AppImage, and then the folder is writable.
+        std::fs::write(dir.join("portable.txt"), "").unwrap();
+        let portable = xenia_directory_settings(&exe, &[]);
+        assert!(portable.portable);
+        assert_eq!(
+            portable.storage_root,
+            resolve_best_effort(&dir).to_string_lossy()
+        );
+    }
+
     #[test]
     fn xenia_save_overrides_walk_xuid_and_bare_title_directories() {
         let _lock = crate::test_env::lock();

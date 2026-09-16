@@ -40,9 +40,9 @@ as `--add-data "build/bundle-assets;assets"` alongside `retroarch-core-list.json
 - **Registry-derived paths.** Emulator modules read user roots from the registry / `%APPDATA%`
   / `OneDrive` Documents only inside `sys.platform == "win32"` blocks (for example
   `dolphin.py::_registry_user_root()`, `pcsx2.py::_windows_documents_folder()`).
-- **Windows-only emulators.** Xenia (master) and Xenia Canary are Windows-only builds; see
-  the platform gate under Linux below. The ShadPS4 Qt launcher used to be listed here; it
-  now ships Linux and macOS assets and installs on every platform.
+- **Windows-only emulators.** Xenia (master) is a Windows-only build; see the platform gate
+  under Linux below. Xenia Canary and the ShadPS4 Qt launcher used to be listed here; both
+  now ship non-Windows assets (Canary a Linux AppImage) and install on every platform.
 - **Controller input.** TV mode polls XInput directly on Windows
   (`_XInputPollThread`, guide button via `XInputGetStateEx` ordinal 100).
 
@@ -97,11 +97,11 @@ detected/configured/launched correctly.
   (`cloud_transfer.py`).
 - **Platform gating for Windows-only emulators.**
   `emulator/profiles.py::is_available_on_current_platform()` filters autoprofiles by
-  `_WINDOWS_ONLY_EMULATOR_SLUGS` (`xenia canary (xbox 360)`, `xenia (xbox 360)`) and by an
+  `_WINDOWS_ONLY_EMULATOR_SLUGS` — one slug in the Rust port, `xenia (xbox 360)` — and by an
   explicit `source.platforms` allowlist. It is applied in
   `emulator_ui_mixin.py` (emulator list), `ui/dialogs.py` (add-emulator dropdown), and
   `install_mixin.py` (Xbox 360 content install, which refuses a Windows-only emulator with a
-  message pointing at Xenia Edge). Covered by `tests/test_platform_gating.py`.
+  message pointing at Xenia Canary or Xenia Edge). Covered by `tests/test_platform_gating.py`.
 - **Xenia Edge.** Ships as a native Linux AppImage from the `has207/xenia-edge` release, so
   Xbox 360 remains playable on Linux; variant handling is in `emulator/xenia.py`.
 - **Token storage.** `token_store.py` uses `keyring` on every platform (Secret Service /
@@ -214,7 +214,7 @@ Always read the environment variable first and fall back to the default — use
 | Pico-8 | Pico-8 | Yes (commercial) | N/A | `~/.lexaloffle/pico-8/` | `~/.lexaloffle/pico-8/carts/` | No |
 | Xenia Edge | Xbox 360 | Yes (AppImage) | N/A | Emulator-directory relative | Emulator-directory relative | No |
 | **Xenia** | **Xbox 360** | **No** | **N/A** | N/A | N/A | **Yes** |
-| **Xenia Canary** | **Xbox 360** | **No** | **N/A** | N/A | N/A | **Yes** |
+| Xenia Canary | Xbox 360 | Yes (AppImage) | N/A | `$XDG_DATA_HOME/Xenia` | `$XDG_DATA_HOME/Xenia` | No |
 | ShadPS4 (Qt launcher) | PS4 | Yes (AppImage) | N/A | Emulator-directory relative | Emulator-directory relative | No |
 
 Notes:
@@ -231,7 +231,7 @@ Notes:
 
 | Platform | Windows Emulator | Linux Support | Notes |
 |---|---|---|---|
-| Xbox 360 | Xenia / Xenia Canary | Xenia Edge (native AppImage) | Xenia master/Canary hidden on Linux by the platform gate |
+| Xbox 360 | Xenia / Xenia Canary | Xenia Canary and Xenia Edge (native AppImages) | Only Xenia master is hidden on Linux by the platform gate |
 | Xbox OG | Xemu | Native | — |
 | PS4 | FPKG extraction | Install pipeline is file-based | ShadPS4 Qt launcher installs on Linux too (prerelease assets) |
 | PS3 | RPCS3 | Native | — |

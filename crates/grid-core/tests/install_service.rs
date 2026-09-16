@@ -2653,8 +2653,8 @@ async fn xbox360_content_without_emulator_fails_with_the_linux_message() {
     assert_eq!(entry.status, DownloadStatus::Failed);
     assert_eq!(
         entry.error,
-        "Xbox 360 content requires a Linux-compatible emulator such as Xenia Edge. \
-         Install and configure Xenia Edge, then try again."
+        "Xbox 360 content requires a Linux-compatible emulator such as Xenia Canary or Xenia Edge. \
+         Install and configure one, then try again."
     );
 }
 

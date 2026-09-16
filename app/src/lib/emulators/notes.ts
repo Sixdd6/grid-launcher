@@ -20,7 +20,10 @@
 
 export type EmulatorNote = { key: string; text: string };
 
-/** Token → note, in the order the reference emits them. */
+/** Token → note, in the order the reference emits them. The `xenia canary`
+ *  note is GRID's own: the catalog installs Canary's Linux AppImage, which
+ *  is less mature than Xenia Edge's Linux build. The two-word key keeps it
+ *  off `Xenia (Xbox 360)` and `Xenia Edge (Xbox 360)`. */
 const NOTES: readonly EmulatorNote[] = [
   {
     key: 'azahar',
@@ -36,6 +39,10 @@ const NOTES: readonly EmulatorNote[] = [
     text: 'RetroAchievements: Configure login via Emulator Settings → Achievements (tokens are machine-encrypted)',
   },
   { key: 'rpcs3', text: 'Controller setup: Configure controllers via Config → Pads' },
+  {
+    key: 'xenia canary',
+    text: 'Linux build is experimental  ·  Xenia Edge is the more mature Linux option',
+  },
   {
     key: 'kyty',
     text: 'Requires a Vulkan 1.3 GPU  ·  Early emulator — expect limited game compatibility',

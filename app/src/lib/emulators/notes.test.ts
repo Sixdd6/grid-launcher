@@ -50,6 +50,20 @@ describe('emulatorNotes', () => {
     ]);
   });
 
+  it('returns the Xenia Canary note verbatim', () => {
+    expect(emulatorNotes('Xenia Canary (Xbox 360)')).toEqual([
+      {
+        key: 'xenia canary',
+        text: 'Linux build is experimental  ·  Xenia Edge is the more mature Linux option',
+      },
+    ]);
+  });
+
+  it('does not fire the Canary note for the other Xenia profiles', () => {
+    expect(emulatorNotes('Xenia (Xbox 360)')).toEqual([]);
+    expect(emulatorNotes('Xenia Edge (Xbox 360)')).toEqual([]);
+  });
+
   it('matches case-insensitively anywhere in the name, like the reference token test', () => {
     expect(emulatorNotes('My DuckStation build').map((n) => n.key)).toEqual(['duckstation']);
     expect(emulatorNotes('  rpcs3-nightly  ').map((n) => n.key)).toEqual(['rpcs3']);
