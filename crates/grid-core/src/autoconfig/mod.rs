@@ -22,6 +22,7 @@ pub mod readers;
 pub mod redream;
 pub mod retroarch;
 pub mod rpcs3;
+pub mod shadps4_qt;
 pub mod writers;
 pub mod xemu;
 
@@ -320,6 +321,20 @@ pub fn is_redream(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
     emulator_matches_tokens(entry, &["redream"], profiles)
 }
 
+/// The ShadPS4 Qt launcher, which ships its own executable alongside the
+/// emulator it launches. Checked BEFORE [`is_shadps4`] so the launcher never
+/// reads as the emulator itself.
+pub fn is_shadps4_qt_launcher(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
+    emulator_matches_tokens(entry, &["shadps4qtlauncher", "qt launcher"], profiles)
+}
+
+/// The shadPS4 emulator itself — every `shadps4` match that is not the Qt
+/// launcher (whose file name and profile name both carry `shadps4` too).
+pub fn is_shadps4(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
+    emulator_matches_tokens(entry, &["shadps4"], profiles)
+        && !is_shadps4_qt_launcher(entry, profiles)
+}
+
 /// Spec deviation D2 (RA-keys-only fan-out) — no direct Python counterpart:
 /// the RA-capable predicates, in dispatch order. DuckStation is
 /// deliberately NOT here even though it takes RetroAchievements-adjacent
@@ -520,6 +535,12 @@ fn record(report: &mut SyncReport, emulator: &str, writer: &str, result: EnsureR
 /// that follows is a FLAT SEQUENCE OF INDEPENDENT `if`s, not a chain, so an
 /// entry name matching two predicates runs both writers.
 ///
+/// Two of those writers need a SECOND entry: shadPS4 and its Qt launcher are
+/// separate catalog installs that arrive in either order, so each one's
+/// branch looks its counterpart up in `config.emulators`
+/// ([`counterpart_path`]) and, when it is there, writes the launcher's
+/// `qt_ui.ini`. A missing counterpart writes nothing and warns nothing.
+///
 /// Never returns `Err` for a writer failure — those land in
 /// `report.warnings`. The only `Err` is a config load or save failure.
 pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncReport, ConfigError> {
@@ -672,8 +693,55 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
     if is_redream(&subject, profiles) {
         record(&mut report, name, "redream", redream::ensure_settings(path));
     }
+    if is_shadps4(&subject, profiles) {
+        record(
+            &mut report,
+            name,
+            "shadps4 user dir",
+            shadps4_qt::ensure_portable_user_dir(path),
+        );
+        if let Some(qt_path) =
+            counterpart_path(&config.emulators, index, profiles, is_shadps4_qt_launcher)
+        {
+            record(
+                &mut report,
+                name,
+                "shadps4 qt launcher",
+                shadps4_qt::ensure_version_selected(&qt_path, path),
+            );
+        }
+    }
+    if is_shadps4_qt_launcher(&subject, profiles) {
+        if let Some(shadps4_path) = counterpart_path(&config.emulators, index, profiles, is_shadps4)
+        {
+            record(
+                &mut report,
+                name,
+                "shadps4 qt launcher",
+                shadps4_qt::ensure_version_selected(path, &shadps4_path),
+            );
+        }
+    }
 
     Ok(report)
+}
+
+/// The first OTHER registered entry (never `index` itself) with a non-blank
+/// trimmed path for which `predicate` holds. `None` means the counterpart is
+/// simply not installed — the caller writes nothing and warns nothing.
+fn counterpart_path(
+    emulators: &[EmulatorEntry],
+    index: usize,
+    profiles: &[EmulatorProfile],
+    predicate: fn(&EmulatorEntry, &[EmulatorProfile]) -> bool,
+) -> Option<String> {
+    emulators
+        .iter()
+        .enumerate()
+        .filter(|(position, _)| *position != index)
+        .map(|(_, entry)| entry)
+        .find(|entry| !entry.path.trim().is_empty() && predicate(entry, profiles))
+        .map(|entry| entry.path.trim().to_string())
 }
 
 /// The LAUNCH-time entry point (doc 05 call-site table): the RetroArch
@@ -1129,6 +1197,46 @@ mod tests {
         assert!(is_rpcs3(&entry("RPCS3-nightly", ""), &[]));
         assert!(is_rpcs3(&entry("  rpcs3  ", ""), &[]));
         assert!(!is_rpcs3(&entry("PCSX2", ""), &[]));
+    }
+
+    #[test]
+    fn shadps4_and_its_qt_launcher_are_told_apart() {
+        let profiles = crate::launch::profiles::load_profiles();
+
+        let sdl = entry(
+            "ShadPS4 (Playstation 4)",
+            "/opt/ShadPS4/Shadps4-sdl.AppImage",
+        );
+        let win = entry("ShadPS4 (Playstation 4)", r"C:\ShadPS4\shadps4.exe");
+        let qt_exe = entry("ShadPS4 Qt Launcher", "/opt/Qt/shadPS4QtLauncher.exe");
+        let qt_appimage = entry(
+            "ShadPS4 Qt Launcher",
+            "/opt/Qt/shadPS4QtLauncher-qt.AppImage",
+        );
+        let by_name = entry("My shadPS4 build", "");
+        let launcher_by_name = entry("ShadPS4 Qt Launcher", "");
+
+        for emulator in [&sdl, &win, &by_name] {
+            assert!(is_shadps4(emulator, profiles), "{}", emulator.path);
+            assert!(
+                !is_shadps4_qt_launcher(emulator, profiles),
+                "{}",
+                emulator.path
+            );
+        }
+        for launcher in [&qt_exe, &qt_appimage, &launcher_by_name] {
+            assert!(
+                is_shadps4_qt_launcher(launcher, profiles),
+                "{}",
+                launcher.path
+            );
+            assert!(
+                !is_shadps4(launcher, profiles),
+                "the launcher is not the emulator: {}",
+                launcher.path
+            );
+        }
+        assert!(!is_shadps4(&entry("PCSX2", "/opt/pcsx2"), profiles));
     }
 
     // --- sync_new_emulator ---------------------------------------------------
@@ -1859,5 +1967,119 @@ mod tests {
                 .map(String::as_str),
             Some("snes9x")
         );
+    }
+
+    // --- shadPS4 / Qt launcher pairing ---------------------------------------
+
+    /// The two entries GRID installs as a pair, with the Qt launcher's
+    /// `qt_ui.ini` path alongside.
+    fn shadps4_pair(temp: &Path) -> (EmulatorEntry, EmulatorEntry, PathBuf, PathBuf) {
+        let shadps4_exe = temp.join("ShadPS4-latest").join("Shadps4-sdl.AppImage");
+        touch(&shadps4_exe);
+        let qt_exe = temp
+            .join("ShadPS4 Qt Launcher-latest")
+            .join("shadPS4QtLauncher-qt.AppImage");
+        touch(&qt_exe);
+        let ini = qt_exe.parent().unwrap().join("launcher").join("qt_ui.ini");
+        let user_dir = shadps4_exe.parent().unwrap().join("user");
+        (
+            entry("ShadPS4 (Playstation 4)", shadps4_exe.to_str().unwrap()),
+            entry("ShadPS4 Qt Launcher", qt_exe.to_str().unwrap()),
+            ini,
+            user_dir,
+        )
+    }
+
+    fn sync(config_path: &Path, entry_name: &str) -> SyncReport {
+        let ctx = SyncContext {
+            config_path,
+            platforms: &[],
+            platform_slugs: &no_slugs(),
+            ps3_library_path: String::new(),
+            ra: None,
+            profiles: crate::launch::profiles::load_profiles(),
+        };
+        sync_new_emulator(entry_name, &ctx).unwrap()
+    }
+
+    #[test]
+    fn installing_the_qt_launcher_after_shadps4_points_it_at_the_installed_build() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated(temp.path());
+        let (shadps4, qt, ini, _user_dir) = shadps4_pair(temp.path());
+        let shadps4_path = shadps4.path.clone();
+        let config = config_with(temp.path(), vec![shadps4, qt]);
+        let config_path = write_config(temp.path(), &config);
+
+        let report = sync(&config_path, "ShadPS4 Qt Launcher");
+
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+        let text = std::fs::read_to_string(&ini).unwrap();
+        assert_eq!(
+            text,
+            format!("[version_manager]\nversionSelected={shadps4_path}\n")
+        );
+        assert!(
+            report.wrote.iter().any(|w| w == &ini.to_string_lossy()),
+            "{:?}",
+            report.wrote
+        );
+    }
+
+    #[test]
+    fn installing_shadps4_after_the_qt_launcher_writes_the_same_file_and_the_user_dir() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated(temp.path());
+        let (shadps4, qt, ini, user_dir) = shadps4_pair(temp.path());
+        let shadps4_path = shadps4.path.clone();
+        // The launcher is registered FIRST: the counterpart lookup must not
+        // depend on install order.
+        let config = config_with(temp.path(), vec![qt, shadps4]);
+        let config_path = write_config(temp.path(), &config);
+
+        let report = sync(&config_path, "ShadPS4 (Playstation 4)");
+
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+        assert!(user_dir.is_dir(), "the portable user dir must exist");
+        assert_eq!(
+            std::fs::read_to_string(&ini).unwrap(),
+            format!("[version_manager]\nversionSelected={shadps4_path}\n")
+        );
+    }
+
+    #[test]
+    fn shadps4_alone_creates_only_the_user_dir() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated(temp.path());
+        let (shadps4, _qt, ini, user_dir) = shadps4_pair(temp.path());
+        let config = config_with(temp.path(), vec![shadps4]);
+        let config_path = write_config(temp.path(), &config);
+
+        let report = sync(&config_path, "ShadPS4 (Playstation 4)");
+
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+        assert!(user_dir.is_dir());
+        assert!(
+            !ini.exists() && !ini.parent().unwrap().exists(),
+            "no launcher entry means no qt_ui.ini"
+        );
+    }
+
+    #[test]
+    fn the_qt_launcher_alone_writes_nothing_and_warns_nothing() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated(temp.path());
+        let (_shadps4, qt, ini, _user_dir) = shadps4_pair(temp.path());
+        let config = config_with(temp.path(), vec![qt]);
+        let config_path = write_config(temp.path(), &config);
+
+        let report = sync(&config_path, "ShadPS4 Qt Launcher");
+
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+        assert!(!ini.exists(), "no shadPS4 entry means no version pointer");
     }
 }

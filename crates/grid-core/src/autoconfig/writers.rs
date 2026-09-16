@@ -316,6 +316,15 @@ pub fn rpcs3_gui_section(
     ini_core(raw, section, desired, &NARROW_KEY_RE, annotations)
 }
 
+/// Qt's QSettings RUNTIME INI form: `key=value`, no spaces around `=`, and
+/// no `key\default=` annotation lines (an existing annotation for a managed
+/// key is deleted). Identical to [`rpcs3_gui_section`] with `annotate =
+/// false`; it exists so a Qt-based emulator module does not have to call an
+/// RPCS3-named function.
+pub fn qt_plain_section(raw: &str, section: &str, desired: &Desired) -> (String, bool) {
+    rpcs3_gui_section(raw, section, desired, false)
+}
+
 /// The walk shared by the add-only section families ([`yaml_add_only_section`]
 /// and [`toml_add_only_section`]): scan `raw` line by line, tracking whether
 /// the current line is inside the target section; on each section header,
@@ -781,6 +790,19 @@ mod tests {
         let (out, changed) =
             rpcs3_gui_section("[Meta]\n", "Meta", &desired![("key", "new")], false);
         assert_eq!(out, "[Meta]\nkey=new\n");
+        assert!(changed);
+    }
+
+    // --- qt_plain_section ---------------------------------------------------
+
+    #[test]
+    fn qt_plain_section_writes_no_spaces_and_drops_the_default_annotation() {
+        let (out, changed) = qt_plain_section(
+            "[version_manager]\nversionSelected\\default=false\nversionSelected=/old\n",
+            "version_manager",
+            &desired![("versionSelected", "/x/y")],
+        );
+        assert_eq!(out, "[version_manager]\nversionSelected=/x/y\n");
         assert!(changed);
     }
 
