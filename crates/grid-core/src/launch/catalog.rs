@@ -324,10 +324,10 @@ mod tests {
     }
 
     #[test]
-    fn real_catalog_excludes_win32_only_platform_gated_profiles() {
+    fn real_catalog_offers_the_qt_launcher_but_not_the_win32_only_profiles() {
         let entries = catalog_entries(load_profiles());
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
-        assert!(!names.contains(&"ShadPS4 Qt Launcher"));
+        assert!(names.contains(&"ShadPS4 Qt Launcher"));
         assert!(!names.contains(&"Xenia Canary (Xbox 360)"));
     }
 

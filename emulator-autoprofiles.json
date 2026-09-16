@@ -237,6 +237,7 @@
       }
     },
     "name": "ShadPS4 (Playstation 4)",
+    "companions": ["ShadPS4 Qt Launcher"],
     "args": "\"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["playstation 4", "ps4"],
@@ -246,20 +247,26 @@
     "state_directories": []
   },
   {
-    "match_tokens": ["shadPS4QtLauncher.exe"],
+    "match_tokens": [
+      "shadPS4QtLauncher.exe",
+      "shadPS4QtLauncher*.AppImage",
+      "shadps4qtlauncher*"
+    ],
     "source": {
       "provider": "github-release",
       "owner": "shadps4-emu",
       "repo": "shadps4-qtlauncher",
       "release_tag": "latest",
-      "platforms": ["win32"],
-      "windows_assets": [
-        {
-          "arch": "x64",
-          "asset_name_regex": "^shadPS4QtLauncher-win64-qt-v[0-9]+\\.zip$",
-          "launch_executable": "shadPS4QtLauncher.exe"
+      "allow_prerelease": true,
+      "asset_patterns": ["shadPS4QtLauncher-win64-qt-*.zip"],
+      "platform_overrides": {
+        "linux": {
+          "asset_patterns": ["shadPS4QtLauncher-linux-qt-*.zip"]
+        },
+        "darwin": {
+          "asset_patterns": ["shadPS4QtLauncher-macos-qt-*.zip"]
         }
-      ]
+      }
     },
     "name": "ShadPS4 Qt Launcher",
     "args": "",
@@ -267,7 +274,7 @@
     "platform_keywords": [],
     "use_game_title_as_name": false,
     "save_strategy": "folder",
-    "save_directories": ["user/home/1000/savedata"],
+    "save_directories": [],
     "state_directories": []
   },
   {

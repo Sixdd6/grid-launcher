@@ -40,8 +40,9 @@ as `--add-data "build/bundle-assets;assets"` alongside `retroarch-core-list.json
 - **Registry-derived paths.** Emulator modules read user roots from the registry / `%APPDATA%`
   / `OneDrive` Documents only inside `sys.platform == "win32"` blocks (for example
   `dolphin.py::_registry_user_root()`, `pcsx2.py::_windows_documents_folder()`).
-- **Windows-only emulators.** Xenia (master), Xenia Canary, and the ShadPS4 Qt launcher are
-  Windows-only builds; see the platform gate under Linux below.
+- **Windows-only emulators.** Xenia (master) and Xenia Canary are Windows-only builds; see
+  the platform gate under Linux below. The ShadPS4 Qt launcher used to be listed here; it
+  now ships Linux and macOS assets and installs on every platform.
 - **Controller input.** TV mode polls XInput directly on Windows
   (`_XInputPollThread`, guide button via `XInputGetStateEx` ordinal 100).
 
@@ -96,8 +97,8 @@ detected/configured/launched correctly.
   (`cloud_transfer.py`).
 - **Platform gating for Windows-only emulators.**
   `emulator/profiles.py::is_available_on_current_platform()` filters autoprofiles by
-  `_WINDOWS_ONLY_EMULATOR_SLUGS` (`xenia canary (xbox 360)`, `xenia (xbox 360)`,
-  `shadps4 qt launcher`) and by an explicit `source.platforms` allowlist. It is applied in
+  `_WINDOWS_ONLY_EMULATOR_SLUGS` (`xenia canary (xbox 360)`, `xenia (xbox 360)`) and by an
+  explicit `source.platforms` allowlist. It is applied in
   `emulator_ui_mixin.py` (emulator list), `ui/dialogs.py` (add-emulator dropdown), and
   `install_mixin.py` (Xbox 360 content install, which refuses a Windows-only emulator with a
   message pointing at Xenia Edge). Covered by `tests/test_platform_gating.py`.
@@ -214,7 +215,7 @@ Always read the environment variable first and fall back to the default — use
 | Xenia Edge | Xbox 360 | Yes (AppImage) | N/A | Emulator-directory relative | Emulator-directory relative | No |
 | **Xenia** | **Xbox 360** | **No** | **N/A** | N/A | N/A | **Yes** |
 | **Xenia Canary** | **Xbox 360** | **No** | **N/A** | N/A | N/A | **Yes** |
-| **ShadPS4 (Qt launcher)** | **PS4** | **No** | **N/A** | N/A | N/A | **Yes** |
+| ShadPS4 (Qt launcher) | PS4 | Yes (AppImage) | N/A | Emulator-directory relative | Emulator-directory relative | No |
 
 Notes:
 
@@ -232,7 +233,7 @@ Notes:
 |---|---|---|---|
 | Xbox 360 | Xenia / Xenia Canary | Xenia Edge (native AppImage) | Xenia master/Canary hidden on Linux by the platform gate |
 | Xbox OG | Xemu | Native | — |
-| PS4 | FPKG extraction | Install pipeline is file-based | ShadPS4 Qt launcher is Windows-only |
+| PS4 | FPKG extraction | Install pipeline is file-based | ShadPS4 Qt launcher installs on Linux too (prerelease assets) |
 | PS3 | RPCS3 | Native | — |
 | Wii/GameCube | Dolphin | Native | Auto-install covers the RetroArch core, not standalone Dolphin |
 | Switch | Eden | Native | — |

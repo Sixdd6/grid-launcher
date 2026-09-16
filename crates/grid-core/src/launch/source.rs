@@ -162,6 +162,15 @@ fn truthy(value: Option<&Value>) -> bool {
     }
 }
 
+/// Whether `source` allows a prerelease to be selected
+/// (`allow_prerelease`, normalized to a bool by [`normalize_source`] but
+/// read with Python truthiness so a raw, un-normalized map works too).
+/// [`select_release`] applies it; `launch/forge.rs` reads it to decide
+/// which release endpoint to ask.
+pub fn allow_prerelease(source: &SourceMap) -> bool {
+    truthy(source.get("allow_prerelease"))
+}
+
 fn string_array(items: &[String]) -> Value {
     Value::Array(items.iter().cloned().map(Value::String).collect())
 }

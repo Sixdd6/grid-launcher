@@ -22,8 +22,8 @@ use regex::RegexBuilder;
 use serde_json::Value;
 
 use super::source::{
-    merge_platform_override, normalize_source, select_asset, select_release, str_field,
-    SourceError, SourceMap, HOST_PLATFORM,
+    allow_prerelease, merge_platform_override, normalize_source, select_asset, select_release,
+    str_field, SourceError, SourceMap, HOST_PLATFORM,
 };
 use crate::library::download::{FileTarget, ResponseProvider};
 use crate::library::LibraryError;
@@ -144,7 +144,10 @@ impl ForgeClient {
     /// view's "Update from Source" check (`SourceVersionCheckWorker`,
     /// `workers.py:439-510`). Runs ON CLICK and is never cached, so a
     /// pinned tag asks `/releases/tags/{tag}` and everything else asks
-    /// `/releases/latest`.
+    /// `/releases/latest` — unless `allow_prerelease` is set, which sends
+    /// an unpinned check to the `/releases` list instead (see
+    /// [`release_endpoint`]) and picks the release out of that array with
+    /// [`select_release`].
     ///
     /// A `direct` source has no release API: it answers `"direct"` without
     /// making a request at all, which the caller renders as "unknown".
@@ -156,12 +159,19 @@ impl ForgeClient {
         repo: &str,
         base_url: &str,
         configured_tag: &str,
+        allow_prerelease: bool,
     ) -> Result<String, SourceError> {
         if provider == "direct" {
             return Ok("direct".to_string());
         }
-        let (endpoint, github_headers) =
-            check_endpoint(provider, owner, repo, base_url, configured_tag)?;
+        let (endpoint, github_headers) = check_endpoint(
+            provider,
+            owner,
+            repo,
+            base_url,
+            configured_tag,
+            allow_prerelease,
+        )?;
         let response = self.get(&endpoint, github_headers).await?;
         let text = response
             .text()
@@ -169,6 +179,19 @@ impl ForgeClient {
             .map_err(|e| http_error(&endpoint, e))?;
         let payload: Value = serde_json::from_str(&text)
             .map_err(|_| SourceError(UNSUPPORTED_PAYLOAD_SHAPE.to_string()))?;
+        // A list payload only arrives from the `/releases` endpoint an
+        // unpinned prerelease-allowing source asks for; picking the release
+        // out of it is `select_release`'s job. Without the flag a list is
+        // still an unsupported shape, exactly as before.
+        if payload.is_array() && allow_prerelease {
+            let list_source = list_check_source(owner, repo);
+            let release = select_release(&list_source, &payload)?;
+            let tag_name = str_field(release, "tag_name");
+            if tag_name.is_empty() {
+                return Err(SourceError(NO_TAG_NAME.to_string()));
+            }
+            return Ok(tag_name);
+        }
         let Some(release) = payload.as_object() else {
             return Err(SourceError(UNSUPPORTED_PAYLOAD_SHAPE.to_string()));
         };
@@ -192,7 +215,7 @@ impl ForgeClient {
         repo: &str,
     ) -> Result<ResolvedDownload, SourceError> {
         let release_tag = str_field(source, "release_tag");
-        let endpoint = release_endpoint(api_base, &release_tag);
+        let endpoint = release_endpoint(api_base, &release_tag, allow_prerelease(source));
 
         let response = self.get(&endpoint, github_headers).await?;
         let text = response
@@ -483,7 +506,17 @@ const TAG_ENCODE_SET: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHA
 /// `/releases/tags/{tag}` (percent-encoded), the literal `latest`
 /// (case-insensitive) to `/releases/latest`, and an unset tag to
 /// `/releases`.
-fn release_endpoint(api_base: &str, release_tag: &str) -> String {
+///
+/// DEVIATION: when `allow_prerelease` is set, a blank or `latest` tag asks
+/// the plain `/releases` LIST instead. GitHub's `/releases/latest` never
+/// returns a prerelease, so a prerelease-only repo (the ShadPS4 Qt
+/// launcher) would 404 there before `select_release` — which honours the
+/// flag — ever saw a payload. A pinned tag ignores the flag.
+fn release_endpoint(api_base: &str, release_tag: &str, allow_prerelease: bool) -> String {
+    let unpinned = release_tag.is_empty() || release_tag.eq_ignore_ascii_case("latest");
+    if allow_prerelease && unpinned {
+        return format!("{api_base}/releases");
+    }
     if !release_tag.is_empty() && !release_tag.eq_ignore_ascii_case("latest") {
         let encoded = percent_encoding::utf8_percent_encode(release_tag, TAG_ENCODE_SET);
         format!("{api_base}/releases/tags/{encoded}")
@@ -500,6 +533,19 @@ fn release_endpoint(api_base: &str, release_tag: &str) -> String {
 /// as the reference's `SourceVersionCheckWorker` words them
 /// (`workers.py:439-510`).
 const UNSUPPORTED_PAYLOAD_SHAPE: &str = "Source release API returned an unsupported payload shape.";
+
+/// The minimal [`SourceMap`] [`ForgeClient::check_release_tag`] hands
+/// [`select_release`] when the check reads a `/releases` LIST: no tag pin
+/// (the check is unpinned by definition here) and prereleases allowed.
+/// `owner`/`repo` only appear in `select_release`'s error text.
+fn list_check_source(owner: &str, repo: &str) -> SourceMap {
+    let mut source = SourceMap::new();
+    source.insert("owner".to_string(), Value::String(owner.to_string()));
+    source.insert("repo".to_string(), Value::String(repo.to_string()));
+    source.insert("release_tag".to_string(), Value::String(String::new()));
+    source.insert("allow_prerelease".to_string(), Value::Bool(true));
+    source
+}
 const NO_TAG_NAME: &str = "Source release API response did not include tag_name.";
 
 /// What a source's newest release looks like next to what is installed:
@@ -554,6 +600,7 @@ fn check_endpoint(
     repo: &str,
     base_url: &str,
     configured_tag: &str,
+    allow_prerelease: bool,
 ) -> Result<(String, bool), SourceError> {
     let api_base = match provider {
         "github" => format!("https://api.github.com/repos/{owner}/{repo}"),
@@ -562,13 +609,18 @@ fn check_endpoint(
     };
     // An unpinned check asks for the newest release, never the plain
     // `/releases` list `release_endpoint` would otherwise choose: there is
-    // one tag to compare against, not a page of them.
+    // one tag to compare against, not a page of them. A source that allows
+    // prereleases is the exception — `release_endpoint` sends it to the
+    // list, and `check_release_tag` picks the release out of it.
     let tag = if configured_tag.trim().is_empty() {
         "latest"
     } else {
         configured_tag
     };
-    Ok((release_endpoint(&api_base, tag), provider == "github"))
+    Ok((
+        release_endpoint(&api_base, tag, allow_prerelease),
+        provider == "github",
+    ))
 }
 
 // --- HTTP error formatting ----------------------------------------------------
@@ -649,7 +701,7 @@ mod tests {
     #[test]
     fn release_endpoint_unset_tag_goes_to_plain_releases() {
         assert_eq!(
-            release_endpoint("https://api.github.com/repos/o/r", ""),
+            release_endpoint("https://api.github.com/repos/o/r", "", false),
             "https://api.github.com/repos/o/r/releases"
         );
     }
@@ -657,7 +709,7 @@ mod tests {
     #[test]
     fn release_endpoint_latest_tag_is_case_insensitive() {
         assert_eq!(
-            release_endpoint("https://api.github.com/repos/o/r", "Latest"),
+            release_endpoint("https://api.github.com/repos/o/r", "Latest", false),
             "https://api.github.com/repos/o/r/releases/latest"
         );
     }
@@ -665,7 +717,7 @@ mod tests {
     #[test]
     fn release_endpoint_explicit_tag_goes_to_tags_path() {
         assert_eq!(
-            release_endpoint("https://api.github.com/repos/o/r", "v1.2.3"),
+            release_endpoint("https://api.github.com/repos/o/r", "v1.2.3", false),
             "https://api.github.com/repos/o/r/releases/tags/v1.2.3"
         );
     }
@@ -673,8 +725,27 @@ mod tests {
     #[test]
     fn release_endpoint_percent_encodes_a_tag_with_a_slash() {
         assert_eq!(
-            release_endpoint("https://api.github.com/repos/o/r", "channel/v1"),
+            release_endpoint("https://api.github.com/repos/o/r", "channel/v1", false),
             "https://api.github.com/repos/o/r/releases/tags/channel%2Fv1"
+        );
+    }
+
+    #[test]
+    fn release_endpoint_latest_with_prereleases_allowed_goes_to_the_list() {
+        for tag in ["", "latest", "Latest"] {
+            assert_eq!(
+                release_endpoint("https://api.github.com/repos/o/r", tag, true),
+                "https://api.github.com/repos/o/r/releases",
+                "tag was {tag:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn release_endpoint_pinned_tag_ignores_the_prerelease_flag() {
+        assert_eq!(
+            release_endpoint("https://api.github.com/repos/o/r", "v1.2.3", true),
+            "https://api.github.com/repos/o/r/releases/tags/v1.2.3"
         );
     }
 
@@ -896,6 +967,46 @@ mod tests {
             resolved.download_url,
             "https://cdn.example.com/build-linux.zip"
         );
+    }
+
+    #[tokio::test]
+    async fn prerelease_only_gitea_resolve_reads_the_releases_list() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/acme/widget/releases"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {"tag_name": "drafted", "draft": true, "assets": []},
+                {
+                    "tag_name": "shadPS4QtLauncher-2026-09-12-abc",
+                    "prerelease": true,
+                    "assets": [
+                        {
+                            "name": "shadPS4QtLauncher-linux-qt-2026-09-12-abc.zip",
+                            "browser_download_url": "https://cdn.example.com/qt-linux.zip",
+                            "size": 7
+                        }
+                    ]
+                }
+            ])))
+            .mount(&mock_server)
+            .await;
+
+        let raw = json!({
+            "provider": "gitea", "owner": "acme", "repo": "widget",
+            "base_url": mock_server.uri(), "release_tag": "latest",
+            "allow_prerelease": true,
+            "asset_patterns": ["shadPS4QtLauncher-linux-qt-*.zip"]
+        });
+        let client = ForgeClient::new().unwrap();
+        let resolved = client.resolve(&raw, "ShadPS4 Qt Launcher").await.unwrap();
+
+        assert_eq!(resolved.release_tag, "shadPS4QtLauncher-2026-09-12-abc");
+        assert_eq!(
+            resolved.download_url,
+            "https://cdn.example.com/qt-linux.zip"
+        );
+        let received = mock_server.received_requests().await.unwrap();
+        assert_eq!(received[0].url.path(), "/api/v1/repos/acme/widget/releases");
     }
 
     // --- resolve: direct page scrape -----------------------------------------
@@ -1172,20 +1283,21 @@ mod tests {
 
     #[test]
     fn check_endpoint_github_latest_uses_the_public_api_with_github_headers() {
-        let (endpoint, github_headers) = check_endpoint("github", "o", "r", "", "latest").unwrap();
+        let (endpoint, github_headers) =
+            check_endpoint("github", "o", "r", "", "latest", false).unwrap();
         assert_eq!(endpoint, "https://api.github.com/repos/o/r/releases/latest");
         assert!(github_headers);
     }
 
     #[test]
     fn check_endpoint_blank_tag_is_treated_as_latest() {
-        let (endpoint, _) = check_endpoint("github", "o", "r", "", "").unwrap();
+        let (endpoint, _) = check_endpoint("github", "o", "r", "", "", false).unwrap();
         assert_eq!(endpoint, "https://api.github.com/repos/o/r/releases/latest");
     }
 
     #[test]
     fn check_endpoint_pinned_tag_goes_to_the_tags_path() {
-        let (endpoint, _) = check_endpoint("github", "o", "r", "", "v1.2.3").unwrap();
+        let (endpoint, _) = check_endpoint("github", "o", "r", "", "v1.2.3", false).unwrap();
         assert_eq!(
             endpoint,
             "https://api.github.com/repos/o/r/releases/tags/v1.2.3"
@@ -1200,6 +1312,7 @@ mod tests {
             "widget",
             "https://git.example.com",
             "latest",
+            false,
         )
         .unwrap();
         assert_eq!(
@@ -1211,7 +1324,7 @@ mod tests {
 
     #[test]
     fn check_endpoint_rejects_an_unknown_provider_verbatim() {
-        let err = check_endpoint("sourceforge", "o", "r", "", "latest").unwrap_err();
+        let err = check_endpoint("sourceforge", "o", "r", "", "latest", false).unwrap_err();
         assert_eq!(err.0, "Unsupported provider: sourceforge");
     }
 
@@ -1226,7 +1339,14 @@ mod tests {
 
         let client = ForgeClient::new().unwrap();
         let tag = client
-            .check_release_tag("gitea", "acme", "widget", &mock_server.uri(), "latest")
+            .check_release_tag(
+                "gitea",
+                "acme",
+                "widget",
+                &mock_server.uri(),
+                "latest",
+                false,
+            )
             .await
             .unwrap();
         assert_eq!(tag, "v3.1");
@@ -1243,7 +1363,7 @@ mod tests {
 
         let client = ForgeClient::new().unwrap();
         let tag = client
-            .check_release_tag("gitea", "acme", "widget", &mock_server.uri(), "v2.0")
+            .check_release_tag("gitea", "acme", "widget", &mock_server.uri(), "v2.0", false)
             .await
             .unwrap();
         assert_eq!(tag, "v2.0");
@@ -1265,7 +1385,14 @@ mod tests {
 
         let client = ForgeClient::new().unwrap();
         let err = client
-            .check_release_tag("gitea", "acme", "widget", &mock_server.uri(), "latest")
+            .check_release_tag(
+                "gitea",
+                "acme",
+                "widget",
+                &mock_server.uri(),
+                "latest",
+                false,
+            )
             .await
             .unwrap_err();
         assert!(err.0.contains("127.0.0.1"), "error was: {}", err.0);
@@ -1281,7 +1408,14 @@ mod tests {
 
         let client = ForgeClient::new().unwrap();
         let err = client
-            .check_release_tag("gitea", "acme", "widget", &mock_server.uri(), "latest")
+            .check_release_tag(
+                "gitea",
+                "acme",
+                "widget",
+                &mock_server.uri(),
+                "latest",
+                false,
+            )
             .await
             .unwrap_err();
         assert_eq!(
@@ -1300,7 +1434,14 @@ mod tests {
 
         let client = ForgeClient::new().unwrap();
         let err = client
-            .check_release_tag("gitea", "acme", "widget", &mock_server.uri(), "latest")
+            .check_release_tag(
+                "gitea",
+                "acme",
+                "widget",
+                &mock_server.uri(),
+                "latest",
+                false,
+            )
             .await
             .unwrap_err();
         assert_eq!(
@@ -1310,11 +1451,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn check_endpoint_latest_with_prereleases_allowed_asks_the_list() {
+        let (endpoint, _) = check_endpoint("github", "o", "r", "", "latest", true).unwrap();
+        assert_eq!(endpoint, "https://api.github.com/repos/o/r/releases");
+    }
+
+    #[tokio::test]
+    async fn check_release_tag_picks_the_first_non_draft_prerelease_from_the_list() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/acme/widget/releases"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                {"tag_name": "draft", "draft": true},
+                {"tag_name": "shadPS4QtLauncher-2026-09-01-abc", "prerelease": true}
+            ])))
+            .mount(&mock_server)
+            .await;
+
+        let client = ForgeClient::new().unwrap();
+        let tag = client
+            .check_release_tag(
+                "gitea",
+                "acme",
+                "widget",
+                &mock_server.uri(),
+                "latest",
+                true,
+            )
+            .await
+            .unwrap();
+        assert_eq!(tag, "shadPS4QtLauncher-2026-09-01-abc");
+    }
+
+    #[tokio::test]
     async fn check_release_tag_answers_direct_without_any_request() {
         let mock_server = MockServer::start().await;
         let client = ForgeClient::new().unwrap();
         let tag = client
-            .check_release_tag("direct", "", "", &mock_server.uri(), "nightly")
+            .check_release_tag("direct", "", "", &mock_server.uri(), "nightly", false)
             .await
             .unwrap();
         assert_eq!(tag, "direct");

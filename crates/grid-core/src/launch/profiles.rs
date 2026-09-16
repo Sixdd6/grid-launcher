@@ -89,11 +89,11 @@ pub struct EmulatorProfile {
 /// Emulator autoprofile slugs that ship a Windows-only build and therefore
 /// must not appear in the UI on non-Windows platforms
 /// (`_WINDOWS_ONLY_EMULATOR_SLUGS`, profiles.py:13).
-pub const WINDOWS_ONLY_SLUGS: [&str; 3] = [
-    "xenia canary (xbox 360)",
-    "xenia (xbox 360)",
-    "shadps4 qt launcher",
-];
+///
+/// DEVIATION: the reference also gated `shadps4 qt launcher`. The launcher
+/// now publishes Linux and macOS assets, so its catalog entry carries
+/// per-OS `asset_patterns` instead and is installable everywhere.
+pub const WINDOWS_ONLY_SLUGS: [&str; 2] = ["xenia canary (xbox 360)", "xenia (xbox 360)"];
 
 const AUTOPROFILES_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -664,6 +664,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn shadps4_qt_launcher_available_on_linux_and_darwin() {
+        let profile = load_profiles()
+            .iter()
+            .find(|p| p.name == "ShadPS4 Qt Launcher")
+            .expect("the catalog ships a ShadPS4 Qt Launcher profile");
+        assert!(profile_available_on_host(profile, "linux"));
+        assert!(profile_available_on_host(profile, "darwin"));
+        assert!(profile_available_on_host(profile, "win32"));
+    }
+
+    #[test]
+    fn embedded_shadps4_profile_names_the_qt_launcher_as_a_companion() {
+        let profile = load_profiles()
+            .iter()
+            .find(|p| p.name == "ShadPS4 (Playstation 4)")
+            .expect("the catalog ships a ShadPS4 profile");
+        assert_eq!(profile.companions, vec!["ShadPS4 Qt Launcher".to_string()]);
     }
 
     #[test]
