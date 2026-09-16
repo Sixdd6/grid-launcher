@@ -1252,4 +1252,222 @@ mod tests {
         assert!(!profile_available_on_host(&p, "linux"));
         assert!(profile_available_on_host(&p, "darwin"));
     }
+
+    // --- catalog integrity: asset selection keys ----------------------------
+
+    /// Keys the catalog used to carry that no Rust, TypeScript or e2e code
+    /// reads. They must not come back: an entry that relies on one of them
+    /// silently falls back to the `*` wildcard on Windows.
+    const DEAD_SOURCE_KEYS: [&str; 3] = ["windows_assets", "asset_name_regex", "launch_executable"];
+
+    fn assert_no_dead_keys(profile_name: &str, value: &serde_json::Value) {
+        match value {
+            serde_json::Value::Object(obj) => {
+                for (key, child) in obj {
+                    assert!(
+                        !DEAD_SOURCE_KEYS.contains(&key.as_str()),
+                        "{profile_name} source still carries the dead key {key:?}"
+                    );
+                    assert_no_dead_keys(profile_name, child);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    assert_no_dead_keys(profile_name, item);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn no_embedded_source_carries_a_dead_asset_key() {
+        for profile in load_profiles() {
+            if let Some(source) = &profile.source {
+                assert_no_dead_keys(&profile.name, source);
+            }
+        }
+    }
+
+    #[test]
+    fn every_windows_release_source_has_a_top_level_asset_patterns() {
+        for profile in load_profiles() {
+            let Some(source) = profile.source.as_ref().and_then(|s| s.as_object()) else {
+                continue;
+            };
+            let provider = source
+                .get("provider")
+                .and_then(|p| p.as_str())
+                .unwrap_or("");
+            if !matches!(provider, "github-release" | "github" | "gitea") {
+                continue;
+            }
+            // Compat tools (Proton builds) are Linux-only by nature and ship
+            // no Windows asset; everything else must pin one.
+            if profile.is_compat_tool || !profile_available_on_host(profile, "win32") {
+                continue;
+            }
+            let patterns = source
+                .get("asset_patterns")
+                .and_then(|p| p.as_array())
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{} has no top-level asset_patterns, so Windows falls back to '*'",
+                        profile.name
+                    )
+                });
+            assert!(
+                !patterns.is_empty(),
+                "{} has an empty top-level asset_patterns",
+                profile.name
+            );
+        }
+    }
+
+    // --- catalog integrity: the win32 asset each entry resolves to -----------
+
+    /// The embedded profile's source, normalized and merged as a win32 host
+    /// would see it.
+    fn win32_source(profile_name: &str) -> crate::launch::source::SourceMap {
+        let profile = load_profiles()
+            .iter()
+            .find(|p| p.name == profile_name)
+            .unwrap_or_else(|| panic!("the catalog ships a {profile_name:?} profile"));
+        let raw = profile
+            .source
+            .as_ref()
+            .unwrap_or_else(|| panic!("{profile_name:?} has a source block"));
+        let mut source = crate::launch::source::normalize_source(raw).unwrap();
+        crate::launch::source::merge_platform_override_for(&mut source, "win32");
+        source
+    }
+
+    fn release_with(names: &[&str]) -> serde_json::Map<String, serde_json::Value> {
+        let assets: Vec<serde_json::Value> = names
+            .iter()
+            .map(|name| {
+                serde_json::json!({
+                    "name": name,
+                    "browser_download_url": format!("https://example.invalid/{name}"),
+                })
+            })
+            .collect();
+        match serde_json::json!({"tag_name": "v1", "assets": assets}) {
+            serde_json::Value::Object(obj) => obj,
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn embedded_sources_pick_the_windows_asset_from_real_release_listings() {
+        let cases: [(&str, &[&str], &str); 9] = [
+            (
+                "DuckStation (Playstation 1)",
+                &[
+                    "DuckStation-arm64.AppImage",
+                    "duckstation-mac-release.zip",
+                    "duckstation-windows-arm64-installer.exe",
+                    "duckstation-windows-arm64-release.zip",
+                    "duckstation-windows-x64-installer.exe",
+                    "duckstation-windows-x64-release-symbols.7z",
+                    "duckstation-windows-x64-release.zip",
+                    "duckstation-windows-x64-sse2-release.zip",
+                    "DuckStation-x64.AppImage",
+                ],
+                "duckstation-windows-x64-release.zip",
+            ),
+            (
+                "PCSX2 (Playstation 2)",
+                &[
+                    "pcsx2-v2.9.53-linux-appimage-x64-Qt.AppImage",
+                    "pcsx2-v2.9.53-macos-Qt.tar.xz",
+                    "pcsx2-v2.9.53-windows-x64-Qt-symbols.7z",
+                    "pcsx2-v2.9.53-windows-x64-Qt.7z",
+                ],
+                "pcsx2-v2.9.53-windows-x64-Qt.7z",
+            ),
+            (
+                "PPSSPP (Playstation Portable)",
+                &[
+                    "PPSSPP-v1.20.4-anylinux-x86_64.AppImage",
+                    "PPSSPP-v1.20.4-Windows-ARM64.zip",
+                    "PPSSPP-v1.20.4-Windows-x64.zip",
+                    "PPSSPPSDL-macOS-v1.20.4.zip",
+                ],
+                "PPSSPP-v1.20.4-Windows-x64.zip",
+            ),
+            (
+                "RPCS3 (Playstation 3)",
+                &[
+                    "rpcs3-v0.0.37-18146-ffeb16fe_win64_msvc.7z",
+                    "rpcs3-v0.0.37-18146-ffeb16fe_win64_msvc.7z.sha256",
+                ],
+                "rpcs3-v0.0.37-18146-ffeb16fe_win64_msvc.7z",
+            ),
+            (
+                "Azahar (Nintendo 3DS)",
+                &[
+                    "azahar-libretro-windows-x86_64-2126.1.1.zip",
+                    "azahar-windows-msvc-2126.1.1-installer.exe",
+                    "azahar-windows-msvc-2126.1.1.zip",
+                    "azahar-windows-msys2-2126.1.1.zip",
+                    "azahar-windows-mxe-2126.1.1.zip",
+                    "azahar.AppImage",
+                ],
+                "azahar-windows-msvc-2126.1.1.zip",
+            ),
+            (
+                "Xemu (Xbox)",
+                &[
+                    "xemu-0.8.136-dbg-windows-x86_64.zip",
+                    "xemu-0.8.136-windows-arm64.zip",
+                    "xemu-0.8.136-windows-x86_64-pdb.zip",
+                    "xemu-0.8.136-windows-x86_64.zip",
+                    "xemu-0.8.136-x86_64.AppImage",
+                    "xemu-win-aarch64-release.zip",
+                    "xemu-win-x86_64-release.zip",
+                ],
+                "xemu-win-x86_64-release.zip",
+            ),
+            (
+                // A prerelease ships only the versioned names, so the second
+                // pattern has to carry it without picking -dbg- or -pdb.
+                "Xemu (Xbox)",
+                &[
+                    "xemu-0.8.136-49-gf9b14039e5-dbg-windows-x86_64.zip",
+                    "xemu-0.8.136-49-gf9b14039e5-windows-arm64.zip",
+                    "xemu-0.8.136-49-gf9b14039e5-windows-x86_64-pdb.zip",
+                    "xemu-0.8.136-49-gf9b14039e5-windows-x86_64.zip",
+                    "xemu-0.8.136-49-gf9b14039e5-x86_64.AppImage",
+                ],
+                "xemu-0.8.136-49-gf9b14039e5-windows-x86_64.zip",
+            ),
+            (
+                "Xenia Canary (Xbox 360)",
+                &["xenia_canary_linux.AppImage", "xenia_canary_windows.7z"],
+                "xenia_canary_windows.7z",
+            ),
+            (
+                "Xenia Edge (Xbox 360)",
+                &[
+                    "xenia_edge_linux.AppImage",
+                    "xenia_edge_macos.dmg",
+                    "xenia_edge_windows.zip",
+                ],
+                "xenia_edge_windows.zip",
+            ),
+        ];
+
+        for (profile_name, asset_names, expected) in cases {
+            let source = win32_source(profile_name);
+            let release = release_with(asset_names);
+            let asset = crate::launch::source::select_asset(&source, &release)
+                .unwrap_or_else(|err| panic!("{profile_name} selected no asset: {}", err.0));
+            assert_eq!(
+                asset.get("name").and_then(|n| n.as_str()),
+                Some(expected),
+                "{profile_name} picked the wrong Windows asset"
+            );
+        }
+    }
 }

@@ -9,10 +9,9 @@
 //! Deviation note: executable selection also accepts an extensionless file
 //! whose executable bit is set (unix only) — see [`launchable_installed_file`].
 //!
-//! Parity note: several catalog `source` blocks carry a `launch_executable`
-//! key. The Python reference never reads it — executable choice is only the
-//! scoring ported here — so this module never reads it either. The
-//! preferred-name rules in [`select_executable`] for KytyPS5 and ShadPS4 are
+//! Parity note: the catalog no longer carries a `launch_executable` key (the
+//! Python reference never read it either) — executable choice is only the
+//! scoring ported here. The preferred-name rules in [`select_executable`] for KytyPS5 and ShadPS4 are
 //! GRID additions, not parity: the reference only had the Eden and Azahar
 //! ones.
 

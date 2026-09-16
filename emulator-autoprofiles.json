@@ -52,22 +52,10 @@
       "owner": "stenzek",
       "repo": "duckstation",
       "release_tag": "latest",
-      "windows_assets": [
-        {
-          "arch": "x64",
-          "asset_name": "duckstation-windows-x64-release.zip",
-          "launch_executable": "duckstation-qt-x64-ReleaseLTCG.exe"
-        },
-        {
-          "arch": "arm64",
-          "asset_name": "duckstation-windows-arm64-release.zip",
-          "launch_executable": "duckstation-qt-arm64-ReleaseLTCG.exe"
-        }
-      ],
+      "asset_patterns": ["duckstation-windows-x64-release.zip"],
       "platform_overrides": {
         "linux": {
-          "asset_patterns": ["DuckStation-x64.AppImage"],
-          "launch_executable": "DuckStation-x64.AppImage"
+          "asset_patterns": ["DuckStation-x64.AppImage"]
         }
       }
     },
@@ -89,17 +77,10 @@
       "owner": "PCSX2",
       "repo": "pcsx2",
       "release_tag": "latest",
-      "windows_assets": [
-        {
-          "arch": "x64",
-          "asset_name_regex": "^pcsx2-v[0-9.]+-windows-x64-Qt\\.7z$",
-          "launch_executable": "pcsx2-qt.exe"
-        }
-      ],
+      "asset_patterns": ["pcsx2-*-windows-x64-Qt.7z"],
       "platform_overrides": {
         "linux": {
-          "asset_patterns": ["pcsx2-v*-linux-appimage-x64-Qt.AppImage"],
-          "launch_executable": "pcsx2-v*-linux-appimage-x64-Qt.AppImage"
+          "asset_patterns": ["pcsx2-v*-linux-appimage-x64-Qt.AppImage"]
         }
       }
     },
@@ -125,22 +106,10 @@
       "owner": "hrydgard",
       "repo": "ppsspp",
       "release_tag": "latest",
-      "windows_assets": [
-        {
-          "arch": "x64",
-          "asset_name_regex": "^PPSSPP-v[0-9.]+-Windows-x64\\.zip$",
-          "launch_executable": "PPSSPPWindows64.exe"
-        },
-        {
-          "arch": "arm64",
-          "asset_name_regex": "^PPSSPP-v[0-9.]+-Windows-ARM64\\.zip$",
-          "launch_executable": "PPSSPPWindowsARM64.exe"
-        }
-      ],
+      "asset_patterns": ["PPSSPP-*-Windows-x64.zip"],
       "platform_overrides": {
         "linux": {
-          "asset_patterns": ["PPSSPP-v*-anylinux-x86_64.AppImage"],
-          "launch_executable": "PPSSPP-v*-anylinux-x86_64.AppImage"
+          "asset_patterns": ["PPSSPP-v*-anylinux-x86_64.AppImage"]
         }
       }
     },
@@ -161,19 +130,12 @@
       "owner": "RPCS3",
       "repo": "rpcs3-binaries-win",
       "release_tag": "latest",
-      "windows_assets": [
-        {
-          "arch": "x64",
-          "asset_name_regex": "^rpcs3-v.*_win64_msvc\\.7z$",
-          "launch_executable": "rpcs3.exe"
-        }
-      ],
+      "asset_patterns": ["rpcs3-*_win64*.7z"],
       "platform_overrides": {
         "linux": {
           "owner": "RPCS3",
           "repo": "rpcs3-binaries-linux",
-          "asset_patterns": ["rpcs3-v*_linux64.AppImage"],
-          "launch_executable": "rpcs3-v*_linux64.AppImage"
+          "asset_patterns": ["rpcs3-v*_linux64.AppImage"]
         }
       }
     },
@@ -199,11 +161,9 @@
       "repo": "Vita3K",
       "release_tag": "continuous",
       "asset_patterns": ["windows-latest.zip"],
-      "launch_executable": "Vita3K.exe",
       "platform_overrides": {
         "linux": {
-          "asset_patterns": ["Vita3K-x86_64.AppImage"],
-          "launch_executable": "Vita3K-x86_64.AppImage"
+          "asset_patterns": ["Vita3K-x86_64.AppImage"]
         }
       }
     },
@@ -224,15 +184,12 @@
       "repo": "shadPS4",
       "release_tag": "latest",
       "asset_patterns": ["shadps4-win64-sdl-*.zip"],
-      "launch_executable": "shadPS4.exe",
       "platform_overrides": {
         "linux": {
-          "asset_patterns": ["shadps4-linux-sdl-*.zip"],
-          "launch_executable": "shadPS4"
+          "asset_patterns": ["shadps4-linux-sdl-*.zip"]
         },
         "darwin": {
-          "asset_patterns": ["shadps4-macos-sdl-*.zip"],
-          "launch_executable": "shadPS4"
+          "asset_patterns": ["shadps4-macos-sdl-*.zip"]
         }
       }
     },
@@ -313,8 +270,7 @@
       "asset_patterns": ["cemu-*-windows-x64.zip"],
       "platform_overrides": {
         "linux": {
-          "asset_patterns": ["Cemu-*-x86_64.AppImage"],
-          "launch_executable": "Cemu-*-x86_64.AppImage"
+          "asset_patterns": ["Cemu-*-x86_64.AppImage"]
         }
       }
     },
@@ -340,17 +296,10 @@
       "owner": "azahar-emu",
       "repo": "azahar",
       "release_tag": "latest",
-      "windows_assets": [
-        {
-          "arch": "x64",
-          "asset_name_regex": "^azahar-windows-msvc-[0-9.]+\\.zip$",
-          "launch_executable": "azahar.exe"
-        }
-      ],
+      "asset_patterns": ["azahar-windows-msvc-*.zip"],
       "platform_overrides": {
         "linux": {
-          "asset_patterns": ["azahar.AppImage"],
-          "launch_executable": "azahar.AppImage"
+          "asset_patterns": ["azahar.AppImage"]
         }
       }
     },
@@ -390,23 +339,12 @@
       "owner": "xemu-project",
       "repo": "xemu",
       "release_tag": "latest",
-      "windows_assets": [
-        {
-          "arch": "x64",
-          "asset_name": "xemu-win-x86_64-release.zip",
-          "launch_executable": "xemu.exe"
-        },
-        {
-          "arch": "arm64",
-          "asset_name": "xemu-win-aarch64-release.zip",
-          "launch_executable": "xemu.exe"
-        }
-      ],
+      "asset_patterns": ["xemu-win-x86_64-release.zip", "xemu-*-windows-x86_64.zip"],
+      "asset_exclude_patterns": ["*dbg*", "*-pdb*"],
       "platform_overrides": {
         "linux": {
           "asset_patterns": ["xemu-*-x86_64.AppImage"],
-          "asset_exclude_patterns": ["*dbg*"],
-          "launch_executable": "xemu-*-x86_64.AppImage"
+          "asset_exclude_patterns": ["*dbg*"]
         }
       }
     },
@@ -433,11 +371,9 @@
       "repo": "eden",
       "release_tag": "latest",
       "asset_patterns": ["Eden-Windows-*-amd64-msvc-standard.zip"],
-      "launch_executable": "eden.exe",
       "platform_overrides": {
         "linux": {
-          "asset_patterns": ["Eden-Linux-*-amd64-clang-pgo.AppImage"],
-          "launch_executable": "Eden-Linux-*-amd64-clang-pgo.AppImage"
+          "asset_patterns": ["Eden-Linux-*-amd64-clang-pgo.AppImage"]
         }
       }
     },
@@ -484,15 +420,12 @@
       "repo": "Supermodel",
       "release_tag": "latest",
       "asset_patterns": ["supermodel-*-windows.zip"],
-      "launch_executable": "supermodel.exe",
       "platform_overrides": {
         "linux": {
-          "asset_patterns": ["supermodel-*-linux.tar.gz"],
-          "launch_executable": "supermodel"
+          "asset_patterns": ["supermodel-*-linux.tar.gz"]
         },
         "darwin": {
-          "asset_patterns": ["supermodel-*-macos.tar.gz"],
-          "launch_executable": "supermodel"
+          "asset_patterns": ["supermodel-*-macos.tar.gz"]
         }
       }
     },
@@ -513,13 +446,7 @@
       "repo": "xenia-canary",
       "release_tag": "latest",
       "platforms": ["win32"],
-      "windows_assets": [
-        {
-          "arch": "x64",
-          "asset_name": "xenia_canary_windows.zip",
-          "launch_executable": "xenia_canary.exe"
-        }
-      ]
+      "asset_patterns": ["xenia_canary_windows.*"]
     },
     "name": "Xenia Canary (Xbox 360)",
     "args": "\"%rom%\"",
@@ -554,10 +481,10 @@
       "owner": "has207",
       "repo": "xenia-edge",
       "release_tag": "latest",
+      "asset_patterns": ["xenia_edge_windows.zip"],
       "platform_overrides": {
         "linux": {
-          "asset_patterns": ["xenia_edge_linux.AppImage"],
-          "launch_executable": "xenia_edge_linux.AppImage"
+          "asset_patterns": ["xenia_edge_linux.AppImage"]
         }
       }
     },
@@ -585,8 +512,7 @@
       "release_tag": "latest",
       "platform_overrides": {
         "linux": {
-          "asset_patterns": ["GE-Proton*[0-9].tar.gz"],
-          "launch_executable": ""
+          "asset_patterns": ["GE-Proton*[0-9].tar.gz"]
         }
       }
     },
@@ -607,8 +533,7 @@
       "release_tag": "latest",
       "platform_overrides": {
         "linux": {
-          "asset_patterns": ["proton-cachyos-*-x86_64.tar.xz"],
-          "launch_executable": ""
+          "asset_patterns": ["proton-cachyos-*-x86_64.tar.xz"]
         }
       }
     },

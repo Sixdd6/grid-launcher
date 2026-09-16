@@ -326,9 +326,15 @@ pub fn normalize_source(raw: &Value) -> Result<SourceMap, SourceError> {
 /// (`_resolve_source_download`, workers.py:167-174). A no-op when
 /// `platform_overrides` is absent, not an object, or has no matching entry.
 pub fn merge_platform_override(source: &mut SourceMap) {
+    merge_platform_override_for(source, HOST_PLATFORM);
+}
+
+/// [`merge_platform_override`] against an explicit `host` slug instead of
+/// [`HOST_PLATFORM`], so a Linux build can exercise the win32 selection.
+pub(crate) fn merge_platform_override_for(source: &mut SourceMap, host: &str) {
     let matched = match source.get("platform_overrides") {
         Some(Value::Object(overrides)) => overrides.iter().find_map(|(key, value)| match value {
-            Value::Object(override_map) if HOST_PLATFORM.starts_with(key.as_str()) => {
+            Value::Object(override_map) if host.starts_with(key.as_str()) => {
                 Some(override_map.clone())
             }
             _ => None,
