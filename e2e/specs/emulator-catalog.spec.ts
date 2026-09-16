@@ -525,6 +525,17 @@ describe('emulator-catalog', () => {
       timeoutMsg: 'the deleted PCSX2 row was still there after the second click',
     });
 
+    // Deleting an emulator removes its installed files, not just the config
+    // entry. The removal runs BEFORE the config write, so the row check
+    // above has already waited for it; poll anyway, since the row can
+    // disappear from a re-render the write triggers.
+    await browser.waitUntil(() => !existsSync(pcsx2Dir()), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: `the PCSX2 install directory survived the delete: ${pcsx2Dir()}`,
+    });
+    // A different install must not be touched.
+    expect(existsSync(redreamPath())).toBe(true);
+
     // The catalog pane must follow the config, not wait for another install
     // job to reach a terminal status (the bug this case guards against).
     await openCatalog();

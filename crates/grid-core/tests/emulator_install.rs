@@ -22,6 +22,7 @@ use std::sync::Mutex;
 
 use grid_core::config::Config;
 use grid_core::launch::profiles::EmulatorProfile;
+use grid_core::library::emulator_removal::remove_emulator_files;
 use grid_core::library::queue::{DownloadEntry, DownloadStatus};
 use grid_core::library::registry::Registry;
 use grid_core::library::{EmulatorInstalled, InstallService};
@@ -366,6 +367,50 @@ async fn zip_install_extracts_writes_config_entry_and_deletes_the_archive() {
 
     // The registry stays games-only: an emulator install writes no row.
     assert!(harness.service.installed().unwrap().is_empty());
+}
+
+// --- (a2) removal -------------------------------------------------------------
+
+/// `remove_emulator_files` deletes what the install wrote. The config entry
+/// is NOT touched: `delete_emulator` edits the config after the files are
+/// gone, so a failed removal leaves the emulator configured.
+#[tokio::test]
+async fn removing_an_installed_emulator_deletes_its_install_directory() {
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = zip_bytes(
+        &staging,
+        "widget.zip",
+        &[("bin/testemu.sh", b"#!/bin/sh\n")],
+    );
+
+    let harness = Harness::new(|uri| vec![profile("Test Emu", gitea_source(uri))]).await;
+    harness.mount_widget("widget-linux.zip", bytes, 0).await;
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let install_dir = harness.install_dir("Test Emu-v1.0");
+    assert!(install_dir.is_dir());
+
+    let config = harness.config();
+    remove_emulator_files(&config, "Test Emu").unwrap();
+
+    assert!(
+        !install_dir.exists(),
+        "the install directory should be gone: {}",
+        install_dir.display()
+    );
+    assert_eq!(
+        harness.config().emulators.len(),
+        1,
+        "the config edit is the command's job, not this function's"
+    );
 }
 
 // --- (b) dedupe ---------------------------------------------------------------

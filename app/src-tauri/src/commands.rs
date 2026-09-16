@@ -27,6 +27,7 @@ use grid_core::launch::spawn::{
     prepare_standalone_emulator_launch, spawn_standalone_emulator, wait_for_early_exit,
 };
 use grid_core::launch::{GameSession, LaunchService, SessionsSnapshot};
+use grid_core::library::emulator_removal::remove_emulator_files;
 use grid_core::library::extract::is_extractable_archive;
 use grid_core::library::paths::library_root;
 use grid_core::library::queue::DownloadsSnapshot;
@@ -1078,10 +1079,21 @@ pub async fn save_emulator(
     Ok(())
 }
 
+/// Deletes an emulator: its managed install directory first, then its
+/// config entry (and any default that named it).
+///
+/// Files go first, like a game uninstall: a failed removal returns its
+/// message and leaves the entry configured, so the user can retry instead
+/// of being left with orphaned bytes and no row. Only a managed install
+/// under `<library>/Emulators/<X>` is removed — a hand-configured path is
+/// left on disk ([`grid_core::library::emulator_removal`]).
 #[tauri::command]
 pub async fn delete_emulator(name: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        modify_config(&Config::default_path(), |config| {
+        let config_path = Config::default_path();
+        let config = Config::load(&config_path).map_err(err)?;
+        remove_emulator_files(&config, &name).map_err(err)?;
+        modify_config(&config_path, |config| {
             apply_delete_emulator(config, &name);
             Ok(())
         })

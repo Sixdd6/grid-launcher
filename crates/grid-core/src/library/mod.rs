@@ -9,6 +9,7 @@
 
 pub mod content;
 pub mod download;
+pub mod emulator_removal;
 pub mod extract;
 pub mod launch_select;
 pub mod paths;
@@ -2659,7 +2660,7 @@ fn safe_file_name<'a>(name: &'a str, asset_name: &str) -> Result<&'a str, Librar
 /// how the removal is done and the verbatim message a failure produces
 /// (`install_cleanup.py:19-91`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RemovalLabel {
+pub(crate) enum RemovalLabel {
     /// A plain file — an archive, or a PS3 ISO.
     File,
     /// A PS3 trophy directory, which the reference names separately.
@@ -2682,9 +2683,9 @@ impl RemovalLabel {
 
 /// One thing an uninstall removes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Removal {
-    path: PathBuf,
-    label: RemovalLabel,
+pub(crate) struct Removal {
+    pub(crate) path: PathBuf,
+    pub(crate) label: RemovalLabel,
 }
 
 /// Runs every removal in order, CONTINUING past a failure, and returns one
@@ -2692,7 +2693,7 @@ struct Removal {
 ///
 /// The remover is injected so the aggregation itself is testable without a
 /// filesystem that can be made to fail on demand.
-fn run_removals(
+pub(crate) fn run_removals(
     steps: &[Removal],
     remove: &mut dyn FnMut(&Removal) -> Result<(), String>,
 ) -> Vec<String> {
@@ -2706,7 +2707,7 @@ fn run_removals(
 }
 
 /// The production remover: a file is unlinked, a directory is removed whole.
-fn apply_removal(step: &Removal) -> Result<(), String> {
+pub(crate) fn apply_removal(step: &Removal) -> Result<(), String> {
     match step.label {
         RemovalLabel::File => fs::remove_file(&step.path).map_err(|e| e.to_string()),
         RemovalLabel::TrophyDir | RemovalLabel::Folder => {
