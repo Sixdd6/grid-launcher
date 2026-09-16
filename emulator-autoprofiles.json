@@ -277,13 +277,7 @@
       "owner": "cemu-project",
       "repo": "Cemu",
       "release_tag": "latest",
-      "windows_assets": [
-        {
-          "arch": "x64",
-          "asset_name_regex": "^cemu-[0-9.]+-windows-x64\\.zip$",
-          "launch_executable": "cemu.exe"
-        }
-      ],
+      "asset_patterns": ["cemu-*-windows-x64.zip"],
       "platform_overrides": {
         "linux": {
           "asset_patterns": ["Cemu-*-x86_64.AppImage"],
@@ -292,7 +286,8 @@
       }
     },
     "name": "Cemu (Wii U)",
-    "args": "-g \"%rom%\"",
+    "args": "-f -g \"%rom%\"",
+    "legacy_args": ["-g \"%rom%\""],
     "all_platforms": false,
     "platform_keywords": ["wii u", "wiiu"],
     "use_game_title_as_name": false,

@@ -72,6 +72,18 @@ pub struct EmulatorProfile {
     /// ordinary emulator profile.
     #[serde(skip_serializing)]
     pub compat_tool_type: String,
+    /// Profile NAMES (exact, as written in the catalog `name` field) that a
+    /// catalog install of this profile should also queue. `skip_serializing`
+    /// like every field below `is_compat_tool`: the IPC `ProfileSummary`
+    /// shape must not change.
+    #[serde(skip_serializing)]
+    pub companions: Vec<String>,
+    /// Earlier default `args` values this profile shipped. An entry still
+    /// carrying one (compared trimmed, verbatim) is migrated to the current
+    /// `args` by `autoconfig::entry`. `skip_serializing` for the same reason
+    /// as `companions`: the IPC `ProfileSummary` shape must not change.
+    #[serde(skip_serializing)]
+    pub legacy_args: Vec<String>,
 }
 
 /// Emulator autoprofile slugs that ship a Windows-only build and therefore
@@ -125,6 +137,10 @@ struct RawProfile {
     firmware_directories: Vec<serde_json::Value>,
     #[serde(default)]
     compat_tool_type: String,
+    #[serde(default)]
+    companions: Vec<String>,
+    #[serde(default)]
+    legacy_args: Vec<String>,
 }
 
 /// The parsed, normalized autoprofile catalog, embedded at build time and
@@ -197,6 +213,8 @@ fn normalize_one(raw: RawProfile) -> Option<EmulatorProfile> {
             .filter_map(firmware_dir_spec)
             .collect(),
         compat_tool_type: raw.compat_tool_type,
+        companions: trimmed_non_blank(&raw.companions),
+        legacy_args: trimmed_non_blank(&raw.legacy_args),
     })
 }
 
@@ -623,6 +641,42 @@ mod tests {
     }
 
     #[test]
+    fn every_companion_name_resolves_to_an_installable_profile() {
+        // Guards the catalog: a `companions` entry names another profile
+        // exactly, and that profile must be installable from the catalog
+        // (not a compat tool, with an object `source`).
+        let profiles = load_profiles();
+        for profile in profiles {
+            for companion in &profile.companions {
+                let found = profiles
+                    .iter()
+                    .find(|candidate| candidate.name == *companion)
+                    .unwrap_or_else(|| {
+                        panic!("{} names an unknown companion {companion:?}", profile.name)
+                    });
+                assert!(
+                    !found.is_compat_tool,
+                    "{companion:?} is a compat tool, not an installable emulator"
+                );
+                assert!(
+                    found.source.as_ref().is_some_and(|s| s.is_object()),
+                    "{companion:?} has no object source block"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn embedded_cemu_launches_fullscreen_and_lists_its_legacy_args() {
+        let profile = load_profiles()
+            .iter()
+            .find(|p| p.name == "Cemu (Wii U)")
+            .expect("the catalog ships a Cemu profile");
+        assert_eq!(profile.args, "-f -g \"%rom%\"");
+        assert_eq!(profile.legacy_args, vec!["-g \"%rom%\"".to_string()]);
+    }
+
+    #[test]
     fn embedded_json_has_at_least_one_compat_tool() {
         let profiles = load_profiles();
         assert!(profiles.iter().any(|p| p.is_compat_tool));
@@ -850,6 +904,17 @@ mod tests {
             profile.screenshot_directories,
             vec!["~/screenshots".to_string()]
         );
+    }
+
+    #[test]
+    fn profile_normalization_trims_companions_and_legacy_args() {
+        let mut entry = raw("Name", &["x.exe"], "", false, &[]);
+        entry.companions = vec!["  Companion Emu  ".into(), "".into(), "   ".into()];
+        entry.legacy_args = vec!["  -g \"%rom%\"  ".into(), "  ".into()];
+
+        let profile = normalize_one(entry).unwrap();
+        assert_eq!(profile.companions, vec!["Companion Emu".to_string()]);
+        assert_eq!(profile.legacy_args, vec!["-g \"%rom%\"".to_string()]);
     }
 
     #[test]

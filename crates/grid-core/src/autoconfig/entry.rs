@@ -10,11 +10,12 @@
 //! `docs/porting/05-emulator-autoconfig.md` "Layer 1 — entry autoconfig".
 
 use std::collections::{BTreeMap, HashSet};
+use std::path::Path;
 use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::config::{Config, EmulatorEntry};
+use crate::config::{Config, ConfigError, EmulatorEntry};
 use crate::launch::profiles::{platform_matches_keywords, profile_for_entry, EmulatorProfile};
 use crate::launch::selection::NO_EMULATOR;
 
@@ -444,7 +445,10 @@ pub fn auto_configure_emulator_settings(
 /// `apply_manual_emulator_profile_defaults` (autoconfig.py:228-270): the
 /// hand-typed-entry path. Unlike layer 1's rebuild this COPIES the entry, so
 /// unlisted fields survive. `name` is filled only when blank; `args` is
-/// replaced when blank or exactly `%rom%`; `save_strategy` is replaced
+/// replaced when blank, exactly `%rom%`, or equal (trimmed, verbatim) to one
+/// of the profile's `legacy_args` — an earlier default this catalog entry
+/// shipped — and in every case only when the profile's own args is non-blank;
+/// `save_strategy` is replaced
 /// whenever the current value normalizes to `"auto"`, so `"auto"` itself (and
 /// any unrecognized alias) counts as unset. The four list-backed fields are
 /// filled only when blank, and the profile's value is written even when it is
@@ -460,7 +464,13 @@ pub fn apply_manual_emulator_profile_defaults(
     }
 
     let current_args = resolved.args.trim();
-    if (current_args.is_empty() || current_args == "%rom%") && !profile.args.trim().is_empty() {
+    let args_are_stale = current_args.is_empty()
+        || current_args == "%rom%"
+        || profile
+            .legacy_args
+            .iter()
+            .any(|legacy| legacy.trim() == current_args);
+    if args_are_stale && !profile.args.trim().is_empty() {
         resolved.args = profile.args.trim().to_string();
     }
 
@@ -483,6 +493,52 @@ pub fn apply_manual_emulator_profile_defaults(
     }
 
     resolved
+}
+
+/// One-time repair for entries still carrying an args value the catalog has
+/// since replaced: for every entry whose resolved profile lists its trimmed
+/// args in `legacy_args`, the profile's current `args` is written instead.
+/// A blank profile args, an entry with no matching profile, and any other
+/// custom args are all left alone. Returns how many entries changed.
+///
+/// Without this, an installed emulator only picks up a new default on its
+/// next update, reinstall or manual save (the
+/// [`apply_manual_emulator_profile_defaults`] path).
+pub fn migrate_legacy_args(emulators: &mut [EmulatorEntry], profiles: &[EmulatorProfile]) -> usize {
+    let mut changed = 0usize;
+    for entry in emulators.iter_mut() {
+        let Some(profile) = profile_for_entry(&entry.name, &entry.path, profiles) else {
+            continue;
+        };
+        let profile_args = profile.args.trim();
+        if profile_args.is_empty() {
+            continue;
+        }
+        let current = entry.args.trim();
+        if profile
+            .legacy_args
+            .iter()
+            .any(|legacy| legacy.trim() == current)
+        {
+            entry.args = profile_args.to_string();
+            changed += 1;
+        }
+    }
+    changed
+}
+
+/// [`migrate_legacy_args`] against the config at `config_path`, saved only
+/// when something changed. Returns how many entries were migrated.
+pub fn migrate_legacy_args_in_config(
+    config_path: &Path,
+    profiles: &[EmulatorProfile],
+) -> Result<usize, ConfigError> {
+    let mut config = Config::load(config_path)?;
+    let migrated = migrate_legacy_args(&mut config.emulators, profiles);
+    if migrated > 0 {
+        config.save(config_path)?;
+    }
+    Ok(migrated)
 }
 
 /// `_backfill_missing_emulator_defaults` (emulator_ui_mixin.py:1790-1839).
@@ -1252,6 +1308,124 @@ mod tests {
         };
         let filled = apply_manual_emulator_profile_defaults(&entry, &blank_args);
         assert_eq!(filled.args, "%rom%");
+    }
+
+    #[test]
+    fn manual_defaults_migrate_a_legacy_args_value() {
+        let mut profile = full_profile("Cemu (Wii U)");
+        profile.args = "-f -g \"%rom%\"".into();
+        profile.legacy_args = strings(&["-g \"%rom%\""]);
+        for current in ["-g \"%rom%\"", "   -g \"%rom%\"  "] {
+            let entry = EmulatorEntry {
+                name: "Cemu (Wii U)".into(),
+                args: current.into(),
+                ..Default::default()
+            };
+            let filled = apply_manual_emulator_profile_defaults(&entry, &profile);
+            assert_eq!(filled.args, "-f -g \"%rom%\"", "current={current:?}");
+        }
+    }
+
+    #[test]
+    fn manual_defaults_keep_custom_args_that_are_not_legacy() {
+        let mut profile = full_profile("Cemu (Wii U)");
+        profile.args = "-f -g \"%rom%\"".into();
+        profile.legacy_args = strings(&["-g \"%rom%\""]);
+        let entry = EmulatorEntry {
+            name: "Cemu (Wii U)".into(),
+            args: "-g \"%rom%\" --nsight".into(),
+            ..Default::default()
+        };
+        let filled = apply_manual_emulator_profile_defaults(&entry, &profile);
+        assert_eq!(filled.args, "-g \"%rom%\" --nsight");
+    }
+
+    #[test]
+    fn manual_defaults_with_no_legacy_args_behave_as_before() {
+        let profile = full_profile("PCSX2");
+        assert!(profile.legacy_args.is_empty());
+        let entry = EmulatorEntry {
+            name: "PCSX2".into(),
+            args: "-g \"%rom%\"".into(),
+            ..Default::default()
+        };
+        let filled = apply_manual_emulator_profile_defaults(&entry, &profile);
+        assert_eq!(filled.args, "-g \"%rom%\"");
+    }
+
+    // --- migrate_legacy_args -------------------------------------------------
+
+    fn cemu_profile() -> EmulatorProfile {
+        EmulatorProfile {
+            name: "Cemu (Wii U)".into(),
+            match_tokens: strings(&["cemu.exe"]),
+            args: "-f -g \"%rom%\"".into(),
+            legacy_args: strings(&["-g \"%rom%\""]),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn migrate_rewrites_a_legacy_args_entry_and_counts_it() {
+        let profiles = vec![cemu_profile()];
+        let mut emulators = vec![EmulatorEntry {
+            name: "Cemu (Wii U)".into(),
+            path: "/x/Cemu.AppImage".into(),
+            args: "  -g \"%rom%\"  ".into(),
+            ..Default::default()
+        }];
+        assert_eq!(migrate_legacy_args(&mut emulators, &profiles), 1);
+        assert_eq!(emulators[0].args, "-f -g \"%rom%\"");
+    }
+
+    #[test]
+    fn migrate_leaves_custom_args_alone() {
+        let profiles = vec![cemu_profile()];
+        let mut emulators = vec![EmulatorEntry {
+            name: "Cemu (Wii U)".into(),
+            args: "-g \"%rom%\" --nsight".into(),
+            ..Default::default()
+        }];
+        assert_eq!(migrate_legacy_args(&mut emulators, &profiles), 0);
+        assert_eq!(emulators[0].args, "-g \"%rom%\" --nsight");
+    }
+
+    #[test]
+    fn migrate_leaves_entries_with_no_matching_profile_alone() {
+        let profiles = vec![cemu_profile()];
+        let mut emulators = vec![EmulatorEntry {
+            name: "Some Other Emu".into(),
+            path: "/x/other".into(),
+            args: "-g \"%rom%\"".into(),
+            ..Default::default()
+        }];
+        assert_eq!(migrate_legacy_args(&mut emulators, &profiles), 0);
+        assert_eq!(emulators[0].args, "-g \"%rom%\"");
+    }
+
+    #[test]
+    fn migrate_counts_every_changed_entry() {
+        let profiles = vec![cemu_profile(), ppsspp_profile()];
+        let mut emulators = vec![
+            EmulatorEntry {
+                name: "Cemu (Wii U)".into(),
+                args: "-g \"%rom%\"".into(),
+                ..Default::default()
+            },
+            EmulatorEntry {
+                name: "Cemu (Wii U) (2)".into(),
+                path: "/x/cemu.exe".into(),
+                args: "-g \"%rom%\"".into(),
+                ..Default::default()
+            },
+            EmulatorEntry {
+                name: "PPSSPP".into(),
+                args: "%rom%".into(),
+                ..Default::default()
+            },
+        ];
+        assert_eq!(migrate_legacy_args(&mut emulators, &profiles), 2);
+        assert_eq!(emulators[2].args, "%rom%", "no legacy_args, no rewrite");
     }
 
     // --- backfill_missing_defaults ------------------------------------------

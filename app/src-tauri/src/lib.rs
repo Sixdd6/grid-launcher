@@ -104,6 +104,18 @@ pub fn run() {
         }
         _ => None,
     };
+    // One-time repair for config entries still carrying an emulator default
+    // the catalog has since replaced (e.g. Cemu gaining `-f`). Runs before
+    // any service reads the config; a failure is logged and startup
+    // continues with the old args.
+    match grid_core::autoconfig::entry::migrate_legacy_args_in_config(
+        &config_path,
+        grid_core::launch::profiles::load_profiles(),
+    ) {
+        Ok(0) => {}
+        Ok(count) => tracing::info!("migrated {count} emulator entries to current default args"),
+        Err(e) => tracing::warn!("emulator args migration failed: {e}"),
+    }
     let install = registry
         .clone()
         .map(|registry| InstallService::new(registry, config_path.clone()));
