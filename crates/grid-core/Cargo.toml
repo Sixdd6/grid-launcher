@@ -43,6 +43,12 @@ wiremock = "0.6.5"
 [target."cfg(unix)".dependencies]
 libc = "0.2.189"
 
+[target."cfg(windows)".dependencies]
+# NTFS junctions: the Windows stand-in for the relative symlink
+# `library::user_data_links` creates on unix (a symlink needs a privilege a
+# normal user does not have).
+junction = "2.0.0"
+
 [features]
 # Gates the E2E forge-request redirect (GRID_LAUNCHER_E2E_FORGE_BASE) so a
 # release build can never honor it — see launch/forge.rs.

@@ -1221,4 +1221,43 @@ mod tests {
         let (resolved, _) = resolved_sync_directory_paths(&e, None, PathKey::StatePaths, &c);
         assert_eq!(resolved, vec![paths::resolve_best_effort(&states)]);
     }
+
+    /// Layout v1 points an emulator's user-data directory at `saves/` with a
+    /// link, so every sync path must resolve THROUGH that link to the real
+    /// directory under `saves/` — `resolve_best_effort` canonicalizes, so no
+    /// resolver code knows the link is there.
+    #[cfg(unix)]
+    #[test]
+    fn sync_paths_resolve_through_a_linked_user_data_directory() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+
+        let emulator_dir = temp.path().join("emulators").join("E");
+        std::fs::create_dir_all(&emulator_dir).unwrap();
+        let exe = emulator_dir.join("emulator");
+        std::fs::write(&exe, b"").unwrap();
+
+        let saves = temp.path().join("saves").join("E").join("memcards");
+        std::fs::create_dir_all(&saves).unwrap();
+        std::fs::write(saves.join("slot.mcd"), b"card").unwrap();
+        crate::library::user_data_links::link_dir(&saves, &emulator_dir.join("memcards")).unwrap();
+
+        let e = entry("E", &exe.to_string_lossy());
+        let profile = EmulatorProfile {
+            save_directories: vec!["memcards".to_string()],
+            ..Default::default()
+        };
+        let c = ctx(Some(&emulator_dir), temp.path());
+
+        let (resolved, files) =
+            resolved_sync_directory_paths(&e, Some(&profile), PathKey::SavePaths, &c);
+
+        assert_eq!(resolved, vec![std::fs::canonicalize(&saves).unwrap()]);
+        assert!(files.is_empty(), "{files:?}");
+        assert!(
+            crate::cloud::latest_mtime_under(&resolved[0], &crate::cloud::IgnoreSets::default())
+                > 0.0
+        );
+    }
 }

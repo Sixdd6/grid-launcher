@@ -18,6 +18,7 @@ pub mod queue;
 pub mod registry;
 pub mod specials;
 pub mod update_detection;
+pub mod user_data_links;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
