@@ -29,11 +29,21 @@ use super::LibraryError;
 /// file, not a directory — moving it would break the install). The first
 /// I/O error returns immediately; the caller decides whether that fails the
 /// whole install or is only worth a warning line.
+///
+/// Both sides are CANONICALIZED before the link is created, so the unix
+/// link text is computed between two real paths. A `..` component or a
+/// symlinked parent in either argument would otherwise produce a `..` count
+/// the kernel reads differently than this code does, leaving a dangling
+/// link that every later run replaces again.
 pub fn ensure_user_data_links(
     install_dir: &Path,
     saves_dir: &Path,
     user_data: &[String],
 ) -> Result<bool, LibraryError> {
+    // The install directory exists by the time this runs; the fallback keeps
+    // a caller that got that wrong on the old lexical behavior instead of
+    // failing outright.
+    let install_root = fs::canonicalize(install_dir).unwrap_or_else(|_| install_dir.to_path_buf());
     let mut changed = false;
     for entry in user_data {
         let name = entry.trim();
@@ -45,8 +55,11 @@ pub fn ensure_user_data_links(
             continue;
         }
         let target = saves_dir.join(name);
-        let link = install_dir.join(name);
+        let link = install_root.join(name);
         fs::create_dir_all(&target)?;
+        // Canonical only after `create_dir_all`, which is what makes the
+        // path resolvable.
+        let target = fs::canonicalize(&target).unwrap_or(target);
 
         if is_link(&link) {
             if points_at(&link, &target) {
@@ -96,9 +109,10 @@ fn is_single_component(name: &str) -> bool {
 fn move_into(src: &Path, dest: &Path) -> Result<(), LibraryError> {
     if fs::read_dir(dest)?.next().is_none() {
         // `rename` onto an existing directory is not portable, so the empty
-        // destination is removed first and recreated if the rename fails
-        // (a cross-device move, which the merge below handles by copying
-        // nothing and renaming per entry).
+        // destination is removed first — and recreated when the rename
+        // fails, which for a `saves/` on another filesystem is
+        // `CrossesDevices`. The merge below then moves the tree file by
+        // file, copying each one across the device boundary.
         let _ = fs::remove_dir(dest);
         if fs::rename(src, dest).is_ok() {
             return Ok(());
@@ -106,6 +120,54 @@ fn move_into(src: &Path, dest: &Path) -> Result<(), LibraryError> {
         fs::create_dir_all(dest)?;
     }
     move_tree_preferring_dest(src, dest)
+}
+
+/// Moves one file, falling back to copy-then-delete when `src` and `dest`
+/// are on different filesystems. Split from [`finish_move`] so the fallback
+/// is testable without two filesystems.
+fn move_file(src: &Path, dest: &Path) -> io::Result<()> {
+    finish_move(src, dest, fs::rename(src, dest))
+}
+
+/// [`move_file`]'s tail, given the result of the rename attempt. The source
+/// is deleted only once the copy is known to be complete: a short copy
+/// (a full disk) must leave the original where it is.
+fn finish_move(src: &Path, dest: &Path, renamed: io::Result<()>) -> io::Result<()> {
+    match renamed {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::CrossesDevices => {
+            // A symlink would be followed by `fs::copy`, so it is recreated
+            // rather than copied.
+            if fs::symlink_metadata(src)?.file_type().is_symlink() {
+                return copy_symlink(src, dest);
+            }
+            let copied = fs::copy(src, dest)?;
+            let source_len = fs::metadata(src)?.len();
+            if copied != source_len || fs::metadata(dest)?.len() != source_len {
+                return Err(io::Error::other(format!(
+                    "short copy: {} of {source_len} bytes reached {}",
+                    copied,
+                    dest.display()
+                )));
+            }
+            fs::remove_file(src)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Recreates the symlink `src` at `dest` and removes `src`. Only reachable
+/// from the cross-device fallback, where a rename is not available.
+#[cfg(unix)]
+fn copy_symlink(src: &Path, dest: &Path) -> io::Result<()> {
+    std::os::unix::fs::symlink(fs::read_link(src)?, dest)?;
+    fs::remove_file(src)
+}
+
+#[cfg(not(unix))]
+fn copy_symlink(src: &Path, dest: &Path) -> io::Result<()> {
+    let _ = (src, dest);
+    Err(io::Error::from(io::ErrorKind::Unsupported))
 }
 
 /// Recursively moves `src`'s entries into `dest`, keeping `dest`'s version
@@ -137,7 +199,19 @@ pub(crate) fn move_tree_preferring_dest(src: &Path, dest: &Path) -> Result<(), L
             }
             continue;
         }
-        fs::rename(&from, &to)?;
+        if from_is_dir {
+            match fs::rename(&from, &to) {
+                Ok(()) => continue,
+                // `dest` is on another filesystem: move the subtree entry by
+                // entry instead, which copies each file across.
+                Err(error) if error.kind() == io::ErrorKind::CrossesDevices => {
+                    move_tree_preferring_dest(&from, &to)?;
+                    continue;
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+        move_file(&from, &to)?;
     }
     // A husk left by a failed removal is not worth failing the move over:
     // the caller only needs the name free, and reports that itself.
@@ -327,11 +401,18 @@ mod tests {
     fn existing_saves_content_wins_on_merge() {
         let temp = tempfile::tempdir().unwrap();
         let (install, saves) = layout(temp.path());
-        fs::create_dir_all(install.join("inis")).unwrap();
+        fs::create_dir_all(install.join("inis").join("sub")).unwrap();
         fs::write(install.join("inis").join("PCSX2.ini"), b"install").unwrap();
         fs::write(install.join("inis").join("extra.ini"), b"extra").unwrap();
-        fs::create_dir_all(saves.join("inis")).unwrap();
+        fs::write(install.join("inis").join("sub").join("a.ini"), b"install").unwrap();
+        fs::write(
+            install.join("inis").join("sub").join("b.ini"),
+            b"only-install",
+        )
+        .unwrap();
+        fs::create_dir_all(saves.join("inis").join("sub")).unwrap();
         fs::write(saves.join("inis").join("PCSX2.ini"), b"saves").unwrap();
+        fs::write(saves.join("inis").join("sub").join("a.ini"), b"saves").unwrap();
 
         let changed = ensure_user_data_links(&install, &saves, &["inis".to_string()]).unwrap();
 
@@ -343,6 +424,15 @@ mod tests {
         assert_eq!(
             fs::read(saves.join("inis").join("extra.ini")).unwrap(),
             b"extra"
+        );
+        // The nested directory merges by the same rule, one level down.
+        assert_eq!(
+            fs::read(saves.join("inis").join("sub").join("a.ini")).unwrap(),
+            b"saves"
+        );
+        assert_eq!(
+            fs::read(saves.join("inis").join("sub").join("b.ini")).unwrap(),
+            b"only-install"
         );
         assert!(is_link(&install.join("inis")));
     }
@@ -395,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn an_entry_with_a_separator_is_skipped() {
+    fn invalid_entries_are_skipped() {
         let temp = tempfile::tempdir().unwrap();
         let (install, saves) = layout(temp.path());
 
@@ -413,6 +503,83 @@ mod tests {
         assert!(!changed);
         assert!(!install.join("nested").exists());
         assert!(!saves.join("nested").exists());
+    }
+
+    /// The link text is computed from CANONICAL paths, so a symlinked
+    /// parent that makes the install directory lexically shallower than it
+    /// physically is still yields a link that resolves.
+    #[cfg(unix)]
+    #[test]
+    fn relative_link_is_correct_through_a_symlinked_install_parent() {
+        let temp = tempfile::tempdir().unwrap();
+        let install = temp
+            .path()
+            .join("real")
+            .join("deep")
+            .join("emulators")
+            .join("E");
+        fs::create_dir_all(&install).unwrap();
+        // `alias` stands in for `real/deep`: one component where the real
+        // path has two, so a lexical `..` count comes out one short.
+        std::os::unix::fs::symlink(
+            temp.path().join("real").join("deep"),
+            temp.path().join("alias"),
+        )
+        .unwrap();
+        let aliased_install = temp.path().join("alias").join("emulators").join("E");
+        let saves = temp.path().join("saves").join("E");
+
+        let changed =
+            ensure_user_data_links(&aliased_install, &saves, &["memcards".to_string()]).unwrap();
+
+        assert!(changed);
+        let link = install.join("memcards");
+        assert!(fs::read_link(&link).unwrap().starts_with(".."));
+        assert!(points_at(&link, &saves.join("memcards")));
+        assert_eq!(
+            read_link_target(&link).unwrap().canonicalize().unwrap(),
+            saves.join("memcards").canonicalize().unwrap()
+        );
+    }
+
+    /// The copy-then-delete path a `saves/` on another filesystem takes.
+    /// Driven through `finish_move` with a synthetic `CrossesDevices`,
+    /// because a test cannot conjure a second filesystem.
+    #[test]
+    fn a_cross_device_file_move_copies_then_deletes() {
+        let temp = tempfile::tempdir().unwrap();
+        let src = temp.path().join("slot.mcd");
+        let dest = temp.path().join("moved.mcd");
+        fs::write(&src, b"card").unwrap();
+
+        finish_move(
+            &src,
+            &dest,
+            Err(io::Error::from(io::ErrorKind::CrossesDevices)),
+        )
+        .unwrap();
+
+        assert_eq!(fs::read(&dest).unwrap(), b"card");
+        assert!(!src.exists(), "the source must be gone after a full copy");
+    }
+
+    /// Any other rename failure is returned as itself: the fallback is for
+    /// the device boundary only.
+    #[test]
+    fn a_non_cross_device_rename_error_is_returned() {
+        let temp = tempfile::tempdir().unwrap();
+        let src = temp.path().join("slot.mcd");
+        fs::write(&src, b"card").unwrap();
+
+        let error = finish_move(
+            &src,
+            &temp.path().join("moved.mcd"),
+            Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(src.exists(), "nothing may be moved on an unrelated error");
     }
 
     #[cfg(windows)]
