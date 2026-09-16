@@ -59,7 +59,7 @@ use extract::{
 use launch_select::select_launch_file;
 use paths::{
     archive_name, candidate_archives, candidate_extracted_dirs, extraction_dir, platform_dir,
-    sanitize_component,
+    sanitize_component, saves_dir,
 };
 use platforms::{
     is_native_platform, is_ps3_platform, is_ps4_platform, is_ps5_platform, is_xbox360_platform,
@@ -67,6 +67,7 @@ use platforms::{
 use queue::{Admission, CancelAction, DownloadStatus, DownloadsSnapshot, JobKey, QueueState};
 use registry::{installed_match, InstalledGame, Registry};
 use specials::ps3::Ps3Roots;
+use user_data_links::ensure_user_data_links;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LibraryError {
@@ -2283,6 +2284,21 @@ impl InstallService {
         };
         make_executable(&exe);
 
+        // Links go in BEFORE the config entry and autoconfig run — a save
+        // writer reads through the link and must see the moved directory,
+        // not the fresh extracted one it would otherwise overwrite.
+        if let Some(profile) = catalog::find_profile(&self.profiles, &job.source_id) {
+            if !profile.user_data.is_empty() {
+                if let Err(e) = ensure_user_data_links(
+                    install_dir,
+                    &saves_dir(&job.library, &job.profile_name),
+                    &profile.user_data,
+                ) {
+                    append_warning(warning, &format!("user data links: {e}"));
+                }
+            }
+        }
+
         let fresh = self.write_emulator_entry(job, &paths.resolved, &exe)?;
         self.sync_autoconfig(&job.profile_name, warning);
 
@@ -2947,6 +2963,11 @@ fn append_warning(warning: &mut String, line: &str) {
 /// inside `dest` that is deleted immediately afterwards, so a rename cannot
 /// cross a filesystem boundary and the result is identical to a copy with
 /// half the writes.
+///
+/// A `dest` entry that is already a user data link (Task 5) is never
+/// written through: it points at `saves/`, and the archive's own copy of
+/// that directory is discarded instead of following the link and
+/// overwriting a user's data on every reinstall.
 fn merge_tree_into(src: &Path, dest: &Path) -> Result<(), LibraryError> {
     fs::create_dir_all(dest)?;
     for entry in fs::read_dir(src)? {
@@ -2956,6 +2977,15 @@ fn merge_tree_into(src: &Path, dest: &Path) -> Result<(), LibraryError> {
         // `file_type` does not follow symlinks, so a symlink is moved as
         // itself rather than being descended into.
         let from_is_dir = entry.file_type()?.is_dir();
+
+        if user_data_links::is_link(&to) {
+            if from_is_dir {
+                let _ = fs::remove_dir_all(&from);
+            } else {
+                let _ = fs::remove_file(&from);
+            }
+            continue;
+        }
 
         if from_is_dir && to.is_dir() {
             merge_tree_into(&from, &to)?;

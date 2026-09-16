@@ -81,6 +81,15 @@ fn profile(name: &str, source: Value) -> EmulatorProfile {
     }
 }
 
+/// [`profile`] with a `user_data` list attached — the directories that
+/// installer/update wiring (Task 5) links to `saves/`.
+fn profile_with_user_data(name: &str, source: Value, user_data: &[&str]) -> EmulatorProfile {
+    EmulatorProfile {
+        user_data: user_data.iter().map(|s| s.to_string()).collect(),
+        ..profile(name, source)
+    }
+}
+
 /// A `gitea` source block for `acme/widget`, tag `v1.0`, served by `base`.
 fn gitea_source(base: &str) -> Value {
     json!({
@@ -420,6 +429,144 @@ async fn removing_an_installed_emulator_deletes_its_install_directory() {
         harness.config().emulators.len(),
         1,
         "the config edit is the command's job, not this function's"
+    );
+}
+
+/// A user data directory survives `remove_emulator_files` and a subsequent
+/// reinstall: install links `memcards` to `saves/Test Emu/memcards`; data
+/// written through the link outlives a removal (which only deletes the
+/// install directory); a reinstall re-links to the same file.
+#[cfg(unix)]
+#[tokio::test]
+async fn user_data_survives_delete_and_reinstall() {
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = zip_bytes(
+        &staging,
+        "widget.zip",
+        &[("bin/testemu.sh", b"#!/bin/sh\n")],
+    );
+
+    let harness = Harness::new(|uri| {
+        vec![profile_with_user_data(
+            "Test Emu",
+            gitea_source(uri),
+            &["memcards"],
+        )]
+    })
+    .await;
+    harness
+        .mount_widget("widget-linux.zip", bytes.clone(), 0)
+        .await;
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let install_dir = harness.install_dir("Test Emu");
+    let link = install_dir.join("memcards");
+    let saves_dir = harness.library.join("saves/Test Emu/memcards");
+    assert!(
+        link.symlink_metadata().unwrap().file_type().is_symlink(),
+        "memcards must be a link: {}",
+        link.display()
+    );
+    assert_eq!(
+        link.canonicalize().unwrap(),
+        saves_dir.canonicalize().unwrap()
+    );
+
+    fs::write(link.join("slot1.mcd"), b"SAVE-DATA").unwrap();
+
+    let config = harness.config();
+    remove_emulator_files(&config, "Test Emu").unwrap();
+    assert!(
+        !install_dir.exists(),
+        "the install directory should be gone"
+    );
+    assert_eq!(fs::read(saves_dir.join("slot1.mcd")).unwrap(), b"SAVE-DATA");
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let link = harness.install_dir("Test Emu").join("memcards");
+    assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+    assert_eq!(
+        link.canonicalize().unwrap(),
+        saves_dir.canonicalize().unwrap()
+    );
+    assert_eq!(
+        fs::read(link.join("slot1.mcd")).unwrap(),
+        b"SAVE-DATA",
+        "the reinstall must re-link to the same saved file"
+    );
+}
+
+/// A reinstall's fresh archive contents never overwrite user data already
+/// under `saves/`: the archive ships its own default `memcards/slot1.mcd`,
+/// but the extraction merge must discard it rather than write through the
+/// link the first install left behind.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_reinstalled_archive_never_overwrites_saved_user_data() {
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = zip_bytes(
+        &staging,
+        "widget.zip",
+        &[
+            ("bin/testemu.sh", b"#!/bin/sh\n"),
+            ("memcards/slot1.mcd", b"DEFAULT"),
+        ],
+    );
+
+    let harness = Harness::new(|uri| {
+        vec![profile_with_user_data(
+            "Test Emu",
+            gitea_source(uri),
+            &["memcards"],
+        )]
+    })
+    .await;
+    harness
+        .mount_widget("widget-linux.zip", bytes.clone(), 0)
+        .await;
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let saves_file = harness.library.join("saves/Test Emu/memcards/slot1.mcd");
+    assert_eq!(fs::read(&saves_file).unwrap(), b"DEFAULT");
+    fs::write(&saves_file, b"MINE").unwrap();
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    assert_eq!(
+        fs::read(&saves_file).unwrap(),
+        b"MINE",
+        "a reinstall must never overwrite saved user data"
     );
 }
 

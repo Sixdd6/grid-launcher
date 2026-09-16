@@ -1043,7 +1043,8 @@ pub async fn save_emulator(
             let mut entry = entry;
             if let Some(archive) = archive_path_to_extract(&entry) {
                 let library = archive_library_root(&Config::load(&config_path).map_err(err)?)?;
-                let executable = install_manual_archive(&library, entry.name.trim(), &archive)?;
+                let executable =
+                    install_manual_archive(&library, entry.name.trim(), &archive, profiles)?;
                 entry.path = executable.to_string_lossy().into_owned();
             }
             // The autoconfig sync below reads no config.json and can be slow

@@ -19,8 +19,10 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use super::profiles::{profile_for_entry, EmulatorProfile};
 use crate::library::extract::extract_archive;
-use crate::library::paths::{sanitize_component, EMULATORS_DIR};
+use crate::library::paths::{sanitize_component, saves_dir, EMULATORS_DIR};
+use crate::library::user_data_links::ensure_user_data_links;
 
 /// `_extract_emulator_archive`'s message when extraction finished but no
 /// launchable file turned up (emulator_ui_mixin.py:1394). Verbatim — the
@@ -53,10 +55,19 @@ pub fn compat_tool_install_dir(root: &Path, archive_stem: &str) -> PathBuf {
 ///
 /// The destination is [`emulator_install_dir`] under the ENTRY name, not the
 /// archive stem, matching the reference. Blocking.
+///
+/// When the extracted executable matches a profile in `profiles`
+/// ([`profile_for_entry`]) with a non-empty `user_data`, the matched
+/// profile's directories are linked to `saves_dir(library, &profile.name)`
+/// (the saves directory is named from the PROFILE, not the entry) before
+/// returning — the autoconfig sync the caller runs afterward must read
+/// through the link, not overwrite it. A link error only warns: the archive
+/// extracted and the entry is still valid without it.
 pub fn install_manual_archive(
     library: &Path,
     entry_name: &str,
     archive: &Path,
+    profiles: &[EmulatorProfile],
 ) -> Result<PathBuf, String> {
     if !archive.is_file() {
         return Err(format!(
@@ -71,6 +82,20 @@ pub fn install_manual_archive(
         .ok_or_else(|| NO_LAUNCHABLE_AFTER_EXTRACT.to_string())?;
     // Python's `os.chmod(path, 0o755)` off win32 (emulator_ui_mixin.py:1399).
     make_executable(&executable);
+
+    if let Some(profile) = profile_for_entry(entry_name, &executable.to_string_lossy(), profiles) {
+        if !profile.user_data.is_empty()
+            && ensure_user_data_links(
+                &dest,
+                &saves_dir(library, &profile.name),
+                &profile.user_data,
+            )
+            .is_err()
+        {
+            tracing::warn!("user data links failed for {}", dest.display());
+        }
+    }
+
     Ok(executable)
 }
 
@@ -848,7 +873,7 @@ mod tests {
             ],
         );
 
-        let executable = install_manual_archive(&library, "My Emu", &archive).unwrap();
+        let executable = install_manual_archive(&library, "My Emu", &archive, &[]).unwrap();
 
         // The ENTRY name names the directory, not the archive stem.
         assert_eq!(executable, library.join("emulators/My Emu/bin/emu.sh"));
@@ -863,7 +888,7 @@ mod tests {
         let archive = dir.path().join("emu.tar.gz");
         write_tar_gz(&archive, &[("emu.sh", "#!/bin/sh\n")]);
 
-        let executable = install_manual_archive(&library, "Tarred", &archive).unwrap();
+        let executable = install_manual_archive(&library, "Tarred", &archive, &[]).unwrap();
 
         assert_eq!(executable, library.join("emulators/Tarred/emu.sh"));
         assert_eq!(mode_of(&executable) & 0o111, 0o111);
@@ -874,7 +899,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let archive = dir.path().join("gone.zip");
 
-        let err = install_manual_archive(&dir.path().join("library"), "Emu", &archive).unwrap_err();
+        let err =
+            install_manual_archive(&dir.path().join("library"), "Emu", &archive, &[]).unwrap_err();
 
         assert_eq!(
             err,
@@ -889,8 +915,50 @@ mod tests {
         let archive = dir.path().join("docs.zip");
         write_zip(&archive, &[("readme.txt", "hello", 0o644)]);
 
-        let err = install_manual_archive(&library, "Emu", &archive).unwrap_err();
+        let err = install_manual_archive(&library, "Emu", &archive, &[]).unwrap_err();
 
         assert_eq!(err, NO_LAUNCHABLE_AFTER_EXTRACT);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_manual_archive_matching_a_profile_gets_its_user_data_links() {
+        use crate::launch::profiles::load_profiles;
+
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("library");
+        let archive = dir.path().join("pcsx2.zip");
+        write_zip(
+            &archive,
+            &[
+                ("pcsx2-qt", "#!/bin/sh\n", 0o755),
+                ("memcards/x.mcd", "card", 0o644),
+            ],
+        );
+
+        install_manual_archive(&library, "PCSX2 (Playstation 2)", &archive, load_profiles())
+            .unwrap();
+
+        let link = library.join("emulators/PCSX2 (Playstation 2)/memcards");
+        assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+        assert!(library
+            .join("saves/PCSX2 (Playstation 2)/memcards/x.mcd")
+            .is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_manual_archive_with_no_matching_profile_gets_no_links() {
+        use crate::launch::profiles::load_profiles;
+
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("library");
+        let archive = dir.path().join("mystery.zip");
+        write_zip(&archive, &[("mystery.sh", "#!/bin/sh\n", 0o755)]);
+
+        install_manual_archive(&library, "Mystery", &archive, load_profiles()).unwrap();
+
+        assert!(!library.join("emulators/Mystery/memcards").exists());
+        assert!(!library.join("saves").exists());
     }
 }
