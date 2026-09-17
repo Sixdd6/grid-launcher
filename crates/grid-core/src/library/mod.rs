@@ -12,6 +12,7 @@ pub mod download;
 pub mod emulator_removal;
 pub mod extract;
 pub mod launch_select;
+pub mod layout_migration;
 pub mod paths;
 pub mod platforms;
 pub mod queue;

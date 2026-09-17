@@ -239,6 +239,20 @@ const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_pa
      native_game_dir, included_dlc, ps3_trophy_paths, ps3_game_id, ps3_iso_path, ps4_game_id, \
      ps4_content, ra_id, last_played_at, fanart_urls, images_version";
 
+/// The path-bearing columns [`Registry::rewrite_paths`] hands to its
+/// closure as plain strings. `ps3_trophy_paths` is the ninth, handled
+/// separately because it holds a JSON array rather than one path.
+const REWRITE_PATH_COLUMNS: [&str; 8] = [
+    "archive_path",
+    "extracted_path",
+    "extracted_dir",
+    "multi_file_game_dir",
+    "native_executable_path",
+    "native_wineprefix",
+    "native_game_dir",
+    "ps3_iso_path",
+];
+
 /// One installed game, as persisted in the SQLite registry. `title_key` and
 /// `platform_key` are not part of this type: they are computed from `title`
 /// and `platform` at write and lookup time (`value.trim().to_lowercase()`),
@@ -697,6 +711,113 @@ impl Registry {
         .map_err(registry_err)
     }
 
+    /// Rewrites every stored path with `rewrite`, in ONE transaction.
+    ///
+    /// `rewrite` is handed each non-empty value of the nine path columns
+    /// ([`REWRITE_PATH_COLUMNS`] plus `ps3_trophy_paths`, whose JSON array
+    /// is rewritten element-wise and re-serialized only when an element
+    /// changed) and returns the replacement, or `None` to leave the value
+    /// alone. Rows with no changed value are not written at all. Returns the
+    /// number of rows updated; any error rolls the whole pass back.
+    ///
+    /// The closure keeps the registry ignorant of layout names: the library
+    /// layout migration owns the prefix rules, this owns the SQL.
+    pub fn rewrite_paths(
+        &self,
+        rewrite: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<usize, LibraryError> {
+        let mut guard = self.conn.lock().unwrap();
+        let tx = guard.transaction().map_err(registry_err)?;
+
+        let columns = REWRITE_PATH_COLUMNS.join(", ");
+        let mut rows: Vec<(i64, Vec<String>, String)> = Vec::new();
+        {
+            let sql =
+                format!("SELECT id, {columns}, ps3_trophy_paths FROM installed_games ORDER BY id");
+            let mut stmt = tx.prepare(&sql).map_err(registry_err)?;
+            let mapped = stmt
+                .query_map([], |row| {
+                    let id: i64 = row.get(0)?;
+                    let mut values = Vec::with_capacity(REWRITE_PATH_COLUMNS.len());
+                    for index in 0..REWRITE_PATH_COLUMNS.len() {
+                        values.push(row.get::<_, String>(index + 1)?);
+                    }
+                    let trophies: String = row.get(REWRITE_PATH_COLUMNS.len() + 1)?;
+                    Ok((id, values, trophies))
+                })
+                .map_err(registry_err)?;
+            for row in mapped {
+                rows.push(row.map_err(registry_err)?);
+            }
+        }
+
+        let assignments: Vec<String> = REWRITE_PATH_COLUMNS
+            .iter()
+            .enumerate()
+            .map(|(index, column)| format!("{column} = ?{}", index + 1))
+            .collect();
+        let update_sql = format!(
+            "UPDATE installed_games SET {}, ps3_trophy_paths = ?{} WHERE id = ?{}",
+            assignments.join(", "),
+            REWRITE_PATH_COLUMNS.len() + 1,
+            REWRITE_PATH_COLUMNS.len() + 2
+        );
+
+        let mut updated = 0usize;
+        for (id, values, trophies) in rows {
+            let mut changed = false;
+            let mut new_values = values.clone();
+            for (index, value) in values.iter().enumerate() {
+                if value.is_empty() {
+                    continue;
+                }
+                if let Some(replacement) = rewrite(value) {
+                    if &replacement != value {
+                        new_values[index] = replacement;
+                        changed = true;
+                    }
+                }
+            }
+            let mut new_trophies = trophies.clone();
+            if let Ok(parsed) = serde_json::from_str::<Vec<String>>(&trophies) {
+                let mut rewritten = parsed.clone();
+                let mut trophies_changed = false;
+                for (index, value) in parsed.iter().enumerate() {
+                    if value.is_empty() {
+                        continue;
+                    }
+                    if let Some(replacement) = rewrite(value) {
+                        if &replacement != value {
+                            rewritten[index] = replacement;
+                            trophies_changed = true;
+                        }
+                    }
+                }
+                if trophies_changed {
+                    if let Ok(serialized) = serde_json::to_string(&rewritten) {
+                        new_trophies = serialized;
+                        changed = true;
+                    }
+                }
+            }
+            if !changed {
+                continue;
+            }
+            let mut params: Vec<rusqlite::types::Value> = new_values
+                .into_iter()
+                .map(rusqlite::types::Value::Text)
+                .collect();
+            params.push(rusqlite::types::Value::Text(new_trophies));
+            params.push(rusqlite::types::Value::Integer(id));
+            tx.execute(&update_sql, rusqlite::params_from_iter(params))
+                .map_err(registry_err)?;
+            updated += 1;
+        }
+
+        tx.commit().map_err(registry_err)?;
+        Ok(updated)
+    }
+
     /// Removes the row for `(title, platform)`'s identity key. Returns
     /// whether a row was removed.
     pub fn remove(&self, title: &str, platform: &str) -> Result<bool, LibraryError> {
@@ -710,5 +831,103 @@ impl Registry {
             )
             .map_err(registry_err)?;
         Ok(affected > 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A registry in a temp directory, with the handle that keeps it alive.
+    fn temp_registry() -> (tempfile::TempDir, Registry) {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = Registry::open(&dir.path().join("registry.db")).unwrap();
+        (dir, registry)
+    }
+
+    /// A row with every path column this migration rewrites set.
+    fn row_with_paths(title: &str) -> InstalledGame {
+        InstalledGame {
+            title: title.to_string(),
+            platform: "Sony PlayStation 2".to_string(),
+            archive_path: "/lib/archive.zip".to_string(),
+            extracted_path: "/lib/game/game.iso".to_string(),
+            extracted_dir: "/lib/game".to_string(),
+            multi_file_game_dir: "/lib/multi".to_string(),
+            native_executable_path: "/lib/native/game.exe".to_string(),
+            native_wineprefix: "/lib/native/prefix".to_string(),
+            native_game_dir: "/lib/native".to_string(),
+            ps3_iso_path: "/lib/ps3/game.iso".to_string(),
+            ps3_trophy_paths: "[\"/lib/a\",\"/lib/b\"]".to_string(),
+            installed_at: 1,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn rewrite_paths_updates_every_path_column_in_one_transaction() {
+        let (_dir, registry) = temp_registry();
+        registry.upsert(&row_with_paths("Game A")).unwrap();
+        let mut untouched = row_with_paths("Game B");
+        untouched.archive_path = "/elsewhere/archive.zip".to_string();
+        untouched.extracted_path = String::new();
+        untouched.extracted_dir = String::new();
+        untouched.multi_file_game_dir = String::new();
+        untouched.native_executable_path = String::new();
+        untouched.native_wineprefix = String::new();
+        untouched.native_game_dir = String::new();
+        untouched.ps3_iso_path = String::new();
+        untouched.ps3_trophy_paths = String::new();
+        registry.upsert(&untouched).unwrap();
+
+        let changed = registry
+            .rewrite_paths(&|value| {
+                value
+                    .strip_prefix("/lib")
+                    .map(|rest| format!("/new/lib{rest}"))
+            })
+            .unwrap();
+        assert_eq!(changed, 1, "only the row with /lib paths changed");
+
+        let rows = registry.all().unwrap();
+        let a = rows.iter().find(|r| r.title == "Game A").unwrap();
+        // `upsert` blanks `archive_path` when `extracted_path` is set, so the
+        // stored value there is "" and stays "".
+        assert_eq!(a.archive_path, "");
+        assert_eq!(a.extracted_path, "/new/lib/game/game.iso");
+        assert_eq!(a.extracted_dir, "/new/lib/game");
+        assert_eq!(a.multi_file_game_dir, "/new/lib/multi");
+        assert_eq!(a.native_executable_path, "/new/lib/native/game.exe");
+        assert_eq!(a.native_wineprefix, "/new/lib/native/prefix");
+        assert_eq!(a.native_game_dir, "/new/lib/native");
+        assert_eq!(a.ps3_iso_path, "/new/lib/ps3/game.iso");
+        assert_eq!(a.ps3_trophy_paths, "[\"/new/lib/a\",\"/new/lib/b\"]");
+        // Columns the closure never matched, and the whole second row, are
+        // unchanged.
+        assert_eq!(a.platform, "Sony PlayStation 2");
+        let b = rows.iter().find(|r| r.title == "Game B").unwrap();
+        assert_eq!(b.archive_path, "/elsewhere/archive.zip");
+        assert_eq!(b.ps3_trophy_paths, "");
+    }
+
+    #[test]
+    fn rewrite_paths_rolls_back_on_a_failing_row() {
+        let (_dir, registry) = temp_registry();
+        registry.upsert(&row_with_paths("Game A")).unwrap();
+        let first = registry
+            .rewrite_paths(&|value| {
+                value
+                    .strip_prefix("/lib")
+                    .map(|rest| format!("/new/lib{rest}"))
+            })
+            .unwrap();
+        assert_eq!(first, 1);
+        let before = registry.all().unwrap();
+
+        // A second pass that rewrites nothing must change no rows and leave
+        // every value exactly as the first pass left it.
+        let second = registry.rewrite_paths(&|_| None).unwrap();
+        assert_eq!(second, 0);
+        assert_eq!(registry.all().unwrap(), before);
     }
 }
