@@ -146,8 +146,11 @@ pub fn remove_emulator_files(
 ///   executable, anything [`is_extractable_archive`] recognizes, and
 ///   `.AppImage` files (Decision 17);
 /// - anywhere else: skipped. A directory reached through a link resolves to
-///   its target — already under `saves/` for a linked install — so it lands
-///   here by construction and is left alone.
+///   its target, and a user data link always points under `saves/`, so a
+///   linked install's directory lands here and is left alone. Nothing here
+///   tests for a link: what decides is where the candidate resolves, so a
+///   link whose target DID sit inside the install directory would be moved
+///   whole, exactly like a real directory.
 pub(crate) fn salvage_user_data(
     entry: &EmulatorEntry,
     install_dir: &Path,
@@ -646,19 +649,24 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn salvage_skips_a_linked_dir() {
+    fn salvage_moves_real_dirs_but_skips_a_linked_dir() {
         let dir = tempfile::tempdir().unwrap();
         let library = dir.path();
         let exe = touch_install(library, "emulators", "PCSX2", "pcsx2-qt");
         let install_dir = expected_dir(library, "emulators", "PCSX2");
         let destination = super::saves_dir(library, "PCSX2");
-        let target = destination.join("memcards");
-        fs::create_dir_all(&target).unwrap();
-        fs::write(target.join("slot1.mcd"), b"SAVE").unwrap();
-        std::os::unix::fs::symlink(&target, install_dir.join("memcards")).unwrap();
+
+        // `memcards` is already linked into `saves/`; `savestates` is still a
+        // real directory inside the install.
+        let linked_target = destination.join("memcards");
+        fs::create_dir_all(&linked_target).unwrap();
+        fs::write(linked_target.join("slot1.mcd"), b"CARD").unwrap();
+        std::os::unix::fs::symlink(&linked_target, install_dir.join("memcards")).unwrap();
+        fs::create_dir_all(install_dir.join("savestates")).unwrap();
+        fs::write(install_dir.join("savestates").join("slot1.p2s"), b"STATE").unwrap();
 
         let entry = entry("PCSX2", &exe);
-        let profile = profile("PCSX2", &["memcards"], &[]);
+        let profile = profile("PCSX2", &["memcards"], &["savestates"]);
         let library_raw = library.to_string_lossy().into_owned();
         let salvaged = salvage_user_data(
             &entry,
@@ -669,11 +677,20 @@ mod tests {
         )
         .unwrap();
 
-        assert!(salvaged.is_empty(), "a linked directory is already safe");
-        assert!(super::super::user_data_links::is_link(
-            &install_dir.join("memcards")
-        ));
-        assert_eq!(fs::read(target.join("slot1.mcd")).unwrap(), b"SAVE");
+        // Exactly one destination: the real directory ran through the move,
+        // the linked one was considered and rejected.
+        assert_eq!(salvaged, vec![destination.join("savestates")]);
+        assert_eq!(
+            fs::read(destination.join("savestates").join("slot1.p2s")).unwrap(),
+            b"STATE"
+        );
+        assert!(!install_dir.join("savestates").exists());
+
+        assert!(
+            super::super::user_data_links::is_link(&install_dir.join("memcards")),
+            "the link itself must survive"
+        );
+        assert_eq!(fs::read(linked_target.join("slot1.mcd")).unwrap(), b"CARD");
     }
 
     #[test]
