@@ -370,8 +370,12 @@ fn plan_install(
     match candidates.as_slice() {
         [] => Err(LibraryError::Extract(NO_DOWNLOADABLE_FILE.to_string())),
         [only] => {
+            // Named from the FILE, not `detail.fs_name`: for a game stored in
+            // a per-game folder on the server, `fs_name` is the folder name
+            // with no extension. The file's name is what the record stores
+            // as `rom_file_name` and what launch re-derives the path from.
             let dest = platform_root.join(archive_name(
-                &detail.fs_name,
+                &only.file_name,
                 &detail.name,
                 &detail.platform_name,
             ));
@@ -3244,6 +3248,31 @@ mod tests {
             matches!(&err, LibraryError::Extract(msg) if msg == NO_DOWNLOADABLE_FILE),
             "unexpected error: {err}"
         );
+    }
+
+    /// RomM stores some single-file games inside a per-game folder
+    /// (`roms/wiiu/<Title (igdb-7346)>/<Title>.wua`). The ROM's `fs_name` is
+    /// then the FOLDER name, with no extension; only the file entry carries
+    /// the real name. The archive must be named from the file, so it keeps
+    /// its extension and matches the `rom_file_name` the record stores.
+    #[test]
+    fn plan_single_file_in_a_folder_rom_is_named_from_the_file_not_the_folder() {
+        let mut detail = detail(vec![rom_file(
+            4401,
+            "The Legend of Zelda - Breath of the Wild (USA) (DLC) (v208).wua",
+            true,
+        )]);
+        detail.fs_name = "The Legend of Zelda - Breath of the Wild (igdb-7346)".to_string();
+        detail.platform_name = "Wii U".to_string();
+        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+
+        assert_eq!(
+            job.primary_archive,
+            PathBuf::from(
+                "/library/games/Wii U/The Legend of Zelda - Breath of the Wild (USA) (DLC) (v208).wua"
+            )
+        );
+        assert_eq!(job.targets[0].dest, job.primary_archive);
     }
 
     #[test]
