@@ -36,7 +36,9 @@ In scope:
   search).
 - Install through the existing InstallService queue as a new job kind
   (drawer rows, progress, cancel/retry as for games).
-- Install dir `<library>/Emulators/<sanitized stem of archive name>`;
+- Install dir `<library>/Emulators/<sanitized stem of archive name>` — superseded by
+  `docs/superpowers/specs/2026-09-15-library-layout-v1-design.md` (`emulators/<profile name>`,
+  no tag);
   extraction via the milestone-2 engine; supplemental archives downloaded as
   `<stem>-supplemental-<n><suffix>` siblings and merged into the install dir
   after the main extraction (doc 03 merge semantics: temp dir, copy-over,

@@ -191,6 +191,9 @@ a native folder picker is a later polish item).
 
 ### Library layout and naming (doc 03, ported verbatim)
 
+Superseded by `docs/superpowers/specs/2026-09-15-library-layout-v1-design.md`
+(`<library_path>/games/<SanitizedPlatform>/`).
+
 ```
 <library_path>/
   <SanitizedPlatform>/

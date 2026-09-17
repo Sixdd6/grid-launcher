@@ -49,7 +49,8 @@ Modules as declared in `src/lib.rs`:
   (Windows) launch and compat tools, process spawn and session tracking.
 - `library` — the install pipeline: download queue, extraction, path rules, launch-file
   selection, the SQLite registry, platform rules, install specials (PS3, extra content),
-  and update detection.
+  and update detection. `user_data_links` links an emulator's own-written directories into
+  `saves/`; `layout_migration` is the one-shot startup migration to the layout below.
 - `pcgw` — PCGamingWiki client that resolves a Windows game's save paths.
 - `platform` — host-platform lookups that need OS APIs (for example the Shell-resolved
   Windows Documents folder).
@@ -139,6 +140,24 @@ mock RomM server. Structure:
   so catalog scraping runs against genuine markup.
 
 Usage and exit codes are in `BUILD.md`.
+
+## Library layout
+
+The library root has three folders: `games/<Platform>/` (game installs), `emulators/<Emulator>/`
+(an emulator's binaries), and `saves/<Emulator>/<dir>/` (every directory the emulator writes
+beside its binary). `<Emulator>` is the sanitized catalog PROFILE name, with no release tag, so
+several config entries can share one emulator and one saves folder. `<install>/<dir>` entries
+listed in a profile's `user_data` are links into `saves/<Emulator>/<dir>` — a relative symlink on
+unix, an NTFS junction on Windows — so deleting an emulator's install directory never deletes its
+saves, settings or firmware.
+
+`Config::library_layout_version` (0 legacy, 1 current) gates a one-shot migration that runs at
+startup in `lib.rs`, before any service is built. The migration itself lives in grid-core
+(`library::layout_migration`), is Tauri-free, reference-driven (it moves only the platform
+directories the registry and config actually point at), idempotent, and resumable. The path
+resolution fallbacks (`library::paths`, registry re-resolution) still read the legacy shape, so a
+library stuck at version 0 keeps working. See
+`docs/superpowers/specs/2026-09-15-library-layout-v1-design.md` for the full design.
 
 ## User state
 
