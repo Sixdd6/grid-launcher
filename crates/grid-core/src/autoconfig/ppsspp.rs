@@ -182,7 +182,17 @@ fn write_ra_token_dat(dat_path: &Path, token: &str) -> Option<bool> {
 /// succeeded for a present RA pair. `changed` still reflects every write
 /// that actually happened (e.g. `installed.txt`'s deletion), independent of
 /// whether the INI or dat portions failed.
-pub fn ensure_settings(emulator_path: &str, ra: Option<&RaCredentials>) -> EnsureResult {
+///
+/// Renderer seed (spec `2026-09-17-vulkan-renderer-seed-design.md`): on a
+/// `fresh_install`, off macOS, `GraphicsBackend = 3 (VULKAN)` joins the
+/// `[Graphics]` desired list ONLY when the INI as it is before this call
+/// has no `GraphicsBackend` under `[Graphics]`. [`ensure_ra_credentials`]
+/// never takes the flag and never touches `[Graphics]`.
+pub fn ensure_settings(
+    emulator_path: &str,
+    ra: Option<&RaCredentials>,
+    fresh_install: bool,
+) -> EnsureResult {
     let Some(emulator_dir) = resolve_emulator_dir(emulator_path) else {
         return EnsureResult::unchanged();
     };
@@ -201,6 +211,19 @@ pub fn ensure_settings(emulator_path: &str, ra: Option<&RaCredentials>) -> Ensur
     let has_ra = !ra_user.is_empty() && !ra_token.is_empty();
 
     let mut sections = base_sections();
+    // The probe reads the INI BEFORE this call writes, like every preserve
+    // probe in this crate. An unreadable INI probes as empty; the write below
+    // then fails exactly as it always did (D5), so nothing new leaks out.
+    if fresh_install && cfg!(not(target_os = "macos")) {
+        let existing = read_guarded(&ini_path).unwrap_or_default();
+        if !writers::section_has_key(&existing, "Graphics", "GraphicsBackend") {
+            for (name, desired) in sections.iter_mut() {
+                if *name == "Graphics" {
+                    desired.push(("GraphicsBackend".to_string(), "3 (VULKAN)".to_string()));
+                }
+            }
+        }
+    }
     if has_ra {
         sections.push(("Achievements", achievements_section(&ra_user, &ra_token)));
     }
@@ -309,7 +332,7 @@ mod tests {
         let (exe, dir) = make_exe(temp.path());
         std::fs::write(dir.join("installed.txt"), "marker").unwrap();
 
-        let result = ensure_settings(exe.to_str().unwrap(), None);
+        let result = ensure_settings(exe.to_str().unwrap(), None, false);
 
         assert!(result.changed);
         assert!(!dir.join("installed.txt").exists());
@@ -320,7 +343,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let (exe, dir) = make_exe(temp.path());
 
-        let result = ensure_settings(exe.to_str().unwrap(), None);
+        let result = ensure_settings(exe.to_str().unwrap(), None, false);
 
         assert_eq!(result.config_path, Some(ini_path_for(&dir)));
         assert!(ini_path_for(&dir).is_file());
@@ -331,7 +354,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let (exe, dir) = make_exe(temp.path());
 
-        ensure_settings(exe.to_str().unwrap(), None);
+        ensure_settings(exe.to_str().unwrap(), None, false);
 
         let text = std::fs::read_to_string(ini_path_for(&dir)).unwrap();
         assert!(text.contains("[General]"));
@@ -360,14 +383,14 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let (exe, dir) = make_exe(temp.path());
         let username_only = RaCredentials::new("psp_user", "");
-        ensure_settings(exe.to_str().unwrap(), Some(&username_only));
+        ensure_settings(exe.to_str().unwrap(), Some(&username_only), false);
         let text = std::fs::read_to_string(ini_path_for(&dir)).unwrap();
         assert!(!text.contains("[Achievements]"));
 
         std::fs::remove_dir_all(&dir).unwrap();
         let (exe, dir) = make_exe(temp.path());
         let token_only = RaCredentials::new("", "psp_tok");
-        ensure_settings(exe.to_str().unwrap(), Some(&token_only));
+        ensure_settings(exe.to_str().unwrap(), Some(&token_only), false);
         let text = std::fs::read_to_string(ini_path_for(&dir)).unwrap();
         assert!(!text.contains("[Achievements]"));
     }
@@ -378,7 +401,7 @@ mod tests {
         let (exe, dir) = make_exe(temp.path());
         let ra = RaCredentials::new("psp_user", "psp_tok");
 
-        let result = ensure_settings(exe.to_str().unwrap(), Some(&ra));
+        let result = ensure_settings(exe.to_str().unwrap(), Some(&ra), false);
 
         assert!(result.changed);
         let text = std::fs::read_to_string(ini_path_for(&dir)).unwrap();
@@ -407,12 +430,12 @@ mod tests {
         let ra = RaCredentials::new("psp_user", "psp_tok");
 
         // First call establishes the INI and the dat file.
-        ensure_settings(exe.to_str().unwrap(), Some(&ra));
+        ensure_settings(exe.to_str().unwrap(), Some(&ra), false);
         let dat_path = dat_path_for(&dir);
         let before = std::fs::metadata(&dat_path).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
 
-        let result = ensure_settings(exe.to_str().unwrap(), Some(&ra));
+        let result = ensure_settings(exe.to_str().unwrap(), Some(&ra), false);
 
         assert!(!result.changed, "a second identical call is a no-op");
         let after = std::fs::metadata(&dat_path).unwrap().modified().unwrap();
@@ -431,7 +454,8 @@ mod tests {
         std::fs::write(&ini, "[General]\nCheckForNewVersion = True\n").unwrap();
         std::fs::set_permissions(&ini, std::fs::Permissions::from_mode(0o000)).unwrap();
 
-        let result = std::panic::catch_unwind(|| ensure_settings(exe.to_str().unwrap(), None));
+        let result =
+            std::panic::catch_unwind(|| ensure_settings(exe.to_str().unwrap(), None, false));
 
         // Always restore permissions before the tempdir is dropped, panic or not.
         std::fs::set_permissions(&ini, std::fs::Permissions::from_mode(0o644)).unwrap();
@@ -459,7 +483,8 @@ mod tests {
         std::fs::create_dir_all(&system_dir).unwrap();
         std::fs::set_permissions(&system_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
 
-        let result = std::panic::catch_unwind(|| ensure_settings(exe.to_str().unwrap(), None));
+        let result =
+            std::panic::catch_unwind(|| ensure_settings(exe.to_str().unwrap(), None, false));
 
         std::fs::set_permissions(&system_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
 
@@ -484,7 +509,7 @@ mod tests {
         let ra = RaCredentials::new("psp_user", "psp_tok");
 
         // First call establishes a correct ini and a correct dat file.
-        let first = ensure_settings(exe.to_str().unwrap(), Some(&ra));
+        let first = ensure_settings(exe.to_str().unwrap(), Some(&ra), false);
         assert!(first.extras.contains_key("ra_token_path"));
 
         // Put stale content in the dat file so a write is attempted this
@@ -495,7 +520,8 @@ mod tests {
         std::fs::write(&dat_path, "stale").unwrap();
         std::fs::set_permissions(&dat_path, std::fs::Permissions::from_mode(0o444)).unwrap();
 
-        let result = std::panic::catch_unwind(|| ensure_settings(exe.to_str().unwrap(), Some(&ra)));
+        let result =
+            std::panic::catch_unwind(|| ensure_settings(exe.to_str().unwrap(), Some(&ra), false));
 
         std::fs::set_permissions(&dat_path, std::fs::Permissions::from_mode(0o644)).unwrap();
 
@@ -515,8 +541,8 @@ mod tests {
         let (exe, _dir) = make_exe(temp.path());
         let ra = RaCredentials::new("psp_user", "psp_tok");
 
-        ensure_settings(exe.to_str().unwrap(), Some(&ra));
-        let second = ensure_settings(exe.to_str().unwrap(), Some(&ra));
+        ensure_settings(exe.to_str().unwrap(), Some(&ra), false);
+        let second = ensure_settings(exe.to_str().unwrap(), Some(&ra), false);
 
         assert!(!second.changed, "a second identical call must be a no-op");
     }
@@ -566,7 +592,80 @@ mod tests {
 
     #[test]
     fn ppsspp_no_change_for_empty_path() {
-        let result = ensure_settings("", None);
+        let result = ensure_settings("", None, false);
         assert!(!result.changed);
+    }
+
+    // --- renderer seed (spec 2026-09-17-vulkan-renderer-seed-design) --------
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn ppsspp_fresh_install_seeds_the_vulkan_backend() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+
+        let result = ensure_settings(exe.to_str().unwrap(), None, true);
+
+        assert!(result.changed);
+        let text = std::fs::read_to_string(ini_path_for(&dir)).unwrap();
+        assert!(text.contains("[Graphics]"), "{text}");
+        assert!(text.contains("GraphicsBackend = 3 (VULKAN)"), "{text}");
+        assert_eq!(text.matches("[Graphics]").count(), 1, "one section: {text}");
+    }
+
+    #[test]
+    fn ppsspp_fresh_install_keeps_an_existing_backend() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+        let ini = ini_path_for(&dir);
+        std::fs::create_dir_all(ini.parent().unwrap()).unwrap();
+        std::fs::write(&ini, "[Graphics]\nGraphicsBackend = 0 (OPENGL)\n").unwrap();
+
+        ensure_settings(exe.to_str().unwrap(), None, true);
+
+        let text = std::fs::read_to_string(&ini).unwrap();
+        assert!(text.contains("GraphicsBackend = 0 (OPENGL)"), "{text}");
+        assert!(!text.contains("VULKAN"), "{text}");
+        assert!(
+            text.contains("InternalResolution = 4"),
+            "the other Graphics keys still land: {text}"
+        );
+    }
+
+    #[test]
+    fn ppsspp_non_fresh_call_never_adds_the_backend() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+
+        ensure_settings(exe.to_str().unwrap(), None, false);
+
+        let text = std::fs::read_to_string(ini_path_for(&dir)).unwrap();
+        assert!(!text.contains("GraphicsBackend"), "{text}");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn ppsspp_second_fresh_call_is_a_no_op() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, _dir) = make_exe(temp.path());
+
+        let first = ensure_settings(exe.to_str().unwrap(), None, true);
+        let second = ensure_settings(exe.to_str().unwrap(), None, true);
+
+        assert!(first.changed);
+        assert!(!second.changed);
+    }
+
+    #[test]
+    fn ppsspp_ensure_ra_credentials_still_never_touches_graphics() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+        let ra = RaCredentials::new("psp_user", "psp_tok");
+
+        ensure_ra_credentials(exe.to_str().unwrap(), &ra);
+
+        let text = std::fs::read_to_string(ini_path_for(&dir)).unwrap();
+        assert!(!text.contains("[Graphics]"), "{text}");
+        assert!(!text.contains("GraphicsBackend"), "{text}");
     }
 }

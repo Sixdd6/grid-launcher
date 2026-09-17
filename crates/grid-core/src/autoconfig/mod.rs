@@ -688,7 +688,7 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
             &mut report,
             name,
             "ppsspp",
-            ppsspp::ensure_settings(path, ra),
+            ppsspp::ensure_settings(path, ra, ctx.fresh_install),
         );
     }
     if is_cemu(&subject, profiles) {
