@@ -1674,6 +1674,87 @@ mod tests {
         assert!(!ini.contains("Bios"), "no profile, so no Bios key:\n{ini}");
     }
 
+    // --- renderer seed forwarding (spec 2026-09-17-vulkan-renderer-seed) ----
+
+    /// The renderer seed is gated on `SyncContext::fresh_install`, so the
+    /// orchestrator must hand the flag to the writers. Dolphin is the probe:
+    /// `[Core] GFXBackend` appears in `User/Config/Dolphin.ini` only on a
+    /// fresh pass. `profiles: &[]` — `is_dolphin` matches the entry NAME.
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn sync_forwards_fresh_install_to_the_writers() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated(temp.path());
+
+        let exe = temp.path().join("Dolphin").join("dolphin-emu");
+        touch(&exe);
+        let config = config_with(temp.path(), vec![entry("Dolphin", exe.to_str().unwrap())]);
+        let config_path = write_config(temp.path(), &config);
+
+        let ctx = SyncContext {
+            config_path: &config_path,
+            platforms: &[],
+            platform_slugs: &no_slugs(),
+            ps3_library_path: String::new(),
+            ra: None,
+            profiles: &[],
+            fresh_install: true,
+        };
+        let report = sync_new_emulator("Dolphin", &ctx).unwrap();
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+
+        let ini = std::fs::read_to_string(
+            exe.parent()
+                .unwrap()
+                .join("User")
+                .join("Config")
+                .join("Dolphin.ini"),
+        )
+        .unwrap();
+        assert!(ini.contains("GFXBackend = Vulkan"), "{ini}");
+    }
+
+    /// The contrast: the same entry through a non-fresh pass (a reinstall
+    /// or a catalog update) gets every other Dolphin key and no renderer.
+    #[test]
+    fn sync_without_fresh_install_leaves_the_renderer_alone() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated(temp.path());
+
+        let exe = temp.path().join("Dolphin").join("dolphin-emu");
+        touch(&exe);
+        let config = config_with(temp.path(), vec![entry("Dolphin", exe.to_str().unwrap())]);
+        let config_path = write_config(temp.path(), &config);
+
+        let ctx = SyncContext {
+            config_path: &config_path,
+            platforms: &[],
+            platform_slugs: &no_slugs(),
+            ps3_library_path: String::new(),
+            ra: None,
+            profiles: &[],
+            fresh_install: false,
+        };
+        let report = sync_new_emulator("Dolphin", &ctx).unwrap();
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+
+        let ini = std::fs::read_to_string(
+            exe.parent()
+                .unwrap()
+                .join("User")
+                .join("Config")
+                .join("Dolphin.ini"),
+        )
+        .unwrap();
+        assert!(
+            ini.contains("Fullscreen = True"),
+            "the writer still ran: {ini}"
+        );
+        assert!(!ini.contains("GFXBackend"), "{ini}");
+    }
+
     // --- backfill_all_defaults ------------------------------------------------
 
     /// The gap this fixes: an entry saved before any platform fetch has run
