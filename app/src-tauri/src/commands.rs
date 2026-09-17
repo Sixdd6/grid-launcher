@@ -270,6 +270,7 @@ pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>,
                     ps3_library_path: String::new(),
                     ra,
                     profiles,
+                    fresh_install: false,
                 };
                 autoconfig::backfill_all_defaults(&ctx)
             })
@@ -927,9 +928,17 @@ impl SyncInputs {
 type SyncPass = fn(&str, &autoconfig::SyncContext) -> Result<autoconfig::SyncReport, ConfigError>;
 
 /// Runs `pass` for one entry and logs its outcome — a sync never fails its
-/// caller. `library_path` feeds RPCS3's PS3 library path only. Blocking:
-/// the writers touch emulator config files.
-pub fn run_emulator_sync(entry_name: &str, library_path: &str, inputs: SyncInputs, pass: SyncPass) {
+/// caller. `library_path` feeds RPCS3's PS3 library path only.
+/// `fresh_install` is the renderer seed's gate: `true` only for a manual ADD
+/// (`save_emulator`); the launch-time RetroArch-only pass ignores it and
+/// passes `false`. Blocking: the writers touch emulator config files.
+pub fn run_emulator_sync(
+    entry_name: &str,
+    library_path: &str,
+    inputs: SyncInputs,
+    fresh_install: bool,
+    pass: SyncPass,
+) {
     let SyncInputs {
         platforms,
         platform_slugs,
@@ -943,6 +952,7 @@ pub fn run_emulator_sync(entry_name: &str, library_path: &str, inputs: SyncInput
         ps3_library_path: autoconfig::ps3_library_path(library_path),
         ra,
         profiles: load_profiles(),
+        fresh_install,
     };
     // Warnings name the emulator and the writer only — never a path, never
     // a secret (`autoconfig::record`); the RA token is a `SecretString`.
@@ -975,6 +985,7 @@ pub fn sync_emulator_settings(entry_name: &str, install: Option<&Arc<InstallServ
         entry_name,
         &library_path,
         SyncInputs::from_install(install),
+        false,
         autoconfig::sync_retroarch_settings_only,
     );
 }
@@ -1071,6 +1082,7 @@ pub async fn save_emulator(
                     &saved_name,
                     &library_path,
                     inputs,
+                    true,
                     autoconfig::sync_new_emulator,
                 );
             }

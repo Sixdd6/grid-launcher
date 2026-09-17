@@ -415,6 +415,12 @@ pub struct SyncContext<'a> {
     /// The autoprofile catalog entry matching and the defaults backfill both
     /// resolve against.
     pub profiles: &'a [EmulatorProfile],
+    /// `true` only for an entry that did not exist before this pass: a
+    /// catalog install that created it, or a manual add. A reinstall, a
+    /// catalog update and a defaults backfill are `false`. The renderer seed
+    /// (Vulkan on Cemu, Dolphin, DuckStation, PPSSPP, Azahar, xemu) runs only
+    /// when this is `true`; nothing else reads it.
+    pub fresh_install: bool,
 }
 
 /// What one [`sync_new_emulator`] pass produced. Every field is diagnostic
@@ -918,6 +924,24 @@ mod tests {
         }
     }
 
+    /// The renderer seed's gate. Every caller states it explicitly; there is
+    /// no default, so a new call site cannot forget it.
+    #[test]
+    fn a_sync_context_carries_the_fresh_install_flag() {
+        let profiles: Vec<EmulatorProfile> = Vec::new();
+        let config_path = PathBuf::from("unused.toml");
+        let ctx = SyncContext {
+            config_path: &config_path,
+            platforms: &[],
+            platform_slugs: &no_slugs(),
+            ps3_library_path: String::new(),
+            ra: None,
+            profiles: &profiles,
+            fresh_install: true,
+        };
+        assert!(ctx.fresh_install);
+    }
+
     /// Fix round 1: the launch-time sync is writers-only. It must write
     /// retroarch.cfg and leave BOTH the entry (a user's `args = "%rom%"`
     /// and `save_strategy = "auto"` are exactly what the entry autoconfig
@@ -944,6 +968,7 @@ mod tests {
             ps3_library_path: String::new(),
             ra: None,
             profiles: crate::launch::profiles::load_profiles(),
+            fresh_install: false,
         };
         let report = sync_retroarch_settings_only("RetroArch", &ctx).unwrap();
         assert!(report.warnings.is_empty(), "{:?}", report.warnings);
@@ -984,6 +1009,7 @@ mod tests {
             ps3_library_path: String::new(),
             ra: None,
             profiles: crate::launch::profiles::load_profiles(),
+            fresh_install: false,
         };
         sync_new_emulator("RetroArch", &ctx).unwrap();
 
@@ -1027,6 +1053,7 @@ mod tests {
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
+            fresh_install: false,
         };
         sync_new_emulator("PCSX2", &ctx).unwrap();
 
@@ -1077,6 +1104,7 @@ mod tests {
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
+            fresh_install: false,
         };
         sync_new_emulator("PCSX2", &ctx).unwrap();
 
@@ -1262,6 +1290,7 @@ mod tests {
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
+            fresh_install: false,
         };
         let report = sync_new_emulator("Not An Emulator", &ctx).unwrap();
 
@@ -1293,6 +1322,7 @@ mod tests {
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
+            fresh_install: false,
         };
         let report = sync_new_emulator("PCSX2", &ctx).unwrap();
 
@@ -1327,6 +1357,7 @@ mod tests {
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
+            fresh_install: false,
         };
         let report = sync_new_emulator("PCSX2", &ctx).unwrap();
         assert!(report.warnings.is_empty(), "{:?}", report.warnings);
@@ -1370,6 +1401,7 @@ mod tests {
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
+            fresh_install: false,
         };
         let report = sync_new_emulator("PCSX2", &ctx).unwrap();
 
@@ -1409,6 +1441,7 @@ mod tests {
             ps3_library_path: String::new(),
             ra: None,
             profiles: &[],
+            fresh_install: false,
         };
         let report = sync_new_emulator("RetroArch + PPSSPP", &ctx).unwrap();
         assert!(report.warnings.is_empty(), "{:?}", report.warnings);
@@ -1446,6 +1479,7 @@ mod tests {
             ps3_library_path: String::new(),
             ra: None,
             profiles: &[],
+            fresh_install: false,
         };
         sync_new_emulator("RetroArch + PPSSPP", &ctx).unwrap();
 
@@ -1484,6 +1518,7 @@ mod tests {
             ps3_library_path: ps3,
             ra: None,
             profiles: &[],
+            fresh_install: false,
         };
         let report = sync_new_emulator("RPCS3", &ctx).unwrap();
         assert!(report.warnings.is_empty(), "{:?}", report.warnings);
@@ -1527,6 +1562,7 @@ mod tests {
             ps3_library_path: String::new(),
             ra: None,
             profiles: &[],
+            fresh_install: false,
         };
         let report = sync_new_emulator("Cemu", &ctx).unwrap();
 
@@ -1562,6 +1598,7 @@ mod tests {
             ps3_library_path: String::new(),
             ra: None,
             profiles: &[],
+            fresh_install: false,
         };
         let report = sync_new_emulator("Cemu", &ctx).unwrap();
 
@@ -1604,6 +1641,7 @@ mod tests {
             ps3_library_path: String::new(),
             ra: None,
             profiles: &[],
+            fresh_install: false,
         };
         sync_new_emulator("PCSX2", &ctx).unwrap();
 
@@ -1648,6 +1686,7 @@ mod tests {
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
+            fresh_install: false,
         };
         let changed = backfill_all_defaults(&ctx).unwrap();
         assert!(changed);
@@ -1684,6 +1723,7 @@ mod tests {
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
+            fresh_install: false,
         };
         assert!(backfill_all_defaults(&ctx).unwrap(), "first call must fill");
 
@@ -1951,6 +1991,7 @@ mod tests {
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
+            fresh_install: false,
         };
         assert!(backfill_all_defaults(&ctx).unwrap());
 
@@ -2002,6 +2043,7 @@ mod tests {
             ps3_library_path: String::new(),
             ra: None,
             profiles: crate::launch::profiles::load_profiles(),
+            fresh_install: false,
         };
         sync_new_emulator(entry_name, &ctx).unwrap()
     }

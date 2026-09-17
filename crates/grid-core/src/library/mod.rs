@@ -2315,7 +2315,7 @@ impl InstallService {
         }
 
         let fresh = self.write_emulator_entry(job, &paths.resolved, &exe)?;
-        self.sync_autoconfig(&job.profile_name, warning);
+        self.sync_autoconfig(&job.profile_name, fresh, warning);
 
         // Only after a successful config write, matching the game path.
         for path in extracted_archives {
@@ -2343,12 +2343,16 @@ impl InstallService {
     /// D1 call site A: runs [`autoconfig::sync_new_emulator`] for the entry
     /// the install just wrote, before the archive cleanup.
     ///
+    /// `fresh_install` is [`Self::write_emulator_entry`]'s answer: `true`
+    /// when this install CREATED the entry, `false` for an update or a
+    /// reinstall — the renderer seed runs only on the former.
+    ///
     /// Autoconfig NEVER fails an install. A config error, or any writer that
     /// reached nothing, appends ONE line to the finalize warning — exactly
     /// like a failed archive delete — and the install still reports
     /// `Completed`. No credential can appear in that line: the report names
     /// emulators and writers only.
-    fn sync_autoconfig(&self, entry_name: &str, warning: &mut String) {
+    fn sync_autoconfig(&self, entry_name: &str, fresh_install: bool, warning: &mut String) {
         let library_path = Config::load(&self.config_path)
             .map(|config| config.library_path)
             .unwrap_or_default();
@@ -2361,6 +2365,7 @@ impl InstallService {
             ps3_library_path: autoconfig::ps3_library_path(&library_path),
             ra: self.ra_credentials(),
             profiles: &self.profiles,
+            fresh_install,
         };
         match autoconfig::sync_new_emulator(entry_name, &ctx) {
             Ok(report) if !report.warnings.is_empty() => append_warning(
