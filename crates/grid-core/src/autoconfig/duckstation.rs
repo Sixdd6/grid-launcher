@@ -207,7 +207,16 @@ fn result_from_settings(settings: &MemoryCardSettings) -> EnsureResult {
 /// [`config_path_candidates`]'s own (untrimmed, file-or-suffix) root rule,
 /// exactly as the Python reference keeps them as two separate helpers
 /// (duckstation.py:206 vs. duckstation.py:16-19).
-pub fn ensure_memory_card_settings(emulator_path: &str, enable_fullscreen: bool) -> EnsureResult {
+///
+/// Renderer seed (spec `2026-09-17-vulkan-renderer-seed-design.md`): on a
+/// `fresh_install`, off macOS, `[GPU] Renderer = Vulkan` joins the per-key
+/// preserve loop in step 5 — written only when `raw_content` has no
+/// `Renderer` under `[GPU]`.
+pub fn ensure_memory_card_settings(
+    emulator_path: &str,
+    enable_fullscreen: bool,
+    fresh_install: bool,
+) -> EnsureResult {
     let trimmed = emulator_path.trim();
     let emulator_dir = if trimmed.is_empty() {
         None
@@ -323,7 +332,7 @@ pub fn ensure_memory_card_settings(emulator_path: &str, enable_fullscreen: bool)
     );
 
     // 5: [GPU] the 9 keys, per-key preserve, probed against raw_content
-    // (duckstation.py:284-301).
+    // (duckstation.py:284-301), plus the renderer seed on a fresh install.
     let mut gpu_desired: writers::Desired = Vec::new();
     for (key, value) in [
         ("ResolutionScale", "4"),
@@ -339,6 +348,12 @@ pub fn ensure_memory_card_settings(emulator_path: &str, enable_fullscreen: bool)
         if !writers::section_has_key(&raw_content, "GPU", key) {
             gpu_desired.push((key.to_string(), value.to_string()));
         }
+    }
+    if fresh_install
+        && cfg!(not(target_os = "macos"))
+        && !writers::section_has_key(&raw_content, "GPU", "Renderer")
+    {
+        gpu_desired.push(("Renderer".to_string(), "Vulkan".to_string()));
     }
     apply_section(&mut content, &mut changed, "GPU", &gpu_desired);
 
@@ -480,7 +495,7 @@ mod tests {
         let _guard = isolated_env(temp.path());
         let (emulator_path, dir, _) = setup_emulator(temp.path());
 
-        ensure_memory_card_settings(&emulator_path, false);
+        ensure_memory_card_settings(&emulator_path, false, false);
 
         assert!(dir.join("portable.txt").exists());
     }
@@ -493,7 +508,7 @@ mod tests {
         let (emulator_path, dir, _) = setup_emulator(temp.path());
         std::fs::write(dir.join("portable.txt"), "custom").unwrap();
 
-        ensure_memory_card_settings(&emulator_path, false);
+        ensure_memory_card_settings(&emulator_path, false, false);
 
         assert_eq!(
             std::fs::read_to_string(dir.join("portable.txt")).unwrap(),
@@ -513,7 +528,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = ensure_memory_card_settings(&emulator_path, false);
+        let result = ensure_memory_card_settings(&emulator_path, false, false);
         let text = std::fs::read_to_string(&config_path).unwrap();
 
         assert!(result.changed);
@@ -535,7 +550,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = ensure_memory_card_settings(&emulator_path, false);
+        let result = ensure_memory_card_settings(&emulator_path, false, false);
         let text = std::fs::read_to_string(&config_path).unwrap();
 
         assert!(result.changed);
@@ -556,7 +571,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = ensure_memory_card_settings(&emulator_path, true);
+        let result = ensure_memory_card_settings(&emulator_path, true, false);
         let text = std::fs::read_to_string(&config_path).unwrap();
 
         assert!(result.changed);
@@ -575,7 +590,7 @@ mod tests {
         let _guard = isolated_env(temp.path());
         let (emulator_path, _, config_path) = setup_emulator(temp.path());
 
-        let result = ensure_memory_card_settings(&emulator_path, false);
+        let result = ensure_memory_card_settings(&emulator_path, false, false);
         let text = std::fs::read_to_string(&config_path).unwrap();
 
         assert!(result.changed);
@@ -593,7 +608,7 @@ mod tests {
             let _guard = isolated_env(temp.path());
             let (emulator_path, _, config_path) = setup_emulator(temp.path());
             std::fs::write(&config_path, "[GPU]\nResolutionScale = 2\n").unwrap();
-            ensure_memory_card_settings(&emulator_path, false);
+            ensure_memory_card_settings(&emulator_path, false, false);
             let text = std::fs::read_to_string(&config_path).unwrap();
             assert!(text.contains("ResolutionScale = 2"));
             assert!(!text.contains("ResolutionScale = 4"));
@@ -613,7 +628,7 @@ mod tests {
                 "[Display]\nScaling = Bilinear\nScaling24Bit = Bilinear\n",
             )
             .unwrap();
-            ensure_memory_card_settings(&emulator_path, false);
+            ensure_memory_card_settings(&emulator_path, false, false);
             let text = std::fs::read_to_string(&config_path).unwrap();
             assert!(text.contains("Scaling = Bilinear"));
             assert!(text.contains("Scaling24Bit = Bilinear"));
@@ -626,7 +641,7 @@ mod tests {
             let _guard = isolated_env(temp.path());
             let (emulator_path, _, config_path) = setup_emulator(temp.path());
             std::fs::write(&config_path, "[Audio]\nOutputVolume = 80\n").unwrap();
-            ensure_memory_card_settings(&emulator_path, false);
+            ensure_memory_card_settings(&emulator_path, false, false);
             let text = std::fs::read_to_string(&config_path).unwrap();
             assert!(text.contains("OutputVolume = 80"));
             assert!(!text.contains("OutputVolume = 60"));
@@ -638,7 +653,7 @@ mod tests {
             let _guard = isolated_env(temp.path());
             let (emulator_path, _, config_path) = setup_emulator(temp.path());
             std::fs::write(&config_path, "[Hotkeys]\nOpenPauseMenu = Keyboard/Escape\n").unwrap();
-            ensure_memory_card_settings(&emulator_path, false);
+            ensure_memory_card_settings(&emulator_path, false, false);
             let text = std::fs::read_to_string(&config_path).unwrap();
             assert!(text.contains("OpenPauseMenu = Keyboard/Escape"));
             assert!(!text.contains("OpenPauseMenu = SDL-0/Guide"));
@@ -654,7 +669,7 @@ mod tests {
                 "[Pad1]\nType = DigitalController\nCross = Keyboard/Z\n",
             )
             .unwrap();
-            ensure_memory_card_settings(&emulator_path, false);
+            ensure_memory_card_settings(&emulator_path, false, false);
             let text = std::fs::read_to_string(&config_path).unwrap();
             assert!(text.contains("Type = DigitalController"));
             assert!(!text.contains("Type = AnalogController"));
@@ -671,7 +686,7 @@ mod tests {
         let (emulator_path, _, config_path) = setup_emulator(temp.path());
         std::fs::write(&config_path, "[Main]\nSetupWizardIncomplete = true\n").unwrap();
 
-        let result = ensure_memory_card_settings(&emulator_path, false);
+        let result = ensure_memory_card_settings(&emulator_path, false, false);
         let text = std::fs::read_to_string(&config_path).unwrap();
 
         assert!(result.changed);
@@ -691,7 +706,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = ensure_memory_card_settings(&emulator_path, false);
+        let result = ensure_memory_card_settings(&emulator_path, false, false);
         let text = std::fs::read_to_string(&config_path).unwrap();
 
         assert!(result.changed);
@@ -713,7 +728,7 @@ mod tests {
         // No [Main] ConfirmPowerOff, but [Audio] OutputVolume is present.
         std::fs::write(&config_path, "[Audio]\nOutputVolume = 80\n").unwrap();
 
-        ensure_memory_card_settings(&emulator_path, false);
+        ensure_memory_card_settings(&emulator_path, false, false);
         let text = std::fs::read_to_string(&config_path).unwrap();
 
         assert!(
@@ -788,7 +803,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = ensure_memory_card_settings(&emulator_path, false);
+        let result = ensure_memory_card_settings(&emulator_path, false, false);
 
         assert!(result.changed);
         assert_eq!(result.config_path, Some(config_path.clone()));
@@ -845,10 +860,76 @@ mod tests {
         let _guard = isolated_env(temp.path());
         let (emulator_path, _, _) = setup_emulator(temp.path());
 
-        let first = ensure_memory_card_settings(&emulator_path, true);
+        let first = ensure_memory_card_settings(&emulator_path, true, false);
         assert!(first.changed);
 
-        let second = ensure_memory_card_settings(&emulator_path, true);
+        let second = ensure_memory_card_settings(&emulator_path, true, false);
         assert!(!second.changed, "a second identical run must be a no-op");
+    }
+
+    // --- renderer seed (spec 2026-09-17-vulkan-renderer-seed-design) --------
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn duckstation_fresh_install_seeds_the_vulkan_renderer() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (emulator_path, _, config_path) = setup_emulator(temp.path());
+
+        let result = ensure_memory_card_settings(&emulator_path, false, true);
+
+        assert!(result.changed);
+        let text = std::fs::read_to_string(&config_path).unwrap();
+        assert!(text.contains("[GPU]"), "{text}");
+        assert!(text.contains("Renderer = Vulkan"), "{text}");
+    }
+
+    #[test]
+    fn duckstation_fresh_install_keeps_an_existing_renderer() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (emulator_path, _, config_path) = setup_emulator(temp.path());
+        std::fs::write(&config_path, "[GPU]\nRenderer = OpenGL\n").unwrap();
+
+        ensure_memory_card_settings(&emulator_path, false, true);
+
+        let text = std::fs::read_to_string(&config_path).unwrap();
+        assert!(text.contains("Renderer = OpenGL"), "{text}");
+        assert!(!text.contains("Renderer = Vulkan"), "{text}");
+        assert!(
+            text.contains("ResolutionScale = 4"),
+            "the other GPU defaults still land: {text}"
+        );
+    }
+
+    #[test]
+    fn duckstation_non_fresh_call_never_adds_the_renderer() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (emulator_path, _, config_path) = setup_emulator(temp.path());
+
+        ensure_memory_card_settings(&emulator_path, false, false);
+
+        let text = std::fs::read_to_string(&config_path).unwrap();
+        assert!(text.contains("[GPU]"), "{text}");
+        assert!(!text.contains("Renderer ="), "{text}");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn duckstation_second_fresh_call_is_a_no_op() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (emulator_path, _, _) = setup_emulator(temp.path());
+
+        let first = ensure_memory_card_settings(&emulator_path, true, true);
+        let second = ensure_memory_card_settings(&emulator_path, true, true);
+
+        assert!(first.changed);
+        assert!(!second.changed);
     }
 }

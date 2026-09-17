@@ -633,7 +633,7 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
             &mut report,
             name,
             "duckstation",
-            duckstation::ensure_memory_card_settings(path, true),
+            duckstation::ensure_memory_card_settings(path, true, ctx.fresh_install),
         );
     }
     if is_xemu(&subject, profiles) {
