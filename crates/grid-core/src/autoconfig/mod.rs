@@ -637,7 +637,12 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
         );
     }
     if is_xemu(&subject, profiles) {
-        record(&mut report, name, "xemu", xemu::ensure_settings(path));
+        record(
+            &mut report,
+            name,
+            "xemu",
+            xemu::ensure_settings(path, ctx.fresh_install),
+        );
     }
     if is_pcsx2(&subject, profiles) {
         // `[Folders] Bios` takes the FIRST firmware target of the SYNTHETIC

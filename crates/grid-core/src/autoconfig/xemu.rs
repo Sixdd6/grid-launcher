@@ -116,11 +116,22 @@ fn hdd_default_path(base_dir: &std::path::Path) -> PathBuf {
 /// (xemu.py:257-315). `base_dir` backs the four `[sys.files]` paths, each
 /// wrapped in single quotes with no escaping. `hdd_path`'s default is
 /// [`hdd_default_path`] (D3).
-fn sections(base_dir: &std::path::Path) -> Vec<(&'static str, writers::Desired)> {
+///
+/// `seed_renderer` (spec `2026-09-17-vulkan-renderer-seed-design.md`) adds
+/// `renderer = 'VULKAN'` to `[display]`. Add-only like everything else here,
+/// so an existing `renderer` survives whatever it says.
+fn sections(
+    base_dir: &std::path::Path,
+    seed_renderer: bool,
+) -> Vec<(&'static str, writers::Desired)> {
+    let mut display = crate::desired![("vsync", "true")];
+    if seed_renderer {
+        display.push(("renderer".to_string(), "'VULKAN'".to_string()));
+    }
     vec![
         ("general", crate::desired![("show_welcome", "false")]),
         ("misc", crate::desired![("check_for_updates", "false")]),
-        ("display", crate::desired![("vsync", "true")]),
+        ("display", display),
         (
             "display.window",
             crate::desired![("fullscreen_on_startup", "true")],
@@ -167,7 +178,10 @@ fn sections(base_dir: &std::path::Path) -> Vec<(&'static str, writers::Desired)>
 /// created lazily. Any I/O error — reading the existing file, creating the
 /// parent, or writing — yields [`EnsureResult::unchanged`]
 /// (xemu.py:296-297's bare `except OSError`).
-pub fn ensure_settings(emulator_path: &str) -> EnsureResult {
+///
+/// `fresh_install`, off macOS, turns on the `[display] renderer` seed in
+/// [`sections`]; add-only semantics make it per-key preserve for free.
+pub fn ensure_settings(emulator_path: &str, fresh_install: bool) -> EnsureResult {
     let emulator_dir = resolve_emulator_dir(emulator_path);
     let config_path = match &emulator_dir {
         Some(dir) => dir.join("xemu.toml"),
@@ -184,9 +198,10 @@ pub fn ensure_settings(emulator_path: &str) -> EnsureResult {
     };
 
     let base_dir = emulator_dir.clone().unwrap_or_else(default_base_root);
+    let seed_renderer = fresh_install && cfg!(not(target_os = "macos"));
     let mut content = content;
     let mut changed = false;
-    for (section, desired) in sections(&base_dir) {
+    for (section, desired) in sections(&base_dir, seed_renderer) {
         let (new_content, section_changed) =
             writers::toml_add_only_section(&content, section, &desired);
         content = new_content;
@@ -314,7 +329,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let (exe, dir) = make_exe(temp.path());
 
-        let result = ensure_settings(exe.to_str().unwrap());
+        let result = ensure_settings(exe.to_str().unwrap(), false);
 
         assert!(result.changed);
         let config_path = result.config_path.clone().unwrap();
@@ -345,7 +360,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let (exe, _dir) = make_exe(temp.path());
 
-        ensure_settings(exe.to_str().unwrap());
+        ensure_settings(exe.to_str().unwrap(), false);
 
         let text = std::fs::read_to_string(temp.path().join("xemu").join("xemu.toml")).unwrap();
         assert!(text.contains(r#"port1_driver = "usb-xbox-gamepad""#));
@@ -356,7 +371,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let (exe, dir) = make_exe(temp.path());
 
-        ensure_settings(exe.to_str().unwrap());
+        ensure_settings(exe.to_str().unwrap(), false);
 
         let text = std::fs::read_to_string(dir.join("xemu.toml")).unwrap();
         let expected = format!("'{}'", dir.join("mcpx_1.0.bin").display());
@@ -388,7 +403,7 @@ mod tests {
             )
             .unwrap();
 
-            ensure_settings(exe.to_str().unwrap());
+            ensure_settings(exe.to_str().unwrap(), false);
 
             let text = std::fs::read_to_string(dir.join("xemu.toml")).unwrap();
             assert!(
@@ -403,10 +418,10 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let (exe, dir) = make_exe(temp.path());
 
-        ensure_settings(exe.to_str().unwrap());
+        ensure_settings(exe.to_str().unwrap(), false);
         let text_after_first = std::fs::read_to_string(dir.join("xemu.toml")).unwrap();
 
-        let second = ensure_settings(exe.to_str().unwrap());
+        let second = ensure_settings(exe.to_str().unwrap(), false);
 
         assert!(!second.changed);
         assert_eq!(
@@ -424,7 +439,7 @@ mod tests {
             ("XDG_DATA_HOME", None),
         ]);
 
-        let result = ensure_settings("");
+        let result = ensure_settings("", false);
 
         assert!(result.changed);
         assert_eq!(
@@ -438,6 +453,64 @@ mod tests {
                     .join("xemu.toml")
             )
         );
+    }
+
+    // --- renderer seed (spec 2026-09-17-vulkan-renderer-seed-design) --------
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn xemu_fresh_install_seeds_the_vulkan_renderer() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+
+        let result = ensure_settings(exe.to_str().unwrap(), true);
+
+        assert!(result.changed);
+        let text = std::fs::read_to_string(dir.join("xemu.toml")).unwrap();
+        assert!(text.contains("[display]"), "{text}");
+        assert!(text.contains("renderer = 'VULKAN'"), "{text}");
+        assert_eq!(text.matches("[display]").count(), 1, "one section: {text}");
+    }
+
+    #[test]
+    fn xemu_fresh_install_keeps_an_existing_renderer() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+        std::fs::write(dir.join("xemu.toml"), "[display]\nrenderer = 'OPENGL'\n").unwrap();
+
+        ensure_settings(exe.to_str().unwrap(), true);
+
+        let text = std::fs::read_to_string(dir.join("xemu.toml")).unwrap();
+        assert!(text.contains("renderer = 'OPENGL'"), "{text}");
+        assert!(!text.contains("VULKAN"), "{text}");
+        assert!(
+            text.contains("vsync = true"),
+            "the other display key still lands: {text}"
+        );
+    }
+
+    #[test]
+    fn xemu_non_fresh_call_never_adds_the_renderer() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+
+        ensure_settings(exe.to_str().unwrap(), false);
+
+        let text = std::fs::read_to_string(dir.join("xemu.toml")).unwrap();
+        assert!(!text.contains("renderer"), "{text}");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn xemu_second_fresh_call_is_a_no_op() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, _dir) = make_exe(temp.path());
+
+        let first = ensure_settings(exe.to_str().unwrap(), true);
+        let second = ensure_settings(exe.to_str().unwrap(), true);
+
+        assert!(first.changed);
+        assert!(!second.changed);
     }
 
     // --- missing_bios_files -----------------------------------------------
@@ -494,7 +567,7 @@ mod tests {
         // Both present: the default prefers the raw image.
         std::fs::write(dir.join("xbox_hdd.img"), b"").unwrap();
         std::fs::write(dir.join("xbox_hdd.qcow2"), b"").unwrap();
-        ensure_settings(exe.to_str().unwrap());
+        ensure_settings(exe.to_str().unwrap(), false);
         let text = std::fs::read_to_string(dir.join("xemu.toml")).unwrap();
         let expected = format!("'{}'", dir.join("xbox_hdd.img").display());
         assert!(
@@ -508,7 +581,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let (exe, dir) = make_exe(temp.path());
 
-        ensure_settings(exe.to_str().unwrap());
+        ensure_settings(exe.to_str().unwrap(), false);
         let text = std::fs::read_to_string(dir.join("xemu.toml")).unwrap();
         let expected = format!("'{}'", dir.join("xbox_hdd.qcow2").display());
         assert!(
@@ -528,7 +601,7 @@ mod tests {
         )
         .unwrap();
 
-        ensure_settings(exe.to_str().unwrap());
+        ensure_settings(exe.to_str().unwrap(), false);
 
         let text = std::fs::read_to_string(dir.join("xemu.toml")).unwrap();
         assert!(
