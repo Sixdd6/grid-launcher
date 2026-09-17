@@ -12,11 +12,18 @@
 //! directory two entries share — Dolphin installs one binary but is recorded
 //! as "Dolphin (GameCube)" and "Dolphin (Wii)".
 
+use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::paths::{emulators_dir, expand_home, legacy_emulators_dir, library_root};
+use super::extract::is_extractable_archive;
+use super::paths::{emulators_dir, expand_home, legacy_emulators_dir, library_root, saves_dir};
+use super::user_data_links::move_tree_preferring_dest;
 use super::{apply_removal, run_removals, LibraryError, Removal, RemovalLabel};
+use crate::cloud::dirs::{
+    resolved_screenshot_directories, resolved_sync_directory_paths, PathKey, ResolveContext,
+};
 use crate::config::{Config, EmulatorEntry};
+use crate::launch::profiles::{profile_for_entry, EmulatorProfile};
 
 /// The removal plan for `entry`: at most one [`RemovalLabel::Folder`] step
 /// for the `<root>/<X>` directory the entry's executable lives in, under
@@ -59,11 +66,20 @@ pub(crate) fn emulator_removal_steps(
 /// the entry in place to retry — the same order [`super::InstallService::uninstall`]
 /// uses for a game).
 ///
+/// User data still living inside the install directory is salvaged into
+/// `<library>/saves/<Emulator>` FIRST ([`salvage_user_data`]); a salvage
+/// failure aborts before anything is deleted.
+///
 /// Succeeds with nothing to do when no entry carries the name or when no
 /// library folder is configured: nothing managed can exist in either case.
-/// Every step is attempted; the failures come back as one error listing them
-/// all (D11).
-pub fn remove_emulator_files(config: &Config, name: &str) -> Result<(), LibraryError> {
+/// Every removal step is attempted; the failures come back as one error
+/// listing them all (D11).
+pub fn remove_emulator_files(
+    config: &Config,
+    config_path: &Path,
+    name: &str,
+    profiles: &[EmulatorProfile],
+) -> Result<(), LibraryError> {
     let folded = name.trim().to_lowercase();
     let Some(entry) = config
         .emulators
@@ -76,11 +92,97 @@ pub fn remove_emulator_files(config: &Config, name: &str) -> Result<(), LibraryE
         return Ok(());
     };
     let steps = emulator_removal_steps(entry, &config.emulators, &library);
+    if steps.is_empty() {
+        // Nothing managed is being removed, so nothing inside it is about
+        // to be lost: salvaging here would move a live install's saves out
+        // from under it.
+        return Ok(());
+    }
+
+    if let Some(install_dir) = managed_install_dir_for(entry, &library) {
+        let profile = profile_for_entry(&entry.name, &entry.path, profiles);
+        let emulator = profile.map_or(entry.name.as_str(), |p| p.name.as_str());
+        let destination = saves_dir(&library, emulator);
+        let emulator_dir = emulator_dir_for(entry);
+        let config_dir = config_path.parent().unwrap_or(Path::new("."));
+        let ctx = ResolveContext {
+            emulator_dir: emulator_dir.as_deref(),
+            library_dir: &config.library_path,
+            config_dir,
+            windows_documents: None,
+            retroarch_portable_home: None,
+        };
+        let salvaged = salvage_user_data(entry, &install_dir, &destination, profile, &ctx)?;
+        if !salvaged.is_empty() {
+            tracing::info!(
+                install_dir = %install_dir.display(),
+                destinations = %display_paths(&salvaged),
+                "salvaged emulator user data before removal"
+            );
+        }
+    }
+
     let failures = run_removals(&steps, &mut apply_removal);
     if !failures.is_empty() {
         return Err(LibraryError::Registry(failures.join("\n")));
     }
     Ok(())
+}
+
+/// Moves whatever user data still sits inside `install_dir` under
+/// `saves_dir`, so deleting the install directory afterwards cannot take it
+/// along. Returns the destinations, for the caller's log line.
+///
+/// The save, state and screenshot directories are resolved with the same
+/// cloud-save resolution the sync uses, so every per-emulator quirk (a
+/// RetroArch config override, a Dolphin ini) is accounted for. Each result
+/// is fully resolved, which decides what happens to it:
+///
+/// - strictly inside `install_dir`: the whole directory moves to
+///   `saves_dir/<relative>` (a rename when the destination is absent, a
+///   destination-wins merge otherwise);
+/// - EQUAL to `install_dir` (a profile with a `"."` directory, Redream):
+///   only the top-level regular files move, minus the entry's own
+///   executable, anything [`is_extractable_archive`] recognizes, and
+///   `.AppImage` files (Decision 17);
+/// - anywhere else: skipped. A directory reached through a link resolves to
+///   its target — already under `saves/` for a linked install — so it lands
+///   here by construction and is left alone.
+pub(crate) fn salvage_user_data(
+    entry: &EmulatorEntry,
+    install_dir: &Path,
+    saves_dir: &Path,
+    profile: Option<&EmulatorProfile>,
+    ctx: &ResolveContext,
+) -> Result<Vec<PathBuf>, LibraryError> {
+    let root = fs::canonicalize(install_dir).unwrap_or_else(|_| install_dir.to_path_buf());
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for key in [PathKey::SavePaths, PathKey::StatePaths] {
+        let (directories, _files) = resolved_sync_directory_paths(entry, profile, key, ctx);
+        candidates.extend(directories);
+    }
+    candidates.extend(resolved_screenshot_directories(entry, profile, ctx));
+
+    let mut seen: Vec<PathBuf> = Vec::new();
+    let mut salvaged: Vec<PathBuf> = Vec::new();
+    for candidate in candidates {
+        let Ok(resolved) = fs::canonicalize(&candidate) else {
+            continue;
+        };
+        if !resolved.is_dir() || seen.contains(&resolved) {
+            continue;
+        }
+        seen.push(resolved.clone());
+
+        if resolved == root {
+            salvaged.extend(salvage_loose_files(entry, &root, saves_dir)?);
+        } else if let Ok(relative) = resolved.strip_prefix(&root) {
+            let destination = saves_dir.join(relative);
+            move_directory(&resolved, &destination)?;
+            salvaged.push(destination);
+        }
+    }
+    Ok(salvaged)
 }
 
 // --- internals --------------------------------------------------------------
@@ -114,12 +216,93 @@ fn managed_install_dir(entry: &EmulatorEntry, roots: &[PathBuf; 2]) -> Option<Pa
 /// The canonical `<root>/<X>` directory `entry`'s executable lives under —
 /// the same lookup [`emulator_removal_steps`] plans a removal for, exposed
 /// separately for the salvage step.
-///
-/// Still `pub(crate)` and exercised only by its own unit test today — no
-/// salvage caller wires it up yet; that lands in a later task.
-#[allow(dead_code)]
 pub(crate) fn managed_install_dir_for(entry: &EmulatorEntry, library: &Path) -> Option<PathBuf> {
     managed_install_dir(entry, &emulator_roots(library))
+}
+
+/// The parent directory of `entry`'s executable, the `%EMULATOR_DIR%` the
+/// cloud resolution expands against (`cloud::ops::resolve_ctx_for`), or
+/// `None` for a blank path.
+fn emulator_dir_for(entry: &EmulatorEntry) -> Option<PathBuf> {
+    let raw = entry.path.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    expand_home(raw).parent().map(Path::to_path_buf)
+}
+
+/// The top-level regular files of `root` worth keeping: everything except
+/// the entry's own executable, an archive [`is_extractable_archive`]
+/// recognizes (the downloaded release, left beside the install) and an
+/// `.AppImage` (the emulator itself). Each one moves to `saves_dir/<name>`;
+/// a name already present there wins, matching
+/// [`move_tree_preferring_dest`].
+fn salvage_loose_files(
+    entry: &EmulatorEntry,
+    root: &Path,
+    saves_dir: &Path,
+) -> Result<Vec<PathBuf>, LibraryError> {
+    let executable = expand_home(entry.path.trim()).canonicalize().ok();
+    let mut salvaged = Vec::new();
+    for item in fs::read_dir(root)? {
+        let item = item?;
+        if !item.file_type()?.is_file() {
+            continue;
+        }
+        let path = item.path();
+        if executable.as_deref() == Some(path.as_path())
+            || is_extractable_archive(&path)
+            || is_appimage(&path)
+        {
+            continue;
+        }
+        let destination = saves_dir.join(item.file_name());
+        if destination.exists() {
+            continue;
+        }
+        fs::create_dir_all(saves_dir)?;
+        move_file(&path, &destination)?;
+        salvaged.push(destination);
+    }
+    Ok(salvaged)
+}
+
+fn is_appimage(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("AppImage"))
+}
+
+/// Moves `src` to `dest`: a rename while `dest` is still absent, otherwise
+/// (and whenever the rename fails, e.g. across filesystems) the
+/// destination-wins merge the install path already uses.
+fn move_directory(src: &Path, dest: &Path) -> Result<(), LibraryError> {
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if !dest.exists() && fs::rename(src, dest).is_ok() {
+        return Ok(());
+    }
+    move_tree_preferring_dest(src, dest)
+}
+
+/// Moves one file, falling back to copy-then-delete across filesystems. The
+/// source is removed only once the copy is complete.
+fn move_file(src: &Path, dest: &Path) -> Result<(), LibraryError> {
+    if fs::rename(src, dest).is_ok() {
+        return Ok(());
+    }
+    fs::copy(src, dest)?;
+    fs::remove_file(src)?;
+    Ok(())
+}
+
+/// The salvaged destinations as one log-safe string — paths only.
+fn display_paths(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The canonical directory `entry`'s path points at: the path itself when it
@@ -165,6 +348,39 @@ mod tests {
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(&file, b"stub").unwrap();
         file
+    }
+
+    /// The launcher config file path the salvage resolution uses for
+    /// `%CONFIG_DIR%`. Never read from disk here.
+    fn config_path(library: &Path) -> PathBuf {
+        library.join("config.json")
+    }
+
+    /// A catalog profile named `name` with one save, state or screenshot
+    /// directory list filled in.
+    fn profile(name: &str, save: &[&str], state: &[&str]) -> EmulatorProfile {
+        EmulatorProfile {
+            name: name.to_string(),
+            save_directories: save.iter().map(|s| s.to_string()).collect(),
+            state_directories: state.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// The resolve context `remove_emulator_files` builds, for a direct
+    /// [`salvage_user_data`] call.
+    fn ctx<'a>(
+        emulator_dir: &'a Path,
+        library: &'a str,
+        config_dir: &'a Path,
+    ) -> ResolveContext<'a> {
+        ResolveContext {
+            emulator_dir: Some(emulator_dir),
+            library_dir: library,
+            config_dir,
+            windows_documents: None,
+            retroarch_portable_home: None,
+        }
     }
 
     fn folder_steps(steps: &[Removal]) -> Vec<&Path> {
@@ -313,7 +529,7 @@ mod tests {
             ..Default::default()
         };
 
-        remove_emulator_files(&config, "pcsx2").unwrap();
+        remove_emulator_files(&config, &config_path(library), "pcsx2", &[]).unwrap();
 
         assert!(!library.join("emulators").join("PCSX2").exists());
         assert!(redream.is_file(), "the other install must survive");
@@ -336,7 +552,7 @@ mod tests {
             emulators: vec![entry("PCSX2", &exe)],
             ..Default::default()
         };
-        remove_emulator_files(&no_library, "PCSX2").unwrap();
+        remove_emulator_files(&no_library, &config_path(library), "PCSX2", &[]).unwrap();
         assert!(exe.is_file());
 
         let config = Config {
@@ -344,7 +560,7 @@ mod tests {
             emulators: vec![entry("PCSX2", &exe)],
             ..Default::default()
         };
-        remove_emulator_files(&config, "Nothing Like This").unwrap();
+        remove_emulator_files(&config, &config_path(library), "Nothing Like This", &[]).unwrap();
         assert!(exe.is_file());
     }
 
@@ -394,5 +610,178 @@ mod tests {
             folder_steps(&legacy_steps),
             vec![expected_dir(library, "Emulators", "PCSX2-latest").as_path()]
         );
+    }
+
+    // --- salvage ------------------------------------------------------------
+
+    #[test]
+    fn salvage_moves_a_save_dir_inside_the_install_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path();
+        let exe = touch_install(library, "emulators", "PCSX2", "pcsx2-qt");
+        let install_dir = expected_dir(library, "emulators", "PCSX2");
+        fs::create_dir_all(install_dir.join("memcards")).unwrap();
+        fs::write(install_dir.join("memcards").join("slot1.mcd"), b"SAVE").unwrap();
+
+        let entry = entry("PCSX2", &exe);
+        let profile = profile("PCSX2", &["memcards"], &[]);
+        let destination = super::saves_dir(library, "PCSX2");
+        let library_raw = library.to_string_lossy().into_owned();
+        let salvaged = salvage_user_data(
+            &entry,
+            &install_dir,
+            &destination,
+            Some(&profile),
+            &ctx(&install_dir, &library_raw, library),
+        )
+        .unwrap();
+
+        assert_eq!(salvaged, vec![destination.join("memcards")]);
+        assert_eq!(
+            fs::read(destination.join("memcards").join("slot1.mcd")).unwrap(),
+            b"SAVE"
+        );
+        assert!(!install_dir.join("memcards").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn salvage_skips_a_linked_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path();
+        let exe = touch_install(library, "emulators", "PCSX2", "pcsx2-qt");
+        let install_dir = expected_dir(library, "emulators", "PCSX2");
+        let destination = super::saves_dir(library, "PCSX2");
+        let target = destination.join("memcards");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("slot1.mcd"), b"SAVE").unwrap();
+        std::os::unix::fs::symlink(&target, install_dir.join("memcards")).unwrap();
+
+        let entry = entry("PCSX2", &exe);
+        let profile = profile("PCSX2", &["memcards"], &[]);
+        let library_raw = library.to_string_lossy().into_owned();
+        let salvaged = salvage_user_data(
+            &entry,
+            &install_dir,
+            &destination,
+            Some(&profile),
+            &ctx(&install_dir, &library_raw, library),
+        )
+        .unwrap();
+
+        assert!(salvaged.is_empty(), "a linked directory is already safe");
+        assert!(super::super::user_data_links::is_link(
+            &install_dir.join("memcards")
+        ));
+        assert_eq!(fs::read(target.join("slot1.mcd")).unwrap(), b"SAVE");
+    }
+
+    #[test]
+    fn salvage_moves_loose_files_when_the_directory_is_the_install_dir_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path();
+        let name = "Redream (Sega Dreamcast)";
+        let exe = touch_install(library, "emulators", name, "redream");
+        let install_dir = expected_dir(library, "emulators", name);
+        for file in [
+            "vmu0.bin",
+            "redream.cfg",
+            "Redream (Sega Dreamcast)-nightly.gz",
+        ] {
+            fs::write(install_dir.join(file), b"stub").unwrap();
+        }
+
+        let entry = entry(name, &exe);
+        let profile = profile(name, &[], &["."]);
+        let destination = super::saves_dir(library, name);
+        let library_raw = library.to_string_lossy().into_owned();
+        let mut salvaged = salvage_user_data(
+            &entry,
+            &install_dir,
+            &destination,
+            Some(&profile),
+            &ctx(&install_dir, &library_raw, library),
+        )
+        .unwrap();
+        salvaged.sort();
+
+        assert_eq!(
+            salvaged,
+            vec![
+                destination.join("redream.cfg"),
+                destination.join("vmu0.bin")
+            ]
+        );
+        assert!(destination.join("vmu0.bin").is_file());
+        assert!(destination.join("redream.cfg").is_file());
+        assert!(exe.is_file(), "the executable stays in the install");
+        assert!(
+            install_dir
+                .join("Redream (Sega Dreamcast)-nightly.gz")
+                .is_file(),
+            "the downloaded archive stays in the install"
+        );
+    }
+
+    #[test]
+    fn remove_emulator_files_salvages_then_removes() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path();
+        let pcsx2 = touch_install(library, "emulators", "PCSX2", "pcsx2-qt");
+        let redream = touch_install(library, "emulators", "Redream", "redream");
+        let install_dir = expected_dir(library, "emulators", "PCSX2");
+        fs::create_dir_all(install_dir.join("memcards")).unwrap();
+        fs::write(install_dir.join("memcards").join("slot1.mcd"), b"SAVE").unwrap();
+
+        let config = Config {
+            library_path: library.to_string_lossy().into_owned(),
+            emulators: vec![entry("PCSX2", &pcsx2), entry("Redream", &redream)],
+            ..Default::default()
+        };
+        let profiles = vec![profile("PCSX2", &["memcards"], &[])];
+
+        remove_emulator_files(&config, &config_path(library), "pcsx2", &profiles).unwrap();
+
+        assert_eq!(
+            fs::read(
+                super::saves_dir(library, "PCSX2")
+                    .join("memcards")
+                    .join("slot1.mcd")
+            )
+            .unwrap(),
+            b"SAVE"
+        );
+        assert!(!library.join("emulators").join("PCSX2").exists());
+        assert!(redream.is_file(), "the other install must survive");
+    }
+
+    #[test]
+    fn a_delete_under_the_legacy_root_still_works() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path();
+        let exe = touch_install(library, "Emulators", "PCSX2-latest", "pcsx2-qt");
+        let install_dir = expected_dir(library, "Emulators", "PCSX2-latest");
+        fs::create_dir_all(install_dir.join("memcards")).unwrap();
+        fs::write(install_dir.join("memcards").join("slot1.mcd"), b"SAVE").unwrap();
+
+        let config = Config {
+            library_path: library.to_string_lossy().into_owned(),
+            emulators: vec![entry("PCSX2", &exe)],
+            ..Default::default()
+        };
+        let profiles = vec![profile("PCSX2", &["memcards"], &[])];
+
+        remove_emulator_files(&config, &config_path(library), "PCSX2", &profiles).unwrap();
+
+        assert_eq!(
+            fs::read(
+                saves_dir(library, "PCSX2")
+                    .join("memcards")
+                    .join("slot1.mcd")
+            )
+            .unwrap(),
+            b"SAVE"
+        );
+        assert!(!install_dir.exists());
     }
 }

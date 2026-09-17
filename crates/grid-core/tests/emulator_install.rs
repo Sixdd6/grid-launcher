@@ -418,7 +418,7 @@ async fn removing_an_installed_emulator_deletes_its_install_directory() {
     assert!(install_dir.is_dir());
 
     let config = harness.config();
-    remove_emulator_files(&config, "Test Emu").unwrap();
+    remove_emulator_files(&config, &harness.config_path, "Test Emu", &[]).unwrap();
 
     assert!(
         !install_dir.exists(),
@@ -483,7 +483,7 @@ async fn user_data_survives_delete_and_reinstall() {
     fs::write(link.join("slot1.mcd"), b"SAVE-DATA").unwrap();
 
     let config = harness.config();
-    remove_emulator_files(&config, "Test Emu").unwrap();
+    remove_emulator_files(&config, &harness.config_path, "Test Emu", &[]).unwrap();
     assert!(
         !install_dir.exists(),
         "the install directory should be gone"
