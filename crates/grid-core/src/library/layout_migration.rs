@@ -38,8 +38,8 @@ const RESERVED_TOP_LEVEL: [&str; 4] = [GAMES_DIR, EMULATORS_DIR, LEGACY_EMULATOR
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RewritePlan {
     /// The library root as the config types it, its `~`-expanded form, and
-    /// each with `\` replaced by `/`; trailing separators trimmed, blanks
-    /// and duplicates dropped.
+    /// each of those with the separators swapped both ways; trailing
+    /// separators trimmed, blanks and duplicates dropped.
     library_forms: Vec<String>,
     /// The reference-derived legacy platform directory names.
     game_dirs: BTreeSet<String>,
@@ -61,14 +61,17 @@ fn split_component(rest: &str) -> (&str, &str) {
     }
 }
 
-/// Every spelling of the library root to match stored paths against.
+/// Every spelling of the library root to match stored paths against: the
+/// typed form, the `~`-expanded form, and each of those with the separators
+/// swapped both ways — a registry value written on Windows may use `\` where
+/// the config was typed with `/`, and the other way round.
 fn library_forms(config: &Config, library: &Path) -> Vec<String> {
     let mut forms = Vec::new();
     for raw in [
         config.library_path.trim().to_string(),
         library.to_string_lossy().into_owned(),
     ] {
-        for form in [raw.clone(), raw.replace('\\', "/")] {
+        for form in [raw.clone(), raw.replace('\\', "/"), raw.replace('/', "\\")] {
             let trimmed = form.trim_end_matches(is_separator).to_string();
             if !trimmed.is_empty() && !forms.contains(&trimmed) {
                 forms.push(trimmed);
@@ -664,6 +667,32 @@ fn step_rewrite(
     plan: &RewritePlan,
     profiles: &[EmulatorProfile],
 ) -> Result<usize, String> {
+    let updated = rewritten_config(config, plan);
+
+    // ORDER IS LOAD-BEARING. `game_dirs` is derived from exactly two
+    // sources: the registry's path columns and the config's save-path
+    // fields. Persisting either one first would make a crash before the
+    // emulator config files are rewritten unrecoverable — the next run would
+    // read paths that already say `games/`, derive an EMPTY game set (the
+    // `.vfs` probe cannot fire either, step 1 moved it), rewrite nothing and
+    // stamp version 1, leaving RPCS3 and PCSX2 pointing at directories that
+    // no longer exist. So the text files go first: once rewritten they are
+    // idempotent no-ops, and until then the plan's sources still describe
+    // the legacy layout and the whole run resumes.
+    rewrite_emulator_configs(&updated, plan, profiles)?;
+
+    let rows = registry
+        .rewrite_paths(&|value| rewrite_path(value, plan))
+        .map_err(|e| e.to_string())?;
+
+    updated
+        .save(config_path)
+        .map_err(|e| format!("could not write {}: {e}", config_path.display()))?;
+    Ok(rows)
+}
+
+/// The config with every library path in v1 form. Pure: nothing is written.
+fn rewritten_config(config: &Config, plan: &RewritePlan) -> Config {
     let mut updated = config.clone();
     for entry in &mut updated.emulators {
         if let Some(path) = rewrite_path(&entry.path, plan) {
@@ -686,16 +715,18 @@ fn step_rewrite(
         }
     }
     updated
-        .save(config_path)
-        .map_err(|e| format!("could not write {}: {e}", config_path.display()))?;
+}
 
-    let rows = registry
-        .rewrite_paths(&|value| rewrite_path(value, plan))
-        .map_err(|e| e.to_string())?;
-
-    // Read through the links: after step 3 these files live under `saves/`
-    // and the install directory reaches them through the link.
-    for entry in &updated.emulators {
+/// The emulator config files that store absolute library paths, rewritten in
+/// place. `config` must already be [`rewritten_config`]'s output: the files
+/// are located through the NEW install directory path, and read through the
+/// links step 3 left behind.
+fn rewrite_emulator_configs(
+    config: &Config,
+    plan: &RewritePlan,
+    profiles: &[EmulatorProfile],
+) -> Result<(), String> {
+    for entry in &config.emulators {
         let Some(install_dir) = Path::new(&entry.path).parent() else {
             continue;
         };
@@ -703,7 +734,7 @@ fn step_rewrite(
             rewrite_text_file(&install_dir.join(relative), plan)?;
         }
     }
-    Ok(rows)
+    Ok(())
 }
 
 /// The `;`/newline separated list rewritten item by item and re-joined with
@@ -793,22 +824,40 @@ fn rename_in_library(source: &Path, dest: &Path) -> Result<(), String> {
     })
 }
 
+/// Whether a path token may start after `previous`: the start of the text,
+/// any whitespace (space, tab, `\r`, `\n`), a quote, or one of the
+/// key/value punctuation marks the three emulator config formats use.
+fn starts_a_value(previous: Option<char>) -> bool {
+    match previous {
+        None => true,
+        Some(c) => c.is_whitespace() || matches!(c, '"' | '\'' | '=' | ':' | '('),
+    }
+}
+
 /// [`rewrite_path`] applied to every library path inside a text file,
 /// leaving every other byte untouched. `None` when nothing changed.
 ///
-/// A path token starts at a library-root spelling and runs to the next
-/// quote, carriage return or newline — spaces are part of a path (`PCSX2
-/// (Playstation 2)-latest`), quotes and line ends never are.
+/// A path token starts at a library-root spelling that begins a value —
+/// the byte before it is the start of the text, whitespace, a quote, `=`,
+/// `:` or `(` — and runs to the next quote, carriage return or newline:
+/// spaces are part of a path (`PCSX2 (Playstation 2)-latest`), quotes and
+/// line ends never are.
+///
+/// The left boundary is what keeps a library at `/lib` from rewriting an
+/// unrelated `/other/lib/Windows/x` that merely ENDS with the library's
+/// spelling.
 pub fn rewrite_paths_in_text(text: &str, plan: &RewritePlan) -> Option<String> {
     let mut out = String::with_capacity(text.len());
     let mut changed = false;
     let mut index = 0;
+    let mut previous: Option<char> = None;
     while index < text.len() {
         let rest = &text[index..];
-        if plan
-            .library_forms
-            .iter()
-            .any(|form| rest.starts_with(form.as_str()))
+        if starts_a_value(previous)
+            && plan
+                .library_forms
+                .iter()
+                .any(|form| rest.starts_with(form.as_str()))
         {
             let end = rest.find(['"', '\'', '\n', '\r']).unwrap_or(rest.len());
             let token = &rest[..end];
@@ -820,11 +869,13 @@ pub fn rewrite_paths_in_text(text: &str, plan: &RewritePlan) -> Option<String> {
                 None => out.push_str(token),
             }
             index += token.len();
+            previous = token.chars().next_back();
             continue;
         }
         let next = rest.chars().next().unwrap_or_default();
         out.push(next);
         index += next.len_utf8();
+        previous = Some(next);
     }
     if changed {
         Some(out)
@@ -1271,6 +1322,68 @@ mod tests {
         std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
     }
 
+    /// Every entry the migrated fixture library holds, in `tree` form
+    /// (`/` for a directory, `@` for a link). Asserted whole so a stray file
+    /// or a missing link fails the test, not just the paths spelled out in
+    /// [`assert_migrated_tree`].
+    const MIGRATED_TREE: [&str; 55] = [
+        "Misc Stuff/",
+        "Misc Stuff/readme.txt",
+        "bare.zip",
+        "emulators/",
+        "emulators/PCSX2 (Playstation 2)/",
+        "emulators/PCSX2 (Playstation 2)/bios@",
+        "emulators/PCSX2 (Playstation 2)/cheats@",
+        "emulators/PCSX2 (Playstation 2)/inis@",
+        "emulators/PCSX2 (Playstation 2)/memcards@",
+        "emulators/PCSX2 (Playstation 2)/pcsx2.AppImage",
+        "emulators/PCSX2 (Playstation 2)/snaps@",
+        "emulators/PCSX2 (Playstation 2)/sstates@",
+        "emulators/PCSX2 (Playstation 2)/textures@",
+        "emulators/RPCS3 (Playstation 3)/",
+        "emulators/RPCS3 (Playstation 3)/portable@",
+        "emulators/RPCS3 (Playstation 3)/rpcs3.AppImage",
+        "emulators/Shared-latest/",
+        "emulators/Shared-latest/shared",
+        "games/",
+        "games/PlayStation 3/",
+        "games/PlayStation 3/.vfs/",
+        "games/PlayStation 3/.vfs/dev_hdd0/",
+        "games/PlayStation 3/.vfs/dev_hdd0/game/",
+        "games/PlayStation 3/.vfs/dev_hdd0/game/BLUS00001/",
+        "games/PlayStation 3/.vfs/dev_hdd0/game/BLUS00001/USRDIR/",
+        "games/PlayStation 3/.vfs/dev_hdd0/game/BLUS00001/USRDIR/EBOOT.BIN",
+        "games/PlayStation 3/.vfs/games/",
+        "games/PlayStation 3/.vfs/games/BLUS00001/",
+        "games/Sony PlayStation 2/",
+        "games/Sony PlayStation 2/Game B/",
+        "games/Sony PlayStation 2/Game B/game.iso",
+        "games/Super Nintendo Entertainment System/",
+        "games/Super Nintendo Entertainment System/Game A/",
+        "games/Super Nintendo Entertainment System/Game A/game.sfc",
+        "games/Windows/",
+        "games/Windows/My Game/",
+        "games/Windows/My Game/game/",
+        "games/Windows/My Game/game/MyGame/",
+        "games/Windows/My Game/game/MyGame/mygame.exe",
+        "saves/",
+        "saves/PCSX2 (Playstation 2)/",
+        "saves/PCSX2 (Playstation 2)/bios/",
+        "saves/PCSX2 (Playstation 2)/cheats/",
+        "saves/PCSX2 (Playstation 2)/inis/",
+        "saves/PCSX2 (Playstation 2)/inis/PCSX2.ini",
+        "saves/PCSX2 (Playstation 2)/memcards/",
+        "saves/PCSX2 (Playstation 2)/memcards/slot1.mcd",
+        "saves/PCSX2 (Playstation 2)/snaps/",
+        "saves/PCSX2 (Playstation 2)/sstates/",
+        "saves/PCSX2 (Playstation 2)/textures/",
+        "saves/RPCS3 (Playstation 3)/",
+        "saves/RPCS3 (Playstation 3)/portable/",
+        "saves/RPCS3 (Playstation 3)/portable/config/",
+        "saves/RPCS3 (Playstation 3)/portable/config/games.yml",
+        "saves/RPCS3 (Playstation 3)/portable/config/vfs.yml",
+    ];
+
     /// The fixture's end state, asserted by both the straight run and the
     /// resumed run.
     fn assert_migrated_tree(fixture: &Fixture) {
@@ -1404,6 +1517,7 @@ mod tests {
             }
         );
         assert_migrated_tree(&fixture);
+        assert_eq!(tree(&fixture.library), MIGRATED_TREE);
     }
 
     #[test]
@@ -1449,6 +1563,127 @@ mod tests {
         );
         assert_migrated_tree(&fixture);
         assert_eq!(tree(&fixture.library), tree(&straight.library));
+    }
+
+    #[test]
+    fn a_failure_after_the_text_rewrites_still_resumes_to_the_same_end_state() {
+        let fixture = legacy_fixture();
+        let config = fixture.config();
+        let library = &fixture.library;
+        let profiles = load_profiles();
+
+        // Steps 1-3 plus the emulator text files only — exactly the state a
+        // crash between the text rewrites and the registry transaction
+        // leaves behind: the config and the registry still describe the
+        // legacy layout, and the version is still 0.
+        let mut plan = build_rewrite_plan(&config, &fixture.registry, library, profiles).unwrap();
+        preflight(library, &plan).unwrap();
+        step_games(library, &plan).unwrap();
+        step_emulators(library, &config, &plan, profiles).unwrap();
+        step_user_data(library, &config, &plan, profiles).unwrap();
+        plan.emulator_dirs = kept_emulator_pairs(&config, library, &plan.library_forms, profiles);
+        rewrite_emulator_configs(&rewritten_config(&config, &plan), &plan, profiles).unwrap();
+        assert_eq!(fixture.config().library_layout_version, 0);
+        assert_eq!(
+            fixture.config().emulators[0].path,
+            format!(
+                "{}/Emulators/PCSX2 (Playstation 2)-latest/pcsx2.AppImage",
+                fixture.lib()
+            ),
+            "the config must still be the legacy one at this point"
+        );
+
+        let outcome = fixture.run();
+        assert!(
+            matches!(outcome, MigrationOutcome::Completed { .. }),
+            "{outcome:?}"
+        );
+        assert_migrated_tree(&fixture);
+        assert_eq!(tree(&fixture.library), MIGRATED_TREE);
+
+        // The other persistence boundary: the text files AND the registry
+        // transaction landed, the config did not. This is the state that was
+        // unrecoverable while the config was written first.
+        let second = legacy_fixture();
+        let config = second.config();
+        let library = &second.library;
+        let mut plan = build_rewrite_plan(&config, &second.registry, library, profiles).unwrap();
+        preflight(library, &plan).unwrap();
+        step_games(library, &plan).unwrap();
+        step_emulators(library, &config, &plan, profiles).unwrap();
+        step_user_data(library, &config, &plan, profiles).unwrap();
+        plan.emulator_dirs = kept_emulator_pairs(&config, library, &plan.library_forms, profiles);
+        rewrite_emulator_configs(&rewritten_config(&config, &plan), &plan, profiles).unwrap();
+        second
+            .registry
+            .rewrite_paths(&|value| rewrite_path(value, &plan))
+            .unwrap();
+
+        let outcome = second.run();
+        assert!(
+            matches!(outcome, MigrationOutcome::Completed { .. }),
+            "{outcome:?}"
+        );
+        assert_migrated_tree(&second);
+        assert_eq!(tree(&second.library), MIGRATED_TREE);
+    }
+
+    /// The regression pin for the ordering inside step 4: a text-file write
+    /// that fails must leave the config and the registry — the two sources
+    /// `game_dirs` is derived from — exactly as they were. Persisting either
+    /// one first would make this state unrecoverable: the next run would
+    /// read paths that already say `games/`, derive an empty game set and
+    /// stamp version 1 with `vfs.yml` still pointing at the old directory.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_text_rewrite_leaves_the_config_and_registry_unwritten() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fixture = legacy_fixture();
+        let lib = fixture.lib();
+        let vfs = fixture
+            .library
+            .join("Emulators/RPCS3 (Playstation 3)-latest/portable/config/vfs.yml");
+        std::fs::set_permissions(&vfs, std::fs::Permissions::from_mode(0o444)).unwrap();
+
+        let outcome = fixture.run();
+        assert!(
+            matches!(outcome, MigrationOutcome::Failed { .. }),
+            "{outcome:?}"
+        );
+        let config = fixture.config();
+        assert_eq!(config.library_layout_version, 0);
+        assert_eq!(
+            config.emulators[0].path,
+            format!("{lib}/Emulators/PCSX2 (Playstation 2)-latest/pcsx2.AppImage"),
+            "the config must not be persisted before the text files are rewritten"
+        );
+        assert_eq!(
+            config.native_pcgw_save_paths.get("my game|windows"),
+            Some(&vec![format!("{lib}/Windows/My Game/saves")])
+        );
+        let rows = fixture.registry.all().unwrap();
+        assert_eq!(
+            rows.iter()
+                .find(|r| r.title == "Game A")
+                .unwrap()
+                .extracted_path,
+            format!("{lib}/Super Nintendo Entertainment System/Game A/game.sfc"),
+            "the registry must not be rewritten before the text files are"
+        );
+
+        // With the file writable again the next run finishes everything.
+        let moved_vfs = fixture
+            .library
+            .join("saves/RPCS3 (Playstation 3)/portable/config/vfs.yml");
+        std::fs::set_permissions(&moved_vfs, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let outcome = fixture.run();
+        assert!(
+            matches!(outcome, MigrationOutcome::Completed { .. }),
+            "{outcome:?}"
+        );
+        assert_migrated_tree(&fixture);
+        assert_eq!(tree(&fixture.library), MIGRATED_TREE);
     }
 
     #[test]
@@ -1637,6 +1872,22 @@ mod tests {
         );
         assert!(!entry_names(&fixture.library).contains(TEMP_EMULATORS_DIR));
         assert_migrated_tree(&fixture);
+    }
+
+    #[test]
+    fn text_rewrite_ignores_an_unrelated_path_that_contains_the_library_as_a_suffix() {
+        let plan = plan_with(&["Windows"], &[]);
+        // `/other/lib` merely ENDS with the library's spelling; the path
+        // token starts at `/other`, so nothing in it is a library path.
+        assert_eq!(
+            rewrite_paths_in_text("Path = /other/lib/Windows/x\n", &plan),
+            None
+        );
+        // The same line with a real library path is still rewritten.
+        assert_eq!(
+            rewrite_paths_in_text("Path = /lib/Windows/x\n", &plan).as_deref(),
+            Some("Path = /lib/games/Windows/x\n")
+        );
     }
 
     #[test]
