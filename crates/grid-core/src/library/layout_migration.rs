@@ -11,8 +11,8 @@
 //! directory, so an interrupted run resumes on the next start. A
 //! `CrossesDevices` rename aborts the run with both paths in the message.
 
-use std::collections::BTreeSet;
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use super::paths::{
     expand_home, sanitize_component, saves_dir, EMULATORS_DIR, GAMES_DIR, LAYOUT_VERSION_V1,
@@ -269,6 +269,14 @@ fn emulator_dir_pairs(
 /// The emulator install directory name `path` sits in, for a path under
 /// either `<library>/Emulators/` or `<library>/emulators/`.
 fn emulator_dir_of(path: &str, forms: &[String]) -> Option<String> {
+    emulator_dir_and_rest(path, forms).map(|(dir, _)| dir)
+}
+
+/// [`emulator_dir_of`] plus the remainder of the path below that directory,
+/// with its leading separator: `<library>/Emulators/X/bin/emu` gives
+/// `("X", "/bin/emu")`. The remainder is what re-roots a stored executable
+/// path onto the install directory's new name.
+fn emulator_dir_and_rest(path: &str, forms: &[String]) -> Option<(String, String)> {
     for form in forms {
         let Some(after) = path.strip_prefix(form.as_str()) else {
             continue;
@@ -285,7 +293,7 @@ fn emulator_dir_of(path: &str, forms: &[String]) -> Option<String> {
         if dir.is_empty() || rest.is_empty() {
             return None;
         }
-        return Some(dir.to_string());
+        return Some((dir.to_string(), rest.to_string()));
     }
     None
 }
@@ -360,6 +368,9 @@ pub enum MigrationOutcome {
         games_moved: usize,
         emulators_renamed: usize,
         links_changed: usize,
+        /// Install directories left unlinked because another install of the
+        /// same emulator already owns `saves/<Emulator>`.
+        skipped_duplicates: usize,
         rows_rewritten: usize,
     },
     /// A step failed. The version stays at 0, the library stays readable
@@ -433,7 +444,7 @@ fn migrate(
 
     let games_moved = step_games(library, &plan)?;
     let emulators_renamed = step_emulators(library, config, &plan, profiles)?;
-    let links_changed = step_user_data(library, config, &plan, profiles)?;
+    let (links_changed, skipped_duplicates) = step_user_data(library, config, &plan, profiles)?;
     // The pairs describe renames that have LANDED, so they are only
     // complete once step 2 has run. The game set is derived from the
     // registry and the config, which step 1 does not touch, so it stands.
@@ -445,6 +456,7 @@ fn migrate(
         games_moved,
         emulators_renamed,
         links_changed,
+        skipped_duplicates,
         rows_rewritten,
     })
 }
@@ -606,18 +618,27 @@ fn merge_emulator_roots(source: &Path, dest: &Path) -> Result<(), String> {
 
 /// Step 3: point every install directory's `user_data` names at
 /// `saves/<Emulator>/`.
+///
+/// Returns `(links changed, installs skipped as duplicates)`.
 fn step_user_data(
     library: &Path,
     config: &Config,
     plan: &RewritePlan,
     profiles: &[EmulatorProfile],
-) -> Result<usize, String> {
+) -> Result<(usize, usize), String> {
     let root = library.join(EMULATORS_DIR);
     let names = entry_names(&root);
     let mut changed = 0;
+    let mut skipped_duplicates = 0;
     let mut seen: BTreeSet<String> = BTreeSet::new();
+    // `saves/<Profile>` → the install directory that filled it. A second
+    // install of the same profile must NOT be linked: its own directories
+    // would be merged destination-wins into a saves directory the first one
+    // just filled, which deletes the second copy.
+    let mut populated: BTreeMap<String, PathBuf> = BTreeMap::new();
     for entry in &config.emulators {
-        let Some(legacy_dir) = emulator_dir_of(&entry.path, &plan.library_forms) else {
+        let Some((legacy_dir, rest)) = emulator_dir_and_rest(&entry.path, &plan.library_forms)
+        else {
             continue;
         };
         let Some(profile) =
@@ -640,22 +661,76 @@ fn step_user_data(
             continue;
         }
         let install_dir = root.join(&install_name);
-        match ensure_user_data_links(
-            &install_dir,
-            &saves_dir(library, &profile.name),
-            &profile.user_data,
-        ) {
+        let target = saves_dir(library, &profile.name);
+
+        if let Some(first) = populated.get(&profile.name) {
+            tracing::warn!(
+                kept = %first.display(),
+                skipped = %install_dir.display(),
+                "a second install of this emulator would share one saves directory; it keeps its own files and is not linked"
+            );
+            skipped_duplicates += 1;
+            continue;
+        }
+        let links_at = links_directory(&install_dir, &rest);
+        if has_entries(&target) && !owns_links(&links_at, &profile.user_data) {
+            tracing::warn!(
+                saves = %target.display(),
+                skipped = %install_dir.display(),
+                "the saves directory of this emulator already holds files from another install; it keeps its own files and is not linked"
+            );
+            populated.insert(profile.name.clone(), install_dir);
+            skipped_duplicates += 1;
+            continue;
+        }
+
+        // Beside the EXECUTABLE, not at the install root: every reader
+        // derives the emulator directory from the executable's parent.
+        match ensure_user_data_links(&links_at, &target, &profile.user_data) {
             Ok(true) => changed += 1,
             Ok(false) => {}
             Err(e) => {
                 return Err(format!(
                     "could not link the user data of {}: {e}",
-                    install_dir.display()
+                    links_at.display()
                 ))
             }
         }
+        populated.insert(profile.name.clone(), install_dir);
     }
-    Ok(changed)
+    Ok((changed, skipped_duplicates))
+}
+
+/// The directory the links belong in: the parent of the stored executable
+/// re-rooted onto `install_dir`, or `install_dir` itself when that parent is
+/// not on disk (a stale entry path).
+fn links_directory(install_dir: &Path, rest: &str) -> PathBuf {
+    let mut components: Vec<&str> = rest.split(is_separator).filter(|s| !s.is_empty()).collect();
+    components.pop(); // the executable's own file name
+    let mut dir = install_dir.to_path_buf();
+    for component in components {
+        dir.push(component);
+    }
+    if dir.is_dir() {
+        dir
+    } else {
+        install_dir.to_path_buf()
+    }
+}
+
+/// Whether `dir` exists and holds at least one entry.
+fn has_entries(dir: &Path) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|mut entries| entries.next().is_some())
+}
+
+/// Whether ANY `user_data` name under `dir` is already a link — the mark of
+/// the install that filled the saves directory. A run interrupted part way
+/// through one install's list must finish it, so one link is enough;
+/// a genuine second install has none.
+fn owns_links(dir: &Path, user_data: &[String]) -> bool {
+    user_data
+        .iter()
+        .any(|name| super::user_data_links::is_link(&dir.join(name.trim())))
 }
 
 /// Step 4: the config, the registry and the three emulator config files that
@@ -720,14 +795,24 @@ fn rewritten_config(config: &Config, plan: &RewritePlan) -> Config {
 /// The emulator config files that store absolute library paths, rewritten in
 /// place. `config` must already be [`rewritten_config`]'s output: the files
 /// are located through the NEW install directory path, and read through the
-/// links step 3 left behind.
+/// links step 3 left behind. Entries outside `<library>/emulators/` are
+/// skipped: GRID never writes a config file it does not own.
 fn rewrite_emulator_configs(
     config: &Config,
     plan: &RewritePlan,
     profiles: &[EmulatorProfile],
 ) -> Result<(), String> {
     for entry in &config.emulators {
-        let Some(install_dir) = Path::new(&entry.path).parent() else {
+        // Managed installs only: an entry pointing outside
+        // `<library>/emulators/` (or the legacy `Emulators/`) is a
+        // hand-configured emulator whose config file GRID does not own.
+        if emulator_dir_of(&entry.path, &plan.library_forms).is_none() {
+            continue;
+        }
+        // The EXPANDED path: an entry typed with `~/` would otherwise name a
+        // literal `~` directory that does not exist.
+        let expanded = expand_home(entry.path.trim());
+        let Some(install_dir) = expanded.parent() else {
             continue;
         };
         for relative in emulator_config_files(entry, profiles) {
@@ -1513,6 +1598,7 @@ mod tests {
                 games_moved: 4,
                 emulators_renamed: 2,
                 links_changed: 2,
+                skipped_duplicates: 0,
                 rows_rewritten: 4,
             }
         );
@@ -1771,6 +1857,7 @@ mod tests {
                 games_moved: 0,
                 emulators_renamed: 0,
                 links_changed: 0,
+                skipped_duplicates: 0,
                 rows_rewritten: 0,
             }
         );
@@ -1927,6 +2014,268 @@ mod tests {
                 "PCSX2 (Playstation 2)-latest".to_string(),
                 "PCSX2 (Playstation 2)".to_string()
             )]
+        );
+    }
+
+    // --- user data links (item 1 and 2) ----------------------------------
+
+    /// A library with no games and the emulator entries `build` writes, so a
+    /// single behavior can be exercised without the whole legacy fixture.
+    fn emulator_fixture(build: impl FnOnce(&Path, &Path) -> Vec<EmulatorEntry>) -> Fixture {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("library");
+        std::fs::create_dir_all(&library).unwrap();
+        let config_path = dir.path().join("config.toml");
+        let registry = Registry::open(&dir.path().join("registry.db")).unwrap();
+
+        let emulators = build(dir.path(), &library);
+        Config {
+            library_path: library.to_string_lossy().into_owned(),
+            emulators,
+            ..Config::default()
+        }
+        .save(&config_path)
+        .unwrap();
+
+        Fixture {
+            _dir: dir,
+            library,
+            config_path,
+            registry,
+        }
+    }
+
+    fn pcsx2_entry(name: &str, path: String) -> EmulatorEntry {
+        EmulatorEntry {
+            name: name.into(),
+            path,
+            ..Default::default()
+        }
+    }
+
+    /// The links belong beside the EXECUTABLE, which `select_executable` may
+    /// have found in a subdirectory — that is the directory every reader
+    /// (`autoconfig::paths::emulator_dir`, `cloud::ops::emulator_dir_for`)
+    /// derives from the entry's path.
+    #[cfg(unix)]
+    #[test]
+    fn a_nested_executable_gets_its_links_beside_the_binary() {
+        let fixture = emulator_fixture(|_root, library| {
+            let install = library.join("Emulators/PCSX2 (Playstation 2)-latest");
+            write_file(&install.join("bin/pcsx2.AppImage"), "pcsx2");
+            write_file(&install.join("bin/memcards/slot1.mcd"), "card");
+            vec![pcsx2_entry(
+                "PCSX2 (Playstation 2)",
+                format!(
+                    "{}/Emulators/PCSX2 (Playstation 2)-latest/bin/pcsx2.AppImage",
+                    library.to_string_lossy()
+                ),
+            )]
+        });
+
+        assert!(matches!(fixture.run(), MigrationOutcome::Completed { .. }));
+
+        let install = fixture.library.join("emulators/PCSX2 (Playstation 2)");
+        assert!(
+            is_link(&install.join("bin/memcards")),
+            "the link belongs beside the binary: {}",
+            tree(&install).join(", ")
+        );
+        assert!(
+            !install.join("memcards").exists(),
+            "nothing may be created at the install root: {}",
+            tree(&install).join(", ")
+        );
+        assert_eq!(
+            read(
+                &fixture
+                    .library
+                    .join("saves/PCSX2 (Playstation 2)/memcards/slot1.mcd")
+            ),
+            "card"
+        );
+    }
+
+    /// Two legacy installs of ONE profile share one `saves/<Emulator>`, and
+    /// the merge into it is destination-wins — so linking the second would
+    /// delete its own files. It is skipped and counted instead.
+    #[cfg(unix)]
+    #[test]
+    fn a_second_install_of_one_profile_is_skipped_rather_than_merged() {
+        let fixture = emulator_fixture(|_root, library| {
+            let lib = library.to_string_lossy().into_owned();
+            for (dir, card) in [
+                ("PCSX2 (Playstation 2)-latest", "NEW"),
+                ("PCSX2 (Playstation 2)-v1.2", "OLD"),
+            ] {
+                let install = library.join("Emulators").join(dir);
+                write_file(&install.join("pcsx2.AppImage"), "pcsx2");
+                write_file(&install.join("memcards/slot1.mcd"), card);
+            }
+            vec![
+                pcsx2_entry(
+                    "PCSX2 (Playstation 2)",
+                    format!("{lib}/Emulators/PCSX2 (Playstation 2)-latest/pcsx2.AppImage"),
+                ),
+                pcsx2_entry(
+                    "PCSX2 1.2",
+                    format!("{lib}/Emulators/PCSX2 (Playstation 2)-v1.2/pcsx2.AppImage"),
+                ),
+            ]
+        });
+
+        let outcome = fixture.run();
+        let MigrationOutcome::Completed {
+            links_changed,
+            skipped_duplicates,
+            ..
+        } = outcome
+        else {
+            panic!("{outcome:?}");
+        };
+        assert_eq!((links_changed, skipped_duplicates), (1, 1));
+
+        let second = fixture
+            .library
+            .join("emulators/PCSX2 (Playstation 2)-v1.2/memcards");
+        assert!(
+            !is_link(&second) && second.is_dir(),
+            "the second install keeps its own directory: {}",
+            tree(&fixture.library).join(", ")
+        );
+        assert_eq!(read(&second.join("slot1.mcd")), "OLD");
+        assert_eq!(
+            read(
+                &fixture
+                    .library
+                    .join("saves/PCSX2 (Playstation 2)/memcards/slot1.mcd")
+            ),
+            "NEW",
+            "the first install's card is the one under saves/"
+        );
+    }
+
+    /// A run interrupted part way through one install's `user_data` list
+    /// left the saves directory populated and ONE link behind. That install
+    /// still owns the saves directory, so the next run finishes its list
+    /// rather than mistaking it for a second install.
+    #[cfg(unix)]
+    #[test]
+    fn a_partly_linked_install_is_finished_not_skipped() {
+        let fixture = emulator_fixture(|_root, library| {
+            let install = library.join("emulators/PCSX2 (Playstation 2)");
+            write_file(&install.join("pcsx2.AppImage"), "pcsx2");
+            write_file(&install.join("memcards/slot1.mcd"), "card");
+            // `inis` is already linked; `memcards` is not.
+            let saves = library.join("saves/PCSX2 (Playstation 2)/inis");
+            std::fs::create_dir_all(&saves).unwrap();
+            std::os::unix::fs::symlink(&saves, install.join("inis")).unwrap();
+            vec![pcsx2_entry(
+                "PCSX2 (Playstation 2)",
+                format!(
+                    "{}/emulators/PCSX2 (Playstation 2)/pcsx2.AppImage",
+                    library.to_string_lossy()
+                ),
+            )]
+        });
+
+        let outcome = fixture.run();
+        let MigrationOutcome::Completed {
+            skipped_duplicates, ..
+        } = outcome
+        else {
+            panic!("{outcome:?}");
+        };
+        assert_eq!(skipped_duplicates, 0);
+        assert!(is_link(
+            &fixture
+                .library
+                .join("emulators/PCSX2 (Playstation 2)/memcards")
+        ));
+        assert_eq!(
+            read(
+                &fixture
+                    .library
+                    .join("saves/PCSX2 (Playstation 2)/memcards/slot1.mcd")
+            ),
+            "card"
+        );
+    }
+
+    // --- config rewriting (item 3 and 4) ---------------------------------
+
+    /// A hand-configured emulator outside the library is not GRID's to
+    /// write: its config file is left byte-identical even when it names a
+    /// path the migration is moving.
+    #[test]
+    fn a_config_file_outside_the_library_is_never_rewritten() {
+        let fixture = emulator_fixture(|root, library| {
+            std::fs::create_dir_all(library.join("PlayStation 3/.vfs/dev_hdd0")).unwrap();
+            let outside = root.join("elsewhere");
+            write_file(&outside.join("rpcs3.AppImage"), "rpcs3");
+            write_file(
+                &outside.join("portable/config/vfs.yml"),
+                &format!(
+                    "\"/dev_hdd0/\": \"{}/PlayStation 3/.vfs/dev_hdd0/\"\n",
+                    library.to_string_lossy()
+                ),
+            );
+            vec![EmulatorEntry {
+                name: "RPCS3 (Playstation 3)".into(),
+                path: outside
+                    .join("rpcs3.AppImage")
+                    .to_string_lossy()
+                    .into_owned(),
+                ..Default::default()
+            }]
+        });
+        let vfs = fixture
+            ._dir
+            .path()
+            .join("elsewhere/portable/config/vfs.yml");
+        let before = read(&vfs);
+
+        assert!(matches!(fixture.run(), MigrationOutcome::Completed { .. }));
+
+        assert_eq!(read(&vfs), before, "an unmanaged config file is untouched");
+    }
+
+    /// An entry path typed with `~/` names a real file only once expanded —
+    /// the config file beside it must still be found and rewritten.
+    #[cfg(unix)]
+    #[test]
+    fn a_tilde_entry_path_still_has_its_config_rewritten() {
+        let _lock = crate::test_env::lock();
+        let fixture = emulator_fixture(|_root, library| {
+            let install = library.join("Emulators/PCSX2 (Playstation 2)-latest");
+            write_file(&install.join("pcsx2.AppImage"), "pcsx2");
+            write_file(
+                &install.join("inis/PCSX2.ini"),
+                "[Folders]\nBios = ~/library/Emulators/PCSX2 (Playstation 2)-latest/bios\n",
+            );
+            vec![pcsx2_entry(
+                "PCSX2 (Playstation 2)",
+                "~/library/Emulators/PCSX2 (Playstation 2)-latest/pcsx2.AppImage".to_string(),
+            )]
+        });
+        // The library the config points at is `$HOME/library`, which is
+        // exactly where the fixture built it.
+        let home = fixture._dir.path().to_string_lossy().into_owned();
+        let mut config = fixture.config();
+        config.library_path = "~/library".into();
+        config.save(&fixture.config_path).unwrap();
+
+        let _guard = crate::test_env::EnvGuard::set(&[("HOME", Some(home.as_str()))]);
+        assert!(matches!(fixture.run(), MigrationOutcome::Completed { .. }));
+        drop(_guard);
+
+        assert_eq!(
+            read(
+                &fixture
+                    .library
+                    .join("saves/PCSX2 (Playstation 2)/inis/PCSX2.ini")
+            ),
+            "[Folders]\nBios = ~/library/emulators/PCSX2 (Playstation 2)/bios\n"
         );
     }
 }

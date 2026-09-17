@@ -146,8 +146,9 @@ Usage and exit codes are in `BUILD.md`.
 The library root has three folders: `games/<Platform>/` (game installs), `emulators/<Emulator>/`
 (an emulator's binaries), and `saves/<Emulator>/<dir>/` (every directory the emulator writes
 beside its binary). `<Emulator>` is the sanitized catalog PROFILE name, with no release tag, so
-several config entries can share one emulator and one saves folder. `<install>/<dir>` entries
-listed in a profile's `user_data` are links into `saves/<Emulator>/<dir>` — a relative symlink on
+several config entries can share one emulator and one saves folder. The `user_data` entries of a
+profile are links into `saves/<Emulator>/<dir>` — created beside the chosen EXECUTABLE, which is
+the directory every config reader derives from an entry's path — a relative symlink on
 unix, an NTFS junction on Windows — so deleting an emulator's install directory never deletes its
 saves, settings or firmware.
 

@@ -468,7 +468,9 @@ async fn user_data_survives_delete_and_reinstall() {
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
     let install_dir = harness.install_dir("Test Emu");
-    let link = install_dir.join("memcards");
+    // Beside the EXECUTABLE (`bin/testemu.sh`), which is the directory every
+    // config reader derives from the entry's path — not the install root.
+    let link = install_dir.join("bin/memcards");
     let saves_dir = harness.library.join("saves/Test Emu/memcards");
     assert!(
         link.symlink_metadata().unwrap().file_type().is_symlink(),
@@ -478,6 +480,10 @@ async fn user_data_survives_delete_and_reinstall() {
     assert_eq!(
         link.canonicalize().unwrap(),
         saves_dir.canonicalize().unwrap()
+    );
+    assert!(
+        !install_dir.join("memcards").exists(),
+        "nothing may be created at the install root"
     );
 
     fs::write(link.join("slot1.mcd"), b"SAVE-DATA").unwrap();
@@ -499,7 +505,7 @@ async fn user_data_survives_delete_and_reinstall() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    let link = harness.install_dir("Test Emu").join("memcards");
+    let link = harness.install_dir("Test Emu").join("bin/memcards");
     assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
     assert_eq!(
         link.canonicalize().unwrap(),
@@ -525,7 +531,7 @@ async fn a_reinstalled_archive_never_overwrites_saved_user_data() {
         "widget.zip",
         &[
             ("bin/testemu.sh", b"#!/bin/sh\n"),
-            ("memcards/slot1.mcd", b"DEFAULT"),
+            ("bin/memcards/slot1.mcd", b"DEFAULT"),
         ],
     );
 

@@ -59,8 +59,8 @@ pub fn compat_tool_install_dir(root: &Path, archive_stem: &str) -> PathBuf {
 /// When the extracted executable matches a profile in `profiles`
 /// ([`profile_for_entry`]) with a non-empty `user_data`, the matched
 /// profile's directories are linked to `saves_dir(library, &profile.name)`
-/// (the saves directory is named from the PROFILE, not the entry) before
-/// returning — the autoconfig sync the caller runs afterward must read
+/// (the saves directory is named from the PROFILE, not the entry) beside the
+/// chosen EXECUTABLE before returning — the autoconfig sync the caller runs afterward must read
 /// through the link, not overwrite it. A link error only warns: the archive
 /// extracted and the entry is still valid without it.
 pub fn install_manual_archive(
@@ -83,16 +83,20 @@ pub fn install_manual_archive(
     // Python's `os.chmod(path, 0o755)` off win32 (emulator_ui_mixin.py:1399).
     make_executable(&executable);
 
+    // Beside the EXECUTABLE, not at the extraction root: every reader
+    // derives the emulator directory from the executable's parent, and
+    // `select_executable` legally picks a nested binary.
+    let exe_dir = executable.parent().unwrap_or(dest.as_path());
     if let Some(profile) = profile_for_entry(entry_name, &executable.to_string_lossy(), profiles) {
         if !profile.user_data.is_empty()
             && ensure_user_data_links(
-                &dest,
+                exe_dir,
                 &saves_dir(library, &profile.name),
                 &profile.user_data,
             )
             .is_err()
         {
-            tracing::warn!("user data links failed for {}", dest.display());
+            tracing::warn!("user data links failed for {}", exe_dir.display());
         }
     }
 
@@ -941,6 +945,44 @@ mod tests {
 
         let link = library.join("emulators/PCSX2 (Playstation 2)/memcards");
         assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+        assert!(library
+            .join("saves/PCSX2 (Playstation 2)/memcards/x.mcd")
+            .is_file());
+    }
+
+    /// The links follow the chosen EXECUTABLE, which may sit in a
+    /// subdirectory: that is the directory `autoconfig::paths::emulator_dir`
+    /// and `cloud::ops::emulator_dir_for` derive from the entry's path.
+    #[cfg(unix)]
+    #[test]
+    fn a_manual_archive_links_beside_a_nested_executable() {
+        use crate::launch::profiles::load_profiles;
+
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path().join("library");
+        let archive = dir.path().join("pcsx2.zip");
+        write_zip(
+            &archive,
+            &[
+                ("bin/pcsx2-qt", "#!/bin/sh\n", 0o755),
+                ("bin/memcards/x.mcd", "card", 0o644),
+            ],
+        );
+
+        install_manual_archive(&library, "PCSX2 (Playstation 2)", &archive, load_profiles())
+            .unwrap();
+
+        let install = library.join("emulators/PCSX2 (Playstation 2)");
+        assert!(install
+            .join("bin/memcards")
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(
+            !install.join("memcards").exists(),
+            "nothing may be created at the install root"
+        );
         assert!(library
             .join("saves/PCSX2 (Playstation 2)/memcards/x.mcd")
             .is_file());

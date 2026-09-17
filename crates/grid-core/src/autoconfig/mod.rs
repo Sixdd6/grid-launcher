@@ -407,8 +407,8 @@ pub struct SyncContext<'a> {
     /// closure capture the map keeps `DefaultsContext` — and every test
     /// built against it — unchanged.
     pub platform_slugs: &'a BTreeMap<String, String>,
-    /// `<library>/PlayStation 3`, or `""` when no library path is set. Build
-    /// it with [`ps3_library_path`].
+    /// `<library>/games/PlayStation 3`, or `""` when no library path is set.
+    /// Build it with [`ps3_library_path`].
     pub ps3_library_path: String,
     /// The RetroAchievements pair, when the user has one.
     pub ra: Option<RaCredentials>,

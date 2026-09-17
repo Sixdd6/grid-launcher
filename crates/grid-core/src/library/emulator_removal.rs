@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 use super::extract::is_extractable_archive;
 use super::paths::{emulators_dir, expand_home, legacy_emulators_dir, library_root, saves_dir};
-use super::user_data_links::move_tree_preferring_dest;
+use super::user_data_links::{move_file, move_tree_preferring_dest};
 use super::{apply_removal, run_removals, LibraryError, Removal, RemovalLabel};
 use crate::cloud::dirs::{
     resolved_screenshot_directories, resolved_sync_directory_paths, PathKey, ResolveContext,
@@ -286,17 +286,6 @@ fn move_directory(src: &Path, dest: &Path) -> Result<(), LibraryError> {
         return Ok(());
     }
     move_tree_preferring_dest(src, dest)
-}
-
-/// Moves one file, falling back to copy-then-delete across filesystems. The
-/// source is removed only once the copy is complete.
-fn move_file(src: &Path, dest: &Path) -> Result<(), LibraryError> {
-    if fs::rename(src, dest).is_ok() {
-        return Ok(());
-    }
-    fs::copy(src, dest)?;
-    fs::remove_file(src)?;
-    Ok(())
 }
 
 /// The salvaged destinations as one log-safe string — paths only.

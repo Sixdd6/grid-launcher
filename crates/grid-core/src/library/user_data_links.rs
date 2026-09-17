@@ -16,6 +16,11 @@ use super::LibraryError;
 /// Points every `user_data` directory of one emulator install at
 /// `saves_dir`, returning whether anything on disk changed.
 ///
+/// `install_dir` is the directory holding the chosen EXECUTABLE — what
+/// `autoconfig::paths::emulator_dir` and `cloud::ops::emulator_dir_for`
+/// resolve from an entry's path — not the extraction root, which is a
+/// different directory whenever the binary is nested.
+///
 /// Per entry: the destination `saves_dir/<dir>` is created; a real directory
 /// at `install_dir/<dir>` has its contents moved there (the destination wins
 /// every collision — those bytes are the ones that survived earlier runs)
@@ -125,7 +130,7 @@ fn move_into(src: &Path, dest: &Path) -> Result<(), LibraryError> {
 /// Moves one file, falling back to copy-then-delete when `src` and `dest`
 /// are on different filesystems. Split from [`finish_move`] so the fallback
 /// is testable without two filesystems.
-fn move_file(src: &Path, dest: &Path) -> io::Result<()> {
+pub(crate) fn move_file(src: &Path, dest: &Path) -> io::Result<()> {
     finish_move(src, dest, fs::rename(src, dest))
 }
 

@@ -134,12 +134,14 @@ pub fn run() {
                 games_moved,
                 emulators_renamed,
                 links_changed,
+                skipped_duplicates,
                 rows_rewritten,
             } => {
                 tracing::info!(
                     games_moved,
                     emulators_renamed,
                     links_changed,
+                    skipped_duplicates,
                     rows_rewritten,
                     "library moved to layout v1"
                 );

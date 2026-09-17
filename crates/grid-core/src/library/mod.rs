@@ -2292,10 +2292,16 @@ impl InstallService {
         // Links go in BEFORE the config entry and autoconfig run — a save
         // writer reads through the link and must see the moved directory,
         // not the fresh extracted one it would otherwise overwrite.
+        //
+        // Beside the EXECUTABLE, not at the install root: every reader
+        // (`autoconfig::paths::emulator_dir`, `cloud::ops::emulator_dir_for`)
+        // derives the emulator directory from the executable's parent, and
+        // `select_executable` legally picks a nested binary.
+        let exe_dir = exe.parent().unwrap_or(install_dir);
         if let Some(profile) = catalog::find_profile(&self.profiles, &job.source_id) {
             if !profile.user_data.is_empty() {
                 if let Err(e) = ensure_user_data_links(
-                    install_dir,
+                    exe_dir,
                     &saves_dir(&job.library, &job.profile_name),
                     &profile.user_data,
                 ) {
