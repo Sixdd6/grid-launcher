@@ -125,7 +125,7 @@ describe('content', () => {
     // fs_name `ps4-base.zip` without its extension. Globbing the platform
     // directory rather than hardcoding that keeps the assertion honest if
     // the naming rule ever changes.
-    const platformDir = path.join(library(), 'PlayStation 4');
+    const platformDir = path.join(library(), 'games', 'PlayStation 4');
     const merged = readdirSync(platformDir, { withFileTypes: true })
       .filter((e) => e.isDirectory())
       .map((e) => path.join(platformDir, e.name, 'CUSA12345', 'patch.txt'))

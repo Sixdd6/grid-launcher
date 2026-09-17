@@ -56,15 +56,16 @@ mkdirSync(libraryPath, { recursive: true });
 
 const configToml = `schema_version = 1
 library_path = ${tomlString(libraryPath)}
+library_layout_version = 1
 default_compat_tool = "wine"
 `;
 writeFileSync(path.join(dataDir, 'config.toml'), configToml);
 
 // --- on-disk installs ---------------------------------------------------------
 
-/** Creates `<library>/<platform>/<name>/<file>` and returns both paths. */
+/** Creates `<library>/games/<platform>/<name>/<file>` and returns both paths. */
 function seedPlainInstall(platform, dirName, fileName) {
-  const extractedDir = path.join(libraryPath, platform, dirName);
+  const extractedDir = path.join(libraryPath, 'games', platform, dirName);
   mkdirSync(extractedDir, { recursive: true });
   const extractedPath = path.join(extractedDir, fileName);
   writeFileSync(extractedPath, `fake ${platform} rom bytes\n`);
@@ -75,7 +76,7 @@ const oldRom = seedPlainInstall('SNES', 'oldrom', 'old.sfc');
 const currentRom = seedPlainInstall('SNES', 'current', 'game.sfc');
 const ghostRom = seedPlainInstall('SNES', 'ghost', 'game.sfc');
 
-const nativeGameDir = path.join(libraryPath, 'Windows', 'My Game');
+const nativeGameDir = path.join(libraryPath, 'games', 'Windows', 'My Game');
 const nativeExtractedDir = path.join(nativeGameDir, 'game');
 const nativeExePath = path.join(nativeExtractedDir, 'MyGame', 'mygame.exe');
 const nativeSavePath = path.join(nativeExtractedDir, 'saves', 'slot1.sav');

@@ -10,6 +10,7 @@
   import { init as initUpdates } from './lib/stores/updates.svelte';
   import { initAppUpdate } from './lib/stores/appUpdate.svelte';
   import { initPythonImport } from './lib/stores/pythonImport.svelte';
+  import { initLayoutMigration } from './lib/stores/layoutMigration.svelte';
   import { initReplenishListener } from './lib/stores/installed.svelte';
   import { initUiSettings } from './lib/stores/uiSettings.svelte';
   import { noteDirectional } from './lib/stores/inputMode.svelte';
@@ -45,6 +46,12 @@
   // effects so the toast appears at the first paint, not after a connect.
   $effect(() => {
     initPythonImport();
+  });
+
+  // The layout migration also ran before the window existed; same pull-only
+  // shape, and its failure toast belongs at the first paint too.
+  $effect(() => {
+    initLayoutMigration();
   });
 
   // The theme must be on `<html>` before the first paint the user sees, so

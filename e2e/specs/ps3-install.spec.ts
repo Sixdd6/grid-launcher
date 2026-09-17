@@ -18,7 +18,7 @@ const testId = (id: string) => `[data-testid="${id}"]`;
  * That is the point of the group. `ps3_roots_from_config`
  * (grid-core/src/library/mod.rs) resolves the RPCS3 VFS from the default PS3
  * emulator's own `vfs.yml` when there is one, and otherwise falls back to
- * `<library>/PlayStation 3/.vfs/dev_hdd0` — the branch nothing else covers.
+ * `<library>/games/PlayStation 3/.vfs/dev_hdd0` — the branch nothing else covers.
  * The seed writes no `config.toml` at all, so this spec sets the library
  * path through the UI exactly as install-a.spec.ts does.
  *
@@ -29,7 +29,7 @@ const testId = (id: string) => `[data-testid="${id}"]`;
  */
 describe('ps3-install', () => {
   const library = () => path.join(dataDir(), 'library');
-  const devHdd0 = () => path.join(library(), 'PlayStation 3', '.vfs', 'dev_hdd0');
+  const devHdd0 = () => path.join(library(), 'games', 'PlayStation 3', '.vfs', 'dev_hdd0');
 
   // The five views no longer stack (design §3): one pill click swaps which
   // root is displayed, so a spec has to be on the right view before it reads
@@ -113,8 +113,8 @@ describe('ps3-install', () => {
     ).toBe(true);
     // `specials::ps3::route` moves the tree and then removes what it
     // extracted; the downloaded archive goes too.
-    expect(existsSync(path.join(library(), 'PlayStation 3', 'game'))).toBe(false);
-    expect(existsSync(path.join(library(), 'PlayStation 3', 'game.zip'))).toBe(false);
+    expect(existsSync(path.join(library(), 'games', 'PlayStation 3', 'game'))).toBe(false);
+    expect(existsSync(path.join(library(), 'games', 'PlayStation 3', 'game.zip'))).toBe(false);
   });
 
   it("records the detected game id on the registry row", () => {

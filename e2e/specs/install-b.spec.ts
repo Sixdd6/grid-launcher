@@ -11,7 +11,13 @@ import {
 const testId = (id: string) => `[data-testid="${id}"]`;
 
 const extractedDir = () =>
-  path.join(dataDir(), 'library', 'Super Nintendo Entertainment System', 'Super Mario World');
+  path.join(
+    dataDir(),
+    'library',
+    'games',
+    'Super Nintendo Entertainment System',
+    'Super Mario World',
+  );
 
 /**
  * Stage `install`, part B: a second launch of the same binary against the

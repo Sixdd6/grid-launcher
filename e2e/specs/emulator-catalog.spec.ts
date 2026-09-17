@@ -43,7 +43,7 @@ const EMULATOR_INSTALL_TIMEOUT = 15_000;
  * - `PCSX2 (Playstation 2)` — a `github-release` source whose linux
  *   `asset_patterns` glob matches the mock's AppImage asset. An AppImage is
  *   never extracted: the downloaded file itself becomes the emulator, kept
- *   in `<library>/Emulators/PCSX2 (Playstation 2)-latest/`.
+ *   in `<library>/emulators/PCSX2 (Playstation 2)/`.
  * - `Redream (Sega Dreamcast)` — a `direct` source, resolved by scraping the
  *   mock's HTML download page with the catalog's own regex, then extracted
  *   from a real tar.gz.
@@ -78,10 +78,12 @@ describe('emulator-catalog', () => {
   /** Row/delete testids sanitize a name the same way Emulators.svelte does (see emulators.spec.ts). */
   const sanitize = (name: string) => name.toLowerCase().replace(/\s+/g, '-');
 
-  const romPath = () => path.join(dataDir(), 'library', PLATFORM, 'Gran Turismo 3', 'game.iso');
-  const emulatorsDir = () => path.join(dataDir(), 'library', 'Emulators');
-  const pcsx2Path = () =>
-    path.join(emulatorsDir(), `${PCSX2_NAME}-latest`, PCSX2_ASSET);
+  const romPath = () =>
+    path.join(dataDir(), 'library', 'games', PLATFORM, 'Gran Turismo 3', 'game.iso');
+  const emulatorsDir = () => path.join(dataDir(), 'library', 'emulators');
+  /** Layout v1: the install DIRECTORY is the profile name, untagged; only the
+   *  downloaded FILE inside still carries the tag. */
+  const pcsx2Path = () => path.join(emulatorsDir(), PCSX2_NAME, PCSX2_ASSET);
   /** D1: the sync runs right after install, so this is the AppImage's parent. */
   const pcsx2Dir = () => path.dirname(pcsx2Path());
   /**
@@ -91,7 +93,7 @@ describe('emulator-catalog', () => {
    * name and its executable bit set is launchable, alongside the reference's
    * .exe/.bat/.cmd/.ps1/.sh/.AppImage suffix set.
    */
-  const redreamPath = () => path.join(emulatorsDir(), `${REDREAM_NAME}-nightly`, 'redream');
+  const redreamPath = () => path.join(emulatorsDir(), REDREAM_NAME, 'redream');
 
   const argvFile = (): string => {
     const value = process.env.GRID_E2E_ARGV_FILE;
@@ -280,8 +282,8 @@ describe('emulator-catalog', () => {
     await expect($(testId('emu-catalog-install-PCSX2-pcsx2'))).not.toExist();
 
     // The AppImage is kept as-is (never extracted), under an install
-    // directory named from the CONFIGURED tag ("latest"), and the config
-    // entry carries the profile's args verbatim.
+    // directory named for the profile (layout v1 drops the tag from the
+    // directory), and the config entry carries the profile's args verbatim.
     expect(existsSync(pcsx2Path())).toBe(true);
     await waitForConfigLine(pcsx2Path());
 
@@ -342,9 +344,14 @@ describe('emulator-catalog', () => {
     expect(ini).not.toContain('[Achievements]');
     // [Folders] Bios is the profile's FIRST firmware directory ("bios" in
     // emulator-autoprofiles.json), resolved against the emulator directory
-    // (autoconfig/mod.rs `sync_new_emulator`, doc 05 step 15).
+    // (autoconfig/mod.rs `sync_new_emulator`, doc 05 step 15). Under layout
+    // v1 that directory is a LINK into `saves/<Emulator>/`, and the writer
+    // records where the link lands.
     expect(ini).toContain('[Folders]');
-    expect(ini).toContain(`Bios = ${path.join(realpathSync(pcsx2Dir()), 'bios')}`);
+    expect(ini).toContain(`Bios = ${realpathSync(path.join(pcsx2Dir(), 'bios'))}`);
+    expect(realpathSync(path.join(pcsx2Dir(), 'bios'))).toBe(
+      realpathSync(path.join(dataDir(), 'library', 'saves', PCSX2_NAME, 'bios')),
+    );
   });
 
   it('plays the seeded PS2 game with the installed PCSX2 as the platform default', async () => {
@@ -415,7 +422,9 @@ describe('emulator-catalog', () => {
     // extraction kept the bit, which is what made it selectable at all.
     expect(statSync(redreamPath()).mode & 0o111).not.toBe(0);
     // The archive is deleted once its contents are merged in.
-    expect(existsSync(path.join(emulatorsDir(), `${REDREAM_NAME}-nightly`, `${REDREAM_NAME}-nightly.gz`))).toBe(false);
+    expect(existsSync(path.join(emulatorsDir(), REDREAM_NAME, `${REDREAM_NAME}-nightly.gz`))).toBe(
+      false,
+    );
     await closeEmulators();
   });
 

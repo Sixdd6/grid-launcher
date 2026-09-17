@@ -77,6 +77,11 @@ pub struct AppState {
     /// the imported file. Pulled once by the frontend through
     /// `commands::updates::python_import_notice`.
     pub python_import: Option<ImportReport>,
+    /// Why the startup library-layout migration did not finish, or `None`
+    /// when it succeeded or was skipped. Paths only — never a credential.
+    /// Pulled once by the frontend through
+    /// `commands::updates::layout_migration_notice`.
+    pub layout_migration: Option<String>,
 }
 
 pub(crate) fn err(e: impl std::fmt::Display) -> String {

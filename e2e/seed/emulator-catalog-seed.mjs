@@ -41,7 +41,7 @@ const TITLE = 'Gran Turismo 3';
 const ROM_ID = 401;
 
 const libraryPath = path.join(dataDir, 'library');
-const gameDir = path.join(libraryPath, PLATFORM, TITLE);
+const gameDir = path.join(libraryPath, 'games', PLATFORM, TITLE);
 mkdirSync(gameDir, { recursive: true });
 
 // --- the "installed" ROM file itself -----------------------------------------
@@ -60,6 +60,7 @@ function tomlString(value) {
 
 const configToml = `schema_version = 1
 library_path = ${tomlString(libraryPath)}
+library_layout_version = 1
 `;
 writeFileSync(path.join(dataDir, 'config.toml'), configToml);
 

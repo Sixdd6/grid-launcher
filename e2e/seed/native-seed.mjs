@@ -49,6 +49,7 @@ chmodSync(wineStub, 0o755);
 
 const configToml = `schema_version = 1
 library_path = ${tomlString(libraryPath)}
+library_layout_version = 1
 default_compat_tool = "wine"
 `;
 writeFileSync(path.join(dataDir, 'config.toml'), configToml);

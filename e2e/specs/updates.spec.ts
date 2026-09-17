@@ -50,7 +50,7 @@ const SELF_UPDATE_TAG = 'v9.9.9-e2e';
  */
 describe('updates', () => {
   const library = () => path.join(dataDir(), 'library');
-  const nativeGameDir = () => path.join(library(), 'Windows', 'My Game');
+  const nativeGameDir = () => path.join(library(), 'games', 'Windows', 'My Game');
 
   async function openDetails(romId: number) {
     await $(testId(`library-card-${romId}`)).waitForExist({ timeout: TRANSITION_TIMEOUT });
@@ -239,7 +239,7 @@ describe('updates', () => {
 
     // The server copy is `newrom.zip`, so it extracts beside the seeded
     // `oldrom/` into its own `extraction_dir` (library/paths.rs).
-    const extracted = path.join(library(), 'SNES', 'newrom');
+    const extracted = path.join(library(), 'games', 'SNES', 'newrom');
     expect(existsSync(extracted)).toBe(true);
     expect(readdirSync(extracted).length > 0).toBe(true);
 

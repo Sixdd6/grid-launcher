@@ -65,6 +65,7 @@ chmodSync(rpcs3, 0o755);
 
 const configToml = `schema_version = 1
 library_path = ${tomlString(libraryPath)}
+library_layout_version = 1
 
 [[emulators]]
 name = ${tomlString(DUCKSTATION_NAME)}

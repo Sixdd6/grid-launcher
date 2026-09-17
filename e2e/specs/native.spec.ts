@@ -49,8 +49,8 @@ const PCGW_LOOKUP_TIMEOUT = 30_000;
  * 2 = rom 702's, 3 = rom 703's.
  */
 describe('native', () => {
-  const gameDir = () => path.join(dataDir(), 'library', 'Windows', 'My Game');
-  const linuxGameDir = () => path.join(dataDir(), 'library', 'Linux', 'Tux Game');
+  const gameDir = () => path.join(dataDir(), 'library', 'games', 'Windows', 'My Game');
+  const linuxGameDir = () => path.join(dataDir(), 'library', 'games', 'Linux', 'Tux Game');
   const wineArgvLog = () => path.join(dataDir(), 'wine-argv.log');
 
   async function openDetails(romId: number) {

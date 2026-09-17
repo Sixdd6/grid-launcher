@@ -56,6 +56,7 @@ writeFileSync(path.join(xeniaDir, 'portable.txt'), '');
 
 const configToml = `schema_version = 1
 library_path = ${tomlString(libraryPath)}
+library_layout_version = 1
 
 [[emulators]]
 name = ${tomlString(EMULATOR_NAME)}

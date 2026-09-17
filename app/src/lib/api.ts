@@ -405,6 +405,11 @@ export type PythonImportReport = {
   retroachievements: boolean;
 };
 
+/** `layout_migration_notice`'s payload: why the startup library-layout
+ *  migration did not finish, or `null` when it succeeded or was skipped.
+ *  Paths only — never a credential. */
+export type LayoutMigrationNotice = { message: string };
+
 export const api = {
   connect: (serverUrl: string, username: string, secret: string, useToken: boolean) =>
     invoke<SessionState>('connect', { serverUrl, username, secret, useToken }),
@@ -554,4 +559,5 @@ export const api = {
   appUpdateNotice: () => invoke<AppUpdateStatus>('app_update_notice'),
   openReleasePage: (url: string) => invoke<void>('open_release_page', { url }),
   pythonImportNotice: () => invoke<PythonImportReport | null>('python_import_notice'),
+  layoutMigrationNotice: () => invoke<LayoutMigrationNotice | null>('layout_migration_notice'),
 };

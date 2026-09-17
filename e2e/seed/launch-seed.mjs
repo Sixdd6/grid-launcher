@@ -47,7 +47,7 @@ const ROM_ID = 101;
 
 const stubsDir = path.join(dataDir, 'stubs');
 const libraryPath = path.join(dataDir, 'library');
-const gameDir = path.join(libraryPath, PLATFORM, TITLE);
+const gameDir = path.join(libraryPath, 'games', PLATFORM, TITLE);
 mkdirSync(stubsDir, { recursive: true });
 mkdirSync(gameDir, { recursive: true });
 
@@ -86,6 +86,7 @@ function tomlString(value) {
 
 const configToml = `schema_version = 1
 library_path = ${tomlString(libraryPath)}
+library_layout_version = 1
 
 [[emulators]]
 name = "LongRunner"

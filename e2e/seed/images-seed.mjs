@@ -40,7 +40,7 @@ const TITLE = 'Chrono Trigger (USA)';
 const ROM_ID = 102;
 
 const libraryPath = path.join(dataDir, 'library');
-const gameDir = path.join(libraryPath, PLATFORM, TITLE);
+const gameDir = path.join(libraryPath, 'games', PLATFORM, TITLE);
 mkdirSync(gameDir, { recursive: true });
 
 const romPath = path.join(gameDir, 'game.rom');
@@ -55,6 +55,7 @@ function tomlString(value) {
 
 const configToml = `schema_version = 1
 library_path = ${tomlString(libraryPath)}
+library_layout_version = 1
 `;
 writeFileSync(path.join(dataDir, 'config.toml'), configToml);
 

@@ -119,6 +119,7 @@ describe('install (a): connect, set library path, install', () => {
     const extracted = path.join(
       dataDir(),
       'library',
+      'games',
       'Super Nintendo Entertainment System',
       'Super Mario World',
       'game.sfc',

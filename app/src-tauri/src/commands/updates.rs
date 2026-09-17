@@ -6,6 +6,7 @@
 use grid_core::import_python::ImportReport;
 use grid_core::library::platforms::is_native_platform;
 use grid_core::library::update_detection::{game_has_server_update, ServerVersion};
+use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
@@ -95,6 +96,22 @@ pub fn app_update_notice(state: State<'_, AppState>) -> AppUpdateStatus {
 #[tauri::command]
 pub fn python_import_notice(state: State<'_, AppState>) -> Option<ImportReport> {
     state.python_import
+}
+
+/// Why the startup library-layout migration did not finish, or `null` when
+/// it succeeded or was skipped. Same late-mount pull as
+/// `python_import_notice`: the migration is over before the webview exists.
+#[derive(Serialize)]
+pub struct LayoutMigrationNotice {
+    pub message: String,
+}
+
+#[tauri::command]
+pub fn layout_migration_notice(state: State<'_, AppState>) -> Option<LayoutMigrationNotice> {
+    state
+        .layout_migration
+        .clone()
+        .map(|message| LayoutMigrationNotice { message })
 }
 
 #[tauri::command]

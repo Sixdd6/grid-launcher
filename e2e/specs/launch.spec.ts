@@ -40,7 +40,7 @@ const testId = (id: string) => `[data-testid="${id}"]`;
 describe('launch', () => {
   const PLATFORM = 'Super Nintendo Entertainment System';
   const romPath = () =>
-    path.join(dataDir(), 'library', PLATFORM, 'Super Mario World', 'game.sfc');
+    path.join(dataDir(), 'library', 'games', PLATFORM, 'Super Mario World', 'game.sfc');
   const longRunnerArgv = () => path.join(dataDir(), 'stubs', 'long-runner.args');
 
   async function waitForConfigLine(line: string) {

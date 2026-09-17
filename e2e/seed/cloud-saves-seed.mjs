@@ -105,7 +105,7 @@ writeFileSync(path.join(savesDir, 'savesyncretention.sav'), 'local-save-for-rete
 
 const gameDirs = new Map();
 for (const { romId, title } of GAMES) {
-  const gameDir = path.join(libraryPath, PLATFORM, title);
+  const gameDir = path.join(libraryPath, 'games', PLATFORM, title);
   mkdirSync(gameDir, { recursive: true });
   const romPath = path.join(gameDir, 'game.rom');
   writeFileSync(romPath, `fake rom bytes for ${title}\n`);
@@ -121,6 +121,7 @@ function tomlString(value) {
 
 const configToml = `schema_version = 1
 library_path = ${tomlString(libraryPath)}
+library_layout_version = 1
 
 [[emulators]]
 name = ${tomlString(EMULATOR_NAME)}

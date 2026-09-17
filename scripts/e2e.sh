@@ -75,6 +75,9 @@ STAGE_GROUPS=(
   "native:specs/native.spec.ts"
   "firmware:specs/firmware.spec.ts"
   "updates:specs/updates.spec.ts"
+  # Legacy library in, layout v1 out: the seed writes an UNVERSIONED config
+  # and a flat library, and the spec reads the migrated tree off disk.
+  "layout-migration:specs/layout-migration.spec.ts"
 )
 
 # Run only the named groups by passing them as arguments, e.g.
@@ -481,6 +484,7 @@ seed_script_for_group() {
     native) printf '%s' "$E2E_DIR/seed/native-seed.mjs" ;;
     firmware) printf '%s' "$E2E_DIR/seed/firmware-seed.mjs" ;;
     updates) printf '%s' "$E2E_DIR/seed/updates-seed.mjs" ;;
+    layout-migration) printf '%s' "$E2E_DIR/seed/layout-migration-seed.mjs" ;;
     *) printf '' ;;
   esac
 }

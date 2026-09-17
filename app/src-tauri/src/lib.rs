@@ -116,6 +116,41 @@ pub fn run() {
         Ok(count) => tracing::info!("migrated {count} emulator entries to current default args"),
         Err(e) => tracing::warn!("emulator args migration failed: {e}"),
     }
+    // The one-shot move to library layout v1 (`games/`, `emulators/`,
+    // `saves/`). It runs before the services are built: they cache nothing
+    // at construction and `InstallService` re-reads the config per call, but
+    // `LaunchService` and the launch hooks must never see a half-moved tree.
+    // A failure leaves the version at 0 and is carried to the UI as one
+    // toast; grid-core already logged the warn line. The message holds
+    // paths only.
+    let layout_migration = match &registry {
+        Ok(registry) => match grid_core::library::layout_migration::run(
+            &config_path,
+            registry,
+            grid_core::launch::profiles::load_profiles(),
+        ) {
+            grid_core::library::layout_migration::MigrationOutcome::Skipped => None,
+            grid_core::library::layout_migration::MigrationOutcome::Completed {
+                games_moved,
+                emulators_renamed,
+                links_changed,
+                rows_rewritten,
+            } => {
+                tracing::info!(
+                    games_moved,
+                    emulators_renamed,
+                    links_changed,
+                    rows_rewritten,
+                    "library moved to layout v1"
+                );
+                None
+            }
+            grid_core::library::layout_migration::MigrationOutcome::Failed { message } => {
+                Some(message)
+            }
+        },
+        Err(_) => None,
+    };
     let install = registry
         .clone()
         .map(|registry| InstallService::new(registry, config_path.clone()));
@@ -132,6 +167,7 @@ pub fn run() {
         app_update: app_update::AppUpdateState::new(),
         media_server: std::sync::OnceLock::new(),
         python_import,
+        layout_migration,
     });
     // Embedded WebDriver automation server, gated behind the `e2e` cargo
     // feature so it never ships in a release build (see
@@ -434,6 +470,7 @@ pub fn run() {
             commands::updates::app_version,
             commands::updates::app_update_notice,
             commands::updates::python_import_notice,
+            commands::updates::layout_migration_notice,
             commands::updates::open_release_page,
             commands::logging::get_debug_prints,
             commands::logging::set_debug_prints,
