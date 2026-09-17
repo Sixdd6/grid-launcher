@@ -123,8 +123,16 @@ fn write_if_changed(
 ///   (`Shortcuts\Main%20Window\Fullscreen\KeySeq`, default `false`/value
 ///   `F1`), the Stop Emulation shortcut (same pattern, value `Escape`).
 ///
+/// Renderer seed (spec `2026-09-17-vulkan-renderer-seed-design.md`): on a
+/// `fresh_install`, off macOS, `[Renderer]` also gets
+/// `graphics_api\default`=`false` and `graphics_api`=`2` (Vulkan) — ONLY
+/// when the file as read has no `graphics_api` under `[Renderer]`. The
+/// probe is [`writers::section_has_key`], whose narrow key charset stops at
+/// the `\` of the companion line, so only a real `graphics_api=` line
+/// counts as present.
+///
 /// Any I/O error along the way reports [`EnsureResult::unchanged`].
-pub fn ensure_settings(emulator_path: &str) -> EnsureResult {
+pub fn ensure_settings(emulator_path: &str, fresh_install: bool) -> EnsureResult {
     maybe_create_user_dir(emulator_path);
 
     let candidates = config_path_candidates(emulator_path);
@@ -136,18 +144,20 @@ pub fn ensure_settings(emulator_path: &str) -> EnsureResult {
         .find(|c| c.exists())
         .cloned()
         .unwrap_or_else(|| candidates[0].clone());
+    let seed_renderer = fresh_install && cfg!(not(target_os = "macos"));
 
-    match write_if_changed(&selected, |content| {
-        let (content, c1) = writers::azahar_section(
-            content,
-            "Renderer",
-            &crate::desired![
-                (r"resolution_factor\default", "false"),
-                ("resolution_factor", "4"),
-                (r"use_vsync\default", "false"),
-                ("use_vsync", "true"),
-            ],
-        );
+    match write_if_changed(&selected, |original| {
+        let mut renderer_desired = crate::desired![
+            (r"resolution_factor\default", "false"),
+            ("resolution_factor", "4"),
+            (r"use_vsync\default", "false"),
+            ("use_vsync", "true"),
+        ];
+        if seed_renderer && !writers::section_has_key(original, "Renderer", "graphics_api") {
+            renderer_desired.push((r"graphics_api\default".to_string(), "false".to_string()));
+            renderer_desired.push(("graphics_api".to_string(), "2".to_string()));
+        }
+        let (content, c1) = writers::azahar_section(original, "Renderer", &renderer_desired);
         let (content, c2) = writers::azahar_section(
             &content,
             "Audio",
@@ -213,7 +223,7 @@ mod tests {
         let _guard = isolated_env(temp.path());
         let (exe, dir) = make_exe(temp.path());
 
-        ensure_settings(exe.to_str().unwrap());
+        ensure_settings(exe.to_str().unwrap(), false);
 
         assert!(dir.join("user").is_dir());
     }
@@ -228,7 +238,7 @@ mod tests {
         std::fs::create_dir_all(marker.parent().unwrap()).unwrap();
         std::fs::write(&marker, "x").unwrap();
 
-        ensure_settings(exe.to_str().unwrap());
+        ensure_settings(exe.to_str().unwrap(), false);
 
         assert_eq!(std::fs::read_to_string(&marker).unwrap(), "x");
     }
@@ -240,8 +250,8 @@ mod tests {
         let _guard = isolated_env(temp.path());
         let (exe, dir) = make_exe(temp.path());
 
-        ensure_settings(exe.to_str().unwrap());
-        ensure_settings(exe.to_str().unwrap());
+        ensure_settings(exe.to_str().unwrap(), false);
+        ensure_settings(exe.to_str().unwrap(), false);
 
         let config_path = dir.join("user").join("config").join("qt-config.ini");
         let text = std::fs::read_to_string(&config_path).unwrap();
@@ -261,7 +271,7 @@ mod tests {
         let _guard = isolated_env(temp.path());
         let (exe, dir) = make_exe(temp.path());
 
-        ensure_settings(exe.to_str().unwrap());
+        ensure_settings(exe.to_str().unwrap(), false);
 
         let config_path = dir.join("user").join("config").join("qt-config.ini");
         let text = std::fs::read_to_string(&config_path).unwrap();
@@ -282,8 +292,8 @@ mod tests {
         let _guard = isolated_env(temp.path());
         let (exe, _dir) = make_exe(temp.path());
 
-        let first = ensure_settings(exe.to_str().unwrap());
-        let second = ensure_settings(exe.to_str().unwrap());
+        let first = ensure_settings(exe.to_str().unwrap(), false);
+        let second = ensure_settings(exe.to_str().unwrap(), false);
 
         assert!(first.changed);
         assert!(!second.changed);
@@ -292,8 +302,87 @@ mod tests {
     #[test]
     fn azahar_blank_path_is_unchanged() {
         let _lock = crate::test_env::lock();
-        assert_eq!(ensure_settings(""), EnsureResult::unchanged());
-        assert_eq!(ensure_settings("   "), EnsureResult::unchanged());
+        assert_eq!(ensure_settings("", false), EnsureResult::unchanged());
+        assert_eq!(ensure_settings("   ", false), EnsureResult::unchanged());
+    }
+
+    // --- renderer seed (spec 2026-09-17-vulkan-renderer-seed-design) --------
+
+    fn qt_config(dir: &Path) -> PathBuf {
+        dir.join("user").join("config").join("qt-config.ini")
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn azahar_fresh_install_seeds_the_vulkan_api_with_its_companion() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (exe, dir) = make_exe(temp.path());
+
+        let result = ensure_settings(exe.to_str().unwrap(), true);
+
+        assert!(result.changed);
+        let text = std::fs::read_to_string(qt_config(&dir)).unwrap();
+        assert!(text.contains(r"graphics_api\default = false"), "{text}");
+        assert!(text.contains("graphics_api = 2"), "{text}");
+        assert_eq!(text.matches(r"graphics_api\default").count(), 1, "{text}");
+    }
+
+    #[test]
+    fn azahar_fresh_install_keeps_an_existing_api() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (exe, dir) = make_exe(temp.path());
+        let ini = qt_config(&dir);
+        std::fs::create_dir_all(ini.parent().unwrap()).unwrap();
+        std::fs::write(
+            &ini,
+            "[Renderer]\ngraphics_api\\default=false\ngraphics_api=1\n",
+        )
+        .unwrap();
+
+        ensure_settings(exe.to_str().unwrap(), true);
+
+        let text = std::fs::read_to_string(&ini).unwrap();
+        assert!(
+            text.contains("graphics_api=1"),
+            "verbatim, unmanaged: {text}"
+        );
+        assert!(!text.contains("graphics_api = 2"), "{text}");
+        assert!(
+            text.contains("resolution_factor = 4"),
+            "the other Renderer keys still land: {text}"
+        );
+    }
+
+    #[test]
+    fn azahar_non_fresh_call_never_adds_the_api() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (exe, dir) = make_exe(temp.path());
+
+        ensure_settings(exe.to_str().unwrap(), false);
+
+        let text = std::fs::read_to_string(qt_config(&dir)).unwrap();
+        assert!(!text.contains("graphics_api"), "{text}");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn azahar_second_fresh_call_is_a_no_op() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (exe, _dir) = make_exe(temp.path());
+
+        let first = ensure_settings(exe.to_str().unwrap(), true);
+        let second = ensure_settings(exe.to_str().unwrap(), true);
+
+        assert!(first.changed);
+        assert!(!second.changed);
     }
 
     #[test]

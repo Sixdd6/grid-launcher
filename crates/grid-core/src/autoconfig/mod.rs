@@ -670,7 +670,12 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
         );
     }
     if is_azahar(&subject, profiles) {
-        record(&mut report, name, "azahar", azahar::ensure_settings(path));
+        record(
+            &mut report,
+            name,
+            "azahar",
+            azahar::ensure_settings(path, ctx.fresh_install),
+        );
     }
     if is_eden(&subject, profiles) {
         record(&mut report, name, "eden", eden::ensure_settings(path));
