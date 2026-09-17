@@ -192,14 +192,20 @@ fn write_if_changed(
 /// `[DSP] Volume` = `70`. `GFX.ini`: `[Settings] UseVerticalSync` = `True`.
 /// Capitalized `True`/`False` is Dolphin's own convention.
 ///
+/// Renderer seed (spec `2026-09-17-vulkan-renderer-seed-design.md`): on a
+/// `fresh_install`, off macOS, `[Core] GFXBackend = Vulkan` is added to
+/// `Dolphin.ini` ONLY when the file as read has no `GFXBackend` under
+/// `[Core]` — per-key preserve, the way PCSX2's `[EmuCore/GS]` block works.
+///
 /// A read/write failure on one file sets its own path to `None` in the
 /// result WITHOUT aborting the other. `config_path` is the `Dolphin.ini`
 /// path; `extras["gfx_ini_path"]` is the `GFX.ini` path; `changed` is the OR
 /// of both files' writes, true only when a write actually happened.
-pub fn ensure_settings(emulator_path: &str) -> EnsureResult {
+pub fn ensure_settings(emulator_path: &str, fresh_install: bool) -> EnsureResult {
     maybe_create_portable_txt(emulator_path);
 
     let force_first = !emulator_path.trim().is_empty();
+    let seed_renderer = fresh_install && cfg!(not(target_os = "macos"));
     let mut changed = false;
     let mut config_path: Option<PathBuf> = None;
     let mut extras = std::collections::BTreeMap::new();
@@ -207,9 +213,9 @@ pub fn ensure_settings(emulator_path: &str) -> EnsureResult {
     let dolphin_candidates = ini_path_candidates(emulator_path, "Dolphin.ini");
     if !dolphin_candidates.is_empty() {
         let selected = select_candidate(&dolphin_candidates, force_first);
-        if let Ok(file_changed) = write_if_changed(&selected, |content| {
+        if let Ok(file_changed) = write_if_changed(&selected, |original| {
             let (content, c1) = writers::ini_overwrite_section(
-                content,
+                original,
                 "Analytics",
                 &crate::desired![("Enabled", "False"), ("PermissionAsked", "True")],
             );
@@ -225,7 +231,19 @@ pub fn ensure_settings(emulator_path: &str) -> EnsureResult {
             );
             let (content, c4) =
                 writers::ini_overwrite_section(&content, "DSP", &crate::desired![("Volume", "70")]);
-            (content, c1 || c2 || c3 || c4)
+            // The probe reads `original` — the file BEFORE this call's own
+            // edits — like every preserve probe in this crate.
+            let (content, c5) =
+                if seed_renderer && !writers::section_has_key(original, "Core", "GFXBackend") {
+                    writers::ini_overwrite_section(
+                        &content,
+                        "Core",
+                        &crate::desired![("GFXBackend", "Vulkan")],
+                    )
+                } else {
+                    (content, false)
+                };
+            (content, c1 || c2 || c3 || c4 || c5)
         }) {
             changed = changed || file_changed;
             config_path = Some(selected);
@@ -357,7 +375,7 @@ mod tests {
         let _guard = isolated_env(temp.path());
         let (exe, dir) = make_exe(temp.path());
 
-        let result = ensure_settings(exe.to_str().unwrap());
+        let result = ensure_settings(exe.to_str().unwrap(), false);
 
         assert!(result.changed);
         let dolphin_ini = result.config_path.clone().unwrap();
@@ -391,7 +409,7 @@ mod tests {
         let _guard = isolated_env(temp.path());
         let (exe, dir) = make_exe(temp.path());
 
-        ensure_settings(exe.to_str().unwrap());
+        ensure_settings(exe.to_str().unwrap(), false);
 
         assert!(dir.join("portable.txt").exists());
     }
@@ -404,7 +422,7 @@ mod tests {
         let (exe, dir) = make_exe(temp.path());
         std::fs::write(dir.join("portable.txt"), "custom").unwrap();
 
-        ensure_settings(exe.to_str().unwrap());
+        ensure_settings(exe.to_str().unwrap(), false);
 
         assert_eq!(
             std::fs::read_to_string(dir.join("portable.txt")).unwrap(),
@@ -430,7 +448,7 @@ mod tests {
         std::fs::create_dir_all(appdata_ini.parent().unwrap()).unwrap();
         std::fs::write(&appdata_ini, "[Analytics]\nEnabled = True\n").unwrap();
 
-        let result = ensure_settings(exe.to_str().unwrap());
+        let result = ensure_settings(exe.to_str().unwrap(), false);
 
         assert_eq!(
             result.config_path,
@@ -442,6 +460,73 @@ mod tests {
                 .contains("Enabled = False"),
             "the appdata candidate must be untouched"
         );
+    }
+
+    // --- renderer seed (spec 2026-09-17-vulkan-renderer-seed-design) --------
+
+    fn dolphin_ini(dir: &Path) -> PathBuf {
+        dir.join("User").join("Config").join("Dolphin.ini")
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn dolphin_fresh_install_seeds_the_vulkan_backend() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (exe, dir) = make_exe(temp.path());
+
+        let result = ensure_settings(exe.to_str().unwrap(), true);
+
+        assert!(result.changed);
+        let text = std::fs::read_to_string(dolphin_ini(&dir)).unwrap();
+        assert!(text.contains("[Core]"), "{text}");
+        assert!(text.contains("GFXBackend = Vulkan"), "{text}");
+    }
+
+    #[test]
+    fn dolphin_fresh_install_keeps_an_existing_backend() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (exe, dir) = make_exe(temp.path());
+        let ini = dolphin_ini(&dir);
+        std::fs::create_dir_all(ini.parent().unwrap()).unwrap();
+        std::fs::write(&ini, "[Core]\nGFXBackend = OGL\n").unwrap();
+
+        ensure_settings(exe.to_str().unwrap(), true);
+
+        let text = std::fs::read_to_string(&ini).unwrap();
+        assert!(text.contains("GFXBackend = OGL"), "{text}");
+        assert!(!text.contains("Vulkan"), "{text}");
+    }
+
+    #[test]
+    fn dolphin_non_fresh_call_never_adds_the_backend() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (exe, dir) = make_exe(temp.path());
+
+        ensure_settings(exe.to_str().unwrap(), false);
+
+        let text = std::fs::read_to_string(dolphin_ini(&dir)).unwrap();
+        assert!(!text.contains("GFXBackend"), "{text}");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn dolphin_second_fresh_call_is_a_no_op() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (exe, _dir) = make_exe(temp.path());
+
+        let first = ensure_settings(exe.to_str().unwrap(), true);
+        let second = ensure_settings(exe.to_str().unwrap(), true);
+
+        assert!(first.changed);
+        assert!(!second.changed);
     }
 
     // --- ensure_skip_ipl / divergence from ensure_settings ---------------
@@ -490,7 +575,7 @@ mod tests {
         std::fs::write(&appdata_ini, "[Core]\nSkipIPL = True\n").unwrap();
 
         let skip_result = ensure_skip_ipl(exe.to_str().unwrap());
-        let settings_result = ensure_settings(exe.to_str().unwrap());
+        let settings_result = ensure_settings(exe.to_str().unwrap(), false);
 
         assert_eq!(skip_result.config_path, Some(appdata_ini));
         assert_eq!(
