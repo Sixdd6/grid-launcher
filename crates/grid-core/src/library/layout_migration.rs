@@ -371,6 +371,9 @@ pub enum MigrationOutcome {
         /// Install directories left unlinked because another install of the
         /// same emulator already owns `saves/<Emulator>`.
         skipped_duplicates: usize,
+        /// Entries left unlinked because the directory holding their
+        /// executable is not on disk.
+        skipped_missing: usize,
         rows_rewritten: usize,
     },
     /// A step failed. The version stays at 0, the library stays readable
@@ -444,7 +447,8 @@ fn migrate(
 
     let games_moved = step_games(library, &plan)?;
     let emulators_renamed = step_emulators(library, config, &plan, profiles)?;
-    let (links_changed, skipped_duplicates) = step_user_data(library, config, &plan, profiles)?;
+    let (links_changed, skipped_duplicates, skipped_missing) =
+        step_user_data(library, config, &plan, profiles)?;
     // The pairs describe renames that have LANDED, so they are only
     // complete once step 2 has run. The game set is derived from the
     // registry and the config, which step 1 does not touch, so it stands.
@@ -457,6 +461,7 @@ fn migrate(
         emulators_renamed,
         links_changed,
         skipped_duplicates,
+        skipped_missing,
         rows_rewritten,
     })
 }
@@ -619,17 +624,19 @@ fn merge_emulator_roots(source: &Path, dest: &Path) -> Result<(), String> {
 /// Step 3: point every install directory's `user_data` names at
 /// `saves/<Emulator>/`.
 ///
-/// Returns `(links changed, installs skipped as duplicates)`.
+/// Returns `(links changed, installs skipped as duplicates, installs skipped
+/// because the executable's directory is not on disk)`.
 fn step_user_data(
     library: &Path,
     config: &Config,
     plan: &RewritePlan,
     profiles: &[EmulatorProfile],
-) -> Result<(usize, usize), String> {
+) -> Result<(usize, usize, usize), String> {
     let root = library.join(EMULATORS_DIR);
     let names = entry_names(&root);
     let mut changed = 0;
     let mut skipped_duplicates = 0;
+    let mut skipped_missing = 0;
     let mut seen: BTreeSet<String> = BTreeSet::new();
     // `saves/<Profile>` → the install directory that filled it. A second
     // install of the same profile must NOT be linked: its own directories
@@ -663,6 +670,19 @@ fn step_user_data(
         let install_dir = root.join(&install_name);
         let target = saves_dir(library, &profile.name);
 
+        // Nothing is linked at a guessed location: the install root is not
+        // where any reader looks when the entry names a nested executable,
+        // so an entry whose directory is not on disk is left alone rather
+        // than given links nothing will follow.
+        let Some(links_at) = links_directory(&install_dir, &rest) else {
+            tracing::warn!(
+                expected = %install_dir.join(rest.trim_start_matches(is_separator)).display(),
+                "the executable of this emulator entry is not in the install directory; its user data is not linked"
+            );
+            skipped_missing += 1;
+            continue;
+        };
+
         if let Some(first) = populated.get(&profile.name) {
             tracing::warn!(
                 kept = %first.display(),
@@ -672,8 +692,7 @@ fn step_user_data(
             skipped_duplicates += 1;
             continue;
         }
-        let links_at = links_directory(&install_dir, &rest);
-        if has_entries(&target) && !owns_links(&links_at, &profile.user_data) {
+        if has_entries(&target) && !owns_links(&links_at, &target, &profile.user_data) {
             tracing::warn!(
                 saves = %target.display(),
                 skipped = %install_dir.display(),
@@ -698,24 +717,21 @@ fn step_user_data(
         }
         populated.insert(profile.name.clone(), install_dir);
     }
-    Ok((changed, skipped_duplicates))
+    Ok((changed, skipped_duplicates, skipped_missing))
 }
 
 /// The directory the links belong in: the parent of the stored executable
-/// re-rooted onto `install_dir`, or `install_dir` itself when that parent is
-/// not on disk (a stale entry path).
-fn links_directory(install_dir: &Path, rest: &str) -> PathBuf {
+/// re-rooted onto `install_dir`. `None` when that directory is not on disk —
+/// the entry points at a tree this migration does not recognize, and the
+/// install root is a guess no reader would follow.
+fn links_directory(install_dir: &Path, rest: &str) -> Option<PathBuf> {
     let mut components: Vec<&str> = rest.split(is_separator).filter(|s| !s.is_empty()).collect();
     components.pop(); // the executable's own file name
     let mut dir = install_dir.to_path_buf();
     for component in components {
         dir.push(component);
     }
-    if dir.is_dir() {
-        dir
-    } else {
-        install_dir.to_path_buf()
-    }
+    dir.is_dir().then_some(dir)
 }
 
 /// Whether `dir` exists and holds at least one entry.
@@ -723,14 +739,29 @@ fn has_entries(dir: &Path) -> bool {
     std::fs::read_dir(dir).is_ok_and(|mut entries| entries.next().is_some())
 }
 
-/// Whether ANY `user_data` name under `dir` is already a link — the mark of
-/// the install that filled the saves directory. A run interrupted part way
-/// through one install's list must finish it, so one link is enough;
-/// a genuine second install has none.
-fn owns_links(dir: &Path, user_data: &[String]) -> bool {
-    user_data
-        .iter()
-        .any(|name| super::user_data_links::is_link(&dir.join(name.trim())))
+/// Whether ANY `user_data` name under `dir` is a link that resolves INSIDE
+/// `target` — the mark of the install that filled that saves directory. A
+/// run interrupted part way through one install's list must finish it, so
+/// one such link is enough.
+///
+/// Where the link points is what carries this: a legacy install can be
+/// carrying a stale link of its own (to a dead path, or to somewhere else
+/// entirely), and treating that as ownership would merge its real
+/// directories into a saves directory another install already filled. The
+/// only case this cannot tell apart is a duplicate whose links already point
+/// at THIS saves directory — which is exactly the interrupted first install.
+fn owns_links(dir: &Path, target: &Path, user_data: &[String]) -> bool {
+    let Ok(saves) = std::fs::canonicalize(target) else {
+        return false;
+    };
+    user_data.iter().any(|name| {
+        let link = dir.join(name.trim());
+        super::user_data_links::is_link(&link)
+            && super::user_data_links::read_link_target(&link)
+                .ok()
+                .and_then(|path| std::fs::canonicalize(path).ok())
+                .is_some_and(|resolved| resolved.starts_with(&saves))
+    })
 }
 
 /// Step 4: the config, the registry and the three emulator config files that
@@ -1599,6 +1630,7 @@ mod tests {
                 emulators_renamed: 2,
                 links_changed: 2,
                 skipped_duplicates: 0,
+                skipped_missing: 0,
                 rows_rewritten: 4,
             }
         );
@@ -1858,6 +1890,7 @@ mod tests {
                 emulators_renamed: 0,
                 links_changed: 0,
                 skipped_duplicates: 0,
+                skipped_missing: 0,
                 rows_rewritten: 0,
             }
         );
@@ -2200,6 +2233,104 @@ mod tests {
             ),
             "card"
         );
+    }
+
+    /// A legacy install can carry a stale link of its own. Ownership of a
+    /// populated `saves/<Emulator>` is only ever proved by a link that
+    /// RESOLVES there — otherwise this install's real directories would be
+    /// merged destination-wins into another install's saves.
+    #[cfg(unix)]
+    #[test]
+    fn a_stale_link_does_not_grant_ownership_of_a_populated_saves_dir() {
+        let fixture = emulator_fixture(|_root, library| {
+            // The first install already filled the saves directory and is
+            // gone from the config.
+            write_file(
+                &library.join("saves/PCSX2 (Playstation 2)/memcards/slot1.mcd"),
+                "FIRST",
+            );
+
+            let install = library.join("Emulators/PCSX2 (Playstation 2)-v1.2");
+            write_file(&install.join("pcsx2.AppImage"), "pcsx2");
+            write_file(&install.join("inis/PCSX2.ini"), "[UI]\n");
+            std::os::unix::fs::symlink("/nonexistent", install.join("memcards")).unwrap();
+
+            vec![pcsx2_entry(
+                "PCSX2 1.2",
+                format!(
+                    "{}/Emulators/PCSX2 (Playstation 2)-v1.2/pcsx2.AppImage",
+                    library.to_string_lossy()
+                ),
+            )]
+        });
+
+        let outcome = fixture.run();
+        let MigrationOutcome::Completed {
+            links_changed,
+            skipped_duplicates,
+            ..
+        } = outcome
+        else {
+            panic!("{outcome:?}");
+        };
+        assert_eq!((links_changed, skipped_duplicates), (0, 1));
+
+        // The only entry, so step 2 renamed it to the profile name.
+        let install = fixture.library.join("emulators/PCSX2 (Playstation 2)");
+        assert!(
+            !is_link(&install.join("inis")) && install.join("inis").is_dir(),
+            "the install keeps its own directories: {}",
+            tree(&install).join(", ")
+        );
+        assert_eq!(read(&install.join("inis/PCSX2.ini")), "[UI]\n");
+        assert_eq!(
+            read(
+                &fixture
+                    .library
+                    .join("saves/PCSX2 (Playstation 2)/memcards/slot1.mcd")
+            ),
+            "FIRST",
+            "the other install's card is untouched"
+        );
+    }
+
+    /// The install root is a guess no reader follows, so an entry whose
+    /// executable directory is not on disk gets no links at all.
+    #[cfg(unix)]
+    #[test]
+    fn an_entry_whose_executable_directory_is_missing_is_skipped_not_linked_at_the_root() {
+        let fixture = emulator_fixture(|_root, library| {
+            // The binary is at the install root; the entry says `bin/`.
+            let install = library.join("Emulators/PCSX2 (Playstation 2)-latest");
+            write_file(&install.join("pcsx2.AppImage"), "pcsx2");
+            vec![pcsx2_entry(
+                "PCSX2 (Playstation 2)",
+                format!(
+                    "{}/Emulators/PCSX2 (Playstation 2)-latest/bin/pcsx2.AppImage",
+                    library.to_string_lossy()
+                ),
+            )]
+        });
+
+        let outcome = fixture.run();
+        let MigrationOutcome::Completed {
+            links_changed,
+            skipped_missing,
+            ..
+        } = outcome
+        else {
+            panic!("{outcome:?}");
+        };
+        assert_eq!((links_changed, skipped_missing), (0, 1));
+
+        let install = fixture.library.join("emulators/PCSX2 (Playstation 2)");
+        let entries = tree(&install);
+        assert!(
+            !entries.iter().any(|e| e.ends_with('@')),
+            "nothing may be linked at a guessed location: {}",
+            entries.join(", ")
+        );
+        assert!(!fixture.library.join("saves").exists());
     }
 
     // --- config rewriting (item 3 and 4) ---------------------------------

@@ -135,6 +135,7 @@ pub fn run() {
                 emulators_renamed,
                 links_changed,
                 skipped_duplicates,
+                skipped_missing,
                 rows_rewritten,
             } => {
                 tracing::info!(
@@ -142,6 +143,7 @@ pub fn run() {
                     emulators_renamed,
                     links_changed,
                     skipped_duplicates,
+                    skipped_missing,
                     rows_rewritten,
                     "library moved to layout v1"
                 );
