@@ -59,7 +59,7 @@ use extract::{
 use launch_select::select_launch_file;
 use paths::{
     archive_name, candidate_archives, candidate_extracted_dirs, extraction_dir, platform_dir,
-    sanitize_component, saves_dir,
+    sanitize_component, saves_dir, SAVES_DIR,
 };
 use platforms::{
     is_native_platform, is_ps3_platform, is_ps4_platform, is_ps5_platform, is_xbox360_platform,
@@ -2223,11 +2223,15 @@ impl InstallService {
         // install, and a failure before this point must keep every archive so
         // a retry skips the finished downloads (doc 03 invariant 5).
         let mut extracted_archives: Vec<&Path> = Vec::new();
+        // Canonical only when the tree already exists — on a fresh install
+        // there is nothing to protect yet, and no earlier run could have
+        // left a user data link behind for `merge_tree_into` to find.
+        let protected_root = fs::canonicalize(job.library.join(SAVES_DIR)).ok();
 
         if should_extract(EMULATOR_PLATFORM, archive) {
             let staging = install_dir.join(EXTRACT_TMP_DIR);
             extract_archive(archive, &staging, &mut progress)?;
-            let merged = merge_tree_into(&staging, install_dir);
+            let merged = merge_tree_into(&staging, install_dir, protected_root.as_deref());
             let _ = fs::remove_dir_all(&staging);
             merged?;
             extracted_archives.push(archive);
@@ -2247,7 +2251,7 @@ impl InstallService {
             // reference's spec index, assigned when the plan was built.
             let staging = install_dir.join(format!(".supp-tmp-{}", index + 1));
             extract_archive(supplemental, &staging, &mut progress)?;
-            let merged = merge_tree_into(&staging, install_dir);
+            let merged = merge_tree_into(&staging, install_dir, protected_root.as_deref());
             let _ = fs::remove_dir_all(&staging);
             merged?;
             extracted_archives.push(supplemental);
@@ -2964,11 +2968,22 @@ fn append_warning(warning: &mut String, line: &str) {
 /// cross a filesystem boundary and the result is identical to a copy with
 /// half the writes.
 ///
-/// A `dest` entry that is already a user data link (Task 5) is never
-/// written through: it points at `saves/`, and the archive's own copy of
-/// that directory is discarded instead of following the link and
-/// overwriting a user's data on every reinstall.
-fn merge_tree_into(src: &Path, dest: &Path) -> Result<(), LibraryError> {
+/// A symlink already at `dest` is normally REPLACED like any other entry —
+/// an archive itself may ship one (a `.so.1 -> .so.1.2` a tar unpacks), and
+/// an update repointing it must win, exactly as a dangling link loses to
+/// the real file the new archive now provides. The one carve-out is
+/// `protected_root`: a `dest` link whose target canonicalizes to somewhere
+/// inside it is left alone, and the archive's own copy of that path is
+/// discarded instead — this is what keeps a user data link (Task 5, which
+/// always points inside `<library>/saves`) from being overwritten by a
+/// reinstall's bundled defaults. `None` protects nothing (every call site
+/// outside the emulator install/update path). A dangling link never
+/// canonicalizes, so it is never protected regardless of `protected_root`.
+fn merge_tree_into(
+    src: &Path,
+    dest: &Path,
+    protected_root: Option<&Path>,
+) -> Result<(), LibraryError> {
     fs::create_dir_all(dest)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
@@ -2978,17 +2993,17 @@ fn merge_tree_into(src: &Path, dest: &Path) -> Result<(), LibraryError> {
         // itself rather than being descended into.
         let from_is_dir = entry.file_type()?.is_dir();
 
-        if user_data_links::is_link(&to) {
+        if is_protected_link(&to, protected_root) {
             if from_is_dir {
-                let _ = fs::remove_dir_all(&from);
+                fs::remove_dir_all(&from)?;
             } else {
-                let _ = fs::remove_file(&from);
+                fs::remove_file(&from)?;
             }
             continue;
         }
 
         if from_is_dir && to.is_dir() {
-            merge_tree_into(&from, &to)?;
+            merge_tree_into(&from, &to, protected_root)?;
             // Now empty; a failure to remove the husk is not worth failing
             // the install for, and the whole staging tree is deleted next.
             let _ = fs::remove_dir(&from);
@@ -3002,6 +3017,21 @@ fn merge_tree_into(src: &Path, dest: &Path) -> Result<(), LibraryError> {
         fs::rename(&from, &to)?;
     }
     Ok(())
+}
+
+/// [`merge_tree_into`]'s carve-out check: whether `to` is a symlink whose
+/// target canonicalizes to somewhere inside `protected_root` (itself
+/// already canonical). `protected_root` being `None`, `to` not being a
+/// link, or `to` being a dangling link (canonicalize fails) all answer
+/// `false`.
+fn is_protected_link(to: &Path, protected_root: Option<&Path>) -> bool {
+    let Some(root) = protected_root else {
+        return false;
+    };
+    if !user_data_links::is_link(to) {
+        return false;
+    }
+    fs::canonicalize(to).is_ok_and(|target| target.starts_with(root))
 }
 
 fn path_string(path: &Path) -> String {
@@ -3567,6 +3597,113 @@ mod tests {
                 dir.path().join("CUSA12345/eboot.bin"),
                 dir.path().join("CUSA12345/sce_sys/param.sfo"),
             ]
+        );
+    }
+
+    // --- merge_tree_into: protected_root --------------------------------------
+
+    #[cfg(unix)]
+    #[test]
+    fn merge_keeps_a_link_into_the_protected_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("install");
+        let saves = temp.path().join("saves");
+        fs::create_dir_all(&dest).unwrap();
+        fs::create_dir_all(saves.join("memcards")).unwrap();
+        fs::write(saves.join("memcards/slot1.mcd"), b"MINE").unwrap();
+        std::os::unix::fs::symlink(saves.join("memcards"), dest.join("memcards")).unwrap();
+
+        let src = temp.path().join("staging");
+        fs::create_dir_all(src.join("memcards")).unwrap();
+        fs::write(src.join("memcards/slot1.mcd"), b"DEFAULT").unwrap();
+
+        let protected_root = fs::canonicalize(&saves).unwrap();
+        merge_tree_into(&src, &dest, Some(&protected_root)).unwrap();
+
+        assert!(
+            user_data_links::is_link(&dest.join("memcards")),
+            "the link must survive"
+        );
+        assert_eq!(
+            fs::read(saves.join("memcards/slot1.mcd")).unwrap(),
+            b"MINE",
+            "the archive's own copy must never overwrite the saved file"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn merge_replaces_an_archive_shipped_symlink_on_update() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("install");
+        fs::create_dir_all(dest.join("lib")).unwrap();
+        fs::write(dest.join("lib/a"), b"a").unwrap();
+        fs::write(dest.join("lib/b"), b"b").unwrap();
+        std::os::unix::fs::symlink("a", dest.join("lib/foo.so.1")).unwrap();
+
+        let src = temp.path().join("staging");
+        fs::create_dir_all(src.join("lib")).unwrap();
+        std::os::unix::fs::symlink("b", src.join("lib/foo.so.1")).unwrap();
+
+        // No `saves/` involved: nothing is protected.
+        merge_tree_into(&src, &dest, None).unwrap();
+
+        assert_eq!(
+            fs::read_link(dest.join("lib/foo.so.1")).unwrap(),
+            Path::new("b"),
+            "the update must repoint the symlink"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn merge_replaces_a_dangling_link_with_the_archive_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("install");
+        fs::create_dir_all(&dest).unwrap();
+        std::os::unix::fs::symlink("nowhere", dest.join("x")).unwrap();
+
+        let src = temp.path().join("staging");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(src.join("x"), b"real file").unwrap();
+
+        // Even protected against a `saves/` root, a dangling link never
+        // canonicalizes, so it is never protected.
+        let saves = temp.path().join("saves");
+        fs::create_dir_all(&saves).unwrap();
+        let protected_root = fs::canonicalize(&saves).unwrap();
+        merge_tree_into(&src, &dest, Some(&protected_root)).unwrap();
+
+        assert!(!user_data_links::is_link(&dest.join("x")));
+        assert_eq!(fs::read(dest.join("x")).unwrap(), b"real file");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn merge_with_no_protected_root_keeps_dest_loses_for_links() {
+        let temp = tempfile::tempdir().unwrap();
+        let dest = temp.path().join("install");
+        let saves = temp.path().join("saves");
+        fs::create_dir_all(&dest).unwrap();
+        fs::create_dir_all(saves.join("memcards")).unwrap();
+        fs::write(saves.join("memcards/slot1.mcd"), b"MINE").unwrap();
+        std::os::unix::fs::symlink(saves.join("memcards"), dest.join("memcards")).unwrap();
+
+        let src = temp.path().join("staging");
+        fs::create_dir_all(src.join("memcards")).unwrap();
+        fs::write(src.join("memcards/slot1.mcd"), b"DEFAULT").unwrap();
+
+        merge_tree_into(&src, &dest, None).unwrap();
+
+        // A directory-shaped link is recursed INTO rather than replaced (it
+        // is followed, like any other directory), so the link node itself
+        // survives either way — what `protected_root` controls is whether
+        // the file inside is protected from the archive's overwrite.
+        assert!(user_data_links::is_link(&dest.join("memcards")));
+        assert_eq!(
+            fs::read(saves.join("memcards/slot1.mcd")).unwrap(),
+            b"DEFAULT",
+            "with no protected root, the archive's file must win over the saved one"
         );
     }
 
