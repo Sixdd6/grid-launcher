@@ -358,12 +358,25 @@ describe('emulators', () => {
     });
   });
 
-  it('shows the DuckStation controller note and none for RetroArch', async () => {
+  it('shows the DuckStation controller note and none for RetroArch, and seeds its Vulkan renderer', async () => {
+    // A real stub in its OWN directory: a manual add is a fresh install, so
+    // the add-time autoconfig sync writes `settings.ini` beside the
+    // executable and the renderer seed
+    // (docs/superpowers/specs/2026-09-17-vulkan-renderer-seed-design.md)
+    // must land in it. Its own directory keeps that file away from the
+    // RetroArch stub. `delete_emulator` leaves hand-configured paths on
+    // disk, so the cleanup below removes only the row.
+    const duckDir = path.join(dataDir(), 'stubs', 'duckstation');
+    mkdirSync(duckDir, { recursive: true });
+    const duckPath = path.join(duckDir, 'duckstation');
+    writeFileSync(duckPath, '#!/bin/sh\nexit 0\n');
+    chmodSync(duckPath, 0o755);
+
     await $(testId('emulator-add')).click();
     await $(testId('emu-add-tab-manual')).click();
     await $(testId('emu-form-name')).waitForExist({ timeout: TRANSITION_TIMEOUT });
     await $(testId('emu-form-name')).setValue('DuckStation');
-    await $(testId('emu-form-path')).setValue('/nonexistent/duckstation');
+    await $(testId('emu-form-path')).setValue(duckPath);
     await $(testId('emu-form-save')).click();
     await $(testId(`emulator-row-${sanitize('DuckStation')}`)).waitForExist({
       timeout: TRANSITION_TIMEOUT,
@@ -374,6 +387,17 @@ describe('emulators', () => {
       'RetroAchievements: Configure login via Emulator Settings → Achievements (tokens are machine-encrypted)',
     );
     await expect($(testId('emulator-note-azahar-duckstation'))).not.toExist();
+
+    // The sync runs after the config save, on the blocking pool; poll for
+    // the file rather than reading it right away.
+    const settingsIni = path.join(duckDir, 'settings.ini');
+    await browser.waitUntil(() => existsSync(settingsIni), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: `the add-time autoconfig never wrote ${settingsIni}`,
+    });
+    const ini = readFileSync(settingsIni, 'utf-8');
+    expect(ini).toContain('[GPU]');
+    expect(ini).toContain('Renderer = Vulkan');
 
     // Clean up so the defaults cases below still see the single RetroArch row.
     const deleteBtn = $(testId(`emulator-delete-${sanitize('DuckStation')}`));
