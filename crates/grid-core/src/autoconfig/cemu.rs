@@ -124,9 +124,12 @@ const DEFAULT_CEMU_SDL_CONTROLLER_PROFILE: &str = r#"<?xml version="1.0" encodin
 </emulated_controller>
 "#;
 
-/// cemu.py:115-237, transcribed verbatim: first line the UPPERCASE-`UTF-8`
-/// XML declaration, last line `</content>`, exactly one trailing newline.
-/// The six forced elements already carry their desired values here, so the
+/// cemu.py:115-237, transcribed verbatim EXCEPT `<Graphic><api>`, which is
+/// `1` (Vulkan) here where the reference pinned `0` (OpenGL): Cemu's own
+/// default has been Vulkan since 1.22.10, and the OpenGL pin booted Breath
+/// of the Wild to a black screen. First line the UPPERCASE-`UTF-8` XML
+/// declaration, last line `</content>`, exactly one trailing newline. The
+/// six forced elements already carry their desired values here, so the
 /// create-from-template branch never needs to touch this text.
 const DEFAULT_CEMU_SETTINGS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <content>
@@ -186,7 +189,7 @@ const DEFAULT_CEMU_SETTINGS_XML: &str = r#"<?xml version="1.0" encoding="UTF-8"?
     <GameCache/>
     <GraphicPack/>
     <Graphic>
-        <api>0</api>
+        <api>1</api>
         <device>00000000000000000000000000000000</device>
         <VSync>0</VSync>
         <GX2DrawdoneSync>true</GX2DrawdoneSync>
@@ -356,12 +359,13 @@ fn find_root_span(content: &str) -> Option<(usize, usize)> {
 }
 
 /// D11: locate the `<content>...</content>` root via [`find_root_span`],
-/// apply the six forced elements in order, and return the (possibly
-/// edited) root span plus whether anything changed. `None` on any parse
-/// failure: empty (after trim) content, no un-commented `<content>` tag, or
-/// a close tag that doesn't follow the open tag — cemu.py:308-312's
+/// apply the six forced elements in order, then — only when `seed_renderer`
+/// — the `<Graphic><api>` seed ([`seed_graphic_api`]), and return the
+/// (possibly edited) root span plus whether anything changed. `None` on any
+/// parse failure: empty (after trim) content, no un-commented `<content>`
+/// tag, or a close tag that doesn't follow the open tag — cemu.py:308-312's
 /// `root is None` / `ET.ParseError` branch.
-fn apply_forced_elements(content: &str) -> Option<(String, bool)> {
+fn apply_forced_elements(content: &str, seed_renderer: bool) -> Option<(String, bool)> {
     if content.trim().is_empty() {
         return None;
     }
@@ -372,8 +376,54 @@ fn apply_forced_elements(content: &str) -> Option<(String, bool)> {
     for ((tag, value), re) in FORCED_ELEMENTS.iter().zip(FORCED_ELEMENT_REGEXES.iter()) {
         changed |= set_or_insert_element(&mut root_span, tag, value, re);
     }
+    if seed_renderer {
+        changed |= seed_graphic_api(&mut root_span);
+    }
 
     Some((root_span, changed))
+}
+
+/// The `<Graphic>...</Graphic>` element, matched on the literal open tag WITH
+/// its `>` so the sibling `<GraphicPack/>` can never match. Group 1 is the
+/// inner text; its start is where the `<api>` child goes.
+static GRAPHIC_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<Graphic>(.*?)</Graphic>").expect("static regex is valid"));
+
+/// An `<api>` child, probed ONLY inside `<Graphic>`'s inner text — `<Audio>`
+/// has its own `<api>` and must not satisfy the probe.
+static GRAPHIC_API_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"<api>[^<]*</api>").expect("static regex is valid"));
+
+/// Cemu's renderer enum: `1` is Vulkan.
+const GRAPHIC_API_VULKAN: &str = "<api>1</api>";
+
+/// The renderer seed for the MERGE branch (spec
+/// `2026-09-17-vulkan-renderer-seed-design.md`): add `<api>1</api>` inside
+/// `<Graphic>` when that element has no `<api>` child; when `<Graphic>` is
+/// absent (or self-closing) create it with the `<api>` child ONLY, right
+/// before `</content>` — never the full template block. Per-key preserve:
+/// any existing `<api>` value, `0` included, is left alone. Returns whether
+/// `root_span` changed.
+fn seed_graphic_api(root_span: &mut String) -> bool {
+    if let Some(caps) = GRAPHIC_RE.captures(root_span.as_str()) {
+        let inner = caps.get(1).unwrap();
+        if GRAPHIC_API_RE.is_match(inner.as_str()) {
+            return false;
+        }
+        let insert_at = inner.start();
+        root_span.insert_str(insert_at, GRAPHIC_API_VULKAN);
+        return true;
+    }
+    if let Some(pos) = root_span.find("<Graphic/>") {
+        root_span.replace_range(
+            pos..pos + "<Graphic/>".len(),
+            "<Graphic><api>1</api></Graphic>",
+        );
+        return true;
+    }
+    let insert_at = root_span.len() - CONTENT_CLOSE.len();
+    root_span.insert_str(insert_at, "<Graphic><api>1</api></Graphic>");
+    true
 }
 
 fn is_windows_host() -> bool {
@@ -432,7 +482,13 @@ fn settings_path_candidates_for(emulator_path: &str, is_windows: bool) -> Vec<Pa
 /// unlike the template) followed by the edited root, with no added trailing
 /// newline. **Every** failure — parse error and I/O alike — yields
 /// [`EnsureResult::unchanged`] (cemu.py:326-327's bare `except Exception`).
-pub fn ensure_settings(emulator_path: &str) -> EnsureResult {
+///
+/// `fresh_install` gates the renderer seed on the merge branch
+/// ([`seed_graphic_api`]): only a fresh install, and never on macOS, adds
+/// `<Graphic><api>1</api>` to an existing file lacking it. The
+/// create-from-template branch is unaffected — the template already says
+/// `1`.
+pub fn ensure_settings(emulator_path: &str, fresh_install: bool) -> EnsureResult {
     let trimmed = emulator_path.trim();
     if trimmed.is_empty() {
         return EnsureResult::unchanged();
@@ -462,7 +518,8 @@ pub fn ensure_settings(emulator_path: &str) -> EnsureResult {
         return EnsureResult::unchanged();
     };
 
-    let Some((new_root_span, changed)) = apply_forced_elements(&content) else {
+    let seed_renderer = fresh_install && cfg!(not(target_os = "macos"));
+    let Some((new_root_span, changed)) = apply_forced_elements(&content, seed_renderer) else {
         return EnsureResult::unchanged();
     };
 
@@ -552,7 +609,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let (exe, dir) = make_exe(temp.path());
 
-        let result = ensure_settings(exe.to_str().unwrap());
+        let result = ensure_settings(exe.to_str().unwrap(), false);
 
         assert!(result.changed);
         let target = dir.join("portable").join("settings.xml");
@@ -570,7 +627,7 @@ mod tests {
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<content>\n<use_discord_presence>true</use_discord_presence>\n<check_update>true</check_update>\n<receive_untested_updates>true</receive_untested_updates>\n<gp_download>false</gp_download>\n<fullscreen>true</fullscreen>\n<window_maximized>false</window_maximized>\n</content>\n",
         );
 
-        let result = ensure_settings(exe.to_str().unwrap());
+        let result = ensure_settings(exe.to_str().unwrap(), false);
 
         assert!(result.changed);
         let text = std::fs::read_to_string(&target).unwrap();
@@ -592,7 +649,7 @@ mod tests {
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<content>\n<mlc_path>/some/path</mlc_path>\n</content>\n",
         );
 
-        ensure_settings(exe.to_str().unwrap());
+        ensure_settings(exe.to_str().unwrap(), false);
 
         let text = std::fs::read_to_string(dir.join("portable").join("settings.xml")).unwrap();
         assert!(
@@ -608,7 +665,7 @@ mod tests {
         let body = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<content>\n<use_discord_presence>false</use_discord_presence>\n<check_update>false</check_update>\n<receive_untested_updates>false</receive_untested_updates>\n<gp_download>true</gp_download>\n<fullscreen>false</fullscreen>\n<window_maximized>true</window_maximized>\n<Audio><api>3</api><TVVolume>100</TVVolume></Audio>\n</content>\n";
         let target = write_settings(&dir, body);
 
-        let result = ensure_settings(exe.to_str().unwrap());
+        let result = ensure_settings(exe.to_str().unwrap(), false);
 
         assert!(!result.changed);
         assert_eq!(std::fs::read_to_string(&target).unwrap(), body);
@@ -620,7 +677,7 @@ mod tests {
         let (exe, dir) = make_exe(temp.path());
         write_settings(&dir, "<not_content>oops</not_content>\n");
 
-        let result = ensure_settings(exe.to_str().unwrap());
+        let result = ensure_settings(exe.to_str().unwrap(), false);
 
         assert!(!result.changed);
         assert_eq!(result.config_path, None);
@@ -632,10 +689,127 @@ mod tests {
         let (exe, dir) = make_exe(temp.path());
         write_settings(&dir, "   \n  \n");
 
-        let result = ensure_settings(exe.to_str().unwrap());
+        let result = ensure_settings(exe.to_str().unwrap(), false);
 
         assert!(!result.changed);
         assert_eq!(result.config_path, None);
+    }
+
+    // --- renderer seed (spec 2026-09-17-vulkan-renderer-seed-design) --------
+
+    /// Every forced element already at its value, so the ONLY thing a fresh
+    /// call can still change is the renderer seed.
+    const SIX_FORCED: &str = "<use_discord_presence>false</use_discord_presence>\n<check_update>false</check_update>\n<receive_untested_updates>false</receive_untested_updates>\n<gp_download>true</gp_download>\n<fullscreen>false</fullscreen>\n<window_maximized>true</window_maximized>\n";
+
+    fn settled_body(extra: &str) -> String {
+        format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<content>\n{SIX_FORCED}{extra}</content>\n"
+        )
+    }
+
+    #[test]
+    fn cemu_template_pins_the_vulkan_renderer() {
+        assert!(DEFAULT_CEMU_SETTINGS_XML.contains("<api>1</api>"));
+        assert!(!DEFAULT_CEMU_SETTINGS_XML.contains("<api>0</api>"));
+        assert!(
+            DEFAULT_CEMU_SETTINGS_XML.contains("<api>3</api>"),
+            "the Audio api is a different element and stays 3"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn cemu_fresh_install_seeds_vulkan_inside_an_existing_graphic_element() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+        let target = write_settings(
+            &dir,
+            &settled_body(
+                "<Graphic>\n<device>abc</device>\n</Graphic>\n<Audio><api>3</api></Audio>\n",
+            ),
+        );
+
+        let result = ensure_settings(exe.to_str().unwrap(), true);
+
+        assert!(result.changed);
+        let text = std::fs::read_to_string(&target).unwrap();
+        assert!(
+            text.contains("<Graphic><api>1</api>\n<device>abc</device>"),
+            "the api child goes first inside <Graphic>: {text}"
+        );
+        assert_eq!(text.matches("<api>1</api>").count(), 1, "{text}");
+        assert!(
+            text.contains("<Audio><api>3</api></Audio>"),
+            "the Audio api is not the Graphic api: {text}"
+        );
+    }
+
+    #[test]
+    fn cemu_fresh_install_keeps_an_existing_graphic_api_value() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+        let body = settled_body("<Graphic><api>0</api></Graphic>\n");
+        let target = write_settings(&dir, &body);
+
+        let result = ensure_settings(exe.to_str().unwrap(), true);
+
+        assert!(!result.changed);
+        let text = std::fs::read_to_string(&target).unwrap();
+        assert!(text.contains("<api>0</api>"));
+        assert!(!text.contains("<api>1</api>"));
+        assert_eq!(text, body, "no write at all");
+    }
+
+    #[test]
+    fn cemu_non_fresh_call_never_adds_the_graphic_api() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+        let body = settled_body("<Graphic><device>abc</device></Graphic>\n");
+        let target = write_settings(&dir, &body);
+
+        let result = ensure_settings(exe.to_str().unwrap(), false);
+
+        assert!(!result.changed);
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), body);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn cemu_second_fresh_call_is_a_no_op() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+        write_settings(
+            &dir,
+            &settled_body("<Graphic><device>abc</device></Graphic>\n"),
+        );
+
+        let first = ensure_settings(exe.to_str().unwrap(), true);
+        let second = ensure_settings(exe.to_str().unwrap(), true);
+
+        assert!(first.changed);
+        assert!(!second.changed);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn cemu_fresh_install_creates_a_graphic_element_with_only_the_api_when_absent() {
+        let temp = tempfile::tempdir().unwrap();
+        let (exe, dir) = make_exe(temp.path());
+        let target = write_settings(&dir, &settled_body(""));
+
+        let result = ensure_settings(exe.to_str().unwrap(), true);
+
+        assert!(result.changed);
+        let text = std::fs::read_to_string(&target).unwrap();
+        assert!(
+            text.contains("<Graphic><api>1</api></Graphic></content>"),
+            "created right before the root close, api child only: {text}"
+        );
+        assert_eq!(text.matches("<Graphic>").count(), 1, "{text}");
+        assert!(
+            !text.contains("<device>"),
+            "not the full template block: {text}"
+        );
     }
 
     // --- comment-aware root-span scan (a decoy `<content>` inside a
@@ -673,7 +847,7 @@ mod tests {
         let body = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- example: <content>fake</content> -->\n<content>\n<use_discord_presence>false</use_discord_presence>\n<check_update>false</check_update>\n<receive_untested_updates>false</receive_untested_updates>\n<gp_download>true</gp_download>\n<fullscreen>false</fullscreen>\n<window_maximized>true</window_maximized>\n</content>\n";
         let target = write_settings(&dir, body);
 
-        let result = ensure_settings(exe.to_str().unwrap());
+        let result = ensure_settings(exe.to_str().unwrap(), false);
 
         assert!(!result.changed);
         assert_eq!(
@@ -694,7 +868,7 @@ mod tests {
         let body = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- example: <content>fake</content> -->\n<content>\n<use_discord_presence>true</use_discord_presence>\n<check_update>false</check_update>\n<receive_untested_updates>false</receive_untested_updates>\n<gp_download>true</gp_download>\n<fullscreen>false</fullscreen>\n<window_maximized>true</window_maximized>\n</content>\n";
         let target = write_settings(&dir, body);
 
-        let result = ensure_settings(exe.to_str().unwrap());
+        let result = ensure_settings(exe.to_str().unwrap(), false);
 
         assert!(result.changed);
         let text = std::fs::read_to_string(&target).unwrap();

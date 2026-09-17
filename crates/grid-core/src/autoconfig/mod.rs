@@ -687,7 +687,12 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
         );
     }
     if is_cemu(&subject, profiles) {
-        record(&mut report, name, "cemu", cemu::ensure_settings(path));
+        record(
+            &mut report,
+            name,
+            "cemu",
+            cemu::ensure_settings(path, ctx.fresh_install),
+        );
         record(
             &mut report,
             name,
