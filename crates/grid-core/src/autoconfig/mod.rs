@@ -280,6 +280,26 @@ pub fn is_pcsx2(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
     emulator_matches_tokens(entry, &["pcsx2"], profiles)
 }
 
+/// The directory an emulator entry actually keeps its data in — the base
+/// every relative profile directory (`memcards`, `sstates`, `bios`) and
+/// every `%EMULATOR_DIR%` token resolves against.
+///
+/// A PCSX2 entry goes through [`paths::pcsx2_data_root`], so the Linux
+/// AppImage answers `<exe dir>/PCSX2` (the only directory that build ever
+/// reads); every other entry keeps the plain [`paths::emulator_dir`] rule.
+/// `None` for a blank path.
+pub fn emulator_data_root(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> Option<PathBuf> {
+    let trimmed = entry.path.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let expanded = paths::expand_user(trimmed);
+    if is_pcsx2(entry, profiles) {
+        return paths::pcsx2_data_root(&expanded);
+    }
+    paths::emulator_dir(&expanded)
+}
+
 /// `_is_dolphin_emulator_name` (cloud_mixin.py:1372).
 pub fn is_dolphin(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
     emulator_matches_tokens(entry, &["dolphin"], profiles)
@@ -1097,6 +1117,60 @@ mod tests {
         assert!(!text.contains("second"), "only the FIRST target is written");
     }
 
+    /// End to end for the Linux AppImage: the managed ini lands under the
+    /// `PCSX2/` data root, its `[Folders] Bios` points at `<root>/bios` (the
+    /// relative firmware spec resolved against the same root), and no
+    /// `portable.ini` is left beside the AppImage.
+    #[test]
+    fn the_add_time_sync_roots_an_appimage_ini_and_bios_under_the_pcsx2_directory() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated(temp.path());
+
+        let install = temp.path().join("PCSX2");
+        let exe = install.join("pcsx2-2.5.0.AppImage");
+        touch(&exe);
+        let config = config_with(temp.path(), vec![entry("PCSX2", exe.to_str().unwrap())]);
+        let config_path = write_config(temp.path(), &config);
+
+        let mut pcsx2_profile = profile("PCSX2", &["pcsx2"]);
+        pcsx2_profile.firmware_directories = vec![crate::launch::profiles::FirmwareDirSpec {
+            path: "bios".to_string(),
+            keywords: None,
+        }];
+        let profiles = vec![pcsx2_profile];
+
+        let ctx = SyncContext {
+            config_path: &config_path,
+            platforms: &[],
+            platform_slugs: &no_slugs(),
+            ps3_library_path: String::new(),
+            ra: None,
+            profiles: &profiles,
+            fresh_install: true,
+        };
+        let report = sync_new_emulator("PCSX2", &ctx).unwrap();
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+
+        let data_root = install.join("PCSX2");
+        let ini_path = data_root.join("inis").join("PCSX2.ini");
+        let text = std::fs::read_to_string(&ini_path).unwrap();
+        let expected = paths::resolve_best_effort(&data_root.join("bios"));
+        assert!(
+            text.contains(&format!("Bios = {}", expected.display())),
+            "missing Bios = {} in:\n{text}",
+            expected.display()
+        );
+        assert!(
+            !install.join("portable.ini").exists(),
+            "the AppImage build reads no portable.ini"
+        );
+        assert!(
+            !install.join("inis").exists(),
+            "nothing may be written beside the AppImage"
+        );
+    }
+
     /// The routing entry is the TRIMMED one: a padded `entry.path` must not
     /// move `%EMULATOR_DIR%` (emulator_ui_mixin.py:383,405).
     #[test]
@@ -1382,9 +1456,11 @@ mod tests {
         let report = sync_new_emulator("PCSX2", &ctx).unwrap();
         assert!(report.warnings.is_empty(), "{:?}", report.warnings);
 
-        let emulator_dir = exe.parent().unwrap();
-        assert!(emulator_dir.join("portable.ini").is_file());
-        assert!(emulator_dir.join("inis").join("PCSX2.ini").is_file());
+        // An AppImage's data root is `<exe dir>/PCSX2`, and that build reads
+        // no `portable.ini`.
+        let data_root = exe.parent().unwrap().join("PCSX2");
+        assert!(!exe.parent().unwrap().join("portable.ini").exists());
+        assert!(data_root.join("inis").join("PCSX2.ini").is_file());
 
         let saved = Config::load(&config_path).unwrap();
         assert_eq!(saved.emulators[0].save_paths, "~/pcsx2/saves");
@@ -1665,8 +1741,14 @@ mod tests {
         };
         sync_new_emulator("PCSX2", &ctx).unwrap();
 
-        let ini =
-            std::fs::read_to_string(exe.parent().unwrap().join("inis").join("PCSX2.ini")).unwrap();
+        let ini = std::fs::read_to_string(
+            exe.parent()
+                .unwrap()
+                .join("PCSX2")
+                .join("inis")
+                .join("PCSX2.ini"),
+        )
+        .unwrap();
         assert!(
             !ini.contains("[Folders]"),
             "no profile, so no [Folders] section:\n{ini}"
@@ -1885,7 +1967,12 @@ mod tests {
 
         let pcsx2_exe = temp.path().join("PCSX2").join("pcsx2-qt.AppImage");
         touch(&pcsx2_exe);
-        let pcsx2_cfg = pcsx2_exe.parent().unwrap().join("inis").join("PCSX2.ini");
+        let pcsx2_cfg = pcsx2_exe
+            .parent()
+            .unwrap()
+            .join("PCSX2")
+            .join("inis")
+            .join("PCSX2.ini");
         std::fs::create_dir_all(pcsx2_cfg.parent().unwrap()).unwrap();
         std::fs::write(&pcsx2_cfg, "[UI]\nSentinelKey = keep\n").unwrap();
 

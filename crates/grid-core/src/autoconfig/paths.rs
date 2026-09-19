@@ -108,6 +108,37 @@ pub fn emulator_dir(path: &Path) -> Option<PathBuf> {
     path.parent().map(Path::to_path_buf)
 }
 
+/// Whether `path` names an AppImage: a case-insensitive `appimage`
+/// extension. One shared test, because several modules key a different
+/// data-root rule off it (`library::emulator_removal` also skips an
+/// AppImage when it salvages loose files).
+pub fn is_appimage(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("appimage"))
+}
+
+/// PCSX2's data root for the executable `exe`: `<emulator_dir>/PCSX2` for
+/// an AppImage, plain [`emulator_dir`] for every other binary.
+///
+/// PCSX2's AppImage build roots every data directory at
+/// `<directory of $APPIMAGE>/PCSX2` whenever `APPIMAGE` is set
+/// (`pcsx2/Pcsx2Config.cpp`). Neither a `portable.ini` beside the file nor
+/// `-portable` changes that: the portable-mode probe looks inside the
+/// read-only AppImage mount. On Windows `portable.ini` beside
+/// `pcsx2-qt.exe` does make the executable's directory the data root,
+/// which is what the non-AppImage arm keeps.
+///
+/// Lexical only, apart from [`emulator_dir`]'s own "is this a directory"
+/// test. `None` when there is no parent at all.
+pub fn pcsx2_data_root(exe: &Path) -> Option<PathBuf> {
+    let dir = emulator_dir(exe)?;
+    Some(if is_appimage(exe) {
+        dir.join("PCSX2")
+    } else {
+        dir
+    })
+}
+
 /// The RetroArch AppImage's portable home, `<parent>/<file name>.home/
 /// .config/retroarch`, when that directory exists. The AppImage runtime
 /// sets `$HOME` to `<AppImage>.home` whenever that directory exists next
@@ -307,6 +338,31 @@ mod tests {
             Some(dir.join("missing")),
             "a path that does not exist is treated as a file"
         );
+    }
+
+    #[test]
+    fn is_appimage_matches_the_extension_case_insensitively() {
+        assert!(is_appimage(Path::new("/games/pcsx2-2.5.0.AppImage")));
+        assert!(is_appimage(Path::new("/games/pcsx2.appimage")));
+        assert!(!is_appimage(Path::new("/games/pcsx2-qt.exe")));
+        assert!(!is_appimage(Path::new("/games/pcsx2-qt")));
+        assert!(
+            !is_appimage(Path::new("/games/AppImage")),
+            "a file NAMED AppImage has no extension"
+        );
+    }
+
+    #[test]
+    fn pcsx2_data_root_adds_the_pcsx2_directory_only_for_an_appimage() {
+        assert_eq!(
+            pcsx2_data_root(Path::new("/games/PCSX2/pcsx2-2.5.0.AppImage")),
+            Some(PathBuf::from("/games/PCSX2/PCSX2"))
+        );
+        assert_eq!(
+            pcsx2_data_root(Path::new("/games/PCSX2/pcsx2-qt.exe")),
+            Some(PathBuf::from("/games/PCSX2"))
+        );
+        assert_eq!(pcsx2_data_root(Path::new("")), None);
     }
 
     #[test]

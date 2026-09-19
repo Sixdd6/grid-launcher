@@ -16,18 +16,28 @@
 //! Spec deviation D2 (RA-keys-only fan-out) — no direct Python counterpart:
 //! [`ensure_ra_credentials`] is a narrow writer for just the three
 //! `[Achievements]` keys, mirroring `retroarch::ensure_ra_credentials`.
+//!
+//! Both writers target `<data root>/inis/PCSX2.ini`, where the data root is
+//! [`paths::pcsx2_data_root`]: `<exe dir>/PCSX2` for the Linux AppImage,
+//! which reads nothing else, and `<exe dir>` for every other binary. Only
+//! the non-AppImage arm gets the `portable.ini` marker.
 
 use std::path::{Path, PathBuf};
 
 use super::{paths, writers, EnsureResult, RaCredentials};
 
-/// Resolve the executable path to its `inis/PCSX2.ini` target, creating an
-/// empty `portable.ini` next to it when absent (pcsx2.py:178-194).
+/// Resolve the executable path to its `inis/PCSX2.ini` target under the
+/// data root [`paths::pcsx2_data_root`] reports, creating an empty
+/// `portable.ini` beside the executable when absent (pcsx2.py:178-194).
 ///
 /// `None` for a blank path, or when the (expanded, trimmed — D4) path does
 /// not exist as a file. A `portable.ini` write failure is swallowed
 /// (pcsx2.py:188-192): portable mode is best-effort, never a bail-out
 /// condition.
+///
+/// An AppImage gets NO `portable.ini` (user ruling, 2026-09-19): that build
+/// never reads one — it roots its data at `<exe dir>/PCSX2` regardless —
+/// so writing the marker would only leave a file nothing consumes.
 fn resolve_target(emulator_path: &str) -> Option<PathBuf> {
     let trimmed = emulator_path.trim();
     if trimmed.is_empty() {
@@ -41,12 +51,15 @@ fn resolve_target(emulator_path: &str) -> Option<PathBuf> {
 
     let emulator_dir = expanded.parent().map(Path::to_path_buf).unwrap_or_default();
 
-    let portable_ini = emulator_dir.join("portable.ini");
-    if !portable_ini.exists() {
-        let _ = std::fs::write(&portable_ini, "");
+    if !paths::is_appimage(&expanded) {
+        let portable_ini = emulator_dir.join("portable.ini");
+        if !portable_ini.exists() {
+            let _ = std::fs::write(&portable_ini, "");
+        }
     }
 
-    Some(emulator_dir.join("inis").join("PCSX2.ini"))
+    let root = paths::pcsx2_data_root(&expanded).unwrap_or(emulator_dir);
+    Some(root.join("inis").join("PCSX2.ini"))
 }
 
 /// Read `target`'s current text, or `""` when it does not exist yet
@@ -400,6 +413,58 @@ mod tests {
         ensure_settings(&emulator_path, false, None, "");
 
         assert!(dir.join("portable.ini").exists());
+    }
+
+    /// A `<temp>/PCSX2/pcsx2-2.5.0.AppImage` stub, the Linux build whose
+    /// data root is `<temp>/PCSX2/PCSX2`.
+    fn setup_appimage(temp: &Path) -> (String, PathBuf, PathBuf) {
+        let dir = temp.join("PCSX2");
+        std::fs::create_dir_all(&dir).unwrap();
+        let emulator_path = dir.join("pcsx2-2.5.0.AppImage");
+        std::fs::write(&emulator_path, b"").unwrap();
+        let config_path = dir.join("PCSX2").join("inis").join("PCSX2.ini");
+        (
+            emulator_path.to_string_lossy().to_string(),
+            dir,
+            config_path,
+        )
+    }
+
+    #[test]
+    fn pcsx2_appimage_writes_under_the_pcsx2_data_root_and_no_portable_ini() {
+        let temp = tempfile::tempdir().unwrap();
+        let (emulator_path, dir, config_path) = setup_appimage(temp.path());
+
+        let result = ensure_settings(&emulator_path, false, None, "");
+
+        assert!(result.changed);
+        assert_eq!(result.config_path, Some(config_path.clone()));
+        assert!(config_path.is_file(), "missing {}", config_path.display());
+        assert!(
+            !dir.join("inis").exists(),
+            "nothing may be written beside the AppImage"
+        );
+        assert!(
+            !dir.join("portable.ini").exists(),
+            "the AppImage build reads no portable.ini"
+        );
+    }
+
+    #[test]
+    fn pcsx2_appimage_ra_credentials_use_the_same_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let (emulator_path, dir, config_path) = setup_appimage(temp.path());
+        let ra = RaCredentials::new("retro_user", "retro_token");
+
+        let result = ensure_ra_credentials(&emulator_path, &ra);
+
+        assert!(result.changed);
+        assert_eq!(result.config_path, Some(config_path.clone()));
+        assert!(std::fs::read_to_string(&config_path)
+            .unwrap()
+            .contains("[Achievements]"));
+        assert!(!dir.join("portable.ini").exists());
+        assert!(!dir.join("inis").exists());
     }
 
     #[test]

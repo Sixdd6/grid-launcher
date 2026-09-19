@@ -343,6 +343,10 @@ fn pcsx2_portable_data_root(emulator_dir: &Path, args: Args) -> Option<PathBuf> 
 /// roots are canonicalized; the user-root entries are joined but left
 /// unresolved, exactly as the Python reference leaves them
 /// (`pcsx2.py:455-478` never calls `.resolve()` on a `user_roots` entry).
+///
+/// For an AppImage executable the portable root is `<exe dir>/PCSX2`
+/// unconditionally, in place of the marker/`-portable` probe: that is the
+/// only root that build ever reads (`paths::pcsx2_data_root`).
 pub fn pcsx2_data_root_candidates(path: &str, args: Args) -> Vec<PathBuf> {
     let mut portable_roots: Vec<PathBuf> = Vec::new();
     let mut fallback_roots: Vec<PathBuf> = Vec::new();
@@ -351,12 +355,17 @@ pub fn pcsx2_data_root_candidates(path: &str, args: Args) -> Vec<PathBuf> {
     if !trimmed.is_empty() {
         let expanded = paths::expand_user(trimmed);
         let emulator_dir = if expanded.is_dir() {
-            expanded
+            expanded.clone()
         } else {
             expanded.parent().map(Path::to_path_buf).unwrap_or_default()
         };
         if !emulator_dir.as_os_str().is_empty() {
-            if let Some(portable_root) = pcsx2_portable_data_root(&emulator_dir, args) {
+            if paths::is_appimage(&expanded) {
+                // The AppImage build roots its data at `<exe dir>/PCSX2`
+                // unconditionally — no `portable.ini` and no `-portable`
+                // involved (`paths::pcsx2_data_root`).
+                portable_roots.push(resolve_best_effort(&emulator_dir.join("PCSX2")));
+            } else if let Some(portable_root) = pcsx2_portable_data_root(&emulator_dir, args) {
                 portable_roots.push(portable_root);
             }
             fallback_roots.push(resolve_best_effort(&emulator_dir));
@@ -4208,6 +4217,84 @@ mod tests {
         let user_index = roots.iter().position(|r| r == &user_root).unwrap();
         let plain_index = roots.iter().position(|r| r == &plain_dir).unwrap();
         assert!(portable_index < user_index && user_index < plain_index);
+    }
+
+    /// A `<temp>/PCSX2/pcsx2-2.5.0.AppImage` stub and its `PCSX2/` data
+    /// root, which is NOT created — the candidate list is lexical.
+    fn pcsx2_appimage(temp: &Path) -> (String, PathBuf) {
+        let dir = temp.join("PCSX2");
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("pcsx2-2.5.0.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        (exe.to_string_lossy().to_string(), dir)
+    }
+
+    #[test]
+    fn pcsx2_appimage_portable_root_is_the_pcsx2_subdirectory_without_a_marker() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (exe, dir) = pcsx2_appimage(temp.path());
+
+        let roots = pcsx2_data_root_candidates(&exe, &[]);
+
+        assert_eq!(
+            roots.first(),
+            Some(&resolve_best_effort(&dir.join("PCSX2"))),
+            "no portable.ini and no -portable are needed: {roots:?}"
+        );
+        assert_eq!(
+            roots.last(),
+            Some(&resolve_best_effort(&dir)),
+            "the plain emulator directory stays the last fallback"
+        );
+    }
+
+    #[test]
+    fn pcsx2_appimage_save_and_state_overrides_resolve_under_the_data_root() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (exe, dir) = pcsx2_appimage(temp.path());
+        let root = dir.join("PCSX2");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let memcards = resolve_best_effort(&root.join("memcards"));
+        assert_eq!(
+            pcsx2_save_path_overrides(&exe, &[]),
+            vec![
+                memcards.join("Mcd001.ps2"),
+                memcards.join("Mcd002.ps2"),
+                memcards,
+            ]
+        );
+        assert_eq!(
+            pcsx2_state_path_overrides(&exe, &[]),
+            vec![resolve_best_effort(&root.join("sstates"))]
+        );
+    }
+
+    #[test]
+    fn pcsx2_appimage_ini_folders_memorycards_still_wins() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (exe, dir) = pcsx2_appimage(temp.path());
+        let root = dir.join("PCSX2");
+        let inis = root.join("inis");
+        std::fs::create_dir_all(&inis).unwrap();
+        std::fs::write(
+            inis.join("PCSX2.ini"),
+            "[Folders]\nMemoryCards = my-cards\n",
+        )
+        .unwrap();
+
+        let settings = pcsx2_directory_settings(&exe, &[]);
+
+        assert_eq!(
+            settings.memory_cards,
+            resolve_best_effort(&root.join("my-cards")).to_string_lossy()
+        );
     }
 
     fn pcsx2_ini_at(dir: &Path, body: &str) -> PathBuf {
