@@ -61,9 +61,11 @@ const EMULATOR_INSTALL_TIMEOUT = 15_000;
  * The group also covers post-install autoconfig (doc 05 milestone-5
  * deviations, D1): right after the PCSX2 install lands, `sync_new_emulator`
  * runs against the freshly installed entry, which for PCSX2 means
- * `pcsx2::ensure_settings` (grid-core `autoconfig/pcsx2.rs`) creates an
- * empty `portable.ini` next to the AppImage and writes the managed keys
- * into `inis/PCSX2.ini` beside it.
+ * `pcsx2::ensure_settings` (grid-core `autoconfig/pcsx2.rs`) writes the
+ * managed keys into `inis/PCSX2.ini` under the AppImage's data root,
+ * `<AppImage dir>/PCSX2` (grid-core `autoconfig/paths.rs`
+ * `pcsx2_data_root`). The AppImage build ignores a `portable.ini`, so none
+ * is written and no user-data link lands beside the file.
  */
 describe('emulator-catalog', () => {
   const PLATFORM = 'Sony PlayStation 2';
@@ -86,6 +88,12 @@ describe('emulator-catalog', () => {
   const pcsx2Path = () => path.join(emulatorsDir(), PCSX2_NAME, PCSX2_ASSET);
   /** D1: the sync runs right after install, so this is the AppImage's parent. */
   const pcsx2Dir = () => path.dirname(pcsx2Path());
+  /**
+   * PCSX2's AppImage roots every data directory at `<AppImage dir>/PCSX2`
+   * (grid-core `autoconfig/paths.rs` `pcsx2_data_root`), so the managed ini
+   * and the user-data links live here, not beside the file.
+   */
+  const pcsx2DataDir = () => path.join(pcsx2Dir(), 'PCSX2');
   /**
    * The tar.gz member is the bare `redream` the real tarball ships. Picking
    * it exercises `launchable_installed_file` (grid-core
@@ -316,17 +324,18 @@ describe('emulator-catalog', () => {
     expect(rowText).toContain('-portable -fullscreen -batch "%rom%"');
   });
 
-  it('autoconfigures the freshly installed PCSX2 (portable.ini + managed PCSX2.ini keys)', async () => {
-    await browser.waitUntil(() => existsSync(path.join(pcsx2Dir(), 'portable.ini')), {
+  it('autoconfigures the freshly installed PCSX2 (managed PCSX2.ini keys under PCSX2/)', async () => {
+    await browser.waitUntil(() => existsSync(path.join(pcsx2DataDir(), 'inis', 'PCSX2.ini')), {
       timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'autoconfig never created PCSX2 portable.ini after install',
-    });
-    await browser.waitUntil(() => existsSync(path.join(pcsx2Dir(), 'inis', 'PCSX2.ini')), {
-      timeout: TRANSITION_TIMEOUT,
-      timeoutMsg: 'autoconfig never created PCSX2 inis/PCSX2.ini after install',
+      timeoutMsg: 'autoconfig never created PCSX2 inis/PCSX2.ini under the data root',
     });
 
-    const ini = readFileSync(path.join(pcsx2Dir(), 'inis', 'PCSX2.ini'), 'utf-8');
+    // The AppImage build reads no `portable.ini`, so the writer leaves none
+    // beside the file, and every user-data link sits under the data root.
+    expect(existsSync(path.join(pcsx2Dir(), 'portable.ini'))).toBe(false);
+    expect(existsSync(path.join(pcsx2Dir(), 'inis'))).toBe(false);
+
+    const ini = readFileSync(path.join(pcsx2DataDir(), 'inis', 'PCSX2.ini'), 'utf-8');
     expect(ini).toContain('[UI]');
     expect(ini).toContain('SetupWizardIncomplete = false');
     expect(ini).toContain('SettingsVersion = 1');
@@ -343,13 +352,13 @@ describe('emulator-catalog', () => {
     // whole [Achievements] block off.
     expect(ini).not.toContain('[Achievements]');
     // [Folders] Bios is the profile's FIRST firmware directory ("bios" in
-    // emulator-autoprofiles.json), resolved against the emulator directory
+    // emulator-autoprofiles.json), resolved against the data root
     // (autoconfig/mod.rs `sync_new_emulator`, doc 05 step 15). Under layout
-    // v1 that directory is a LINK into `saves/<Emulator>/`, and the writer
+    // v2 that directory is a LINK into `saves/<Emulator>/`, and the writer
     // records where the link lands.
     expect(ini).toContain('[Folders]');
-    expect(ini).toContain(`Bios = ${realpathSync(path.join(pcsx2Dir(), 'bios'))}`);
-    expect(realpathSync(path.join(pcsx2Dir(), 'bios'))).toBe(
+    expect(ini).toContain(`Bios = ${realpathSync(path.join(pcsx2DataDir(), 'bios'))}`);
+    expect(realpathSync(path.join(pcsx2DataDir(), 'bios'))).toBe(
       realpathSync(path.join(dataDir(), 'library', 'saves', PCSX2_NAME, 'bios')),
     );
   });
@@ -476,8 +485,10 @@ describe('emulator-catalog', () => {
     // one in place rather than landing in a per-release directory.
     await waitForConfigLine('source_installed_tag = "v9.9.1-e2e"');
     expect(readFileSync(pcsx2Path(), 'utf-8')).toContain('mock forge stub: pcsx2 (v9.9.1-e2e)');
-    // Autoconfig ran again and its marker survived the merge.
-    expect(existsSync(path.join(pcsx2Dir(), 'portable.ini'))).toBe(true);
+    // Autoconfig ran again against the data root and still wrote no
+    // `portable.ini` beside the AppImage.
+    expect(existsSync(path.join(pcsx2DataDir(), 'inis', 'PCSX2.ini'))).toBe(true);
+    expect(existsSync(path.join(pcsx2Dir(), 'portable.ini'))).toBe(false);
 
     const config = readFileSync(configPath(), 'utf-8');
     // The user-owned fields and the platform default are untouched.

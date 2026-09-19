@@ -198,3 +198,30 @@ the config at an existing legacy library sets it to 0 so the migration runs on n
 - Moving Vita3K or Linux Xenia data out of the OS data directory.
 - Rewriting absolute paths inside emulator configs other than the three listed.
 - Deduplicating firmware across emulators.
+
+## Layout v2 (2026-09-19)
+
+PCSX2's Linux AppImage roots every data directory at `<AppImage dir>/PCSX2` whenever `APPIMAGE`
+is set, and ignores both a `portable.ini` beside the file and `-portable`. Layout v1 linked
+`user_data` beside the executable, so those links sat in a directory PCSX2 never read.
+
+- **Root rule.** `autoconfig::emulator_data_root(entry, profiles)` returns the emulator's data
+  root: `paths::pcsx2_data_root(exe)` for a PCSX2 entry (`<exe dir>/PCSX2` for an `.appimage`
+  executable, `<exe dir>` otherwise), plain `paths::emulator_dir` for every other emulator.
+  `library::user_data_links::user_data_root(profile, exe)` is the link call sites' entry point.
+  The managed ini, `%EMULATOR_DIR%`, firmware `bios` routing, cloud save/state/screenshot
+  resolution and removal salvage all derive from the root. No `portable.ini` is written for an
+  AppImage; every other PCSX2 binary still gets one.
+- **Migration step.** `LAYOUT_VERSION_CURRENT = 2`. `layout_migration::migrate` runs the v1 steps
+  only when the stored version is below 1, then always runs `step_data_root_links`: for each
+  entry under `<library>/emulators/` whose data root differs from its executable's directory, it
+  removes each `user_data` name beside the executable that is a LINK (a real directory or file is
+  left alone with a warning), creates the root, and calls `ensure_user_data_links` there.
+- **Destination-wins.** The link helper keeps whatever `saves/<Profile>/<dir>` already holds, so a
+  repair never overwrites the user's saves; the ini PCSX2 wrote for itself under the old root can
+  be dropped, and the managed copy in `saves/` survives.
+- **Startup resync.** The step reports each repaired entry in `MigrationOutcome::Completed
+  { relinked, .. }`. `app/src-tauri/src/lib.rs` then runs `run_emulator_sync(..., false,
+  autoconfig::sync_new_emulator)` for each name, so `[Folders] Bios` and the managed keys land in
+  the ini the emulator now reads. Credentials stay inside `RaCredentials`; the logs carry names
+  and paths only.

@@ -147,13 +147,18 @@ The library root has three folders: `games/<Platform>/` (game installs), `emulat
 (an emulator's binaries), and `saves/<Emulator>/<dir>/` (every directory the emulator writes
 beside its binary). `<Emulator>` is the sanitized catalog PROFILE name, with no release tag, so
 several config entries can share one emulator and one saves folder. The `user_data` entries of a
-profile are links into `saves/<Emulator>/<dir>` — created beside the chosen EXECUTABLE, which is
-the directory every config reader derives from an entry's path — a relative symlink on
-unix, an NTFS junction on Windows — so deleting an emulator's install directory never deletes its
-saves, settings or firmware.
+profile are links into `saves/<Emulator>/<dir>` — created under the emulator's DATA ROOT, the
+directory that emulator actually reads: the chosen executable's own directory for every binary
+except the PCSX2 Linux AppImage, which roots its data at `<exe dir>/PCSX2` and reads nothing else
+(`autoconfig::emulator_data_root`). The links are a relative symlink on unix, an NTFS junction on
+Windows, so deleting an emulator's install directory never deletes its saves, settings or
+firmware.
 
-`Config::library_layout_version` (0 legacy, 1 current) gates a one-shot migration that runs at
-startup in `lib.rs`, before any service is built. The migration itself lives in grid-core
+`Config::library_layout_version` (0 legacy, 1 the flat-to-folders move, 2 current) gates a
+one-shot migration that runs at startup in `lib.rs`, before any service is built. Version 2 adds
+`step_data_root_links`: it removes stale links beside a PCSX2 AppImage and relinks under
+`PCSX2/`, destination-wins, then `lib.rs` re-runs autoconfig for each relinked entry so the ini
+PCSX2 reads carries the new `[Folders] Bios`. The migration itself lives in grid-core
 (`library::layout_migration`), is Tauri-free, reference-driven (it moves only the platform
 directories the registry and config actually point at), idempotent, and resumable. The path
 resolution fallbacks (`library::paths`, registry re-resolution) still read the legacy shape, so a

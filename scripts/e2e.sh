@@ -75,7 +75,7 @@ STAGE_GROUPS=(
   "native:specs/native.spec.ts"
   "firmware:specs/firmware.spec.ts"
   "updates:specs/updates.spec.ts"
-  # Legacy library in, layout v1 out: the seed writes an UNVERSIONED config
+  # Legacy library in, layout v2 out: the seed writes an UNVERSIONED config
   # and a flat library, and the spec reads the migrated tree off disk.
   "layout-migration:specs/layout-migration.spec.ts"
 )

@@ -59,7 +59,7 @@ describe('layout-migration', () => {
 
   it('stamps the version and rewrites the emulator path in the config', () => {
     const config = readFileSync(configPath(), 'utf-8');
-    expect(config).toContain('library_layout_version = 1');
+    expect(config).toContain('library_layout_version = 2');
     expect(config).toContain(path.join(installDir(), 'pcsx2-qt'));
   });
 
