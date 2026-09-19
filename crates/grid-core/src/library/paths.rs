@@ -16,6 +16,14 @@ pub const LEGACY_EMULATORS_DIR: &str = "Emulators";
 pub const SAVES_DIR: &str = "saves";
 /// `Config::library_layout_version` for the `games`/`emulators`/`saves` split.
 pub const LAYOUT_VERSION_V1: u32 = 1;
+/// `Config::library_layout_version` for the DATA ROOT repair: every
+/// `user_data` link sits at the directory the emulator really reads, which
+/// for PCSX2's AppImage is `<exe dir>/PCSX2` and not the executable's own
+/// directory (`autoconfig::paths::pcsx2_data_root`).
+pub const LAYOUT_VERSION_V2: u32 = 2;
+/// The layout this build writes. A library stamped lower than this runs
+/// `library::layout_migration` on the next start.
+pub const LAYOUT_VERSION_CURRENT: u32 = LAYOUT_VERSION_V2;
 
 /// Sanitize one path component (a title, platform, or emulator name) for use
 /// as a file/directory name.
@@ -150,24 +158,25 @@ pub fn library_root(config: &crate::config::Config) -> Option<PathBuf> {
 
 /// Decide which library layout a path (new or existing) should use.
 ///
-/// Returns `LAYOUT_VERSION_V1` (`1`) when `raw` is blank, does not exist, is
+/// Returns `LAYOUT_VERSION_CURRENT` when `raw` is blank, does not exist, is
 /// not a directory, or is empty (no entries other than dot-entries) — i.e.
-/// whenever it is safe to start fresh in the new layout. Also returns `1`
-/// when the directory already has a top-level `games`, `emulators`, or
-/// `saves` entry (already v1). Returns `0` for any other non-empty
-/// directory, which is treated as an existing flat/legacy library root that
-/// must not be reorganized silently.
+/// whenever it is safe to start fresh in the current layout, with nothing
+/// to repair. Returns `LAYOUT_VERSION_V1` when the directory already has a
+/// top-level `games`, `emulators`, or `saves` entry: it is shaped v1, so the
+/// v2 data-root step runs on the next start. Returns `0` for any other
+/// non-empty directory, which is treated as an existing flat/legacy library
+/// root that must not be reorganized silently.
 pub fn layout_version_for_library_path(raw: &str) -> u32 {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return LAYOUT_VERSION_V1;
+        return LAYOUT_VERSION_CURRENT;
     }
     let path = expand_home(trimmed);
     if !path.is_dir() {
-        return LAYOUT_VERSION_V1;
+        return LAYOUT_VERSION_CURRENT;
     }
     let Ok(entries) = std::fs::read_dir(&path) else {
-        return LAYOUT_VERSION_V1;
+        return LAYOUT_VERSION_CURRENT;
     };
     let mut saw_entry = false;
     for entry in entries.flatten() {
@@ -183,7 +192,7 @@ pub fn layout_version_for_library_path(raw: &str) -> u32 {
     if saw_entry {
         0
     } else {
-        LAYOUT_VERSION_V1
+        LAYOUT_VERSION_CURRENT
     }
 }
 
@@ -526,11 +535,13 @@ mod tests {
     #[test]
     fn layout_version_for_library_path_table() {
         let dir = tempfile::tempdir().unwrap();
+        // Nothing to migrate and nothing to repair: the current layout.
+        let current = LAYOUT_VERSION_CURRENT;
 
-        assert_eq!(layout_version_for_library_path(""), 1, "blank");
+        assert_eq!(layout_version_for_library_path(""), current, "blank");
         assert_eq!(
             layout_version_for_library_path(&dir.path().join("nope").to_string_lossy()),
-            1,
+            current,
             "nonexistent"
         );
 
@@ -538,7 +549,7 @@ mod tests {
         std::fs::write(&file_path, b"x").unwrap();
         assert_eq!(
             layout_version_for_library_path(&file_path.to_string_lossy()),
-            1,
+            current,
             "a file path"
         );
 
@@ -546,7 +557,7 @@ mod tests {
         std::fs::create_dir(&empty).unwrap();
         assert_eq!(
             layout_version_for_library_path(&empty.to_string_lossy()),
-            1,
+            current,
             "empty temp dir"
         );
 
@@ -555,17 +566,27 @@ mod tests {
         std::fs::write(only_hidden.join(".hidden"), b"x").unwrap();
         assert_eq!(
             layout_version_for_library_path(&only_hidden.to_string_lossy()),
-            1,
+            current,
             "dir with only .hidden"
         );
 
+        // Already v1-shaped: the v2 data-root step still has to run.
         let with_games = dir.path().join("with_games");
         std::fs::create_dir(&with_games).unwrap();
         std::fs::create_dir(with_games.join("games")).unwrap();
         assert_eq!(
             layout_version_for_library_path(&with_games.to_string_lossy()),
-            1,
+            LAYOUT_VERSION_V1,
             "dir with games/"
+        );
+
+        let with_emulators = dir.path().join("with_emulators");
+        std::fs::create_dir(&with_emulators).unwrap();
+        std::fs::create_dir(with_emulators.join("emulators")).unwrap();
+        assert_eq!(
+            layout_version_for_library_path(&with_emulators.to_string_lossy()),
+            LAYOUT_VERSION_V1,
+            "dir with emulators/"
         );
 
         let with_saves = dir.path().join("with_saves");
@@ -573,7 +594,7 @@ mod tests {
         std::fs::create_dir(with_saves.join("saves")).unwrap();
         assert_eq!(
             layout_version_for_library_path(&with_saves.to_string_lossy()),
-            1,
+            LAYOUT_VERSION_V1,
             "dir with saves/ only"
         );
 
@@ -603,6 +624,12 @@ mod tests {
             0,
             "dir with a loose foo.zip file and no directories"
         );
+    }
+
+    #[test]
+    fn the_current_layout_version_is_v2() {
+        assert_eq!(LAYOUT_VERSION_CURRENT, LAYOUT_VERSION_V2);
+        assert_eq!(LAYOUT_VERSION_V2, 2);
     }
 
     #[test]

@@ -7,6 +7,12 @@
 //! directory is left exactly where it is, so pointing the config at a
 //! populated non-GRID directory moves nothing and still stamps the version.
 //!
+//! Layout v2 adds one more step on top of that, for a library that already
+//! went through v1: the `user_data` links move from beside the executable to
+//! the emulator's DATA root ([`super::user_data_links::user_data_root`]),
+//! which is `<exe dir>/PCSX2` for PCSX2's AppImage and unchanged for
+//! everything else.
+//!
 //! Every step is idempotent and every move is a `rename` inside the library
 //! directory, so an interrupted run resumes on the next start. A
 //! `CrossesDevices` rename aborts the run with both paths in the message.
@@ -15,11 +21,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::paths::{
-    expand_home, sanitize_component, saves_dir, EMULATORS_DIR, GAMES_DIR, LAYOUT_VERSION_V1,
-    LEGACY_EMULATORS_DIR, SAVES_DIR,
+    expand_home, sanitize_component, saves_dir, EMULATORS_DIR, GAMES_DIR, LAYOUT_VERSION_CURRENT,
+    LAYOUT_VERSION_V1, LEGACY_EMULATORS_DIR, SAVES_DIR,
 };
 use super::registry::{InstalledGame, Registry};
-use super::user_data_links::ensure_user_data_links;
+use super::user_data_links::{ensure_user_data_links, user_data_root};
 use super::LibraryError;
 use crate::config::Config;
 use crate::launch::profiles::EmulatorProfile;
@@ -357,13 +363,14 @@ pub fn rewrite_path(value: &str, plan: &RewritePlan) -> Option<String> {
 /// What one [`run`] did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MigrationOutcome {
-    /// Nothing to do: already at layout v1, no library configured, or the
-    /// library directory is not there (an unmounted drive retries next
-    /// start). The version is left untouched.
+    /// Nothing to do: already at the current layout, no library configured,
+    /// or the library directory is not there (an unmounted drive retries
+    /// next start). The version is left untouched.
     Skipped,
-    /// Every step finished and the version was stamped. All four counts are
-    /// zero for a library with nothing referenced in it, which is still a
-    /// completed run.
+    /// Every step finished and the version was stamped. Every count is zero
+    /// and `relinked` is empty for a library with nothing referenced in it,
+    /// which is still a completed run. A library that was already at v1 also
+    /// reports zeros: only the data-root step ran.
     Completed {
         games_moved: usize,
         emulators_renamed: usize,
@@ -375,13 +382,17 @@ pub enum MigrationOutcome {
         /// executable is not on disk.
         skipped_missing: usize,
         rows_rewritten: usize,
+        /// The names of the config entries whose `user_data` links moved to
+        /// the emulator's data root (layout v2). The app layer resyncs each
+        /// one, so the managed keys name the directory the emulator reads.
+        relinked: Vec<String>,
     },
     /// A step failed. The version stays at 0, the library stays readable
     /// through the legacy fallbacks, and the next start resumes.
     Failed { message: String },
 }
 
-/// Migrates the configured library to layout v1, once.
+/// Migrates the configured library to the current layout, once.
 ///
 /// Reads and writes `config_path` itself (the caller has no config handle at
 /// this point in startup) and rewrites `registry` in place. Never panics and
@@ -401,7 +412,7 @@ pub fn run(
             };
         }
     };
-    if config.library_layout_version >= LAYOUT_VERSION_V1 {
+    if config.library_layout_version >= LAYOUT_VERSION_CURRENT {
         return MigrationOutcome::Skipped;
     }
     if config.library_path.trim().is_empty() {
@@ -432,8 +443,12 @@ pub fn run(
     }
 }
 
-/// The five steps, in order. Every one is idempotent, so a run interrupted
+/// The steps, in order. Every one is idempotent, so a run interrupted
 /// anywhere resumes here on the next start.
+///
+/// The four v1 steps run only for a library that never had them: a v1
+/// library's directories, names and stored paths are already in place, and
+/// only the data-root step is left. That step always runs, for both.
 fn migrate(
     config_path: &Path,
     config: &Config,
@@ -441,19 +456,35 @@ fn migrate(
     registry: &Registry,
     profiles: &[EmulatorProfile],
 ) -> Result<MigrationOutcome, String> {
-    let mut plan =
-        build_rewrite_plan(config, registry, library, profiles).map_err(|e| e.to_string())?;
-    preflight(library, &plan)?;
+    let mut games_moved = 0;
+    let mut emulators_renamed = 0;
+    let mut links_changed = 0;
+    let mut skipped_duplicates = 0;
+    let mut skipped_missing = 0;
+    let mut rows_rewritten = 0;
+    let mut current = config.clone();
 
-    let games_moved = step_games(library, &plan)?;
-    let emulators_renamed = step_emulators(library, config, &plan, profiles)?;
-    let (links_changed, skipped_duplicates, skipped_missing) =
-        step_user_data(library, config, &plan, profiles)?;
-    // The pairs describe renames that have LANDED, so they are only
-    // complete once step 2 has run. The game set is derived from the
-    // registry and the config, which step 1 does not touch, so it stands.
-    plan.emulator_dirs = kept_emulator_pairs(config, library, &plan.library_forms, profiles);
-    let rows_rewritten = step_rewrite(config_path, config, registry, &plan, profiles)?;
+    if config.library_layout_version < LAYOUT_VERSION_V1 {
+        let mut plan =
+            build_rewrite_plan(config, registry, library, profiles).map_err(|e| e.to_string())?;
+        preflight(library, &plan)?;
+
+        games_moved = step_games(library, &plan)?;
+        emulators_renamed = step_emulators(library, config, &plan, profiles)?;
+        (links_changed, skipped_duplicates, skipped_missing) =
+            step_user_data(library, config, &plan, profiles)?;
+        // The pairs describe renames that have LANDED, so they are only
+        // complete once step 2 has run. The game set is derived from the
+        // registry and the config, which step 1 does not touch, so it stands.
+        plan.emulator_dirs = kept_emulator_pairs(config, library, &plan.library_forms, profiles);
+        rows_rewritten = step_rewrite(config_path, config, registry, &plan, profiles)?;
+        // Step 4 rewrote every stored path and saved the config; the
+        // data-root step below must read the NEW paths, not the legacy ones.
+        current = Config::load(config_path)
+            .map_err(|e| format!("could not read {}: {e}", config_path.display()))?;
+    }
+
+    let relinked = step_data_root_links(library, &current, profiles)?;
     write_version(config_path)?;
 
     Ok(MigrationOutcome::Completed {
@@ -463,6 +494,7 @@ fn migrate(
         skipped_duplicates,
         skipped_missing,
         rows_rewritten,
+        relinked,
     })
 }
 
@@ -683,6 +715,13 @@ fn step_user_data(
             continue;
         };
 
+        // The links belong at the emulator's DATA root: `<exe dir>/PCSX2`
+        // for PCSX2's AppImage, the executable's own directory for every
+        // other emulator. `links_at` is that directory, so the executable's
+        // file name is all `user_data_root` still needs.
+        let exe_name = rest.rsplit(is_separator).next().unwrap_or_default();
+        let root = user_data_root(profile, &links_at.join(exe_name));
+
         if let Some(first) = populated.get(&profile.name) {
             tracing::warn!(
                 kept = %first.display(),
@@ -692,7 +731,7 @@ fn step_user_data(
             skipped_duplicates += 1;
             continue;
         }
-        if has_entries(&target) && !owns_links(&links_at, &target, &profile.user_data) {
+        if has_entries(&target) && !owns_links(&root, &target, &profile.user_data) {
             tracing::warn!(
                 saves = %target.display(),
                 skipped = %install_dir.display(),
@@ -703,15 +742,18 @@ fn step_user_data(
             continue;
         }
 
-        // Beside the EXECUTABLE, not at the install root: every reader
-        // derives the emulator directory from the executable's parent.
-        match ensure_user_data_links(&links_at, &target, &profile.user_data) {
+        // At the data root, not at the install root: every reader derives
+        // the emulator's directory from the executable, never from the
+        // directory the archive extracted into.
+        std::fs::create_dir_all(&root)
+            .map_err(|e| format!("could not create {}: {e}", root.display()))?;
+        match ensure_user_data_links(&root, &target, &profile.user_data) {
             Ok(true) => changed += 1,
             Ok(false) => {}
             Err(e) => {
                 return Err(format!(
                     "could not link the user data of {}: {e}",
-                    links_at.display()
+                    root.display()
                 ))
             }
         }
@@ -762,6 +804,118 @@ fn owns_links(dir: &Path, target: &Path, user_data: &[String]) -> bool {
                 .and_then(|path| std::fs::canonicalize(path).ok())
                 .is_some_and(|resolved| resolved.starts_with(&saves))
     })
+}
+
+/// Layout v2: move every `user_data` link from beside the executable to the
+/// emulator's DATA root, and return the names of the entries that were
+/// relinked.
+///
+/// PCSX2's AppImage reads `<exe dir>/PCSX2` and nothing else, so the links
+/// layout v1 left beside the binary named directories that build never
+/// opens. Every other emulator's data root IS the executable's directory,
+/// which this step recognizes and skips.
+///
+/// Managed installs only (under `<library>/emulators/`), and only for a
+/// matched profile with a non-empty `user_data`. The merge into
+/// `saves/<Profile>` keeps the DESTINATION's copy of every collision (user
+/// ruling 2026-09-19): those bytes are the managed ones that survived
+/// earlier runs. A `portable.ini` beside the executable is left alone — it
+/// is inert for an AppImage and load-bearing for every other PCSX2 build.
+fn step_data_root_links(
+    library: &Path,
+    config: &Config,
+    profiles: &[EmulatorProfile],
+) -> Result<Vec<String>, String> {
+    let forms = library_forms(config, library);
+    let mut relinked = Vec::new();
+    // `saves/<Profile>` → the install that owns it, exactly as in
+    // [`step_user_data`]: a second install of one profile would have its own
+    // files merged destination-wins into a directory the first one filled.
+    let mut populated: BTreeMap<String, PathBuf> = BTreeMap::new();
+    for entry in &config.emulators {
+        // An entry pointing outside `<library>/emulators/` (or the legacy
+        // `Emulators/`) is a hand-configured emulator whose directories GRID
+        // does not move.
+        if emulator_dir_of(&entry.path, &forms).is_none() {
+            continue;
+        }
+        let Some(profile) =
+            crate::launch::profiles::profile_for_entry(&entry.name, &entry.path, profiles)
+        else {
+            continue;
+        };
+        if profile.user_data.is_empty() {
+            continue;
+        }
+        // The EXPANDED path: an entry typed with `~/` would otherwise name a
+        // literal `~` directory that does not exist.
+        let exe = expand_home(entry.path.trim());
+        // Nothing is created at a guessed location: an entry whose
+        // executable directory is not on disk is left alone, the same rule
+        // [`links_directory`] applies in the v1 step.
+        let Some(exe_dir) = exe.parent().filter(|dir| dir.is_dir()) else {
+            tracing::warn!(
+                expected = %exe.display(),
+                "the executable of this emulator entry is not on disk; its user data is not relinked"
+            );
+            continue;
+        };
+        let root = user_data_root(profile, &exe);
+        if root == exe_dir {
+            continue; // the data root is the executable's own directory
+        }
+        if let Some(first) = populated.get(&profile.name) {
+            tracing::warn!(
+                kept = %first.display(),
+                skipped = %exe_dir.display(),
+                "a second install of this emulator would share one saves directory; it keeps its own files and is not linked"
+            );
+            continue;
+        }
+
+        remove_stale_links(exe_dir, &profile.user_data);
+        let target = saves_dir(library, &profile.name);
+        std::fs::create_dir_all(&root)
+            .map_err(|e| format!("could not create {}: {e}", root.display()))?;
+        ensure_user_data_links(&root, &target, &profile.user_data)
+            .map_err(|e| format!("could not link the user data of {}: {e}", root.display()))?;
+        populated.insert(profile.name.clone(), exe_dir.to_path_buf());
+        relinked.push(entry.name.clone());
+    }
+    Ok(relinked)
+}
+
+/// Removes every `user_data` name beside the executable that is a LINK —
+/// layout v1's links into `saves/`, which this emulator never followed.
+///
+/// A real directory or file is left in place with a warning: those bytes are
+/// the user's, `ensure_user_data_links` at the data root does not reach
+/// them, and deleting one here would be the only destructive act in the
+/// whole migration.
+fn remove_stale_links(exe_dir: &Path, user_data: &[String]) {
+    for name in user_data {
+        let path = exe_dir.join(name.trim());
+        if super::user_data_links::is_link(&path) {
+            match super::user_data_links::remove_link(&path) {
+                Ok(()) => tracing::debug!(
+                    path = %path.display(),
+                    "user data link beside the executable removed; it is remade at the data root"
+                ),
+                Err(e) => tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "user data link beside the executable could not be removed; left in place"
+                ),
+            }
+            continue;
+        }
+        if path.exists() {
+            tracing::warn!(
+                path = %path.display(),
+                "user data beside the executable is a real directory, not a link; left in place"
+            );
+        }
+    }
 }
 
 /// Step 4: the config, the registry and the three emulator config files that
@@ -840,14 +994,15 @@ fn rewrite_emulator_configs(
         if emulator_dir_of(&entry.path, &plan.library_forms).is_none() {
             continue;
         }
-        // The EXPANDED path: an entry typed with `~/` would otherwise name a
-        // literal `~` directory that does not exist.
-        let expanded = expand_home(entry.path.trim());
-        let Some(install_dir) = expanded.parent() else {
+        // The DATA root, not the executable's directory: PCSX2's AppImage
+        // reads `inis/PCSX2.ini` under `<exe dir>/PCSX2` and nowhere else.
+        // `emulator_data_root` expands a `~/` entry path itself, which an
+        // entry typed that way needs to name a real file at all.
+        let Some(root) = crate::autoconfig::emulator_data_root(entry, profiles) else {
             continue;
         };
         for relative in emulator_config_files(entry, profiles) {
-            rewrite_text_file(&install_dir.join(relative), plan)?;
+            rewrite_text_file(&root.join(relative), plan)?;
         }
     }
     Ok(())
@@ -908,12 +1063,12 @@ fn rewrite_text_file(path: &Path, plan: &RewritePlan) -> Result<(), String> {
     Ok(())
 }
 
-/// Step 5: stamp the version. Reloaded from disk so the value lands on the
-/// config [`step_rewrite`] just wrote.
+/// The last step: stamp the version. Reloaded from disk so the value lands
+/// on the config [`step_rewrite`] just wrote.
 fn write_version(config_path: &Path) -> Result<(), String> {
     let mut config = Config::load(config_path)
         .map_err(|e| format!("could not read {}: {e}", config_path.display()))?;
-    config.library_layout_version = LAYOUT_VERSION_V1;
+    config.library_layout_version = LAYOUT_VERSION_CURRENT;
     config
         .save(config_path)
         .map_err(|e| format!("could not write {}: {e}", config_path.display()))
@@ -1260,11 +1415,14 @@ mod tests {
         write_file(&library.join("Misc Stuff/readme.txt"), "leave me alone");
         write_file(&library.join("bare.zip"), "archive");
 
+        // The AppImage build's data root is `<exe dir>/PCSX2`, never the
+        // executable's own directory (`autoconfig::paths::pcsx2_data_root`),
+        // so that is where a legacy install's files really are.
         let pcsx2_dir = library.join("Emulators/PCSX2 (Playstation 2)-latest");
         write_file(&pcsx2_dir.join("pcsx2.AppImage"), "pcsx2");
-        write_file(&pcsx2_dir.join("memcards/slot1.mcd"), "card");
+        write_file(&pcsx2_dir.join("PCSX2/memcards/slot1.mcd"), "card");
         write_file(
-            &pcsx2_dir.join("inis/PCSX2.ini"),
+            &pcsx2_dir.join("PCSX2/inis/PCSX2.ini"),
             &format!("[Folders]\nBios = {lib}/Emulators/PCSX2 (Playstation 2)-latest/bios\n"),
         );
 
@@ -1442,20 +1600,21 @@ mod tests {
     /// (`/` for a directory, `@` for a link). Asserted whole so a stray file
     /// or a missing link fails the test, not just the paths spelled out in
     /// [`assert_migrated_tree`].
-    const MIGRATED_TREE: [&str; 55] = [
+    const MIGRATED_TREE: [&str; 56] = [
         "Misc Stuff/",
         "Misc Stuff/readme.txt",
         "bare.zip",
         "emulators/",
         "emulators/PCSX2 (Playstation 2)/",
-        "emulators/PCSX2 (Playstation 2)/bios@",
-        "emulators/PCSX2 (Playstation 2)/cheats@",
-        "emulators/PCSX2 (Playstation 2)/inis@",
-        "emulators/PCSX2 (Playstation 2)/memcards@",
+        "emulators/PCSX2 (Playstation 2)/PCSX2/",
+        "emulators/PCSX2 (Playstation 2)/PCSX2/bios@",
+        "emulators/PCSX2 (Playstation 2)/PCSX2/cheats@",
+        "emulators/PCSX2 (Playstation 2)/PCSX2/inis@",
+        "emulators/PCSX2 (Playstation 2)/PCSX2/memcards@",
+        "emulators/PCSX2 (Playstation 2)/PCSX2/snaps@",
+        "emulators/PCSX2 (Playstation 2)/PCSX2/sstates@",
+        "emulators/PCSX2 (Playstation 2)/PCSX2/textures@",
         "emulators/PCSX2 (Playstation 2)/pcsx2.AppImage",
-        "emulators/PCSX2 (Playstation 2)/snaps@",
-        "emulators/PCSX2 (Playstation 2)/sstates@",
-        "emulators/PCSX2 (Playstation 2)/textures@",
         "emulators/RPCS3 (Playstation 3)/",
         "emulators/RPCS3 (Playstation 3)/portable@",
         "emulators/RPCS3 (Playstation 3)/rpcs3.AppImage",
@@ -1542,7 +1701,7 @@ mod tests {
             .join("emulators/PCSX2 (Playstation 2)/pcsx2.AppImage")
             .is_file());
         assert!(is_link(
-            &library.join("emulators/PCSX2 (Playstation 2)/memcards")
+            &library.join("emulators/PCSX2 (Playstation 2)/PCSX2/memcards")
         ));
         assert_eq!(
             read(&library.join("saves/PCSX2 (Playstation 2)/memcards/slot1.mcd")),
@@ -1591,7 +1750,7 @@ mod tests {
             config.native_pcgw_save_paths.get("my game|windows"),
             Some(&vec![format!("{lib}/games/Windows/My Game/saves")])
         );
-        assert_eq!(config.library_layout_version, 1);
+        assert_eq!(config.library_layout_version, LAYOUT_VERSION_CURRENT);
 
         let rows = fixture.registry.all().unwrap();
         let game_a = rows.iter().find(|r| r.title == "Game A").unwrap();
@@ -1632,6 +1791,7 @@ mod tests {
                 skipped_duplicates: 0,
                 skipped_missing: 0,
                 rows_rewritten: 4,
+                relinked: vec!["PCSX2 (Playstation 2)".to_string()],
             }
         );
         assert_migrated_tree(&fixture);
@@ -1868,7 +2028,7 @@ mod tests {
     }
 
     #[test]
-    fn a_library_with_no_references_becomes_version_1_without_moving_anything() {
+    fn a_library_with_no_references_becomes_the_current_version_without_moving_anything() {
         let dir = tempfile::tempdir().unwrap();
         let library = dir.path().join("foreign");
         let config_path = dir.path().join("config.toml");
@@ -1892,12 +2052,13 @@ mod tests {
                 skipped_duplicates: 0,
                 skipped_missing: 0,
                 rows_rewritten: 0,
+                relinked: Vec::new(),
             }
         );
         assert_eq!(tree(&library), before);
         assert_eq!(
             Config::load(&config_path).unwrap().library_layout_version,
-            1
+            LAYOUT_VERSION_CURRENT
         );
     }
 
@@ -1919,10 +2080,10 @@ mod tests {
     }
 
     #[test]
-    fn a_version_1_library_is_skipped() {
+    fn a_library_at_the_current_version_is_skipped() {
         let fixture = legacy_fixture();
         let mut config = fixture.config();
-        config.library_layout_version = 1;
+        config.library_layout_version = LAYOUT_VERSION_CURRENT;
         config.save(&fixture.config_path).unwrap();
         let before = tree(&fixture.library);
 
@@ -1973,7 +2134,7 @@ mod tests {
             .library
             .join("games/Sony PlayStation 2/Game B/game.iso")
             .is_file());
-        assert_eq!(config.library_layout_version, 1);
+        assert_eq!(config.library_layout_version, LAYOUT_VERSION_CURRENT);
     }
 
     #[test]
@@ -2086,17 +2247,18 @@ mod tests {
         }
     }
 
-    /// The links belong beside the EXECUTABLE, which `select_executable` may
-    /// have found in a subdirectory — that is the directory every reader
-    /// (`autoconfig::paths::emulator_dir`, `cloud::ops::emulator_dir_for`)
-    /// derives from the entry's path.
+    /// The links belong at the data root of the EXECUTABLE, which
+    /// `select_executable` may have found in a subdirectory — that is the
+    /// path every reader (`autoconfig::emulator_data_root`,
+    /// `cloud::ops::emulator_dir_for`) derives from the entry, never the
+    /// install root.
     #[cfg(unix)]
     #[test]
-    fn a_nested_executable_gets_its_links_beside_the_binary() {
+    fn a_nested_executable_gets_its_links_at_the_data_root_beside_the_binary() {
         let fixture = emulator_fixture(|_root, library| {
             let install = library.join("Emulators/PCSX2 (Playstation 2)-latest");
             write_file(&install.join("bin/pcsx2.AppImage"), "pcsx2");
-            write_file(&install.join("bin/memcards/slot1.mcd"), "card");
+            write_file(&install.join("bin/PCSX2/memcards/slot1.mcd"), "card");
             vec![pcsx2_entry(
                 "PCSX2 (Playstation 2)",
                 format!(
@@ -2110,8 +2272,8 @@ mod tests {
 
         let install = fixture.library.join("emulators/PCSX2 (Playstation 2)");
         assert!(
-            is_link(&install.join("bin/memcards")),
-            "the link belongs beside the binary: {}",
+            is_link(&install.join("bin/PCSX2/memcards")),
+            "the link belongs at the data root beside the binary: {}",
             tree(&install).join(", ")
         );
         assert!(
@@ -2143,7 +2305,7 @@ mod tests {
             ] {
                 let install = library.join("Emulators").join(dir);
                 write_file(&install.join("pcsx2.AppImage"), "pcsx2");
-                write_file(&install.join("memcards/slot1.mcd"), card);
+                write_file(&install.join("PCSX2/memcards/slot1.mcd"), card);
             }
             vec![
                 pcsx2_entry(
@@ -2170,7 +2332,7 @@ mod tests {
 
         let second = fixture
             .library
-            .join("emulators/PCSX2 (Playstation 2)-v1.2/memcards");
+            .join("emulators/PCSX2 (Playstation 2)-v1.2/PCSX2/memcards");
         assert!(
             !is_link(&second) && second.is_dir(),
             "the second install keeps its own directory: {}",
@@ -2198,11 +2360,11 @@ mod tests {
         let fixture = emulator_fixture(|_root, library| {
             let install = library.join("emulators/PCSX2 (Playstation 2)");
             write_file(&install.join("pcsx2.AppImage"), "pcsx2");
-            write_file(&install.join("memcards/slot1.mcd"), "card");
+            write_file(&install.join("PCSX2/memcards/slot1.mcd"), "card");
             // `inis` is already linked; `memcards` is not.
             let saves = library.join("saves/PCSX2 (Playstation 2)/inis");
             std::fs::create_dir_all(&saves).unwrap();
-            std::os::unix::fs::symlink(&saves, install.join("inis")).unwrap();
+            std::os::unix::fs::symlink(&saves, install.join("PCSX2/inis")).unwrap();
             vec![pcsx2_entry(
                 "PCSX2 (Playstation 2)",
                 format!(
@@ -2223,7 +2385,7 @@ mod tests {
         assert!(is_link(
             &fixture
                 .library
-                .join("emulators/PCSX2 (Playstation 2)/memcards")
+                .join("emulators/PCSX2 (Playstation 2)/PCSX2/memcards")
         ));
         assert_eq!(
             read(
@@ -2381,7 +2543,7 @@ mod tests {
             let install = library.join("Emulators/PCSX2 (Playstation 2)-latest");
             write_file(&install.join("pcsx2.AppImage"), "pcsx2");
             write_file(
-                &install.join("inis/PCSX2.ini"),
+                &install.join("PCSX2/inis/PCSX2.ini"),
                 "[Folders]\nBios = ~/library/Emulators/PCSX2 (Playstation 2)-latest/bios\n",
             );
             vec![pcsx2_entry(
@@ -2407,6 +2569,236 @@ mod tests {
                     .join("saves/PCSX2 (Playstation 2)/inis/PCSX2.ini")
             ),
             "[Folders]\nBios = ~/library/emulators/PCSX2 (Playstation 2)/bios\n"
+        );
+    }
+    // --- the data root step (layout v2) ----------------------------------
+
+    /// PCSX2's `user_data` directory names, in catalog order.
+    const PCSX2_USER_DATA: [&str; 7] = [
+        "bios", "cheats", "inis", "memcards", "snaps", "sstates", "textures",
+    ];
+
+    /// Stamps the fixture as a finished layout v1 library, so only the
+    /// data-root step runs.
+    fn stamp_v1(fixture: &Fixture) {
+        let mut config = fixture.config();
+        config.library_layout_version = LAYOUT_VERSION_V1;
+        config.save(&fixture.config_path).unwrap();
+    }
+
+    /// A legacy (v0) library whose PCSX2 install is an AppImage: the links
+    /// belong under `PCSX2/`, which is the only data root that build reads,
+    /// and nothing may be linked beside the executable.
+    #[cfg(unix)]
+    #[test]
+    fn a_v0_appimage_install_is_linked_at_its_pcsx2_data_root() {
+        let fixture = emulator_fixture(|_root, library| {
+            let install = library.join("Emulators/PCSX2 (Playstation 2)-latest");
+            write_file(&install.join("pcsx2-2.5.0.AppImage"), "pcsx2");
+            write_file(&install.join("PCSX2/memcards/Mcd001.ps2"), "card");
+            vec![pcsx2_entry(
+                "PCSX2 (Playstation 2)",
+                format!(
+                    "{}/Emulators/PCSX2 (Playstation 2)-latest/pcsx2-2.5.0.AppImage",
+                    library.to_string_lossy()
+                ),
+            )]
+        });
+
+        assert!(matches!(fixture.run(), MigrationOutcome::Completed { .. }));
+
+        let install = fixture.library.join("emulators/PCSX2 (Playstation 2)");
+        for name in PCSX2_USER_DATA {
+            assert!(
+                is_link(&install.join("PCSX2").join(name)),
+                "{name} belongs under PCSX2/: {}",
+                tree(&install).join(", ")
+            );
+            assert!(
+                !install.join(name).exists(),
+                "nothing may be linked beside the executable: {}",
+                tree(&install).join(", ")
+            );
+        }
+        assert_eq!(
+            read(
+                &fixture
+                    .library
+                    .join("saves/PCSX2 (Playstation 2)/memcards/Mcd001.ps2")
+            ),
+            "card"
+        );
+    }
+
+    /// The repair a layout v1 library needs: the links beside the AppImage
+    /// are removed, the real directories under `PCSX2/` are moved into
+    /// `saves/` destination-wins (user ruling 2026-09-19), and the entry is
+    /// reported so the app layer can resync its config file.
+    #[cfg(unix)]
+    #[test]
+    fn a_v1_appimage_install_has_its_links_moved_to_the_data_root() {
+        let fixture = emulator_fixture(|_root, library| {
+            let install = library.join("emulators/PCSX2 (Playstation 2)");
+            let saves = library.join("saves/PCSX2 (Playstation 2)");
+            write_file(&install.join("pcsx2-2.5.0.AppImage"), "pcsx2");
+            // Layout v1's links, beside the executable, where PCSX2 never
+            // looked.
+            for name in PCSX2_USER_DATA {
+                std::fs::create_dir_all(saves.join(name)).unwrap();
+                std::os::unix::fs::symlink(
+                    format!("../../saves/PCSX2 (Playstation 2)/{name}"),
+                    install.join(name),
+                )
+                .unwrap();
+            }
+            write_file(&saves.join("inis/PCSX2.ini"), "GRID\n");
+            write_file(&saves.join("bios/x.bin"), "bios");
+            // What PCSX2 itself wrote, at the root it really uses.
+            write_file(&install.join("PCSX2/inis/PCSX2.ini"), "LIVE\n");
+            write_file(&install.join("PCSX2/memcards/Mcd001.ps2"), "card");
+            vec![pcsx2_entry(
+                "PCSX2 (Playstation 2)",
+                format!(
+                    "{}/emulators/PCSX2 (Playstation 2)/pcsx2-2.5.0.AppImage",
+                    library.to_string_lossy()
+                ),
+            )]
+        });
+        stamp_v1(&fixture);
+
+        assert_eq!(
+            fixture.run(),
+            MigrationOutcome::Completed {
+                games_moved: 0,
+                emulators_renamed: 0,
+                links_changed: 0,
+                skipped_duplicates: 0,
+                skipped_missing: 0,
+                rows_rewritten: 0,
+                relinked: vec!["PCSX2 (Playstation 2)".to_string()],
+            }
+        );
+
+        let install = fixture.library.join("emulators/PCSX2 (Playstation 2)");
+        let saves = fixture.library.join("saves/PCSX2 (Playstation 2)");
+        for name in PCSX2_USER_DATA {
+            assert!(
+                !install.join(name).exists() && !is_link(&install.join(name)),
+                "the link beside the executable must be gone: {}",
+                tree(&install).join(", ")
+            );
+            assert!(
+                is_link(&install.join("PCSX2").join(name)),
+                "{name} belongs under PCSX2/: {}",
+                tree(&install).join(", ")
+            );
+        }
+        // The managed copy wins the collision; the emulator's own is dropped.
+        assert_eq!(read(&saves.join("inis/PCSX2.ini")), "GRID\n");
+        assert_eq!(read(&saves.join("bios/x.bin")), "bios");
+        assert_eq!(read(&saves.join("memcards/Mcd001.ps2")), "card");
+        assert_eq!(
+            fixture.config().library_layout_version,
+            LAYOUT_VERSION_CURRENT
+        );
+
+        // Already at the current version: the second run does nothing.
+        let before_tree = tree(&fixture.library);
+        let before_contents = contents(&fixture.library);
+        assert_eq!(fixture.run(), MigrationOutcome::Skipped);
+        assert_eq!(tree(&fixture.library), before_tree);
+        assert_eq!(contents(&fixture.library), before_contents);
+    }
+
+    /// Two installs of one profile share one `saves/<Emulator>`, and the
+    /// merge into it is destination-wins — so the second is skipped here for
+    /// the same reason the v1 step skips it.
+    #[cfg(unix)]
+    #[test]
+    fn the_data_root_step_skips_a_second_install_of_one_profile() {
+        let fixture = emulator_fixture(|_root, library| {
+            let lib = library.to_string_lossy().into_owned();
+            for (dir, card) in [("PCSX2 (Playstation 2)", "NEW"), ("PCSX2-v1.2", "OLD")] {
+                let install = library.join("emulators").join(dir);
+                write_file(&install.join("pcsx2-2.5.0.AppImage"), "pcsx2");
+                write_file(&install.join("PCSX2/memcards/Mcd001.ps2"), card);
+            }
+            vec![
+                pcsx2_entry(
+                    "PCSX2 (Playstation 2)",
+                    format!("{lib}/emulators/PCSX2 (Playstation 2)/pcsx2-2.5.0.AppImage"),
+                ),
+                pcsx2_entry(
+                    "PCSX2 1.2",
+                    format!("{lib}/emulators/PCSX2-v1.2/pcsx2-2.5.0.AppImage"),
+                ),
+            ]
+        });
+        stamp_v1(&fixture);
+
+        let outcome = fixture.run();
+        let MigrationOutcome::Completed { relinked, .. } = outcome else {
+            panic!("{outcome:?}");
+        };
+        assert_eq!(relinked, vec!["PCSX2 (Playstation 2)".to_string()]);
+
+        let second = fixture.library.join("emulators/PCSX2-v1.2/PCSX2/memcards");
+        assert!(
+            !is_link(&second) && second.is_dir(),
+            "the second install keeps its own directory: {}",
+            tree(&fixture.library).join(", ")
+        );
+        assert_eq!(read(&second.join("Mcd001.ps2")), "OLD");
+        assert_eq!(
+            read(
+                &fixture
+                    .library
+                    .join("saves/PCSX2 (Playstation 2)/memcards/Mcd001.ps2")
+            ),
+            "NEW",
+            "the first install's card is the one under saves/"
+        );
+    }
+
+    /// A PCSX2 build that is not an AppImage reads the executable's own
+    /// directory, which is where layout v1 already put its links: nothing to
+    /// relink, and the version is still stamped.
+    #[cfg(unix)]
+    #[test]
+    fn a_non_appimage_install_is_left_alone_by_the_data_root_step() {
+        let fixture = emulator_fixture(|_root, library| {
+            let install = library.join("emulators/PCSX2 (Playstation 2)");
+            let saves = library.join("saves/PCSX2 (Playstation 2)");
+            write_file(&install.join("pcsx2-qt.exe"), "pcsx2");
+            for name in PCSX2_USER_DATA {
+                std::fs::create_dir_all(saves.join(name)).unwrap();
+                std::os::unix::fs::symlink(
+                    format!("../../saves/PCSX2 (Playstation 2)/{name}"),
+                    install.join(name),
+                )
+                .unwrap();
+            }
+            write_file(&saves.join("inis/PCSX2.ini"), "GRID\n");
+            vec![pcsx2_entry(
+                "PCSX2 (Playstation 2)",
+                format!(
+                    "{}/emulators/PCSX2 (Playstation 2)/pcsx2-qt.exe",
+                    library.to_string_lossy()
+                ),
+            )]
+        });
+        stamp_v1(&fixture);
+        let before = tree(&fixture.library);
+
+        let outcome = fixture.run();
+        let MigrationOutcome::Completed { relinked, .. } = outcome else {
+            panic!("{outcome:?}");
+        };
+        assert!(relinked.is_empty(), "{relinked:?}");
+        assert_eq!(tree(&fixture.library), before);
+        assert_eq!(
+            fixture.config().library_layout_version,
+            LAYOUT_VERSION_CURRENT
         );
     }
 }

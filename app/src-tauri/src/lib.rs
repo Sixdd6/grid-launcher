@@ -116,20 +116,23 @@ pub fn run() {
         Ok(count) => tracing::info!("migrated {count} emulator entries to current default args"),
         Err(e) => tracing::warn!("emulator args migration failed: {e}"),
     }
-    // The one-shot move to library layout v1 (`games/`, `emulators/`,
-    // `saves/`). It runs before the services are built: they cache nothing
-    // at construction and `InstallService` re-reads the config per call, but
+    // The one-shot move to the current library layout: v1's `games/`,
+    // `emulators/`, `saves/` split, then v2's data-root repair (the
+    // `user_data` links move to the directory the emulator really reads).
+    // It runs before the services are built: they cache nothing at
+    // construction and `InstallService` re-reads the config per call, but
     // `LaunchService` and the launch hooks must never see a half-moved tree.
-    // A failure leaves the version at 0 and is carried to the UI as one
+    // A failure leaves the version unstamped and is carried to the UI as one
     // toast; grid-core already logged the warn line. The message holds
-    // paths only.
-    let layout_migration = match &registry {
+    // paths only. `relinked` names the entries whose config files the resync
+    // below has to rewrite.
+    let (layout_migration, relinked) = match &registry {
         Ok(registry) => match grid_core::library::layout_migration::run(
             &config_path,
             registry,
             grid_core::launch::profiles::load_profiles(),
         ) {
-            grid_core::library::layout_migration::MigrationOutcome::Skipped => None,
+            grid_core::library::layout_migration::MigrationOutcome::Skipped => (None, Vec::new()),
             grid_core::library::layout_migration::MigrationOutcome::Completed {
                 games_moved,
                 emulators_renamed,
@@ -137,6 +140,7 @@ pub fn run() {
                 skipped_duplicates,
                 skipped_missing,
                 rows_rewritten,
+                relinked,
             } => {
                 tracing::info!(
                     games_moved,
@@ -145,19 +149,43 @@ pub fn run() {
                     skipped_duplicates,
                     skipped_missing,
                     rows_rewritten,
-                    "library moved to layout v1"
+                    relinked = relinked.len(),
+                    "library moved to the current layout"
                 );
-                None
+                (None, relinked)
             }
             grid_core::library::layout_migration::MigrationOutcome::Failed { message } => {
-                Some(message)
+                (Some(message), Vec::new())
             }
         },
-        Err(_) => None,
+        Err(_) => (None, Vec::new()),
     };
     let install = registry
         .clone()
         .map(|registry| InstallService::new(registry, config_path.clone()));
+    // The data-root repair moved these entries' user data to the directory
+    // the emulator really reads; their config files still name the old one
+    // (PCSX2's `[Folders] Bios` above all). One full autoconfig pass per
+    // entry rewrites the managed keys in place. `fresh_install` is false: a
+    // repair must not reseed a renderer the user has since changed.
+    //
+    // Logs carry the entry name only; the RetroAchievements credential stays
+    // inside `RaCredentials` for the whole hop.
+    if !relinked.is_empty() {
+        let library_path = Config::load(&config_path)
+            .map(|config| config.library_path)
+            .unwrap_or_default();
+        for name in &relinked {
+            tracing::info!(emulator = %name, "resyncing emulator config after the library layout repair");
+            commands::run_emulator_sync(
+                name,
+                &library_path,
+                commands::SyncInputs::from_install(install.as_ref().ok()),
+                false,
+                grid_core::autoconfig::sync_new_emulator,
+            );
+        }
+    }
     let launch = registry.map(|registry| LaunchService::new(registry, config_path));
     let builder = tauri::Builder::default().manage(AppState {
         session,
