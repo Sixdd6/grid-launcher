@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use super::profiles::{profile_for_entry, EmulatorProfile};
 use crate::library::extract::extract_archive;
 use crate::library::paths::{sanitize_component, saves_dir, EMULATORS_DIR};
-use crate::library::user_data_links::ensure_user_data_links;
+use crate::library::user_data_links::{ensure_user_data_links, user_data_root};
 
 /// `_extract_emulator_archive`'s message when extraction finished but no
 /// launchable file turned up (emulator_ui_mixin.py:1394). Verbatim — the
@@ -59,9 +59,10 @@ pub fn compat_tool_install_dir(root: &Path, archive_stem: &str) -> PathBuf {
 /// When the extracted executable matches a profile in `profiles`
 /// ([`profile_for_entry`]) with a non-empty `user_data`, the matched
 /// profile's directories are linked to `saves_dir(library, &profile.name)`
-/// (the saves directory is named from the PROFILE, not the entry) beside the
-/// chosen EXECUTABLE before returning — the autoconfig sync the caller runs afterward must read
-/// through the link, not overwrite it. A link error only warns: the archive
+/// (the saves directory is named from the PROFILE, not the entry) at the
+/// executable's data root ([`user_data_root`]) before returning — the
+/// autoconfig sync the caller runs afterward must read through the link, not
+/// overwrite it. A link error only warns: the archive
 /// extracted and the entry is still valid without it.
 pub fn install_manual_archive(
     library: &Path,
@@ -83,20 +84,24 @@ pub fn install_manual_archive(
     // Python's `os.chmod(path, 0o755)` off win32 (emulator_ui_mixin.py:1399).
     make_executable(&executable);
 
-    // Beside the EXECUTABLE, not at the extraction root: every reader
-    // derives the emulator directory from the executable's parent, and
+    // At the emulator's DATA root (`user_data_root`): beside the EXECUTABLE
+    // for every emulator but the PCSX2 AppImage, which reads
+    // `<exe dir>/PCSX2` and nothing else. Never the extraction root — every
+    // reader derives its directory from the executable, and
     // `select_executable` legally picks a nested binary.
-    let exe_dir = executable.parent().unwrap_or(dest.as_path());
     if let Some(profile) = profile_for_entry(entry_name, &executable.to_string_lossy(), profiles) {
-        if !profile.user_data.is_empty()
-            && ensure_user_data_links(
-                exe_dir,
-                &saves_dir(library, &profile.name),
-                &profile.user_data,
-            )
-            .is_err()
-        {
-            tracing::warn!("user data links failed for {}", exe_dir.display());
+        if !profile.user_data.is_empty() {
+            let root = user_data_root(profile, &executable);
+            if fs::create_dir_all(&root).is_err()
+                || ensure_user_data_links(
+                    &root,
+                    &saves_dir(library, &profile.name),
+                    &profile.user_data,
+                )
+                .is_err()
+            {
+                tracing::warn!("user data links failed for {}", root.display());
+            }
         }
     }
 

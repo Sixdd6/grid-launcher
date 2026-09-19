@@ -12,14 +12,39 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use super::LibraryError;
+use crate::config::EmulatorEntry;
+use crate::launch::profiles::EmulatorProfile;
+
+/// The directory a profile's `user_data` links belong in for the executable
+/// `exe`: the DATA root `autoconfig::emulator_data_root` resolves for a
+/// synthetic entry named after the profile — `<exe dir>/PCSX2` for the PCSX2
+/// AppImage (the only place that build reads), and the executable's own
+/// directory for everything else. The exe parent is the fallback for a path
+/// with no resolvable root at all.
+///
+/// The link call sites (`library::InstallService`,
+/// `launch::emu_install::install_manual_archive`,
+/// `library::layout_migration`) all go through this one function, so a link
+/// can never land somewhere the writers and readers do not look.
+pub fn user_data_root(profile: &EmulatorProfile, exe: &Path) -> PathBuf {
+    let entry = EmulatorEntry {
+        name: profile.name.clone(),
+        path: exe.to_string_lossy().into_owned(),
+        ..Default::default()
+    };
+    crate::autoconfig::emulator_data_root(&entry, std::slice::from_ref(profile))
+        .unwrap_or_else(|| exe.parent().unwrap_or(exe).to_path_buf())
+}
 
 /// Points every `user_data` directory of one emulator install at
 /// `saves_dir`, returning whether anything on disk changed.
 ///
-/// `install_dir` is the directory holding the chosen EXECUTABLE — what
-/// `autoconfig::paths::emulator_dir` and `cloud::ops::emulator_dir_for`
-/// resolve from an entry's path — not the extraction root, which is a
-/// different directory whenever the binary is nested.
+/// `install_dir` is the DATA root the emulator reads from — build it with
+/// [`user_data_root`], which is the directory holding the chosen EXECUTABLE
+/// for every emulator but the PCSX2 AppImage. It is never the extraction
+/// root, which is a different directory whenever the binary is nested. The
+/// caller creates the root first: a link cannot be made inside a directory
+/// that does not exist.
 ///
 /// Per entry: the destination `saves_dir/<dir>` is created; a real directory
 /// at `install_dir/<dir>` has its contents moved there (the destination wins
@@ -348,6 +373,43 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::{Path, PathBuf};
+
+    /// A catalog profile named `name` with `user_data` left empty —
+    /// [`user_data_root`] reads only the name and the executable.
+    fn profile(name: &str) -> EmulatorProfile {
+        EmulatorProfile {
+            name: name.to_string(),
+            match_tokens: vec![name.to_lowercase()],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn user_data_root_is_the_pcsx2_subdirectory_for_an_appimage() {
+        let install = Path::new("/library/emulators/PCSX2 (Playstation 2)");
+        assert_eq!(
+            user_data_root(&profile("PCSX2"), &install.join("pcsx2-2.5.0.AppImage")),
+            install.join("PCSX2")
+        );
+    }
+
+    #[test]
+    fn user_data_root_is_the_exe_parent_for_a_pcsx2_binary_that_is_not_an_appimage() {
+        let install = Path::new("/library/emulators/PCSX2 (Playstation 2)");
+        assert_eq!(
+            user_data_root(&profile("PCSX2"), &install.join("pcsx2-qt.exe")),
+            install.to_path_buf()
+        );
+    }
+
+    #[test]
+    fn user_data_root_is_the_exe_parent_for_another_profile() {
+        let install = Path::new("/library/emulators/Dolphin (GameCube)");
+        assert_eq!(
+            user_data_root(&profile("Dolphin"), &install.join("Dolphin.AppImage")),
+            install.to_path_buf()
+        );
+    }
 
     /// `<temp>/emulators/E` and `<temp>/saves/E`, the install/saves pair
     /// every test links between.

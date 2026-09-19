@@ -365,7 +365,7 @@ fn attach_screenshot_fallback(
     jobs: &mut [UploadJob],
 ) {
     let profile = profile_for(ctx, entry);
-    let emulator_dir = emulator_dir_for(entry);
+    let emulator_dir = emulator_dir_for(entry, ctx.profiles);
     let rctx = resolve_ctx_for(ctx, emulator_dir.as_deref());
     let screenshot_dirs = resolved_screenshot_directories(entry, profile, &rctx);
     if screenshot_dirs.is_empty() {

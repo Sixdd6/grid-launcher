@@ -1233,7 +1233,9 @@ async fn retrying_an_unknown_entry_is_a_no_op() {
 
 /// The catalog install is D1 call site A: after the config entry is written,
 /// `autoconfig::sync_new_emulator` runs for it. A PCSX2 AppImage install must
-/// come out with `portable.ini` sitting next to the installed executable.
+/// come out with its managed ini under the AppImage's data root,
+/// `<install>/PCSX2/inis/PCSX2.ini`, and no `portable.ini` (that build reads
+/// neither the marker nor anything beside the binary).
 #[tokio::test]
 async fn emulator_install_runs_autoconfig_after_writing_the_entry() {
     let harness = Harness::new(|uri| vec![profile("PCSX2", gitea_source(uri))]).await;
@@ -1252,16 +1254,25 @@ async fn emulator_install_runs_autoconfig_after_writing_the_entry() {
     assert_eq!(entry.error, "", "a clean autoconfig adds no warning");
 
     let install_dir = harness.install_dir("PCSX2");
+    let data_root = install_dir.join("PCSX2");
     assert!(
-        install_dir.join("portable.ini").is_file(),
-        "autoconfig must have run next to the installed executable"
+        data_root.join("inis").join("PCSX2.ini").is_file(),
+        "autoconfig must have run at the AppImage data root"
     );
-    assert!(install_dir.join("inis").join("PCSX2.ini").is_file());
+    assert!(
+        !install_dir.join("portable.ini").exists(),
+        "an AppImage gets no portable.ini"
+    );
+    assert!(
+        !install_dir.join("inis").exists(),
+        "nothing may be written beside the AppImage"
+    );
 }
 
 /// An autoconfig failure is a warning on a Completed row, never a failed
-/// install. `inis` arrives from the archive as a plain FILE, so PCSX2's
-/// `create_dir_all(<dir>/inis)` cannot succeed and the writer reaches nothing.
+/// install. `PCSX2/inis` arrives from the archive as a plain FILE — the
+/// AppImage data root's ini directory — so PCSX2's `create_dir_all` cannot
+/// succeed and the writer reaches nothing.
 #[tokio::test]
 async fn autoconfig_failure_leaves_the_install_completed_with_a_warning() {
     let staging = tempfile::tempdir().unwrap();
@@ -1270,7 +1281,7 @@ async fn autoconfig_failure_leaves_the_install_completed_with_a_warning() {
         "widget.zip",
         &[
             ("pcsx2.AppImage", b"APPIMAGE-BYTES"),
-            ("inis", b"not a directory"),
+            ("PCSX2/inis", b"not a directory"),
         ],
     );
 

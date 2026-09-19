@@ -31,7 +31,9 @@ use crate::autoconfig::cores::{
     core_saves_files_metadata, cores_for_platform, CoreEntry,
 };
 use crate::autoconfig::paths::{self, expand_user, resolve_best_effort};
-use crate::autoconfig::{dolphin, is_cemu, is_dolphin, is_retroarch, retroarch};
+use crate::autoconfig::{
+    dolphin, emulator_data_root, is_cemu, is_dolphin, is_retroarch, retroarch,
+};
 use crate::config::{Config, EmulatorEntry};
 use crate::launch::profiles::{platform_matches_keywords, profile_for_entry, EmulatorProfile};
 use crate::launch::selection::{
@@ -135,7 +137,10 @@ pub fn targets_for_entry(
         return Vec::new();
     }
 
-    let emulator_dir = emulator_dir_of(entry);
+    // The DATA root, not just the executable's directory: PCSX2's AppImage
+    // reads `<exe dir>/PCSX2/bios`, so a relative `bios` spec has to land
+    // there. Every other emulator keeps `emulator_dir_of`'s answer.
+    let emulator_dir = emulator_data_root(entry, std::slice::from_ref(profile)).unwrap_or_default();
     let library_path = if library_dir.trim().is_empty() {
         PathBuf::new()
     } else {
@@ -667,6 +672,28 @@ mod tests {
         assert_eq!(
             crate::firmware::resolve_targets("xbox-firmware.zip", &targets),
             vec![&targets[0]]
+        );
+    }
+
+    /// PCSX2's AppImage reads `<exe dir>/PCSX2/bios`, so the relative
+    /// `bios` spec resolves under the data root, not beside the binary.
+    #[test]
+    fn pcsx2_appimage_bios_target_is_under_the_pcsx2_data_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("PCSX2");
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("pcsx2-2.5.0.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        let e = entry("PCSX2 (Playstation 2)", &exe);
+        let mut pcsx2 = profile_with(&[spec("bios", None)]);
+        pcsx2.name = "PCSX2 (Playstation 2)".to_string();
+        pcsx2.match_tokens = vec!["pcsx2".to_string()];
+
+        let targets = targets_for_entry(&e, Some(&pcsx2), "", temp.path());
+
+        assert_eq!(
+            targets,
+            vec![plain(resolve_best_effort(&dir.join("PCSX2").join("bios")))]
         );
     }
 

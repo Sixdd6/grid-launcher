@@ -19,6 +19,7 @@ use super::extract::is_extractable_archive;
 use super::paths::{emulators_dir, expand_home, legacy_emulators_dir, library_root, saves_dir};
 use super::user_data_links::{move_file, move_tree_preferring_dest};
 use super::{apply_removal, run_removals, LibraryError, Removal, RemovalLabel};
+use crate::autoconfig::paths::is_appimage;
 use crate::cloud::dirs::{
     resolved_screenshot_directories, resolved_sync_directory_paths, PathKey, ResolveContext,
 };
@@ -103,7 +104,7 @@ pub fn remove_emulator_files(
         let profile = profile_for_entry(&entry.name, &entry.path, profiles);
         let emulator = profile.map_or(entry.name.as_str(), |p| p.name.as_str());
         let destination = saves_dir(&library, emulator);
-        let emulator_dir = emulator_dir_for(entry);
+        let emulator_dir = emulator_dir_for(entry, profiles);
         let config_dir = config_path.parent().unwrap_or(Path::new("."));
         let ctx = ResolveContext {
             emulator_dir: emulator_dir.as_deref(),
@@ -140,7 +141,10 @@ pub fn remove_emulator_files(
 ///
 /// - strictly inside `install_dir`: the whole directory moves to
 ///   `saves_dir/<relative>` (a rename when the destination is absent, a
-///   destination-wins merge otherwise);
+///   destination-wins merge otherwise). `<relative>` is measured from the
+///   emulator's DATA root when that root is itself inside the install
+///   directory — PCSX2's AppImage, whose `PCSX2/memcards` lands at
+///   `saves/<E>/memcards`, the same name a reinstall links;
 /// - EQUAL to `install_dir` (a profile with a `"."` directory, Redream):
 ///   only the top-level regular files move, minus the entry's own
 ///   executable, anything [`is_extractable_archive`] recognizes, and
@@ -159,6 +163,15 @@ pub(crate) fn salvage_user_data(
     ctx: &ResolveContext,
 ) -> Result<Vec<PathBuf>, LibraryError> {
     let root = fs::canonicalize(install_dir).unwrap_or_else(|_| install_dir.to_path_buf());
+    // PCSX2's AppImage keeps everything one level deeper, in
+    // `<exe dir>/PCSX2`. When that data root sits inside the install
+    // directory, a salvaged directory keeps its path BELOW the root
+    // (`PCSX2/memcards` -> `saves/<E>/memcards`), so the links a reinstall
+    // creates at the data root find the same bytes again.
+    let data_root = profile
+        .and_then(|p| crate::autoconfig::emulator_data_root(entry, std::slice::from_ref(p)))
+        .and_then(|candidate| fs::canonicalize(candidate).ok())
+        .filter(|candidate| *candidate != root && candidate.starts_with(&root));
     let mut candidates: Vec<PathBuf> = Vec::new();
     for key in [PathKey::SavePaths, PathKey::StatePaths] {
         let (directories, _files) = resolved_sync_directory_paths(entry, profile, key, ctx);
@@ -179,7 +192,13 @@ pub(crate) fn salvage_user_data(
 
         if resolved == root {
             salvaged.extend(salvage_loose_files(entry, &root, saves_dir)?);
-        } else if let Ok(relative) = resolved.strip_prefix(&root) {
+            continue;
+        }
+        let relative = data_root
+            .as_deref()
+            .and_then(|base| resolved.strip_prefix(base).ok())
+            .or_else(|| resolved.strip_prefix(&root).ok());
+        if let Some(relative) = relative {
             let destination = saves_dir.join(relative);
             move_directory(&resolved, &destination)?;
             salvaged.push(destination);
@@ -223,15 +242,12 @@ pub(crate) fn managed_install_dir_for(entry: &EmulatorEntry, library: &Path) -> 
     managed_install_dir(entry, &emulator_roots(library))
 }
 
-/// The parent directory of `entry`'s executable, the `%EMULATOR_DIR%` the
-/// cloud resolution expands against (`cloud::ops::resolve_ctx_for`), or
-/// `None` for a blank path.
-fn emulator_dir_for(entry: &EmulatorEntry) -> Option<PathBuf> {
-    let raw = entry.path.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    expand_home(raw).parent().map(Path::to_path_buf)
+/// The `%EMULATOR_DIR%` the cloud resolution expands against
+/// (`cloud::ops::emulator_dir_for`): the entry's DATA root, which is its
+/// executable's parent for every emulator but the PCSX2 AppImage
+/// (`<exe dir>/PCSX2`). `None` for a blank path.
+fn emulator_dir_for(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> Option<PathBuf> {
+    crate::autoconfig::emulator_data_root(entry, profiles)
 }
 
 /// The top-level regular files of `root` worth keeping: everything except
@@ -268,11 +284,6 @@ fn salvage_loose_files(
         salvaged.push(destination);
     }
     Ok(salvaged)
-}
-
-fn is_appimage(path: &Path) -> bool {
-    path.extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("AppImage"))
 }
 
 /// Moves `src` to `dest`: a rename while `dest` is still absent, otherwise
@@ -677,6 +688,80 @@ mod tests {
 
         assert!(
             super::super::user_data_links::is_link(&install_dir.join("memcards")),
+            "the link itself must survive"
+        );
+        assert_eq!(fs::read(linked_target.join("slot1.mcd")).unwrap(), b"CARD");
+    }
+
+    /// PCSX2's AppImage writes under `<install>/PCSX2`, so the salvaged
+    /// directory keeps its name BELOW that data root — `saves/<E>/memcards`,
+    /// the name a reinstall links again, not `saves/<E>/PCSX2/memcards`.
+    #[test]
+    fn salvage_strips_the_pcsx2_appimage_data_root_from_the_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path();
+        let exe = touch_install(library, "emulators", "PCSX2", "pcsx2-2.5.0.AppImage");
+        let install_dir = expected_dir(library, "emulators", "PCSX2");
+        let data_root = install_dir.join("PCSX2");
+        fs::create_dir_all(data_root.join("memcards")).unwrap();
+        fs::write(data_root.join("memcards").join("slot1.mcd"), b"SAVE").unwrap();
+
+        let entry = entry("PCSX2", &exe);
+        let profile = profile("PCSX2", &["memcards"], &[]);
+        let emulator_dir = emulator_dir_for(&entry, std::slice::from_ref(&profile)).unwrap();
+        assert_eq!(emulator_dir, data_root);
+        let destination = super::saves_dir(library, "PCSX2");
+        let library_raw = library.to_string_lossy().into_owned();
+        let salvaged = salvage_user_data(
+            &entry,
+            &install_dir,
+            &destination,
+            Some(&profile),
+            &ctx(&emulator_dir, &library_raw, library),
+        )
+        .unwrap();
+
+        assert_eq!(salvaged, vec![destination.join("memcards")]);
+        assert_eq!(
+            fs::read(destination.join("memcards").join("slot1.mcd")).unwrap(),
+            b"SAVE"
+        );
+        assert!(!data_root.join("memcards").exists());
+    }
+
+    /// The same install once the links are in place: the candidate resolves
+    /// into `saves/`, so nothing is salvaged and the link survives.
+    #[cfg(unix)]
+    #[test]
+    fn salvage_skips_a_linked_pcsx2_appimage_install() {
+        let dir = tempfile::tempdir().unwrap();
+        let library = dir.path();
+        let exe = touch_install(library, "emulators", "PCSX2", "pcsx2-2.5.0.AppImage");
+        let install_dir = expected_dir(library, "emulators", "PCSX2");
+        let data_root = install_dir.join("PCSX2");
+        fs::create_dir_all(&data_root).unwrap();
+        let destination = super::saves_dir(library, "PCSX2");
+        let linked_target = destination.join("memcards");
+        fs::create_dir_all(&linked_target).unwrap();
+        fs::write(linked_target.join("slot1.mcd"), b"CARD").unwrap();
+        std::os::unix::fs::symlink(&linked_target, data_root.join("memcards")).unwrap();
+
+        let entry = entry("PCSX2", &exe);
+        let profile = profile("PCSX2", &["memcards"], &[]);
+        let emulator_dir = emulator_dir_for(&entry, std::slice::from_ref(&profile)).unwrap();
+        let library_raw = library.to_string_lossy().into_owned();
+        let salvaged = salvage_user_data(
+            &entry,
+            &install_dir,
+            &destination,
+            Some(&profile),
+            &ctx(&emulator_dir, &library_raw, library),
+        )
+        .unwrap();
+
+        assert!(salvaged.is_empty(), "{salvaged:?}");
+        assert!(
+            super::super::user_data_links::is_link(&data_root.join("memcards")),
             "the link itself must survive"
         );
         assert_eq!(fs::read(linked_target.join("slot1.mcd")).unwrap(), b"CARD");

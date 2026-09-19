@@ -29,7 +29,6 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use crate::autoconfig::cores::{core_entries, core_flags, core_flags_for_platform, CoreFlags};
-use crate::autoconfig::paths::expand_user;
 use crate::autoconfig::{self, name_matches_any_token_substring, readers};
 use crate::config::{Config, EmulatorEntry};
 use crate::launch::profiles::{profile_for_entry, EmulatorProfile};
@@ -215,13 +214,13 @@ fn stub_entry(name: &str) -> EmulatorEntry {
     }
 }
 
-/// `Path(emulator["path"]).expanduser().parent`, or `None` for a blank
-/// path (cloud_mixin.py:927-930's `Path()` fallback).
-fn emulator_dir_for(entry: &EmulatorEntry) -> Option<PathBuf> {
-    if entry.path.is_empty() {
-        return None;
-    }
-    expand_user(&entry.path).parent().map(Path::to_path_buf)
+/// The `%EMULATOR_DIR%` every sync path expands against: the entry's DATA
+/// root (`autoconfig::emulator_data_root`), which is
+/// `Path(emulator["path"]).expanduser().parent` for every emulator except
+/// PCSX2's AppImage, whose data lives one level deeper in `<exe dir>/PCSX2`.
+/// `None` for a blank path (cloud_mixin.py:927-930's `Path()` fallback).
+fn emulator_dir_for(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> Option<PathBuf> {
+    crate::autoconfig::emulator_data_root(entry, profiles)
 }
 
 fn resolve_ctx_for<'a>(
@@ -264,7 +263,7 @@ pub fn resolved_sync_dirs(
         return cached.clone();
     }
     let profile = profile_for(ctx, entry);
-    let emulator_dir = emulator_dir_for(entry);
+    let emulator_dir = emulator_dir_for(entry, ctx.profiles);
     let rctx = resolve_ctx_for(ctx, emulator_dir.as_deref());
     let resolved = dirs::resolved_sync_directory_paths(entry, profile, key, &rctx);
     caches.sync_dirs.insert(cache_key, resolved.clone());

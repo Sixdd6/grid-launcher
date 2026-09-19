@@ -693,6 +693,52 @@ mod tests {
         assert_eq!(resolved, vec![paths::resolve_best_effort(&configured)]);
     }
 
+    /// PCSX2's AppImage: `%EMULATOR_DIR%` is the data root
+    /// `cloud::ops::emulator_dir_for` now builds, so the profile's relative
+    /// `memcards`/`snaps` resolve under `PCSX2/` and the decoy directories
+    /// beside the AppImage are never returned.
+    #[test]
+    fn pcsx2_appimage_saves_and_screenshots_resolve_under_the_data_root() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+
+        let install = temp.path().join("PCSX2");
+        std::fs::create_dir_all(&install).unwrap();
+        let exe = install.join("pcsx2-2.5.0.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        let root = install.join("PCSX2");
+        std::fs::create_dir_all(root.join("memcards")).unwrap();
+        std::fs::create_dir_all(root.join("snaps")).unwrap();
+        // The pre-fix locations, left on disk as decoys.
+        std::fs::create_dir_all(install.join("memcards")).unwrap();
+        std::fs::create_dir_all(install.join("snaps")).unwrap();
+
+        let e = entry("PCSX2", &exe.to_string_lossy());
+        let profile = EmulatorProfile {
+            name: "PCSX2 (Playstation 2)".to_string(),
+            match_tokens: vec!["pcsx2".to_string()],
+            save_directories: vec!["memcards".to_string()],
+            screenshot_directories: vec!["snaps".to_string()],
+            ..Default::default()
+        };
+        let data_root = crate::autoconfig::emulator_data_root(&e, std::slice::from_ref(&profile))
+            .expect("the AppImage data root");
+        assert_eq!(data_root, root);
+
+        let c = ctx(Some(&data_root), temp.path());
+        let (saves, _files) =
+            resolved_sync_directory_paths(&e, Some(&profile), PathKey::SavePaths, &c);
+        assert_eq!(
+            saves,
+            vec![paths::resolve_best_effort(&root.join("memcards"))]
+        );
+        assert_eq!(
+            resolved_screenshot_directories(&e, Some(&profile), &c),
+            vec![paths::resolve_best_effort(&root.join("snaps"))]
+        );
+    }
+
     #[test]
     fn retroarch_prepends_config_dir_and_appends_literal_fallbacks() {
         let _lock = crate::test_env::lock();

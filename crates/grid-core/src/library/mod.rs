@@ -68,7 +68,7 @@ use platforms::{
 use queue::{Admission, CancelAction, DownloadStatus, DownloadsSnapshot, JobKey, QueueState};
 use registry::{installed_match, InstalledGame, Registry};
 use specials::ps3::Ps3Roots;
-use user_data_links::ensure_user_data_links;
+use user_data_links::{ensure_user_data_links, user_data_root};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LibraryError {
@@ -2297,15 +2297,18 @@ impl InstallService {
         // writer reads through the link and must see the moved directory,
         // not the fresh extracted one it would otherwise overwrite.
         //
-        // Beside the EXECUTABLE, not at the install root: every reader
-        // (`autoconfig::paths::emulator_dir`, `cloud::ops::emulator_dir_for`)
-        // derives the emulator directory from the executable's parent, and
+        // At the emulator's DATA root (`user_data_root`): beside the
+        // EXECUTABLE for every emulator but the PCSX2 AppImage, which reads
+        // `<exe dir>/PCSX2` and nothing else. Never the install root — every
+        // reader derives its directory from the executable, and
         // `select_executable` legally picks a nested binary.
-        let exe_dir = exe.parent().unwrap_or(install_dir);
         if let Some(profile) = catalog::find_profile(&self.profiles, &job.source_id) {
             if !profile.user_data.is_empty() {
-                if let Err(e) = ensure_user_data_links(
-                    exe_dir,
+                let root = user_data_root(profile, &exe);
+                if let Err(e) = std::fs::create_dir_all(&root) {
+                    append_warning(warning, &format!("user data links: {e}"));
+                } else if let Err(e) = ensure_user_data_links(
+                    &root,
                     &saves_dir(&job.library, &job.profile_name),
                     &profile.user_data,
                 ) {
