@@ -33,6 +33,19 @@ pub fn is_ps3_platform(platform: &str) -> bool {
     )
 }
 
+/// Whether `platform` names DOS: "DOS", "MS-DOS", "PC DOS", or any name
+/// carrying `dos` / `msdos` as a whole token. Token-based on purpose so a
+/// name that merely contains the letters does not match. A DOS game's
+/// archive is the ROM itself: the DOSBox cores mount the zip directly, so
+/// it is never extracted and always launched as the archive.
+pub fn is_dos_platform(platform: &str) -> bool {
+    let (normalized, _compact, tokens) = normalized_tokens(platform);
+    if normalized.is_empty() {
+        return false;
+    }
+    tokens.iter().any(|t| t == "dos" || t == "msdos")
+}
+
 /// Splits `platform` into a normalized (lowercased, non-alphanumeric runs
 /// collapsed to single spaces, trimmed) form, its space-free "compact" form,
 /// and the whitespace-separated tokens of the normalized form.
@@ -96,6 +109,20 @@ pub fn is_xbox360_platform(platform: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dos_platform_matches_dos_names_by_token() {
+        for platform in ["DOS", "dos", " MS-DOS ", "PC DOS", "MSDOS", "IBM PC (DOS)"] {
+            assert!(is_dos_platform(platform), "{platform} should be DOS");
+        }
+    }
+
+    #[test]
+    fn dos_platform_false_for_names_that_only_contain_the_letters() {
+        for platform in ["Windows", "Nintendo DS", "Dosukoi", "Amiga CDOS", "", "  "] {
+            assert!(!is_dos_platform(platform), "{platform} should not be DOS");
+        }
+    }
 
     #[test]
     fn native_platform_matches_windows_case_and_whitespace_insensitively() {

@@ -651,6 +651,8 @@ fn should_extract_follows_the_python_table() {
         ("Windows", "game.exe", true),
         ("Windows", "game.iso", true),
         ("Arcade", "game.zip", false),
+        ("DOS", "game.zip", false),
+        ("MS-DOS", "game.7z", false),
         ("PlayStation 3", "game.rar", true),
         ("SNES", "game.rar", true),
         ("SNES", "game.bin", false),

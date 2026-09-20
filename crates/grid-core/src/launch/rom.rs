@@ -7,15 +7,17 @@ use std::path::Path;
 use crate::library::extract::is_arcade_platform;
 use crate::library::launch_select::select_launch_file;
 use crate::library::paths::{archive_name, candidate_archives, candidate_extracted_dirs};
+use crate::library::platforms::is_dos_platform;
 use crate::library::registry::InstalledGame;
 
 /// Resolves the ROM/disc-image path to launch `game` with, given the
 /// library root.
 ///
-/// Unless `game.platform` is arcade: tries every candidate extracted
+/// Unless `game.platform` is arcade or DOS: tries every candidate extracted
 /// directory that exists, in order — `select_launch_file(dir, archive_stem)`
 /// — returning the first hit; then falls back to `game.extracted_path` when
-/// it exists as a file. Either way (and always for arcade), falls back to
+/// it exists as a file. Either way (and always for arcade and DOS, whose
+/// archive is the ROM itself), falls back to
 /// the first archive candidate that exists as a file. If nothing on disk
 /// matched, returns `game.archive_path`, trimmed. `~` expansion of that
 /// final fallback is left to the spawn step, not done here.
@@ -24,7 +26,7 @@ pub fn resolve_rom_path(game: &InstalledGame, library: &Path) -> String {
     let archive_candidates =
         candidate_archives(library, &game.platform, &game.archive_path, &archive_name);
 
-    if !is_arcade_platform(&game.platform) {
+    if !is_arcade_platform(&game.platform) && !is_dos_platform(&game.platform) {
         let archive_stem = Path::new(&archive_name)
             .file_stem()
             .map(|stem| stem.to_string_lossy().into_owned())
@@ -108,6 +110,28 @@ mod tests {
         fs::write(extracted_dir.join("Game.chd"), b"rom bytes").unwrap();
 
         let mut g = game("Some Game", "Arcade");
+        g.rom_file_name = "Game.zip".to_string();
+
+        let resolved = resolve_rom_path(&g, library.path());
+        assert_eq!(resolved, archive.to_string_lossy());
+    }
+
+    // --- DOS launches the archive: the DOSBox cores mount the zip -----------
+
+    #[test]
+    fn dos_returns_archive_even_when_extracted_exists() {
+        let library = tempfile::tempdir().unwrap();
+        let platform_dir = library.path().join("games").join("DOS");
+        fs::create_dir_all(&platform_dir).unwrap();
+
+        let archive = platform_dir.join("Game.zip");
+        fs::write(&archive, b"archive bytes").unwrap();
+
+        let extracted_dir = platform_dir.join("Game");
+        fs::create_dir_all(&extracted_dir).unwrap();
+        fs::write(extracted_dir.join("GAME.EXE"), b"rom bytes").unwrap();
+
+        let mut g = game("Some Game", "DOS");
         g.rom_file_name = "Game.zip".to_string();
 
         let resolved = resolve_rom_path(&g, library.path());

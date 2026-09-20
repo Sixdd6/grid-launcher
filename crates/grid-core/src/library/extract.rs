@@ -10,7 +10,7 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use super::platforms::{is_native_platform, is_ps3_platform};
+use super::platforms::{is_dos_platform, is_native_platform, is_ps3_platform};
 use super::LibraryError;
 
 // --- Platform predicates and extraction decision --------------------------
@@ -36,7 +36,8 @@ const PS3_SUFFIXES: &[&str] = &["zip", "7z", "rar", "tar", "gz", "bz2", "xz"];
 /// Whether `archive` should be extracted for `platform`, mirroring the
 /// Python `should_extract` table (`docs/porting/03-library-install.md`):
 /// a native (Windows) platform's archive is always extracted; an arcade
-/// platform's archive is never extracted (the archive is the ROM itself);
+/// platform's archive is never extracted (the archive is the ROM itself),
+/// and neither is a DOS archive (the DOSBox cores mount the zip directly);
 /// a PlayStation 3 archive is extracted only when its suffix is one of
 /// `PS3_SUFFIXES`; every other platform's archive is extracted only when
 /// its suffix is one of `EXTRACTABLE_SUFFIXES` (both sets are
@@ -46,7 +47,7 @@ pub fn should_extract(platform: &str, archive: &Path) -> bool {
     if is_native_platform(platform) {
         return true;
     }
-    if is_arcade_platform(platform) {
+    if is_arcade_platform(platform) || is_dos_platform(platform) {
         return false;
     }
     let Some(suffix) = lowercase_suffix(archive) else {
@@ -791,6 +792,22 @@ mod tests {
     #[test]
     fn is_arcade_platform_false_for_non_arcade() {
         assert!(!is_arcade_platform("Sony PlayStation"));
+        assert!(!is_arcade_platform("DOS"));
+    }
+
+    // --- DOS: the archive is the ROM ------------------------------------------
+
+    #[test]
+    fn should_extract_is_false_for_a_dos_archive() {
+        for archive in ["game.zip", "game.7z", "game.rar", "game.tar.gz"] {
+            assert!(
+                !should_extract("DOS", Path::new(archive)),
+                "{archive} must stay an archive for DOS"
+            );
+        }
+        assert!(!should_extract("MS-DOS", Path::new("game.zip")));
+        // The rule is platform-scoped: the same zip is extracted elsewhere.
+        assert!(should_extract("SNES", Path::new("game.zip")));
     }
 
     // --- mask_zip_unix_mode -----------------------------------------------------
