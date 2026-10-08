@@ -1035,6 +1035,51 @@ mod tests {
         );
     }
 
+    /// The catalog Dolphin profile launches with `-u "%emu_dir%/User"` and
+    /// leaves its save lists empty, so the readers resolve saves from that
+    /// flag. With no `portable.txt` and a stale `~/.dolphin-emu` on disk,
+    /// only the EXPANDED flag can put `<exe dir>/User` first.
+    #[test]
+    fn dolphin_emu_dir_user_flag_wins_over_a_stale_home_install() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+
+        let emulator_dir = temp.path().join("Dolphin (GameCube, Wii)");
+        std::fs::create_dir_all(&emulator_dir).unwrap();
+        let exe = emulator_dir.join("Dolphin_Emulator-2609-anylinux-x86_64.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        let card_a = emulator_dir
+            .join("User")
+            .join("GC")
+            .join("USA")
+            .join("Card A");
+        std::fs::create_dir_all(&card_a).unwrap();
+        let stale_home = temp.path().join(".dolphin-emu");
+        std::fs::create_dir_all(stale_home.join("GC").join("USA").join("Card A")).unwrap();
+
+        let profile = EmulatorProfile {
+            match_tokens: vec!["dolphin*.appimage".to_string()],
+            ..Default::default()
+        };
+        let mut e = entry("Dolphin (GameCube, Wii)", &exe.to_string_lossy());
+        e.args = "-u \"%emu_dir%/User\" -b -v Vulkan -e \"%rom%\"".to_string();
+        let c = ctx(Some(&emulator_dir), temp.path());
+
+        let (resolved, _files) =
+            resolved_sync_directory_paths(&e, Some(&profile), PathKey::SavePaths, &c);
+
+        assert!(
+            resolved.contains(&paths::resolve_best_effort(&card_a)),
+            "{resolved:?}"
+        );
+        let stale = paths::resolve_best_effort(&stale_home);
+        assert!(
+            resolved.iter().all(|p| !p.starts_with(&stale)),
+            "{resolved:?}"
+        );
+    }
+
     #[test]
     fn xemu_save_override_wiring_lands_ahead_of_profile_paths() {
         let _lock = crate::test_env::lock();

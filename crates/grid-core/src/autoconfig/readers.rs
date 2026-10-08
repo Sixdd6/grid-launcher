@@ -614,11 +614,27 @@ const DOLPHIN_WII_TITLE_GROUPS: [&str; 6] = [
     "00010000", "00010001", "00010002", "00010004", "00010005", "00010008",
 ];
 
+/// `value` with the `%emu_dir%` launch placeholder
+/// ([`crate::launch::template::EMU_DIR_PLACEHOLDER`]) replaced by the
+/// directory that holds the executable — the expansion a launch performs,
+/// so a reader sees the same user root Dolphin will. `None` when `value`
+/// names the placeholder but no directory is known; the caller skips that
+/// candidate rather than resolving a literal `%emu_dir%` path.
+fn expand_emu_dir(value: &str, emulator_dir: Option<&Path>) -> Option<String> {
+    use crate::launch::template::EMU_DIR_PLACEHOLDER;
+    if !value.contains(EMU_DIR_PLACEHOLDER) {
+        return Some(value.to_string());
+    }
+    let dir = emulator_dir.filter(|dir| !dir.as_os_str().is_empty())?;
+    Some(value.replace(EMU_DIR_PLACEHOLDER, &dir.to_string_lossy()))
+}
+
 /// `_launch_user_root` (`dolphin.py:41-67`): `-u`/`--user` (with the value
 /// as the following token) or `--user=`/`--user=VALUE`, first match wins.
 /// The value is quote-stripped; a blank result after cleaning is treated as
-/// no match and the scan continues.
-fn dolphin_launch_user_root(args: Args) -> Option<PathBuf> {
+/// no match and the scan continues. A value naming `%emu_dir%` is expanded
+/// against `emulator_dir`, or skipped when that is unknown.
+fn dolphin_launch_user_root(args: Args, emulator_dir: Option<&Path>) -> Option<PathBuf> {
     let mut index = 0;
     while index < args.len() {
         let raw_arg = &args[index];
@@ -633,8 +649,10 @@ fn dolphin_launch_user_root(args: Args) -> Option<PathBuf> {
             let next_arg = &args[index + 1];
             if !next_arg.trim().is_empty() {
                 let cleaned = clean_ini_value(next_arg);
-                if !cleaned.is_empty() {
-                    return Some(resolve_best_effort(&paths::expand_user(&cleaned)));
+                if let Some(value) =
+                    expand_emu_dir(&cleaned, emulator_dir).filter(|v| !v.is_empty())
+                {
+                    return Some(resolve_best_effort(&paths::expand_user(&value)));
                 }
             }
             index += 1;
@@ -648,8 +666,8 @@ fn dolphin_launch_user_root(args: Args) -> Option<PathBuf> {
             // `normalized_arg.split("=", 1)` would (`dolphin.py:61-63`).
             let value = &normalized[7..];
             let cleaned = clean_ini_value(value);
-            if !cleaned.is_empty() {
-                return Some(resolve_best_effort(&paths::expand_user(&cleaned)));
+            if let Some(value) = expand_emu_dir(&cleaned, emulator_dir).filter(|v| !v.is_empty()) {
+                return Some(resolve_best_effort(&paths::expand_user(&value)));
             }
         }
 
@@ -675,6 +693,7 @@ fn dolphin_registry_user_root(_emulator_dir: &Path) -> Option<PathBuf> {
 /// data dir, then `<exe_dir>/User` again as a fallback. EVERY candidate is
 /// expanded and canonicalized best-effort in one final pass
 /// (`dolphin.py:146`), unlike PCSX2's selective resolution.
+/// `-u` values expand `%emu_dir%` exactly as a launch does.
 pub fn dolphin_user_root_candidates(path: &str, args: Args) -> Vec<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
 
@@ -690,7 +709,7 @@ pub fn dolphin_user_root_candidates(path: &str, args: Args) -> Vec<PathBuf> {
         })
     };
 
-    if let Some(root) = dolphin_launch_user_root(args) {
+    if let Some(root) = dolphin_launch_user_root(args, emulator_dir.as_deref()) {
         candidates.push(root);
     }
 
@@ -4522,6 +4541,44 @@ mod tests {
         assert_eq!(
             dolphin_user_root_candidates(&exe, &equals).first(),
             Some(&expected)
+        );
+    }
+
+    #[test]
+    fn dolphin_user_root_expands_the_emu_dir_placeholder_in_the_user_flag() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let (exe, dir) = dolphin_emulator(temp.path());
+        // No portable.txt: only the expanded -u flag can name <exe dir>/User first.
+        let launch = crate::launch::template::split_template(
+            "-u \"%emu_dir%/User\" -b -v Vulkan -e \"%rom%\"",
+        )
+        .unwrap();
+        assert_eq!(
+            dolphin_user_root_candidates(&exe, &launch).first(),
+            Some(&resolve_best_effort(&dir.join("User")))
+        );
+
+        let equals = args(&["--user=%emu_dir%/User"]);
+        assert_eq!(
+            dolphin_user_root_candidates(&exe, &equals).first(),
+            Some(&resolve_best_effort(&dir.join("User")))
+        );
+    }
+
+    #[test]
+    fn dolphin_user_root_skips_an_emu_dir_flag_with_no_executable() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+        let launch = args(&["-u", "%emu_dir%/User"]);
+        let roots = dolphin_user_root_candidates("", &launch);
+        assert!(
+            roots
+                .iter()
+                .all(|root| !root.to_string_lossy().contains("%emu_dir%")),
+            "{roots:?}"
         );
     }
 
