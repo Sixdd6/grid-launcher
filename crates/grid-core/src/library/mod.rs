@@ -344,22 +344,42 @@ fn content_target(rom_id: i64, file: &RomFile, dest: PathBuf, expected_size: i64
 }
 
 /// Whether a PS5 game's download set is one KytyPS5 cannot run: a single
-/// `.pkg` (no `.pkg` support anywhere) or more than one file (a bare folder
-/// game, whose nested files are never downloaded). A single file of any
-/// other kind — a `.zar`, an archive, a bare `eboot.bin` — is allowed. Any
-/// other platform, and an empty set (reported as
-/// [`NO_DOWNLOADABLE_FILE`]), is `false`.
-fn ps5_unsupported_download(platform: &str, candidates: &[&RomFile]) -> bool {
+/// `.pkg` (no `.pkg` support anywhere), more than one file (a bare folder
+/// game, whose nested files are never downloaded), or a single bare file
+/// that is not a `.zar` or an extractable archive while `files` also lists
+/// a nested game file (a folder game whose only top-level file is
+/// `eboot.bin`). A `.zar`, an archive, or a truly single bare file (no
+/// nested game files) is allowed. Any other platform, and an empty set
+/// (reported as [`NO_DOWNLOADABLE_FILE`]), is `false`.
+fn ps5_unsupported_download(platform: &str, candidates: &[&RomFile], files: &[RomFile]) -> bool {
     if !is_ps5_platform(platform) {
         return false;
     }
     match candidates {
         [] => false,
-        [only] => Path::new(&only.file_name)
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("pkg")),
+        [only] => {
+            let path = Path::new(&only.file_name);
+            let has_extension = |wanted: &str| {
+                path.extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case(wanted))
+            };
+            if has_extension("pkg") {
+                return true;
+            }
+            if has_extension("zar") || should_extract(platform, path) {
+                return false;
+            }
+            files.iter().any(is_nested_game_file)
+        }
         _ => true,
     }
+}
+
+/// Whether `file` is a game-category file below the game's top level: the
+/// server flags it as nested, or its name carries a path separator.
+fn is_nested_game_file(file: &RomFile) -> bool {
+    content::is_game_category(&file.category)
+        && (!file.is_top_level || file.file_name.contains('/') || file.file_name.contains('\\'))
 }
 
 /// Computes the download plan for `detail` under `library`. Pure apart from
@@ -370,8 +390,8 @@ fn ps5_unsupported_download(platform: &str, candidates: &[&RomFile]) -> bool {
 /// `<platform dir>/<safe title>/`, and the launch entry is the first `.m3u`
 /// if there is one, else the first candidate.
 ///
-/// A PlayStation 5 `.pkg` or multi-file game is rejected here
-/// ([`KYTY_UNSUPPORTED_GAME`]).
+/// A PlayStation 5 `.pkg` or folder game is rejected here
+/// ([`KYTY_UNSUPPORTED_GAME`]; see [`ps5_unsupported_download`]).
 fn plan_install(
     detail: &RomDetail,
     library: &Path,
@@ -393,7 +413,7 @@ fn plan_install(
         .filter(|file| is_download_candidate(file))
         .collect();
 
-    if ps5_unsupported_download(&detail.platform_name, &candidates) {
+    if ps5_unsupported_download(&detail.platform_name, &candidates, &detail.files) {
         return Err(LibraryError::Extract(KYTY_UNSUPPORTED_GAME.to_string()));
     }
 
@@ -3508,6 +3528,41 @@ mod tests {
             base_finalize_route("PlayStation 5", Path::new("ASTRO.ZAR")),
             BaseRoute::Downloaded
         );
+    }
+
+    /// A folder game whose only top-level file is `eboot.bin`: the nested
+    /// files would never download, so Kyty could not run it.
+    #[test]
+    fn plan_rejects_a_ps5_folder_game_with_a_single_top_level_file() {
+        for nested in ["sce_sys/param.json", "sce_sys\\param.json"] {
+            let Err(err) = plan_install(
+                &ps5_detail(vec![
+                    rom_file(1, "eboot.bin", true),
+                    rom_file(2, nested, false),
+                ]),
+                Path::new("/library"),
+                client(),
+            ) else {
+                panic!("a PS5 folder game ({nested}) must be rejected");
+            };
+            assert_eq!(err.to_string(), KYTY_UNSUPPORTED_GAME);
+        }
+    }
+
+    #[test]
+    fn plan_accepts_a_ps5_zar_or_archive_with_nested_extras() {
+        for name in ["Astro Bot.zar", "Astro Bot.zip", "Astro Bot.7z"] {
+            let job = plan_install(
+                &ps5_detail(vec![
+                    rom_file(1, name, true),
+                    rom_file(2, "extras/readme.txt", false),
+                ]),
+                Path::new("/library"),
+                client(),
+            )
+            .unwrap_or_else(|e| panic!("{name} must be accepted: {e}"));
+            assert_eq!(job.file_ids, vec![1]);
+        }
     }
 
     /// User ruling (2026-10-08): a PS5 game whose only candidate is a bare
