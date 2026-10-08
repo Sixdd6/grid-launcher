@@ -74,7 +74,8 @@ A new entry in `emulator-autoprofiles.json`:
   with `asset_patterns` for `Dolphin_Emulator-*-anylinux-x86_64.AppImage`, no prereleases,
   and the `.zsync` files excluded. If a `direct` source cannot override into a GitHub source,
   the planner chooses the smallest change that gives one profile per-OS providers, or two
-  per-OS profiles with one display name.
+  per-OS profiles with one display name. Either way, the user sees exactly one Dolphin row
+  in the catalog on every OS (user ruling, 2026-10-08). A test pins this.
 - `source.platforms`: `win32`, `linux`.
 - `args`: `-u "%emu_dir%/User" -b -v Vulkan -C Dolphin.Display.Fullscreen=True
   -C GFX.Settings.InternalResolution=3 -e "%rom%"`.
