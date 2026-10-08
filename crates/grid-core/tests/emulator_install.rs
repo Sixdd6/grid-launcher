@@ -853,6 +853,114 @@ async fn a_reinstalled_appimage_of_the_same_length_is_replaced_on_disk() {
     assert_eq!(harness.config().emulators[0].source_installed_tag, "v1.0");
 }
 
+/// An update whose AppImage carries a new version in its FILE NAME must
+/// launch the new AppImage and remove the one it replaced — and nothing
+/// else: the user data behind the `User` link, a stray file, and an
+/// AppImage the entry never pointed at all survive. Applies to every
+/// AppImage emulator; Dolphin's names are the example.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_appimage_update_with_a_new_file_name_launches_the_new_build_and_removes_the_old_one() {
+    let harness = Harness::new(|uri| {
+        let mut source = gitea_source(uri);
+        source["release_tag"] = json!("latest");
+        vec![profile_with_user_data(
+            "Dolphin (GameCube, Wii)",
+            source,
+            &["User"],
+        )]
+    })
+    .await;
+    let latest = "/api/v1/repos/acme/widget/releases/latest";
+    let old_name = "Dolphin_Emulator-2609-anylinux-x86_64.AppImage";
+    let new_name = "Dolphin_Emulator-2612-anylinux-x86_64.AppImage";
+
+    harness
+        .mount_widget_at(
+            latest,
+            "2609@2026-10-01_1",
+            old_name,
+            b"OLD-APPIMAGE".to_vec(),
+            0,
+        )
+        .await;
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let entry = harness.wait_terminal(harness.newest_entry_id()).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let install_dir = harness.install_dir("Dolphin (GameCube, Wii)");
+    let old = install_dir.join(old_name);
+    assert_eq!(harness.config().emulators[0].path, old.to_string_lossy());
+
+    // State the update must not touch.
+    let memcard = harness
+        .library
+        .join("saves")
+        .join("Dolphin (GameCube, Wii)")
+        .join("User")
+        .join("GC")
+        .join("MemoryCardA.USA.raw");
+    fs::create_dir_all(memcard.parent().unwrap()).unwrap();
+    fs::write(&memcard, b"MEMCARD").unwrap();
+    // Sorts BEFORE both builds: a directory scan would pick it.
+    let stray = install_dir.join("Dolphin_Emulator-2603-anylinux-x86_64.AppImage");
+    fs::write(&stray, b"STRAY").unwrap();
+    let notes = install_dir.join("notes.txt");
+    fs::write(&notes, b"keep").unwrap();
+
+    harness.server.reset().await;
+    harness
+        .mount_widget_at(
+            latest,
+            "2612@2026-12-01_1",
+            new_name,
+            b"NEW-APPIMAGE".to_vec(),
+            0,
+        )
+        .await;
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let entry = harness.wait_terminal(harness.newest_entry_id()).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let new = install_dir.join(new_name);
+    let config = harness.config();
+    assert_eq!(config.emulators.len(), 1);
+    assert_eq!(config.emulators[0].path, new.to_string_lossy());
+    assert_eq!(
+        config.emulators[0].source_installed_tag,
+        "2612@2026-12-01_1"
+    );
+    assert_eq!(fs::read(&new).unwrap(), b"NEW-APPIMAGE");
+    assert_eq!(mode_of(&new), 0o755);
+    assert!(!old.exists(), "the replaced AppImage must be removed");
+    assert!(
+        stray.is_file(),
+        "an AppImage the entry never pointed at stays"
+    );
+    assert!(notes.is_file(), "unrelated files stay");
+
+    let user = install_dir.join("User");
+    assert!(
+        fs::symlink_metadata(&user)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "the User link survives the update"
+    );
+    assert_eq!(
+        fs::read(user.join("GC").join("MemoryCardA.USA.raw")).unwrap(),
+        b"MEMCARD"
+    );
+}
+
 // --- (g) extensionless executable-bit member ------------------------------------------
 
 /// A tar.gz whose only launchable member is a bare, executable-bit binary —

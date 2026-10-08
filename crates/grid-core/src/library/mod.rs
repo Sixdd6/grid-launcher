@@ -2207,6 +2207,8 @@ impl InstallService {
     /// config entry, and archive cleanup. Ports the emulator half of the
     /// reference's post-download install path (`install_mixin.py:690-780`,
     /// `autoconfig.py:19-87`); nothing here writes to the SQLite registry.
+    /// A primary AppImage is the executable; an update removes the AppImage
+    /// the entry pointed at before (`superseded_appimage`).
     fn finalize_emulator(
         &self,
         id: u64,
@@ -2287,8 +2289,30 @@ impl InstallService {
             return Ok(());
         }
 
-        let Some(exe) = emu_install::select_executable(&job.profile_name, install_dir, archive)
-        else {
+        // The entry's executable BEFORE this install, matched by exact name
+        // like `write_emulator_entry`. An update deletes it below once the new
+        // entry is saved, if it is the AppImage this install replaced.
+        let previous_path = Config::load(&self.config_path).ok().and_then(|config| {
+            config
+                .emulators
+                .iter()
+                .find(|existing| existing.name == job.profile_name)
+                .map(|existing| existing.path.clone())
+        });
+
+        // A primary AppImage IS the new install. Scanning the directory would
+        // rank it against the AppImage it replaces — both carry the title
+        // token, so the casefolded-path tie-break can pick the OLD one
+        // (`…-2609-…` sorts before `…-2612-…`).
+        let selected = if !should_extract(EMULATOR_PLATFORM, archive)
+            && is_appimage(archive)
+            && archive.is_file()
+        {
+            Some(archive.to_path_buf())
+        } else {
+            emu_install::select_executable(&job.profile_name, install_dir, archive)
+        };
+        let Some(exe) = selected else {
             return Err(LibraryError::Extract(NO_EMULATOR_EXECUTABLE.to_string()));
         };
         make_executable(&exe);
@@ -2326,6 +2350,20 @@ impl InstallService {
                 append_warning(
                     warning,
                     &format!("could not delete archive: {}", path.display()),
+                );
+            }
+        }
+
+        // Only after the new entry is saved: a failure before this point
+        // keeps the old AppImage launchable.
+        if let Some(old) = previous_path
+            .as_deref()
+            .and_then(|path| superseded_appimage(path, install_dir, &exe))
+        {
+            if !delete_with_retry(&old) {
+                append_warning(
+                    warning,
+                    &format!("could not delete the replaced AppImage: {}", old.display()),
                 );
             }
         }
@@ -3097,6 +3135,36 @@ fn is_appimage(path: &Path) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("appimage"))
 }
 
+/// The AppImage an emulator install replaced: the entry's PREVIOUS
+/// executable, when it is a regular AppImage file (not a link, not a
+/// directory) sitting directly inside `install_dir` and is not `new_exe`.
+/// `None` for anything else — a blank or missing path, a file outside the
+/// install directory or nested below it, a non-AppImage, or the file this
+/// install just wrote. Only this one file is ever deleted after an update;
+/// user data, links and every other file stay.
+fn superseded_appimage(previous_path: &str, install_dir: &Path, new_exe: &Path) -> Option<PathBuf> {
+    let trimmed = previous_path.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let previous = crate::library::paths::expand_home(trimmed);
+    if !is_appimage(&previous) {
+        return None;
+    }
+    if !fs::symlink_metadata(&previous).ok()?.file_type().is_file() {
+        return None;
+    }
+    let previous_dir = fs::canonicalize(previous.parent()?).ok()?;
+    if previous_dir != fs::canonicalize(install_dir).ok()? {
+        return None;
+    }
+    let same_file = match (fs::canonicalize(&previous), fs::canonicalize(new_exe)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    };
+    (!same_file).then_some(previous)
+}
+
 /// Deletes `path`, retrying every [`ARCHIVE_DELETE_PAUSE`] for up to
 /// [`ARCHIVE_DELETE_ATTEMPTS`] attempts. Returns whether the file is gone.
 /// Blocking — only ever called from the finalize task's blocking half.
@@ -3815,6 +3883,99 @@ mod tests {
         fs::write(&path, b"bytes").unwrap();
         assert!(delete_with_retry(&path));
         assert!(!path.exists());
+    }
+
+    // --- superseded_appimage ---------------------------------------------------
+
+    fn appimage_install() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let install = dir.path().join("emulators").join("Dolphin (GameCube, Wii)");
+        fs::create_dir_all(&install).unwrap();
+        (dir, install)
+    }
+
+    #[test]
+    fn superseded_appimage_is_the_previous_appimage_in_the_install_dir() {
+        let (_dir, install) = appimage_install();
+        let old = install.join("Dolphin_Emulator-2609-anylinux-x86_64.AppImage");
+        let new = install.join("Dolphin_Emulator-2612-anylinux-x86_64.AppImage");
+        fs::write(&old, b"old").unwrap();
+        fs::write(&new, b"new").unwrap();
+
+        assert_eq!(
+            superseded_appimage(&old.to_string_lossy(), &install, &new),
+            Some(old.clone())
+        );
+        // The file the update just wrote is never "superseded".
+        assert_eq!(
+            superseded_appimage(&new.to_string_lossy(), &install, &new),
+            None
+        );
+        assert_eq!(superseded_appimage("   ", &install, &new), None);
+        // Already gone: nothing to delete.
+        fs::remove_file(&old).unwrap();
+        assert_eq!(
+            superseded_appimage(&old.to_string_lossy(), &install, &new),
+            None
+        );
+    }
+
+    #[test]
+    fn superseded_appimage_never_reaches_past_the_install_dir_or_a_non_appimage_file() {
+        let (dir, install) = appimage_install();
+        let new = install.join("Dolphin_Emulator-2612-anylinux-x86_64.AppImage");
+        fs::write(&new, b"new").unwrap();
+
+        // An AppImage the user keeps elsewhere.
+        let outside = dir
+            .path()
+            .join("Dolphin_Emulator-2609-anylinux-x86_64.AppImage");
+        fs::write(&outside, b"mine").unwrap();
+        assert_eq!(
+            superseded_appimage(&outside.to_string_lossy(), &install, &new),
+            None
+        );
+
+        // Not an AppImage.
+        let exe = install.join("Dolphin.exe");
+        fs::write(&exe, b"exe").unwrap();
+        assert_eq!(
+            superseded_appimage(&exe.to_string_lossy(), &install, &new),
+            None
+        );
+
+        // A directory with an AppImage name.
+        let folder = install.join("folder.AppImage");
+        fs::create_dir_all(&folder).unwrap();
+        assert_eq!(
+            superseded_appimage(&folder.to_string_lossy(), &install, &new),
+            None
+        );
+
+        // Nested one level down: not the install's own primary.
+        let nested = install.join("sub").join("Old.AppImage");
+        fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        fs::write(&nested, b"x").unwrap();
+        assert_eq!(
+            superseded_appimage(&nested.to_string_lossy(), &install, &new),
+            None
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn superseded_appimage_never_follows_a_link() {
+        let (dir, install) = appimage_install();
+        let new = install.join("New.AppImage");
+        fs::write(&new, b"new").unwrap();
+        let target = dir.path().join("Target.AppImage");
+        fs::write(&target, b"user").unwrap();
+        let link = install.join("Linked.AppImage");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert_eq!(
+            superseded_appimage(&link.to_string_lossy(), &install, &new),
+            None
+        );
     }
 
     #[test]
