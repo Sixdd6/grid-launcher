@@ -588,8 +588,12 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
         &config.emulators[index].path,
         ctx.profiles,
     ) {
-        config.emulators[index] =
-            entry::apply_manual_emulator_profile_defaults(&config.emulators[index], profile);
+        let library = crate::library::paths::library_root(&config);
+        config.emulators[index] = entry::apply_manual_emulator_profile_defaults(
+            &config.emulators[index],
+            profile,
+            library.as_deref(),
+        );
     }
 
     // D3: the defaults backfill runs at the same two points, right after the

@@ -18,6 +18,7 @@ use regex::Regex;
 use crate::config::{Config, ConfigError, EmulatorEntry};
 use crate::launch::profiles::{platform_matches_keywords, profile_for_entry, EmulatorProfile};
 use crate::launch::selection::NO_EMULATOR;
+use crate::launch::template::EMU_DIR_PLACEHOLDER;
 
 /// The `[^a-z0-9]+` run-collapse the Dolphin variant rules apply to an
 /// already-casefolded string (selection.py:180, selection.py:200).
@@ -453,9 +454,17 @@ pub fn auto_configure_emulator_settings(
 /// any unrecognized alias) counts as unset. The four list-backed fields are
 /// filled only when blank, and the profile's value is written even when it is
 /// `""`. `path` is NEVER touched.
+///
+/// A profile whose args name `%emu_dir%` (Dolphin's portable `-u
+/// "%emu_dir%/User"`) fills `args` only for a catalog-shaped install: an
+/// executable inside `<library>/emulators/`. A system install such as
+/// `/usr/bin/dolphin-emu` keeps its own args, because `-u` would point it at
+/// `/usr/bin/User`. `library` is the configured library root; `None` (no
+/// library path set) counts as outside.
 pub fn apply_manual_emulator_profile_defaults(
     entry: &EmulatorEntry,
     profile: &EmulatorProfile,
+    library: Option<&Path>,
 ) -> EmulatorEntry {
     let mut resolved = entry.clone();
 
@@ -470,7 +479,11 @@ pub fn apply_manual_emulator_profile_defaults(
             .legacy_args
             .iter()
             .any(|legacy| legacy.trim() == current_args);
-    if args_are_stale && !profile.args.trim().is_empty() {
+    if args_are_stale
+        && !profile.args.trim().is_empty()
+        && (!profile.args.contains(EMU_DIR_PLACEHOLDER)
+            || is_catalog_shaped_install(&resolved.path, library))
+    {
         resolved.args = profile.args.trim().to_string();
     }
 
@@ -493,6 +506,21 @@ pub fn apply_manual_emulator_profile_defaults(
     }
 
     resolved
+}
+
+/// Whether `path` (after `~/` expansion) lies inside `<library>/emulators/`,
+/// where the emulator catalog installs.
+fn is_catalog_shaped_install(path: &str, library: Option<&Path>) -> bool {
+    let Some(library) = library else {
+        return false;
+    };
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let emulators = crate::library::paths::emulators_dir(library);
+    let executable = crate::library::paths::expand_home(trimmed);
+    executable != emulators && executable.starts_with(&emulators)
 }
 
 /// One-time repair for entries still carrying an args value the catalog has
@@ -1239,7 +1267,7 @@ mod tests {
             source_id: "PCSX2/pcsx2".into(),
             ..Default::default()
         };
-        let filled = apply_manual_emulator_profile_defaults(&entry, &profile);
+        let filled = apply_manual_emulator_profile_defaults(&entry, &profile, None);
 
         assert_eq!(filled.name, "PCSX2");
         assert_eq!(filled.path, "/keep/me", "path is never touched");
@@ -1267,7 +1295,7 @@ mod tests {
             save_paths: "   ".into(),
             ..Default::default()
         };
-        let filled = apply_manual_emulator_profile_defaults(&entry, &profile);
+        let filled = apply_manual_emulator_profile_defaults(&entry, &profile, None);
         assert_eq!(filled.save_paths, "");
     }
 
@@ -1280,7 +1308,7 @@ mod tests {
                 save_strategy: current.into(),
                 ..Default::default()
             };
-            let filled = apply_manual_emulator_profile_defaults(&entry, &profile);
+            let filled = apply_manual_emulator_profile_defaults(&entry, &profile, None);
             assert_eq!(filled.save_strategy, "single_file", "current={current:?}");
         }
     }
@@ -1294,7 +1322,7 @@ mod tests {
                 args: current.into(),
                 ..Default::default()
             };
-            let filled = apply_manual_emulator_profile_defaults(&entry, &profile);
+            let filled = apply_manual_emulator_profile_defaults(&entry, &profile, None);
             assert_eq!(filled.args, "-batch %rom%", "current={current:?}");
         }
 
@@ -1306,7 +1334,7 @@ mod tests {
             args: "%rom%".into(),
             ..Default::default()
         };
-        let filled = apply_manual_emulator_profile_defaults(&entry, &blank_args);
+        let filled = apply_manual_emulator_profile_defaults(&entry, &blank_args, None);
         assert_eq!(filled.args, "%rom%");
     }
 
@@ -1321,7 +1349,7 @@ mod tests {
                 args: current.into(),
                 ..Default::default()
             };
-            let filled = apply_manual_emulator_profile_defaults(&entry, &profile);
+            let filled = apply_manual_emulator_profile_defaults(&entry, &profile, None);
             assert_eq!(filled.args, "-f -g \"%rom%\"", "current={current:?}");
         }
     }
@@ -1336,7 +1364,7 @@ mod tests {
             args: "-g \"%rom%\" --nsight".into(),
             ..Default::default()
         };
-        let filled = apply_manual_emulator_profile_defaults(&entry, &profile);
+        let filled = apply_manual_emulator_profile_defaults(&entry, &profile, None);
         assert_eq!(filled.args, "-g \"%rom%\" --nsight");
     }
 
@@ -1349,8 +1377,66 @@ mod tests {
             args: "-g \"%rom%\"".into(),
             ..Default::default()
         };
-        let filled = apply_manual_emulator_profile_defaults(&entry, &profile);
+        let filled = apply_manual_emulator_profile_defaults(&entry, &profile, None);
         assert_eq!(filled.args, "-g \"%rom%\"");
+    }
+
+    /// The catalog Dolphin profile: its args name `%emu_dir%`.
+    fn dolphin_profile() -> EmulatorProfile {
+        EmulatorProfile {
+            name: "Dolphin (GameCube, Wii)".into(),
+            args: "-u \"%emu_dir%/User\" -b -v Vulkan -C Dolphin.Display.Fullscreen=True -C GFX.Settings.InternalResolution=3 -e \"%rom%\"".into(),
+            save_strategy: "folder".into(),
+            save_directories: strings(&["%EMULATOR_DIR%/User/GC"]),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn manual_defaults_keep_blank_args_for_an_emu_dir_profile_outside_the_library() {
+        let profile = dolphin_profile();
+        let library = Path::new("/games/lib");
+        for library in [Some(library), None] {
+            let entry = EmulatorEntry {
+                name: "Dolphin".into(),
+                path: "/usr/bin/dolphin-emu".into(),
+                args: "".into(),
+                ..Default::default()
+            };
+            let filled = apply_manual_emulator_profile_defaults(&entry, &profile, library);
+            assert_eq!(filled.args, "", "library={library:?}");
+            // Every other default still applies.
+            assert_eq!(filled.save_strategy, "folder");
+            assert_eq!(filled.save_paths, "%EMULATOR_DIR%/User/GC");
+        }
+    }
+
+    #[test]
+    fn manual_defaults_fill_emu_dir_args_for_a_catalog_shaped_install() {
+        let profile = dolphin_profile();
+        let library = Path::new("/games/lib");
+        let entry = EmulatorEntry {
+            name: "Dolphin (GameCube, Wii)".into(),
+            path: "/games/lib/emulators/Dolphin (GameCube, Wii)/Dolphin_Emulator-2609-anylinux-x86_64.AppImage".into(),
+            args: "".into(),
+            ..Default::default()
+        };
+        let filled = apply_manual_emulator_profile_defaults(&entry, &profile, Some(library));
+        assert_eq!(filled.args, profile.args);
+    }
+
+    #[test]
+    fn manual_defaults_fill_plain_profile_args_outside_the_library() {
+        let profile = full_profile("PCSX2");
+        let entry = EmulatorEntry {
+            name: "PCSX2".into(),
+            path: "/usr/bin/pcsx2-qt".into(),
+            args: "".into(),
+            ..Default::default()
+        };
+        let filled =
+            apply_manual_emulator_profile_defaults(&entry, &profile, Some(Path::new("/games/lib")));
+        assert_eq!(filled.args, "-batch %rom%");
     }
 
     // --- migrate_legacy_args -------------------------------------------------

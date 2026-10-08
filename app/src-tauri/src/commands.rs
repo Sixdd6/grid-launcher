@@ -37,7 +37,7 @@ use grid_core::session::{RestoreOutcome, SessionManager, SessionState};
 use secrecy::SecretString;
 use serde::Serialize;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tauri::State;
@@ -1067,7 +1067,8 @@ pub async fn save_emulator(
             let (is_add, saved_name, library_path, saved_entry) =
                 modify_config(&config_path, |config| {
                     let is_add = is_manual_add(config, &original_name);
-                    let entry = manual_add_entry(entry, is_add, profiles);
+                    let library = library_root(config);
+                    let entry = manual_add_entry(entry, is_add, profiles, library.as_deref());
                     // The name as it will be STORED, so the sync lookup matches exactly.
                     let saved_name = entry.name.clone();
                     let saved_entry = entry.clone();
@@ -1865,12 +1866,15 @@ fn manual_add_entry(
     entry: EmulatorEntry,
     is_add: bool,
     profiles: &[EmulatorProfile],
+    library: Option<&Path>,
 ) -> EmulatorEntry {
     if !is_add {
         return entry;
     }
     match profile_for_entry(&entry.name, &entry.path, profiles) {
-        Some(profile) => autoconfig_entry::apply_manual_emulator_profile_defaults(&entry, profile),
+        Some(profile) => {
+            autoconfig_entry::apply_manual_emulator_profile_defaults(&entry, profile, library)
+        }
         None => entry,
     }
 }
@@ -2671,16 +2675,16 @@ mod merge_tests {
             ..Default::default()
         };
 
-        let added = manual_add_entry(typed.clone(), true, &profiles);
+        let added = manual_add_entry(typed.clone(), true, &profiles, None);
         assert_eq!(added.args, "-batch %rom%");
         assert_eq!(added.save_paths, "~/pcsx2/memcards");
         assert_eq!(added.save_strategy, "folder");
 
-        let edited = manual_add_entry(typed.clone(), false, &profiles);
+        let edited = manual_add_entry(typed.clone(), false, &profiles, None);
         assert_eq!(edited, typed, "an edit must pass through untouched (D1)");
 
         // No matching profile: the add passes through unchanged too.
-        let unmatched = manual_add_entry(typed.clone(), true, &[]);
+        let unmatched = manual_add_entry(typed.clone(), true, &[], None);
         assert_eq!(unmatched, typed);
     }
 
@@ -2695,7 +2699,7 @@ mod merge_tests {
             ..Default::default()
         };
 
-        let added = manual_add_entry(typed.clone(), true, &profiles);
+        let added = manual_add_entry(typed.clone(), true, &profiles, None);
         assert_eq!(
             added.path, "/home/me/my own build/pcsx2",
             "autoconfig.py:228 never touches `path`"
