@@ -552,6 +552,7 @@ fn resolve_launch(game: &InstalledGame, config: &Config) -> Result<LaunchPlan, L
         rom: rom_path.clone(),
         core,
         ps3_launch_target,
+        emu_dir: String::new(), // filled by prepare_emulator_launch from the resolved executable
     };
 
     let (argv, working_dir) = prepare_emulator_launch(

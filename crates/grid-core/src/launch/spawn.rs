@@ -11,7 +11,9 @@ use std::process::{Child, ExitStatus};
 use crate::config::EmulatorEntry;
 use crate::library::paths::expand_home;
 
-use super::template::{build_args, normalized_retroarch_core_args, Placeholders};
+use super::template::{
+    build_args, emulator_dir_placeholder, normalized_retroarch_core_args, Placeholders,
+};
 
 /// Builds the argv (executable first) and working directory for an emulated
 /// launch, applying the validation chain in the reference order:
@@ -32,6 +34,8 @@ use super::template::{build_args, normalized_retroarch_core_args, Placeholders};
 /// emulator's directory. The caller decides
 /// what counts as RetroArch (entry name or matched profile name), and the
 /// same flag decides whether `placeholders.core` was populated at all.
+///
+/// `%emu_dir%` is filled from the resolved executable's parent.
 ///
 /// The working directory is the executable's parent (`.` when the resolved
 /// executable has no parent component).
@@ -76,7 +80,13 @@ pub fn prepare_emulator_launch(
         return Err(format!("ROM file not found:\n{}", rom_file.display()));
     }
 
-    let args = build_args(&entry.args, global_launch_args, placeholders)
+    // `%emu_dir%` comes from the executable this function just resolved, so
+    // every caller gets it without computing it itself.
+    let placeholders = Placeholders {
+        emu_dir: emulator_dir_placeholder(&executable),
+        ..placeholders.clone()
+    };
+    let args = build_args(&entry.args, global_launch_args, &placeholders)
         .map_err(|e| format!("Invalid launch arguments: {e}"))?;
 
     let working_dir = match executable.parent() {
@@ -395,6 +405,7 @@ mod tests {
             rom: rom.to_string(),
             core: core.to_string(),
             ps3_launch_target: String::new(),
+            emu_dir: String::new(),
         }
     }
 
@@ -969,5 +980,41 @@ mod tests {
             spawn_standalone_emulator(&[], Path::new(".")).unwrap_err(),
             "Failed to launch emulator:\nno executable to run"
         );
+    }
+
+    #[test]
+    fn emu_dir_expands_to_the_executable_folder_as_one_argument() {
+        let dir = tempfile::tempdir().unwrap();
+        let emu_dir = dir.path().join("Dolphin (GameCube, Wii)");
+        std::fs::create_dir_all(&emu_dir).unwrap();
+        let exe = emu_dir.join("Dolphin_Emulator-2609-anylinux-x86_64.AppImage");
+        std::fs::write(&exe, b"stub").unwrap();
+        let rom = dir.path().join("Some Game.rvz");
+        std::fs::write(&rom, b"rom").unwrap();
+        let rom_text = rom.to_string_lossy().into_owned();
+
+        let e = entry(
+            exe.to_str().unwrap(),
+            "-u \"%emu_dir%/User\" -b -e \"%rom%\"",
+        );
+        let (argv, working_dir) = prepare_emulator_launch(
+            "Dolphin",
+            Some(&e),
+            &rom_text,
+            &placeholders(&rom_text, ""),
+            "",
+            false,
+        )
+        .unwrap();
+
+        let expected: Vec<String> = vec![
+            "-u".to_string(),
+            format!("{}/User", emu_dir.display()),
+            "-b".to_string(),
+            "-e".to_string(),
+            rom_text.clone(),
+        ];
+        assert_eq!(argv[1..].to_vec(), expected);
+        assert_eq!(working_dir, emu_dir);
     }
 }

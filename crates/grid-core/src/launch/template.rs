@@ -3,7 +3,8 @@
 //! substitution, and the RetroArch core-argument normalization pass that
 //! resolves a relative core path against the emulator directory. Ports
 //! `grid_launcher/emulator/launch.py:31-147,202-221`. See
-//! `docs/porting/04-emulator-launch.md` §5 and §7.
+//! `docs/porting/04-emulator-launch.md` §5 and §7. `%emu_dir%` is a GRID
+//! addition with no Python counterpart.
 
 use std::path::{Path, PathBuf};
 
@@ -16,6 +17,9 @@ pub struct Placeholders {
     pub rom: String,
     pub core: String,
     pub ps3_launch_target: String,
+    /// The directory holding the emulator's executable (`%emu_dir%`). Filled
+    /// by `spawn::prepare_emulator_launch`; callers leave it blank.
+    pub emu_dir: String,
 }
 
 /// The host OS string consumed by [`retroarch_core_argument_path`]'s
@@ -225,6 +229,26 @@ pub fn split_template(template: &str) -> Result<Vec<String>, String> {
     }
 }
 
+/// The launch placeholder for the directory that holds the emulator's
+/// executable — the AppImage's own directory for an AppImage.
+pub const EMU_DIR_PLACEHOLDER: &str = "%emu_dir%";
+
+/// [`validate_placeholders`]'s message when a template names
+/// [`EMU_DIR_PLACEHOLDER`] but the executable path has no directory.
+pub const EMU_DIR_MISSING: &str =
+    "The emulator's folder could not be found from its executable path.";
+
+/// `%emu_dir%`'s value for `executable`: its parent directory, or `""`
+/// when there is none (a bare file name, a filesystem root). A blank value
+/// makes [`validate_placeholders`] fail, so a launch never receives a bare
+/// `-u` or a `-u /User`.
+pub fn emulator_dir_placeholder(executable: &Path) -> String {
+    match executable.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_string_lossy().into_owned(),
+        _ => String::new(),
+    }
+}
+
 /// Validates that every placeholder mentioned in `template` has a
 /// non-blank value (`validate_launch_placeholders`, launch.py:140).
 /// Returns the exact configured-emulator or configured-PS3-target message
@@ -239,6 +263,9 @@ pub fn validate_placeholders(template: &str, ph: &Placeholders) -> Result<(), St
     if template.contains("%ps3_launch_target%") && ph.ps3_launch_target.trim().is_empty() {
         return Err("No PS3 ISO or game ID was found for this game.".to_string());
     }
+    if template.contains(EMU_DIR_PLACEHOLDER) && ph.emu_dir.trim().is_empty() {
+        return Err(EMU_DIR_MISSING.to_string());
+    }
     Ok(())
 }
 
@@ -246,7 +273,7 @@ pub fn validate_placeholders(template: &str, ph: &Placeholders) -> Result<(), St
 /// (`apply_launch_placeholders_to_args`, launch.py:111):
 ///
 /// - remembers, per token, whether the raw token contained `%core%`;
-/// - replaces `%rom%`, `%core%`, `%ps3_launch_target%` in that order
+/// - replaces `%rom%`, `%core%`, `%ps3_launch_target%`, `%emu_dir%` in that order
 ///   (plain, unanchored replace);
 /// - strips one wrapping quote pair via [`strip_wrapping_quotes`];
 /// - if the token had `%core%` and the resolved core is blank, pops the
@@ -262,7 +289,8 @@ pub fn apply_placeholders(tokens: Vec<String>, ph: &Placeholders) -> Vec<String>
         let resolved = token
             .replace("%rom%", &ph.rom)
             .replace("%core%", &ph.core)
-            .replace("%ps3_launch_target%", &ph.ps3_launch_target);
+            .replace("%ps3_launch_target%", &ph.ps3_launch_target)
+            .replace(EMU_DIR_PLACEHOLDER, &ph.emu_dir);
         let resolved = strip_wrapping_quotes(&resolved);
 
         if had_core_placeholder && core_missing {
@@ -385,6 +413,7 @@ mod tests {
             rom: rom.to_string(),
             core: core.to_string(),
             ps3_launch_target: ps3.to_string(),
+            emu_dir: String::new(),
         }
     }
 
@@ -666,5 +695,68 @@ mod tests {
             err,
             "No RetroArch core is configured for this platform. Set one in Emulators > Defaults."
         );
+    }
+
+    // --- %emu_dir% ------------------------------------------------------------
+
+    #[test]
+    fn emu_dir_is_substituted_and_a_path_with_spaces_and_a_comma_stays_one_argument() {
+        let ph = Placeholders {
+            rom: "/roms/Some Game.rvz".to_string(),
+            emu_dir: "/lib/emulators/Dolphin (GameCube, Wii)".to_string(),
+            ..Default::default()
+        };
+        let result = build_args("-u \"%emu_dir%/User\" -b -e \"%rom%\"", "", &ph).unwrap();
+        assert_eq!(
+            result,
+            vec![
+                "-u",
+                "/lib/emulators/Dolphin (GameCube, Wii)/User",
+                "-b",
+                "-e",
+                "/roms/Some Game.rvz"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_blank_emu_dir_fails_instead_of_producing_a_bare_user_flag() {
+        let ph = Placeholders {
+            rom: "/roms/game.rvz".to_string(),
+            ..Default::default()
+        };
+        let err = build_args("-u \"%emu_dir%/User\" -e \"%rom%\"", "", &ph).unwrap_err();
+        assert_eq!(err, EMU_DIR_MISSING);
+
+        let whitespace = Placeholders {
+            emu_dir: "   ".to_string(),
+            ..ph
+        };
+        assert_eq!(
+            build_args("-u %emu_dir%", "", &whitespace).unwrap_err(),
+            EMU_DIR_MISSING
+        );
+    }
+
+    #[test]
+    fn a_template_without_emu_dir_ignores_a_blank_value() {
+        let ph = Placeholders {
+            rom: "/roms/game.rvz".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            build_args("%rom%", "", &ph).unwrap(),
+            vec!["/roms/game.rvz"]
+        );
+    }
+
+    #[test]
+    fn emulator_dir_placeholder_is_the_parent_or_blank() {
+        assert_eq!(
+            emulator_dir_placeholder(Path::new("/opt/Dolphin/Dolphin.exe")),
+            "/opt/Dolphin"
+        );
+        assert_eq!(emulator_dir_placeholder(Path::new("dolphin-emu")), "");
+        assert_eq!(emulator_dir_placeholder(Path::new("/")), "");
     }
 }
