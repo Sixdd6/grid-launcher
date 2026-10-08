@@ -1,13 +1,24 @@
-# Dolphin auto-install and KytyPS5 `.zar` games: implementation plan (2026-10-08)
+# Dolphin auto-install and KytyPS5 `.zar` games: implementation plan (2026-10-08, revised)
 
-> **For agentic workers:** Steps use checkbox (`- [ ]`) syntax. One implementer at a time in the shared working tree. Commit each verified task with `git commit --only <paths>`. Never run `git checkout`, `git restore`, `git reset` or `git stash` on tracked files.
+> **For agentic workers:** Steps use checkbox (`- [ ]`) syntax. One coder per task, with a reviewer after each. Tasks run in the order listed. A task may assume that every earlier task is committed. Each task lists its own files, interfaces and context, so read only your own task plus "Global Constraints". Commit each verified task with `git commit --only <paths>`. Never run `git checkout`, `git restore`, `git reset` or `git stash` on tracked files.
 
-**Goal:** GRID installs Dolphin from the catalog. On Windows it uses the official portable `.7z`. On Linux it uses the unofficial `pkgforge-dev` AppImage. Dolphin is not offered on macOS. Games launch fullscreen, on Vulkan, at 3x internal resolution, with user data in `<exe dir>/User`. KytyPS5 gets explicit 1080p output args. A PS5 `.zar` installs untouched. A PS5 `.pkg` or bare folder game is rejected before any download.
+**Goal:**
+- GRID installs Dolphin from the catalog:
+  - On Windows it uses the official portable `.7z`.
+  - On Linux it uses the unofficial `pkgforge-dev` AppImage.
+  - It is not offered on macOS.
+- Dolphin games launch fullscreen, on Vulkan, at 3x internal resolution, with user data in `<exe dir>/User`.
+- KytyPS5 gets explicit 1080p output args.
+- PS5 games:
+  - A `.zar` installs as downloaded, without extraction.
+  - A `.pkg` or a bare multi-file folder game is rejected before any download.
+- After an update of any AppImage emulator, GRID launches the newly downloaded AppImage and removes the one it replaced.
 
 **Architecture:**
-- **One catalog row on every OS.** A `platform_overrides` entry is now merged into the raw source before normalization. This lets one profile switch provider: `direct` on Windows, `github` on Linux. The catalog still shows exactly one Dolphin row, built from the top-level source identity.
-- **`%emu_dir%` placeholder.** A new placeholder in `launch/template.rs` expands to the executable's directory. `prepare_emulator_launch` fills it in. The Dolphin save reader expands the same placeholder, so cloud saves follow the `-u` flag.
-- **PS5 rejection.** The PS5 checks run in `plan_install`, before admission. `.zar` already takes the `Downloaded` route because it is not an extractable suffix. A test pins that.
+- **One catalog row on every OS.** A `platform_overrides` entry is merged into the raw source before normalization. This lets one profile switch provider: `direct` on Windows, `github` on Linux. The row still comes from the top-level source identity.
+- **`%emu_dir%` placeholder.** It expands to the executable's directory. `prepare_emulator_launch` fills it in. The Dolphin save reader expands the same placeholder.
+- **PS5 checks.** They run in `plan_install`, before admission.
+- **AppImage updates.** A primary AppImage IS the executable, so the directory scan never ranks it against a stale one. The entry's previous AppImage in the same install directory is removed after the config write.
 
 **Tech Stack:** Rust (grid-core, Tauri 2 shell), serde_json (`preserve_order`), regex, wiremock (tests), vitest unchanged, WebdriverIO e2e (regression only).
 
@@ -21,61 +32,126 @@
 
 These settle the points the spec left to the planner. Each one binds the coder.
 
-1. **The override can switch provider (no second profile).** Today `forge.rs::resolve` (`:92-93`) and `commands.rs::update_source_for` (`:1705-1706`) normalize first and merge the override after. A `provider` key in an override therefore lands un-normalized (`"github-release"`). It then fails with "Unsupported source provider". The fix is a new `source::resolve_source_for_host(raw, host)`. It shallow-merges the matching override into the RAW object with the existing `merge_platform_override_for`, then calls `normalize_source`. A regression test pins that every override in today's catalog that does not set `provider` gives the same map as before.
-2. **The catalog row keeps the top-level identity.** `catalog::catalog_row` keeps reading the top-level `provider`/`owner`/`repo`. RPCS3 already works this way: its row says `rpcs3-binaries-win` on Linux. So `source_id` stays `dolphin-emu/dolphin` on every host, and `find_profile` finds the profile from any host. Side effect: the Linux row's meta line reads `direct • latest` (see Open Questions).
-3. **Dolphin save lists stay empty, on purpose.** `cloud/dirs.rs:484` asks the Dolphin readers only when the entry's `save_paths`/`state_paths` are blank. A catalog install copies the profile's lists into the entry (`autoconfig::entry::apply_manual_emulator_profile_defaults`). Empty `save_directories`/`state_directories` keep the readers in charge. The readers know memory-card permutations, GCI region folders, Wii title groups and `Dolphin.ini` overrides. `readers::dolphin_launch_user_root` (`readers.rs:621`) reads the `-u` value, and today it would read the literal `%emu_dir%/User`. Task 4 makes it expand the placeholder.
-4. **`user_data: ["User"]`, `screenshot_directories: ["User/ScreenShots"]`.** The data root is the executable's directory for every non-PCSX2 binary (`autoconfig::emulator_data_root`):
-   - Windows `.7z`: the directory that holds `Dolphin.exe`, possibly nested as `Dolphin-x64/`.
-   - Linux: the AppImage's directory.
-   Both match `-u "%emu_dir%/User"` and `dolphin::ini_path_candidates` candidate 0 (`<exe parent>/User/Config`). `ensure_user_data_links` links that `User` into `saves/<profile>/User`.
-5. **No `firmware_directories` for Dolphin.** `firmware::routing::install_for_game` (`routing.rs:428`) returns early when no targets exist. The Dolphin hooks (`ensure_skip_ipl`, `ensure_gcpad_config`, `:472-477`) only run when targets exist. `ensure_gcpad_config` appends an `XInput/0/Gamepad` block, which is Windows-only and would break the default Linux mapping. Leaving firmware routing off keeps today's behaviour, where no Dolphin entry ever reaches those hooks. Dolphin's own IPL handling also needs per-region `User/GC/<REGION>/IPL.bin` paths that flat routing cannot produce. This is a follow-up (Open Questions).
-6. **`save_strategy: "single_file"`.** `cloud/ops/mod.rs:804` gives Dolphin its own branch, so the strategy is not read for Dolphin saves. `"single_file"` matches DuckStation/PCSX2.
-7. **Executable choice.** The title tokens give `Dolphin.exe` and `DolphinTool.exe` the same score. Then the shallower path wins. `select_executable` gains the preferred name `dolphin.exe` for a title containing `dolphin`.
-8. **Install directory name.** `sanitize_component` turns `/` into `_`. The profile `Dolphin (GameCube / Wii)` therefore installs to `emulators/Dolphin (GameCube _ Wii)/` and saves to `saves/Dolphin (GameCube _ Wii)/`. The spec's wording `emulators/Dolphin (GameCube / Wii)/` cannot exist on disk. See Open Question 1. That question must be answered before Task 5 lands.
-9. **The feed regex.** Captured live on 2026-10-08: the payload is Python-style JSON (`", "` separators, unescaped `/`). The artifact order puts `-arm64.7z` BEFORE `-x64.7z`. The href walk in `scrape_download_url` finds nothing: the only `href` sits inside `changelog_html` as `href=\"…`, and `\` is not whitespace. The whole-page fallback then returns the whole match, because the regex has no capture group. The catalog regex is `https://dl\.dolphin-emu\.org/releases/[0-9A-Za-z._-]+/dolphin-[0-9A-Za-z._-]+-x64\.7z`, compiled case-insensitive. The character class excludes `/` and `"`, so a match cannot cross into a neighbouring artifact. `-arm64.7z` can never end in `-x64.7z`.
-10. **`.zar` needs no routing code.** `extract::EXTRACTABLE_SUFFIXES` does not list `zar`, so `base_finalize_route("PlayStation 5", "x.zar")` is already `Downloaded`. Task 9 pins it.
-11. **PS5 rejection surfaces verbatim.** `LibraryError::Extract` displays `{0}`. `commands::install_game` maps it with `err`. `Server.svelte:271-274` and `Details.svelte:416-419` show the message as-is.
-12. **No Dolphin e2e stage.** `e2e/mock-romm/mock-forge.mjs` serves only PCSX2, Redream and GRID's own release. A Dolphin stage needs new routes and fixture bytes. Per the spec rule, it is out. The `emulator-catalog` and `launch` groups run as regression.
+1. **The override can switch provider (no second profile).**
+   - Today `forge.rs::resolve` (`:92-93`) and `commands.rs::update_source_for` (`:1705-1706`) normalize first and merge the override after.
+   - A `provider` key in an override therefore lands un-normalized (`"github-release"`) and fails with "Unsupported source provider".
+   - The fix is a new `source::resolve_source_for_host(raw, host)`. It merges the override into the RAW object with the existing `merge_platform_override_for`, then calls `normalize_source`.
+   - A regression test pins that every catalog override that does not set `provider` gives the same map as before.
+
+2. **The catalog row keeps the top-level identity.**
+   - `catalog::catalog_row` keeps reading the top-level `provider`/`owner`/`repo`, as it already does for RPCS3.
+   - So `source_id` stays `dolphin-emu/dolphin` on every host, and `find_profile` finds the profile from any host.
+   - Side effect: the Linux row's meta line reads `direct • latest` (Open Question 4).
+
+3. **Dolphin save lists stay empty, on purpose.**
+   - `cloud/dirs.rs:484` asks the Dolphin readers only when the entry's `save_paths`/`state_paths` are blank.
+   - A catalog install copies the profile's lists into the entry (`autoconfig::entry::apply_manual_emulator_profile_defaults`). Empty profile lists therefore keep the readers in charge.
+   - The readers handle memory-card permutations, GCI region folders, Wii title groups and `Dolphin.ini` overrides.
+   - `readers::dolphin_launch_user_root` (`readers.rs:621`) reads the `-u` value. Today it would read the literal `%emu_dir%/User`, so Task 4 makes it expand the placeholder.
+
+4. **`user_data: ["User"]`, `screenshot_directories: ["User/ScreenShots"]`.**
+   - The data root is the executable's directory for every non-PCSX2 binary (`autoconfig::emulator_data_root`).
+   - That holds for the Windows `.7z` (which may nest the exe as `Dolphin-x64/`) and for the Linux AppImage.
+   - Both match `-u "%emu_dir%/User"` and `dolphin::ini_path_candidates` candidate 0 (`<exe parent>/User/Config`).
+   - `ensure_user_data_links` links that `User` into `saves/<profile>/User`.
+
+5. **No `firmware_directories` for Dolphin.**
+   - `firmware::routing::install_for_game` (`routing.rs:428`) returns early when there are no targets. The Dolphin hooks (`:472-477`) therefore run only when targets exist.
+   - `ensure_gcpad_config` writes an XInput-only block, which would break the default Linux mapping.
+   - Leaving firmware routing off keeps today's behaviour, where no Dolphin entry ever reaches those hooks.
+   - IPL support needs per-region `User/GC/<REGION>/IPL.bin` paths. That is a follow-up (Open Question 3).
+
+6. **`save_strategy: "single_file"`.** `cloud/ops/mod.rs:804` gives Dolphin its own branch, so the strategy is not read for Dolphin saves.
+
+7. **Executable choice.** `Dolphin.exe` and `DolphinTool.exe` score the same, so the shallower path wins. `select_executable` gains the preferred name `dolphin.exe` for a title containing `dolphin`.
+
+8. **The profile name is `Dolphin (GameCube, Wii)` (user ruling 2026-10-08).** I checked that the comma is safe at every step:
+   - **Directory names.** `library::paths::sanitize_component` replaces only `<>:"/\|?*` and control characters, so it keeps the comma. The install dir is `emulators/Dolphin (GameCube, Wii)/` and the saves dir is `saves/Dolphin (GameCube, Wii)/`.
+   - **Args.** `split_template` splits the TEMPLATE before substitution. The expanded path is a single argv element handed to `std::process::Command` with no shell.
+   - **Links.** `ensure_user_data_links` builds a relative symlink or junction, and neither cares about commas.
+   - **Cloud paths.** The cloud lists split on `;`, `\r` and `\n` only (`cloud/dirs.rs:189`, `cloud/candidates.rs:114`, `layout_migration.rs:117`).
+   - **Other comma splits.** The only `split(',')` calls are the D-Bus address (`spawn.rs:336`) and the frontend's company names.
+   - **Config.** TOML strings take commas.
+   - Tasks 3 and 6 pin this.
+
+9. **The feed regex.**
+   - Captured live on 2026-10-08: the payload is Python-style JSON with unescaped `/`, and arm64 is listed BEFORE x64.
+   - The href walk finds nothing: the only `href` is `href=\"…` inside `changelog_html`.
+   - The whole-page fallback therefore returns the whole match.
+   - The regex is `https://dl\.dolphin-emu\.org/releases/[0-9A-Za-z._-]+/dolphin-[0-9A-Za-z._-]+-x64\.7z`, compiled case-insensitive.
+   - The character class excludes `/` and `"`, so a match cannot cross into a neighbouring artifact.
+
+10. **`.zar` needs no routing code.** `extract::EXTRACTABLE_SUFFIXES` does not list `zar`, so the route is already `Downloaded`. Task 10 pins it.
+
+11. **PS5 rules (user ruling 2026-10-08).**
+    - Rejected: a single `.pkg`, or more than one download candidate.
+    - Accepted and routed `Downloaded`: a single non-`.pkg`, non-archive file, such as a bare `eboot.bin`.
+    - The message surfaces verbatim: `LibraryError::Extract` displays `{0}`, and `Server.svelte:271-274` and `Details.svelte:416-419` show it unchanged.
+
+12. **No Dolphin e2e stage.** `e2e/mock-romm/mock-forge.mjs` serves only PCSX2, Redream and GRID's own release, and the spec allows no new mock routes. The `emulator-catalog` and `launch` groups run as regression.
+
+13. **Versioned AppImage updates (user ruling 2026-10-08).** Three parts of the current code combine into the bug:
+    - The download step unlinks only a same-named primary (`library/mod.rs:2585`).
+    - `finalize_emulator` then calls `select_executable` over the whole install directory (`:2290`).
+    - The old and new AppImage score the same, and the casefolded-path tie-break prefers `…-2609-…` over `…-2612-…`.
+
+    The fix has two parts:
+    - **(a)** A non-extracted AppImage primary becomes the executable directly, with no scan.
+    - **(b)** After the config write, the entry's PREVIOUS executable is deleted, but only when all of these hold: it is an AppImage, a regular file (not a link or directory), directly inside the same install directory, and not the file just written.
+
+    Nothing else is ever deleted: no user data, no stray AppImages, no other files. This applies to every AppImage emulator: PCSX2, PPSSPP, Cemu, Eden, xemu, Xenia Canary/Edge, Dolphin and any future one.
 
 ---
 
 ## Global Constraints
 
 - **Never destroy work:** no `git checkout`, `git restore`, `git reset`, `git stash` on tracked files.
-- **Commits:** `git commit --only <paths>` with the paths listed in each task. Every message ends with the trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- **Commits:** `git commit --only <paths>` with the paths listed in the task. Every message ends with the trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **grid-core stays Tauri-free.** Only Task 1 touches `app/src-tauri` (one import and one call site).
-- **Secrets:** nothing here reads or logs a credential. Fixtures contain no `token`/`password`/`Bearer` strings, so `check_secret_hygiene.sh` stays green.
+- **Secrets:** nothing here reads or logs a credential. Fixtures contain no `token`/`password`/`Bearer` strings.
 - **Catalog JSON is compiled in** (`include_str!` in `profiles.rs` and `source.rs` tests). Editing it is a rebuild.
 - **Formatting:** run `cargo fmt` before each commit and commit only the task's paths.
 - **No RomM request changes** (`openapi.json` not involved). No IPC payload shape changes.
 - **Autoconfig writers are untouched.** `autoconfig/dolphin.rs` keeps its overwrite policy and its Vulkan seed.
+- **The Dolphin profile name is exactly `Dolphin (GameCube, Wii)`.** Its install and saves folders have the same name.
 
 ## Review Focus
 
-These are the five failure modes most likely to ship without a test today. Each one gets a test in its owning task.
+These are the top five failure modes that today's tests do not cover. Each one gets a test in its owning task.
 
-1. **Linux Dolphin installs the Windows `.7z`.** The override fails to switch provider, so the Linux host scrapes the Windows feed. Tests: Task 1 `resolve_source_for_host_lets_an_override_switch_the_provider`; Task 5 `embedded_dolphin_source_is_direct_on_windows_and_github_on_linux`.
-2. **The feed regex picks `-arm64.7z`, a `.flatpak`, or the `.dmg`.** The real feed lists arm64 first. Tests: Task 6 `dolphin_regex_picks_the_windows_x64_7z_out_of_the_update_feed` (fixture keeps the real order) and `dolphin_regex_finds_nothing_when_the_feed_has_no_x64_build`.
-3. **Cloud saves read the literal `%emu_dir%/User`.** They then fall back to a stale `~/.dolphin-emu`, so the wrong saves are uploaded or restored. Test: Task 4 `dolphin_emu_dir_user_flag_wins_over_a_stale_home_install`. It uses no `portable.txt`, so the fallback cannot hide the bug.
-4. **A PS5 `.pkg` or folder game starts downloading, or a `.zar` gets extracted.** Tests: Task 9:
-   - `plan_rejects_a_ps5_pkg_before_any_download`
-   - `plan_rejects_a_ps5_folder_game`
-   - `plan_accepts_a_single_ps5_zar_and_routes_it_as_downloaded`
-5. **Windows Dolphin launches `DolphinTool.exe`.** Test: Task 5 `dolphin_title_prefers_dolphin_exe_over_its_bundled_tools`.
+1. **Linux Dolphin installs the Windows `.7z`.** The override fails to switch provider, so Linux scrapes the Windows feed.
+   - Task 1 `resolve_source_for_host_lets_an_override_switch_the_provider`
+   - Task 6 `embedded_dolphin_source_is_direct_on_windows_and_github_on_linux`
+2. **After an AppImage update GRID still launches the old build, or the cleanup deletes the wrong file.**
+   - Task 5 `an_appimage_update_with_a_new_file_name_launches_the_new_build_and_removes_the_old_one`. It checks that a stray AppImage, a stray file and the user data behind the `User` link all survive.
+   - Task 5 unit tests for `superseded_appimage` (outside the dir, a link, a directory, the same file).
+3. **The feed regex picks `-arm64.7z`, a `.flatpak` or the `.dmg`.**
+   - Task 7 `dolphin_regex_picks_the_windows_x64_7z_out_of_the_update_feed` (real artifact order)
+   - Task 7 `dolphin_regex_finds_nothing_when_the_feed_has_no_x64_build`
+4. **Cloud saves read the literal `%emu_dir%/User` and fall back to a stale `~/.dolphin-emu`.**
+   - Task 4 `dolphin_emu_dir_user_flag_wins_over_a_stale_home_install`. It writes no `portable.txt`, so the fallback cannot hide the bug.
+5. **A PS5 `.pkg` or folder game starts downloading, a `.zar` gets extracted, or a bare `eboot.bin` is wrongly rejected.**
+   - Task 10 `plan_rejects_a_ps5_pkg_before_any_download`
+   - Task 10 `plan_rejects_a_ps5_folder_game`
+   - Task 10 `plan_accepts_a_single_ps5_zar_and_routes_it_as_downloaded`
+   - Task 10 `plan_accepts_a_single_bare_ps5_executable_and_routes_it_as_downloaded`
 
 Also pinned:
-- The hard user requirement, exactly one Dolphin row on win32 and linux and none on darwin: Task 5 `real_catalog_shows_exactly_one_dolphin_row_on_windows_and_linux_and_none_on_macos`.
-- `%emu_dir%` with spaces stays one argument, and a blank value is an error: Task 3.
+- **Exactly one Dolphin row** on win32 and linux, and none on darwin (hard user requirement): Task 6 `real_catalog_shows_exactly_one_dolphin_row_on_windows_and_linux_and_none_on_macos`.
+- **Windows Dolphin launches `Dolphin.exe`, not `DolphinTool.exe`:** Task 6.
+- **`%emu_dir%` with spaces and a comma stays one argument, and a blank value is an error:** Task 3.
 
 ---
 
 ## Task 1: Platform overrides can switch the source provider
 
+**Context:** Today the override is merged after normalization (`forge.rs:92-93`, `commands.rs:1705-1706`), so an override cannot change `provider`. This task makes normalization run after the merge.
+
 **Files:**
 - `crates/grid-core/src/launch/source.rs` (new fns + tests)
-- `crates/grid-core/src/launch/forge.rs` (`ForgeClient::resolve`, imports)
-- `crates/grid-core/src/launch/profiles.rs` (test helper `win32_source` only)
-- `app/src-tauri/src/commands.rs` (`update_source_for`, imports at `:23-25`)
+- `crates/grid-core/src/launch/forge.rs` (`ForgeClient::resolve`, imports at `:24-27`)
+- `crates/grid-core/src/launch/profiles.rs` (test helper `win32_source` at `:1443-1455` only)
+- `app/src-tauri/src/commands.rs` (`update_source_for` at `:1696-1716`, imports at `:23-25`)
 
 **Interfaces:**
 - Consumes:
@@ -86,7 +162,7 @@ Also pinned:
   - `pub fn resolve_source_for_host(raw: &Value, host: &str) -> Result<SourceMap, SourceError>`
   - `pub fn resolve_source(raw: &Value) -> Result<SourceMap, SourceError>`
 
-- [ ] **1.1 Write the failing tests** in `source.rs`'s `#[cfg(test)] mod tests` (after the `merge_platform_override` block):
+- [ ] **1.1 Write the failing tests** in `source.rs`'s `#[cfg(test)] mod tests`, after the `merge_platform_override` block:
 
 ```rust
     // --- resolve_source_for_host ------------------------------------------------
@@ -164,7 +240,7 @@ Also pinned:
     }
 ```
 
-- [ ] **1.2 Run:** `cargo test -p grid-core resolve_source` (expect a compile failure: `resolve_source_for_host` not found).
+- [ ] **1.2 Run** `cargo test -p grid-core resolve_source`. Expected: a compile failure, because `resolve_source_for_host` does not exist yet.
 
 - [ ] **1.3 Implement** in `source.rs`, directly after `merge_platform_override_for`:
 
@@ -197,16 +273,23 @@ pub fn resolve_source(raw: &Value) -> Result<SourceMap, SourceError> {
 }
 ```
 
-- [ ] **1.4 Switch the callers:**
-  - `forge.rs` imports (`:24-27`): replace `merge_platform_override, normalize_source` with `resolve_source`.
-  - In `ForgeClient::resolve`, replace the two lines `let mut source = normalize_source(raw)?; merge_platform_override(&mut source);` with `let source = resolve_source(raw)?;`. Change the comment and the `expect` text that mention `normalize_source` to `resolve_source`.
-  - Update the `resolve` doc comment to "resolve for this host (override merged into the raw source, then normalized), then dispatch on provider".
-  - `commands.rs:23-25`: the import becomes `use grid_core::launch::source::{allow_prerelease, resolve_source, str_field, SourceMap};`.
-  - In `update_source_for` (`:1705-1706`), use `let source = resolve_source(&raw).map_err(|e| e.0)?;`. Update the doc comment's "normalized the same way the install itself normalizes it" to "resolved the same way the install resolves it".
-  - `profiles.rs` test helper `win32_source` (`:1443-1455`): the body ends with `crate::launch::source::resolve_source_for_host(raw, "win32").unwrap()`. Doc: "resolved as a win32 host would see it".
-  - Keep `merge_platform_override` (pub) and its tests unchanged.
+- [ ] **1.4 Switch the callers.**
+  - **`forge.rs` imports:** replace `merge_platform_override, normalize_source` with `resolve_source`.
+  - **`ForgeClient::resolve` body:** replace `let mut source = normalize_source(raw)?; merge_platform_override(&mut source);` with `let source = resolve_source(raw)?;`.
+  - **`ForgeClient::resolve` text:** change the comment and the `expect` text that name `normalize_source` to name `resolve_source`. The doc becomes: "resolve for this host (override merged into the raw source, then normalized), then dispatch on provider."
+  - **`commands.rs:23-25`:** replace the import with `use grid_core::launch::source::{allow_prerelease, resolve_source, str_field, SourceMap};`.
+  - **`update_source_for`:** use `let source = resolve_source(&raw).map_err(|e| e.0)?;`. The doc says "resolved the same way the install resolves it".
+  - **`profiles.rs` `win32_source`:** the body ends with `crate::launch::source::resolve_source_for_host(raw, "win32").unwrap()`.
+  - Keep `merge_platform_override` (pub) and its tests.
 
-- [ ] **1.5 Run:** `cargo test -p grid-core resolve_source`, `cargo test -p grid-core embedded_sources_pick_the_windows_asset_from_real_release_listings`, `cargo test -p grid-core forge`, `cargo test -p app update_check`. All pass. Run `cargo clippy --workspace --all-targets -- -D warnings`. Expected: no unused-import warning.
+- [ ] **1.5 Run:**
+  - `cargo test -p grid-core resolve_source`
+  - `cargo test -p grid-core embedded_sources_pick_the_windows_asset_from_real_release_listings`
+  - `cargo test -p grid-core forge`
+  - `cargo test -p app`
+  - `cargo clippy --workspace --all-targets -- -D warnings`
+
+  Expected: all pass, with no unused-import warning.
 
 - [ ] **1.6 Commit:**
 ```
@@ -217,17 +300,20 @@ git commit --only crates/grid-core/src/launch/source.rs crates/grid-core/src/lau
 
 ## Task 2: Catalog rows can be built for any host
 
-**Files:** `crates/grid-core/src/launch/catalog.rs`
+**Context:** `catalog_row`'s `platforms` gate reads the compile-time `HOST_PLATFORM`. A later task must pin "one Dolphin row on win32 and linux, none on darwin" from one test run, so the host becomes a parameter.
+
+**Files:**
+- `crates/grid-core/src/launch/catalog.rs`
 
 **Interfaces:**
-- Consumes: `HOST_PLATFORM`.
-- Produces (private to the module, used by its tests):
+- Produces (module-private, used by this module's tests):
   - `fn catalog_entries_for_host(profiles: &[EmulatorProfile], host: &str) -> Vec<CatalogEntry>`
   - `fn catalog_row(profile: &EmulatorProfile, host: &str) -> Option<CatalogEntry>`
   - `fn platforms_allow_host(source: &Map<String, Value>, host: &str) -> bool`
-- Public signatures unchanged: `catalog_entries`, `compat_tool_catalog_entries`, `find_profile`, `find_compat_profile`.
+  - `fn catalog_entries_filtered(profiles: &[EmulatorProfile], compat: bool, host: &str) -> Vec<CatalogEntry>`
+- These public signatures do not change: `catalog_entries`, `compat_tool_catalog_entries`, `find_profile`, `find_compat_profile`.
 
-- [ ] **2.1 Write the failing test** in `catalog.rs` tests (after `platforms_gate_is_a_noop_when_the_list_is_empty`):
+- [ ] **2.1 Write the failing test** in `catalog.rs` tests, after `platforms_gate_is_a_noop_when_the_list_is_empty`:
 
 ```rust
     #[test]
@@ -257,13 +343,13 @@ git commit --only crates/grid-core/src/launch/source.rs crates/grid-core/src/lau
     }
 ```
 
-- [ ] **2.2 Run:** `cargo test -p grid-core one_profile_with_a_provider_switching_override` (expect a compile failure).
+- [ ] **2.2 Run** `cargo test -p grid-core one_profile_with_a_provider_switching_override`. Expected: a compile failure.
 
-- [ ] **2.3 Implement:**
-  - `platforms_allow_host(source, host: &str)`: replace `HOST_PLATFORM.starts_with(text.as_str())` with `host.starts_with(text.as_str())`. The doc now says "allows `host`".
-  - `catalog_row(profile, host: &str)` passes `host` to `platforms_allow_host`.
-  - `catalog_entries_filtered(profiles, compat: bool, host: &str)` passes `host` to `catalog_row`.
-  - Add:
+- [ ] **2.3 Implement.**
+  - **`platforms_allow_host(source, host: &str)`:** replace `HOST_PLATFORM.starts_with(text.as_str())` with `host.starts_with(text.as_str())`.
+  - **`catalog_row(profile, host: &str)`:** pass `host` to `platforms_allow_host`.
+  - **`catalog_entries_filtered(profiles, compat, host: &str)`:** pass `host` to `catalog_row`.
+  - **Add:**
 ```rust
 /// [`catalog_entries`] as `host` (a `sys.platform`-shaped slug) would list
 /// it: the same rows, gated by that host's `platforms` allowlist instead of
@@ -272,11 +358,11 @@ fn catalog_entries_for_host(profiles: &[EmulatorProfile], host: &str) -> Vec<Cat
     catalog_entries_filtered(profiles, false, host)
 }
 ```
-  - `catalog_entries` returns `catalog_entries_for_host(profiles, HOST_PLATFORM)`.
-  - `compat_tool_catalog_entries` passes `HOST_PLATFORM`.
-  - `find_profile_filtered` calls `catalog_row(profile, HOST_PLATFORM)`.
+  - **`catalog_entries`:** return `catalog_entries_for_host(profiles, HOST_PLATFORM)`.
+  - **`compat_tool_catalog_entries`:** pass `HOST_PLATFORM`.
+  - **`find_profile_filtered`:** call `catalog_row(profile, HOST_PLATFORM)`.
 
-- [ ] **2.4 Run:** `cargo test -p grid-core catalog`. All pass.
+- [ ] **2.4 Run** `cargo test -p grid-core catalog`. Expected: all pass.
 
 - [ ] **2.5 Commit:**
 ```
@@ -287,31 +373,33 @@ git commit --only crates/grid-core/src/launch/catalog.rs \
 
 ## Task 3: `%emu_dir%` launch placeholder
 
+**Context:** Dolphin will launch with `-u "%emu_dir%/User"`. The placeholder expands to the directory that holds the executable. A blank value must fail the launch rather than produce `-u /User`. A path with spaces or a comma must stay one argument.
+
 **Files:**
 - `crates/grid-core/src/launch/template.rs`
 - `crates/grid-core/src/launch/spawn.rs`
-- `crates/grid-core/src/launch/mod.rs` (`resolve_launch` literal at `:551-555`)
+- `crates/grid-core/src/launch/mod.rs` (the `Placeholders` literal in `resolve_launch`, `:551-555`)
 
 **Interfaces:**
 - Produces:
-  - `pub struct Placeholders { pub rom: String, pub core: String, pub ps3_launch_target: String, pub emu_dir: String }`
+  - `pub struct Placeholders { pub rom: String, pub core: String, pub ps3_launch_target: String, pub emu_dir: String }` (derives `Default`, as today)
   - `pub const EMU_DIR_PLACEHOLDER: &str = "%emu_dir%";`
   - `pub const EMU_DIR_MISSING: &str`
   - `pub fn emulator_dir_placeholder(executable: &Path) -> String`
-- Unchanged signatures: `build_args`, `validate_placeholders`, `apply_placeholders`, `prepare_emulator_launch`.
+- These signatures do not change: `build_args`, `validate_placeholders`, `apply_placeholders`, `spawn::prepare_emulator_launch`.
 
-- [ ] **3.1 Write the failing tests.** In `template.rs` tests:
-  - Change the helper `placeholders(rom, core, ps3)` to add `emu_dir: String::new(),`.
-  - Add:
+- [ ] **3.1 Write the failing tests.**
+
+  In `template.rs` tests, add `emu_dir: String::new(),` to the helper `placeholders(rom, core, ps3)`, then add:
 
 ```rust
     // --- %emu_dir% ------------------------------------------------------------
 
     #[test]
-    fn emu_dir_is_substituted_and_a_path_with_spaces_stays_one_argument() {
+    fn emu_dir_is_substituted_and_a_path_with_spaces_and_a_comma_stays_one_argument() {
         let ph = Placeholders {
             rom: "/roms/Some Game.rvz".to_string(),
-            emu_dir: "/lib/emulators/Dolphin (GameCube _ Wii)".to_string(),
+            emu_dir: "/lib/emulators/Dolphin (GameCube, Wii)".to_string(),
             ..Default::default()
         };
         let result = build_args("-u \"%emu_dir%/User\" -b -e \"%rom%\"", "", &ph).unwrap();
@@ -319,7 +407,7 @@ git commit --only crates/grid-core/src/launch/catalog.rs \
             result,
             vec![
                 "-u",
-                "/lib/emulators/Dolphin (GameCube _ Wii)/User",
+                "/lib/emulators/Dolphin (GameCube, Wii)/User",
                 "-b",
                 "-e",
                 "/roms/Some Game.rvz"
@@ -366,15 +454,13 @@ git commit --only crates/grid-core/src/launch/catalog.rs \
     }
 ```
 
-  In `spawn.rs` tests:
-  - Change the helper `placeholders(rom, core)` to add `emu_dir: String::new(),`.
-  - Add:
+  In `spawn.rs` tests, add `emu_dir: String::new(),` to the helper `placeholders(rom, core)`, then add:
 
 ```rust
     #[test]
     fn emu_dir_expands_to_the_executable_folder_as_one_argument() {
         let dir = tempfile::tempdir().unwrap();
-        let emu_dir = dir.path().join("Dolphin (GameCube _ Wii)");
+        let emu_dir = dir.path().join("Dolphin (GameCube, Wii)");
         std::fs::create_dir_all(&emu_dir).unwrap();
         let exe = emu_dir.join("Dolphin_Emulator-2609-anylinux-x86_64.AppImage");
         std::fs::write(&exe, b"stub").unwrap();
@@ -405,11 +491,11 @@ git commit --only crates/grid-core/src/launch/catalog.rs \
     }
 ```
 
-- [ ] **3.2 Run:** `cargo test -p grid-core emu_dir` (expect a compile failure: no field `emu_dir`, no `EMU_DIR_MISSING`).
+- [ ] **3.2 Run** `cargo test -p grid-core emu_dir`. Expected: a compile failure.
 
-- [ ] **3.3 Implement** in `template.rs`:
-  - Add `pub emu_dir: String,` to `Placeholders` with the doc "The directory holding the emulator's executable (`%emu_dir%`). Filled by `spawn::prepare_emulator_launch` from the resolved executable; callers leave it blank."
-  - Add, above `validate_placeholders`:
+- [ ] **3.3 Implement in `template.rs`.**
+  - Add `pub emu_dir: String,` to `Placeholders` with the doc: "The directory holding the emulator's executable (`%emu_dir%`). Filled by `spawn::prepare_emulator_launch`; callers leave it blank."
+  - Above `validate_placeholders`, add:
 
 ```rust
 /// The launch placeholder for the directory that holds the emulator's
@@ -432,17 +518,17 @@ pub fn emulator_dir_placeholder(executable: &Path) -> String {
     }
 }
 ```
-  - In `validate_placeholders`, add as the last check:
+  - At the end of `validate_placeholders`, add:
 ```rust
     if template.contains(EMU_DIR_PLACEHOLDER) && ph.emu_dir.trim().is_empty() {
         return Err(EMU_DIR_MISSING.to_string());
     }
 ```
-  - In `apply_placeholders`, append `.replace(EMU_DIR_PLACEHOLDER, &ph.emu_dir)` after the `%ps3_launch_target%` replace. Update the doc's replace list.
-  - Module doc: mention `%emu_dir%` next to the reference placeholders as a GRID addition.
+  - In `apply_placeholders`, append `.replace(EMU_DIR_PLACEHOLDER, &ph.emu_dir)` after the `%ps3_launch_target%` replace, and update the doc's list.
+  - In the module doc, name `%emu_dir%` as a GRID addition.
 
-  In `spawn.rs`:
-  - Import becomes `use super::template::{build_args, emulator_dir_placeholder, normalized_retroarch_core_args, Placeholders};`.
+- [ ] **3.4 Implement in `spawn.rs`.**
+  - The import becomes `use super::template::{build_args, emulator_dir_placeholder, normalized_retroarch_core_args, Placeholders};`.
   - In `prepare_emulator_launch`, replace the `build_args` call with:
 ```rust
     // `%emu_dir%` comes from the executable this function just resolved, so
@@ -454,33 +540,45 @@ pub fn emulator_dir_placeholder(executable: &Path) -> String {
     let args = build_args(&entry.args, global_launch_args, &placeholders)
         .map_err(|e| format!("Invalid launch arguments: {e}"))?;
 ```
-  - Add one line to the function doc: "`%emu_dir%` is filled from the resolved executable's parent."
+  - Add one line to its doc: "`%emu_dir%` is filled from the resolved executable's parent."
 
-  In `launch/mod.rs::resolve_launch`, add `emu_dir: String::new(),` to the `Placeholders` literal with the comment `// filled by prepare_emulator_launch from the resolved executable`.
+- [ ] **3.5 Implement in `launch/mod.rs`.** In `resolve_launch`, add `emu_dir: String::new(), // filled by prepare_emulator_launch from the resolved executable` to the `Placeholders` literal.
 
-- [ ] **3.4 Run:** `cargo test -p grid-core template`, `cargo test -p grid-core spawn`, `cargo test -p grid-core --test launch_service`, `cargo test -p grid-core --test launch_tilde`. All pass.
+- [ ] **3.6 Run:**
+  - `cargo test -p grid-core template`
+  - `cargo test -p grid-core spawn`
+  - `cargo test -p grid-core --test launch_service`
+  - `cargo test -p grid-core --test launch_tilde`
 
-- [ ] **3.5 Commit:**
+  Expected: all pass.
+
+- [ ] **3.7 Commit:**
 ```
 git commit --only crates/grid-core/src/launch/template.rs crates/grid-core/src/launch/spawn.rs crates/grid-core/src/launch/mod.rs \
   -m "feat(launch): %emu_dir% expands to the emulator executable's folder" \
   -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-## Task 4: Dolphin save reader expands `%emu_dir%` in `-u`
+## Task 4: The Dolphin save reader expands `%emu_dir%` in `-u`
+
+**Context:**
+- Cloud saves for a Dolphin entry with blank `save_paths` come from `readers::dolphin_save_path_overrides`. That reader reads the `-u` flag from the entry's args through `dolphin_launch_user_root`.
+- Dolphin's args will contain `-u "%emu_dir%/User"`. The reader must expand the placeholder the same way a launch does (Task 3 added `crate::launch::template::EMU_DIR_PLACEHOLDER`).
 
 **Files:**
-- `crates/grid-core/src/autoconfig/readers.rs` (`dolphin_launch_user_root`, `dolphin_user_root_candidates`, tests)
-- `crates/grid-core/src/cloud/dirs.rs` (test only)
+- `crates/grid-core/src/autoconfig/readers.rs` (`dolphin_launch_user_root` at `:621`, `dolphin_user_root_candidates` at `:678`, tests)
+- `crates/grid-core/src/cloud/dirs.rs` (one test only)
 
 **Interfaces:**
-- Consumes: `crate::launch::template::EMU_DIR_PLACEHOLDER` (Task 3).
+- Consumes: `crate::launch::template::EMU_DIR_PLACEHOLDER`, `crate::launch::template::split_template`.
 - Produces (private):
   - `fn dolphin_launch_user_root(args: Args, emulator_dir: Option<&Path>) -> Option<PathBuf>`
   - `fn expand_emu_dir(value: &str, emulator_dir: Option<&Path>) -> Option<String>`
-- Public `dolphin_user_root_candidates(path: &str, args: Args) -> Vec<PathBuf>` is unchanged.
+- This public signature does not change: `dolphin_user_root_candidates(path: &str, args: Args) -> Vec<PathBuf>`.
 
-- [ ] **4.1 Write the failing tests.** In `readers.rs` tests (Dolphin block, after `dolphin_user_root_prefers_a_launch_user_flag`):
+- [ ] **4.1 Write the failing tests.**
+
+  In the `readers.rs` tests Dolphin block, after `dolphin_user_root_prefers_a_launch_user_flag`:
 
 ```rust
     #[test]
@@ -522,7 +620,7 @@ git commit --only crates/grid-core/src/launch/template.rs crates/grid-core/src/l
     }
 ```
 
-  In `cloud/dirs.rs` tests (after `dolphin_override_wiring_lands_ahead_of_profile_paths`):
+  In `cloud/dirs.rs` tests, after `dolphin_override_wiring_lands_ahead_of_profile_paths`:
 
 ```rust
     /// The catalog Dolphin profile launches with `-u "%emu_dir%/User"` and
@@ -535,7 +633,7 @@ git commit --only crates/grid-core/src/launch/template.rs crates/grid-core/src/l
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
 
-        let emulator_dir = temp.path().join("Dolphin (GameCube _ Wii)");
+        let emulator_dir = temp.path().join("Dolphin (GameCube, Wii)");
         std::fs::create_dir_all(&emulator_dir).unwrap();
         let exe = emulator_dir.join("Dolphin_Emulator-2609-anylinux-x86_64.AppImage");
         std::fs::write(&exe, b"").unwrap();
@@ -552,7 +650,7 @@ git commit --only crates/grid-core/src/launch/template.rs crates/grid-core/src/l
             match_tokens: vec!["dolphin*.appimage".to_string()],
             ..Default::default()
         };
-        let mut e = entry("Dolphin (GameCube / Wii)", &exe.to_string_lossy());
+        let mut e = entry("Dolphin (GameCube, Wii)", &exe.to_string_lossy());
         e.args = "-u \"%emu_dir%/User\" -b -v Vulkan -e \"%rom%\"".to_string();
         let c = ctx(Some(&emulator_dir), temp.path());
 
@@ -571,9 +669,10 @@ git commit --only crates/grid-core/src/launch/template.rs crates/grid-core/src/l
     }
 ```
 
-- [ ] **4.2 Run:** `cargo test -p grid-core dolphin_user_root_expands` and `cargo test -p grid-core dolphin_emu_dir_user_flag_wins`. Expected: both FAIL. The first candidate is the relative `%emu_dir%/User`, and the cloud test resolves under `.dolphin-emu`.
+- [ ] **4.2 Run** `cargo test -p grid-core dolphin_user_root_expands` and `cargo test -p grid-core dolphin_emu_dir_user_flag_wins`. Expected: both FAIL.
 
-- [ ] **4.3 Implement** in `readers.rs`, above `dolphin_launch_user_root`:
+- [ ] **4.3 Implement in `readers.rs`.**
+  - Above `dolphin_launch_user_root`, add:
 
 ```rust
 /// `value` with the `%emu_dir%` launch placeholder
@@ -592,7 +691,7 @@ fn expand_emu_dir(value: &str, emulator_dir: Option<&Path>) -> Option<String> {
 }
 ```
   - Change `dolphin_launch_user_root(args: Args)` to `dolphin_launch_user_root(args: Args, emulator_dir: Option<&Path>)`.
-  - In the `-u`/`--user` branch, replace `if !cleaned.is_empty() { return Some(resolve_best_effort(&paths::expand_user(&cleaned))); }` with:
+  - In both the `-u`/`--user` branch and the `--user=` branch, replace `if !cleaned.is_empty() { return Some(resolve_best_effort(&paths::expand_user(&cleaned))); }` with:
 ```rust
                 if let Some(value) =
                     expand_emu_dir(&cleaned, emulator_dir).filter(|v| !v.is_empty())
@@ -600,11 +699,10 @@ fn expand_emu_dir(value: &str, emulator_dir: Option<&Path>) -> Option<String> {
                     return Some(resolve_best_effort(&paths::expand_user(&value)));
                 }
 ```
-  - Make the same replacement in the `--user=` branch.
-  - Doc addition: "A value naming `%emu_dir%` is expanded against `emulator_dir`, or skipped when that is unknown."
-  - In `dolphin_user_root_candidates`, call `dolphin_launch_user_root(args, emulator_dir.as_deref())`. `emulator_dir` is already computed above it. Add one line to its doc: "`-u` values expand `%emu_dir%` exactly as a launch does."
+  - Add to its doc: "A value naming `%emu_dir%` is expanded against `emulator_dir`, or skipped when that is unknown."
+  - In `dolphin_user_root_candidates`, call `dolphin_launch_user_root(args, emulator_dir.as_deref())`. `emulator_dir` is computed just above. Add to its doc: "`-u` values expand `%emu_dir%` exactly as a launch does."
 
-- [ ] **4.4 Run:** `cargo test -p grid-core dolphin` and `cargo test -p grid-core cloud::dirs`. All pass.
+- [ ] **4.4 Run** `cargo test -p grid-core dolphin` and `cargo test -p grid-core cloud::dirs`. Expected: all pass.
 
 - [ ] **4.5 Commit:**
 ```
@@ -613,30 +711,328 @@ git commit --only crates/grid-core/src/autoconfig/readers.rs crates/grid-core/sr
   -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-## Task 5: Dolphin catalog profile
+## Task 5: An AppImage update launches the new build and removes the one it replaced
 
-Open Question 1 (the folder name) must be answered before this task lands.
+**Context:**
+- **Why the old build survives.** Most AppImage assets carry a version in their file name: PCSX2 `pcsx2-v2.1.0-…`, PPSSPP, Cemu, Eden, xemu, and Dolphin `Dolphin_Emulator-2609-…`. The download step (`library/mod.rs:2585`) unlinks only a same-named primary. An update therefore leaves the old AppImage beside the new one.
+- **Why the old build is picked.** `finalize_emulator` (`:2290`) calls `emu_install::select_executable`, which scans the whole install directory. The two AppImages tie on every rank field except the casefolded path. So the OLDER one (`…2609…` < `…2612…`) becomes the entry's path.
+- **Rule (user ruling 2026-10-08):**
+  - GRID launches the newly downloaded AppImage.
+  - Only the AppImage the entry pointed at before this install is deleted.
+  - User data, links, stray files and AppImages the entry never pointed at are never deleted.
+
+**Files:**
+- `crates/grid-core/src/library/mod.rs` (`InstallService::finalize_emulator` at `:2210-2344`, new helper, unit tests)
+- `crates/grid-core/tests/emulator_install.rs` (integration test)
+
+**Interfaces:**
+- Consumes (all exist in `library/mod.rs`):
+  - `fn is_appimage(path: &Path) -> bool` (`:3095`)
+  - `fn delete_with_retry(path: &Path) -> bool`
+  - `fn append_warning(warning: &mut String, text: &str)`
+  - `should_extract`, `EMULATOR_PLATFORM`
+  - `emu_install::select_executable(title: &str, install_dir: &Path, archive: &Path) -> Option<PathBuf>`
+  - `crate::library::paths::expand_home`
+  - `Config::load`
+- Produces:
+  - `fn superseded_appimage(previous_path: &str, install_dir: &Path, new_exe: &Path) -> Option<PathBuf>`
+- Behaviour: in `finalize_emulator`, a non-extracted AppImage primary is the executable. After the config write and archive cleanup, the superseded AppImage (if any) is deleted. A failed delete is a warning on a Completed row.
+- No public signature changes.
+
+- [ ] **5.1 Write the failing unit tests** in `library/mod.rs` tests:
+
+```rust
+    // --- superseded_appimage ---------------------------------------------------
+
+    fn appimage_install() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let install = dir.path().join("emulators").join("Dolphin (GameCube, Wii)");
+        fs::create_dir_all(&install).unwrap();
+        (dir, install)
+    }
+
+    #[test]
+    fn superseded_appimage_is_the_previous_appimage_in_the_install_dir() {
+        let (_dir, install) = appimage_install();
+        let old = install.join("Dolphin_Emulator-2609-anylinux-x86_64.AppImage");
+        let new = install.join("Dolphin_Emulator-2612-anylinux-x86_64.AppImage");
+        fs::write(&old, b"old").unwrap();
+        fs::write(&new, b"new").unwrap();
+
+        assert_eq!(
+            superseded_appimage(&old.to_string_lossy(), &install, &new),
+            Some(old.clone())
+        );
+        // The file the update just wrote is never "superseded".
+        assert_eq!(superseded_appimage(&new.to_string_lossy(), &install, &new), None);
+        assert_eq!(superseded_appimage("   ", &install, &new), None);
+        // Already gone: nothing to delete.
+        fs::remove_file(&old).unwrap();
+        assert_eq!(superseded_appimage(&old.to_string_lossy(), &install, &new), None);
+    }
+
+    #[test]
+    fn superseded_appimage_never_reaches_past_the_install_dir_or_a_non_appimage_file() {
+        let (dir, install) = appimage_install();
+        let new = install.join("Dolphin_Emulator-2612-anylinux-x86_64.AppImage");
+        fs::write(&new, b"new").unwrap();
+
+        // An AppImage the user keeps elsewhere.
+        let outside = dir.path().join("Dolphin_Emulator-2609-anylinux-x86_64.AppImage");
+        fs::write(&outside, b"mine").unwrap();
+        assert_eq!(superseded_appimage(&outside.to_string_lossy(), &install, &new), None);
+
+        // Not an AppImage.
+        let exe = install.join("Dolphin.exe");
+        fs::write(&exe, b"exe").unwrap();
+        assert_eq!(superseded_appimage(&exe.to_string_lossy(), &install, &new), None);
+
+        // A directory with an AppImage name.
+        let folder = install.join("folder.AppImage");
+        fs::create_dir_all(&folder).unwrap();
+        assert_eq!(superseded_appimage(&folder.to_string_lossy(), &install, &new), None);
+
+        // Nested one level down: not the install's own primary.
+        let nested = install.join("sub").join("Old.AppImage");
+        fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        fs::write(&nested, b"x").unwrap();
+        assert_eq!(superseded_appimage(&nested.to_string_lossy(), &install, &new), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn superseded_appimage_never_follows_a_link() {
+        let (dir, install) = appimage_install();
+        let new = install.join("New.AppImage");
+        fs::write(&new, b"new").unwrap();
+        let target = dir.path().join("Target.AppImage");
+        fs::write(&target, b"user").unwrap();
+        let link = install.join("Linked.AppImage");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert_eq!(superseded_appimage(&link.to_string_lossy(), &install, &new), None);
+    }
+```
+
+- [ ] **5.2 Write the failing integration test.** Add it to `crates/grid-core/tests/emulator_install.rs`, after `a_reinstalled_appimage_of_the_same_length_is_replaced_on_disk`:
+
+```rust
+/// An update whose AppImage carries a new version in its FILE NAME must
+/// launch the new AppImage and remove the one it replaced — and nothing
+/// else: the user data behind the `User` link, a stray file, and an
+/// AppImage the entry never pointed at all survive. Applies to every
+/// AppImage emulator; Dolphin's names are the example.
+#[cfg(unix)]
+#[tokio::test]
+async fn an_appimage_update_with_a_new_file_name_launches_the_new_build_and_removes_the_old_one() {
+    let harness = Harness::new(|uri| {
+        let mut source = gitea_source(uri);
+        source["release_tag"] = json!("latest");
+        vec![profile_with_user_data("Dolphin (GameCube, Wii)", source, &["User"])]
+    })
+    .await;
+    let latest = "/api/v1/repos/acme/widget/releases/latest";
+    let old_name = "Dolphin_Emulator-2609-anylinux-x86_64.AppImage";
+    let new_name = "Dolphin_Emulator-2612-anylinux-x86_64.AppImage";
+
+    harness
+        .mount_widget_at(latest, "2609@2026-10-01_1", old_name, b"OLD-APPIMAGE".to_vec(), 0)
+        .await;
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let entry = harness.wait_terminal(harness.newest_entry_id()).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let install_dir = harness.install_dir("Dolphin (GameCube, Wii)");
+    let old = install_dir.join(old_name);
+    assert_eq!(harness.config().emulators[0].path, old.to_string_lossy());
+
+    // State the update must not touch.
+    let memcard = harness
+        .library
+        .join("saves")
+        .join("Dolphin (GameCube, Wii)")
+        .join("User")
+        .join("GC")
+        .join("MemoryCardA.USA.raw");
+    fs::create_dir_all(memcard.parent().unwrap()).unwrap();
+    fs::write(&memcard, b"MEMCARD").unwrap();
+    // Sorts BEFORE both builds: a directory scan would pick it.
+    let stray = install_dir.join("Dolphin_Emulator-2603-anylinux-x86_64.AppImage");
+    fs::write(&stray, b"STRAY").unwrap();
+    let notes = install_dir.join("notes.txt");
+    fs::write(&notes, b"keep").unwrap();
+
+    harness.server.reset().await;
+    harness
+        .mount_widget_at(latest, "2612@2026-12-01_1", new_name, b"NEW-APPIMAGE".to_vec(), 0)
+        .await;
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let entry = harness.wait_terminal(harness.newest_entry_id()).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let new = install_dir.join(new_name);
+    let config = harness.config();
+    assert_eq!(config.emulators.len(), 1);
+    assert_eq!(config.emulators[0].path, new.to_string_lossy());
+    assert_eq!(config.emulators[0].source_installed_tag, "2612@2026-12-01_1");
+    assert_eq!(fs::read(&new).unwrap(), b"NEW-APPIMAGE");
+    assert_eq!(mode_of(&new), 0o755);
+    assert!(!old.exists(), "the replaced AppImage must be removed");
+    assert!(stray.is_file(), "an AppImage the entry never pointed at stays");
+    assert!(notes.is_file(), "unrelated files stay");
+
+    let user = install_dir.join("User");
+    assert!(
+        fs::symlink_metadata(&user).unwrap().file_type().is_symlink(),
+        "the User link survives the update"
+    );
+    assert_eq!(
+        fs::read(user.join("GC").join("MemoryCardA.USA.raw")).unwrap(),
+        b"MEMCARD"
+    );
+}
+```
+
+- [ ] **5.3 Run:**
+  - `cargo test -p grid-core superseded_appimage`. Expected: a compile failure.
+  - `cargo test -p grid-core --test emulator_install an_appimage_update_with_a_new_file_name`. Expected: FAIL, because the path still points at the 2603 or 2609 file and the old file still exists.
+
+- [ ] **5.4 Implement the helper** in `library/mod.rs`, next to `is_appimage`:
+
+```rust
+/// The AppImage an emulator install replaced: the entry's PREVIOUS
+/// executable, when it is a regular AppImage file (not a link, not a
+/// directory) sitting directly inside `install_dir` and is not `new_exe`.
+/// `None` for anything else — a blank or missing path, a file outside the
+/// install directory or nested below it, a non-AppImage, or the file this
+/// install just wrote. Only this one file is ever deleted after an update;
+/// user data, links and every other file stay.
+fn superseded_appimage(previous_path: &str, install_dir: &Path, new_exe: &Path) -> Option<PathBuf> {
+    let trimmed = previous_path.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let previous = crate::library::paths::expand_home(trimmed);
+    if !is_appimage(&previous) {
+        return None;
+    }
+    if !fs::symlink_metadata(&previous).ok()?.file_type().is_file() {
+        return None;
+    }
+    let previous_dir = fs::canonicalize(previous.parent()?).ok()?;
+    if previous_dir != fs::canonicalize(install_dir).ok()? {
+        return None;
+    }
+    let same_file = match (fs::canonicalize(&previous), fs::canonicalize(new_exe)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    };
+    (!same_file).then_some(previous)
+}
+```
+
+- [ ] **5.5 Implement the changes in `finalize_emulator`.**
+
+  **(a) Read the previous executable** before anything is written. Place this after the compat-tool early return and before executable selection:
+```rust
+        // The entry's executable BEFORE this install, matched by exact name
+        // like `write_emulator_entry`. An update deletes it below once the new
+        // entry is saved, if it is the AppImage this install replaced.
+        let previous_path = Config::load(&self.config_path).ok().and_then(|config| {
+            config
+                .emulators
+                .iter()
+                .find(|existing| existing.name == job.profile_name)
+                .map(|existing| existing.path.clone())
+        });
+```
+
+  **(b) Replace the `select_executable` call** (`:2290-2293`) with:
+```rust
+        // A primary AppImage IS the new install. Scanning the directory would
+        // rank it against the AppImage it replaces — both carry the title
+        // token, so the casefolded-path tie-break can pick the OLD one
+        // (`…-2609-…` sorts before `…-2612-…`).
+        let selected = if !should_extract(EMULATOR_PLATFORM, archive)
+            && is_appimage(archive)
+            && archive.is_file()
+        {
+            Some(archive.to_path_buf())
+        } else {
+            emu_install::select_executable(&job.profile_name, install_dir, archive)
+        };
+        let Some(exe) = selected else {
+            return Err(LibraryError::Extract(NO_EMULATOR_EXECUTABLE.to_string()));
+        };
+```
+
+  **(c) Delete the superseded AppImage** after the extracted-archive cleanup loop and before the `emulator_installed_hook` block:
+```rust
+        // Only after the new entry is saved: a failure before this point
+        // keeps the old AppImage launchable.
+        if let Some(old) = previous_path
+            .as_deref()
+            .and_then(|path| superseded_appimage(path, install_dir, &exe))
+        {
+            if !delete_with_retry(&old) {
+                append_warning(
+                    warning,
+                    &format!("could not delete the replaced AppImage: {}", old.display()),
+                );
+            }
+        }
+```
+
+  **(d) Update `finalize_emulator`'s doc** with: "A primary AppImage is the executable; an update removes the AppImage the entry pointed at before (`superseded_appimage`)."
+
+- [ ] **5.6 Run:**
+  - `cargo test -p grid-core superseded_appimage`
+  - `cargo test -p grid-core --test emulator_install`. Expected: all pass, including the existing `an_appimage_primary_is_kept_in_place_made_executable_and_recorded`, `a_reinstalled_appimage_of_the_same_length_is_replaced_on_disk`, `emulator_install_runs_autoconfig_after_writing_the_entry` and `updating_a_source_installed_emulator_preserves_user_fields_and_records_the_new_tag`.
+
+- [ ] **5.7 Commit:**
+```
+git commit --only crates/grid-core/src/library/mod.rs crates/grid-core/tests/emulator_install.rs \
+  -m "fix(library): AppImage updates launch the new build and remove the replaced one" \
+  -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+```
+
+## Task 6: Dolphin catalog profile
+
+**Context:**
+- Tasks 1-4 are in place: `resolve_source_for_host`, `catalog_entries_for_host`, `%emu_dir%`, and the reader expansion.
+- **Profile name:** `Dolphin (GameCube, Wii)` (user ruling). The comma survives `sanitize_component`.
+- **Windows source:** the `direct` feed at `https://dolphin-emu.org/update/latest/beta/`.
+- **Linux source:** a `github-release` override to `pkgforge-dev/Dolphin-emu-AppImage`. It skips the nightly prerelease and excludes `.zsync`.
+- **macOS:** gated out by `source.platforms`.
 
 **Files:**
 - `emulator-autoprofiles.json`
-- `crates/grid-core/src/launch/emu_install.rs` (`select_executable` + test)
+- `crates/grid-core/src/launch/emu_install.rs` (`select_executable` + tests)
 - `crates/grid-core/src/launch/profiles.rs` (tests)
 - `crates/grid-core/src/launch/catalog.rs` (tests)
 
 **Interfaces:**
 - Consumes:
-  - `resolve_source_for_host` (Task 1)
-  - `catalog_entries_for_host` (Task 2)
-  - `profile_available_on_host`, `platform_matches_keywords`, `profile_for_entry`
-- Produces: the catalog profile `Dolphin (GameCube / Wii)` with `source_id` `dolphin-emu/dolphin`.
+  - `crate::launch::source::{resolve_source_for_host, allow_prerelease, str_field}`
+  - `catalog_entries_for_host` (catalog.rs, private)
+  - `profile_available_on_host`, `platform_matches_keywords`, `profile_for_entry`, `load_profiles`
+  - `emulator_install_dir(library: &Path, name: &str) -> PathBuf`
+- Produces: the catalog profile `Dolphin (GameCube, Wii)` with `source_id` `dolphin-emu/dolphin`, and the preferred executable name `dolphin.exe`.
 
-- [ ] **5.1 Write the failing tests.** In `profiles.rs` tests (after `embedded_kyty_profile_launches_fullscreen_and_names_the_ps5_platform`):
+- [ ] **6.1 Write the failing tests in `profiles.rs`**, after `embedded_kyty_profile_launches_fullscreen_and_names_the_ps5_platform`:
 
 ```rust
     fn embedded_dolphin() -> &'static EmulatorProfile {
         load_profiles()
             .iter()
-            .find(|p| p.name == "Dolphin (GameCube / Wii)")
+            .find(|p| p.name == "Dolphin (GameCube, Wii)")
             .expect("the catalog ships a Dolphin profile")
     }
 
@@ -645,8 +1041,7 @@ Open Question 1 (the folder name) must be answered before this task lands.
         let profile = embedded_dolphin();
         assert_eq!(
             profile.args,
-            "-u \"%emu_dir%/User\" -b -v Vulkan -C Dolphin.Display.Fullscreen=True \
-             -C GFX.Settings.InternalResolution=3 -e \"%rom%\""
+            "-u \"%emu_dir%/User\" -b -v Vulkan -C Dolphin.Display.Fullscreen=True -C GFX.Settings.InternalResolution=3 -e \"%rom%\""
         );
         assert_eq!(profile.user_data, vec!["User".to_string()]);
         assert_eq!(
@@ -684,12 +1079,12 @@ Open Question 1 (the folder name) must be answered before this task lands.
     fn dolphin_binaries_resolve_to_the_dolphin_profile() {
         for exe in [
             r"C:\Emulators\Dolphin-x64\Dolphin.exe",
-            "/lib/emulators/Dolphin (GameCube _ Wii)/Dolphin_Emulator-2609-anylinux-x86_64.AppImage",
+            "/lib/emulators/Dolphin (GameCube, Wii)/Dolphin_Emulator-2609-anylinux-x86_64.AppImage",
             "/usr/bin/dolphin-emu",
         ] {
             assert_eq!(
                 profile_for_entry("", exe, load_profiles()).map(|p| p.name.as_str()),
-                Some("Dolphin (GameCube / Wii)"),
+                Some("Dolphin (GameCube, Wii)"),
                 "{exe}"
             );
         }
@@ -716,14 +1111,13 @@ Open Question 1 (the folder name) must be answered before this task lands.
     }
 ```
 
-  In `catalog.rs` tests:
-  - In `real_catalog_includes_expected_rows_with_expected_fields`, before its end, add:
+- [ ] **6.2 Write the failing tests in `catalog.rs`.** In `real_catalog_includes_expected_rows_with_expected_fields`, add before its end:
 ```rust
-        let dolphin = by_name("Dolphin (GameCube / Wii)");
+        let dolphin = by_name("Dolphin (GameCube, Wii)");
         assert_eq!(dolphin.provider, "direct");
         assert_eq!(dolphin.source_id, "dolphin-emu/dolphin");
 ```
-  - Add:
+  Then add:
 ```rust
     /// User ruling (2026-10-08): one Dolphin row on every OS that offers it.
     #[test]
@@ -736,14 +1130,14 @@ Open Question 1 (the folder name) must be answered before this task lands.
                 .collect();
             assert_eq!(dolphin.len(), expected, "host {host}: {dolphin:?}");
             if expected == 1 {
-                assert_eq!(dolphin[0].name, "Dolphin (GameCube / Wii)");
+                assert_eq!(dolphin[0].name, "Dolphin (GameCube, Wii)");
                 assert_eq!(dolphin[0].source_id, "dolphin-emu/dolphin");
             }
         }
     }
 ```
 
-  In `emu_install.rs` tests:
+- [ ] **6.3 Write the failing tests in `emu_install.rs`:**
 ```rust
     /// The Windows build ships helper executables beside `Dolphin.exe`; the
     /// title tokens score them all the same, so without the preferred name
@@ -756,17 +1150,27 @@ Open Question 1 (the folder name) must be answered before this task lands.
         touch(&install.join("Dolphin-x64").join("Dolphin.exe"));
         touch(&install.join("Dolphin-x64").join("Updater.exe"));
         let picked = select_executable(
-            "Dolphin (GameCube / Wii)",
+            "Dolphin (GameCube, Wii)",
             install,
             &install.join("absent.7z"),
         );
         assert_eq!(picked, Some(install.join("Dolphin-x64").join("Dolphin.exe")));
     }
+
+    /// The profile name's comma is a legal path character: it survives
+    /// `sanitize_component` unchanged in the install directory name.
+    #[test]
+    fn a_comma_in_the_profile_name_survives_the_install_dir() {
+        assert_eq!(
+            emulator_install_dir(Path::new("/lib"), "Dolphin (GameCube, Wii)"),
+            Path::new("/lib/emulators/Dolphin (GameCube, Wii)")
+        );
+    }
 ```
 
-- [ ] **5.2 Run:** `cargo test -p grid-core dolphin` (expect FAIL: no profile, wrong executable).
+- [ ] **6.4 Run** `cargo test -p grid-core dolphin`. Expected: FAIL (no profile, wrong executable). The comma test may already pass. Keep it as a pin.
 
-- [ ] **5.3 Implement the catalog entry.** In `emulator-autoprofiles.json`, insert directly after the `"Cemu (Wii U)"` object (after its closing `},`, before the Azahar object):
+- [ ] **6.5 Add the catalog entry.** In `emulator-autoprofiles.json`, insert directly after the `"Cemu (Wii U)"` object (after its closing `},`, before the Azahar object):
 
 ```json
   {
@@ -790,7 +1194,7 @@ Open Question 1 (the folder name) must be answered before this task lands.
         }
       }
     },
-    "name": "Dolphin (GameCube / Wii)",
+    "name": "Dolphin (GameCube, Wii)",
     "args": "-u \"%emu_dir%/User\" -b -v Vulkan -C Dolphin.Display.Fullscreen=True -C GFX.Settings.InternalResolution=3 -e \"%rom%\"",
     "all_platforms": false,
     "platform_keywords": ["gamecube", "ngc", "wii"],
@@ -803,9 +1207,7 @@ Open Question 1 (the folder name) must be answered before this task lands.
   },
 ```
 
-  The profile's `args` and the Rust test string must be byte-identical. The test uses a `\` line continuation. Before running, check that the joined string has exactly one space between `InternalResolution=3`'s preceding flag and `-C`. Write it as one line if in doubt.
-
-- [ ] **5.4 Implement the executable preference.** In `emu_install.rs::select_executable`, after the ShadPS4 block:
+- [ ] **6.6 Add the preferred executable name.** In `emu_install.rs::select_executable`, after the ShadPS4 block:
 ```rust
     if title_casefold.contains("dolphin") {
         // The Windows build ships DolphinTool.exe and Updater.exe beside
@@ -813,38 +1215,46 @@ Open Question 1 (the folder name) must be answered before this task lands.
         preferred_names.insert("dolphin.exe");
     }
 ```
-  Extend the module doc's parity note to "for KytyPS5, ShadPS4 and Dolphin".
+  Extend the module doc's parity note to read "for KytyPS5, ShadPS4 and Dolphin".
 
-- [ ] **5.5 Run:**
+- [ ] **6.7 Run:**
   - `cargo test -p grid-core dolphin`
   - `cargo test -p grid-core real_catalog`
   - `cargo test -p grid-core embedded_`
   - `cargo test -p grid-core every_catalog_source_block_with_a_recognized_provider_normalizes`
   - `cargo test -p grid-core resolve_source_matches_normalize_then_merge_for_the_catalog`
   - `cargo test -p grid-core emu_install`
-  All pass.
 
-- [ ] **5.6 Commit:**
+  Expected: all pass.
+
+- [ ] **6.8 Commit:**
 ```
 git commit --only emulator-autoprofiles.json crates/grid-core/src/launch/emu_install.rs crates/grid-core/src/launch/profiles.rs crates/grid-core/src/launch/catalog.rs \
   -m "feat(catalog): Dolphin installs from the official 7z on Windows and the pkgforge AppImage on Linux" \
   -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-## Task 6: Pin Dolphin asset selection against captured payloads
+## Task 7: Pin Dolphin asset selection against captured payloads
 
-**Files:** `crates/grid-core/src/launch/forge.rs` (tests only)
+**Context:**
+- The `Dolphin (GameCube, Wii)` catalog profile exists (Task 6).
+- `scrape_download_url` walks hrefs first, then falls back to a whole-page regex search. Without capture groups, it returns the whole match.
+- The live feed (captured 2026-10-08) lists arm64 before x64. The Linux release list has a `nightly` prerelease plus `.zsync` and aarch64 assets.
+
+**Files:**
+- `crates/grid-core/src/launch/forge.rs` (tests only)
 
 **Interfaces:**
 - Consumes:
   - `fn scrape_download_url(page_text: &str, download_url_regex: &str, page_url: &str) -> Result<String, SourceError>`
   - `fn basename_of_url(url: &str) -> String`
-  - `select_release`, `select_asset`, `str_field`
+  - `select_release`, `select_asset`, `str_field`, `SourceMap`
   - `crate::launch::source::resolve_source_for_host`
+  - `crate::launch::profiles::load_profiles`
   - `ForgeClient::resolve(&self, raw: &Value, profile_name: &str) -> Result<ResolvedDownload, SourceError>`
 - Produces: tests only.
 
-- [ ] **6.1 Add the fixtures and tests** to `forge.rs`'s `mod tests` (append at the end of that module):
+- [ ] **7.1 Add fixtures and tests** at the end of `forge.rs`'s `mod tests`:
 
 ```rust
     // --- Dolphin: captured payloads ----------------------------------------------
@@ -861,7 +1271,7 @@ git commit --only emulator-autoprofiles.json crates/grid-core/src/launch/emu_ins
     fn dolphin_source_for(host: &str) -> SourceMap {
         let profile = crate::launch::profiles::load_profiles()
             .iter()
-            .find(|p| p.name == "Dolphin (GameCube / Wii)")
+            .find(|p| p.name == "Dolphin (GameCube, Wii)")
             .expect("the catalog ships a Dolphin profile");
         crate::launch::source::resolve_source_for_host(profile.source.as_ref().unwrap(), host)
             .unwrap()
@@ -921,7 +1331,7 @@ git commit --only emulator-autoprofiles.json crates/grid-core/src/launch/emu_ins
 
         let resolved = ForgeClient::new()
             .unwrap()
-            .resolve(&raw, "Dolphin (GameCube / Wii)")
+            .resolve(&raw, "Dolphin (GameCube, Wii)")
             .await
             .unwrap();
         assert_eq!(resolved.provider, "direct");
@@ -993,28 +1403,33 @@ git commit --only emulator-autoprofiles.json crates/grid-core/src/launch/emu_ins
     }
 ```
 
-- [ ] **6.2 Run:** `cargo test -p grid-core forge::tests::dolphin` and `cargo test -p grid-core a_direct_source_resolves_the_dolphin`. All pass. If `dolphin_regex_picks…` fails, the catalog regex in Task 5 is wrong: fix the JSON, not the test.
+- [ ] **7.2 Run** `cargo test -p grid-core forge::tests::dolphin` and `cargo test -p grid-core a_direct_source_resolves_the_dolphin`. Expected: all pass. If a regex test fails, the catalog regex is wrong: fix the JSON from Task 6, not the test.
 
-- [ ] **6.3 Commit:**
+- [ ] **7.3 Commit:**
 ```
 git commit --only crates/grid-core/src/launch/forge.rs \
   -m "test(forge): pin Dolphin asset selection against the live feed and release shapes" \
   -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-## Task 7: Integration test: Dolphin AppImage install runs portable from its own directory
+## Task 8: Integration test: a Dolphin AppImage install runs portable from its own directory
 
-**Files:** `crates/grid-core/tests/emulator_install.rs`
+**Context:**
+- The real catalog profile `Dolphin (GameCube, Wii)` exists (Task 6). Its args contain `-u "%emu_dir%/User"`, which Task 3 expands.
+- The test harness cannot reach `api.github.com`, so the profile's source is swapped for a `gitea` one served by wiremock.
+
+**Files:**
+- `crates/grid-core/tests/emulator_install.rs`
 
 **Interfaces:**
 - Consumes:
   - `grid_core::launch::profiles::load_profiles`
-  - `grid_core::launch::spawn::prepare_emulator_launch`
+  - `grid_core::launch::spawn::prepare_emulator_launch(emulator_name: &str, entry: Option<&EmulatorEntry>, rom_path: &str, placeholders: &Placeholders, global_launch_args: &str, is_retroarch: bool) -> Result<(Vec<String>, PathBuf), String>`
   - `grid_core::launch::template::Placeholders`
-  - harness helpers: `Harness::new`, `gitea_source`, `mount_widget`, `wait_terminal`, `install_dir`, `config`
+  - Harness helpers in this file: `Harness::new`, `gitea_source`, `mount_widget`, `newest_entry_id`, `wait_terminal`, `install_dir`, `config`, `mode_of`.
 - Produces: tests only.
 
-- [ ] **7.1 Add the imports** `use grid_core::launch::spawn::prepare_emulator_launch;` and `use grid_core::launch::template::Placeholders;`. Add the test after `an_appimage_primary_is_kept_in_place_made_executable_and_recorded`:
+- [ ] **8.1 Add the imports** `use grid_core::launch::spawn::prepare_emulator_launch;` and `use grid_core::launch::template::Placeholders;`, then add the test after `an_appimage_primary_is_kept_in_place_made_executable_and_recorded`:
 
 ```rust
 /// The catalog's Dolphin profile, pointed at the mock forge (the github
@@ -1028,7 +1443,7 @@ async fn a_dolphin_appimage_install_runs_portable_from_its_own_directory() {
     let harness = Harness::new(|uri| {
         let mut dolphin = grid_core::launch::profiles::load_profiles()
             .iter()
-            .find(|p| p.name == "Dolphin (GameCube / Wii)")
+            .find(|p| p.name == "Dolphin (GameCube, Wii)")
             .expect("the catalog ships Dolphin")
             .clone();
         dolphin.source = Some(gitea_source(uri));
@@ -1049,8 +1464,7 @@ async fn a_dolphin_appimage_install_runs_portable_from_its_own_directory() {
     let entry = harness.wait_terminal(id).await;
     assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
 
-    // `/` is illegal in a directory name: sanitize_component makes it `_`.
-    let install_dir = harness.install_dir("Dolphin (GameCube _ Wii)");
+    let install_dir = harness.install_dir("Dolphin (GameCube, Wii)");
     let appimage = install_dir.join(asset);
     assert!(appimage.is_file(), "the AppImage is the install");
     assert_eq!(mode_of(&appimage), 0o755);
@@ -1066,7 +1480,7 @@ async fn a_dolphin_appimage_install_runs_portable_from_its_own_directory() {
             harness
                 .library
                 .join("saves")
-                .join("Dolphin (GameCube _ Wii)")
+                .join("Dolphin (GameCube, Wii)")
                 .join("User")
         )
         .unwrap()
@@ -1079,6 +1493,7 @@ async fn a_dolphin_appimage_install_runs_portable_from_its_own_directory() {
 
     let config = harness.config();
     let emu = &config.emulators[0];
+    assert_eq!(emu.name, "Dolphin (GameCube, Wii)");
     assert_eq!(emu.path, appimage.to_string_lossy());
     let rom = harness.library.join("Some Game.rvz");
     fs::write(&rom, b"rom").unwrap();
@@ -1103,29 +1518,34 @@ async fn a_dolphin_appimage_install_runs_portable_from_its_own_directory() {
 }
 ```
 
-- [ ] **7.2 Run:** `cargo test -p grid-core --test emulator_install a_dolphin_appimage_install`. It passes with Tasks 3-5 in place. If `Dolphin.ini` is missing, check `sync_autoconfig`'s warning in `entry.error` before changing anything.
+- [ ] **8.2 Run** `cargo test -p grid-core --test emulator_install a_dolphin_appimage_install`. Expected: pass. If `Dolphin.ini` is missing, read the warning in `entry.error` before changing code.
 
-- [ ] **7.3 Commit:**
+- [ ] **8.3 Commit:**
 ```
 git commit --only crates/grid-core/tests/emulator_install.rs \
   -m "test(library): Dolphin AppImage install links User and launches with -u to its own folder" \
   -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-## Task 8: KytyPS5 output resolution args and their migration
+## Task 9: KytyPS5 output resolution args and their migration
+
+**Context:**
+- Kyty's args become `--fullscreen --screen-width 1920 --screen-height 1080 --game "%rom%"`.
+- Existing installs carry `--fullscreen --game "%rom%"`. `autoconfig::entry::migrate_legacy_args` rewrites any entry whose trimmed args equal one of the profile's `legacy_args`.
+- The app runs that at startup (`app/src-tauri/src/lib.rs:111` via `migrate_legacy_args_in_config`).
 
 **Files:**
-- `emulator-autoprofiles.json` (KytyPS5 object only)
-- `crates/grid-core/src/launch/profiles.rs` (test at `:714-729`)
-- `crates/grid-core/src/autoconfig/entry.rs` (test)
+- `emulator-autoprofiles.json` (the `"KytyPS5 (Playstation 5)"` object only)
+- `crates/grid-core/src/launch/profiles.rs` (the test at `:714-729`)
+- `crates/grid-core/src/autoconfig/entry.rs` (a test)
 
 **Interfaces:**
-- Consumes: `pub fn migrate_legacy_args(emulators: &mut [EmulatorEntry], profiles: &[EmulatorProfile]) -> usize` (run at startup by `app/src-tauri/src/lib.rs:111` via `migrate_legacy_args_in_config`).
-- Produces: data change only.
+- Consumes: `pub fn migrate_legacy_args(emulators: &mut [EmulatorEntry], profiles: &[EmulatorProfile]) -> usize`, `load_profiles`.
+- Produces: a data change only.
 
-- [ ] **8.1 Write the failing tests.**
+- [ ] **9.1 Write the failing tests.**
 
-  In `profiles.rs`, rewrite `embedded_kyty_profile_launches_fullscreen_and_names_the_ps5_platform` so its args assertions read:
+  In `profiles.rs`, `embedded_kyty_profile_launches_fullscreen_and_names_the_ps5_platform`: replace the args assertion with the block below and keep the two keyword assertions.
 ```rust
         assert_eq!(
             profile.args,
@@ -1136,9 +1556,8 @@ git commit --only crates/grid-core/tests/emulator_install.rs \
             vec!["--fullscreen --game \"%rom%\"".to_string()]
         );
 ```
-  Keep its two keyword assertions.
 
-  In `entry.rs` tests (the `migrate_legacy_args` block):
+  In `entry.rs` tests, in the `migrate_legacy_args` block:
 ```rust
     #[test]
     fn migrate_moves_an_installed_kyty_entry_to_the_1080p_args() {
@@ -1159,36 +1578,45 @@ git commit --only crates/grid-core/tests/emulator_install.rs \
     }
 ```
 
-- [ ] **8.2 Run:** `cargo test -p grid-core kyty` (expect FAIL).
+- [ ] **9.2 Run** `cargo test -p grid-core kyty`. Expected: FAIL.
 
-- [ ] **8.3 Implement.** In the `"KytyPS5 (Playstation 5)"` object:
+- [ ] **9.3 Implement.** In the `"KytyPS5 (Playstation 5)"` object:
   - Set `"args": "--fullscreen --screen-width 1920 --screen-height 1080 --game \"%rom%\""`.
   - Add `"legacy_args": ["--fullscreen --game \"%rom%\""]` directly after `args`.
   - Change nothing else.
 
-- [ ] **8.4 Run:** `cargo test -p grid-core kyty` and `cargo test -p grid-core migrate_`. All pass.
+- [ ] **9.4 Run** `cargo test -p grid-core kyty` and `cargo test -p grid-core migrate_`. Expected: all pass.
 
-- [ ] **8.5 Commit:**
+- [ ] **9.5 Commit:**
 ```
 git commit --only emulator-autoprofiles.json crates/grid-core/src/launch/profiles.rs crates/grid-core/src/autoconfig/entry.rs \
   -m "feat(catalog): KytyPS5 renders at 1920x1080; old default args migrate at startup" \
   -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-## Task 9: PS5 install planning rejects `.pkg` and folder games, keeps `.zar` untouched
+## Task 10: PS5 install planning rejects `.pkg` and folder games, keeps `.zar` and bare files untouched
 
-**Files:** `crates/grid-core/src/library/mod.rs`
+**Context:**
+- `plan_install` (`library/mod.rs:349-438`) builds the download plan before admission. Its `Err` reaches the UI verbatim, because `LibraryError::Extract` displays `{0}`.
+- Rules (user rulings 2026-10-08), for a PlayStation 5 platform (`is_ps5_platform`):
+  - **Rejected:** a single `.pkg` candidate, or more than one candidate.
+  - **Accepted and routed `Downloaded`:** a single `.zar`, or a single bare non-archive file such as `eboot.bin`. `zar` and `bin` are not in `extract::EXTRACTABLE_SUFFIXES`.
+  - **Unchanged:** a single `.zip`/`.7z`, which keeps the `Eboot { ps4: false }` route.
+
+**Files:**
+- `crates/grid-core/src/library/mod.rs`
 
 **Interfaces:**
 - Consumes:
   - `is_ps5_platform(&str) -> bool` (already imported)
   - `fn plan_install(detail: &RomDetail, library: &Path, client: Arc<RommClient>) -> Result<InstallJob, LibraryError>`
   - `fn base_finalize_route(platform: &str, archive: &Path) -> BaseRoute`
+  - Test helpers in this module: `detail`, `rom_file`, `client`.
 - Produces:
   - `const KYTY_UNSUPPORTED_GAME: &str`
   - `fn ps5_unsupported_download(platform: &str, candidates: &[&RomFile]) -> bool`
 
-- [ ] **9.1 Write the failing tests** in `library/mod.rs` tests (after `plan_multi_file_without_an_m3u_launches_the_first_candidate`):
+- [ ] **10.1 Write the failing tests** in `library/mod.rs` tests, after `plan_multi_file_without_an_m3u_launches_the_first_candidate`:
 
 ```rust
     // --- plan_install: PS5 ------------------------------------------------------
@@ -1212,8 +1640,7 @@ git commit --only emulator-autoprofiles.json crates/grid-core/src/launch/profile
             };
             assert_eq!(
                 err.to_string(),
-                "KytyPS5 needs a .zar archive, or a .zip/.7z that contains eboot.bin. \
-                 .pkg files and folder games are not supported."
+                "KytyPS5 needs a .zar archive, or a .zip/.7z that contains eboot.bin. .pkg files and folder games are not supported."
             );
         }
     }
@@ -1262,6 +1689,26 @@ git commit --only emulator-autoprofiles.json crates/grid-core/src/launch/profile
         );
     }
 
+    /// User ruling (2026-10-08): a PS5 game whose only candidate is a bare
+    /// executable (an `eboot.bin` / ELF) is allowed and installed as-is.
+    #[test]
+    fn plan_accepts_a_single_bare_ps5_executable_and_routes_it_as_downloaded() {
+        let job = plan_install(
+            &ps5_detail(vec![rom_file(1, "eboot.bin", true)]),
+            Path::new("/library"),
+            client(),
+        )
+        .unwrap();
+        assert_eq!(
+            job.primary_archive,
+            PathBuf::from("/library/games/PlayStation 5/eboot.bin")
+        );
+        assert_eq!(
+            base_finalize_route("PlayStation 5", &job.primary_archive),
+            BaseRoute::Downloaded
+        );
+    }
+
     #[test]
     fn plan_keeps_the_ps5_zip_eboot_route() {
         let job = plan_install(
@@ -1287,11 +1734,9 @@ git commit --only emulator-autoprofiles.json crates/grid-core/src/launch/profile
     }
 ```
 
-  The first test's message string uses a `\` continuation. The continued line's leading spaces are stripped, so the text is `…eboot.bin. .pkg files…` with exactly one space. Check it against the constant.
+- [ ] **10.2 Run** `cargo test -p grid-core plan_`. Expected: FAIL (`KYTY_UNSUPPORTED_GAME` is missing, and the `.pkg` plan succeeds).
 
-- [ ] **9.2 Run:** `cargo test -p grid-core plan_` (expect FAIL: `KYTY_UNSUPPORTED_GAME` missing, the pkg plan succeeds).
-
-- [ ] **9.3 Implement.** Next to `NO_DOWNLOADABLE_FILE` (`:108`):
+- [ ] **10.3 Implement.** Next to `NO_DOWNLOADABLE_FILE` (`:108`), add:
 
 ```rust
 /// Why a PlayStation 5 game cannot be installed for KytyPS5: Kyty opens a
@@ -1301,8 +1746,10 @@ const KYTY_UNSUPPORTED_GAME: &str = "KytyPS5 needs a .zar archive, or a .zip/.7z
 
 /// Whether a PS5 game's download set is one KytyPS5 cannot run: a single
 /// `.pkg` (no `.pkg` support anywhere) or more than one file (a bare folder
-/// game, whose nested files are never downloaded). Any other platform, and
-/// an empty set (reported as [`NO_DOWNLOADABLE_FILE`]), is `false`.
+/// game, whose nested files are never downloaded). A single file of any
+/// other kind — a `.zar`, an archive, a bare `eboot.bin` — is allowed. Any
+/// other platform, and an empty set (reported as
+/// [`NO_DOWNLOADABLE_FILE`]), is `false`.
 fn ps5_unsupported_download(platform: &str, candidates: &[&RomFile]) -> bool {
     if !is_ps5_platform(platform) {
         return false;
@@ -1316,69 +1763,75 @@ fn ps5_unsupported_download(platform: &str, candidates: &[&RomFile]) -> bool {
     }
 }
 ```
-  In `plan_install`, directly after `let candidates: Vec<&RomFile> = …collect();` and before the `match`:
+  In `plan_install`, directly after `let candidates: Vec<&RomFile> = …collect();` and before the `match`, add:
 ```rust
     if ps5_unsupported_download(&detail.platform_name, &candidates) {
         return Err(LibraryError::Extract(KYTY_UNSUPPORTED_GAME.to_string()));
     }
 ```
-  Extend `plan_install`'s doc with "A PlayStation 5 `.pkg` or multi-file game is rejected here ([`KYTY_UNSUPPORTED_GAME`])."
+  Add to `plan_install`'s doc: "A PlayStation 5 `.pkg` or multi-file game is rejected here ([`KYTY_UNSUPPORTED_GAME`])."
 
-- [ ] **9.4 Run:** `cargo test -p grid-core plan_` and `cargo test -p grid-core base_route`. All pass.
+- [ ] **10.4 Run** `cargo test -p grid-core plan_` and `cargo test -p grid-core base_route`. Expected: all pass.
 
-- [ ] **9.5 Commit:**
+- [ ] **10.5 Commit:**
 ```
 git commit --only crates/grid-core/src/library/mod.rs \
   -m "feat(library): reject PS5 .pkg and folder games at install planning; .zar installs as-is" \
   -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-## Task 10: Docs
+## Task 11: Docs
+
+**Context:** These are behaviour docs that must travel with the change. Dolphin is now in the catalog as `Dolphin (GameCube, Wii)`. PS5 accepts `.zar`. AppImage updates replace the old file.
 
 **Files:**
 - `future-plans/platform-support.md`
 - `docs/superpowers/plans/2026-09-15-library-layout-v1.md`
 - `.claude/skills/emulator-autoconfig/SKILL.md`
 
-- [ ] **10.1 `future-plans/platform-support.md`.**
+- [ ] **11.1 Edit `future-plans/platform-support.md`.**
   - Replace lines 166-167 with:
 ```
 - **MAME is not part of auto-install.** It remains playable through its RetroArch cores
   (`mame_libretro` / `mame2003_plus_libretro`).
-- **Dolphin auto-installs** as `Dolphin (GameCube / Wii)`: the official portable `.7z` on
+- **Dolphin auto-installs** as `Dolphin (GameCube, Wii)`: the official portable `.7z` on
   Windows, the unofficial `pkgforge-dev/Dolphin-emu-AppImage` on Linux (the Flatpak is never
   used), not offered on macOS. It launches with `-u "%emu_dir%/User"`, so both builds keep
   their data in `<exe dir>/User`, linked into `saves/`.
+- **AppImage updates** launch the newly downloaded AppImage and delete only the AppImage the
+  entry pointed at before; user data and every other file stay.
 ```
   - Replace the Wii/GameCube row (`:238`) with:
 ```
 | Wii/GameCube | Dolphin | Native (unofficial `pkgforge-dev` AppImage) | Auto-install: official `.7z` on Windows, AppImage on Linux; not offered on macOS |
 ```
-  - Add after the PS4 row:
+  - After the PS4 row, add:
 ```
-| PS5 | KytyPS5 | Native | Games must be `.zar`, or a `.zip`/`.7z` containing `eboot.bin`; `.pkg` and bare folder games are rejected at install |
-```
-
-- [ ] **10.2 `docs/superpowers/plans/2026-09-15-library-layout-v1.md`.** Append to Decision 9 (line 37) and to the "Dolphin shared directory" bullet (line 313):
-```
-**Superseded 2026-10-08:** Dolphin is now in the catalog as `Dolphin (GameCube / Wii)` with `user_data: ["User"]` (spec `docs/superpowers/specs/2026-10-08-dolphin-and-kyty-zar-design.md`).
+| PS5 | KytyPS5 | Native | Games must be `.zar`, a `.zip`/`.7z` containing `eboot.bin`, or a single bare executable; `.pkg` and multi-file folder games are rejected at install |
 ```
 
-- [ ] **10.3 `.claude/skills/emulator-autoconfig/SKILL.md`.** Under "Other Emulators", extend the Dolphin bullet with:
+- [ ] **11.2 Edit `docs/superpowers/plans/2026-09-15-library-layout-v1.md`.** Append this to Decision 9 (line 37) and to the "Dolphin shared directory" bullet (line 313):
 ```
-  - The catalog profile launches with `-u "%emu_dir%/User"` (`%emu_dir%` = the executable's directory, `launch::template`). `readers::dolphin_user_root_candidates` expands the same placeholder, so the Linux AppImage (whose own directory is a read-only mount) and the Windows `.7z` share one `<exe dir>/User` root. The profile has no `firmware_directories`: `ensure_gcpad_config`'s block is XInput-only.
+**Superseded 2026-10-08:** Dolphin is now in the catalog as `Dolphin (GameCube, Wii)` with `user_data: ["User"]` (spec `docs/superpowers/specs/2026-10-08-dolphin-and-kyty-zar-design.md`).
 ```
 
-- [ ] **10.4 Commit:**
+- [ ] **11.3 Edit `.claude/skills/emulator-autoconfig/SKILL.md`.** Under "Other Emulators", extend the Dolphin bullet with:
+```
+  - The catalog profile `Dolphin (GameCube, Wii)` launches with `-u "%emu_dir%/User"` (`%emu_dir%` = the executable's directory, `launch::template`). `readers::dolphin_user_root_candidates` expands the same placeholder, so the Linux AppImage (whose own directory is a read-only mount) and the Windows `.7z` share one `<exe dir>/User` root. The profile has no `firmware_directories`: `ensure_gcpad_config`'s block is XInput-only.
+```
+
+- [ ] **11.4 Commit:**
 ```
 git commit --only future-plans/platform-support.md docs/superpowers/plans/2026-09-15-library-layout-v1.md .claude/skills/emulator-autoconfig/SKILL.md \
-  -m "docs: Dolphin is in the catalog; PS5 accepts .zar" \
+  -m "docs: Dolphin is in the catalog; PS5 accepts .zar; AppImage updates replace the old file" \
   -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-## Task 11: Gate, e2e regression, live check
+## Task 12: Gate, e2e regression, live check
 
-- [ ] **11.1 Run the full gate** from the repo root, in order. Run it detached and read the log.
+**Context:** Tasks 1-11 are committed. This task proves the whole change set.
+
+- [ ] **12.1 Run the full gate** from the repo root, in order. Run it detached and read the log.
 ```
 scripts/check_secret_hygiene.sh
 cargo fmt --check
@@ -1388,42 +1841,55 @@ cargo clippy -p app --all-targets --features e2e -- -D warnings
 cargo test --workspace
 cd app && npm test
 ```
-  Fix any failure only in the files this plan touched. Re-run the failed command, then the rest of the gate.
-- [ ] **11.2 E2E regression.** Run `scripts/e2e.sh emulator-catalog`. It needs a full build because Rust changed. Then run `E2E_SKIP_BUILD=1 scripts/e2e.sh launch`. That is safe because nothing changed since that build. No spec or fixture changes are expected: no spec lists catalog rows, and the mock forge 404s Dolphin.
-- [ ] **11.3 Commit any gate fixes** with `git commit --only <touched paths>` and the same trailer.
-- [ ] **11.4 Manual live check (the user's machine).**
-  - Install Dolphin from the catalog. Expect one row.
-  - Launch one GameCube and one Wii game. Expect fullscreen, Vulkan, 3x IR, and data in `emulators/Dolphin (GameCube _ Wii)/User` → `saves/…`.
-  - Restart GRID and confirm the KytyPS5 entry's args migrated.
+  If a command fails, fix it only in the files this plan touched. Then re-run the failed command and the rest of the gate.
+
+- [ ] **12.2 Run the e2e regression.**
+  - First, `scripts/e2e.sh emulator-catalog`. It does a full build, because Rust changed. It covers the PCSX2 AppImage install and "Update from Source", which go through the Task 5 code.
+  - Then `E2E_SKIP_BUILD=1 scripts/e2e.sh launch`. Skipping the build is safe because nothing changed since that build.
+  - Expected: no spec or fixture changes. The PCSX2 update keeps the same asset name, so nothing is deleted.
+
+- [ ] **12.3 Commit any gate fixes** with `git commit --only <touched paths>` and the same trailer.
+
+- [ ] **12.4 Manual live check (user's machine).**
+  - Install Dolphin from the catalog. Expect exactly one row.
+  - Launch one GameCube game and one Wii game. Expect fullscreen, Vulkan, 3x internal resolution, and data in `emulators/Dolphin (GameCube, Wii)/User` → `saves/Dolphin (GameCube, Wii)/User`.
+  - Run "Update from Source" on one AppImage emulator whose release changed. Expect the new AppImage to launch and the old file to be gone.
+  - Restart GRID and confirm the KytyPS5 entry's args were migrated.
   - Launch one `.zar` game.
-  - Click Install on a `.pkg` PS5 game. Expect the exact rejection text and no download row.
-- [ ] **11.5** If the orchestrator closes the milestone here, run `cargo clean --profile dev` from the repo root (standing milestone cleanup).
+  - Try a `.pkg` PS5 game. Expect the exact rejection text and no download row.
+
+- [ ] **12.5 Milestone cleanup.** If the orchestrator closes the milestone here, run `cargo clean --profile dev` from the repo root.
 
 ---
 
 ## Edge cases to handle (covered above unless noted)
 
-- **An override with `provider` but a blank `owner`.** `normalize_source` errors after the merge. The catalog test `resolve_source_matches_normalize_then_merge_for_the_catalog` resolves every source on every host.
-- **`tag` vs `release_tag`.** `normalize_source` reads `tag` first, so a top-level `tag` now beats an override's `release_tag`. No catalog entry uses `tag`. The regression test would catch a future one.
-- **`%emu_dir%` validation.** A path with spaces stays one argv element (Task 3). A bare file name or `/` gives `EMU_DIR_MISSING`, never `-u /User`.
-- **Hand-configured Dolphin entries.** A manual Dolphin entry now matches the new profile by token. Saves still come from the readers. Its own args are kept: `apply_manual_emulator_profile_defaults` replaces args only when blank or `%rom%`.
-- **Windows `.7z` nested in `Dolphin-x64/`.** `user_data_root` and `%emu_dir%` both use the executable's parent, so the links and `-u` agree.
-- **`.zar` with uppercase suffix.** Covered: no `zar` suffix ever reaches the extractor.
-- **PS5 game with a `game.json` sidecar.** Not a candidate (`is_download_candidate`), so it is not counted as a folder game (Task 9).
-- **PS5 folder game that lists only one top-level file.** It is downloaded alone and will fail at launch. The spec rule is "more than one file". Not handled (Open Question 6).
-- **Future feed revs with hyphens.** The character class allows `-`, `_` and `.`. A rev the class cannot match fails the install with "did not resolve a download URL"; it never picks a wrong file.
+- **Override sets `provider` but a blank `owner`.** `normalize_source` errors after the merge. The catalog test resolves every source on every host.
+- **`tag` versus `release_tag`.** `normalize_source` reads `tag` first, so a top-level `tag` now beats an override's `release_tag`. No catalog entry uses `tag`, and the regression test would catch a future one.
+- **`%emu_dir%` with spaces or a comma.** It stays one argv element. A bare file name or `/` gives `EMU_DIR_MISSING`, never `-u /User` (Task 3).
+- **Hand-configured Dolphin entries.** They now match the new profile by token. Saves still come from the readers. Their own args are kept, because `apply_manual_emulator_profile_defaults` replaces args only when they are blank or `%rom%`.
+- **Windows `.7z` nested in `Dolphin-x64/`.** `user_data_root` and `%emu_dir%` both use the executable's parent.
+- **The previous executable is not an AppImage** (an extracted build, or a user-chosen path outside the install dir). Nothing is deleted (Task 5 unit tests).
+- **The previous AppImage is still running.** On Linux, deleting the file leaves the running inode intact.
+- **A failed delete** becomes a warning on a Completed row. The new entry is already saved.
+- **An update that keeps the same asset name** (PCSX2 in e2e). It is already unlinked before download, so `superseded_appimage` returns `None` because it is the same file.
+- **Stray older AppImages from earlier updates** stay on disk, because the entry no longer points at them. Removing them would break the "only the replaced file" rule. A user can delete them by hand.
+- **`.zar` with an uppercase suffix.** No `zar` suffix ever reaches the extractor.
+- **A PS5 game with a `game.json` sidecar.** The sidecar is not a candidate, so the game is not counted as a folder game.
+- **Future Dolphin feed revisions with hyphens.** The character class allows `-`, `_` and `.`. An unmatched revision fails with "did not resolve a download URL"; it never picks a wrong file.
 
 ## Open questions
 
-1. **Folder name (answer before Task 5).** `/` cannot appear in a directory name, so the install and saves folders become `Dolphin (GameCube _ Wii)`. Keep the spec name, or rename the profile now (for example `Dolphin (GameCube, Wii)`)? Renaming later needs a saves-folder migration. Default if unanswered: keep the spec name.
-2. **Versioned AppImage names on update (pre-existing).** The download step unlinks only an AppImage with the SAME file name (`library/mod.rs:2585`). After a Dolphin update, `Dolphin_Emulator-2609-…` and `Dolphin_Emulator-2612-…` sit side by side. `select_executable` then breaks the tie by path text and keeps the OLDER one. PCSX2, PPSSPP, Cemu, Eden and xemu already have this gap. Recommend a separate fix: prefer the just-downloaded primary when it is launchable.
-3. **Dolphin firmware and the GCPad block.** Firmware routing stays off (Decision 5). A follow-up could route `dsp_rom.bin`, `dsp_coef.bin` and `font_*.bin` to `User/GC`. It could route `IPL.bin` per region. It needs a non-XInput GCPad default on Linux.
-4. **Linux catalog meta line.** The row shows `direct • latest` while Linux installs from GitHub (Decision 2). Is that acceptable, or should the row show the host-resolved provider while keeping the top-level `source_id`?
+Numbering is kept from the first draft. Questions 1, 2 and 6 were ruled on 2026-10-08.
+
+3. **Dolphin firmware and the GCPad block.** Firmware routing stays off (Decision 5). A follow-up could route `dsp_rom.bin`, `dsp_coef.bin` and `font_*.bin` to `User/GC`, and `IPL.bin` per region. It also needs a non-XInput GCPad default on Linux.
+4. **The Linux catalog meta line.** The row shows `direct • latest` while Linux installs from GitHub (Decision 2). Is that acceptable, or should the row show the host-resolved provider while keeping the top-level `source_id`?
 5. **Copy changes not made.**
-   - `ARGS_LABEL` (`app/src/lib/emulators/form.ts:13`, pinned by `form.test.ts` and `e2e/specs/emulators.spec.ts:222`) does not list `%emu_dir%`.
-   - The KytyPS5 note (`app/src/lib/emulators/notes.ts:47-49`) does not mention `.zar`. Both are UI copy, which belongs to the designer.
-6. **Single-file PS5 folder games.** Should a PS5 game whose only candidate is a bare `eboot.bin` also be rejected?
-7. **Windows update check.** It says "unknown" for Dolphin (direct provider), the same as RetroArch and Redream. Reading `shortrev` from the feed would make it real. Out of scope.
+   - `ARGS_LABEL` does not list `%emu_dir%`. It is in `app/src/lib/emulators/form.ts:13`, and is pinned by `form.test.ts` and `e2e/specs/emulators.spec.ts:222`.
+   - The KytyPS5 note (`app/src/lib/emulators/notes.ts:47-49`) does not mention `.zar`.
+
+   Both are UI copy, which belongs to the designer.
+7. **The Windows Dolphin update check** says "unknown" (direct provider), the same as RetroArch and Redream. Reading `shortrev` from the feed would make it real. This is out of scope.
 
 ## Files in this plan
 
@@ -1445,4 +1911,3 @@ cd app && npm test
 - `/home/six/Documents/Programming/grid-launcher/future-plans/platform-support.md`
 - `/home/six/Documents/Programming/grid-launcher/docs/superpowers/plans/2026-09-15-library-layout-v1.md`
 - `/home/six/Documents/Programming/grid-launcher/.claude/skills/emulator-autoconfig/SKILL.md`
-
