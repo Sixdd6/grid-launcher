@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { convertFileSrc } from '@tauri-apps/api/core';
+  import { fileSrc } from './fileSrc';
   import { api } from './api';
   import { BACKGROUND_CYCLE_MS, backgroundUrls, CROSS_FADE_MS, cycleIndex, shouldCycle } from './background';
   import { rememberVariant, variantKey, variantPaths } from './backgroundPrefetch';
@@ -91,7 +91,7 @@
     // `clearIfBottom` timer it had just armed. The outgoing layer's image
     // would then never be dropped.
     function show(path: string) {
-      const src = convertFileSrc(path);
+      const src = fileSrc(path);
       if (slots[slots.top] === src) return; // already showing this image
       slots = withNextCover(slots, src);
       const toClear = outgoingSlot(slots);

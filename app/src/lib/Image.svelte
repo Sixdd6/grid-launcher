@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { convertFileSrc } from '@tauri-apps/api/core';
+  import { fileSrc } from './fileSrc';
   import { api } from './api';
 
   let {
@@ -42,7 +42,7 @@
         .ensureImage(url)
         .then((path) => {
           if (cancelled) return;
-          src = convertFileSrc(path);
+          src = fileSrc(path);
           status = 'ready';
         })
         .catch(() => {
