@@ -22,6 +22,8 @@ use std::sync::Mutex;
 
 use grid_core::config::Config;
 use grid_core::launch::profiles::EmulatorProfile;
+use grid_core::launch::spawn::prepare_emulator_launch;
+use grid_core::launch::template::Placeholders;
 use grid_core::library::emulator_removal::remove_emulator_files;
 use grid_core::library::queue::{DownloadEntry, DownloadStatus};
 use grid_core::library::registry::Registry;
@@ -791,6 +793,94 @@ async fn an_appimage_primary_is_kept_in_place_made_executable_and_recorded() {
         harness.config().emulators[0].path,
         appimage.to_string_lossy()
     );
+}
+
+/// The catalog's Dolphin profile, pointed at the mock forge (the github
+/// host is hard-coded, so the source is swapped for a gitea one). A Linux
+/// AppImage install lands in the profile-named directory, links `User`
+/// into `saves/`, gets its settings written THROUGH that link, and its
+/// stored args expand `-u` to that same directory.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_dolphin_appimage_install_runs_portable_from_its_own_directory() {
+    let harness = Harness::new(|uri| {
+        let mut dolphin = grid_core::launch::profiles::load_profiles()
+            .iter()
+            .find(|p| p.name == "Dolphin (GameCube, Wii)")
+            .expect("the catalog ships Dolphin")
+            .clone();
+        dolphin.source = Some(gitea_source(uri));
+        vec![dolphin]
+    })
+    .await;
+    let asset = "Dolphin_Emulator-2609-anylinux-x86_64.AppImage";
+    harness
+        .mount_widget(asset, b"APPIMAGE-BYTES".to_vec(), 0)
+        .await;
+
+    harness
+        .service
+        .install_emulator("acme/widget".to_string())
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let install_dir = harness.install_dir("Dolphin (GameCube, Wii)");
+    let appimage = install_dir.join(asset);
+    assert!(appimage.is_file(), "the AppImage is the install");
+    assert_eq!(mode_of(&appimage), 0o755);
+
+    let user = install_dir.join("User");
+    assert!(
+        fs::symlink_metadata(&user)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "User must be a link into saves/"
+    );
+    assert_eq!(
+        fs::canonicalize(&user).unwrap(),
+        fs::canonicalize(
+            harness
+                .library
+                .join("saves")
+                .join("Dolphin (GameCube, Wii)")
+                .join("User")
+        )
+        .unwrap()
+    );
+    assert!(
+        user.join("Config").join("Dolphin.ini").is_file(),
+        "autoconfig writes Dolphin.ini through the link"
+    );
+    assert!(install_dir.join("portable.txt").is_file());
+
+    let config = harness.config();
+    let emu = &config.emulators[0];
+    assert_eq!(emu.name, "Dolphin (GameCube, Wii)");
+    assert_eq!(emu.path, appimage.to_string_lossy());
+    let rom = harness.library.join("Some Game.rvz");
+    fs::write(&rom, b"rom").unwrap();
+    let rom_text = rom.to_string_lossy().into_owned();
+    let (argv, working_dir) = prepare_emulator_launch(
+        &emu.name,
+        Some(emu),
+        &rom_text,
+        &Placeholders {
+            rom: rom_text.clone(),
+            ..Default::default()
+        },
+        "",
+        false,
+    )
+    .unwrap();
+    assert_eq!(argv[0], appimage.to_string_lossy());
+    assert_eq!(argv[1], "-u");
+    assert_eq!(argv[2], format!("{}/User", install_dir.display()));
+    assert_eq!(argv.last().unwrap(), &rom_text);
+    assert_eq!(working_dir, install_dir);
 }
 
 /// Re-installing an AppImage source whose new asset has the SAME byte length
