@@ -3189,8 +3189,9 @@ fn is_appimage(path: &Path) -> bool {
 /// executable, when it is a regular AppImage file (not a link, not a
 /// directory) sitting directly inside `install_dir` and is not `new_exe`.
 /// `None` for anything else — a blank or missing path, a file outside the
-/// install directory or nested below it, a non-AppImage, or the file this
-/// install just wrote. Only this one file is ever deleted after an update;
+/// install directory or nested below it, a non-AppImage, the file this
+/// install just wrote (by file identity on Unix, so a hard link to it
+/// counts), or any case where `new_exe` cannot be read. Only this one file is ever deleted after an update;
 /// user data, links and every other file stay.
 fn superseded_appimage(previous_path: &str, install_dir: &Path, new_exe: &Path) -> Option<PathBuf> {
     let trimmed = previous_path.trim();
@@ -3201,18 +3202,36 @@ fn superseded_appimage(previous_path: &str, install_dir: &Path, new_exe: &Path) 
     if !is_appimage(&previous) {
         return None;
     }
-    if !fs::symlink_metadata(&previous).ok()?.file_type().is_file() {
+    let previous_meta = fs::symlink_metadata(&previous).ok()?;
+    if !previous_meta.file_type().is_file() {
         return None;
     }
     let previous_dir = fs::canonicalize(previous.parent()?).ok()?;
     if previous_dir != fs::canonicalize(install_dir).ok()? {
         return None;
     }
-    let same_file = match (fs::canonicalize(&previous), fs::canonicalize(new_exe)) {
+    // An unreadable new file means "same file" cannot be ruled out: keep
+    // the previous one.
+    let new_meta = fs::metadata(new_exe).ok()?;
+    (!is_same_file(&previous, &previous_meta, new_exe, &new_meta)).then_some(previous)
+}
+
+/// Whether `a` and `b` are one file. On Unix this is file identity
+/// (device and inode), so a hard link under another name counts as the
+/// same file; elsewhere the canonical paths are compared, and a path that
+/// cannot be canonicalized counts as the same file.
+#[cfg(unix)]
+fn is_same_file(_a: &Path, a_meta: &fs::Metadata, _b: &Path, b_meta: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    a_meta.dev() == b_meta.dev() && a_meta.ino() == b_meta.ino()
+}
+
+#[cfg(not(unix))]
+fn is_same_file(a: &Path, _a_meta: &fs::Metadata, b: &Path, _b_meta: &fs::Metadata) -> bool {
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
         (Ok(a), Ok(b)) => a == b,
-        _ => false,
-    };
-    (!same_file).then_some(previous)
+        _ => true,
+    }
 }
 
 /// Deletes `path`, retrying every [`ARCHIVE_DELETE_PAUSE`] for up to
@@ -4184,6 +4203,34 @@ mod tests {
         std::os::unix::fs::symlink(&target, &link).unwrap();
         assert_eq!(
             superseded_appimage(&link.to_string_lossy(), &install, &new),
+            None
+        );
+    }
+
+    /// A hard link to the new file under another name is the same file, so
+    /// it is never "superseded".
+    #[cfg(unix)]
+    #[test]
+    fn superseded_appimage_treats_a_hard_link_to_the_new_file_as_the_same_file() {
+        let (_dir, install) = appimage_install();
+        let new = install.join("Dolphin_Emulator-2612-anylinux-x86_64.AppImage");
+        fs::write(&new, b"new").unwrap();
+        let previous = install.join("Dolphin_Emulator-2609-anylinux-x86_64.AppImage");
+        fs::hard_link(&new, &previous).unwrap();
+        assert_eq!(
+            superseded_appimage(&previous.to_string_lossy(), &install, &new),
+            None
+        );
+    }
+
+    #[test]
+    fn superseded_appimage_keeps_the_previous_file_when_the_new_one_is_unreadable() {
+        let (_dir, install) = appimage_install();
+        let previous = install.join("Dolphin_Emulator-2609-anylinux-x86_64.AppImage");
+        fs::write(&previous, b"old").unwrap();
+        let missing = install.join("Dolphin_Emulator-2612-anylinux-x86_64.AppImage");
+        assert_eq!(
+            superseded_appimage(&previous.to_string_lossy(), &install, &missing),
             None
         );
     }
