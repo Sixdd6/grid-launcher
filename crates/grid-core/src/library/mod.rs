@@ -106,6 +106,10 @@ const ARCHIVE_DELETE_PAUSE: Duration = Duration::from_millis(250);
 /// download target.
 const METADATA_FILE_NAME: &str = "game.json";
 const NO_DOWNLOADABLE_FILE: &str = "the server lists no downloadable file for this game";
+/// Why a PlayStation 5 game cannot be installed for KytyPS5: Kyty opens a
+/// `.zar` in place, or GRID extracts a `.zip`/`.7z` and launches its
+/// `eboot.bin`. Raised by [`plan_install`], before any byte is requested.
+const KYTY_UNSUPPORTED_GAME: &str = "KytyPS5 needs a .zar archive, or a .zip/.7z that contains eboot.bin. .pkg files and folder games are not supported.";
 /// The native (Windows) branch's own "nothing to install" message, which the
 /// reference words differently from the generic one above.
 const NO_NATIVE_DOWNLOADABLE_FILE: &str = "No downloadable file was found for this game";
@@ -339,6 +343,25 @@ fn content_target(rom_id: i64, file: &RomFile, dest: PathBuf, expected_size: i64
     }
 }
 
+/// Whether a PS5 game's download set is one KytyPS5 cannot run: a single
+/// `.pkg` (no `.pkg` support anywhere) or more than one file (a bare folder
+/// game, whose nested files are never downloaded). A single file of any
+/// other kind — a `.zar`, an archive, a bare `eboot.bin` — is allowed. Any
+/// other platform, and an empty set (reported as
+/// [`NO_DOWNLOADABLE_FILE`]), is `false`.
+fn ps5_unsupported_download(platform: &str, candidates: &[&RomFile]) -> bool {
+    if !is_ps5_platform(platform) {
+        return false;
+    }
+    match candidates {
+        [] => false,
+        [only] => Path::new(&only.file_name)
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("pkg")),
+        _ => true,
+    }
+}
+
 /// Computes the download plan for `detail` under `library`. Pure apart from
 /// cloning the client handle: no I/O, no queue access.
 ///
@@ -346,6 +369,9 @@ fn content_target(rom_id: i64, file: &RomFile, dest: PathBuf, expected_size: i64
 /// More than one ⇒ a multi-file game: every candidate lands in
 /// `<platform dir>/<safe title>/`, and the launch entry is the first `.m3u`
 /// if there is one, else the first candidate.
+///
+/// A PlayStation 5 `.pkg` or multi-file game is rejected here
+/// ([`KYTY_UNSUPPORTED_GAME`]).
 fn plan_install(
     detail: &RomDetail,
     library: &Path,
@@ -366,6 +392,10 @@ fn plan_install(
         .iter()
         .filter(|file| is_download_candidate(file))
         .collect();
+
+    if ps5_unsupported_download(&detail.platform_name, &candidates) {
+        return Err(LibraryError::Extract(KYTY_UNSUPPORTED_GAME.to_string()));
+    }
 
     match candidates.as_slice() {
         [] => Err(LibraryError::Extract(NO_DOWNLOADABLE_FILE.to_string())),
@@ -3408,6 +3438,131 @@ mod tests {
         ]);
         let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
         assert_eq!(job.launch_entry, "disc1.bin");
+    }
+
+    // --- plan_install: PS5 ------------------------------------------------------
+
+    fn ps5_detail(files: Vec<RomFile>) -> RomDetail {
+        let mut detail = detail(files);
+        detail.name = "Astro Bot".to_string();
+        detail.platform_name = "PlayStation 5".to_string();
+        detail
+    }
+
+    #[test]
+    fn plan_rejects_a_ps5_pkg_before_any_download() {
+        for name in ["Astro Bot.pkg", "ASTRO BOT.PKG"] {
+            let Err(err) = plan_install(
+                &ps5_detail(vec![rom_file(1, name, true)]),
+                Path::new("/library"),
+                client(),
+            ) else {
+                panic!("a PS5 {name} must be rejected");
+            };
+            assert_eq!(
+                err.to_string(),
+                "KytyPS5 needs a .zar archive, or a .zip/.7z that contains eboot.bin. .pkg files and folder games are not supported."
+            );
+        }
+    }
+
+    #[test]
+    fn plan_rejects_a_ps5_folder_game() {
+        let Err(err) = plan_install(
+            &ps5_detail(vec![
+                rom_file(1, "eboot.bin", true),
+                rom_file(2, "libSceFios2.prx", true),
+            ]),
+            Path::new("/library"),
+            client(),
+        ) else {
+            panic!("a bare PS5 folder must be rejected");
+        };
+        assert_eq!(err.to_string(), KYTY_UNSUPPORTED_GAME);
+    }
+
+    #[test]
+    fn plan_accepts_a_single_ps5_zar_and_routes_it_as_downloaded() {
+        // The metadata sidecar is not a download candidate, so it does not
+        // turn a .zar game into a "folder".
+        let job = plan_install(
+            &ps5_detail(vec![
+                rom_file(1, "Astro Bot.zar", true),
+                rom_file(2, "game.json", true),
+            ]),
+            Path::new("/library"),
+            client(),
+        )
+        .unwrap();
+        assert_eq!(
+            job.primary_archive,
+            PathBuf::from("/library/games/PlayStation 5/Astro Bot.zar")
+        );
+        assert_eq!(job.file_ids, vec![1]);
+        assert_eq!(
+            base_finalize_route("PlayStation 5", &job.primary_archive),
+            BaseRoute::Downloaded,
+            "a .zar is opened in place by Kyty; it must never be extracted"
+        );
+        assert_eq!(
+            base_finalize_route("PlayStation 5", Path::new("ASTRO.ZAR")),
+            BaseRoute::Downloaded
+        );
+    }
+
+    /// User ruling (2026-10-08): a PS5 game whose only candidate is a bare
+    /// executable (an `eboot.bin` / ELF) is allowed and installed as-is.
+    #[test]
+    fn plan_accepts_a_single_bare_ps5_executable_and_routes_it_as_downloaded() {
+        let job = plan_install(
+            &ps5_detail(vec![rom_file(1, "eboot.bin", true)]),
+            Path::new("/library"),
+            client(),
+        )
+        .unwrap();
+        assert_eq!(
+            job.primary_archive,
+            PathBuf::from("/library/games/PlayStation 5/eboot.bin")
+        );
+        assert_eq!(
+            base_finalize_route("PlayStation 5", &job.primary_archive),
+            BaseRoute::Downloaded
+        );
+    }
+
+    #[test]
+    fn plan_keeps_the_ps5_zip_eboot_route() {
+        let job = plan_install(
+            &ps5_detail(vec![rom_file(1, "Astro Bot.zip", true)]),
+            Path::new("/library"),
+            client(),
+        )
+        .unwrap();
+        assert_eq!(
+            base_finalize_route("PlayStation 5", &job.primary_archive),
+            BaseRoute::Eboot { ps4: false }
+        );
+    }
+
+    #[test]
+    fn plan_rejection_applies_to_ps5_only() {
+        let mut ps4 = detail(vec![rom_file(1, "game.pkg", true)]);
+        ps4.platform_name = "PlayStation 4".to_string();
+        assert!(plan_install(&ps4, Path::new("/library"), client()).is_ok());
+
+        let snes = detail(vec![
+            rom_file(1, "disc1.bin", true),
+            rom_file(2, "disc2.bin", true),
+        ]);
+        assert!(plan_install(&snes, Path::new("/library"), client()).is_ok());
+
+        // A multi-file game on another PlayStation platform still installs.
+        let mut ps4_multi = detail(vec![
+            rom_file(1, "eboot.bin", true),
+            rom_file(2, "sce_sys.dat", true),
+        ]);
+        ps4_multi.platform_name = "PlayStation 4".to_string();
+        assert!(plan_install(&ps4_multi, Path::new("/library"), client()).is_ok());
     }
 
     // --- install modes -------------------------------------------------------
