@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ExitStatus};
 
 use crate::config::EmulatorEntry;
-use crate::launch::profiles::EmulatorProfile;
+use crate::launch::profiles::{EmulatorProfile, StandaloneLauncher};
 use crate::library::paths::expand_home;
 
 use super::template::{
@@ -115,7 +115,14 @@ pub fn prepare_emulator_launch(
 /// never templates `entry.args`, so a `%rom%` in the stored arguments cannot
 /// leak into a launch that has no ROM.
 ///
-/// One exception: a Dolphin entry ([`crate::autoconfig::is_dolphin`]) keeps
+/// One exception to that: when the entry's catalog profile declares a
+/// `standalone_launcher` (the emulator's own launcher app) that resolves to
+/// an existing file, the argv is that launcher alone and the working
+/// directory is the launcher's folder. A launcher that does not resolve
+/// falls back to the emulator. `all_entries` is every configured emulator,
+/// which a `companion` launcher is looked up in.
+///
+/// Another exception: a Dolphin entry ([`crate::autoconfig::is_dolphin`]) keeps
 /// its `-u` / `--user` user-directory argument, with `%emu_dir%` expanded,
 /// so the portable AppImage opens on `<install dir>/User` and not on
 /// `~/.local/share/dolphin-emu`. Its other arguments are dropped.
@@ -138,6 +145,7 @@ pub fn prepare_emulator_launch(
 pub fn prepare_standalone_emulator_launch(
     emulator_name: &str,
     entry: Option<&EmulatorEntry>,
+    all_entries: &[EmulatorEntry],
     profiles: &[EmulatorProfile],
 ) -> Result<(Vec<String>, PathBuf), String> {
     let name = emulator_name.trim();
@@ -161,10 +169,12 @@ pub fn prepare_standalone_emulator_launch(
         ));
     }
 
-    let working_dir = match executable.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
-        _ => PathBuf::from("."),
-    };
+    if let Some(launcher) = standalone_launcher_path(&executable, entry, all_entries, profiles) {
+        let launcher_dir = parent_dir_or_dot(&launcher);
+        return Ok((vec![launcher.to_string_lossy().into_owned()], launcher_dir));
+    }
+
+    let working_dir = parent_dir_or_dot(&executable);
 
     let mut argv = vec![executable.to_string_lossy().into_owned()];
     if crate::autoconfig::is_dolphin(entry, profiles) {
@@ -174,6 +184,48 @@ pub fn prepare_standalone_emulator_launch(
         )?);
     }
     Ok((argv, working_dir))
+}
+
+/// The directory holding `path`, or `.` when `path` has no folder part.
+fn parent_dir_or_dot(path: &Path) -> PathBuf {
+    match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+        _ => PathBuf::from("."),
+    }
+}
+
+/// The emulator's own launcher app, when the entry's catalog profile
+/// declares one (`standalone_launcher`) and it resolves to an existing
+/// file. `Files` names are looked up beside `executable`, first existing
+/// regular file wins. `Companion` names another configured entry (compared
+/// trimmed and case-insensitively) whose path must be an existing file.
+/// `None` means "open the emulator itself".
+fn standalone_launcher_path(
+    executable: &Path,
+    entry: &EmulatorEntry,
+    all_entries: &[EmulatorEntry],
+    profiles: &[EmulatorProfile],
+) -> Option<PathBuf> {
+    let profile = crate::launch::profiles::profile_for_entry(&entry.name, &entry.path, profiles)?;
+    match profile.standalone_launcher.as_ref()? {
+        StandaloneLauncher::Files(names) => {
+            let dir = parent_dir_or_dot(executable);
+            names
+                .iter()
+                .map(|file_name| dir.join(file_name))
+                .find(|candidate| candidate.is_file())
+        }
+        StandaloneLauncher::Companion(companion) => {
+            let wanted = companion.trim().to_lowercase();
+            all_entries
+                .iter()
+                .find(|other| other.name.trim().to_lowercase() == wanted)
+                .map(|other| other.path.trim())
+                .filter(|path| !path.is_empty())
+                .map(expand_home)
+                .filter(|path| path.is_file())
+        }
+    }
 }
 
 /// The user-directory arguments a ROM-less Dolphin launch keeps: the first
@@ -438,6 +490,7 @@ fn without_entries_under(value: &str, root: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::launch::profiles::load_profiles;
 
     fn entry(path: &str, args: &str) -> EmulatorEntry {
         EmulatorEntry {
@@ -901,7 +954,7 @@ mod tests {
     #[test]
     fn standalone_launch_rejects_an_unknown_entry() {
         assert_eq!(
-            prepare_standalone_emulator_launch("Ghost", None, &[]).unwrap_err(),
+            prepare_standalone_emulator_launch("Ghost", None, &[], &[]).unwrap_err(),
             "Emulator 'Ghost' was not found."
         );
     }
@@ -910,7 +963,7 @@ mod tests {
     fn standalone_launch_rejects_a_blank_path() {
         let e = entry("   ", "%rom%");
         assert_eq!(
-            prepare_standalone_emulator_launch("Dolphin", Some(&e), &[]).unwrap_err(),
+            prepare_standalone_emulator_launch("Dolphin", Some(&e), &[], &[]).unwrap_err(),
             "Emulator 'Dolphin' has no executable path configured."
         );
     }
@@ -921,7 +974,7 @@ mod tests {
         let missing = dir.path().join("nope");
         let e = entry(missing.to_str().unwrap(), "%rom%");
         assert_eq!(
-            prepare_standalone_emulator_launch("Dolphin", Some(&e), &[]).unwrap_err(),
+            prepare_standalone_emulator_launch("Dolphin", Some(&e), &[], &[]).unwrap_err(),
             format!("Emulator executable not found:\n{}", missing.display())
         );
     }
@@ -935,7 +988,127 @@ mod tests {
         let e = entry(exe.to_str().unwrap(), "-b \"%rom%\"");
 
         let (argv, working_dir) =
-            prepare_standalone_emulator_launch("Dolphin", Some(&e), &[]).unwrap();
+            prepare_standalone_emulator_launch("Dolphin", Some(&e), &[], &[]).unwrap();
+        assert_eq!(argv, vec![exe.to_string_lossy().into_owned()]);
+        assert_eq!(working_dir, dir.path());
+    }
+
+    // --- standalone launcher (the emulator's own launcher app) ------------
+
+    fn catalog_entry(profile_name: &str, path: &Path) -> EmulatorEntry {
+        EmulatorEntry {
+            name: profile_name.to_string(),
+            path: path.to_string_lossy().into_owned(),
+            args: "%rom%".to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn standalone_launch_opens_kytys_launcher_beside_the_emulator() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("kyty_emulator");
+        let launcher = dir.path().join("launcher");
+        std::fs::write(&exe, b"").unwrap();
+        std::fs::write(&launcher, b"").unwrap();
+        let e = catalog_entry("KytyPS5 (Playstation 5)", &exe);
+
+        let (argv, working_dir) =
+            prepare_standalone_emulator_launch(&e.name.clone(), Some(&e), &[], load_profiles())
+                .unwrap();
+        assert_eq!(argv, vec![launcher.to_string_lossy().into_owned()]);
+        assert_eq!(working_dir, dir.path());
+    }
+
+    #[test]
+    fn standalone_launch_tries_the_kyty_launcher_names_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("kyty_emulator.exe");
+        let launcher = dir.path().join("launcher.exe");
+        std::fs::write(&exe, b"").unwrap();
+        std::fs::write(&launcher, b"").unwrap();
+        // A directory named `launcher` is not a regular file.
+        std::fs::create_dir(dir.path().join("launcher")).unwrap();
+        let e = catalog_entry("KytyPS5 (Playstation 5)", &exe);
+
+        let (argv, _) =
+            prepare_standalone_emulator_launch(&e.name.clone(), Some(&e), &[], load_profiles())
+                .unwrap();
+        assert_eq!(argv, vec![launcher.to_string_lossy().into_owned()]);
+    }
+
+    #[test]
+    fn standalone_launch_falls_back_to_kyty_when_it_has_no_launcher() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("kyty_emulator");
+        std::fs::write(&exe, b"").unwrap();
+        let e = catalog_entry("KytyPS5 (Playstation 5)", &exe);
+
+        let (argv, working_dir) =
+            prepare_standalone_emulator_launch(&e.name.clone(), Some(&e), &[], load_profiles())
+                .unwrap();
+        assert_eq!(argv, vec![exe.to_string_lossy().into_owned()]);
+        assert_eq!(working_dir, dir.path());
+    }
+
+    #[test]
+    fn standalone_launch_opens_the_shadps4_qt_launcher_entry() {
+        let emu_dir = tempfile::tempdir().unwrap();
+        let qt_dir = tempfile::tempdir().unwrap();
+        let exe = emu_dir.path().join("shadPS4.AppImage");
+        let qt = qt_dir.path().join("shadPS4QtLauncher.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        std::fs::write(&qt, b"").unwrap();
+        let e = catalog_entry("ShadPS4 (Playstation 4)", &exe);
+        let all = vec![e.clone(), catalog_entry("  shadps4 qt launcher ", &qt)];
+
+        let (argv, working_dir) =
+            prepare_standalone_emulator_launch(&e.name.clone(), Some(&e), &all, load_profiles())
+                .unwrap();
+        assert_eq!(argv, vec![qt.to_string_lossy().into_owned()]);
+        assert_eq!(working_dir, qt_dir.path());
+    }
+
+    #[test]
+    fn standalone_launch_falls_back_to_shadps4_without_a_usable_qt_entry() {
+        let emu_dir = tempfile::tempdir().unwrap();
+        let exe = emu_dir.path().join("shadPS4.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        let e = catalog_entry("ShadPS4 (Playstation 4)", &exe);
+        let missing = emu_dir.path().join("gone");
+
+        for all in [
+            vec![e.clone()],
+            vec![e.clone(), catalog_entry("ShadPS4 Qt Launcher", &missing)],
+            vec![
+                e.clone(),
+                catalog_entry("ShadPS4 Qt Launcher", Path::new("")),
+            ],
+        ] {
+            let (argv, working_dir) = prepare_standalone_emulator_launch(
+                &e.name.clone(),
+                Some(&e),
+                &all,
+                load_profiles(),
+            )
+            .unwrap();
+            assert_eq!(argv, vec![exe.to_string_lossy().into_owned()]);
+            assert_eq!(working_dir, emu_dir.path());
+        }
+    }
+
+    #[test]
+    fn standalone_launch_leaves_a_profile_less_entry_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("mystery");
+        std::fs::write(&exe, b"").unwrap();
+        std::fs::write(dir.path().join("launcher"), b"").unwrap();
+        let mut e = entry(exe.to_str().unwrap(), "%rom%");
+        e.name = "Mystery".to_string();
+
+        let (argv, working_dir) =
+            prepare_standalone_emulator_launch("Mystery", Some(&e), &[e.clone()], load_profiles())
+                .unwrap();
         assert_eq!(argv, vec![exe.to_string_lossy().into_owned()]);
         assert_eq!(working_dir, dir.path());
     }
@@ -954,7 +1127,7 @@ mod tests {
         e.name = "Dolphin (GameCube, Wii)".to_string();
 
         let (argv, working_dir) =
-            prepare_standalone_emulator_launch(&e.name.clone(), Some(&e), &[]).unwrap();
+            prepare_standalone_emulator_launch(&e.name.clone(), Some(&e), &[], &[]).unwrap();
         assert_eq!(
             argv,
             vec![
@@ -984,7 +1157,8 @@ mod tests {
         ] {
             let mut e = entry(exe.to_str().unwrap(), args);
             e.name = "Dolphin".to_string();
-            let (argv, _) = prepare_standalone_emulator_launch("Dolphin", Some(&e), &[]).unwrap();
+            let (argv, _) =
+                prepare_standalone_emulator_launch("Dolphin", Some(&e), &[], &[]).unwrap();
             assert_eq!(argv[1..], expected[..], "args: {args}");
         }
     }
@@ -1016,7 +1190,7 @@ mod tests {
             "-u \"%emu_dir%/User\" -batch \"%rom%\"",
         );
         e.name = "PCSX2".to_string();
-        let (argv, _) = prepare_standalone_emulator_launch("PCSX2", Some(&e), &[]).unwrap();
+        let (argv, _) = prepare_standalone_emulator_launch("PCSX2", Some(&e), &[], &[]).unwrap();
         assert_eq!(argv, vec![exe.to_string_lossy().into_owned()]);
     }
 

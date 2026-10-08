@@ -92,6 +92,24 @@ pub struct EmulatorProfile {
     /// `ProfileSummary` shape must not change.
     #[serde(skip_serializing)]
     pub user_data: Vec<String>,
+    /// The emulator's own launcher app, which the Emulators panel opens in
+    /// place of the emulator binary (game launches never read it).
+    /// `skip_serializing` for the same reason as `companions`: the IPC
+    /// `ProfileSummary` shape must not change.
+    #[serde(skip_serializing)]
+    pub standalone_launcher: Option<StandaloneLauncher>,
+}
+
+/// Where an emulator's own launcher app lives (the `standalone_launcher`
+/// catalog key).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StandaloneLauncher {
+    /// File names looked up directly beside the emulator executable; the
+    /// first existing regular file wins.
+    Files(Vec<String>),
+    /// The name of another configured emulator entry whose executable is
+    /// the launcher.
+    Companion(String),
 }
 
 /// Emulator autoprofile slugs that ship a Windows-only build and therefore
@@ -155,6 +173,18 @@ struct RawProfile {
     legacy_args: Vec<String>,
     #[serde(default)]
     user_data: Vec<String>,
+    #[serde(default)]
+    standalone_launcher: Option<RawStandaloneLauncher>,
+}
+
+/// The raw `standalone_launcher` object: exactly one of `file` or
+/// `companion`.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct RawStandaloneLauncher {
+    #[serde(default)]
+    file: Vec<String>,
+    #[serde(default)]
+    companion: Option<String>,
 }
 
 /// The parsed, normalized autoprofile catalog, embedded at build time and
@@ -230,7 +260,26 @@ fn normalize_one(raw: RawProfile) -> Option<EmulatorProfile> {
         companions: trimmed_non_blank(&raw.companions),
         legacy_args: trimmed_non_blank(&raw.legacy_args),
         user_data: trimmed_non_blank(&raw.user_data),
+        standalone_launcher: raw
+            .standalone_launcher
+            .and_then(normalize_standalone_launcher),
     })
+}
+
+/// Trims a raw `standalone_launcher`. Blank values, or naming both `file`
+/// and `companion`, drop the key.
+fn normalize_standalone_launcher(raw: RawStandaloneLauncher) -> Option<StandaloneLauncher> {
+    let files = trimmed_non_blank(&raw.file);
+    let companion = raw
+        .companion
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty());
+    match (files.is_empty(), companion) {
+        (false, None) => Some(StandaloneLauncher::Files(files)),
+        (true, Some(name)) => Some(StandaloneLauncher::Companion(name.to_string())),
+        _ => None,
+    }
 }
 
 /// Normalizes one `firmware_directories` catalog entry
@@ -1086,6 +1135,91 @@ mod tests {
         let profile = normalize_one(entry).unwrap();
         assert_eq!(profile.companions, vec!["Companion Emu".to_string()]);
         assert_eq!(profile.legacy_args, vec!["-g \"%rom%\"".to_string()]);
+    }
+
+    #[test]
+    fn embedded_catalog_declares_standalone_launchers() {
+        let profiles = load_profiles();
+        let find = |name: &str| profiles.iter().find(|p| p.name == name).unwrap();
+        assert_eq!(
+            find("KytyPS5 (Playstation 5)").standalone_launcher,
+            Some(StandaloneLauncher::Files(vec![
+                "launcher".to_string(),
+                "launcher.exe".to_string()
+            ]))
+        );
+        assert_eq!(
+            find("ShadPS4 (Playstation 4)").standalone_launcher,
+            Some(StandaloneLauncher::Companion(
+                "ShadPS4 Qt Launcher".to_string()
+            ))
+        );
+        assert_eq!(find("PCSX2 (Playstation 2)").standalone_launcher, None);
+    }
+
+    #[test]
+    fn every_standalone_launcher_companion_names_a_profile() {
+        let profiles = load_profiles();
+        for profile in profiles {
+            if let Some(StandaloneLauncher::Companion(name)) = &profile.standalone_launcher {
+                assert!(
+                    profiles.iter().any(|candidate| candidate.name == *name),
+                    "{} names an unknown standalone launcher companion {name:?}",
+                    profile.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn standalone_launcher_is_trimmed_and_blank_values_drop_it() {
+        let with = |launcher: RawStandaloneLauncher| {
+            let mut entry = raw("Name", &["x.exe"], "", false, &[]);
+            entry.standalone_launcher = Some(launcher);
+            normalize_one(entry).unwrap().standalone_launcher
+        };
+        assert_eq!(
+            with(RawStandaloneLauncher {
+                file: vec!["  launcher ".into(), "".into(), "  ".into()],
+                companion: None,
+            }),
+            Some(StandaloneLauncher::Files(vec!["launcher".to_string()]))
+        );
+        assert_eq!(
+            with(RawStandaloneLauncher {
+                file: vec![],
+                companion: Some("  Qt  ".into()),
+            }),
+            Some(StandaloneLauncher::Companion("Qt".to_string()))
+        );
+        assert_eq!(
+            with(RawStandaloneLauncher {
+                file: vec!["".into(), "   ".into()],
+                companion: None,
+            }),
+            None
+        );
+        assert_eq!(
+            with(RawStandaloneLauncher {
+                file: vec![],
+                companion: Some("   ".into()),
+            }),
+            None
+        );
+        // Naming both is not "exactly one of": the key is dropped.
+        assert_eq!(
+            with(RawStandaloneLauncher {
+                file: vec!["launcher".into()],
+                companion: Some("Qt".into()),
+            }),
+            None
+        );
+        assert_eq!(
+            normalize_one(raw("Name", &["x.exe"], "", false, &[]))
+                .unwrap()
+                .standalone_launcher,
+            None
+        );
     }
 
     #[test]

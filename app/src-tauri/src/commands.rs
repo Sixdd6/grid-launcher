@@ -1148,7 +1148,7 @@ pub async fn launch_emulator(
         let config = Config::load(&Config::default_path()).map_err(err)?;
         let entry = emulator_entry_by_name(&config.emulators, &name);
         let (argv, working_dir) =
-            prepare_standalone_emulator_launch(&name, entry, load_profiles())?;
+            prepare_standalone_emulator_launch(&name, entry, &config.emulators, load_profiles())?;
         if entry.is_some_and(|entry| entry_is_retroarch(entry, load_profiles())) {
             sync_emulator_settings(&name, install.as_ref());
         }
