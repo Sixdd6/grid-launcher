@@ -348,6 +348,33 @@ pub(crate) fn merge_platform_override_for(source: &mut SourceMap, host: &str) {
     }
 }
 
+/// `raw` as `host` sees it: the first `platform_overrides` entry whose key
+/// is a prefix of `host` (the [`merge_platform_override_for`] rule) is
+/// shallow-merged over the RAW object, and only then is the result
+/// normalized. Merging first lets an override change anything
+/// normalization reads, `provider` included, so one catalog profile can
+/// scrape a `direct` page on Windows and pick a GitHub release asset on
+/// Linux (Dolphin).
+///
+/// DEVIATION from workers.py:165-175, which normalizes first and merges
+/// the raw override afterwards. For an override that does not set
+/// `provider`, both orders give the same map
+/// (`resolve_source_matches_normalize_then_merge_for_the_catalog`).
+pub fn resolve_source_for_host(raw: &Value, host: &str) -> Result<SourceMap, SourceError> {
+    let Some(obj) = raw.as_object() else {
+        return normalize_source(raw);
+    };
+    let mut merged = obj.clone();
+    merge_platform_override_for(&mut merged, host);
+    normalize_source(&Value::Object(merged))
+}
+
+/// [`resolve_source_for_host`] for this build's [`HOST_PLATFORM`]: the
+/// source an install or an update check actually uses.
+pub fn resolve_source(raw: &Value) -> Result<SourceMap, SourceError> {
+    resolve_source_for_host(raw, HOST_PLATFORM)
+}
+
 /// `_extract_releases` (source.py:223-240): an array's object elements; a
 /// single release object recognized by an `assets` array; or an object with
 /// a `releases` array, unwrapped the same way. Anything else — including an
@@ -1115,6 +1142,79 @@ mod tests {
         let before = source.clone();
         merge_platform_override(&mut source);
         assert_eq!(source, before);
+    }
+
+    // --- resolve_source_for_host ------------------------------------------------
+
+    #[test]
+    fn resolve_source_for_host_lets_an_override_switch_the_provider() {
+        let raw = json!({
+            "provider": "direct", "owner": "o", "repo": "r", "release_tag": "latest",
+            "page_url": "https://example.invalid/latest/",
+            "download_url_regex": "https://example\\.invalid/x64\\.7z",
+            "platform_overrides": {"linux": {
+                "provider": "github-release", "owner": "p", "repo": "q",
+                "asset_patterns": ["App-*-x86_64.AppImage"],
+                "asset_exclude_patterns": ["*.zsync"]
+            }}
+        });
+
+        let linux = resolve_source_for_host(&raw, "linux").unwrap();
+        assert_eq!(str_field(&linux, "provider"), "github");
+        assert_eq!(str_field(&linux, "owner"), "p");
+        assert_eq!(str_field(&linux, "repo"), "q");
+        assert_eq!(str_field(&linux, "release_tag"), "latest");
+        assert_eq!(linux["asset_patterns"], json!(["App-*-x86_64.AppImage"]));
+        assert_eq!(linux["asset_exclude_patterns"], json!(["*.zsync"]));
+        assert!(
+            !linux.contains_key("download_url"),
+            "direct-only keys are not normalized for a github source"
+        );
+
+        let windows = resolve_source_for_host(&raw, "win32").unwrap();
+        assert_eq!(str_field(&windows, "provider"), "direct");
+        assert_eq!(
+            str_field(&windows, "page_url"),
+            "https://example.invalid/latest/"
+        );
+    }
+
+    #[test]
+    fn resolve_source_for_host_rejects_a_non_object_source_verbatim() {
+        let err = resolve_source_for_host(&json!(["x"]), "linux").unwrap_err();
+        assert_eq!(err.0, "Source metadata must be a dictionary.");
+    }
+
+    /// Merging the override before normalizing must not change any catalog
+    /// entry whose override leaves `provider` alone: for those, the new
+    /// order and the reference order (normalize, then merge) give the same
+    /// map on every host. Every source must also resolve on every host.
+    #[test]
+    fn resolve_source_matches_normalize_then_merge_for_the_catalog() {
+        let entries: Vec<Value> = serde_json::from_str(AUTOPROFILES_JSON).unwrap();
+        for entry in &entries {
+            let Some(source) = entry.get("source").filter(|s| s.is_object()) else {
+                continue;
+            };
+            let switches_provider = source
+                .get("platform_overrides")
+                .and_then(Value::as_object)
+                .is_some_and(|overrides| {
+                    overrides
+                        .values()
+                        .any(|o| o.get("provider").is_some() || o.get("type").is_some())
+                });
+            for host in ["win32", "linux", "darwin"] {
+                let resolved = resolve_source_for_host(source, host)
+                    .unwrap_or_else(|e| panic!("{:?} on {host}: {}", entry.get("name"), e.0));
+                if switches_provider {
+                    continue;
+                }
+                let mut reference = normalize_source(source).unwrap();
+                merge_platform_override_for(&mut reference, host);
+                assert_eq!(resolved, reference, "{:?} on {host}", entry.get("name"));
+            }
+        }
     }
 
     // --- select_release: shapes and extraction ---------------------------------

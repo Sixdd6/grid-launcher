@@ -20,9 +20,7 @@ use grid_core::launch::selection::{
     compatible_emulator_names_for_platform, emulator_entry_by_name, emulator_supports_platform,
     entry_is_retroarch, mapping_value_for_platform, slug_core_resolver, NO_EMULATOR,
 };
-use grid_core::launch::source::{
-    allow_prerelease, merge_platform_override, normalize_source, str_field, SourceMap,
-};
+use grid_core::launch::source::{allow_prerelease, resolve_source, str_field, SourceMap};
 use grid_core::launch::spawn::{
     prepare_standalone_emulator_launch, spawn_standalone_emulator, wait_for_early_exit,
 };
@@ -1691,8 +1689,8 @@ pub struct EmulatorInstalledEvent {
 const NO_SOURCE_DOWNLOAD: &str = "No source download configured for this emulator.";
 
 /// The source an update would install from: the catalog profile the entry's
-/// `source_id` names, normalized the same way the install itself normalizes
-/// it, plus the tag currently on disk.
+/// `source_id` names, resolved the same way the install resolves it, plus the
+/// tag currently on disk.
 fn update_source_for(name: &str) -> Result<(String, SourceMap), String> {
     let config = Config::load(&Config::default_path()).map_err(err)?;
     let entry = emulator_entry_by_name(&config.emulators, name).ok_or(NO_SOURCE_DOWNLOAD)?;
@@ -1702,8 +1700,7 @@ fn update_source_for(name: &str) -> Result<(String, SourceMap), String> {
     let profile = find_profile(load_profiles(), &entry.source_id)
         .ok_or_else(|| format!("unknown emulator source: {}", entry.source_id))?;
     let raw = profile.source.clone().ok_or(NO_SOURCE_DOWNLOAD)?;
-    let mut source = normalize_source(&raw).map_err(|e| e.0)?;
-    merge_platform_override(&mut source);
+    let source = resolve_source(&raw).map_err(|e| e.0)?;
     // The RESOLVED tag when there is one (what is actually on disk); the
     // configured pin otherwise, for an entry installed before that field
     // existed.

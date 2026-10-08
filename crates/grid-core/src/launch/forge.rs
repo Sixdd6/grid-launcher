@@ -22,8 +22,8 @@ use regex::RegexBuilder;
 use serde_json::Value;
 
 use super::source::{
-    allow_prerelease, merge_platform_override, normalize_source, select_asset, select_release,
-    str_field, SourceError, SourceMap, HOST_PLATFORM,
+    allow_prerelease, resolve_source, select_asset, select_release, str_field, SourceError,
+    SourceMap, HOST_PLATFORM,
 };
 use crate::library::download::{FileTarget, ResponseProvider};
 use crate::library::LibraryError;
@@ -79,8 +79,8 @@ impl ForgeClient {
 
     /// Resolves `raw` (a profile's raw, un-normalized source JSON — or, for
     /// a `supplemental_downloads` entry, that entry's own raw spec) down to
-    /// one downloadable file: normalize, merge the matching
-    /// `platform_overrides` entry, then dispatch on provider.
+    /// one downloadable file: resolve for this host (override merged into the
+    /// raw source, then normalized), then dispatch on provider.
     ///
     /// `profile_name` feeds the `direct` platforms-gate message only, as a
     /// fallback when the raw source has no `name` key of its own.
@@ -89,13 +89,12 @@ impl ForgeClient {
         raw: &Value,
         profile_name: &str,
     ) -> Result<ResolvedDownload, SourceError> {
-        let mut source = normalize_source(raw)?;
-        merge_platform_override(&mut source);
+        let source = resolve_source(raw)?;
         let provider = str_field(&source, "provider");
 
-        // `normalize_source` above already rejected a non-object `raw`, so
+        // `resolve_source` above already rejected a non-object `raw`, so
         // this object is always present once we get here.
-        let raw_obj = raw.as_object().expect("normalize_source accepted `raw`");
+        let raw_obj = raw.as_object().expect("resolve_source accepted `raw`");
 
         match provider.as_str() {
             "direct" => self.resolve_direct(&source, raw_obj, profile_name).await,

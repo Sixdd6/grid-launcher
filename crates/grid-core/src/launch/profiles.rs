@@ -1438,8 +1438,7 @@ mod tests {
 
     // --- catalog integrity: the win32 asset each entry resolves to -----------
 
-    /// The embedded profile's source, normalized and merged as a win32 host
-    /// would see it.
+    /// The embedded profile's source, resolved as a win32 host would see it.
     fn win32_source(profile_name: &str) -> crate::launch::source::SourceMap {
         let profile = load_profiles()
             .iter()
@@ -1449,9 +1448,7 @@ mod tests {
             .source
             .as_ref()
             .unwrap_or_else(|| panic!("{profile_name:?} has a source block"));
-        let mut source = crate::launch::source::normalize_source(raw).unwrap();
-        crate::launch::source::merge_platform_override_for(&mut source, "win32");
-        source
+        crate::launch::source::resolve_source_for_host(raw, "win32").unwrap()
     }
 
     fn release_with(names: &[&str]) -> serde_json::Map<String, serde_json::Value> {
