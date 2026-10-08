@@ -163,8 +163,14 @@ Consequences:
   themselves and point grid-launcher at the Flatpak wrapper (or `~/.var/app/<id>/` config); the
   app just will not install or auto-detect it. The `~/.var/app/<id>/` entries that remain in the
   emulator path candidates exist for exactly this case.
-- **Dolphin and MAME are not part of auto-install.** Both remain playable through their
-  RetroArch cores (`dolphin_libretro`, `mame_libretro` / `mame2003_plus_libretro`).
+- **MAME is not part of auto-install.** It remains playable through its RetroArch cores
+  (`mame_libretro` / `mame2003_plus_libretro`).
+- **Dolphin auto-installs** as `Dolphin (GameCube, Wii)`: the official portable `.7z` on
+  Windows, the unofficial `pkgforge-dev/Dolphin-emu-AppImage` on Linux (the Flatpak is never
+  used), not offered on macOS. It launches with `-u "%emu_dir%/User"`, so both builds keep
+  their data in `<exe dir>/User`, linked into `saves/`.
+- **AppImage updates** launch the newly downloaded AppImage and delete only the AppImage the
+  entry pointed at before; user data and every other file stay.
 
 ---
 
@@ -234,8 +240,9 @@ Notes:
 | Xbox 360 | Xenia / Xenia Canary | Xenia Canary and Xenia Edge (native AppImages) | Only Xenia master is hidden on Linux by the platform gate |
 | Xbox OG | Xemu | Native | — |
 | PS4 | FPKG extraction | Install pipeline is file-based | ShadPS4 Qt launcher installs on Linux too (prerelease assets) |
+| PS5 | KytyPS5 | Native | Games must be `.zar`, a `.zip`/`.7z` containing `eboot.bin`, or a single bare executable; `.pkg` and multi-file folder games are rejected at install |
 | PS3 | RPCS3 | Native | — |
-| Wii/GameCube | Dolphin | Native | Auto-install covers the RetroArch core, not standalone Dolphin |
+| Wii/GameCube | Dolphin | Native (unofficial `pkgforge-dev` AppImage) | Auto-install: official `.7z` on Windows, AppImage on Linux; not offered on macOS |
 | Switch | Eden | Native | — |
 | 3DS | Azahar | Native | — |
 | PS1 / PS2 / PSP | DuckStation / PCSX2 / PPSSPP | Native | — |
