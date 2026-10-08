@@ -100,17 +100,17 @@ pub fn configured_tag(source: &Map<String, Value>) -> String {
 }
 
 /// Whether `source`'s raw `platforms` list (when present and non-empty)
-/// allows this host: some entry must be a prefix of [`HOST_PLATFORM`]. A
+/// allows `host`: some entry must be a prefix of it. A
 /// missing, empty, or non-array `platforms` never gates
 /// (ui/emulators.py:189-192).
-fn platforms_allow_host(source: &Map<String, Value>) -> bool {
+fn platforms_allow_host(source: &Map<String, Value>, host: &str) -> bool {
     match source.get("platforms") {
         Some(Value::Array(items)) if !items.is_empty() => items.iter().any(|item| {
             let text = match item {
                 Value::String(s) => s.clone(),
                 other => other.to_string(),
             };
-            HOST_PLATFORM.starts_with(text.as_str())
+            host.starts_with(text.as_str())
         }),
         _ => true,
     }
@@ -120,14 +120,14 @@ fn platforms_allow_host(source: &Map<String, Value>) -> bool {
 /// skipped: blank name, no object `source`, platform-gated out, an unusable
 /// provider, or a missing `owner`/`repo`. The shared row builder for
 /// [`catalog_entries`] and [`find_profile`].
-fn catalog_row(profile: &EmulatorProfile) -> Option<CatalogEntry> {
+fn catalog_row(profile: &EmulatorProfile, host: &str) -> Option<CatalogEntry> {
     let name = profile.name.trim();
     if name.is_empty() {
         return None;
     }
     let source = profile.source.as_ref()?.as_object()?;
 
-    if !platforms_allow_host(source) {
+    if !platforms_allow_host(source, host) {
         return None;
     }
 
@@ -159,7 +159,11 @@ fn catalog_row(profile: &EmulatorProfile) -> Option<CatalogEntry> {
 /// every profile whose `is_compat_tool` equals `compat`, turned into rows,
 /// deduped and sorted (`source_download_emulator_entries`,
 /// ui/emulators.py:168-231).
-fn catalog_entries_filtered(profiles: &[EmulatorProfile], compat: bool) -> Vec<CatalogEntry> {
+fn catalog_entries_filtered(
+    profiles: &[EmulatorProfile],
+    compat: bool,
+    host: &str,
+) -> Vec<CatalogEntry> {
     let mut seen: HashSet<(String, String, String, String)> = HashSet::new();
     let mut rows: Vec<CatalogEntry> = Vec::new();
 
@@ -167,7 +171,7 @@ fn catalog_entries_filtered(profiles: &[EmulatorProfile], compat: bool) -> Vec<C
         if profile.is_compat_tool != compat {
             continue;
         }
-        let Some(row) = catalog_row(profile) else {
+        let Some(row) = catalog_row(profile, host) else {
             continue;
         };
         let key = (
@@ -195,7 +199,14 @@ fn catalog_entries_filtered(profiles: &[EmulatorProfile], compat: bool) -> Vec<C
 /// own dialog). `installed` is always `false` here — call
 /// [`mark_installed`] to fill it in.
 pub fn catalog_entries(profiles: &[EmulatorProfile]) -> Vec<CatalogEntry> {
-    catalog_entries_filtered(profiles, false)
+    catalog_entries_for_host(profiles, HOST_PLATFORM)
+}
+
+/// [`catalog_entries`] as `host` (a `sys.platform`-shaped slug) would list
+/// it: the same rows, gated by that host's `platforms` allowlist instead of
+/// this build's.
+fn catalog_entries_for_host(profiles: &[EmulatorProfile], host: &str) -> Vec<CatalogEntry> {
+    catalog_entries_filtered(profiles, false, host)
 }
 
 /// [`catalog_entries`]'s counterpart for the compat-tool dialog: the same
@@ -203,7 +214,7 @@ pub fn catalog_entries(profiles: &[EmulatorProfile]) -> Vec<CatalogEntry> {
 /// `installed` is always `false` here — call [`mark_compat_installed`] to
 /// fill it in.
 pub fn compat_tool_catalog_entries(profiles: &[EmulatorProfile]) -> Vec<CatalogEntry> {
-    catalog_entries_filtered(profiles, true)
+    catalog_entries_filtered(profiles, true, HOST_PLATFORM)
 }
 
 /// Marks each entry installed when its `name` casefold-matches any
@@ -250,7 +261,7 @@ fn find_profile_filtered<'a>(
         if profile.is_compat_tool != compat {
             return false;
         }
-        match catalog_row(profile) {
+        match catalog_row(profile, HOST_PLATFORM) {
             Some(row) => row.source_id.to_lowercase() == target,
             None => false,
         }
@@ -581,6 +592,32 @@ mod tests {
             Some(json!({"provider": "github", "owner": "o", "repo": "r", "platforms": []})),
         )];
         assert_eq!(catalog_entries(&profiles).len(), 1);
+    }
+
+    #[test]
+    fn one_profile_with_a_provider_switching_override_is_one_row_per_allowed_host() {
+        let profiles = vec![profile(
+            "Switcher",
+            false,
+            Some(json!({
+                "provider": "direct", "owner": "o", "repo": "r",
+                "page_url": "https://x.invalid/",
+                "platforms": ["win32", "linux"],
+                "platform_overrides": {"linux": {
+                    "provider": "github-release", "owner": "p", "repo": "q"
+                }}
+            })),
+        )];
+        for host in ["win32", "linux"] {
+            let rows = catalog_entries_for_host(&profiles, host);
+            assert_eq!(rows.len(), 1, "host {host}: {rows:?}");
+            // The row keeps the top-level identity on every host, so an
+            // installed entry's source_id finds its profile again wherever
+            // the config is read.
+            assert_eq!(rows[0].source_id, "o/r", "host {host}");
+            assert_eq!(rows[0].provider, "direct", "host {host}");
+        }
+        assert!(catalog_entries_for_host(&profiles, "darwin").is_empty());
     }
 
     // --- mark_installed --------------------------------------------------------
