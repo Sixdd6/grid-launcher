@@ -1428,6 +1428,24 @@ mod tests {
         assert_eq!(emulators[2].args, "%rom%", "no legacy_args, no rewrite");
     }
 
+    #[test]
+    fn migrate_moves_an_installed_kyty_entry_to_the_1080p_args() {
+        let profiles = crate::launch::profiles::load_profiles();
+        let mut emulators = vec![EmulatorEntry {
+            name: "KytyPS5 (Playstation 5)".into(),
+            path: "/x/KytyPS5/kyty_emulator".into(),
+            args: "--fullscreen --game \"%rom%\"".into(),
+            ..Default::default()
+        }];
+        assert_eq!(migrate_legacy_args(&mut emulators, profiles), 1);
+        assert_eq!(
+            emulators[0].args,
+            "--fullscreen --screen-width 1920 --screen-height 1080 --game \"%rom%\""
+        );
+        // A second pass finds nothing left to migrate.
+        assert_eq!(migrate_legacy_args(&mut emulators, profiles), 0);
+    }
+
     // --- backfill_missing_defaults ------------------------------------------
 
     fn ppsspp_profile() -> EmulatorProfile {

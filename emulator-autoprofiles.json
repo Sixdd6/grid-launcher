@@ -259,7 +259,8 @@
       }
     },
     "name": "KytyPS5 (Playstation 5)",
-    "args": "--fullscreen --game \"%rom%\"",
+    "args": "--fullscreen --screen-width 1920 --screen-height 1080 --game \"%rom%\"",
+    "legacy_args": ["--fullscreen --game \"%rom%\""],
     "all_platforms": false,
     "platform_keywords": ["playstation 5", "ps5"],
     "use_game_title_as_name": false,

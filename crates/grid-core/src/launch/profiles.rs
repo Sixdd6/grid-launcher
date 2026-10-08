@@ -717,7 +717,14 @@ mod tests {
             .iter()
             .find(|p| p.name == "KytyPS5 (Playstation 5)")
             .expect("the catalog ships a KytyPS5 profile");
-        assert_eq!(profile.args, "--fullscreen --game \"%rom%\"");
+        assert_eq!(
+            profile.args,
+            "--fullscreen --screen-width 1920 --screen-height 1080 --game \"%rom%\""
+        );
+        assert_eq!(
+            profile.legacy_args,
+            vec!["--fullscreen --game \"%rom%\"".to_string()]
+        );
         assert!(platform_matches_keywords(
             "Sony PlayStation 5",
             &profile.platform_keywords
