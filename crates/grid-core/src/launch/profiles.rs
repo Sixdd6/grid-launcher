@@ -728,6 +728,96 @@ mod tests {
         ));
     }
 
+    fn embedded_dolphin() -> &'static EmulatorProfile {
+        load_profiles()
+            .iter()
+            .find(|p| p.name == "Dolphin (GameCube, Wii)")
+            .expect("the catalog ships a Dolphin profile")
+    }
+
+    #[test]
+    fn embedded_dolphin_profile_launches_portable_fullscreen_vulkan_at_1080p() {
+        let profile = embedded_dolphin();
+        assert_eq!(
+            profile.args,
+            "-u \"%emu_dir%/User\" -b -v Vulkan -C Dolphin.Display.Fullscreen=True -C GFX.Settings.InternalResolution=3 -e \"%rom%\""
+        );
+        assert_eq!(profile.user_data, vec!["User".to_string()]);
+        assert_eq!(
+            profile.screenshot_directories,
+            vec!["User/ScreenShots".to_string()]
+        );
+        assert!(
+            profile.save_directories.is_empty() && profile.state_directories.is_empty(),
+            "the Dolphin readers own save resolution; a profile list would bypass them"
+        );
+        assert!(profile.firmware_directories.is_empty());
+        assert!(profile.legacy_args.is_empty());
+    }
+
+    #[test]
+    fn embedded_dolphin_matches_gamecube_and_wii_but_never_wii_u() {
+        let keywords = &embedded_dolphin().platform_keywords;
+        for platform in [
+            "Nintendo GameCube",
+            "GameCube",
+            "ngc",
+            "Nintendo Wii",
+            "Wii",
+        ] {
+            assert!(platform_matches_keywords(platform, keywords), "{platform}");
+        }
+        for platform in ["Nintendo Wii U", "Wii U", "wiiu", "Nintendo Switch"] {
+            assert!(!platform_matches_keywords(platform, keywords), "{platform}");
+        }
+    }
+
+    #[test]
+    fn embedded_dolphin_is_offered_on_windows_and_linux_only() {
+        let profile = embedded_dolphin();
+        assert!(profile_available_on_host(profile, "win32"));
+        assert!(profile_available_on_host(profile, "linux"));
+        assert!(!profile_available_on_host(profile, "darwin"));
+    }
+
+    #[test]
+    fn dolphin_binaries_resolve_to_the_dolphin_profile() {
+        for exe in [
+            r"C:\Emulators\Dolphin-x64\Dolphin.exe",
+            "/lib/emulators/Dolphin (GameCube, Wii)/Dolphin_Emulator-2609-anylinux-x86_64.AppImage",
+            "/usr/bin/dolphin-emu",
+        ] {
+            assert_eq!(
+                profile_for_entry("", exe, load_profiles()).map(|p| p.name.as_str()),
+                Some("Dolphin (GameCube, Wii)"),
+                "{exe}"
+            );
+        }
+    }
+
+    #[test]
+    fn embedded_dolphin_source_is_direct_on_windows_and_github_on_linux() {
+        use crate::launch::source::{allow_prerelease, resolve_source_for_host, str_field};
+        let raw = embedded_dolphin().source.as_ref().unwrap();
+
+        let windows = resolve_source_for_host(raw, "win32").unwrap();
+        assert_eq!(str_field(&windows, "provider"), "direct");
+        assert_eq!(
+            str_field(&windows, "page_url"),
+            "https://dolphin-emu.org/update/latest/beta/"
+        );
+
+        let linux = resolve_source_for_host(raw, "linux").unwrap();
+        assert_eq!(str_field(&linux, "provider"), "github");
+        assert_eq!(str_field(&linux, "owner"), "pkgforge-dev");
+        assert_eq!(str_field(&linux, "repo"), "Dolphin-emu-AppImage");
+        assert_eq!(str_field(&linux, "release_tag"), "latest");
+        assert!(
+            !allow_prerelease(&linux),
+            "the nightly prerelease is never picked"
+        );
+    }
+
     #[test]
     fn embedded_json_has_at_least_one_compat_tool() {
         let profiles = load_profiles();

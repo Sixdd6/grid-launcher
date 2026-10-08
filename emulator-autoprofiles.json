@@ -299,6 +299,38 @@
     "firmware_directories": ["portable"]
   },
   {
+    "match_tokens": ["Dolphin.exe", "dolphin-emu", "dolphin-emu-nogui", "dolphin*.appimage"],
+    "source": {
+      "provider": "direct",
+      "owner": "dolphin-emu",
+      "repo": "dolphin",
+      "release_tag": "latest",
+      "platforms": ["win32", "linux"],
+      "page_url": "https://dolphin-emu.org/update/latest/beta/",
+      "download_url_regex": "https://dl\\.dolphin-emu\\.org/releases/[0-9A-Za-z._-]+/dolphin-[0-9A-Za-z._-]+-x64\\.7z",
+      "platform_overrides": {
+        "linux": {
+          "provider": "github-release",
+          "owner": "pkgforge-dev",
+          "repo": "Dolphin-emu-AppImage",
+          "release_tag": "latest",
+          "asset_patterns": ["Dolphin_Emulator-*-anylinux-x86_64.AppImage"],
+          "asset_exclude_patterns": ["*.zsync"]
+        }
+      }
+    },
+    "name": "Dolphin (GameCube, Wii)",
+    "args": "-u \"%emu_dir%/User\" -b -v Vulkan -C Dolphin.Display.Fullscreen=True -C GFX.Settings.InternalResolution=3 -e \"%rom%\"",
+    "all_platforms": false,
+    "platform_keywords": ["gamecube", "ngc", "wii"],
+    "use_game_title_as_name": false,
+    "save_strategy": "single_file",
+    "save_directories": [],
+    "state_directories": [],
+    "user_data": ["User"],
+    "screenshot_directories": ["User/ScreenShots"]
+  },
+  {
     "match_tokens": ["azahar.exe", "azahar.AppImage", "azahar*.appimage"],
     "source": {
       "provider": "github-release",

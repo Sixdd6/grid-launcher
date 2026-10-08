@@ -365,6 +365,27 @@ mod tests {
         let kyty = by_name("KytyPS5 (Playstation 5)");
         assert_eq!(kyty.provider, "github");
         assert_eq!(kyty.source_id, "KytyPS5/KytyPS5");
+
+        let dolphin = by_name("Dolphin (GameCube, Wii)");
+        assert_eq!(dolphin.provider, "direct");
+        assert_eq!(dolphin.source_id, "dolphin-emu/dolphin");
+    }
+
+    /// User ruling (2026-10-08): one Dolphin row on every OS that offers it.
+    #[test]
+    fn real_catalog_shows_exactly_one_dolphin_row_on_windows_and_linux_and_none_on_macos() {
+        for (host, expected) in [("win32", 1usize), ("linux", 1), ("darwin", 0)] {
+            let rows = catalog_entries_for_host(load_profiles(), host);
+            let dolphin: Vec<&CatalogEntry> = rows
+                .iter()
+                .filter(|row| row.name.to_lowercase().contains("dolphin"))
+                .collect();
+            assert_eq!(dolphin.len(), expected, "host {host}: {dolphin:?}");
+            if expected == 1 {
+                assert_eq!(dolphin[0].name, "Dolphin (GameCube, Wii)");
+                assert_eq!(dolphin[0].source_id, "dolphin-emu/dolphin");
+            }
+        }
     }
 
     #[test]

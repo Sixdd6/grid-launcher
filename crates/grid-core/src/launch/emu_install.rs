@@ -11,7 +11,7 @@
 //!
 //! Parity note: the catalog no longer carries a `launch_executable` key (the
 //! Python reference never read it either) — executable choice is only the
-//! scoring ported here. The preferred-name rules in [`select_executable`] for KytyPS5 and ShadPS4 are
+//! scoring ported here. The preferred-name rules in [`select_executable`] for KytyPS5, ShadPS4 and Dolphin are
 //! GRID additions, not parity: the reference only had the Eden and Azahar
 //! ones.
 
@@ -354,6 +354,11 @@ pub fn select_executable(title: &str, install_dir: &Path, archive: &Path) -> Opt
         preferred_names.insert("shadps4.exe");
         preferred_names.insert("shadps4-sdl.appimage");
     }
+    if title_casefold.contains("dolphin") {
+        // The Windows build ships DolphinTool.exe and Updater.exe beside
+        // Dolphin.exe, and every one of them carries the title token.
+        preferred_names.insert("dolphin.exe");
+    }
 
     if install_dir.is_dir() {
         let mut candidates = Vec::new();
@@ -661,6 +666,37 @@ mod tests {
         )
         .unwrap();
         assert_eq!(picked, install_dir.join("shadPS4QtLauncher.exe"));
+    }
+
+    /// The Windows build ships helper executables beside `Dolphin.exe`; the
+    /// title tokens score them all the same, so without the preferred name
+    /// the shallower `DolphinTool.exe` would win the path tie-break.
+    #[test]
+    fn dolphin_title_prefers_dolphin_exe_over_its_bundled_tools() {
+        let dir = tempfile::tempdir().unwrap();
+        let install = dir.path();
+        touch(&install.join("DolphinTool.exe"));
+        touch(&install.join("Dolphin-x64").join("Dolphin.exe"));
+        touch(&install.join("Dolphin-x64").join("Updater.exe"));
+        let picked = select_executable(
+            "Dolphin (GameCube, Wii)",
+            install,
+            &install.join("absent.7z"),
+        );
+        assert_eq!(
+            picked,
+            Some(install.join("Dolphin-x64").join("Dolphin.exe"))
+        );
+    }
+
+    /// The profile name's comma is a legal path character: it survives
+    /// `sanitize_component` unchanged in the install directory name.
+    #[test]
+    fn a_comma_in_the_profile_name_survives_the_install_dir() {
+        assert_eq!(
+            emulator_install_dir(Path::new("/lib"), "Dolphin (GameCube, Wii)"),
+            Path::new("/lib/emulators/Dolphin (GameCube, Wii)")
+        );
     }
 
     #[test]
