@@ -9,10 +9,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ExitStatus};
 
 use crate::config::EmulatorEntry;
+use crate::launch::profiles::EmulatorProfile;
 use crate::library::paths::expand_home;
 
 use super::template::{
-    build_args, emulator_dir_placeholder, normalized_retroarch_core_args, Placeholders,
+    apply_placeholders, build_args, emulator_dir_placeholder, normalized_retroarch_core_args,
+    split_template, validate_placeholders, Placeholders,
 };
 
 /// Builds the argv (executable first) and working directory for an emulated
@@ -113,6 +115,11 @@ pub fn prepare_emulator_launch(
 /// never templates `entry.args`, so a `%rom%` in the stored arguments cannot
 /// leak into a launch that has no ROM.
 ///
+/// One exception: a Dolphin entry ([`crate::autoconfig::is_dolphin`]) keeps
+/// its `-u` / `--user` user-directory argument, with `%emu_dir%` expanded,
+/// so the portable AppImage opens on `<install dir>/User` and not on
+/// `~/.local/share/dolphin-emu`. Its other arguments are dropped.
+///
 /// The validation chain and its wording follow the reference, minus the
 /// ROM checks it has no use for:
 ///
@@ -131,6 +138,7 @@ pub fn prepare_emulator_launch(
 pub fn prepare_standalone_emulator_launch(
     emulator_name: &str,
     entry: Option<&EmulatorEntry>,
+    profiles: &[EmulatorProfile],
 ) -> Result<(Vec<String>, PathBuf), String> {
     let name = emulator_name.trim();
 
@@ -158,7 +166,47 @@ pub fn prepare_standalone_emulator_launch(
         _ => PathBuf::from("."),
     };
 
-    Ok((vec![executable.to_string_lossy().into_owned()], working_dir))
+    let mut argv = vec![executable.to_string_lossy().into_owned()];
+    if crate::autoconfig::is_dolphin(entry, profiles) {
+        argv.extend(standalone_dolphin_user_args(
+            &entry.args,
+            &emulator_dir_placeholder(&executable),
+        )?);
+    }
+    Ok((argv, working_dir))
+}
+
+/// The user-directory arguments a ROM-less Dolphin launch keeps: the first
+/// `-u <value>`, `--user <value>`, or `--user=<value>` in `args`, with
+/// `%emu_dir%` filled from `emu_dir` exactly as a game launch fills it.
+/// Every other argument is dropped. A value that names `%emu_dir%` while
+/// `emu_dir` is blank fails with the game launch's
+/// `"Invalid launch arguments: <EMU_DIR_MISSING>"` message.
+fn standalone_dolphin_user_args(args: &str, emu_dir: &str) -> Result<Vec<String>, String> {
+    let tokens = split_template(args).map_err(|e| format!("Invalid launch arguments: {e}"))?;
+    let mut kept = Vec::new();
+    let mut iter = tokens.into_iter();
+    while let Some(token) = iter.next() {
+        if token == "-u" || token == "--user" {
+            if let Some(value) = iter.next() {
+                kept = vec![token, value];
+            }
+            break;
+        }
+        if token.starts_with("--user=") {
+            kept = vec![token];
+            break;
+        }
+    }
+    let placeholders = Placeholders {
+        emu_dir: emu_dir.to_string(),
+        ..Placeholders::default()
+    };
+    for token in &kept {
+        validate_placeholders(token, &placeholders)
+            .map_err(|e| format!("Invalid launch arguments: {e}"))?;
+    }
+    Ok(apply_placeholders(kept, &placeholders))
 }
 
 /// Spawns a standalone emulator and hands the caller its [`Child`] —
@@ -853,7 +901,7 @@ mod tests {
     #[test]
     fn standalone_launch_rejects_an_unknown_entry() {
         assert_eq!(
-            prepare_standalone_emulator_launch("Ghost", None).unwrap_err(),
+            prepare_standalone_emulator_launch("Ghost", None, &[]).unwrap_err(),
             "Emulator 'Ghost' was not found."
         );
     }
@@ -862,7 +910,7 @@ mod tests {
     fn standalone_launch_rejects_a_blank_path() {
         let e = entry("   ", "%rom%");
         assert_eq!(
-            prepare_standalone_emulator_launch("Dolphin", Some(&e)).unwrap_err(),
+            prepare_standalone_emulator_launch("Dolphin", Some(&e), &[]).unwrap_err(),
             "Emulator 'Dolphin' has no executable path configured."
         );
     }
@@ -873,7 +921,7 @@ mod tests {
         let missing = dir.path().join("nope");
         let e = entry(missing.to_str().unwrap(), "%rom%");
         assert_eq!(
-            prepare_standalone_emulator_launch("Dolphin", Some(&e)).unwrap_err(),
+            prepare_standalone_emulator_launch("Dolphin", Some(&e), &[]).unwrap_err(),
             format!("Emulator executable not found:\n{}", missing.display())
         );
     }
@@ -886,9 +934,90 @@ mod tests {
         // Args that would normally be templated: a ROM-less launch takes none.
         let e = entry(exe.to_str().unwrap(), "-b \"%rom%\"");
 
-        let (argv, working_dir) = prepare_standalone_emulator_launch("Dolphin", Some(&e)).unwrap();
+        let (argv, working_dir) =
+            prepare_standalone_emulator_launch("Dolphin", Some(&e), &[]).unwrap();
         assert_eq!(argv, vec![exe.to_string_lossy().into_owned()]);
         assert_eq!(working_dir, dir.path());
+    }
+
+    /// The catalog Dolphin row's launch arguments.
+    const DOLPHIN_CATALOG_ARGS: &str = "-u \"%emu_dir%/User\" -b -v Vulkan -C Dolphin.Display.Fullscreen=True -C GFX.Settings.InternalResolution=3 -e \"%rom%\"";
+
+    #[test]
+    fn standalone_dolphin_launch_keeps_only_the_user_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir
+            .path()
+            .join("Dolphin_Emulator-2609-anylinux-x86_64.AppImage");
+        std::fs::write(&exe, b"").unwrap();
+        let mut e = entry(exe.to_str().unwrap(), DOLPHIN_CATALOG_ARGS);
+        e.name = "Dolphin (GameCube, Wii)".to_string();
+
+        let (argv, working_dir) =
+            prepare_standalone_emulator_launch(&e.name.clone(), Some(&e), &[]).unwrap();
+        assert_eq!(
+            argv,
+            vec![
+                exe.to_string_lossy().into_owned(),
+                "-u".to_string(),
+                format!("{}/User", dir.path().display()),
+            ]
+        );
+        assert_eq!(working_dir, dir.path());
+    }
+
+    #[test]
+    fn standalone_dolphin_launch_keeps_the_long_user_forms() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("dolphin-emu");
+        std::fs::write(&exe, b"").unwrap();
+        let user = format!("{}/User", dir.path().display());
+        for (args, expected) in [
+            (
+                "--user \"%emu_dir%/User\" -b -e \"%rom%\"",
+                vec!["--user".to_string(), user.clone()],
+            ),
+            (
+                "-b --user=%emu_dir%/User -e \"%rom%\"",
+                vec![format!("--user={user}")],
+            ),
+        ] {
+            let mut e = entry(exe.to_str().unwrap(), args);
+            e.name = "Dolphin".to_string();
+            let (argv, _) = prepare_standalone_emulator_launch("Dolphin", Some(&e), &[]).unwrap();
+            assert_eq!(argv[1..], expected[..], "args: {args}");
+        }
+    }
+
+    #[test]
+    fn standalone_dolphin_user_args_without_an_emu_dir_fail_like_a_game_launch() {
+        // A bare executable file name has no folder: `%emu_dir%` is "".
+        assert_eq!(
+            standalone_dolphin_user_args(DOLPHIN_CATALOG_ARGS, "").unwrap_err(),
+            format!(
+                "Invalid launch arguments: {}",
+                super::super::template::EMU_DIR_MISSING
+            )
+        );
+        // A literal user dir needs no emulator folder.
+        assert_eq!(
+            standalone_dolphin_user_args("-u /data/User -b", "").unwrap(),
+            vec!["-u".to_string(), "/data/User".to_string()]
+        );
+    }
+
+    #[test]
+    fn standalone_non_dolphin_launch_still_drops_every_argument() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("pcsx2");
+        std::fs::write(&exe, b"").unwrap();
+        let mut e = entry(
+            exe.to_str().unwrap(),
+            "-u \"%emu_dir%/User\" -batch \"%rom%\"",
+        );
+        e.name = "PCSX2".to_string();
+        let (argv, _) = prepare_standalone_emulator_launch("PCSX2", Some(&e), &[]).unwrap();
+        assert_eq!(argv, vec![exe.to_string_lossy().into_owned()]);
     }
 
     /// Writes an executable `#!/bin/sh` stub and returns its path.
