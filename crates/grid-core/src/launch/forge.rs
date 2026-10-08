@@ -1518,6 +1518,153 @@ mod tests {
         assert!(same.up_to_date);
         assert!(!version_check_outcome("v1.9", "v2.0").up_to_date);
     }
+
+    // --- Dolphin: captured payloads ----------------------------------------------
+
+    /// `https://dolphin-emu.org/update/latest/beta/` as served on 2026-10-08
+    /// (`changelog_html` shortened). Artifact order is the real one: arm64
+    /// comes BEFORE x64, and the only `href` sits inside an escaped string,
+    /// so the scrape must fall through to the whole-page regex search.
+    const DOLPHIN_LATEST_BETA_JSON: &str = r#"{"shortrev": "2609a", "date": "2026-10-08T00:57:28.587Z", "hash": "409881c34357d0f105fd473167d15ab0bd9c1628", "changelog_html": "<p>See the <a href=\"https://dolphin-emu.org/blog/2026/09/24/dolphin-progress-report-release-2609/\">Dolphin Progress Report: Release 2609!</a></p>", "artifacts": [{"system": "Linux x86_64 (Flatpak)", "url": "https://dl.dolphin-emu.org/releases/2609a/dolphin-2609a-x86_64.flatpak"}, {"system": "Linux aarch64 (Flatpak)", "url": "https://dl.dolphin-emu.org/releases/2609a/dolphin-2609a-aarch64.flatpak"}, {"system": "Android", "url": "https://dl.dolphin-emu.org/releases/2609a/dolphin-2609a.apk"}, {"system": "macOS (ARM/Intel Universal)", "url": "https://dl.dolphin-emu.org/releases/2609a/dolphin-2609a-universal.dmg"}, {"system": "Windows arm64", "url": "https://dl.dolphin-emu.org/releases/2609a/dolphin-2609a-arm64.7z"}, {"system": "Windows x64", "url": "https://dl.dolphin-emu.org/releases/2609a/dolphin-2609a-x64.7z"}]}"#;
+
+    const DOLPHIN_X64_URL: &str = "https://dl.dolphin-emu.org/releases/2609a/dolphin-2609a-x64.7z";
+
+    fn dolphin_source_for(host: &str) -> SourceMap {
+        let profile = crate::launch::profiles::load_profiles()
+            .iter()
+            .find(|p| p.name == "Dolphin (GameCube, Wii)")
+            .expect("the catalog ships a Dolphin profile");
+        crate::launch::source::resolve_source_for_host(profile.source.as_ref().unwrap(), host)
+            .unwrap()
+    }
+
+    #[test]
+    fn dolphin_regex_picks_the_windows_x64_7z_out_of_the_update_feed() {
+        let source = dolphin_source_for("win32");
+        let url = scrape_download_url(
+            DOLPHIN_LATEST_BETA_JSON,
+            &str_field(&source, "download_url_regex"),
+            &str_field(&source, "page_url"),
+        )
+        .unwrap();
+        assert_eq!(url, DOLPHIN_X64_URL);
+        assert_eq!(basename_of_url(&url), "dolphin-2609a-x64.7z");
+    }
+
+    #[test]
+    fn dolphin_regex_finds_nothing_when_the_feed_has_no_x64_build() {
+        let source = dolphin_source_for("win32");
+        let without_x64 = DOLPHIN_LATEST_BETA_JSON.replace(
+            r#", {"system": "Windows x64", "url": "https://dl.dolphin-emu.org/releases/2609a/dolphin-2609a-x64.7z"}"#,
+            "",
+        );
+        assert!(
+            !without_x64.contains("-x64.7z"),
+            "the fixture edit must apply"
+        );
+        let url = scrape_download_url(
+            &without_x64,
+            &str_field(&source, "download_url_regex"),
+            &str_field(&source, "page_url"),
+        )
+        .unwrap();
+        assert_eq!(url, "", "arm64, flatpak, apk and dmg must never match");
+    }
+
+    /// End to end through `resolve`, with the catalog regex and a mock page
+    /// that serves the JSON feed. A synthetic source without overrides keeps
+    /// the `direct` provider on every test host.
+    #[tokio::test]
+    async fn a_direct_source_resolves_the_dolphin_x64_7z_from_the_json_feed() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/update/latest/beta/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(DOLPHIN_LATEST_BETA_JSON, "application/json"),
+            )
+            .mount(&server)
+            .await;
+        let regex = str_field(&dolphin_source_for("win32"), "download_url_regex");
+        let raw = json!({
+            "provider": "direct", "owner": "dolphin-emu", "repo": "dolphin",
+            "release_tag": "latest",
+            "page_url": format!("{}/update/latest/beta/", server.uri()),
+            "download_url_regex": regex,
+        });
+
+        let resolved = ForgeClient::new()
+            .unwrap()
+            .resolve(&raw, "Dolphin (GameCube, Wii)")
+            .await
+            .unwrap();
+        assert_eq!(resolved.provider, "direct");
+        assert_eq!(resolved.download_url, DOLPHIN_X64_URL);
+        assert_eq!(resolved.asset_name, "dolphin-2609a-x64.7z");
+        assert_eq!(resolved.release_tag, "latest");
+    }
+
+    /// `pkgforge-dev/Dolphin-emu-AppImage` releases, newest first: the
+    /// rolling `nightly` prerelease, then the stable release. Every release
+    /// carries aarch64 builds and `.zsync` files.
+    fn dolphin_appimage_releases() -> Value {
+        let asset = |tag: &str, name: &str| {
+            json!({
+                "name": name,
+                "browser_download_url": format!(
+                    "https://github.com/pkgforge-dev/Dolphin-emu-AppImage/releases/download/{tag}/{name}"
+                ),
+                "size": 1,
+                "state": "uploaded",
+            })
+        };
+        let stable = "2609%402026-10-01_1790876487";
+        json!([
+            {
+                "tag_name": "nightly", "draft": false, "prerelease": true,
+                "assets": [
+                    asset("nightly", "Dolphin_Emulator_Nightly-a1b2c3d-anylinux-x86_64.AppImage"),
+                    asset("nightly", "Dolphin_Emulator_Nightly-a1b2c3d-anylinux-x86_64.AppImage.zsync"),
+                ]
+            },
+            {
+                "tag_name": "2609@2026-10-01_1790876487", "draft": false, "prerelease": false,
+                "assets": [
+                    asset(stable, "Dolphin_Emulator-2609-anylinux-aarch64.AppImage"),
+                    asset(stable, "Dolphin_Emulator-2609-anylinux-aarch64.AppImage.zsync"),
+                    asset(stable, "Dolphin_Emulator-2609-anylinux-x86_64.AppImage.zsync"),
+                    asset(stable, "Dolphin_Emulator-2609-anylinux-x86_64.AppImage"),
+                ]
+            }
+        ])
+    }
+
+    #[test]
+    fn dolphin_linux_source_picks_the_stable_x86_64_appimage() {
+        let source = dolphin_source_for("linux");
+        let releases = dolphin_appimage_releases();
+
+        let release = select_release(&source, &releases).unwrap();
+        assert_eq!(
+            str_field(release, "tag_name"),
+            "2609@2026-10-01_1790876487",
+            "the nightly prerelease must be skipped"
+        );
+        let asset = select_asset(&source, release).unwrap();
+        assert_eq!(
+            str_field(asset, "name"),
+            "Dolphin_Emulator-2609-anylinux-x86_64.AppImage"
+        );
+
+        // `/releases/latest` returns the stable release as a bare object.
+        let latest = releases[1].clone();
+        let release = select_release(&source, &latest).unwrap();
+        let asset = select_asset(&source, release).unwrap();
+        assert_eq!(
+            str_field(asset, "name"),
+            "Dolphin_Emulator-2609-anylinux-x86_64.AppImage"
+        );
+    }
 }
 
 #[cfg(all(test, feature = "e2e"))]
