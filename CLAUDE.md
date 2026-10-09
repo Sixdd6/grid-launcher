@@ -11,7 +11,7 @@ For complex, multi-step requests, the main session acts as orchestrator: break t
 - **planner** — Creates implementation strategies and technical plans
 - **coder** — Writes code, fixes bugs, implements logic (Rust, TypeScript, Svelte)
 - **designer** — Creates UI/UX, styling, visual design
-- **api-tester** — Validates behaviour against the live RomM server using read-only API GET requests. Produces a PASS/FAIL/WARN report per endpoint tested.
+- **api-tester** — Validates behaviour against the live RomM server as the disposable `tester` account (GET freely; writes only on that account's own data). Produces a PASS/FAIL/WARN report per endpoint tested.
 - **doc-research** — Parses local documents and does web research/documentation lookups. Returns a structured report; does NOT modify the repository.
 - **Explore** — Fast read-only codebase Q&A. Use instead of chaining multiple search/read calls when researching the codebase.
 
