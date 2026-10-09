@@ -2,6 +2,7 @@ mod app_update;
 mod cloud_service;
 mod commands;
 mod config_write;
+mod covers_dir;
 mod firmware_service;
 mod gamepad;
 mod images;
@@ -50,14 +51,7 @@ pub fn run() {
         .map(|c| c.debug_prints)
         .unwrap_or(true);
     logging::init(debug_prints);
-    let cache_dir = grid_core::config::data_dir_override()
-        .map(|d| d.join("covers"))
-        .unwrap_or_else(|| {
-            directories::ProjectDirs::from("io.github", "Sixdd6", "grid-launcher")
-                .expect("home directory must exist")
-                .cache_dir()
-                .join("covers")
-        });
+    let cache_dir = covers_dir::covers_dir(grid_core::config::data_dir_override());
     let session = Arc::new(SessionManager::new(
         Config::default_path(),
         cache_dir,
@@ -238,24 +232,27 @@ pub fn run() {
                 app.state::<AppState>().app_update.clone(),
             );
             gamepad::spawn(app.handle().clone());
-            // The static scope in tauri.conf.json only covers the default
-            // ProjectDirs cache location ($CACHE/grid-launcher/covers/**/*).
-            // When GRID_LAUNCHER_DATA_DIR is set (E2E harness, and any real
-            // portable-mode install), covers live under <data dir>/covers
-            // instead, which that static scope never grants — every cover
-            // request 404s with "asset protocol not configured to allow the
-            // path". Extend the scope at runtime to cover it too.
-            if let Some(dir) = grid_core::config::data_dir_override() {
-                let covers_dir = dir.join("covers");
-                if let Err(e) = app
-                    .asset_protocol_scope()
-                    .allow_directory(&covers_dir, true)
-                {
-                    tracing::warn!(
-                        "failed to extend asset protocol scope for {}: {e}",
-                        covers_dir.display()
-                    );
-                }
+            // Grant the asset protocol the exact directory the session caches
+            // covers in. The static scope in tauri.conf.json is
+            // `$CACHE/grid-launcher/covers`, which matches the `ProjectDirs`
+            // cache directory only on Linux. On Windows
+            // (`%LOCALAPPDATA%\Sixdd6\grid-launcher\cache\covers`) and macOS
+            // (`~/Library/Caches/io.github.Sixdd6.grid-launcher/covers`) it
+            // names a different place, so every cover request fails with
+            // "asset protocol not configured to allow the path". Portable
+            // installs and the E2E harness (`GRID_LAUNCHER_DATA_DIR`) move the
+            // cache again. Reading the directory back from the session keeps
+            // the cache and the scope on one value on every OS.
+            let covers_dir =
+                covers_dir::asset_scope_dir(&app.state::<AppState>().session).to_path_buf();
+            if let Err(e) = app
+                .asset_protocol_scope()
+                .allow_directory(&covers_dir, true)
+            {
+                tracing::warn!(
+                    "failed to extend asset protocol scope for {}: {e}",
+                    covers_dir.display()
+                );
             }
             let state = app.state::<AppState>();
             // The media viewer's video source. Started here rather than at
