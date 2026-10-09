@@ -34,7 +34,7 @@ For complex, multi-step requests, the main session acts as orchestrator: break t
 ## The gate
 
 These are exactly the commands `.github/workflows/build.yml`'s `check` job runs, in its
-order. All must pass before work counts as done.
+order. All must pass before work counts as done. On Windows, run them in Git Bash.
 
     scripts/check_secret_hygiene.sh
     cargo fmt --check

@@ -30,6 +30,17 @@ The repository is a Cargo workspace with a Svelte frontend:
   `libsecret-tools` supplies `secret-tool`, which the runner uses to clear a stage's
   keyring item; without it that step is a silent no-op.
 - For a local AppImage bundle: `zsync`.
+- On Windows:
+  - Visual Studio Build Tools with the "Desktop development with C++" workload (MSVC
+    and the Windows SDK).
+  - Rust stable on the MSVC toolchain (`stable-x86_64-pc-windows-msvc`), with `rustfmt`
+    and `clippy`.
+  - Node 22.
+  - Git for Windows. Its Git Bash runs the `.sh` scripts and the gate.
+  - WebView2 ships with Windows 11.
+
+  The end-to-end suite and the AppImage bundle need Linux. On a Windows machine, run them
+  in WSL2 (from a clone inside the WSL file system, not `/mnt/c`) or leave them to CI.
 
 Install the frontend dependencies once:
 
@@ -55,11 +66,18 @@ in its order. All of them must pass before work is considered done.
     cargo test --workspace
     cd app && npm test
 
+On Windows, run the same commands, in the same order, from Git Bash at the repository
+root. `scripts/check_secret_hygiene.sh` calls `cargo tree`, so Rust must be on the Git
+Bash `PATH`.
+
 A second job, `check-windows`, compiles the Windows code paths with
 `cargo check --workspace --all-targets` on `windows-latest`. It runs no tests; it exists
 so a Windows-only compile error is caught on the pull request rather than on a tag.
 
 ## End-to-end tests
+
+The suite runs on Linux only (it needs Xvfb, D-Bus, gnome-keyring and `secret-tool`).
+On Windows, run it in WSL2 or leave it to CI.
 
 `scripts/e2e.sh` drives a real, locally built Tauri binary with WebdriverIO against a
 mock RomM server. CI runs it on pushes to `main` and on manual dispatch.
