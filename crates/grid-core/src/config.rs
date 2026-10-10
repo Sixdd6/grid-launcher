@@ -265,6 +265,15 @@ pub struct Config {
     /// so an older config keeps behaving as it always has.
     #[serde(default)]
     pub library_layout_version: u32,
+    /// Library roots the user changed away from in Settings › Library (Q2),
+    /// oldest first, never the current `library_path`. The uninstall
+    /// `RemovalGuard` protects each one like the current root, so a row that
+    /// still names an old library can never remove that library's own
+    /// folders. A list, not one value: a later milestone adds several
+    /// library folders. Absent in an older config (empty), and not written
+    /// while empty, so such a config round-trips unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub former_library_paths: Vec<String>,
     /// Desktop shell appearance. A TOML table, so it must stay after every
     /// scalar key in this struct.
     #[serde(default)]
@@ -312,6 +321,7 @@ impl Default for Config {
             compat_tool_installs: Vec::new(),
             debug_prints: true,
             library_layout_version: 0,
+            former_library_paths: Vec::new(),
             ui: UiSettings::default(),
             extra: BTreeMap::new(),
         }
@@ -531,6 +541,36 @@ mod tests {
             .unwrap_or_else(|| panic!("written config:\n{text}"));
         assert!(field_pos < ui_pos, "written config:\n{text}");
         assert_eq!(Config::load(&path).unwrap().library_layout_version, 1);
+    }
+
+    /// Q2: `former_library_paths` is absent from an older config (empty),
+    /// is not written while empty, and round-trips in order once set.
+    #[test]
+    fn former_library_paths_default_empty_and_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "schema_version = 1\n").unwrap();
+        let loaded = Config::load(&path).unwrap();
+        assert!(loaded.former_library_paths.is_empty());
+        loaded.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("former_library_paths"), "{text}");
+
+        let cfg = Config {
+            former_library_paths: vec!["/old/one".into(), "/old/two".into()],
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let ui_pos = text.find("[ui]").expect("written config has a [ui] table");
+        let field_pos = text
+            .find("former_library_paths")
+            .unwrap_or_else(|| panic!("written config:\n{text}"));
+        assert!(field_pos < ui_pos, "written config:\n{text}");
+        assert_eq!(
+            Config::load(&path).unwrap().former_library_paths,
+            vec!["/old/one".to_string(), "/old/two".to_string()]
+        );
     }
 
     #[test]

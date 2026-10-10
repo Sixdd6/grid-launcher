@@ -65,9 +65,20 @@ There are several main sections to the application with buttons across the top b
   tools** (Linux only) is the wine/proton default picker and its install catalog. Each
   emulator entry includes a name, executable path, launch arguments, save strategy,
   ignore rules, and optional custom save/state directories.
-- **Settings** is a rail of five panes: **Connection** (server URL, user, whether a
+- **Settings** is a rail of six panes: **Connection** (server URL, user, whether a
   credential is stored in the OS keyring and whether the session is verified, Reconnect,
-  Disconnect), **Cloud saves** (restore before launch, upload after exit, skip when the
+  Disconnect), **Library** (the library folder and Change…: the new folder is typed or
+  picked with Browse…, and is refused when it is not a full path, is the current folder,
+  is inside it or contains it, cannot be created or written, or while a download or
+  install, a running game or a cloud transfer is active; then **Move existing files**
+  (shown as coming soon until the move job lands) or **Start fresh**. Start fresh asks
+  "Delete the old game files, or leave them on disk?". Either way the games whose files
+  are in the old folder leave the library and new installs go to the new folder; games
+  installed outside the old folder, emulators and saves are not touched. Leave removes
+  the library entries only. Delete first shows the folders it removes and their total
+  size, and removes them only through the guarded uninstall after that confirmation; a
+  game whose files could not be removed stays in the library. The old folder is
+  remembered, so no later uninstall can remove it or its top-level folders), **Cloud saves** (restore before launch, upload after exit, skip when the
   local save is newer, upload delay, a save retention limit — default 10, 0 = unlimited;
   the server's autocleanup applies it to slotted saves and the app prunes the others; an
   install that still has the old default 3 moves to 10 once), **RetroAchievements** (username
@@ -106,7 +117,8 @@ On first launch, or when required configuration is missing, the app should promp
 - API token
 - Library path
 
-The user must complete this setup before continuing into the main application.
+The user must complete this setup before continuing into the main application. The
+library path can be changed later under Settings › Library.
 
 If the server rejects the stored credential (HTTP 401), at startup or during a session, the app returns to this screen. The server URL (and username, for a password) is filled in, the credential field is empty, and a line explains why ("The server rejected your token. Enter a new one."). The stored credential stays in the OS keyring until a new connect succeeds. When the server is unreachable or denies permission (HTTP 403), the app stays open and shows "Not connected" with Retry.
 

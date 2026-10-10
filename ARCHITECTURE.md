@@ -55,6 +55,10 @@ Modules as declared in `src/lib.rs`:
   emulator's files and finds the package rows a deleted entry takes with it.
   `user_data_links` links an emulator's own-written directories into
   `saves/`; `layout_migration` is the one-shot startup migration to the layout below.
+  `path_change` (Q2) validates a new library folder, switches `library_path` (the old
+  root goes to `Config::former_library_paths`, which the uninstall `RemovalGuard`
+  protects like the current root) and picks the rows Start fresh drops; the app side is
+  `commands/library_path.rs`.
 - `pcgw` — PCGamingWiki client that resolves a Windows game's save paths.
 - `platform` — host-platform lookups that need OS APIs (for example the Shell-resolved
   Windows Documents folder).

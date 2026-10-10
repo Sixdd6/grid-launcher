@@ -29,6 +29,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
@@ -135,6 +136,22 @@ impl AutoUploadPool {
         });
         true
     }
+
+    /// True while any trigger is queued or running.
+    pub fn is_busy(&self) -> bool {
+        !lock_tolerant(&self.inflight).is_empty()
+    }
+}
+
+/// Counts one manual cloud transfer (an upload or a restore) while it
+/// lives. Created by [`CloudService::track_transfer`]; dropping it,
+/// panic-unwind included, ends the count.
+struct TransferGuard(Arc<AtomicUsize>);
+
+impl Drop for TransferGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 /// Removes `key` from `inflight` when dropped, panic-unwind included.
@@ -175,6 +192,9 @@ fn lock_tolerant<T>(mutex: &StdMutex<T>) -> std::sync::MutexGuard<'_, T> {
 pub struct CloudService {
     caches: AsyncMutex<CloudCaches>,
     pool: AutoUploadPool,
+    /// Manual uploads and restores (and the pre-launch auto-restore) in
+    /// flight. With `pool`, what [`Self::transfers_active`] reports.
+    transfers: Arc<AtomicUsize>,
     /// Plain `reqwest::Client` (never `RommClient` — different host, and
     /// the RomM token must never reach PCGamingWiki); built once by
     /// `grid_core::pcgw::build_http_client`.
@@ -194,9 +214,23 @@ impl CloudService {
         Arc::new(Self {
             caches: AsyncMutex::new(CloudCaches::default()),
             pool: AutoUploadPool::new(MAX_CONCURRENT_AUTO_UPLOADS),
+            transfers: Arc::new(AtomicUsize::new(0)),
             pcgw_client: grid_core::pcgw::build_http_client(),
             pcgw_base: base,
         })
+    }
+
+    /// True while a cloud upload or restore is in flight: an auto-upload
+    /// queued or running in the pool, or a manual upload / restore. A
+    /// library path change waits for this (Q2).
+    pub fn transfers_active(&self) -> bool {
+        self.pool.is_busy() || self.transfers.load(Ordering::SeqCst) > 0
+    }
+
+    /// Counts one transfer until the returned guard drops.
+    fn track_transfer(&self) -> TransferGuard {
+        self.transfers.fetch_add(1, Ordering::SeqCst);
+        TransferGuard(self.transfers.clone())
     }
 
     // -- PCGamingWiki save locations (Task 18, persisted 2026-09-08) -----
@@ -390,6 +424,7 @@ impl CloudService {
         game: CloudGameInput,
         save_type: SaveType,
     ) -> Result<UploadReportDto, String> {
+        let _transfer = self.track_transfer();
         let client = session.client().ok_or("not connected")?;
         let inputs = Self::load_inputs(config_path, install, launch).await?;
         let cloud_game = cloud_game_from_input(&game);
@@ -445,6 +480,7 @@ impl CloudService {
         save_type: SaveType,
         record_id: Option<i64>,
     ) -> Result<RestoreReportDto, String> {
+        let _transfer = self.track_transfer();
         let client = session.client().ok_or("not connected")?;
         let inputs = Self::load_inputs(config_path, install, launch).await?;
         let cloud_game = cloud_game_from_input(&game);
@@ -694,6 +730,7 @@ impl CloudService {
         config_path: &Path,
         installed_game: &InstalledGame,
     ) {
+        let _transfer = self.track_transfer();
         let Some(client) = session.client() else {
             return;
         };
@@ -2268,6 +2305,35 @@ mod tests {
             .await
             .unwrap();
         assert!(!config_path.exists());
+    }
+
+    /// Q2: a library path change waits for every cloud transfer — a manual
+    /// one while its guard lives, an auto-upload while the pool holds it.
+    #[tokio::test]
+    async fn transfers_active_covers_manual_transfers_and_the_pool() {
+        let cloud = CloudService::new();
+        assert!(!cloud.transfers_active());
+        let first = cloud.track_transfer();
+        let second = cloud.track_transfer();
+        assert!(cloud.transfers_active());
+        drop(first);
+        assert!(cloud.transfers_active());
+        drop(second);
+        assert!(!cloud.transfers_active());
+
+        let (release, wait) = tokio::sync::oneshot::channel::<()>();
+        assert!(cloud.pool.trigger("game-y".to_string(), || async move {
+            let _ = wait.await;
+        }));
+        assert!(cloud.transfers_active());
+        release.send(()).unwrap();
+        for _ in 0..50 {
+            if !cloud.transfers_active() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(!cloud.transfers_active());
     }
 
     /// Fix round 1, FIX 3: a panicking task must not leak its in-flight

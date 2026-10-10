@@ -63,7 +63,8 @@ STAGE_GROUPS=(
   "connect:specs/connect.spec.ts"
   "connect-restore:specs/connect-restore-a.spec.ts specs/connect-restore-b.spec.ts specs/connect-restore-c.spec.ts"
   "library:specs/library.spec.ts specs/library-grid.spec.ts"
-  "install:specs/install-a.spec.ts specs/install-b.spec.ts"
+  # install-c: Settings › Library — change the folder, Start fresh › Leave (Q2).
+  "install:specs/install-a.spec.ts specs/install-b.spec.ts specs/install-c.spec.ts"
   "downloads:specs/downloads.spec.ts"
   "emulators:specs/emulators.spec.ts"
   "launch:specs/launch.spec.ts"

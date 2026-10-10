@@ -1,6 +1,6 @@
 <script lang="ts">
   // The Settings view (design §10, D-UI-5): a 220px category rail and one
-  // pane per page. All five panes stay mounted and switch with `hidden`,
+  // pane per page. All six panes stay mounted and switch with `hidden`,
   // the same rule the shell applies to views, so an in-flight save or a
   // typed-but-unsaved field survives a rail click. Each pane's column caps
   // at 1100px (D-UI-7).
@@ -12,6 +12,7 @@
     type SettingsPage,
   } from './settings/pages';
   import ConnectionPage from './settings/ConnectionPage.svelte';
+  import LibraryPage from './settings/LibraryPage.svelte';
   import CloudSavesPage from './settings/CloudSavesPage.svelte';
   import RetroAchievementsPage from './settings/RetroAchievementsPage.svelte';
   import UpdatesPage from './settings/UpdatesPage.svelte';
@@ -54,6 +55,10 @@
             <!-- Page-level activation, unlike the other panes: the edit form
                  holds a plain secret, so leaving this page must close it. -->
             <ConnectionPage active={active && page === 'connection'} />
+          {:else if p === 'library'}
+            <!-- Page-level activation: the path is re-read each time the page
+                 comes forward. -->
+            <LibraryPage active={active && page === 'library'} />
           {:else if p === 'cloud-saves'}
             <CloudSavesPage {active} />
           {:else if p === 'retroachievements'}

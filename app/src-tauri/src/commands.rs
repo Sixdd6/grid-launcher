@@ -1,4 +1,5 @@
 pub mod cloud;
+pub mod library_path;
 pub mod logging;
 pub mod relink;
 pub mod specials;

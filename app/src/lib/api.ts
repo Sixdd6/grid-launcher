@@ -144,6 +144,40 @@ export type RaUsernameSync =
   | { kind: 'failed'; error: string }
   | { kind: 'not_connected' };
 
+// Settings › Library (Q2). Mirrors `grid_core::library::path_change` and
+// `commands/library_path.rs`.
+export type PathChangeRefusal =
+  | 'blank'
+  | 'not_absolute'
+  | 'same_as_current'
+  | 'inside_current'
+  | 'contains_current'
+  | 'not_a_directory'
+  | 'not_creatable'
+  | 'not_writable'
+  | 'install_active'
+  | 'game_running'
+  | 'cloud_transfer_active';
+
+export type LibraryPathCheck =
+  | { status: 'ok'; path: string }
+  | { status: 'refused'; reason: PathChangeRefusal; message: string };
+
+export type StartFreshGame = { title: string; platform: string; paths: string[]; bytes: number };
+
+export type StartFreshPreview = {
+  old_root: string;
+  games: StartFreshGame[];
+  total_bytes: number;
+  /** Paths a normal uninstall would also remove but that lie outside the old folder: left on disk. */
+  left_outside: string[];
+};
+
+export type StartFreshOutcome =
+  | { status: 'switched'; library_path: string; rows_removed: number; failures: string[] }
+  | { status: 'refused'; reason: PathChangeRefusal; message: string }
+  | { status: 'stale'; message: string };
+
 export type DownloadStatus =
   | 'queued'
   | 'downloading'
@@ -510,6 +544,16 @@ export const api = {
     invoke<void>('remove_from_library', { title, platform }),
   getLibraryPath: () => invoke<string>('get_library_path'),
   setLibraryPath: (path: string) => invoke<void>('set_library_path', { path }),
+  /** Settings › Library: can `path` become the library folder? Creates nothing. */
+  checkLibraryPath: (path: string) => invoke<LibraryPathCheck>('check_library_path', { path }),
+  /** What Start fresh › Delete would remove from the current library. Reads only. */
+  libraryStartFreshPreview: () => invoke<StartFreshPreview>('library_start_fresh_preview'),
+  /** Start fresh › Leave: switch to `path`; the old games leave the library, their files stay. */
+  libraryStartFreshKeep: (path: string, expectedOldRoot: string) =>
+    invoke<StartFreshOutcome>('library_start_fresh_keep', { path, expectedOldRoot }),
+  /** Start fresh › Delete: switch to `path`, then uninstall the old library's games. */
+  libraryStartFreshDelete: (path: string, expectedOldRoot: string) =>
+    invoke<StartFreshOutcome>('library_start_fresh_delete', { path, expectedOldRoot }),
   getUiSettings: () => invoke<UiSettings>('get_ui_settings'),
   setUiSettings: (settings: UiSettings) => invoke<void>('set_ui_settings', { settings }),
   /** The `debug_prints` setting: `debug` rather than `info` logging.

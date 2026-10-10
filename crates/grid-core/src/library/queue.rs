@@ -90,6 +90,25 @@ pub struct DownloadsSnapshot {
     pub entries: Vec<DownloadEntry>,
 }
 
+impl DownloadStatus {
+    /// Queued, downloading, installing or cancelling: the entry may still
+    /// write into the library.
+    pub fn is_live(self) -> bool {
+        matches!(
+            self,
+            Self::Queued | Self::Downloading | Self::Installing | Self::Cancelling
+        )
+    }
+}
+
+impl DownloadsSnapshot {
+    /// True when any entry is still live ([`DownloadStatus::is_live`]),
+    /// firmware rows included. A library path change waits for this.
+    pub fn has_live_entry(&self) -> bool {
+        self.entries.iter().any(|entry| entry.status.is_live())
+    }
+}
+
 /// Result of [`QueueState::admit`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Admission {
@@ -503,6 +522,43 @@ mod tests {
             Admission::Start(id) => id,
             other => panic!("expected Start, got {other:?}"),
         }
+    }
+
+    // --- has_live_entry ---------------------------------------------------
+
+    #[test]
+    fn live_statuses_are_the_non_terminal_ones() {
+        let live: Vec<DownloadStatus> = [
+            DownloadStatus::Queued,
+            DownloadStatus::Downloading,
+            DownloadStatus::Installing,
+            DownloadStatus::Cancelling,
+            DownloadStatus::Completed,
+            DownloadStatus::Failed,
+            DownloadStatus::Cancelled,
+        ]
+        .into_iter()
+        .filter(|status| status.is_live())
+        .collect();
+        assert_eq!(
+            live,
+            vec![
+                DownloadStatus::Queued,
+                DownloadStatus::Downloading,
+                DownloadStatus::Installing,
+                DownloadStatus::Cancelling,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_snapshot_with_an_external_row_is_live_until_it_finishes() {
+        let mut state = QueueState::default();
+        assert!(!state.snapshot().has_live_entry());
+        let id = state.admit_external("Firmware", "PS3");
+        assert!(state.snapshot().has_live_entry());
+        state.finish_external(id, "");
+        assert!(!state.snapshot().has_live_entry());
     }
 
     // --- admit --------------------------------------------------------

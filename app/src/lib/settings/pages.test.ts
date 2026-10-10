@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { SETTINGS_PAGES, settingsPageLabel, settingsRailEntries } from './pages';
 
 describe('settings rail', () => {
-  it('lists the five pages of design §10, in order', () => {
+  it('lists the five pages of design §10 plus Library (Q2), in order', () => {
     expect([...SETTINGS_PAGES]).toEqual([
       'connection',
+      'library',
       'cloud-saves',
       'retroachievements',
       'updates',
@@ -14,6 +15,7 @@ describe('settings rail', () => {
 
   it('labels every page', () => {
     expect(settingsPageLabel('connection')).toBe('Connection');
+    expect(settingsPageLabel('library')).toBe('Library');
     expect(settingsPageLabel('cloud-saves')).toBe('Cloud saves');
     expect(settingsPageLabel('retroachievements')).toBe('RetroAchievements');
     expect(settingsPageLabel('updates')).toBe('Updates');
@@ -26,12 +28,13 @@ describe('settingsRailEntries', () => {
     const entries = settingsRailEntries('updates');
     expect(entries.map((e) => e.testId)).toEqual([
       'settings-nav-connection',
+      'settings-nav-library',
       'settings-nav-cloud-saves',
       'settings-nav-retroachievements',
       'settings-nav-updates',
       'settings-nav-appearance',
     ]);
-    expect(entries.map((e) => e.selected)).toEqual([false, false, false, true, false]);
+    expect(entries.map((e) => e.selected)).toEqual([false, false, false, false, true, false]);
     expect(entries[0].heading).toBe('SETTINGS');
     expect(entries.slice(1).every((e) => e.heading === undefined)).toBe(true);
   });
