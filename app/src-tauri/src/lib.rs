@@ -211,6 +211,21 @@ pub fn run() {
     }
     if let Ok(install) = &install {
         install.set_library_gate(library_move.gate().clone());
+        // Moved-file detection (9c), once the layout migration and the
+        // move recovery are done: a game moved inside the library is
+        // re-pointed before any service reads its row. A no-op while the
+        // root is unreachable or a move waits to resume (the gate is closed
+        // and the journal exists); every Library refresh runs it again.
+        if library_reachable {
+            match install.reconcile_library() {
+                Ok(report) => tracing::info!(
+                    moved = report.moved,
+                    missing = report.missing.len(),
+                    "library: moved-file check at startup"
+                ),
+                Err(error) => tracing::warn!(%error, "library: moved-file check failed"),
+            }
+        }
     }
     cloud.set_library_gate(library_move.gate().clone());
     let firmware = firmware_service::FirmwareService::new();
@@ -592,6 +607,7 @@ pub fn run() {
             commands::relink::list_server_roms_for_platform,
             commands::relink::link_installed_row,
             commands::relink::remove_from_library,
+            commands::relink::locate_installed_row,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

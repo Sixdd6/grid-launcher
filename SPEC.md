@@ -34,6 +34,28 @@ There are several main sections to the application with buttons across the top b
   Platform, card size Small / Medium / Large) and one grid of cover cards. Each rail
   entry has its own empty state. Clicking a card opens the details sub view; the hover
   Play launches directly. The card size is remembered as `ui.card_size_library`.
+
+  **Moved and missing files.** At startup and on every Library refresh, GRID checks
+  that each installed game's files are still on disk. It never deletes anything, and it
+  looks only inside the current library folder, at the fixed places a game can sit
+  (`games/<Platform>/`, the older `<library>/<Platform>/`, the library folder itself),
+  by the game's own folder or file name — there is no disk-wide search. A game whose
+  folder or archive moved to one of those places is pointed there silently, and plays
+  from it. A game whose files are not found is **Missing**: its card shows a MISSING
+  badge, and its hover action opens the details sub view instead of launching. A game
+  installed outside the library (a native game elsewhere, a PS3 game inside RPCS3's
+  `dev_hdd0`) is only checked, never searched for. Missing is worked out on each check,
+  not saved: a drive that comes back clears it. Nothing is checked while a library move
+  runs or while the library folder cannot be reached (the Unreachable library dialog
+  handles that). In the details sub view a Missing game shows "Files not found", Play and
+  Uninstall are disabled with that reason, and it offers:
+  - **Locate…** — pick (or type) the folder that holds the game: the game's folder,
+    archive or file must be inside it (or it is the game's folder itself, holding the
+    launch file). The folder may be anywhere, because the user chose it. GRID points the
+    Library row there and moves no file; a folder without the game is refused with the
+    reason.
+  - **Remove from library (keeps files)** — the same action as for a game with no server
+    id below: the Library row goes, no file is touched.
 - **Server** mirrors Library: a rail of the server's platforms with ROM counts, a
   platform header (name, ROM count, installed count, a firmware chip with an Install
   action when the server offers firmware, and the platform's default emulator chip

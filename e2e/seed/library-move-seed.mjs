@@ -8,6 +8,7 @@
  *   node library-move-seed.mjs <data-dir> library-move-a   # a move to run
  *   node library-move-seed.mjs <data-dir> library-move-b   # a move to resume
  *   node library-move-seed.mjs <data-dir> library-move-c   # an unreachable root
+ *   node library-move-seed.mjs <data-dir> library-move-d   # moved-file detection (9c)
  *
  * Every variant writes a fresh `config.toml` and `grid-launcher.db` (the
  * earlier spec's are replaced) and uses library folders of its own, so what
@@ -28,7 +29,9 @@
  *
  * Variant b adds a Copy-phase move record (`library-move.json`) and a
  * partial staging folder under the new root. Variant c stores a library
- * root that does not exist while the files are in another folder.
+ * root that does not exist while the files are in another folder. Variant d is
+ * variant a in a folder of its own: the spec itself moves and deletes the
+ * game folder while the app runs (9c moved-file detection).
  */
 
 import {
@@ -48,7 +51,7 @@ import { tomlString, writeRegistry } from './registry-schema.mjs';
 
 const [dataDir, variant] = process.argv.slice(2);
 if (!dataDir || !variant) {
-  console.error('usage: library-move-seed.mjs <data-dir> <library-move-a|library-move-b|library-move-c>');
+  console.error('usage: library-move-seed.mjs <data-dir> <library-move-a|library-move-b|library-move-c|library-move-d>');
   process.exit(1);
 }
 
@@ -65,6 +68,7 @@ const ROOTS = {
   'library-move-a': { old: 'library', new: 'library-new' },
   'library-move-b': { old: 'resume-old', new: 'resume-new' },
   'library-move-c': { old: 'relocate-missing', new: 'relocate-real' },
+  'library-move-d': { old: 'reconcile', new: 'reconcile-elsewhere' },
 };
 const roots = ROOTS[variant];
 if (!roots) {
@@ -277,6 +281,7 @@ function writeResumeState() {
 
 switch (variant) {
   case 'library-move-a':
+  case 'library-move-d':
     writeLibrary(oldRoot, oldRoot);
     writeConfig(oldRoot);
     writeDb(oldRoot);

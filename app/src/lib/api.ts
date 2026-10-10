@@ -432,6 +432,12 @@ export type InstalledGame = {
   ra_id: string;
   /** Epoch seconds of the last launch; 0 when never launched through GRID. */
   last_played_at: number;
+  /**
+   * 9c: the files are not on disk. Set by `list_installed` only (the
+   * reconcile pass computes it on every listing; it is never stored), so a
+   * row from any other command leaves it out.
+   */
+  missing?: boolean;
 };
 
 // Cloud save/state sync (app/src-tauri/src/cloud_service.rs,
@@ -647,6 +653,9 @@ export const api = {
   /** Registry row only: never deletes a file. */
   removeFromLibrary: (title: string, platform: string) =>
     invoke<void>('remove_from_library', { title, platform }),
+  /** 9c Locate…: point a missing row at the install inside `folder` (anywhere on disk). */
+  locateInstalledRow: (title: string, platform: string, folder: string) =>
+    invoke<InstalledGame>('locate_installed_row', { title, platform, folder }),
   getLibraryPath: () => invoke<string>('get_library_path'),
   setLibraryPath: (path: string) => invoke<void>('set_library_path', { path }),
   /** Settings › Library: can `path` become the library folder? Creates nothing. */

@@ -2,6 +2,7 @@
   import Image from './Image.svelte';
   import Icon from './Icon.svelte';
   import { cardBadges, UPDATE_TAG_TEXT } from './cards/badges';
+  import { cardPrimaryLabel, MISSING_BADGE_TEXT } from './library/missing';
   import {
     ACTION_ROW_HEIGHT_PX,
     CARD_COVER_RATIO,
@@ -18,6 +19,7 @@
     platform,
     coverUrl,
     installed,
+    missing = false,
     updateLabel,
     cloudPlatforms,
     focused,
@@ -33,6 +35,8 @@
     platform: string;
     coverUrl: string | null;
     installed: boolean;
+    /** 9c: an installed game whose files are not on disk (Library only). */
+    missing?: boolean;
     updateLabel: string | null;
     cloudPlatforms: ReadonlySet<string>;
     focused: boolean;
@@ -71,8 +75,17 @@
   <div class="cover">
     <Image url={coverUrl} alt={title} placeholder="No cover" backdrop />
 
-    {#if badges.update}
-      <span data-testid={`library-update-badge-${badgeId}`} class="tag update">{UPDATE_TAG_TEXT}</span>
+    <!-- Top-left tags stack in one column so MISSING and UPDATE never cover
+         each other (a missing game can still have a newer server version). -->
+    {#if missing || badges.update}
+      <div class="tag-stack">
+        {#if missing}
+          <span data-testid={`library-card-missing-${badgeId}`} class="tag missing" title="Files not found">{MISSING_BADGE_TEXT}</span>
+        {/if}
+        {#if badges.update}
+          <span data-testid={`library-update-badge-${badgeId}`} class="tag update">{UPDATE_TAG_TEXT}</span>
+        {/if}
+      </div>
     {/if}
     {#if badges.installed}
       <span data-testid={`installed-badge-${badgeId}`} class="dot" role="img" aria-label="Installed" title="Installed"></span>
@@ -94,7 +107,7 @@
       onclick={act(onPrimary)}
       tabindex="0"
     >
-      {installed ? 'Play' : 'Install'}
+      {cardPrimaryLabel(installed, missing)}
     </button>
 
     <!-- The four overlay controls stay in the Tab order: `:focus-within`
@@ -280,7 +293,6 @@
   }
 
   .tag {
-    position: absolute;
     padding: 2px 6px;
     border-radius: var(--r-chip);
     font-size: 10px;
@@ -294,18 +306,45 @@
     white-space: nowrap;
   }
 
-  /* D-UI-9 placements. */
-  .tag.update {
+  /* D-UI-9 placements. The top-right corner belongs to the installed dot,
+     so the stack stops short of it. */
+  .tag-stack {
+    position: absolute;
     top: 6px;
     left: 6px;
+    max-width: calc(100% - 28px);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .tag-stack .tag {
+    max-width: 100%;
+  }
+
+  .tag.update {
     background: var(--warning);
     color: #1a1a12;
     letter-spacing: 0.06em;
   }
 
   .tag.platform {
+    position: absolute;
     bottom: 6px;
     left: 6px;
+  }
+
+  /* 9c: first in the stack (the more urgent state). Overlay tags sit on
+     cover art, not on a themed surface, so the fill is the fixed light-theme
+     danger red: white on #c62828 is 5.6:1 in both themes, where the dark
+     theme's lighter --danger would drop white text to 3.2:1. The faint white
+     ring keeps it readable on red covers. */
+  .tag.missing {
+    background: #c62828;
+    color: #fff;
+    letter-spacing: 0.06em;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7);
   }
 
   .dot {

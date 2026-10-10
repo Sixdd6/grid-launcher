@@ -402,7 +402,7 @@ impl InstalledGame {
     }
 }
 
-fn identity_key(value: &str) -> String {
+pub(crate) fn identity_key(value: &str) -> String {
     value.trim().to_lowercase()
 }
 
@@ -759,17 +759,54 @@ impl Registry {
         &self,
         rewrite: &dyn Fn(&str) -> Option<String>,
     ) -> Result<usize, LibraryError> {
+        self.rewrite_paths_where(None, rewrite)
+    }
+
+    /// [`Self::rewrite_paths`] for the ONE row with `(title, platform)`'s
+    /// identity key (9c: a moved game is re-pointed, or Locate… points it at
+    /// a folder the user chose). One transaction; `true` when the row's
+    /// paths changed.
+    ///
+    /// The closure sees the values as they stand inside the transaction,
+    /// so a caller that rewrites only values under an old prefix makes this
+    /// a compare-and-swap: a reinstall or an uninstall that landed first
+    /// leaves nothing to match, and nothing is written.
+    pub fn rewrite_row_paths(
+        &self,
+        title: &str,
+        platform: &str,
+        rewrite: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<bool, LibraryError> {
+        let keys = (identity_key(title), identity_key(platform));
+        Ok(self.rewrite_paths_where(Some(keys), rewrite)? > 0)
+    }
+
+    /// The body of [`Self::rewrite_paths`]: every row, or only the row with
+    /// the `(title_key, platform_key)` in `only`.
+    fn rewrite_paths_where(
+        &self,
+        only: Option<(String, String)>,
+        rewrite: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<usize, LibraryError> {
         let mut guard = self.conn.lock().unwrap();
         let tx = guard.transaction().map_err(registry_err)?;
 
         let columns = REWRITE_PATH_COLUMNS.join(", ");
+        let (filter, filter_params): (&str, Vec<String>) = match only {
+            Some((title_key, platform_key)) => (
+                "WHERE title_key = ?1 AND platform_key = ?2",
+                vec![title_key, platform_key],
+            ),
+            None => ("", Vec::new()),
+        };
         let mut rows: Vec<(i64, Vec<String>, String)> = Vec::new();
         {
-            let sql =
-                format!("SELECT id, {columns}, ps3_trophy_paths FROM installed_games ORDER BY id");
+            let sql = format!(
+                "SELECT id, {columns}, ps3_trophy_paths FROM installed_games {filter} ORDER BY id"
+            );
             let mut stmt = tx.prepare(&sql).map_err(registry_err)?;
             let mapped = stmt
-                .query_map([], |row| {
+                .query_map(rusqlite::params_from_iter(filter_params.iter()), |row| {
                     let id: i64 = row.get(0)?;
                     let mut values = Vec::with_capacity(REWRITE_PATH_COLUMNS.len());
                     for index in 0..REWRITE_PATH_COLUMNS.len() {
@@ -1081,6 +1118,50 @@ mod tests {
         let b = rows.iter().find(|r| r.title == "Game B").unwrap();
         assert_eq!(b.archive_path, "/elsewhere/archive.zip");
         assert_eq!(b.ps3_trophy_paths, "");
+    }
+
+    /// 9c: a re-point touches ONE row. Another row with the same old
+    /// prefix keeps its paths, and a row that is gone reports `false`.
+    #[test]
+    fn rewrite_row_paths_changes_only_the_named_row() {
+        let (_dir, registry) = temp_registry();
+        registry.upsert(&row_with_paths("Game A")).unwrap();
+        registry.upsert(&row_with_paths("Game B")).unwrap();
+        let before_b = registry
+            .all()
+            .unwrap()
+            .into_iter()
+            .find(|r| r.title == "Game B")
+            .unwrap();
+
+        let changed = registry
+            .rewrite_row_paths(" game a ", "SONY PLAYSTATION 2", &|value| {
+                value
+                    .strip_prefix("/lib")
+                    .map(|rest| format!("/moved{rest}"))
+            })
+            .unwrap();
+        assert!(changed, "the row matched by its identity key changed");
+
+        let rows = registry.all().unwrap();
+        let a = rows.iter().find(|r| r.title == "Game A").unwrap();
+        assert_eq!(a.extracted_dir, "/moved/game");
+        assert_eq!(a.extracted_path, "/moved/game/game.iso");
+        assert_eq!(a.native_game_dir, "/moved/native");
+        assert_eq!(a.ps3_trophy_paths, "[\"/moved/a\",\"/moved/b\"]");
+        let b = rows.iter().find(|r| r.title == "Game B").unwrap();
+        assert_eq!(b, &before_b, "the other row is untouched");
+
+        let gone = registry
+            .rewrite_row_paths("Nope", "Sony PlayStation 2", &|value| {
+                Some(format!("/x{value}"))
+            })
+            .unwrap();
+        assert!(!gone, "no row has that identity");
+        let unchanged = registry
+            .rewrite_row_paths("Game B", "Sony PlayStation 2", &|_| None)
+            .unwrap();
+        assert!(!unchanged, "a rewrite that changes nothing writes nothing");
     }
 
     #[test]

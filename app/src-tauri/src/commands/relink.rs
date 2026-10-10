@@ -1,6 +1,7 @@
-//! Q4 commands for installed rows with no ROM id: the Details "Link to
-//! server game" picker and "Remove from library (keeps files)". Thin
-//! wrappers — the matching rules live in `grid_core::library::relink`, the
+//! Commands for one installed row. Q4, rows with no ROM id: the Details "Link to
+//! server game" picker and "Remove from library (keeps files)". 9c, a
+//! Missing row: Locate…. Thin wrappers — the matching rules live in
+//! `grid_core::library::relink` and `grid_core::library::reconcile`, the
 //! SQL in `grid_core::library::registry`.
 
 use grid_core::library::registry::{InstalledGame, SetRomIdOutcome};
@@ -95,4 +96,27 @@ pub async fn remove_from_library(
     } else {
         Err("This game is no longer in your library.".to_string())
     }
+}
+
+/// Locate… (9c) for a Missing row: points `(title, platform)` at the
+/// install inside `folder`, which the user picked (anywhere on disk). The
+/// folder must hold the row's game folder, archive or launch file; the
+/// refusal says why otherwise. Registry only: no file moves. Answers with
+/// the updated row.
+#[tauri::command]
+pub async fn locate_installed_row(
+    state: State<'_, AppState>,
+    title: String,
+    platform: String,
+    folder: String,
+) -> Result<InstalledGame, String> {
+    ensure_library_idle(&state)?;
+    let install = state.install.as_ref().map_err(Clone::clone)?.clone();
+    tokio::task::spawn_blocking(move || {
+        install
+            .locate_row(&title, &platform, std::path::Path::new(folder.trim()))
+            .map_err(err)
+    })
+    .await
+    .map_err(|e| format!("locate did not finish: {e}"))?
 }

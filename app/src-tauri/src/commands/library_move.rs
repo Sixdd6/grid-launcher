@@ -208,7 +208,11 @@ mod tests {
             (
                 "relink.rs",
                 include_str!("relink.rs"),
-                &["link_installed_row", "remove_from_library"],
+                &[
+                    "link_installed_row",
+                    "remove_from_library",
+                    "locate_installed_row",
+                ],
             ),
             ("updates.rs", include_str!("updates.rs"), &["update_game"]),
         ];

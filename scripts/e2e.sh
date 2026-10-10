@@ -81,10 +81,12 @@ STAGE_GROUPS=(
   # and a flat library, and the spec reads the migrated tree off disk.
   "layout-migration:specs/layout-migration.spec.ts"
   # 9b: (a) Move existing files end to end, (b) resume an interrupted Copy
-  # at startup, (c) the unreachable-library dialog's Relocate. Each spec
+  # at startup, (c) the unreachable-library dialog's Relocate; 9c: (d)
+  # moved-file detection (a moved game is re-pointed, a gone one is Missing
+  # and Locate… finds its copy). Each spec
   # needs its own starting state, so its seed runs before every spec
   # (group_seeds_per_spec).
-  "library-move:specs/library-move-a.spec.ts specs/library-move-b.spec.ts specs/library-move-c.spec.ts"
+  "library-move:specs/library-move-a.spec.ts specs/library-move-b.spec.ts specs/library-move-c.spec.ts specs/library-move-d.spec.ts"
 )
 
 # Run only the named groups by passing them as arguments, e.g.

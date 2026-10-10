@@ -33,7 +33,7 @@ use grid_core::library::extract::is_extractable_archive;
 use grid_core::library::paths::{layout_version_for_library_path, library_root};
 use grid_core::library::queue::DownloadsSnapshot;
 use grid_core::library::registry::InstalledGame;
-use grid_core::library::InstallService;
+use grid_core::library::{InstallService, InstalledRow};
 use grid_core::romm::achievements;
 use grid_core::romm::{AchievementsView, GameSummary, Platform, RaUsernameSync, RomDetail};
 use grid_core::secrets::RaTokenStore;
@@ -542,9 +542,12 @@ pub fn list_downloads(state: State<'_, AppState>) -> Result<DownloadsSnapshot, S
 }
 
 #[tauri::command]
-pub async fn list_installed(state: State<'_, AppState>) -> Result<Vec<InstalledGame>, String> {
+pub async fn list_installed(state: State<'_, AppState>) -> Result<Vec<InstalledRow>, String> {
     let install = state.install.as_ref().map_err(Clone::clone)?.clone();
-    tokio::task::spawn_blocking(move || install.installed().map_err(err))
+    // Every Library refresh is also a moved-file pass (9c): a moved game is
+    // re-pointed before the list is read, and a gone one comes back
+    // flagged `missing`.
+    tokio::task::spawn_blocking(move || install.installed_rows().map_err(err))
         .await
         .map_err(|e| format!("list_installed did not finish: {e}"))?
 }

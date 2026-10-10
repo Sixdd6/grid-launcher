@@ -31,6 +31,8 @@
   import LinkPicker from './details/LinkPicker.svelte';
   import RemoveConfirm from './details/RemoveConfirm.svelte';
   import { keptFolder, showsUnlinkedActions } from './details/unlinked';
+  import { missingActions } from './library/missing';
+  import { pickFolder } from './pickers';
   import { fullIndex, galleryItems, viewableIndex, viewableItems } from './details/media';
   import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
   import { syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
@@ -354,9 +356,40 @@
     await refreshInstalled();
   }
 
+  // 9c: the row's files are not on disk (the backend's reconcile pass sets
+  // the flag on every listing). Details offers Locate… and Remove from
+  // library (keeps files); Play and Uninstall are disabled with the reason.
+  let missing = $derived(missingActions(installedRow));
+  let locatePath = $state('');
+  let locateError = $state<string | null>(null);
+  let locatePending = $state(false);
+
+  // The row the Remove confirm acts on: an unlinked row (Q4) or a missing one.
+  let removeTarget = $derived(unlinkedRow ?? (missing.showMissing ? installedRow : null));
+
+  async function locate(folder: string) {
+    if (installedRow === null || folder.trim() === '') return;
+    locateError = null;
+    locatePending = true;
+    try {
+      await api.locateInstalledRow(installedRow.title, installedRow.platform, folder.trim());
+      locatePath = '';
+      await refreshInstalled();
+    } catch (err) {
+      locateError = errorMessage(err);
+    } finally {
+      locatePending = false;
+    }
+  }
+
+  async function locateWithPicker() {
+    const folder = await pickFolder('Locate the game folder');
+    if (folder !== null) await locate(folder);
+  }
+
   async function removeFromLibrary() {
-    if (unlinkedRow === null) return;
-    await api.removeFromLibrary(unlinkedRow.title, unlinkedRow.platform);
+    if (removeTarget === null) return;
+    await api.removeFromLibrary(removeTarget.title, removeTarget.platform);
     showRemoveConfirm = false;
     await refreshInstalled();
     onClose();
@@ -601,6 +634,50 @@
           <Image url={coverLarge ?? coverSmall} alt={subject.name} placeholder="No cover" data-testid="details-cover" />
         </div>
 
+        {#if missing.showMissing}
+          <!-- A notice, not a plain action list: danger edge, Locate… as the one
+               primary action, the typed path as a secondary group, and the
+               destructive choice last. DOM order is the Tab/gamepad order. -->
+          <div class="action notice" data-testid="details-missing" role="group" aria-labelledby="details-missing-title">
+            <span id="details-missing-title" class="chip unlinked missing">Files not found</span>
+            <p class="meta-line">{missing.playBlocked}</p>
+            <button data-testid="details-locate" disabled={locatePending} onclick={locateWithPicker}>
+              {locatePending ? 'Locating…' : 'Locate…'}
+            </button>
+            <!-- The typed path is the same action as the picker: the picker
+                 cannot open in every environment (pickers.ts). -->
+            <div class="locate-path">
+              <input
+                data-testid="details-locate-path"
+                type="text"
+                placeholder="Or type the folder that holds the game"
+                aria-label="Folder that holds the game"
+                aria-invalid={locateError ? 'true' : undefined}
+                aria-describedby={locateError ? 'details-locate-error' : undefined}
+                bind:value={locatePath}
+              />
+              <button
+                data-testid="details-locate-submit"
+                class="secondary"
+                disabled={locatePending || locatePath.trim() === ''}
+                onclick={() => locate(locatePath)}
+              >
+                Use this folder
+              </button>
+            </div>
+            {#if locateError}
+              <p id="details-locate-error" data-testid="locate-error" class="error" role="alert">{locateError}</p>
+            {/if}
+            <button
+              data-testid="details-missing-remove"
+              class="secondary destructive"
+              onclick={() => (showRemoveConfirm = true)}
+            >
+              Remove from library (keeps files)
+            </button>
+          </div>
+        {/if}
+
         {#if subject.romId === null}
           {#if unlinkedRow}
             <div class="action" data-testid="details-unlinked">
@@ -618,13 +695,17 @@
                 <!-- The button's `title` is hover-only; this line is the visible reason. -->
                 <p id="details-link-offline" class="meta-line offline-note">Connect to a server to link this game.</p>
               {/if}
-              <button
-                data-testid="details-remove-from-library"
-                class="secondary destructive"
-                onclick={() => (showRemoveConfirm = true)}
-              >
-                Remove from library (keeps files)
-              </button>
+              <!-- A row that is also missing already offers Remove in the notice
+                   above: one Remove button, not two. -->
+              {#if !missing.showMissing}
+                <button
+                  data-testid="details-remove-from-library"
+                  class="secondary destructive"
+                  onclick={() => (showRemoveConfirm = true)}
+                >
+                  Remove from library (keeps files)
+                </button>
+              {/if}
             </div>
           {:else}
             <p data-testid="details-no-id">This entry has no server id</p>
@@ -650,7 +731,13 @@
                 {pendingAction === 'stop' ? 'Stopping…' : 'Stop'}
               </button>
             {:else if installedNow}
-              <button data-testid="details-play" disabled={pending} onclick={handlePlay}>
+              <button
+                data-testid="details-play"
+                disabled={pending || missing.playBlocked !== ''}
+                aria-describedby={missing.playBlocked !== '' ? 'details-blocked-note' : undefined}
+                title={missing.playBlocked || undefined}
+                onclick={handlePlay}
+              >
                 {pendingAction === 'play' ? 'Launching…' : 'Play'}
               </button>
               {#if updateLabel !== null}
@@ -699,11 +786,17 @@
                 data-testid="details-uninstall"
                 class="secondary"
                 class:confirm={confirmingUninstall}
-                disabled={pending}
+                disabled={pending || missing.uninstallBlocked !== ''}
+                aria-describedby={missing.uninstallBlocked !== '' ? 'details-blocked-note' : undefined}
+                title={missing.uninstallBlocked || undefined}
                 onclick={handleUninstallClick}
               >
                 {confirmingUninstall ? 'Confirm uninstall' : 'Uninstall'}
               </button>
+              {#if missing.playBlocked !== '' || missing.uninstallBlocked !== ''}
+                <!-- The buttons' `title` is hover-only; this line is the visible reason. -->
+                <p id="details-blocked-note" class="meta-line offline-note">Play and Uninstall are unavailable until the files are found.</p>
+              {/if}
             {:else}
               <button data-testid="details-install" title={installBlocked} disabled={pending} onclick={handleInstall}>
                 {pendingAction === 'install' ? 'Installing…' : installLabel(subject.platformName)}
@@ -838,10 +931,10 @@
   />
 {/if}
 
-{#if showRemoveConfirm && unlinkedRow}
+{#if showRemoveConfirm && removeTarget}
   <RemoveConfirm
-    title={unlinkedRow.title}
-    folder={keptFolder(unlinkedRow)}
+    title={removeTarget.title}
+    folder={keptFolder(removeTarget)}
     onConfirm={removeFromLibrary}
     onClose={() => {
       showRemoveConfirm = false;
@@ -1035,6 +1128,10 @@
     background: var(--warning);
   }
 
+  .chip.unlinked.missing::before {
+    background: var(--danger);
+  }
+
   .tabs {
     display: flex;
     gap: 4px;
@@ -1073,6 +1170,44 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+  }
+
+  /* "Files not found": the same column as the other action groups, framed
+     as a notice with a danger edge. Text stays on --text/--text-muted so
+     contrast holds in both themes; only the edge and the dot carry colour. */
+  .action.notice {
+    box-sizing: border-box;
+    padding: 12px;
+    border: 1px solid var(--danger);
+    border-left-width: 4px;
+    border-radius: var(--r-row);
+    background: var(--surface);
+  }
+
+  .locate-path {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .locate-path input {
+    font: inherit;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border-radius: var(--r-control);
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-h);
+  }
+
+  .locate-path input[aria-invalid='true'] {
+    border-color: var(--danger);
+  }
+
+  .locate-path input:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
   }
 
   .action button {

@@ -65,7 +65,11 @@ Modules as declared in `src/lib.rs`:
   `relocate_references` rewrites references only (the unreachable-library Relocate);
   `LibraryGate` is the open/closed flag every library writer checks. `root_access` (9b)
   says whether the library root can be reached (not set / reachable / unreachable and
-  why), whether GRID stored anything there, and checks a Relocate target.
+  why), whether GRID stored anything there, and checks a Relocate target. `reconcile`
+  (9c) is moved-file detection: a pure plan over the installed rows (present / moved
+  inside a library root → re-point the row / missing, computed and never stored) and
+  the Locate… folder check; `InstallService::reconcile_library` applies it at startup
+  and on every `list_installed`.
 - `pcgw` — PCGamingWiki client that resolves a Windows game's save paths.
 - `platform` — host-platform lookups that need OS APIs (for example the Shell-resolved
   Windows Documents folder).

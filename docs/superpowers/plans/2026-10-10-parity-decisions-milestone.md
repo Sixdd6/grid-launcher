@@ -156,6 +156,6 @@ User answers: keep the rejected credential until replaced; retention defaults sa
 - **CI:** check-windows runs clippy + cargo test (0556f73). Watch the first run (8.3 temp names on runners).
 - **G1-Q (user):** keep the before-launch auto-restore for games with an unknown PS3/Wii U id, but "match off other data": when restoring a cloud record for such a game, restore only the folders that match the game by other data (title tokens, serial in folder names, install paths) and skip folders that belong to other games (old records from released builds may hold them). Plan + implement after 9c.
 - **Uninstall refusals (user):** when the RemovalGuard skips a path, show an alert that names each skipped folder and the reason (today silent). Small; after 9c.
-- **`~\` expansion:** explained to the user; awaiting yes/no.
+- **`~\` expansion (user: yes, as a failsafe):** expand `~\…` like `~/…` at use time in `autoconfig/paths.rs` (expand_user) and `library/paths.rs` (expand_home), on every OS; stored config values are not rewritten. Small; bundle with the uninstall-alert batch.
 - **Firmware memory:** closed.
 - Small: MediaViewer not registered with dialogNav (gamepad); white-on-primary contrast in all Downloads row buttons (`.row-actions button`).

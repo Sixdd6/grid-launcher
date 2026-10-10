@@ -17,6 +17,7 @@ pub mod path_change;
 pub mod paths;
 pub mod platforms;
 pub mod queue;
+pub mod reconcile;
 pub mod registry;
 pub mod relink;
 pub mod relocate;
@@ -71,7 +72,7 @@ use platforms::{
     is_native_platform, is_ps3_platform, is_ps4_platform, is_ps5_platform, is_xbox360_platform,
 };
 use queue::{Admission, CancelAction, DownloadStatus, DownloadsSnapshot, JobKey, QueueState};
-use registry::{installed_match, InstalledGame, Registry};
+use registry::{identity_key, installed_match, InstalledGame, Registry};
 use relocate::LibraryGate;
 use specials::ps3::Ps3Roots;
 use update_detection::is_emulators_platform;
@@ -177,6 +178,33 @@ pub const NOT_INSTALLED: &str = "not installed";
 /// `install_update` refuses native rows: those merge through
 /// `install_native_update` instead of replacing the install.
 pub const NATIVE_UPDATE_REQUIRED: &str = "Native games update through the merge path.";
+/// Locate… refuses a row an install is writing right now.
+const LOCATE_WHILE_INSTALLING: &str = "This game is installing. Wait for it to finish.";
+
+/// One installed game as the Library lists it (9c): the registry row,
+/// flattened, plus `missing` — its files are not on disk. Computed by the
+/// reconcile pass on every listing, never stored.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct InstalledRow {
+    #[serde(flatten)]
+    pub game: InstalledGame,
+    pub missing: bool,
+}
+
+/// True while a live install, update or content job belongs to `row`
+/// (same rom id, or same title/platform identity): the reconcile pass does
+/// not judge it, and Locate… refuses it.
+fn row_is_busy(snapshot: &DownloadsSnapshot, row: &InstalledGame) -> bool {
+    let title = identity_key(&row.title);
+    let platform = identity_key(&row.platform);
+    snapshot.entries.iter().any(|entry| {
+        entry.status.is_live()
+            && entry.job == "game"
+            && (row.rom_id == Some(entry.rom_id)
+                || (identity_key(&entry.title) == title
+                    && identity_key(&entry.platform) == platform))
+    })
+}
 
 /// Everything outside the RFC 3986 unreserved set (`ALPHA / DIGIT / - . _ ~`)
 /// is percent-encoded. Applied to the file-name segment of a content URL so a
@@ -931,6 +959,152 @@ impl InstallService {
     /// Every installed game in the registry.
     pub fn installed(&self) -> Result<Vec<InstalledGame>, LibraryError> {
         self.registry.all()
+    }
+
+    /// Every installed game with its Missing flag (9c): runs
+    /// [`Self::reconcile_library`] first, so a moved game is already
+    /// re-pointed in the rows this returns.
+    pub fn installed_rows(&self) -> Result<Vec<InstalledRow>, LibraryError> {
+        let report = self.reconcile_library()?;
+        Ok(self
+            .registry
+            .all()?
+            .into_iter()
+            .map(|game| {
+                let key = (identity_key(&game.title), identity_key(&game.platform));
+                InstalledRow {
+                    missing: report.missing.contains(&key),
+                    game,
+                }
+            })
+            .collect())
+    }
+
+    /// Moved-file detection (9c, [`reconcile`]): checks every installed
+    /// row on disk, re-points a game that moved inside the library root,
+    /// and reports the rows whose files are gone.
+    ///
+    /// A no-op (nothing re-pointed, nothing missing) while a library move
+    /// holds the gate or waits to resume (its journal exists), when no
+    /// library is set, and while the root cannot be reached — that case is
+    /// the unreachable-library dialog's.
+    ///
+    /// Concurrency: a gate ticket is held for the whole pass, so a library
+    /// move cannot start until it ends; a row an install, update or content
+    /// job is writing is not judged; and each re-point is a compare-and-swap
+    /// inside one registry transaction (only values still under the old
+    /// path change), so an uninstall or reinstall that lands between the
+    /// check and the write leaves the row as that job wrote it.
+    pub fn reconcile_library(&self) -> Result<reconcile::ReconcileReport, LibraryError> {
+        let mut report = reconcile::ReconcileReport::default();
+        let gate = self.library_gate.read().unwrap().clone();
+        let Ok(_ticket) = gate.enter() else {
+            return Ok(report);
+        };
+        let config = Config::load(&self.config_path)?;
+        let Some(root) = paths::library_root(&config) else {
+            return Ok(report);
+        };
+        let home = crate::platform::home_dir();
+        let home = home.as_deref();
+        let move_pending = fs::symlink_metadata(relocate::journal_path(&self.config_path)).is_ok();
+        let gate_state = if move_pending {
+            reconcile::ReconcileGate::MoveActive
+        } else if root_access::library_root_access(&config.library_path, home)
+            != root_access::RootAccess::Reachable
+        {
+            reconcile::ReconcileGate::RootUnreachable
+        } else {
+            reconcile::ReconcileGate::Ready
+        };
+
+        let rows = self.registry.all()?;
+        let snapshot = self.snapshot();
+        let busy = |row: &InstalledGame| row_is_busy(&snapshot, row);
+        let decisions = reconcile::plan(
+            &rows,
+            std::slice::from_ref(&root),
+            gate_state,
+            &busy,
+            &reconcile::fs_probe,
+            home,
+        );
+        for decision in decisions {
+            let key = (
+                identity_key(&decision.title),
+                identity_key(&decision.platform),
+            );
+            match decision.state {
+                reconcile::RowState::Moved { from, to } => {
+                    let rewrite = |value: &str| reconcile::repoint(value, &from, &to, home);
+                    match self.registry.rewrite_row_paths(
+                        &decision.title,
+                        &decision.platform,
+                        &rewrite,
+                    ) {
+                        Ok(true) => {
+                            tracing::info!(
+                                title = %decision.title,
+                                path = %to.display(),
+                                "library: re-pointed a moved game"
+                            );
+                            report.moved += 1;
+                        }
+                        // Another writer changed the row first: theirs stands.
+                        Ok(false) => {}
+                        Err(error) => {
+                            tracing::warn!(
+                                title = %decision.title,
+                                %error,
+                                "library: a moved game could not be re-pointed"
+                            );
+                            report.missing.push(key);
+                        }
+                    }
+                }
+                reconcile::RowState::Missing => report.missing.push(key),
+                reconcile::RowState::Present | reconcile::RowState::NotChecked => {}
+            }
+        }
+        Ok(report)
+    }
+
+    /// Locate… (9c): points the row `(title, platform)` at the install in
+    /// `folder`, which the user picked ([`reconcile::locate_target`]; it
+    /// may lie outside the library). Registry only, one transaction; no
+    /// file moves. Answers with the updated row.
+    pub fn locate_row(
+        &self,
+        title: &str,
+        platform: &str,
+        folder: &Path,
+    ) -> Result<InstalledGame, LibraryError> {
+        self.check_library_gate()?;
+        let row = self
+            .registry
+            .find(None, title, platform)?
+            .ok_or_else(|| LibraryError::Registry(NOT_INSTALLED.to_string()))?;
+        if row_is_busy(&self.snapshot(), &row) {
+            return Err(LibraryError::Extract(LOCATE_WHILE_INSTALLING.to_string()));
+        }
+        let home = crate::platform::home_dir();
+        let home = home.as_deref();
+        let target = reconcile::locate_target(&row, folder, &reconcile::fs_probe, home)
+            .map_err(|refusal| LibraryError::Extract(refusal.message()))?;
+        // `locate_target` found an anchor, so this is `Some`.
+        let anchor = reconcile::anchor(&row, home)
+            .ok_or_else(|| LibraryError::Registry(NOT_INSTALLED.to_string()))?;
+        let rewrite = |value: &str| reconcile::repoint(value, &anchor.path, &target, home);
+        if self.registry.rewrite_row_paths(title, platform, &rewrite)? {
+            tracing::info!(
+                title = %row.title,
+                path = %target.display(),
+                "library: located a missing game"
+            );
+        }
+        self.registry
+            .find(None, title, platform)?
+            .ok_or_else(|| LibraryError::Registry(NOT_INSTALLED.to_string()))
     }
 
     /// The registry backing this service, for callers that need to write to
@@ -5529,5 +5703,192 @@ mod tests {
             message,
             "Could not determine Xenia content directory. Is Xenia configured?"
         );
+    }
+
+    // --- moved-file detection (9c) -----------------------------------------
+
+    const SNES: &str = "Super Nintendo Entertainment System";
+
+    /// A service whose config stores `root` as a layout-v2 library.
+    fn service_for_root(dir: &Path, root: &Path) -> Arc<InstallService> {
+        service_with_config(
+            dir,
+            &format!(
+                "schema_version = 1\nlibrary_path = {:?}\nlibrary_layout_version = 2\n",
+                root.to_string_lossy()
+            ),
+        )
+    }
+
+    /// An extracted SNES row at `dir` with its launch file `game.sfc`.
+    fn extracted_snes_row(title: &str, rom_id: i64, dir: &Path) -> InstalledGame {
+        InstalledGame {
+            title: title.to_string(),
+            platform: SNES.to_string(),
+            rom_id: Some(rom_id),
+            rom_file_name: "game.zip".to_string(),
+            extracted_dir: path_string(dir),
+            extracted_path: path_string(&dir.join("game.sfc")),
+            installed_at: 1,
+            ..Default::default()
+        }
+    }
+
+    fn write_file(path: &Path) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, b"rom").unwrap();
+    }
+
+    #[test]
+    fn installed_rows_re_points_a_moved_game_and_flags_a_gone_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("library");
+        let service = service_for_root(dir.path(), &root);
+        let recorded = root.join("games").join(SNES).join("Mario");
+        let moved = root.join(SNES).join("Mario");
+        write_file(&moved.join("game.sfc"));
+        let present = root.join("games").join(SNES).join("Zelda");
+        write_file(&present.join("game.sfc"));
+        let registry = service.registry();
+        registry
+            .upsert(&extracted_snes_row("Mario", 1, &recorded))
+            .unwrap();
+        registry
+            .upsert(&extracted_snes_row("Zelda", 2, &present))
+            .unwrap();
+        registry
+            .upsert(&extracted_snes_row(
+                "Gone",
+                3,
+                &root.join("games").join(SNES).join("Gone"),
+            ))
+            .unwrap();
+
+        let rows = service.installed_rows().unwrap();
+        let by_title = |t: &str| rows.iter().find(|r| r.game.title == t).unwrap();
+        assert!(!by_title("Mario").missing);
+        assert_eq!(by_title("Mario").game.extracted_dir, path_string(&moved));
+        assert_eq!(
+            by_title("Mario").game.extracted_path,
+            path_string(&moved.join("game.sfc"))
+        );
+        assert!(!by_title("Zelda").missing);
+        assert!(by_title("Gone").missing);
+        // The re-point is stored, not just reported.
+        let stored = registry.find(Some(1), "", "").unwrap().unwrap();
+        assert_eq!(stored.extracted_dir, path_string(&moved));
+    }
+
+    #[test]
+    fn reconcile_is_a_no_op_while_the_library_gate_is_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("library");
+        let service = service_for_root(dir.path(), &root);
+        let recorded = root.join("games").join(SNES).join("Mario");
+        write_file(&root.join(SNES).join("Mario").join("game.sfc"));
+        service
+            .registry()
+            .upsert(&extracted_snes_row("Mario", 1, &recorded))
+            .unwrap();
+        service.set_library_gate(LibraryGate::closed(relocate::LIBRARY_MOVE_BUSY));
+
+        let rows = service.installed_rows().unwrap();
+        assert!(!rows[0].missing, "no row is called missing during a move");
+        assert_eq!(rows[0].game.extracted_dir, path_string(&recorded));
+    }
+
+    #[test]
+    fn reconcile_is_a_no_op_while_a_move_record_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("library");
+        let service = service_for_root(dir.path(), &root);
+        fs::create_dir_all(&root).unwrap();
+        let recorded = root.join("games").join(SNES).join("Gone");
+        service
+            .registry()
+            .upsert(&extracted_snes_row("Gone", 1, &recorded))
+            .unwrap();
+        fs::write(
+            relocate::journal_path(&dir.path().join("config.toml")),
+            "{}",
+        )
+        .unwrap();
+
+        let rows = service.installed_rows().unwrap();
+        assert!(!rows[0].missing);
+    }
+
+    #[test]
+    fn reconcile_is_a_no_op_while_the_root_is_unreachable() {
+        let dir = tempfile::tempdir().unwrap();
+        // The root folder itself is not there.
+        let root = dir.path().join("library");
+        let service = service_for_root(dir.path(), &root);
+        service
+            .registry()
+            .upsert(&extracted_snes_row(
+                "Gone",
+                1,
+                &root.join("games").join(SNES).join("Gone"),
+            ))
+            .unwrap();
+
+        let rows = service.installed_rows().unwrap();
+        assert!(!rows[0].missing, "an unreachable root is the dialog's case");
+    }
+
+    #[test]
+    fn locate_row_points_the_row_at_the_chosen_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("library");
+        fs::create_dir_all(&root).unwrap();
+        let service = service_for_root(dir.path(), &root);
+        let recorded = root.join("games").join(SNES).join("Mario");
+        service
+            .registry()
+            .upsert(&extracted_snes_row("Mario", 1, &recorded))
+            .unwrap();
+        let elsewhere = dir.path().join("backup");
+        fs::create_dir_all(&elsewhere).unwrap();
+
+        // Refused: the folder does not hold the game.
+        let err = service
+            .locate_row("Mario", SNES, &elsewhere)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("does not contain “Mario”"), "{err}");
+
+        // Accepted: a copy outside the library, chosen by the user.
+        write_file(&elsewhere.join("Mario").join("game.sfc"));
+        let row = service.locate_row("Mario", SNES, &elsewhere).unwrap();
+        assert_eq!(row.extracted_dir, path_string(&elsewhere.join("Mario")));
+        assert_eq!(
+            row.extracted_path,
+            path_string(&elsewhere.join("Mario").join("game.sfc"))
+        );
+        let rows = service.installed_rows().unwrap();
+        assert!(!rows[0].missing);
+
+        // Refused while a library move holds the gate.
+        service.set_library_gate(LibraryGate::closed(relocate::LIBRARY_MOVE_BUSY));
+        assert!(matches!(
+            service.locate_row("Mario", SNES, &elsewhere),
+            Err(LibraryError::LibraryBusy(_))
+        ));
+    }
+
+    #[test]
+    fn installed_row_serializes_flat_with_a_missing_flag() {
+        let row = InstalledRow {
+            game: InstalledGame {
+                title: "T".into(),
+                ..Default::default()
+            },
+            missing: true,
+        };
+        let json = serde_json::to_value(&row).unwrap();
+        assert_eq!(json["title"], "T");
+        assert_eq!(json["missing"], true);
+        assert!(json.get("game").is_none());
     }
 }

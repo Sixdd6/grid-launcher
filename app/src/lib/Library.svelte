@@ -4,6 +4,7 @@
   import { installed, refresh as refreshInstalled } from './stores/installed.svelte';
   import { updates } from './stores/updates.svelte';
   import { installedKey, visibleLibraryGames } from './library';
+  import { isMissing } from './library/missing';
   import { emptyText, entryForKey, matchesRail, railEntries, type RailKey } from './library/rail';
   import { librarySelection, selectRail } from './library/selection.svelte';
   import { LIBRARY_SORTS, normalizeSort, sortGames, sortLabel, titleContains, type LibrarySort } from './library/sort';
@@ -374,6 +375,7 @@
             platform={row.platform}
             coverUrl={row.cover_small_path || null}
             installed={true}
+            missing={isMissing(row)}
             updateLabel={updates.labelFor(row.rom_id)}
             {cloudPlatforms}
             focused={i === focusIndex && inputMode.directional}
@@ -385,7 +387,7 @@
               focusIndex = i;
               openDetails(row);
             }}
-            onPrimary={() => play(row)}
+            onPrimary={() => (isMissing(row) ? openDetails(row) : play(row))}
             onCloud={() => openDetails(row, 'save')}
             onHoverStart={() => hoverStart(row)}
             onHoverEnd={hover.end}
