@@ -304,6 +304,7 @@ export type CloudSettings = {
   upload_on_exit: boolean;
   skip_if_local_newer: boolean;
   upload_delay_seconds: number;
+  /** Saves kept per rom and slot; 0 keeps all. */
   retention_limit: number;
 };
 

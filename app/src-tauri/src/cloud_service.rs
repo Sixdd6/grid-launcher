@@ -655,8 +655,8 @@ impl CloudService {
 
     /// Persists `settings` verbatim — no clamping here (task ruling:
     /// clamping happens only where the delay is actually consumed/read,
-    /// not on write); `cloud_save_retention_limit`'s minimum-1 floor is
-    /// applied inside `ops` at upload time, not duplicated here either.
+    /// not on write). The save retention limit is stored as given; `0` means
+    /// keep every record (Q9).
     pub async fn set_settings(
         &self,
         config_path: &Path,
@@ -1731,6 +1731,7 @@ pub struct CloudSettingsDto {
     pub upload_on_exit: bool,
     pub skip_if_local_newer: bool,
     pub upload_delay_seconds: u64,
+    /// Saves kept per rom and slot; `0` keeps all.
     pub retention_limit: u32,
 }
 
@@ -2528,5 +2529,33 @@ mod tests {
         assert!(accepted_again, "a finished key must accept a new trigger");
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert_eq!(ran_again.load(Ordering::SeqCst), 1);
+    }
+
+    /// Q9: Settings shows an old stored default of 3 as 10 (the one-time
+    /// migration), and a user who then saves 3 keeps 3; `0` (unlimited) is
+    /// written as given.
+    #[tokio::test]
+    async fn settings_show_the_migrated_retention_limit_and_keep_a_chosen_3() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            "schema_version = 1\ncloud_save_retention_limit = 3\n",
+        )
+        .unwrap();
+        let cloud = CloudService::new();
+
+        let loaded = cloud.settings(&config_path).await.unwrap();
+        assert_eq!(loaded.retention_limit, 10);
+
+        for chosen in [3u32, 0] {
+            let updated = CloudSettingsDto {
+                retention_limit: chosen,
+                ..loaded.clone()
+            };
+            cloud.set_settings(&config_path, updated).await.unwrap();
+            let again = cloud.settings(&config_path).await.unwrap();
+            assert_eq!(again.retention_limit, chosen);
+        }
     }
 }

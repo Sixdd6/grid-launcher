@@ -68,7 +68,9 @@ There are several main sections to the application with buttons across the top b
 - **Settings** is a rail of five panes: **Connection** (server URL, user, whether a
   credential is stored in the OS keyring and whether the session is verified, Reconnect,
   Disconnect), **Cloud saves** (restore before launch, upload after exit, skip when the
-  local save is newer, upload delay, retention limit), **RetroAchievements** (username
+  local save is newer, upload delay, a save retention limit — default 10, 0 = unlimited;
+  the server's autocleanup applies it to slotted saves and the app prunes the others; an
+  install that still has the old default 3 moves to 10 once), **RetroAchievements** (username
   and a write-only token; Save fans the credentials out to every emulator that supports
   them, Clear removes them), **Updates** (the running version, when the startup check
   ran, the release notice with its Open release and Dismiss buttons, and the note that
@@ -162,6 +164,7 @@ Core behavior should include:
 - separate handling for save files and emulator state files
 - per-emulator configuration that determines how save discovery and filtering works
 - shared-save emulator scopes that surface emulator-wide backups with explicit warnings instead of pretending they are per-game saves
+- save retention after each successful save upload: the newest N per game and slot are kept (a slotted upload asks the server to clean its own rom+slot group; the app prunes null-slot saves and never deletes a slotted one); 0 keeps everything. States have no limit: each state is uploaded under its own slot file name, and the server replaces the record for that file name, so it keeps one copy per state slot file
 - immediate UI view switching with asynchronous cloud-record loading so the details panel remains responsive
 
 ## Folder-based saves

@@ -102,6 +102,52 @@ fn build_multipart_form(payload: &[(String, PathBuf)]) -> Result<Form, RommError
     Ok(form)
 }
 
+/// The `POST /api/saves` query (`cloud_mixin.py:2606-2624`): `rom_id`,
+/// `emulator`, `overwrite=true`, and `slot` only when it is non-empty.
+///
+/// Q9: `autocleanup=true&autocleanup_limit=<limit>` go out only with a
+/// slot AND a limit above 0. RomM's autocleanup groups by rom + slot,
+/// ignores the emulator, and never touches null-slot saves, so a slotted
+/// group belongs to the server and a null-slot group to
+/// `cloud::retention::prune_server_save_records`. A limit of 0 is unlimited.
+pub(crate) fn save_upload_query(
+    rom_id: &str,
+    emulator: &str,
+    slot: Option<&str>,
+    retention_limit: u32,
+) -> Vec<(&'static str, String)> {
+    let mut query: Vec<(&'static str, String)> = vec![
+        ("rom_id", rom_id.to_string()),
+        ("emulator", emulator.to_string()),
+        ("overwrite", "true".to_string()),
+    ];
+    if let Some(slot) = slot.filter(|s| !s.is_empty()) {
+        query.push(("slot", slot.to_string()));
+        if retention_limit > 0 {
+            query.push(("autocleanup", "true".to_string()));
+            query.push(("autocleanup_limit", retention_limit.to_string()));
+        }
+    }
+    query
+}
+
+/// A delete status that leaves the record gone: any 2xx, or 404/410 (the
+/// record was already gone — `cloud_mixin.py:1752-1758`).
+pub(crate) fn delete_status_is_success(status: u16) -> bool {
+    (200..300).contains(&status) || status == 404 || status == 410
+}
+
+fn delete_outcome(status: u16) -> Result<(), RommError> {
+    if delete_status_is_success(status) {
+        Ok(())
+    } else {
+        Err(RommError::Http {
+            status,
+            excerpt: String::new(),
+        })
+    }
+}
+
 impl RommClient {
     /// `GET /api/saves?rom_id=` (`cloud_mixin.py:1593`). Returns the raw
     /// JSON payload — see this module's doc comment for why record parsing
@@ -162,35 +208,24 @@ impl RommClient {
         self.get_bytes(&normalize_candidate_url(&relative)).await
     }
 
-    /// `POST /api/saves` multipart (`cloud_mixin.py:2478-2479,2606-2624`):
-    /// query `rom_id`, `emulator`, `overwrite=true` (the literal string,
-    /// matching Python's `params["overwrite"] = "true"`), and `slot` ONLY
-    /// when `slot` is `Some` and non-empty (`cloud_mixin.py:2610-2612`'s
-    /// `if slot_value:` truthiness check).
+    /// `POST /api/saves` multipart (`cloud_mixin.py:2478-2479,2606-2624`),
+    /// with the query from [`save_upload_query`].
     pub async fn upload_save(
         &self,
         rom_id: &str,
         emulator: &str,
         slot: Option<&str>,
+        retention_limit: u32,
         payload: &[(String, PathBuf)],
     ) -> Result<(), RommError> {
-        let mut query: Vec<(&str, String)> = vec![
-            ("rom_id", rom_id.to_string()),
-            ("emulator", emulator.to_string()),
-            ("overwrite", "true".to_string()),
-        ];
-        if let Some(slot) = slot {
-            if !slot.is_empty() {
-                query.push(("slot", slot.to_string()));
-            }
-        }
+        let query = save_upload_query(rom_id, emulator, slot, retention_limit);
         self.post_multipart("/api/saves", &query, payload).await
     }
 
     /// `POST /api/states` multipart (`cloud_mixin.py:2478-2479,2606-2624`):
-    /// query `rom_id`, `emulator` only — NO `slot`, NO `overwrite`. States
-    /// never carry those two params; the Python upload code only adds them
-    /// inside the `save_type == "save"` branch (`cloud_mixin.py:2609-2613`).
+    /// query `rom_id`, `emulator` only — NO `slot`, NO `overwrite`, NO
+    /// `autocleanup` (RomM's state endpoint has none of them; it replaces a
+    /// state uploaded under the same file name and emulator in place).
     pub async fn upload_state(
         &self,
         rom_id: &str,
@@ -261,6 +296,19 @@ impl RommClient {
             .await
     }
 
+    /// Deletes ONE save record. RomM's bulk delete stops at the first
+    /// missing id with a 404 and keeps every later id, so retention never
+    /// batches. HTTP 404/410 mean the record is already gone: `Ok`.
+    pub async fn delete_save_record(&self, id: i64) -> Result<(), RommError> {
+        delete_outcome(self.delete_save(id).await?)
+    }
+
+    /// Deletes ONE state record; same contract as
+    /// [`Self::delete_save_record`].
+    pub async fn delete_state_record(&self, id: i64) -> Result<(), RommError> {
+        delete_outcome(self.delete_state(id).await?)
+    }
+
     async fn post_delete(&self, path: &str, body: Value) -> Result<u16, RommError> {
         let resp = self
             .http
@@ -275,5 +323,58 @@ impl RommClient {
             return Err(e);
         }
         Ok(status.as_u16())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn has(query: &[(&str, String)], key: &str, value: &str) -> bool {
+        query.iter().any(|(k, v)| *k == key && v == value)
+    }
+
+    fn has_key(query: &[(&str, String)], key: &str) -> bool {
+        query.iter().any(|(k, _)| *k == key)
+    }
+
+    #[test]
+    fn save_upload_query_sends_autocleanup_only_with_a_slot_and_a_limit() {
+        // Slot and limit: the server owns this rom+slot group.
+        let q = save_upload_query("42", "xemu", Some("shared-media"), 10);
+        assert!(has(&q, "rom_id", "42"));
+        assert!(has(&q, "emulator", "xemu"));
+        assert!(has(&q, "overwrite", "true"));
+        assert!(has(&q, "slot", "shared-media"));
+        assert!(has(&q, "autocleanup", "true"));
+        assert!(has(&q, "autocleanup_limit", "10"));
+
+        // No slot: the server never cleans null-slot saves, so no params.
+        let q = save_upload_query("42", "Snes9x", None, 10);
+        assert!(!has_key(&q, "slot"));
+        assert!(!has_key(&q, "autocleanup"));
+        assert!(!has_key(&q, "autocleanup_limit"));
+
+        // A blank slot is no slot.
+        let q = save_upload_query("42", "Snes9x", Some(""), 10);
+        assert!(!has_key(&q, "slot"));
+        assert!(!has_key(&q, "autocleanup"));
+        assert!(!has_key(&q, "autocleanup_limit"));
+
+        // Limit 0 means unlimited: the slot goes out, autocleanup does not.
+        let q = save_upload_query("42", "Redream", Some("vmu0"), 0);
+        assert!(has(&q, "slot", "vmu0"));
+        assert!(!has_key(&q, "autocleanup"));
+        assert!(!has_key(&q, "autocleanup_limit"));
+    }
+
+    #[test]
+    fn delete_status_counts_404_and_410_as_already_gone() {
+        for status in [200u16, 204, 404, 410] {
+            assert!(delete_status_is_success(status), "{status}");
+        }
+        for status in [400u16, 409, 422, 500, 502] {
+            assert!(!delete_status_is_success(status), "{status}");
+        }
     }
 }

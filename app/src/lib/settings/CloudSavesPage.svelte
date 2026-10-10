@@ -88,11 +88,11 @@
       />
     </label>
     <label>
-      Save retention limit
+      Save retention limit (0 = unlimited)
       <input
         data-testid="cloud-settings-retention-limit"
         type="number"
-        min="1"
+        min="0"
         bind:value={cloudSettings.retention_limit}
       />
     </label>

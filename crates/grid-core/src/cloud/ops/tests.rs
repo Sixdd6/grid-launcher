@@ -381,7 +381,7 @@ fn slot_assignment_table() {
 }
 
 /// Doc 06 "Upload execution": a failing POST isolates to its own job, and
-/// retention pruning still runs afterwards with the clamped limit.
+/// retention pruning still runs afterwards.
 #[tokio::test]
 async fn upload_isolates_per_job_failures_and_prunes_after() {
     let server = MockServer::start().await;
@@ -419,7 +419,7 @@ async fn upload_isolates_per_job_failures_and_prunes_after() {
 
     let entry = entry_named("Dolphin", saves.path().to_str().unwrap());
     let mut config = config_with(entry, "GameCube");
-    config.cloud_save_retention_limit = 0; // clamped to 1 (D7)
+    config.cloud_save_retention_limit = 1;
     let fx = Fixture::new(config);
     let mut caches = CloudCaches::default();
 
@@ -448,7 +448,112 @@ async fn upload_isolates_per_job_failures_and_prunes_after() {
         .into_iter()
         .filter(|r| r.url.path() == "/api/saves/delete")
         .count();
-    assert_eq!(deletes, 2, "limit clamped to 1 keeps only the newest");
+    assert_eq!(deletes, 2, "limit 1 keeps only the newest");
+}
+
+fn requests_to(requests: &[wiremock::Request], verb: &str, route: &str) -> Vec<wiremock::Request> {
+    requests
+        .iter()
+        .filter(|r| r.method.as_str() == verb && r.url.path() == route)
+        .cloned()
+        .collect()
+}
+
+fn query_of(request: &wiremock::Request) -> std::collections::HashMap<String, String> {
+    request
+        .url
+        .query_pairs()
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect()
+}
+
+/// Q9: a save retention limit of 0 is unlimited — no autocleanup params,
+/// no record list, no delete.
+#[tokio::test]
+async fn save_retention_limit_zero_prunes_nothing() {
+    let server = MockServer::start().await;
+    mock_ok(&server, "POST", "/api/saves", json!({})).await;
+    let client = client_for(&server);
+
+    let saves = TempDir::new().unwrap();
+    write_file(&saves.path().join("zelda.srm"), b"a");
+    let mut config = config_with(
+        entry_named("Dolphin", saves.path().to_str().unwrap()),
+        "GameCube",
+    );
+    config.cloud_save_retention_limit = 0;
+    let fx = Fixture::new(config);
+
+    let report = upload_cloud_files_for_game(
+        &client,
+        &fx.ctx(),
+        &mut CloudCaches::default(),
+        &game("Zelda", "GameCube", "7"),
+        SaveType::Save,
+    )
+    .await;
+    assert_eq!((report.uploaded, report.total), (1, 1));
+
+    let requests = server.received_requests().await.unwrap();
+    let paths: Vec<&str> = requests.iter().map(|r| r.url.path()).collect();
+    assert_eq!(paths, vec!["/api/saves"], "only the upload");
+    assert!(!query_of(&requests[0]).contains_key("autocleanup"));
+}
+
+/// Q9 owner rule: a slotted save upload hands its rom+slot group to the
+/// server's autocleanup, and the client prune never deletes a slotted
+/// record.
+#[tokio::test]
+async fn slotted_save_upload_sends_autocleanup_and_the_client_skips_slotted_records() {
+    let server = MockServer::start().await;
+    mock_ok(&server, "POST", "/api/saves", json!({})).await;
+    mock_ok(
+        &server,
+        "GET",
+        "/api/saves",
+        json!([
+            {"id": 1, "emulator": "Redream", "slot": "vmu0", "file_name": "vmu0.bin", "updated_at": "2026-01-03T00:00:00Z"},
+            {"id": 2, "emulator": "Redream", "slot": "vmu0", "file_name": "vmu0.bin", "updated_at": "2026-01-02T00:00:00Z"},
+            {"id": 3, "emulator": "Redream", "slot": "vmu0", "file_name": "vmu0.bin", "updated_at": "2026-01-01T00:00:00Z"}
+        ]),
+    )
+    .await;
+    mock_ok(&server, "POST", "/api/saves/delete", json!([])).await;
+    let client = client_for(&server);
+
+    let saves = TempDir::new().unwrap();
+    write_file(&saves.path().join("shenmue_vmu0.bin"), b"vmu");
+    let mut config = config_with(
+        entry_named("Redream", saves.path().to_str().unwrap()),
+        "Dreamcast",
+    );
+    config.cloud_save_retention_limit = 1;
+    let fx = Fixture::new(config);
+
+    let report = upload_cloud_files_for_game(
+        &client,
+        &fx.ctx(),
+        &mut CloudCaches::default(),
+        &game("Shenmue", "Dreamcast", "7"),
+        SaveType::Save,
+    )
+    .await;
+    assert_eq!(report.uploaded, 1, "{:?}", report.messages);
+
+    let requests = server.received_requests().await.unwrap();
+    let uploads = requests_to(&requests, "POST", "/api/saves");
+    assert_eq!(uploads.len(), 1);
+    let query = query_of(&uploads[0]);
+    assert_eq!(query.get("slot").map(String::as_str), Some("vmu0"));
+    assert_eq!(query.get("autocleanup").map(String::as_str), Some("true"));
+    assert_eq!(
+        query.get("autocleanup_limit").map(String::as_str),
+        Some("1")
+    );
+    assert!(
+        requests_to(&requests, "POST", "/api/saves/delete").is_empty(),
+        "the client must never prune a slotted group"
+    );
 }
 
 // --- restore -----------------------------------------------------------

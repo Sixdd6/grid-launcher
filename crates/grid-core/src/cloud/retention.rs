@@ -1,11 +1,19 @@
 //! Client-side retention pruning of server save records.
 //!
-//! Ported from `_prune_server_save_records`
-//! (`grid_launcher/ui/mixins/cloud_mixin.py:1676-1765`). See
-//! `docs/porting/06-cloud-saves.md`, "Retention pruning", for the
-//! narrative six-step version this module implements verbatim. There is
-//! no client-side pruning of states (doc 06, same section) — hence this
-//! module has only the one save-side entry point.
+//! Saves: ported from `_prune_server_save_records`
+//! (`grid_launcher/ui/mixins/cloud_mixin.py:1676-1765`).
+//!
+//! Q9 owner rule for saves (one owner per group, never both): RomM's
+//! `autocleanup` groups saves by rom + slot, ignores the emulator, and never
+//! cleans a null-slot save. So a record with a non-blank `slot` belongs to
+//! the server (GRID sends `autocleanup` on every slotted upload, see
+//! `romm::cloud::save_upload_query`), and [`saves_to_prune`] never selects
+//! one. A null-slot record belongs to the client prune here. The two never
+//! touch the same group, so they can never prune it to different counts.
+//!
+//! There is no state retention: RomM replaces a state uploaded under the
+//! same file name and emulator in place, and GRID uploads each state under
+//! its own file name, so each state slot file has one cloud record.
 
 use std::collections::HashMap;
 
@@ -17,73 +25,54 @@ use super::restore::{
     id_rank, record_timestamp, server_records_from_payload, slot_dedupe_key, stringify_id,
 };
 
-/// `_prune_server_save_records(rom_id, emulator_name, keep_latest)`
-/// (`cloud_mixin.py:1676-1765`). Steps, in order:
-///
-/// 1. `keep = max(1, keep)` (:1677).
-/// 2. Refetch `GET /api/saves?rom_id=` via [`RommClient::saves_for_rom`],
-///    parsed through [`server_records_from_payload`] — the SAME function
-///    `saves_for_rom`'s Python counterpart (`_server_save_records_for_rom`)
-///    already runs, so a blank-id record is dropped right here, before
-///    this function's own loop ever sees it (see the "BLANK id" note on
-///    step 6 below).
-/// 3. Keep records whose `emulator` field matches `emulator_name`
-///    case-insensitively; when `emulator_name` is blank, EVERY record
-///    passes (:1682-1690's `not emulator_key or (...)"`) — this is
-///    DIFFERENT from [`super::restore::latest_server_record`]'s "fall back
-///    to all when NOTHING matches" rule: here, a non-blank
-///    `emulator_name` that matches nothing prunes nothing at all.
-/// 4. Sort by `(timestamp, numeric id)` descending (:1701), reusing
-///    [`record_timestamp`] and [`id_rank`] exactly like
-///    [`super::restore::sort_server_records_by_recency`]'s own key.
-/// 5. Group by [`slot_dedupe_key`] (:1706-1719), first-seen group order
-///    preserved.
-/// 6. Within each group, everything after the first `keep` entries is
-///    stale (:1721-1723). For each stale record: a BLANK id (after
-///    stringify + trim) is silently skipped — counted in neither return
-///    value, no request sent (:1734-1736; unreachable via this function's
-///    OWN fetch path per step 2's note, but kept here as the same
-///    defense-in-depth Python has, and the observable contract — never
-///    requested, never counted — is identical either way). A
-///    NON-INTEGER id is recorded as failed WITHOUT a request
-///    (:1737-1741). Otherwise `POST /api/saves/delete {"saves": [id]}`
-///    via [`RommClient::delete_save`]: HTTP 404 or 410 count as a
-///    SUCCESSFUL deletion (:1752-1758); any other non-2xx status, or a
-///    transport/auth error, records the id as failed and the loop
-///    continues (:1759-1765).
-///
-/// Returns `(deleted_count, failed_ids)`. Fix round 1 (controller ruling): a
-/// failure to refetch the record list itself (step 2) now returns
-/// `(0, vec![err.to_string()])` — one synthetic failed-id entry holding the
-/// error text, `deleted_count` staying `0`. This reproduces, INSIDE this
-/// function, what Python's CALLER does with the propagated exception
-/// (`cloud_mixin.py:2634-2641`: `except (...) as error:
-/// retention_failed_ids = [str(error)]`), since that caller — the upload
-/// flow that decides whether to prune at all — is a future ops-layer task
-/// not yet wired up in the port; folding its exception handling in here
-/// keeps the observable outcome identical regardless of which layer ends
-/// up doing it, which matters because a later task (Task 16) consumes this
-/// function's return value directly. `RommError`'s `Display` impl (see
-/// `romm/error.rs`) never embeds the request or its headers, so this text
-/// carries no secret — same guarantee the existing `Http`/`Decode`
-/// variants already give every other caller.
-pub async fn prune_server_save_records(
-    client: &RommClient,
-    rom_id: &str,
-    emulator_name: &str,
-    keep: u32,
-) -> (usize, Vec<String>) {
-    let keep = keep.max(1) as usize;
+/// `true` when the record has a non-blank `slot` string.
+fn has_slot(record: &Value) -> bool {
+    record
+        .get("slot")
+        .and_then(Value::as_str)
+        .is_some_and(|s| !s.trim().is_empty())
+}
 
-    let payload = match client.saves_for_rom(rom_id).await {
-        Ok(payload) => payload,
-        Err(err) => return (0, vec![err.to_string()]),
-    };
-    let records = server_records_from_payload(&payload);
+/// Splits `sorted` (newest first) into groups by `key` in first-seen
+/// order, and returns every record after the first `keep` of each group.
+fn stale_after_keep(sorted: Vec<Value>, keep: usize, key: impl Fn(&Value) -> String) -> Vec<Value> {
+    let mut group_order: Vec<String> = Vec::new();
+    let mut groups: HashMap<String, Vec<Value>> = HashMap::new();
+    for item in sorted {
+        let k = key(&item);
+        if !groups.contains_key(&k) {
+            group_order.push(k.clone());
+        }
+        groups.entry(k).or_default().push(item);
+    }
+    let mut stale = Vec::new();
+    for k in group_order {
+        if let Some(group) = groups.remove(&k) {
+            stale.extend(group.into_iter().skip(keep));
+        }
+    }
+    stale
+}
 
+/// The save records the client prune deletes (`cloud_mixin.py:1677-1723`),
+/// pure:
+///
+/// 1. `keep == 0` is unlimited: nothing.
+/// 2. Records with a non-blank `slot` are skipped: the server owns them.
+/// 3. Records whose `emulator` matches `emulator_name` case-insensitively;
+///    a blank `emulator_name` passes every record (:1682-1690). Unlike
+///    [`super::restore::latest_server_record`], no match prunes nothing.
+/// 4. Sorted by `(timestamp, numeric id)` descending (:1701).
+/// 5. Grouped by [`slot_dedupe_key`] (here: the file stem, as the slot is
+///    blank); everything after the first `keep` of a group is stale.
+pub fn saves_to_prune(records: &[Value], emulator_name: &str, keep: u32) -> Vec<Value> {
+    if keep == 0 {
+        return Vec::new();
+    }
     let emulator_key = emulator_name.trim().to_lowercase();
     let mut matching: Vec<Value> = records
-        .into_iter()
+        .iter()
+        .filter(|item| !has_slot(item))
         .filter(|item| {
             emulator_key.is_empty()
                 || item
@@ -92,6 +81,7 @@ pub async fn prune_server_save_records(
                     .map(|s| s.trim().to_lowercase() == emulator_key)
                     .unwrap_or(false)
         })
+        .cloned()
         .collect();
 
     matching.sort_by(|a, b| {
@@ -104,28 +94,40 @@ pub async fn prune_server_save_records(
             .then(b_key.1.cmp(&a_key.1))
     });
 
-    let mut group_order: Vec<String> = Vec::new();
-    let mut groups: HashMap<String, Vec<Value>> = HashMap::new();
-    for item in matching {
-        let key = slot_dedupe_key(&item);
-        if !groups.contains_key(&key) {
-            group_order.push(key.clone());
-        }
-        groups.entry(key).or_default().push(item);
-    }
+    stale_after_keep(matching, keep as usize, slot_dedupe_key)
+}
 
-    let mut stale: Vec<Value> = Vec::new();
-    for key in group_order {
-        if let Some(group) = groups.remove(&key) {
-            if group.len() > keep {
-                stale.extend(group.into_iter().skip(keep));
-            }
-        }
+/// `_prune_server_save_records(rom_id, emulator_name, keep_latest)`
+/// (`cloud_mixin.py:1676-1765`): `keep == 0` returns at once without a
+/// request. Otherwise it lists `GET /api/saves?rom_id=` (parsed through
+/// [`server_records_from_payload`], which drops blank ids), selects
+/// [`saves_to_prune`], and deletes each stale record with one request
+/// ([`RommClient::delete_save_record`]: 404/410 count as deleted). A
+/// non-integer id is recorded as failed WITHOUT a request (:1737-1741); any
+/// other failure records the id and the loop continues (:1759-1765).
+///
+/// Returns `(deleted_count, failed_ids)`. A failure to list the records
+/// returns `(0, vec![err.to_string()])`. `RommError`'s `Display` never
+/// embeds the request, its URL, or its headers, so this text carries no
+/// secret.
+pub async fn prune_server_save_records(
+    client: &RommClient,
+    rom_id: &str,
+    emulator_name: &str,
+    keep: u32,
+) -> (usize, Vec<String>) {
+    if keep == 0 {
+        return (0, Vec::new());
     }
+    let payload = match client.saves_for_rom(rom_id).await {
+        Ok(payload) => payload,
+        Err(err) => return (0, vec![err.to_string()]),
+    };
+    let records = server_records_from_payload(&payload);
 
     let mut deleted_count = 0usize;
     let mut failed_ids: Vec<String> = Vec::new();
-    for record in stale {
+    for record in saves_to_prune(&records, emulator_name, keep) {
         let raw_id = record
             .get("id")
             .cloned()
@@ -138,13 +140,73 @@ pub async fn prune_server_save_records(
             failed_ids.push(save_id);
             continue;
         };
-        match client.delete_save(numeric_id).await {
-            Ok(status) if (200..300).contains(&status) || status == 404 || status == 410 => {
-                deleted_count += 1;
-            }
-            _ => failed_ids.push(save_id),
+        match client.delete_save_record(numeric_id).await {
+            Ok(()) => deleted_count += 1,
+            Err(_) => failed_ids.push(save_id),
         }
     }
 
     (deleted_count, failed_ids)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn ids(records: &[Value]) -> Vec<i64> {
+        let mut out: Vec<i64> = records.iter().map(id_rank).collect();
+        out.sort_unstable();
+        out
+    }
+
+    // --- saves_to_prune ---------------------------------------------------
+
+    #[test]
+    fn saves_limit_zero_prunes_nothing() {
+        let records = vec![
+            json!({"id": 1, "emulator": "Snes9x", "file_name": "a.srm", "updated_at": "2026-01-01T00:00:00Z"}),
+            json!({"id": 2, "emulator": "Snes9x", "file_name": "a.srm", "updated_at": "2026-01-02T00:00:00Z"}),
+        ];
+        assert!(saves_to_prune(&records, "Snes9x", 0).is_empty());
+    }
+
+    #[test]
+    fn saves_with_a_slot_belong_to_the_server_and_are_never_pruned_here() {
+        let records = vec![
+            json!({"id": 1, "emulator": "Redream", "slot": "vmu0", "updated_at": "2026-01-01T00:00:00Z"}),
+            json!({"id": 2, "emulator": "Redream", "slot": "vmu0", "updated_at": "2026-01-02T00:00:00Z"}),
+            json!({"id": 3, "emulator": "Redream", "slot": "vmu0", "updated_at": "2026-01-03T00:00:00Z"}),
+            json!({"id": 4, "emulator": "xemu", "slot": "shared-media", "updated_at": "2026-01-01T00:00:00Z"}),
+            json!({"id": 5, "emulator": "xemu", "slot": "shared-media", "updated_at": "2026-01-02T00:00:00Z"}),
+        ];
+        assert!(saves_to_prune(&records, "Redream", 1).is_empty());
+        assert!(saves_to_prune(&records, "xemu", 1).is_empty());
+        assert!(saves_to_prune(&records, "", 1).is_empty());
+    }
+
+    #[test]
+    fn saves_without_a_slot_keep_n_per_file_stem() {
+        let records = vec![
+            json!({"id": 1, "emulator": "Snes9x", "slot": null, "file_name": "a.srm", "updated_at": "2026-01-01T00:00:00Z"}),
+            json!({"id": 2, "emulator": "Snes9x", "slot": null, "file_name": "a.srm", "updated_at": "2026-01-02T00:00:00Z"}),
+            json!({"id": 3, "emulator": "Snes9x", "slot": "", "file_name": "a.srm", "updated_at": "2026-01-03T00:00:00Z"}),
+            json!({"id": 4, "emulator": "Snes9x", "file_name": "b.srm", "updated_at": "2026-01-01T00:00:00Z"}),
+            json!({"id": 5, "emulator": "Snes9x", "file_name": "b.srm", "updated_at": "2026-01-02T00:00:00Z"}),
+            // A slotted record in the same rom stays out of every group.
+            json!({"id": 6, "emulator": "Snes9x", "slot": "auto", "file_name": "a.srm", "updated_at": "2025-01-01T00:00:00Z"}),
+        ];
+        assert_eq!(ids(&saves_to_prune(&records, "Snes9x", 1)), vec![1, 2, 4]);
+        assert_eq!(ids(&saves_to_prune(&records, "Snes9x", 2)), vec![1]);
+    }
+
+    #[test]
+    fn saves_equal_timestamps_keep_the_higher_id() {
+        let records = vec![
+            json!({"id": 7, "emulator": "Snes9x", "file_name": "a.srm", "updated_at": "2026-01-01T00:00:00Z"}),
+            json!({"id": 9, "emulator": "Snes9x", "file_name": "a.srm", "updated_at": "2026-01-01T00:00:00Z"}),
+            json!({"id": 8, "emulator": "Snes9x", "file_name": "a.srm", "updated_at": "2026-01-01T00:00:00Z"}),
+        ];
+        assert_eq!(ids(&saves_to_prune(&records, "Snes9x", 1)), vec![7, 8]);
+    }
 }

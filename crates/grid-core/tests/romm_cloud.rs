@@ -106,6 +106,7 @@ async fn upload_save_sends_query_and_multipart_shape() {
             "42",
             "Snes9x",
             Some("vmu0"),
+            10,
             &[("saveFile".to_string(), save_file.clone())],
         )
         .await
@@ -117,6 +118,7 @@ async fn upload_save_sends_query_and_multipart_shape() {
             "42",
             "Snes9x",
             None,
+            10,
             &[("saveFile".to_string(), save_file.clone())],
         )
         .await
@@ -131,6 +133,10 @@ async fn upload_save_sends_query_and_multipart_shape() {
     assert_eq!(query.get("rom_id").unwrap(), "42");
     assert_eq!(query.get("emulator").unwrap(), "Snes9x");
     assert_eq!(query.get("slot").unwrap(), "vmu0");
+    // Q9: a slotted upload hands retention for its rom+slot group to the
+    // server.
+    assert_eq!(query.get("autocleanup").unwrap(), "true");
+    assert_eq!(query.get("autocleanup_limit").unwrap(), "10");
     let body = String::from_utf8_lossy(&with_slot.body);
     assert!(body.contains("name=\"saveFile\""), "body: {body}");
     assert!(
@@ -143,6 +149,9 @@ async fn upload_save_sends_query_and_multipart_shape() {
     let query = query_pairs(&without_slot.url);
     assert_eq!(query.get("overwrite").unwrap(), "true");
     assert!(!query.contains_key("slot"), "query: {query:?}");
+    // The server never cleans null-slot saves; the client owns them.
+    assert!(!query.contains_key("autocleanup"), "query: {query:?}");
+    assert!(!query.contains_key("autocleanup_limit"), "query: {query:?}");
 }
 
 // --- upload multipart: per-part Content-Type (fix round 1) ---------------
@@ -166,6 +175,7 @@ async fn upload_save_multipart_parts_carry_a_guessed_content_type() {
             "42",
             "Snes9x",
             None,
+            10,
             &[
                 ("saveFile".to_string(), save_file),
                 ("screenshotFile".to_string(), screenshot_file),
@@ -210,6 +220,7 @@ async fn upload_save_skips_a_missing_payload_path_instead_of_failing() {
             "42",
             "Snes9x",
             None,
+            10,
             &[
                 ("saveFile".to_string(), save_file),
                 ("screenshotFile".to_string(), missing_screenshot),
@@ -251,6 +262,8 @@ async fn upload_state_sends_no_slot_and_no_overwrite() {
     let requests = server.received_requests().await.unwrap();
     assert_eq!(requests.len(), 1);
     let query = query_pairs(&requests[0].url);
+    assert!(!query.contains_key("autocleanup"), "query: {query:?}");
+    let query = query_pairs(&requests[0].url);
     assert_eq!(query.get("rom_id").unwrap(), "42");
     assert_eq!(query.get("emulator").unwrap(), "Snes9x");
     assert!(!query.contains_key("overwrite"), "query: {query:?}");
@@ -284,6 +297,53 @@ async fn delete_bodies_use_the_right_keys() {
     let client = client_for(&server).await;
     assert_eq!(client.delete_save(7).await.unwrap(), 200);
     assert_eq!(client.delete_state(9).await.unwrap(), 200);
+}
+
+// --- one-id delete helpers: 404 is "already gone" ------------------------
+
+#[tokio::test]
+async fn delete_record_helpers_send_one_id_and_treat_404_as_success() {
+    let server = MockServer::start().await;
+    for (route, key, id, status) in [
+        ("/api/states/delete", "states", 5, 200),
+        ("/api/states/delete", "states", 6, 404),
+        ("/api/states/delete", "states", 7, 410),
+        ("/api/states/delete", "states", 8, 500),
+        ("/api/saves/delete", "saves", 15, 404),
+        ("/api/saves/delete", "saves", 16, 500),
+    ] {
+        Mock::given(method("POST"))
+            .and(path(route))
+            .and(body_json(json!({ key: [id] })))
+            .respond_with(ResponseTemplate::new(status))
+            .mount(&server)
+            .await;
+    }
+    let client = client_for(&server).await;
+
+    assert!(client.delete_state_record(5).await.is_ok());
+    assert!(client.delete_state_record(6).await.is_ok());
+    assert!(client.delete_state_record(7).await.is_ok());
+    assert!(matches!(
+        client.delete_state_record(8).await,
+        Err(RommError::Http { status: 500, .. })
+    ));
+    assert!(client.delete_save_record(15).await.is_ok());
+    assert!(matches!(
+        client.delete_save_record(16).await,
+        Err(RommError::Http { status: 500, .. })
+    ));
+
+    // One id per request, never a batch.
+    for request in server.received_requests().await.unwrap() {
+        let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+        let list = body
+            .get("states")
+            .or_else(|| body.get("saves"))
+            .and_then(|v| v.as_array())
+            .unwrap();
+        assert_eq!(list.len(), 1, "{body}");
+    }
 }
 
 // --- get_relative_bytes: leading slash + D4 absolute rejection -----------
@@ -323,8 +383,11 @@ async fn get_relative_bytes_prefixes_a_slash_and_rejects_absolute_urls() {
 
 // --- retention pruning ----------------------------------------------------
 
-fn save_record(id: i64, slot: &str, updated_at: &str, emulator: &str) -> serde_json::Value {
-    json!({"id": id, "slot": slot, "updated_at": updated_at, "emulator": emulator})
+/// A null-slot save record, grouped by its file stem. Q9: the client prune
+/// owns only null-slot groups; a slotted record belongs to the server's
+/// `autocleanup` (see `prune_never_deletes_slotted_records`).
+fn save_record(id: i64, stem: &str, updated_at: &str, emulator: &str) -> serde_json::Value {
+    json!({"id": id, "slot": null, "file_name": format!("{stem}.bin"), "updated_at": updated_at, "emulator": emulator})
 }
 
 #[tokio::test]
@@ -414,15 +477,15 @@ async fn prune_blank_id_skipped_non_integer_failed() {
     let server = MockServer::start().await;
     let records = json!([
         // Newest: kept (within the keep=1 budget).
-        {"id": 5, "slot": "vmu0", "updated_at": "2026-04-08T11:00:00Z", "emulator": "Redream"},
+        {"id": 5, "file_name": "vmu0.bin", "updated_at": "2026-04-08T11:00:00Z", "emulator": "Redream"},
         // Blank id: dropped upstream by `server_records_from_payload`
         // itself (it never becomes a matching record at all) — the
         // observable contract is identical to being dropped in this
         // function's own loop: never requested, never counted.
-        {"id": "", "slot": "vmu0", "updated_at": "2026-04-08T10:00:00Z", "emulator": "Redream"},
+        {"id": "", "file_name": "vmu0.bin", "updated_at": "2026-04-08T10:00:00Z", "emulator": "Redream"},
         // Non-integer id, oldest: stale, and fails WITHOUT a delete
         // request ever being sent.
-        {"id": "abc", "slot": "vmu0", "updated_at": "2026-04-08T09:00:00Z", "emulator": "Redream"},
+        {"id": "abc", "file_name": "vmu0.bin", "updated_at": "2026-04-08T09:00:00Z", "emulator": "Redream"},
     ]);
     Mock::given(method("GET"))
         .and(path("/api/saves"))
@@ -476,6 +539,67 @@ async fn prune_refetch_failure_returns_a_synthetic_failed_id() {
     assert!(!failed[0].contains("Bearer"), "failed: {failed:?}");
 }
 
+// --- Q9: owner per group, limit 0, and state pruning ---------------------
+
+async fn delete_requests(server: &MockServer, route: &str) -> Vec<serde_json::Value> {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.url.path() == route)
+        .map(|r| serde_json::from_slice(&r.body).unwrap())
+        .collect()
+}
+
+#[tokio::test]
+async fn prune_never_deletes_slotted_records() {
+    let server = MockServer::start().await;
+    let records = json!([
+        {"id": 1, "slot": "vmu0", "file_name": "vmu0.bin", "updated_at": "2026-04-08T09:00:00Z", "emulator": "Redream"},
+        {"id": 2, "slot": "vmu0", "file_name": "vmu0.bin", "updated_at": "2026-04-08T10:00:00Z", "emulator": "Redream"},
+        {"id": 3, "slot": "vmu0", "file_name": "vmu0.bin", "updated_at": "2026-04-08T11:00:00Z", "emulator": "Redream"},
+        // Null slot, same emulator: this group is the client's.
+        {"id": 4, "slot": null, "file_name": "sonic.bin", "updated_at": "2026-04-08T09:00:00Z", "emulator": "Redream"},
+        {"id": 5, "slot": null, "file_name": "sonic.bin", "updated_at": "2026-04-08T10:00:00Z", "emulator": "Redream"},
+    ]);
+    Mock::given(method("GET"))
+        .and(path("/api/saves"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(records))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/saves/delete"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+
+    let client = client_for(&server).await;
+    let (deleted, failed) = prune_server_save_records(&client, "42", "Redream", 1).await;
+
+    assert_eq!(deleted, 1);
+    assert!(failed.is_empty(), "failed: {failed:?}");
+    assert_eq!(
+        delete_requests(&server, "/api/saves/delete").await,
+        vec![json!({"saves": [4]})]
+    );
+}
+
+#[tokio::test]
+async fn prune_limit_zero_is_unlimited_and_sends_nothing() {
+    let server = MockServer::start().await;
+    let client = client_for(&server).await;
+
+    assert_eq!(
+        prune_server_save_records(&client, "42", "Redream", 0).await,
+        (0, Vec::new())
+    );
+    assert!(
+        server.received_requests().await.unwrap().is_empty(),
+        "limit 0 must not even list the records"
+    );
+}
+
 // --- 401 vs 403 on the write paths ----------------------------------------
 
 #[tokio::test]
@@ -516,7 +640,13 @@ async fn upload_save_maps_403_to_forbidden() {
     let file = temp_payload(&dir, "game.srm", b"save");
     let client = client_for(&server).await;
     let err = client
-        .upload_save("1", "retroarch", None, &[("game.srm".to_string(), file)])
+        .upload_save(
+            "1",
+            "retroarch",
+            None,
+            10,
+            &[("game.srm".to_string(), file)],
+        )
         .await
         .unwrap_err();
     assert!(matches!(err, RommError::Forbidden), "{err:?}");

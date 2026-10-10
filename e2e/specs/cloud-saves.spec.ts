@@ -37,7 +37,9 @@ const testId = (id: string) => `[data-testid="${id}"]`;
  *   download completing strictly before the emulator's own writes.
  * - rom 603 "SaveSyncRetention": a local save file, plus FOUR server
  *   records in one slot group (`saves.json`). Scenario 4 (retention
- *   pruning against the default `cloud_save_retention_limit` of 3).
+ *   pruning against `cloud_save_retention_limit = 3`, stored by the seed
+ *   with the Q9 migration marker so it is not moved to 10;
+ *   the upload has no slot, so the app prunes and no autocleanup is sent).
  *
  * The mock RomM server (`e2e/mock-romm/server.mjs`) runs as its own
  * process (scripts/e2e.sh's `run_group_attempt`), so this spec inspects
@@ -145,8 +147,13 @@ describe('cloud-saves', () => {
     await delayInput.waitForExist({ timeout: TRANSITION_TIMEOUT });
     await delayInput.clearValue();
     await delayInput.setValue('0');
+    // Q9: the seed stores 3 with the migration marker set, so the one-time
+    // move to 10 does not apply and the chosen 3 is kept.
+    expect(await $(testId('cloud-settings-retention-limit')).getValue()).toBe('3');
     await $(testId('cloud-settings-save')).click();
     await waitForConfigLine('auto_cloud_save_upload_delay_seconds = 0');
+    await waitForConfigLine('cloud_save_retention_limit = 3');
+    await waitForConfigLine('cloud_retention_default_migrated = true');
     await $(testId('nav-server')).click();
     await $(testId('settings-view')).waitForDisplayed({
       timeout: TRANSITION_TIMEOUT,
@@ -294,6 +301,13 @@ describe('cloud-saves', () => {
     );
 
     const after = (await mockRequests()).slice(before);
+    // Q9 owner rule: a null-slot upload never asks for server autocleanup;
+    // the app prunes that group itself.
+    const uploads = after.filter((r) => r.method === 'POST' && r.path.startsWith('/api/saves?'));
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0].query?.slot).toBeUndefined();
+    expect(uploads[0].query?.autocleanup).toBeUndefined();
+    expect(uploads[0].query?.autocleanup_limit).toBeUndefined();
     const deletes = after.filter((r) => r.method === 'POST' && r.path === '/api/saves/delete');
     expect(deletes).toHaveLength(1);
     expect(deletes[0].bodyJson).toEqual({ saves: [9004] });

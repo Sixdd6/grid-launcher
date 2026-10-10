@@ -1019,15 +1019,17 @@ pub async fn delete_cloud_record(
     save_type: SaveType,
     id: i64,
 ) -> Result<(), String> {
-    let status = match save_type {
-        SaveType::Save => client.delete_save(id).await,
-        SaveType::State => client.delete_state(id).await,
+    let outcome = match save_type {
+        SaveType::Save => client.delete_save_record(id).await,
+        SaveType::State => client.delete_state_record(id).await,
+    };
+    match outcome {
+        Ok(()) => Ok(()),
+        Err(crate::romm::RommError::Http { status, .. }) => {
+            Err(format!("Server returned HTTP {status}."))
+        }
+        Err(e) => Err(e.to_string()),
     }
-    .map_err(|e| e.to_string())?;
-    if (200..300).contains(&status) || status == 404 || status == 410 {
-        return Ok(());
-    }
-    Err(format!("Server returned HTTP {status}."))
 }
 
 // ---------------------------------------------------------------------

@@ -172,7 +172,13 @@ pub async fn upload_cloud_files_for_game(
 
     attach_screenshot_fallback(ctx, game, &entry, &mut jobs);
 
-    // Execution: one POST per job, per-job error isolation.
+    // Q9: `0` keeps every record. States have no limit: RomM replaces a
+    // state uploaded under the same file name, so each slot file has one
+    // cloud record.
+    let save_limit = ctx.config.cloud_save_retention_limit;
+
+    // Execution: one POST per job, per-job error isolation. A slotted save
+    // carries `autocleanup` (see `save_upload_query`).
     let mut uploaded = 0usize;
     let mut failed: Vec<String> = Vec::new();
     for job in &jobs {
@@ -180,7 +186,7 @@ pub async fn upload_cloud_files_for_game(
         let result = match save_type {
             SaveType::Save => {
                 client
-                    .upload_save(&rom_id, &name, slot.as_deref(), &job.payload)
+                    .upload_save(&rom_id, &name, slot.as_deref(), save_limit, &job.payload)
                     .await
             }
             SaveType::State => client.upload_state(&rom_id, &name, &job.payload).await,
@@ -193,14 +199,11 @@ pub async fn upload_cloud_files_for_game(
 
     cleanup_temp_archives(&temp_archives);
 
-    // Retention pruning: saves only, at least one success. D7: the
-    // configured limit is clamped to a minimum of 1 HERE, and the clamped
-    // value is what both the prune and the completion message use.
-    let retention_limit = ctx.config.cloud_save_retention_limit.max(1);
+    // Save retention: null-slot groups only (the server owns slotted ones),
+    // at least one success. Its failures reach the completion message.
     let mut retention_failed: Vec<String> = Vec::new();
-    if save_type == SaveType::Save && uploaded > 0 {
-        let (_, failed_ids) =
-            prune_server_save_records(client, &rom_id, &name, retention_limit).await;
+    if save_type == SaveType::Save && uploaded > 0 && save_limit > 0 {
+        let (_, failed_ids) = prune_server_save_records(client, &rom_id, &name, save_limit).await;
         retention_failed = failed_ids;
     }
 
@@ -210,7 +213,7 @@ pub async fn upload_cloud_files_for_game(
         failed: failed.clone(),
     };
     let (text, severity) =
-        upload_completion_message(&outcome, save_type, retention_failed.len(), retention_limit);
+        upload_completion_message(&outcome, save_type, retention_failed.len(), save_limit);
     let messages = vec![CloudMessage { text, severity }];
 
     UploadReport {

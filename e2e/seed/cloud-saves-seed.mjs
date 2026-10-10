@@ -119,9 +119,15 @@ function tomlString(value) {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
+// `cloud_save_retention_limit = 3` with the Q9 migration marker set: the
+// retention scenario (rom 603, four seeded records) needs a limit of 3, and
+// a 3 the user chose after the one-time migration must stay 3 (without the
+// marker, the old default 3 would move to 10).
 const configToml = `schema_version = 1
 library_path = ${tomlString(libraryPath)}
 library_layout_version = 1
+cloud_save_retention_limit = 3
+cloud_retention_default_migrated = true
 
 [[emulators]]
 name = ${tomlString(EMULATOR_NAME)}

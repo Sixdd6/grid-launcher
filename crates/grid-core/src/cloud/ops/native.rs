@@ -153,10 +153,12 @@ pub async fn upload_native_saves_for_game(
         return UploadReport::stop(CloudMessage::info(no_jobs_message(SaveType::Save)));
     }
 
-    // 6. One multipart POST, archive always deleted afterwards.
+    // 6. One multipart POST, archive always deleted afterwards. No slot, so
+    // no server autocleanup: the client prune below owns this group.
+    let retention_limit = ctx.config.cloud_save_retention_limit;
     let payload = vec![("saveFile".to_string(), archive_path.clone())];
     let posted = client
-        .upload_save(&rom_id, NATIVE_MULTI_DIR, None, &payload)
+        .upload_save(&rom_id, NATIVE_MULTI_DIR, None, retention_limit, &payload)
         .await;
     cleanup_temp_archives(&[archive_path]);
     let (uploaded, failed) = match posted {
@@ -164,10 +166,9 @@ pub async fn upload_native_saves_for_game(
         Err(_) => (0usize, vec![safe_title]),
     };
 
-    // 7. Retention pruning keyed on `native_multi_dir`.
-    let retention_limit = ctx.config.cloud_save_retention_limit.max(1);
+    // 7. Retention pruning keyed on `native_multi_dir`; Q9: `0` keeps all.
     let mut retention_failed: Vec<String> = Vec::new();
-    if uploaded > 0 {
+    if uploaded > 0 && retention_limit > 0 {
         let (_, failed_ids) =
             prune_server_save_records(client, &rom_id, NATIVE_MULTI_DIR, retention_limit).await;
         retention_failed = failed_ids;

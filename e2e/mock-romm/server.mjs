@@ -31,7 +31,9 @@
 // `cloud-saves` stage group:
 //   GET  /api/saves?rom_id=            (canned records, from saves.json)
 //   GET  /api/saves/:id/content        (raw bytes for one canned record)
-//   POST /api/saves                    (multipart upload — captured)
+//   POST /api/saves                    (multipart upload — captured, the
+//                                        full query included, so a spec
+//                                        can read autocleanup params)
 //   POST /api/saves/delete             ({"saves": [id, ...]})
 //   GET  /api/states?rom_id=           (always [] — no group needs seeded
 //                                        state records; states are queried

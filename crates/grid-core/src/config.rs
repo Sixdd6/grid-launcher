@@ -188,13 +188,21 @@ pub struct Config {
     /// value itself is not clamped on write.
     #[serde(default = "default_upload_delay_seconds")]
     pub auto_cloud_save_upload_delay_seconds: u64,
-    /// How many server save records `cloud::retention` keeps per game
-    /// (saves only; states are never pruned). Deviation D7 (doc 06 /
-    /// `2026-09-02-cloud-saves-design.md`): Python hardcodes this to `3`
-    /// (`grid-launcher.py:2224`); the rewrite makes it a config key with
-    /// the same default. Read sites clamp to a minimum of `1`.
-    #[serde(default = "default_retention_limit")]
+    /// How many server save records to keep per rom and slot; `0` keeps all.
+    /// A slotted upload sends it as the server's `autocleanup_limit`; a
+    /// null-slot group is pruned by `cloud::retention` after the upload.
+    /// Q9: the default is 10 (Python hardcoded 3). A stored 3 (the old
+    /// default) moves to 10 once, in [`Config::load`]; every other stored
+    /// value is kept.
+    #[serde(default = "default_save_retention_limit")]
     pub cloud_save_retention_limit: u32,
+    /// Q9 one-time migration marker: `true` once [`Config::load`] has
+    /// checked the old default 3. Absent in an older config (`false`), so the
+    /// check runs once; after that a user who chooses 3 keeps 3. States
+    /// have no limit: RomM replaces a state uploaded under the same file
+    /// name, so each state slot file has one cloud record.
+    #[serde(default)]
+    pub cloud_retention_default_migrated: bool,
     /// Raw per-game cloud sync state, keyed by `cloud::state::game_key`.
     /// Stored as an untyped TOML table (not `SyncStateEntry`s) so foreign/
     /// future keys and mistyped fields round-trip byte-for-byte through a
@@ -274,8 +282,8 @@ fn default_upload_delay_seconds() -> u64 {
     3
 }
 
-fn default_retention_limit() -> u32 {
-    3
+fn default_save_retention_limit() -> u32 {
+    10
 }
 
 impl Default for Config {
@@ -294,7 +302,8 @@ impl Default for Config {
             auto_cloud_save_upload_on_exit: true,
             auto_cloud_save_skip_download_if_local_newer: true,
             auto_cloud_save_upload_delay_seconds: 3,
-            cloud_save_retention_limit: 3,
+            cloud_save_retention_limit: default_save_retention_limit(),
+            cloud_retention_default_migrated: true,
             cloud_sync_state: toml::value::Table::new(),
             native_manual_save_paths: BTreeMap::new(),
             native_removed_save_paths: BTreeMap::new(),
@@ -342,7 +351,22 @@ impl Config {
         };
         // Filter out emulators with blank names
         config.emulators.retain(|e| !e.name.trim().is_empty());
+        config.migrate_retention_default();
         Ok(config)
+    }
+
+    /// Q9 one-time migration: a stored `cloud_save_retention_limit` of 3
+    /// (the old default) without the marker becomes 10. The marker is set
+    /// for every value, so the check runs once: it persists with the next
+    /// [`Config::save`], and a user who later chooses 3 keeps 3.
+    fn migrate_retention_default(&mut self) {
+        if self.cloud_retention_default_migrated {
+            return;
+        }
+        if self.cloud_save_retention_limit == 3 {
+            self.cloud_save_retention_limit = default_save_retention_limit();
+        }
+        self.cloud_retention_default_migrated = true;
     }
 
     /// Atomic + durable: write `<path>.tmp`, fsync it, then rename over the
@@ -919,7 +943,7 @@ mod tests {
         assert!(cfg.auto_cloud_save_upload_on_exit);
         assert!(cfg.auto_cloud_save_skip_download_if_local_newer);
         assert_eq!(cfg.auto_cloud_save_upload_delay_seconds, 3);
-        assert_eq!(cfg.cloud_save_retention_limit, 3);
+        assert_eq!(cfg.cloud_save_retention_limit, 10);
         assert!(cfg.cloud_sync_state.is_empty());
         assert!(cfg.native_manual_save_paths.is_empty());
     }
@@ -1113,5 +1137,95 @@ mod tests {
         let loaded = Config::load(&path).unwrap();
         assert_eq!(loaded.ui.card_size_library, "large");
         assert_eq!(loaded.ui.card_size_server, "small");
+    }
+
+    fn load_text(text: &str) -> Config {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, text).unwrap();
+        Config::load(&path).unwrap()
+    }
+
+    /// Q9: the save retention default is 10 when the key is absent.
+    #[test]
+    fn save_retention_defaults_to_10_when_absent() {
+        let cfg = load_text("schema_version = 1\n");
+        assert_eq!(cfg.cloud_save_retention_limit, 10);
+        assert!(cfg.cloud_retention_default_migrated);
+    }
+
+    /// Q9 one-time migration: a stored 3 (the old default) without the
+    /// marker moves to 10 and sets the marker.
+    #[test]
+    fn stored_old_default_3_moves_to_10_once() {
+        let cfg = load_text("schema_version = 1\ncloud_save_retention_limit = 3\n");
+        assert_eq!(cfg.cloud_save_retention_limit, 10);
+        assert!(cfg.cloud_retention_default_migrated);
+    }
+
+    /// Q9: after the migration, a user who sets 3 again keeps 3.
+    #[test]
+    fn stored_3_with_the_marker_stays_3() {
+        let cfg = load_text(
+            "schema_version = 1\ncloud_save_retention_limit = 3\ncloud_retention_default_migrated = true\n",
+        );
+        assert_eq!(cfg.cloud_save_retention_limit, 3);
+        assert!(cfg.cloud_retention_default_migrated);
+    }
+
+    /// Q9: any other stored value is untouched; the marker is still set.
+    #[test]
+    fn stored_non_default_value_is_untouched_and_marked() {
+        for stored in [0u32, 1, 7, 10] {
+            let cfg = load_text(&format!(
+                "schema_version = 1\ncloud_save_retention_limit = {stored}\n"
+            ));
+            assert_eq!(cfg.cloud_save_retention_limit, stored);
+            assert!(cfg.cloud_retention_default_migrated);
+        }
+    }
+
+    /// Q9: the migration result persists through save, so it runs once:
+    /// after a save, setting 3 again survives every later load.
+    #[test]
+    fn migration_persists_and_never_runs_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "schema_version = 1\ncloud_save_retention_limit = 3\n",
+        )
+        .unwrap();
+
+        let mut cfg = Config::load(&path).unwrap();
+        assert_eq!(cfg.cloud_save_retention_limit, 10);
+        cfg.cloud_save_retention_limit = 3;
+        cfg.save(&path).unwrap();
+
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("cloud_retention_default_migrated = true"),
+            "{text}"
+        );
+        assert_eq!(Config::load(&path).unwrap().cloud_save_retention_limit, 3);
+    }
+
+    /// A fresh install needs no migration.
+    #[test]
+    fn default_config_is_already_migrated() {
+        let cfg = Config::default();
+        assert_eq!(cfg.cloud_save_retention_limit, 10);
+        assert!(cfg.cloud_retention_default_migrated);
+    }
+
+    /// The dropped state limit key from a pre-release build still loads;
+    /// it is kept as an unknown key.
+    #[test]
+    fn a_stray_state_retention_key_still_loads() {
+        let cfg = load_text(
+            "schema_version = 1\ncloud_save_retention_limit = 7\ncloud_state_retention_limit = 5\n",
+        );
+        assert_eq!(cfg.cloud_save_retention_limit, 7);
+        assert!(cfg.extra.contains_key("cloud_state_retention_limit"));
     }
 }
