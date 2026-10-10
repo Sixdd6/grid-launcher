@@ -56,10 +56,9 @@ jobs:
 
   check-windows:
     name: Check (Windows)
-    # Compiles the Windows code paths. No tests: this job exists so a
-    # Windows-only compile error is caught on the pull request that
-    # introduces it rather than on the release tag. Runs on release events
-    # too — it gates `build-windows`.
+    # Lints and tests the Windows code paths, so a Windows-only failure is
+    # caught on the pull request that introduces it rather than on the
+    # release tag. Runs on release events too — it gates `build-windows`.
     runs-on: windows-latest
     defaults:
       run:
@@ -67,6 +66,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .
@@ -75,8 +76,12 @@ jobs:
           node-version: 22
       - name: Frontend install and build
         run: cd app && npm ci && npm run build
-      - name: Cargo check
-        run: cargo check --workspace --all-targets
+      - name: Clippy
+        run: |
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo clippy -p app --all-targets --features e2e -- -D warnings
+      - name: Cargo test
+        run: cargo test --workspace
 
   e2e:
     name: End-to-end

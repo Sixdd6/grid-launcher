@@ -70,9 +70,9 @@ On Windows, run the same commands, in the same order, from Git Bash at the repos
 root. `scripts/check_secret_hygiene.sh` calls `cargo tree`, so Rust must be on the Git
 Bash `PATH`.
 
-A second job, `check-windows`, compiles the Windows code paths with
-`cargo check --workspace --all-targets` on `windows-latest`. It runs no tests; it exists
-so a Windows-only compile error is caught on the pull request rather than on a tag.
+A second job, `check-windows`, runs the frontend build, both clippy commands and
+`cargo test --workspace` on `windows-latest`, so a Windows-only failure is caught on the
+pull request rather than on a tag.
 
 ## End-to-end tests
 
