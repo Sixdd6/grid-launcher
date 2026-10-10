@@ -5869,6 +5869,10 @@ mod tests {
         let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
         let _guard = isolated_env(temp.path());
+        // On Windows the default user root comes only from `%APPDATA%`, which
+        // `isolated_env` clears. Point it at the temp dir.
+        let appdata = temp.path().join("appdata");
+        let _appdata_guard = EnvGuard::set(&[("APPDATA", Some(appdata.to_str().unwrap()))]);
 
         let settings = pico8_directory_settings("/nonexistent/pico8.exe", &[]);
 
@@ -6153,7 +6157,13 @@ mod tests {
         std::fs::write(root.join("VMU0.BIN"), "x").unwrap();
 
         let result = flycast_vmu_file_candidates(&[root.to_path_buf()]);
-        assert!(result.is_empty(), "{result:?}");
+        if cfg!(windows) {
+            // `flycast_bin_extension_matches` lowercases the name on Windows
+            // (case-insensitive `glob("*.bin")`), so the file is found.
+            assert_eq!(result, vec![root.join("VMU0.BIN")]);
+        } else {
+            assert!(result.is_empty(), "{result:?}");
+        }
 
         let missing = root.join("does-not-exist");
         assert!(flycast_vmu_file_candidates(&[missing]).is_empty());

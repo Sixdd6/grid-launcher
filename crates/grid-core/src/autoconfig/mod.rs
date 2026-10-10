@@ -1718,7 +1718,12 @@ mod tests {
 
     #[test]
     fn ps3_library_path_lives_under_games() {
-        assert_eq!(ps3_library_path("/library"), "/library/games/PlayStation 3");
+        let expected = Path::new("/library")
+            .join("games")
+            .join("PlayStation 3")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(ps3_library_path("/library"), expected);
     }
 
     /// No matched profile means no firmware targets, so the orchestrator
@@ -2246,7 +2251,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let _env = isolated(temp.path());
         let (shadps4, qt, ini, _user_dir) = shadps4_pair(temp.path());
-        let shadps4_path = shadps4.path.clone();
+        // The Qt INI writer stores every `\` as `/` on every OS (`ini_value`).
+        let shadps4_path = shadps4.path.replace('\\', "/");
         let config = config_with(temp.path(), vec![shadps4, qt]);
         let config_path = write_config(temp.path(), &config);
 
@@ -2271,7 +2277,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let _env = isolated(temp.path());
         let (shadps4, qt, ini, user_dir) = shadps4_pair(temp.path());
-        let shadps4_path = shadps4.path.clone();
+        // The Qt INI writer stores every `\` as `/` on every OS (`ini_value`).
+        let shadps4_path = shadps4.path.replace('\\', "/");
         // The launcher is registered FIRST: the counterpart lookup must not
         // depend on install order.
         let config = config_with(temp.path(), vec![qt, shadps4]);

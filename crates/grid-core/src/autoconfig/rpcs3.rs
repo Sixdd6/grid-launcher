@@ -731,7 +731,7 @@ mod tests {
 
         let content = std::fs::read_to_string(data_root.join("config").join("games.yml")).unwrap();
         assert!(content.contains("BLUS30336:"));
-        let expected_dir = std::fs::canonicalize(&game_dir).unwrap();
+        let expected_dir = resolve_best_effort(&game_dir);
         let expected_str = format!("{}/", expected_dir.to_string_lossy().replace('\\', "/"));
         assert!(content.contains(&expected_str));
     }
@@ -749,7 +749,7 @@ mod tests {
         assert!(result);
 
         let content = std::fs::read_to_string(data_root.join("config").join("games.yml")).unwrap();
-        let expected_dir = std::fs::canonicalize(&game_dir).unwrap();
+        let expected_dir = resolve_best_effort(&game_dir);
         let expected_str = format!("{}/", expected_dir.to_string_lossy().replace('\\', "/"));
         assert!(content.contains(&expected_str));
         assert!(!content.contains("dev_hdd0"));
