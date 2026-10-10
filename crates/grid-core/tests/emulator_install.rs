@@ -22,7 +22,9 @@ use std::sync::Mutex;
 
 use grid_core::config::Config;
 use grid_core::launch::profiles::EmulatorProfile;
+#[cfg(unix)]
 use grid_core::launch::spawn::prepare_emulator_launch;
+#[cfg(unix)]
 use grid_core::launch::template::Placeholders;
 use grid_core::library::emulator_removal::remove_emulator_files;
 use grid_core::library::queue::{DownloadEntry, DownloadStatus};
@@ -54,6 +56,7 @@ fn write_zip(path: &Path, entries: &[(&str, &[u8])]) -> Vec<u8> {
 
 /// Builds a gzipped tar at `path` from `(name, content, mode)` entries and
 /// returns its bytes.
+#[cfg(unix)]
 fn write_tar_gz(path: &Path, entries: &[(&str, &[u8], u32)]) -> Vec<u8> {
     let file = fs::File::create(path).unwrap();
     let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
@@ -85,6 +88,7 @@ fn profile(name: &str, source: Value) -> EmulatorProfile {
 
 /// [`profile`] with a `user_data` list attached — the directories that
 /// installer/update wiring (Task 5) links to `saves/`.
+#[cfg(unix)]
 fn profile_with_user_data(name: &str, source: Value, user_data: &[&str]) -> EmulatorProfile {
     EmulatorProfile {
         user_data: user_data.iter().map(|s| s.to_string()).collect(),
@@ -310,6 +314,7 @@ fn zip_bytes(staging: &tempfile::TempDir, name: &str, entries: &[(&str, &[u8])])
 /// Builds a zip archive at `path` from `(name, content, unix mode)` entries,
 /// stamping each entry's Unix permission bits via `unix_permissions`, and
 /// returns its bytes.
+#[cfg(unix)]
 fn write_zip_with_modes(path: &Path, entries: &[(&str, &[u8], u32)]) -> Vec<u8> {
     let file = fs::File::create(path).unwrap();
     let mut zip = zip::ZipWriter::new(file);
@@ -360,7 +365,7 @@ async fn zip_install_extracts_writes_config_entry_and_deletes_the_archive() {
     assert_eq!(entry.platform, "Emulator");
 
     let install_dir = harness.install_dir("Test Emu");
-    let exe = install_dir.join("bin/testemu.sh");
+    let exe = install_dir.join("bin").join("testemu.sh");
     assert!(exe.is_file(), "extracted tree missing: {}", exe.display());
     assert!(install_dir.join("data/readme.txt").is_file());
     assert!(
@@ -1319,7 +1324,8 @@ async fn an_existing_config_entry_with_the_same_name_is_replaced_at_its_index() 
         config.emulators[0].path,
         harness
             .install_dir("Test Emu")
-            .join("bin/testemu.sh")
+            .join("bin")
+            .join("testemu.sh")
             .to_string_lossy()
     );
     // A replace keeps the user's own args (Task 3): only the path and the

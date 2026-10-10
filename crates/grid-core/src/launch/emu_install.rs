@@ -879,6 +879,7 @@ mod tests {
     }
 
     /// Writes a gzipped tar at `path` holding `(name, contents)` entries.
+    #[cfg(unix)]
     fn write_tar_gz(path: &Path, entries: &[(&str, &str)]) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         let encoder = flate2::write::GzEncoder::new(

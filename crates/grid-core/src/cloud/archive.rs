@@ -758,6 +758,7 @@ pub fn cleanup_temp_archives(paths: &[PathBuf]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::io::Read as _;
     use std::sync::Mutex;
 

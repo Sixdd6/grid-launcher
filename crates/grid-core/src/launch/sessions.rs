@@ -160,7 +160,7 @@ impl SessionStore {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::process::Command;
@@ -176,7 +176,6 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     fn sleeper() -> Child {
         Command::new("/bin/sh")
             .args(["-c", "sleep 30"])
@@ -184,7 +183,6 @@ mod tests {
             .unwrap()
     }
 
-    #[cfg(unix)]
     fn quitter() -> Child {
         Command::new("/bin/sh")
             .args(["-c", "exit 7"])
@@ -192,7 +190,6 @@ mod tests {
             .unwrap()
     }
 
-    #[cfg(unix)]
     #[test]
     fn register_rejects_a_second_session_for_the_same_rom() {
         let store = SessionStore::default();
@@ -227,7 +224,6 @@ mod tests {
     }
 
     /// Reaps until the store is empty or the budget runs out.
-    #[cfg(unix)]
     fn drain(store: &SessionStore) {
         for _ in 0..200 {
             store.reap();
@@ -238,7 +234,6 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     #[test]
     fn reap_removes_only_exited_children() {
         let store = SessionStore::default();

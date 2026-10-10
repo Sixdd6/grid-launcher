@@ -27,6 +27,7 @@ use tauri::{Emitter, Manager};
 /// NVIDIA/Wayland stacks ("Failed to create GBM buffer ... Invalid argument"),
 /// leaving the webview blank white. Returns true when the workaround variable
 /// should be set: only if the user has not already chosen a value.
+#[cfg(any(target_os = "linux", test))]
 fn dmabuf_override_needed(existing: Option<std::ffi::OsString>) -> bool {
     existing.is_none()
 }
