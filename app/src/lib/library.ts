@@ -25,3 +25,12 @@ export function visibleLibraryGames(rows: InstalledGame[]): InstalledGame[] {
       return 0;
     });
 }
+
+/** A stable key for an installed row: the registry's own identity (title and
+ *  platform, trimmed and case-folded — `registry.rs` `identity_key`), which is
+ *  unique per row and does not change when the relink pass or the Link
+ *  picker gives the row a rom id (Q4). */
+export function installedKey(row: InstalledGame): string {
+  // JSON keeps the two parts apart: no title/platform pair can spell another.
+  return JSON.stringify([row.title.trim().toLowerCase(), row.platform.trim().toLowerCase()]);
+}

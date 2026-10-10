@@ -3,7 +3,7 @@
   import { api, type InstalledGame } from './api';
   import { installed, refresh as refreshInstalled } from './stores/installed.svelte';
   import { updates } from './stores/updates.svelte';
-  import { visibleLibraryGames } from './library';
+  import { installedKey, visibleLibraryGames } from './library';
   import { emptyText, entryForKey, matchesRail, railEntries, type RailKey } from './library/rail';
   import { librarySelection, selectRail } from './library/selection.svelte';
   import { LIBRARY_SORTS, normalizeSort, sortGames, sortLabel, titleContains, type LibrarySort } from './library/sort';
@@ -125,6 +125,18 @@
     subject = fromInstalled(row);
     noteViewed(subjectFromInstalled(row));
   }
+
+  // Q4: the open Details shows a row with no server id, and the row gains
+  // one — from the Link picker or from the relink pass after a connect.
+  // Re-open Details on the linked row (`{#key subject.romId}` remounts it),
+  // so it shows the server-backed actions instead of a stale "unlinked" view.
+  $effect(() => {
+    const current = subject;
+    if (current === null || current.source !== 'installed' || current.romId !== null) return;
+    const key = installedKey({ title: current.name, platform: current.platformName } as InstalledGame);
+    const row = installed.list.find((r) => installedKey(r) === key);
+    if (row !== undefined && row.rom_id !== null) subject = fromInstalled(row);
+  });
 
   function closeDetails() {
     subject = null;
@@ -354,7 +366,7 @@
       </p>
     {:else}
       <CardGrid bind:this={grid} gridId="library-grid" size={uiSettings.cardSizeLibrary}>
-        {#each rows as row, i (row.rom_id ?? `x-${i}`)}
+        {#each rows as row, i (installedKey(row))}
           <GameCard
             testId={`library-card-${row.rom_id ?? `x-${i}`}`}
             badgeId={row.rom_id ?? `x-${i}`}

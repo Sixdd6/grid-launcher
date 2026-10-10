@@ -49,7 +49,8 @@ Modules as declared in `src/lib.rs`:
   (Windows) launch and compat tools, process spawn and session tracking.
 - `library` — the install pipeline: download queue, extraction, path rules, launch-file
   selection, the SQLite registry, platform rules, install specials (PS3, extra content),
-  and update detection. `user_data_links` links an emulator's own-written directories into
+  update detection, and `relink` (Q4: links installed rows that have no server ROM id
+  to their unique server match). `user_data_links` links an emulator's own-written directories into
   `saves/`; `layout_migration` is the one-shot startup migration to the layout below.
 - `pcgw` — PCGamingWiki client that resolves a Windows game's save paths.
 - `platform` — host-platform lookups that need OS APIs (for example the Shell-resolved
@@ -95,7 +96,8 @@ The shell owns *when* things run; grid-core owns *what* they do.
   the `debug_prints` toggle), `gamepad/` (polling and the navigation events it emits),
   `play_session_service.rs` (play activity: queues a finished session in the registry
   outbox and flushes it on session end and after connect, restore or retry; offline, the
-  queue waits).
+  queue waits), `relink_service.rs` (after connect, restore or retry: the relink pass, then
+  the image replenish and the update recompute; `installed-changed` tells the frontend).
 
 **Hooks pattern.** grid-core services expose setters — `InstallService`'s
 `set_game_finalized_hook`, `set_emulator_installed_hook`, `set_image_hook`,

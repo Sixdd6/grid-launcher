@@ -17,6 +17,7 @@ pub mod paths;
 pub mod platforms;
 pub mod queue;
 pub mod registry;
+pub mod relink;
 pub mod specials;
 pub mod update_detection;
 pub mod user_data_links;

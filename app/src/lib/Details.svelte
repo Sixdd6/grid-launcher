@@ -8,6 +8,7 @@
     type ContentKind,
     type DownloadStatus,
     type FirmwarePassFinished,
+    type GameSummary,
     type LaunchDefaults,
     type RomDetail,
   } from './api';
@@ -26,6 +27,9 @@
   import MediaViewer from './details/MediaViewer.svelte';
   import SavesTab from './details/SavesTab.svelte';
   import FilesTab from './details/FilesTab.svelte';
+  import LinkPicker from './details/LinkPicker.svelte';
+  import RemoveConfirm from './details/RemoveConfirm.svelte';
+  import { keptFolder, showsUnlinkedActions } from './details/unlinked';
   import { fullIndex, galleryItems, viewableIndex, viewableItems } from './details/media';
   import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
   import { syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
@@ -323,6 +327,33 @@
   // subject.
   let installedRow = $derived(installed.list.find((row) => matchesInstalled(row, summary, subject.platformName)) ?? null);
   let cloudGame = $derived(installedRow ?? syntheticCloudGame(summary, subject.platformName));
+
+  // Q4: an installed row with no server rom id. Details offers "Link to
+  // server game" and "Remove from library (keeps files)" for it instead of
+  // the server-backed actions.
+  let unlinkedRow = $derived(showsUnlinkedActions(subject.romId, installedRow) ? installedRow : null);
+  let heldRomIds = $derived(
+    new Set(installed.list.flatMap((row) => (row.rom_id === null ? [] : [row.rom_id]))),
+  );
+  let showLinkPicker = $state(false);
+  let showRemoveConfirm = $state(false);
+
+  async function linkTo(rom: GameSummary) {
+    if (unlinkedRow === null) return;
+    await api.linkInstalledRow(unlinkedRow.title, unlinkedRow.platform, rom.id);
+    showLinkPicker = false;
+    // The opener sees the row gain its rom id in the refreshed list and
+    // re-opens Details on it (Library.svelte).
+    await refreshInstalled();
+  }
+
+  async function removeFromLibrary() {
+    if (unlinkedRow === null) return;
+    await api.removeFromLibrary(unlinkedRow.title, unlinkedRow.platform);
+    showRemoveConfirm = false;
+    await refreshInstalled();
+    onClose();
+  }
   // `''` from `launchTargetLine` means "no launch target to state" — today
   // only a native platform, whose game runs its own executable.
   let launchTarget = $derived(launchTargetLine(launchDefaults, subject.platformName));
@@ -564,7 +595,33 @@
         </div>
 
         {#if subject.romId === null}
-          <p data-testid="details-no-id">This entry has no server id</p>
+          {#if unlinkedRow}
+            <div class="action" data-testid="details-unlinked">
+              <span class="chip unlinked" data-testid="details-unlinked-note">Not linked to a server game</span>
+              <button
+                data-testid="details-link-server"
+                disabled={!session.connected}
+                aria-describedby={session.connected ? undefined : 'details-link-offline'}
+                title={session.connected ? undefined : 'Connect to a server to link this game'}
+                onclick={() => (showLinkPicker = true)}
+              >
+                Link to server game
+              </button>
+              {#if !session.connected}
+                <!-- The button's `title` is hover-only; this line is the visible reason. -->
+                <p id="details-link-offline" class="meta-line offline-note">Connect to a server to link this game.</p>
+              {/if}
+              <button
+                data-testid="details-remove-from-library"
+                class="secondary destructive"
+                onclick={() => (showRemoveConfirm = true)}
+              >
+                Remove from library (keeps files)
+              </button>
+            </div>
+          {:else}
+            <p data-testid="details-no-id">This entry has no server id</p>
+          {/if}
         {:else}
           <div class="action">
             {#if liveEntry}
@@ -759,6 +816,31 @@
   />
 {/if}
 
+{#if showLinkPicker && unlinkedRow}
+  <LinkPicker
+    title={unlinkedRow.title}
+    platform={unlinkedRow.platform}
+    {heldRomIds}
+    onPick={linkTo}
+    onClose={() => {
+      showLinkPicker = false;
+      panelEl?.focus();
+    }}
+  />
+{/if}
+
+{#if showRemoveConfirm && unlinkedRow}
+  <RemoveConfirm
+    title={unlinkedRow.title}
+    folder={keptFolder(unlinkedRow)}
+    onConfirm={removeFromLibrary}
+    onClose={() => {
+      showRemoveConfirm = false;
+      panelEl?.focus();
+    }}
+  />
+{/if}
+
 {#if viewerIndex !== null}
   <MediaViewer
     items={viewerItems}
@@ -922,6 +1004,28 @@
     letter-spacing: 0.03em;
   }
 
+  /* Status chip for an installed row with no server id. Same pill as the
+     header chips; the amber dot (decorative, the text carries the meaning)
+     marks it as a state to resolve rather than a fact about the game. In the
+     left column it sits centred above the two actions. */
+  .chip.unlinked {
+    align-self: center;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-h);
+    text-align: center;
+  }
+
+  .chip.unlinked::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    flex: none;
+    border-radius: 50%;
+    background: var(--warning);
+  }
+
   .tabs {
     display: flex;
     gap: 4px;
@@ -1007,9 +1111,19 @@
     color: #16171d;
   }
 
+  /* "Remove from library (keeps files)": secondary shape, danger-coloured
+     label. Text-only danger keeps AA contrast in both themes. */
+  .action button.secondary.destructive {
+    color: var(--danger);
+  }
+
   .action button:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+
+  .offline-note {
+    text-align: center;
   }
 
   .meta-line {

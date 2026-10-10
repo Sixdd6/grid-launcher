@@ -564,6 +564,13 @@ run_group_attempt() {
       secret-tool clear service grid-launcher username romm-credential >/dev/null 2>&1 || true
     fi
     python_config="$RUN_DIR/$name/attempt-$attempt/python-config.json"
+    # Q4: three rows carry no rom id. "Super Mario World" has exactly one
+    # match on the mock (rom 101), so the relink pass after connect links
+    # it; "Mystery Cart" has none, so Details offers "Link to server game";
+    # "Old Demo" is removed from the library and its folder (made here,
+    # outside the library so the layout migration leaves it alone) stays.
+    mkdir -p "$data_dir/kept/Old Demo"
+    printf 'demo' >"$data_dir/kept/Old Demo/demo.sfc"
     cat >"$python_config" <<EOF
 {
   "server_url": "$mock_url",
@@ -575,7 +582,10 @@ run_group_attempt() {
   ],
   "installed_games": [
     { "title": "Chrono Trigger", "platform": "SNES", "rom_id": "401" },
-    { "title": "Super Metroid", "platform": "SNES", "rom_id": "402" }
+    { "title": "Super Metroid", "platform": "SNES", "rom_id": "402" },
+    { "title": "Super Mario World", "platform": "SNES" },
+    { "title": "Mystery Cart", "platform": "SNES" },
+    { "title": "Old Demo", "platform": "SNES", "extracted_dir": "$data_dir/kept/Old Demo" }
   ]
 }
 EOF

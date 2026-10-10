@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isHiddenLibraryPlatform, visibleLibraryGames } from './library';
+import { installedKey, isHiddenLibraryPlatform, visibleLibraryGames } from './library';
 import type { InstalledGame } from './api';
 
 const row = (title: string, platform: string): InstalledGame => ({
@@ -19,5 +19,27 @@ describe('library visibility (game_views.py:297-311)', () => {
   it('sorts by title then platform, case-folded and trimmed', () => {
     const out = visibleLibraryGames([row('zelda', 'SNES'), row(' Alpha', 'PS2'), row('alpha', 'GBA'), row('Redream', 'Emulators')]);
     expect(out.map((r) => `${r.title}|${r.platform}`)).toEqual(['alpha|GBA', ' Alpha|PS2', 'zelda|SNES']);
+  });
+});
+
+describe('installedKey', () => {
+  const base = { title: 'Old Demo', platform: 'SNES', rom_id: null } as InstalledGame;
+
+  it('is the registry identity: title and platform, trimmed and case-folded', () => {
+    expect(installedKey(base)).toBe(installedKey({ ...base, title: ' old demo ', platform: 'snes' }));
+  });
+
+  it('does not change when the row gets a rom id', () => {
+    expect(installedKey({ ...base, rom_id: 103 })).toBe(installedKey(base));
+  });
+
+  it('tells rows apart that share a title on different platforms', () => {
+    expect(installedKey(base)).not.toBe(installedKey({ ...base, platform: 'NES' }));
+  });
+
+  it('cannot collide by moving text between the title and the platform', () => {
+    expect(installedKey({ ...base, title: 'a b', platform: 'c' })).not.toBe(
+      installedKey({ ...base, title: 'a', platform: 'b c' }),
+    );
   });
 });

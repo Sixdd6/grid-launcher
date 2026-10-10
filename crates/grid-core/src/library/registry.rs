@@ -852,7 +852,9 @@ impl Registry {
     }
 
     /// Removes the row for `(title, platform)`'s identity key. Returns
-    /// whether a row was removed.
+    /// whether a row was removed. Registry only: no file on disk is touched.
+    /// Uninstall deletes the files itself first; Details' "Remove from
+    /// library (keeps files)" (Q4) calls this alone.
     pub fn remove(&self, title: &str, platform: &str) -> Result<bool, LibraryError> {
         let title_key = identity_key(title);
         let platform_key = identity_key(platform);
@@ -864,6 +866,53 @@ impl Registry {
             )
             .map_err(registry_err)?;
         Ok(affected > 0)
+    }
+
+    /// Links the row for `(title, platform)`'s identity key to `rom_id`
+    /// (Q4: rows with no rom id). Refuses an id another row already holds,
+    /// so two rows never share a rom id. Linking a row to the id it already
+    /// has is a `Linked` no-op apart from the stamp below.
+    ///
+    /// `images_version` is reset to `0`: the row's cover, screenshot and
+    /// fanart fields came from an import or an older install, not from this
+    /// rom, so the next replenish re-fetches them from the server. The text
+    /// metadata stays; Details overlays the live rom detail anyway.
+    ///
+    /// The check and the write run in one transaction.
+    pub fn set_rom_id_by_key(
+        &self,
+        title: &str,
+        platform: &str,
+        rom_id: i64,
+    ) -> Result<SetRomIdOutcome, LibraryError> {
+        let title_key = identity_key(title);
+        let platform_key = identity_key(platform);
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(registry_err)?;
+        let held_elsewhere: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM installed_games WHERE rom_id = ?1 \
+                 AND NOT (title_key = ?2 AND platform_key = ?3))",
+                params![rom_id, title_key, platform_key],
+                |row| row.get(0),
+            )
+            .map_err(registry_err)?;
+        if held_elsewhere {
+            return Ok(SetRomIdOutcome::RomIdHeld);
+        }
+        let affected = tx
+            .execute(
+                "UPDATE installed_games SET rom_id = ?1, images_version = 0 \
+                 WHERE title_key = ?2 AND platform_key = ?3",
+                params![rom_id, title_key, platform_key],
+            )
+            .map_err(registry_err)?;
+        tx.commit().map_err(registry_err)?;
+        Ok(if affected > 0 {
+            SetRomIdOutcome::Linked
+        } else {
+            SetRomIdOutcome::NoSuchRow
+        })
     }
 
     // --- play-session outbox (Q10, `play_activity`) ------------------------
@@ -938,6 +987,17 @@ impl Registry {
         tx.commit().map_err(registry_err)?;
         Ok(removed)
     }
+}
+
+/// What [`Registry::set_rom_id_by_key`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetRomIdOutcome {
+    /// The row now carries the rom id.
+    Linked,
+    /// Another row already holds that rom id; nothing changed.
+    RomIdHeld,
+    /// No row has that identity key; nothing changed.
+    NoSuchRow,
 }
 
 /// One queued play session: the outbox row id and the entry to send.

@@ -134,6 +134,25 @@ flags and the version, then four tabs:
 
 The last tab is remembered for the rest of the session.
 
+**Installed games with no server id.** A Library row can have no server ROM id: a game
+imported from the previous app, or one installed before ids were recorded. Such a row
+cannot use Play, cloud saves or update checks.
+
+- **Auto re-link on connect.** After each successful connect, restore or retry, GRID reads
+  the server's ROMs for the platforms that have such rows. It compares titles case-folded,
+  with punctuation ignored, and matches the row's platform against the server platform's
+  display name, custom name, name or slug. It links a row only when exactly one server ROM
+  matches, and never to a ROM another installed row already holds. Every other row stays
+  unlinked. A linked row gets its covers from the server on the same pass.
+- For a row that stays unlinked, Details shows "Not linked to a server game" and two actions
+  in place of Play / Install:
+  - **Link to server game** opens a searchable list of that platform's server games (the
+    same title / platform / genre search as the Server view). Choosing one links the row,
+    and Details re-opens on the linked game. Games another installed row holds are not
+    listed. Needs a connection.
+  - **Remove from library (keeps files)** deletes the Library row only. It never uninstalls
+    and never touches a file. A confirm names the folder that stays on disk.
+
 The button bar area should include:
 - `Manage Saves` for normal per-game cloud-save platforms
 - `Emulator Saves` for shared/global save media such as Xemu and Redream VMUs

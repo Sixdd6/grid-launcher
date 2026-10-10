@@ -1,5 +1,6 @@
 pub mod cloud;
 pub mod logging;
+pub mod relink;
 pub mod specials;
 pub mod updates;
 
@@ -106,17 +107,7 @@ pub async fn connect(
         .connect(server_url, username, secret, use_token)
         .await
         .map_err(err)?;
-    if let Ok(install) = state.install.as_ref() {
-        state
-            .images
-            .spawn_replenish(app.clone(), state.session.clone(), install.clone());
-        state
-            .updates
-            .spawn_refresh(app, state.session.clone(), install.clone());
-        state
-            .play_sessions
-            .spawn_flush(state.session.clone(), install.registry());
-    }
+    crate::relink_service::spawn_connected_jobs(&state, app);
     Ok(result)
 }
 
@@ -127,17 +118,7 @@ pub async fn restore_session(
 ) -> Result<RestoreOutcome, String> {
     let outcome = state.session.restore().await.map_err(err)?;
     if matches!(outcome, RestoreOutcome::Connected { .. }) {
-        if let Ok(install) = state.install.as_ref() {
-            state
-                .images
-                .spawn_replenish(app.clone(), state.session.clone(), install.clone());
-            state
-                .updates
-                .spawn_refresh(app, state.session.clone(), install.clone());
-            state
-                .play_sessions
-                .spawn_flush(state.session.clone(), install.registry());
-        }
+        crate::relink_service::spawn_connected_jobs(&state, app);
     }
     Ok(outcome)
 }
@@ -159,17 +140,7 @@ pub async fn retry_connect(
 ) -> Result<RestoreOutcome, String> {
     let outcome = state.session.retry().await.map_err(err)?;
     if matches!(outcome, RestoreOutcome::Connected { .. }) {
-        if let Ok(install) = state.install.as_ref() {
-            state
-                .images
-                .spawn_replenish(app.clone(), state.session.clone(), install.clone());
-            state
-                .updates
-                .spawn_refresh(app, state.session.clone(), install.clone());
-            state
-                .play_sessions
-                .spawn_flush(state.session.clone(), install.registry());
-        }
+        crate::relink_service::spawn_connected_jobs(&state, app);
     }
     Ok(outcome)
 }

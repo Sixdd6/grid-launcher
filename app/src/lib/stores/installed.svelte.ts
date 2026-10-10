@@ -30,8 +30,19 @@ export async function refresh(): Promise<void> {
  * install time and have since been backfilled.
  */
 export function initReplenishListener(): Promise<UnlistenFn> {
-  return listen('images-replenished', () => {
-    refresh();
+  // `installed-changed`: the backend changed the registry on its own — today
+  // the relink pass after a connect, which links rows that had no server id
+  // (Q4). Same answer: re-read the registry.
+  const offs = [
+    listen('images-replenished', () => {
+      refresh();
+    }),
+    listen('installed-changed', () => {
+      refresh();
+    }),
+  ];
+  return Promise.all(offs).then((fns) => () => {
+    for (const off of fns) off();
   });
 }
 

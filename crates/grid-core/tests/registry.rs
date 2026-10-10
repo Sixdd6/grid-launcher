@@ -964,3 +964,95 @@ fn the_outbox_queues_pages_and_deletes() {
     assert_eq!(left.len(), 1);
     assert_eq!(left[0].entry, b);
 }
+
+// --- Q4: id-less rows (`set_rom_id_by_key`, `remove`) ----------------------
+
+use grid_core::library::registry::SetRomIdOutcome;
+
+fn unlinked(title: &str, platform: &str) -> InstalledGame {
+    InstalledGame {
+        rom_id: None,
+        ..sample(title, platform)
+    }
+}
+
+#[test]
+fn set_rom_id_by_key_links_an_unlinked_row_and_marks_its_images_stale() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Registry::open(&dir.path().join("grid-launcher.db")).unwrap();
+    registry
+        .upsert(&unlinked("Chrono Trigger", "SNES"))
+        .unwrap();
+
+    // The key is the registry identity: case and outer whitespace fold.
+    let outcome = registry
+        .set_rom_id_by_key(" chrono trigger ", "snes", 401)
+        .unwrap();
+    assert_eq!(outcome, SetRomIdOutcome::Linked);
+
+    let row = registry.find(Some(401), "", "").unwrap().unwrap();
+    assert_eq!(row.title, "Chrono Trigger");
+    assert_eq!(row.rom_id, Some(401));
+    // The image fields came from a guess (or nowhere); the next replenish
+    // re-fetches them from the linked rom.
+    assert_eq!(row.images_version, 0);
+    // Everything else stays as it was.
+    assert_eq!(row.description, "A game.");
+    assert_eq!(row.archive_path, "/library/Platform/Game.zip");
+}
+
+#[test]
+fn set_rom_id_by_key_refuses_an_id_another_row_holds() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Registry::open(&dir.path().join("grid-launcher.db")).unwrap();
+    registry.upsert(&sample("Zelda", "SNES")).unwrap(); // rom 42
+    registry.upsert(&unlinked("Zelda Copy", "SNES")).unwrap();
+
+    let outcome = registry
+        .set_rom_id_by_key("Zelda Copy", "SNES", 42)
+        .unwrap();
+    assert_eq!(outcome, SetRomIdOutcome::RomIdHeld);
+
+    let copy = registry.find(None, "Zelda Copy", "SNES").unwrap().unwrap();
+    assert_eq!(copy.rom_id, None);
+    assert_eq!(copy.images_version, IMAGES_VERSION);
+}
+
+#[test]
+fn set_rom_id_by_key_accepts_the_id_the_row_already_holds() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Registry::open(&dir.path().join("grid-launcher.db")).unwrap();
+    registry.upsert(&sample("Zelda", "SNES")).unwrap(); // rom 42
+
+    let outcome = registry.set_rom_id_by_key("Zelda", "SNES", 42).unwrap();
+    assert_eq!(outcome, SetRomIdOutcome::Linked);
+}
+
+#[test]
+fn set_rom_id_by_key_reports_a_missing_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Registry::open(&dir.path().join("grid-launcher.db")).unwrap();
+
+    let outcome = registry.set_rom_id_by_key("Nope", "SNES", 7).unwrap();
+    assert_eq!(outcome, SetRomIdOutcome::NoSuchRow);
+}
+
+#[test]
+fn remove_deletes_the_row_and_keeps_the_files_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Registry::open(&dir.path().join("grid-launcher.db")).unwrap();
+    let game_dir = dir.path().join("library").join("games").join("Old Demo");
+    std::fs::create_dir_all(&game_dir).unwrap();
+    let rom = game_dir.join("Old Demo.sfc");
+    std::fs::write(&rom, b"rom bytes").unwrap();
+    let mut row = unlinked("Old Demo", "SNES");
+    row.extracted_dir = game_dir.to_string_lossy().into_owned();
+    row.extracted_path = rom.to_string_lossy().into_owned();
+    registry.upsert(&row).unwrap();
+
+    assert!(registry.remove("Old Demo", "SNES").unwrap());
+
+    assert!(registry.find(None, "Old Demo", "SNES").unwrap().is_none());
+    assert!(game_dir.is_dir());
+    assert_eq!(std::fs::read(&rom).unwrap(), b"rom bytes");
+}

@@ -10,6 +10,7 @@ mod logging;
 mod media_server;
 mod play_session_service;
 mod python_import;
+mod relink_service;
 pub(crate) mod test_env;
 mod update_service;
 
@@ -524,6 +525,9 @@ pub fn run() {
             commands::updates::open_release_page,
             commands::logging::get_debug_prints,
             commands::logging::set_debug_prints,
+            commands::relink::list_server_roms_for_platform,
+            commands::relink::link_installed_row,
+            commands::relink::remove_from_library,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

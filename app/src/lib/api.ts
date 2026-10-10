@@ -458,6 +458,15 @@ export const api = {
   uninstallGame: (romId: number) => invoke<void>('uninstall_game', { romId }),
   listDownloads: () => invoke<DownloadsSnapshot>('list_downloads'),
   listInstalled: () => invoke<InstalledGame[]>('list_installed'),
+  // Q4: installed rows with no server rom id. `platform` is the row's own
+  // platform text; the backend maps it to the server platform(s) it names.
+  listServerRomsForPlatform: (platform: string) =>
+    invoke<GameSummary[]>('list_server_roms_for_platform', { platform }),
+  linkInstalledRow: (title: string, platform: string, romId: number) =>
+    invoke<InstalledGame>('link_installed_row', { title, platform, romId }),
+  /** Registry row only: never deletes a file. */
+  removeFromLibrary: (title: string, platform: string) =>
+    invoke<void>('remove_from_library', { title, platform }),
   getLibraryPath: () => invoke<string>('get_library_path'),
   setLibraryPath: (path: string) => invoke<void>('set_library_path', { path }),
   getUiSettings: () => invoke<UiSettings>('get_ui_settings'),
