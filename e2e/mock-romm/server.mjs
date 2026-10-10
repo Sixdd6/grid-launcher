@@ -93,6 +93,7 @@ import { fileURLToPath } from "node:url";
 import { readFile, writeFile } from "node:fs/promises";
 
 import { buildStfs, buildZip } from "./archives.mjs";
+import { PCSX2_APPIMAGE_BYTES, PCSX2_ASSET_NAME } from "./mock-forge.mjs";
 
 export const FAKE_TOKEN = "FAKE-E2E-TOKEN-not-real";
 
@@ -220,6 +221,16 @@ function buildContentFixtures() {
   // game — the install only exists to fire the per-game firmware pass.
   const ps1ZipBytes = buildZip([{ name: "game.bin", data: dummyBytes(256, 0x33) }]);
 
+  // A server "Emulators"-platform package (`server-emulator` group): the
+  // mock forge's PCSX2 AppImage stub, zipped under a folder. Its name
+  // matches PCSX2's catalog match_tokens, so the app registers it as the
+  // PCSX2 profile. This writer stores no Unix mode: the install's own
+  // `make_executable` is what makes the AppImage runnable.
+  const serverEmulatorZipBytes = buildZip([
+    { name: `PCSX2/${PCSX2_ASSET_NAME}`, data: PCSX2_APPIMAGE_BYTES },
+    { name: "PCSX2/readme.txt", data: Buffer.from("server package\n", "utf8") },
+  ]);
+
   return {
     zipBytes,
     bigZipBytes,
@@ -236,6 +247,7 @@ function buildContentFixtures() {
     linuxZipBytes,
     gameJsonBytes,
     ps1ZipBytes,
+    serverEmulatorZipBytes,
   };
 }
 
@@ -270,6 +282,7 @@ function contentForFile(fileName, content) {
   // executable untouched and prove nothing.
   if (lower === "mygame (v1.1.0).zip") return content.nativeZipBytes;
   if (lower === "ps1.zip") return content.ps1ZipBytes;
+  if (lower === "pcsx2-server.zip") return content.serverEmulatorZipBytes;
   if (lower.endsWith(".zip")) return content.zipBytes;
   return dummyBytes(64, 0x00);
 }

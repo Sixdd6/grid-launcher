@@ -334,6 +334,17 @@ fn score_candidate(
 /// `archive` itself is used if it is a launchable file. `None` when neither
 /// yields a candidate.
 pub fn select_executable(title: &str, install_dir: &Path, archive: &Path) -> Option<PathBuf> {
+    select_executable_where(title, install_dir, archive, |_| true)
+}
+
+/// [`select_executable`]'s candidate walk and scoring, keeping only the
+/// files (and the `archive` fallback) for which `keep` holds.
+fn select_executable_where(
+    title: &str,
+    install_dir: &Path,
+    archive: &Path,
+    keep: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
     let title_casefold = title.trim().to_lowercase();
     let tokens = title_tokens(&title_casefold);
 
@@ -363,6 +374,7 @@ pub fn select_executable(title: &str, install_dir: &Path, archive: &Path) -> Opt
     if install_dir.is_dir() {
         let mut candidates = Vec::new();
         collect_launchable_files(install_dir, &mut candidates);
+        candidates.retain(|candidate| keep(candidate));
         if !candidates.is_empty() {
             return candidates.into_iter().min_by(|a, b| {
                 score_candidate(a, &preferred_names, &tokens).cmp(&score_candidate(
@@ -374,11 +386,48 @@ pub fn select_executable(title: &str, install_dir: &Path, archive: &Path) -> Opt
         }
     }
 
-    if archive.is_file() && launchable_emulator_file(archive) {
+    if archive.is_file() && launchable_emulator_file(archive) && keep(archive) {
         return Some(archive.to_path_buf());
     }
 
     None
+}
+
+/// [`select_executable`] for a server "Emulators"-platform package, limited
+/// to what runs on this host: on Windows (`windows == true`) only `.exe`,
+/// `.bat` and `.cmd`; elsewhere only `.AppImage`, `.sh`, and (unix) an
+/// extensionless file with its executable bit set. A package often ships
+/// builds for several systems, and the reference's `.exe` preference would
+/// otherwise register a Windows binary on Linux.
+///
+/// The same scoring as [`select_executable`] ranks what is left. `archive`
+/// is the fallback when `install_dir` yields nothing, and only when it is
+/// itself a host-appropriate launchable file (an AppImage served as-is).
+pub fn select_package_executable(
+    title: &str,
+    install_dir: &Path,
+    archive: &Path,
+    windows: bool,
+) -> Option<PathBuf> {
+    select_executable_where(title, install_dir, archive, |path| {
+        runs_on_host(path, windows)
+    })
+}
+
+/// Whether a launchable file's suffix belongs to the host's binaries. An
+/// extensionless file reaches here only off Windows, where
+/// `launchable_installed_file` already required its executable bit.
+fn runs_on_host(path: &Path, windows: bool) -> bool {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let suffix = suffix_of(&name).to_lowercase();
+    if windows {
+        matches!(suffix.as_str(), ".exe" | ".bat" | ".cmd")
+    } else {
+        matches!(suffix.as_str(), ".appimage" | ".sh" | "")
+    }
 }
 
 #[cfg(test)]
@@ -1044,5 +1093,114 @@ mod tests {
 
         assert!(!library.join("emulators/Mystery/memcards").exists());
         assert!(!library.join("saves").exists());
+    }
+}
+
+#[cfg(test)]
+mod package_executable_tests {
+    use super::*;
+    use std::fs;
+
+    fn touch(path: &Path) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, b"").unwrap();
+    }
+
+    /// A package carrying a Windows and a Linux build side by side.
+    fn dual_build_package() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        touch(&dir.path().join("win").join("pcsx2-qt.exe"));
+        touch(
+            &dir.path()
+                .join("linux")
+                .join("pcsx2-v2.4-linux-appimage-x64-Qt.AppImage"),
+        );
+        touch(&dir.path().join("readme.txt"));
+        dir
+    }
+
+    #[test]
+    fn windows_picks_the_exe_of_a_dual_build_package() {
+        let dir = dual_build_package();
+        let archive = dir.path().join("missing.zip");
+        let picked = select_package_executable("PCSX2", dir.path(), &archive, true);
+        assert_eq!(picked, Some(dir.path().join("win").join("pcsx2-qt.exe")));
+    }
+
+    #[test]
+    fn linux_picks_the_appimage_of_a_dual_build_package() {
+        let dir = dual_build_package();
+        let archive = dir.path().join("missing.zip");
+        let picked = select_package_executable("PCSX2", dir.path(), &archive, false);
+        assert_eq!(
+            picked,
+            Some(
+                dir.path()
+                    .join("linux")
+                    .join("pcsx2-v2.4-linux-appimage-x64-Qt.AppImage")
+            )
+        );
+    }
+
+    #[test]
+    fn a_package_with_only_the_other_systems_build_yields_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(&dir.path().join("emu.exe"));
+        let archive = dir.path().join("missing.zip");
+        assert_eq!(
+            select_package_executable("Emu", dir.path(), &archive, false),
+            None
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        touch(&dir.path().join("emu.AppImage"));
+        touch(&dir.path().join("run.sh"));
+        assert_eq!(
+            select_package_executable("Emu", dir.path(), &archive, true),
+            None
+        );
+    }
+
+    #[test]
+    fn the_title_tokens_still_rank_the_candidates() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(&dir.path().join("updater.exe"));
+        touch(&dir.path().join("cemu.exe"));
+        let archive = dir.path().join("missing.zip");
+        assert_eq!(
+            select_package_executable("Cemu", dir.path(), &archive, true),
+            Some(dir.path().join("cemu.exe"))
+        );
+    }
+
+    #[test]
+    fn an_appimage_served_as_is_is_its_own_executable_off_windows_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = dir.path().join("Emu-1.0.AppImage");
+        touch(&archive);
+        let no_dir = dir.path().join("not-extracted");
+        assert_eq!(
+            select_package_executable("Emu", &no_dir, &archive, false),
+            Some(archive.clone())
+        );
+        assert_eq!(
+            select_package_executable("Emu", &no_dir, &archive, true),
+            None
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linux_accepts_an_extensionless_binary_with_the_executable_bit() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("redream");
+        touch(&bin);
+        fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+        let archive = dir.path().join("missing.zip");
+        assert_eq!(
+            select_package_executable("Redream", dir.path(), &archive, false),
+            Some(bin)
+        );
     }
 }

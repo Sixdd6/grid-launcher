@@ -50,7 +50,10 @@ Modules as declared in `src/lib.rs`:
 - `library` — the install pipeline: download queue, extraction, path rules, launch-file
   selection, the SQLite registry, platform rules, install specials (PS3, extra content),
   update detection, and `relink` (Q4: links installed rows that have no server ROM id
-  to their unique server match). `user_data_links` links an emulator's own-written directories into
+  to their unique server match). `server_emulator` (Q3) registers a package from the
+  server's "Emulators" platform as an emulator entry; `emulator_removal` removes an
+  emulator's files and finds the package rows a deleted entry takes with it.
+  `user_data_links` links an emulator's own-written directories into
   `saves/`; `layout_migration` is the one-shot startup migration to the layout below.
 - `pcgw` — PCGamingWiki client that resolves a Windows game's save paths.
 - `platform` — host-platform lookups that need OS APIs (for example the Shell-resolved

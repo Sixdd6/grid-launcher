@@ -26,6 +26,7 @@
   import { pushToast } from './stores/toasts.svelte';
   import { compatTools } from './stores/compatTools.svelte';
   import { filterCatalogEntries } from './emulators/catalog';
+  import { emulatorTerminalSignature as terminalSignature } from './emulators/installSignal';
   import {
     defaultEmulatorKey,
     needsEmulator,
@@ -149,17 +150,11 @@
   let installingSourceIds = $state<Set<string>>(new Set());
   let filteredCatalog = $derived(filterCatalogEntries(catalogSearch, catalog));
 
-  // Signature of every emulator-job download that has reached a terminal
-  // status — read inside the effects below so a fresh terminal entry (an
-  // install completing, failing, or getting cancelled) triggers a catalog
-  // re-fetch. Approximate on purpose (task-7-brief.md): any terminal
-  // emulator entry is enough of a signal, not just the one just installed.
-  let emulatorTerminalSignature = $derived(
-    downloads.entries
-      .filter((e) => e.job === 'emulator' && ['completed', 'failed', 'cancelled'].includes(e.status))
-      .map((e) => `${e.id}:${e.status}`)
-      .join(',')
-  );
+  // Signature of every emulator install (a catalog job, or a server
+  // Emulators-platform package) that has reached a terminal status — read
+  // inside the effects below so a fresh terminal entry triggers a re-fetch
+  // (emulators/installSignal.ts).
+  let emulatorTerminalSignature = $derived(terminalSignature(downloads.entries));
 
   // RPCS3 PS3 firmware note/button (task-17-brief.md). Keyed by emulator
   // entry name; `null` means the status was queried and no PS3UPDAT.PUP is

@@ -489,6 +489,45 @@ pub fn profile_for_entry<'a>(
     None
 }
 
+/// The profile a server "Emulators"-platform package resolves to
+/// (`emulator_profile_for_game`, profiles.py:279-310). Unlike
+/// [`profile_for_entry`] there is no entry name to compare: only the
+/// executable's basename is matched against every profile's tokens (exact,
+/// or glob for a token with `*`/`?`), and compat-tool profiles never match.
+///
+/// When more than one profile matches, the one whose name equals the ROM
+/// `title` wins (trimmed; casefolded here, where the reference compared
+/// case-sensitively); otherwise the first match in catalog order. `None`
+/// when nothing matches — the caller then registers the package under the
+/// ROM title with `%rom%` args and no platforms (the reference's fallback
+/// profile).
+pub fn profile_for_package<'a>(
+    title: &str,
+    exe_path: &str,
+    profiles: &'a [EmulatorProfile],
+) -> Option<&'a EmulatorProfile> {
+    let executable_name = windows_tolerant_basename(exe_path).trim().to_lowercase();
+    if executable_name.is_empty() {
+        return None;
+    }
+    let matches: Vec<&EmulatorProfile> = profiles
+        .iter()
+        .filter(|profile| !profile.is_compat_tool)
+        .filter(|profile| {
+            profile
+                .match_tokens
+                .iter()
+                .any(|token| token_matches_executable(token, &executable_name))
+        })
+        .collect();
+    let title = title.trim().to_lowercase();
+    matches
+        .iter()
+        .find(|profile| profile.name.trim().to_lowercase() == title)
+        .or_else(|| matches.first())
+        .copied()
+}
+
 /// Whether `t` is a run of one or more ASCII digits (`str.isdigit`, applied
 /// to a token built only from `[A-Za-z0-9]` runs).
 fn is_digit_token(t: &str) -> bool {
@@ -1807,6 +1846,147 @@ mod tests {
                 asset.get("name").and_then(|n| n.as_str()),
                 Some(expected),
                 "{profile_name} picked the wrong Windows asset"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod package_match_tests {
+    use super::*;
+
+    fn profile(name: &str, tokens: &[&str]) -> EmulatorProfile {
+        EmulatorProfile {
+            name: name.to_string(),
+            match_tokens: tokens.iter().map(|t| t.to_lowercase()).collect(),
+            args: format!("--{}", name.to_lowercase().replace(' ', "-")),
+            ..Default::default()
+        }
+    }
+
+    fn names(found: Option<&EmulatorProfile>) -> Option<&str> {
+        found.map(|p| p.name.as_str())
+    }
+
+    #[test]
+    fn a_single_token_match_wins_whatever_the_title() {
+        let profiles = vec![
+            profile("Alpha", &["alpha.exe"]),
+            profile("Beta", &["beta.exe", "beta*.appimage"]),
+        ];
+        let cases = [
+            (
+                "Some Package",
+                "/lib/games/Emulators/pkg/Beta.exe",
+                Some("Beta"),
+            ),
+            (
+                "Some Package",
+                r"C:\lib\games\Emulators\pkg\BETA.EXE",
+                Some("Beta"),
+            ),
+            ("x", "/pkg/Beta-1.2-x86_64.AppImage", Some("Beta")),
+            ("x", "/pkg/alpha.exe", Some("Alpha")),
+        ];
+        for (title, exe, expected) in cases {
+            assert_eq!(
+                names(profile_for_package(title, exe, &profiles)),
+                expected,
+                "{exe}"
+            );
+        }
+    }
+
+    #[test]
+    fn several_token_matches_prefer_the_profile_named_like_the_title() {
+        let profiles = vec![
+            profile("Xenia (Xbox 360)", &["xenia.exe"]),
+            profile("Xenia Fork", &["xenia.exe"]),
+        ];
+        assert_eq!(
+            names(profile_for_package("Xenia Fork", "/p/xenia.exe", &profiles)),
+            Some("Xenia Fork")
+        );
+        assert_eq!(
+            names(profile_for_package(
+                "  xenia fork ",
+                "/p/xenia.exe",
+                &profiles
+            )),
+            Some("Xenia Fork"),
+            "the title compare trims and ignores case"
+        );
+        assert_eq!(
+            names(profile_for_package(
+                "Something Else",
+                "/p/xenia.exe",
+                &profiles
+            )),
+            Some("Xenia (Xbox 360)"),
+            "no title match: the first match in catalog order"
+        );
+    }
+
+    #[test]
+    fn no_token_match_is_none_even_when_the_title_names_a_profile() {
+        let profiles = vec![profile("Alpha", &["alpha.exe"])];
+        // The title alone never selects a profile (the reference matched on
+        // the executable only); the caller falls back to the ROM title.
+        assert_eq!(
+            names(profile_for_package("Alpha", "/p/other.exe", &profiles)),
+            None
+        );
+        assert_eq!(names(profile_for_package("Alpha", "", &profiles)), None);
+    }
+
+    #[test]
+    fn a_stem_only_match_does_not_count() {
+        // `profile_for_entry` also matches stems; the package matcher, like
+        // `emulator_profile_for_game`, compares whole basenames only.
+        let profiles = vec![profile("Alpha", &["alpha.exe"])];
+        assert_eq!(
+            names(profile_for_package("x", "/p/alpha.AppImage", &profiles)),
+            None
+        );
+    }
+
+    #[test]
+    fn compat_tool_profiles_never_match() {
+        let mut tool = profile("Proton", &["proton"]);
+        tool.is_compat_tool = true;
+        let profiles = vec![tool];
+        assert_eq!(
+            names(profile_for_package("Proton", "/p/proton", &profiles)),
+            None
+        );
+    }
+
+    #[test]
+    fn the_embedded_catalog_matches_windows_and_linux_builds() {
+        let profiles = load_profiles();
+        let cases = [
+            (
+                "PCSX2",
+                r"C:\lib\games\Emulators\pcsx2\pcsx2-qt.exe",
+                "PCSX2 (Playstation 2)",
+            ),
+            (
+                "PCSX2",
+                "/lib/games/Emulators/pcsx2/pcsx2-v2.4.0-linux-appimage-x64-Qt.AppImage",
+                "PCSX2 (Playstation 2)",
+            ),
+            (
+                "Dolphin",
+                r"C:\pkg\Dolphin-x64\Dolphin.exe",
+                "Dolphin (GameCube, Wii)",
+            ),
+            ("Azahar", "/pkg/azahar.AppImage", "Azahar (Nintendo 3DS)"),
+        ];
+        for (title, exe, expected) in cases {
+            assert_eq!(
+                names(profile_for_package(title, exe, profiles)),
+                Some(expected),
+                "{exe}"
             );
         }
     }

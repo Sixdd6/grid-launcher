@@ -96,7 +96,7 @@ There are several main sections to the application with buttons across the top b
 - Save strategy should support `auto`, `single_file`, and `folder` modes.
 - Users should be able to define ignored files/extensions and semicolon-separated save/state directories for cloud sync handling.
 - The app should support default emulator assignment per platform, including RetroArch core selection where applicable.
-- Known emulator packages downloaded from the server may be auto-configured using bundled emulator profiles.
+- A package installed from the server's "Emulators" platform is registered as an emulator. It is downloaded and extracted under `games/Emulators/<package>` like a game, and its hidden library row is kept. GRID then picks the executable for this system (`.exe` on Windows; an AppImage, `.sh` or executable file on Linux) and matches it to a bundled emulator profile. A match gives the profile's name and arguments; no match gives the ROM title and `%rom%`. When another emulator entry already has that name, the package is added as "<Name> (server)", so a catalog entry and its update source stay unchanged. The profile's user-data folders are linked into `saves/`, the emulator is configured and gets default platforms like a catalog install, and its Downloads row shows the Emulator badge. Reinstalling the package updates the same entry and keeps the user's arguments. Deleting the emulator under Emulators › Installed also uninstalls its server package.
 
 ## Sub Views
 

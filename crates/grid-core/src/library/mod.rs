@@ -18,6 +18,7 @@ pub mod platforms;
 pub mod queue;
 pub mod registry;
 pub mod relink;
+pub mod server_emulator;
 pub mod specials;
 pub mod update_detection;
 pub mod user_data_links;
@@ -69,6 +70,7 @@ use platforms::{
 use queue::{Admission, CancelAction, DownloadStatus, DownloadsSnapshot, JobKey, QueueState};
 use registry::{installed_match, InstalledGame, Registry};
 use specials::ps3::Ps3Roots;
+use update_detection::is_emulators_platform;
 use user_data_links::{ensure_user_data_links, user_data_root};
 
 #[derive(Debug, thiserror::Error)]
@@ -136,6 +138,11 @@ const UNKNOWN_COMPAT_TOOL_SOURCE: &str = "unknown compat tool source";
 /// sitting next to the archive).
 const EXTRACT_TMP_DIR: &str = ".extract-tmp";
 const NO_EMULATOR_EXECUTABLE: &str = "No launchable emulator executable was found after install";
+/// The finalize warning when an Emulators-platform package holds no
+/// executable for this system. The package and its row stay installed.
+const NO_SERVER_EMULATOR_EXECUTABLE: &str =
+    "No launchable emulator executable for this system was \
+     found in the package. Add it under Emulators › Add from catalog › Manual.";
 
 /// The verbatim messages the update/DLC flows show. Worded as the
 /// reference does (`install_mixin.py:364-383`,
@@ -939,7 +946,13 @@ impl InstallService {
         let key = JobKey::Rom(job.rom_id);
         let title = job.detail.name.clone();
         let platform = job.detail.platform_name.clone();
-        let kind = job.mode.kind();
+        // An Emulators-platform package installs an emulator: its Downloads
+        // row carries the Emulator badge (SPEC "Downloads").
+        let kind = if job.mode == InstallMode::Base && is_emulators_platform(&platform) {
+            "emulator"
+        } else {
+            job.mode.kind()
+        };
         self.admit(key, &title, &platform, kind, JobPayload::Game(job));
         Ok(())
     }
@@ -1402,8 +1415,14 @@ impl InstallService {
             .filter(|found| installed_match(found, rom_id))
             .ok_or_else(|| LibraryError::Registry(NOT_INSTALLED.to_string()))?;
 
+        self.uninstall_record(&record, &library)
+    }
+
+    /// [`Self::uninstall`] for a row already looked up: every removal step
+    /// (through [`RemovalGuard`]), then the row, only when nothing failed.
+    fn uninstall_record(&self, record: &InstalledGame, library: &Path) -> Result<(), LibraryError> {
         let home = crate::platform::home_dir();
-        let steps = uninstall_steps(&record, &library, home.as_deref());
+        let steps = uninstall_steps(record, library, home.as_deref());
         let failures = run_removals(&steps, &mut apply_removal);
         if !failures.is_empty() {
             return Err(LibraryError::Registry(failures.join("\n")));
@@ -1411,6 +1430,40 @@ impl InstallService {
 
         self.registry.remove(&record.title, &record.platform)?;
         Ok(())
+    }
+
+    /// Uninstalls the hidden Emulators-platform rows whose package holds
+    /// `entry`'s executable ([`emulator_removal::server_package_rows`]),
+    /// through the same removal path as [`Self::uninstall`] — so the
+    /// [`RemovalGuard`] applies. Returns how many rows went.
+    ///
+    /// Ports `_uninstall_emulator_files` (install_mixin.py:1117-1138): the
+    /// Emulators view's delete takes the server package with the entry.
+    /// No configured library means nothing managed can exist: `Ok(0)`. Every
+    /// row is attempted; the failures come back as one error.
+    pub fn uninstall_server_emulator_rows(
+        &self,
+        entry: &EmulatorEntry,
+        others: &[EmulatorEntry],
+    ) -> Result<usize, LibraryError> {
+        let library = match self.library_root() {
+            Ok(library) => library,
+            Err(LibraryError::LibraryPathUnset) => return Ok(0),
+            Err(e) => return Err(e),
+        };
+        let rows = emulator_removal::server_package_rows(entry, others, &self.registry.all()?);
+        let mut failures = Vec::new();
+        let mut removed = 0;
+        for row in &rows {
+            match self.uninstall_record(row, &library) {
+                Ok(()) => removed += 1,
+                Err(e) => failures.push(e.to_string()),
+            }
+        }
+        if !failures.is_empty() {
+            return Err(LibraryError::Registry(failures.join("\n")));
+        }
+        Ok(removed)
     }
 
     // --- internals ----------------------------------------------------------
@@ -1799,12 +1852,22 @@ impl InstallService {
             self.queue_xbox360_content(job);
         }
 
+        // An Emulators-platform package is an emulator build: register and
+        // configure it now, while a served-as-is archive still exists. The
+        // registry row above stays — cloud scope reads it.
+        if is_emulators_platform(platform) {
+            self.register_server_emulator(&record, archive, warning);
+        }
+
         // Only after a successful write, and only when the archive has been
         // superseded by an extraction — a finalize failure keeps the archive
         // so a retry skips the re-download (doc 03 invariant 5).
         if let Some(archive) = archive_to_delete {
             if !delete_with_retry(archive) {
-                *warning = format!("could not delete archive: {}", archive.display());
+                append_warning(
+                    warning,
+                    &format!("could not delete archive: {}", archive.display()),
+                );
             }
         }
         Ok(())
@@ -2431,6 +2494,95 @@ impl InstallService {
             });
         }
         Ok(())
+    }
+
+    /// Registers the emulator a finalized Emulators-platform package carries
+    /// (`_auto_configure_installed_emulator`, grid-launcher.py:3622-3664):
+    /// picks this host's executable ([`emu_install::select_package_executable`]),
+    /// plans the entry ([`server_emulator::plan_server_emulator`]: bundled
+    /// profile or ROM-title fallback, `(server)` suffix on a name clash),
+    /// links the profile's `user_data` into `saves/<Profile>` at the data
+    /// root, writes the entry, runs [`autoconfig::sync_new_emulator`] and
+    /// fires the emulator-installed hook — the catalog finalize's order.
+    ///
+    /// Never fails the install: the package is on disk and its row is
+    /// written. A missing executable or a config error appends one line to
+    /// the finalize warning instead, naming paths and emulators only.
+    fn register_server_emulator(
+        &self,
+        record: &InstalledGame,
+        archive: &Path,
+        warning: &mut String,
+    ) {
+        let package_dir = (!record.extracted_dir.trim().is_empty())
+            .then(|| PathBuf::from(record.extracted_dir.trim()));
+        let scan_dir = package_dir.clone().unwrap_or_default();
+        let Some(exe) = emu_install::select_package_executable(
+            &record.title,
+            &scan_dir,
+            archive,
+            cfg!(windows),
+        ) else {
+            append_warning(warning, NO_SERVER_EMULATOR_EXECUTABLE);
+            return;
+        };
+        make_executable(&exe);
+
+        let mut config = match Config::load(&self.config_path) {
+            Ok(config) => config,
+            Err(e) => {
+                append_warning(warning, &format!("emulator registration: {e}"));
+                return;
+            }
+        };
+        let plan = server_emulator::plan_server_emulator(
+            &record.title,
+            &exe,
+            package_dir.as_deref(),
+            &config.emulators,
+            &self.profiles,
+        );
+
+        // Links before the entry and autoconfig, as in the catalog finalize:
+        // a writer must write THROUGH the link into saves/.
+        if let Some(profile) = plan.profile.filter(|p| !p.user_data.is_empty()) {
+            match self.library_root() {
+                Ok(library) => {
+                    let root = user_data_root(profile, &exe);
+                    let linked = fs::create_dir_all(&root)
+                        .map_err(|e| e.to_string())
+                        .and_then(|()| {
+                            ensure_user_data_links(
+                                &root,
+                                &saves_dir(&library, &profile.name),
+                                &profile.user_data,
+                            )
+                            .map_err(|e| e.to_string())
+                        });
+                    if let Err(e) = linked {
+                        append_warning(warning, &format!("user data links: {e}"));
+                    }
+                }
+                Err(e) => append_warning(warning, &format!("user data links: {e}")),
+            }
+        }
+
+        let fresh = server_emulator::write_server_emulator_entry(&mut config, &plan, &exe);
+        if let Err(e) = config.save(&self.config_path) {
+            append_warning(warning, &format!("emulator registration: {e}"));
+            return;
+        }
+        self.sync_autoconfig(&plan.name, fresh, warning);
+
+        // Same lock discipline as the catalog finalize's hook call.
+        let hook = self.emulator_installed_hook.read().unwrap().clone();
+        if let Some(hook) = hook {
+            hook(EmulatorInstalled {
+                name: plan.name,
+                fresh,
+                compat_tool: false,
+            });
+        }
     }
 
     /// D1 call site A: runs [`autoconfig::sync_new_emulator`] for the entry

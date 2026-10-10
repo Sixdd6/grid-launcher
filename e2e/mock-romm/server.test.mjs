@@ -917,3 +917,26 @@ test("the native fixture serves game.json as its own JSON body", async () => {
     assert.deepEqual(body, { version: "1.0", year: 2004, tags: ["indie"] });
   });
 });
+
+test("the server-emulator fixture lists an Emulators platform whose package zips the PCSX2 AppImage stub", async () => {
+  await withFixtureServer(path.join(__dirname, "../fixtures-server-emulator"), async ({ url }) => {
+    const platforms = await fetch(`${url}/api/platforms`, { headers: authHeader() }).then((r) =>
+      r.json(),
+    );
+    assert.ok(platforms.some((p) => p.id === 1 && p.name === "Emulators"));
+
+    const detail = await fetch(`${url}/api/roms/801`, { headers: authHeader() }).then((r) =>
+      r.json(),
+    );
+    assert.equal(detail.platform_display_name, "Emulators");
+    const [file] = detail.files;
+    const res = await fetch(`${url}/api/roms/801/content/pcsx2-server.zip?file_ids=${file.id}`, {
+      headers: authHeader(),
+    });
+    assert.equal(res.status, 200);
+    const buf = Buffer.from(await res.arrayBuffer());
+    assert.equal(buf.length, file.file_size_bytes);
+    assert.ok(buf.includes(Buffer.from("PCSX2/pcsx2-v9.9-e2e-linux-appimage-x64-Qt.AppImage")));
+    assert.ok(buf.includes(Buffer.from("grid-launcher e2e mock forge stub: pcsx2")));
+  });
+});

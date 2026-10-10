@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 
 use super::extract::is_extractable_archive;
 use super::paths::{emulators_dir, expand_home, legacy_emulators_dir, library_root, saves_dir};
+use super::registry::InstalledGame;
+use super::server_emulator::path_key;
 use super::user_data_links::{move_file, move_tree_preferring_dest};
 use super::{apply_removal, run_removals, LibraryError, Removal, RemovalLabel};
 use crate::autoconfig::paths::is_appimage;
@@ -321,6 +323,161 @@ fn resolved_entry_dir(entry: &EmulatorEntry) -> Option<PathBuf> {
         return Some(resolved);
     }
     resolved.parent().map(Path::to_path_buf)
+}
+
+/// The hidden Emulators-platform registry rows whose package holds
+/// `entry`'s executable (`matching_installed_emulator_games`,
+/// install_registry.py:65-90): a row matches when its archive or extracted
+/// path IS the executable, or its extracted directory contains it.
+///
+/// Deleting the entry uninstalls these rows. A row that another entry
+/// (`others`, the deleted one skipped by name) also points into is left
+/// alone: its files would go with it — the same rule
+/// [`emulator_removal_steps`] applies to a shared install directory.
+/// Pure: paths compare lexically ([`path_key`]), nothing is read from disk.
+pub fn server_package_rows(
+    entry: &EmulatorEntry,
+    others: &[EmulatorEntry],
+    rows: &[InstalledGame],
+) -> Vec<InstalledGame> {
+    let in_package = |exe: &str, row: &InstalledGame| {
+        let exe = exe.trim();
+        if exe.is_empty() || !crate::cloud::scope::is_emulators_platform(&row.platform) {
+            return false;
+        }
+        let exe = path_key(exe);
+        let same = |raw: &str| !raw.trim().is_empty() && path_key(raw) == exe;
+        same(&row.archive_path)
+            || same(&row.extracted_path)
+            || (!row.extracted_dir.trim().is_empty()
+                && exe.starts_with(path_key(&row.extracted_dir)))
+    };
+    let folded = entry.name.trim().to_lowercase();
+    rows.iter()
+        .filter(|row| in_package(&entry.path, row))
+        .filter(|row| {
+            !others
+                .iter()
+                .filter(|other| other.name.trim().to_lowercase() != folded)
+                .any(|other| in_package(&other.path, row))
+        })
+        .cloned()
+        .collect()
+}
+
+#[cfg(test)]
+mod server_package_tests {
+    use super::*;
+
+    fn entry(name: &str, path: &str) -> EmulatorEntry {
+        EmulatorEntry {
+            name: name.to_string(),
+            path: path.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn row(title: &str, platform: &str, dir: &str, launch: &str) -> InstalledGame {
+        InstalledGame {
+            title: title.to_string(),
+            platform: platform.to_string(),
+            rom_id: Some(7),
+            extracted_dir: dir.to_string(),
+            extracted_path: launch.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn titles(rows: &[InstalledGame]) -> Vec<&str> {
+        rows.iter().map(|r| r.title.as_str()).collect()
+    }
+
+    const PKG: &str = "/lib/games/Emulators/pcsx2-pkg";
+    const EXE: &str = "/lib/games/Emulators/pcsx2-pkg/bin/pcsx2-qt.exe";
+
+    fn rows() -> Vec<InstalledGame> {
+        vec![
+            row(
+                "PCSX2",
+                "Emulators",
+                PKG,
+                "/lib/games/Emulators/pcsx2-pkg/readme.txt",
+            ),
+            row(
+                "Cemu",
+                "Emulators",
+                "/lib/games/Emulators/cemu",
+                "/lib/games/Emulators/cemu/cemu.exe",
+            ),
+            // A game whose directory happens to hold the path is never an
+            // emulator package.
+            row("Game", "Sony PlayStation 2", PKG, EXE),
+        ]
+    }
+
+    #[test]
+    fn the_package_whose_directory_holds_the_executable_matches() {
+        let deleted = entry("PCSX2 (server)", EXE);
+        let found = server_package_rows(&deleted, std::slice::from_ref(&deleted), &rows());
+        assert_eq!(titles(&found), vec!["PCSX2"]);
+    }
+
+    #[test]
+    fn an_archive_or_launch_path_equal_to_the_executable_matches() {
+        let appimage = "/lib/games/Emulators/Emu-1.0.AppImage";
+        let served = InstalledGame {
+            title: "Emu".to_string(),
+            platform: " emulators ".to_string(),
+            archive_path: appimage.to_string(),
+            ..Default::default()
+        };
+        let deleted = entry("Emu", appimage);
+        assert_eq!(
+            titles(&server_package_rows(&deleted, &[], &[served])),
+            vec!["Emu"]
+        );
+
+        let cemu = entry(
+            "Cemu (Wii U) (server)",
+            "/lib/games/Emulators/cemu/cemu.exe",
+        );
+        assert_eq!(
+            titles(&server_package_rows(&cemu, &[], &rows())),
+            vec!["Cemu"]
+        );
+    }
+
+    #[test]
+    fn unrelated_entries_and_blank_paths_match_nothing() {
+        let catalog = entry(
+            "PCSX2 (Playstation 2)",
+            "/lib/emulators/PCSX2 (Playstation 2)/pcsx2.AppImage",
+        );
+        assert!(server_package_rows(&catalog, &[], &rows()).is_empty());
+        assert!(server_package_rows(&entry("Blank", "  "), &[], &rows()).is_empty());
+        // A sibling directory sharing a name prefix is not "inside".
+        let sibling = entry("X", "/lib/games/Emulators/pcsx2-pkg-old/pcsx2-qt.exe");
+        assert!(server_package_rows(&sibling, &[], &rows()).is_empty());
+    }
+
+    #[test]
+    fn a_package_another_entry_still_uses_is_kept() {
+        let deleted = entry("PCSX2 (server)", EXE);
+        let other = entry(
+            "PCSX2 copy",
+            "/lib/games/Emulators/pcsx2-pkg/bin/pcsx2-qt.exe",
+        );
+        let all = vec![deleted.clone(), other];
+        assert!(server_package_rows(&deleted, &all, &rows()).is_empty());
+
+        // The deleted entry itself, listed in `others` under another case,
+        // does not count as a second user.
+        let all = vec![entry("pcsx2 (SERVER)", EXE)];
+        assert_eq!(
+            titles(&server_package_rows(&deleted, &all, &rows())),
+            vec!["PCSX2"]
+        );
+    }
 }
 
 #[cfg(test)]

@@ -1,0 +1,21 @@
+{
+  "801": {
+    "id": 801,
+    "name": "PCSX2",
+    "fs_name_no_ext": "pcsx2-server",
+    "platform_id": 1,
+    "platform_display_name": "Emulators",
+    "fs_name": "pcsx2-server.zip",
+    "summary": "A server Emulators-platform package: one zip holding a Linux PCSX2 AppImage stub.",
+    "regions": [],
+    "languages": [],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      { "id": 8011, "file_name": "pcsx2-server.zip", "file_size_bytes": 0, "is_top_level": true }
+    ],
+    "metadatum": null
+  }
+}

@@ -1139,12 +1139,26 @@ pub async fn save_emulator(
 /// managed install under `<library>/emulators/<X>` or the legacy
 /// `<library>/Emulators/<X>` is removed — a hand-configured path is left on
 /// disk ([`grid_core::library::emulator_removal`]).
+///
+/// An emulator registered from a server "Emulators"-platform package also
+/// takes that package with it: its hidden registry row is uninstalled
+/// through the game uninstall path (`uninstall_server_emulator_rows`),
+/// before the entry goes, so a failure keeps the entry to retry.
 #[tauri::command]
-pub async fn delete_emulator(name: String) -> Result<(), String> {
+pub async fn delete_emulator(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    // `State` is not `Send`; the service handle crosses the hop instead.
+    let install = state.install.as_ref().ok().cloned();
     tokio::task::spawn_blocking(move || {
         let config_path = Config::default_path();
         let config = Config::load(&config_path).map_err(err)?;
         remove_emulator_files(&config, &config_path, &name, load_profiles()).map_err(err)?;
+        if let (Some(install), Some(entry)) =
+            (install, emulator_entry_by_name(&config.emulators, &name))
+        {
+            install
+                .uninstall_server_emulator_rows(entry, &config.emulators)
+                .map_err(err)?;
+        }
         modify_config(&config_path, |config| {
             apply_delete_emulator(config, &name);
             Ok(())

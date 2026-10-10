@@ -68,6 +68,7 @@ STAGE_GROUPS=(
   "emulators:specs/emulators.spec.ts"
   "launch:specs/launch.spec.ts"
   "emulator-catalog:specs/emulator-catalog.spec.ts"
+  "server-emulator:specs/server-emulator.spec.ts"
   "cloud-saves:specs/cloud-saves.spec.ts"
   "images:specs/images-a.spec.ts specs/images-b.spec.ts"
   "ps3-install:specs/ps3-install.spec.ts"
@@ -429,6 +430,9 @@ mock_args_for_group() {
     # from e2e/fixtures so the shared set — and every assertion the other
     # groups and mock-romm/server.test.mjs make about it — stays untouched.
     emulator-catalog) printf -- '--fixtures-dir fixtures-emulator-catalog' ;;
+    # An "Emulators" platform with one package (rom 801) that zips the mock
+    # forge's PCSX2 AppImage stub, plus a PS2 platform for the defaults.
+    server-emulator) printf -- '--fixtures-dir fixtures-server-emulator' ;;
     # A fixture set with three installed games and seeded server save
     # records (e2e/fixtures-cloud-saves/saves.json) the default set has no
     # equivalent for. Kept separate for the same reason as
