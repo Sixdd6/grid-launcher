@@ -132,11 +132,12 @@ pub fn saves_dir(library: &Path, emulator_name: &str) -> PathBuf {
 /// Expand a leading `~/` in `raw` to the user's home directory. Any other
 /// form (a bare `~`, `~user/...`, or no tilde at all) is left untouched —
 /// this is a minimal, manual stand-in for shell tilde expansion, not a full
-/// implementation.
+/// implementation. The home directory comes from
+/// [`crate::platform::home_dir`].
 pub(crate) fn expand_home(raw: &str) -> PathBuf {
     if let Some(rest) = raw.strip_prefix("~/") {
-        if let Some(base_dirs) = directories::BaseDirs::new() {
-            return base_dirs.home_dir().join(rest);
+        if let Some(home) = crate::platform::home_dir() {
+            return home.join(rest);
         }
     }
     PathBuf::from(raw)
@@ -463,14 +464,13 @@ mod tests {
     #[test]
     fn candidate_archives_dedups_by_string() {
         // archive_path already points at the games-platform-dir candidate,
-        // so it collapses into one entry instead of appearing twice.
+        // so it collapses into one entry instead of appearing twice. The
+        // recorded path is built with `Path::join` like the product's own
+        // candidate, so its text matches on every OS's separator.
         let library = Path::new("/library");
-        let candidates = candidate_archives(
-            library,
-            "Platform",
-            "/library/games/Platform/Game.zip",
-            "Game.zip",
-        );
+        let recorded = library.join("games").join("Platform").join("Game.zip");
+        let candidates =
+            candidate_archives(library, "Platform", recorded.to_str().unwrap(), "Game.zip");
         assert_eq!(
             candidates,
             vec![
@@ -483,13 +483,14 @@ mod tests {
 
     #[test]
     fn candidate_archives_expands_leading_tilde() {
+        // `expand_home` reads `$HOME` under test; see `crate::test_env`.
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard =
+            crate::test_env::EnvGuard::set(&[("HOME", Some(temp.path().to_str().unwrap()))]);
         let library = Path::new("/library");
-        let home = directories::BaseDirs::new()
-            .unwrap()
-            .home_dir()
-            .to_path_buf();
         let candidates = candidate_archives(library, "Platform", "~/Games/Game.zip", "Game.zip");
-        assert_eq!(candidates[0], home.join("Games/Game.zip"));
+        assert_eq!(candidates[0], temp.path().join("Games/Game.zip"));
     }
 
     #[test]
@@ -638,7 +639,10 @@ mod tests {
             PathBuf::from("/library/Platform/Game.zip"),
             PathBuf::from("/other/Game.zip"),
         ];
-        let candidates = candidate_extracted_dirs(&archive_candidates, "/library/Platform/Game");
+        // Built with `Path::join` like `extraction_dir`, so the recorded
+        // text matches the derived candidate on every OS's separator.
+        let recorded = Path::new("/library/Platform").join("Game");
+        let candidates = candidate_extracted_dirs(&archive_candidates, recorded.to_str().unwrap());
         assert_eq!(
             candidates,
             vec![

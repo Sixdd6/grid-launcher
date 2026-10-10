@@ -434,25 +434,34 @@ mod tests {
     fn xemu_blank_path_targets_default_base_root() {
         let _lock = crate::test_env::lock();
         let temp = tempfile::tempdir().unwrap();
+        let appdata = temp.path().join("appdata");
         let _guard = EnvGuard::set(&[
             ("HOME", Some(temp.path().to_str().unwrap())),
             ("XDG_DATA_HOME", None),
+            ("APPDATA", Some(appdata.to_str().unwrap())),
         ]);
+
+        // `ensure_settings` writes here: it must never be the real profile.
+        assert!(
+            default_base_root().starts_with(temp.path()),
+            "{:?} is outside {:?}",
+            default_base_root(),
+            temp.path()
+        );
 
         let result = ensure_settings("", false);
 
+        let expected_root = if cfg!(windows) {
+            appdata.join("xemu").join("xemu")
+        } else {
+            temp.path()
+                .join(".local")
+                .join("share")
+                .join("xemu")
+                .join("xemu")
+        };
         assert!(result.changed);
-        assert_eq!(
-            result.config_path,
-            Some(
-                temp.path()
-                    .join(".local")
-                    .join("share")
-                    .join("xemu")
-                    .join("xemu")
-                    .join("xemu.toml")
-            )
-        );
+        assert_eq!(result.config_path, Some(expected_root.join("xemu.toml")));
     }
 
     // --- renderer seed (spec 2026-09-17-vulkan-renderer-seed-design) --------

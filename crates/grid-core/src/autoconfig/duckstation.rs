@@ -762,6 +762,12 @@ mod tests {
             .join("Documents")
             .join("DuckStation")
             .join("settings.ini");
+        // This test writes the file: it must never land in the real profile.
+        assert!(
+            second_candidate.starts_with(temp.path()),
+            "{second_candidate:?} is outside {:?}",
+            temp.path()
+        );
         std::fs::create_dir_all(second_candidate.parent().unwrap()).unwrap();
         std::fs::write(
             &second_candidate,

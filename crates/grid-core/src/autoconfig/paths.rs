@@ -13,16 +13,10 @@ use std::path::{Component, Path, PathBuf};
 
 /// The user's home directory, or `None` when it cannot be determined.
 ///
-/// `directories::UserDirs` first (which is `$HOME` on unix and the Windows
-/// known-folder API on Windows), then a direct `$HOME` read as a fallback so
-/// a test can point the whole helper family at a temporary directory.
+/// Delegates to [`crate::platform::home_dir`], which also carries the test
+/// seam that lets a test point the whole helper family at a temp dir.
 pub fn home_dir() -> Option<PathBuf> {
-    if let Some(user_dirs) = directories::UserDirs::new() {
-        return Some(user_dirs.home_dir().to_path_buf());
-    }
-    let raw = std::env::var("HOME").ok()?;
-    let trimmed = raw.trim();
-    (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
+    crate::platform::home_dir()
 }
 
 /// `$XDG_CONFIG_HOME`, else `~/.config` (`core/path.py:33`).
@@ -438,8 +432,12 @@ mod tests {
 
     #[test]
     fn resolve_best_effort_clamps_a_leading_parent_dir_at_root() {
-        let resolved = resolve_best_effort(Path::new("/../../some/nonexistent/dir"));
-        assert_eq!(resolved, PathBuf::from("/some/nonexistent/dir"));
+        // The cwd's root ancestor is `/` on unix and `C:\` (with its drive
+        // prefix) on Windows, where a bare `/` is not absolute.
+        let cwd = std::env::current_dir().unwrap();
+        let root = cwd.ancestors().last().unwrap().to_path_buf();
+        let resolved = resolve_best_effort(&root.join("../../some/nonexistent/dir"));
+        assert_eq!(resolved, root.join("some").join("nonexistent").join("dir"));
     }
 
     #[test]
@@ -473,9 +471,11 @@ mod tests {
         let dir = temp.path().join("real");
         std::fs::create_dir_all(&dir).unwrap();
 
+        // `platform::canonicalize`: the plain form, never Windows' verbatim
+        // `\\?\` one, which `resolve_best_effort` does not produce either.
         assert_eq!(
             resolve_best_effort(&dir),
-            std::fs::canonicalize(&dir).unwrap()
+            crate::platform::canonicalize(&dir).unwrap()
         );
     }
 

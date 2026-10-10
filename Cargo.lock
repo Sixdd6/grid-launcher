@@ -1915,6 +1915,7 @@ dependencies = [
  "bzip2",
  "chrono",
  "directories",
+ "dunce",
  "flate2",
  "futures",
  "futures-util",
