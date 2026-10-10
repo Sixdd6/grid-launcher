@@ -44,6 +44,41 @@
         { "id": 901, "name": "A Game Nobody Owns", "slug": "ango", "type": "game", "cover_url": "" }
       ]
     },
+    "ra_id": 4242,
+    "merged_ra_metadata": {
+      "first_release_date": null,
+      "genres": [],
+      "companies": [],
+      "achievements": [
+        {
+          "ra_id": 9001, "title": "Yoshi's Friend", "description": "Find Yoshi",
+          "points": 5, "num_awarded": 10, "num_awarded_hardcore": 4, "badge_id": "50001",
+          "badge_url": "https://media.retroachievements.org/Badge/50001.png",
+          "badge_url_lock": "https://media.retroachievements.org/Badge/50001_lock.png",
+          "badge_path": "roms/1/101/badges/50001.png",
+          "badge_path_lock": "roms/1/101/badges/50001_lock.png",
+          "display_order": 1, "type": "progression"
+        },
+        {
+          "ra_id": 9002, "title": "Star Road", "description": "Reach the Star Road",
+          "points": 10, "num_awarded": 5, "num_awarded_hardcore": 1, "badge_id": "50002",
+          "badge_url": "https://media.retroachievements.org/Badge/50002.png",
+          "badge_url_lock": "https://media.retroachievements.org/Badge/50002_lock.png",
+          "badge_path": "roms/1/101/badges/50002.png",
+          "badge_path_lock": "roms/1/101/badges/50002_lock.png",
+          "display_order": 2, "type": null
+        },
+        {
+          "ra_id": 9003, "title": "Bowser Down", "description": "Beat Bowser",
+          "points": 30, "num_awarded": 2, "num_awarded_hardcore": 0, "badge_id": "50003",
+          "badge_url": "https://media.retroachievements.org/Badge/50003.png",
+          "badge_url_lock": "https://media.retroachievements.org/Badge/50003_lock.png",
+          "badge_path": "roms/1/101/badges/50003.png",
+          "badge_path_lock": "roms/1/101/badges/50003_lock.png",
+          "display_order": 3, "type": "win_condition"
+        }
+      ]
+    },
     "path_cover_small": "/assets/romm/resources/roms/101/cover/small.png",
     "path_cover_large": "/assets/romm/resources/roms/101/cover/large.png",
     "merged_screenshots": [

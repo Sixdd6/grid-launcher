@@ -59,8 +59,70 @@ test("GET /api/users/me returns the fixture user", async () => {
     const res = await fetch(`${url}/api/users/me`, { headers: authHeader() });
     assert.equal(res.status, 200);
     const body = await res.json();
-    assert.deepEqual(body, { id: 1, username: "e2euser" });
+    assert.equal(body.id, 1);
+    assert.equal(body.username, "e2euser");
+    assert.equal(body.ra_username, "e2e-ra-player");
+    const game = body.ra_progression.results.find((g) => g.rom_ra_id === 4242);
+    assert.deepEqual(
+      game.earned_achievements.map((e) => e.id),
+      ["9001", "9003"],
+    );
   });
+});
+
+test("rom 101 carries an ra_id and achievements with resources-relative badges", async () => {
+  await withServer(async ({ url }) => {
+    const detail = await fetch(`${url}/api/roms/101`, { headers: authHeader() }).then((r) =>
+      r.json(),
+    );
+    assert.equal(detail.ra_id, 4242);
+    const ids = detail.merged_ra_metadata.achievements.map((a) => a.ra_id);
+    assert.deepEqual(ids, [9001, 9002, 9003]);
+    const badge = detail.merged_ra_metadata.achievements[1].badge_path_lock;
+    const res = await fetch(`${url}/assets/romm/resources/${badge}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-type"), "image/png");
+  });
+});
+
+test("PUT /api/users/1 sets a non-empty ra_username and ignores an empty one", async () => {
+  await withServer(async ({ url }) => {
+    const put = (body) =>
+      fetch(`${url}/api/users/1`, {
+        method: "PUT",
+        headers: { ...authHeader(), "content-type": "application/x-www-form-urlencoded" },
+        body,
+      });
+    assert.equal((await put("ra_username=")).status, 200);
+    let me = await fetch(`${url}/api/users/me`, { headers: authHeader() }).then((r) => r.json());
+    assert.equal(me.ra_username, "e2e-ra-player");
+    assert.equal((await put("ra_username=someone-else")).status, 200);
+    me = await fetch(`${url}/api/users/me`, { headers: authHeader() }).then((r) => r.json());
+    assert.equal(me.ra_username, "someone-else");
+    assert.equal((await put("ra_username=x")).ok, true);
+    const other = await fetch(`${url}/api/users/2`, {
+      method: "PUT",
+      headers: authHeader(),
+      body: "ra_username=x",
+    });
+    assert.equal(other.status, 404);
+  });
+});
+
+test("POST /api/users/1/ra/refresh answers 200 and logs the JSON body", async () => {
+  const handle = await startMockRomm({ port: 0 });
+  try {
+    const res = await fetch(`${handle.url}/api/users/1/ra/refresh`, {
+      method: "POST",
+      headers: { ...authHeader(), "content-type": "application/json" },
+      body: JSON.stringify({ incremental: true }),
+    });
+    assert.equal(res.status, 200);
+    const entry = handle.requestLog.find((e) => e.path === "/api/users/1/ra/refresh");
+    assert.deepEqual(entry.bodyJson, { incremental: true });
+  } finally {
+    await handle.close();
+  }
 });
 
 // --- platforms -------------------------------------------------------------
@@ -469,7 +531,8 @@ test("POST /__e2e__/offline {offline:true} makes /api/ requests fail with a conn
 
     const res = await fetch(`${url}/api/users/me`, { headers: authHeader() });
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { id: 1, username: "e2euser" });
+    const restored = await res.json();
+    assert.deepEqual({ id: restored.id, username: restored.username }, { id: 1, username: "e2euser" });
   });
 });
 

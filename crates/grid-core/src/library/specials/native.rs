@@ -1183,6 +1183,7 @@ mod tests {
             video_path: "".to_string(),
             is_identified: false,
             related: Vec::new(),
+            achievement_count: 0,
         }
     }
 

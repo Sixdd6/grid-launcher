@@ -1,6 +1,8 @@
+pub mod achievements;
 mod cloud;
 mod error;
 mod play_sessions;
+pub use achievements::{AchievementsView, RaUsernameSync};
 pub use error::RommError;
 pub use play_sessions::{play_sessions_body, IngestResult, IngestStatus, PlaySessionEntry};
 
@@ -625,6 +627,10 @@ pub struct RomDetail {
     pub is_identified: bool,
     /// The Overview "Related" row, in source-list order.
     pub related: Vec<RelatedGame>,
+    /// How many achievements `merged_ra_metadata.achievements` lists. The
+    /// Details Achievements tab shows only when this is above zero: many
+    /// RA-linked ROMs (`ra_id` set) have an empty list.
+    pub achievement_count: usize,
 }
 
 /// Wire shape of `RomMetadataSchema` fields we use. Every field defaulted so
@@ -747,6 +753,8 @@ struct RawRomDetail {
     path_video: Option<String>,
     #[serde(default)]
     is_identified: bool,
+    #[serde(default)]
+    merged_ra_metadata: Option<achievements::RaRomMetadata>,
     /// Every field not named above — the screenshot and fanart sources
     /// (`merged_screenshots`, `user_screenshots`, metadata blocks…) are read
     /// from here by `screenshot_urls_from_payload` and
@@ -802,6 +810,10 @@ impl RawRomDetail {
             video_path: self.path_video.unwrap_or_default(),
             is_identified: self.is_identified,
             related: igdb.into_related(),
+            achievement_count: self
+                .merged_ra_metadata
+                .map(|m| m.achievements.len())
+                .unwrap_or(0),
         }
     }
 }
@@ -962,6 +974,21 @@ mod detail_fanart_tests {
             detail.fanart_urls,
             vec!["https://romm.example/assets/art/fanart.jpg".to_string()]
         );
+        assert_eq!(detail.achievement_count, 0);
+    }
+
+    #[test]
+    fn a_detail_counts_its_achievements() {
+        let raw: RawRomDetail = serde_json::from_value(serde_json::json!({
+            "id": 194,
+            "platform_id": 9,
+            "ra_id": 5001,
+            "merged_ra_metadata": {
+                "achievements": [{ "ra_id": 1, "title": "A" }, { "ra_id": 2, "title": "B" }]
+            }
+        }))
+        .expect("detail decodes");
+        assert_eq!(raw.into_detail("https://romm.example").achievement_count, 2);
     }
 }
 

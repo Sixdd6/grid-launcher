@@ -6,14 +6,16 @@ import {
   rememberTab,
   rememberedTab,
   resetRememberedTab,
+  shownTab,
   tabTestId,
+  visibleTabs,
 } from './tabs';
 
 beforeEach(() => resetRememberedTab());
 
 describe('the tab set', () => {
-  it('is exactly design §7 four tabs, in order', () => {
-    expect(DETAILS_TABS).toEqual(['overview', 'media', 'saves', 'files']);
+  it('is the four design §7 tabs plus Achievements, in order', () => {
+    expect(DETAILS_TABS).toEqual(['overview', 'media', 'saves', 'files', 'achievements']);
   });
 
   it('labels every tab', () => {
@@ -22,16 +24,37 @@ describe('the tab set', () => {
       'Media',
       'Saves',
       'Files',
+      'Achievements',
     ]);
   });
 
   it('builds the design §11 test id', () => {
     expect(tabTestId('media')).toBe('details-tab-media');
+    expect(tabTestId('achievements')).toBe('details-tab-achievements');
   });
 
-  it('recognizes only the four names', () => {
+  it('recognizes only the five names', () => {
     expect(isDetailsTab('files')).toBe(true);
+    expect(isDetailsTab('achievements')).toBe(true);
     expect(isDetailsTab('metadata')).toBe(false);
+  });
+});
+
+describe('tab visibility', () => {
+  it('shows Achievements only when the ROM lists at least one', () => {
+    expect(visibleTabs(3)).toEqual(['overview', 'media', 'saves', 'files', 'achievements']);
+    expect(visibleTabs(0)).toEqual(['overview', 'media', 'saves', 'files']);
+  });
+
+  it('hides Achievements while the detail has not loaded', () => {
+    expect(visibleTabs(null)).toEqual(['overview', 'media', 'saves', 'files']);
+    expect(visibleTabs(undefined)).toEqual(['overview', 'media', 'saves', 'files']);
+  });
+
+  it('falls back to Overview when the chosen tab is hidden for this game', () => {
+    expect(shownTab('achievements', visibleTabs(0))).toBe('overview');
+    expect(shownTab('achievements', visibleTabs(5))).toBe('achievements');
+    expect(shownTab('files', visibleTabs(0))).toBe('files');
   });
 });
 

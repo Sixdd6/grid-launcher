@@ -71,8 +71,12 @@ There are several main sections to the application with buttons across the top b
   local save is newer, upload delay, a save retention limit — default 10, 0 = unlimited;
   the server's autocleanup applies it to slotted saves and the app prunes the others; an
   install that still has the old default 3 moves to 10 once), **RetroAchievements** (username
-  and a write-only token; Save fans the credentials out to every emulator that supports
-  them, Clear removes them), **Updates** (the running version, when the startup check
+  and a write-only token; Save fans the credentials out to every emulator config that
+  supports them, Clear removes them; saving the username, by Save or Log In, also sets it
+  on the server account — the username only, never the token — when it differs from the
+  server's, so the Achievements tab can show progress, and asks the server to refresh that
+  progress; if the server update fails the local save still stands and a short notice
+  says so; the server-side name is never cleared), **Updates** (the running version, when the startup check
   ran, the release notice with its Open release and Dismiss buttons, and the note that
   the launcher only ever checks — it never downloads or installs an update), and
   **Appearance**.
@@ -119,7 +123,7 @@ would launch it.
 
 The right side carries the title, one header line (platform · release year · developer ·
 genres · rating), chips for the playing state, the identification state, region and language
-flags and the version, then four tabs:
+flags and the version, then up to five tabs:
 
 - **Overview** — the summary, a metadata grid (developer, companies, release, genres, game
   modes, players, franchises), the first six screenshots, and a Related row filtered to
@@ -131,8 +135,19 @@ flags and the version, then four tabs:
   parsed out of the file name, else the file's last-modified date), the installed-versus-
   server version line, the PS4 / Xbox 360 content files, and the platform's firmware row
   with an Install action when the server offers firmware.
+- **Achievements** — shown only when the server lists RetroAchievements achievements for
+  the game. The data comes from the server only: the game's achievement list and the
+  progress of the server account. A summary line (unlocked of total, points earned of
+  total, the hardcore count when there is one) sits above the rows; each row has the badge
+  (the locked badge while not earned), title, description, points and, once earned, the
+  unlock date with a hardcore mark. Earned rows come first, newest first, then the locked
+  rows in the game's own order. Badges load as they scroll into view. Progress needs a
+  RetroAchievements username on the server account; without one the tab lists the
+  achievements without progress and says "Set your RetroAchievements username in
+  Settings to see your progress."
 
-The last tab is remembered for the rest of the session.
+The last tab is remembered for the rest of the session. When the remembered tab is
+Achievements and the game has none, the popup opens on Overview.
 
 **Installed games with no server id.** A Library row can have no server ROM id: a game
 imported from the previous app, or one installed before ids were recorded. Such a row

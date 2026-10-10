@@ -9,6 +9,15 @@
 //   GET  /api/roms/:id/content/:file_name?file_ids=[&e2e_throttle=<ms-per-chunk>]
 //   GET  /assets/romm/resources/roms/:id/cover/(small|large).png
 //   GET  /assets/romm/resources/roms/:id/screenshots/:n.png
+//   GET  /assets/romm/resources/roms/:platform/:id/badges/:badge.png
+//
+// RetroAchievements on the RomM account (grid-core/src/romm/achievements.rs),
+// used by the `library` stage group's Achievements tab case. `/api/users/me`
+// carries `ra_username` and an `ra_progression` for rom 101's `ra_id`:
+//   PUT  /api/users/:id               (form-urlencoded; a non-empty
+//                                       `ra_username` replaces the mock's,
+//                                       an empty one is ignored like RomM)
+//   POST /api/users/:id/ra/refresh    (200 {})
 //
 // Server firmware (grid-core/src/romm/mod.rs's `firmware`/`firmware_bytes`,
 // used by the `firmware` stage group), served from an optional
@@ -479,6 +488,32 @@ const MP4_BYTES = Buffer.concat([
   Buffer.from([0x00, 0x00, 0x02, 0x00]), Buffer.from("isomiso2avc1mp41"),
   Buffer.from([0x00, 0x00, 0x00, 0x08]), Buffer.from("mdat"),
 ]);
+// RomM's achievement badge_path is resources-relative, like fanart_path:
+// roms/<platform id>/<rom id>/badges/<badge>.png.
+const BADGE_PATH_RE = /^\/assets\/romm\/resources\/roms\/\d+\/\d+\/badges\/[\w-]+\.png$/;
+const USER_ID_RE = /^\/api\/users\/(\d+)$/;
+const USER_RA_REFRESH_RE = /^\/api\/users\/(\d+)\/ra\/refresh$/;
+
+/** The fixture user's RA progress: rom 101 (`ra_id` 4242) has achievements
+ *  9001 (softcore) and 9003 (hardcore) earned, 9002 locked. */
+const RA_PROGRESSION = {
+  total: 1,
+  results: [
+    {
+      rom_ra_id: 4242,
+      max_possible: 3,
+      num_awarded: 2,
+      num_awarded_hardcore: 1,
+      most_recent_awarded_date: "2024-02-01 12:00:00",
+      highest_award_kind: null,
+      earned_achievements: [
+        { id: "9001", date: "2024-01-01 12:00:00" },
+        { id: "9003", date: "2024-02-01 12:00:00", date_hardcore: "2024-02-01 12:00:00" },
+      ],
+    },
+  ],
+};
+
 const ROM_ID_RE = /^\/api\/roms\/(\d+)$/;
 const ROM_CONTENT_RE = /^\/api\/roms\/(\d+)\/content\/(.+)$/;
 const SAVE_CONTENT_RE = /^\/api\/saves\/([^/]+)\/content$/;
@@ -643,13 +678,17 @@ async function handleRequest(req, res, state) {
   const logEntry = { method: req.method, path: req.url };
   state.requestLog.push(logEntry);
   let body = Buffer.alloc(0);
-  if (req.method === "POST") {
+  if (req.method === "POST" || req.method === "PUT") {
     body = await readBody(req);
   }
 
   // Static-style cover/screenshot asset: not under /api, no auth required —
   // mirrors RomM serving these images directly off disk.
   if (req.method === "GET" && (COVER_PATH_RE.test(pathname) || SCREENSHOT_PATH_RE.test(pathname))) {
+    sendBuffer(res, 200, "image/png", state.pngBytes);
+    return;
+  }
+  if (req.method === "GET" && BADGE_PATH_RE.test(pathname)) {
     sendBuffer(res, 200, "image/png", state.pngBytes);
     return;
   }
@@ -674,7 +713,37 @@ async function handleRequest(req, res, state) {
   }
 
   if (req.method === "GET" && pathname === "/api/users/me") {
-    sendJson(res, 200, { id: 1, username: "e2euser" });
+    sendJson(res, 200, {
+      id: 1,
+      username: "e2euser",
+      ra_username: state.raUsername,
+      ra_progression: RA_PROGRESSION,
+    });
+    return;
+  }
+
+  const userIdMatch = pathname.match(USER_ID_RE);
+  if (req.method === "PUT" && userIdMatch) {
+    if (userIdMatch[1] !== "1") {
+      sendJson(res, 404, { detail: "user not found" });
+      return;
+    }
+    const form = new URLSearchParams(body.toString("utf8"));
+    logEntry.form = Object.fromEntries(form);
+    const name = form.get("ra_username");
+    if (name) state.raUsername = name;
+    sendJson(res, 200, { id: 1, username: "e2euser", ra_username: state.raUsername });
+    return;
+  }
+
+  const raRefreshMatch = pathname.match(USER_RA_REFRESH_RE);
+  if (req.method === "POST" && raRefreshMatch) {
+    try {
+      logEntry.bodyJson = JSON.parse(body.toString("utf8"));
+    } catch {
+      logEntry.bodyJson = null;
+    }
+    sendJson(res, 200, {});
     return;
   }
 
@@ -910,6 +979,8 @@ export async function startMockRomm({
   // Every play session POST /api/play-sessions stored, oldest first. Read
   // through GET /__e2e__/play-sessions (the `launch` stage group).
   state.playSessions = [];
+  // The fixture account's RA username on "RomM"; PUT /api/users/1 changes it.
+  state.raUsername = "e2e-ra-player";
 
   const server = http.createServer((req, res) => {
     handleRequest(req, res, state).catch((err) => {

@@ -1,7 +1,7 @@
 // Pure helpers for the Emulators panel's RetroAchievements block
 // (task-12-brief.md). No store/API imports here so this stays trivially
 // unit-testable.
-import type { RaFanOutRow, RaStatus } from '../api';
+import type { RaFanOutRow, RaStatus, RaUsernameSync } from '../api';
 
 /** Both fields non-blank after trim — the frontend's save-button gate. */
 export function canSubmit(username: string, token: string): boolean {
@@ -48,4 +48,21 @@ export function loginToast(username: string): string {
 /** grid-launcher.py:2736, verbatim. */
 export function loginFailedToast(error: string): string {
   return `RA login failed: ${error}`;
+}
+
+/**
+ * The short notice after an RA username save, about the RomM side (user
+ * ruling U6). `null` when there is nothing to say: RomM took the name, or
+ * already had it. A failed progress refresh stays silent — RomM answers 500
+ * for a name RetroAchievements does not know.
+ */
+export function rommSyncNotice(outcome: RaUsernameSync): string | null {
+  switch (outcome.kind) {
+    case 'failed':
+      return `Saved in GRID. RomM did not take the username: ${outcome.error}`;
+    case 'not_connected':
+      return 'Saved in GRID. Connect to RomM to set the username there too.';
+    default:
+      return null;
+  }
 }

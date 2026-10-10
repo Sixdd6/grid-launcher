@@ -27,6 +27,7 @@
   import MediaViewer from './details/MediaViewer.svelte';
   import SavesTab from './details/SavesTab.svelte';
   import FilesTab from './details/FilesTab.svelte';
+  import AchievementsTab from './details/AchievementsTab.svelte';
   import LinkPicker from './details/LinkPicker.svelte';
   import RemoveConfirm from './details/RemoveConfirm.svelte';
   import { keptFolder, showsUnlinkedActions } from './details/unlinked';
@@ -51,11 +52,12 @@
     verificationLabel,
   } from './details/header';
   import {
-    DETAILS_TABS,
     DETAILS_TAB_LABELS,
     rememberTab,
     rememberedTab,
+    shownTab,
     tabTestId,
+    visibleTabs,
     type DetailsTab,
   } from './details/tabs';
   import type { FirmwareChipState } from './server/header';
@@ -110,6 +112,11 @@
   let launchDefaults = $state<LaunchDefaults | null>(null);
 
   let merged = $derived(detail === null ? subject : mergeDetail(subject, detail));
+
+  // Achievements shows only for a ROM whose RomM detail lists achievements;
+  // a remembered Achievements choice falls back to Overview elsewhere.
+  let tabs = $derived(visibleTabs(detail?.achievement_count));
+  let activeTab = $derived(shownTab(tab, tabs));
 
   // The grid already reported what IT knew when the popup opened (a summary
   // has a cover and, since round 4, the list payload's screenshots); once the
@@ -743,12 +750,12 @@
         </header>
 
         <div class="tabs" role="tablist">
-          {#each DETAILS_TABS as name (name)}
+          {#each tabs as name (name)}
             <button
               role="tab"
               data-testid={tabTestId(name)}
-              class:active={tab === name}
-              aria-selected={tab === name}
+              class:active={activeTab === name}
+              aria-selected={activeTab === name}
               onclick={() => selectTab(name)}
             >
               {DETAILS_TAB_LABELS[name]}
@@ -757,9 +764,9 @@
         </div>
 
         <div class="tabpanel" role="tabpanel">
-          {#if tab === 'overview'}
+          {#if activeTab === 'overview'}
             <OverviewTab name={subject.name} {description} {screenshotUrls} {detail} {serverTitles} />
-          {:else if tab === 'media'}
+          {:else if activeTab === 'media'}
             <MediaTab
               items={mediaItems}
               onOpen={(i) => (viewerAnchor = i)}
@@ -767,7 +774,7 @@
               onScreenshotError={markMediaFailed}
               coverUrl={coverLarge ?? coverSmall}
             />
-          {:else if tab === 'saves'}
+          {:else if activeTab === 'saves'}
             <SavesTab
               gameTitle={subject.name}
               {cloudGame}
@@ -778,6 +785,8 @@
               infoError={cloudPanelInfoError}
               onToggle={handleCloudToggle}
             />
+          {:else if activeTab === 'achievements' && subject.romId !== null}
+            <AchievementsTab romId={subject.romId} />
           {:else}
             <FilesTab
               files={detail?.files ?? []}

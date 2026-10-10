@@ -102,7 +102,47 @@ export type RomDetail = {
   video_path: string;
   is_identified: boolean;
   related: RelatedGame[];
+  /** How many achievements RomM lists for the ROM; the Achievements tab
+   *  shows only when this is above zero. */
+  achievement_count: number;
 };
+
+/** One Achievements tab row. Mirrors `grid_core::romm::achievements::AchievementRow`. */
+export type AchievementRow = {
+  ra_id: number | null;
+  title: string;
+  description: string;
+  points: number;
+  /** Resolved, server-hosted badge URL for the row state (lock badge while
+   *  locked); `""` when RomM serves none. Load it through `ensureImage`. */
+  badge_url: string;
+  earned: boolean;
+  /** The unlock date as RomM states it; `null` while locked. */
+  unlocked_at: string | null;
+  hardcore: boolean;
+};
+export type AchievementsSummary = {
+  total: number;
+  earned: number;
+  hardcore: number;
+  points_total: number;
+  points_earned: number;
+};
+/** `get_achievements`. No username or token: `progress_known` says whether
+ *  the RomM account has an RA username. */
+export type AchievementsView = {
+  progress_known: boolean;
+  summary: AchievementsSummary;
+  rows: AchievementRow[];
+};
+/** `sync_ra_username_to_romm`: what happened to the RomM side of an RA
+ *  username save. */
+export type RaUsernameSync =
+  | { kind: 'skipped' }
+  | { kind: 'unchanged' }
+  | { kind: 'updated'; refreshed: boolean }
+  | { kind: 'failed'; error: string }
+  | { kind: 'not_connected' };
 
 export type DownloadStatus =
   | 'queued'
@@ -431,6 +471,7 @@ export const api = {
   listPlatforms: () => invoke<Platform[]>('list_platforms'),
   listGames: (platformId: number) => invoke<GameSummary[]>('list_games', { platformId }),
   getRomDetail: (romId: number) => invoke<RomDetail>('get_rom_detail', { romId }),
+  getAchievements: (romId: number) => invoke<AchievementsView>('get_achievements', { romId }),
   ensureImage: (url: string) => invoke<string>('ensure_image', { url }),
   /** The `http://127.0.0.1:<port>/…` URL of a server-hosted game video,
    *  fetched through the session client and cached by the backend, then
@@ -528,6 +569,7 @@ export const api = {
     invoke<RaLoginResult>('retroachievements_login', { username, password }),
   getRetroachievementsStatus: () => invoke<RaStatus>('get_retroachievements_status'),
   clearRetroachievementsCredentials: () => invoke<void>('clear_retroachievements_credentials'),
+  syncRaUsernameToRomm: () => invoke<RaUsernameSync>('sync_ra_username_to_romm'),
   cloudPanelInfo: (game: InstalledGame, saveType: SaveType) =>
     invoke<CloudPanelInfo>('cloud_panel_info', { game, saveType }),
   cloudRecords: (game: InstalledGame, saveType: SaveType) =>

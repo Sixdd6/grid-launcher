@@ -3,6 +3,7 @@ import type { RaFanOutRow, RaStatus } from '../api';
 import {
   canLogin,
   canSubmit,
+  rommSyncNotice,
   CREDENTIALS_CLEARED_TOAST,
   fanOutSummary,
   LOGIN_MISSING_FIELDS_TOAST,
@@ -76,5 +77,26 @@ describe('the RetroAchievements toast texts', () => {
     expect(loginToast('Sixdd6')).toBe('Logged in as Sixdd6');
     expect(loginFailedToast('Invalid credentials')).toBe('RA login failed: Invalid credentials');
     expect(CREDENTIALS_CLEARED_TOAST).toBe('RetroAchievements credentials cleared.');
+  });
+});
+
+describe('rommSyncNotice', () => {
+  it('is silent when RomM took the name or needed nothing', () => {
+    expect(rommSyncNotice({ kind: 'updated', refreshed: true })).toBeNull();
+    expect(rommSyncNotice({ kind: 'updated', refreshed: false })).toBeNull();
+    expect(rommSyncNotice({ kind: 'unchanged' })).toBeNull();
+    expect(rommSyncNotice({ kind: 'skipped' })).toBeNull();
+  });
+
+  it('names the RomM failure and says the local save stands', () => {
+    expect(rommSyncNotice({ kind: 'failed', error: 'server error 403' })).toBe(
+      'Saved in GRID. RomM did not take the username: server error 403',
+    );
+  });
+
+  it('says the name stayed local without a server connection', () => {
+    expect(rommSyncNotice({ kind: 'not_connected' })).toBe(
+      'Saved in GRID. Connect to RomM to set the username there too.',
+    );
   });
 });

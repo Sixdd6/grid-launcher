@@ -3556,6 +3556,7 @@ mod tests {
             video_path: String::new(),
             is_identified: false,
             related: Vec::new(),
+            achievement_count: 0,
         }
     }
 

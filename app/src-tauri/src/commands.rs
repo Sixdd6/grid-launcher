@@ -9,7 +9,7 @@ use crate::images::ImageService;
 use grid_core::autoconfig::paths::expand_user;
 use grid_core::autoconfig::{self, entry as autoconfig_entry, RaCredentials};
 use grid_core::config::{Config, ConfigError, EmulatorEntry, UiSettings};
-use grid_core::images::urls::{filter_to_server_host, resolve_image_url};
+use grid_core::images::urls::{filter_to_server_host, resolve_image_url, server_resolver};
 use grid_core::import_python::ImportReport;
 use grid_core::launch::catalog::{catalog_entries, find_profile, mark_installed, CatalogEntry};
 use grid_core::launch::emu_install::install_manual_archive;
@@ -32,7 +32,8 @@ use grid_core::library::paths::{layout_version_for_library_path, library_root};
 use grid_core::library::queue::DownloadsSnapshot;
 use grid_core::library::registry::InstalledGame;
 use grid_core::library::InstallService;
-use grid_core::romm::{GameSummary, Platform, RomDetail};
+use grid_core::romm::achievements;
+use grid_core::romm::{AchievementsView, GameSummary, Platform, RaUsernameSync, RomDetail};
 use grid_core::secrets::RaTokenStore;
 use grid_core::session::{RestoreOutcome, SessionManager, SessionState};
 use secrecy::SecretString;
@@ -294,6 +295,38 @@ pub async fn list_games(
 pub async fn get_rom_detail(state: State<'_, AppState>, rom_id: i64) -> Result<RomDetail, String> {
     let client = state.session.client().ok_or("not connected")?;
     client.rom_detail(rom_id).await.map_err(err)
+}
+
+/// The Details Achievements tab: the ROM's RA achievement list joined with
+/// the RomM account's RA progress, both read from RomM. Badges are resolved
+/// against the server and host-filtered, so `ensure_image` can fetch them.
+/// The view carries no username and no token.
+#[tauri::command]
+pub async fn get_achievements(
+    state: State<'_, AppState>,
+    rom_id: i64,
+) -> Result<AchievementsView, String> {
+    let client = state.session.client().ok_or("not connected")?;
+    let (rom, user) = tokio::try_join!(client.rom_ra(rom_id), client.me_ra()).map_err(err)?;
+    let resolver = server_resolver(&state.session.server_url());
+    Ok(achievements::build_view(&rom, &user, &resolver))
+}
+
+/// U6: sets the saved RetroAchievements username on the RomM account (and
+/// asks RomM to refresh the progress). The frontend calls this after a
+/// successful local save; the local save never depends on it. Reads the
+/// username from config, so only what was saved is sent. Never the RA token.
+#[tauri::command]
+pub async fn sync_ra_username_to_romm(
+    state: State<'_, AppState>,
+) -> Result<RaUsernameSync, String> {
+    let config = Config::load(&Config::default_path()).map_err(err)?;
+    let Some(client) = state.session.client() else {
+        return Ok(RaUsernameSync::NotConnected);
+    };
+    Ok(client
+        .sync_ra_username(&config.retroachievements_username)
+        .await)
 }
 
 #[tauri::command]

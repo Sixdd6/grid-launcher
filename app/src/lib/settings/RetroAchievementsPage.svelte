@@ -10,6 +10,7 @@
     LOGIN_MISSING_FIELDS_TOAST,
     loginFailedToast,
     loginToast,
+    rommSyncNotice,
     statusLabel,
   } from '../emulators/retroachievements';
   import { pushToast } from '../stores/toasts.svelte';
@@ -44,6 +45,22 @@
     }
   }
 
+  // U6: a saved username also goes to the RomM account (username only,
+  // never the token). Fire and forget: the local save already succeeded,
+  // and a RomM failure is a short notice, never an error on this form.
+  function syncUsernameToRomm() {
+    api
+      .syncRaUsernameToRomm()
+      .then((outcome) => {
+        const notice = rommSyncNotice(outcome);
+        if (notice) pushToast(notice, 'error');
+      })
+      .catch((err) => {
+        const notice = rommSyncNotice({ kind: 'failed', error: errorMessage(err) });
+        if (notice) pushToast(notice, 'error');
+      });
+  }
+
   async function handleRaSave() {
     if (!canSubmit(raUsername, raToken)) return;
     raError = null;
@@ -54,6 +71,7 @@
       raToken = '';
       raResultLine = fanOutSummary(rows);
       await refreshRaStatus();
+      syncUsernameToRomm();
     } catch (err) {
       raError = errorMessage(err);
     } finally {
@@ -76,6 +94,7 @@
       raResultLine = fanOutSummary(result.fan_out);
       pushToast(loginToast(result.username));
       await refreshRaStatus();
+      syncUsernameToRomm();
     } catch (err) {
       raPassword = '';
       const message = errorMessage(err);

@@ -249,4 +249,64 @@ describe('library', () => {
     await browser.pause(1200);
     expect(await visibleLayers()).toContain(`${shotKey}.bg`);
   });
+
+  // Q5: rom 101's RomM detail lists three achievements (fixture ra_id 4242)
+  // and the mock account's ra_progression has 9001 (softcore) and 9003
+  // (hardcore) earned. Badges come from RomM's own badge_path, so the
+  // locked row's lock badge loads through the image cache.
+  it('shows the Achievements tab with RomM progress for a game that lists achievements', async () => {
+    await $(testId('platform-btn-1')).click();
+    await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await $(testId('game-card-101')).click();
+    await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await $(testId('details-tab-achievements')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the Achievements tab never appeared for rom 101',
+    });
+    await $(testId('details-tab-achievements')).click();
+
+    await $(testId('achievements-summary')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await expect($(testId('achievements-summary'))).toHaveText(
+      '2 of 3 unlocked · 35 of 45 points · 1 hardcore',
+    );
+    await expect($(testId('achievements-progress-hint'))).not.toExist();
+
+    const rows = await $$(testId('achievement-row'));
+    expect(rows.length).toBe(3);
+    // Earned first, newest first (9003 then 9001); then the locked 9002.
+    const titles = await browser.execute(() =>
+      Array.from(document.querySelectorAll('[data-testid="achievement-row"] .title')).map(
+        (el) => el.textContent?.trim() ?? '',
+      ),
+    );
+    expect(titles).toEqual(['Bowser Down', "Yoshi's Friend", 'Star Road']);
+    expect(await rows[0].$(testId('achievement-hardcore')).isExisting()).toBe(true);
+    expect(await rows[1].$(testId('achievement-hardcore')).isExisting()).toBe(false);
+    expect(await rows[2].$(testId('achievement-locked')).isExisting()).toBe(true);
+    expect((await $$(testId('achievement-locked'))).length).toBe(1);
+
+    // The locked row's badge is RomM's lock badge, loaded through the cache.
+    await browser.waitUntil(async () => await rows[2].$('img').isExisting(), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: "the locked row's badge never loaded",
+    });
+
+    // Leave the remembered tab on Overview for any later case.
+    await $(testId('details-tab-overview')).click();
+    await $(testId('details-close')).click();
+    await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+  });
+
+  it('hides the Achievements tab for a game without achievements', async () => {
+    await $(testId('game-card-103')).click();
+    await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    // Visibility follows the detail fetch; wait for it to land (Files lists
+    // rom 103's file) before asserting the tab is absent.
+    await $(testId('details-tab-files')).click();
+    await $('[data-testid^="details-file-"]').waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await expect($(testId('details-tab-achievements'))).not.toExist();
+    await $(testId('details-tab-overview')).click();
+    await $(testId('details-close')).click();
+    await $(testId('details-panel')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+  });
 });

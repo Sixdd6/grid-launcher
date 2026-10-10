@@ -30,6 +30,9 @@
   --danger: #c62828;
   --info: #93c5fd;
   --graph-disk: #2dd4bf;
+  /* Trophy gold (hardcore achievements). Used as TEXT, so light mode takes a
+     dark amber (about 5.4:1 on --bg) and dark mode a bright one. */
+  --gold: #8a5a00;
 
   /* `--accent` predates the redesign and is still read by pre-redesign
      components (focus rings, progress fills). It tracks --primary. */
@@ -79,6 +82,7 @@
     --text-h: #ffffff;
     --text-muted: #c8c8dc;
     --danger: #ff5050;
+    --gold: #f5c451;
     --text-halo:
       0 0 2px rgba(7, 7, 15, 0.85),
       0 0 8px rgba(7, 7, 15, 0.5);
@@ -98,6 +102,7 @@
   --text-h: #ffffff;
   --text-muted: #c8c8dc;
   --danger: #ff5050;
+  --gold: #f5c451;
   --text-halo:
     0 0 2px rgba(7, 7, 15, 0.85),
     0 0 8px rgba(7, 7, 15, 0.5);
@@ -115,6 +120,7 @@
   --text-h: #111117;
   --text-muted: #3d3d52;
   --danger: #c62828;
+  --gold: #8a5a00;
   --text-halo:
     0 0 2px rgba(245, 245, 250, 0.92),
     0 0 8px rgba(245, 245, 250, 0.6);
