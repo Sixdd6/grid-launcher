@@ -592,7 +592,7 @@ mod tests {
             false,
             Some(json!({"provider": "github", "owner": "o", "repo": "r", "platforms": ["win32"]})),
         )];
-        assert!(catalog_entries(&profiles).is_empty());
+        assert!(catalog_entries_for_host(&profiles, "linux").is_empty());
     }
 
     #[test]
@@ -602,7 +602,7 @@ mod tests {
             false,
             Some(json!({"provider": "github", "owner": "o", "repo": "r", "platforms": ["lin"]})),
         )];
-        assert_eq!(catalog_entries(&profiles).len(), 1);
+        assert_eq!(catalog_entries_for_host(&profiles, "linux").len(), 1);
     }
 
     #[test]

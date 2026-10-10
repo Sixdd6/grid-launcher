@@ -1108,7 +1108,7 @@ mod tests {
             "platform_overrides": {"win32": {"asset_patterns": ["win.zip"]}, "linux": {"asset_patterns": ["lin.AppImage"]}}
         });
         let mut normalized = normalize_source(&raw).unwrap();
-        merge_platform_override(&mut normalized);
+        merge_platform_override_for(&mut normalized, "linux");
         assert_eq!(normalized["asset_patterns"], json!(["lin.AppImage"]));
     }
 
@@ -1119,7 +1119,7 @@ mod tests {
             "platform_overrides": {"win32": {"owner": "should-not-apply"}}
         });
         let mut normalized = normalize_source(&raw).unwrap();
-        merge_platform_override(&mut normalized);
+        merge_platform_override_for(&mut normalized, "linux");
         assert_eq!(normalized.get("owner").and_then(Value::as_str), Some("o"));
     }
 
@@ -1132,7 +1132,7 @@ mod tests {
             "provider": "github", "owner": "o", "repo": "r",
             "platform_overrides": {"l": {"owner": "first"}, "linux": {"owner": "second"}}
         }));
-        merge_platform_override(&mut source);
+        merge_platform_override_for(&mut source, "linux");
         assert_eq!(source.get("owner").and_then(Value::as_str), Some("first"));
     }
 

@@ -676,6 +676,8 @@ mod tests {
         move |p| paths.iter().any(|known| Path::new(known) == p)
     }
 
+    // flatpak D-Bus bus repair is Linux-only; unix-socket addresses are POSIX paths.
+    #[cfg(unix)]
     #[test]
     fn clean_env_repoints_a_dead_bus_address_at_the_runtime_dir_bus() {
         // Gear Lever launches the AppImage through `flatpak-spawn --host`,
@@ -738,6 +740,8 @@ mod tests {
         assert_eq!(clean_env_with(base.clone(), &exists_only(&[])), base);
     }
 
+    // flatpak D-Bus bus repair is Linux-only; unix-socket addresses are POSIX paths.
+    #[cfg(unix)]
     #[test]
     fn clean_env_repairs_the_bus_address_even_with_the_saved_original_present() {
         let env = clean_env_with(
@@ -941,7 +945,7 @@ mod tests {
 
         let (argv, _) =
             prepare_emulator_launch("RetroArch", Some(&entry), &rom_text, &ph, "", true).unwrap();
-        let expected = std::fs::canonicalize(&core).unwrap();
+        let expected = crate::platform::canonicalize(&core).unwrap();
         assert_eq!(argv[2], expected.to_string_lossy());
 
         let (argv, _) =

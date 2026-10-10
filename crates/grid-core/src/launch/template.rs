@@ -321,7 +321,8 @@ pub fn apply_placeholders(tokens: Vec<String>, ph: &Placeholders) -> Vec<String>
 /// runtime points `$HOME` at the portable home when present, so that is
 /// where RetroArch and its own core updater actually put the
 /// `cores/` directory. The first search directory the token resolves to an
-/// existing file under wins and is canonicalized in. Absolute paths and
+/// existing file under wins and is canonicalized in, without a Windows verbatim
+/// prefix (`platform::canonicalize`). Absolute paths and
 /// tokens that resolve under no search directory are left untouched.
 pub fn normalized_retroarch_core_args(executable: &Path, args: Vec<String>) -> Vec<String> {
     let mut normalized = args;
@@ -364,7 +365,7 @@ pub fn normalized_retroarch_core_args(executable: &Path, args: Vec<String>) -> V
             continue;
         };
 
-        if let Ok(resolved) = std::fs::canonicalize(&candidate) {
+        if let Ok(resolved) = crate::platform::canonicalize(&candidate) {
             normalized[index + 1] = resolved.to_string_lossy().into_owned();
         }
     }
@@ -577,8 +578,31 @@ mod tests {
             "%rom%".to_string(),
         ];
         let result = normalized_retroarch_core_args(&exe, args);
-        let expected = fs::canonicalize(&core_file).unwrap();
+        let expected = crate::platform::canonicalize(&core_file).unwrap();
         assert_eq!(result[1], expected.to_string_lossy());
+    }
+
+    #[test]
+    fn normalize_never_hands_retroarch_a_verbatim_prefix() {
+        // RetroArch's `-L` cannot open a `\\?\C:\...` path on Windows.
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("retroarch");
+        fs::write(&exe, b"").unwrap();
+        let cores_dir = dir.path().join("cores");
+        fs::create_dir_all(&cores_dir).unwrap();
+        let core_file = cores_dir.join("snes9x_libretro.dll");
+        fs::write(&core_file, b"core bytes").unwrap();
+
+        let args = vec!["-L".to_string(), "cores/snes9x_libretro.dll".to_string()];
+        let result = normalized_retroarch_core_args(&exe, args);
+
+        assert!(!result[1].starts_with(r"\\?\"), "{}", result[1]);
+        assert_eq!(
+            result[1],
+            crate::platform::canonicalize(&core_file)
+                .unwrap()
+                .to_string_lossy()
+        );
     }
 
     #[test]
@@ -637,7 +661,7 @@ mod tests {
             "/roms/game.sfc".to_string(),
         ];
         let result = normalized_retroarch_core_args(&exe, args);
-        let expected = fs::canonicalize(&core_file).unwrap();
+        let expected = crate::platform::canonicalize(&core_file).unwrap();
         assert_eq!(result[1], expected.to_string_lossy());
     }
 
@@ -660,7 +684,7 @@ mod tests {
 
         let args = vec!["-L".to_string(), "cores/snes9x_libretro.so".to_string()];
         let result = normalized_retroarch_core_args(&exe, args);
-        let expected = fs::canonicalize(&core_file).unwrap();
+        let expected = crate::platform::canonicalize(&core_file).unwrap();
         assert_eq!(result[1], expected.to_string_lossy());
     }
 

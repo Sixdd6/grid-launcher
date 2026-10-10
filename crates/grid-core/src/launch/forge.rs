@@ -909,7 +909,9 @@ mod tests {
         let raw = json!({
             "provider": "direct", "owner": "o", "repo": "r",
             "page_url": "https://example.com/downloads",
-            "platforms": ["win32"],
+            // No host slug starts with this, so the gate fires on every OS
+            // and the test never reaches the network.
+            "platforms": ["no-such-host"],
             "name": "Frobnicator", "manual_install_hint": "Grab it from the website."
         });
         let client = ForgeClient::new().unwrap();
@@ -925,7 +927,9 @@ mod tests {
         let raw = json!({
             "provider": "direct", "owner": "o", "repo": "r",
             "page_url": "https://example.com/downloads",
-            "platforms": ["win32"]
+            // No host slug starts with this, so the gate fires on every OS
+            // and the test never reaches the network.
+            "platforms": ["no-such-host"]
         });
         let client = ForgeClient::new().unwrap();
 
