@@ -8,7 +8,7 @@ use grid_core::library::relink::server_roms_for_platform;
 use grid_core::romm::GameSummary;
 use tauri::{AppHandle, State};
 
-use super::{err, AppState};
+use super::{ensure_library_idle, err, AppState};
 
 /// The server ROMs of every platform `platform` (a registry row's platform
 /// text) names: the picker's list.
@@ -35,6 +35,7 @@ pub async fn link_installed_row(
     platform: String,
     rom_id: i64,
 ) -> Result<InstalledGame, String> {
+    ensure_library_idle(&state)?;
     let install = state.install.as_ref().map_err(Clone::clone)?.clone();
     let registry = install.registry();
     let linked = tokio::task::spawn_blocking(move || {
@@ -82,6 +83,7 @@ pub async fn remove_from_library(
     title: String,
     platform: String,
 ) -> Result<(), String> {
+    ensure_library_idle(&state)?;
     let install = state.install.as_ref().map_err(Clone::clone)?.clone();
     let registry = install.registry();
     let removed = tokio::task::spawn_blocking(move || registry.remove(&title, &platform))

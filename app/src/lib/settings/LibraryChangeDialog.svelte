@@ -1,8 +1,11 @@
 <script lang="ts">
-  // Settings › Library › Change… (Q2). One modal, three steps:
+  // Settings › Library › Change… (Q2, 9b). One modal, four steps:
   //   choose          — the new folder (typed or Browse…), checked by the
-  //                     backend as it changes; then Move existing files
-  //                     (disabled until phase 9b), Start fresh, or Cancel.
+  //                     backend as it changes; then Move existing files,
+  //                     Start fresh, or Cancel.
+  //   move-confirm    — what a move does (per folder: same drive or copied;
+  //                     the space), then Start move: a background job with
+  //                     its own Downloads row.
   //   fresh-ask       — "Delete the old game files, or leave them on disk?"
   //   delete-confirm  — the folders Delete removes and their total size.
   // With no current library folder there is nothing to keep or delete, so
@@ -16,20 +19,38 @@
   // Focus on each step lands on the first control that is safe to press: the
   // folder field, then "Leave on disk", then "Back". The dialog's label and
   // description follow the step, and a polite live region announces the step.
-  import { api, type LibraryPathCheck, type StartFreshOutcome, type StartFreshPreview } from '../api';
+  import {
+    api,
+    type LibraryMoveStartOutcome,
+    type LibraryPathCheck,
+    type MovePreview,
+    type StartFreshOutcome,
+    type StartFreshPreview,
+  } from '../api';
   import { pickFolder } from '../pickers';
   import { activateFocused, moveDialogFocus, registerDialog, type NavAction } from '../focus/dialogNav';
-  import { MOVE_AVAILABLE, canStartFresh, formatBytes, previewSummary, type ChangeStep } from './library';
+  import {
+    canMove,
+    canStartFresh,
+    formatBytes,
+    moveItemLine,
+    movePreviewSummary,
+    previewSummary,
+    type ChangeStep,
+  } from './library';
 
   let {
     currentPath,
     onDone,
+    onMoveStarted,
     onClose,
   }: {
     /** The stored library path, verbatim: sent back as `expectedOldRoot`. */
     currentPath: string;
     /** A Start fresh call returned; `deleted` says which answer was given. */
     onDone: (outcome: StartFreshOutcome, deleted: boolean) => void;
+    /** The move started in the background. */
+    onMoveStarted: (outcome: LibraryMoveStartOutcome) => void;
     onClose: () => void;
   } = $props();
 
@@ -44,8 +65,11 @@
   let inputEl = $state<HTMLInputElement | null>(null);
   let keepEl = $state<HTMLButtonElement | null>(null);
   let deleteBackEl = $state<HTMLButtonElement | null>(null);
+  let moveBackEl = $state<HTMLButtonElement | null>(null);
+  let movePreview = $state<MovePreview | null>(null);
 
   let ready = $derived(canStartFresh(check, typed) && !checking);
+  let moveReady = $derived(canMove(check, typed, currentPath) && !checking);
   let hasOldRoot = $derived(currentPath.trim() !== '');
 
   // What the header says per step: the eyebrow, the dialog's accessible name
@@ -68,6 +92,12 @@
       eyebrow: 'Step 3 · Final check',
       title: 'Delete these game files?',
       desc: 'This cannot be undone. Only the folders listed below are removed.',
+    },
+    'move-confirm': {
+      n: 2,
+      eyebrow: 'Step 2 · Move',
+      title: 'Move your library to the new folder?',
+      desc: 'Games, emulators and saves move in the background. You can follow the move in Downloads.',
     },
   };
   let meta = $derived(STEP_META[step]);
@@ -129,6 +159,10 @@
     deleteBackEl?.focus();
   });
 
+  $effect(() => {
+    moveBackEl?.focus();
+  });
+
   async function browse() {
     const picked = await pickFolder('Select Library Folder');
     if (picked !== null) typed = picked;
@@ -169,11 +203,41 @@
     }
   }
 
+  // Move existing files (9b): the preview first, then the start.
+  async function askMove() {
+    if (pending || !moveReady || check === null || check.status !== 'ok') return;
+    step = 'move-confirm';
+    movePreview = null;
+    error = null;
+    try {
+      const outcome = await api.libraryMovePreview(check.path);
+      if (outcome.status === 'ok') movePreview = outcome.preview;
+      else error = outcome.message;
+    } catch (err) {
+      error = errorMessage(err);
+    }
+  }
+
+  async function startMove() {
+    if (pending || movePreview === null || check === null || check.status !== 'ok') return;
+    pending = true;
+    error = null;
+    try {
+      const outcome = await api.libraryMoveStart(check.path);
+      if (outcome.status === 'started') onMoveStarted(outcome);
+      else error = outcome.message;
+    } catch (err) {
+      error = errorMessage(err);
+    } finally {
+      pending = false;
+    }
+  }
+
   function back() {
     if (pending) return;
     error = null;
     if (step === 'delete-confirm') step = 'fresh-ask';
-    else if (step === 'fresh-ask') step = 'choose';
+    else if (step === 'fresh-ask' || step === 'move-confirm') step = 'choose';
     else onClose();
   }
 
@@ -299,11 +363,11 @@
           <button
             data-testid="library-change-move"
             class="choice"
-            disabled={!MOVE_AVAILABLE}
+            disabled={!moveReady}
+            aria-disabled={pending}
             aria-labelledby="library-change-move-title"
-            aria-describedby={MOVE_AVAILABLE
-              ? 'library-change-move-desc'
-              : 'library-change-move-desc library-change-move-tag'}
+            aria-describedby="library-change-move-desc"
+            onclick={askMove}
           >
             <span class="choice-text">
               <span id="library-change-move-title" class="choice-title">Move existing files</span>
@@ -311,9 +375,9 @@
                 >Moves your games, emulators and saves to the new folder.</span
               >
             </span>
-            {#if !MOVE_AVAILABLE}
-              <span id="library-change-move-tag" class="tag">Coming soon</span>
-            {/if}
+            <svg class="chevron" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+              <path d="M6 3l5 5-5 5" />
+            </svg>
           </button>
           <button
             data-testid="library-change-fresh"
@@ -367,6 +431,34 @@
             </span>
           </button>
         </div>
+      {:else if step === 'move-confirm'}
+        <div class="field">
+          <span class="field-label">From</span>
+          <code class="path">{currentPath}</code>
+        </div>
+        {#if movePreview === null && error === null}
+          <p class="status-line" role="status">Measuring the library…</p>
+        {:else if movePreview}
+          <div class="field">
+            <span class="field-label">To</span>
+            <code class="path">{movePreview.new_root}</code>
+          </div>
+          <div class="summary-box">
+            <span class="field-label">Moves</span>
+            <p data-testid="library-move-summary" class="summary">{movePreviewSummary(movePreview)}</p>
+          </div>
+          {#if movePreview.items.length > 0}
+            <ul data-testid="library-move-list" class="list" aria-label="Folders that move">
+              {#each movePreview.items as item (item.name)}
+                <li class="game">{moveItemLine(item)}</li>
+              {/each}
+            </ul>
+          {/if}
+          <p data-testid="library-move-blocked" class="kept-note">
+            While the move runs, installs, game launches and cloud transfers wait. Close any emulator you
+            opened yourself before you start. If GRID closes, the move continues at the next start.
+          </p>
+        {/if}
       {:else}
         {#if preview === null && error === null}
           <p class="status-line" role="status">Measuring the old games…</p>
@@ -423,6 +515,25 @@
           onclick={back}
         >
           Back
+        </button>
+      {:else if step === 'move-confirm'}
+        <button
+          data-testid="library-move-back"
+          class="btn secondary"
+          bind:this={moveBackEl}
+          aria-disabled={pending}
+          onclick={back}
+        >
+          Back
+        </button>
+        <button
+          data-testid="library-move-confirm"
+          class="btn"
+          disabled={movePreview === null}
+          aria-disabled={pending}
+          onclick={startMove}
+        >
+          {pending ? 'Starting…' : 'Start move'}
         </button>
       {:else}
         <button

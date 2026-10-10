@@ -20,7 +20,7 @@ use grid_core::library::InstallService;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use super::{err, AppState};
+use super::{ensure_library_idle, err, AppState};
 use crate::config_write::modify_config;
 use crate::relink_service::INSTALLED_CHANGED_EVENT;
 
@@ -72,20 +72,26 @@ enum OldFiles {
 /// What is running right now: live download-queue entries (firmware rows
 /// included), running games, cloud transfers.
 pub(crate) fn library_activity(state: &AppState) -> LibraryActivity {
+    activity_of(
+        state.install.as_ref().ok(),
+        state.launch.as_ref().ok(),
+        &state.cloud,
+    )
+}
+
+/// [`library_activity`] from the owned handles, for a closure that
+/// outlives the command (the library move reads it again after it closed
+/// the gate).
+pub(crate) fn activity_of(
+    install: Option<&Arc<InstallService>>,
+    launch: Option<&Arc<grid_core::launch::LaunchService>>,
+    cloud: &crate::cloud_service::CloudService,
+) -> LibraryActivity {
     LibraryActivity {
-        installs: state
-            .install
-            .as_ref()
-            .is_ok_and(|install| install.snapshot().has_live_entry()),
-        running_games: state
-            .launch
-            .as_ref()
-            .is_ok_and(|launch| !launch.snapshot().sessions.is_empty()),
-        cloud_transfers: state.cloud.transfers_active(),
-        library_move: state
-            .install
-            .as_ref()
-            .is_ok_and(|install| install.snapshot().has_live_library_move()),
+        installs: install.is_some_and(|install| install.snapshot().has_live_entry()),
+        running_games: launch.is_some_and(|launch| !launch.snapshot().sessions.is_empty()),
+        cloud_transfers: cloud.transfers_active(),
+        library_move: install.is_some_and(|install| install.snapshot().has_live_library_move()),
     }
 }
 
@@ -126,6 +132,7 @@ pub async fn check_library_path(
 pub async fn library_start_fresh_preview(
     state: State<'_, AppState>,
 ) -> Result<StartFreshPreview, String> {
+    ensure_library_idle(&state)?;
     let install = state.install.as_ref().map_err(Clone::clone)?.clone();
     tokio::task::spawn_blocking(move || {
         let config = Config::load(&Config::default_path()).map_err(err)?;
@@ -152,6 +159,7 @@ pub async fn library_start_fresh_keep(
     path: String,
     expected_old_root: String,
 ) -> Result<StartFreshOutcome, String> {
+    ensure_library_idle(&state)?;
     start_fresh(&state, app, path, expected_old_root, OldFiles::Leave).await
 }
 
@@ -165,6 +173,7 @@ pub async fn library_start_fresh_delete(
     path: String,
     expected_old_root: String,
 ) -> Result<StartFreshOutcome, String> {
+    ensure_library_idle(&state)?;
     start_fresh(&state, app, path, expected_old_root, OldFiles::Delete).await
 }
 

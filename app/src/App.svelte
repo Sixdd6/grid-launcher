@@ -12,6 +12,9 @@
   import { initAppUpdate } from './lib/stores/appUpdate.svelte';
   import { initPythonImport } from './lib/stores/pythonImport.svelte';
   import { initLayoutMigration } from './lib/stores/layoutMigration.svelte';
+  import { initLibraryMove } from './lib/stores/libraryMove.svelte';
+  import { initLibraryUnreachable, libraryUnreachable } from './lib/stores/libraryUnreachable.svelte';
+  import LibraryUnreachableDialog from './lib/LibraryUnreachableDialog.svelte';
   import { initReplenishListener } from './lib/stores/installed.svelte';
   import { initUiSettings } from './lib/stores/uiSettings.svelte';
   import { noteDirectional } from './lib/stores/inputMode.svelte';
@@ -53,6 +56,23 @@
   // shape, and its failure toast belongs at the first paint too.
   $effect(() => {
     initLayoutMigration();
+  });
+
+  // 9b: the unreachable-library check and a resumed library move both ran
+  // before the window existed; pull their state at the first paint and
+  // follow their events for the app's whole life.
+  $effect(() => {
+    const un = initLibraryUnreachable();
+    return () => {
+      un.then((f) => f());
+    };
+  });
+
+  $effect(() => {
+    const un = initLibraryMove();
+    return () => {
+      un.then((f) => f());
+    };
   });
 
   // Q6: a 401 mid-session sends the user back to Connect, pre-filled. One
@@ -99,7 +119,11 @@
   });
 </script>
 
-{#if session.phase === 'shell'}
+<!-- 9b: GRID cannot run without a valid library. While the library folder
+     cannot be reached, the blocking dialog replaces the whole app. -->
+{#if libraryUnreachable.blocking}
+  <LibraryUnreachableDialog />
+{:else if session.phase === 'shell'}
   <Shell bind:this={shell} />
 {:else if session.phase === 'none'}
   <Connect prefill={connectPrefill(session)} />

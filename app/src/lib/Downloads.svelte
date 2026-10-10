@@ -1,5 +1,6 @@
 <script lang="ts">
   import { downloads } from './stores/downloads.svelte';
+  import { libraryMove } from './stores/libraryMove.svelte';
   import { api, type DownloadEntry } from './api';
   import { actionFor, entryDetail, graphCaption, kindLabel, percent } from './downloads/format';
   import {
@@ -37,8 +38,24 @@
     }
   }
 
-  const cancel = (id: number) => runAction(id, () => api.cancelInstall(id));
-  const retry = (id: number) => runAction(id, () => api.retryInstall(id));
+  // The library move row's Cancel and Retry are the move's own commands
+  // (9b); a refusal comes back as an outcome and shows under the row.
+  // A failed row that was retried or undone makes way: the retry runs on a
+  // new row, and an undone move has nothing left to show.
+  async function cancelMove(e: DownloadEntry): Promise<void> {
+    const outcome = await api.libraryMoveCancel();
+    if (outcome.status === 'not_cancellable' || outcome.status === 'no_move') throw new Error(outcome.message);
+    if (outcome.status === 'cancelled' && e.status === 'failed') await api.dismissDownload(e.id);
+  }
+  async function resumeMove(e: DownloadEntry): Promise<void> {
+    const outcome = await api.libraryMoveResume();
+    if (outcome.status === 'refused') throw new Error(outcome.message);
+    if (e.status === 'failed') await api.dismissDownload(e.id);
+  }
+  const cancel = (e: DownloadEntry) =>
+    runAction(e.id, () => (e.kind === 'library_move' ? cancelMove(e) : api.cancelInstall(e.id)));
+  const retry = (e: DownloadEntry) =>
+    runAction(e.id, () => (e.kind === 'library_move' ? resumeMove(e) : api.retryInstall(e.id)));
   const dismiss = (id: number) => runAction(id, () => api.dismissDownload(id));
 
   type Progress = { pct: number; indeterminate: boolean };
@@ -91,7 +108,7 @@
         <p class="seg-empty">{segmentEmptyText(seg)}</p>
       {:else}
         {#each rows as e (e.id)}
-          {@const action = actionFor(e.status, e.kind)}
+          {@const action = actionFor(e.status, e.kind, libraryMove.phase)}
           {@const progress = rowProgress(e)}
           <div data-testid={`download-row-${e.id}`} class="row">
             <div class="row-text">
@@ -128,10 +145,17 @@
 
             <div class="row-actions">
               {#if action === 'cancel'}
-                <button data-testid={`download-action-cancel-${e.id}`} disabled={pending[e.id]} onclick={() => cancel(e.id)}>Cancel</button>
+                <button data-testid={`download-action-cancel-${e.id}`} disabled={pending[e.id]} onclick={() => cancel(e)}>Cancel</button>
               {:else if action === 'retry-dismiss'}
-                <button data-testid={`download-action-retry-${e.id}`} disabled={pending[e.id]} onclick={() => retry(e.id)}>Retry</button>
+                <button data-testid={`download-action-retry-${e.id}`} disabled={pending[e.id]} onclick={() => retry(e)}>Retry</button>
                 <button data-testid={`download-action-dismiss-${e.id}`} class="secondary" disabled={pending[e.id]} onclick={() => dismiss(e.id)}>Dismiss</button>
+              {:else if action === 'retry-cancel'}
+                <!-- A failed library move still in its copy: run it again, or undo it. -->
+                <button data-testid={`download-action-retry-${e.id}`} disabled={pending[e.id]} onclick={() => retry(e)}>Retry</button>
+                <button data-testid={`download-action-cancel-${e.id}`} class="secondary" disabled={pending[e.id]} onclick={() => cancel(e)}>Cancel move</button>
+              {:else if action === 'retry'}
+                <!-- A failed library move past its copy cannot be undone: Retry only. -->
+                <button data-testid={`download-action-retry-${e.id}`} disabled={pending[e.id]} onclick={() => retry(e)}>Retry</button>
               {:else if action === 'dismiss'}
                 <button data-testid={`download-action-dismiss-${e.id}`} class="secondary" disabled={pending[e.id]} onclick={() => dismiss(e.id)}>Dismiss</button>
               {/if}

@@ -8,7 +8,7 @@ use grid_core::cloud::SaveType;
 use grid_core::config::Config;
 use tauri::State;
 
-use super::AppState;
+use super::{ensure_library_idle, AppState};
 use crate::cloud_service::{
     CloudGameInput, CloudPanelInfoDto, CloudRecordDto, CloudSettingsDto, NativeSavePathsDto,
     RestoreReportDto, UploadReportDto,
@@ -56,6 +56,7 @@ pub async fn cloud_upload(
     game: CloudGameInput,
     save_type: SaveType,
 ) -> Result<UploadReportDto, String> {
+    ensure_library_idle(&state)?;
     let install = state.install.as_ref().map_err(Clone::clone)?.clone();
     let launch = state.launch.as_ref().map_err(Clone::clone)?.clone();
     state
@@ -79,6 +80,7 @@ pub async fn cloud_restore(
     save_type: SaveType,
     record_id: Option<String>,
 ) -> Result<RestoreReportDto, String> {
+    ensure_library_idle(&state)?;
     let record_id = match record_id {
         None => None,
         Some(raw) => Some(
@@ -133,6 +135,7 @@ pub async fn native_add_manual_save_path(
     game: CloudGameInput,
     path: String,
 ) -> Result<(), String> {
+    ensure_library_idle(&state)?;
     state
         .cloud
         .native_add_manual_save_path(&Config::default_path(), game, path)
@@ -145,6 +148,7 @@ pub async fn native_remove_save_path(
     game: CloudGameInput,
     path: String,
 ) -> Result<(), String> {
+    ensure_library_idle(&state)?;
     state
         .cloud
         .native_remove_save_path(&Config::default_path(), game, path)

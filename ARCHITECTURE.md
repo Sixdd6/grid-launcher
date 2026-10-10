@@ -58,7 +58,14 @@ Modules as declared in `src/lib.rs`:
   `path_change` (Q2) validates a new library folder, switches `library_path` (the old
   root goes to `Config::former_library_paths`, which the uninstall `RemovalGuard`
   protects like the current root) and picks the rows Start fresh drops; the app side is
-  `commands/library_path.rs`.
+  `commands/library_path.rs`. `relocate` (9b) is the "Move existing files" engine: plan
+  and refusals, Copy (staging + verify) → Commit (place, relink, rewrite the registry,
+  the config and the emulator config files that hold absolute paths, switch the root) →
+  Cleanup, journaled in `library-move.json` beside `config.toml` so a crash resumes;
+  `relocate_references` rewrites references only (the unreachable-library Relocate);
+  `LibraryGate` is the open/closed flag every library writer checks. `root_access` (9b)
+  says whether the library root can be reached (not set / reachable / unreachable and
+  why), whether GRID stored anything there, and checks a Relocate target.
 - `pcgw` — PCGamingWiki client that resolves a Windows game's save paths.
 - `platform` — host-platform lookups that need OS APIs (for example the Shell-resolved
   Windows Documents folder).
@@ -87,7 +94,11 @@ The shell owns *when* things run; grid-core owns *what* they do.
 
 - `lib.rs` — startup: logging, the data directory, `SessionManager`, `InstallService`,
   `LaunchService`, the registry, the keyring stores, the Tauri builder, and the hook
-  wiring in `.setup()`.
+  wiring in `.setup()`. Startup order: registry → Python import → args migration →
+  library move service (gate closed if a journal exists) and the library root check →
+  layout migration and its relinked resync (skipped while the root is unreachable) →
+  `relocate::recover` (finishes a Commit) → gates handed to the services → `.setup()`,
+  which resumes a Copy or Cleanup in the background.
 - `commands.rs` (+ `commands/cloud.rs`, `commands/specials.rs`, `commands/updates.rs`,
   `commands/logging.rs`) — the `#[tauri::command]` surface. Thin wrappers: they build a
   context, call a service or grid-core, and map the result to a serializable DTO.
@@ -104,7 +115,14 @@ The shell owns *when* things run; grid-core owns *what* they do.
   `play_session_service.rs` (play activity: queues a finished session in the registry
   outbox and flushes it on session end and after connect, restore or retry; offline, the
   queue waits), `relink_service.rs` (after connect, restore or retry: the relink pass, then
-  the image replenish and the update recompute; `installed-changed` tells the frontend).
+  the image replenish and the update recompute; `installed-changed` tells the frontend),
+  `library_move_service.rs` (9b: when the library move runs — plan, Downloads row, close
+  the `LibraryGate`, wait for launch tickets, re-check what runs, start, run on the
+  blocking pool with a throttled row detail; cancel, resume, finish events; the startup
+  root check and Commit recovery; the unreachable-library state and Relocate; its
+  commands are `commands/library_move.rs`). The gate is created once in `lib.rs` and
+  shared with `InstallService`, `LaunchService`, `CloudService` and `FirmwareService`;
+  commands that write into the library call `commands::ensure_library_idle` first.
 
 **Hooks pattern.** grid-core services expose setters — `InstallService`'s
 `set_game_finalized_hook`, `set_emulator_installed_hook`, `set_image_hook`,
@@ -128,7 +146,9 @@ session exists and `Shell.svelte` afterwards.
   exactly, with no cosmetic renames.
 - `lib/stores/*.svelte.ts` — rune-based state shared across views: `session`,
   `installed`, `downloads`, `sessions`, `updates`, `appUpdate`, `uiSettings`, `toasts`,
-  `inputMode`, `lastViewed`, `compatTools`, `pythonImport`.
+  `inputMode`, `lastViewed`, `compatTools`, `pythonImport`, `libraryMove` (the 9b move status and its toasts),
+  `libraryUnreachable` (while it says unreachable, `App.svelte` shows only
+  `LibraryUnreachableDialog.svelte`, whose pure half is `lib/libraryUnreachable.ts`).
 - Views — `Library.svelte`, `Server.svelte`, `Downloads.svelte`, `Emulators.svelte`,
   `Settings.svelte`, plus `Details.svelte` as a sub-view. `shell.ts` holds the view list
   and the session-phase mapping.
@@ -184,7 +204,8 @@ library stuck at version 0 keeps working. See
 
 ## User state
 
-All of it lives in one directory: `config.toml`, `grid-launcher.db` (the SQLite registry
+All of it lives in one directory: `config.toml`, `library-move.json` (only while a library
+move runs or waits), `grid-launcher.db` (the SQLite registry
 of installed games) and `covers/`. The location is the platform `ProjectDirs`
 (`io.github` / `Sixdd6` / `grid-launcher`) directory, unless `GRID_LAUNCHER_DATA_DIR` is
 set and non-empty, in which case everything moves under that path. The e2e harness relies

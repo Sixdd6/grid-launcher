@@ -575,6 +575,11 @@ run_group_attempt() {
     # "Old Demo" is removed from the library and its folder (made here,
     # outside the library so the layout migration leaves it alone) stays.
     mkdir -p "$data_dir/kept/Old Demo"
+    # A Python user's library folder exists on the machine they import on.
+    # Without it the imported RetroArch entry points into a missing folder,
+    # and the 9b unreachable-library check rightly blocks startup with its
+    # dialog instead of the Connect form.
+    mkdir -p "$data_dir/library"
     printf 'demo' >"$data_dir/kept/Old Demo/demo.sfc"
     cat >"$python_config" <<EOF
 {

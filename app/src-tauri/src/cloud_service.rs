@@ -30,7 +30,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, RwLock};
 use std::time::Duration;
 
 use crate::config_write::modify_config;
@@ -50,6 +50,7 @@ use grid_core::config::Config;
 use grid_core::launch::profiles::{load_profiles, EmulatorProfile};
 use grid_core::launch::{GameSession, LaunchService};
 use grid_core::library::registry::InstalledGame;
+use grid_core::library::relocate::LibraryGate;
 use grid_core::library::InstallService;
 use grid_core::platform::windows_documents_dir;
 use grid_core::romm::RommClient;
@@ -202,6 +203,11 @@ pub struct CloudService {
     /// The PCGamingWiki API base URL; the real host in production, a
     /// `wiremock` server under test.
     pcgw_base: String,
+    /// The library move's gate (9b). A transfer reads and writes save
+    /// folders inside the library, so a closed gate refuses a manual one,
+    /// skips the pre-launch restore, and holds an auto-upload back until it
+    /// opens.
+    library_gate: RwLock<LibraryGate>,
 }
 
 impl CloudService {
@@ -217,7 +223,61 @@ impl CloudService {
             transfers: Arc::new(AtomicUsize::new(0)),
             pcgw_client: grid_core::pcgw::build_http_client(),
             pcgw_base: base,
+            library_gate: RwLock::new(LibraryGate::default()),
         })
+    }
+
+    /// Sets the gate the library move closes. Until then it is open.
+    pub fn set_library_gate(&self, gate: LibraryGate) {
+        *self.library_gate.write().unwrap_or_else(|e| e.into_inner()) = gate;
+    }
+
+    fn library_gate(&self) -> LibraryGate {
+        self.library_gate
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Counts a transfer, then checks the gate. In this order on purpose:
+    /// a library move closes the gate first and reads the count after, so
+    /// either the move sees this transfer and refuses, or this transfer
+    /// sees the closed gate and refuses.
+    fn begin_transfer(&self) -> Result<TransferGuard, String> {
+        let transfer = self.track_transfer();
+        self.library_gate().check().map_err(|busy| busy.reason)?;
+        Ok(transfer)
+    }
+
+    /// Waits until the library gate is open (a library move holds it
+    /// closed for its whole run).
+    async fn wait_library_open(&self) {
+        loop {
+            let gate = self.library_gate();
+            if !gate.is_closed() {
+                return;
+            }
+            let _ =
+                tokio::task::spawn_blocking(move || gate.wait_open(Duration::from_secs(5))).await;
+        }
+    }
+
+    /// The auto-upload's wait between a session's end and the pool
+    /// handoff: the upload delay, then until the library gate is open, then
+    /// `reload` — the installed rows and the config read AFTER the wait,
+    /// because a library move in between rewrites both. The caller holds a
+    /// [`TransferGuard`] across this, so [`Self::transfers_active`] stays
+    /// true and no library move can start in the gap.
+    async fn upload_window<T, F, Fut>(&self, delay: Duration, reload: F) -> Option<T>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Option<T>>,
+    {
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
+        self.wait_library_open().await;
+        reload().await
     }
 
     /// True while a cloud upload or restore is in flight: an auto-upload
@@ -424,7 +484,7 @@ impl CloudService {
         game: CloudGameInput,
         save_type: SaveType,
     ) -> Result<UploadReportDto, String> {
-        let _transfer = self.track_transfer();
+        let _transfer = self.begin_transfer()?;
         let client = session.client().ok_or("not connected")?;
         let inputs = Self::load_inputs(config_path, install, launch).await?;
         let cloud_game = cloud_game_from_input(&game);
@@ -480,7 +540,7 @@ impl CloudService {
         save_type: SaveType,
         record_id: Option<i64>,
     ) -> Result<RestoreReportDto, String> {
-        let _transfer = self.track_transfer();
+        let _transfer = self.begin_transfer()?;
         let client = session.client().ok_or("not connected")?;
         let inputs = Self::load_inputs(config_path, install, launch).await?;
         let cloud_game = cloud_game_from_input(&game);
@@ -730,7 +790,11 @@ impl CloudService {
         config_path: &Path,
         installed_game: &InstalledGame,
     ) {
-        let _transfer = self.track_transfer();
+        let Ok(_transfer) = self.begin_transfer() else {
+            // A library move holds the save folders: no restore now. The
+            // launch itself is refused by the same gate.
+            return;
+        };
         let Some(client) = session.client() else {
             return;
         };
@@ -918,8 +982,13 @@ impl CloudService {
         install: Arc<InstallService>,
         config_path: PathBuf,
     ) {
+        // Raised from here to the pool handoff (9b): the delay below can
+        // last a minute, and `transfers_active` must stay true across it,
+        // or a library move could start between this session's end and its
+        // upload.
+        let transfer = self.track_transfer();
         let ended_at = unix_now_f64();
-        let installed = match blocking_installed(install).await {
+        let installed = match blocking_installed(install.clone()).await {
             Ok(installed) => installed,
             Err(e) => {
                 tracing::debug!("cloud session-finished: registry lookup failed: {e}");
@@ -930,16 +999,7 @@ impl CloudService {
         else {
             return;
         };
-        let cloud_game = cloud_game_from_installed(installed_game);
-        let wine_prefix = {
-            let prefix = installed_game.native_wineprefix.trim();
-            if prefix.is_empty() {
-                None
-            } else {
-                Some(PathBuf::from(prefix))
-            }
-        };
-        let key = game_key(&cloud_game);
+        let key = game_key(&cloud_game_from_installed(installed_game));
 
         // `session.started_at` is a unix-seconds `i64`; only re-stamped
         // when positive (parity: `session_cloud_sync_updates`,
@@ -980,16 +1040,35 @@ impl CloudService {
         // entry out of `config`. After sleeping for up to a minute that
         // snapshot can be stale — another session's stamp, a settings
         // change, or a concurrent auto-upload may have landed meanwhile —
-        // so reload once here, before anything plans from it.
-        let config = if delay > 0 {
-            tokio::time::sleep(Duration::from_secs(delay)).await;
-            match blocking_load_config(config_path.clone()).await {
-                Ok(fresh) => fresh,
-                Err(_) => return,
-            }
-        } else {
-            config
+        // so reload once here, before anything plans from it. 9b: the
+        // installed rows too, and only once the library gate is open — a
+        // library move in the gap rewrites every path in both.
+        let Some((installed, config)) = self
+            .upload_window(Duration::from_secs(delay), || {
+                reload_upload_inputs(install, config_path.clone())
+            })
+            .await
+        else {
+            return;
         };
+        // Uninstalled meanwhile: nothing to upload.
+        let Some(installed_game) = installed.iter().find(|g| g.rom_id == Some(session.rom_id))
+        else {
+            return;
+        };
+        let cloud_game = cloud_game_from_installed(installed_game);
+        let wine_prefix = {
+            let prefix = installed_game.native_wineprefix.trim();
+            if prefix.is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(prefix))
+            }
+        };
+        let key = game_key(&cloud_game);
+        if key.is_empty() {
+            return;
+        }
 
         let all_games: Vec<CloudGame> = installed.iter().map(cloud_game_from_installed).collect();
         let config_dir = config_path
@@ -1019,6 +1098,8 @@ impl CloudService {
             // on the event still see the pre-upload `last_uploaded_at`.
             emit_upload_finished(&app, &title_for_event, &messages);
         });
+        // The pool's in-flight key now keeps `transfers_active` true.
+        drop(transfer);
     }
 
     /// `AutoCloudSaveUploadWorker.run` + `_on_auto_cloud_upload_finished`
@@ -1283,6 +1364,20 @@ async fn blocking_installed(install: Arc<InstallService>) -> Result<Vec<Installe
     tokio::task::spawn_blocking(move || install.installed().map_err(err))
         .await
         .map_err(|e| format!("registry lookup did not finish: {e}"))?
+}
+
+/// The auto-upload's inputs, read fresh after its wait: the installed rows
+/// and the config. `None` (logged) when either cannot be read.
+async fn reload_upload_inputs(
+    install: Arc<InstallService>,
+    config_path: PathBuf,
+) -> Option<(Vec<InstalledGame>, Config)> {
+    let installed = blocking_installed(install)
+        .await
+        .map_err(|e| tracing::debug!("cloud auto-upload: registry lookup failed: {e}"))
+        .ok()?;
+    let config = blocking_load_config(config_path).await.ok()?;
+    Some((installed, config))
 }
 
 async fn blocking_load_config(config_path: PathBuf) -> Result<Config, String> {
@@ -1779,6 +1874,95 @@ mod tests {
     use std::sync::Arc;
     use wiremock::matchers::{method, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    /// 9b: the auto-upload's delay keeps `transfers_active` true, waits
+    /// for a closed library gate, and reads the installed rows and the
+    /// config only after the wait — a library move in between rewrites
+    /// both.
+    #[tokio::test]
+    async fn the_upload_window_holds_the_transfer_count_waits_for_the_gate_and_rereads_rows() {
+        use grid_core::library::registry::Registry;
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        Config::default().save(&config_path).unwrap();
+        let registry = Arc::new(Registry::open(&dir.path().join("registry.db")).unwrap());
+        let row = |dir_path: &str| InstalledGame {
+            title: "Mario".into(),
+            platform: "SNES".into(),
+            rom_id: Some(1),
+            extracted_dir: dir_path.into(),
+            ..Default::default()
+        };
+        registry.upsert(&row("/old/games/SNES/Mario")).unwrap();
+        let install = InstallService::new(registry.clone(), config_path.clone());
+
+        let cloud = CloudService::with_pcgw_base("http://127.0.0.1:9".into());
+        let gate = LibraryGate::default();
+        cloud.set_library_gate(gate.clone());
+        assert!(!cloud.transfers_active());
+
+        let reads = Arc::new(AtomicUsize::new(0));
+        let transfer = cloud.track_transfer();
+        let task = {
+            let cloud = cloud.clone();
+            let reads = reads.clone();
+            let install = install.clone();
+            let config_path = config_path.clone();
+            tokio::spawn(async move {
+                let result = cloud
+                    .upload_window(Duration::from_millis(150), move || {
+                        reads.fetch_add(1, Ordering::SeqCst);
+                        reload_upload_inputs(install, config_path)
+                    })
+                    .await;
+                drop(transfer);
+                result
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(cloud.transfers_active(), "raised during the delay");
+        // A library move closes the gate and rewrites the row meanwhile.
+        gate.close(grid_core::library::relocate::LIBRARY_MOVE_BUSY);
+        registry.upsert(&row("/new/games/SNES/Mario")).unwrap();
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert!(
+            cloud.transfers_active(),
+            "still raised while the gate is closed"
+        );
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            0,
+            "nothing read under a closed gate"
+        );
+        assert!(!task.is_finished());
+
+        gate.open();
+        let (installed, _config) = task.await.unwrap().expect("inputs read");
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+        assert_eq!(installed.len(), 1);
+        assert_eq!(installed[0].extracted_dir, "/new/games/SNES/Mario");
+        assert!(!cloud.transfers_active());
+    }
+
+    /// A manual transfer counts itself before it checks the gate, and a
+    /// refusal leaves no count behind.
+    #[test]
+    fn a_manual_transfer_is_refused_while_the_library_gate_is_closed() {
+        let cloud = CloudService::with_pcgw_base("http://127.0.0.1:9".into());
+        let gate = LibraryGate::default();
+        cloud.set_library_gate(gate.clone());
+        {
+            let _transfer = cloud.begin_transfer().expect("open gate");
+            assert!(cloud.transfers_active());
+        }
+        assert!(!cloud.transfers_active());
+        gate.close(grid_core::library::relocate::LIBRARY_MOVE_BUSY);
+        assert_eq!(
+            cloud.begin_transfer().err(),
+            Some(grid_core::library::relocate::LIBRARY_MOVE_BUSY.to_string())
+        );
+        assert!(!cloud.transfers_active());
+    }
 
     fn windows_game(title: &str) -> CloudGame {
         CloudGame {

@@ -31,7 +31,7 @@ use grid_core::library::specials::native;
 use serde::Serialize;
 use tauri::{Emitter, State};
 
-use super::{err, AppState};
+use super::{ensure_library_idle, err, AppState};
 
 /// Emitted after [`set_default_compat_tool`] and after a managed compat-tool
 /// install finalizes (`InstallService::set_compat_tools_hook`, wired in
@@ -270,6 +270,7 @@ pub async fn install_compat_tool(
     state: State<'_, AppState>,
     source_id: String,
 ) -> Result<(), String> {
+    ensure_library_idle(&state)?;
     let install = state.install.as_ref().map_err(Clone::clone)?;
     install.install_compat_tool(source_id).await.map_err(err)
 }
@@ -307,7 +308,11 @@ pub async fn rpcs3_firmware_status(emulator_name: String) -> Result<Rpcs3Firmwar
 /// [`crate::firmware_service::FirmwareService::spawn_ps3_firmware`], not
 /// here: this command only runs the emulator-side install step.
 #[tauri::command]
-pub async fn install_ps3_firmware(emulator_name: String) -> Result<bool, String> {
+pub async fn install_ps3_firmware(
+    state: State<'_, AppState>,
+    emulator_name: String,
+) -> Result<bool, String> {
+    ensure_library_idle(&state)?;
     tokio::task::spawn_blocking(move || {
         let config = Config::load(&Config::default_path()).map_err(err)?;
         let Some(entry) = emulator_entry_by_name(&config.emulators, &emulator_name) else {

@@ -6,6 +6,7 @@ mod covers_dir;
 mod firmware_service;
 mod gamepad;
 mod images;
+mod library_move_service;
 mod logging;
 mod media_server;
 mod play_session_service;
@@ -113,6 +114,18 @@ pub fn run() {
         Ok(count) => tracing::info!("migrated {count} emulator entries to current default args"),
         Err(e) => tracing::warn!("emulator args migration failed: {e}"),
     }
+    // The library move (9b) and the unreachable-library rule. The gate
+    // starts closed when a move record exists. Before anything writes into
+    // the library, check that its root can be reached: an unreachable root
+    // that GRID has stored something in blocks the app (the frontend shows
+    // the unreachable-library dialog), and every library step below is
+    // skipped, so nothing is written until the user relocates the library
+    // or closes the app. A blank root is a first run and passes.
+    let library_move = library_move_service::LibraryMoveService::new(config_path.clone());
+    let library_reachable = match &registry {
+        Ok(registry) => library_move.check_root_at_startup(registry),
+        Err(_) => true,
+    };
     // The one-shot move to the current library layout: v1's `games/`,
     // `emulators/`, `saves/` split, then v2's data-root repair (the
     // `user_data` links move to the directory the emulator really reads).
@@ -124,7 +137,7 @@ pub fn run() {
     // paths only. `relinked` names the entries whose config files the resync
     // below has to rewrite.
     let (layout_migration, relinked) = match &registry {
-        Ok(registry) => match grid_core::library::layout_migration::run(
+        Ok(registry) if library_reachable => match grid_core::library::layout_migration::run(
             &config_path,
             registry,
             grid_core::launch::profiles::load_profiles(),
@@ -155,16 +168,19 @@ pub fn run() {
                 (Some(message), Vec::new())
             }
         },
-        Err(_) => (None, Vec::new()),
+        _ => (None, Vec::new()),
     };
     let install = registry
         .clone()
         .map(|registry| InstallService::new(registry, config_path.clone()));
     // The data-root repair moved these entries' user data to the directory
-    // the emulator really reads; their config files still name the old one
-    // (PCSX2's `[Folders] Bios` above all). One full autoconfig pass per
-    // entry rewrites the managed keys in place. `fresh_install` is false: a
-    // repair must not reseed a renderer the user has since changed.
+    // the emulator really reads. One full autoconfig pass per entry writes
+    // the keys a sync manages into the config files found there.
+    // `fresh_install` is false: a repair must not reseed a renderer the user
+    // has since changed. A sync does NOT rewrite add-only keys: PCSX2's
+    // `[Folders] Bios` is written only when the ini has none, so an
+    // existing value stays as it is (the layout migration's own text
+    // rewrite of the emulator config files is what repairs absolute paths).
     //
     // Logs carry the entry name only; the RetroAchievements credential stays
     // inside `RaCredentials` for the whole hop.
@@ -183,7 +199,27 @@ pub fn run() {
             );
         }
     }
-    let launch = registry.map(|registry| LaunchService::new(registry, config_path));
+    // A move interrupted in Commit is finished now, before any service
+    // reads the config; Copy and Cleanup resume from `.setup()` below. The
+    // resync is the managed-key pass for every emulator entry.
+    if let (Ok(registry), true) = (&registry, library_reachable) {
+        let install_for_resync = install.as_ref().ok().cloned();
+        library_move.recover_at_startup(registry, &move |config: &Config| {
+            commands::resync_all_emulators(config, install_for_resync.as_ref());
+            Ok(())
+        });
+    }
+    if let Ok(install) = &install {
+        install.set_library_gate(library_move.gate().clone());
+    }
+    cloud.set_library_gate(library_move.gate().clone());
+    let firmware = firmware_service::FirmwareService::new();
+    firmware.set_library_gate(library_move.gate().clone());
+    let launch = registry.map(|registry| {
+        let launch = LaunchService::new(registry, config_path);
+        launch.set_library_gate(library_move.gate().clone());
+        launch
+    });
     let builder = tauri::Builder::default().manage(AppState {
         session,
         install,
@@ -192,7 +228,8 @@ pub fn run() {
         cloud,
         play_sessions: play_session_service::PlaySessionService::new(),
         images: images::ImageService::new(),
-        firmware: firmware_service::FirmwareService::new(),
+        firmware,
+        library_move,
         updates: update_service::UpdateService::new(),
         app_update: app_update::AppUpdateState::new(),
         media_server: std::sync::OnceLock::new(),
@@ -441,6 +478,19 @@ pub fn run() {
                     launch_for_loop.spawn_poll_loop();
                 });
             }
+            // 9b: a library move stopped in Copy or Cleanup (a crash or a
+            // close) resumes in the background. The frontend reads
+            // `resumed` from `library_move_status` and says "Resuming the
+            // library move to <new>" once: this runs before it listens.
+            if state.library_move.has_pending_resume() {
+                match commands::library_move::move_context(&state, app.handle()) {
+                    Ok(ctx) => match state.library_move.resume(&ctx) {
+                        Ok(outcome) => tracing::info!("library move resume: {outcome:?}"),
+                        Err(e) => tracing::warn!("library move not resumed: {e}"),
+                    },
+                    Err(e) => tracing::warn!("library move not resumed: {e}"),
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -469,6 +519,14 @@ pub fn run() {
             commands::library_path::library_start_fresh_preview,
             commands::library_path::library_start_fresh_keep,
             commands::library_path::library_start_fresh_delete,
+            commands::library_move::library_move_preview,
+            commands::library_move::library_move_start,
+            commands::library_move::library_move_cancel,
+            commands::library_move::library_move_resume,
+            commands::library_move::library_move_status,
+            commands::library_move::library_unreachable_status,
+            commands::library_move::library_relocate,
+            commands::library_move::library_unreachable_close,
             commands::get_ui_settings,
             commands::set_ui_settings,
             commands::open_server_page,

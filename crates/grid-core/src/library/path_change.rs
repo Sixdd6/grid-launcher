@@ -103,7 +103,7 @@ fn compare_keys(current: &[String], candidate: &[String]) -> Result<(), PathChan
 
 /// `raw` trimmed, with a leading `~/` (or `~\` on Windows) joined onto
 /// `home`. Any other form is taken as typed.
-fn expand(raw: &str, home: Option<&Path>) -> PathBuf {
+pub(crate) fn expand(raw: &str, home: Option<&Path>) -> PathBuf {
     let trimmed = raw.trim();
     let rest = trimmed
         .strip_prefix("~/")

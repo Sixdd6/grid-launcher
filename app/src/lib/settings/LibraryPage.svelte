@@ -3,9 +3,14 @@
   // opens LibraryChangeDialog. After a change the page shows what happened;
   // the installed store re-reads the registry on the backend's
   // `installed-changed` event.
-  import { api, type StartFreshOutcome } from '../api';
+  //
+  // 9b: while a library move runs or waits, the pane says so ("Moving to
+  // <new>…") and Change… is disabled; the folder is re-read when the move
+  // (or a relocate) changes it.
+  import { api, type LibraryMoveStartOutcome, type StartFreshOutcome } from '../api';
+  import { libraryMove } from '../stores/libraryMove.svelte';
   import LibraryChangeDialog from './LibraryChangeDialog.svelte';
-  import { outcomeNotice, type Notice } from './library';
+  import { moveInProgress, moveStartNotice, outcomeNotice, paneMoveText, type Notice } from './library';
 
   let { active = true }: { active?: boolean } = $props();
 
@@ -29,8 +34,18 @@
   // Re-read whenever the page comes forward: First Run Setup or the Server
   // banner may have set the folder since.
   $effect(() => {
+    // Read so a finished move or a relocate re-reads the folder.
+    void libraryMove.pathVersion;
     if (active && !dialogOpen) load();
   });
+
+  let moveText = $derived(paneMoveText(libraryMove.status));
+  let moving = $derived(moveInProgress(libraryMove.status));
+
+  function onMoveStarted(outcome: LibraryMoveStartOutcome) {
+    notice = moveStartNotice(outcome);
+    dialogOpen = false;
+  }
 
   function openDialog() {
     notice = null;
@@ -67,11 +82,15 @@
         class="primary"
         aria-describedby="library-folder-hint"
         onclick={openDialog}
-        disabled={path === null}
+        disabled={path === null || moving}
       >
         Change…
       </button>
     </div>
+
+    {#if moveText}
+      <p data-testid="library-move-state" class="notice" role="status">{moveText}</p>
+    {/if}
 
     {#if notice}
       <p
@@ -87,7 +106,7 @@
 </div>
 
 {#if dialogOpen && path !== null}
-  <LibraryChangeDialog currentPath={path} {onDone} onClose={() => (dialogOpen = false)} />
+  <LibraryChangeDialog currentPath={path} {onDone} {onMoveStarted} onClose={() => (dialogOpen = false)} />
 {/if}
 
 <style>

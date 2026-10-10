@@ -2,7 +2,7 @@
 // grid_launcher/library/downloads.py (see docs/porting/03-library-install.md,
 // "Display text per status" and "Aggregate status text"). No store imports here
 // so this module stays import-cycle-free.
-import type { DownloadEntry, DownloadKind, DownloadStatus } from '../api';
+import type { DownloadEntry, DownloadKind, DownloadStatus, MovePhase } from '../api';
 
 const SIZE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'];
 
@@ -23,6 +23,7 @@ export function percent(done: number, total: number): number {
 }
 
 export function entryDetail(e: DownloadEntry): string {
+  if (e.kind === 'library_move') return moveDetail(e);
   switch (e.status) {
     case 'queued':
       return 'Queued';
@@ -55,11 +56,40 @@ export function entryDetail(e: DownloadEntry): string {
   }
 }
 
+/**
+ * The library move row's line: the backend's detail while it runs
+ * (`games/ · 1.2 of 5.6 GB` while copying, `Updating paths…` after), and a
+ * plain outcome once it ends.
+ */
+function moveDetail(e: DownloadEntry): string {
+  const detail = e.detail.trim();
+  switch (e.status) {
+    case 'downloading':
+      return detail === '' ? 'Copying…' : `Copying • ${detail}`;
+    case 'installing':
+    case 'cancelling':
+    case 'queued':
+      return detail === '' ? 'Finishing…' : detail;
+    case 'completed':
+      return 'Completed • The library has moved';
+    case 'cancelled':
+      return 'Cancelled • The library did not move';
+    case 'failed':
+      return `Failed • ${e.error.trim() || 'Unknown error'}`;
+    default:
+      return 'Unknown';
+  }
+}
+
 const LIVE_STATUSES: DownloadStatus[] = ['queued', 'downloading', 'installing', 'cancelling'];
 
-export function aggregate(entries: DownloadEntry[]): string {
-  const hasLive = entries.some((e) => LIVE_STATUSES.includes(e.status));
-  if (!hasLive) return '';
+export function aggregate(all: DownloadEntry[]): string {
+  const live = all.filter((e) => LIVE_STATUSES.includes(e.status));
+  if (live.length === 0) return '';
+  // The library move is not a download: it never counts, and alone it
+  // names itself.
+  if (live.every((e) => e.kind === 'library_move')) return 'Moving the library';
+  const entries = all.filter((e) => e.kind !== 'library_move');
 
   const queuedCount = entries.filter((e) => e.status === 'queued').length;
   const activeDownloadCount = entries.filter(
@@ -98,12 +128,21 @@ export function kindLabel(kind: DownloadKind): string {
       return 'Compat tool';
     case 'firmware':
       return 'Firmware';
+    case 'library_move':
+      return 'Library move';
     default:
       return '';
   }
 }
 
-export type DownloadAction = 'cancel' | 'installing' | 'retry-dismiss' | 'dismiss' | 'none';
+export type DownloadAction =
+  | 'cancel'
+  | 'installing'
+  | 'retry-dismiss'
+  | 'retry-cancel'
+  | 'retry'
+  | 'dismiss'
+  | 'none';
 
 /**
  * Which buttons a drawer row offers.
@@ -114,8 +153,24 @@ export type DownloadAction = 'cancel' | 'installing' | 'retry-dismiss' | 'dismis
  * button at all while it is live, and only `Dismiss` once it is terminal —
  * never a Cancel or Retry that would do nothing. Every other kind keeps the
  * behavior it had.
+ *
+ * The `library_move` row's Cancel and Retry are the move's own commands. It
+ * offers Cancel only while it copies (`downloading`); committing and
+ * cleaning up (`installing`) cannot be stopped. A failed move whose record
+ * still waits (`movePhase` from `library_move_status`) offers Retry, plus
+ * Cancel while it is still in the copy; with no move waiting, only Dismiss.
  */
-export function actionFor(status: DownloadStatus, kind: DownloadKind = 'base'): DownloadAction {
+export function actionFor(
+  status: DownloadStatus,
+  kind: DownloadKind = 'base',
+  movePhase: MovePhase | null = null,
+): DownloadAction {
+  if (kind === 'library_move') {
+    if (status === 'downloading') return 'cancel';
+    if (LIVE_STATUSES.includes(status)) return 'none';
+    if (status === 'failed' && movePhase !== null) return movePhase === 'copy' ? 'retry-cancel' : 'retry';
+    return 'dismiss';
+  }
   if (kind === 'firmware') {
     return LIVE_STATUSES.includes(status) ? 'none' : 'dismiss';
   }
@@ -187,6 +242,9 @@ export function footerLine(entries: DownloadEntry[]): string | null {
       speed = 'Queued';
       break;
   }
+  // A library move reads and writes local disks: the phase word, never a
+  // network rate.
+  if (current.kind === 'library_move') speed = 'Moving';
   return `${current.title} · ${pct} · ${speed}`;
 }
 
@@ -197,6 +255,7 @@ export function footerLine(entries: DownloadEntry[]): string | null {
  * a rate the backend does not report, and a queued job has no rate yet.
  */
 export function etaText(e: DownloadEntry): string {
+  if (e.kind === 'library_move') return '';
   if (e.status !== 'downloading' || e.total_bytes <= 0 || e.speed_bps <= 0) return '';
   const remaining = Math.max(0, e.total_bytes - e.downloaded_bytes);
   const secs = Math.ceil(remaining / e.speed_bps);
@@ -211,6 +270,11 @@ export function etaText(e: DownloadEntry): string {
  * install writes to disk, blank for queued and terminal rows.
  */
 export function graphCaption(e: DownloadEntry): string {
+  if (e.kind === 'library_move') {
+    if (e.status === 'downloading') return 'Copying files';
+    if (e.status === 'installing') return 'Updating paths';
+    return '';
+  }
   switch (e.status) {
     case 'downloading':
     case 'cancelling': {

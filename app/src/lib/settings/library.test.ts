@@ -1,11 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
-  MOVE_AVAILABLE,
+  canMove,
   canStartFresh,
   formatBytes,
   outcomeNotice,
+  moveFinishedToast,
+  moveItemLine,
+  moveInProgress,
+  movePreviewSummary,
+  moveStartNotice,
+  paneMoveText,
   previewSummary,
+  resumeToast,
 } from './library';
+import type { LibraryMoveStatus, MovePreview } from '../api';
 
 describe('formatBytes', () => {
   it('uses the largest unit below 1024, one decimal past bytes', () => {
@@ -28,12 +36,6 @@ describe('canStartFresh', () => {
     expect(
       canStartFresh({ status: 'refused', reason: 'inside_current', message: 'x' }, '/new'),
     ).toBe(false);
-  });
-});
-
-describe('move existing files', () => {
-  it('stays unavailable until phase 9b lands', () => {
-    expect(MOVE_AVAILABLE).toBe(false);
   });
 });
 
@@ -94,5 +96,132 @@ describe('outcomeNotice', () => {
       kind: 'error',
       text: 'Changed.',
     });
+  });
+});
+
+describe('move existing files', () => {
+  const GB = 1024 ** 3;
+  const preview = (overrides: Partial<MovePreview>): MovePreview => ({
+    old_root: '/old',
+    new_root: '/new',
+    items: [
+      { name: 'games', strategy: 'rename', bytes: 5 * GB, files: 10 },
+      { name: 'saves', strategy: 'rename', bytes: 1024, files: 2 },
+    ],
+    total_bytes: 5 * GB + 1024,
+    copy_bytes: 0,
+    required_bytes: 0,
+    free_bytes: 100 * GB,
+    ...overrides,
+  });
+
+  it('is offered once the typed folder is accepted and a library exists', () => {
+    const ok = { status: 'ok' as const, path: '/new' };
+    expect(canMove(ok, '/new', '/old')).toBe(true);
+    expect(canMove(ok, '/new', '  ')).toBe(false);
+    expect(canMove(null, '/new', '/old')).toBe(false);
+    expect(canMove(ok, '/other', '/old')).toBe(false);
+  });
+
+  it('summarizes a same-drive move as instant and a copy with its size and the free space', () => {
+    expect(movePreviewSummary(preview({}))).toBe('Same drive — instant');
+    expect(
+      movePreviewSummary(
+        preview({
+          items: [{ name: 'games', strategy: 'copy', bytes: 5.6 * GB, files: 10 }],
+          copy_bytes: 5.6 * GB,
+          required_bytes: 6.6 * GB,
+          free_bytes: 120 * GB,
+        }),
+      ),
+    ).toBe('Copies 5.6 GB; 120.0 GB free');
+    expect(
+      movePreviewSummary(
+        preview({
+          items: [{ name: 'games', strategy: 'copy', bytes: GB, files: 1 }],
+          copy_bytes: GB,
+          free_bytes: null,
+        }),
+      ),
+    ).toBe('Copies 1.0 GB; free space unknown');
+    expect(movePreviewSummary(preview({ items: [], total_bytes: 0 }))).toBe('Nothing to move');
+  });
+
+  it('describes each folder', () => {
+    expect(moveItemLine({ name: 'games', strategy: 'rename', bytes: 5 * GB, files: 10 })).toBe(
+      'games/ · 5.0 GB · same drive',
+    );
+    expect(moveItemLine({ name: 'saves', strategy: 'copy', bytes: 1536, files: 2 })).toBe(
+      'saves/ · 1.5 KB · copied and checked',
+    );
+  });
+
+  const status = (overrides: Partial<LibraryMoveStatus>): LibraryMoveStatus => ({
+    phase: 'copy',
+    running: true,
+    old_root: '/old',
+    new_root: '/new',
+    resumed: false,
+    error: null,
+    ...overrides,
+  });
+
+  it('gives the pane its moving state', () => {
+    expect(paneMoveText(null)).toBeNull();
+    expect(paneMoveText(status({ phase: null, running: false }))).toBeNull();
+    expect(paneMoveText(status({}))).toBe('Moving to /new…');
+    expect(paneMoveText(status({ phase: 'cleanup' }))).toBe('Moving to /new…');
+    expect(paneMoveText(status({ running: false, error: 'Disk full.' }))).toBe(
+      'The move to /new stopped: Disk full. Retry or cancel it in Downloads.',
+    );
+    expect(paneMoveText(status({ phase: 'commit', running: false, error: 'Disk full.' }))).toBe(
+      'The move to /new stopped: Disk full. Retry it in Downloads.',
+    );
+    expect(paneMoveText(status({ running: false }))).toBe('The move to /new waits to resume.');
+    expect(moveInProgress(null)).toBe(false);
+    expect(moveInProgress(status({ phase: null }))).toBe(false);
+    expect(moveInProgress(status({ running: false }))).toBe(true);
+  });
+
+  it('reports the start', () => {
+    expect(moveStartNotice({ status: 'started', new_root: '/new' })).toEqual({
+      kind: 'success',
+      text: 'Moving the library to /new. Follow it in Downloads.',
+    });
+    expect(
+      moveStartNotice({ status: 'refused', reason: 'not_enough_space', message: 'Not enough space.' }),
+    ).toEqual({ kind: 'error', text: 'Not enough space.' });
+  });
+
+  it('turns a finished run into one toast', () => {
+    expect(
+      moveFinishedToast({ status: 'finished', new_root: '/new', report: [], old_root_removed: true }),
+    ).toEqual({ level: 'success', text: 'Library moved to /new.' });
+    expect(
+      moveFinishedToast({
+        status: 'finished',
+        new_root: '/new',
+        report: ['games changed during the move; left at /old/games.'],
+        old_root_removed: false,
+      }),
+    ).toEqual({
+      level: 'error',
+      text: 'Library moved to /new. games changed during the move; left at /old/games.',
+    });
+    expect(moveFinishedToast({ status: 'cancelled' })).toEqual({
+      level: 'success',
+      text: 'Library move cancelled. Nothing changed.',
+    });
+    expect(moveFinishedToast({ status: 'failed', error: 'Disk full.' })).toEqual({
+      level: 'error',
+      text: 'Library move stopped: Disk full.',
+    });
+  });
+
+  it('announces a resume once, only for a move that was resumed at startup', () => {
+    expect(resumeToast(status({ resumed: true }))).toBe('Resuming the library move to /new');
+    expect(resumeToast(status({ resumed: false }))).toBeNull();
+    expect(resumeToast(status({ resumed: true, phase: null }))).toBeNull();
+    expect(resumeToast(null)).toBeNull();
   });
 });

@@ -10,7 +10,7 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 
-use super::{err, AppState};
+use super::{ensure_library_idle, err, AppState};
 use crate::app_update::AppUpdateStatus;
 use crate::update_service::{UpdateRow, UPDATE_GONE};
 
@@ -37,6 +37,7 @@ pub async fn update_game(
     app: AppHandle,
     rom_id: i64,
 ) -> Result<(), String> {
+    ensure_library_idle(&state)?;
     let install = state.install.as_ref().map_err(Clone::clone)?.clone();
     let client = state.session.client().ok_or("not connected")?;
     let session = state.session.clone();

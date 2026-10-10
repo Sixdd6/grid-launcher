@@ -20,6 +20,7 @@ pub mod queue;
 pub mod registry;
 pub mod relink;
 pub mod relocate;
+pub mod root_access;
 pub mod server_emulator;
 pub mod specials;
 pub mod update_detection;
@@ -1362,6 +1363,9 @@ impl InstallService {
             let mut queue = self.queue.lock().unwrap();
             let changed = queue.entry(id).is_some_and(|entry| entry.detail != detail);
             queue.set_detail(id, detail);
+            // Both byte pairs: the row reads the download pair while it
+            // copies (`Downloading`) and the install pair after.
+            queue.set_progress(id, done, total, 0.0);
             queue.set_install_progress(id, done, total);
             changed
         };
@@ -1372,9 +1376,25 @@ impl InstallService {
         }
     }
 
+    /// Shows the move row as copying (cancellable) or committing
+    /// ([`QueueState::set_library_move_copying`]).
+    pub fn set_library_move_copying(&self, id: u64, copying: bool) {
+        self.queue
+            .lock()
+            .unwrap()
+            .set_library_move_copying(id, copying);
+        self.notify_now();
+    }
+
     /// Ends the library move row: a blank `error` completes it.
     pub fn finish_library_move(&self, id: u64, error: &str) {
         self.queue.lock().unwrap().finish_library_move(id, error);
+        self.notify_now();
+    }
+
+    /// Ends the library move row as cancelled.
+    pub fn cancel_library_move(&self, id: u64) {
+        self.queue.lock().unwrap().cancel_library_move(id);
         self.notify_now();
     }
 

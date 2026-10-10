@@ -157,7 +157,8 @@ export type PathChangeRefusal =
   | 'not_writable'
   | 'install_active'
   | 'game_running'
-  | 'cloud_transfer_active';
+  | 'cloud_transfer_active'
+  | 'library_move_active';
 
 export type LibraryPathCheck =
   | { status: 'ok'; path: string }
@@ -178,6 +179,103 @@ export type StartFreshOutcome =
   | { status: 'refused'; reason: PathChangeRefusal; message: string }
   | { status: 'stale'; message: string };
 
+// Settings › Library › Move existing files (9b) and the unreachable-library
+// dialog. Mirrors `library_move_service.rs` and `grid_core::library::
+// relocate` / `root_access`.
+
+/** Where a move is. Only `copy` can be cancelled. */
+export type MovePhase = 'copy' | 'commit' | 'cleanup';
+/** Same drive: one rename. Another drive: copied, verified, then the source removed. */
+export type MoveStrategy = 'rename' | 'copy';
+
+export type MovePreviewItem = { name: string; strategy: MoveStrategy; bytes: number; files: number };
+
+export type MovePreview = {
+  old_root: string;
+  new_root: string;
+  items: MovePreviewItem[];
+  total_bytes: number;
+  /** Bytes on another drive, which are copied. */
+  copy_bytes: number;
+  /** `copy_bytes` plus the safety margin; 0 for a same-drive move. */
+  required_bytes: number;
+  /** Free bytes at the new folder; `null` when unknown. */
+  free_bytes: number | null;
+};
+
+export type MoveRefusalReason =
+  | 'layout_not_current'
+  | 'old_root_missing'
+  | 'target_has_library_folders'
+  | 'not_enough_space'
+  | 'move_active'
+  | 'library_unreachable'
+  | 'no_move'
+  | PathChangeRefusal;
+
+export type MoveRefusal = { reason: MoveRefusalReason; message: string };
+
+export type LibraryMovePreviewOutcome =
+  | { status: 'ok'; preview: MovePreview }
+  | ({ status: 'refused' } & MoveRefusal);
+
+export type LibraryMoveStartOutcome =
+  | { status: 'started'; new_root: string }
+  | ({ status: 'refused' } & MoveRefusal);
+
+export type LibraryMoveResumeOutcome =
+  | { status: 'resumed'; new_root: string }
+  | ({ status: 'refused' } & MoveRefusal);
+
+export type LibraryMoveCancelOutcome =
+  | { status: 'cancelling' }
+  | { status: 'cancelled' }
+  | { status: 'not_cancellable'; message: string }
+  | { status: 'no_move'; message: string };
+
+/** `library_move_status`, and the `library-move-changed` event's payload. */
+export type LibraryMoveStatus = {
+  /** `null` when no move is in progress. */
+  phase: MovePhase | null;
+  running: boolean;
+  old_root: string;
+  new_root: string;
+  /** The move was resumed at startup. */
+  resumed: boolean;
+  /** Why the last run stopped, while the move waits. */
+  error: string | null;
+};
+
+/** The `library-move-finished` event's payload. */
+export type LibraryMoveFinished =
+  | { status: 'finished'; new_root: string; report: string[]; old_root_removed: boolean }
+  | { status: 'cancelled' }
+  | { status: 'failed'; error: string };
+
+export type UnreachableReason =
+  | 'missing'
+  | 'drive_missing'
+  | 'not_a_directory'
+  | 'permission_denied'
+  | 'unreadable';
+
+/** `library_unreachable_status`, and the `library-unreachable` event's payload. */
+export type LibraryUnreachableStatus =
+  | { status: 'reachable' }
+  | { status: 'unreachable'; root: string; reason: UnreachableReason; message: string };
+
+export type RelocateRefusalReason =
+  | 'blank'
+  | 'not_absolute'
+  | 'not_a_directory'
+  | 'no_library_folders'
+  | 'library_reachable'
+  | 'move_active';
+
+export type LibraryRelocateOutcome =
+  | { status: 'relocated'; library_path: string; report: string[] }
+  | { status: 'refused'; reason: RelocateRefusalReason; message: string };
+
 export type DownloadStatus =
   | 'queued'
   | 'downloading'
@@ -190,7 +288,7 @@ export type DownloadStatus =
 // Which half of the install pipeline owns an entry. `'firmware'` is an
 // EXTERNAL row: the background firmware installer moves its own bytes, so
 // the entry takes no queue slot and reports no progress.
-export type DownloadJob = 'game' | 'emulator' | 'firmware';
+export type DownloadJob = 'game' | 'emulator' | 'firmware' | 'library';
 
 // What an entry installs — finer-grained than `job`.
 export type DownloadKind =
@@ -201,7 +299,12 @@ export type DownloadKind =
   | 'native_update'
   | 'emulator'
   | 'compat_tool'
-  | 'firmware';
+  | 'firmware'
+  // Settings › Library › Move existing files (9b): the one library move
+  // row. It takes no queue slot; its Cancel and Retry are the move's own
+  // commands. `downloading` while it copies (cancellable), `installing`
+  // while it commits and cleans up (not cancellable).
+  | 'library_move';
 
 export type DownloadEntry = {
   id: number;
@@ -218,6 +321,8 @@ export type DownloadEntry = {
   install_processed_bytes: number;
   install_total_bytes: number;
   error: string;
+  /** One line of free text: what a library move is doing ("games/ · 1.2 of 5.6 GB"). Empty for every other row. */
+  detail: string;
 };
 
 export type DownloadsSnapshot = { entries: DownloadEntry[] };
@@ -554,6 +659,21 @@ export const api = {
   /** Start fresh › Delete: switch to `path`, then uninstall the old library's games. */
   libraryStartFreshDelete: (path: string, expectedOldRoot: string) =>
     invoke<StartFreshOutcome>('library_start_fresh_delete', { path, expectedOldRoot }),
+  /** Move existing files: what a move to `path` would do. Reads only. */
+  libraryMovePreview: (path: string) =>
+    invoke<LibraryMovePreviewOutcome>('library_move_preview', { path }),
+  /** Starts the background move to `path`; its Downloads row shows the progress. */
+  libraryMoveStart: (path: string) => invoke<LibraryMoveStartOutcome>('library_move_start', { path }),
+  /** Cancels the move while it copies. */
+  libraryMoveCancel: () => invoke<LibraryMoveCancelOutcome>('library_move_cancel'),
+  /** Retry on a failed move row: runs the waiting move again. */
+  libraryMoveResume: () => invoke<LibraryMoveResumeOutcome>('library_move_resume'),
+  libraryMoveStatus: () => invoke<LibraryMoveStatus>('library_move_status'),
+  libraryUnreachableStatus: () => invoke<LibraryUnreachableStatus>('library_unreachable_status'),
+  /** The library now lives at `path`: stored paths are rewritten, no file moves. */
+  libraryRelocate: (path: string) => invoke<LibraryRelocateOutcome>('library_relocate', { path }),
+  /** Exits the app without changing anything. */
+  libraryUnreachableClose: () => invoke<void>('library_unreachable_close'),
   getUiSettings: () => invoke<UiSettings>('get_ui_settings'),
   setUiSettings: (settings: UiSettings) => invoke<void>('set_ui_settings', { settings }),
   /** The `debug_prints` setting: `debug` rather than `info` logging.

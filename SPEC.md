@@ -70,8 +70,27 @@ There are several main sections to the application with buttons across the top b
   Disconnect), **Library** (the library folder and Change…: the new folder is typed or
   picked with Browse…, and is refused when it is not a full path, is the current folder,
   is inside it or contains it, cannot be created or written, or while a download or
-  install, a running game or a cloud transfer is active; then **Move existing files**
-  (shown as coming soon until the move job lands) or **Start fresh**. Start fresh asks
+  install, a running game, a cloud transfer or a library move is active; then **Move
+  existing files** or **Start fresh**. Move first shows what moves — the `games`,
+  `emulators` and `saves` folders, each "same drive" (a rename, instant) or "copied and
+  checked" (another drive), with "Same drive — instant" or "Copies N GB; X GB free" — and
+  says what waits while it runs. Start move runs it in the background as one row in
+  Downloads ("Library move", with a line such as `games/ · 1.2 of 5.6 GB`); the pane shows
+  "Moving to <new>…" and Change… is disabled. While the move runs or waits, installs,
+  uninstalls, game and emulator launches, emulator and firmware installs, cloud transfers
+  and another folder change are refused with "The library is being moved…"; an
+  auto-upload that is due waits for the move. Copied files are checked (every file's
+  size; a full SHA-256 for `saves`, the first and last MiB for `games` and `emulators`)
+  before anything switches; then every stored path is rewritten (installed games,
+  emulator entries and the emulator config files that hold absolute library paths) and
+  the library folder changes. The old copies are deleted only if they did not change
+  during the move (a changed one is kept and named in the finish toast), and the old
+  folder goes only when it is empty. Cancel (in Downloads) is offered only while files
+  copy and leaves the old library exactly as it was; once the copy is done the move can
+  no longer be undone. If GRID closes or crashes, the move resumes at the next start
+  ("Resuming the library move to <new>"); a move that stopped with an error waits —
+  Retry runs it again, and while it is still copying Cancel undoes it. Unrelated files in
+  the old folder stay. Start fresh asks
   "Delete the old game files, or leave them on disk?". Either way the games whose files
   are in the old folder leave the library and new installs go to the new folder; games
   installed outside the old folder, emulators and saves are not touched. Leave removes
@@ -121,6 +140,22 @@ The user must complete this setup before continuing into the main application. T
 library path can be changed later under Settings › Library.
 
 If the server rejects the stored credential (HTTP 401), at startup or during a session, the app returns to this screen. The server URL (and username, for a password) is filled in, the credential field is empty, and a line explains why ("The server rejected your token. Enter a new one."). The stored credential stays in the OS keyring until a new connect succeeds. When the server is unreachable or denies permission (HTTP 403), the app stays open and shows "Not connected" with Retry.
+
+### Unreachable library
+GRID cannot run without a valid library. When the library folder cannot be reached — the
+folder is gone, its drive is not connected (for example a USB disk unplugged after a
+move), the path is a file, or GRID may not read it — and GRID has something stored there
+(an installed game, an emulator, or a library move in progress), a blocking dialog
+replaces the whole app at startup, or as soon as a library move finds its library folder
+gone. It names the folder and the reason, and offers exactly two choices: **Relocate the
+library…** (type the folder or pick it with Browse…; it must hold a `games`, `emulators`
+or `saves` folder; GRID rewrites its stored paths to it and moves no files, then starts
+normally) and **Close without changing anything** (GRID exits and writes nothing). There
+is no "continue anyway". During startup with an unreachable library nothing writes into
+it: the layout migration and a library move's recovery wait until it is reachable. A
+library path that is not set yet is a first run (First Run Setup above), and a set
+folder that GRID never stored anything in is created again by the next install; neither
+shows the dialog.
 
 ### Game Details View
 Clicking a game in the Library or Server sections opens a popup, at most 1040×680, centred

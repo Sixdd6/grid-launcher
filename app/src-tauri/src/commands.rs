@@ -1,4 +1,5 @@
 pub mod cloud;
+pub mod library_move;
 pub mod library_path;
 pub mod logging;
 pub mod relink;
@@ -86,6 +87,32 @@ pub struct AppState {
     /// Pulled once by the frontend through
     /// `commands::updates::layout_migration_notice`.
     pub layout_migration: Option<String>,
+    /// The library move job (9b), its gate and the unreachable-library
+    /// state. See `library_move_service.rs`.
+    pub library_move: Arc<crate::library_move_service::LibraryMoveService>,
+}
+
+/// Refuses a command that touches the library while a library move runs
+/// or waits to resume, or while the library folder cannot be reached. The
+/// message names the move ("The library is being moved. …").
+pub(crate) fn ensure_library_idle(state: &AppState) -> Result<(), String> {
+    state.library_move.ensure_idle()
+}
+
+/// The managed-key resync after a library move or relocate: one
+/// autoconfig pass per emulator entry, `fresh_install = false` (a move
+/// must not reseed a renderer the user changed). Blocking; logs its own
+/// failures, so it never fails the move.
+pub fn resync_all_emulators(config: &Config, install: Option<&Arc<InstallService>>) {
+    for entry in &config.emulators {
+        run_emulator_sync(
+            &entry.name,
+            &config.library_path,
+            SyncInputs::from_install(install),
+            false,
+            autoconfig::sync_new_emulator,
+        );
+    }
 }
 
 pub(crate) fn err(e: impl std::fmt::Display) -> String {
@@ -457,6 +484,7 @@ pub async fn ensure_background_variant(
 
 #[tauri::command]
 pub async fn install_game(state: State<'_, AppState>, rom_id: i64) -> Result<(), String> {
+    ensure_library_idle(&state)?;
     let install = state.install.as_ref().map_err(Clone::clone)?;
     let client = state.session.client().ok_or("not connected")?;
     install.install(client, rom_id).await.map_err(err)
@@ -471,6 +499,7 @@ pub fn cancel_install(state: State<'_, AppState>, entry_id: u64) -> Result<(), S
 
 #[tauri::command]
 pub async fn retry_install(state: State<'_, AppState>, entry_id: u64) -> Result<(), String> {
+    ensure_library_idle(&state)?;
     let install = state.install.as_ref().map_err(Clone::clone)?;
     // `None` when no session is connected: an emulator retry does not need a
     // RomM client, and `retry` reports "not connected" itself for a game row.
@@ -493,6 +522,7 @@ pub async fn uninstall_game(
     app: tauri::AppHandle,
     rom_id: i64,
 ) -> Result<(), String> {
+    ensure_library_idle(&state)?;
     let install = state.install.as_ref().map_err(Clone::clone)?.clone();
     let install_for_updates = install.clone();
     tokio::task::spawn_blocking(move || install.uninstall(rom_id).map_err(err))
@@ -530,7 +560,8 @@ pub async fn get_library_path() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn set_library_path(path: String) -> Result<(), String> {
+pub async fn set_library_path(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    ensure_library_idle(&state)?;
     tokio::task::spawn_blocking(move || {
         modify_config(&Config::default_path(), |config| {
             // The layout decision (flat legacy vs. the games/emulators/saves
@@ -735,6 +766,7 @@ pub fn install_firmware_for_platform(
     platform_id: i64,
     platform: String,
 ) -> Result<(), String> {
+    ensure_library_idle(&state)?;
     state.firmware.spawn_for_platform(
         app,
         state.session.clone(),
@@ -783,6 +815,16 @@ pub async fn launch_game(
     app: tauri::AppHandle,
     rom_id: i64,
 ) -> Result<GameSession, String> {
+    ensure_library_idle(&state)?;
+    // 9b: held until the session is registered, so a library move that
+    // closes the gate meanwhile waits for this launch (and then refuses,
+    // seeing the running game) instead of moving files under the
+    // pre-launch restore. `LaunchService::launch` takes its own ticket.
+    let _library_ticket = state
+        .library_move
+        .gate()
+        .enter()
+        .map_err(|busy| busy.reason)?;
     let launch = state.launch.as_ref().map_err(Clone::clone)?.clone();
     let install = state.install.as_ref().map_err(Clone::clone)?.clone();
     let config_path = Config::default_path();
@@ -1063,6 +1105,7 @@ pub async fn save_emulator(
     original_name: String,
     entry: EmulatorEntry,
 ) -> Result<(), String> {
+    ensure_library_idle(&state)?;
     // Read out of the install service before the blocking hop: `State` is not
     // `Send`.
     let inputs = SyncInputs::from_install(state.install.as_ref().ok());
@@ -1147,6 +1190,7 @@ pub async fn save_emulator(
 /// before the entry goes, so a failure keeps the entry to retry.
 #[tauri::command]
 pub async fn delete_emulator(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    ensure_library_idle(&state)?;
     // `State` is not `Send`; the service handle crosses the hop instead.
     let install = state.install.as_ref().ok().cloned();
     tokio::task::spawn_blocking(move || {
@@ -1185,6 +1229,7 @@ pub async fn launch_emulator(
     state: State<'_, AppState>,
     name: String,
 ) -> Result<Option<String>, String> {
+    ensure_library_idle(&state)?;
     // `State` is not `Send`; the service handle crosses the hop instead.
     let install = state.install.as_ref().ok().cloned();
     tokio::task::spawn_blocking(move || {
@@ -1573,6 +1618,7 @@ pub async fn set_retroachievements_credentials(
     username: String,
     token: String,
 ) -> Result<Vec<RaFanOutRow>, String> {
+    ensure_library_idle(&state)?;
     let token_is_blank = token.trim().is_empty();
     let token = SecretString::from(token);
     let trimmed_username = username.trim().to_string();
@@ -1710,6 +1756,7 @@ pub fn list_emulator_catalog(state: State<'_, AppState>) -> Result<Vec<CatalogEn
 
 #[tauri::command]
 pub async fn install_emulator(state: State<'_, AppState>, source_id: String) -> Result<(), String> {
+    ensure_library_idle(&state)?;
     let install = state.install.as_ref().map_err(Clone::clone)?;
     install.install_emulator(source_id).await.map_err(err)
 }
@@ -1805,6 +1852,7 @@ async fn run_emulator_update_check(name: String) -> Result<VersionCheck, String>
 /// Progress shows up on the downloads drawer row, like every other install.
 #[tauri::command]
 pub async fn update_emulator(state: State<'_, AppState>, name: String) -> Result<(), String> {
+    ensure_library_idle(&state)?;
     let install = state.install.as_ref().map_err(Clone::clone)?.clone();
     let source_id = tokio::task::spawn_blocking(move || {
         let config = Config::load(&Config::default_path()).map_err(err)?;

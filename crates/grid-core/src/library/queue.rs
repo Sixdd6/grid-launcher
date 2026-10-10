@@ -341,6 +341,40 @@ impl QueueState {
         self.prune_terminal();
     }
 
+    /// Shows whether a live library move row is copying (`Downloading`: the
+    /// Copy phase, which can be cancelled) or committing and cleaning up
+    /// (`Installing`: no cancel). Ignores any other entry and any terminal
+    /// row.
+    pub fn set_library_move_copying(&mut self, id: u64, copying: bool) {
+        let Some(entry) = self.entry_mut(id) else {
+            return;
+        };
+        if entry.key != JobKey::LibraryMove || !entry.status.is_live() {
+            return;
+        }
+        entry.status = if copying {
+            DownloadStatus::Downloading
+        } else {
+            DownloadStatus::Installing
+        };
+    }
+
+    /// Ends a library move row as `Cancelled` (the user cancelled the
+    /// Copy phase and the old library is unchanged). Ignores any other
+    /// entry.
+    pub fn cancel_library_move(&mut self, id: u64) {
+        let Some(entry) = self.entry_mut(id) else {
+            return;
+        };
+        if entry.key != JobKey::LibraryMove {
+            return;
+        }
+        entry.speed_bps = 0.0;
+        entry.status = DownloadStatus::Cancelled;
+        entry.error.clear();
+        self.prune_terminal();
+    }
+
     /// The id of the oldest entry for `rom_id` that has not reached a
     /// terminal status yet (`Queued`, `Downloading` or `Installing`), or
     /// `None` when the game has no live entry.
@@ -684,6 +718,39 @@ mod tests {
             DownloadStatus::Downloading
         );
         assert!(state.snapshot().has_live_entry());
+    }
+
+    #[test]
+    fn a_library_move_row_shows_its_phase_and_can_end_cancelled() {
+        let mut state = QueueState::default();
+        let id = state.admit_library_move("Library move", "x").unwrap();
+        state.set_library_move_copying(id, true);
+        assert_eq!(state.entry(id).unwrap().status, DownloadStatus::Downloading);
+        assert!(state.snapshot().has_live_library_move());
+        assert!(!state.snapshot().has_live_entry());
+        // Still not the queue's to cancel, and still no slot.
+        assert_eq!(state.request_cancel(id), CancelAction::Ignored);
+        assert!(state.next_ready().is_none());
+        state.set_library_move_copying(id, false);
+        assert_eq!(state.entry(id).unwrap().status, DownloadStatus::Installing);
+
+        state.cancel_library_move(id);
+        let entry = state.entry(id).unwrap();
+        assert_eq!(entry.status, DownloadStatus::Cancelled);
+        assert_eq!(entry.error, "");
+        assert!(!state.snapshot().has_live_library_move());
+        // A terminal row keeps its status.
+        state.set_library_move_copying(id, true);
+        assert_eq!(state.entry(id).unwrap().status, DownloadStatus::Cancelled);
+
+        // Neither touches an ordinary install.
+        let rom = admit_idle(&mut state, 9);
+        state.set_library_move_copying(rom, false);
+        state.cancel_library_move(rom);
+        assert_eq!(
+            state.entry(rom).unwrap().status,
+            DownloadStatus::Downloading
+        );
     }
 
     /// The live-install check sees a live install even when a move row is

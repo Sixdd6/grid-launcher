@@ -18,6 +18,7 @@ function entry(overrides: Partial<DownloadEntry>): DownloadEntry {
     install_processed_bytes: 0,
     install_total_bytes: 0,
     error: '',
+    detail: '',
     ...overrides,
   };
 }
@@ -287,6 +288,7 @@ describe('kindLabel', () => {
       'emulator',
       'compat_tool',
       'firmware',
+      'library_move',
     ];
     for (const kind of kinds) {
       expect(() => kindLabel(kind)).not.toThrow();
@@ -392,5 +394,65 @@ describe('graphCaption', () => {
     expect(graphCaption(entry({ status: 'queued' }))).toBe('');
     expect(graphCaption(entry({ status: 'completed' }))).toBe('');
     expect(graphCaption(entry({ status: 'failed' }))).toBe('');
+  });
+});
+
+// Settings › Library › Move existing files (9b): the one library move row.
+describe('library move row', () => {
+  const move = (overrides: Partial<DownloadEntry>) =>
+    entry({ job: 'library', kind: 'library_move', title: 'Library move', platform: 'D:\Games', ...overrides });
+
+  it('is labelled Library move', () => {
+    expect(kindLabel('library_move')).toBe('Library move');
+  });
+
+  it('shows its detail line while it runs', () => {
+    expect(entryDetail(move({ status: 'downloading', detail: 'games/ · 1.2 of 5.6 GB' }))).toBe(
+      'Copying • games/ · 1.2 of 5.6 GB',
+    );
+    expect(entryDetail(move({ status: 'downloading', detail: '' }))).toBe('Copying…');
+    expect(entryDetail(move({ status: 'installing', detail: 'Updating paths…' }))).toBe('Updating paths…');
+    expect(entryDetail(move({ status: 'installing', detail: '' }))).toBe('Finishing…');
+    expect(entryDetail(move({ status: 'completed' }))).toBe('Completed • The library has moved');
+    expect(entryDetail(move({ status: 'cancelled' }))).toBe('Cancelled • The library did not move');
+    expect(entryDetail(move({ status: 'failed', error: 'The copy of games does not match the original.' }))).toBe(
+      'Failed • The copy of games does not match the original.',
+    );
+  });
+
+  it('offers Cancel only while it copies', () => {
+    expect(actionFor('downloading', 'library_move')).toBe('cancel');
+    expect(actionFor('installing', 'library_move')).toBe('none');
+    expect(actionFor('cancelling', 'library_move')).toBe('none');
+    expect(actionFor('queued', 'library_move')).toBe('none');
+  });
+
+  it('offers Retry on a failed move that waits, and Cancel too while it is still in the copy', () => {
+    expect(actionFor('failed', 'library_move', 'copy')).toBe('retry-cancel');
+    expect(actionFor('failed', 'library_move', 'commit')).toBe('retry');
+    expect(actionFor('failed', 'library_move', 'cleanup')).toBe('retry');
+    // No move waits any more: nothing to retry.
+    expect(actionFor('failed', 'library_move', null)).toBe('dismiss');
+    expect(actionFor('failed', 'library_move')).toBe('dismiss');
+    expect(actionFor('completed', 'library_move', null)).toBe('dismiss');
+    expect(actionFor('cancelled', 'library_move', null)).toBe('dismiss');
+  });
+
+  it('does not count as a download in the aggregate', () => {
+    expect(aggregate([move({ status: 'downloading' })])).toBe('Moving the library');
+    expect(aggregate([move({ status: 'installing' })])).toBe('Moving the library');
+    expect(aggregate([move({ status: 'downloading' }), entry({ status: 'downloading' })])).toBe('1 active download');
+  });
+
+  it('says Moving in the strip and the caption', () => {
+    expect(
+      footerLine([move({ status: 'downloading', downloaded_bytes: 50, total_bytes: 200 })]),
+    ).toBe('Library move · 25% · Moving');
+    expect(footerLine([move({ status: 'installing', install_processed_bytes: 1, install_total_bytes: 1 })])).toBe(
+      'Library move · 100% · Moving',
+    );
+    expect(graphCaption(move({ status: 'downloading', speed_bps: 0 }))).toBe('Copying files');
+    expect(graphCaption(move({ status: 'installing' }))).toBe('Updating paths');
+    expect(etaText(move({ status: 'downloading', total_bytes: 10, speed_bps: 5 }))).toBe('');
   });
 });

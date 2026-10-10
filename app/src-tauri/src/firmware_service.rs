@@ -52,7 +52,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, RwLock};
 
 use grid_core::config::{Config, EmulatorEntry};
 use grid_core::firmware::routing::{
@@ -63,6 +63,7 @@ use grid_core::firmware::rpcs3::{ps3_platform_id, rpcs3_pup_path};
 use grid_core::firmware::{install_platform_firmware, FirmwareOptions};
 use grid_core::launch::profiles::{load_profiles, profile_for_entry};
 use grid_core::library::registry::InstalledGame;
+use grid_core::library::relocate::{GateTicket, LibraryGate};
 use grid_core::library::InstallService;
 use grid_core::session::SessionManager;
 use serde::Serialize;
@@ -139,6 +140,11 @@ pub struct FirmwareService {
     /// run to completion in this process. Never persisted: a restart is a
     /// deliberate re-check.
     completed: StdMutex<HashSet<PassKey>>,
+    /// The library move's gate (9b). A per-platform or whole-emulator pass
+    /// writes into the emulators folder, so it holds a [`GateTicket`] for
+    /// its whole run: a move cannot start under it (the move waits for the
+    /// tickets and then refuses), and no pass starts while a move runs.
+    library_gate: RwLock<LibraryGate>,
 }
 
 impl FirmwareService {
@@ -146,7 +152,30 @@ impl FirmwareService {
         Arc::new(Self {
             in_flight: StdMutex::new(HashSet::new()),
             completed: StdMutex::new(HashSet::new()),
+            library_gate: RwLock::new(LibraryGate::default()),
         })
+    }
+
+    /// Sets the gate the library move closes. Until then the gate is open.
+    pub fn set_library_gate(&self, gate: LibraryGate) {
+        *self.library_gate.write().unwrap_or_else(|e| e.into_inner()) = gate;
+    }
+
+    /// A ticket while the library is free; `None` (logged) while a library
+    /// move runs or the library cannot be reached.
+    fn enter_library(&self) -> Option<GateTicket> {
+        let gate = self
+            .library_gate
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        match gate.enter() {
+            Ok(ticket) => Some(ticket),
+            Err(busy) => {
+                tracing::info!("firmware pass not started: {busy}");
+                None
+            }
+        }
     }
 
     /// The D19 gate: whether a per-game pass for `platform_id` under `dir`
@@ -264,6 +293,11 @@ impl FirmwareService {
             emit_pass_finished(&app, platform_id, true);
             return;
         }
+        // Held for the whole pass (9b): the files land in the library.
+        let Some(ticket) = self.enter_library() else {
+            emit_pass_finished(&app, platform_id, false);
+            return;
+        };
         if !self.try_begin(&dir, Some(platform_id)) {
             // A pass for this pair is already running and will emit its own
             // event when it ends; this one ended here, so it says so.
@@ -275,6 +309,7 @@ impl FirmwareService {
         let config_dir = config_dir_of(&config_path);
         tauri::async_runtime::spawn(async move {
             let _guard = guard;
+            let _ticket = ticket;
             let ctx = GameFirmwareContext {
                 platform: &platform,
                 platform_id,
@@ -377,6 +412,11 @@ impl FirmwareService {
         // profile claims, so no per-game pass for the same directory may
         // start alongside it — nor may this one start beside a per-game
         // pass that is already running there.
+        //
+        // Held for the whole pass (9b): the files land in the library.
+        let Some(ticket) = self.enter_library() else {
+            return;
+        };
         if !self.try_begin(&dir, None) {
             return;
         }
@@ -384,6 +424,7 @@ impl FirmwareService {
         let label = entry.name.clone();
         tauri::async_runtime::spawn(async move {
             let _guard = guard;
+            let _ticket = ticket;
             let mut warnings = Vec::new();
             for id in ids {
                 warnings.extend(
@@ -590,6 +631,30 @@ pub(crate) fn default_entry_for_platform<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A firmware pass holds a gate ticket for its whole run, so a library
+    /// move that closes the gate waits for it; and no pass starts while
+    /// the gate is closed.
+    #[test]
+    fn a_firmware_pass_is_gated_by_the_library_move() {
+        let service = FirmwareService::new();
+        let gate = LibraryGate::default();
+        service.set_library_gate(gate.clone());
+        let ticket = service.enter_library().expect("open gate");
+        gate.close(grid_core::library::relocate::LIBRARY_MOVE_BUSY);
+        assert!(
+            !gate.wait_no_tickets(std::time::Duration::from_millis(20)),
+            "the running pass holds the move back"
+        );
+        assert!(
+            service.enter_library().is_none(),
+            "no pass under a closed gate"
+        );
+        drop(ticket);
+        assert!(gate.wait_no_tickets(std::time::Duration::from_millis(20)));
+        gate.open();
+        assert!(service.enter_library().is_some());
+    }
 
     /// The chip's contract with the frontend: the event name and the payload
     /// shape are what `app/src/lib/api.ts` declares. A rename on either side

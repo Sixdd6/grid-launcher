@@ -18,6 +18,7 @@ function entry(overrides: Partial<DownloadEntry>): DownloadEntry {
     install_processed_bytes: 0,
     install_total_bytes: 0,
     error: '',
+    detail: '',
     ...overrides,
   };
 }
