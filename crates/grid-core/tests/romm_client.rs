@@ -205,3 +205,45 @@ async fn firmware_bytes_unauthorized_maps_to_auth_error() {
         other => panic!("expected Unauthorized, got {other:?}"),
     }
 }
+
+/// 403 means "this credential may not do that" (RomM answers it for a token
+/// without the needed scope), NOT "this credential is dead". It must stay
+/// apart from `Unauthorized`, which sends the user back to Connect.
+#[tokio::test]
+async fn forbidden_maps_to_forbidden_not_unauthorized() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/users/me"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+    let client = RommClient::new(&server.uri(), token_cred()).unwrap();
+    match client.connect().await {
+        Err(RommError::Forbidden) => {}
+        other => panic!("expected Forbidden, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn firmware_bytes_forbidden_maps_to_forbidden() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/firmware/42/content/scph5501.bin"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+    let client = RommClient::new(&server.uri(), token_cred()).unwrap();
+    match client.firmware_bytes(42, "scph5501.bin").await {
+        Err(RommError::Forbidden) => {}
+        other => panic!("expected Forbidden, got {other:?}"),
+    }
+}
+
+#[test]
+fn unauthorized_and_forbidden_read_differently() {
+    let unauthorized = RommError::Unauthorized.to_string();
+    let forbidden = RommError::Forbidden.to_string();
+    assert_eq!(unauthorized, "the server rejected the credentials");
+    assert_ne!(unauthorized, forbidden);
+    assert!(forbidden.contains("permission"), "{forbidden}");
+}

@@ -11,7 +11,10 @@ import {
 describe('credentialStatusLabel', () => {
   it('reports presence only, never a value (token secrecy)', () => {
     expect(credentialStatusLabel(true)).toBe(`${CREDENTIAL_STORED} · session verified`);
-    expect(credentialStatusLabel(false)).toBe(`${CREDENTIAL_STORED} · not verified (server unreachable)`);
+    // Offline can mean unreachable, 403 or a server error: the label states
+    // only that the session is not verified, and the Status line and error
+    // banner carry the reason. A 401 never lands here — it opens Connect.
+    expect(credentialStatusLabel(false)).toBe(`${CREDENTIAL_STORED} · not verified`);
   });
 });
 

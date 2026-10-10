@@ -4,10 +4,17 @@ import { invoke } from '@tauri-apps/api/core';
 // (see crates/grid-core/src/session.rs and romm/mod.rs) — no
 // cosmetic renames.
 export type SessionState = { connected: boolean; username: string; server_url: string };
+/** Which kind of credential the keyring holds — never its value. */
+export type AuthKind = 'token' | 'basic';
+/** Payload of `SESSION_UNAUTHORIZED_EVENT` (`grid_core::session::SessionUnauthorized`). */
+export type SessionUnauthorized = { server_url: string; username: string; auth_kind: AuthKind };
 export type RestoreOutcome =
   | { kind: 'no_session'; server_url: string; username: string }
   | { kind: 'connected'; state: SessionState }
+  | ({ kind: 'unauthorized' } & SessionUnauthorized)
   | { kind: 'unreachable'; server_url: string; username: string; error: string };
+/** Emitted once when a live session gets a 401 (commands.rs `SESSION_UNAUTHORIZED_EVENT`). */
+export const SESSION_UNAUTHORIZED_EVENT = 'session-unauthorized';
 export type Platform = {
   id: number;
   name: string;
@@ -414,7 +421,7 @@ export const api = {
   connect: (serverUrl: string, username: string, secret: string, useToken: boolean) =>
     invoke<SessionState>('connect', { serverUrl, username, secret, useToken }),
   restoreSession: () => invoke<RestoreOutcome>('restore_session'),
-  retryConnect: () => invoke<SessionState>('retry_connect'),
+  retryConnect: () => invoke<RestoreOutcome>('retry_connect'),
   disconnect: () => invoke<void>('disconnect'),
   listPlatforms: () => invoke<Platform[]>('list_platforms'),
   listGames: (platformId: number) => invoke<GameSummary[]>('list_games', { platformId }),

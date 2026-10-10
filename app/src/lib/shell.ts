@@ -1,4 +1,4 @@
-import type { RestoreOutcome } from './api';
+import type { AuthKind, RestoreOutcome, SessionUnauthorized } from './api';
 
 /** The five first-class views, in pill order (design §3). The index in this
  *  array is also the `Ctrl+<n>` accelerator. */
@@ -11,6 +11,9 @@ export type ShellSession = {
   serverUrl: string;
   username: string;
   lastError: string | null;
+  /** Set only when the server rejected the stored credential (401): which
+   *  kind it was, so Connect asks for the right one. Never the value. */
+  rejected?: AuthKind;
 };
 
 export function applyRestore(outcome: RestoreOutcome): ShellSession {
@@ -21,9 +24,27 @@ export function applyRestore(outcome: RestoreOutcome): ShellSession {
       return { phase: 'none', connected: false, serverUrl: outcome.server_url, username: outcome.username, lastError: null };
     case 'connected':
       return { phase: 'shell', connected: true, serverUrl: outcome.state.server_url, username: outcome.state.username, lastError: null };
+    case 'unauthorized':
+      // Q6: a rejected credential is not "offline" — Retry would resend it
+      // forever. Back to Connect, pre-filled; the keyring item stays until
+      // a new connect succeeds.
+      return {
+        phase: 'none', connected: false, serverUrl: outcome.server_url, username: outcome.username, lastError: null,
+        rejected: outcome.auth_kind,
+      };
     case 'unreachable':
       return { phase: 'shell', connected: false, serverUrl: outcome.server_url, username: outcome.username, lastError: outcome.error };
   }
+}
+
+/**
+ * The `session-unauthorized` event (a 401 mid-session). It acts only on a
+ * live shell: on any other phase there is no session for it to end, and
+ * resetting a Connect form the user is typing into would lose their input.
+ */
+export function applyUnauthorizedEvent(phase: SessionPhase, info: SessionUnauthorized): ShellSession | null {
+  if (phase !== 'shell') return null;
+  return applyRestore({ kind: 'unauthorized', ...info });
 }
 
 /** R2: Server first when connected (E2E specs wait for platform-btn-1 after connecting), Library when offline. */

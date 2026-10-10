@@ -6,8 +6,14 @@ pub enum RommError {
     InvalidUrl,
     #[error("could not reach the server: {0}")]
     Connection(String),
+    /// HTTP 401: the credential itself is dead (revoked, expired, wrong).
+    /// The session drops it and the UI asks for a new one.
     #[error("the server rejected the credentials")]
     Unauthorized,
+    /// HTTP 403: the credential is valid but may not do this (for example a
+    /// RomM token without the needed scope). Not a reason to re-authenticate.
+    #[error("the server denied access: the credentials lack permission for this")]
+    Forbidden,
     #[error("server error {status}{}", http_excerpt_suffix(.excerpt))]
     Http { status: u16, excerpt: String },
     #[error("unexpected response from the server: {0}")]

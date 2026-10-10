@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyRestore, chipLabel, hostOf, initialView, viewForDigit, viewLabel } from './shell';
+import { applyRestore, applyUnauthorizedEvent, chipLabel, hostOf, initialView, viewForDigit, viewLabel } from './shell';
 
 describe('applyRestore', () => {
   it('maps no_session to the connect screen', () => {
@@ -19,6 +19,32 @@ describe('applyRestore', () => {
     expect(s.phase).toBe('shell');
     expect(s.connected).toBe(false);
     expect(s.lastError).toBe('boom');
+    expect(s.rejected).toBeUndefined();
+  });
+  // Q6: a rejected credential is not "offline" — it goes to Connect with the
+  // server, the username and the credential kind, and no error line.
+  it('maps unauthorized to the connect screen with the rejected credential kind', () => {
+    expect(applyRestore({ kind: 'unauthorized', server_url: 'https://h', username: 'u', auth_kind: 'token' })).toEqual({
+      phase: 'none', connected: false, serverUrl: 'https://h', username: 'u', lastError: null, rejected: 'token',
+    });
+    expect(applyRestore({ kind: 'unauthorized', server_url: 'https://h', username: 'u', auth_kind: 'basic' }).rejected).toBe('basic');
+  });
+  it('leaves rejected unset for every other outcome', () => {
+    expect(applyRestore({ kind: 'no_session', server_url: '', username: '' }).rejected).toBeUndefined();
+    expect(applyRestore({ kind: 'connected', state: { connected: true, username: 'u', server_url: 'h' } }).rejected).toBeUndefined();
+  });
+});
+
+describe('applyUnauthorizedEvent', () => {
+  const info = { server_url: 'https://h', username: 'u', auth_kind: 'token' } as const;
+  it('takes a live shell to the connect screen', () => {
+    expect(applyUnauthorizedEvent('shell', info)).toEqual({
+      phase: 'none', connected: false, serverUrl: 'https://h', username: 'u', lastError: null, rejected: 'token',
+    });
+  });
+  it('ignores the event outside the shell, so a form being typed into is never reset', () => {
+    expect(applyUnauthorizedEvent('none', info)).toBeNull();
+    expect(applyUnauthorizedEvent('loading', info)).toBeNull();
   });
 });
 

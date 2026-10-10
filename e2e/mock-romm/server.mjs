@@ -22,6 +22,11 @@
 // answered (an unreachable server, from the client's point of view); GET
 // reads the current value.
 //
+// `GET/POST /__e2e__/revoke` (same rules), used by the `connect-restore`
+// stage group: POST { revoked: true|false } sets whether every /api/
+// request answers 401 even with the fixture token (a token revoked on the
+// server); GET reads the current value.
+//
 // Cloud save/state sync (grid-core/src/romm/cloud.rs), used by the
 // `cloud-saves` stage group:
 //   GET  /api/saves?rom_id=            (canned records, from saves.json)
@@ -587,6 +592,22 @@ async function handleRequest(req, res, state) {
       sendJson(res, 200, { offline: state.offline });
       return;
     }
+    if (req.method === "GET" && pathname === "/__e2e__/revoke") {
+      sendJson(res, 200, { revoked: state.revoked });
+      return;
+    }
+    if (req.method === "POST" && pathname === "/__e2e__/revoke") {
+      const body = await readBody(req);
+      let parsed = {};
+      try {
+        parsed = JSON.parse(body.toString("utf8"));
+      } catch {
+        parsed = {};
+      }
+      state.revoked = Boolean(parsed.revoked);
+      sendJson(res, 200, { revoked: state.revoked });
+      return;
+    }
     sendJson(res, 404, { detail: "not found" });
     return;
   }
@@ -632,7 +653,7 @@ async function handleRequest(req, res, state) {
   }
 
   const authHeader = req.headers["authorization"];
-  if (authHeader !== `Bearer ${FAKE_TOKEN}`) {
+  if (state.revoked || authHeader !== `Bearer ${FAKE_TOKEN}`) {
     sendJson(res, 401, { detail: "Unauthorized" });
     return;
   }
@@ -821,6 +842,10 @@ export async function startMockRomm({
   // every /api/ and /assets/ request gets its socket destroyed instead of a
   // response, simulating an unreachable server.
   state.offline = false;
+  // Toggled by POST /__e2e__/revoke (the `connect-restore` stage group):
+  // while true, every /api/ request answers 401 even with the fixture token
+  // — a token revoked on the server.
+  state.revoked = false;
 
   const server = http.createServer((req, res) => {
     handleRequest(req, res, state).catch((err) => {

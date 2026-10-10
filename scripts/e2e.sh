@@ -61,7 +61,7 @@ STAGE_GROUPS=(
   # `e2e.sh connect python-import` work too.
   "python-import:specs/python-import.spec.ts"
   "connect:specs/connect.spec.ts"
-  "connect-restore:specs/connect-restore-a.spec.ts specs/connect-restore-b.spec.ts"
+  "connect-restore:specs/connect-restore-a.spec.ts specs/connect-restore-b.spec.ts specs/connect-restore-c.spec.ts"
   "library:specs/library.spec.ts specs/library-grid.spec.ts"
   "install:specs/install-a.spec.ts specs/install-b.spec.ts"
   "downloads:specs/downloads.spec.ts"

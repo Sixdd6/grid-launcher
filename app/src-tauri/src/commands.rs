@@ -133,21 +133,33 @@ pub async fn restore_session(
     Ok(outcome)
 }
 
+/// Event emitted the first time a live session gets a 401 (Q6). Payload:
+/// `grid_core::session::SessionUnauthorized` — server URL, username and
+/// auth kind, never the credential. The frontend shows the Connect form,
+/// pre-filled.
+pub const SESSION_UNAUTHORIZED_EVENT: &str = "session-unauthorized";
+
+/// The chip's Retry. Answers with the same typed outcome as
+/// `restore_session` (`connected`, `unauthorized`, `unreachable`), so a
+/// rejected credential reaches the Connect form instead of an endless
+/// "Not connected". A missing stored session is still an `Err`.
 #[tauri::command]
 pub async fn retry_connect(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
-) -> Result<SessionState, String> {
-    let result = state.session.retry().await.map_err(err)?;
-    if let Ok(install) = state.install.as_ref() {
-        state
-            .images
-            .spawn_replenish(app.clone(), state.session.clone(), install.clone());
-        state
-            .updates
-            .spawn_refresh(app, state.session.clone(), install.clone());
+) -> Result<RestoreOutcome, String> {
+    let outcome = state.session.retry().await.map_err(err)?;
+    if matches!(outcome, RestoreOutcome::Connected { .. }) {
+        if let Ok(install) = state.install.as_ref() {
+            state
+                .images
+                .spawn_replenish(app.clone(), state.session.clone(), install.clone());
+            state
+                .updates
+                .spawn_refresh(app, state.session.clone(), install.clone());
+        }
     }
-    Ok(result)
+    Ok(outcome)
 }
 
 #[tauri::command]

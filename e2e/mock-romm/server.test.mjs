@@ -493,6 +493,36 @@ test("the offline toggle also blocks /assets/ but /__e2e__/ routes keep working"
   });
 });
 
+// --- revoke toggle (Q6) --------------------------------------------------
+
+test("POST /__e2e__/revoke {revoked:true} answers 401 to the fixture token, and {revoked:false} restores it", async () => {
+  await withServer(async ({ url }) => {
+    const setRevoked = await fetch(`${url}/__e2e__/revoke`, {
+      method: "POST",
+      body: JSON.stringify({ revoked: true }),
+    });
+    assert.equal(setRevoked.status, 200);
+    assert.deepEqual(await setRevoked.json(), { revoked: true });
+
+    const rejected = await fetch(`${url}/api/users/me`, { headers: authHeader() });
+    assert.equal(rejected.status, 401);
+    const rejectedPlatforms = await fetch(`${url}/api/platforms`, { headers: authHeader() });
+    assert.equal(rejectedPlatforms.status, 401);
+
+    const getRevoked = await fetch(`${url}/__e2e__/revoke`);
+    assert.deepEqual(await getRevoked.json(), { revoked: true });
+
+    const restore = await fetch(`${url}/__e2e__/revoke`, {
+      method: "POST",
+      body: JSON.stringify({ revoked: false }),
+    });
+    assert.deepEqual(await restore.json(), { revoked: false });
+
+    const res = await fetch(`${url}/api/users/me`, { headers: authHeader() });
+    assert.equal(res.status, 200);
+  });
+});
+
 // --- request log -------------------------------------------------------
 
 test("requestLog records {method, path} for each request", async () => {

@@ -4,7 +4,7 @@ use crate::romm::{strip_userinfo, RommClient, RommError};
 use crate::secrets::{Credential, SecretError, SecretStore};
 use secrecy::SecretString;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -28,14 +28,49 @@ pub struct SessionState {
     pub server_url: String,
 }
 
-/// The three-way outcome of [`SessionManager::restore`] (spec "App layer"):
-/// no stored session, a live reconnect, or a stored session whose server the
-/// probe could not reach.
+/// Which kind of credential the keyring holds — the variant only, never its
+/// content. The Connect form uses it to show the token or the password field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthKind {
+    Token,
+    Basic,
+}
+
+impl AuthKind {
+    fn of(cred: &Credential) -> Self {
+        match cred {
+            Credential::Token(_) => AuthKind::Token,
+            Credential::Basic { .. } => AuthKind::Basic,
+        }
+    }
+}
+
+/// What the unauthorized hook receives when the server answers 401 in the
+/// middle of a session: enough to pre-fill the Connect form, and no secret.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SessionUnauthorized {
+    pub server_url: String,
+    pub username: String,
+    pub auth_kind: AuthKind,
+}
+
+/// Called at most once per live session, the first time a request on it
+/// gets a 401. Set by the app layer (the Tauri shell emits an event).
+pub type UnauthorizedHook = Arc<dyn Fn(SessionUnauthorized) + Send + Sync>;
+
+/// The outcome of [`SessionManager::restore`] and [`SessionManager::retry`]
+/// (spec "App layer"): no stored session, a live reconnect, a stored
+/// credential the server rejected (401), or a stored session whose server
+/// the probe could not use (offline, 403, 5xx, ...).
 ///
 /// `NoSession` still carries whatever the config holds so the Connect form
 /// can prefill them — the Python importer writes `server_url`/`username`
 /// but no credential, and that user must retype nothing but their token.
 /// Both are blank when there is no config at all.
+///
+/// `Unauthorized` keeps the keyring credential (user decision Q6): it is
+/// replaced only when a new connect succeeds.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RestoreOutcome {
@@ -46,6 +81,11 @@ pub enum RestoreOutcome {
     Connected {
         state: SessionState,
     },
+    Unauthorized {
+        server_url: String,
+        username: String,
+        auth_kind: AuthKind,
+    },
     Unreachable {
         server_url: String,
         username: String,
@@ -53,12 +93,23 @@ pub enum RestoreOutcome {
     },
 }
 
+/// The live client and a counter that changes every time the live client
+/// does. A 401 acts on the session only when the client that saw it is
+/// still the live one, so a late answer to an old client cannot end the
+/// session that replaced it.
+#[derive(Default)]
+struct Live {
+    client: Option<Arc<RommClient>>,
+    generation: u64,
+}
+
 pub struct SessionManager {
     config_path: PathBuf,
     secrets: Arc<dyn SecretStore>,
     cache: ImageCache,
-    client: Mutex<Option<Arc<RommClient>>>,
+    live: Arc<Mutex<Live>>,
     server_url: Mutex<String>,
+    unauthorized_hook: Arc<Mutex<Option<UnauthorizedHook>>>,
 }
 
 impl SessionManager {
@@ -67,8 +118,9 @@ impl SessionManager {
             config_path,
             secrets,
             cache: ImageCache::new(cache_dir),
-            client: Mutex::new(None),
+            live: Arc::new(Mutex::new(Live::default())),
             server_url: Mutex::new(String::new()),
+            unauthorized_hook: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -77,7 +129,17 @@ impl SessionManager {
     }
 
     pub fn client(&self) -> Option<Arc<RommClient>> {
-        self.client.lock().unwrap().clone()
+        self.live.lock().unwrap().client.clone()
+    }
+
+    /// Sets what runs when a live session's credential is rejected (401).
+    /// It runs once per session: the first 401 drops the live client (so
+    /// `client()` reports no connection) and later 401s on that session do
+    /// nothing. A 401 on a connect/restore/retry probe never runs it — those
+    /// report through their own return value. The keyring credential is
+    /// kept.
+    pub fn set_unauthorized_hook(&self, hook: UnauthorizedHook) {
+        *self.unauthorized_hook.lock().unwrap() = Some(hook);
     }
 
     /// The stored server URL: set in `connect` once the session is fully
@@ -93,9 +155,9 @@ impl SessionManager {
     /// account password (HTTP basic). On success the config and credential
     /// are persisted; the plain secret is consumed and dropped here.
     ///
-    /// `self.client` is set only after the probe AND both persistence steps
-    /// (config save, credential save) succeed — on any failure path it is
-    /// left untouched, so a caller who sees `connect()` return `Err` can
+    /// The live client is set only after the probe AND both persistence
+    /// steps (config save, credential save) succeed — on any failure path it
+    /// is left untouched, so a caller who sees `connect()` return `Err` can
     /// never observe `client()` reporting a live connection.
     pub async fn connect(
         &self,
@@ -112,6 +174,7 @@ impl SessionManager {
                 password: secret,
             }
         };
+        let auth_kind = AuthKind::of(&cred);
         // Normalise once, at the session boundary: everything downstream —
         // the probe, `SessionState`, config, and the base used for image host
         // filtering — sees the same credential-free URL.
@@ -138,15 +201,15 @@ impl SessionManager {
         cfg.username = state.username.clone();
         cfg.save(&self.config_path)?;
         self.secrets.save(&cred)?;
-        *self.client.lock().unwrap() = Some(Arc::new(client));
+        self.install(client, &state, auth_kind);
         *self.server_url.lock().unwrap() = server_url;
         Ok(state)
     }
 
-    /// Three-way restore (spec "App layer"): no stored session, connected,
-    /// or stored-but-unreachable with the probe error's text (SessionError
-    /// Display is secret-free by construction). Only config/secret load
-    /// failures are `Err`.
+    /// Restore at startup (spec "App layer"): no stored session, connected,
+    /// rejected (401), or stored-but-unusable with the probe error's text
+    /// (SessionError Display is secret-free by construction). Only
+    /// config/secret load failures are `Err`.
     pub async fn restore(&self) -> Result<RestoreOutcome, SessionError> {
         let cfg = Config::load(&self.config_path)?;
         if cfg.server_url.is_empty() {
@@ -161,27 +224,16 @@ impl SessionManager {
                 username: cfg.username,
             });
         };
-        // A config written by an older build may still carry userinfo.
-        let server_url = strip_userinfo(&cfg.server_url);
-        *self.server_url.lock().unwrap() = server_url.clone();
-        match self.probe(&server_url, &cfg.username, cred).await {
-            Ok((client, state)) => {
-                *self.client.lock().unwrap() = Some(Arc::new(client));
-                Ok(RestoreOutcome::Connected { state })
-            }
-            Err(e) => Ok(RestoreOutcome::Unreachable {
-                server_url,
-                username: cfg.username,
-                error: e.to_string(),
-            }),
-        }
+        Ok(self.reprobe(cfg, cred).await)
     }
 
-    /// Re-probes with the stored credentials (the chip's Retry). Sets the
-    /// stored server URL as soon as it is known non-empty, before the probe
-    /// — same placement as `restore`, so the chip's Retry works even after
-    /// a fresh start where `restore` itself already failed to connect.
-    pub async fn retry(&self) -> Result<SessionState, SessionError> {
+    /// Re-probes with the stored credentials (the chip's Retry). Answers
+    /// with the same outcomes as `restore`, except that a missing stored
+    /// session is `Err(NoStoredSession)`. Sets the stored server URL as soon
+    /// as it is known non-empty, before the probe — same placement as
+    /// `restore`, so the chip's Retry works even after a fresh start where
+    /// `restore` itself already failed to connect.
+    pub async fn retry(&self) -> Result<RestoreOutcome, SessionError> {
         let cfg = Config::load(&self.config_path)?;
         let Some(cred) = self.secrets.load()? else {
             return Err(SessionError::NoStoredSession);
@@ -189,17 +241,73 @@ impl SessionManager {
         if cfg.server_url.is_empty() {
             return Err(SessionError::NoStoredSession);
         }
-        let server_url = strip_userinfo(&cfg.server_url);
-        *self.server_url.lock().unwrap() = server_url.clone();
-        let (client, state) = self.probe(&server_url, &cfg.username, cred).await?;
-        *self.client.lock().unwrap() = Some(Arc::new(client));
-        Ok(state)
+        Ok(self.reprobe(cfg, cred).await)
     }
 
-    /// Builds a client and probes the server. Does NOT touch `self.client` —
-    /// callers decide when (and whether) the probed client becomes the
-    /// manager's live connection, after any persistence they require has
-    /// succeeded.
+    /// The probe shared by `restore` and `retry`, for a config with a
+    /// non-empty server URL and a stored credential.
+    async fn reprobe(&self, cfg: Config, cred: Credential) -> RestoreOutcome {
+        // A config written by an older build may still carry userinfo.
+        let server_url = strip_userinfo(&cfg.server_url);
+        *self.server_url.lock().unwrap() = server_url.clone();
+        let auth_kind = AuthKind::of(&cred);
+        match self.probe(&server_url, &cfg.username, cred).await {
+            Ok((client, state)) => {
+                self.install(client, &state, auth_kind);
+                RestoreOutcome::Connected { state }
+            }
+            Err(SessionError::Romm(RommError::Unauthorized)) => RestoreOutcome::Unauthorized {
+                server_url,
+                username: cfg.username,
+                auth_kind,
+            },
+            Err(e) => RestoreOutcome::Unreachable {
+                server_url,
+                username: cfg.username,
+                error: e.to_string(),
+            },
+        }
+    }
+
+    /// Makes `client` the live client and arms its 401 hook for this
+    /// session only.
+    fn install(&self, mut client: RommClient, state: &SessionState, auth_kind: AuthKind) {
+        let mut live = self.live.lock().unwrap();
+        live.generation += 1;
+        let generation = live.generation;
+        let info = SessionUnauthorized {
+            server_url: state.server_url.clone(),
+            username: state.username.clone(),
+            auth_kind,
+        };
+        // Weak, so the client (held by `live`) does not keep `live` alive
+        // through its own hook.
+        let live_slot: Weak<Mutex<Live>> = Arc::downgrade(&self.live);
+        let hook_slot = self.unauthorized_hook.clone();
+        client.set_unauthorized_hook(Arc::new(move || {
+            let Some(live_slot) = live_slot.upgrade() else {
+                return;
+            };
+            {
+                let mut live = live_slot.lock().unwrap();
+                if live.generation != generation || live.client.is_none() {
+                    return;
+                }
+                live.client = None;
+            }
+            // Outside the lock: the hook may call back into the manager.
+            let hook = hook_slot.lock().unwrap().clone();
+            if let Some(hook) = hook {
+                hook(info.clone());
+            }
+        }));
+        live.client = Some(Arc::new(client));
+    }
+
+    /// Builds a client and probes the server. Does NOT touch the live
+    /// client — callers decide when (and whether) the probed client becomes
+    /// the manager's live connection, after any persistence they require
+    /// has succeeded. The probe client has no 401 hook.
     async fn probe(
         &self,
         server_url: &str,
@@ -221,7 +329,11 @@ impl SessionManager {
     }
 
     pub fn disconnect(&self) -> Result<(), SessionError> {
-        *self.client.lock().unwrap() = None;
+        {
+            let mut live = self.live.lock().unwrap();
+            live.client = None;
+            live.generation += 1;
+        }
         self.secrets.clear()?;
         Ok(())
     }

@@ -1,9 +1,10 @@
 <script lang="ts">
   import { listen } from '@tauri-apps/api/event';
   import Connect from './lib/Connect.svelte';
+  import { connectPrefill } from './lib/connectPrefill';
   import Shell from './lib/Shell.svelte';
   import Toast from './lib/Toast.svelte';
-  import { session, restore } from './lib/stores/session.svelte';
+  import { session, restore, listenUnauthorized } from './lib/stores/session.svelte';
   import { init as initDownloads } from './lib/stores/downloads.svelte';
   import { init as initSessions } from './lib/stores/sessions.svelte';
   import { init as initCompatTools } from './lib/stores/compatTools.svelte';
@@ -54,6 +55,15 @@
     initLayoutMigration();
   });
 
+  // Q6: a 401 mid-session sends the user back to Connect, pre-filled. One
+  // listener for the app's whole life, registered before `restore()` below.
+  $effect(() => {
+    const un = listenUnauthorized();
+    return () => {
+      un.then((f) => f());
+    };
+  });
+
   // The theme must be on `<html>` before the first paint the user sees, so
   // this registers alongside the other pre-shell effects rather than inside
   // Shell.svelte.
@@ -92,7 +102,7 @@
 {#if session.phase === 'shell'}
   <Shell bind:this={shell} />
 {:else if session.phase === 'none'}
-  <Connect />
+  <Connect prefill={connectPrefill(session)} />
 {/if}
 
 <!-- Outside the phase branch: the startup Python-import notice is pushed

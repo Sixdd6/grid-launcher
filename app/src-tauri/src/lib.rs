@@ -256,6 +256,15 @@ pub fn run() {
                 );
             }
             let state = app.state::<AppState>();
+            // Q6: the first 401 on a live session sends the user back to the
+            // Connect form. grid-core fires this once per session and drops
+            // the dead client; the payload is URL, username and auth kind,
+            // never the credential. Set before `restore_session` can run.
+            let handle = app.handle().clone();
+            state.session.set_unauthorized_hook(Arc::new(move |info| {
+                tracing::info!("server rejected the stored credential (401)");
+                let _ = handle.emit(commands::SESSION_UNAUTHORIZED_EVENT, info);
+            }));
             // The media viewer's video source. Started here rather than at
             // `AppState` construction because it serves out of the image
             // cache directory and must be handed exactly the directory the

@@ -21,7 +21,6 @@ use std::sync::LazyLock;
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use reqwest::header::AUTHORIZATION;
 use reqwest::multipart::{Form, Part};
-use reqwest::StatusCode;
 use serde_json::Value;
 
 use super::error::excerpt;
@@ -222,8 +221,8 @@ impl RommClient {
             .await
             .map_err(|e| RommError::Connection(e.without_url().to_string()))?;
         let status = resp.status();
-        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-            return Err(RommError::Unauthorized);
+        if let Some(e) = self.auth_error(status) {
+            return Err(e);
         }
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
@@ -243,7 +242,8 @@ impl RommClient {
     /// `cloud_mixin.py:1752-1758`) apart from every other status (a
     /// failure — :1759-1765) — a distinction `Err` alone can't carry once
     /// collapsed to one variant. 401/403 are the one exception: they still
-    /// map to [`RommError::Unauthorized`], matching every other method
+    /// map to [`RommError::Unauthorized`] / [`RommError::Forbidden`],
+    /// matching every other method
     /// (Python's `HTTPError` there isn't in `{404, 410}` either, so it
     /// falls into the same "failed" bucket the caller already handles —
     /// this just gives that specific case a sharper error instead of a
@@ -271,8 +271,8 @@ impl RommClient {
             .await
             .map_err(|e| RommError::Connection(e.without_url().to_string()))?;
         let status = resp.status();
-        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-            return Err(RommError::Unauthorized);
+        if let Some(e) = self.auth_error(status) {
+            return Err(e);
         }
         Ok(status.as_u16())
     }

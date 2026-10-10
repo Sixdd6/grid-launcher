@@ -1,4 +1,4 @@
-import { APP_START_TIMEOUT } from '../helpers/env.js';
+import { APP_START_TIMEOUT, mockUrl } from '../helpers/env.js';
 
 const testId = (id: string) => `[data-testid="${id}"]`;
 
@@ -18,5 +18,16 @@ describe('connect-restore (b): relaunch', () => {
     });
     await expect($(testId('connect-submit'))).not.toExist();
     await expect($(testId('connect-secret'))).not.toExist();
+  });
+
+  // Last on purpose: part C starts against a server that has revoked the
+  // stored token (Q6). The mock outlives this app process, as in `images`.
+  it('revokes the stored token on the mock for part C', async () => {
+    const res = await fetch(`${mockUrl()}/__e2e__/revoke`, {
+      method: 'POST',
+      body: JSON.stringify({ revoked: true }),
+    });
+    expect(res.ok).toBe(true);
+    expect(await res.json()).toEqual({ revoked: true });
   });
 });

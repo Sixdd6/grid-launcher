@@ -2,15 +2,30 @@
   import { api } from './api';
   import { session, connect } from './stores/session.svelte';
   import { pickFolder } from './pickers';
+  import { untrack } from 'svelte';
+  import { connectPrefill, type ConnectPrefill } from './connectPrefill';
+
   // Seeded from the restored config (blank when there is none): a Python
   // import carries `server_url`/`username` across without a credential, so
-  // the only thing left to type is the token. `libraryPath` stays blank —
-  // an imported path is already stored, and the submit below writes only a
+  // the only thing left to type is the token. After a rejected credential
+  // (Q6) the same fields come back with the credential kind and a reason
+  // line. The secret is never seeded. `libraryPath` stays blank — an
+  // imported path is already stored, and the submit below writes only a
   // non-blank one.
-  let serverUrl = $state(session.serverUrl);
-  let username = $state(session.username);
+  let { prefill = connectPrefill(session) }: { prefill?: ConnectPrefill } = $props();
+  // The form owns its fields after the first render: this component mounts
+  // fresh each time the phase turns to 'none', so the initial value is the one.
+  const initial = untrack(() => prefill);
+  let serverUrl = $state(initial.serverUrl);
+  let username = $state(initial.username);
   let secret = $state('');
-  let useToken = $state(true);
+  let useToken = $state(initial.useToken);
+  let secretEl = $state<HTMLInputElement | null>(null);
+
+  // A rejected credential is the one field left to fix: put the caret there.
+  $effect(() => {
+    if (initial.reason !== null) secretEl?.focus();
+  });
   // `FirstRunDialog` asks for the library path alongside the server details
   // (dialogs.py:133-146). A folder picker is a separate plan; this is the
   // free-text half only.
@@ -64,13 +79,14 @@
   }}
 >
   <h1>Connect to RomM</h1>
+  {#if initial.reason !== null}<p data-testid="connect-reason" class="reason" role="status">{initial.reason}</p>{/if}
   <label>Server URL <input data-testid="connect-server-url" bind:value={serverUrl} placeholder="https://romm.example" required /></label>
   {#if !useToken}
     <label>Username <input data-testid="connect-username" bind:value={username} autocomplete="username" required /></label>
   {/if}
   <label>
     {useToken ? 'API token' : 'Password'}
-    <input data-testid="connect-secret" bind:value={secret} type="password" autocomplete="current-password" required />
+    <input data-testid="connect-secret" bind:this={secretEl} bind:value={secret} type="password" autocomplete="current-password" required />
   </label>
   <label class="mode"><input data-testid="connect-use-token" type="checkbox" bind:checked={useToken} /> Use API token</label>
   <label>
@@ -173,6 +189,22 @@
     background: transparent;
     color: var(--text-h);
     white-space: nowrap;
+  }
+
+  /* A calm notice, not an error: the neutral `--surface` banner fill used by
+     Server's `.library-banner`, plus a `--primary` edge to set it apart from
+     the form fields. Plain text colour keeps contrast high in both themes;
+     `--danger` is reserved for `.error` below. It is not focusable, so the
+     secret field keeps focus. */
+  .reason {
+    margin: 0;
+    padding: 10px 12px;
+    border-left: 3px solid var(--primary);
+    border-radius: var(--r-row);
+    background: var(--surface);
+    color: var(--text-h);
+    font-size: 14px;
+    line-height: 1.4;
   }
 
   .error {

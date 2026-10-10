@@ -475,3 +475,49 @@ async fn prune_refetch_failure_returns_a_synthetic_failed_id() {
     assert!(!failed[0].contains("Authorization"), "failed: {failed:?}");
     assert!(!failed[0].contains("Bearer"), "failed: {failed:?}");
 }
+
+// --- 401 vs 403 on the write paths ----------------------------------------
+
+#[tokio::test]
+async fn delete_save_maps_401_to_unauthorized_and_403_to_forbidden() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/saves/delete"))
+        .and(body_json(json!({"saves": [7]})))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/saves/delete"))
+        .and(body_json(json!({"saves": [8]})))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+    let client = client_for(&server).await;
+    assert!(matches!(
+        client.delete_save(7).await,
+        Err(RommError::Unauthorized)
+    ));
+    assert!(matches!(
+        client.delete_save(8).await,
+        Err(RommError::Forbidden)
+    ));
+}
+
+#[tokio::test]
+async fn upload_save_maps_403_to_forbidden() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/saves"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = temp_payload(&dir, "game.srm", b"save");
+    let client = client_for(&server).await;
+    let err = client
+        .upload_save("1", "retroarch", None, &[("game.srm".to_string(), file)])
+        .await
+        .unwrap_err();
+    assert!(matches!(err, RommError::Forbidden), "{err:?}");
+}

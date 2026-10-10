@@ -102,6 +102,8 @@ On first launch, or when required configuration is missing, the app should promp
 
 The user must complete this setup before continuing into the main application.
 
+If the server rejects the stored credential (HTTP 401), at startup or during a session, the app returns to this screen. The server URL (and username, for a password) is filled in, the credential field is empty, and a line explains why ("The server rejected your token. Enter a new one."). The stored credential stays in the OS keyring until a new connect succeeds. When the server is unreachable or denies permission (HTTP 403), the app stays open and shows "Not connected" with Retry.
+
 ### Game Details View
 Clicking a game in the Library or Server sections opens a popup, at most 1040×680, centred
 over a dimmed and blurred shell. Esc and the ✕ close it.

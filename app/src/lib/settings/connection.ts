@@ -9,11 +9,15 @@ export const CREDENTIAL_STORED = 'Stored in the OS keyring';
  * Once the shell is up a credential is in the keyring by construction —
  * `restore_session` answers `connected` or `unreachable` only when one is
  * stored. The two states differ in whether the server has accepted it.
+ * "Not verified" names no cause: offline can mean an unreachable server, a
+ * 403 or a server error, and the Status line and error banner carry the
+ * reason. A rejected credential (401) never reaches this page — it opens the
+ * Connect form instead (Q6).
  */
 export function credentialStatusLabel(connected: boolean): string {
   return connected
     ? `${CREDENTIAL_STORED} · session verified`
-    : `${CREDENTIAL_STORED} · not verified (server unreachable)`;
+    : `${CREDENTIAL_STORED} · not verified`;
 }
 
 /** Mirrors the server menu: Reconnect exists only while offline, and not mid-retry. */

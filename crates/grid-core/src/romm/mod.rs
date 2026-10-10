@@ -31,7 +31,15 @@ pub struct RommClient {
     /// Prebuilt Authorization header value. Held as a reqwest HeaderValue
     /// marked sensitive so reqwest's own debug output redacts it.
     auth: reqwest::header::HeaderValue,
+    /// Called on every 401 this client sees. `SessionManager` installs it on
+    /// the live client only (never on a connect probe) and makes it act once
+    /// per session; see `session::SessionManager::set_unauthorized_hook`.
+    on_unauthorized: Option<UnauthorizedHook>,
 }
+
+/// What a client calls when the server answers 401. Takes no arguments, so
+/// nothing about the request (and never the credential) can reach it.
+pub(crate) type UnauthorizedHook = std::sync::Arc<dyn Fn() + Send + Sync>;
 
 /// Removes any `user:pass@` from a server URL, leaving everything else
 /// (scheme, host, port, subpath, trailing-slash shape) as typed. Unparsable
@@ -98,7 +106,32 @@ impl RommClient {
             .read_timeout(read_timeout)
             .build()
             .map_err(|e| RommError::Connection(e.to_string()))?;
-        Ok(Self { http, base, auth })
+        Ok(Self {
+            http,
+            base,
+            auth,
+            on_unauthorized: None,
+        })
+    }
+
+    pub(crate) fn set_unauthorized_hook(&mut self, hook: UnauthorizedHook) {
+        self.on_unauthorized = Some(hook);
+    }
+
+    /// The error for an auth-failure status, or `None` for any other status.
+    /// 401 means the credential is dead and also fires the unauthorized
+    /// hook; 403 means it lacks permission and does not.
+    fn auth_error(&self, status: reqwest::StatusCode) -> Option<RommError> {
+        match status {
+            reqwest::StatusCode::UNAUTHORIZED => {
+                if let Some(hook) = &self.on_unauthorized {
+                    hook();
+                }
+                Some(RommError::Unauthorized)
+            }
+            reqwest::StatusCode::FORBIDDEN => Some(RommError::Forbidden),
+            _ => None,
+        }
     }
 
     /// Appends `path` to the base URL verbatim, preserving any base subpath
@@ -123,9 +156,10 @@ impl RommClient {
     }
 
     /// Status-checked GET returning the raw response for streaming (or for
-    /// `get_json` to decode). 401/403 map to `Unauthorized`; any other
-    /// non-2xx maps to `Http` with a body excerpt — the body is consumed
-    /// here so callers never see the excerpt logic duplicated.
+    /// `get_json` to decode). 401 maps to `Unauthorized`, 403 to `Forbidden`
+    /// (see `auth_error`); any other non-2xx maps to `Http` with a body
+    /// excerpt — the body is consumed here so callers never see the excerpt
+    /// logic duplicated.
     pub(crate) async fn get_response(
         &self,
         path: &str,
@@ -140,8 +174,8 @@ impl RommClient {
             .await
             .map_err(|e| RommError::Connection(e.without_url().to_string()))?;
         let status = resp.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-            return Err(RommError::Unauthorized);
+        if let Some(e) = self.auth_error(status) {
+            return Err(e);
         }
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
@@ -170,10 +204,10 @@ impl RommClient {
 
     /// Bytes plus the response Content-Type (empty when absent). Accepts a
     /// server-relative `/path` or an absolute same-host URL (host filtering
-    /// happens before this is called — see images::urls). Same 401/403 →
-    /// Unauthorized mapping as `get_bytes`.
+    /// happens before this is called — see images::urls). Same 401/403
+    /// mapping (`auth_error`) as every other method.
     ///
-    /// Task 11 fix: this used to skip the 401/403 -> Unauthorized mapping
+    /// Task 11 fix: this used to skip the 401/403 auth mapping
     /// that `get_response` applies, so a save/cover download against an
     /// expired token surfaced as a generic `Http{401,..}` instead of the
     /// dedicated auth error every other client method returns. Bytes
@@ -191,8 +225,8 @@ impl RommClient {
             .await
             .map_err(|e| RommError::Connection(e.without_url().to_string()))?;
         let status = resp.status();
-        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-            return Err(RommError::Unauthorized);
+        if let Some(e) = self.auth_error(status) {
+            return Err(e);
         }
         if !status.is_success() {
             return Err(RommError::Http {
