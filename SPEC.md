@@ -23,7 +23,7 @@ view.
 There are several main sections to the application with buttons across the top bar to navigate between them:
 - Library
 - Server
-- Discover
+- Discover (ON HOLD — not built; see below)
 - Downloads
 - Emulators
 - Settings
@@ -42,7 +42,7 @@ There are several main sections to the application with buttons across the top b
   Install for a game that is not installed and Play for one that is. The card size is
   remembered as `ui.card_size_server`. Downloads and installs are queued and handled in
   the background.
-- **Discover** contains collapsible, cached recommendation sections built from the server library — Short But Fun, New on Server, Highly Rated (All-Time), Recommended for You, Browse by Genre, and Your Watchlist — with genre/platform filters and a manual refresh. Sections load in the background and fall back to the cached view when the server is unreachable.
+- **Discover** (ON HOLD since 2026-09-09 by user decision; not part of the current app — kept here as the reference if it is revived as a redesign) contains collapsible, cached recommendation sections built from the server library — Short But Fun, New on Server, Highly Rated (All-Time), Recommended for You, Browse by Genre, and Your Watchlist — with genre/platform filters and a manual refresh. Sections load in the background and fall back to the cached view when the server is unreachable.
 - **Downloads** is a full view, capped at 1100px and centred, with three stacked
   segments in this order — Active (downloading, installing, cancelling), Queued, and
   Completed (finished, failed, or cancelled) — each with a count, under the legend
