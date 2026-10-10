@@ -791,7 +791,7 @@ mod tests {
     // -- executable_candidates ----------------------------------------------------
 
     /// Creates each relative file under `dir` and returns the candidates
-    /// as paths relative to `dir`, for terse ordering assertions.
+    /// as `/`-separated paths relative to `dir`, for terse ordering assertions.
     fn ranked(dir: &tempfile::TempDir, title: &str, files: &[&str]) -> Vec<String> {
         for file in files {
             let path = dir.path().join(file);
@@ -801,10 +801,14 @@ mod tests {
         executable_candidates(dir.path(), title)
             .iter()
             .map(|p| {
+                // Joined with `/` on every host, so an expectation reads the
+                // same on Windows, where `Path` renders `\`.
                 p.strip_prefix(dir.path())
                     .unwrap()
-                    .to_string_lossy()
-                    .into_owned()
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join("/")
             })
             .collect()
     }

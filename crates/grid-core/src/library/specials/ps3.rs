@@ -670,8 +670,9 @@ mod tests {
             .join("home/00000001/trophy/NPWR12345/TROPUSR.DAT")
             .is_file());
 
-        let nested_dest = path_string(&dev_hdd0.join("home/00000001/trophy/NPWR00002"));
-        let top_dest = path_string(&dev_hdd0.join("home/00000001/trophy/NPWR12345"));
+        let trophy_root = dev_hdd0.join("home").join("00000001").join("trophy");
+        let nested_dest = path_string(&trophy_root.join("NPWR00002"));
+        let top_dest = path_string(&trophy_root.join("NPWR12345"));
         assert_eq!(trophy_paths(&outcome), vec![nested_dest, top_dest]);
         assert!(outcome
             .installed_paths

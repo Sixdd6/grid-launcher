@@ -33,10 +33,37 @@ pub fn rpcs3_pup_path(emulator_path: &str) -> Option<PathBuf> {
     pup.is_file().then(|| resolve_best_effort(&pup))
 }
 
+/// The three paths `rpcs3 --installfw` is started with: the executable, the
+/// PUP argument, and the working directory (the executable's parent).
+#[derive(Debug, PartialEq, Eq)]
+struct InstallFwInvocation {
+    exe: PathBuf,
+    pup: PathBuf,
+    working_dir: PathBuf,
+}
+
+/// Resolves the `--installfw` paths, or `None` when either does not
+/// canonicalize to an existing file. Uses [`crate::platform::canonicalize`]
+/// so on Windows none of the paths carries the `\\?\` verbatim prefix, which
+/// RPCS3 and `current_dir` handle poorly.
+fn installfw_invocation(exe: &Path, pup: &Path) -> Option<InstallFwInvocation> {
+    let exe = crate::platform::canonicalize(exe).ok()?;
+    let pup = crate::platform::canonicalize(pup).ok()?;
+    if !exe.is_file() || !pup.is_file() {
+        return None;
+    }
+    let working_dir = exe.parent()?.to_path_buf();
+    Some(InstallFwInvocation {
+        exe,
+        pup,
+        working_dir,
+    })
+}
+
 /// Launches `rpcs3 --installfw <pup>` and returns whether the process
 /// started (`trigger_rpcs3_firmware_install`, rpcs3.py:365-386).
 ///
-/// Both paths must canonicalize to existing files. This call does not block:
+/// Both paths must canonicalize (without a Windows `\?` prefix) to existing files. This call does not block:
 /// RPCS3 shows its own install dialog and outlives it, exactly like Python's
 /// bare `subprocess.Popen`. A detached thread owns the
 /// [`std::process::Child`] and blocks in `wait()` on it, purely so the
@@ -46,23 +73,14 @@ pub fn rpcs3_pup_path(emulator_path: &str) -> Option<PathBuf> {
 /// is collected. The environment is rebuilt from [`clean_env`] so an
 /// AppImage's `LD_LIBRARY_PATH` shim does not leak into the child.
 pub fn spawn_rpcs3_installfw(exe: &Path, pup: &Path) -> bool {
-    let Ok(exe) = std::fs::canonicalize(exe) else {
-        return false;
-    };
-    let Ok(pup) = std::fs::canonicalize(pup) else {
-        return false;
-    };
-    if !exe.is_file() || !pup.is_file() {
-        return false;
-    }
-    let Some(working_dir) = exe.parent() else {
+    let Some(invocation) = installfw_invocation(exe, pup) else {
         return false;
     };
 
-    let spawned = Command::new(&exe)
+    let spawned = Command::new(&invocation.exe)
         .arg("--installfw")
-        .arg(&pup)
-        .current_dir(working_dir)
+        .arg(&invocation.pup)
+        .current_dir(&invocation.working_dir)
         .env_clear()
         .envs(clean_env())
         .spawn();
@@ -184,7 +202,7 @@ mod tests {
         assert_eq!(lines[1], "--installfw");
         assert_eq!(
             Path::new(lines[2]),
-            std::fs::canonicalize(&pup).unwrap(),
+            crate::platform::canonicalize(&pup).unwrap(),
             "the PUP is passed canonicalized"
         );
         assert!(
@@ -192,6 +210,51 @@ mod tests {
             "the spawned child was never reaped (pid {} still in /proc)",
             lines[0]
         );
+    }
+
+    /// The executable, the PUP argument and the working directory are the
+    /// plain canonical paths — on Windows none starts with the `\\?\`
+    /// verbatim prefix — and the working directory is the executable's parent.
+    #[test]
+    fn installfw_invocation_paths_are_canonical_and_never_verbatim() {
+        let temp = tempfile::tempdir().unwrap();
+        let bin = temp.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let exe = bin.join("rpcs3.exe");
+        let pup = temp.path().join("PS3UPDAT.PUP");
+        std::fs::write(&exe, b"").unwrap();
+        std::fs::write(&pup, b"").unwrap();
+
+        let invocation = installfw_invocation(&exe, &pup).unwrap();
+
+        let expected_exe = crate::platform::canonicalize(&exe).unwrap();
+        assert_eq!(
+            invocation,
+            InstallFwInvocation {
+                working_dir: expected_exe.parent().unwrap().to_path_buf(),
+                exe: expected_exe,
+                pup: crate::platform::canonicalize(&pup).unwrap(),
+            }
+        );
+        for path in [&invocation.exe, &invocation.pup, &invocation.working_dir] {
+            assert!(
+                !path.to_string_lossy().starts_with(r"\\?\"),
+                "verbatim path handed to rpcs3: {path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn installfw_invocation_rejects_missing_files_and_directories() {
+        let temp = tempfile::tempdir().unwrap();
+        let exe = temp.path().join("rpcs3.exe");
+        let pup = temp.path().join("PS3UPDAT.PUP");
+        assert!(installfw_invocation(&exe, &pup).is_none());
+        std::fs::write(&exe, b"").unwrap();
+        assert!(installfw_invocation(&exe, &pup).is_none());
+        std::fs::write(&pup, b"").unwrap();
+        assert!(installfw_invocation(&exe, &pup).is_some());
+        assert!(installfw_invocation(&exe, temp.path()).is_none());
     }
 
     #[test]

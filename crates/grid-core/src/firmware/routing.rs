@@ -1085,12 +1085,14 @@ mod tests {
 
     #[test]
     fn saves_dir_honors_absolute_and_relative_paths() {
+        // A platform-absolute path: `/elsewhere/saves` has no drive, so it is
+        // relative on Windows. It is used exactly as written, not resolved.
+        let temp = tempfile::tempdir().unwrap();
+        let absolute = temp.path().join("elsewhere").join("saves");
+        assert!(absolute.is_absolute());
         assert_eq!(
-            saves_plan("/elsewhere/saves").saves,
-            vec![routed(
-                PathBuf::from("/elsewhere/saves"),
-                &["citra-sysdata.zip"]
-            )]
+            saves_plan(absolute.to_str().unwrap()).saves,
+            vec![routed(absolute.clone(), &["citra-sysdata.zip"])]
         );
         assert_eq!(
             saves_plan("relative/saves").saves,

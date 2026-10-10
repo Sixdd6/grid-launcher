@@ -709,7 +709,13 @@ mod tests {
         let entry = entry("PCSX2", &exe);
         let profile = profile("PCSX2", &["memcards"], &[]);
         let emulator_dir = emulator_dir_for(&entry, std::slice::from_ref(&profile)).unwrap();
-        assert_eq!(emulator_dir, data_root);
+        // `data_root` descends from the canonicalized install dir, which on
+        // Windows carries the `\\?\` prefix; the data root the planner
+        // reports does not. Compare the canonical forms.
+        assert_eq!(
+            crate::platform::canonicalize(&emulator_dir).unwrap(),
+            crate::platform::canonicalize(&data_root).unwrap()
+        );
         let destination = super::saves_dir(library, "PCSX2");
         let library_raw = library.to_string_lossy().into_owned();
         let salvaged = salvage_user_data(
