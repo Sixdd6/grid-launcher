@@ -82,6 +82,10 @@ pub(crate) fn library_activity(state: &AppState) -> LibraryActivity {
             .as_ref()
             .is_ok_and(|launch| !launch.snapshot().sessions.is_empty()),
         cloud_transfers: state.cloud.transfers_active(),
+        library_move: state
+            .install
+            .as_ref()
+            .is_ok_and(|install| install.snapshot().has_live_library_move()),
     }
 }
 
@@ -277,6 +281,7 @@ mod tests {
         installs: false,
         running_games: false,
         cloud_transfers: false,
+        library_move: false,
     };
 
     fn s(path: &Path) -> String {

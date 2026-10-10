@@ -28,6 +28,7 @@ use crate::library::extract::which_on_path;
 use crate::library::paths::expand_home;
 use crate::library::platforms::is_native_platform;
 use crate::library::registry::{installed_match, InstalledGame, Registry};
+use crate::library::relocate::LibraryGate;
 
 use native::build_native_command;
 use profiles::load_profiles;
@@ -59,6 +60,9 @@ pub enum LaunchError {
     Config(#[from] crate::config::ConfigError),
     #[error("failed to launch game: {0}")]
     Io(#[from] std::io::Error),
+    /// The library gate is closed (a library move runs): the reason.
+    #[error("{0}")]
+    LibraryBusy(String),
 }
 
 // --- constants --------------------------------------------------------------
@@ -124,6 +128,10 @@ pub struct LaunchService {
     /// that finds the dead child, and the warning has to survive whichever it
     /// is. Bounded by the number of launches in flight.
     early_exit_watch: Mutex<HashMap<u64, Vec<String>>>,
+    /// Closed while a library move runs. A launch holds a ticket from it
+    /// until its session is registered, so a move that closes the gate and
+    /// waits for the tickets sees every game that got past it.
+    library_gate: RwLock<LibraryGate>,
 }
 
 impl LaunchService {
@@ -152,6 +160,7 @@ impl LaunchService {
             poll_interval,
             reap_gate: Mutex::new(()),
             early_exit_watch: Mutex::new(HashMap::new()),
+            library_gate: RwLock::new(LibraryGate::default()),
         })
     }
 
@@ -159,6 +168,12 @@ impl LaunchService {
     /// layer; a second call replaces the first.
     pub fn set_notify(&self, f: Listener) {
         *self.notify.write().unwrap() = Some(f);
+    }
+
+    /// Sets the gate a library move closes. The app calls this once with
+    /// the gate it owns; until then the service has its own, always open.
+    pub fn set_library_gate(&self, gate: LibraryGate) {
+        *self.library_gate.write().unwrap() = gate;
     }
 
     /// Adds a session-finished listener; earlier listeners stay. Each one is
@@ -241,6 +256,10 @@ impl LaunchService {
     /// RetroArch entry also gets the pre-launch settings sync
     /// ([`Self::set_pre_launch_hook`]) between resolution and the spawn.
     pub async fn launch(self: &Arc<Self>, rom_id: i64) -> Result<GameSession, LaunchError> {
+        let gate = self.library_gate.read().unwrap().clone();
+        let _ticket = gate
+            .enter()
+            .map_err(|busy| LaunchError::LibraryBusy(busy.reason))?;
         let game = self.installed_game(rom_id).await?;
 
         // Cheap rejection before any work; `SessionStore::register` repeats
@@ -626,6 +645,35 @@ async fn spawn_child(
 mod tests {
     use super::*;
     use crate::config::EmulatorEntry;
+
+    /// While a library move holds the gate, a launch is refused before the
+    /// registry is read and no session is created.
+    #[tokio::test]
+    async fn a_closed_library_gate_refuses_a_launch() {
+        use crate::library::relocate::{LibraryGate, LIBRARY_MOVE_BUSY};
+        let dir = tempfile::tempdir().unwrap();
+        let registry = Arc::new(Registry::open(&dir.path().join("registry.db")).unwrap());
+        let service = LaunchService::new(registry, dir.path().join("config.toml"));
+        let gate = LibraryGate::closed(LIBRARY_MOVE_BUSY);
+        service.set_library_gate(gate.clone());
+        match service.launch(1).await {
+            Err(LaunchError::LibraryBusy(reason)) => assert_eq!(reason, LIBRARY_MOVE_BUSY),
+            other => panic!("expected LibraryBusy, got {other:?}"),
+        }
+        assert!(service.snapshot().sessions.is_empty());
+        assert!(
+            gate.wait_no_tickets(Duration::from_millis(1)),
+            "no ticket leaks"
+        );
+
+        // Open again: the launch gets past the gate (and fails on the
+        // missing row instead).
+        gate.open();
+        assert!(matches!(
+            service.launch(1).await,
+            Err(LaunchError::NotInstalled)
+        ));
+    }
 
     #[test]
     fn every_session_finished_listener_sees_every_finished_session() {

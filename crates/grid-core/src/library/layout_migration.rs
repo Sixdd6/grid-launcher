@@ -1054,9 +1054,11 @@ fn rewrite_entry_list(value: &str, plan: &RewritePlan) -> String {
 }
 
 /// The emulator config files that store absolute library paths, relative to
-/// the install directory. Everything else the `ensure_*` writers write is
-/// either relative or outside the library.
-fn emulator_config_files(
+/// the emulator's DATA root (`autoconfig::emulator_data_root`). Everything
+/// else the `ensure_*` writers write is either relative or outside the
+/// library. xemu keeps `xemu.toml` beside its executable, with four
+/// single-quoted `[sys.files]` paths.
+pub(crate) fn emulator_config_files(
     entry: &crate::config::EmulatorEntry,
     profiles: &[EmulatorProfile],
 ) -> Vec<&'static str> {
@@ -1068,6 +1070,9 @@ fn emulator_config_files(
     }
     if crate::autoconfig::is_shadps4_qt_launcher(entry, profiles) {
         return vec!["launcher/qt_ui.ini"];
+    }
+    if crate::autoconfig::is_xemu(entry, profiles) {
+        return vec!["xemu.toml"];
     }
     Vec::new()
 }
@@ -1149,21 +1154,37 @@ fn starts_a_value(previous: Option<char>) -> bool {
 /// unrelated `/other/lib/Windows/x` that merely ENDS with the library's
 /// spelling.
 pub fn rewrite_paths_in_text(text: &str, plan: &RewritePlan) -> Option<String> {
+    let starts = |rest: &str| {
+        plan.library_forms
+            .iter()
+            .any(|form| rest.starts_with(form.as_str()))
+    };
+    rewrite_paths_in_text_with(text, &starts, &|token| rewrite_path(token, plan))
+}
+
+/// [`rewrite_paths_in_text`] with the two rules passed in: `starts` says
+/// whether a path token begins at the given rest of the text (a
+/// library-root spelling, matched however the caller matches it), and
+/// `rewrite` maps one token to its replacement, or `None` to keep it.
+/// The token rules are the same: a token begins where a value may begin
+/// and runs to the next quote (`"` or `'`) or line end. `None` when nothing
+/// changed. The library move (`library::relocate`) uses it with its own
+/// matcher.
+pub fn rewrite_paths_in_text_with(
+    text: &str,
+    starts: &dyn Fn(&str) -> bool,
+    rewrite: &dyn Fn(&str) -> Option<String>,
+) -> Option<String> {
     let mut out = String::with_capacity(text.len());
     let mut changed = false;
     let mut index = 0;
     let mut previous: Option<char> = None;
     while index < text.len() {
         let rest = &text[index..];
-        if starts_a_value(previous)
-            && plan
-                .library_forms
-                .iter()
-                .any(|form| rest.starts_with(form.as_str()))
-        {
+        if starts_a_value(previous) && starts(rest) {
             let end = rest.find(['"', '\'', '\n', '\r']).unwrap_or(rest.len());
             let token = &rest[..end];
-            match rewrite_path(token, plan) {
+            match rewrite(token) {
                 Some(rewritten) => {
                     out.push_str(&rewritten);
                     changed = true;
@@ -1420,6 +1441,45 @@ mod tests {
 
         // Nothing to rewrite is `None`, not `Some(same text)`.
         assert_eq!(rewrite_paths_in_text("nothing here\n", &plan), None);
+    }
+
+    /// xemu stores four absolute paths in `xemu.toml` beside its
+    /// executable, so the file is one of the files a rewrite reaches.
+    #[test]
+    fn xemu_toml_is_an_emulator_config_file() {
+        let profiles = load_profiles();
+        let xemu = EmulatorEntry {
+            name: "Xemu (Xbox)".into(),
+            path: "/lib/emulators/Xemu (Xbox)/xemu.AppImage".into(),
+            ..Default::default()
+        };
+        assert_eq!(emulator_config_files(&xemu, profiles), vec!["xemu.toml"]);
+        let other = EmulatorEntry {
+            name: "Some Emulator".into(),
+            path: "/lib/emulators/Some/emu".into(),
+            ..Default::default()
+        };
+        assert!(emulator_config_files(&other, profiles).is_empty());
+    }
+
+    /// The generalized rewrite takes its own start test and rewrite
+    /// closure, and keeps a single-quoted value's closing quote.
+    #[test]
+    fn rewrite_paths_in_text_with_uses_the_given_closures() {
+        let starts = |rest: &str| rest.starts_with("/old");
+        let rewrite = |value: &str| value.strip_prefix("/old").map(|rest| format!("/new{rest}"));
+        let toml =
+            "[sys.files]\nhdd_path = '/old/emulators/x/hdd.qcow2'\nother = '/elsewhere/old/x'\n";
+        assert_eq!(
+            rewrite_paths_in_text_with(toml, &starts, &rewrite).as_deref(),
+            Some(
+                "[sys.files]\nhdd_path = '/new/emulators/x/hdd.qcow2'\nother = '/elsewhere/old/x'\n"
+            )
+        );
+        assert_eq!(
+            rewrite_paths_in_text_with("nothing\n", &starts, &rewrite),
+            None
+        );
     }
 
     // --- filesystem migration -------------------------------------------

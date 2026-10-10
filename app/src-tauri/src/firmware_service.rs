@@ -449,7 +449,16 @@ impl FirmwareService {
             return;
         }
         let guard = FirmwareGuard::new(self.clone(), dir, None);
-        let row_id = install.admit_external(PS3_FIRMWARE_TITLE, PS3_FIRMWARE_PLATFORM);
+        // Refused while a library move holds the library gate: the firmware
+        // would land in the folder being moved. `guard` drops here and
+        // releases the directory.
+        let row_id = match install.admit_external(PS3_FIRMWARE_TITLE, PS3_FIRMWARE_PLATFORM) {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::warn!("PS3 firmware install not started: {e}");
+                return;
+            }
+        };
         // The drawer row is admitted BEFORE the task exists, so it must be
         // closed by a drop guard too: a panic unwinding out of the task
         // would otherwise release the directory but leave the row stuck in
@@ -812,7 +821,9 @@ mod tests {
     fn a_completed_row_guard_reports_the_real_outcome_and_does_not_fire_on_drop() {
         let dir = tempfile::tempdir().unwrap();
         let install = install_service(&dir);
-        let id = install.admit_external(PS3_FIRMWARE_TITLE, PS3_FIRMWARE_PLATFORM);
+        let id = install
+            .admit_external(PS3_FIRMWARE_TITLE, PS3_FIRMWARE_PLATFORM)
+            .unwrap();
         {
             let mut row = RowGuard::new(install.clone(), id);
             row.complete("");
@@ -833,7 +844,9 @@ mod tests {
     fn an_abandoned_row_guard_fails_the_row_on_drop() {
         let dir = tempfile::tempdir().unwrap();
         let install = install_service(&dir);
-        let id = install.admit_external(PS3_FIRMWARE_TITLE, PS3_FIRMWARE_PLATFORM);
+        let id = install
+            .admit_external(PS3_FIRMWARE_TITLE, PS3_FIRMWARE_PLATFORM)
+            .unwrap();
         drop(RowGuard::new(install.clone(), id));
         assert_eq!(
             row_status(&install, id),

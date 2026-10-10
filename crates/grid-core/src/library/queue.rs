@@ -29,6 +29,9 @@ pub enum JobKey {
     /// background firmware installer). Keyed by the entry's own id, so two
     /// external entries never dedupe against each other.
     External(u64),
+    /// The library move (phase 9b, `library::relocate`). There is only ever
+    /// one, so the key carries nothing. Its row takes no slot.
+    LibraryMove,
 }
 
 /// Lifecycle state of one [`DownloadEntry`].
@@ -70,6 +73,10 @@ pub struct DownloadEntry {
     pub install_processed_bytes: u64,
     pub install_total_bytes: u64,
     pub error: String,
+    /// One line of free text under the title: what a library move is
+    /// doing (`"Copying games"`). Empty for every other entry.
+    #[serde(default)]
+    pub detail: String,
     /// The admission key this entry was created from. Kept for dedupe and
     /// `retryable`; the public `job`/`rom_id`/`source_id` fields above are
     /// derived from it once, at insertion.
@@ -102,10 +109,21 @@ impl DownloadStatus {
 }
 
 impl DownloadsSnapshot {
-    /// True when any entry is still live ([`DownloadStatus::is_live`]),
-    /// firmware rows included. A library path change waits for this.
+    /// True when any install entry is still live
+    /// ([`DownloadStatus::is_live`]), firmware rows included. A library
+    /// path change waits for this. The library move's own row is not an
+    /// install and does not count: see [`Self::has_live_library_move`].
     pub fn has_live_entry(&self) -> bool {
-        self.entries.iter().any(|entry| entry.status.is_live())
+        self.entries
+            .iter()
+            .any(|entry| entry.status.is_live() && entry.key != JobKey::LibraryMove)
+    }
+
+    /// True while the library move's row is live.
+    pub fn has_live_library_move(&self) -> bool {
+        self.entries
+            .iter()
+            .any(|entry| entry.status.is_live() && entry.key == JobKey::LibraryMove)
     }
 }
 
@@ -181,6 +199,8 @@ impl QueueState {
             // Never reached: an external entry is created by
             // `admit_external`, which never routes through here.
             JobKey::External(_) => ("firmware", 0, String::new()),
+            // Never reached either: `admit_library_move` creates its own row.
+            JobKey::LibraryMove => ("library", 0, String::new()),
         };
         self.entries.push(DownloadEntry {
             id,
@@ -197,6 +217,7 @@ impl QueueState {
             install_processed_bytes: 0,
             install_total_bytes: 0,
             error: String::new(),
+            detail: String::new(),
             key,
         });
 
@@ -234,6 +255,7 @@ impl QueueState {
             install_processed_bytes: 0,
             install_total_bytes: 0,
             error: String::new(),
+            detail: String::new(),
             key: JobKey::External(id),
         });
         id
@@ -248,6 +270,64 @@ impl QueueState {
             return;
         };
         if !matches!(entry.key, JobKey::External(_)) {
+            return;
+        }
+        entry.speed_bps = 0.0;
+        if error.is_empty() {
+            entry.status = DownloadStatus::Completed;
+            entry.error.clear();
+        } else {
+            entry.status = DownloadStatus::Failed;
+            entry.error = error.to_string();
+        }
+        self.prune_terminal();
+    }
+
+    /// Creates the library move's Downloads row, `Installing` from the
+    /// start. Like an external row it takes no slot and never enters
+    /// `waiting`, so it neither blocks nor is blocked by the queue (the
+    /// move itself refuses to start while an install is live). `None` when
+    /// a live move row already exists.
+    pub fn admit_library_move(&mut self, title: &str, platform: &str) -> Option<u64> {
+        if self.snapshot().has_live_library_move() {
+            return None;
+        }
+        let id = self.alloc_id();
+        self.entries.push(DownloadEntry {
+            id,
+            job: "library",
+            kind: "library_move",
+            rom_id: 0,
+            source_id: String::new(),
+            title: title.to_string(),
+            platform: platform.to_string(),
+            status: DownloadStatus::Installing,
+            downloaded_bytes: 0,
+            total_bytes: 0,
+            speed_bps: 0.0,
+            install_processed_bytes: 0,
+            install_total_bytes: 0,
+            error: String::new(),
+            detail: String::new(),
+            key: JobKey::LibraryMove,
+        });
+        Some(id)
+    }
+
+    /// Sets the free-text detail line of `id`. No-op when `id` is unknown.
+    pub fn set_detail(&mut self, id: u64, detail: &str) {
+        if let Some(entry) = self.entry_mut(id) {
+            entry.detail = detail.to_string();
+        }
+    }
+
+    /// Ends a [`Self::admit_library_move`] row: a blank `error` completes
+    /// it, anything else fails it with that text. Ignores any other entry.
+    pub fn finish_library_move(&mut self, id: u64, error: &str) {
+        let Some(entry) = self.entry_mut(id) else {
+            return;
+        };
+        if entry.key != JobKey::LibraryMove {
             return;
         }
         entry.speed_bps = 0.0;
@@ -549,6 +629,71 @@ mod tests {
                 DownloadStatus::Cancelling,
             ]
         );
+    }
+
+    /// A library move has its own Downloads row: live while it runs, but
+    /// not a live INSTALL, so the path-change and move checks can tell the
+    /// two apart.
+    #[test]
+    fn a_library_move_row_is_live_but_not_an_install() {
+        let mut state = QueueState::default();
+        let id = state
+            .admit_library_move("Library move", "D:\\Games")
+            .unwrap();
+        assert_eq!(
+            state.admit_library_move("Library move", "x"),
+            None,
+            "one at a time"
+        );
+        let entry = state.entry(id).unwrap().clone();
+        assert_eq!(entry.job, "library");
+        assert_eq!(entry.kind, "library_move");
+        assert_eq!(entry.status, DownloadStatus::Installing);
+        assert_eq!(entry.detail, "");
+        let snapshot = state.snapshot();
+        assert!(!snapshot.has_live_entry(), "a move is not a live install");
+        assert!(snapshot.has_live_library_move());
+
+        state.set_detail(id, "Copying games");
+        state.set_install_progress(id, 5, 10);
+        let entry = state.entry(id).unwrap();
+        assert_eq!(entry.detail, "Copying games");
+        assert_eq!(entry.install_processed_bytes, 5);
+
+        // Cancel is the move's own command, not the queue's.
+        assert_eq!(state.request_cancel(id), CancelAction::Ignored);
+        assert!(state.next_ready().is_none(), "it never takes a slot");
+
+        state.finish_library_move(id, "");
+        assert_eq!(state.entry(id).unwrap().status, DownloadStatus::Completed);
+        assert!(!state.snapshot().has_live_library_move());
+        assert_eq!(state.retryable(id), None);
+
+        let failed = state.admit_library_move("Library move", "x").unwrap();
+        state.finish_library_move(failed, "disk full");
+        let entry = state.entry(failed).unwrap();
+        assert_eq!(entry.status, DownloadStatus::Failed);
+        assert_eq!(entry.error, "disk full");
+        assert_eq!(state.retryable(failed), Some(JobKey::LibraryMove));
+
+        // A stray finish for an ordinary install changes nothing.
+        let rom = admit_idle(&mut state, 9);
+        state.finish_library_move(rom, "nope");
+        assert_eq!(
+            state.entry(rom).unwrap().status,
+            DownloadStatus::Downloading
+        );
+        assert!(state.snapshot().has_live_entry());
+    }
+
+    /// The live-install check sees a live install even when a move row is
+    /// there too.
+    #[test]
+    fn a_live_install_beside_a_move_row_still_counts() {
+        let mut state = QueueState::default();
+        state.admit_library_move("Library move", "x").unwrap();
+        admit_idle(&mut state, 1);
+        assert!(state.snapshot().has_live_entry());
     }
 
     #[test]

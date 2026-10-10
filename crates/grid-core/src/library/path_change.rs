@@ -40,6 +40,9 @@ pub struct LibraryActivity {
     pub running_games: bool,
     /// A cloud save upload or restore is in flight.
     pub cloud_transfers: bool,
+    /// A library move (phase 9b, `library::relocate`) is running or waits
+    /// to resume.
+    pub library_move: bool,
 }
 
 /// Why a new library path was refused. Serialized as a snake_case tag, so
@@ -58,6 +61,7 @@ pub enum PathChangeRefusal {
     InstallActive,
     GameRunning,
     CloudTransferActive,
+    LibraryMoveActive,
 }
 
 impl PathChangeRefusal {
@@ -79,6 +83,7 @@ impl PathChangeRefusal {
             Self::CloudTransferActive => {
                 "Wait until the cloud save transfer finishes, then try again."
             }
+            Self::LibraryMoveActive => "Wait until the library move finishes, then try again.",
         }
     }
 }
@@ -131,6 +136,9 @@ pub fn check_new_library_path(
         if let Some(current_key) = removal_key(&expand(current, home), home) {
             compare_keys(&current_key, &target_key)?;
         }
+    }
+    if activity.library_move {
+        return Err(PathChangeRefusal::LibraryMoveActive);
     }
     if activity.installs {
         return Err(PathChangeRefusal::InstallActive);
@@ -417,6 +425,7 @@ mod tests {
         installs: false,
         running_games: false,
         cloud_transfers: false,
+        library_move: false,
     };
 
     // --- check_new_library_path ---------------------------------------------
@@ -510,6 +519,13 @@ mod tests {
                 },
                 PathChangeRefusal::CloudTransferActive,
             ),
+            (
+                LibraryActivity {
+                    library_move: true,
+                    ..IDLE
+                },
+                PathChangeRefusal::LibraryMoveActive,
+            ),
         ];
         for (activity, expected) in busy {
             assert_eq!(
@@ -533,6 +549,7 @@ mod tests {
             PathChangeRefusal::InstallActive,
             PathChangeRefusal::GameRunning,
             PathChangeRefusal::CloudTransferActive,
+            PathChangeRefusal::LibraryMoveActive,
         ] {
             assert!(refusal.message().ends_with('.'), "{refusal:?}");
         }

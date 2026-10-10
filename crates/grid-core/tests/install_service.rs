@@ -1560,7 +1560,8 @@ async fn admit_external_and_complete_external_round_trip() {
 
     let ok = harness
         .service
-        .admit_external("PS3 Firmware", "PlayStation 3");
+        .admit_external("PS3 Firmware", "PlayStation 3")
+        .unwrap();
     let entry = harness.entry(ok);
     assert_eq!(entry.kind, "firmware");
     assert_eq!(entry.job, "firmware");
@@ -1574,7 +1575,8 @@ async fn admit_external_and_complete_external_round_trip() {
 
     let bad = harness
         .service
-        .admit_external("PS3 Firmware", "PlayStation 3");
+        .admit_external("PS3 Firmware", "PlayStation 3")
+        .unwrap();
     harness.service.complete_external(bad, "download failed");
     assert_eq!(harness.entry(bad).status, DownloadStatus::Failed);
     assert_eq!(harness.entry(bad).error, "download failed");
@@ -3029,4 +3031,103 @@ async fn native_update_without_an_install_directory_fails() {
         "Game install directory could not be found. Reinstall the game and try again."
     );
     assert!(harness.server.received_requests().await.unwrap().is_empty());
+}
+
+// --- library move gate (phase 9b) -------------------------------------------
+
+/// While a library move holds the gate, nothing new may write into the
+/// library: an install, a firmware row, an uninstall and Start fresh are
+/// all refused with the gate's reason, and nothing is created or removed.
+/// Opening the gate lets them through again.
+#[tokio::test]
+async fn a_closed_library_gate_refuses_installs_uninstalls_and_start_fresh() {
+    use grid_core::library::relocate::{LibraryGate, LIBRARY_MOVE_BUSY};
+
+    let harness = Harness::new().await;
+    let gate = LibraryGate::closed(LIBRARY_MOVE_BUSY);
+    harness.service.set_library_gate(gate.clone());
+    let busy = |result: Result<(), LibraryError>| match result {
+        Err(LibraryError::LibraryBusy(reason)) => assert_eq!(reason, LIBRARY_MOVE_BUSY),
+        other => panic!("expected LibraryBusy, got {other:?}"),
+    };
+
+    busy(harness.service.install(harness.client.clone(), 1).await);
+    assert!(harness.service.snapshot().entries.is_empty());
+    assert!(harness.server.received_requests().await.unwrap().is_empty());
+
+    busy(
+        harness
+            .service
+            .admit_external("PS3 Firmware", "PlayStation 3")
+            .map(|_| ()),
+    );
+    assert!(harness.service.snapshot().entries.is_empty());
+
+    let game_dir = harness.library.join("games/SNES/Kept");
+    fs::create_dir_all(&game_dir).unwrap();
+    harness
+        .registry
+        .upsert(&InstalledGame {
+            title: "Kept".into(),
+            platform: "SNES".into(),
+            rom_id: Some(7),
+            extracted_dir: game_dir.to_string_lossy().into_owned(),
+            installed_at: 1,
+            ..Default::default()
+        })
+        .unwrap();
+    busy(harness.service.uninstall(7));
+    busy(
+        harness
+            .service
+            .start_fresh_forget(&harness.library)
+            .map(|_| ()),
+    );
+    busy(
+        harness
+            .service
+            .start_fresh_delete(&harness.library)
+            .map(|_| ()),
+    );
+    assert!(game_dir.is_dir());
+    assert_eq!(harness.service.installed().unwrap().len(), 1);
+
+    gate.open();
+    let id = harness
+        .service
+        .admit_external("PS3 Firmware", "PlayStation 3")
+        .unwrap();
+    harness.service.complete_external(id, "");
+}
+
+/// The move's own Downloads row: created once, updated with a detail line
+/// and progress, finished; never counted as a live install.
+#[tokio::test]
+async fn the_library_move_row_reports_progress_and_finishes() {
+    let harness = Harness::new().await;
+    let id = harness
+        .service
+        .begin_library_move("Library move", "/new/library")
+        .unwrap();
+    assert_eq!(
+        harness.service.begin_library_move("Library move", "x"),
+        None
+    );
+    harness
+        .service
+        .set_library_move_progress(id, "Copying games", 5, 10);
+    let entry = harness.entry(id);
+    assert_eq!(entry.kind, "library_move");
+    assert_eq!(entry.detail, "Copying games");
+    assert_eq!(entry.install_processed_bytes, 5);
+    assert_eq!(entry.install_total_bytes, 10);
+    assert!(!harness.service.snapshot().has_live_entry());
+    assert!(harness.service.snapshot().has_live_library_move());
+
+    harness.service.finish_library_move(id, "");
+    assert_eq!(harness.entry(id).status, DownloadStatus::Completed);
+    assert!(harness.snapshots.lock().unwrap().iter().any(|snap| snap
+        .entries
+        .iter()
+        .any(|e| e.id == id && e.detail == "Copying games")));
 }

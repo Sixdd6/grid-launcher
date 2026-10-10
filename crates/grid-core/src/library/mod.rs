@@ -19,6 +19,7 @@ pub mod platforms;
 pub mod queue;
 pub mod registry;
 pub mod relink;
+pub mod relocate;
 pub mod server_emulator;
 pub mod specials;
 pub mod update_detection;
@@ -70,6 +71,7 @@ use platforms::{
 };
 use queue::{Admission, CancelAction, DownloadStatus, DownloadsSnapshot, JobKey, QueueState};
 use registry::{installed_match, InstalledGame, Registry};
+use relocate::LibraryGate;
 use specials::ps3::Ps3Roots;
 use update_detection::is_emulators_platform;
 use user_data_links::{ensure_user_data_links, user_data_root};
@@ -92,6 +94,9 @@ pub enum LibraryError {
     LibraryPathUnset,
     #[error("registry: {0}")]
     Registry(String),
+    /// The library gate is closed (a library move runs): the reason.
+    #[error("{0}")]
+    LibraryBusy(String),
 }
 
 // --- constants --------------------------------------------------------------
@@ -790,6 +795,9 @@ pub struct InstallService {
     /// `None` until the app installs one; a finalized ordinary emulator
     /// install then triggers no follow-on work.
     emulator_installed_hook: RwLock<Option<EmulatorInstalledHook>>,
+    /// Closed while a library move runs; every admission and removal
+    /// checks it. Open by default until the app installs its own.
+    library_gate: RwLock<LibraryGate>,
 }
 
 impl InstallService {
@@ -832,6 +840,7 @@ impl InstallService {
             platform_slugs: RwLock::new(BTreeMap::new()),
             compat_tools_hook: RwLock::new(None),
             emulator_installed_hook: RwLock::new(None),
+            library_gate: RwLock::new(LibraryGate::default()),
         })
     }
 
@@ -941,6 +950,7 @@ impl InstallService {
         client: Arc<RommClient>,
         rom_id: i64,
     ) -> Result<(), LibraryError> {
+        self.check_library_gate()?;
         let library = self.library_root()?;
         let detail = client.rom_detail(rom_id).await?;
         let job = plan_install(&detail, &library, client)?;
@@ -954,8 +964,7 @@ impl InstallService {
         } else {
             job.mode.kind()
         };
-        self.admit(key, &title, &platform, kind, JobPayload::Game(job));
-        Ok(())
+        self.admit(key, &title, &platform, kind, JobPayload::Game(job))
     }
 
     /// Starts (or queues) an update or DLC install for an already installed
@@ -975,6 +984,7 @@ impl InstallService {
         rom_id: i64,
         kind: ContentKind,
     ) -> Result<(), LibraryError> {
+        self.check_library_gate()?;
         let library = self.library_root()?;
         self.current_row(rom_id)?;
         let detail = client.rom_detail(rom_id).await?;
@@ -988,8 +998,7 @@ impl InstallService {
             return Err(LibraryError::Extract(no_content_message(mode, kind)));
         }
         let (key, title, payload) = content_job(&library, &detail, kind, mode, file_ids, client);
-        self.admit(key, &title, &detail.platform_name, mode.kind(), payload);
-        Ok(())
+        self.admit(key, &title, &detail.platform_name, mode.kind(), payload)
     }
 
     /// Starts (or queues) an update install for an already installed native
@@ -1004,6 +1013,7 @@ impl InstallService {
         client: Arc<RommClient>,
         rom_id: i64,
     ) -> Result<(), LibraryError> {
+        self.check_library_gate()?;
         let row = self.current_row(rom_id)?;
         let extracted_dir = row.extracted_dir.trim();
         if !is_native_platform(&row.platform)
@@ -1058,8 +1068,7 @@ impl InstallService {
             &platform,
             InstallMode::NativeUpdate.kind(),
             JobPayload::Game(job),
-        );
-        Ok(())
+        )
     }
 
     /// Starts (or queues) a plain re-install of an already installed
@@ -1073,6 +1082,7 @@ impl InstallService {
         client: Arc<RommClient>,
         rom_id: i64,
     ) -> Result<(), LibraryError> {
+        self.check_library_gate()?;
         let library = self.library_root()?;
         let row = self.current_row(rom_id)?;
         if is_native_platform(&row.platform) {
@@ -1090,8 +1100,7 @@ impl InstallService {
             &platform,
             InstallMode::Update.kind(),
             JobPayload::Game(job),
-        );
-        Ok(())
+        )
     }
 
     /// Starts (or queues) an emulator acquisition for the catalog
@@ -1113,6 +1122,7 @@ impl InstallService {
     /// re-installs through here, so an update also enqueues a missing
     /// companion.
     pub async fn install_emulator(self: &Arc<Self>, source_id: String) -> Result<(), LibraryError> {
+        self.check_library_gate()?;
         let library = self.library_root()?;
         fn unknown(source_id: &str) -> LibraryError {
             LibraryError::Registry(format!("unknown emulator: {source_id}"))
@@ -1163,8 +1173,7 @@ impl InstallService {
             EMULATOR_PLATFORM,
             "emulator",
             JobPayload::Emulator(job),
-        );
-        Ok(())
+        )
     }
 
     /// Admits every companion `profile` names that is not installed yet.
@@ -1230,6 +1239,7 @@ impl InstallService {
         self: &Arc<Self>,
         source_id: String,
     ) -> Result<(), LibraryError> {
+        self.check_library_gate()?;
         fn unknown() -> LibraryError {
             LibraryError::Extract(UNKNOWN_COMPAT_TOOL_SOURCE.to_string())
         }
@@ -1264,8 +1274,7 @@ impl InstallService {
             COMPAT_TOOL_PLATFORM,
             "compat_tool",
             JobPayload::Emulator(job),
-        );
-        Ok(())
+        )
     }
 
     /// Cancels `entry_id`: an active download gets its flag flipped and ends
@@ -1303,10 +1312,70 @@ impl InstallService {
     /// is handed back to [`Self::complete_external`] when that transfer
     /// ends. The row takes no queue slot, so it neither blocks nor is
     /// blocked by a real install.
-    pub fn admit_external(&self, title: &str, platform: &str) -> u64 {
-        let id = self.queue.lock().unwrap().admit_external(title, platform);
+    ///
+    /// Refused with [`LibraryError::LibraryBusy`] while the library gate is
+    /// closed: a firmware transfer writes into the emulators folder.
+    pub fn admit_external(&self, title: &str, platform: &str) -> Result<u64, LibraryError> {
+        let id = {
+            let mut queue = self.queue.lock().unwrap();
+            self.check_library_gate()?;
+            queue.admit_external(title, platform)
+        };
         self.notify_now();
+        Ok(id)
+    }
+
+    /// Sets the gate a library move closes. The app calls this once with
+    /// the gate it owns; until then the service has its own, always open.
+    pub fn set_library_gate(&self, gate: LibraryGate) {
+        *self.library_gate.write().unwrap() = gate;
+    }
+
+    /// [`LibraryError::LibraryBusy`] while the library gate is closed.
+    fn check_library_gate(&self) -> Result<(), LibraryError> {
+        self.library_gate
+            .read()
+            .unwrap()
+            .check()
+            .map_err(|busy| LibraryError::LibraryBusy(busy.reason))
+    }
+
+    /// Creates the library move's Downloads row
+    /// ([`QueueState::admit_library_move`]). `None` while one is live.
+    pub fn begin_library_move(&self, title: &str, platform: &str) -> Option<u64> {
+        let id = self
+            .queue
+            .lock()
+            .unwrap()
+            .admit_library_move(title, platform);
+        if id.is_some() {
+            self.notify_now();
+        }
         id
+    }
+
+    /// Updates the library move row: its detail line and byte progress.
+    /// Notifies at the install-progress rate, or at once when the detail
+    /// line changed.
+    pub fn set_library_move_progress(&self, id: u64, detail: &str, done: u64, total: u64) {
+        let changed = {
+            let mut queue = self.queue.lock().unwrap();
+            let changed = queue.entry(id).is_some_and(|entry| entry.detail != detail);
+            queue.set_detail(id, detail);
+            queue.set_install_progress(id, done, total);
+            changed
+        };
+        if changed {
+            self.notify_now();
+        } else {
+            self.notify_throttled(INSTALL_NOTIFY_INTERVAL);
+        }
+    }
+
+    /// Ends the library move row: a blank `error` completes it.
+    pub fn finish_library_move(&self, id: u64, error: &str) {
+        self.queue.lock().unwrap().finish_library_move(id, error);
+        self.notify_now();
     }
 
     /// Reports the outcome of an [`Self::admit_external`] row: a blank
@@ -1370,6 +1439,8 @@ impl InstallService {
             // never moved its bytes and has no plan to restart. The owner
             // re-requests it instead, which creates a new row.
             Some(JobKey::External(_)) => Ok(()),
+            // A library move is resumed or restarted by its own service.
+            Some(JobKey::LibraryMove) => Ok(()),
             None => Ok(()),
         }
     }
@@ -1402,6 +1473,7 @@ impl InstallService {
     /// only when nothing failed, so a partial removal leaves the game
     /// installed rather than orphaning it.
     pub fn uninstall(&self, rom_id: i64) -> Result<(), LibraryError> {
+        self.check_library_gate()?;
         let library = self.library_root()?;
         // `find` falls back to the (title, platform) identity when no row
         // carries the rom id, but never for this call: title and platform
@@ -1448,6 +1520,7 @@ impl InstallService {
         entry: &EmulatorEntry,
         others: &[EmulatorEntry],
     ) -> Result<usize, LibraryError> {
+        self.check_library_gate()?;
         let library = match self.library_root() {
             Ok(library) => library,
             Err(LibraryError::LibraryPathUnset) => return Ok(0),
@@ -1519,6 +1592,7 @@ impl InstallService {
         &self,
         old_root: &Path,
     ) -> Result<path_change::StartFreshReport, LibraryError> {
+        self.check_library_gate()?;
         let home = crate::platform::home_dir();
         let rows = path_change::start_fresh_rows(&self.registry.all()?, old_root, home.as_deref());
         let mut report = path_change::StartFreshReport::default();
@@ -1541,6 +1615,7 @@ impl InstallService {
         &self,
         old_root: &Path,
     ) -> Result<path_change::StartFreshReport, LibraryError> {
+        self.check_library_gate()?;
         let mut report = path_change::StartFreshReport::default();
         for entry in self.start_fresh_plan(old_root)? {
             let failures = run_removals(&entry.inside, &mut apply_removal);
@@ -1650,9 +1725,13 @@ impl InstallService {
         platform: &str,
         kind: &'static str,
         payload: JobPayload,
-    ) {
+    ) -> Result<(), LibraryError> {
         let (admitted, start) = {
             let mut queue = self.queue.lock().unwrap();
+            // Under the queue lock: a library move closes the gate first and
+            // then reads the queue under this same lock, so an admission can
+            // never slip in between.
+            self.check_library_gate()?;
             match queue.admit(key, title, platform, kind) {
                 Admission::Start(id) => (true, Some((id, payload))),
                 Admission::Queued(id) => {
@@ -1665,12 +1744,13 @@ impl InstallService {
         // Nothing below runs under the queue lock: `spawn_download` takes it
         // again, and the listener must never see it held.
         if !admitted {
-            return;
+            return Ok(());
         }
         if let Some((id, payload)) = start {
             self.spawn_download(id, payload);
         }
         self.notify_now();
+        Ok(())
     }
 
     /// Starts the download task for `id`, registering its cancellation flag
@@ -2046,13 +2126,15 @@ impl InstallService {
                 file_ids,
                 job.client.clone(),
             );
-            self.admit(
+            if let Err(e) = self.admit(
                 key,
                 &title,
                 &job.detail.platform_name,
                 InstallMode::Xbox360Content.kind(),
                 payload,
-            );
+            ) {
+                tracing::warn!(error = %e, "Xbox 360 content was not queued");
+            }
         }
     }
 

@@ -327,6 +327,13 @@ pub(crate) fn is_link(path: &Path) -> bool {
     false
 }
 
+/// Whether `path` is a link (a symlink, or an NTFS junction on Windows)
+/// rather than a real directory or file. The public face of [`is_link`],
+/// for the integration tests and the app layer.
+pub fn is_link_path(path: &Path) -> bool {
+    is_link(path)
+}
+
 /// Where `link` points, as an absolute path. A relative unix symlink is
 /// joined onto the link's own parent.
 #[cfg(unix)]
