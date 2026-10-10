@@ -43,14 +43,19 @@ use super::IgnoreSets;
 /// "game"` on top of the caller's sanitization. Folding both steps in here
 /// means every caller in this module can pass a raw, unsanitized title.
 pub fn temp_archive_path(title: &str) -> PathBuf {
-    let sanitized = sanitize_component(title, "game");
-    let trimmed = sanitized.trim();
-    let base_title = if trimmed.is_empty() { "game" } else { trimmed };
-
     let timestamp = chrono::Local::now()
         .format("%Y-%m-%dT%H:%M:%S%:z")
         .to_string()
         .replace(':', "-");
+    temp_archive_path_at(title, &timestamp)
+}
+
+/// [`temp_archive_path`] with the timestamp supplied, so a test can hit
+/// the collision branch without racing the clock across a second boundary.
+fn temp_archive_path_at(title: &str, timestamp: &str) -> PathBuf {
+    let sanitized = sanitize_component(title, "game");
+    let trimmed = sanitized.trim();
+    let base_title = if trimmed.is_empty() { "game" } else { trimmed };
 
     let archive_path = std::env::temp_dir().join(format!("{base_title}-{timestamp}.zip"));
     if !archive_path.exists() {
@@ -1006,14 +1011,13 @@ mod tests {
 
     #[test]
     fn temp_archive_name_shape_and_collision_suffix() {
-        let timestamp = chrono::Local::now()
-            .format("%Y-%m-%dT%H:%M:%S%:z")
-            .to_string()
-            .replace(':', "-");
+        // A fixed timestamp: with the live clock, crossing a second boundary
+        // between this line and the call made the collision vanish.
+        let timestamp = "2026-10-10T12-34-56+00-00";
         let expected_first = std::env::temp_dir().join(format!("My_Game-{timestamp}.zip"));
         fs::write(&expected_first, b"").unwrap();
 
-        let result = temp_archive_path("My:Game");
+        let result = temp_archive_path_at("My:Game", timestamp);
 
         let file_name = result.file_name().unwrap().to_str().unwrap().to_string();
         let _ = fs::remove_file(&expected_first);

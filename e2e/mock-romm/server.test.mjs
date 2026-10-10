@@ -65,14 +65,14 @@ test("GET /api/users/me returns the fixture user", async () => {
 
 // --- platforms -------------------------------------------------------------
 
-test("GET /api/platforms returns two platforms, both with rom_count > 0", async () => {
+test("GET /api/platforms returns the three fixture platforms, all with rom_count > 0", async () => {
   await withServer(async ({ url }) => {
     const res = await fetch(`${url}/api/platforms`, { headers: authHeader() });
     assert.equal(res.status, 200);
     const body = await res.json();
-    assert.equal(body.length, 2);
+    assert.equal(body.length, 3);
     const names = body.map((p) => p.name).sort();
-    assert.deepEqual(names, ["Arcade", "Super Nintendo Entertainment System"]);
+    assert.deepEqual(names, ["Arcade", "Super Nintendo Entertainment System", "Windows"]);
     for (const platform of body) {
       assert.ok(platform.rom_count > 0, `expected rom_count > 0 for ${platform.name}`);
       assert.ok(platform.id);
