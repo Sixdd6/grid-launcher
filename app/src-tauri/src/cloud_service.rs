@@ -8,7 +8,7 @@
 //!   (`details_view_mixin.py:1497`'s call site; `_auto_sync_before_launch`
 //!   at cloud_mixin.py:2799-2814);
 //! - **after exit** — [`CloudService::install_session_finished_hook`]
-//!   installs a `LaunchService::set_session_finished_hook` that stamps the
+//!   adds a `LaunchService::add_session_finished_hook` listener that stamps the
 //!   session-start/end sync state and, gated on the config flag and a live
 //!   connection, schedules an auto-upload after the (clamped) delay
 //!   (`_register_game_session_for_auto_upload` at
@@ -840,7 +840,7 @@ impl CloudService {
 
     /// Installs the cloud auto-upload trigger on `launch`. Called once
     /// from `lib.rs`'s `.setup()`. The hook itself must be a plain (not
-    /// `async`) closure — `LaunchService::set_session_finished_hook`'s
+    /// `async`) closure — `LaunchService::add_session_finished_hook`'s
     /// contract — so it hands the actual work to
     /// `tauri::async_runtime::spawn`, exactly like `spawn_poll_loop`'s own
     /// call site requires for any code that reaches `tokio::spawn`.
@@ -853,7 +853,7 @@ impl CloudService {
         config_path: PathBuf,
     ) {
         let cloud = self.clone();
-        launch.set_session_finished_hook(Arc::new(move |session: GameSession| {
+        launch.add_session_finished_hook(Arc::new(move |session: GameSession| {
             let app = app.clone();
             let cloud = cloud.clone();
             let session_mgr = session_mgr.clone();

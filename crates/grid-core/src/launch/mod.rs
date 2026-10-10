@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::process::ExitStatus;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use crate::config::Config;
 use crate::library::extract::which_on_path;
@@ -71,7 +71,7 @@ const EARLY_EXIT_DELAY: Duration = Duration::from_millis(500);
 
 type Listener = Arc<dyn Fn(SessionsSnapshot) + Send + Sync>;
 /// Fired once per reaped session, after that reap's snapshot emit(s), with
-/// no lock held — see [`LaunchService::set_session_finished_hook`].
+/// no lock held — see [`LaunchService::add_session_finished_hook`].
 type SessionFinishedHook = Arc<dyn Fn(GameSession) + Send + Sync>;
 /// Fired with the emulator's name and path just before a RetroArch game is
 /// spawned — see [`LaunchService::set_pre_launch_hook`].
@@ -88,13 +88,14 @@ pub struct LaunchService {
     registry: Arc<Registry>,
     config_path: PathBuf,
     notify: RwLock<Option<Listener>>,
-    /// The cloud auto-upload trigger — installed once by the app layer
-    /// (`CloudService`), which has no place in grid-core (it needs a
-    /// `RommClient`, config, and the cloud `ops` layer). `None` in every
-    /// grid-core test that does not opt in.
-    session_finished_hook: RwLock<Option<SessionFinishedHook>>,
+    /// The session-finished listeners, in the order they were added. The
+    /// app layer installs them at startup: the cloud auto-upload trigger
+    /// (`CloudService`) and play activity (`PlaySessionService`). Neither
+    /// has a place in grid-core — they need a `RommClient`, config and the
+    /// app's runtime. Empty in every grid-core test that does not opt in.
+    session_finished_hooks: RwLock<Vec<SessionFinishedHook>>,
     /// The RetroArch settings sync, installed once by the app layer for the
-    /// same reason as `session_finished_hook`: it needs the server platform
+    /// same reason as `session_finished_hooks`: it needs the server platform
     /// list and the RetroAchievements credentials, neither of which
     /// grid-core's launch path holds. `None` in every grid-core test that
     /// does not opt in.
@@ -144,7 +145,7 @@ impl LaunchService {
             registry,
             config_path,
             notify: RwLock::new(None),
-            session_finished_hook: RwLock::new(None),
+            session_finished_hooks: RwLock::new(Vec::new()),
             pre_launch_hook: RwLock::new(None),
             next_id: AtomicU64::new(1),
             poll_started: AtomicBool::new(false),
@@ -160,12 +161,29 @@ impl LaunchService {
         *self.notify.write().unwrap() = Some(f);
     }
 
-    /// Installs the cloud auto-upload trigger. Called once by the app
-    /// layer; a second call replaces the first. Fired from the poll loop
-    /// for each session the reaper removes — AFTER that reap's snapshot
-    /// emit(s), with no lock held (see [`Self::reap_and_notify`]).
-    pub fn set_session_finished_hook(&self, f: SessionFinishedHook) {
-        *self.session_finished_hook.write().unwrap() = Some(f);
+    /// Adds a session-finished listener; earlier listeners stay. Each one is
+    /// fired from the reaping path for every session the reaper removes —
+    /// AFTER that reap's snapshot emit(s), with no lock held (see
+    /// [`Self::reap_and_notify`]). The session carries its end time and
+    /// duration ([`GameSession::finished_at`]).
+    pub fn add_session_finished_hook(&self, f: SessionFinishedHook) {
+        self.session_finished_hooks.write().unwrap().push(f);
+    }
+
+    /// Hands every finished session to every listener, in the order the
+    /// listeners were added. The list is cloned and the lock released first:
+    /// a listener is arbitrary app code and must never block a later reap or
+    /// an `add_session_finished_hook`.
+    fn fire_session_finished(&self, finished: Vec<GameSession>) {
+        let hooks = self.session_finished_hooks.read().unwrap().clone();
+        if hooks.is_empty() {
+            return;
+        }
+        for session in finished {
+            for hook in &hooks {
+                hook(session.clone());
+            }
+        }
     }
 
     /// Installs the RetroArch settings sync. Called once by the app layer;
@@ -287,13 +305,18 @@ impl LaunchService {
         let child = spawn_child(argv, working_dir, extra_env).await?;
         let pid = child.id();
 
+        let started_at_ms = sessions::unix_now_ms();
         let session = GameSession {
             id: self.next_id.fetch_add(1, Ordering::Relaxed),
             rom_id,
             title,
             emulator_name,
-            started_at: unix_now(),
+            started_at: started_at_ms.div_euclid(1000),
             pid,
+            platform: game.platform.clone(),
+            started_at_ms,
+            ended_at_ms: None,
+            duration_ms: None,
         };
 
         // `register` re-checks the rom under the store lock; it is the
@@ -426,8 +449,8 @@ impl LaunchService {
     /// session that died inside its early-exit window, or a single plain
     /// snapshot when sessions went away with nothing to report. Emits nothing
     /// when the store did not change. Once every snapshot for this reap has
-    /// been emitted, fires the session-finished hook (if any) once per
-    /// reaped session, with no lock held.
+    /// been emitted, fires every session-finished listener once per reaped
+    /// session, with no lock held.
     ///
     /// A warning gets its own snapshot because `SessionsSnapshot` carries at
     /// most one message; two games failing in the same tick is rare, and
@@ -456,15 +479,9 @@ impl LaunchService {
             }
         }
 
-        // The hook, like `notify`, is read (and its Arc cloned) with the
-        // lock released before it is called — the callback is arbitrary app
-        // code and must never be able to block a later reap.
-        let hook = self.session_finished_hook.read().unwrap().clone();
-        if let Some(hook) = hook {
-            for (session, _status) in exited {
-                hook(session);
-            }
-        }
+        // The listeners, like `notify`, are read (their Arcs cloned) with the
+        // lock released before they are called.
+        self.fire_session_finished(exited.into_iter().map(|(session, _)| session).collect());
     }
 
     /// Reaps under the reap gate. Never notifies: [`Self::reap_and_notify`]
@@ -605,17 +622,38 @@ async fn spawn_child(
     Ok(spawned?)
 }
 
-fn unix_now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::EmulatorEntry;
+
+    #[test]
+    fn every_session_finished_listener_sees_every_finished_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = Arc::new(Registry::open(&dir.path().join("registry.db")).unwrap());
+        let service = LaunchService::new(registry, dir.path().join("config.toml"));
+
+        let first: Arc<Mutex<Vec<u64>>> = Arc::new(Mutex::new(Vec::new()));
+        let second: Arc<Mutex<Vec<u64>>> = Arc::new(Mutex::new(Vec::new()));
+        let log = first.clone();
+        service.add_session_finished_hook(Arc::new(move |s: GameSession| {
+            log.lock().unwrap().push(s.id);
+        }));
+        let log = second.clone();
+        service.add_session_finished_hook(Arc::new(move |s: GameSession| {
+            log.lock().unwrap().push(s.id);
+        }));
+
+        let finished = |id| GameSession {
+            id,
+            rom_id: 7,
+            ..Default::default()
+        };
+        service.fire_session_finished(vec![finished(1), finished(2)]);
+
+        assert_eq!(*first.lock().unwrap(), vec![1, 2]);
+        assert_eq!(*second.lock().unwrap(), vec![1, 2]);
+    }
 
     #[test]
     fn entry_is_retroarch_uses_the_matched_profile_name() {

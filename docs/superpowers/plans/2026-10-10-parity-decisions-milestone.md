@@ -126,3 +126,9 @@ User answers: keep the rejected credential until replaced; retention defaults sa
 - `POST /api/states` ignores autocleanup params (200). No `DELETE /api/states/{id}` or `/api/saves/{id}`; use `POST /api/states/delete {"states":[ids]}` / `POST /api/saves/delete {"saves":[ids]}`.
 - Bulk delete is NOT atomic: it stops at the first missing id with 404, earlier ids stay deleted, later ids are kept. → delete one id per call (or treat 404 per id as success and continue).
 - Consequence: server autocleanup only helps for slotted uploads. Keep the client-side prune for whatever GRID uploads without a slot; send autocleanup when a slot is set. Confirm in code which uploads carry a slot (`slot_dedupe_key`).
+
+## B4 live probe (tester account, 2026-10-10)
+- `POST /api/play-sessions` JSON `{"sessions":[{"rom_id":N,"start_time":"<RFC3339 Z>","end_time":"...","duration_ms":int}]}` (device_id optional, top-level and per entry) → 201 `{results:[{index,status:"created"|"duplicate"|"error",id}],created_count,skipped_count}`. An exact repeat → `duplicate` (safe retry).
+- The ingest ALSO sets the user's `rom_user.last_played` to the session end_time.
+- `PUT /api/roms/{id}/props?update_last_played=true` sets last_played to now BUT also sets `now_playing=true` and `status="incomplete"` (would clobber a user's status) → **do not call props**; last played reaches RomM through the session ingest.
+- `DELETE /api/play-sessions/{id}` → 204. GET filters: rom_id, device_id, start_after, end_before, limit, offset. Returned timestamps lack an offset (treat as UTC).

@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use grid_core::config::{Config, EmulatorEntry};
-use grid_core::launch::{LaunchError, LaunchService, SessionsSnapshot};
+use grid_core::launch::{GameSession, LaunchError, LaunchService, SessionsSnapshot};
 use grid_core::library::registry::{InstalledGame, Registry};
 
 // --- fixtures ---------------------------------------------------------------
@@ -469,7 +469,7 @@ async fn the_session_finished_hook_fires_once_per_reaped_session_after_the_snaps
     }));
 
     let hook_log = log.clone();
-    service.set_session_finished_hook(Arc::new(move |session| {
+    service.add_session_finished_hook(Arc::new(move |session| {
         hook_log
             .lock()
             .unwrap()
@@ -502,6 +502,42 @@ async fn the_session_finished_hook_fires_once_per_reaped_session_after_the_snaps
         ],
         "the hook must fire exactly once, after the snapshot emit(s): {events:?}"
     );
+}
+
+#[tokio::test]
+async fn every_session_finished_listener_gets_the_end_time_duration_and_platform() {
+    let h = Harness::new();
+    let exe = h.stub("quitter", "exit 0");
+    h.write_config(vec![entry("Stub", &exe, "%rom%")], &[("SNES", "Stub")]);
+    h.install_game(7, "Chrono", "SNES");
+    let service = h.service();
+
+    let cloud: Arc<Mutex<Vec<GameSession>>> = Arc::new(Mutex::new(Vec::new()));
+    let play: Arc<Mutex<Vec<GameSession>>> = Arc::new(Mutex::new(Vec::new()));
+    let log = cloud.clone();
+    service.add_session_finished_hook(Arc::new(move |s| log.lock().unwrap().push(s)));
+    let log = play.clone();
+    service.add_session_finished_hook(Arc::new(move |s| log.lock().unwrap().push(s)));
+
+    let started = service.launch(7).await.unwrap();
+    assert_eq!(started.ended_at_ms, None);
+    assert!(
+        wait_until(|| play.lock().unwrap().len() == 1).await,
+        "the second listener never fired"
+    );
+
+    let cloud = cloud.lock().unwrap().clone();
+    let play = play.lock().unwrap().clone();
+    assert_eq!(cloud.len(), 1, "the first listener fired once");
+    for finished in [&cloud[0], &play[0]] {
+        assert_eq!(finished.id, started.id);
+        assert_eq!(finished.platform, "SNES");
+        assert_eq!(finished.started_at_ms, started.started_at_ms);
+        assert_eq!(finished.started_at, started.started_at_ms / 1000);
+        let ended = finished.ended_at_ms.expect("a finished session has an end");
+        assert!(ended >= finished.started_at_ms);
+        assert_eq!(finished.duration_ms, Some(ended - finished.started_at_ms));
+    }
 }
 
 #[tokio::test]

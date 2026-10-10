@@ -54,9 +54,13 @@ Modules as declared in `src/lib.rs`:
 - `pcgw` — PCGamingWiki client that resolves a Windows game's save paths.
 - `platform` — host-platform lookups that need OS APIs (for example the Shell-resolved
   Windows Documents folder).
+- `play_activity` — play activity (Q10): which finished game session is sent to RomM's
+  play-session ingest (≥ 30 s, with a rom id, not the Emulators platform), and the flush
+  of the registry's `pending_play_sessions` outbox — what is deleted, dropped or kept
+  after each batch.
 - `retroachievements` — the RetroAchievements login client. Login only.
 - `romm` — the RomM HTTP client: `RommClient`, platforms, games, ROM detail, firmware,
-  byte fetches, and the cloud save/state endpoints. All request construction lives here;
+  byte fetches, the cloud save/state endpoints, and the play-session ingest. All request construction lives here;
   check `openapi.json` before changing any of it.
 - `secrets` — `Credential`, the `SecretStore`/`RaTokenStore` traits, and `KeyringStore`,
   the OS keyring implementation. Secrets are `SecretString` values that cannot be
@@ -88,11 +92,15 @@ The shell owns *when* things run; grid-core owns *what* they do.
   process, banner only, nothing downloaded), `python_import.rs` (the startup presence
   check for a Python-era config), `config_write.rs` (one config writer at a time, so two
   load-modify-save cycles cannot lose an update), `logging.rs` (the tracing filter and
-  the `debug_prints` toggle), `gamepad/` (polling and the navigation events it emits).
+  the `debug_prints` toggle), `gamepad/` (polling and the navigation events it emits),
+  `play_session_service.rs` (play activity: queues a finished session in the registry
+  outbox and flushes it on session end and after connect, restore or retry; offline, the
+  queue waits).
 
 **Hooks pattern.** grid-core services expose setters — `InstallService`'s
 `set_game_finalized_hook`, `set_emulator_installed_hook`, `set_image_hook`,
-`set_compat_tools_hook`, and `LaunchService::set_session_finished_hook`. `lib.rs`
+`set_compat_tools_hook`, and `LaunchService::add_session_finished_hook` (a list: cloud
+auto-upload and play activity each add a listener). `lib.rs`
 installs closures on them at startup, and each closure body stays trivial: it hands the
 work to an app-layer service. That is how a finished install can trigger a firmware pass,
 a cover prefetch and an update recompute without grid-core knowing any of them exist.

@@ -4,6 +4,7 @@
 
 use super::LibraryError;
 use crate::images::ImageFields;
+use crate::romm::PlaySessionEntry;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use std::path::Path;
 use std::sync::Mutex;
@@ -55,9 +56,26 @@ CREATE TABLE installed_games (
 );
 ";
 
+/// The play-session outbox (v7, Q10): finished sessions waiting for
+/// `POST /api/play-sessions` (see `crate::play_activity`). The columns
+/// rebuild a `PlaySessionEntry`; `id` is the stable local id a flush pages
+/// and deletes by. `(rom_id, start_time)` is one game process, so a second
+/// enqueue of it is ignored. `IF NOT EXISTS` makes the v6 -> v7 step
+/// idempotent.
+const PLAY_SESSIONS_SQL: &str = "
+CREATE TABLE IF NOT EXISTS pending_play_sessions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    rom_id      INTEGER NOT NULL,
+    start_time  TEXT NOT NULL,
+    end_time    TEXT NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    UNIQUE (rom_id, start_time)
+);
+";
+
 /// The schema version this build understands. Bumped when a migration adds
-/// columns (see spec: later milestones add native/PS3/PS4 fields).
-const LATEST_USER_VERSION: i64 = 6;
+/// columns or tables (see spec: later milestones add native/PS3/PS4 fields).
+const LATEST_USER_VERSION: i64 = 7;
 
 /// The columns v1 -> v2 (milestone 7) adds to `installed_games`.
 const V2_IMAGE_COLUMNS: [&str; 3] = ["cover_small_path", "cover_large_path", "screenshot_urls"];
@@ -226,6 +244,18 @@ fn migrate_5_to_6(conn: &mut Connection) -> Result<(), LibraryError> {
         .map_err(registry_err)?;
     }
     tx.pragma_update(None, "user_version", 6)
+        .map_err(registry_err)?;
+    tx.commit().map_err(registry_err)
+}
+
+/// v6 -> v7 (Q10 play activity): adds the `pending_play_sessions` outbox.
+/// One transaction for the table and the `user_version` bump, like every
+/// migration above; the `CREATE` is `IF NOT EXISTS`, so a database torn
+/// between the two finishes instead of erroring, and keeps its queued rows.
+fn migrate_6_to_7(conn: &mut Connection) -> Result<(), LibraryError> {
+    let tx = conn.transaction().map_err(registry_err)?;
+    tx.execute_batch(PLAY_SESSIONS_SQL).map_err(registry_err)?;
+    tx.pragma_update(None, "user_version", 7)
         .map_err(registry_err)?;
     tx.commit().map_err(registry_err)
 }
@@ -424,6 +454,8 @@ impl Registry {
         }
         if version == 0 {
             conn.execute_batch(SCHEMA_SQL).map_err(registry_err)?;
+            conn.execute_batch(PLAY_SESSIONS_SQL)
+                .map_err(registry_err)?;
             version = LATEST_USER_VERSION;
         }
         // Each step commits its own `user_version` bump with its own schema
@@ -436,6 +468,7 @@ impl Registry {
                 3 => migrate_3_to_4(&mut conn)?,
                 4 => migrate_4_to_5(&mut conn)?,
                 5 => migrate_5_to_6(&mut conn)?,
+                6 => migrate_6_to_7(&mut conn)?,
                 v => {
                     return Err(LibraryError::Registry(format!(
                         "no migration from user_version {v}"
@@ -832,6 +865,86 @@ impl Registry {
             .map_err(registry_err)?;
         Ok(affected > 0)
     }
+
+    // --- play-session outbox (Q10, `play_activity`) ------------------------
+
+    /// Queues `entry` for the play-session ingest. Returns `false` when the
+    /// same `(rom_id, start_time)` is already queued: one game process is
+    /// one session, so a second enqueue of it is a repeat.
+    pub fn enqueue_play_session(&self, entry: &PlaySessionEntry) -> Result<bool, LibraryError> {
+        let conn = self.conn.lock().unwrap();
+        let inserted = conn
+            .execute(
+                "INSERT OR IGNORE INTO pending_play_sessions                  (rom_id, start_time, end_time, duration_ms) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    entry.rom_id,
+                    entry.start_time,
+                    entry.end_time,
+                    entry.duration_ms
+                ],
+            )
+            .map_err(registry_err)?;
+        Ok(inserted > 0)
+    }
+
+    /// Up to `limit` queued sessions with a row id above `after_id`, oldest
+    /// first. A flush pages with the last id it saw, so a row it keeps is
+    /// not sent twice in one pass.
+    pub fn pending_play_sessions(
+        &self,
+        after_id: i64,
+        limit: usize,
+    ) -> Result<Vec<PendingPlaySession>, LibraryError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, rom_id, start_time, end_time, duration_ms                  FROM pending_play_sessions WHERE id > ?1 ORDER BY id LIMIT ?2",
+            )
+            .map_err(registry_err)?;
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let rows = stmt
+            .query_map(params![after_id, limit], |row| {
+                Ok(PendingPlaySession {
+                    id: row.get(0)?,
+                    entry: PlaySessionEntry {
+                        rom_id: row.get(1)?,
+                        start_time: row.get(2)?,
+                        end_time: row.get(3)?,
+                        duration_ms: row.get(4)?,
+                    },
+                })
+            })
+            .map_err(registry_err)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(registry_err)
+    }
+
+    /// Deletes the queued sessions with these row ids. Returns how many
+    /// rows went away.
+    pub fn delete_pending_play_sessions(&self, ids: &[i64]) -> Result<usize, LibraryError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction().map_err(registry_err)?;
+        let mut removed = 0;
+        {
+            let mut stmt = tx
+                .prepare("DELETE FROM pending_play_sessions WHERE id = ?1")
+                .map_err(registry_err)?;
+            for id in ids {
+                removed += stmt.execute(params![id]).map_err(registry_err)?;
+            }
+        }
+        tx.commit().map_err(registry_err)?;
+        Ok(removed)
+    }
+}
+
+/// One queued play session: the outbox row id and the entry to send.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingPlaySession {
+    pub id: i64,
+    pub entry: PlaySessionEntry,
 }
 
 #[cfg(test)]

@@ -1,6 +1,8 @@
 mod cloud;
 mod error;
+mod play_sessions;
 pub use error::RommError;
+pub use play_sessions::{play_sessions_body, IngestResult, IngestStatus, PlaySessionEntry};
 
 use crate::secrets::Credential;
 use base64::Engine;

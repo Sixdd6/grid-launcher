@@ -53,6 +53,9 @@ pub struct AppState {
     /// Cloud save/state sync: the emulator-entry/sync-dir caches and the
     /// D5 auto-upload pool. See `cloud_service.rs` and `commands/cloud.rs`.
     pub cloud: Arc<crate::cloud_service::CloudService>,
+    /// Play activity: the play-session outbox flush triggers. See
+    /// `play_session_service.rs`.
+    pub play_sessions: Arc<crate::play_session_service::PlaySessionService>,
     /// Cover/screenshot pipeline glue: the startup sweep, the one-at-a-time
     /// replenish job, and the post-install prefetch. See `images.rs`.
     pub images: Arc<ImageService>,
@@ -110,6 +113,9 @@ pub async fn connect(
         state
             .updates
             .spawn_refresh(app, state.session.clone(), install.clone());
+        state
+            .play_sessions
+            .spawn_flush(state.session.clone(), install.registry());
     }
     Ok(result)
 }
@@ -128,6 +134,9 @@ pub async fn restore_session(
             state
                 .updates
                 .spawn_refresh(app, state.session.clone(), install.clone());
+            state
+                .play_sessions
+                .spawn_flush(state.session.clone(), install.registry());
         }
     }
     Ok(outcome)
@@ -157,6 +166,9 @@ pub async fn retry_connect(
             state
                 .updates
                 .spawn_refresh(app, state.session.clone(), install.clone());
+            state
+                .play_sessions
+                .spawn_flush(state.session.clone(), install.registry());
         }
     }
     Ok(outcome)

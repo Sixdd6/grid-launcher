@@ -40,6 +40,15 @@
 //                                        as a side effect of the save-type
 //                                        auto-restore/auto-upload flows)
 //
+// Play activity (grid-core/src/romm/play_sessions.rs), used by the
+// `launch` stage group:
+//   POST /api/play-sessions            ({"sessions": [...]} — 201 with one
+//                                        result per entry: "created", or
+//                                        "duplicate" for an exact repeat)
+// `GET /__e2e__/play-sessions` (outside `/api/`, no auth, not logged)
+// returns every session the mock has stored, each with its id, so a spec
+// can assert on what reached the "server".
+//
 // `GET /__e2e__/requests` (outside `/api/`, no auth) returns the live
 // request log as JSON so a spec can assert on what the mock received
 // (query params, parsed multipart parts, JSON bodies) WHILE the mock is
@@ -578,6 +587,10 @@ async function handleRequest(req, res, state) {
       sendJson(res, 200, state.requestLog);
       return;
     }
+    if (req.method === "GET" && pathname === "/__e2e__/play-sessions") {
+      sendJson(res, 200, state.playSessions);
+      return;
+    }
     if (req.method === "GET" && pathname === "/__e2e__/offline") {
       sendJson(res, 200, { offline: state.offline });
       return;
@@ -808,6 +821,52 @@ async function handleRequest(req, res, state) {
     return;
   }
 
+  // Play-session ingest, in the shape of the live probe: one result per
+  // entry by index. An exact repeat (same four fields) is "duplicate" and
+  // is not stored again, which is what makes a client retry safe.
+  if (req.method === "POST" && pathname === "/api/play-sessions") {
+    let parsed = null;
+    try {
+      parsed = JSON.parse(body.toString("utf8"));
+    } catch {
+      parsed = null;
+    }
+    logEntry.bodyJson = parsed;
+    const sessions = Array.isArray(parsed?.sessions) ? parsed.sessions : null;
+    if (!sessions) {
+      sendJson(res, 422, { detail: "sessions is required" });
+      return;
+    }
+    const results = sessions.map((s, index) => {
+      const record = {
+        rom_id: s.rom_id,
+        start_time: s.start_time,
+        end_time: s.end_time,
+        duration_ms: s.duration_ms,
+      };
+      const known = state.playSessions.find(
+        (p) =>
+          p.rom_id === record.rom_id &&
+          p.start_time === record.start_time &&
+          p.end_time === record.end_time &&
+          p.duration_ms === record.duration_ms,
+      );
+      if (known) {
+        return { index, status: "duplicate", id: known.id };
+      }
+      const stored = { id: state.playSessions.length + 1, ...record };
+      state.playSessions.push(stored);
+      return { index, status: "created", id: stored.id };
+    });
+    const created = results.filter((r) => r.status === "created").length;
+    sendJson(res, 201, {
+      results,
+      created_count: created,
+      skipped_count: results.length - created,
+    });
+    return;
+  }
+
   // States: no stage group seeds records, but the save-type auto-restore
   // and auto-upload flows always probe the state side too (grid-core
   // resolves save/state independently) — an empty list keeps that probe
@@ -848,6 +907,9 @@ export async function startMockRomm({
   // while true, every /api/ request answers 401 even with the fixture token
   // — a token revoked on the server.
   state.revoked = false;
+  // Every play session POST /api/play-sessions stored, oldest first. Read
+  // through GET /__e2e__/play-sessions (the `launch` stage group).
+  state.playSessions = [];
 
   const server = http.createServer((req, res) => {
     handleRequest(req, res, state).catch((err) => {

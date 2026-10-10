@@ -2,8 +2,8 @@
  * The CURRENT `grid-launcher.db` schema, for seed scripts that need a
  * registry the running app will accept as already up to date.
  *
- * `SCHEMA_SQL` is copied verbatim from `SCHEMA_SQL` in
- * `crates/grid-core/src/library/registry.rs`, and `USER_VERSION` matches that
+ * `SCHEMA_SQL` is copied verbatim from `SCHEMA_SQL` and `PLAY_SESSIONS_SQL`
+ * in `crates/grid-core/src/library/registry.rs`, and `USER_VERSION` matches that
  * file's `LATEST_USER_VERSION`. This pairing is load-bearing:
  * `Registry::open` only runs its own `CREATE TABLE` when `PRAGMA
  * user_version` is 0, and it trusts a database already at
@@ -24,7 +24,7 @@
 
 import { execFileSync } from 'node:child_process';
 
-export const USER_VERSION = 6;
+export const USER_VERSION = 7;
 
 export const SCHEMA_SQL = `
 CREATE TABLE installed_games (
@@ -70,6 +70,14 @@ CREATE TABLE installed_games (
     last_played_at      INTEGER NOT NULL DEFAULT 0,
     images_version      INTEGER NOT NULL DEFAULT 0,
     UNIQUE (title_key, platform_key)
+);
+CREATE TABLE IF NOT EXISTS pending_play_sessions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    rom_id      INTEGER NOT NULL,
+    start_time  TEXT NOT NULL,
+    end_time    TEXT NOT NULL,
+    duration_ms INTEGER NOT NULL,
+    UNIQUE (rom_id, start_time)
 );
 PRAGMA user_version = ${USER_VERSION};
 `;

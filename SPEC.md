@@ -185,6 +185,9 @@ Special shared-media handling should include:
 The sync flow should track recent game sessions so that auto-upload focuses on files changed during or immediately after play.
 Some emulator/platform combinations may limit state-sync actions when that behavior is not reliable.
 
+## Play activity
+Every finished game session of 30 seconds or more is sent to RomM as a play session (start, end, duration). It is always on; there is no setting. Sessions without a server ROM id and Emulators-platform entries are not sent. While the server is unreachable, sessions wait in a local queue and go out after the next successful connect or restore. RomM's "last played" for the game follows the session end; the app never changes the game's play status on the server.
+
 ## Screenshot upload
 When uploading saves or states, the app should attempt to attach the most recently captured screenshot as a companion `screenshotFile`.
 - PPSSPP and RetroArch use file sidecars; all other supported emulators scan the emulator's screenshot directory for the most recent image within the session window. See ARCHITECTURE.md maintenance notes for routing details.

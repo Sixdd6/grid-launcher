@@ -8,6 +8,7 @@ mod gamepad;
 mod images;
 mod logging;
 mod media_server;
+mod play_session_service;
 mod python_import;
 pub(crate) mod test_env;
 mod update_service;
@@ -188,6 +189,7 @@ pub fn run() {
         launch,
         ra_store,
         cloud,
+        play_sessions: play_session_service::PlaySessionService::new(),
         images: images::ImageService::new(),
         firmware: firmware_service::FirmwareService::new(),
         updates: update_service::UpdateService::new(),
@@ -414,6 +416,15 @@ pub fn run() {
                         state.session.clone(),
                         install.clone(),
                         Config::default_path(),
+                    );
+                    // Play activity (Q10): a second listener on the same
+                    // hook. It queues a finished session (>= 30 s) in the
+                    // registry outbox and tries to send it; offline, it
+                    // waits for the next connect (see play_session_service.rs).
+                    state.play_sessions.install_session_finished_hook(
+                        launch,
+                        state.session.clone(),
+                        install.registry(),
                     );
                 }
                 // `.setup` runs on the main thread with no tokio runtime

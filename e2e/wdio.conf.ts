@@ -47,6 +47,13 @@ const appEnv: Record<string, string> = {
   // group renders the banner strip. It requires a mock forge to be running —
   // without one the check would reach the real api.github.com.
   ...(process.env.E2E_UPDATE_CHECK ? { GRID_LAUNCHER_E2E_UPDATE_CHECK: '1' } : {}),
+  // GRID_LAUNCHER_E2E_PLAY_SESSION_MIN_SECS lowers the 30 s play-activity
+  // threshold (play_session_service.rs) so a stub game that runs for a
+  // moment still reaches the mock's POST /api/play-sessions. e2e.sh sets
+  // E2E_PLAY_SESSION_MIN_SECS for the `launch` group only.
+  ...(process.env.E2E_PLAY_SESSION_MIN_SECS !== undefined
+    ? { GRID_LAUNCHER_E2E_PLAY_SESSION_MIN_SECS: process.env.E2E_PLAY_SESSION_MIN_SECS }
+    : {}),
   ...(process.env.GRID_E2E_ARGV_FILE
     ? { GRID_E2E_ARGV_FILE: process.env.GRID_E2E_ARGV_FILE }
     : {}),

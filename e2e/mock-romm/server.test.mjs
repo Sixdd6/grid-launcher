@@ -523,6 +523,67 @@ test("POST /__e2e__/revoke {revoked:true} answers 401 to the fixture token, and 
   });
 });
 
+// --- play sessions (Q10) -------------------------------------------------
+
+function postPlaySessions(url, sessions) {
+  return fetch(`${url}/api/play-sessions`, {
+    method: "POST",
+    headers: { ...authHeader(), "Content-Type": "application/json" },
+    body: JSON.stringify({ sessions }),
+  });
+}
+
+test("POST /api/play-sessions answers created, then duplicate for an exact repeat, and records each session once", async () => {
+  await withServer(async ({ url }) => {
+    const a = {
+      rom_id: 101,
+      start_time: "2026-10-10T12:00:00.000Z",
+      end_time: "2026-10-10T12:00:45.000Z",
+      duration_ms: 45000,
+    };
+    const b = { ...a, rom_id: 102 };
+
+    const first = await postPlaySessions(url, [a, b]);
+    assert.equal(first.status, 201);
+    assert.deepEqual(await first.json(), {
+      results: [
+        { index: 0, status: "created", id: 1 },
+        { index: 1, status: "created", id: 2 },
+      ],
+      created_count: 2,
+      skipped_count: 0,
+    });
+
+    const again = await postPlaySessions(url, [a]);
+    assert.equal(again.status, 201);
+    assert.deepEqual(await again.json(), {
+      results: [{ index: 0, status: "duplicate", id: 1 }],
+      created_count: 0,
+      skipped_count: 1,
+    });
+
+    const recorded = await fetch(`${url}/__e2e__/play-sessions`);
+    assert.equal(recorded.status, 200);
+    assert.deepEqual(await recorded.json(), [
+      { id: 1, ...a },
+      { id: 2, ...b },
+    ]);
+  });
+});
+
+test("POST /api/play-sessions needs the fixture token", async () => {
+  await withServer(async ({ url }) => {
+    const res = await fetch(`${url}/api/play-sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessions: [] }),
+    });
+    assert.equal(res.status, 401);
+    const recorded = await fetch(`${url}/__e2e__/play-sessions`);
+    assert.deepEqual(await recorded.json(), []);
+  });
+});
+
 // --- request log -------------------------------------------------------
 
 test("requestLog records {method, path} for each request", async () => {

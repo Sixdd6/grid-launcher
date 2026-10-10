@@ -638,6 +638,13 @@ EOF
       if [[ "$name" == "updates" ]]; then
         export E2E_UPDATE_CHECK=1
       fi
+      # Only the `launch` group asserts play activity. Its stub game runs
+      # for about a second, so the 30 s threshold drops to 0 (only a zero or
+      # negative duration is skipped); wdio.conf.ts turns this into
+      # GRID_LAUNCHER_E2E_PLAY_SESSION_MIN_SECS, read by the e2e build only.
+      if [[ "$name" == "launch" ]]; then
+        export E2E_PLAY_SESSION_MIN_SECS=0
+      fi
       # Both of these are seed-script conventions rather than per-group
       # settings: a seed that writes the directory opts its group in, and
       # wdio.conf.ts turns each into an app-process environment variable.

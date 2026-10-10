@@ -160,6 +160,35 @@ describe('launch', () => {
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the Play button never came back after stopping',
     });
+
+    // Play activity (Q10): the finished session reaches the server's
+    // play-session ingest, which is also how RomM's "last played" moves.
+    // e2e.sh lowers the 30 s threshold to 0 for this group, so the
+    // second-long stub run counts.
+    type StoredSession = {
+      id: number;
+      rom_id: number;
+      start_time: string;
+      end_time: string;
+      duration_ms: number;
+    };
+    const playSessions = async (): Promise<StoredSession[]> => {
+      const res = await fetch(`${mockUrl()}/__e2e__/play-sessions`);
+      return (await res.json()) as StoredSession[];
+    };
+    await browser.waitUntil(async () => (await playSessions()).length > 0, {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the mock never received a play session after the game stopped',
+    });
+    const sessions = await playSessions();
+    expect(sessions).toHaveLength(1);
+    const [played] = sessions;
+    expect(played.rom_id).toBe(101);
+    expect(played.start_time).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(played.end_time).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(played.duration_ms).toBeGreaterThan(0);
+    expect(Date.parse(played.end_time) - Date.parse(played.start_time)).toBe(played.duration_ms);
+
     await $(testId('details-close')).click();
 
     // `last_played_at` end to end (design §5): the launch above stamped it,

@@ -1,5 +1,6 @@
 use grid_core::images::ImageFields;
 use grid_core::library::registry::{InstalledGame, Registry, IMAGES_VERSION};
+use grid_core::romm::PlaySessionEntry;
 use rusqlite::Connection;
 
 fn sample(title: &str, platform: &str) -> InstalledGame {
@@ -60,7 +61,7 @@ fn table_columns(conn: &Connection) -> Vec<String> {
 }
 
 #[test]
-fn open_creates_file_and_sets_user_version_6() {
+fn open_creates_file_and_sets_user_version_7() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     let registry = Registry::open(&path).unwrap();
@@ -70,12 +71,12 @@ fn open_creates_file_and_sets_user_version_6() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     drop(registry);
 }
 
 #[test]
-fn fresh_db_is_v6_and_has_the_twelve_columns() {
+fn fresh_db_is_v7_and_has_the_twelve_columns() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     let registry = Registry::open(&path).unwrap();
@@ -84,7 +85,7 @@ fn fresh_db_is_v6_and_has_the_twelve_columns() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 
     let columns = table_columns(&conn);
     for column in V3_COLUMN_NAMES {
@@ -259,7 +260,7 @@ fn open_migrates_a_v1_database_and_update_images_round_trips() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     let rows = registry.all().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].cover_small_path, "");
@@ -309,7 +310,7 @@ fn open_migrates_a_v1_database_that_already_has_one_v2_column() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 
     let columns = table_columns(&conn);
     for column in ["cover_small_path", "cover_large_path", "screenshot_urls"] {
@@ -351,7 +352,7 @@ fn v2_schema() -> String {
 }
 
 #[test]
-fn migrates_v1_to_v6_transactionally() {
+fn migrates_v1_to_v7_transactionally() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -367,7 +368,7 @@ fn migrates_v1_to_v6_transactionally() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 
     let columns = table_columns(&conn);
     for column in V3_COLUMN_NAMES {
@@ -387,7 +388,7 @@ fn migrates_v1_to_v6_transactionally() {
 }
 
 #[test]
-fn migrates_v2_to_v6() {
+fn migrates_v2_to_v7() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -403,7 +404,7 @@ fn migrates_v2_to_v6() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 
     let columns = table_columns(&conn);
     for column in V3_COLUMN_NAMES {
@@ -444,7 +445,7 @@ fn migration_is_idempotent_when_columns_preexist() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 
     let columns = table_columns(&conn);
     for column in V3_COLUMN_NAMES {
@@ -553,7 +554,7 @@ fn v3_schema() -> String {
 }
 
 #[test]
-fn fresh_db_is_v6_and_has_last_played_at() {
+fn fresh_db_is_v7_and_has_last_played_at() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     let registry = Registry::open(&path).unwrap();
@@ -562,7 +563,7 @@ fn fresh_db_is_v6_and_has_last_played_at() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     let columns = table_columns(&conn);
     assert!(
         columns.iter().any(|c| c == "last_played_at"),
@@ -578,7 +579,7 @@ fn fresh_db_is_v6_and_has_last_played_at() {
 }
 
 #[test]
-fn migrates_v3_to_v6_keeping_rows_and_defaulting_last_played_to_zero() {
+fn migrates_v3_to_v7_keeping_rows_and_defaulting_last_played_to_zero() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -598,7 +599,7 @@ fn migrates_v3_to_v6_keeping_rows_and_defaulting_last_played_to_zero() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 
     let rows = registry.all().unwrap();
     assert_eq!(rows.len(), 1);
@@ -625,12 +626,12 @@ fn v3_to_v4_migration_is_idempotent_when_the_column_preexists() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     assert!(registry.all().unwrap().is_empty());
 }
 
 #[test]
-fn migrates_v4_to_v6_keeping_rows_and_defaulting_fanart_to_blank() {
+fn migrates_v4_to_v7_keeping_rows_and_defaulting_fanart_to_blank() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -655,7 +656,7 @@ fn migrates_v4_to_v6_keeping_rows_and_defaulting_fanart_to_blank() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 
     let rows = registry.all().unwrap();
     assert_eq!(rows.len(), 1);
@@ -681,12 +682,12 @@ fn v4_to_v5_migration_is_idempotent_when_the_column_preexists() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     assert!(registry.all().unwrap().is_empty());
 }
 
 #[test]
-fn fresh_db_is_v6_and_stamps_images_version_on_insert() {
+fn fresh_db_is_v7_and_stamps_images_version_on_insert() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     let registry = Registry::open(&path).unwrap();
@@ -695,7 +696,7 @@ fn fresh_db_is_v6_and_stamps_images_version_on_insert() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     let columns = table_columns(&conn);
     assert!(
         columns.iter().any(|c| c == "images_version"),
@@ -711,7 +712,7 @@ fn fresh_db_is_v6_and_stamps_images_version_on_insert() {
 }
 
 #[test]
-fn migrates_v5_to_v6_keeping_rows_and_defaulting_images_version_to_zero() {
+fn migrates_v5_to_v7_keeping_rows_and_defaulting_images_version_to_zero() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -736,7 +737,7 @@ fn migrates_v5_to_v6_keeping_rows_and_defaulting_images_version_to_zero() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     let columns = table_columns(&conn);
     assert!(
         columns.iter().any(|c| c == "images_version"),
@@ -769,7 +770,7 @@ fn v5_to_v6_migration_is_idempotent_when_the_column_preexists() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
     assert!(registry.all().unwrap().is_empty());
 }
 
@@ -846,4 +847,120 @@ fn reinstalling_a_game_does_not_reset_its_last_played_stamp() {
     let rows = registry.all().unwrap();
     assert_eq!(rows[0].installed_at, 1_900_000_000);
     assert_eq!(rows[0].last_played_at, 1_800_000_000);
+}
+
+// --- play-session outbox (v7) -------------------------------------------
+
+fn play_entry(rom_id: i64, start: &str) -> PlaySessionEntry {
+    PlaySessionEntry {
+        rom_id,
+        start_time: start.to_string(),
+        end_time: "2026-10-10T13:00:00.000Z".to_string(),
+        duration_ms: 60_000,
+    }
+}
+
+fn has_table(conn: &Connection, name: &str) -> bool {
+    conn.query_row(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+        [name],
+        |row| row.get::<_, i64>(0),
+    )
+    .unwrap()
+        == 1
+}
+
+#[test]
+fn a_fresh_database_has_the_play_session_outbox() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    let registry = Registry::open(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    assert!(has_table(&conn, "pending_play_sessions"));
+    drop(registry);
+}
+
+#[test]
+fn migrates_v6_to_v7_adding_the_outbox_and_keeping_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    {
+        // A v6 database: today's schema without the outbox table.
+        let registry = Registry::open(&path).unwrap();
+        registry.upsert(&sample("Chrono Trigger", "SNES")).unwrap();
+        drop(registry);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch("DROP TABLE pending_play_sessions;")
+            .unwrap();
+        conn.pragma_update(None, "user_version", 6).unwrap();
+    }
+
+    let registry = Registry::open(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 7);
+    assert!(has_table(&conn, "pending_play_sessions"));
+    assert_eq!(registry.all().unwrap().len(), 1);
+    assert!(registry
+        .enqueue_play_session(&play_entry(42, "2026-10-10T12:00:00.000Z"))
+        .unwrap());
+}
+
+#[test]
+fn v6_to_v7_migration_is_idempotent_when_the_table_preexists() {
+    // A database torn between the CREATE and the version bump.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    {
+        let registry = Registry::open(&path).unwrap();
+        registry
+            .enqueue_play_session(&play_entry(42, "2026-10-10T12:00:00.000Z"))
+            .unwrap();
+        drop(registry);
+        let conn = Connection::open(&path).unwrap();
+        conn.pragma_update(None, "user_version", 6).unwrap();
+    }
+    let registry = Registry::open(&path).unwrap();
+    let pending = registry.pending_play_sessions(0, 10).unwrap();
+    assert_eq!(pending.len(), 1, "the queued row survives the re-run");
+}
+
+#[test]
+fn the_outbox_queues_pages_and_deletes() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Registry::open(&dir.path().join("grid-launcher.db")).unwrap();
+
+    let a = play_entry(42, "2026-10-10T12:00:00.000Z");
+    let b = play_entry(43, "2026-10-10T12:00:00.000Z");
+    let c = play_entry(42, "2026-10-10T14:00:00.000Z");
+    assert!(registry.enqueue_play_session(&a).unwrap());
+    assert!(registry.enqueue_play_session(&b).unwrap());
+    assert!(registry.enqueue_play_session(&c).unwrap());
+    // The same rom and start again is the same session: not queued twice.
+    assert!(!registry.enqueue_play_session(&a).unwrap());
+
+    let all = registry.pending_play_sessions(0, 10).unwrap();
+    let entries: Vec<&PlaySessionEntry> = all.iter().map(|p| &p.entry).collect();
+    assert_eq!(entries, vec![&a, &b, &c], "oldest first, every field kept");
+    assert!(all.windows(2).all(|w| w[0].id < w[1].id));
+
+    // Paging: a limit and a cursor.
+    let first_page = registry.pending_play_sessions(0, 2).unwrap();
+    assert_eq!(first_page.len(), 2);
+    let rest = registry.pending_play_sessions(first_page[1].id, 2).unwrap();
+    assert_eq!(rest.len(), 1);
+    assert_eq!(rest[0].entry, c);
+
+    assert_eq!(
+        registry
+            .delete_pending_play_sessions(&[all[0].id, all[2].id])
+            .unwrap(),
+        2
+    );
+    assert_eq!(registry.delete_pending_play_sessions(&[]).unwrap(), 0);
+    let left = registry.pending_play_sessions(0, 10).unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].entry, b);
 }

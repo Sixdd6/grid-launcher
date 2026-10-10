@@ -12,8 +12,10 @@ use std::process::{Child, ExitStatus};
 use std::sync::Mutex;
 
 /// One running game, as handed to the UI. Serialized straight to the
-/// frontend, so field names are part of the IPC contract.
-#[derive(Debug, Clone, serde::Serialize)]
+/// frontend, so field names are part of the IPC contract. The fields marked
+/// `#[serde(skip)]` stay on the Rust side: the session-finished hooks read
+/// them, the UI never sees them.
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct GameSession {
     pub id: u64,
     pub rom_id: i64,
@@ -22,6 +24,40 @@ pub struct GameSession {
     /// Unix seconds at spawn time.
     pub started_at: i64,
     pub pid: u32,
+    /// The installed row's platform. Play activity skips the Emulators
+    /// platform with it.
+    #[serde(skip)]
+    pub platform: String,
+    /// Unix milliseconds at spawn time. `started_at` is this value in seconds.
+    #[serde(skip)]
+    pub started_at_ms: i64,
+    /// Unix milliseconds when the reaper removed the session. `None` while
+    /// the game runs.
+    #[serde(skip)]
+    pub ended_at_ms: Option<i64>,
+    /// `ended_at_ms - started_at_ms`. `None` while the game runs.
+    #[serde(skip)]
+    pub duration_ms: Option<i64>,
+}
+
+impl GameSession {
+    /// This record, stamped as finished at `ended_at_ms` (unix ms). The
+    /// duration is the wall-clock difference, so it agrees with the two
+    /// timestamps even when it is negative (a clock that went back); play
+    /// activity skips such a session.
+    pub fn finished_at(mut self, ended_at_ms: i64) -> Self {
+        self.ended_at_ms = Some(ended_at_ms);
+        self.duration_ms = Some(ended_at_ms - self.started_at_ms);
+        self
+    }
+}
+
+/// Unix milliseconds now, `0` if the clock is before the epoch.
+pub(crate) fn unix_now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// The running-game list plus an optional one-shot message (today: the
@@ -112,6 +148,9 @@ impl SessionStore {
     pub(crate) fn reap(&self) -> Vec<(GameSession, Option<ExitStatus>)> {
         let mut exited = Vec::new();
         let mut unusable: Vec<Child> = Vec::new();
+        // One stamp for the whole pass: every session removed here ended
+        // at most one poll interval before it.
+        let now_ms = unix_now_ms();
         {
             let mut entries = self.entries.lock().unwrap();
             let mut kept = Vec::with_capacity(entries.len());
@@ -120,10 +159,12 @@ impl SessionStore {
             // preserved: survivors are pushed back in the order they came.
             for mut entry in entries.drain(..) {
                 match entry.child.try_wait() {
-                    Ok(Some(status)) => exited.push((entry.info.clone(), Some(status))),
+                    Ok(Some(status)) => {
+                        exited.push((entry.info.clone().finished_at(now_ms), Some(status)))
+                    }
                     Ok(None) => kept.push(entry),
                     Err(_) => {
-                        exited.push((entry.info.clone(), None));
+                        exited.push((entry.info.clone().finished_at(now_ms), None));
                         unusable.push(entry.child);
                     }
                 }
@@ -160,6 +201,59 @@ impl SessionStore {
     }
 }
 
+#[cfg(test)]
+mod finish_tests {
+    use super::*;
+
+    #[test]
+    fn finished_at_records_the_end_and_the_duration() {
+        let running = GameSession {
+            id: 1,
+            rom_id: 7,
+            started_at: 1_700_000_000,
+            started_at_ms: 1_700_000_000_250,
+            ..Default::default()
+        };
+        assert_eq!(running.ended_at_ms, None);
+        assert_eq!(running.duration_ms, None);
+
+        let done = running.finished_at(1_700_000_045_750);
+        assert_eq!(done.ended_at_ms, Some(1_700_000_045_750));
+        assert_eq!(done.duration_ms, Some(45_500));
+        // The IPC shape is unchanged: none of the Rust-side fields reach JSON.
+        let json = serde_json::to_value(&done).unwrap();
+        let mut keys: Vec<&str> = json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            vec![
+                "emulator_name",
+                "id",
+                "pid",
+                "rom_id",
+                "started_at",
+                "title"
+            ]
+        );
+    }
+
+    #[test]
+    fn finished_at_keeps_a_negative_duration_for_the_skip_rule() {
+        let done = GameSession {
+            started_at_ms: 10_000,
+            ..Default::default()
+        }
+        .finished_at(4_000);
+        assert_eq!(done.ended_at_ms, Some(4_000));
+        assert_eq!(done.duration_ms, Some(-6_000));
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -173,6 +267,7 @@ mod tests {
             emulator_name: "Stub".to_string(),
             started_at: 1,
             pid,
+            ..Default::default()
         }
     }
 
