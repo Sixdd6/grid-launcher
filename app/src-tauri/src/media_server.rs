@@ -953,15 +953,23 @@ mod tests {
             .await
             .unwrap();
         let mut all = Vec::new();
-        // Either outcome means "closed without a response": a clean EOF, or
+        // Every outcome means "closed without a response": a clean EOF, or
         // ECONNRESET because the socket was dropped with the request still
-        // unread in its receive buffer. What must NOT happen is a wait.
+        // unread in its receive buffer (Windows reports the same drop as
+        // WSAECONNABORTED when it races the read). What must NOT happen is
+        // a wait.
         let read = tokio::time::timeout(Duration::from_secs(5), shed.read_to_end(&mut all))
             .await
             .expect("the shed connection was queued instead of closed");
         match read {
             Ok(n) => assert_eq!(n, 0, "a shed connection must get no response"),
-            Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::ConnectionReset, "{e}"),
+            Err(e) => assert!(
+                matches!(
+                    e.kind(),
+                    std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted
+                ),
+                "{e}"
+            ),
         }
         assert!(all.is_empty(), "a shed connection must get no response");
 
