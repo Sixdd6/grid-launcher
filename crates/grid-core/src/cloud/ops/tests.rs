@@ -110,7 +110,10 @@ fn write_file(path: &Path, contents: &[u8]) {
 
 fn set_mtime(path: &Path, secs: u64) {
     let time = UNIX_EPOCH + Duration::from_secs(secs);
-    fs::File::open(path)
+    // Write access: Windows refuses `SetFileTime` on a read-only handle.
+    fs::File::options()
+        .write(true)
+        .open(path)
         .unwrap()
         .set_modified(time)
         .expect("set mtime");

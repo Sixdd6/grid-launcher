@@ -843,8 +843,27 @@ mod tests {
     fn touch_dir_at(path: &Path, unix_secs: f64) {
         fs::create_dir_all(path).unwrap();
         let modified = UNIX_EPOCH + Duration::from_secs_f64(unix_secs);
-        let dir = fs::File::open(path).unwrap();
+        let dir = open_dir_for_set_times(path);
         dir.set_modified(modified).unwrap();
+    }
+
+    /// A read-only directory handle is enough to set its times on unix.
+    #[cfg(not(windows))]
+    fn open_dir_for_set_times(path: &Path) -> fs::File {
+        fs::File::open(path).unwrap()
+    }
+
+    /// Windows opens a directory only with `FILE_FLAG_BACKUP_SEMANTICS`,
+    /// and `SetFileTime` needs write access on the handle.
+    #[cfg(windows)]
+    fn open_dir_for_set_times(path: &Path) -> fs::File {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+        fs::File::options()
+            .write(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path)
+            .unwrap()
     }
 
     fn ignore(basenames: &[&str], extensions: &[&str]) -> IgnoreSets {

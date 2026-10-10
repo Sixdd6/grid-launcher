@@ -339,9 +339,8 @@ pub fn normalize_manual_save_path(path: &Path) -> String {
 /// [`resolve_under_root`] from `cloud::archive` — the same guard
 /// `extract_payload_zip` uses — rather than re-implementing Python's
 /// `Path.resolve()` + `relative_to()` check by hand: the destination root
-/// is best-effort-resolved (mirroring `target_root.resolve()`, no
-/// existence required) via `autoconfig::paths::resolve_best_effort`, then
-/// the member's relative path is walked and symlink-resolved against it,
+/// is resolved (mirroring `target_root.resolve()`, no existence required)
+/// via `restore_root`, then the member's relative path is walked and symlink-resolved against it,
 /// with any result that escapes the root skipped.
 ///
 /// A genuine I/O failure (directory creation, file creation, or copy)
@@ -396,7 +395,7 @@ pub fn restore_native_multi_dir_archive(
             continue;
         };
 
-        let resolved_root = resolve_best_effort(&target_root);
+        let resolved_root = restore_root(&target_root);
 
         let normalized = relative_str.replace('\\', "/");
         if !is_safe_member_name(&normalized) {
@@ -420,6 +419,25 @@ pub fn restore_native_multi_dir_archive(
     }
 
     Ok(written)
+}
+
+/// The destination root in the form [`resolve_under_root`] requires.
+///
+/// `resolve_under_root` canonicalizes each existing component below the
+/// root with `std::fs::canonicalize`, and the caller then checks
+/// `starts_with(root)`. The root must come from the same function, or the
+/// check fails for every member that lands in an existing file or
+/// directory: on Windows `std::fs::canonicalize` returns the verbatim
+/// `\\?\C:\...` form and `resolve_best_effort` returns `C:\...`, so a
+/// restore over existing saves wrote nothing.
+///
+/// A root that does not exist (or cannot be canonicalized) keeps
+/// `resolve_best_effort` (Python's `resolve(strict=False)`): nothing below
+/// it exists, so the walk canonicalizes no component and the forms agree.
+/// Off Windows both functions return the same realpath for an existing
+/// path, so this changes nothing there.
+fn restore_root(target_root: &Path) -> PathBuf {
+    std::fs::canonicalize(target_root).unwrap_or_else(|_| resolve_best_effort(target_root))
 }
 
 // ---------------------------------------------------------------------
@@ -1113,6 +1131,32 @@ mod tests {
         assert_eq!(written, 1);
         assert_eq!(
             std::fs::read(fallback.join("save.dat")).unwrap(),
+            b"new-content"
+        );
+    }
+
+    /// The walk canonicalizes every existing component below the root
+    /// (`sub` here), so the root must be in the same canonical form, or the
+    /// containment check rejects the member and the restore silently
+    /// writes nothing (Windows' verbatim `\\?\` form did exactly that).
+    #[test]
+    fn manifest_restore_overwrites_a_file_inside_an_existing_nested_dir() {
+        let _lock = crate::test_env::lock();
+        let _guard = crate::test_env::EnvGuard::set(&[]);
+        let temp = tempfile::tempdir().unwrap();
+        let fallback = temp.path().join("fallback");
+        std::fs::create_dir_all(fallback.join("sub")).unwrap();
+        std::fs::write(fallback.join("sub").join("save.dat"), b"old-content").unwrap();
+
+        let payload = build_zip_bytes(&[("0/sub/save.dat", b"new-content")]);
+
+        let written =
+            restore_native_multi_dir_archive(&payload, std::slice::from_ref(&fallback), None, None)
+                .unwrap();
+
+        assert_eq!(written, 1);
+        assert_eq!(
+            std::fs::read(fallback.join("sub").join("save.dat")).unwrap(),
             b"new-content"
         );
     }
