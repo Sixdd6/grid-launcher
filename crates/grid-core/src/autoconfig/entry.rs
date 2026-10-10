@@ -19,6 +19,7 @@ use crate::config::{Config, ConfigError, EmulatorEntry};
 use crate::launch::profiles::{platform_matches_keywords, profile_for_entry, EmulatorProfile};
 use crate::launch::selection::NO_EMULATOR;
 use crate::launch::template::EMU_DIR_PLACEHOLDER;
+use crate::library::platforms::is_native_platform;
 
 /// The `[^a-z0-9]+` run-collapse the Dolphin variant rules apply to an
 /// already-casefolded string (selection.py:180, selection.py:200).
@@ -165,14 +166,18 @@ pub fn auto_configured_emulator_name(base_name: &str, variant: &str) -> String {
 }
 
 /// `default_assignable_server_platforms` (selection.py:157-165): drops any
-/// platform whose trimmed casefolded name starts with `"windows"` or equals
-/// `"emulators"`. Order and the original (untrimmed) spelling are kept.
+/// platform whose trimmed casefolded name equals `"emulators"` or that
+/// [`is_native_platform`] accepts (a `windows*` or `linux*` prefix). Order and
+/// the original (untrimmed) spelling are kept.
+///
+/// The `linux*` half goes beyond the reference: user ruling 2026-09-08
+/// (`library/platforms.rs:10-13`) makes Linux platforms native everywhere,
+/// so no emulator default belongs under them.
 pub fn assignable_platforms(platforms: &[String]) -> Vec<String> {
     platforms
         .iter()
         .filter(|platform| {
-            let folded = platform.trim().to_lowercase();
-            !folded.starts_with("windows") && folded != "emulators"
+            !is_native_platform(platform) && platform.trim().to_lowercase() != "emulators"
         })
         .cloned()
         .collect()
@@ -743,11 +748,15 @@ mod tests {
     }
 
     #[test]
-    fn assignable_platforms_drops_windows_prefixed_and_emulators() {
+    fn assignable_platforms_drops_native_platforms_and_emulators() {
+        // `is_native_platform` matches by trimmed, casefolded prefix, so
+        // "Linux" and "  linux games " go the same way as the Windows rows.
         let platforms = strings(&[
             "Nintendo 64",
             "Windows",
             "  windows games ",
+            "Linux",
+            "  linux games ",
             "Emulators",
             " emulators ",
             "PlayStation 2",
@@ -1191,6 +1200,29 @@ mod tests {
             &no_cores,
         );
         assert_eq!(defaults, map(&[("Nintendo 64", "Some Emulator")]));
+    }
+
+    #[test]
+    fn assign_defaults_all_platforms_writes_no_linux_default() {
+        // User ruling 2026-09-08: Linux platforms are native, so no emulator
+        // default belongs under them, even for an `all_platforms` profile.
+        let raw = strings(&["Linux", "  linux games ", "Nintendo 64"]);
+        let every_platform = EmulatorProfile {
+            name: "MAME".into(),
+            args: "%rom%".into(),
+            all_platforms: true,
+            ..Default::default()
+        };
+        let (defaults, _) = assign(
+            None,
+            "MAME",
+            &every_platform,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &raw,
+            &no_cores,
+        );
+        assert_eq!(defaults, map(&[("Nintendo 64", "MAME")]));
     }
 
     #[test]
