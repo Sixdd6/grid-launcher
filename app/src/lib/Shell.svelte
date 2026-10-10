@@ -17,6 +17,7 @@
   import { pushToast } from './stores/toasts.svelte';
   import { chipLabel, hostOf, initialView, VIEWS, viewForDigit, viewLabel, type View } from './shell';
   import type { NavDirection } from './focus/grid';
+  import { routeDialogNav } from './focus/dialogNav';
   // The same guard the grid views use for Ctrl+F: an accelerator must stay
   // out of the way while focus sits in a text-entry control (where
   // Ctrl+<n> can be an editor chord) or a modal dialog owns the screen and
@@ -36,6 +37,9 @@
   let sessionEl = $state<HTMLElement | null>(null);
 
   export function handleNav(action: NavDirection | 'accept' | 'back') {
+    // An open dialog (link picker, remove confirm, game settings) owns the
+    // gamepad: it gets the action and nothing reaches the view underneath.
+    if (routeDialogNav(action)) return;
     if (view === 'library') library?.handleNav(action);
     else if (view === 'server') server?.handleNav(action);
   }
