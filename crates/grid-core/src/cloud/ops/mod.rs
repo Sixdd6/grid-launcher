@@ -49,7 +49,10 @@ use super::scope::{
     is_native_executable_platform, shared_sync_owner, SaveScope,
 };
 use super::state::{game_key, sync_entry_for};
-use super::tokens::{game_save_match_tokens, ps2_serial_tokens, ps3_id_tokens, psp_id_tokens};
+use super::tokens::{
+    cemu_game_title_id_tokens, game_save_match_tokens, ps2_serial_tokens, ps3_id_tokens,
+    psp_id_tokens,
+};
 use super::transfer::{MessageSeverity, SUPPORTED_IMAGE_EXTENSIONS};
 use super::window::{
     session_filtered_directory_candidates, session_filtered_file_candidates,
@@ -800,7 +803,8 @@ fn cloud_sync_targets_in(
     let mut folder_targets: Vec<PathBuf> = Vec::new();
 
     if is_cemu(ctx, name, entry_ref) {
-        folder_targets = cemu_save_directories(directories, &tokens, &ignore);
+        folder_targets =
+            cemu_save_directories(directories, &cemu_game_title_id_tokens(game), &ignore);
     } else if is_dolphin(ctx, name, entry_ref) {
         files = file_candidates(
             directories,

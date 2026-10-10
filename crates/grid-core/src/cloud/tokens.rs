@@ -1,7 +1,8 @@
 //! Cloud-save match tokens, id extraction, and state-file naming rules.
 //!
 //! Ported from `grid_launcher/ui/mixins/cloud_mixin.py`
-//! (`_game_save_match_tokens` :1204-1263, `_is_state_file_candidate` :1334,
+//! (`_game_save_match_tokens` :1204-1263, `_cemu_title_id_tokens` :1268-1332,
+//! `_is_state_file_candidate` :1334,
 //! `_ps2_game_id_tokens` :1401-1411, `_psp_game_id_tokens` :1414-1424, and
 //! `_rpcs3_save_directories_for_game` :1177-1200 — that method calls
 //! `self._ps3_game_ids_for_game(game)`, which is never defined anywhere in
@@ -13,11 +14,14 @@
 //! `cemu_save_directories_for_game`'s title-id preference ladder :502-513).
 
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use regex::Regex;
 
+use crate::library::paths::expand_home;
+
+use super::install_match::extracted_file_candidates;
 use super::transfer::SUPPORTED_IMAGE_EXTENSIONS;
 use super::CloudGame;
 
@@ -304,6 +308,113 @@ pub fn ps3_id_tokens(game: &CloudGame) -> Vec<String> {
     } else {
         vec![normalized]
     }
+}
+
+/// `cloud_mixin.py:1270-1282`'s `add_title_id_variants` closure: for each
+/// 16-hex-digit run in `value.upper()`, the run plus its high and low
+/// 8-hex halves; for each `<8hex><non-hex-separator><8hex>` pair, the
+/// concatenation plus both halves. All uppercase.
+fn add_cemu_title_id_variants(value: &str, tokens: &mut BTreeSet<String>) {
+    let text = value.trim().to_uppercase();
+    if text.is_empty() {
+        return;
+    }
+    for m in HEX16_RE.find_iter(&text) {
+        let id = m.as_str();
+        tokens.insert(id.to_string());
+        tokens.insert(id[..8].to_string());
+        tokens.insert(id[8..].to_string());
+    }
+    for caps in HEX_PAIR_RE.captures_iter(&text) {
+        tokens.insert(format!("{}{}", &caps[1], &caps[2]));
+        tokens.insert(caps[1].to_string());
+        tokens.insert(caps[2].to_string());
+    }
+}
+
+/// The text of every `<title_id ...>...</title_id>` element in a Wii U
+/// `app.xml` / `meta.xml`.
+static XML_TITLE_ID_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<title_id\b[^>]*>([^<]*)</title_id\s*>").unwrap());
+
+/// The raw Cemu title-id token set for `game`, for
+/// [`crate::cloud::candidates::cemu_save_directories`] (which runs it
+/// through [`cemu_title_id_tokens`]). Port of `cloud_mixin.py:1268-1332`'s
+/// `_cemu_title_id_tokens`:
+///
+/// - hex ids (see [`add_cemu_title_id_variants`]) from `title_id`,
+///   `base_title_id`, `rom_id`, `rom_file_name`, `extracted_path`,
+///   `archive_path`, and `extracted_dir`. The reference also read
+///   `native_executable_path`; [`CloudGame`] has no such field.
+/// - the same from `app.xml` / `meta.xml` files: beside each extracted
+///   launch file (`install_match::extracted_file_candidates`), in its
+///   `code`/`meta` subfolders, in its grandparent's `code`/`meta`
+///   subfolders, and in `<extracted_dir>/code/app.xml` and
+///   `<extracted_dir>/meta/meta.xml` (`~` expanded). Each path is read once
+///   (case-insensitive dedupe) and only when it is an existing file.
+///
+/// The title contributes nothing: a game with only a title has no tokens,
+/// so it matches no Cemu save folder.
+///
+/// DELIBERATE DEVIATION (G1): from an XML file only the `<title_id>`
+/// element's text is scanned. The reference scanned the whole file, and a
+/// real `meta.xml`/`app.xml` also holds other 16-hex values (for example
+/// `os_version`, a system title id), which could name another title's
+/// save folder.
+pub fn cemu_game_title_id_tokens(game: &CloudGame) -> BTreeSet<String> {
+    let mut tokens: BTreeSet<String> = BTreeSet::new();
+
+    for value in [
+        &game.title_id,
+        &game.base_title_id,
+        &game.rom_id,
+        &game.rom_file_name,
+        &game.extracted_path,
+        &game.archive_path,
+        &game.extracted_dir,
+    ] {
+        add_cemu_title_id_variants(value, &mut tokens);
+    }
+
+    let mut xml_candidates: Vec<PathBuf> = Vec::new();
+    for extracted in extracted_file_candidates(game) {
+        let Some(parent) = extracted.parent() else {
+            continue;
+        };
+        xml_candidates.push(parent.join("app.xml"));
+        xml_candidates.push(parent.join("meta.xml"));
+        xml_candidates.push(parent.join("code").join("app.xml"));
+        xml_candidates.push(parent.join("meta").join("meta.xml"));
+        if let Some(grandparent) = parent.parent() {
+            xml_candidates.push(grandparent.join("code").join("app.xml"));
+            xml_candidates.push(grandparent.join("meta").join("meta.xml"));
+        }
+    }
+    let extracted_dir = game.extracted_dir.trim();
+    if !extracted_dir.is_empty() {
+        let dir = expand_home(extracted_dir);
+        xml_candidates.push(dir.join("code").join("app.xml"));
+        xml_candidates.push(dir.join("meta").join("meta.xml"));
+    }
+
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    for xml_path in xml_candidates {
+        let key = xml_path.to_string_lossy().to_lowercase();
+        if seen.contains(&key) || !xml_path.is_file() {
+            continue;
+        }
+        seen.insert(key);
+        let Ok(bytes) = std::fs::read(&xml_path) else {
+            continue;
+        };
+        let text = String::from_utf8_lossy(&bytes);
+        for caps in XML_TITLE_ID_RE.captures_iter(&text) {
+            add_cemu_title_id_variants(&caps[1], &mut tokens);
+        }
+    }
+
+    tokens.retain(|t| !t.is_empty());
+    tokens
 }
 
 /// Applies `cloud_sync.py:502-513`'s Cemu title-id preference ladder to an
@@ -763,6 +874,76 @@ mod tests {
         let fallback_only = set(&["0005ABCD", "AB"]);
         let ladder = cemu_title_id_tokens(&fallback_only);
         assert_eq!(ladder, vec!["0005ABCD".to_string(), "AB".to_string()]);
+    }
+
+    // -- cemu_game_title_id_tokens ----------------------------------------
+
+    fn write(path: &Path, text: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+
+    #[test]
+    fn cemu_game_tokens_read_meta_xml_under_extracted_dir() {
+        let dir = tempfile::TempDir::new().unwrap();
+        // A real meta.xml carries other 16-hex fields (os_version is a
+        // system title id). Only `<title_id>` may contribute tokens.
+        write(
+            &dir.path().join("meta/meta.xml"),
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<menu type=\"complex\" access=\"777\">\n  \
+             <os_version type=\"hexBinary\" length=\"8\">000500101000400A</os_version>\n  \
+             <title_id type=\"hexBinary\" length=\"8\">0005000010145d00</title_id>\n  \
+             <common_save_size type=\"hexBinary\" length=\"8\">0000000000000000</common_save_size>\n</menu>\n",
+        );
+        let g = game(|g| {
+            g.title = "Some Wii U Game".to_string();
+            g.extracted_dir = dir.path().to_string_lossy().into_owned();
+        });
+        assert_eq!(
+            cemu_game_title_id_tokens(&g),
+            set(&["0005000010145D00", "00050000", "10145D00"])
+        );
+    }
+
+    #[test]
+    fn cemu_game_tokens_read_app_xml_beside_the_launch_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let rpx = dir.path().join("code/game.rpx");
+        write(&rpx, "x");
+        write(
+            &dir.path().join("code/app.xml"),
+            "<app><title_id type=\"hexBinary\" length=\"8\">000500001010ED00</title_id></app>",
+        );
+        let g = game(|g| g.extracted_path = rpx.to_string_lossy().into_owned());
+        assert_eq!(
+            cemu_game_title_id_tokens(&g),
+            set(&["000500001010ED00", "00050000", "1010ED00"])
+        );
+    }
+
+    #[test]
+    fn cemu_game_tokens_take_the_hex_id_from_the_rom_file_name() {
+        let g = game(|g| {
+            g.title = "Some Wii U Game".to_string();
+            g.rom_file_name = "Some Wii U Game [0005000010145D00].wua".to_string();
+        });
+        assert_eq!(
+            cemu_game_title_id_tokens(&g),
+            set(&["0005000010145D00", "00050000", "10145D00"])
+        );
+
+        let pair = game(|g| g.archive_path = "/roms/wiiu/00050000-10145D00.wux".to_string());
+        assert_eq!(
+            cemu_game_title_id_tokens(&pair),
+            set(&["0005000010145D00", "00050000", "10145D00"])
+        );
+    }
+
+    #[test]
+    fn cemu_game_tokens_are_empty_for_a_title_only_game() {
+        // The title never contributes, even when it holds hex text.
+        let g = game(|g| g.title = "Breath of the Wild 0005000010145D00".to_string());
+        assert!(cemu_game_title_id_tokens(&g).is_empty());
     }
 
     #[test]

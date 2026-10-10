@@ -100,7 +100,7 @@ fn archive_candidates(game: &CloudGame, library: Option<&Path>) -> Vec<PathBuf> 
 /// taken from `archive_path`, literal `"archive"` when blank), then
 /// `extracted_path` when it exists as a file. Both are existence-gated in
 /// the reference, so a missing directory contributes nothing.
-fn extracted_file_candidates(game: &CloudGame) -> Vec<PathBuf> {
+pub(crate) fn extracted_file_candidates(game: &CloudGame) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if !game.extracted_dir.trim().is_empty() {
         let dir = expand_home(&game.extracted_dir);

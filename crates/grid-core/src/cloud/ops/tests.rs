@@ -1543,6 +1543,112 @@ fn cloud_sync_targets_dispatch_table() {
     assert!(folders.is_empty());
 }
 
+/// G1: an RPCS3 game targets only its own savedata folder, and a game
+/// with no PS3 id targets none — never every PS3 game's folder. The local
+/// save mtime follows the same targets.
+#[test]
+fn rpcs3_targets_only_the_games_own_savedata_folder() {
+    let saves = TempDir::new().unwrap();
+    let own = saves.path().join("BLUS30443-SAVE00/SAVEDATA.BIN");
+    let other = saves.path().join("BLES00001-AUTOSAVE/SAVEDATA.BIN");
+    write_file(&own, b"own");
+    write_file(&other, b"other");
+    set_mtime(&own, 1_500_000_000);
+    set_mtime(&other, 1_600_000_000);
+
+    let entry = entry_named("RPCS3", saves.path().to_str().unwrap());
+    let fx = Fixture::new(config_with(entry.clone(), "PS3"));
+
+    let mut with_id = game("Demon's Souls", "PS3", "7");
+    with_id.ps3_game_id = "BLUS30443".to_string();
+    let mut caches = CloudCaches::default();
+    let (files, folders) =
+        cloud_sync_targets(&fx.ctx(), &mut caches, &with_id, &entry, SaveType::Save);
+    assert!(files.is_empty());
+    assert_eq!(folders, vec![saves.path().join("BLUS30443-SAVE00")]);
+    let mtime = latest_local_save_mtime(&fx.ctx(), &mut caches, &with_id, "RPCS3");
+    assert_eq!(mtime as u64, 1_500_000_000);
+
+    let blank = game("Demon's Souls", "PS3", "7");
+    let mut caches = CloudCaches::default();
+    let (files, folders) =
+        cloud_sync_targets(&fx.ctx(), &mut caches, &blank, &entry, SaveType::Save);
+    assert!(files.is_empty());
+    assert!(folders.is_empty());
+    assert_eq!(
+        latest_local_save_mtime(&fx.ctx(), &mut caches, &blank, "RPCS3"),
+        0.0
+    );
+
+    // The shipped RPCS3 autoprofile sets `save_strategy: folder`, so a
+    // configured entry takes the generic folder scanner instead. There the
+    // `ps3_game_id` token is what finds the game's own folder.
+    let mut folder_entry = entry.clone();
+    folder_entry.save_strategy = "folder".to_string();
+    let fx = Fixture::new(config_with(folder_entry.clone(), "PS3"));
+    let mut caches = CloudCaches::default();
+    let (_, folders) = cloud_sync_targets(
+        &fx.ctx(),
+        &mut caches,
+        &with_id,
+        &folder_entry,
+        SaveType::Save,
+    );
+    assert_eq!(folders, vec![saves.path().join("BLUS30443-SAVE00")]);
+    let (_, folders) = cloud_sync_targets(
+        &fx.ctx(),
+        &mut caches,
+        &blank,
+        &folder_entry,
+        SaveType::Save,
+    );
+    assert!(folders.is_empty());
+}
+
+/// G1: a Cemu game targets only the title folder its own id names, and a
+/// game with no id targets none — never every Wii U title's folder.
+#[test]
+fn cemu_targets_only_the_games_own_title_folder() {
+    let saves = TempDir::new().unwrap();
+    let own = saves
+        .path()
+        .join("00050000/10145D00/user/80000001/game.sav");
+    let other = saves
+        .path()
+        .join("00050000/1010ED00/user/80000001/other.sav");
+    write_file(&own, b"own");
+    write_file(&other, b"other");
+    set_mtime(&own, 1_500_000_000);
+    set_mtime(&other, 1_600_000_000);
+
+    let entry = entry_named("Cemu", saves.path().to_str().unwrap());
+    let fx = Fixture::new(config_with(entry.clone(), "Wii U"));
+
+    let mut with_id = game("Some Wii U Game", "Wii U", "7");
+    with_id.rom_file_name = "Some Wii U Game [0005000010145D00].wua".to_string();
+    let mut caches = CloudCaches::default();
+    let (files, folders) =
+        cloud_sync_targets(&fx.ctx(), &mut caches, &with_id, &entry, SaveType::Save);
+    assert!(files.is_empty());
+    assert_eq!(
+        folders,
+        vec![saves.path().join("00050000/10145D00/user/80000001")]
+    );
+    let mtime = latest_local_save_mtime(&fx.ctx(), &mut caches, &with_id, "Cemu");
+    assert_eq!(mtime as u64, 1_500_000_000);
+
+    let title_only = game("Some Wii U Game", "Wii U", "7");
+    let mut caches = CloudCaches::default();
+    let (files, folders) =
+        cloud_sync_targets(&fx.ctx(), &mut caches, &title_only, &entry, SaveType::Save);
+    assert!(files.is_empty());
+    assert!(folders.is_empty());
+    assert_eq!(
+        latest_local_save_mtime(&fx.ctx(), &mut caches, &title_only, "Cemu"),
+        0.0
+    );
+}
+
 /// D1: xemu contributes no generic save candidates, and its local mtime
 /// stands in as the raw image file's own.
 #[test]

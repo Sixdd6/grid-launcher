@@ -1292,7 +1292,7 @@ async fn reload_apply_and_save(
 }
 
 // ---------------------------------------------------------------------
-// CloudGame construction (rulings: id fields blank — data gap, recorded)
+// CloudGame construction (ps3_game_id copied; title_id/base_title_id have no source)
 // ---------------------------------------------------------------------
 
 /// The `game` parameter every cloud command takes. Deliberately a
@@ -1323,13 +1323,17 @@ pub struct CloudGameInput {
     pub native_game_dir: String,
     #[serde(default)]
     pub description: String,
+    /// The RPCS3 save scanner's only match key (G1). `serde(default)`
+    /// because a server game has none.
+    #[serde(default)]
+    pub ps3_game_id: String,
 }
 
 /// `CloudGame` from an `InstalledGame` registry row (task ruling):
 /// title/platform/rom_id (string form, `""` when `None`)/rom_file_name/
-/// archive_path/extracted_path/extracted_dir/native_game_dir/description; `title_id`/`base_title_id`/
-/// `ps3_game_id` stay blank — the registry does not carry them yet (same
-/// documented gap `CloudGame`'s own doc comment records).
+/// archive_path/extracted_path/extracted_dir/native_game_dir/description/
+/// ps3_game_id. `title_id`/`base_title_id` stay blank: no source carries
+/// them (see `CloudGame`'s doc comment).
 pub fn cloud_game_from_installed(game: &InstalledGame) -> CloudGame {
     CloudGame {
         title: game.title.clone(),
@@ -1343,7 +1347,7 @@ pub fn cloud_game_from_installed(game: &InstalledGame) -> CloudGame {
         description: game.description.clone(),
         title_id: String::new(),
         base_title_id: String::new(),
-        ps3_game_id: String::new(),
+        ps3_game_id: game.ps3_game_id.clone(),
     }
 }
 
@@ -1360,7 +1364,7 @@ fn cloud_game_from_input(game: &CloudGameInput) -> CloudGame {
         description: game.description.clone(),
         title_id: String::new(),
         base_title_id: String::new(),
-        ps3_game_id: String::new(),
+        ps3_game_id: game.ps3_game_id.clone(),
     }
 }
 
@@ -1850,6 +1854,42 @@ mod tests {
             format_size(1024.0 * 1024.0 * 1024.0 * 1024.0 * 1024.0),
             "1024.0 TB"
         );
+    }
+
+    #[test]
+    fn cloud_game_from_installed_copies_the_ps3_game_id() {
+        let row = InstalledGame {
+            title: "Demon's Souls".to_string(),
+            platform: "PS3".to_string(),
+            rom_id: Some(7),
+            ps3_game_id: "BLUS30443".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(cloud_game_from_installed(&row).ps3_game_id, "BLUS30443");
+    }
+
+    #[test]
+    fn cloud_game_input_carries_the_ps3_game_id_from_installed_json() {
+        // The frontend sends whole InstalledGame-shaped objects.
+        let row = InstalledGame {
+            title: "Demon's Souls".to_string(),
+            platform: "PS3".to_string(),
+            rom_id: Some(7),
+            ps3_game_id: "BLUS30443".to_string(),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&row).unwrap();
+        let input: CloudGameInput = serde_json::from_value(json).unwrap();
+        assert_eq!(cloud_game_from_input(&input).ps3_game_id, "BLUS30443");
+
+        // A server game has no such field: it stays blank.
+        let server: CloudGameInput = serde_json::from_value(serde_json::json!({
+            "title": "Demon's Souls",
+            "platform": "PS3",
+            "rom_id": 7
+        }))
+        .unwrap();
+        assert_eq!(cloud_game_from_input(&server).ps3_game_id, "");
     }
 
     #[test]

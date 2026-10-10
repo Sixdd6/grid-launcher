@@ -52,12 +52,20 @@ impl SaveType {
 /// Plain-data view of a game for cloud logic. Built from an InstalledGame
 /// or a server GameSummary; fields the source lacks stay `""`.
 ///
-/// The three id fields below (`title_id`, `base_title_id`, `ps3_game_id`)
-/// are a recorded data-availability gap: Python fills them during PS3/Wii-U
-/// archive preparation, which the rewrite has not ported as of this
-/// milestone. With them blank, the RPCS3/Cemu scanners run with empty token
-/// sets, which — per the reference — accept everything: degraded matching,
-/// not a crash.
+/// The id fields below:
+///
+/// - `ps3_game_id` comes from the installed-game registry (filled at PS3
+///   install) and from the frontend's `InstalledGame`-shaped game object.
+///   A server-only game has none.
+/// - `title_id` / `base_title_id` have no source (neither the registry nor
+///   the RomM API carries them), so they are always `""`. For Wii U the
+///   real source is the `app.xml`/`meta.xml` scan in
+///   [`tokens::cemu_game_title_id_tokens`].
+///
+/// An unknown id matches nothing: the RPCS3 and Cemu save scanners return
+/// no folders for a game whose id they cannot find, so upload reports
+/// that there is nothing to upload instead of taking every game's saves
+/// (G1; SPEC "Folder-based saves": "the relevant subfolder").
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CloudGame {
     pub title: String,
@@ -69,9 +77,9 @@ pub struct CloudGame {
     pub archive_path: String,
     pub native_game_dir: String,
     pub description: String,
-    pub title_id: String,      // data-availability gap: the rewrite's
-    pub base_title_id: String, // registry does not carry these three yet;
-    pub ps3_game_id: String,   // token logic ports fully, wiring passes ""
+    pub title_id: String,      // no source yet: always ""
+    pub base_title_id: String, // no source yet: always ""
+    pub ps3_game_id: String,   // registry / frontend; "" for a server game
 }
 
 /// Case-insensitive block lists for save-directory scanning, in

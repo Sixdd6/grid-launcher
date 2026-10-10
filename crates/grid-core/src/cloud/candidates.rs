@@ -574,24 +574,33 @@ pub fn directory_candidates(
 /// [`cemu_title_id_tokens`]'s normalize-and-prefer-16-then-8-else-all ladder
 /// to get `match_tokens`, which is then compared against each
 /// `<high>`/`<low>` pair's `[A-Z0-9]`-only normalized names (exact match on
-/// either, or a substring match against their concatenation) — an empty
-/// `match_tokens` accepts every title-id pair.
+/// either, or a substring match against their concatenation).
 ///
 /// A candidate directory whose [`latest_mtime_under`] (with `ignore`) is
-/// `<= 0.0` is dropped outright. The title-id-matched list wins when
-/// non-empty; otherwise every surviving candidate (regardless of title-id
-/// match) is returned. Sorted by `latest_mtime_under` descending, deduped
-/// case-insensitively. `cloud_sync.py:492-566`'s
+/// `<= 0.0` is dropped outright. Sorted by `latest_mtime_under` descending,
+/// deduped case-insensitively. `cloud_sync.py:492-566`'s
 /// `cemu_save_directories_for_game`.
+///
+/// DELIBERATE DEVIATION (G1): only title-id-matched folders are returned.
+/// Empty `match_tokens` match nothing, and an unmatched set returns
+/// nothing. The reference accepted every title on empty tokens and fell
+/// back to every title folder when nothing matched, so one upload pushed
+/// every Wii U game's saves to this game's ROM. SPEC "Folder-based saves"
+/// archives only "the relevant subfolder".
 pub fn cemu_save_directories(
     dirs: &[PathBuf],
     tokens: &BTreeSet<String>,
     ignore: &IgnoreSets,
 ) -> Vec<PathBuf> {
-    let match_tokens: BTreeSet<String> = cemu_title_id_tokens(tokens).into_iter().collect();
+    let match_tokens: BTreeSet<String> = cemu_title_id_tokens(tokens)
+        .into_iter()
+        .filter(|t| !t.is_empty())
+        .collect();
+    if match_tokens.is_empty() {
+        return Vec::new();
+    }
 
     let mut matched: Vec<PathBuf> = Vec::new();
-    let mut fallback: Vec<PathBuf> = Vec::new();
 
     for directory in dirs {
         if !directory.is_dir() {
@@ -623,13 +632,12 @@ pub fn cemu_save_directories(
                 let low_token =
                     upper_alnum(title_low.file_name().and_then(|n| n.to_str()).unwrap_or(""));
                 let combined_token = format!("{high_token}{low_token}");
-                let matches_title_id = match_tokens.is_empty()
-                    || match_tokens.iter().any(|t| {
-                        !t.is_empty()
-                            && (t == &high_token
-                                || t == &low_token
-                                || combined_token.contains(t.as_str()))
-                    });
+                let matches_title_id = match_tokens.iter().any(|t| {
+                    t == &high_token || t == &low_token || combined_token.contains(t.as_str())
+                });
+                if !matches_title_id {
+                    continue;
+                }
 
                 let user_root = title_low.join("user");
                 if !user_root.is_dir() {
@@ -655,20 +663,13 @@ pub fn cemu_save_directories(
                     if latest <= 0.0 {
                         continue;
                     }
-                    fallback.push(candidate.clone());
-                    if matches_title_id {
-                        matched.push(candidate);
-                    }
+                    matched.push(candidate);
                 }
             }
         }
     }
 
-    let mut candidates = if !matched.is_empty() {
-        matched
-    } else {
-        fallback
-    };
+    let mut candidates = matched;
     candidates
         .sort_by(|a, b| latest_mtime_under(b, ignore).total_cmp(&latest_mtime_under(a, ignore)));
     dedupe_casefold(candidates)
@@ -745,15 +746,27 @@ pub fn pcsx2_save_directories(
 
 /// RPCS3 save directories. QUIRK, ported as-is: immediate children of
 /// `dirs` matched against `ids` (already-normalized `[A-Z0-9]`-only PS3
-/// game-id tokens, substring on the child's normalized name; an empty
-/// `ids` accepts every child) — NO contained-file requirement at all, and
-/// NO ignore filtering. Sorted by `(configured-directory index ascending,
-/// latest_mtime_under with no ignore, descending)` — the directory a
-/// candidate was found under always outranks how recently it was touched,
-/// so a stale directory listed first in `dirs` beats a fresh one listed
-/// second. Deduped case-insensitively. `cloud_mixin.py:1177-1200`'s
-/// `_rpcs3_save_directories_for_game`.
+/// game-id tokens, substring on the child's normalized name) — NO
+/// contained-file requirement at all, and NO ignore filtering. Sorted by
+/// `(configured-directory index ascending, latest_mtime_under with no
+/// ignore, descending)` — the directory a candidate was found under always
+/// outranks how recently it was touched, so a stale directory listed first
+/// in `dirs` beats a fresh one listed second. Deduped case-insensitively.
+/// `cloud_mixin.py:1177-1200`'s `_rpcs3_save_directories_for_game`.
+///
+/// DELIBERATE DEVIATION (G1): empty `ids` (or only blank ids) match
+/// nothing. The reference accepted every child, so one upload pushed every
+/// PS3 game's savedata folder to this game's ROM. SPEC "Folder-based
+/// saves" archives only "the relevant subfolder".
 pub fn rpcs3_save_directories(dirs: &[PathBuf], ids: &[String]) -> Vec<PathBuf> {
+    let ids: Vec<&str> = ids
+        .iter()
+        .map(|id| id.as_str())
+        .filter(|id| !id.is_empty())
+        .collect();
+    if ids.is_empty() {
+        return Vec::new();
+    }
     let no_ignore = IgnoreSets::default();
     let mut scored: Vec<(usize, f64, PathBuf)> = Vec::new();
 
@@ -771,7 +784,7 @@ pub fn rpcs3_save_directories(dirs: &[PathBuf], ids: &[String]) -> Vec<PathBuf> 
             }
             let child_name = child.file_name().and_then(|n| n.to_str()).unwrap_or("");
             let normalized_name = upper_alnum(child_name);
-            if !ids.is_empty() && !ids.iter().any(|id| normalized_name.contains(id.as_str())) {
+            if !ids.iter().any(|id| normalized_name.contains(id)) {
                 continue;
             }
             let mtime = latest_mtime_under(&child, &no_ignore);
@@ -1280,25 +1293,76 @@ mod tests {
 
     #[test]
     fn cemu_uses_user_root_itself_when_childless() {
+        // G1: passes the folder's own title id. An empty token set now
+        // matches nothing, so the empty set this test used before no
+        // longer reaches the childless-`user` rule it pins.
         let dir = TempDir::new().unwrap();
         let save_root = dir.path().join("mlc01/usr/save");
         let user_root = save_root.join("00050000/1010ED00/user");
         touch_at(&user_root.join("save.dat"), 100.0);
 
-        let candidates =
-            cemu_save_directories(&[save_root], &BTreeSet::new(), &IgnoreSets::default());
+        let candidates = cemu_save_directories(
+            &[save_root],
+            &set(&["000500001010ED00"]),
+            &IgnoreSets::default(),
+        );
         assert_eq!(candidates, vec![user_root]);
     }
 
     #[test]
     fn cemu_drops_candidates_with_zero_latest_mtime() {
+        // G1: passes the folder's own title id, so the folder matches and
+        // the empty result comes from the zero-mtime rule, not from an
+        // empty token set.
         let dir = TempDir::new().unwrap();
         let save_root = dir.path().join("mlc01/usr/save");
         let empty_user_dir = save_root.join("00050000/1010ED00/user");
         fs::create_dir_all(&empty_user_dir).unwrap();
 
+        let candidates = cemu_save_directories(
+            &[save_root],
+            &set(&["000500001010ED00"]),
+            &IgnoreSets::default(),
+        );
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn cemu_empty_tokens_match_nothing() {
+        let dir = TempDir::new().unwrap();
+        let save_root = dir.path().join("mlc01/usr/save");
+        touch_at(
+            &save_root.join("00050000/1010ED00/user/80000001/progress.dat"),
+            100.0,
+        );
+        touch_at(
+            &save_root.join("00050000/1010EE00/user/80000001/other.dat"),
+            200.0,
+        );
+
         let candidates =
             cemu_save_directories(&[save_root], &BTreeSet::new(), &IgnoreSets::default());
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn cemu_unmatched_tokens_do_not_fall_back_to_every_title() {
+        let dir = TempDir::new().unwrap();
+        let save_root = dir.path().join("mlc01/usr/save");
+        touch_at(
+            &save_root.join("00050000/1010ED00/user/80000001/progress.dat"),
+            100.0,
+        );
+        touch_at(
+            &save_root.join("00050000/1010EE00/user/80000001/other.dat"),
+            200.0,
+        );
+
+        let candidates = cemu_save_directories(
+            &[save_root],
+            &set(&["0005000010145D00"]),
+            &IgnoreSets::default(),
+        );
         assert!(candidates.is_empty());
     }
 
@@ -1361,13 +1425,29 @@ mod tests {
         touch_at(&stale_child.join("save.dat"), 100.0);
         touch_at(&fresh_child.join("save.dat"), 900.0);
 
-        let candidates = rpcs3_save_directories(&[stale_root, fresh_root], &[]);
+        // G1: passes the game id both children contain. An empty id list
+        // now matches nothing, so the empty list this test used before no
+        // longer reaches the sort it pins.
+        let candidates =
+            rpcs3_save_directories(&[stale_root, fresh_root], &strings(&["BLUS30443"]));
         // dirs[0]'s child sorts first even though dirs[1]'s child has a
         // much newer mtime.
         assert_eq!(
             names(&candidates),
             vec!["BLUS30443".to_string(), "BLUS30443-copy".to_string()]
         );
+    }
+
+    #[test]
+    fn rpcs3_empty_ids_match_nothing() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path().join("root");
+        touch_at(&root.join("BLUS30443/save.dat"), 100.0);
+        touch_at(&root.join("BLUS99999/save.dat"), 200.0);
+
+        assert!(rpcs3_save_directories(std::slice::from_ref(&root), &[]).is_empty());
+        // A blank id is no id: `contains("")` must not match every folder.
+        assert!(rpcs3_save_directories(&[root], &strings(&[""])).is_empty());
     }
 
     #[test]
