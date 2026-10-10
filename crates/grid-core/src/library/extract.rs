@@ -171,7 +171,22 @@ fn unsafe_path_error(raw_name: &str) -> LibraryError {
 }
 
 /// Whether `raw_name` (the untrusted entry name, before any format-specific
-/// parsing), normalized `\` → `/`, is an absolute path.
+/// parsing), normalized `\` → `/`, is rooted anywhere but the destination.
+///
+/// The rule is the same on every OS, because an archive made on one OS can
+/// be opened on another. After `\` → `/`, a name is rejected when it:
+/// - starts with `/` (a Unix absolute path, a Windows root-relative path
+///   such as `\x`, and every UNC or device path such as `//srv/share/x` or
+///   `\\?\C:\x`), or
+/// - starts with an ASCII letter and `:` (a Windows drive prefix, including
+///   the drive-relative `C:x`, which Windows resolves against that drive's
+///   current directory, not the destination).
+///
+/// Any other `:` stays legal: Windows reads only a single letter before the
+/// first `:` as a drive, so `ab:c` or `dir/C:x` names a file (or an NTFS
+/// stream of a file) inside the destination. Before this rule the check was
+/// `Path::is_absolute`, which on Windows accepts `/etc/x` — and
+/// `dest.join("/etc/x")` there is `C:\etc\x`.
 ///
 /// None of `zip`'s `enclosed_name()` or `tar`'s `unpack_in` reject a
 /// *purely* absolute entry on their own: both silently strip the leading
@@ -182,9 +197,13 @@ fn unsafe_path_error(raw_name: &str) -> LibraryError {
 /// traversal policy treats an absolute path as unconditionally hostile, so
 /// every format checks the raw name for this explicitly, alongside
 /// whatever `..`-escape guard the format's own crate provides.
-fn is_absolute_entry_path(raw_name: &str) -> bool {
+pub(crate) fn is_absolute_entry_path(raw_name: &str) -> bool {
     let normalized = raw_name.replace('\\', "/");
-    Path::new(&normalized).is_absolute()
+    match normalized.as_bytes() {
+        [b'/', ..] => true,
+        [drive, b':', ..] => drive.is_ascii_alphabetic(),
+        _ => false,
+    }
 }
 
 // --- ZIP --------------------------------------------------------------------
@@ -668,9 +687,41 @@ pub(crate) fn bundled_7z_windows_path() -> Option<PathBuf> {
 /// (`cloud_transfer.py:150-165`) without duplicating this lookup.
 pub(crate) fn which_on_path(name: &str) -> Option<PathBuf> {
     let path_var = std::env::var_os("PATH")?;
-    std::env::split_paths(&path_var)
-        .map(|dir| dir.join(name))
-        .find(|candidate| candidate.is_file())
+    let file_names = executable_file_names(name);
+    std::env::split_paths(&path_var).find_map(|dir| {
+        file_names
+            .iter()
+            .map(|file_name| dir.join(file_name))
+            .find(|candidate| candidate.is_file())
+    })
+}
+
+/// The file names `which_on_path` looks for in each `PATH` directory. On
+/// Windows the shell appends each `PATHEXT` extension to a bare name
+/// (`7z` → `7z.exe`), so this does too; a name that already has an
+/// extension is also tried as given. `PATHEXT` falls back to the Windows
+/// default when unset.
+#[cfg(windows)]
+fn executable_file_names(name: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    if Path::new(name).extension().is_some() {
+        names.push(name.to_string());
+    }
+    let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_string());
+    names.extend(
+        pathext
+            .split(';')
+            .map(str::trim)
+            .filter(|ext| !ext.is_empty())
+            .map(|ext| format!("{name}{ext}")),
+    );
+    names
+}
+
+/// Off Windows an executable has no implied extension.
+#[cfg(not(windows))]
+fn executable_file_names(name: &str) -> Vec<String> {
+    vec![name.to_string()]
 }
 
 fn extract_7z_system_fallback(archive: &Path, dest: &Path) -> Result<(), String> {
@@ -905,9 +956,114 @@ mod tests {
 
     // --- rar_entry_relative_path ---------------------------------------------
 
+    // --- is_absolute_entry_path (shared by every format) ----------------------
+
+    /// Entry names that point outside the destination on at least one OS.
+    /// An archive made on one OS can be opened on another, so every name
+    /// here is rejected on every OS.
+    const ROOTED_ENTRY_NAMES: &[&str] = &[
+        "/x",
+        "\\x",
+        "C:/x",
+        "C:\\x",
+        "c:x",
+        "C:x",
+        "C:",
+        "//srv/share/x",
+        "\\\\srv\\share\\x",
+        "\\\\?\\C:\\x",
+    ];
+
+    /// Relative names that stay under the destination, including names
+    /// with a `:` that is not a drive prefix. Windows reads only a single
+    /// ASCII letter before the first `:` as a drive; any other `:` names
+    /// an NTFS stream of a file inside the destination.
+    const RELATIVE_ENTRY_NAMES: &[&str] = &[
+        "x",
+        "dir/file.bin",
+        "dir\\file.bin",
+        "ab:c",
+        "dir/C:x",
+        "1:x",
+        "game: the sequel/disc.bin",
+    ];
+
+    #[test]
+    fn is_absolute_entry_path_rejects_every_rooted_shape_on_every_os() {
+        for name in ROOTED_ENTRY_NAMES {
+            assert!(is_absolute_entry_path(name), "{name:?} should be rooted");
+        }
+        for name in RELATIVE_ENTRY_NAMES {
+            assert!(!is_absolute_entry_path(name), "{name:?} should be relative");
+        }
+    }
+
+    #[test]
+    fn is_unsafe_7z_path_rejects_every_rooted_shape_on_every_os() {
+        for name in ROOTED_ENTRY_NAMES {
+            assert!(is_unsafe_7z_path(name), "{name:?} should be unsafe");
+        }
+        for name in RELATIVE_ENTRY_NAMES {
+            assert!(!is_unsafe_7z_path(name), "{name:?} should be safe");
+        }
+    }
+
+    #[test]
+    fn rar_entry_relative_path_rejects_every_rooted_shape_on_every_os() {
+        for name in ROOTED_ENTRY_NAMES {
+            assert!(
+                rar_entry_relative_path(name).is_err(),
+                "{name:?} should be rejected"
+            );
+        }
+        for name in RELATIVE_ENTRY_NAMES {
+            assert!(
+                rar_entry_relative_path(name).is_ok(),
+                "{name:?} should be accepted"
+            );
+        }
+    }
+
+    // --- which_on_path ----------------------------------------------------------
+
+    /// PATHEXT exists only on Windows: a bare `7z` must resolve to `7z.exe`
+    /// the way the Windows shell resolves it.
+    #[cfg(windows)]
+    #[test]
+    fn which_on_path_tries_each_pathext_extension() {
+        let _lock = crate::test_env::lock();
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("7z.exe");
+        fs::write(&exe, b"MZ").unwrap();
+        let path = dir.path().to_str().unwrap().to_string();
+        let _guard = crate::test_env::EnvGuard::set(&[
+            ("PATH", Some(path.as_str())),
+            ("PATHEXT", Some(".COM;.EXE;.BAT")),
+        ]);
+
+        let found = which_on_path("7z").expect("7z.exe should be found");
+
+        assert!(
+            found
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&exe.to_string_lossy()),
+            "found {found:?}, expected {exe:?}"
+        );
+        assert_eq!(which_on_path("missing-tool"), None);
+    }
+
     #[test]
     fn rar_entry_relative_path_rejects_traversal() {
-        for bad in ["../x", "/abs", "a/../../b"] {
+        for bad in [
+            "../x",
+            "/abs",
+            "\\abs",
+            "a/../../b",
+            "C:/x",
+            "C:x",
+            "//srv/share/x",
+            "\\\\srv\\share\\x",
+        ] {
             assert!(
                 rar_entry_relative_path(bad).is_err(),
                 "{bad} should be rejected"

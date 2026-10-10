@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 use super::FirmwareOptions;
-use crate::library::extract::extract_archive;
+use crate::library::extract::{extract_archive, is_absolute_entry_path};
 
 /// Whether `data` starts with one of the three zip local-file-header /
 /// empty-archive / spanned-archive signatures (`"PK\x03\x04"`,
@@ -256,18 +256,23 @@ fn write_zip_members(
 
 /// Path-traversal guard for an `extract_zip_with_paths` member
 /// (firmware_install.py:187-194): backslashes normalized to `/`, then
-/// `None` when the result is empty, absolute, or contains a `..`
-/// component.
+/// `None` when the result is empty, rooted, or contains a `..` component.
+/// "Rooted" is the archive extractor's rule (`is_absolute_entry_path`),
+/// the same on every OS: a leading `/` or `\` (including UNC) or a drive
+/// prefix such as `C:/x` or `C:x`.
 fn safe_relative_path(raw_name: &str) -> Option<PathBuf> {
     let normalized = raw_name.replace('\\', "/");
     let path = PathBuf::from(&normalized);
-    if path.as_os_str().is_empty() || path.is_absolute() {
+    if path.as_os_str().is_empty() || is_absolute_entry_path(raw_name) {
         return None;
     }
     let mut any_component = false;
     for component in path.components() {
         any_component = true;
-        if component == Component::ParentDir {
+        if matches!(
+            component,
+            Component::ParentDir | Component::Prefix(_) | Component::RootDir
+        ) {
             return None;
         }
     }
@@ -374,6 +379,37 @@ mod tests {
                 "{name:?} wrote outside the target directory"
             );
         }
+    }
+
+    #[test]
+    fn safe_relative_path_rejects_every_rooted_shape_on_every_os() {
+        for name in [
+            "/abs",
+            "\\abs",
+            "C:/x",
+            "C:\\x",
+            "C:x",
+            "//srv/share/x",
+            "\\\\srv\\share\\x",
+            "../x",
+            "a/../../x",
+            "",
+        ] {
+            assert_eq!(
+                safe_relative_path(name),
+                None,
+                "{name:?} should be rejected"
+            );
+        }
+        assert_eq!(
+            safe_relative_path("dir/file.bin"),
+            Some(PathBuf::from("dir/file.bin"))
+        );
+        assert_eq!(
+            safe_relative_path("dir\\file.bin"),
+            Some(PathBuf::from("dir/file.bin"))
+        );
+        assert_eq!(safe_relative_path("ab:c"), Some(PathBuf::from("ab:c")));
     }
 
     #[test]

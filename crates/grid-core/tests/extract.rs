@@ -71,6 +71,8 @@ fn write_7z(path: &Path, entries: &[(&str, &[u8])]) {
 
 /// Builds a zip archive at `path` from `(name, content, unix mode)` entries,
 /// stamping each entry's Unix permission bits via `SimpleFileOptions::unix_permissions`.
+/// Only the Unix permission tests use it.
+#[cfg(unix)]
 fn write_zip_with_modes(path: &Path, entries: &[(&str, &[u8], u32)]) {
     let file = fs::File::create(path).unwrap();
     let mut zip = zip::ZipWriter::new(file);
@@ -87,7 +89,9 @@ fn write_zip_with_modes(path: &Path, entries: &[(&str, &[u8], u32)]) {
 /// Builds a 7z archive at `path` from `(name, content, unix mode)` entries,
 /// stamping each entry's Windows attribute field with the `0x8000` Unix flag
 /// and the mode in the upper 16 bits — the same layout `sevenz-rust2`'s
-/// reader hands back via `ArchiveEntry::windows_attributes()`.
+/// reader hands back via `ArchiveEntry::windows_attributes()`. Only the
+/// Unix permission tests use it.
+#[cfg(unix)]
 fn write_7z_with_modes(path: &Path, entries: &[(&str, &[u8], u32)]) {
     let file = fs::File::create(path).unwrap();
     let mut writer = sevenz_rust2::ArchiveWriter::new(file).unwrap();
@@ -102,6 +106,38 @@ fn write_7z_with_modes(path: &Path, entries: &[(&str, &[u8], u32)]) {
 
 fn read_to_string(path: &Path) -> String {
     fs::read_to_string(path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()))
+}
+
+/// Entry names rooted outside the destination on at least one OS. An
+/// archive made on one OS can be opened on another, so every format
+/// rejects all of them on every OS.
+const ROOTED_ENTRY_NAMES: &[&str] = &[
+    "/etc/evil.txt",
+    "\\etc\\evil.txt",
+    "C:/evil.txt",
+    "C:\\evil.txt",
+    "C:evil.txt",
+    "//srv/share/evil.txt",
+    "\\\\srv\\share\\evil.txt",
+];
+
+/// Asserts that extracting a hostile archive failed with the unsafe-path
+/// error naming the entry, and left no destination behind.
+fn assert_unsafe_path_rejected(name: &str, dest: &Path, result: Result<(), LibraryError>) {
+    assert!(!dest.exists(), "{name:?} left the destination behind");
+    match result {
+        Err(LibraryError::Extract(message)) => {
+            assert!(
+                message.contains("unsafe path"),
+                "{name:?}: unexpected message: {message}"
+            );
+            assert!(
+                message.contains("evil.txt"),
+                "{name:?}: unexpected message: {message}"
+            );
+        }
+        other => panic!("{name:?}: expected LibraryError::Extract, got {other:?}"),
+    }
 }
 
 // --- zip ----------------------------------------------------------------------
@@ -198,26 +234,15 @@ fn extract_zip_entry_with_parent_dir_traversal_fails_and_deletes_dest() {
 
 #[test]
 fn extract_zip_entry_with_absolute_path_fails_and_deletes_dest() {
-    let dir = tempfile::tempdir().unwrap();
-    let archive = dir.path().join("evil-absolute.zip");
-    write_zip(&archive, &[("/etc/evil.txt", b"pwned" as &[u8])]);
-    let dest = dir.path().join("out");
+    for name in ROOTED_ENTRY_NAMES {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = dir.path().join("evil-absolute.zip");
+        write_zip(&archive, &[(name, b"pwned" as &[u8])]);
+        let dest = dir.path().join("out");
 
-    let result = extract_archive(&archive, &dest, &mut |_, _| {});
+        let result = extract_archive(&archive, &dest, &mut |_, _| {});
 
-    assert!(!dest.exists());
-    match result {
-        Err(LibraryError::Extract(message)) => {
-            assert!(
-                message.contains("unsafe path"),
-                "unexpected message: {message}"
-            );
-            assert!(
-                message.contains("evil.txt"),
-                "unexpected message: {message}"
-            );
-        }
-        other => panic!("expected LibraryError::Extract, got {other:?}"),
+        assert_unsafe_path_rejected(name, &dest, result);
     }
 }
 
@@ -443,26 +468,15 @@ fn extract_tar_entry_with_parent_dir_traversal_fails_and_deletes_dest() {
 
 #[test]
 fn extract_tar_entry_with_absolute_path_fails_and_deletes_dest() {
-    let dir = tempfile::tempdir().unwrap();
-    let archive = dir.path().join("evil-absolute.tar.gz");
-    write_tar_gz(&archive, &[("/etc/evil.txt", b"pwned" as &[u8])]);
-    let dest = dir.path().join("out");
+    for name in ROOTED_ENTRY_NAMES {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = dir.path().join("evil-absolute.tar.gz");
+        write_tar_gz(&archive, &[(name, b"pwned" as &[u8])]);
+        let dest = dir.path().join("out");
 
-    let result = extract_archive(&archive, &dest, &mut |_, _| {});
+        let result = extract_archive(&archive, &dest, &mut |_, _| {});
 
-    assert!(!dest.exists());
-    match result {
-        Err(LibraryError::Extract(message)) => {
-            assert!(
-                message.contains("unsafe path"),
-                "unexpected message: {message}"
-            );
-            assert!(
-                message.contains("evil.txt"),
-                "unexpected message: {message}"
-            );
-        }
-        other => panic!("expected LibraryError::Extract, got {other:?}"),
+        assert_unsafe_path_rejected(name, &dest, result);
     }
 }
 
@@ -567,22 +581,15 @@ fn extract_7z_entry_with_parent_dir_traversal_fails_and_deletes_dest() {
 
 #[test]
 fn extract_7z_entry_with_absolute_path_fails_and_deletes_dest() {
-    let dir = tempfile::tempdir().unwrap();
-    let archive = dir.path().join("evil-absolute.7z");
-    write_7z(&archive, &[("/etc/evil.txt", b"pwned" as &[u8])]);
-    let dest = dir.path().join("out");
+    for name in ROOTED_ENTRY_NAMES {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = dir.path().join("evil-absolute.7z");
+        write_7z(&archive, &[(name, b"pwned" as &[u8])]);
+        let dest = dir.path().join("out");
 
-    let result = extract_archive(&archive, &dest, &mut |_, _| {});
+        let result = extract_archive(&archive, &dest, &mut |_, _| {});
 
-    assert!(!dest.exists());
-    match result {
-        Err(LibraryError::Extract(message)) => {
-            assert!(
-                message.contains("unsafe path"),
-                "unexpected message: {message}"
-            );
-        }
-        other => panic!("expected LibraryError::Extract, got {other:?}"),
+        assert_unsafe_path_rejected(name, &dest, result);
     }
 }
 
