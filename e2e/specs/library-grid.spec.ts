@@ -115,6 +115,38 @@ describe('library and server chrome', () => {
     });
   });
 
+  it('matches the Server search box against a game genre and its platform label', async () => {
+    await $(testId('platform-btn-1')).click();
+    await $(testId('game-card-101')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+
+    // "Platformer" is only in Super Mario World's genres, never in its title.
+    await $(testId('server-search')).setValue('platformer');
+    await $(testId('game-card-102')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      reverse: true,
+      timeoutMsg: 'Chrono Trigger survived a search for the genre "platformer"',
+    });
+    await expect($(testId('game-card-101'))).toExist();
+
+    await $(testId('server-search')).setValue('');
+    await $(testId('game-card-102')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'clearing the search never restored the full platform list',
+    });
+
+    // The platform label matches too, case-insensitively. Only Super Mario
+    // World's fixture carries the label, so the other card must drop out.
+    await $(testId('server-search')).setValue('SUPER NINTENDO');
+    await $(testId('game-card-102')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      reverse: true,
+      timeoutMsg: 'a search for the platform label never filtered the grid',
+    });
+    await expect($(testId('game-card-101'))).toExist();
+
+    await $(testId('server-search')).setValue('');
+  });
+
   it('Ctrl+F focuses the active view search box', async () => {
     await $(testId('nav-server')).click();
     await browser.keys(['Control', 'f']);

@@ -37,8 +37,8 @@ There are several main sections to the application with buttons across the top b
 - **Server** mirrors Library: a rail of the server's platforms with ROM counts, a
   platform header (name, ROM count, installed count, a firmware chip with an Install
   action when the server offers firmware, and the platform's default emulator chip
-  linking to the Emulators view), a search box that filters the loaded platform list,
-  and a grid whose not-installed cards render dimmed until hovered. The hover action is
+  linking to the Emulators view), a search box that filters the loaded platform list by
+  title, platform or genre, and a grid whose not-installed cards render dimmed until hovered. The hover action is
   Install for a game that is not installed and Play for one that is. The card size is
   remembered as `ui.card_size_server`. Downloads and installs are queued and handled in
   the background.

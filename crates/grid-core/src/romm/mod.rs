@@ -317,6 +317,57 @@ pub struct GameSummary {
     /// fanart, which is why the background falls back to screenshots.
     #[serde(default)]
     pub fanart_urls: Vec<String>,
+    /// The server's platform label (`platform_display_name`), empty when the
+    /// payload has none. The Server search box matches it.
+    #[serde(default)]
+    pub platform_display_name: String,
+    /// Genres for the Server search box: `metadatum.genres`, or — when that is
+    /// empty — the provider blocks' genres (see `genres_from_payload`).
+    #[serde(default)]
+    pub genres: Vec<String>,
+}
+
+/// Genres of a `SimpleRomSchema` entry. RomM's merged `metadatum.genres` wins.
+/// When it is empty the provider blocks supply them in the order the previous
+/// app used (`server/metadata.py`): launchbox, screenscraper, igdb, mobygames,
+/// merged case-insensitively without duplicates. Lenient: a block that is
+/// null, or a `genres` value that is not a list of strings, contributes
+/// nothing instead of failing the page.
+fn genres_from_payload(payload: &serde_json::Value) -> Vec<String> {
+    let list = |block: &str| -> Vec<String> {
+        payload
+            .get(block)
+            .and_then(|b| b.get("genres"))
+            .and_then(|g| g.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|v| !v.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let merged = list("metadatum");
+    if !merged.is_empty() {
+        return merged;
+    }
+    let mut out: Vec<String> = Vec::new();
+    for block in [
+        "launchbox_metadata",
+        "ss_metadata",
+        "igdb_metadata",
+        "moby_metadata",
+    ] {
+        for genre in list(block) {
+            if !out.iter().any(|g| g.to_lowercase() == genre.to_lowercase()) {
+                out.push(genre);
+            }
+        }
+    }
+    out
 }
 
 /// Wire shape of a `SimpleRomSchema` entry. `name` is nullable server-side
@@ -337,9 +388,12 @@ struct RawGameSummary {
     cover_path: Option<String>,
     #[serde(rename = "path_cover_large", default)]
     cover_large_path: Option<String>,
+    #[serde(default)]
+    platform_display_name: Option<String>,
     /// Every field not named above — the screenshot and fanart sources
-    /// (`merged_screenshots`, `ss_metadata`, `gamelist_metadata`, …) are read
-    /// from here, exactly as `RawRomDetail` does it.
+    /// (`merged_screenshots`, `ss_metadata`, `gamelist_metadata`, …) and the
+    /// genre sources (`metadatum`, provider blocks) are read from here,
+    /// exactly as `RawRomDetail` does it.
     #[serde(flatten)]
     extra: serde_json::Map<String, serde_json::Value>,
 }
@@ -365,6 +419,8 @@ impl RawGameSummary {
             cover_large_path: self.cover_large_path,
             screenshot_urls: crate::images::urls::screenshot_urls_from_payload(&extra, &resolver),
             fanart_urls: crate::images::urls::fanart_urls_from_payload(&extra, &resolver),
+            platform_display_name: self.platform_display_name.unwrap_or_default(),
+            genres: genres_from_payload(&extra),
         }
     }
 }
@@ -824,6 +880,65 @@ mod summary_tests {
         assert!(summary.screenshot_urls.is_empty());
         assert!(summary.fanart_urls.is_empty());
         assert_eq!(summary.cover_large_path, None);
+    }
+
+    #[test]
+    fn a_summary_carries_its_genres_and_platform_label() {
+        let summary = parse(serde_json::json!({
+            "id": 103,
+            "name": "Metroid Fusion",
+            "platform_id": 4,
+            "platform_display_name": "Game Boy Advance",
+            "metadatum": { "rom_id": 103, "genres": ["Action", "Platform"] },
+            "igdb_metadata": { "genres": ["Adventure"] }
+        }));
+        assert_eq!(summary.platform_display_name, "Game Boy Advance");
+        assert_eq!(summary.genres, vec!["Action", "Platform"]);
+    }
+
+    /// `metadatum.genres` empty: the provider blocks supply the genres in the
+    /// old app's order (launchbox, screenscraper, igdb, mobygames), merged
+    /// case-insensitively without duplicates.
+    #[test]
+    fn empty_metadatum_genres_fall_back_to_provider_blocks_in_order() {
+        let summary = parse(serde_json::json!({
+            "id": 104,
+            "name": "Chrono Trigger",
+            "platform_id": 5,
+            "metadatum": { "rom_id": 104, "genres": [] },
+            "moby_metadata": { "genres": ["Role-playing (RPG)", "rpg"] },
+            "igdb_metadata": { "genres": ["RPG", "Adventure"] },
+            "ss_metadata": null,
+            "launchbox_metadata": { "genres": ["Role-Playing", "rpg"] }
+        }));
+        assert_eq!(
+            summary.genres,
+            vec!["Role-Playing", "rpg", "Adventure", "Role-playing (RPG)"]
+        );
+    }
+
+    #[test]
+    fn a_null_or_absent_metadatum_gives_no_genres_and_an_empty_label() {
+        for payload in [
+            serde_json::json!({ "id": 105, "name": "A", "platform_id": 1, "metadatum": null }),
+            serde_json::json!({ "id": 106, "name": "B", "platform_id": 1 }),
+        ] {
+            let summary = parse(payload);
+            assert!(summary.genres.is_empty());
+            assert_eq!(summary.platform_display_name, "");
+        }
+    }
+
+    #[test]
+    fn a_genre_list_with_a_null_entry_or_wrong_type_does_not_fail_the_page() {
+        let summary = parse(serde_json::json!({
+            "id": 107,
+            "name": "C",
+            "platform_id": 1,
+            "metadatum": { "genres": null },
+            "igdb_metadata": { "genres": "Action" }
+        }));
+        assert!(summary.genres.is_empty());
     }
 }
 

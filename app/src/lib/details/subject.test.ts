@@ -54,6 +54,8 @@ function game(overrides: Partial<GameSummary>): GameSummary {
     path_cover_large: null,
     screenshot_urls: [],
     fanart_urls: [],
+    platform_display_name: '',
+    genres: [],
     ...overrides,
   };
 }

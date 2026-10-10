@@ -22,7 +22,7 @@
   import { cloudPlatformSet } from './cards/badges';
   import { CARD_SIZES, cardSizeLabel, type CardSize } from './cards/size';
   import { setCardSize, uiSettings } from './stores/uiSettings.svelte';
-  import { titleContains } from './library/sort';
+  import { filterServerGames } from './server/search';
   import {
     emulatorChipLabel,
     firmwareChipLabel,
@@ -86,7 +86,7 @@
 
   let activePlatformRow = $derived(platforms.find((p) => p.id === activePlatform) ?? null);
   let activePlatformName = $derived(activePlatformRow ? platformLabel(activePlatformRow) : '');
-  let visible = $derived(games.filter((game) => titleContains(game.name, search)));
+  let visible = $derived(filterServerGames(games, search));
   let installedCount = $derived(
     games.filter((game) => isInstalled(game, activePlatformName)).length,
   );
@@ -531,7 +531,7 @@
             data-testid="server-search"
             class="search"
             type="search"
-            placeholder="Search this platform"
+            placeholder="Search title, platform or genre"
             aria-label="Search this platform"
             bind:this={searchEl}
             bind:value={search}

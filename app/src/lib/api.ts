@@ -53,6 +53,10 @@ export type GameSummary = {
   screenshot_urls: string[];
   /** Resolved + host-filtered; the Server grid's background art reads these. */
   fanart_urls: string[];
+  /** The server's platform label; the Server search box matches it. */
+  platform_display_name: string;
+  /** The server's genres for the game; the Server search box matches them. */
+  genres: string[];
 };
 
 export type RomFile = {
