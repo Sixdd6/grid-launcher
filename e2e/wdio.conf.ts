@@ -54,6 +54,11 @@ const appEnv: Record<string, string> = {
   ...(process.env.E2E_PLAY_SESSION_MIN_SECS !== undefined
     ? { GRID_LAUNCHER_E2E_PLAY_SESSION_MIN_SECS: process.env.E2E_PLAY_SESSION_MIN_SECS }
     : {}),
+  // GRID_LAUNCHER_E2E_FORCE_COPY_MOVE makes a library move copy every folder
+  // instead of renaming it (grid-core library/relocate.rs `probe_strategy`,
+  // e2e feature only). e2e.sh sets E2E_FORCE_COPY_MOVE for the
+  // `library-move` group only.
+  ...(process.env.E2E_FORCE_COPY_MOVE ? { GRID_LAUNCHER_E2E_FORCE_COPY_MOVE: '1' } : {}),
   ...(process.env.GRID_E2E_ARGV_FILE
     ? { GRID_E2E_ARGV_FILE: process.env.GRID_E2E_ARGV_FILE }
     : {}),

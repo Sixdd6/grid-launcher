@@ -110,7 +110,7 @@
         {#each rows as e (e.id)}
           {@const action = actionFor(e.status, e.kind, libraryMove.phase)}
           {@const progress = rowProgress(e)}
-          <div data-testid={`download-row-${e.id}`} class="row">
+          <div data-testid={`download-row-${e.id}`} class="row" class:move={e.kind === 'library_move'}>
             <div class="row-text">
               <span class="title-row">
                 <span class="title">{e.title}</span>
@@ -119,7 +119,7 @@
                 {/if}
                 <span class="platform">{e.platform}</span>
               </span>
-              <span data-testid={`download-detail-${e.id}`} class="detail">{entryDetail(e)}</span>
+              <span data-testid={`download-detail-${e.id}`} class="detail" title={entryDetail(e)}>{entryDetail(e)}</span>
               <span class="bar-track" class:indeterminate={progress.indeterminate}>
                 <span class="bar-fill" style={progress.indeterminate ? '' : `width: ${progress.pct}%`}></span>
               </span>
@@ -145,7 +145,14 @@
 
             <div class="row-actions">
               {#if action === 'cancel'}
-                <button data-testid={`download-action-cancel-${e.id}`} disabled={pending[e.id]} onclick={() => cancel(e)}>Cancel</button>
+                <!-- A library move's Cancel is the quiet choice: secondary, and
+                     named for what it stops. -->
+                <button
+                  data-testid={`download-action-cancel-${e.id}`}
+                  class:secondary={e.kind === 'library_move'}
+                  disabled={pending[e.id]}
+                  onclick={() => cancel(e)}
+                >{e.kind === 'library_move' ? 'Cancel move' : 'Cancel'}</button>
               {:else if action === 'retry-dismiss'}
                 <button data-testid={`download-action-retry-${e.id}`} disabled={pending[e.id]} onclick={() => retry(e)}>Retry</button>
                 <button data-testid={`download-action-dismiss-${e.id}`} class="secondary" disabled={pending[e.id]} onclick={() => dismiss(e.id)}>Dismiss</button>
@@ -413,5 +420,32 @@
   .row-actions button:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+
+  /* The library move row. It reads like the others (same grid, bar, graph
+     and buttons); the differences are for legibility only. Its detail line
+     carries a phase ("Copying • games/ · 1.2 of 5.6 GB", "Updating paths…",
+     "Removing the old copies…") or a failure reason, so it wraps instead of
+     being cut off; the full text is also the tooltip. A thin --primary edge
+     marks it as the one job that is not a download. Its filled buttons take
+     the theme background as the label (about 5.4:1 on the dark theme's
+     #8b74e8; white there is about 3.6:1). */
+  .row.move {
+    box-shadow: inset 3px 0 0 var(--primary);
+  }
+
+  .row.move .detail {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .row.move .row-actions button:not(.secondary) {
+    color: var(--bg);
+    font-weight: 600;
+  }
+
+  .row.move .row-actions button:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
   }
 </style>

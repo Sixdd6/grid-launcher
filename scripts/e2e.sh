@@ -80,6 +80,11 @@ STAGE_GROUPS=(
   # Legacy library in, layout v2 out: the seed writes an UNVERSIONED config
   # and a flat library, and the spec reads the migrated tree off disk.
   "layout-migration:specs/layout-migration.spec.ts"
+  # 9b: (a) Move existing files end to end, (b) resume an interrupted Copy
+  # at startup, (c) the unreachable-library dialog's Relocate. Each spec
+  # needs its own starting state, so its seed runs before every spec
+  # (group_seeds_per_spec).
+  "library-move:specs/library-move-a.spec.ts specs/library-move-b.spec.ts specs/library-move-c.spec.ts"
 )
 
 # Run only the named groups by passing them as arguments, e.g.
@@ -490,8 +495,18 @@ seed_script_for_group() {
     firmware) printf '%s' "$E2E_DIR/seed/firmware-seed.mjs" ;;
     updates) printf '%s' "$E2E_DIR/seed/updates-seed.mjs" ;;
     layout-migration) printf '%s' "$E2E_DIR/seed/layout-migration-seed.mjs" ;;
+    library-move) printf '%s' "$E2E_DIR/seed/library-move-seed.mjs" ;;
     *) printf '' ;;
   esac
+}
+
+# A group listed here runs its seed script before EVERY spec instead of once
+# before the first, as `node <seed> <data-dir> <spec base name>` (e.g.
+# `library-move-b`). The specs of such a group share the data directory and
+# the run's keyring, but each starts the app on the state its own seed
+# variant writes.
+group_seeds_per_spec() {
+  [[ "$1" == "library-move" ]]
 }
 
 # Runs every spec of one group against a freshly created data dir and mock.
@@ -516,7 +531,7 @@ run_group_attempt() {
 
   local seed_script
   seed_script="$(seed_script_for_group "$name")"
-  if [[ -n "$seed_script" ]]; then
+  if [[ -n "$seed_script" ]] && ! group_seeds_per_spec "$name"; then
     if ! node "$seed_script" "$data_dir" >"$attempt_mock_log" 2>&1; then
       printf 'e2e: seed script failed for stage %s\n' "$name" >&2
       tail -n 40 "$attempt_mock_log" >&2
@@ -637,6 +652,17 @@ EOF
     wdio_log="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.log"
     out_dir="$LOG_DIR/$name-attempt-$attempt-$(basename "$spec").wdio.d"
     say "running $stage (attempt $attempt)"
+    if [[ -n "$seed_script" ]] && group_seeds_per_spec "$name"; then
+      # Appended to the mock log, which the failure dump already shows.
+      if ! node "$seed_script" "$data_dir" "$(basename "$spec" .spec.ts)" >>"$attempt_mock_log" 2>&1; then
+        printf 'e2e: seed script failed for stage %s\n' "$stage" >&2
+        tail -n 40 "$attempt_mock_log" >&2
+        attempt_failed_stage="$stage (seed script)"
+        attempt_failed_log="$wdio_log"
+        attempt_out_dir="$out_dir"
+        break
+      fi
+    fi
     (
       cd "$E2E_DIR" || exit 1
       export E2E_SPEC="$spec"
@@ -664,6 +690,14 @@ EOF
       # GRID_LAUNCHER_E2E_PLAY_SESSION_MIN_SECS, read by the e2e build only.
       if [[ "$name" == "launch" ]]; then
         export E2E_PLAY_SESSION_MIN_SECS=0
+      fi
+      # Only the `library-move` group: the whole run is on one disk, where
+      # every library folder would move by rename. This forces the Copy path
+      # (copy, verify, commit, delete the source); wdio.conf.ts turns it into
+      # GRID_LAUNCHER_E2E_FORCE_COPY_MOVE, read by the e2e build only
+      # (grid-core library/relocate.rs `probe_strategy`).
+      if [[ "$name" == "library-move" ]]; then
+        export E2E_FORCE_COPY_MOVE=1
       fi
       # Both of these are seed-script conventions rather than per-group
       # settings: a seed that writes the directory opts its group in, and

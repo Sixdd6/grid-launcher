@@ -72,6 +72,33 @@
   let moveReady = $derived(canMove(check, typed, currentPath) && !checking);
   let hasOldRoot = $derived(currentPath.trim() !== '');
 
+  // How the move-confirm summary reads, from the preview alone (presentation
+  // only; the backend still refuses a move that does not fit). A same-drive
+  // move copies nothing, so space is no concern. A copy needs `required_bytes`
+  // (the copied bytes plus a safety margin): below that the drive is short,
+  // within a quarter above it the space is tight, and an unreadable figure is
+  // flagged rather than assumed to be fine.
+  type MoveTone = 'ok' | 'warn' | 'bad';
+  let moveTone = $derived.by((): MoveTone => {
+    const p = movePreview;
+    if (p === null || p.copy_bytes === 0) return 'ok';
+    if (p.free_bytes === null) return 'warn';
+    if (p.free_bytes < p.required_bytes) return 'bad';
+    if (p.free_bytes < p.required_bytes * 1.25) return 'warn';
+    return 'ok';
+  });
+  let moveHint = $derived.by((): string => {
+    const p = movePreview;
+    if (p === null || p.items.length === 0) return '';
+    if (p.copy_bytes === 0) return 'Each folder is renamed. Nothing is copied.';
+    if (moveTone === 'bad') {
+      return 'The new drive does not have enough free space for this move. Free up space or choose another folder.';
+    }
+    if (p.free_bytes === null) return 'GRID could not read the free space on the new drive.';
+    if (moveTone === 'warn') return 'Space is tight: the new drive has little room to spare.';
+    return 'Files are copied and checked first. The old copies are removed afterwards.';
+  });
+
   // What the header says per step: the eyebrow, the dialog's accessible name
   // (the heading) and its accessible description.
   const STEP_META: Record<ChangeStep, { n: number; eyebrow: string; title: string; desc: string }> = {
@@ -432,32 +459,76 @@
           </button>
         </div>
       {:else if step === 'move-confirm'}
-        <div class="field">
+        <div class="route">
           <span class="field-label">From</span>
           <code class="path">{currentPath}</code>
+          {#if movePreview}
+            <span class="field-label">To</span>
+            <code class="path">{movePreview.new_root}</code>
+          {/if}
         </div>
         {#if movePreview === null && error === null}
           <p class="status-line" role="status">Measuring the library…</p>
         {:else if movePreview}
-          <div class="field">
-            <span class="field-label">To</span>
-            <code class="path">{movePreview.new_root}</code>
-          </div>
-          <div class="summary-box">
-            <span class="field-label">Moves</span>
+          <!-- The tone is the answer to "will it fit": calm edge when the move
+               is instant or the space is ample, gold when it is tight or
+               unknown, danger when the new drive is short. The hint line says
+               the same in words, so colour is never the only cue. -->
+          <div class="summary-box tone-{moveTone}">
+            <span class="field-label">Size and space</span>
             <p data-testid="library-move-summary" class="summary">{movePreviewSummary(movePreview)}</p>
+            {#if movePreview.items.length > 0}
+              <p class="summary-sub">
+                {formatBytes(movePreview.total_bytes)} in total · {movePreview.items.length}
+                {movePreview.items.length === 1 ? 'folder' : 'folders'}
+              </p>
+              <p class="summary-hint">
+                {#if moveTone !== 'ok'}
+                  <svg class="hint-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+                    <path d="M8 2.5l6 10.5H2z" />
+                    <path d="M8 6.8v2.9M8 11.4v.1" />
+                  </svg>
+                {/if}
+                <span>{moveHint}</span>
+              </p>
+            {/if}
           </div>
+
           {#if movePreview.items.length > 0}
-            <ul data-testid="library-move-list" class="list" aria-label="Folders that move">
-              {#each movePreview.items as item (item.name)}
-                <li class="game">{moveItemLine(item)}</li>
-              {/each}
-            </ul>
+            <div class="field">
+              <span id="library-move-folders-label" class="field-label">Folders that move</span>
+              <ul data-testid="library-move-list" class="folders" aria-labelledby="library-move-folders-label">
+                {#each movePreview.items as item (item.name)}
+                  <li class="folder">
+                    <span class="sr-only">{moveItemLine(item)}</span>
+                    <span class="folder-name" aria-hidden="true">{item.name}/</span>
+                    <span class="folder-size" aria-hidden="true">{formatBytes(item.bytes)}</span>
+                    <span class="tag" class:safe={item.strategy === 'rename'} aria-hidden="true"
+                      >{item.strategy === 'rename' ? 'Same drive' : 'Copied and checked'}</span
+                    >
+                  </li>
+                {/each}
+              </ul>
+            </div>
           {/if}
-          <p data-testid="library-move-blocked" class="kept-note">
-            While the move runs, installs, game launches and cloud transfers wait. Close any emulator you
-            opened yourself before you start. If GRID closes, the move continues at the next start.
-          </p>
+
+          <section data-testid="library-move-blocked" class="while" aria-labelledby="library-move-while-title">
+            <h4 id="library-move-while-title">While moving</h4>
+            <p class="while-lead">These wait until the move ends:</p>
+            <ul class="waits">
+              <li>Installs and uninstalls</li>
+              <li>Game and emulator launches</li>
+              <li>Cloud transfers</li>
+            </ul>
+            <p class="while-warn">
+              <svg class="hint-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+                <path d="M8 2.5l6 10.5H2z" />
+                <path d="M8 6.8v2.9M8 11.4v.1" />
+              </svg>
+              <span>Close any emulator you opened yourself before you start.</span>
+            </p>
+            <p class="kept-note">If GRID closes, the move continues at the next start.</p>
+          </section>
         {/if}
       {:else}
         {#if preview === null && error === null}
@@ -528,7 +599,7 @@
         </button>
         <button
           data-testid="library-move-confirm"
-          class="btn"
+          class="btn primary"
           disabled={movePreview === null}
           aria-disabled={pending}
           onclick={startMove}
@@ -913,6 +984,144 @@
     color: var(--text-h);
   }
 
+  /* Move confirmation. The summary card's edge carries the tone: --primary
+     when the move is instant or the space is ample, --gold (theme-aware:
+     about 10:1 on the dark panel, about 5.5:1 on the light one) when it is
+     tight or unknown, --danger when the new drive is short. */
+  .summary-box.tone-ok {
+    border-left-color: var(--primary);
+  }
+
+  .summary-box.tone-warn {
+    border-left-color: var(--gold);
+  }
+
+  .summary-box.tone-bad {
+    border-left-color: var(--danger);
+  }
+
+  .summary-sub {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .summary-hint,
+  .while-warn {
+    margin: 4px 0 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 12px;
+    line-height: 150%;
+    color: var(--text-muted);
+  }
+
+  .tone-warn .summary-hint,
+  .tone-bad .summary-hint {
+    color: var(--text-h);
+  }
+
+  .hint-icon {
+    flex: none;
+    margin-top: 1px;
+    fill: none;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .tone-warn .hint-icon,
+  .while-warn .hint-icon {
+    stroke: var(--gold);
+  }
+
+  .tone-bad .hint-icon {
+    stroke: var(--danger);
+  }
+
+  /* From / To as one compact card of labelled paths. */
+  .route {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 8px 12px;
+  }
+
+  /* The folders that move: one row each, name and size on the left, how it
+     moves as a tag on the right. The full line is read out by a screen reader
+     from the hidden span, so the visual columns are decoration. */
+  .folders {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .folder {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--r-row);
+    border: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .folder-name {
+    font-family: ui-monospace, 'Cascadia Mono', Consolas, 'SFMono-Regular', Menlo, monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-h);
+  }
+
+  .folder-size {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-h);
+  }
+
+  /* "While moving": what waits, and the one thing to do first. */
+  .while {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px;
+    border-radius: var(--r-row);
+    border: 1px dashed var(--border);
+  }
+
+  .while-lead {
+    margin: 0;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .waits {
+    margin: 0;
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13px;
+    color: var(--text-h);
+  }
+
+  .while-warn {
+    margin-top: 4px;
+    padding: 8px 10px;
+    border-left: 3px solid var(--gold);
+    border-radius: var(--r-row);
+    background: var(--surface);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-h);
+  }
+
   .list {
     list-style: none;
     margin: 0;
@@ -1025,6 +1234,21 @@
   .btn[aria-disabled='true'] {
     opacity: 0.6;
     cursor: default;
+  }
+
+  /* The primary action ("Start move"): the --primary fill with the theme
+     background as the label, as the Library pane's Change… button (about 5.4:1
+     on the dark theme's #8b74e8, about 7.6:1 on the light theme's #553e98). */
+  .btn.primary {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: var(--bg);
+    font-weight: 600;
+  }
+
+  .btn.primary:hover:not(:disabled):not([aria-disabled='true']) {
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
   }
 
   /* Same danger fill as RemoveConfirm: the label is the theme background

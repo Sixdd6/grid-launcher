@@ -18,6 +18,7 @@
   import { initReplenishListener } from './lib/stores/installed.svelte';
   import { initUiSettings } from './lib/stores/uiSettings.svelte';
   import { noteDirectional } from './lib/stores/inputMode.svelte';
+  import { routeDialogNav } from './lib/focus/dialogNav';
 
   let shell = $state<ReturnType<typeof Shell> | null>(null);
   let restored = false; // restore() must fire once on mount, not on every phase change
@@ -103,7 +104,10 @@
       // The gamepad moves a selection, so it puts the app in directional
       // mode — the grid views' own key handlers do the same for the keyboard.
       noteDirectional('gamepad');
-      shell?.handleNav(e.payload.action);
+      // Without a mounted shell (e.g. the unreachable-library dialog shows
+      // instead), a registered dialog still gets the gamepad.
+      if (shell) shell.handleNav(e.payload.action);
+      else routeDialogNav(e.payload.action);
     });
     const unDownloads = session.phase === 'shell' ? initDownloads() : undefined;
     const unSessions = session.phase === 'shell' ? initSessions() : undefined;
