@@ -147,6 +147,7 @@ impl FatxImageBuilder {
         place_dir(&self.root, &mut fat, &geo, &mut placements)?;
 
         let mut file = File::create(path)?;
+        mark_sparse(&file);
         // Sparse: reserve the whole image without writing the hole.
         file.set_len(self.base_offset + self.partition_size)?;
         file.seek(SeekFrom::Start(self.base_offset))?;
@@ -172,6 +173,39 @@ impl FatxImageBuilder {
         Ok(())
     }
 }
+
+/// Mark a fresh, empty file sparse so the hole `set_len` makes costs no
+/// disk space. NTFS zero-fills a non-sparse file up to its highest write,
+/// which makes a retail-offset image (~7.5 GB) really occupy that much.
+/// A volume without sparse support (FAT32, exFAT) refuses the call; the
+/// image is then written dense, as before, so the result is ignored.
+#[cfg(windows)]
+fn mark_sparse(file: &File) {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::Ioctl::FSCTL_SET_SPARSE;
+    use windows_sys::Win32::System::IO::DeviceIoControl;
+
+    let mut returned = 0u32;
+    // SAFETY: the handle belongs to `file`, which outlives the call. A null
+    // input buffer means "set sparse"; there is no output buffer and the
+    // call is synchronous (no OVERLAPPED).
+    unsafe {
+        DeviceIoControl(
+            file.as_raw_handle(),
+            FSCTL_SET_SPARSE,
+            std::ptr::null(),
+            0,
+            std::ptr::null_mut(),
+            0,
+            &mut returned,
+            std::ptr::null_mut(),
+        );
+    }
+}
+
+/// Unix filesystems leave a `set_len` hole unallocated already.
+#[cfg(not(windows))]
+fn mark_sparse(_file: &File) {}
 
 fn clusters_for(bytes: u64, cluster_size: u64) -> usize {
     bytes.div_ceil(cluster_size).max(1) as usize
@@ -234,4 +268,50 @@ fn place_file(
         pad: false,
     });
     Ok(first)
+}
+
+// Windows only: NTFS sparse files are what this module checks.
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    /// Bytes the file really occupies on disk. For a sparse file this is
+    /// the allocated size, not the logical length.
+    fn allocated_size(path: &Path) -> u64 {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{GetCompressedFileSizeW, INVALID_FILE_SIZE};
+
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut high = 0u32;
+        // SAFETY: `wide` is a NUL-terminated UTF-16 path that outlives the
+        // call, and `high` is a valid out pointer.
+        let low = unsafe { GetCompressedFileSizeW(wide.as_ptr(), &mut high) };
+        assert!(
+            !(low == INVALID_FILE_SIZE
+                && std::io::Error::last_os_error().raw_os_error() != Some(0)),
+            "GetCompressedFileSizeW failed: {}",
+            std::io::Error::last_os_error()
+        );
+        (u64::from(high) << 32) | u64::from(low)
+    }
+
+    // Windows only: NTFS zero-fills a non-sparse file up to its highest
+    // write, so a retail-offset image costs GBs unless it is marked sparse.
+    #[test]
+    fn image_with_far_base_offset_is_sparse_on_disk() {
+        const LOGICAL: u64 = 512 * 1024 * 1024;
+        const PART: u64 = 8 * 1024 * 1024;
+        let tmp = tempfile::tempdir().unwrap();
+        let img = tmp.path().join("far.img");
+        let mut b = FatxImageBuilder::new(PART).with_base_offset(LOGICAL - PART);
+        b.add_file("UDATA/save.bin", vec![0xAB; 4096]);
+        b.write_to(&img).unwrap();
+
+        assert_eq!(std::fs::metadata(&img).unwrap().len(), LOGICAL);
+        let allocated = allocated_size(&img);
+        assert!(
+            allocated <= 16 * 1024 * 1024,
+            "image of {LOGICAL} logical bytes allocates {allocated} bytes on disk"
+        );
+    }
 }

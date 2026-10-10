@@ -49,6 +49,9 @@ libc = "0.2.189"
 # `library::user_data_links` creates on unix (a symlink needs a privilege a
 # normal user does not have).
 junction = "2.0.0"
+# NTFS sparse files for the FATX test image builder (FSCTL_SET_SPARSE), and
+# the allocated-size probe its test uses. Already in the tree via `junction`.
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl"] }
 
 [features]
 # Gates the E2E forge-request redirect (GRID_LAUNCHER_E2E_FORGE_BASE) so a

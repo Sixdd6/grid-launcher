@@ -1942,6 +1942,7 @@ dependencies = [
  "tracing",
  "unrar",
  "url",
+ "windows-sys 0.61.2",
  "wiremock",
  "zip",
 ]
