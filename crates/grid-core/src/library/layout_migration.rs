@@ -230,8 +230,10 @@ fn kept_emulator_pairs(
     forms: &[String],
     profiles: &[EmulatorProfile],
 ) -> Vec<(String, String)> {
-    let new_names = entry_names(&library.join(EMULATORS_DIR));
-    let legacy_names = entry_names(&library.join(LEGACY_EMULATORS_DIR));
+    let root = entry_names(library);
+    let list = |name: &str| entry_names(&library.join(name));
+    let new_names = exact_root_entries(&root, EMULATORS_DIR, &list);
+    let legacy_names = exact_root_entries(&root, LEGACY_EMULATORS_DIR, &list);
 
     let mut pairs: Vec<(String, String)> = Vec::new();
     for (legacy_dir, new_dir) in emulator_dir_pairs(config, forms, profiles) {
@@ -512,15 +514,44 @@ fn preflight(library: &Path, plan: &RewritePlan) -> Result<(), String> {
         }
     }
 
-    let legacy = entry_names(&library.join(LEGACY_EMULATORS_DIR));
-    let current = entry_names(&library.join(EMULATORS_DIR));
-    if let Some(name) = legacy.intersection(&current).next() {
+    let list = |name: &str| entry_names(&library.join(name));
+    if let Some(name) = emulator_root_collision(&root, &list) {
         return Err(collision_message(
-            &library.join(LEGACY_EMULATORS_DIR).join(name),
-            &library.join(EMULATORS_DIR).join(name),
+            &library.join(LEGACY_EMULATORS_DIR).join(&name),
+            &library.join(EMULATORS_DIR).join(&name),
         ));
     }
     Ok(())
+}
+
+/// The first install directory name BOTH emulator roots hold. `root` is the
+/// library root's exact listing; `list` reads one root's entry names.
+fn emulator_root_collision(
+    root: &BTreeSet<String>,
+    list: &dyn Fn(&str) -> BTreeSet<String>,
+) -> Option<String> {
+    let legacy = exact_root_entries(root, LEGACY_EMULATORS_DIR, list);
+    let current = exact_root_entries(root, EMULATORS_DIR, list);
+    legacy.intersection(&current).next().cloned()
+}
+
+/// The entry names of the library root `name`, or none when `root` (the
+/// library root's exact listing) does not hold `name` itself.
+///
+/// On a case-insensitive filesystem `<library>/emulators` opens
+/// `<library>/Emulators`, so reading both spellings lists ONE directory
+/// twice. On a case-sensitive one a name the listing does not hold cannot be
+/// opened, so the check changes nothing there.
+fn exact_root_entries(
+    root: &BTreeSet<String>,
+    name: &str,
+    list: &dyn Fn(&str) -> BTreeSet<String>,
+) -> BTreeSet<String> {
+    if root.contains(name) {
+        list(name)
+    } else {
+        BTreeSet::new()
+    }
 }
 
 fn collision_message(from: &Path, to: &Path) -> String {
@@ -1178,6 +1209,33 @@ mod tests {
         }
     }
 
+    /// A case-insensitive filesystem (NTFS, APFS) opens `<library>/Emulators`
+    /// for `<library>/emulators` too, so both roots list the same entries.
+    /// Only a root whose exact name the library listing holds is real; a v0
+    /// library with `Emulators/` alone has no collision.
+    #[test]
+    fn a_case_insensitive_alias_of_the_emulator_root_is_not_a_collision() {
+        let names =
+            |items: &[&str]| -> BTreeSet<String> { items.iter().map(|s| s.to_string()).collect() };
+        // Both spellings resolve to one directory, as on NTFS.
+        let aliased = |_: &str| names(&["PCSX2 (Playstation 2)-latest"]);
+
+        assert_eq!(
+            emulator_root_collision(&names(&["Emulators", "Windows"]), &aliased),
+            None
+        );
+        assert_eq!(
+            emulator_root_collision(&names(&["emulators"]), &aliased),
+            None
+        );
+        // Two real roots (a case-sensitive filesystem) that share a name are
+        // still a collision.
+        assert_eq!(
+            emulator_root_collision(&names(&["Emulators", "emulators"]), &aliased),
+            Some("PCSX2 (Playstation 2)-latest".to_string())
+        );
+    }
+
     #[test]
     fn derive_game_dirs_table() {
         let dir = tempfile::tempdir().unwrap();
@@ -1190,7 +1248,10 @@ mod tests {
 
         let rows = vec![InstalledGame {
             extracted_path: format!("{lib}/Sony PlayStation 2/Game B/game.iso"),
-            ps3_trophy_paths: format!("[\"{lib}/PlayStation 3/.vfs/dev_hdd0/trophy\"]"),
+            ps3_trophy_paths: serde_json::to_string(&[format!(
+                "{lib}/PlayStation 3/.vfs/dev_hdd0/trophy"
+            )])
+            .unwrap(),
             multi_file_game_dir: format!("{lib}/games/Already/Moved"),
             native_wineprefix: format!("{lib}/emulators/Thing/prefix"),
             native_game_dir: format!("{lib}/Emulators/Thing/dir"),
@@ -1515,9 +1576,10 @@ mod tests {
                 title: "PS3 Game".into(),
                 platform: "PlayStation 3".into(),
                 ps3_iso_path: format!("{lib}/PlayStation 3/BLUS00001.iso"),
-                ps3_trophy_paths: format!(
-                    "[\"{lib}/PlayStation 3/.vfs/dev_hdd0/home/00000001/trophy/BLUS00001\"]"
-                ),
+                ps3_trophy_paths: serde_json::to_string(&[format!(
+                    "{lib}/PlayStation 3/.vfs/dev_hdd0/home/00000001/trophy/BLUS00001"
+                )])
+                .unwrap(),
                 installed_at: 1,
                 ..Default::default()
             },
@@ -1548,7 +1610,7 @@ mod tests {
                     .strip_prefix(root)
                     .unwrap()
                     .to_string_lossy()
-                    .into_owned();
+                    .replace('\\', "/");
                 if is_link(&path) {
                     out.push(format!("{relative}@"));
                 } else if path.is_dir() {
@@ -1584,7 +1646,7 @@ mod tests {
                     .strip_prefix(root)
                     .unwrap()
                     .to_string_lossy()
-                    .into_owned();
+                    .replace('\\', "/");
                 out.push((relative, std::fs::read_to_string(&path).unwrap_or_default()));
             }
         }
@@ -1774,7 +1836,10 @@ mod tests {
         );
         assert_eq!(
             ps3.ps3_trophy_paths,
-            format!("[\"{lib}/games/PlayStation 3/.vfs/dev_hdd0/home/00000001/trophy/BLUS00001\"]")
+            serde_json::to_string(&[format!(
+                "{lib}/games/PlayStation 3/.vfs/dev_hdd0/home/00000001/trophy/BLUS00001"
+            )])
+            .unwrap()
         );
     }
 
@@ -1986,7 +2051,8 @@ mod tests {
             ) && message.contains(
                 &fixture
                     .library
-                    .join("games/Sony PlayStation 2")
+                    .join("games")
+                    .join("Sony PlayStation 2")
                     .display()
                     .to_string()
             ),
@@ -2239,6 +2305,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn pcsx2_entry(name: &str, path: String) -> EmulatorEntry {
         EmulatorEntry {
             name: name.into(),
@@ -2574,12 +2641,14 @@ mod tests {
     // --- the data root step (layout v2) ----------------------------------
 
     /// PCSX2's `user_data` directory names, in catalog order.
+    #[cfg(unix)]
     const PCSX2_USER_DATA: [&str; 7] = [
         "bios", "cheats", "inis", "memcards", "snaps", "sstates", "textures",
     ];
 
     /// Stamps the fixture as a finished layout v1 library, so only the
     /// data-root step runs.
+    #[cfg(unix)]
     fn stamp_v1(fixture: &Fixture) {
         let mut config = fixture.config();
         config.library_layout_version = LAYOUT_VERSION_V1;
