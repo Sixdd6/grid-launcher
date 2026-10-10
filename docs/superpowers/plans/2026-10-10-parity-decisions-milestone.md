@@ -151,3 +151,11 @@ User answers: keep the rejected credential until replaced; retention defaults sa
 - **Start fresh:** old installs leave the library, and the app ASKS the user whether to delete the old game files or leave them on disk (a delete is confirmed with the folder list and total size; deletion goes through the guarded uninstall path; nothing is deleted without that confirmation). Supersedes the round-2 interpretation.
 - **Move existing files:** a BACKGROUND job (Downloads strip / progress), not a modal; while it runs, installs, launches, cloud syncs and another path change are blocked; resumable after interruption.
 - Order: 9a Settings Library pane + Start fresh (keep/delete prompt) → 9b move job → 9c moved-file detection (reconcile + Missing state + Locate…).
+
+## Follow-ups decided 2026-10-10 (after B9)
+- **CI:** check-windows runs clippy + cargo test (0556f73). Watch the first run (8.3 temp names on runners).
+- **G1-Q (user):** keep the before-launch auto-restore for games with an unknown PS3/Wii U id, but "match off other data": when restoring a cloud record for such a game, restore only the folders that match the game by other data (title tokens, serial in folder names, install paths) and skip folders that belong to other games (old records from released builds may hold them). Plan + implement after 9c.
+- **Uninstall refusals (user):** when the RemovalGuard skips a path, show an alert that names each skipped folder and the reason (today silent). Small; after 9c.
+- **`~\` expansion:** explained to the user; awaiting yes/no.
+- **Firmware memory:** closed.
+- Small: MediaViewer not registered with dialogNav (gamepad); white-on-primary contrast in all Downloads row buttons (`.row-actions button`).
