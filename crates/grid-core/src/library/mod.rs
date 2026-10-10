@@ -1401,7 +1401,8 @@ impl InstallService {
             .filter(|found| installed_match(found, rom_id))
             .ok_or_else(|| LibraryError::Registry(NOT_INSTALLED.to_string()))?;
 
-        let steps = uninstall_steps(&record, &library);
+        let home = crate::platform::home_dir();
+        let steps = uninstall_steps(&record, &library, home.as_deref());
         let failures = run_removals(&steps, &mut apply_removal);
         if !failures.is_empty() {
             return Err(LibraryError::Registry(failures.join("\n")));
@@ -2856,10 +2857,24 @@ pub(crate) fn apply_removal(step: &Removal) -> Result<(), String> {
 /// points. The reference's early `return`s become "stop adding steps": a
 /// native game whose home directory exists never falls through to the
 /// candidate extraction directories, and neither does a multi-file game.
-fn uninstall_steps(record: &InstalledGame, library: &Path) -> Vec<Removal> {
+///
+/// Two safety rules the reference lacks (G9). Both only ever drop a step,
+/// as silently as a missing path is skipped:
+/// - when `rom_file_name` does not end in one plain component
+///   ([`paths::is_plain_component`]), no candidate is built from it, so a
+///   name like `..` can never turn into the library root or a platform dir;
+/// - every step passes [`RemovalGuard`], which refuses the filesystem root,
+///   `home`, the library root and its ancestors, the library's own top-level
+///   directories, platform directories, and ancestors of `native_game_dir`.
+fn uninstall_steps(record: &InstalledGame, library: &Path, home: Option<&Path>) -> Vec<Removal> {
+    let guard = RemovalGuard::new(record, library, home);
     let mut steps = Vec::new();
-    let push_dir = |path: &Path, label: RemovalLabel, steps: &mut Vec<Removal>| {
-        if path.is_dir() {
+    let mut push = |path: &Path, label: RemovalLabel| {
+        let shape_ok = match label {
+            RemovalLabel::File => path.is_file(),
+            RemovalLabel::TrophyDir | RemovalLabel::Folder => path.is_dir(),
+        };
+        if shape_ok && !guard.refuses(path) {
             steps.push(Removal {
                 path: path.to_path_buf(),
                 label,
@@ -2868,22 +2883,32 @@ fn uninstall_steps(record: &InstalledGame, library: &Path) -> Vec<Removal> {
     };
 
     let name = archive_name(&record.rom_file_name, &record.title, &record.platform);
-    let archives = candidate_archives(library, &record.platform, &record.archive_path, &name);
-    let extracted = candidate_extracted_dirs(&archives, &record.extracted_dir);
+    let archives = if paths::is_plain_component(&name) {
+        candidate_archives(
+            library,
+            &record.platform,
+            &record.archive_path,
+            &name,
+            &record.native_game_dir,
+        )
+    } else if record.archive_path.trim().is_empty() {
+        Vec::new()
+    } else {
+        vec![paths::expand_home(&record.archive_path)]
+    };
+    let extracted =
+        candidate_extracted_dirs(&archives, &record.extracted_dir, &record.native_game_dir);
 
     if is_ps3_platform(&record.platform) {
         let iso = record.ps3_iso_path.trim();
-        if !iso.is_empty() && Path::new(iso).is_file() {
-            steps.push(Removal {
-                path: PathBuf::from(iso),
-                label: RemovalLabel::File,
-            });
+        if !iso.is_empty() {
+            push(Path::new(iso), RemovalLabel::File);
         }
         for trophy in parse_trophy_paths(&record.ps3_trophy_paths) {
-            push_dir(&trophy, RemovalLabel::TrophyDir, &mut steps);
+            push(&trophy, RemovalLabel::TrophyDir);
         }
         for dir in &extracted {
-            push_dir(dir, RemovalLabel::Folder, &mut steps);
+            push(dir, RemovalLabel::Folder);
         }
         return steps;
     }
@@ -2891,39 +2916,209 @@ fn uninstall_steps(record: &InstalledGame, library: &Path) -> Vec<Removal> {
     if is_native_platform(&record.platform) {
         let game_dir = record.native_game_dir.trim();
         if !game_dir.is_empty() && Path::new(game_dir).is_dir() {
-            steps.push(Removal {
-                path: PathBuf::from(game_dir),
-                label: RemovalLabel::Folder,
-            });
+            push(Path::new(game_dir), RemovalLabel::Folder);
             return steps;
         }
         for dir in &extracted {
-            push_dir(dir, RemovalLabel::Folder, &mut steps);
+            push(dir, RemovalLabel::Folder);
         }
         return steps;
     }
 
     let multi_file = record.multi_file_game_dir.trim();
     if !multi_file.is_empty() && Path::new(multi_file).is_dir() {
-        steps.push(Removal {
-            path: PathBuf::from(multi_file),
-            label: RemovalLabel::Folder,
-        });
+        push(Path::new(multi_file), RemovalLabel::Folder);
         return steps;
     }
 
     for archive in &archives {
-        if archive.is_file() {
-            steps.push(Removal {
-                path: archive.clone(),
-                label: RemovalLabel::File,
-            });
-        }
+        push(archive, RemovalLabel::File);
     }
     for dir in &extracted {
-        push_dir(dir, RemovalLabel::Folder, &mut steps);
+        push(dir, RemovalLabel::Folder);
     }
     steps
+}
+
+/// The deny-list every uninstall step passes (G9): directories no game's
+/// uninstall may ever remove, whatever its record says.
+///
+/// Pure: it never touches the filesystem or the environment. Paths are
+/// compared lexically ([`removal_key`]): a leading `~` component becomes
+/// `home`, `.` is dropped, `..` pops a component, and a trailing separator
+/// is ignored. On Windows every component is also case-folded with
+/// trailing dots and spaces removed (NTFS ignores case and Win32 drops
+/// those characters), and a `\\?\` disk or UNC prefix compares equal to
+/// its plain form. Elsewhere components compare exactly.
+///
+/// A path is refused when it:
+/// - holds a `..` component, or is not absolute once `~` is expanded;
+/// - is a filesystem root (a drive or share root on Windows);
+/// - is `home` or an ancestor of it;
+/// - is the library root or an ancestor of it;
+/// - is `<library>/games`, `<library>/emulators`, `<library>/Emulators` or
+///   `<library>/saves`;
+/// - is a platform dir: any direct child of `<library>/games`, or the
+///   record's legacy `<library>/<platform>`;
+/// - is a strict ancestor of the record's `native_game_dir`.
+///
+/// It is a deny-list on purpose. "Inside the library" would be wrong: PS3
+/// routed dirs live under `dev_hdd0`, and a native row may live anywhere.
+pub(crate) struct RemovalGuard {
+    home: Option<PathBuf>,
+    /// Refused, and so is every ancestor.
+    with_ancestors: Vec<Vec<String>>,
+    /// Refused only as themselves.
+    exact: Vec<Vec<String>>,
+    /// Every direct child is refused.
+    parents_of_protected: Vec<Vec<String>>,
+    /// Every strict ancestor is refused; the path itself is not.
+    ancestors_only: Vec<Vec<String>>,
+}
+
+impl RemovalGuard {
+    pub(crate) fn new(record: &InstalledGame, library: &Path, home: Option<&Path>) -> Self {
+        let key = |path: &Path| removal_key(path, home);
+        let games = library.join(paths::GAMES_DIR);
+        let with_ancestors = [home.and_then(key), key(library)]
+            .into_iter()
+            .flatten()
+            .collect();
+        let exact = [
+            games.clone(),
+            paths::emulators_dir(library),
+            paths::legacy_emulators_dir(library),
+            library.join(paths::SAVES_DIR),
+            platform_dir(library, &record.platform),
+            paths::legacy_platform_dir(library, &record.platform),
+        ]
+        .iter()
+        .filter_map(|path| key(path))
+        .collect();
+        let native = record.native_game_dir.trim();
+        let ancestors_only = if native.is_empty() {
+            Vec::new()
+        } else {
+            key(Path::new(native)).into_iter().collect()
+        };
+        RemovalGuard {
+            home: home.map(Path::to_path_buf),
+            with_ancestors,
+            exact,
+            parents_of_protected: key(&games).into_iter().collect(),
+            ancestors_only,
+        }
+    }
+
+    /// True when `path` must not be removed.
+    pub(crate) fn refuses(&self, path: &Path) -> bool {
+        if path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            return true;
+        }
+        let Some(key) = removal_key(path, self.home.as_deref()) else {
+            return true;
+        };
+        // The first slot is the prefix; nothing after it means a root.
+        if key.len() < 2 {
+            return true;
+        }
+        self.with_ancestors
+            .iter()
+            .any(|protected| protected.starts_with(&key))
+            || self.exact.contains(&key)
+            || self
+                .parents_of_protected
+                .iter()
+                .any(|parent| key.len() == parent.len() + 1 && key.starts_with(parent))
+            || self
+                .ancestors_only
+                .iter()
+                .any(|protected| protected.len() > key.len() && protected.starts_with(&key))
+    }
+}
+
+/// [`RemovalGuard`]'s comparable form of `path`: the prefix (empty off
+/// Windows) followed by one entry per normal component, after `~`
+/// expansion and lexical normalization. `None` when the path is not
+/// absolute: a relative path resolves against whatever the working
+/// directory is, so the guard refuses it outright.
+fn removal_key(path: &Path, home: Option<&Path>) -> Option<Vec<String>> {
+    use std::path::Component;
+
+    let expanded;
+    let path = match path.components().next() {
+        Some(Component::Normal(first)) if first == "~" => {
+            let rest: PathBuf = path.components().skip(1).collect();
+            expanded = home?.join(rest);
+            expanded.as_path()
+        }
+        _ => path,
+    };
+
+    let mut prefix = None;
+    let mut rooted = false;
+    let mut names: Vec<String> = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix_component) => {
+                prefix = Some(prefix_key(prefix_component.kind()));
+            }
+            Component::RootDir => rooted = true,
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if names.pop().is_none() && !rooted {
+                    return None;
+                }
+            }
+            Component::Normal(name) => names.extend(component_key(name)),
+        }
+    }
+    // Windows needs both a drive (or share) and a root: `\x` and `C:x`
+    // both depend on process state.
+    let absolute = rooted && (prefix.is_some() || !cfg!(windows));
+    if !absolute {
+        return None;
+    }
+    let mut key = Vec::with_capacity(names.len() + 1);
+    key.push(prefix.unwrap_or_default());
+    key.extend(names);
+    Some(key)
+}
+
+/// One normal component as [`removal_key`] compares it. On Windows it is
+/// lower-cased with trailing dots and spaces removed, and a component made
+/// only of those names its parent, so it yields nothing.
+fn component_key(name: &std::ffi::OsStr) -> Option<String> {
+    let text = name.to_string_lossy();
+    if cfg!(windows) {
+        let trimmed = text.trim_end_matches(['.', ' ']);
+        (!trimmed.is_empty()).then(|| trimmed.to_lowercase())
+    } else {
+        Some(text.into_owned())
+    }
+}
+
+/// A Windows path prefix as [`removal_key`] compares it: the verbatim
+/// (`\\?\`) and plain forms of a disk or share are the same key, and case
+/// is folded. Prefixes only exist on Windows.
+fn prefix_key(prefix: std::path::Prefix<'_>) -> String {
+    use std::path::Prefix;
+    match prefix {
+        Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => {
+            format!("{}:", char::from(drive).to_ascii_lowercase())
+        }
+        Prefix::UNC(server, share) | Prefix::VerbatimUNC(server, share) => format!(
+            r"\\{}\{}",
+            server.to_string_lossy(),
+            share.to_string_lossy()
+        )
+        .to_lowercase(),
+        Prefix::Verbatim(name) => format!(r"\\?\{}", name.to_string_lossy()).to_lowercase(),
+        Prefix::DeviceNS(name) => format!(r"\\.\{}", name.to_string_lossy()).to_lowercase(),
+    }
 }
 
 /// The trophy directories a record's `ps3_trophy_paths` JSON names. Lenient:
@@ -3847,7 +4042,7 @@ mod tests {
             ..Default::default()
         };
 
-        let steps = uninstall_steps(&record, dir.path());
+        let steps = uninstall_steps(&record, dir.path(), None);
         assert_eq!(
             steps,
             vec![Removal {
@@ -3880,7 +4075,7 @@ mod tests {
             ..Default::default()
         };
 
-        let steps = uninstall_steps(&record, dir.path());
+        let steps = uninstall_steps(&record, dir.path(), None);
         assert_eq!(
             steps,
             vec![
@@ -3899,6 +4094,338 @@ mod tests {
             ],
             "a trophy path that is not a directory is skipped, not reported"
         );
+    }
+
+    // --- uninstall guard (G9) ------------------------------------------------
+
+    fn snes_record() -> InstalledGame {
+        InstalledGame {
+            title: "Game".to_string(),
+            platform: "SNES".to_string(),
+            rom_file_name: "Game.zip".to_string(),
+            ..Default::default()
+        }
+    }
+
+    /// A library with its `games/SNES` and legacy `SNES` platform dirs on
+    /// disk, so every protected directory exists and would pass `is_dir`.
+    fn library_with_platform_dirs() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("games/SNES")).unwrap();
+        fs::create_dir_all(dir.path().join("games/Other")).unwrap();
+        fs::create_dir_all(dir.path().join("SNES")).unwrap();
+        fs::create_dir_all(dir.path().join("emulators")).unwrap();
+        fs::create_dir_all(dir.path().join("saves")).unwrap();
+        dir
+    }
+
+    #[test]
+    fn uninstall_steps_ignore_a_rom_file_name_that_is_not_one_plain_component() {
+        let library = library_with_platform_dirs();
+        for rom_file_name in ["..", ".", "sub/..", "sub\\..", "..."] {
+            let record = InstalledGame {
+                rom_file_name: rom_file_name.to_string(),
+                ..snes_record()
+            };
+            let steps = uninstall_steps(&record, library.path(), None);
+            assert!(
+                steps.is_empty(),
+                "rom_file_name {rom_file_name:?} must not reach the library root or a platform dir: {steps:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn uninstall_steps_refuse_an_extracted_dir_at_a_protected_library_dir() {
+        let library = library_with_platform_dirs();
+        let root = library.path();
+        let protected = [
+            root.to_path_buf(),
+            root.join(""),
+            root.join("games"),
+            root.join("games/SNES"),
+            root.join("games/Other"),
+            root.join("SNES"),
+            root.join("emulators"),
+            root.join("saves"),
+            root.join("games/SNES/.."),
+            root.join("games/SNES/."),
+        ];
+        for extracted_dir in protected {
+            let record = InstalledGame {
+                extracted_dir: extracted_dir.to_string_lossy().into_owned(),
+                ..snes_record()
+            };
+            let steps = uninstall_steps(&record, root, None);
+            assert!(
+                steps.is_empty(),
+                "extracted_dir {extracted_dir:?} must be refused: {steps:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn uninstall_steps_refuse_an_ancestor_of_the_library_root() {
+        let outer = tempfile::tempdir().unwrap();
+        let library = outer.path().join("Library");
+        fs::create_dir_all(library.join("games/SNES")).unwrap();
+        let record = InstalledGame {
+            extracted_dir: outer.path().to_string_lossy().into_owned(),
+            ..snes_record()
+        };
+        let steps = uninstall_steps(&record, &library, None);
+        assert!(steps.is_empty(), "{steps:?}");
+    }
+
+    /// NTFS matches names without regard to case, and Win32 drops a
+    /// trailing dot, so neither may slip a protected dir past the guard.
+    #[cfg(windows)]
+    #[test]
+    fn uninstall_steps_refuse_the_library_root_in_another_case_on_windows() {
+        let library = library_with_platform_dirs();
+        let root = library.path().to_string_lossy().into_owned();
+        for extracted_dir in [
+            root.to_uppercase(),
+            root.to_lowercase(),
+            root.replace('\\', "/"),
+            format!("{root}."),
+            format!("{}\\GAMES\\snes", root.to_uppercase()),
+        ] {
+            let record = InstalledGame {
+                extracted_dir: extracted_dir.clone(),
+                ..snes_record()
+            };
+            let steps = uninstall_steps(&record, library.path(), None);
+            assert!(
+                steps.is_empty(),
+                "extracted_dir {extracted_dir:?} must be refused: {steps:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn uninstall_steps_refuse_an_extracted_dir_at_home() {
+        let _lock = crate::test_env::lock();
+        let home = tempfile::tempdir().unwrap();
+        let _guard =
+            crate::test_env::EnvGuard::set(&[("HOME", Some(home.path().to_str().unwrap()))]);
+        let library = library_with_platform_dirs();
+        for extracted_dir in ["~", "~/", "~/."] {
+            let record = InstalledGame {
+                extracted_dir: extracted_dir.to_string(),
+                ..snes_record()
+            };
+            let steps = uninstall_steps(&record, library.path(), Some(home.path()));
+            assert!(
+                steps.is_empty(),
+                "extracted_dir {extracted_dir:?} must be refused: {steps:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn uninstall_steps_refuse_an_ancestor_of_the_native_game_dir() {
+        let library = library_with_platform_dirs();
+        let other = tempfile::tempdir().unwrap();
+        let native = other.path().join("Games/My Game");
+        fs::create_dir_all(&native).unwrap();
+        for extracted_dir in [other.path().join("Games"), other.path().to_path_buf()] {
+            let record = InstalledGame {
+                native_game_dir: native.to_string_lossy().into_owned(),
+                extracted_dir: extracted_dir.to_string_lossy().into_owned(),
+                ..snes_record()
+            };
+            let steps = uninstall_steps(&record, library.path(), None);
+            assert!(
+                steps.is_empty(),
+                "extracted_dir {extracted_dir:?} must be refused: {steps:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn uninstall_steps_remove_the_game_inside_its_platform_dir() {
+        let library = library_with_platform_dirs();
+        let archive = library.path().join("games/SNES/Game.zip");
+        fs::write(&archive, b"zip").unwrap();
+        let extracted = library.path().join("games/SNES/Game");
+        fs::create_dir_all(&extracted).unwrap();
+
+        let steps = uninstall_steps(&snes_record(), library.path(), None);
+        assert_eq!(
+            steps,
+            vec![
+                Removal {
+                    path: archive,
+                    label: RemovalLabel::File,
+                },
+                Removal {
+                    path: extracted,
+                    label: RemovalLabel::Folder,
+                },
+            ]
+        );
+    }
+
+    /// `install_paths.py:38-41`, `:82-87`: the archive under
+    /// `native_game_dir` and the same extraction dir name under it are
+    /// candidates too, so uninstall removes them.
+    #[test]
+    fn uninstall_steps_remove_the_archive_and_extraction_under_native_game_dir() {
+        let library = library_with_platform_dirs();
+        let archive = library.path().join("games/SNES/Game.zip");
+        fs::write(&archive, b"zip").unwrap();
+        let extracted = library.path().join("games/SNES/Game");
+        fs::create_dir_all(&extracted).unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let native = other.path().join("Native");
+        fs::create_dir_all(native.join("Game")).unwrap();
+        fs::write(native.join("Game.zip"), b"zip").unwrap();
+
+        let record = InstalledGame {
+            native_game_dir: native.to_string_lossy().into_owned(),
+            ..snes_record()
+        };
+        let steps = uninstall_steps(&record, library.path(), None);
+        assert_eq!(
+            steps,
+            vec![
+                Removal {
+                    path: archive,
+                    label: RemovalLabel::File,
+                },
+                Removal {
+                    path: native.join("Game.zip"),
+                    label: RemovalLabel::File,
+                },
+                Removal {
+                    path: extracted,
+                    label: RemovalLabel::Folder,
+                },
+                Removal {
+                    path: native.join("Game"),
+                    label: RemovalLabel::Folder,
+                },
+            ]
+        );
+    }
+
+    /// An absolute path root for the pure guard tests: `C:\` on Windows,
+    /// `/` elsewhere.
+    fn abs(rest: &str) -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(format!("C:/{rest}"))
+        } else {
+            PathBuf::from(format!("/{rest}"))
+        }
+    }
+
+    fn guard_for_tests() -> RemovalGuard {
+        let record = InstalledGame {
+            native_game_dir: abs("n/a/My Game").to_string_lossy().into_owned(),
+            ..snes_record()
+        };
+        RemovalGuard::new(&record, &abs("lib"), Some(&abs("home/u")))
+    }
+
+    #[test]
+    fn removal_guard_refuses_every_protected_path() {
+        let guard = guard_for_tests();
+        let refused = [
+            abs(""),
+            abs("home/u"),
+            abs("home/u/"),
+            abs("home"),
+            abs("lib"),
+            abs("lib/"),
+            abs("lib/./"),
+            abs("lib/games"),
+            abs("lib/games/SNES"),
+            abs("lib/games/Other"),
+            abs("lib/SNES"),
+            abs("lib/emulators"),
+            abs("lib/Emulators"),
+            abs("lib/saves"),
+            abs("lib/games/SNES/Game/../.."),
+            abs("lib/x/../games"),
+            abs(".."),
+            // Any `..` is refused, even one that resolves to a game's own
+            // dir: through a symlink the OS may resolve it elsewhere.
+            abs("lib/emulators/RetroArch/../../games/SNES/Game"),
+            abs("n/a"),
+            abs("n"),
+            PathBuf::from("relative/dir"),
+            PathBuf::from("~"),
+            PathBuf::from("~/"),
+            PathBuf::from(""),
+            PathBuf::from("."),
+        ];
+        for path in refused {
+            assert!(guard.refuses(&path), "{path:?} must be refused");
+        }
+    }
+
+    #[test]
+    fn removal_guard_allows_a_game_s_own_paths() {
+        let guard = guard_for_tests();
+        let allowed = [
+            abs("lib/games/SNES/Game"),
+            abs("lib/games/SNES/Game.zip"),
+            abs("lib/SNES/Game"),
+            abs("lib/Game"),
+            abs("lib/Game.zip"),
+            abs("n/a/My Game"),
+            abs("n/a/My Game/Game"),
+            abs("n/b"),
+            abs("home/u/Games/Game"),
+        ];
+        for path in allowed {
+            assert!(!guard.refuses(&path), "{path:?} must be allowed");
+        }
+    }
+
+    /// `~` in a recorded path expands to the home the guard was given.
+    #[test]
+    fn removal_guard_refuses_tilde_forms_of_home() {
+        let guard = guard_for_tests();
+        assert!(guard.refuses(Path::new("~")));
+        assert!(guard.refuses(Path::new("~/")));
+        assert!(!guard.refuses(Path::new("~/Games/Game")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn removal_guard_compares_without_case_on_windows() {
+        let guard = guard_for_tests();
+        for path in [
+            "C:\\LIB",
+            "c:\\lib",
+            "C:\\Lib\\GAMES",
+            "C:\\lib\\games\\snes",
+            "C:\\lib.",
+            "C:\\lib\\games ",
+            "\\\\?\\C:\\lib",
+            "C:\\HOME\\U",
+            "C:\\N\\A",
+            "C:\\",
+            "\\\\server\\share\\",
+            "\\lib",
+            "C:lib",
+        ] {
+            assert!(guard.refuses(Path::new(path)), "{path:?} must be refused");
+        }
+        assert!(!guard.refuses(Path::new("C:\\LIB\\GAMES\\SNES\\Game")));
+    }
+
+    /// Off Windows names are case-sensitive, so a different case is a
+    /// different directory.
+    #[cfg(not(windows))]
+    #[test]
+    fn removal_guard_compares_exactly_off_windows() {
+        let guard = guard_for_tests();
+        assert!(!guard.refuses(Path::new("/LIB")));
+        assert!(!guard.refuses(Path::new("/lib/Games")));
+        assert!(guard.refuses(Path::new("/lib/games")));
     }
 
     #[test]

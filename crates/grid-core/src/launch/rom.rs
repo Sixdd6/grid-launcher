@@ -23,8 +23,13 @@ use crate::library::registry::InstalledGame;
 /// final fallback is left to the spawn step, not done here.
 pub fn resolve_rom_path(game: &InstalledGame, library: &Path) -> String {
     let archive_name = archive_name(&game.rom_file_name, &game.title, &game.platform);
-    let archive_candidates =
-        candidate_archives(library, &game.platform, &game.archive_path, &archive_name);
+    let archive_candidates = candidate_archives(
+        library,
+        &game.platform,
+        &game.archive_path,
+        &archive_name,
+        &game.native_game_dir,
+    );
 
     if !is_arcade_platform(&game.platform) && !is_dos_platform(&game.platform) {
         let archive_stem = Path::new(&archive_name)
@@ -32,7 +37,11 @@ pub fn resolve_rom_path(game: &InstalledGame, library: &Path) -> String {
             .map(|stem| stem.to_string_lossy().into_owned())
             .unwrap_or_else(|| archive_name.clone());
 
-        let extracted_dirs = candidate_extracted_dirs(&archive_candidates, &game.extracted_dir);
+        let extracted_dirs = candidate_extracted_dirs(
+            &archive_candidates,
+            &game.extracted_dir,
+            &game.native_game_dir,
+        );
         for dir in &extracted_dirs {
             if !dir.is_dir() {
                 continue;

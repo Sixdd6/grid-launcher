@@ -207,10 +207,32 @@ pub(crate) fn dedup_by_string(paths: Vec<PathBuf>) -> Vec<PathBuf> {
         .collect()
 }
 
+/// True when `name` is one ordinary path component that `Path::join` can
+/// only append: not blank, not made only of dots and spaces (`.`, `..`,
+/// `...`; Win32 drops trailing dots and spaces, so these name the parent
+/// directory or worse), free of both `/` and `\` on every OS, and parsed by
+/// `Path` as a single normal component (on Windows this rejects a drive
+/// prefix such as `C:`, which would make `join` replace the base path).
+///
+/// Uninstall uses it to drop every candidate built from `archive_name` when
+/// the server's file name is not plain.
+pub(crate) fn is_plain_component(name: &str) -> bool {
+    if name.trim_end_matches(['.', ' ']).is_empty() || name.contains(['/', '\\']) {
+        return false;
+    }
+    let mut components = Path::new(name).components();
+    matches!(
+        (components.next(), components.next()),
+        (Some(std::path::Component::Normal(only)), None) if only == name
+    )
+}
+
 /// The ordered, deduplicated set of archive locations a game might be found
 /// at: the recorded `archive_path` (`~`-expanded) first when non-blank, then
 /// `<games platform dir>/<archive_name>`, then the legacy (pre-v1)
-/// `<platform dir>/<archive_name>`, then `<library>/<archive_name>`.
+/// `<platform dir>/<archive_name>`, then `<library>/<archive_name>`, then
+/// `<native_game_dir>/<archive_name>` (`~`-expanded) when `native_game_dir`
+/// is non-blank (`candidate_archive_paths_for_game`, install_paths.py:19-43).
 ///
 /// This takes plain parameters rather than an `InstalledGame` record because
 /// the registry type is introduced in a later task; a `library::registry`
@@ -220,6 +242,7 @@ pub fn candidate_archives(
     platform: &str,
     archive_path: &str,
     archive_name: &str,
+    native_game_dir: &str,
 ) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if !archive_path.trim().is_empty() {
@@ -228,22 +251,38 @@ pub fn candidate_archives(
     candidates.push(platform_dir(library, platform).join(archive_name));
     candidates.push(legacy_platform_dir(library, platform).join(archive_name));
     candidates.push(library.join(archive_name));
+    if !native_game_dir.trim().is_empty() {
+        candidates.push(expand_home(native_game_dir).join(archive_name));
+    }
     dedup_by_string(candidates)
 }
 
 /// The ordered, deduplicated set of extraction directories a game might be
-/// found at: the recorded `extracted_dir` first when non-blank, then the
-/// `extraction_dir()` of every candidate archive path.
+/// found at: the recorded `extracted_dir` (`~`-expanded) first when
+/// non-blank, then for every candidate archive path its `extraction_dir()`
+/// followed, when `native_game_dir` is non-blank, by that directory's name
+/// under the (`~`-expanded) `native_game_dir`
+/// (`candidate_extracted_dirs_for_game`, install_paths.py:68-89). An
+/// extraction dir with no final name adds no native sibling.
 pub fn candidate_extracted_dirs(
     archive_candidates: &[PathBuf],
     extracted_dir: &str,
+    native_game_dir: &str,
 ) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if !extracted_dir.trim().is_empty() {
-        candidates.push(PathBuf::from(extracted_dir));
+        candidates.push(expand_home(extracted_dir));
     }
+    let native_game_dir =
+        (!native_game_dir.trim().is_empty()).then(|| expand_home(native_game_dir));
     for archive in archive_candidates {
-        candidates.push(extraction_dir(archive));
+        let extracted = extraction_dir(archive);
+        let native_sibling = native_game_dir
+            .as_ref()
+            .zip(extracted.file_name())
+            .map(|(native, name)| native.join(name));
+        candidates.push(extracted);
+        candidates.extend(native_sibling);
     }
     dedup_by_string(candidates)
 }
@@ -435,7 +474,7 @@ mod tests {
     #[test]
     fn candidate_archives_orders_archive_path_platform_dir_then_library() {
         let library = Path::new("/library");
-        let candidates = candidate_archives(library, "Platform", "/other/Game.zip", "Game.zip");
+        let candidates = candidate_archives(library, "Platform", "/other/Game.zip", "Game.zip", "");
         assert_eq!(
             candidates,
             vec![
@@ -450,7 +489,7 @@ mod tests {
     #[test]
     fn candidate_archives_skips_blank_archive_path() {
         let library = Path::new("/library");
-        let candidates = candidate_archives(library, "Platform", "  ", "Game.zip");
+        let candidates = candidate_archives(library, "Platform", "  ", "Game.zip", "");
         assert_eq!(
             candidates,
             vec![
@@ -469,8 +508,13 @@ mod tests {
         // candidate, so its text matches on every OS's separator.
         let library = Path::new("/library");
         let recorded = library.join("games").join("Platform").join("Game.zip");
-        let candidates =
-            candidate_archives(library, "Platform", recorded.to_str().unwrap(), "Game.zip");
+        let candidates = candidate_archives(
+            library,
+            "Platform",
+            recorded.to_str().unwrap(),
+            "Game.zip",
+            "",
+        );
         assert_eq!(
             candidates,
             vec![
@@ -489,14 +533,16 @@ mod tests {
         let _guard =
             crate::test_env::EnvGuard::set(&[("HOME", Some(temp.path().to_str().unwrap()))]);
         let library = Path::new("/library");
-        let candidates = candidate_archives(library, "Platform", "~/Games/Game.zip", "Game.zip");
+        let candidates =
+            candidate_archives(library, "Platform", "~/Games/Game.zip", "Game.zip", "");
         assert_eq!(candidates[0], temp.path().join("Games/Game.zip"));
     }
 
     #[test]
     fn candidate_archives_does_not_expand_bare_tilde_without_slash() {
         let library = Path::new("/library");
-        let candidates = candidate_archives(library, "Platform", "~backup/Game.zip", "Game.zip");
+        let candidates =
+            candidate_archives(library, "Platform", "~backup/Game.zip", "Game.zip", "");
         assert_eq!(candidates[0], PathBuf::from("~backup/Game.zip"));
     }
 
@@ -505,7 +551,7 @@ mod tests {
     #[test]
     fn candidate_extracted_dirs_puts_extracted_dir_first() {
         let archive_candidates = vec![PathBuf::from("/library/Platform/Game.zip")];
-        let candidates = candidate_extracted_dirs(&archive_candidates, "/custom/extracted");
+        let candidates = candidate_extracted_dirs(&archive_candidates, "/custom/extracted", "");
         assert_eq!(
             candidates,
             vec![
@@ -521,7 +567,7 @@ mod tests {
             PathBuf::from("/library/Platform/Game.zip"),
             PathBuf::from("/library/Game.zip"),
         ];
-        let candidates = candidate_extracted_dirs(&archive_candidates, "");
+        let candidates = candidate_extracted_dirs(&archive_candidates, "", "");
         assert_eq!(
             candidates,
             vec![
@@ -529,6 +575,177 @@ mod tests {
                 PathBuf::from("/library/Game"),
             ]
         );
+    }
+
+    // --- native_game_dir candidates (install_paths.py:19-43, :68-89) -------
+
+    #[test]
+    fn candidate_archives_appends_the_native_game_dir_entry_last() {
+        let library = Path::new("/library");
+        let candidates = candidate_archives(
+            library,
+            "Platform",
+            "/other/Game.zip",
+            "Game.zip",
+            "/native/My Game",
+        );
+        assert_eq!(
+            candidates,
+            vec![
+                PathBuf::from("/other/Game.zip"),
+                PathBuf::from("/library/games/Platform/Game.zip"),
+                PathBuf::from("/library/Platform/Game.zip"),
+                PathBuf::from("/library/Game.zip"),
+                PathBuf::from("/native/My Game/Game.zip"),
+            ]
+        );
+    }
+
+    #[test]
+    fn candidate_archives_skips_a_blank_native_game_dir() {
+        let library = Path::new("/library");
+        let candidates = candidate_archives(library, "Platform", "", "Game.zip", "   ");
+        assert_eq!(
+            candidates,
+            vec![
+                PathBuf::from("/library/games/Platform/Game.zip"),
+                PathBuf::from("/library/Platform/Game.zip"),
+                PathBuf::from("/library/Game.zip"),
+            ]
+        );
+    }
+
+    #[test]
+    fn candidate_archives_expands_a_leading_tilde_in_native_game_dir() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard =
+            crate::test_env::EnvGuard::set(&[("HOME", Some(temp.path().to_str().unwrap()))]);
+        let library = Path::new("/library");
+        let candidates = candidate_archives(library, "Platform", "", "Game.zip", "~/Native");
+        assert_eq!(
+            candidates.last(),
+            Some(&temp.path().join("Native").join("Game.zip"))
+        );
+    }
+
+    #[test]
+    fn candidate_archives_dedups_the_native_entry() {
+        // The native game dir IS the games platform dir, so its entry
+        // collapses into the one already listed.
+        let library = Path::new("/library");
+        let native = library.join("games").join("Platform");
+        let candidates = candidate_archives(
+            library,
+            "Platform",
+            "",
+            "Game.zip",
+            native.to_str().unwrap(),
+        );
+        assert_eq!(
+            candidates,
+            vec![
+                PathBuf::from("/library/games/Platform/Game.zip"),
+                PathBuf::from("/library/Platform/Game.zip"),
+                PathBuf::from("/library/Game.zip"),
+            ]
+        );
+    }
+
+    #[test]
+    fn candidate_extracted_dirs_expands_a_leading_tilde() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard =
+            crate::test_env::EnvGuard::set(&[("HOME", Some(temp.path().to_str().unwrap()))]);
+        let candidates = candidate_extracted_dirs(&[], "~/Games/Game", "");
+        assert_eq!(candidates, vec![temp.path().join("Games/Game")]);
+    }
+
+    #[test]
+    fn candidate_extracted_dirs_adds_a_native_sibling_after_each_archive_dir() {
+        let archive_candidates = vec![
+            PathBuf::from("/library/games/Platform/Game.zip"),
+            PathBuf::from("/other/Other.zip"),
+        ];
+        let candidates =
+            candidate_extracted_dirs(&archive_candidates, "/custom/extracted", "/native");
+        assert_eq!(
+            candidates,
+            vec![
+                PathBuf::from("/custom/extracted"),
+                PathBuf::from("/library/games/Platform/Game"),
+                PathBuf::from("/native/Game"),
+                PathBuf::from("/other/Other"),
+                PathBuf::from("/native/Other"),
+            ]
+        );
+    }
+
+    #[test]
+    fn candidate_extracted_dirs_dedups_native_siblings() {
+        // Both archives share a stem, so the second native sibling repeats
+        // the first and is dropped.
+        let archive_candidates = vec![
+            PathBuf::from("/library/games/Platform/Game.zip"),
+            PathBuf::from("/library/Game.zip"),
+        ];
+        let candidates = candidate_extracted_dirs(&archive_candidates, "", "/native");
+        assert_eq!(
+            candidates,
+            vec![
+                PathBuf::from("/library/games/Platform/Game"),
+                PathBuf::from("/native/Game"),
+                PathBuf::from("/library/Game"),
+            ]
+        );
+    }
+
+    #[test]
+    fn candidate_extracted_dirs_adds_no_sibling_for_a_blank_native_game_dir() {
+        let archive_candidates = vec![PathBuf::from("/library/Game.zip")];
+        let candidates = candidate_extracted_dirs(&archive_candidates, "", "  ");
+        assert_eq!(candidates, vec![PathBuf::from("/library/Game")]);
+    }
+
+    // --- is_plain_component ------------------------------------------------
+
+    #[test]
+    fn is_plain_component_table() {
+        for plain in [
+            "Game.zip",
+            "Chrono Trigger (USA).sfc",
+            "a..b.zip",
+            ".hidden",
+        ] {
+            assert!(is_plain_component(plain), "{plain:?} is plain");
+        }
+        for not_plain in [
+            "",
+            " ",
+            ".",
+            "..",
+            "...",
+            "a/b",
+            "a\\b",
+            "../Game.zip",
+            "..\\Game.zip",
+            "/",
+            "\\",
+            "Game/",
+        ] {
+            assert!(!is_plain_component(not_plain), "{not_plain:?} is not plain");
+        }
+    }
+
+    /// A drive prefix makes `Path::join` replace the base on Windows, so it
+    /// never counts as one plain component there.
+    #[cfg(windows)]
+    #[test]
+    fn is_plain_component_rejects_a_drive_prefix_on_windows() {
+        for not_plain in ["C:", "C:Game.zip", "c:"] {
+            assert!(!is_plain_component(not_plain), "{not_plain:?} is not plain");
+        }
     }
 
     // --- layout_version_for_library_path -----------------------------------
@@ -642,7 +859,8 @@ mod tests {
         // Built with `Path::join` like `extraction_dir`, so the recorded
         // text matches the derived candidate on every OS's separator.
         let recorded = Path::new("/library/Platform").join("Game");
-        let candidates = candidate_extracted_dirs(&archive_candidates, recorded.to_str().unwrap());
+        let candidates =
+            candidate_extracted_dirs(&archive_candidates, recorded.to_str().unwrap(), "");
         assert_eq!(
             candidates,
             vec![

@@ -142,6 +142,7 @@ pub async fn native_game_settings(
                 &row.platform,
                 &row.archive_path,
                 &archive_name(&row.rom_file_name, &row.title, &row.platform),
+                &row.native_game_dir,
             ),
             None => Vec::new(),
         };
