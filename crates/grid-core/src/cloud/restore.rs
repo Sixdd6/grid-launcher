@@ -321,16 +321,12 @@ pub fn record_timestamp(record: &Value) -> f64 {
 /// `relative_timestamp_text` (`cloud_restore.py:30-58`). `timestamp == 0.0`
 /// (falsy in Python) renders `"Unknown"`.
 ///
-/// **Ports the BUGGY bucket table verbatim — do not fix.** The `ranges`
-/// tuple is checked largest-threshold-first: `(86_400, 3_600, "hour")`
-/// comes before `(3_600, 60, "minute")`. Since the first entry's guard
-/// (`elapsed_seconds < 86_400`) already covers every value the second
-/// entry's guard (`elapsed_seconds < 3_600`) would ever see, the minutes
-/// bucket is dead code — ANY elapsed time from 90 seconds up to a day
-/// renders as `"N hours ago"` (N computed via `elapsed / 3600`, floored to
-/// at least 1). Concretely: 120 seconds elapsed renders `"1 hour ago"`,
-/// not `"2 minutes ago"`. See `docs/porting/06-cloud-saves.md`, "Manual
-/// actions" for context on why this ships as-is.
+/// Deliberately differs from the Python original, which checked the hour
+/// range before the minute range, so the minute bucket was dead code and 120
+/// seconds rendered `"1 hour ago"`. Here minutes (under an hour) are checked
+/// before hours (under a day), so 120 seconds renders `"2 minutes ago"`.
+/// SPEC.md:141 requires "x hours/minutes ago", and the user asked on
+/// 2026-10-09 for parity or better.
 pub fn relative_timestamp_text(timestamp: f64, now: f64) -> String {
     if timestamp == 0.0 {
         return "Unknown".to_string();
@@ -348,7 +344,7 @@ pub fn relative_timestamp_text(timestamp: f64, now: f64) -> String {
         return "1 minute ago".to_string();
     }
 
-    const RANGES: [(i64, i64, &str); 2] = [(86_400, 3_600, "hour"), (3_600, 60, "minute")];
+    const RANGES: [(i64, i64, &str); 2] = [(3_600, 60, "minute"), (86_400, 3_600, "hour")];
     for (threshold, unit_seconds, label) in RANGES {
         if elapsed_seconds < threshold {
             let value = (elapsed_seconds / unit_seconds).max(1);
@@ -906,39 +902,48 @@ mod tests {
     // --- relative_timestamp_text (test_cloud_restore.py:21) ----------
 
     #[test]
-    fn relative_timestamp_text_uses_human_readable_ranges() {
-        assert_eq!(relative_timestamp_text(0.0, 1_000.0), "Unknown");
-        assert_eq!(relative_timestamp_text(995.0, 1_000.0), "just now");
-        assert_eq!(relative_timestamp_text(940.0, 1_000.0), "1 minute ago");
-        assert_eq!(
-            relative_timestamp_text(1_000.0 - (3.0 * 3_600.0), 1_000.0),
-            "3 hours ago"
-        );
-        assert_eq!(
-            relative_timestamp_text(1_000.0 - (2.0 * 86_400.0), 1_000.0),
-            "2 days ago"
-        );
-    }
+    fn relative_timestamp_text_buckets() {
+        const NOW: f64 = 10_000_000.0;
+        const MINUTE: f64 = 60.0;
+        const HOUR: f64 = 3_600.0;
+        const DAY: f64 = 86_400.0;
+        const WEEK: f64 = 7.0 * DAY;
 
-    #[test]
-    fn relative_timestamp_text_120_seconds_renders_1_hour_ago_bug() {
-        // The pinned QUIRK: the minutes bucket is unreachable above 90s.
-        assert_eq!(
-            relative_timestamp_text(1_000.0 - 120.0, 1_000.0),
-            "1 hour ago"
-        );
-    }
-
-    #[test]
-    fn relative_timestamp_text_weeks() {
-        assert_eq!(
-            relative_timestamp_text(1_000.0 - (10.0 * 86_400.0), 1_000.0),
-            "1 week ago"
-        );
-        assert_eq!(
-            relative_timestamp_text(1_000.0 - (20.0 * 86_400.0), 1_000.0),
-            "2 weeks ago"
-        );
+        // (timestamp, expected). Elapsed seconds are `NOW - timestamp`.
+        let cases: [(f64, &str); 24] = [
+            (0.0, "Unknown"),
+            (NOW + 500.0, "just now"),
+            (NOW - 5.0, "just now"),
+            (NOW - 29.0, "just now"),
+            (NOW - 30.0, "1 minute ago"),
+            (NOW - 89.0, "1 minute ago"),
+            (NOW - 90.0, "1 minute ago"),
+            (NOW - 119.0, "1 minute ago"),
+            (NOW - 120.0, "2 minutes ago"),
+            (NOW - 5.0 * MINUTE, "5 minutes ago"),
+            (NOW - (HOUR - 1.0), "59 minutes ago"),
+            (NOW - HOUR, "1 hour ago"),
+            (NOW - (2.0 * HOUR - 1.0), "1 hour ago"),
+            (NOW - 2.0 * HOUR, "2 hours ago"),
+            (NOW - 3.0 * HOUR, "3 hours ago"),
+            (NOW - (DAY - 1.0), "23 hours ago"),
+            (NOW - DAY, "1 day ago"),
+            (NOW - 2.0 * DAY, "2 days ago"),
+            (NOW - (WEEK - 1.0), "6 days ago"),
+            (NOW - WEEK, "1 week ago"),
+            (NOW - 10.0 * DAY, "1 week ago"),
+            (NOW - 14.0 * DAY, "2 weeks ago"),
+            (NOW - 20.0 * DAY, "2 weeks ago"),
+            (NOW - 21.0 * DAY, "3 weeks ago"),
+        ];
+        for (timestamp, expected) in cases {
+            assert_eq!(
+                relative_timestamp_text(timestamp, NOW),
+                expected,
+                "elapsed {} s",
+                NOW - timestamp
+            );
+        }
     }
 
     // --- sort_server_records_by_recency (test_cloud_restore.py:28) ---
