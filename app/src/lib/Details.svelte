@@ -33,6 +33,8 @@
   import { keptFolder, showsUnlinkedActions } from './details/unlinked';
   import { missingActions } from './library/missing';
   import { pickFolder } from './pickers';
+  import { pushToast } from './stores/toasts.svelte';
+  import { SKIPPED_TOAST_MS, skippedRemovalText } from './uninstallSkips';
   import { fullIndex, galleryItems, viewableIndex, viewableItems } from './details/media';
   import { mergeDetail, summaryOf, type DetailsSubject } from './details/subject';
   import { syntheticCloudGame, toggleCloudMode, type CloudMode } from './details/cloud';
@@ -503,7 +505,8 @@
     error = null;
     pendingAction = 'uninstall';
     try {
-      await api.uninstallGame(subject.romId);
+      const report = await api.uninstallGame(subject.romId);
+      pushToast(skippedRemovalText(report?.skipped), 'error', SKIPPED_TOAST_MS);
       await refreshInstalled();
       onClose();
     } catch (err) {

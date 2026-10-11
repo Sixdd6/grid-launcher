@@ -16,7 +16,7 @@ use grid_core::library::path_change::{
     self, LibraryActivity, PathChangeRefusal, StartFreshPreview, StartFreshReport,
 };
 use grid_core::library::paths::library_root;
-use grid_core::library::InstallService;
+use grid_core::library::{InstallService, SkippedRemoval};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
@@ -43,11 +43,13 @@ pub enum LibraryPathCheck {
 pub enum StartFreshOutcome {
     /// `library_path` is the new root. `rows_removed` games left the
     /// library; `failures` lists what could not be removed (Delete only —
-    /// those games stay in the library).
+    /// those games stay in the library); `skipped` lists the folders the
+    /// uninstall guard kept on disk, each with its reason (Delete only).
     Switched {
         library_path: String,
         rows_removed: usize,
         failures: Vec<String>,
+        skipped: Vec<SkippedRemoval>,
     },
     /// Nothing changed.
     Refused {
@@ -264,13 +266,14 @@ fn run_start_fresh(
             OldFiles::Delete => install.start_fresh_delete(&old_root),
         },
     };
-    let (rows_removed, failures) = match report {
-        Ok(report) => (report.rows_removed, report.failures),
-        Err(e) => (0, vec![err(e)]),
+    let (rows_removed, failures, skipped) = match report {
+        Ok(report) => (report.rows_removed, report.failures, report.skipped),
+        Err(e) => (0, vec![err(e)], Vec::new()),
     };
     tracing::info!(
         rows_removed,
         failures = failures.len(),
+        skipped = skipped.len(),
         delete = old_files == OldFiles::Delete,
         "library folder changed (start fresh)"
     );
@@ -278,6 +281,7 @@ fn run_start_fresh(
         library_path: target.to_string_lossy().into_owned(),
         rows_removed,
         failures,
+        skipped,
     })
 }
 
@@ -364,6 +368,7 @@ mod tests {
                 library_path: s(&new),
                 rows_removed: 1,
                 failures: Vec::new(),
+                skipped: Vec::new(),
             }
         );
         assert!(new.is_dir());

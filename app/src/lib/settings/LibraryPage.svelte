@@ -12,6 +12,8 @@
   import { libraryMove } from '../stores/libraryMove.svelte';
   import LibraryChangeDialog from './LibraryChangeDialog.svelte';
   import { moveInProgress, moveStartNotice, outcomeNotice, paneMoveText, type Notice } from './library';
+  import { pushToast } from '../stores/toasts.svelte';
+  import { SKIPPED_TOAST_MS, skippedRemovalText } from '../uninstallSkips';
 
   let { active = true }: { active?: boolean } = $props();
 
@@ -58,7 +60,10 @@
 
   function onDone(outcome: StartFreshOutcome, deleted: boolean) {
     notice = outcomeNotice(outcome, deleted);
-    if (outcome.status === 'switched') path = outcome.library_path;
+    if (outcome.status === 'switched') {
+      path = outcome.library_path;
+      pushToast(skippedRemovalText(outcome.skipped), 'error', SKIPPED_TOAST_MS);
+    }
     dialogOpen = false;
   }
 </script>

@@ -205,6 +205,7 @@ fn delete_removes_files_through_uninstall_and_never_outside_the_old_root() {
     let report = f.service.start_fresh_delete(&f.old).unwrap();
 
     assert!(report.failures.is_empty(), "{:?}", report.failures);
+    assert!(report.skipped.is_empty(), "{:?}", report.skipped);
     assert_eq!(report.rows_removed, 3);
     assert_eq!(titles(&f.registry), vec!["Quake", "Some Emu"]);
     for gone in [
@@ -286,8 +287,16 @@ fn uninstall_after_a_change_refuses_the_former_root() {
             ..Default::default()
         })
         .unwrap();
-    f.service.uninstall(9).unwrap();
+    let report = f.service.uninstall(9).unwrap();
 
+    assert_eq!(
+        report.skipped,
+        vec![grid_core::library::SkippedRemoval {
+            path: s(&f.old),
+            reason: "a library folder or a folder that holds one".into(),
+        }],
+        "the refused folder and its reason reach the caller"
+    );
     assert!(f.old.join("games/SNES/Mario/game.sfc").is_file());
     assert!(f.old.join("emulators/RetroArch/retroarch.exe").is_file());
 }

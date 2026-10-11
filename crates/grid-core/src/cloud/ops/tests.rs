@@ -22,6 +22,13 @@ use super::restore::{restore_cloud_save_for_game, restore_cloud_state_for_game};
 use super::upload::upload_cloud_files_for_game;
 use super::*;
 
+/// The canonical long form of an existing `path`. A save target is
+/// resolved like `Path.resolve()`, which expands a Windows 8.3 short name
+/// (GitHub's runner `TEMP` is `C:\Users\RUNNER~1\...`).
+fn long(path: &Path) -> std::path::PathBuf {
+    crate::platform::canonicalize(path).unwrap()
+}
+
 // --- fixtures ----------------------------------------------------------
 
 fn client_for(server: &MockServer) -> RommClient {
@@ -1616,7 +1623,7 @@ fn cloud_sync_targets_dispatch_table() {
     // Row 1: state -> file candidates only, never folder targets.
     let (files, folders) =
         cloud_sync_targets(&fx.ctx(), &mut caches, &target, &entry, SaveType::State);
-    assert_eq!(files, vec![states.path().join("zelda.state")]);
+    assert_eq!(files, vec![long(&states.path().join("zelda.state"))]);
     assert!(folders.is_empty());
 
     // Row 4: an explicit `folder` strategy yields generic folder targets.
@@ -1632,7 +1639,7 @@ fn cloud_sync_targets_dispatch_table() {
         SaveType::Save,
     );
     assert!(files.is_empty());
-    assert_eq!(folders, vec![saves.path().join("zelda")]);
+    assert_eq!(folders, vec![long(&saves.path().join("zelda"))]);
 
     // The explicit-file-root rescan: a configured path that IS a file is
     // rescanned as a root when the chosen branch found nothing.
@@ -1644,7 +1651,7 @@ fn cloud_sync_targets_dispatch_table() {
     let mut caches = CloudCaches::default();
     let (files, folders) =
         cloud_sync_targets(&fx.ctx(), &mut caches, &target, &root_entry, SaveType::Save);
-    assert_eq!(files, vec![file_root]);
+    assert_eq!(files, vec![long(&file_root)]);
     assert!(folders.is_empty());
 }
 
@@ -1670,7 +1677,7 @@ fn rpcs3_targets_only_the_games_own_savedata_folder() {
     let (files, folders) =
         cloud_sync_targets(&fx.ctx(), &mut caches, &with_id, &entry, SaveType::Save);
     assert!(files.is_empty());
-    assert_eq!(folders, vec![saves.path().join("BLUS30443-SAVE00")]);
+    assert_eq!(folders, vec![long(&saves.path().join("BLUS30443-SAVE00"))]);
     let mtime = latest_local_save_mtime(&fx.ctx(), &mut caches, &with_id, "RPCS3");
     assert_eq!(mtime as u64, 1_500_000_000);
 
@@ -1699,7 +1706,7 @@ fn rpcs3_targets_only_the_games_own_savedata_folder() {
         &folder_entry,
         SaveType::Save,
     );
-    assert_eq!(folders, vec![saves.path().join("BLUS30443-SAVE00")]);
+    assert_eq!(folders, vec![long(&saves.path().join("BLUS30443-SAVE00"))]);
     let (_, folders) = cloud_sync_targets(
         &fx.ctx(),
         &mut caches,
@@ -1737,7 +1744,7 @@ fn cemu_targets_only_the_games_own_title_folder() {
     assert!(files.is_empty());
     assert_eq!(
         folders,
-        vec![saves.path().join("00050000/10145D00/user/80000001")]
+        vec![long(&saves.path().join("00050000/10145D00/user/80000001"))]
     );
     let mtime = latest_local_save_mtime(&fx.ctx(), &mut caches, &with_id, "Cemu");
     assert_eq!(mtime as u64, 1_500_000_000);

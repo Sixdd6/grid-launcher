@@ -33,7 +33,7 @@ use grid_core::library::extract::is_extractable_archive;
 use grid_core::library::paths::{layout_version_for_library_path, library_root};
 use grid_core::library::queue::DownloadsSnapshot;
 use grid_core::library::registry::InstalledGame;
-use grid_core::library::{InstallService, InstalledRow};
+use grid_core::library::{InstallService, InstalledRow, UninstallReport};
 use grid_core::romm::achievements;
 use grid_core::romm::{AchievementsView, GameSummary, Platform, RaUsernameSync, RomDetail};
 use grid_core::secrets::RaTokenStore;
@@ -521,18 +521,18 @@ pub async fn uninstall_game(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
     rom_id: i64,
-) -> Result<(), String> {
+) -> Result<UninstallReport, String> {
     ensure_library_idle(&state)?;
     let install = state.install.as_ref().map_err(Clone::clone)?.clone();
     let install_for_updates = install.clone();
-    tokio::task::spawn_blocking(move || install.uninstall(rom_id).map_err(err))
+    let report = tokio::task::spawn_blocking(move || install.uninstall(rom_id).map_err(err))
         .await
         .map_err(|e| format!("uninstall did not finish: {e}"))??;
     // The uninstalled row can no longer carry an update.
     state
         .updates
         .spawn_refresh(app, state.session.clone(), install_for_updates);
-    Ok(())
+    Ok(report)
 }
 
 #[tauri::command]
@@ -1190,9 +1190,13 @@ pub async fn save_emulator(
 /// An emulator registered from a server "Emulators"-platform package also
 /// takes that package with it: its hidden registry row is uninstalled
 /// through the game uninstall path (`uninstall_server_emulator_rows`),
-/// before the entry goes, so a failure keeps the entry to retry.
+/// before the entry goes, so a failure keeps the entry to retry. The
+/// report names the package folders the uninstall guard kept on disk.
 #[tauri::command]
-pub async fn delete_emulator(state: State<'_, AppState>, name: String) -> Result<(), String> {
+pub async fn delete_emulator(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<UninstallReport, String> {
     ensure_library_idle(&state)?;
     // `State` is not `Send`; the service handle crosses the hop instead.
     let install = state.install.as_ref().ok().cloned();
@@ -1200,17 +1204,20 @@ pub async fn delete_emulator(state: State<'_, AppState>, name: String) -> Result
         let config_path = Config::default_path();
         let config = Config::load(&config_path).map_err(err)?;
         remove_emulator_files(&config, &config_path, &name, load_profiles()).map_err(err)?;
+        let mut report = UninstallReport::default();
         if let (Some(install), Some(entry)) =
             (install, emulator_entry_by_name(&config.emulators, &name))
         {
-            install
+            report = install
                 .uninstall_server_emulator_rows(entry, &config.emulators)
-                .map_err(err)?;
+                .map_err(err)?
+                .1;
         }
         modify_config(&config_path, |config| {
             apply_delete_emulator(config, &name);
             Ok(())
-        })
+        })?;
+        Ok(report)
     })
     .await
     .map_err(|e| format!("delete_emulator did not finish: {e}"))?

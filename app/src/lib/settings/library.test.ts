@@ -69,17 +69,17 @@ describe('previewSummary', () => {
 describe('outcomeNotice', () => {
   it('reports a switch, with failures as an error', () => {
     expect(
-      outcomeNotice({ status: 'switched', library_path: '/new', rows_removed: 3, failures: [] }, false),
+      outcomeNotice({ status: 'switched', library_path: '/new', rows_removed: 3, failures: [], skipped: [] }, false),
     ).toEqual({ kind: 'success', text: 'Library folder changed. 3 games left the library; their files stay on disk.' });
     expect(
-      outcomeNotice({ status: 'switched', library_path: '/new', rows_removed: 1, failures: [] }, true),
+      outcomeNotice({ status: 'switched', library_path: '/new', rows_removed: 1, failures: [], skipped: [] }, true),
     ).toEqual({ kind: 'success', text: 'Library folder changed. 1 game was deleted.' });
     expect(
-      outcomeNotice({ status: 'switched', library_path: '/new', rows_removed: 0, failures: [] }, false),
+      outcomeNotice({ status: 'switched', library_path: '/new', rows_removed: 0, failures: [], skipped: [] }, false),
     ).toEqual({ kind: 'success', text: 'Library folder changed.' });
     expect(
       outcomeNotice(
-        { status: 'switched', library_path: '/new', rows_removed: 1, failures: ['a', 'b'] },
+        { status: 'switched', library_path: '/new', rows_removed: 1, failures: ['a', 'b'], skipped: [] },
         true,
       ),
     ).toEqual({

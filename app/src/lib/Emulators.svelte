@@ -24,6 +24,7 @@
   import RailPane, { type RailPaneEntry } from './RailPane.svelte';
   import { downloads } from './stores/downloads.svelte';
   import { pushToast } from './stores/toasts.svelte';
+  import { SKIPPED_TOAST_MS, skippedRemovalText } from './uninstallSkips';
   import { compatTools } from './stores/compatTools.svelte';
   import { filterCatalogEntries } from './emulators/catalog';
   import { emulatorTerminalSignature as terminalSignature } from './emulators/installSignal';
@@ -482,7 +483,8 @@
     deleteError = null;
     deletePending = name;
     try {
-      await api.deleteEmulator(name);
+      const report = await api.deleteEmulator(name);
+      pushToast(skippedRemovalText(report?.skipped), 'error', SKIPPED_TOAST_MS);
       if (editing?.name === name) closeSheet();
       await refreshEmulators();
       await refreshDefaults();

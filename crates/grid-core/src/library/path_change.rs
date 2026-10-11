@@ -402,6 +402,9 @@ pub struct StartFreshReport {
     /// One line per path that could not be removed. A row with a failure
     /// stays in the library, so nothing is orphaned.
     pub failures: Vec<String>,
+    /// Paths a row named that the uninstall guard kept on disk, each with
+    /// its reason (Delete only; empty for Leave).
+    pub skipped: Vec<super::SkippedRemoval>,
 }
 
 #[cfg(test)]

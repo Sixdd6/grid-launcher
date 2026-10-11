@@ -129,13 +129,15 @@ pub fn saves_dir(library: &Path, emulator_name: &str) -> PathBuf {
         .join(sanitize_component(emulator_name, "emulator"))
 }
 
-/// Expand a leading `~/` in `raw` to the user's home directory. Any other
+/// Expand a leading `~/` or `~\` in `raw` to the user's home directory, on
+/// every OS (`~\` is a failsafe for a Windows-style value; the stored config
+/// value is not rewritten). Any other
 /// form (a bare `~`, `~user/...`, or no tilde at all) is left untouched —
 /// this is a minimal, manual stand-in for shell tilde expansion, not a full
 /// implementation. The home directory comes from
 /// [`crate::platform::home_dir`].
 pub(crate) fn expand_home(raw: &str) -> PathBuf {
-    if let Some(rest) = raw.strip_prefix("~/") {
+    if let Some(rest) = raw.strip_prefix("~/").or_else(|| raw.strip_prefix("~\\")) {
         if let Some(home) = crate::platform::home_dir() {
             return home.join(rest);
         }
@@ -523,6 +525,26 @@ mod tests {
                 PathBuf::from("/library/Game.zip"),
             ]
         );
+    }
+
+    #[test]
+    fn expand_home_table() {
+        // `expand_home` reads `$HOME` under test; see `crate::test_env`.
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard =
+            crate::test_env::EnvGuard::set(&[("HOME", Some(temp.path().to_str().unwrap()))]);
+        let home = temp.path();
+        let cases: [(&str, PathBuf); 5] = [
+            ("~", PathBuf::from("~")),
+            ("~/x", home.join("x")),
+            ("~\\x", home.join("x")),
+            ("~user/x", PathBuf::from("~user/x")),
+            ("x~", PathBuf::from("x~")),
+        ];
+        for (raw, expected) in cases {
+            assert_eq!(expand_home(raw), expected, "input {raw:?}");
+        }
     }
 
     #[test]

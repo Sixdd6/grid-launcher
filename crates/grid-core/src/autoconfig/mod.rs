@@ -1208,7 +1208,11 @@ mod tests {
 
         let text =
             std::fs::read_to_string(exe.parent().unwrap().join("inis").join("PCSX2.ini")).unwrap();
-        let expected = exe.parent().unwrap().join("bios");
+        // The long form: the writer resolves like `Path.resolve()`, which
+        // expands an 8.3 short name in `TEMP` (GitHub's Windows runner).
+        let expected = crate::platform::canonicalize(exe.parent().unwrap())
+            .unwrap()
+            .join("bios");
         assert!(
             text.contains(&format!("Bios = {}", expected.to_string_lossy())),
             "missing Bios = {} in:\n{text}",

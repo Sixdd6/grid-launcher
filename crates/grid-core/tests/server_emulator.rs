@@ -372,11 +372,12 @@ async fn deleting_the_emulator_uninstalls_its_package_and_nothing_else() {
 
     let config = harness.config();
     let pcsx2 = harness.entry(PCSX2);
-    let removed = harness
+    let (removed, report) = harness
         .service
         .uninstall_server_emulator_rows(&pcsx2, &config.emulators)
         .unwrap();
     assert_eq!(removed, 1);
+    assert!(report.skipped.is_empty(), "{:?}", report.skipped);
 
     assert!(
         !harness.package_dir("pcsx2-pkg").exists(),

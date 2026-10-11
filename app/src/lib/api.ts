@@ -174,8 +174,22 @@ export type StartFreshPreview = {
   left_outside: string[];
 };
 
+/** A folder an uninstall left on disk because the removal guard refused it
+ *  (`grid_core::library::SkippedRemoval`). `reason` is user-facing text. */
+export type SkippedRemoval = { path: string; reason: string };
+
+/** What `uninstall_game` and `delete_emulator` report on success. */
+export type UninstallReport = { skipped: SkippedRemoval[] };
+
 export type StartFreshOutcome =
-  | { status: 'switched'; library_path: string; rows_removed: number; failures: string[] }
+  | {
+      status: 'switched';
+      library_path: string;
+      rows_removed: number;
+      failures: string[];
+      /** Delete only: folders the uninstall guard kept on disk. */
+      skipped: SkippedRemoval[];
+    }
   | { status: 'refused'; reason: PathChangeRefusal; message: string }
   | { status: 'stale'; message: string };
 
@@ -641,7 +655,7 @@ export const api = {
   cancelInstall: (entryId: number) => invoke<void>('cancel_install', { entryId }),
   retryInstall: (entryId: number) => invoke<void>('retry_install', { entryId }),
   dismissDownload: (entryId: number) => invoke<void>('dismiss_download', { entryId }),
-  uninstallGame: (romId: number) => invoke<void>('uninstall_game', { romId }),
+  uninstallGame: (romId: number) => invoke<UninstallReport>('uninstall_game', { romId }),
   listDownloads: () => invoke<DownloadsSnapshot>('list_downloads'),
   listInstalled: () => invoke<InstalledGame[]>('list_installed'),
   // Q4: installed rows with no server rom id. `platform` is the row's own
@@ -701,7 +715,7 @@ export const api = {
   emulatorFacts: (name: string) => invoke<EmulatorFacts>('emulator_facts', { name }),
   saveEmulator: (originalName: string, entry: EmulatorEntry) =>
     invoke<void>('save_emulator', { originalName, entry }),
-  deleteEmulator: (name: string) => invoke<void>('delete_emulator', { name }),
+  deleteEmulator: (name: string) => invoke<UninstallReport>('delete_emulator', { name }),
   /**
    * Opens the emulator with no ROM, so its own settings UI can be reached.
    * Resolves 500 ms later with the warning text when the process is already

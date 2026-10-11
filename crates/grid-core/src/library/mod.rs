@@ -1666,7 +1666,10 @@ impl InstallService {
     /// failures come back as one error listing them all. The row is deleted
     /// only when nothing failed, so a partial removal leaves the game
     /// installed rather than orphaning it.
-    pub fn uninstall(&self, rom_id: i64) -> Result<(), LibraryError> {
+    ///
+    /// The report lists every existing path the [`RemovalGuard`] kept on
+    /// disk, with its reason, so the user is told what stayed.
+    pub fn uninstall(&self, rom_id: i64) -> Result<UninstallReport, LibraryError> {
         self.check_library_gate()?;
         let library = self.library_root()?;
         // `find` falls back to the (title, platform) identity when no row
@@ -1687,52 +1690,65 @@ impl InstallService {
 
     /// [`Self::uninstall`] for a row already looked up: every removal step
     /// (through [`RemovalGuard`]), then the row, only when nothing failed.
-    fn uninstall_record(&self, record: &InstalledGame, library: &Path) -> Result<(), LibraryError> {
+    /// A failure's error also names the paths the guard kept.
+    fn uninstall_record(
+        &self,
+        record: &InstalledGame,
+        library: &Path,
+    ) -> Result<UninstallReport, LibraryError> {
         let home = crate::platform::home_dir();
         let roots = self.protected_roots()?;
-        let steps = uninstall_steps(record, library, &roots, home.as_deref());
-        let failures = run_removals(&steps, &mut apply_removal);
+        let plan = uninstall_steps(record, library, &roots, home.as_deref());
+        let mut failures = run_removals(&plan.steps, &mut apply_removal);
         if !failures.is_empty() {
+            failures.extend(skipped_lines(&plan.skipped));
             return Err(LibraryError::Registry(failures.join("\n")));
         }
 
         self.registry.remove(&record.title, &record.platform)?;
-        Ok(())
+        Ok(UninstallReport {
+            skipped: plan.skipped,
+        })
     }
 
     /// Uninstalls the hidden Emulators-platform rows whose package holds
     /// `entry`'s executable ([`emulator_removal::server_package_rows`]),
     /// through the same removal path as [`Self::uninstall`] — so the
-    /// [`RemovalGuard`] applies. Returns how many rows went.
+    /// [`RemovalGuard`] applies. Returns how many rows went, and every
+    /// path the guard kept on disk across them.
     ///
     /// Ports `_uninstall_emulator_files` (install_mixin.py:1117-1138): the
     /// Emulators view's delete takes the server package with the entry.
-    /// No configured library means nothing managed can exist: `Ok(0)`. Every
+    /// No configured library means nothing managed can exist: 0 rows. Every
     /// row is attempted; the failures come back as one error.
     pub fn uninstall_server_emulator_rows(
         &self,
         entry: &EmulatorEntry,
         others: &[EmulatorEntry],
-    ) -> Result<usize, LibraryError> {
+    ) -> Result<(usize, UninstallReport), LibraryError> {
         self.check_library_gate()?;
         let library = match self.library_root() {
             Ok(library) => library,
-            Err(LibraryError::LibraryPathUnset) => return Ok(0),
+            Err(LibraryError::LibraryPathUnset) => return Ok((0, UninstallReport::default())),
             Err(e) => return Err(e),
         };
         let rows = emulator_removal::server_package_rows(entry, others, &self.registry.all()?);
         let mut failures = Vec::new();
         let mut removed = 0;
+        let mut report = UninstallReport::default();
         for row in &rows {
             match self.uninstall_record(row, &library) {
-                Ok(()) => removed += 1,
+                Ok(row_report) => {
+                    removed += 1;
+                    report.skipped.extend(row_report.skipped);
+                }
                 Err(e) => failures.push(e.to_string()),
             }
         }
         if !failures.is_empty() {
             return Err(LibraryError::Registry(failures.join("\n")));
         }
-        Ok(removed)
+        Ok((removed, report))
     }
 
     // --- library path change (Q2) -------------------------------------------
@@ -1812,6 +1828,11 @@ impl InstallService {
         self.check_library_gate()?;
         let mut report = path_change::StartFreshReport::default();
         for entry in self.start_fresh_plan(old_root)? {
+            for skip in entry.skipped {
+                if !report.skipped.iter().any(|seen| seen.path == skip.path) {
+                    report.skipped.push(skip);
+                }
+            }
             let failures = run_removals(&entry.inside, &mut apply_removal);
             if failures.is_empty() {
                 if self
@@ -1839,12 +1860,11 @@ impl InstallService {
         Ok(rows
             .into_iter()
             .map(|row| {
-                let (inside, outside): (Vec<Removal>, Vec<Removal>) =
-                    uninstall_steps(&row, old_root, &roots, home)
-                        .into_iter()
-                        .partition(|step| {
-                            path_change::is_strictly_inside(&step.path, old_root, home)
-                        });
+                let plan = uninstall_steps(&row, old_root, &roots, home);
+                let (inside, outside): (Vec<Removal>, Vec<Removal>) = plan
+                    .steps
+                    .into_iter()
+                    .partition(|step| path_change::is_strictly_inside(&step.path, old_root, home));
                 // A recorded path and a computed candidate can name one
                 // folder in two spellings (`/` and `\` on Windows): keep the
                 // first, so the second removal never fails on a missing path.
@@ -1868,6 +1888,7 @@ impl InstallService {
                     row,
                     inside,
                     outside: outside.into_iter().map(|step| step.path).collect(),
+                    skipped: plan.skipped,
                 }
             })
             .collect())
@@ -3396,6 +3417,40 @@ pub(crate) struct Removal {
     pub(crate) label: RemovalLabel,
 }
 
+/// A path an uninstall left on disk because [`RemovalGuard`] refused it.
+/// The frontend names each one, with its reason, after the uninstall.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SkippedRemoval {
+    pub path: String,
+    /// Why the guard refused it, in words for the user
+    /// ([`RefusalReason::text`]).
+    pub reason: String,
+}
+
+/// What an uninstall did beyond removing the files and the row.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct UninstallReport {
+    /// Paths the record named that the guard kept on disk.
+    pub skipped: Vec<SkippedRemoval>,
+}
+
+/// The removal plan for one record ([`uninstall_steps`]): what goes, and
+/// what the guard keeps.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct UninstallPlan {
+    pub(crate) steps: Vec<Removal>,
+    pub(crate) skipped: Vec<SkippedRemoval>,
+}
+
+/// One line per skipped path, appended to an uninstall error so the
+/// skipped paths are not lost when the uninstall fails.
+fn skipped_lines(skipped: &[SkippedRemoval]) -> Vec<String> {
+    skipped
+        .iter()
+        .map(|skip| format!("Left on disk: {} ({})", skip.path, skip.reason))
+        .collect()
+}
+
 /// One row of [`InstallService::start_fresh_plan`]: the row, its guarded
 /// removal steps inside the old root, and the recorded paths outside it
 /// that Start fresh leaves on disk.
@@ -3403,6 +3458,7 @@ struct StartFreshEntry {
     row: InstalledGame,
     inside: Vec<Removal>,
     outside: Vec<PathBuf>,
+    skipped: Vec<SkippedRemoval>,
 }
 
 /// Runs every removal in order, CONTINUING past a failure, and returns one
@@ -3443,8 +3499,7 @@ pub(crate) fn apply_removal(step: &Removal) -> Result<(), String> {
 /// native game whose home directory exists never falls through to the
 /// candidate extraction directories, and neither does a multi-file game.
 ///
-/// Two safety rules the reference lacks (G9). Both only ever drop a step,
-/// as silently as a missing path is skipped:
+/// Two safety rules the reference lacks (G9). Both only ever drop a step:
 /// - when `rom_file_name` does not end in one plain component
 ///   ([`paths::is_plain_component`]), no candidate is built from it, so a
 ///   name like `..` can never turn into the library root or a platform dir;
@@ -3452,25 +3507,40 @@ pub(crate) fn apply_removal(step: &Removal) -> Result<(), String> {
 ///   `home`, the library root and its ancestors, the library's own top-level
 ///   directories, platform directories, and ancestors of `native_game_dir`.
 ///   `other_roots` (the current root and every former root, Q2) get the
-///   same protection as `library`.
+///   same protection as `library`. An existing path the guard refuses goes
+///   into the plan's `skipped` list with its reason, so the user is told
+///   (a missing path stays silent).
 fn uninstall_steps(
     record: &InstalledGame,
     library: &Path,
     other_roots: &[PathBuf],
     home: Option<&Path>,
-) -> Vec<Removal> {
+) -> UninstallPlan {
     let guard = RemovalGuard::new(record, library, other_roots, home);
     let mut steps = Vec::new();
+    let mut skipped: Vec<SkippedRemoval> = Vec::new();
     let mut push = |path: &Path, label: RemovalLabel| {
         let shape_ok = match label {
             RemovalLabel::File => path.is_file(),
             RemovalLabel::TrophyDir | RemovalLabel::Folder => path.is_dir(),
         };
-        if shape_ok && !guard.refuses(path) {
-            steps.push(Removal {
+        if !shape_ok {
+            return;
+        }
+        match guard.refusal(path) {
+            None => steps.push(Removal {
                 path: path.to_path_buf(),
                 label,
-            });
+            }),
+            Some(reason) => {
+                let path = path_string(path);
+                if !skipped.iter().any(|skip| skip.path == path) {
+                    skipped.push(SkippedRemoval {
+                        path,
+                        reason: reason.text().to_string(),
+                    });
+                }
+            }
         }
     };
 
@@ -3502,25 +3572,25 @@ fn uninstall_steps(
         for dir in &extracted {
             push(dir, RemovalLabel::Folder);
         }
-        return steps;
+        return UninstallPlan { steps, skipped };
     }
 
     if is_native_platform(&record.platform) {
         let game_dir = record.native_game_dir.trim();
         if !game_dir.is_empty() && Path::new(game_dir).is_dir() {
             push(Path::new(game_dir), RemovalLabel::Folder);
-            return steps;
+            return UninstallPlan { steps, skipped };
         }
         for dir in &extracted {
             push(dir, RemovalLabel::Folder);
         }
-        return steps;
+        return UninstallPlan { steps, skipped };
     }
 
     let multi_file = record.multi_file_game_dir.trim();
     if !multi_file.is_empty() && Path::new(multi_file).is_dir() {
         push(Path::new(multi_file), RemovalLabel::Folder);
-        return steps;
+        return UninstallPlan { steps, skipped };
     }
 
     for archive in &archives {
@@ -3529,7 +3599,7 @@ fn uninstall_steps(
     for dir in &extracted {
         push(dir, RemovalLabel::Folder);
     }
-    steps
+    UninstallPlan { steps, skipped }
 }
 
 /// The deny-list every uninstall step passes (G9): directories no game's
@@ -3565,14 +3635,48 @@ fn uninstall_steps(
 /// routed dirs live under `dev_hdd0`, and a native row may live anywhere.
 pub(crate) struct RemovalGuard {
     home: Option<PathBuf>,
-    /// Refused, and so is every ancestor.
-    with_ancestors: Vec<Vec<String>>,
-    /// Refused only as themselves.
-    exact: Vec<Vec<String>>,
-    /// Every direct child is refused.
+    /// `home`: refused, and so is every ancestor.
+    home_with_ancestors: Vec<Vec<String>>,
+    /// Each library root: refused, and so is every ancestor.
+    roots_with_ancestors: Vec<Vec<String>>,
+    /// Each root's top-level folders (`games`, `emulators`, `saves`):
+    /// refused only as themselves.
+    library_dirs: Vec<Vec<String>>,
+    /// The record's platform dirs: refused only as themselves.
+    platform_dirs: Vec<Vec<String>>,
+    /// Every direct child is refused (a platform dir under `games`).
     parents_of_protected: Vec<Vec<String>>,
     /// Every strict ancestor is refused; the path itself is not.
     ancestors_only: Vec<Vec<String>>,
+}
+
+/// Why [`RemovalGuard`] refused a path. [`Self::text`] is the reason the
+/// user sees.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RefusalReason {
+    ParentDir,
+    NotAbsolute,
+    FilesystemRoot,
+    Home,
+    LibraryRoot,
+    LibraryFolder,
+    PlatformFolder,
+    HoldsGameFolder,
+}
+
+impl RefusalReason {
+    pub(crate) fn text(self) -> &'static str {
+        match self {
+            RefusalReason::ParentDir => "\"..\" in the path",
+            RefusalReason::NotAbsolute => "not an absolute path",
+            RefusalReason::FilesystemRoot => "a drive or filesystem root",
+            RefusalReason::Home => "the home folder or a folder that holds it",
+            RefusalReason::LibraryRoot => "a library folder or a folder that holds one",
+            RefusalReason::LibraryFolder => "a top-level folder of the library",
+            RefusalReason::PlatformFolder => "a platform folder",
+            RefusalReason::HoldsGameFolder => "a folder that holds the game's install folder",
+        }
+    }
 }
 
 impl RemovalGuard {
@@ -3583,19 +3687,27 @@ impl RemovalGuard {
         home: Option<&Path>,
     ) -> Self {
         let key = |path: &Path| removal_key(path, home);
-        let mut with_ancestors: Vec<Vec<String>> = home.and_then(key).into_iter().collect();
-        let mut exact = Vec::new();
+        let home_with_ancestors: Vec<Vec<String>> = home.and_then(key).into_iter().collect();
+        let mut roots_with_ancestors = Vec::new();
+        let mut library_dirs = Vec::new();
+        let mut platform_dirs = Vec::new();
         let mut parents_of_protected = Vec::new();
         let roots = std::iter::once(library).chain(other_roots.iter().map(PathBuf::as_path));
         for root in roots {
             let games = root.join(paths::GAMES_DIR);
-            with_ancestors.extend(key(root));
-            exact.extend(
+            roots_with_ancestors.extend(key(root));
+            library_dirs.extend(
                 [
                     games.clone(),
                     paths::emulators_dir(root),
                     paths::legacy_emulators_dir(root),
                     root.join(paths::SAVES_DIR),
+                ]
+                .iter()
+                .filter_map(|path| key(path)),
+            );
+            platform_dirs.extend(
+                [
                     platform_dir(root, &record.platform),
                     paths::legacy_platform_dir(root, &record.platform),
                 ]
@@ -3612,40 +3724,65 @@ impl RemovalGuard {
         };
         RemovalGuard {
             home: home.map(Path::to_path_buf),
-            with_ancestors,
-            exact,
+            home_with_ancestors,
+            roots_with_ancestors,
+            library_dirs,
+            platform_dirs,
             parents_of_protected,
             ancestors_only,
         }
     }
 
     /// True when `path` must not be removed.
+    #[cfg(test)]
     pub(crate) fn refuses(&self, path: &Path) -> bool {
+        self.refusal(path).is_some()
+    }
+
+    /// Why `path` must not be removed, or `None` when it may be. When
+    /// several rules match, the first in this order wins: `..`, not
+    /// absolute, a root, home, a library root, a top-level library folder,
+    /// a platform folder, an ancestor of the native game dir.
+    pub(crate) fn refusal(&self, path: &Path) -> Option<RefusalReason> {
         if path
             .components()
             .any(|component| matches!(component, std::path::Component::ParentDir))
         {
-            return true;
+            return Some(RefusalReason::ParentDir);
         }
         let Some(key) = removal_key(path, self.home.as_deref()) else {
-            return true;
+            return Some(RefusalReason::NotAbsolute);
         };
         // The first slot is the prefix; nothing after it means a root.
         if key.len() < 2 {
-            return true;
+            return Some(RefusalReason::FilesystemRoot);
         }
-        self.with_ancestors
-            .iter()
-            .any(|protected| protected.starts_with(&key))
-            || self.exact.contains(&key)
+        let is_or_holds = |protected: &Vec<String>| protected.starts_with(&key);
+        if self.home_with_ancestors.iter().any(is_or_holds) {
+            return Some(RefusalReason::Home);
+        }
+        if self.roots_with_ancestors.iter().any(is_or_holds) {
+            return Some(RefusalReason::LibraryRoot);
+        }
+        if self.library_dirs.contains(&key) {
+            return Some(RefusalReason::LibraryFolder);
+        }
+        if self.platform_dirs.contains(&key)
             || self
                 .parents_of_protected
                 .iter()
                 .any(|parent| key.len() == parent.len() + 1 && key.starts_with(parent))
-            || self
-                .ancestors_only
-                .iter()
-                .any(|protected| protected.len() > key.len() && protected.starts_with(&key))
+        {
+            return Some(RefusalReason::PlatformFolder);
+        }
+        if self
+            .ancestors_only
+            .iter()
+            .any(|protected| protected.len() > key.len() && protected.starts_with(&key))
+        {
+            return Some(RefusalReason::HoldsGameFolder);
+        }
+        None
     }
 }
 
@@ -4652,7 +4789,7 @@ mod tests {
             ..Default::default()
         };
 
-        let steps = uninstall_steps(&record, dir.path(), &[], None);
+        let steps = uninstall_steps(&record, dir.path(), &[], None).steps;
         assert_eq!(
             steps,
             vec![Removal {
@@ -4685,7 +4822,7 @@ mod tests {
             ..Default::default()
         };
 
-        let steps = uninstall_steps(&record, dir.path(), &[], None);
+        let steps = uninstall_steps(&record, dir.path(), &[], None).steps;
         assert_eq!(
             steps,
             vec![
@@ -4737,7 +4874,7 @@ mod tests {
                 rom_file_name: rom_file_name.to_string(),
                 ..snes_record()
             };
-            let steps = uninstall_steps(&record, library.path(), &[], None);
+            let steps = uninstall_steps(&record, library.path(), &[], None).steps;
             assert!(
                 steps.is_empty(),
                 "rom_file_name {rom_file_name:?} must not reach the library root or a platform dir: {steps:?}"
@@ -4766,7 +4903,7 @@ mod tests {
                 extracted_dir: extracted_dir.to_string_lossy().into_owned(),
                 ..snes_record()
             };
-            let steps = uninstall_steps(&record, root, &[], None);
+            let steps = uninstall_steps(&record, root, &[], None).steps;
             assert!(
                 steps.is_empty(),
                 "extracted_dir {extracted_dir:?} must be refused: {steps:?}"
@@ -4783,7 +4920,7 @@ mod tests {
             extracted_dir: outer.path().to_string_lossy().into_owned(),
             ..snes_record()
         };
-        let steps = uninstall_steps(&record, &library, &[], None);
+        let steps = uninstall_steps(&record, &library, &[], None).steps;
         assert!(steps.is_empty(), "{steps:?}");
     }
 
@@ -4805,7 +4942,7 @@ mod tests {
                 extracted_dir: extracted_dir.clone(),
                 ..snes_record()
             };
-            let steps = uninstall_steps(&record, library.path(), &[], None);
+            let steps = uninstall_steps(&record, library.path(), &[], None).steps;
             assert!(
                 steps.is_empty(),
                 "extracted_dir {extracted_dir:?} must be refused: {steps:?}"
@@ -4825,7 +4962,7 @@ mod tests {
                 extracted_dir: extracted_dir.to_string(),
                 ..snes_record()
             };
-            let steps = uninstall_steps(&record, library.path(), &[], Some(home.path()));
+            let steps = uninstall_steps(&record, library.path(), &[], Some(home.path())).steps;
             assert!(
                 steps.is_empty(),
                 "extracted_dir {extracted_dir:?} must be refused: {steps:?}"
@@ -4845,7 +4982,7 @@ mod tests {
                 extracted_dir: extracted_dir.to_string_lossy().into_owned(),
                 ..snes_record()
             };
-            let steps = uninstall_steps(&record, library.path(), &[], None);
+            let steps = uninstall_steps(&record, library.path(), &[], None).steps;
             assert!(
                 steps.is_empty(),
                 "extracted_dir {extracted_dir:?} must be refused: {steps:?}"
@@ -4861,7 +4998,7 @@ mod tests {
         let extracted = library.path().join("games/SNES/Game");
         fs::create_dir_all(&extracted).unwrap();
 
-        let steps = uninstall_steps(&snes_record(), library.path(), &[], None);
+        let steps = uninstall_steps(&snes_record(), library.path(), &[], None).steps;
         assert_eq!(
             steps,
             vec![
@@ -4896,7 +5033,7 @@ mod tests {
             native_game_dir: native.to_string_lossy().into_owned(),
             ..snes_record()
         };
-        let steps = uninstall_steps(&record, library.path(), &[], None);
+        let steps = uninstall_steps(&record, library.path(), &[], None).steps;
         assert_eq!(
             steps,
             vec![
@@ -5023,6 +5160,62 @@ mod tests {
         for path in allowed {
             assert!(!guard.refuses(&path), "{path:?} must be allowed");
         }
+    }
+
+    #[test]
+    fn removal_guard_refusal_reason_table() {
+        use RefusalReason::*;
+        let guard = guard_for_tests();
+        let cases = [
+            (abs("lib/emulators/RetroArch/../../x"), Some(ParentDir)),
+            (PathBuf::from("relative/dir"), Some(NotAbsolute)),
+            (abs(""), Some(FilesystemRoot)),
+            (abs("home/u"), Some(Home)),
+            (abs("home"), Some(Home)),
+            (abs("lib"), Some(LibraryRoot)),
+            (abs("lib/games"), Some(LibraryFolder)),
+            (abs("lib/emulators"), Some(LibraryFolder)),
+            (abs("lib/Emulators"), Some(LibraryFolder)),
+            (abs("lib/saves"), Some(LibraryFolder)),
+            (abs("lib/games/SNES"), Some(PlatformFolder)),
+            (abs("lib/games/Other"), Some(PlatformFolder)),
+            (abs("lib/SNES"), Some(PlatformFolder)),
+            (abs("n/a"), Some(HoldsGameFolder)),
+            (abs("lib/games/SNES/Game"), None),
+            (abs("n/a/My Game"), None),
+        ];
+        for (path, expected) in cases {
+            assert_eq!(guard.refusal(&path), expected, "{path:?}");
+        }
+    }
+
+    #[test]
+    fn uninstall_steps_report_a_refused_path_with_its_reason() {
+        let library = library_with_platform_dirs();
+        let platform = library.path().join("games/SNES");
+        let record = InstalledGame {
+            extracted_dir: platform.to_string_lossy().into_owned(),
+            ..snes_record()
+        };
+        let plan = uninstall_steps(&record, library.path(), &[], None);
+        assert!(plan.steps.is_empty(), "{:?}", plan.steps);
+        assert_eq!(
+            plan.skipped,
+            vec![SkippedRemoval {
+                path: platform.to_string_lossy().into_owned(),
+                reason: "a platform folder".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn uninstall_steps_report_nothing_skipped_for_a_plain_game() {
+        let library = library_with_platform_dirs();
+        fs::write(library.path().join("games/SNES/Game.zip"), b"zip").unwrap();
+        fs::create_dir_all(library.path().join("games/SNES/Game")).unwrap();
+        let plan = uninstall_steps(&snes_record(), library.path(), &[], None);
+        assert_eq!(plan.steps.len(), 2);
+        assert!(plan.skipped.is_empty(), "{:?}", plan.skipped);
     }
 
     /// `~` in a recorded path expands to the home the guard was given.

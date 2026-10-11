@@ -1352,7 +1352,8 @@ async fn uninstall_removes_the_extracted_dir_and_the_row() {
     let extracted_dir = harness.library.join("games").join("SNES").join("chrono");
     assert!(extracted_dir.is_dir());
 
-    harness.service.uninstall(1).unwrap();
+    let report = harness.service.uninstall(1).unwrap();
+    assert!(report.skipped.is_empty(), "{:?}", report.skipped);
     assert!(!extracted_dir.exists());
     assert!(harness.service.installed().unwrap().is_empty());
 }
@@ -3076,7 +3077,7 @@ async fn a_closed_library_gate_refuses_installs_uninstalls_and_start_fresh() {
             ..Default::default()
         })
         .unwrap();
-    busy(harness.service.uninstall(7));
+    busy(harness.service.uninstall(7).map(|_| ()));
     busy(
         harness
             .service

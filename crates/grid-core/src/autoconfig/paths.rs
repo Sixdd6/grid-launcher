@@ -55,8 +55,12 @@ pub fn env_dir(var: &str) -> Option<PathBuf> {
     (!trimmed.is_empty()).then(|| expand_user(trimmed))
 }
 
-/// Expand a leading `~` — `~` alone or `~/rest` — to the user's home
-/// directory, like `Path.expanduser()`.
+/// Expand a leading `~` — `~` alone, `~/rest`, or `~\rest` — to the user's
+/// home directory, like `Path.expanduser()`.
+///
+/// `~\rest` is a failsafe for a Windows-style value typed into config; it
+/// expands on every OS. This happens only at use time: the stored value
+/// keeps the text the user typed.
 ///
 /// `~user/...` is NOT expanded (Python resolves it through the password
 /// database); with no home directory, the text is returned untouched, which
@@ -66,7 +70,7 @@ pub fn expand_user(text: &str) -> PathBuf {
         if let Some(home) = home_dir() {
             return home;
         }
-    } else if let Some(rest) = text.strip_prefix("~/") {
+    } else if let Some(rest) = text.strip_prefix("~/").or_else(|| text.strip_prefix("~\\")) {
         if let Some(home) = home_dir() {
             return home.join(rest);
         }
@@ -293,7 +297,42 @@ pub(crate) fn resolve_best_effort(path: &Path) -> PathBuf {
     };
 
     let mut seen: HashMap<PathBuf, Option<PathBuf>> = HashMap::new();
-    join_realpath(PathBuf::new(), &absolute, &mut seen)
+    let resolved = join_realpath(PathBuf::new(), &absolute, &mut seen);
+    // Off Windows `join_realpath` already returns the realpath of the
+    // existing prefix, so the extra step runs on Windows only.
+    if cfg!(windows) {
+        canonicalize_existing_prefix(resolved)
+    } else {
+        resolved
+    }
+}
+
+/// Used on Windows only: canonicalize the longest existing prefix of `resolved`
+/// with [`crate::platform::canonicalize`] and append the rest unchanged.
+///
+/// [`join_realpath`] keeps the spelling it was given, so an 8.3 short name
+/// (`C:\Users\RUNNER~1`, GitHub's runner `TEMP`) or a different letter case
+/// survives it. `Path.resolve()` on Windows calls `GetFinalPathNameByHandle`,
+/// which returns long names in their on-disk case; this step gives the same
+/// answer. `resolved` holds no `.` or `..` by now, so the remainder is plain
+/// names. A canonical form that is still verbatim (`\\?\`, which `dunce`
+/// keeps when the plain form would change the meaning) is not used, so the
+/// result never mixes the two forms.
+fn canonicalize_existing_prefix(resolved: PathBuf) -> PathBuf {
+    for prefix in resolved.ancestors() {
+        let Ok(canonical) = crate::platform::canonicalize(prefix) else {
+            continue;
+        };
+        if canonical.as_os_str().to_string_lossy().starts_with(r"\\?\") {
+            return resolved;
+        }
+        return match resolved.strip_prefix(prefix) {
+            Ok(rest) if rest.as_os_str().is_empty() => canonical,
+            Ok(rest) => canonical.join(rest),
+            Err(_) => resolved,
+        };
+    }
+    resolved
 }
 
 #[cfg(test)]
@@ -408,6 +447,26 @@ mod tests {
             PathBuf::from("~root/games"),
             "another user's home is not resolved"
         );
+    }
+
+    #[test]
+    fn expand_user_table() {
+        // `home_dir()` reads `$HOME`; see `crate::test_env`.
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard =
+            crate::test_env::EnvGuard::set(&[("HOME", Some(temp.path().to_str().unwrap()))]);
+        let home = temp.path();
+        let cases: [(&str, PathBuf); 5] = [
+            ("~", home.to_path_buf()),
+            ("~/x", home.join("x")),
+            ("~\\x", home.join("x")),
+            ("~user/x", PathBuf::from("~user/x")),
+            ("x~", PathBuf::from("x~")),
+        ];
+        for (raw, expected) in cases {
+            assert_eq!(expand_user(raw), expected, "input {raw:?}");
+        }
     }
 
     #[test]
@@ -570,6 +629,49 @@ mod tests {
     /// inherently untestable on the platforms this crate's CI runs on
     /// today, and is gated here rather than faked with a synthetic
     /// `Component` value.
+    /// The Windows 8.3 short name of an existing `path`, from
+    /// `GetShortPathNameW`. `None` when the call fails.
+    #[cfg(windows)]
+    fn short_path_name(path: &Path) -> Option<PathBuf> {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let mut buffer = vec![0u16; 1024];
+        // SAFETY: `wide` is NUL-terminated and `buffer` holds `len` u16s.
+        let written =
+            unsafe { GetShortPathNameW(wide.as_ptr(), buffer.as_mut_ptr(), buffer.len() as u32) };
+        if written == 0 || written as usize >= buffer.len() {
+            return None;
+        }
+        buffer.truncate(written as usize);
+        Some(PathBuf::from(std::ffi::OsString::from_wide(&buffer)))
+    }
+
+    /// GitHub's Windows runner has an 8.3 `TEMP` (`C:\Users\RUNNER~1\...`).
+    /// `Path.resolve()` expands short names; so must this function, or a
+    /// path built from it never equals one from `platform::canonicalize`.
+    #[test]
+    #[cfg(windows)]
+    fn resolve_best_effort_expands_a_windows_short_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let long = temp.path().join("LongDirectoryNameForShortNameTest");
+        std::fs::create_dir_all(&long).unwrap();
+        let long_canonical = crate::platform::canonicalize(&long).unwrap();
+        let short = short_path_name(&long).expect("GetShortPathNameW failed");
+        if short.file_name() == long.file_name() {
+            eprintln!("skipped: this volume has 8.3 short names disabled ({short:?})");
+            return;
+        }
+
+        assert_eq!(resolve_best_effort(&short), long_canonical);
+        assert_eq!(
+            resolve_best_effort(&short.join("missing").join("deeper")),
+            long_canonical.join("missing").join("deeper"),
+            "the part that does not exist is appended unchanged"
+        );
+    }
+
     #[test]
     #[cfg(windows)]
     fn resolve_best_effort_preserves_the_windows_drive_prefix() {

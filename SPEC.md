@@ -190,6 +190,11 @@ native games, Uninstall, and a cloud button that opens the Saves tab. Under them
 states when the game was last played and which emulator — and, for RetroArch, which core —
 would launch it.
 
+Uninstall never removes a protected folder (a filesystem root, home, a library folder, its
+top-level and platform folders, a folder that holds the game's install folder, a path with
+`..`); when it keeps one, an error toast names each kept folder and the reason. This applies
+to Details › Uninstall, deleting a server-package emulator, and Start fresh › Delete.
+
 The right side carries the title, one header line (platform · release year · developer ·
 genres · rating), chips for the playing state, the identification state, region and language
 flags and the version, then up to five tabs:
