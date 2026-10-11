@@ -14,6 +14,7 @@
 //! implements (zip-slip guard, ignore filtering on both write and extract
 //! sides, partial-archive cleanup on write failure).
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::{self, Cursor, Write};
 use std::path::{Component, Path, PathBuf};
@@ -583,6 +584,29 @@ pub fn extract_payload_zip(
     dest: &Path,
     ignore: &IgnoreSets,
 ) -> Result<usize, String> {
+    extract_payload_zip_filtered(bytes, dest, ignore, None)
+}
+
+/// [`extract_payload_zip`] limited to the members under the top-level
+/// entries named in `top_level` (exact names, as
+/// [`archive_top_level_entries`] lists them). Every other member is left
+/// out on both the zip path and the 7-Zip fallback. G1-Q uses it to restore
+/// only the save folders that belong to the game.
+pub fn extract_payload_zip_only(
+    bytes: &[u8],
+    dest: &Path,
+    ignore: &IgnoreSets,
+    top_level: &BTreeSet<String>,
+) -> Result<usize, String> {
+    extract_payload_zip_filtered(bytes, dest, ignore, Some(top_level))
+}
+
+fn extract_payload_zip_filtered(
+    bytes: &[u8],
+    dest: &Path,
+    ignore: &IgnoreSets,
+    top_level: Option<&BTreeSet<String>>,
+) -> Result<usize, String> {
     fs::create_dir_all(dest).map_err(|e| format!("failed to prepare destination: {e}"))?;
     let dest_root = dest
         .canonicalize()
@@ -595,13 +619,21 @@ pub fn extract_payload_zip(
 
     let mut extracted = 0usize;
     for i in 0..archive.len() {
+        if let Some(only) = top_level {
+            let wanted = archive
+                .name_for_index(i)
+                .is_some_and(|name| only.contains(top_level_component(&name.replace('\\', "/"))));
+            if !wanted {
+                continue;
+            }
+        }
         let mut entry = match archive.by_index(i) {
             Ok(entry) => entry,
             Err(
                 zip::result::ZipError::UnsupportedArchive(_)
                 | zip::result::ZipError::CompressionMethodNotSupported(_),
             ) => {
-                return extract_with_system_7z(bytes, &dest_root, ignore);
+                return extract_with_system_7z(bytes, &dest_root, ignore, top_level);
             }
             Err(err) => return Err(format!("failed to read archive entry: {err}")),
         };
@@ -635,6 +667,57 @@ pub fn extract_payload_zip(
     }
 
     Ok(extracted)
+}
+
+/// The top-level entries of a zip archive, in first-seen order: each name
+/// with `true` when it is a folder (some member lives under it) and
+/// `false` for a loose file at the root. Reads only the central directory,
+/// so it works for members the `zip` crate cannot decompress. Unsafe member
+/// names (absolute, `.`/`..`) are left out, as extraction leaves them out.
+pub fn archive_top_level_entries(bytes: &[u8]) -> Result<Vec<(String, bool)>, String> {
+    let archive = ZipArchive::new(Cursor::new(bytes))
+        .map_err(|_| "Downloaded save is not a zip archive.".to_string())?;
+    let mut entries: Vec<(String, bool)> = Vec::new();
+    for raw_name in archive.file_names() {
+        let normalized = raw_name.replace('\\', "/");
+        if !is_safe_member_name(&normalized) {
+            continue;
+        }
+        let mut parts = normalized.split('/').filter(|p| !p.is_empty());
+        let Some(first) = parts.next() else {
+            continue;
+        };
+        let is_dir = parts.next().is_some() || normalized.ends_with('/');
+        match entries.iter_mut().find(|(name, _)| name == first) {
+            Some(existing) => existing.1 |= is_dir,
+            None => entries.push((first.to_string(), is_dir)),
+        }
+    }
+    Ok(entries)
+}
+
+/// The top-level component of a normalized (`/`-separated) member name.
+fn top_level_component(normalized: &str) -> &str {
+    normalized
+        .split('/')
+        .find(|p| !p.is_empty())
+        .unwrap_or_default()
+}
+
+/// The bytes of the member named `name` (`\` and `/` alike, ASCII case
+/// ignored), or `None` when there is no such member or it cannot be read.
+pub fn archive_member_bytes(bytes: &[u8], name: &str) -> Option<Vec<u8>> {
+    let mut archive = ZipArchive::new(Cursor::new(bytes)).ok()?;
+    let wanted = name.replace('\\', "/");
+    let index = (0..archive.len()).find(|&i| {
+        archive
+            .name_for_index(i)
+            .is_some_and(|n| n.replace('\\', "/").eq_ignore_ascii_case(&wanted))
+    })?;
+    let mut entry = archive.by_index(index).ok()?;
+    let mut out = Vec::new();
+    io::copy(&mut entry, &mut out).ok()?;
+    Some(out)
 }
 
 /// Python's exact 7-Zip candidate order (`cloud_transfer.py:150-165`):
@@ -701,6 +784,7 @@ fn extract_with_system_7z(
     bytes: &[u8],
     dest_root: &Path,
     ignore: &IgnoreSets,
+    top_level: Option<&BTreeSet<String>>,
 ) -> Result<usize, String> {
     let mut zip_tmp = tempfile::Builder::new()
         .prefix("grid-launcher-save-")
@@ -728,6 +812,16 @@ fn extract_with_system_7z(
         let relative = source
             .strip_prefix(extract_dir.path())
             .expect("walk_files always yields paths under root");
+        if let Some(only) = top_level {
+            let first = relative
+                .components()
+                .next()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if !only.contains(&first) {
+                continue;
+            }
+        }
         if ignore.blocks(relative) {
             continue;
         }
@@ -1140,5 +1234,53 @@ mod tests {
 
         assert!(!present.exists());
         assert!(!missing.exists());
+    }
+
+    /// G1-Q: only members under the named top-level folders are written;
+    /// a loose root file and every other folder stay out.
+    #[test]
+    fn extract_payload_zip_only_writes_the_named_top_level_folders() {
+        let bytes = build_zip_bytes(&[
+            ("BLUS30443DATA/SAVE.BIN", b"own"),
+            ("BLUS30443DATA/sub/ICON0.PNG", b"icon"),
+            ("BCUS98174AUTO/SAVE.BIN", b"other"),
+            ("loose.bin", b"loose"),
+        ]);
+        let dest = tempfile::tempdir().unwrap();
+        let only: BTreeSet<String> = ["BLUS30443DATA".to_string()].into();
+        let written =
+            extract_payload_zip_only(&bytes, dest.path(), &IgnoreSets::default(), &only).unwrap();
+        assert_eq!(written, 2);
+        assert_eq!(
+            fs::read(dest.path().join("BLUS30443DATA/SAVE.BIN")).unwrap(),
+            b"own"
+        );
+        assert!(dest.path().join("BLUS30443DATA/sub/ICON0.PNG").is_file());
+        assert!(!dest.path().join("BCUS98174AUTO").exists());
+        assert!(!dest.path().join("loose.bin").exists());
+    }
+
+    #[test]
+    fn archive_top_level_entries_lists_folders_and_loose_files_once() {
+        let bytes = build_zip_bytes(&[
+            ("B/x", b"1"),
+            ("A\\y", b"2"),
+            ("B/z", b"3"),
+            ("root.txt", b"4"),
+            ("../evil/x", b"5"),
+        ]);
+        assert_eq!(
+            archive_top_level_entries(&bytes).unwrap(),
+            vec![
+                ("B".to_string(), true),
+                ("A".to_string(), true),
+                ("root.txt".to_string(), false),
+            ]
+        );
+        assert_eq!(
+            archive_member_bytes(&bytes, "a/Y").as_deref(),
+            Some(&b"2"[..])
+        );
+        assert_eq!(archive_member_bytes(&bytes, "A/none"), None);
     }
 }

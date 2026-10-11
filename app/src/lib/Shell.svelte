@@ -8,7 +8,13 @@
   import Icon from './Icon.svelte';
   import Settings from './Settings.svelte';
   import { listen } from '@tauri-apps/api/event';
-  import { api, CLOUD_UPLOAD_FINISHED_EVENT, type CloudUploadFinished } from './api';
+  import {
+    api,
+    CLOUD_RESTORE_NOTICE_EVENT,
+    CLOUD_UPLOAD_FINISHED_EVENT,
+    type CloudRestoreNotice,
+    type CloudUploadFinished,
+  } from './api';
   import { session, retry, disconnect } from './stores/session.svelte';
   import { appUpdate } from './stores/appUpdate.svelte';
   import { installed, refresh as refreshInstalled } from './stores/installed.svelte';
@@ -120,6 +126,18 @@
     const unlisten = listen<CloudUploadFinished>(CLOUD_UPLOAD_FINISHED_EVENT, (e) => {
       const { title, message, failed } = e.payload;
       pushToast(title === '' ? message : `${title} — ${message}`, failed ? 'error' : 'success');
+    });
+    return () => {
+      void unlisten.then((off) => off());
+    };
+  });
+
+  // G1-Q: the pre-launch restore skipped save folders it could not match to
+  // the game. It runs inside `launch_game`, with no panel open to report in.
+  $effect(() => {
+    // The message already names the game ("Cloud save for <title> …").
+    const unlisten = listen<CloudRestoreNotice>(CLOUD_RESTORE_NOTICE_EVENT, (e) => {
+      pushToast(e.payload.message, e.payload.failed ? 'error' : 'success');
     });
     return () => {
       void unlisten.then((off) => off());

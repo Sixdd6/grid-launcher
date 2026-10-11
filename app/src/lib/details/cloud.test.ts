@@ -10,6 +10,7 @@ import {
   isNativePlatform,
   latestRecordText,
   recordsStatusLine,
+  restoreAllConfirmText,
   restoreConfirmText,
   sharedScopeWarning,
   syntheticCloudGame,
@@ -339,5 +340,22 @@ describe('latestRecordText', () => {
       loading: 'Checking cloud states…',
       empty: 'No cloud states yet.',
     });
+  });
+});
+
+describe('restoreAllConfirmText', () => {
+  it('names the skipped folders and the risk to other games', () => {
+    const result = restoreAllConfirmText("Demon's Souls", ['BCUS98174AUTO', 'NPUB30024SAVE']);
+    expect(result.title).toBe('Restore All Folders');
+    expect(result.message).toBe(
+      "This cloud save also holds folders that could not be matched to 'Demon's Souls': " +
+        'BCUS98174AUTO, NPUB30024SAVE. Restoring them overwrites the local saves in those ' +
+        'folders, which may belong to other games. Restore every folder?'
+    );
+  });
+
+  it('lists at most five folders', () => {
+    const folders = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7'];
+    expect(restoreAllConfirmText('X', folders).message).toContain('A1, A2, A3, A4, A5 and 2 more.');
   });
 });

@@ -496,7 +496,9 @@ export type UploadReport = {
   messages: CloudMessage[];
 };
 
-export type RestoreReport = { ok: boolean; messages: CloudMessage[] };
+/** `skipped_folders` (G1-Q): top-level folders of the record that were not
+ * restored because they could not be matched to the game. */
+export type RestoreReport = { ok: boolean; messages: CloudMessage[]; skipped_folders: string[] };
 
 /** One save-location row: `raw` is the stored path (and the value
  * `native_remove_save_path` takes back), `expanded` is that path resolved
@@ -593,6 +595,15 @@ export type CloudUploadFinished = { title: string; message: string; failed: bool
 /// Emitted after every cloud upload that ran — the manual panel button and
 /// the auto upload after a game exits. The Shell turns it into one toast.
 export const CLOUD_UPLOAD_FINISHED_EVENT = 'cloud-upload-finished';
+
+/// The `cloud-restore-notice` payload (`cloud_service.rs`'s `CloudRestoreNotice`,
+/// G1-Q): the pre-launch restore skipped save folders it could not match to
+/// the game. `failed` is true when nothing was restored. Folder names only.
+export type CloudRestoreNotice = { title: string; message: string; failed: boolean };
+
+/// Emitted at most once per game and record per run. The Shell turns it into
+/// one toast.
+export const CLOUD_RESTORE_NOTICE_EVENT = 'cloud-restore-notice';
 
 // Server updates (app/src-tauri/src/update_service.rs,
 // app/src-tauri/src/commands/updates.rs).
@@ -771,8 +782,10 @@ export const api = {
     invoke<CloudRecord[]>('cloud_records', { game, saveType }),
   cloudUpload: (game: InstalledGame, saveType: SaveType) =>
     invoke<UploadReport>('cloud_upload', { game, saveType }),
-  cloudRestore: (game: InstalledGame, saveType: SaveType, recordId: string | null) =>
-    invoke<RestoreReport>('cloud_restore', { game, saveType, recordId }),
+  /** `restoreAll` (G1-Q): the user confirmed restoring every folder of the
+   *  record, including ones not matched to the game. */
+  cloudRestore: (game: InstalledGame, saveType: SaveType, recordId: string | null, restoreAll = false) =>
+    invoke<RestoreReport>('cloud_restore', { game, saveType, recordId, restoreAll }),
   cloudDelete: (saveType: SaveType, recordId: number) =>
     invoke<void>('cloud_delete', { saveType, recordId }),
   nativeSavePaths: (game: InstalledGame) => invoke<NativeSavePaths>('native_save_paths', { game }),

@@ -7,6 +7,7 @@
 pub mod archive;
 pub mod candidates;
 pub mod dirs;
+pub mod folder_filter;
 pub mod install_match;
 pub mod native;
 pub mod ops;

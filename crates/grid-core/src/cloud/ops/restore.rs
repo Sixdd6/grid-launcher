@@ -7,7 +7,12 @@
 //! partial slot set), **D2** (a legacy whole-image xemu record is skipped
 //! with a notice rather than restored), and **D4** (absolute-URL state
 //! content candidates are skipped rather than fetched).
+//!
+//! **G1-Q:** an RPCS3 save record restores only the savedata folders
+//! [`folders_to_restore`] matches to the game (see `cloud::folder_filter`);
+//! a confirmed manual restore can pass [`FolderPolicy::RestoreAll`].
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -18,7 +23,12 @@ use crate::library::paths::sanitize_component;
 use crate::romm::RommClient;
 
 use super::super::archive::extract_payload_zip;
+use super::super::archive::extract_payload_zip_only;
 use super::super::candidates::file_candidates;
+use super::super::folder_filter::{
+    folders_to_restore, nothing_matched_notice, preferred_record, record_folders, skipped_notice,
+    FolderMatchKeys, FolderPolicy, FolderSelection, SkipReason,
+};
 use super::super::restore::{
     latest_server_record, latest_server_records_by_slot, preferred_restore_target_path,
     record_timestamp, restore_single_save_payload, restore_single_state_payload, stringify_id,
@@ -116,6 +126,112 @@ pub async fn restore_cloud_save_for_game(
     skip_if_local_newer: bool,
     skip_if_known_latest: bool,
 ) -> RestoreOutcome {
+    restore_cloud_save_for_game_with(
+        client,
+        ctx,
+        caches,
+        game,
+        record,
+        skip_if_local_newer,
+        skip_if_known_latest,
+        FolderPolicy::MatchedOnly,
+    )
+    .await
+    .into_outcome()
+}
+
+/// What a save restore did, for callers that report skipped folders
+/// (G1-Q). [`restore_cloud_save_for_game`] returns the first three fields.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SaveRestoreReport {
+    pub ok: bool,
+    pub messages: Vec<CloudMessage>,
+    pub update: SyncStateUpdate,
+    /// The record's top-level folders that were NOT restored because they
+    /// could not be matched to the game. Empty when nothing was skipped.
+    pub skipped_folders: Vec<String>,
+    /// True when the record held folders but none matched, so nothing was
+    /// restored.
+    pub nothing_matched: bool,
+    /// The id of the record the restore used, `""` before one was chosen.
+    pub record_id: String,
+    /// The G1-Q notice about skipped folders (also in `messages`), for a
+    /// caller that reports it on its own, such as a toast.
+    pub notice: Option<String>,
+}
+
+impl SaveRestoreReport {
+    pub fn into_outcome(self) -> RestoreOutcome {
+        (self.ok, self.messages, self.update)
+    }
+
+    fn from_outcome((ok, messages, update): RestoreOutcome) -> Self {
+        Self {
+            ok,
+            messages,
+            update,
+            ..Default::default()
+        }
+    }
+}
+
+/// [`restore_cloud_save_for_game`] with the G1-Q folder policy: an RPCS3
+/// record restores only the folders [`folders_to_restore`] matches to the
+/// game, unless `policy` is [`FolderPolicy::RestoreAll`].
+#[allow(clippy::too_many_arguments)]
+pub async fn restore_cloud_save_for_game_with(
+    client: &RommClient,
+    ctx: &CloudContext<'_>,
+    caches: &mut CloudCaches,
+    game: &CloudGame,
+    record: Option<&Value>,
+    skip_if_local_newer: bool,
+    skip_if_known_latest: bool,
+    policy: FolderPolicy,
+) -> SaveRestoreReport {
+    let mut folders = FolderOutcome::default();
+    let outcome = restore_save_inner(
+        client,
+        ctx,
+        caches,
+        game,
+        record,
+        skip_if_local_newer,
+        skip_if_known_latest,
+        policy,
+        &mut folders,
+    )
+    .await;
+    SaveRestoreReport {
+        skipped_folders: folders.skipped,
+        nothing_matched: folders.nothing_matched,
+        record_id: folders.record_id,
+        notice: folders.notice,
+        ..SaveRestoreReport::from_outcome(outcome)
+    }
+}
+
+/// The G1-Q facts [`restore_save_inner`] reports beside its outcome.
+#[derive(Debug, Default)]
+struct FolderOutcome {
+    skipped: Vec<String>,
+    nothing_matched: bool,
+    record_id: String,
+    notice: Option<String>,
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn restore_save_inner(
+    client: &RommClient,
+    ctx: &CloudContext<'_>,
+    caches: &mut CloudCaches,
+    game: &CloudGame,
+    record: Option<&Value>,
+    skip_if_local_newer: bool,
+    skip_if_known_latest: bool,
+    policy: FolderPolicy,
+    folders: &mut FolderOutcome,
+) -> RestoreOutcome {
     // 1. Native Windows platform -> delegate.
     if game.is_native() {
         let (ok, messages) = super::native::restore_native_cloud_save_for_game(
@@ -161,6 +277,11 @@ pub async fn restore_cloud_save_for_game(
         )));
     }
 
+    // G1-Q: an RPCS3 record may hold other games' savedata folders (old
+    // uploads did); match its folders to this game.
+    let folder_keys = is_rpcs3(ctx, &name, Some(&entry))
+        .then(|| FolderMatchKeys::for_rpcs3_game(game, ctx.all_games));
+
     // 6. Record selection.
     let scope = scope_for(ctx, &name, Some(&entry), &game.platform, SaveType::Save);
     let records: Vec<Value> = match record {
@@ -175,10 +296,11 @@ pub async fn restore_cloud_save_for_game(
                 }
             };
             if scope == SaveScope::PerGame {
-                latest_server_record(&all, &name)
-                    .cloned()
-                    .into_iter()
-                    .collect()
+                let latest = match &folder_keys {
+                    Some(keys) => preferred_record(&all, &name, keys),
+                    None => latest_server_record(&all, &name),
+                };
+                latest.cloned().into_iter().collect()
             } else {
                 latest_server_records_by_slot(&all, &name)
             }
@@ -193,6 +315,7 @@ pub async fn restore_cloud_save_for_game(
     if save_id.is_empty() {
         return stop(CloudMessage::warning(SAVE_RECORD_MISSING_ID));
     }
+    folders.record_id = save_id.clone();
 
     // 7a. Known-latest short circuit — per-game scope only.
     if skip_if_known_latest && scope == SaveScope::PerGame {
@@ -239,6 +362,10 @@ pub async fn restore_cloud_save_for_game(
         is_folder_save,
         fallback_name: format!("{}.srm", sanitize_component(&game.title, "save")),
         tokens_source: game,
+        folder_keys: match policy {
+            FolderPolicy::MatchedOnly => folder_keys.as_ref(),
+            FolderPolicy::RestoreAll => None,
+        },
     };
 
     let placement = if records.len() == 1 {
@@ -247,10 +374,33 @@ pub async fn restore_cloud_save_for_game(
         // D6: stage every record, commit only when all succeeded.
         place_staged(client, &plan, &records).await
     };
-    if let Err(message) = placement {
-        return stop(CloudMessage::warning(format!(
-            "Failed to restore cloud save: {message}"
-        )));
+    let skipped = match placement {
+        Ok(skipped) => skipped,
+        Err(PlaceError::Failed(message)) => {
+            return stop(CloudMessage::warning(format!(
+                "Failed to restore cloud save: {message}"
+            )))
+        }
+        Err(PlaceError::NothingMatched(selection)) => {
+            folders.nothing_matched = true;
+            folders.skipped = selection.skipped.iter().map(|(n, _)| n.clone()).collect();
+            let notice = nothing_matched_notice(&game.title, &selection);
+            folders.notice = Some(notice.clone());
+            return stop(CloudMessage::warning(notice));
+        }
+    };
+    let mut messages = vec![CloudMessage::info(RESTORE_SUCCESS)];
+    if !skipped.is_empty() {
+        let notice = skipped_notice(
+            &game.title,
+            &FolderSelection {
+                keep: Vec::new(),
+                skipped: skipped.clone(),
+            },
+        );
+        messages.push(CloudMessage::info(notice.clone()));
+        folders.notice = Some(notice);
+        folders.skipped = skipped.into_iter().map(|(n, _)| n).collect();
     }
 
     // 9. Persist the newest restored id + timestamp.
@@ -259,7 +409,7 @@ pub async fn restore_cloud_save_for_game(
 
     (
         true,
-        vec![CloudMessage::info(RESTORE_SUCCESS)],
+        messages,
         SyncStateUpdate {
             last_downloaded_save_id: Some(latest_restored_id),
             last_server_timestamp: Some(latest_server_timestamp),
@@ -292,9 +442,65 @@ struct RestorePlan<'a> {
     is_folder_save: bool,
     fallback_name: String,
     tokens_source: &'a CloudGame,
+    /// G1-Q: set for an RPCS3 record under [`FolderPolicy::MatchedOnly`];
+    /// only the folders it matches to the game are restored.
+    folder_keys: Option<&'a FolderMatchKeys>,
 }
 
+/// Why a placement wrote nothing.
+enum PlaceError {
+    Failed(String),
+    /// G1-Q: the record has folders, but none belongs to the game.
+    NothingMatched(FolderSelection),
+}
+
+impl From<String> for PlaceError {
+    fn from(message: String) -> Self {
+        PlaceError::Failed(message)
+    }
+}
+
+type Skipped = Vec<(String, SkipReason)>;
+
 impl RestorePlan<'_> {
+    /// G1-Q: which top-level folders of a folder-save `payload` to extract.
+    /// `None` restores the whole archive (no filter applies). Decided before
+    /// anything is written, so a record with no matching folder touches no
+    /// local file.
+    fn select_folders(
+        &self,
+        payload: &[u8],
+    ) -> Result<(Option<BTreeSet<String>>, Skipped), PlaceError> {
+        let Some(keys) = self.folder_keys else {
+            return Ok((None, Vec::new()));
+        };
+        let selection = folders_to_restore(&record_folders(payload)?, keys);
+        if selection.keep.is_empty() {
+            if selection.skipped.is_empty() {
+                return Err(PlaceError::Failed(SAVE_ARCHIVE_NOTHING.to_string()));
+            }
+            return Err(PlaceError::NothingMatched(selection));
+        }
+        Ok((
+            Some(selection.keep.into_iter().collect()),
+            selection.skipped,
+        ))
+    }
+
+    /// Extracts a folder-save `payload` into `dest`, limited to the matched
+    /// folders when a filter applies.
+    fn extract_folders(&self, payload: &[u8], dest: &Path) -> Result<Skipped, PlaceError> {
+        let (only, skipped) = self.select_folders(payload)?;
+        let extracted = match &only {
+            Some(only) => extract_payload_zip_only(payload, dest, self.ignore, only)?,
+            None => extract_payload_zip(payload, dest, self.ignore)?,
+        };
+        if extracted == 0 {
+            return Err(PlaceError::Failed(SAVE_ARCHIVE_NOTHING.to_string()));
+        }
+        Ok(skipped)
+    }
+
     /// The target path a single-file save record restores to
     /// (`_restore_single_save_file`, cloud_mixin.py:1839-1866).
     fn target_for(&self, record: &Value) -> Option<PathBuf> {
@@ -333,21 +539,17 @@ async fn place_directly(
     client: &RommClient,
     plan: &RestorePlan<'_>,
     record: &Value,
-) -> Result<(), String> {
+) -> Result<Skipped, PlaceError> {
     let payload = download_save(client, record).await?;
     if plan.is_folder_save {
-        let extracted = extract_payload_zip(&payload, &plan.directories[0], plan.ignore)?;
-        if extracted == 0 {
-            return Err(SAVE_ARCHIVE_NOTHING.to_string());
-        }
-        return Ok(());
+        return plan.extract_folders(&payload, &plan.directories[0]);
     }
     let Some(target) = plan.target_for(record) else {
-        return Err(SAVE_NOTHING_RESTORED.to_string());
+        return Err(SAVE_NOTHING_RESTORED.to_string().into());
     };
     match restore_single_save_payload(&payload, &target, plan.ignore)? {
-        Some(_) => Ok(()),
-        None => Err(SAVE_NOTHING_RESTORED.to_string()),
+        Some(_) => Ok(Vec::new()),
+        None => Err(SAVE_NOTHING_RESTORED.to_string().into()),
     }
 }
 
@@ -368,7 +570,8 @@ async fn place_staged(
     client: &RommClient,
     plan: &RestorePlan<'_>,
     records: &[Value],
-) -> Result<(), String> {
+) -> Result<Skipped, PlaceError> {
+    let mut skipped: Skipped = Vec::new();
     let staging = tempfile::tempdir().map_err(|e| e.to_string())?;
     let mut commits: Vec<(PathBuf, PathBuf)> = Vec::new();
 
@@ -378,16 +581,13 @@ async fn place_staged(
         fs::create_dir_all(&stage).map_err(|e| e.to_string())?;
 
         if plan.is_folder_save {
-            let extracted = extract_payload_zip(&payload, &stage, plan.ignore)?;
-            if extracted == 0 {
-                return Err(SAVE_ARCHIVE_NOTHING.to_string());
-            }
+            skipped.extend(plan.extract_folders(&payload, &stage)?);
             commits.push((stage, plan.directories[0].clone()));
             continue;
         }
 
         let Some(target) = plan.target_for(record) else {
-            return Err(SAVE_NOTHING_RESTORED.to_string());
+            return Err(SAVE_NOTHING_RESTORED.to_string().into());
         };
         let file_name = target
             .file_name()
@@ -395,7 +595,7 @@ async fn place_staged(
             .unwrap_or_else(|| PathBuf::from("save"));
         let staged_target = stage.join(&file_name);
         if restore_single_save_payload(&payload, &staged_target, plan.ignore)?.is_none() {
-            return Err(SAVE_NOTHING_RESTORED.to_string());
+            return Err(SAVE_NOTHING_RESTORED.to_string().into());
         }
         let commit_root = target
             .parent()
@@ -407,7 +607,7 @@ async fn place_staged(
     for (stage, root) in commits {
         copy_tree(&stage, &root)?;
     }
-    Ok(())
+    Ok(skipped)
 }
 
 /// Copies every file under `from` into `to`, preserving relative paths and

@@ -79,6 +79,9 @@ pub async fn cloud_restore(
     game: CloudGameInput,
     save_type: SaveType,
     record_id: Option<String>,
+    // G1-Q: the user confirmed restoring every folder of the record,
+    // including ones not matched to the game. Absent means false.
+    restore_all: Option<bool>,
 ) -> Result<RestoreReportDto, String> {
     ensure_library_idle(&state)?;
     let record_id = match record_id {
@@ -101,6 +104,7 @@ pub async fn cloud_restore(
             game,
             save_type,
             record_id,
+            restore_all.unwrap_or(false),
         )
         .await
 }

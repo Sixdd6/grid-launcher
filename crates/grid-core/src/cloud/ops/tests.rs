@@ -18,9 +18,12 @@ use crate::secrets::Credential;
 use secrecy::SecretString;
 
 use super::native::restore_native_cloud_save_for_game;
-use super::restore::{restore_cloud_save_for_game, restore_cloud_state_for_game};
+use super::restore::{
+    restore_cloud_save_for_game, restore_cloud_save_for_game_with, restore_cloud_state_for_game,
+};
 use super::upload::upload_cloud_files_for_game;
 use super::*;
+use crate::cloud::folder_filter::{test_sfo, FolderPolicy};
 
 /// The canonical long form of an existing `path`. A save target is
 /// resolved like `Path.resolve()`, which expands a Windows 8.3 short name
@@ -2201,4 +2204,261 @@ fn restore_enabled_true_with_the_shared_scope_notice_as_tooltip() {
         text,
         "These cloud saves are shared xemu media. Restoring or deleting one affects every game using this emulator."
     );
+}
+
+// --- G1-Q: RPCS3 records restore only the game's own folders ------------
+
+/// A cloud record as an old polluted upload left it: this game's savedata
+/// folder plus another game's.
+fn multi_game_rpcs3_record() -> Vec<u8> {
+    let own_sfo = test_sfo(&[("TITLE", "Demon's Souls")]);
+    let other_sfo = test_sfo(&[("TITLE", "Uncharted 2: Among Thieves")]);
+    zip_bytes(&[
+        ("BLUS30443DATA/PARAM.SFO", own_sfo.as_slice()),
+        ("BLUS30443DATA/SAVE.BIN", b"cloud-own"),
+        ("BCUS98174AUTO/PARAM.SFO", other_sfo.as_slice()),
+        ("BCUS98174AUTO/SAVE.BIN", b"cloud-other"),
+    ])
+}
+
+async fn serve_save(server: &MockServer, id: u32, payload: Vec<u8>) {
+    Mock::given(method("GET"))
+        .and(wm_path(format!("/api/saves/{id}/content")))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(payload))
+        .mount(server)
+        .await;
+}
+
+fn rpcs3_fixture(savedata: &Path) -> Fixture {
+    Fixture::new(config_with(
+        entry_named("RPCS3", savedata.to_str().unwrap()),
+        "PS3",
+    ))
+}
+
+/// Unknown PS3 id: the folder whose `PARAM.SFO` title is the game's
+/// restores; the other game's folder is skipped and its local save stays.
+#[tokio::test]
+async fn rpcs3_restore_skips_folders_of_other_games() {
+    let server = MockServer::start().await;
+    serve_save(&server, 41, multi_game_rpcs3_record()).await;
+    let client = client_for(&server);
+
+    let savedata = TempDir::new().unwrap();
+    let other_local = savedata.path().join("BCUS98174AUTO/SAVE.BIN");
+    write_file(&other_local, b"local-other");
+    let fx = rpcs3_fixture(savedata.path());
+    let mut caches = CloudCaches::default();
+    let record = json!({"id": 41, "emulator": "RPCS3", "file_name": "BLUS30443DATA.zip"});
+
+    let report = restore_cloud_save_for_game_with(
+        &client,
+        &fx.ctx(),
+        &mut caches,
+        &game("Demon's Souls", "PS3", "7"),
+        Some(&record),
+        false,
+        false,
+        FolderPolicy::MatchedOnly,
+    )
+    .await;
+
+    assert!(report.ok, "{:?}", report.messages);
+    assert_eq!(
+        texts(&report.messages),
+        vec![
+            RESTORE_SUCCESS.to_string(),
+            "Cloud save for Demon's Souls: skipped save folders that could not be matched to this game: BCUS98174AUTO.".to_string(),
+        ]
+    );
+    assert_eq!(report.skipped_folders, vec!["BCUS98174AUTO".to_string()]);
+    assert_eq!(
+        report.notice.as_deref(),
+        Some("Cloud save for Demon's Souls: skipped save folders that could not be matched to this game: BCUS98174AUTO.")
+    );
+    assert!(!report.nothing_matched);
+    assert_eq!(report.record_id, "41");
+    assert_eq!(report.update.last_downloaded_save_id.as_deref(), Some("41"));
+    assert_eq!(
+        fs::read(savedata.path().join("BLUS30443DATA/SAVE.BIN")).unwrap(),
+        b"cloud-own"
+    );
+    assert_eq!(fs::read(&other_local).unwrap(), b"local-other");
+}
+
+/// No folder matches: nothing is written, nothing is recorded as
+/// downloaded, and the notice says to restore manually. `RestoreAll`
+/// (the confirmed manual restore) then writes every folder.
+#[tokio::test]
+async fn rpcs3_restore_with_no_matching_folder_restores_nothing_unless_all_is_confirmed() {
+    let server = MockServer::start().await;
+    serve_save(&server, 42, multi_game_rpcs3_record()).await;
+    let client = client_for(&server);
+
+    let savedata = TempDir::new().unwrap();
+    let own_local = savedata.path().join("BLUS30443DATA/SAVE.BIN");
+    let other_local = savedata.path().join("BCUS98174AUTO/SAVE.BIN");
+    write_file(&own_local, b"local-own");
+    write_file(&other_local, b"local-other");
+    let fx = rpcs3_fixture(savedata.path());
+    let mut caches = CloudCaches::default();
+    let record = json!({"id": 42, "emulator": "RPCS3", "file_name": "save.zip"});
+    let flower = game("Flower", "PS3", "9");
+
+    let report = restore_cloud_save_for_game_with(
+        &client,
+        &fx.ctx(),
+        &mut caches,
+        &flower,
+        Some(&record),
+        false,
+        false,
+        FolderPolicy::MatchedOnly,
+    )
+    .await;
+
+    assert!(!report.ok);
+    assert!(report.nothing_matched);
+    assert_eq!(
+        texts(&report.messages),
+        vec![
+            "Cloud save for Flower holds saves for several games; none could be matched to \
+             this game — restore it manually in Manage Saves."
+        ]
+    );
+    assert_eq!(
+        report.skipped_folders,
+        vec!["BLUS30443DATA".to_string(), "BCUS98174AUTO".to_string()]
+    );
+    assert_eq!(
+        report.notice.as_deref(),
+        Some(report.messages[0].text.as_str())
+    );
+    assert_eq!(report.update, SyncStateUpdate::default());
+    assert_eq!(fs::read(&own_local).unwrap(), b"local-own");
+    assert_eq!(fs::read(&other_local).unwrap(), b"local-other");
+
+    let report = restore_cloud_save_for_game_with(
+        &client,
+        &fx.ctx(),
+        &mut caches,
+        &flower,
+        Some(&record),
+        false,
+        false,
+        FolderPolicy::RestoreAll,
+    )
+    .await;
+    assert!(report.ok, "{:?}", report.messages);
+    assert!(report.skipped_folders.is_empty());
+    assert_eq!(fs::read(&own_local).unwrap(), b"cloud-own");
+    assert_eq!(fs::read(&other_local).unwrap(), b"cloud-other");
+}
+
+/// Known PS3 id: an old record that holds only another game's folder
+/// restores nothing (before G1-Q it overwrote that game's save).
+#[tokio::test]
+async fn rpcs3_known_id_does_not_restore_another_games_single_folder_record() {
+    let server = MockServer::start().await;
+    serve_save(
+        &server,
+        43,
+        zip_bytes(&[("BCUS98174AUTO/SAVE.BIN", b"cloud-other")]),
+    )
+    .await;
+    let client = client_for(&server);
+
+    let savedata = TempDir::new().unwrap();
+    let other_local = savedata.path().join("BCUS98174AUTO/SAVE.BIN");
+    write_file(&other_local, b"local-other");
+    let fx = rpcs3_fixture(savedata.path());
+    let mut caches = CloudCaches::default();
+    let mut demons = game("Demon's Souls", "PS3", "7");
+    demons.ps3_game_id = "BLUS30443".to_string();
+    let record = json!({"id": 43, "emulator": "RPCS3", "file_name": "BCUS98174AUTO.zip"});
+
+    let report = restore_cloud_save_for_game_with(
+        &client,
+        &fx.ctx(),
+        &mut caches,
+        &demons,
+        Some(&record),
+        false,
+        false,
+        FolderPolicy::MatchedOnly,
+    )
+    .await;
+
+    assert!(!report.ok);
+    assert!(report.nothing_matched);
+    assert_eq!(
+        texts(&report.messages),
+        vec![
+            "Cloud save for Demon's Souls holds a save folder (BCUS98174AUTO) that could not \
+             be matched to this game — restore it manually in Manage Saves."
+        ]
+    );
+    assert_eq!(fs::read(&other_local).unwrap(), b"local-other");
+}
+
+/// The before-launch path (no record given): among old polluted records
+/// the game's own record wins over another game's newer one, and a
+/// known-id game's own record restores in full.
+#[tokio::test]
+async fn rpcs3_auto_restore_picks_the_games_own_record() {
+    let server = MockServer::start().await;
+    mock_ok(
+        &server,
+        "GET",
+        "/api/saves",
+        json!([
+            {"id": 51, "emulator": "RPCS3", "file_name": "BLUS30443DATA-2026-01-01T10-00-00.zip",
+             "updated_at": "2026-01-01T10:00:00Z"},
+            {"id": 52, "emulator": "RPCS3", "file_name": "BCUS98174AUTO-2026-01-01T10-00-01.zip",
+             "updated_at": "2026-01-01T10:00:01Z"}
+        ]),
+    )
+    .await;
+    serve_save(
+        &server,
+        51,
+        zip_bytes(&[("BLUS30443DATA/SAVE.BIN", b"cloud-own")]),
+    )
+    .await;
+    serve_save(
+        &server,
+        52,
+        zip_bytes(&[("BCUS98174AUTO/SAVE.BIN", b"cloud-other")]),
+    )
+    .await;
+    let client = client_for(&server);
+
+    let savedata = TempDir::new().unwrap();
+    let fx = rpcs3_fixture(savedata.path());
+    let mut caches = CloudCaches::default();
+    let mut demons = game("Demon's Souls", "PS3", "7");
+    demons.ps3_game_id = "BLUS30443".to_string();
+
+    let report = restore_cloud_save_for_game_with(
+        &client,
+        &fx.ctx(),
+        &mut caches,
+        &demons,
+        None,
+        false,
+        false,
+        FolderPolicy::MatchedOnly,
+    )
+    .await;
+
+    assert!(report.ok, "{:?}", report.messages);
+    assert_eq!(texts(&report.messages), vec![RESTORE_SUCCESS]);
+    assert_eq!(report.notice, None);
+    assert!(report.skipped_folders.is_empty());
+    assert_eq!(report.record_id, "51");
+    assert_eq!(
+        fs::read(savedata.path().join("BLUS30443DATA/SAVE.BIN")).unwrap(),
+        b"cloud-own"
+    );
+    assert!(!savedata.path().join("BCUS98174AUTO").exists());
 }

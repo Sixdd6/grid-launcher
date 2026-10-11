@@ -34,10 +34,12 @@ use std::sync::{Arc, Mutex as StdMutex, RwLock};
 use std::time::Duration;
 
 use crate::config_write::modify_config;
+use grid_core::cloud::folder_filter::FolderPolicy;
 use grid_core::cloud::native::{
     normalize_manual_save_path, resolve_native_save_dir, visible_native_paths,
 };
 use grid_core::cloud::ops::native::manual_paths_key;
+use grid_core::cloud::ops::restore::SaveRestoreReport;
 use grid_core::cloud::ops::{self, CloudCaches, CloudContext, CloudMessage};
 use grid_core::cloud::scope::SaveScope;
 use grid_core::cloud::state::{
@@ -208,6 +210,10 @@ pub struct CloudService {
     /// skips the pre-launch restore, and holds an auto-upload back until it
     /// opens.
     library_gate: RwLock<LibraryGate>,
+    /// G1-Q: `<game key>|<record id>` pairs whose skipped-folder notice
+    /// the pre-launch restore already showed in this process. A game whose
+    /// record never matches would otherwise toast on every launch.
+    restore_notices_shown: StdMutex<HashSet<String>>,
 }
 
 impl CloudService {
@@ -224,6 +230,7 @@ impl CloudService {
             pcgw_client: grid_core::pcgw::build_http_client(),
             pcgw_base: base,
             library_gate: RwLock::new(LibraryGate::default()),
+            restore_notices_shown: StdMutex::new(HashSet::new()),
         })
     }
 
@@ -529,6 +536,10 @@ impl CloudService {
     /// `details_view_mixin.py:1237-1263`; `skip_if_local_newer` and
     /// `skip_if_known_latest` are both `false` for a manual restore,
     /// cloud_mixin.py:1906-1908's defaults).
+    ///
+    /// G1-Q: an RPCS3 save restores only the folders matched to the game;
+    /// the report lists the skipped ones. `restore_all` (the user confirmed
+    /// after seeing that list) restores every folder of the record.
     #[allow(clippy::too_many_arguments)]
     pub async fn restore(
         &self,
@@ -539,6 +550,7 @@ impl CloudService {
         game: CloudGameInput,
         save_type: SaveType,
         record_id: Option<i64>,
+        restore_all: bool,
     ) -> Result<RestoreReportDto, String> {
         let _transfer = self.begin_transfer()?;
         let client = session.client().ok_or("not connected")?;
@@ -563,9 +575,15 @@ impl CloudService {
             }
         };
 
+        let policy = if restore_all {
+            FolderPolicy::RestoreAll
+        } else {
+            FolderPolicy::MatchedOnly
+        };
+        let mut skipped_folders: Vec<String> = Vec::new();
         let (ok, messages, update) = match save_type {
             SaveType::Save => {
-                ops::restore::restore_cloud_save_for_game(
+                let report = ops::restore::restore_cloud_save_for_game_with(
                     &client,
                     &ctx,
                     &mut caches,
@@ -573,8 +591,12 @@ impl CloudService {
                     selected.as_ref(),
                     false,
                     false,
+                    policy,
                 )
-                .await
+                .await;
+                log_skipped_folders("restore", &report);
+                skipped_folders = report.skipped_folders.clone();
+                report.into_outcome()
             }
             SaveType::State => {
                 ops::restore::restore_cloud_state_for_game(
@@ -601,6 +623,7 @@ impl CloudService {
         Ok(RestoreReportDto {
             ok,
             messages: messages.into_iter().map(CloudMessageDto::from).collect(),
+            skipped_folders,
         })
     }
 
@@ -782,8 +805,10 @@ impl CloudService {
     /// (`details_view_mixin.py:1497`). Every failure is logged at debug
     /// only and never blocks the launch — there is no `Result` to
     /// propagate on purpose.
+    #[allow(clippy::too_many_arguments)]
     pub async fn auto_restore_before_launch(
         &self,
+        app: &AppHandle,
         session: &SessionManager,
         install: Arc<InstallService>,
         launch: Arc<LaunchService>,
@@ -825,7 +850,7 @@ impl CloudService {
         if ops::block_reason_for_game(&ctx, &cloud_game, SaveType::Save, save_entry.as_ref())
             .is_empty()
         {
-            let (_ok, messages, update) = ops::restore::restore_cloud_save_for_game(
+            let report = ops::restore::restore_cloud_save_for_game_with(
                 &client,
                 &ctx,
                 &mut caches,
@@ -833,10 +858,21 @@ impl CloudService {
                 None,
                 skip_if_local_newer,
                 true,
+                FolderPolicy::MatchedOnly,
             )
             .await;
-            log_cloud_messages("auto-restore save", &messages);
-            merge_update(&mut combined, update);
+            log_cloud_messages("auto-restore save", &report.messages);
+            log_skipped_folders("auto-restore", &report);
+            if let Some(payload) = restore_notice_payload(&cloud_game.title, &report) {
+                let first = first_notice(
+                    &self.restore_notices_shown,
+                    format!("{}|{}", game_key(&cloud_game), report.record_id),
+                );
+                if first {
+                    let _ = app.emit(CLOUD_RESTORE_NOTICE_EVENT, payload);
+                }
+            }
+            merge_update(&mut combined, report.update);
         }
 
         let state_entry =
@@ -1764,6 +1800,62 @@ fn emit_upload_finished(app: &AppHandle, title: &str, messages: &[CloudMessage])
     }
 }
 
+/// G1-Q: emitted when the pre-launch restore skipped save folders it could
+/// not match to the game (old uploads put other games' folders under one
+/// ROM). The Shell turns it into one toast. Once per game and record per
+/// process, so a record that never matches does not toast on every launch.
+pub const CLOUD_RESTORE_NOTICE_EVENT: &str = "cloud-restore-notice";
+
+/// The [`CLOUD_RESTORE_NOTICE_EVENT`] payload: the game title and the
+/// restore's notice text (folder names only — no path, URL, or token).
+/// `failed` is true when nothing was restored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CloudRestoreNotice {
+    pub title: String,
+    pub message: String,
+    pub failed: bool,
+}
+
+/// The toast payload for a restore that skipped folders, `None` when it
+/// skipped none.
+fn restore_notice_payload(title: &str, report: &SaveRestoreReport) -> Option<CloudRestoreNotice> {
+    if report.skipped_folders.is_empty() {
+        return None;
+    }
+    let message = report.notice.as_deref()?.trim();
+    if message.is_empty() {
+        return None;
+    }
+    Some(CloudRestoreNotice {
+        title: title.trim().to_string(),
+        message: message.to_string(),
+        failed: report.nothing_matched,
+    })
+}
+
+/// True the first time `key` is seen in `shown`.
+fn first_notice(shown: &StdMutex<HashSet<String>>, key: String) -> bool {
+    shown.lock().unwrap_or_else(|e| e.into_inner()).insert(key)
+}
+
+/// Logs the folders a restore skipped: folder names (`BLUS30443DATA`) and
+/// the record id only.
+fn log_skipped_folders(context: &str, report: &SaveRestoreReport) {
+    if report.skipped_folders.is_empty() {
+        return;
+    }
+    tracing::info!(
+        "cloud {context}: record {} skipped save folders not matched to the game: {}{}",
+        report.record_id,
+        report.skipped_folders.join(", "),
+        if report.nothing_matched {
+            " (nothing restored)"
+        } else {
+            ""
+        }
+    );
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct CloudMessageDto {
     pub text: String,
@@ -1809,6 +1901,10 @@ impl From<ops::upload::UploadReport> for UploadReportDto {
 pub struct RestoreReportDto {
     pub ok: bool,
     pub messages: Vec<CloudMessageDto>,
+    /// G1-Q: top-level folders of the record that were not restored
+    /// because they could not be matched to the game (folder names only).
+    /// Non-empty lets the panel offer a confirmed "restore all".
+    pub skipped_folders: Vec<String>,
 }
 
 /// One row of a native game's save-location list.
@@ -2300,6 +2396,69 @@ mod tests {
             json,
             r#"{"title":"Chrono Trigger","message":"Uploaded 2 save files.","failed":false}"#
         );
+    }
+
+    /// G1-Q: the frontend listens on this exact string and reads these keys.
+    #[test]
+    fn the_restore_notice_event_name_and_payload_are_pinned() {
+        assert_eq!(CLOUD_RESTORE_NOTICE_EVENT, "cloud-restore-notice");
+        let json = serde_json::to_string(&CloudRestoreNotice {
+            title: "Demon's Souls".to_string(),
+            message: "Cloud save for Demon's Souls: skipped save folders that could not be matched to this game: BCUS98174AUTO."
+                .to_string(),
+            failed: false,
+        })
+        .expect("payload serialises");
+        assert_eq!(
+            json,
+            r#"{"title":"Demon's Souls","message":"Cloud save for Demon's Souls: skipped save folders that could not be matched to this game: BCUS98174AUTO.","failed":false}"#
+        );
+    }
+
+    /// G1-Q: only a restore that skipped folders toasts; one that restored
+    /// nothing is a failure toast.
+    #[test]
+    fn restore_notice_payload_follows_the_skipped_folders() {
+        let clean = SaveRestoreReport {
+            ok: true,
+            messages: vec![info("Cloud save restored successfully.")],
+            ..Default::default()
+        };
+        assert_eq!(restore_notice_payload("Demon's Souls", &clean), None);
+
+        let partial = SaveRestoreReport {
+            ok: true,
+            skipped_folders: vec!["BCUS98174AUTO".to_string()],
+            notice: Some(
+                "Cloud save for Demon's Souls: skipped save folders that could not be matched to this game: BCUS98174AUTO."
+                    .to_string(),
+            ),
+            ..Default::default()
+        };
+        let payload = restore_notice_payload(" Demon's Souls ", &partial).unwrap();
+        assert_eq!(payload.title, "Demon's Souls");
+        assert!(!payload.failed);
+
+        let none = SaveRestoreReport {
+            skipped_folders: vec!["BLUS30443DATA".to_string(), "BCUS98174AUTO".to_string()],
+            nothing_matched: true,
+            notice: Some("Cloud save for Flower holds saves for several games; …".to_string()),
+            ..Default::default()
+        };
+        let payload = restore_notice_payload("Flower", &none).unwrap();
+        assert!(payload.failed);
+        assert_eq!(
+            payload.message,
+            "Cloud save for Flower holds saves for several games; …"
+        );
+    }
+
+    #[test]
+    fn a_restore_notice_shows_once_per_game_and_record() {
+        let shown = StdMutex::new(HashSet::new());
+        assert!(first_notice(&shown, "rom:7|41".to_string()));
+        assert!(!first_notice(&shown, "rom:7|41".to_string()));
+        assert!(first_notice(&shown, "rom:7|42".to_string()));
     }
 
     #[test]

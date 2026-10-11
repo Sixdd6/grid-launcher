@@ -222,6 +222,26 @@ export function restoreConfirmText(saveType: SaveType, gameTitle: string, warnin
 }
 
 /**
+ * G1-Q: the second confirm a manual restore shows when it skipped folders it
+ * could not match to the game (old uploads put other games' save folders
+ * under one ROM). "Yes" restores every folder of the record.
+ */
+export function restoreAllConfirmText(gameTitle: string, skippedFolders: string[]): ConfirmText {
+  const limit = 5;
+  const listed =
+    skippedFolders.length <= limit
+      ? skippedFolders.join(', ')
+      : `${skippedFolders.slice(0, limit).join(', ')} and ${skippedFolders.length - limit} more`;
+  return {
+    title: 'Restore All Folders',
+    message:
+      `This cloud save also holds folders that could not be matched to '${gameTitle}': ${listed}. ` +
+      'Restoring them overwrites the local saves in those folders, which may belong to other ' +
+      'games. Restore every folder?',
+  };
+}
+
+/**
  * `_confirm_delete_details_cloud_record` (details_view_mixin.py:1270-1289),
  * copy ported verbatim. `recordTitle` is `cloudRecordTitle`'s result;
  * `warning` is `sharedScopeWarning` for the panel's scope.

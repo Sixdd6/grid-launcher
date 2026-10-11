@@ -844,7 +844,7 @@ pub async fn launch_game(
         // emulator existed still gets its BIOS). Fire-and-forget: it spawns
         // its own task, returns immediately, and can never fail the launch.
         state.firmware.spawn_for_game(
-            app,
+            app.clone(),
             state.session.clone(),
             install.clone(),
             installed_game.clone(),
@@ -853,6 +853,7 @@ pub async fn launch_game(
         state
             .cloud
             .auto_restore_before_launch(
+                &app,
                 &state.session,
                 install.clone(),
                 launch.clone(),

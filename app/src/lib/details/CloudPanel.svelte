@@ -16,6 +16,7 @@
     createRequestGuard,
     deleteConfirmText,
     recordsStatusLine,
+    restoreAllConfirmText,
     restoreConfirmText,
     sharedScopeWarning,
     uploadButtonLabel,
@@ -83,7 +84,14 @@
 
   let actionPendingId = $state<number | null>(null);
   let actionError = $state<string | null>(null);
-  let confirmState = $state<{ kind: 'restore' | 'delete'; record: CloudRecord } | null>(null);
+  // G1-Q: a restore that skipped save folders not matched to the game says so
+  // here, and the panel offers a confirmed "restore all" (`folders`).
+  let actionNotice = $state<string | null>(null);
+  let confirmState = $state<{
+    kind: 'restore' | 'restore-all' | 'delete';
+    record: CloudRecord;
+    folders?: string[];
+  } | null>(null);
 
   const recordsGuard = createRequestGuard();
   const nativeGuard = createRequestGuard();
@@ -188,11 +196,13 @@
       ? null
       : confirmState.kind === 'restore'
         ? restoreConfirmText(saveType, gameTitle, confirmState.record.restore_tooltip ?? '')
-        : deleteConfirmText(
-            saveType,
-            cloudRecordTitle(confirmState.record, saveType),
-            sharedScopeWarning(panelInfo.scope, confirmState.record.emulator)
-          )
+        : confirmState.kind === 'restore-all'
+          ? restoreAllConfirmText(gameTitle, confirmState.folders ?? [])
+          : deleteConfirmText(
+              saveType,
+              cloudRecordTitle(confirmState.record, saveType),
+              sharedScopeWarning(panelInfo.scope, confirmState.record.emulator)
+            )
   );
 
   async function confirmAction() {
@@ -201,13 +211,21 @@
     confirmState = null;
     actionPendingId = record.id;
     actionError = null;
+    actionNotice = null;
     try {
-      if (kind === 'restore') {
-        const report = await api.cloudRestore(game, saveType, String(record.id));
+      if (kind === 'restore' || kind === 'restore-all') {
+        const restoreAll = kind === 'restore-all';
+        const report = await api.cloudRestore(game, saveType, String(record.id), restoreAll);
+        const text = report.messages.map((m) => m.text).join(' ');
         if (report.ok) {
+          if (report.skipped_folders.length > 0) actionNotice = text;
           await loadRecords();
         } else {
-          actionError = report.messages.map((m) => m.text).join(' ') || 'Restore failed.';
+          actionError = text || 'Restore failed.';
+        }
+        // G1-Q: offer every folder only after the user saw which were skipped.
+        if (!restoreAll && report.skipped_folders.length > 0) {
+          confirmState = { kind: 'restore-all', record, folders: report.skipped_folders };
         }
       } else {
         await api.cloudDelete(saveType, record.id);
@@ -294,6 +312,7 @@
     {/if}
 
     {#if actionError}<p data-testid="cloud-action-error" class="error" role="alert">{actionError}</p>{/if}
+    {#if actionNotice}<p data-testid="cloud-action-notice" class="message">{actionNotice}</p>{/if}
 
     {#if !recordsBlocked}
       {#if nativeSave}
