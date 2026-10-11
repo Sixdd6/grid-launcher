@@ -71,8 +71,12 @@ root. `scripts/check_secret_hygiene.sh` calls `cargo tree`, so Rust must be on t
 Bash `PATH`.
 
 A second job, `check-windows`, runs the frontend build, both clippy commands and
-`cargo test --workspace` on `windows-latest`, so a Windows-only failure is caught on the
-pull request rather than on a tag.
+`cargo test --workspace` on `windows-latest`.
+
+CI runs only when a release is published or when the workflow is started by hand
+(`workflow_dispatch`). Pushes and pull requests trigger nothing, so run the gate locally
+before every push. The Windows runner's `TEMP` is a short 8.3 path (`RUNNER~1`); run
+Windows tests with a short `TEMP` too, or path comparisons that pass locally fail there.
 
 ## End-to-end tests
 
@@ -80,7 +84,8 @@ The suite runs on Linux only (it needs Xvfb, D-Bus, gnome-keyring and `secret-to
 On Windows, run it in WSL2 or leave it to CI.
 
 `scripts/e2e.sh` drives a real, locally built Tauri binary with WebdriverIO against a
-mock RomM server. CI runs it on pushes to `main` and on manual dispatch.
+mock RomM server. CI runs it on every release and manual dispatch, and both build jobs wait
+for it.
 
     scripts/e2e.sh                   # build, then run every stage group
     scripts/e2e.sh connect           # run only the named stage groups
@@ -138,7 +143,7 @@ keeps `0.9.0-dev`; each build job passes the real version with
    for it. `build.yml` triggers on `release: [published]` only, which covers both a
    direct publish and a draft published later.
 2. The `version` job strips the leading `v` and rejects a tag that is not semver.
-3. `check` and `check-windows` must pass; both build jobs `need` them, so a tag can never
+3. `check`, `check-windows` and `e2e` must pass; both build jobs `need` them, so a tag can never
    ship artifacts from an untested tree.
 4. `build-linux` builds the AppImage, extracts its AppDir, and repacks it with
    `appimagetool -u "gh-releases-zsync|Sixdd6|grid-launcher|latest|grid-launcher-*-x86_64.AppImage.zsync"`,

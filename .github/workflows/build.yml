@@ -1,19 +1,17 @@
 name: Build
 
-# One pipeline for the Rust app: gates on every push, pull request AND
-# release, the end-to-end suite on pushes to main, and the release artifacts
-# when a release is published. A workflow_dispatch run does everything as a
-# dry run — it builds version 0.0.0-dev, uploads to the run, and attaches
-# nothing.
+# One pipeline for the Rust app. It runs only when a release is published
+# or when started by hand (workflow_dispatch), never on a push or pull
+# request: local checks gate day-to-day work. A release runs the gates and
+# the end-to-end suite, then builds the artifacts. A workflow_dispatch run
+# does everything as a dry run — it builds version 0.0.0-dev, uploads to
+# the run, and attaches nothing.
 #
 # `types: [published]` only. It fires both for a release published directly
 # and for a draft that is later published, which is the flow that writes the
 # notes first; `created` misses the draft flow, and listing both would build
 # a direct publish twice.
 on:
-  push:
-    branches: [main]
-  pull_request:
   release:
     types: [published]
   workflow_dispatch:
@@ -85,7 +83,8 @@ jobs:
 
   e2e:
     name: End-to-end
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # Runs on every trigger (release, workflow_dispatch); both build jobs
+    # `need` it.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -142,7 +141,7 @@ jobs:
   build-linux:
     name: AppImage
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
-    needs: [version, check, check-windows]
+    needs: [version, check, check-windows, e2e]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -222,7 +221,7 @@ jobs:
   build-windows:
     name: Windows installer
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
-    needs: [version, check, check-windows]
+    needs: [version, check, check-windows, e2e]
     runs-on: windows-latest
     permissions:
       contents: write
