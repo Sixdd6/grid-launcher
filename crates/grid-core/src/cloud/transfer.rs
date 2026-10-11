@@ -568,6 +568,59 @@ pub fn directory_archive_upload_jobs(
     })
 }
 
+/// Cemu save upload jobs: ONE job per Wii U title, holding every candidate
+/// folder of that title (`80000001/…`, `common/…` at the archive's top, as
+/// [`directory_archive_upload_jobs`] stores a folder). The archive's file
+/// name starts with the 16-hex title id (`0005000010145D00-<time>.zip`),
+/// which the record's file name keeps, so a restore can prefer the game's
+/// own record. A folder outside a `<high>/<low>/user` layout gets its own
+/// job as before.
+pub fn cemu_archive_upload_jobs(dirs: &[PathBuf], ignore: &IgnoreSets) -> io::Result<BuiltJobs> {
+    use super::cemu_saves::{cemu_title_of_save_dir, CemuTitle};
+
+    let mut groups: Vec<(CemuTitle, Vec<PathBuf>)> = Vec::new();
+    let mut loose: Vec<PathBuf> = Vec::new();
+    for dir in dirs {
+        match cemu_title_of_save_dir(dir) {
+            Some((title, _)) => match groups.iter_mut().find(|(t, _)| *t == title) {
+                Some((_, members)) => members.push(dir.clone()),
+                None => groups.push((title, vec![dir.clone()])),
+            },
+            None => loose.push(dir.clone()),
+        }
+    }
+
+    let mut built = BuiltJobs {
+        jobs: Vec::new(),
+        temp_archives: Vec::new(),
+    };
+    for (title, members) in &groups {
+        let archive_path = match archive::zip_directories_for_upload(members, &title.id(), ignore) {
+            Ok(path) => path,
+            Err(err) => {
+                archive::cleanup_temp_archives(&built.temp_archives);
+                return Err(err);
+            }
+        };
+        built.temp_archives.push(archive_path.clone());
+        built.jobs.push(UploadJob {
+            display_name: title.id(),
+            payload: vec![("saveFile".to_string(), archive_path)],
+        });
+    }
+    match directory_archive_upload_jobs(&loose, ignore) {
+        Ok(rest) => {
+            built.jobs.extend(rest.jobs);
+            built.temp_archives.extend(rest.temp_archives);
+            Ok(built)
+        }
+        Err(err) => {
+            archive::cleanup_temp_archives(&built.temp_archives);
+            Err(err)
+        }
+    }
+}
+
 /// All of `files` archived together into ONE upload job, regardless of
 /// [`grouped_upload_key`] grouping — the "shared-single" save scope.
 /// Mirrors `cloud_mixin.py:2519-2527`: `shared_archive =

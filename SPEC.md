@@ -305,6 +305,8 @@ Core behavior should include:
 
 RPCS3 save restores (automatic before launch and manual) write only the savedata folders that belong to the game, because older releases could upload other PS3 games' folders under one game. A folder belongs to the game when its name holds the game's PS3 id; when the id is unknown, when its name holds a serial found in the game's file names, install paths, or install `PARAM.SFO`, or when the folder's own `PARAM.SFO` title equals the game title (one serial only). A folder that carries another installed game's id is skipped. Skipped folders are named in a notice (a toast before launch); when no folder matches, nothing is restored. A manual restore then offers to restore every folder after an explicit confirmation. Before launch, the game's own record is preferred over another game's newer record by its file name.
 
+Cemu save restores (automatic before launch and manual) write into the game's own title folder, `<mlc>/usr/save/<high>/<low>/user/`, which the app finds from the game's Wii U title id. This applies to records from older releases too. Before a restore replaces local save files, the app copies those files to a backup folder beside `user` (`user.grid-backup-<time>`) and names it in a notice. When the title id is unknown, nothing is restored and a notice says why. A Cemu upload puts all user folders of the title in one record whose file name starts with the title id; before launch, that record is preferred over a newer record without the id.
+
 ## Folder-based saves
 For emulators which store saves in a subfolder, the archive should include the relevant subfolder and its contents.
 

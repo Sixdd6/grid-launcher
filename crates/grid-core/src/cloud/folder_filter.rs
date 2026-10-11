@@ -25,9 +25,9 @@
 //!   game's.
 //!
 //! Cemu records are not filtered here: their top-level folders are Cemu
-//! user folders (`80000001`, `common`) with no title id, and restore puts
-//! them at `<mlc>/usr/save/<folder>`, outside every title folder, so a
-//! Cemu restore cannot overwrite another game's save.
+//! user folders (`80000001`, `common`) with no title id. A Cemu restore
+//! places them in the game's own title folder instead (see
+//! `cloud::cemu_saves`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -394,7 +394,18 @@ pub fn preferred_record<'a>(
     emulator_name: &str,
     keys: &FolderMatchKeys,
 ) -> Option<&'a Value> {
-    let ids = keys.record_ids();
+    preferred_record_by_ids(records, emulator_name, keys.record_ids())
+}
+
+/// The newest record of this emulator whose file name (compared
+/// `[A-Z0-9]`-only, uppercase) holds one of `ids`, else
+/// [`latest_server_record`]. `ids` must already be uppercase `[A-Z0-9]`.
+/// [`preferred_record`] (RPCS3) and the Cemu restore (title id) use it.
+pub fn preferred_record_by_ids<'a>(
+    records: &'a [Value],
+    emulator_name: &str,
+    ids: &[String],
+) -> Option<&'a Value> {
     if !ids.is_empty() {
         let named: Vec<Value> = records
             .iter()

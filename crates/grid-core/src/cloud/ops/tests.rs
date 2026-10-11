@@ -2462,3 +2462,327 @@ async fn rpcs3_auto_restore_picks_the_games_own_record() {
     );
     assert!(!savedata.path().join("BCUS98174AUTO").exists());
 }
+
+// --- Cemu: restore into the game's own title folder ---------------------
+
+const CEMU_ID: &str = "0005000010145D00";
+
+fn cemu_fixture(save_root: &Path) -> Fixture {
+    Fixture::new(config_with(
+        entry_named("Cemu", save_root.to_str().unwrap()),
+        "Wii U",
+    ))
+}
+
+fn cemu_game() -> CloudGame {
+    let mut target = game("Some Wii U Game", "Wii U", "7");
+    target.rom_file_name = format!("Some Wii U Game [{CEMU_ID}].wua");
+    target
+}
+
+fn cemu_user_dir(save_root: &Path) -> std::path::PathBuf {
+    save_root.join("00050000").join("10145d00").join("user")
+}
+
+/// The file name and zip bytes of the one save upload `requests` holds.
+fn uploaded_save(requests: &[wiremock::Request]) -> (String, Vec<u8>) {
+    let posts = requests_to(requests, "POST", "/api/saves");
+    assert_eq!(posts.len(), 1, "one upload");
+    let post = &posts[0];
+    let content_type = post
+        .headers
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    let boundary = content_type.split("boundary=").nth(1).unwrap().trim();
+    let body = &post.body;
+    let text = String::from_utf8_lossy(body);
+    let name_at = text.find("filename=\"").unwrap() + "filename=\"".len();
+    let name_end = name_at + text[name_at..].find('"').unwrap();
+    let file_name = text[name_at..name_end].to_string();
+    let start = body
+        .windows(4)
+        .position(|w| w == b"PK\x03\x04")
+        .expect("zip bytes in the body");
+    let closing = format!("\r\n--{boundary}");
+    let end = start
+        + body[start..]
+            .windows(closing.len())
+            .position(|w| w == closing.as_bytes())
+            .expect("closing boundary");
+    (file_name, body[start..end].to_vec())
+}
+
+fn zip_names(bytes: &[u8]) -> Vec<String> {
+    let archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut names: Vec<String> = archive.file_names().map(str::to_string).collect();
+    names.sort();
+    names
+}
+
+/// An old record (`80000001-<time>.zip`, no title id) restores into the
+/// game's own `user` folder, not `<save root>/80000001`. The local file it
+/// replaces is copied to a backup folder first, and the notice says so.
+#[tokio::test]
+async fn cemu_old_record_restores_into_the_games_title_folder_with_a_backup() {
+    let server = MockServer::start().await;
+    mock_ok(
+        &server,
+        "GET",
+        "/api/saves",
+        json!([
+            {"id": 61, "emulator": "Cemu", "file_name": "common-2026-01-01T10-00-00.zip",
+             "updated_at": "2026-01-01T10:00:00Z"},
+            {"id": 62, "emulator": "Cemu", "file_name": "80000001-2026-01-01T10-00-01.zip",
+             "updated_at": "2026-01-01T10:00:01Z"}
+        ]),
+    )
+    .await;
+    serve_save(
+        &server,
+        61,
+        zip_bytes(&[("common/shared.dat", b"cloud-common")]),
+    )
+    .await;
+    serve_save(
+        &server,
+        62,
+        zip_bytes(&[("80000001/game.sav", b"cloud-save")]),
+    )
+    .await;
+    let client = client_for(&server);
+
+    let saves = TempDir::new().unwrap();
+    let user = cemu_user_dir(saves.path());
+    write_file(&user.join("80000001/game.sav"), b"local-save");
+    let fx = cemu_fixture(saves.path());
+    let mut caches = CloudCaches::default();
+
+    let report = restore_cloud_save_for_game_with(
+        &client,
+        &fx.ctx(),
+        &mut caches,
+        &cemu_game(),
+        None,
+        false,
+        false,
+        FolderPolicy::MatchedOnly,
+    )
+    .await;
+
+    assert!(report.ok, "{:?}", report.messages);
+    assert_eq!(report.record_id, "62", "no id match: the newest record");
+    assert_eq!(
+        fs::read(user.join("80000001/game.sav")).unwrap(),
+        b"cloud-save"
+    );
+    assert!(!saves.path().join("80000001").exists());
+    let backups: Vec<_> = fs::read_dir(user.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with("user.grid-backup-"))
+        .collect();
+    assert_eq!(backups.len(), 1, "{backups:?}");
+    let backup = user.parent().unwrap().join(&backups[0]);
+    assert_eq!(
+        fs::read(backup.join("80000001/game.sav")).unwrap(),
+        b"local-save"
+    );
+    let notice = format!(
+        "Cloud save for Some Wii U Game: 1 existing save file was replaced. Copies are in 00050000/10145d00/{} in the Cemu save folder.",
+        backups[0]
+    );
+    assert_eq!(
+        texts(&report.messages),
+        vec![RESTORE_SUCCESS.to_string(), notice.clone()]
+    );
+    assert_eq!(report.notice, Some(notice));
+    assert!(report.skipped_folders.is_empty());
+    assert_eq!(report.update.last_downloaded_save_id.as_deref(), Some("62"));
+}
+
+/// A restore that replaces nothing makes no backup folder and no notice.
+#[tokio::test]
+async fn cemu_restore_into_an_empty_title_folder_makes_no_backup() {
+    let server = MockServer::start().await;
+    serve_save(
+        &server,
+        63,
+        zip_bytes(&[("80000001/game.sav", b"cloud-save")]),
+    )
+    .await;
+    let client = client_for(&server);
+
+    let saves = TempDir::new().unwrap();
+    let fx = cemu_fixture(saves.path());
+    let mut caches = CloudCaches::default();
+    let record = json!({"id": 63, "emulator": "Cemu", "file_name": "80000001-x.zip"});
+
+    let report = restore_cloud_save_for_game_with(
+        &client,
+        &fx.ctx(),
+        &mut caches,
+        &cemu_game(),
+        Some(&record),
+        false,
+        false,
+        FolderPolicy::MatchedOnly,
+    )
+    .await;
+
+    assert!(report.ok, "{:?}", report.messages);
+    assert_eq!(texts(&report.messages), vec![RESTORE_SUCCESS]);
+    assert_eq!(report.notice, None);
+    let user = cemu_user_dir(saves.path());
+    assert_eq!(
+        fs::read(user.join("80000001/game.sav")).unwrap(),
+        b"cloud-save"
+    );
+    let title_dir = user.parent().unwrap();
+    let entries: Vec<_> = fs::read_dir(title_dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(entries, vec!["user".to_string()]);
+}
+
+/// Unknown title id: nothing is downloaded or written; the notice explains
+/// why (auto-restore toasts it, a manual restore shows it).
+#[tokio::test]
+async fn cemu_restore_with_an_unknown_title_id_restores_nothing() {
+    let server = MockServer::start().await;
+    serve_save(
+        &server,
+        64,
+        zip_bytes(&[("80000001/game.sav", b"cloud-save")]),
+    )
+    .await;
+    let client = client_for(&server);
+
+    let saves = TempDir::new().unwrap();
+    let fx = cemu_fixture(saves.path());
+    let mut caches = CloudCaches::default();
+    let record = json!({"id": 64, "emulator": "Cemu", "file_name": "80000001-x.zip"});
+
+    let report = restore_cloud_save_for_game_with(
+        &client,
+        &fx.ctx(),
+        &mut caches,
+        &game("Some Wii U Game", "Wii U", "7"),
+        Some(&record),
+        false,
+        false,
+        FolderPolicy::MatchedOnly,
+    )
+    .await;
+
+    let notice = "Cloud save for Some Wii U Game was not restored: GRID cannot find the game's Wii U title id, so it does not know which Cemu save folder the save belongs to.";
+    assert!(!report.ok);
+    assert_eq!(texts(&report.messages), vec![notice]);
+    assert_eq!(report.notice.as_deref(), Some(notice));
+    assert_eq!(report.update, SyncStateUpdate::default());
+    assert_eq!(fs::read_dir(saves.path()).unwrap().count(), 0);
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+/// A new upload puts every user folder of the title into ONE record named
+/// after the title id; the other title's folder stays out. Restoring it
+/// round-trips, and the before-launch pick prefers it over a newer record
+/// without the id.
+#[tokio::test]
+async fn cemu_upload_names_the_record_after_the_title_and_restore_prefers_it() {
+    let saves = TempDir::new().unwrap();
+    let user = cemu_user_dir(saves.path());
+    write_file(&user.join("80000001/game.sav"), b"local-save");
+    write_file(&user.join("common/shared.dat"), b"local-common");
+    write_file(
+        &saves
+            .path()
+            .join("00050000/1010ec00/user/80000001/other.sav"),
+        b"other-game",
+    );
+    let fx = cemu_fixture(saves.path());
+
+    let server = MockServer::start().await;
+    mock_ok(&server, "POST", "/api/saves", json!({})).await;
+    mock_ok(&server, "GET", "/api/saves", json!([])).await;
+    let client = client_for(&server);
+    let mut caches = CloudCaches::default();
+    let report = upload_cloud_files_for_game(
+        &client,
+        &fx.ctx(),
+        &mut caches,
+        &cemu_game(),
+        SaveType::Save,
+    )
+    .await;
+    assert_eq!(
+        (report.uploaded, report.total),
+        (1, 1),
+        "{:?}",
+        report.messages
+    );
+
+    let (file_name, archive) = uploaded_save(&server.received_requests().await.unwrap());
+    assert!(
+        file_name.starts_with(&format!("{CEMU_ID}-")) && file_name.ends_with(".zip"),
+        "{file_name}"
+    );
+    assert_eq!(
+        zip_names(&archive),
+        vec![
+            "80000001/game.sav".to_string(),
+            "common/shared.dat".to_string()
+        ]
+    );
+
+    // Round trip: the local save changes, then the uploaded record restores.
+    write_file(&user.join("80000001/game.sav"), b"changed-locally");
+    let server = MockServer::start().await;
+    mock_ok(
+        &server,
+        "GET",
+        "/api/saves",
+        json!([
+            {"id": 71, "emulator": "Cemu", "file_name": file_name,
+             "updated_at": "2026-01-01T10:00:00Z"},
+            {"id": 72, "emulator": "Cemu", "file_name": "80000001-2026-01-02T10-00-00.zip",
+             "updated_at": "2026-01-02T10:00:00Z"}
+        ]),
+    )
+    .await;
+    serve_save(&server, 71, archive).await;
+    let client = client_for(&server);
+    let mut caches = CloudCaches::default();
+
+    let report = restore_cloud_save_for_game_with(
+        &client,
+        &fx.ctx(),
+        &mut caches,
+        &cemu_game(),
+        None,
+        false,
+        false,
+        FolderPolicy::MatchedOnly,
+    )
+    .await;
+
+    assert!(report.ok, "{:?}", report.messages);
+    assert_eq!(report.record_id, "71");
+    assert_eq!(
+        fs::read(user.join("80000001/game.sav")).unwrap(),
+        b"local-save"
+    );
+    assert_eq!(
+        fs::read(user.join("common/shared.dat")).unwrap(),
+        b"local-common"
+    );
+    assert!(
+        report.notice.is_some(),
+        "two files replaced: a backup notice"
+    );
+}

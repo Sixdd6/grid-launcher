@@ -1802,12 +1802,15 @@ fn emit_upload_finished(app: &AppHandle, title: &str, messages: &[CloudMessage])
 
 /// G1-Q: emitted when the pre-launch restore skipped save folders it could
 /// not match to the game (old uploads put other games' folders under one
-/// ROM). The Shell turns it into one toast. Once per game and record per
-/// process, so a record that never matches does not toast on every launch.
+/// ROM). Cemu: also when the restore backed up replaced files, or could not
+/// restore because the game's Wii U title id is unknown. The Shell turns it
+/// into one toast. Once per game and record per process, so a record that
+/// never matches does not toast on every launch.
 pub const CLOUD_RESTORE_NOTICE_EVENT: &str = "cloud-restore-notice";
 
 /// The [`CLOUD_RESTORE_NOTICE_EVENT`] payload: the game title and the
-/// restore's notice text (folder names only — no path, URL, or token).
+/// restore's notice text (folder names, or a backup folder relative to the
+/// save root — no full path, URL, or token).
 /// `failed` is true when nothing was restored.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CloudRestoreNotice {
@@ -1816,12 +1819,10 @@ pub struct CloudRestoreNotice {
     pub failed: bool,
 }
 
-/// The toast payload for a restore that skipped folders, `None` when it
-/// skipped none.
+/// The toast payload for a restore that carries a notice (G1-Q skipped
+/// folders; Cemu backup of replaced files or unknown title id), `None`
+/// when it has none. `failed` when nothing was restored.
 fn restore_notice_payload(title: &str, report: &SaveRestoreReport) -> Option<CloudRestoreNotice> {
-    if report.skipped_folders.is_empty() {
-        return None;
-    }
     let message = report.notice.as_deref()?.trim();
     if message.is_empty() {
         return None;
@@ -1829,7 +1830,7 @@ fn restore_notice_payload(title: &str, report: &SaveRestoreReport) -> Option<Clo
     Some(CloudRestoreNotice {
         title: title.trim().to_string(),
         message: message.to_string(),
-        failed: report.nothing_matched,
+        failed: !report.ok,
     })
 }
 
@@ -2451,6 +2452,32 @@ mod tests {
             payload.message,
             "Cloud save for Flower holds saves for several games; …"
         );
+    }
+
+    /// Cemu: a notice with no skipped folders still toasts — the backup
+    /// of replaced files (restored) and the unknown title id (not
+    /// restored).
+    #[test]
+    fn restore_notice_payload_carries_the_cemu_notices() {
+        let backup = SaveRestoreReport {
+            ok: true,
+            notice: Some("Cloud save for Game: 1 existing save file was replaced.".to_string()),
+            ..Default::default()
+        };
+        let payload = restore_notice_payload("Game", &backup).unwrap();
+        assert!(!payload.failed);
+        assert_eq!(
+            payload.message,
+            "Cloud save for Game: 1 existing save file was replaced."
+        );
+
+        let unknown = SaveRestoreReport {
+            ok: false,
+            notice: Some("Cloud save for Game was not restored.".to_string()),
+            ..Default::default()
+        };
+        let payload = restore_notice_payload("Game", &unknown).unwrap();
+        assert!(payload.failed);
     }
 
     #[test]

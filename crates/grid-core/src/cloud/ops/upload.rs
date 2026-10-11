@@ -18,10 +18,10 @@ use super::super::retention::prune_server_save_records;
 use super::super::scope::SaveScope;
 use super::super::tokens::psp_id_tokens;
 use super::super::transfer::{
-    directory_archive_upload_jobs, filter_upload_jobs_by_session_window, grouped_file_upload_jobs,
-    no_jobs_message, ppsspp_state_upload_jobs, retroarch_state_upload_jobs,
-    session_screenshot_path, shared_single_upload_job, upload_completion_message, BuiltJobs,
-    UploadJob, UploadOutcome,
+    cemu_archive_upload_jobs, directory_archive_upload_jobs, filter_upload_jobs_by_session_window,
+    grouped_file_upload_jobs, no_jobs_message, ppsspp_state_upload_jobs,
+    retroarch_state_upload_jobs, session_screenshot_path, shared_single_upload_job,
+    upload_completion_message, BuiltJobs, UploadJob, UploadOutcome,
 };
 use super::super::xemu_sync::{build_xemu_save_archive, xemu_hdd_path_from_config};
 use super::super::{CloudGame, IgnoreSets, SaveType};
@@ -255,7 +255,13 @@ fn build_jobs(
             SaveType::Save,
         );
 
-        let mut built = directory_archive_upload_jobs(&folders, &ignore)
+        // Cemu: one record per title, named after the title id.
+        let folder_jobs = if is_cemu(ctx, name, Some(entry)) {
+            cemu_archive_upload_jobs(&folders, &ignore)
+        } else {
+            directory_archive_upload_jobs(&folders, &ignore)
+        };
+        let mut built = folder_jobs
             .map_err(|e| CloudMessage::warning(format!("Failed to create save archive: {e}")))?;
 
         if is_xemu(ctx, name, Some(entry)) {

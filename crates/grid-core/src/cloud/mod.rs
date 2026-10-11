@@ -6,6 +6,7 @@
 
 pub mod archive;
 pub mod candidates;
+pub mod cemu_saves;
 pub mod dirs;
 pub mod folder_filter;
 pub mod install_match;

@@ -188,7 +188,19 @@ fn write_directory_archive(
 ) -> io::Result<()> {
     let file = fs::File::create(archive_path)?;
     let mut writer = ZipWriter::new(file);
+    write_directory_entries(&mut writer, dir, dir_name, ignore)?;
+    writer.finish().map_err(zip_err_to_io)?;
+    Ok(())
+}
 
+/// Writes every non-ignored file under `dir` into `writer`, each member
+/// named `"<dir_name>/<path relative to dir, posix-separated>"`.
+fn write_directory_entries<W: Write + io::Seek>(
+    writer: &mut ZipWriter<W>,
+    dir: &Path,
+    dir_name: &str,
+    ignore: &IgnoreSets,
+) -> io::Result<()> {
     for candidate in walk_all_entries(dir)? {
         if !candidate.is_file() {
             continue;
@@ -200,11 +212,45 @@ fn write_directory_archive(
             .strip_prefix(dir)
             .expect("walk_all_entries always yields paths under root");
         let member_name = format!("{dir_name}/{}", to_posix_member(relative));
-        write_file_entry(&mut writer, &candidate, &member_name)?;
+        write_file_entry(writer, &candidate, &member_name)?;
     }
-
-    writer.finish().map_err(zip_err_to_io)?;
     Ok(())
+}
+
+// --- zip_directories_for_upload ------------------------------------------
+
+/// [`zip_directory_for_upload`] for several folders in ONE temp archive:
+/// each folder's files are stored under the folder's own basename, as
+/// `zip_directory_for_upload` stores them. The archive's file name comes
+/// from `title` (via [`temp_archive_path`]). A Cemu upload uses it to put
+/// every user folder of one title (`80000001`, `common`) in one record.
+pub fn zip_directories_for_upload(
+    dirs: &[PathBuf],
+    title: &str,
+    ignore: &IgnoreSets,
+) -> io::Result<PathBuf> {
+    let archive_path = temp_archive_path(title);
+    let written = (|| -> io::Result<()> {
+        let file = fs::File::create(&archive_path)?;
+        let mut writer = ZipWriter::new(file);
+        for dir in dirs {
+            let dir_name = dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("archive")
+                .to_string();
+            write_directory_entries(&mut writer, dir, &dir_name, ignore)?;
+        }
+        writer.finish().map_err(zip_err_to_io)?;
+        Ok(())
+    })();
+    match written {
+        Ok(()) => Ok(archive_path),
+        Err(err) => {
+            unlink_best_effort(&archive_path);
+            Err(err)
+        }
+    }
 }
 
 // --- zip_grouped_files_for_upload -----------------------------------------
@@ -694,6 +740,38 @@ pub fn archive_top_level_entries(bytes: &[u8]) -> Result<Vec<(String, bool)>, St
         }
     }
     Ok(entries)
+}
+
+/// The file members [`extract_payload_zip_only`] (or, with `top_level`
+/// `None`, [`extract_payload_zip`]) would write, as normalized
+/// `/`-separated names relative to the destination: directory entries,
+/// unsafe names, and names `ignore` blocks are left out, as extraction
+/// leaves them out. Reads only the central directory. A Cemu restore uses
+/// it to find the local files a restore would replace before it writes.
+pub fn payload_zip_file_members(
+    bytes: &[u8],
+    ignore: &IgnoreSets,
+    top_level: Option<&BTreeSet<String>>,
+) -> Result<Vec<String>, String> {
+    let archive = ZipArchive::new(Cursor::new(bytes))
+        .map_err(|_| "Downloaded save is not a zip archive.".to_string())?;
+    let mut members: Vec<String> = Vec::new();
+    for raw_name in archive.file_names() {
+        let normalized = raw_name.replace('\\', "/");
+        if normalized.ends_with('/') || !is_safe_member_name(&normalized) {
+            continue;
+        }
+        if top_level.is_some_and(|only| !only.contains(top_level_component(&normalized))) {
+            continue;
+        }
+        if ignore.blocks(Path::new(&normalized)) {
+            continue;
+        }
+        if !members.contains(&normalized) {
+            members.push(normalized);
+        }
+    }
+    Ok(members)
 }
 
 /// The top-level component of a normalized (`/`-separated) member name.

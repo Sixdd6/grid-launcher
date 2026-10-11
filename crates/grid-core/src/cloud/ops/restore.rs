@@ -11,6 +11,11 @@
 //! **G1-Q:** an RPCS3 save record restores only the savedata folders
 //! [`folders_to_restore`] matches to the game (see `cloud::folder_filter`);
 //! a confirmed manual restore can pass [`FolderPolicy::RestoreAll`].
+//!
+//! **Cemu:** a save record restores into the game's own title folder
+//! `<save root>/<high>/<low>/user/`, found from the game's Wii U title id,
+//! with a backup of the local files it replaces (`cloud::cemu_saves`). An
+//! unknown title id restores nothing.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -25,9 +30,13 @@ use crate::romm::RommClient;
 use super::super::archive::extract_payload_zip;
 use super::super::archive::extract_payload_zip_only;
 use super::super::candidates::file_candidates;
+use super::super::cemu_saves::{
+    ambiguous_title_notice, backup_notice, backup_stamp, cemu_title_dir, cemu_title_for_game,
+    place_cemu_payload, unknown_title_notice, CemuTitleLookup,
+};
 use super::super::folder_filter::{
-    folders_to_restore, nothing_matched_notice, preferred_record, record_folders, skipped_notice,
-    FolderMatchKeys, FolderPolicy, FolderSelection, SkipReason,
+    folders_to_restore, nothing_matched_notice, preferred_record, preferred_record_by_ids,
+    record_folders, skipped_notice, FolderMatchKeys, FolderPolicy, FolderSelection, SkipReason,
 };
 use super::super::restore::{
     latest_server_record, latest_server_records_by_slot, preferred_restore_target_path,
@@ -155,8 +164,10 @@ pub struct SaveRestoreReport {
     pub nothing_matched: bool,
     /// The id of the record the restore used, `""` before one was chosen.
     pub record_id: String,
-    /// The G1-Q notice about skipped folders (also in `messages`), for a
-    /// caller that reports it on its own, such as a toast.
+    /// The G1-Q notice about skipped folders, or the Cemu notice about a
+    /// backup of replaced files or an unknown title id (also in
+    /// `messages`), for a caller that reports it on its own, such as a
+    /// toast.
     pub notice: Option<String>,
 }
 
@@ -281,6 +292,10 @@ async fn restore_save_inner(
     // uploads did); match its folders to this game.
     let folder_keys = is_rpcs3(ctx, &name, Some(&entry))
         .then(|| FolderMatchKeys::for_rpcs3_game(game, ctx.all_games));
+    // Cemu: a record restores into the game's own title folder, found from
+    // the game's Wii U title id.
+    let cemu_title =
+        is_cemu(ctx, &name, Some(&entry)).then(|| cemu_title_for_game(game, &directories));
 
     // 6. Record selection.
     let scope = scope_for(ctx, &name, Some(&entry), &game.platform, SaveType::Save);
@@ -296,9 +311,12 @@ async fn restore_save_inner(
                 }
             };
             if scope == SaveScope::PerGame {
-                let latest = match &folder_keys {
-                    Some(keys) => preferred_record(&all, &name, keys),
-                    None => latest_server_record(&all, &name),
+                let latest = match (&folder_keys, &cemu_title) {
+                    (Some(keys), _) => preferred_record(&all, &name, keys),
+                    (None, Some(CemuTitleLookup::Found(title))) => {
+                        preferred_record_by_ids(&all, &name, &[title.id()])
+                    }
+                    _ => latest_server_record(&all, &name),
                 };
                 latest.cloned().into_iter().collect()
             } else {
@@ -350,10 +368,25 @@ async fn restore_save_inner(
         return restore_xemu(client, &entry, &records, save_id, server_latest_timestamp).await;
     }
 
+    // Cemu: into the game's own title folder, with a backup of replaced
+    // files. Cemu's scope is per-game, so `records` holds one record.
+    if let Some(lookup) = &cemu_title {
+        return restore_cemu(
+            client,
+            game,
+            &directories,
+            &ignore,
+            &records[0],
+            lookup,
+            save_id,
+            folders,
+        )
+        .await;
+    }
+
     let is_folder_save = is_ppsspp(ctx, &name, Some(&entry))
         || is_rpcs3(ctx, &name, Some(&entry))
-        || is_pcsx2(ctx, &name, Some(&entry))
-        || is_cemu(ctx, &name, Some(&entry));
+        || is_pcsx2(ctx, &name, Some(&entry));
 
     let plan = RestorePlan {
         directories: &directories,
@@ -433,6 +466,72 @@ fn newest_restored(records: &[Value], primary_id: String, seed_timestamp: f64) -
         }
     }
     (latest_id, latest_timestamp)
+}
+
+/// A Cemu save record restores into the game's own
+/// `<save root>/<high>/<low>/user/` folder (see `cloud::cemu_saves`).
+/// Local files it replaces are copied to a backup folder first; the backup
+/// is reported in a notice. An unknown or ambiguous title id restores
+/// nothing: there is no title folder to place the save in.
+#[allow(clippy::too_many_arguments)]
+async fn restore_cemu(
+    client: &RommClient,
+    game: &CloudGame,
+    directories: &[PathBuf],
+    ignore: &IgnoreSets,
+    record: &Value,
+    lookup: &CemuTitleLookup,
+    save_id: String,
+    folders: &mut FolderOutcome,
+) -> RestoreOutcome {
+    let title = match lookup {
+        CemuTitleLookup::Found(title) => *title,
+        CemuTitleLookup::Unknown | CemuTitleLookup::Ambiguous(_) => {
+            let notice = match lookup {
+                CemuTitleLookup::Ambiguous(titles) => ambiguous_title_notice(&game.title, titles),
+                _ => unknown_title_notice(&game.title),
+            };
+            folders.notice = Some(notice.clone());
+            return stop(CloudMessage::warning(notice));
+        }
+    };
+    let Some(title_dir) = cemu_title_dir(directories, &title) else {
+        return stop(CloudMessage::warning(no_directories_message(
+            SaveType::Save,
+            "Cemu",
+        )));
+    };
+    let failed = |message: String| {
+        stop(CloudMessage::warning(format!(
+            "Failed to restore cloud save: {message}"
+        )))
+    };
+    let payload = match download_save(client, record).await {
+        Ok(payload) => payload,
+        Err(message) => return failed(message),
+    };
+    let placement = match place_cemu_payload(&payload, &title_dir, ignore, &backup_stamp()) {
+        Ok(placement) => placement,
+        Err(message) => return failed(message),
+    };
+    if placement.extracted == 0 {
+        return failed(SAVE_ARCHIVE_NOTHING.to_string());
+    }
+
+    let mut messages = vec![CloudMessage::info(RESTORE_SUCCESS)];
+    if let Some(notice) = backup_notice(&game.title, &title, &placement) {
+        messages.push(CloudMessage::info(notice.clone()));
+        folders.notice = Some(notice);
+    }
+    (
+        true,
+        messages,
+        SyncStateUpdate {
+            last_downloaded_save_id: Some(save_id),
+            last_server_timestamp: Some(record_timestamp(record)),
+            ..Default::default()
+        },
+    )
 }
 
 struct RestorePlan<'a> {
