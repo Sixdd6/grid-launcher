@@ -19,6 +19,7 @@ pub mod state;
 pub mod tokens;
 pub mod transfer;
 pub mod window;
+pub mod wua;
 pub mod xemu_sync;
 
 use std::collections::BTreeSet;
@@ -61,7 +62,8 @@ impl SaveType {
 ///   A server-only game has none.
 /// - `title_id` / `base_title_id` have no source (neither the registry nor
 ///   the RomM API carries them), so they are always `""`. For Wii U the
-///   real source is the `app.xml`/`meta.xml` scan in
+///   real sources are the `app.xml`/`meta.xml` scan and the folder names
+///   inside an installed `.wua` ([`wua::wua_title_ids`]), both in
 ///   [`tokens::cemu_game_title_id_tokens`].
 ///
 /// An unknown id matches nothing: the RPCS3 and Cemu save scanners return

@@ -1764,6 +1764,47 @@ fn cemu_targets_only_the_games_own_title_folder() {
     );
 }
 
+/// A `.wua` install whose name has no title id targets the title folder
+/// the archive's own `<id>_v<version>` folder names.
+#[test]
+fn cemu_targets_the_title_folder_named_inside_a_wua() {
+    let saves = TempDir::new().unwrap();
+    let own = saves
+        .path()
+        .join("00050000/101c9400/user/80000001/game.sav");
+    let other = saves
+        .path()
+        .join("00050000/1010ed00/user/80000001/other.sav");
+    write_file(&own, b"own");
+    write_file(&other, b"other");
+    set_mtime(&own, 1_500_000_000);
+    set_mtime(&other, 1_600_000_000);
+
+    let library = TempDir::new().unwrap();
+    let wua = library
+        .path()
+        .join("Some Wii U Game (USA) (DLC) (v208).wua");
+    write_file(
+        &wua,
+        &crate::cloud::wua::test_wua(&["00050000101c9400_v0", "content"]),
+    );
+
+    let entry = entry_named("Cemu", saves.path().to_str().unwrap());
+    let fx = Fixture::new(config_with(entry.clone(), "Wii U"));
+    let mut target = game("Some Wii U Game", "Wii U", "7");
+    target.rom_file_name = "Some Wii U Game (USA) (DLC) (v208).wua".to_string();
+    target.archive_path = wua.to_string_lossy().into_owned();
+
+    let mut caches = CloudCaches::default();
+    let (files, folders) =
+        cloud_sync_targets(&fx.ctx(), &mut caches, &target, &entry, SaveType::Save);
+    assert!(files.is_empty());
+    assert_eq!(
+        folders,
+        vec![long(&saves.path().join("00050000/101c9400/user/80000001"))]
+    );
+}
+
 /// D1: xemu contributes no generic save candidates, and its local mtime
 /// stands in as the raw image file's own.
 #[test]

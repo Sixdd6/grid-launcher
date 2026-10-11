@@ -511,6 +511,23 @@ mod tests {
     }
 
     #[test]
+    fn title_for_game_reads_the_ids_inside_a_wua() {
+        let dir = tempfile::tempdir().unwrap();
+        let wua = dir.path().join("Some Wii U Game (USA) (DLC) (v208).wua");
+        let names = ["00050000101c9400_v0", "0005000c101c9400_v0", "content"];
+        fs::write(&wua, crate::cloud::wua::test_wua(&names)).unwrap();
+        let game = CloudGame {
+            rom_file_name: "Some Wii U Game (USA) (DLC) (v208).wua".to_string(),
+            archive_path: wua.to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        assert_eq!(
+            cemu_title_for_game(&game, &[]),
+            CemuTitleLookup::Found(CemuTitle::from_hex16("00050000101C9400").unwrap())
+        );
+    }
+
+    #[test]
     fn title_for_game_with_two_titles_takes_the_one_with_a_save_folder() {
         let root = tempfile::tempdir().unwrap();
         let game = CloudGame {

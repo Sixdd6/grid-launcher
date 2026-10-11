@@ -23,6 +23,7 @@ use crate::library::paths::expand_home;
 
 use super::install_match::extracted_file_candidates;
 use super::transfer::SUPPORTED_IMAGE_EXTENSIONS;
+use super::wua::wua_title_ids;
 use super::CloudGame;
 
 static NON_ALNUM_LOWER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^a-z0-9]+").unwrap());
@@ -352,6 +353,10 @@ static XML_TITLE_ID_RE: LazyLock<Regex> =
 ///   subfolders, and in `<extracted_dir>/code/app.xml` and
 ///   `<extracted_dir>/meta/meta.xml` (`~` expanded). Each path is read once
 ///   (case-insensitive dedupe) and only when it is an existing file.
+/// - the same from the `<id>_v<version>` folder names inside a `.wua` file
+///   at `archive_path` (a downloaded single-file install) or
+///   `extracted_path` (a folder-routed install), `~` expanded, when it is
+///   an existing file ([`super::wua::wua_title_ids`]).
 ///
 /// The title contributes nothing: a game with only a title has no tokens,
 /// so it matches no Cemu save folder.
@@ -374,6 +379,19 @@ pub fn cemu_game_title_id_tokens(game: &CloudGame) -> BTreeSet<String> {
         &game.extracted_dir,
     ] {
         add_cemu_title_id_variants(value, &mut tokens);
+    }
+
+    for value in [&game.archive_path, &game.extracted_path] {
+        let value = value.trim();
+        if !value.to_lowercase().ends_with(".wua") {
+            continue;
+        }
+        let path = expand_home(value);
+        if path.is_file() {
+            for id in wua_title_ids(&path) {
+                add_cemu_title_id_variants(&id, &mut tokens);
+            }
+        }
     }
 
     let mut xml_candidates: Vec<PathBuf> = Vec::new();
@@ -577,6 +595,7 @@ pub fn state_candidate_hash_group_key(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cloud::wua::test_wua;
 
     fn game(overrides: impl FnOnce(&mut CloudGame)) -> CloudGame {
         let mut g = CloudGame::default();
@@ -937,6 +956,33 @@ mod tests {
             cemu_game_title_id_tokens(&pair),
             set(&["0005000010145D00", "00050000", "10145D00"])
         );
+    }
+
+    #[test]
+    fn cemu_game_tokens_read_the_title_id_inside_a_wua() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let wua = dir.path().join("Some Wii U Game (USA) (v208).wua");
+        std::fs::write(&wua, test_wua(&["00050000101c9400_v0", "content"])).unwrap();
+        let path = wua.to_string_lossy().into_owned();
+        let expected = set(&["00050000101C9400", "00050000", "101C9400"]);
+
+        let downloaded = game(|g| {
+            g.rom_file_name = "Some Wii U Game (USA) (v208).wua".to_string();
+            g.archive_path = path.clone();
+        });
+        assert_eq!(cemu_game_title_id_tokens(&downloaded), expected);
+
+        let folder_routed = game(|g| g.extracted_path = path.clone());
+        assert_eq!(cemu_game_title_id_tokens(&folder_routed), expected);
+    }
+
+    #[test]
+    fn cemu_game_tokens_are_empty_for_a_wua_without_a_title_folder() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let wua = dir.path().join("Some Wii U Game.wua");
+        std::fs::write(&wua, test_wua(&["content", "meta"])).unwrap();
+        let g = game(|g| g.archive_path = wua.to_string_lossy().into_owned());
+        assert!(cemu_game_title_id_tokens(&g).is_empty());
     }
 
     #[test]
