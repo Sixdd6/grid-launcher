@@ -61,7 +61,7 @@ fn table_columns(conn: &Connection) -> Vec<String> {
 }
 
 #[test]
-fn open_creates_file_and_sets_user_version_8() {
+fn open_creates_file_and_sets_user_version_9() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     let registry = Registry::open(&path).unwrap();
@@ -71,12 +71,12 @@ fn open_creates_file_and_sets_user_version_8() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     drop(registry);
 }
 
 #[test]
-fn fresh_db_is_v8_and_has_the_twelve_columns() {
+fn fresh_db_is_v9_and_has_the_twelve_columns() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     let registry = Registry::open(&path).unwrap();
@@ -85,7 +85,7 @@ fn fresh_db_is_v8_and_has_the_twelve_columns() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let columns = table_columns(&conn);
     for column in V3_COLUMN_NAMES {
@@ -260,7 +260,7 @@ fn open_migrates_a_v1_database_and_update_images_round_trips() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     let rows = registry.all().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].cover_small_path, "");
@@ -310,7 +310,7 @@ fn open_migrates_a_v1_database_that_already_has_one_v2_column() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let columns = table_columns(&conn);
     for column in ["cover_small_path", "cover_large_path", "screenshot_urls"] {
@@ -352,7 +352,7 @@ fn v2_schema() -> String {
 }
 
 #[test]
-fn migrates_v1_to_v8_transactionally() {
+fn migrates_v1_to_v9_transactionally() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -368,7 +368,7 @@ fn migrates_v1_to_v8_transactionally() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let columns = table_columns(&conn);
     for column in V3_COLUMN_NAMES {
@@ -388,7 +388,7 @@ fn migrates_v1_to_v8_transactionally() {
 }
 
 #[test]
-fn migrates_v2_to_v8() {
+fn migrates_v2_to_v9() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -404,7 +404,7 @@ fn migrates_v2_to_v8() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let columns = table_columns(&conn);
     for column in V3_COLUMN_NAMES {
@@ -445,7 +445,7 @@ fn migration_is_idempotent_when_columns_preexist() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let columns = table_columns(&conn);
     for column in V3_COLUMN_NAMES {
@@ -554,7 +554,7 @@ fn v3_schema() -> String {
 }
 
 #[test]
-fn fresh_db_is_v8_and_has_last_played_at() {
+fn fresh_db_is_v9_and_has_last_played_at() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     let registry = Registry::open(&path).unwrap();
@@ -563,7 +563,7 @@ fn fresh_db_is_v8_and_has_last_played_at() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     let columns = table_columns(&conn);
     assert!(
         columns.iter().any(|c| c == "last_played_at"),
@@ -579,7 +579,7 @@ fn fresh_db_is_v8_and_has_last_played_at() {
 }
 
 #[test]
-fn migrates_v3_to_v8_keeping_rows_and_defaulting_last_played_to_zero() {
+fn migrates_v3_to_v9_keeping_rows_and_defaulting_last_played_to_zero() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -599,7 +599,7 @@ fn migrates_v3_to_v8_keeping_rows_and_defaulting_last_played_to_zero() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let rows = registry.all().unwrap();
     assert_eq!(rows.len(), 1);
@@ -626,12 +626,12 @@ fn v3_to_v4_migration_is_idempotent_when_the_column_preexists() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     assert!(registry.all().unwrap().is_empty());
 }
 
 #[test]
-fn migrates_v4_to_v8_keeping_rows_and_defaulting_fanart_to_blank() {
+fn migrates_v4_to_v9_keeping_rows_and_defaulting_fanart_to_blank() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -656,7 +656,7 @@ fn migrates_v4_to_v8_keeping_rows_and_defaulting_fanart_to_blank() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
 
     let rows = registry.all().unwrap();
     assert_eq!(rows.len(), 1);
@@ -682,12 +682,12 @@ fn v4_to_v5_migration_is_idempotent_when_the_column_preexists() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     assert!(registry.all().unwrap().is_empty());
 }
 
 #[test]
-fn fresh_db_is_v8_and_stamps_images_version_on_insert() {
+fn fresh_db_is_v9_and_stamps_images_version_on_insert() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     let registry = Registry::open(&path).unwrap();
@@ -696,7 +696,7 @@ fn fresh_db_is_v8_and_stamps_images_version_on_insert() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     let columns = table_columns(&conn);
     assert!(
         columns.iter().any(|c| c == "images_version"),
@@ -712,7 +712,7 @@ fn fresh_db_is_v8_and_stamps_images_version_on_insert() {
 }
 
 #[test]
-fn migrates_v5_to_v8_keeping_rows_and_defaulting_images_version_to_zero() {
+fn migrates_v5_to_v9_keeping_rows_and_defaulting_images_version_to_zero() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -737,7 +737,7 @@ fn migrates_v5_to_v8_keeping_rows_and_defaulting_images_version_to_zero() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     let columns = table_columns(&conn);
     assert!(
         columns.iter().any(|c| c == "images_version"),
@@ -770,7 +770,7 @@ fn v5_to_v6_migration_is_idempotent_when_the_column_preexists() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     assert!(registry.all().unwrap().is_empty());
 }
 
@@ -881,7 +881,7 @@ fn a_fresh_database_has_the_play_session_outbox() {
 }
 
 #[test]
-fn migrates_v6_to_v8_adding_the_outbox_and_keeping_rows() {
+fn migrates_v6_to_v9_adding_the_outbox_and_keeping_rows() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("grid-launcher.db");
     {
@@ -900,7 +900,7 @@ fn migrates_v6_to_v8_adding_the_outbox_and_keeping_rows() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     assert!(has_table(&conn, "pending_play_sessions"));
     assert_eq!(registry.all().unwrap().len(), 1);
     assert!(registry
@@ -1081,7 +1081,7 @@ fn migrates_v7_to_v8_adding_a_blank_platform_slug_and_keeping_rows() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 8);
+    assert_eq!(version, 9);
     assert!(table_columns(&conn).iter().any(|c| c == "platform_slug"));
     let rows = registry.all().unwrap();
     assert_eq!(rows.len(), 1);
@@ -1144,4 +1144,93 @@ fn set_platform_slug_fills_the_row_for_the_rom_and_ignores_a_blank_slug() {
     assert_eq!(stored.platform_slug, "win");
     assert!(stored.is_native());
     assert!(stored.is_windows());
+}
+
+// --- native launch origin (v9) ---------------------------------------------
+
+#[test]
+fn migrates_v8_to_v9_marking_an_existing_pin_as_the_users_choice() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    {
+        // A v8 database: today's schema without the two launch columns.
+        let registry = Registry::open(&path).unwrap();
+        let mut pinned = sample("Pinned", "Windows");
+        pinned.rom_id = Some(1);
+        pinned.native_executable_path = "/lib/Pinned/game/run.bat".into();
+        registry.upsert(&pinned).unwrap();
+        let mut automatic = sample("Automatic", "Windows");
+        automatic.rom_id = Some(2);
+        registry.upsert(&automatic).unwrap();
+        drop(registry);
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE installed_games DROP COLUMN native_launch_source;
+             ALTER TABLE installed_games DROP COLUMN native_working_dir;",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", 8).unwrap();
+    }
+
+    let registry = Registry::open(&path).unwrap();
+    let conn = Connection::open(&path).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(version, 9);
+    let columns = table_columns(&conn);
+    assert!(columns.iter().any(|c| c == "native_launch_source"));
+    assert!(columns.iter().any(|c| c == "native_working_dir"));
+    let pinned = registry.find(Some(1), "", "").unwrap().unwrap();
+    assert_eq!(pinned.native_launch_source, "user");
+    assert_eq!(pinned.native_working_dir, "");
+    let automatic = registry.find(Some(2), "", "").unwrap().unwrap();
+    assert_eq!(automatic.native_launch_source, "");
+}
+
+#[test]
+fn v8_to_v9_migration_is_idempotent_and_keeps_a_sidecar_source() {
+    // A database torn between the ALTERs and the version bump.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("grid-launcher.db");
+    {
+        let registry = Registry::open(&path).unwrap();
+        let mut row = sample("Side", "Linux");
+        row.native_executable_path = "/lib/Side/game/launch.sh".into();
+        row.native_launch_source = "sidecar".into();
+        row.native_working_dir = "bin".into();
+        registry.upsert(&row).unwrap();
+        drop(registry);
+        let conn = Connection::open(&path).unwrap();
+        conn.pragma_update(None, "user_version", 8).unwrap();
+    }
+    let registry = Registry::open(&path).unwrap();
+    let row = &registry.all().unwrap()[0];
+    assert_eq!(row.native_launch_source, "sidecar");
+    assert_eq!(row.native_working_dir, "bin");
+}
+
+#[test]
+fn upsert_and_update_native_launch_round_trip_the_origin() {
+    let dir = tempfile::tempdir().unwrap();
+    let registry = Registry::open(&dir.path().join("grid-launcher.db")).unwrap();
+    let mut row = sample("Side", "Linux");
+    row.native_launch_source = "sidecar".into();
+    row.native_working_dir = "bin".into();
+    registry.upsert(&row).unwrap();
+    let stored = registry.find(Some(42), "", "").unwrap().unwrap();
+    assert_eq!(stored.native_launch_source, "sidecar");
+    assert_eq!(stored.native_working_dir, "bin");
+
+    assert!(!registry
+        .update_native_launch(999, "/x", "", "user", "")
+        .unwrap());
+    assert!(registry
+        .update_native_launch(42, "/lib/run.sh", "--a b", "user", "")
+        .unwrap());
+    let stored = registry.find(Some(42), "", "").unwrap().unwrap();
+    assert_eq!(stored.native_executable_path, "/lib/run.sh");
+    assert_eq!(stored.native_launch_parameters, "--a b");
+    assert_eq!(stored.native_launch_source, "user");
+    assert_eq!(stored.native_working_dir, "");
 }

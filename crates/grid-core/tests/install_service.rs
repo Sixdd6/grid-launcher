@@ -3189,3 +3189,392 @@ async fn the_library_move_row_reports_progress_and_finishes() {
         .iter()
         .any(|e| e.id == id && e.detail == "Copying games")));
 }
+
+// --- game.json launch section (user feature 2026-10-10) ---------------------
+
+use grid_core::library::specials::native::SidecarOutcome;
+
+/// A Windows payload with batch launchers in `bin/` and a root `.exe` that
+/// the automatic ranking would pick (the root beats `bin/`).
+fn launcher_zip(staging: &Path, name: &str) -> Vec<u8> {
+    write_zip(
+        &staging.join(name),
+        &[
+            ("Game.exe", b"MZ"),
+            ("bin/start.bat", b"@echo off"),
+            ("bin/other.bat", b"@echo off"),
+        ],
+    )
+}
+
+const SIDECAR_START: &[u8] = br#"{"version": "1.0", "launch": {"executable": "bin/start.bat", "arguments": "-w \"two words\"", "working_dir": "bin"}}"#;
+
+fn game_dir_of(harness: &Harness) -> PathBuf {
+    harness
+        .library
+        .join("games")
+        .join("Windows")
+        .join("Launcher Game")
+}
+
+/// Installs rom 60 ("Launcher Game") with `sidecar` (or none) and returns
+/// the finished drawer entry. The detail is mounted ONCE, so a test can
+/// mount the next answer (an update, a reload) afterwards.
+async fn install_launcher_game(harness: &Harness, sidecar: Option<&[u8]>) -> DownloadEntry {
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = launcher_zip(staging.path(), "launcher.zip");
+    let mut files = vec![file_spec(601, "launcher.zip", bytes.len())];
+    if let Some(sidecar) = sidecar {
+        files.push(file_spec(602, "game.json", sidecar.len()));
+        harness
+            .mount_content_ids(60, "game.json", "602", sidecar.to_vec())
+            .await;
+    }
+    harness
+        .mount_detail_once(
+            60,
+            detail_json(60, "Launcher Game", "Windows", "launcher.zip", &files),
+        )
+        .await;
+    harness
+        .mount_content_ids(60, "launcher.zip", "601", bytes)
+        .await;
+    harness
+        .service
+        .install(harness.client.clone(), 60)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    harness.wait_terminal(id).await
+}
+
+/// The server answer for rom 60 once it lists `game.json` (id 603) next to
+/// the installed archive.
+async fn mount_detail_with_new_sidecar(harness: &Harness) {
+    harness
+        .mount_detail(
+            60,
+            detail_json(
+                60,
+                "Launcher Game",
+                "Windows",
+                "launcher.zip",
+                &[
+                    file_spec(601, "launcher.zip", 10),
+                    file_spec(603, "game.json", SIDECAR_START.len()),
+                ],
+            ),
+        )
+        .await;
+}
+
+#[tokio::test]
+async fn native_install_pins_the_sidecar_launch_file() {
+    let harness = Harness::new().await;
+    let entry = install_launcher_game(&harness, Some(SIDECAR_START)).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+    assert_eq!(entry.error, "", "a valid sidecar adds no warning");
+
+    let extracted = game_dir_of(&harness).join("game");
+    let row = row_of(&harness, 60);
+    assert_eq!(
+        row.native_executable_path,
+        extracted.join("bin").join("start.bat").to_string_lossy()
+    );
+    assert_eq!(row.native_launch_parameters, "-w \"two words\"");
+    assert_eq!(row.native_launch_source, "sidecar");
+    assert_eq!(row.native_working_dir, "bin");
+    assert_eq!(row.revision, "1.1", "the server revision still wins");
+}
+
+#[tokio::test]
+async fn an_invalid_sidecar_launch_warns_and_keeps_the_ranking() {
+    let harness = Harness::new().await;
+    let sidecar = br#"{"launch": {"executable": "../escape.bat"}}"#;
+    let entry = install_launcher_game(&harness, Some(sidecar)).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+    assert!(
+        entry.error.contains(
+            "game.json launch section ignored: launch.executable \"../escape.bat\" leaves the game folder"
+        ),
+        "{}",
+        entry.error
+    );
+    let row = row_of(&harness, 60);
+    assert_eq!(row.native_executable_path, "");
+    assert_eq!(row.native_launch_source, "");
+    assert!(
+        row.extracted_path.ends_with("Game.exe"),
+        "{}",
+        row.extracted_path
+    );
+}
+
+/// Mounts the update answer for rom 60: an update archive (adding
+/// `AAA.exe` at the root, which the ranking would now pick) and, when
+/// given, a `game.json`.
+async fn mount_launcher_update(harness: &Harness, sidecar: Option<&[u8]>) {
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(
+        &staging.path().join("launcher-v2.zip"),
+        &[("AAA.exe", b"MZ"), ("bin/start.bat", b"@echo v2")],
+    );
+    let mut files = vec![file_spec(611, "launcher-v2.zip", bytes.len())];
+    if let Some(sidecar) = sidecar {
+        files.push(file_spec(612, "game.json", sidecar.len()));
+        harness
+            .mount_content_ids(60, "game.json", "612", sidecar.to_vec())
+            .await;
+    }
+    harness
+        .mount_detail(
+            60,
+            detail_json(60, "Launcher Game", "Windows", "launcher-v2.zip", &files),
+        )
+        .await;
+    harness
+        .mount_content_ids(60, "launcher-v2.zip", "611", bytes)
+        .await;
+}
+
+async fn run_native_update(harness: &Harness) -> DownloadEntry {
+    harness
+        .service
+        .install_native_update(harness.client.clone(), 60)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    harness.wait_terminal(id).await
+}
+
+#[tokio::test]
+async fn a_native_update_keeps_the_sidecar_pin() {
+    let harness = Harness::new().await;
+    install_launcher_game(&harness, Some(SIDECAR_START)).await;
+    mount_launcher_update(&harness, Some(SIDECAR_START)).await;
+    let entry = run_native_update(&harness).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let extracted = game_dir_of(&harness).join("game");
+    let row = row_of(&harness, 60);
+    assert_eq!(
+        row.native_executable_path,
+        extracted.join("bin").join("start.bat").to_string_lossy()
+    );
+    assert_eq!(row.native_launch_source, "sidecar");
+    assert_eq!(row.native_working_dir, "bin");
+    assert!(game_dir_of(&harness).join("game.json").is_file());
+}
+
+#[tokio::test]
+async fn a_native_update_without_a_sidecar_keeps_the_sidecar_pin() {
+    let harness = Harness::new().await;
+    install_launcher_game(&harness, Some(SIDECAR_START)).await;
+    mount_launcher_update(&harness, None).await;
+    let entry = run_native_update(&harness).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let row = row_of(&harness, 60);
+    assert!(
+        row.native_executable_path.ends_with("start.bat"),
+        "{}",
+        row.native_executable_path
+    );
+    assert_eq!(row.native_launch_source, "sidecar");
+}
+
+#[tokio::test]
+async fn a_native_update_applies_a_changed_sidecar_launch() {
+    let harness = Harness::new().await;
+    install_launcher_game(&harness, Some(SIDECAR_START)).await;
+    mount_launcher_update(
+        &harness,
+        Some(br#"{"launch": {"executable": "bin/other.bat"}}"#),
+    )
+    .await;
+    let entry = run_native_update(&harness).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let row = row_of(&harness, 60);
+    assert!(
+        row.native_executable_path.ends_with("other.bat"),
+        "{}",
+        row.native_executable_path
+    );
+    assert_eq!(row.native_launch_parameters, "");
+    assert_eq!(row.native_working_dir, "");
+    assert_eq!(row.native_launch_source, "sidecar");
+}
+
+#[tokio::test]
+async fn a_native_update_keeps_the_users_choice() {
+    let harness = Harness::new().await;
+    install_launcher_game(&harness, Some(SIDECAR_START)).await;
+    let mine = game_dir_of(&harness)
+        .join("game")
+        .join("bin")
+        .join("other.bat")
+        .to_string_lossy()
+        .into_owned();
+    harness
+        .registry
+        .update_native_launch(60, &mine, "-mine", "user", "")
+        .unwrap();
+    mount_launcher_update(&harness, Some(SIDECAR_START)).await;
+    let entry = run_native_update(&harness).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let row = row_of(&harness, 60);
+    assert_eq!(row.native_executable_path, mine);
+    assert_eq!(row.native_launch_parameters, "-mine");
+    assert_eq!(row.native_launch_source, "user");
+}
+
+#[tokio::test]
+async fn reload_picks_up_a_sidecar_added_after_the_install() {
+    let harness = Harness::new().await;
+    let entry = install_launcher_game(&harness, None).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+    assert_eq!(row_of(&harness, 60).native_launch_source, "");
+
+    mount_detail_with_new_sidecar(&harness).await;
+    harness
+        .mount_content_ids(60, "game.json", "603", SIDECAR_START.to_vec())
+        .await;
+
+    let outcome = harness
+        .service
+        .reload_native_launch(harness.client.clone(), 60)
+        .await
+        .unwrap();
+    assert_eq!(outcome, SidecarOutcome::Pinned);
+    let row = row_of(&harness, 60);
+    assert!(
+        row.native_executable_path.ends_with("start.bat"),
+        "{}",
+        row.native_executable_path
+    );
+    assert_eq!(row.native_launch_parameters, "-w \"two words\"");
+    assert_eq!(row.native_launch_source, "sidecar");
+    assert_eq!(row.native_working_dir, "bin");
+    assert_eq!(
+        fs::read(game_dir_of(&harness).join("game.json")).unwrap(),
+        SIDECAR_START,
+        "the fresh sidecar is kept next to the game"
+    );
+}
+
+#[tokio::test]
+async fn reload_never_overrides_the_users_choice() {
+    let harness = Harness::new().await;
+    install_launcher_game(&harness, None).await;
+    let mine = game_dir_of(&harness)
+        .join("game")
+        .join("Game.exe")
+        .to_string_lossy()
+        .into_owned();
+    harness
+        .registry
+        .update_native_launch(60, &mine, "", "user", "")
+        .unwrap();
+    mount_detail_with_new_sidecar(&harness).await;
+    harness
+        .mount_content_ids(60, "game.json", "603", SIDECAR_START.to_vec())
+        .await;
+
+    let outcome = harness
+        .service
+        .reload_native_launch(harness.client.clone(), 60)
+        .await
+        .unwrap();
+    assert_eq!(outcome, SidecarOutcome::KeptUserChoice);
+    let row = row_of(&harness, 60);
+    assert_eq!(row.native_executable_path, mine);
+    assert_eq!(row.native_launch_source, "user");
+}
+
+#[tokio::test]
+async fn reload_reports_a_server_entry_with_no_sidecar() {
+    let harness = Harness::new().await;
+    install_launcher_game(&harness, None).await;
+    harness
+        .mount_detail(
+            60,
+            detail_json(
+                60,
+                "Launcher Game",
+                "Windows",
+                "launcher.zip",
+                &[file_spec(601, "launcher.zip", 10)],
+            ),
+        )
+        .await;
+    let outcome = harness
+        .service
+        .reload_native_launch(harness.client.clone(), 60)
+        .await
+        .unwrap();
+    assert_eq!(outcome, SidecarOutcome::NoSidecar);
+}
+
+#[tokio::test]
+async fn the_update_check_pickup_applies_a_new_sidecar_and_then_reads_it_from_disk() {
+    let harness = Harness::new().await;
+    install_launcher_game(&harness, None).await;
+    mount_detail_with_new_sidecar(&harness).await;
+    let detail = harness.client.rom_detail(60).await.unwrap();
+    // Served exactly once: the second pickup must read the local copy.
+    Mock::given(method("GET"))
+        .and(path("/api/roms/60/content/game.json"))
+        .and(query_param("file_ids", "603"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(SIDECAR_START.to_vec()))
+        .expect(1)
+        .mount(&harness.server)
+        .await;
+
+    let first = harness
+        .service
+        .pick_up_native_launch(&harness.client, 60, &detail)
+        .await
+        .unwrap();
+    assert_eq!(first, SidecarOutcome::Pinned);
+    assert_eq!(row_of(&harness, 60).native_launch_source, "sidecar");
+
+    let second = harness
+        .service
+        .pick_up_native_launch(&harness.client, 60, &detail)
+        .await
+        .unwrap();
+    assert_eq!(second, SidecarOutcome::Pinned, "the local copy still pins");
+    harness.server.verify().await;
+}
+
+#[tokio::test]
+async fn the_update_check_pickup_skips_the_users_choice_without_a_download() {
+    let harness = Harness::new().await;
+    install_launcher_game(&harness, None).await;
+    harness
+        .registry
+        .update_native_launch(60, "/mine/Game.exe", "", "user", "")
+        .unwrap();
+    mount_detail_with_new_sidecar(&harness).await;
+    let detail = harness.client.rom_detail(60).await.unwrap();
+    Mock::given(method("GET"))
+        .and(path("/api/roms/60/content/game.json"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(SIDECAR_START.to_vec()))
+        .expect(0)
+        .mount(&harness.server)
+        .await;
+
+    let outcome = harness
+        .service
+        .pick_up_native_launch(&harness.client, 60, &detail)
+        .await
+        .unwrap();
+    assert_eq!(outcome, SidecarOutcome::KeptUserChoice);
+    assert_eq!(
+        row_of(&harness, 60).native_executable_path,
+        "/mine/Game.exe"
+    );
+    harness.server.verify().await;
+}

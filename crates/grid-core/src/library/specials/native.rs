@@ -86,6 +86,70 @@ pub struct GameJson {
     pub tags: String,
     pub included_dlc: String,
     pub name: String,
+    /// The optional `launch` object. `Some` whenever `launch` is a JSON
+    /// object, even one with missing or mistyped fields, so the install can
+    /// warn about it ([`validate_sidecar_launch`]); `None` when the key is
+    /// absent or not an object.
+    pub launch: Option<SidecarLaunch>,
+}
+
+/// A `game.json` `launch` section, as written: every field is a path or a
+/// string relative to the game folder, `""` when absent or not a string.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SidecarLaunch {
+    /// The launch file, relative to the game folder.
+    pub executable: String,
+    /// The arguments, as one string (split like Game Settings parameters).
+    pub arguments: String,
+    /// The working directory, relative to the game folder; `""` = the
+    /// executable's own folder.
+    pub working_dir: String,
+}
+
+/// `native_launch_source` for a launch file pinned from `game.json`.
+pub const LAUNCH_SOURCE_SIDECAR: &str = "sidecar";
+/// `native_launch_source` for a launch file the user set in Native Game
+/// Settings. A sidecar never replaces it.
+pub const LAUNCH_SOURCE_USER: &str = "user";
+
+/// A [`SidecarLaunch`] that passed [`validate_sidecar_launch`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedSidecarLaunch {
+    /// The launch file: the game folder joined with the relative path.
+    pub executable: PathBuf,
+    pub arguments: String,
+    /// The working directory, normalized and relative to the game folder
+    /// (`/`-separated); `""` = the executable's own folder.
+    pub working_dir: String,
+}
+
+/// What [`apply_sidecar_launch`] did to a row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SidecarOutcome {
+    /// The server lists no `game.json` for this game.
+    NoSidecar,
+    /// The sidecar has no `launch` section.
+    NoLaunch,
+    /// The user set the launch file in Game Settings; the sidecar was not
+    /// read further.
+    KeptUserChoice,
+    /// The sidecar's launch file is now pinned.
+    Pinned,
+    /// The `launch` section is unusable; the row is unchanged. The text
+    /// names the problem.
+    Invalid(String),
+}
+
+impl SidecarOutcome {
+    /// The finalize warning for this outcome, or `""`.
+    pub fn warning(&self) -> String {
+        match self {
+            SidecarOutcome::Invalid(problem) => {
+                format!("game.json launch section ignored: {problem}")
+            }
+            _ => String::new(),
+        }
+    }
 }
 
 /// Whether a JSON value counts as "falsy" the way Python's `or` treats it:
@@ -181,6 +245,25 @@ pub fn parse_game_json(bytes: &[u8]) -> Option<GameJson> {
         tags,
         included_dlc,
         name,
+        launch: parse_launch(map.get("launch")),
+    })
+}
+
+/// The `launch` object, leniently: `None` unless it is a JSON object; a
+/// field that is missing or not a string reads as `""` (and is reported by
+/// [`validate_sidecar_launch`], not here). Extra keys are ignored.
+fn parse_launch(value: Option<&Value>) -> Option<SidecarLaunch> {
+    let Some(Value::Object(launch)) = value else {
+        return None;
+    };
+    let text = |key: &str| match launch.get(key) {
+        Some(Value::String(s)) => s.trim().to_string(),
+        _ => String::new(),
+    };
+    Some(SidecarLaunch {
+        executable: text("executable"),
+        arguments: text("arguments"),
+        working_dir: text("working_dir"),
     })
 }
 
@@ -202,6 +285,171 @@ pub fn apply_game_json(row: &mut InstalledGame, parsed: &GameJson) {
         row.tags = parsed.tags.clone();
     }
     row.included_dlc = parsed.included_dlc.clone();
+}
+
+/// Splits a sidecar path into its folder names, refusing anything that is
+/// not a plain path inside the game folder: an absolute path (`/x`, `\x`),
+/// a drive prefix (`C:\x`, `c:x`), or a `..` step. Both `/` and `\` separate
+/// folders, so one `game.json` works on every host. `.` steps and empty
+/// steps are dropped. `field` and the raw text name the problem in the
+/// error.
+fn relative_parts(text: &str, field: &str) -> Result<Vec<String>, String> {
+    let text = text.trim();
+    if text.starts_with('/') || text.starts_with('\\') {
+        return Err(format!(
+            "{field} \"{text}\" is an absolute path; use a path relative to the game folder"
+        ));
+    }
+    if text.as_bytes().get(1) == Some(&b':') {
+        return Err(format!(
+            "{field} \"{text}\" has a drive prefix; use a path relative to the game folder"
+        ));
+    }
+    let mut parts = Vec::new();
+    for part in text.split(['/', '\\']) {
+        match part {
+            "" | "." => {}
+            ".." => return Err(format!("{field} \"{text}\" leaves the game folder")),
+            other => parts.push(other.to_string()),
+        }
+    }
+    Ok(parts)
+}
+
+/// Whether `path` (which exists) is inside `game_dir` once every symlink is
+/// resolved, so a link in the archive cannot point the launch outside it.
+fn stays_inside(game_dir: &Path, path: &Path) -> bool {
+    match (fs::canonicalize(game_dir), fs::canonicalize(path)) {
+        (Ok(root), Ok(target)) => target.starts_with(root),
+        _ => false,
+    }
+}
+
+/// Checks a sidecar `launch` section against the game folder `game_dir`:
+/// `executable` is a relative path ([`relative_parts`]) to an existing,
+/// launchable file ([`is_launchable_native_file`]) inside the folder;
+/// `working_dir`, when set, is a relative path to an existing folder inside
+/// it (`"."` = the game folder itself). The error names the field, the
+/// text, and the problem.
+pub fn validate_sidecar_launch(
+    game_dir: &Path,
+    launch: &SidecarLaunch,
+) -> Result<ResolvedSidecarLaunch, String> {
+    let raw = launch.executable.trim();
+    if raw.is_empty() {
+        return Err("launch.executable is missing".to_string());
+    }
+    let parts = relative_parts(raw, "launch.executable")?;
+    if parts.is_empty() {
+        return Err("launch.executable is missing".to_string());
+    }
+    let executable = parts.iter().fold(game_dir.to_path_buf(), |p, s| p.join(s));
+    if !executable.is_file() {
+        return Err(format!(
+            "launch.executable \"{raw}\" does not exist in the game folder"
+        ));
+    }
+    if !stays_inside(game_dir, &executable) {
+        return Err(format!(
+            "launch.executable \"{raw}\" leaves the game folder"
+        ));
+    }
+    if !is_launchable_native_file(&executable) {
+        return Err(format!(
+            "launch.executable \"{raw}\" is not a launchable file \
+             (.exe, .bat, .cmd, .ps1, .sh, or a program)"
+        ));
+    }
+
+    let raw_dir = launch.working_dir.trim();
+    let working_dir = if raw_dir.is_empty() {
+        String::new()
+    } else {
+        let parts = relative_parts(raw_dir, "launch.working_dir")?;
+        let dir = parts.iter().fold(game_dir.to_path_buf(), |p, s| p.join(s));
+        if !dir.is_dir() {
+            return Err(format!(
+                "launch.working_dir \"{raw_dir}\" is not a folder in the game folder"
+            ));
+        }
+        if !stays_inside(game_dir, &dir) {
+            return Err(format!(
+                "launch.working_dir \"{raw_dir}\" leaves the game folder"
+            ));
+        }
+        if parts.is_empty() {
+            ".".to_string()
+        } else {
+            parts.join("/")
+        }
+    };
+
+    Ok(ResolvedSidecarLaunch {
+        executable,
+        arguments: launch.arguments.clone(),
+        working_dir,
+    })
+}
+
+/// Applies a parsed sidecar's `launch` section to `row`, whose game folder
+/// is `game_dir`. Precedence: the user's choice (`native_launch_source ==
+/// "user"`) is never replaced; otherwise a valid section pins
+/// `native_executable_path`, `native_launch_parameters` (= `arguments`) and
+/// `native_working_dir`, with source `"sidecar"`. An invalid section, or no
+/// section, leaves the row exactly as it was: a sidecar only ever sets a
+/// pin, it never clears one, and an unpinned row keeps the automatic
+/// ranking.
+pub fn apply_sidecar_launch(
+    row: &mut InstalledGame,
+    game_dir: &Path,
+    parsed: Option<&GameJson>,
+) -> SidecarOutcome {
+    let Some(launch) = parsed.and_then(|parsed| parsed.launch.as_ref()) else {
+        return SidecarOutcome::NoLaunch;
+    };
+    if row.native_launch_source == LAUNCH_SOURCE_USER {
+        return SidecarOutcome::KeptUserChoice;
+    }
+    match validate_sidecar_launch(game_dir, launch) {
+        Ok(resolved) => {
+            row.native_executable_path = resolved.executable.to_string_lossy().into_owned();
+            row.native_launch_parameters = resolved.arguments;
+            row.native_launch_source = LAUNCH_SOURCE_SIDECAR.to_string();
+            row.native_working_dir = resolved.working_dir;
+            SidecarOutcome::Pinned
+        }
+        Err(problem) => SidecarOutcome::Invalid(problem),
+    }
+}
+
+/// The `(native_launch_source, native_working_dir)` a Native Game Settings
+/// save stores. `shown_executable` is the file the form showed (the
+/// resolved one); `executable` and `parameters` are what the user saved.
+///
+/// A save that changes neither keeps the row's origin, so opening the form
+/// to pick a compat tool does not turn a sidecar (or automatic) launch into
+/// a user choice. Any change makes it the user's choice; a new executable
+/// also drops the sidecar's working directory, which belonged to the old
+/// file.
+pub fn launch_origin_after_save(
+    row: &InstalledGame,
+    shown_executable: &str,
+    executable: &str,
+    parameters: &str,
+) -> (String, String) {
+    let same_file = executable == shown_executable;
+    if same_file && parameters == row.native_launch_parameters {
+        return (
+            row.native_launch_source.clone(),
+            row.native_working_dir.clone(),
+        );
+    }
+    let working_dir = if same_file {
+        row.native_working_dir.clone()
+    } else {
+        String::new()
+    };
+    (LAUNCH_SOURCE_USER.to_string(), working_dir)
 }
 
 // ---------------------------------------------------------------------------
@@ -767,6 +1015,7 @@ mod tests {
             tags: "rpg".to_string(),
             included_dlc: "[]".to_string(),
             name: "".to_string(),
+            launch: None,
         };
         apply_game_json(&mut row, &parsed);
         assert_eq!(row.revision, "existing");
@@ -786,6 +1035,285 @@ mod tests {
         };
         apply_game_json(&mut row, &parsed);
         assert_eq!(row.included_dlc, "[]");
+    }
+
+    // -- game.json launch section ---------------------------------------------------
+
+    fn launch_of(json: &str) -> Option<SidecarLaunch> {
+        parse_game_json(json.as_bytes()).unwrap().launch
+    }
+
+    fn sidecar(executable: &str, arguments: &str, working_dir: &str) -> SidecarLaunch {
+        SidecarLaunch {
+            executable: executable.to_string(),
+            arguments: arguments.to_string(),
+            working_dir: working_dir.to_string(),
+        }
+    }
+
+    #[test]
+    fn parse_launch_reads_all_three_fields() {
+        assert_eq!(
+            launch_of(
+                r#"{"launch": {"executable": "bin/start.bat", "arguments": "-w \"two words\"", "working_dir": "bin"}}"#
+            ),
+            Some(sidecar("bin/start.bat", "-w \"two words\"", "bin"))
+        );
+    }
+
+    #[test]
+    fn parse_launch_is_none_when_missing_or_not_an_object() {
+        assert_eq!(launch_of(r#"{"name": "x"}"#), None);
+        assert_eq!(launch_of(r#"{"launch": null}"#), None);
+        assert_eq!(launch_of(r#"{"launch": "start.bat"}"#), None);
+        assert_eq!(launch_of(r#"{"launch": ["start.bat"]}"#), None);
+    }
+
+    #[test]
+    fn parse_launch_blanks_fields_of_the_wrong_type() {
+        assert_eq!(
+            launch_of(r#"{"launch": {"executable": 5, "arguments": ["-a"], "working_dir": true}}"#),
+            Some(sidecar("", "", ""))
+        );
+        assert_eq!(launch_of(r#"{"launch": {}}"#), Some(sidecar("", "", "")));
+    }
+
+    #[test]
+    fn parse_launch_ignores_extra_keys_and_keeps_the_other_fields() {
+        let parsed = parse_game_json(
+            br#"{"version": "2", "launch": {"executable": "go.sh", "env": {"A": "1"}}, "extra": 1}"#,
+        )
+        .unwrap();
+        assert_eq!(parsed.revision, "2");
+        assert_eq!(parsed.launch, Some(sidecar("go.sh", "", "")));
+    }
+
+    /// A game folder with `bin/start.bat`, `game.exe`, `readme.txt` and an
+    /// empty `data/` folder.
+    fn game_folder() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("bin")).unwrap();
+        fs::create_dir_all(dir.path().join("data")).unwrap();
+        fs::write(dir.path().join("bin").join("start.bat"), b"@echo off").unwrap();
+        fs::write(dir.path().join("game.exe"), b"MZ").unwrap();
+        fs::write(dir.path().join("readme.txt"), b"text").unwrap();
+        dir
+    }
+
+    #[test]
+    fn validate_accepts_a_relative_path_with_either_separator() {
+        let dir = game_folder();
+        for executable in ["bin/start.bat", "bin\\start.bat", "./bin/start.bat"] {
+            let resolved =
+                validate_sidecar_launch(dir.path(), &sidecar(executable, "-x", "")).unwrap();
+            assert_eq!(
+                resolved.executable,
+                dir.path().join("bin").join("start.bat"),
+                "{executable}"
+            );
+            assert_eq!(resolved.arguments, "-x");
+            assert_eq!(resolved.working_dir, "");
+        }
+    }
+
+    #[test]
+    fn validate_normalizes_the_working_dir() {
+        let dir = game_folder();
+        let resolved =
+            validate_sidecar_launch(dir.path(), &sidecar("game.exe", "", ".\\data\\")).unwrap();
+        assert_eq!(resolved.working_dir, "data");
+        let root = validate_sidecar_launch(dir.path(), &sidecar("game.exe", "", ".")).unwrap();
+        assert_eq!(root.working_dir, ".", "\".\" names the game folder itself");
+    }
+
+    #[test]
+    fn validate_rejects_every_unsafe_or_wrong_path() {
+        let dir = game_folder();
+        let cases: &[(SidecarLaunch, &str)] = &[
+            (sidecar("", "", ""), "launch.executable is missing"),
+            (sidecar("../outside.exe", "", ""), "leaves the game folder"),
+            (
+                sidecar("bin/../../outside.exe", "", ""),
+                "leaves the game folder",
+            ),
+            (sidecar("/usr/bin/game", "", ""), "is an absolute path"),
+            (
+                sidecar("\\Windows\\game.exe", "", ""),
+                "is an absolute path",
+            ),
+            (sidecar("C:\\Games\\game.exe", "", ""), "has a drive prefix"),
+            (sidecar("c:game.exe", "", ""), "has a drive prefix"),
+            (
+                sidecar("bin/missing.bat", "", ""),
+                "does not exist in the game folder",
+            ),
+            (sidecar("bin", "", ""), "does not exist in the game folder"),
+            (sidecar("readme.txt", "", ""), "is not a launchable file"),
+            (
+                sidecar("game.exe", "", "../elsewhere"),
+                "leaves the game folder",
+            ),
+            (sidecar("game.exe", "", "/tmp"), "is an absolute path"),
+            (
+                sidecar("game.exe", "", "nope"),
+                "is not a folder in the game folder",
+            ),
+        ];
+        for (launch, expected) in cases {
+            let error = validate_sidecar_launch(dir.path(), launch).unwrap_err();
+            assert!(
+                error.contains(expected),
+                "{launch:?}: expected {expected:?} in {error:?}"
+            );
+        }
+    }
+
+    fn parsed_with(launch: Option<SidecarLaunch>) -> GameJson {
+        GameJson {
+            launch,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn apply_pins_a_valid_sidecar_launch() {
+        let dir = game_folder();
+        let mut row = InstalledGame::default();
+        let outcome = apply_sidecar_launch(
+            &mut row,
+            dir.path(),
+            Some(&parsed_with(Some(sidecar("bin/start.bat", "-w", "bin")))),
+        );
+        assert_eq!(outcome, SidecarOutcome::Pinned);
+        assert_eq!(
+            row.native_executable_path,
+            dir.path().join("bin").join("start.bat").to_string_lossy()
+        );
+        assert_eq!(row.native_launch_parameters, "-w");
+        assert_eq!(row.native_launch_source, LAUNCH_SOURCE_SIDECAR);
+        assert_eq!(row.native_working_dir, "bin");
+        assert_eq!(outcome.warning(), "");
+    }
+
+    #[test]
+    fn apply_replaces_an_earlier_sidecar_pin() {
+        let dir = game_folder();
+        let mut row = InstalledGame {
+            native_executable_path: "/old/start.bat".to_string(),
+            native_launch_parameters: "-old".to_string(),
+            native_launch_source: LAUNCH_SOURCE_SIDECAR.to_string(),
+            native_working_dir: "old".to_string(),
+            ..Default::default()
+        };
+        let outcome = apply_sidecar_launch(
+            &mut row,
+            dir.path(),
+            Some(&parsed_with(Some(sidecar("game.exe", "", "")))),
+        );
+        assert_eq!(outcome, SidecarOutcome::Pinned);
+        assert_eq!(
+            row.native_executable_path,
+            dir.path().join("game.exe").to_string_lossy()
+        );
+        assert_eq!(row.native_launch_parameters, "");
+        assert_eq!(row.native_working_dir, "");
+    }
+
+    #[test]
+    fn apply_never_replaces_the_users_choice() {
+        let dir = game_folder();
+        let user = InstalledGame {
+            native_executable_path: "/mine/game.exe".to_string(),
+            native_launch_parameters: "-mine".to_string(),
+            native_launch_source: LAUNCH_SOURCE_USER.to_string(),
+            ..Default::default()
+        };
+        let mut row = user.clone();
+        let outcome = apply_sidecar_launch(
+            &mut row,
+            dir.path(),
+            Some(&parsed_with(Some(sidecar("bin/start.bat", "-w", "")))),
+        );
+        assert_eq!(outcome, SidecarOutcome::KeptUserChoice);
+        assert_eq!(row, user);
+    }
+
+    #[test]
+    fn apply_an_invalid_launch_leaves_the_row_and_names_the_problem() {
+        let dir = game_folder();
+        let mut row = InstalledGame::default();
+        let outcome = apply_sidecar_launch(
+            &mut row,
+            dir.path(),
+            Some(&parsed_with(Some(sidecar("../x.exe", "", "")))),
+        );
+        assert!(matches!(outcome, SidecarOutcome::Invalid(_)), "{outcome:?}");
+        assert_eq!(row, InstalledGame::default());
+        let warning = outcome.warning();
+        assert!(
+            warning.starts_with("game.json launch section ignored: "),
+            "{warning}"
+        );
+        assert!(warning.contains("\"../x.exe\""), "{warning}");
+    }
+
+    #[test]
+    fn apply_without_a_launch_section_changes_nothing() {
+        let dir = game_folder();
+        let mut row = InstalledGame::default();
+        assert_eq!(
+            apply_sidecar_launch(&mut row, dir.path(), Some(&parsed_with(None))),
+            SidecarOutcome::NoLaunch
+        );
+        assert_eq!(
+            apply_sidecar_launch(&mut row, dir.path(), None),
+            SidecarOutcome::NoLaunch
+        );
+        assert_eq!(row, InstalledGame::default());
+    }
+
+    fn sidecar_row() -> InstalledGame {
+        InstalledGame {
+            native_executable_path: "/g/bin/start.bat".to_string(),
+            native_launch_parameters: "-w".to_string(),
+            native_launch_source: LAUNCH_SOURCE_SIDECAR.to_string(),
+            native_working_dir: "bin".to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_save_that_changes_nothing_keeps_the_origin() {
+        let row = sidecar_row();
+        assert_eq!(
+            launch_origin_after_save(&row, "/g/bin/start.bat", "/g/bin/start.bat", "-w"),
+            ("sidecar".to_string(), "bin".to_string())
+        );
+        // An automatic row whose shown (ranked) file is saved unchanged
+        // stays automatic, so a sidecar added later can still take over.
+        let automatic = InstalledGame::default();
+        assert_eq!(
+            launch_origin_after_save(&automatic, "/g/game.exe", "/g/game.exe", ""),
+            (String::new(), String::new())
+        );
+    }
+
+    #[test]
+    fn a_save_with_a_new_executable_is_the_users_choice_without_the_sidecar_dir() {
+        let row = sidecar_row();
+        assert_eq!(
+            launch_origin_after_save(&row, "/g/bin/start.bat", "/g/game.exe", "-w"),
+            ("user".to_string(), String::new())
+        );
+    }
+
+    #[test]
+    fn a_save_with_new_parameters_is_the_users_choice_and_keeps_the_dir() {
+        let row = sidecar_row();
+        assert_eq!(
+            launch_origin_after_save(&row, "/g/bin/start.bat", "/g/bin/start.bat", "-other"),
+            ("user".to_string(), "bin".to_string())
+        );
     }
 
     // -- executable_candidates ----------------------------------------------------

@@ -8,6 +8,7 @@ import {
   compatToolNotice,
   isNativePlatform,
   isWindowsHost,
+  launchSourceNote,
 } from './actions';
 
 describe('compatToolNotice', () => {
@@ -154,5 +155,19 @@ describe('isWindowsHost', () => {
     expect(isWindowsHost('Linux x86_64')).toBe(false);
     expect(isWindowsHost('MacIntel')).toBe(false);
     expect(isWindowsHost('')).toBe(false);
+  });
+});
+
+describe('launchSourceNote', () => {
+  const shown = '/games/Side/game/bin/start.bat';
+
+  it('names game.json while the form shows the file the sidecar set', () => {
+    expect(launchSourceNote('sidecar', shown, shown)).toBe('Set by game.json');
+  });
+
+  it('is blank once another file is picked, or for any other source', () => {
+    expect(launchSourceNote('sidecar', '/games/Side/game/Game.exe', shown)).toBe('');
+    expect(launchSourceNote('user', shown, shown)).toBe('');
+    expect(launchSourceNote('', shown, shown)).toBe('');
   });
 });

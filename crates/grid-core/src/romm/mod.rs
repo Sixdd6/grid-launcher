@@ -513,6 +513,25 @@ impl RommClient {
         .await
     }
 
+    /// `GET /api/roms/{id}/content/{file_name}?file_ids={file.id}`: ONE file
+    /// of a ROM, as bytes (the `game.json` sidecar). The `file_ids` pair is
+    /// what keeps the server from bundling every listed file into a zip.
+    /// Same auth-error mapping as every other call.
+    pub async fn rom_file_bytes(&self, rom_id: i64, file: &RomFile) -> Result<Vec<u8>, RommError> {
+        let path = format!(
+            "/api/roms/{rom_id}/content/{}",
+            crate::library::encode_file_segment(&file.file_name)
+        );
+        let resp = self
+            .get_response(&path, &[("file_ids", file.id.to_string())])
+            .await?;
+        Ok(resp
+            .bytes()
+            .await
+            .map_err(|e| RommError::Connection(e.without_url().to_string()))?
+            .to_vec())
+    }
+
     pub async fn rom_detail(&self, rom_id: i64) -> Result<RomDetail, RommError> {
         let raw: RawRomDetail = self.get_json(&format!("/api/roms/{rom_id}"), &[]).await?;
         Ok(raw.into_detail(&self.base))

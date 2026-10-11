@@ -53,6 +53,8 @@ CREATE TABLE installed_games (
     last_played_at      INTEGER NOT NULL DEFAULT 0,
     images_version      INTEGER NOT NULL DEFAULT 0,
     platform_slug       TEXT NOT NULL DEFAULT '',
+    native_launch_source     TEXT NOT NULL DEFAULT '',
+    native_working_dir       TEXT NOT NULL DEFAULT '',
     UNIQUE (title_key, platform_key)
 );
 ";
@@ -76,7 +78,7 @@ CREATE TABLE IF NOT EXISTS pending_play_sessions (
 
 /// The schema version this build understands. Bumped when a migration adds
 /// columns or tables (see spec: later milestones add native/PS3/PS4 fields).
-const LATEST_USER_VERSION: i64 = 8;
+const LATEST_USER_VERSION: i64 = 9;
 
 /// The columns v1 -> v2 (milestone 7) adds to `installed_games`.
 const V2_IMAGE_COLUMNS: [&str; 3] = ["cover_small_path", "cover_large_path", "screenshot_urls"];
@@ -285,6 +287,45 @@ fn migrate_7_to_8(conn: &mut Connection) -> Result<(), LibraryError> {
     tx.commit().map_err(registry_err)
 }
 
+/// The columns v8 -> v9 adds (user feature 2026-10-10, launch metadata in
+/// the `game.json` sidecar):
+///
+/// - `native_launch_source`: who pinned `native_executable_path` —
+///   `"sidecar"` (the game's `game.json` `launch` section), `"user"`
+///   (Native Game Settings), or `""` (nobody: the automatic ranking).
+/// - `native_working_dir`: the sidecar's `launch.working_dir`, RELATIVE to
+///   the game folder (`""` = the executable's own folder). Relative on
+///   purpose: a library move or a layout migration rewrites absolute paths,
+///   and a relative one needs no rewrite.
+const V9_COLUMNS: [&str; 2] = ["native_launch_source", "native_working_dir"];
+
+/// v8 -> v9: adds [`V9_COLUMNS`]. Same transaction + idempotent-`ADD
+/// COLUMN` shape as every migration above it. A row that already has a
+/// pinned executable was pinned in Native Game Settings (nothing else wrote
+/// that column before v9), so it is marked `"user"`: a sidecar never
+/// replaces that choice.
+fn migrate_8_to_9(conn: &mut Connection) -> Result<(), LibraryError> {
+    let tx = conn.transaction().map_err(registry_err)?;
+    let existing = installed_games_columns(&tx)?;
+    for column in V9_COLUMNS {
+        if existing.iter().any(|name| name == column) {
+            continue;
+        }
+        tx.execute_batch(&format!(
+            "ALTER TABLE installed_games ADD COLUMN {column} TEXT NOT NULL DEFAULT '';"
+        ))
+        .map_err(registry_err)?;
+    }
+    tx.execute_batch(
+        "UPDATE installed_games SET native_launch_source = 'user' \
+         WHERE TRIM(native_executable_path) <> '' AND native_launch_source = '';",
+    )
+    .map_err(registry_err)?;
+    tx.pragma_update(None, "user_version", 9)
+        .map_err(registry_err)?;
+    tx.commit().map_err(registry_err)
+}
+
 /// Every column of `installed_games`, in the order selected/inserted below.
 const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_path, \
      extracted_path, extracted_dir, multi_file_game_dir, description, rating, genres, \
@@ -292,7 +333,8 @@ const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_pa
      server_updated_at, installed_at, cover_small_path, cover_large_path, screenshot_urls, \
      native_executable_path, native_launch_parameters, native_compat_tool, native_wineprefix, \
      native_game_dir, included_dlc, ps3_trophy_paths, ps3_game_id, ps3_iso_path, ps4_game_id, \
-     ps4_content, ra_id, last_played_at, fanart_urls, images_version, platform_slug";
+     ps4_content, ra_id, last_played_at, fanart_urls, images_version, platform_slug, \
+     native_launch_source, native_working_dir";
 
 /// The path-bearing columns [`Registry::rewrite_paths`] hands to its
 /// closure as plain strings. `ps3_trophy_paths` is the ninth, handled
@@ -387,6 +429,14 @@ pub struct InstalledGame {
     /// rule. [`Registry::upsert`] never blanks a stored slug.
     #[serde(default)]
     pub platform_slug: String,
+    /// Who pinned `native_executable_path`: `"sidecar"`, `"user"`, or `""`
+    /// (see [`V9_COLUMNS`] and `specials::native`).
+    #[serde(default)]
+    pub native_launch_source: String,
+    /// The sidecar's `launch.working_dir`, relative to the game folder;
+    /// `""` = the executable's own folder.
+    #[serde(default)]
+    pub native_working_dir: String,
 }
 
 impl InstalledGame {
@@ -446,6 +496,8 @@ impl InstalledGame {
             fanart_urls: row.get(36)?,
             images_version: row.get(37)?,
             platform_slug: row.get(38)?,
+            native_launch_source: row.get(39)?,
+            native_working_dir: row.get(40)?,
         })
     }
 }
@@ -518,6 +570,7 @@ impl Registry {
                 5 => migrate_5_to_6(&mut conn)?,
                 6 => migrate_6_to_7(&mut conn)?,
                 7 => migrate_7_to_8(&mut conn)?,
+                8 => migrate_8_to_9(&mut conn)?,
                 v => {
                     return Err(LibraryError::Registry(format!(
                         "no migration from user_version {v}"
@@ -564,11 +617,11 @@ impl Registry {
                 native_executable_path, native_launch_parameters, native_compat_tool,
                 native_wineprefix, native_game_dir, included_dlc, ps3_trophy_paths,
                 ps3_game_id, ps3_iso_path, ps4_game_id, ps4_content, ra_id, images_version,
-                platform_slug
+                platform_slug, native_launch_source, native_working_dir
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
                 ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
-                ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40
+                ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42
             )
             ON CONFLICT(title_key, platform_key) DO UPDATE SET
                 title = excluded.title,
@@ -608,6 +661,8 @@ impl Registry {
                 ps4_content = excluded.ps4_content,
                 ra_id = excluded.ra_id,
                 images_version = excluded.images_version,
+                native_launch_source = excluded.native_launch_source,
+                native_working_dir = excluded.native_working_dir,
                 platform_slug = CASE WHEN excluded.platform_slug = ''
                     THEN installed_games.platform_slug ELSE excluded.platform_slug END",
             params![
@@ -651,6 +706,8 @@ impl Registry {
                 rec.ra_id,
                 IMAGES_VERSION,
                 rec.platform_slug.trim(),
+                rec.native_launch_source,
+                rec.native_working_dir,
             ],
         )
         .map_err(registry_err)?;
@@ -732,6 +789,30 @@ impl Registry {
                 "UPDATE installed_games SET native_executable_path = ?1, \
                  native_launch_parameters = ?2, native_compat_tool = ?3 WHERE rom_id = ?4",
                 params![executable, parameters, compat_tool, rom_id],
+            )
+            .map_err(registry_err)?;
+        Ok(affected > 0)
+    }
+
+    /// Sets the launch-file pin on the row for `rom_id` together with where
+    /// it came from — `executable`, `parameters`, `source` (`"sidecar"`,
+    /// `"user"` or `""`) and the relative `working_dir` — in one statement.
+    /// The compat tool is left alone. Returns whether a row matched.
+    pub fn update_native_launch(
+        &self,
+        rom_id: i64,
+        executable: &str,
+        parameters: &str,
+        source: &str,
+        working_dir: &str,
+    ) -> Result<bool, LibraryError> {
+        let conn = self.conn.lock().unwrap();
+        let affected = conn
+            .execute(
+                "UPDATE installed_games SET native_executable_path = ?1, \
+                 native_launch_parameters = ?2, native_launch_source = ?3, \
+                 native_working_dir = ?4 WHERE rom_id = ?5",
+                params![executable, parameters, source, working_dir, rom_id],
             )
             .map_err(registry_err)?;
         Ok(affected > 0)

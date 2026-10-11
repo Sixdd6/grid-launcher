@@ -588,6 +588,7 @@ pub fn run() {
             commands::specials::install_block_reason,
             commands::specials::native_game_settings,
             commands::specials::set_native_game_settings,
+            commands::specials::reload_native_launch,
             commands::specials::list_compat_tools,
             commands::specials::set_default_compat_tool,
             commands::specials::list_compat_tool_catalog,

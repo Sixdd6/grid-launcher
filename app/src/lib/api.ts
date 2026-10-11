@@ -538,7 +538,14 @@ export type NativeGameSettings = {
   /** The install directory the executable candidates are labelled relative to; '' when none resolved. */
   install_dir: string;
   candidates: string[];
+  /** Who set the launch file: 'sidecar' (game.json), 'user' (this dialog), or '' (automatic). */
+  launch_source: string;
 };
+
+/// `reload_native_launch`'s answer. `outcome` is 'pinned',
+/// 'kept_user_choice', 'no_sidecar', 'no_launch' or 'invalid'; `message`
+/// is the line the dialog shows.
+export type NativeLaunchReload = { outcome: string; message: string };
 
 /// `kind` is `'wine'` or `'proton'`; `source` is `'system'`, `'steam'` or
 /// `'managed'`.
@@ -812,6 +819,9 @@ export const api = {
     parameters: string,
     compatTool: string,
   ) => invoke<void>('set_native_game_settings', { romId, executable, parameters, compatTool }),
+  /** Re-reads the server's game.json and applies its launch section (no reinstall). */
+  reloadNativeLaunch: (romId: number) =>
+    invoke<NativeLaunchReload>('reload_native_launch', { romId }),
   listCompatTools: () => invoke<CompatToolsDto>('list_compat_tools'),
   setDefaultCompatTool: (value: string) => invoke<void>('set_default_compat_tool', { value }),
   listCompatToolCatalog: () => invoke<CatalogEntry[]>('list_compat_tool_catalog'),

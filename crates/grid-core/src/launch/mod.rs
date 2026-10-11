@@ -770,4 +770,80 @@ mod tests {
         };
         assert!(!entry_is_retroarch(&unrelated, profiles));
     }
+
+    // --- Windows script launch (game.json launch metadata, 2026-10-10) ------
+    //
+    // These spawn real child processes through `spawn_child`, the same call
+    // `LaunchService::launch` makes, from a `build_native_command` result:
+    // a script in a folder WITH SPACES, arguments with a space, and a
+    // `game.json` working directory that differs from the script's folder.
+
+    /// Builds the native launch for `script` (relative to the install) with
+    /// working dir `"."` (the install root), spawns it, waits, and returns
+    /// the `out.txt` the script wrote beside itself.
+    #[cfg(windows)]
+    async fn run_script(file_name: &str, body: &str) -> (String, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let install = dir.path().join("My Game (v1)").join("game");
+        let bin = install.join("bin dir");
+        std::fs::create_dir_all(&bin).unwrap();
+        let script = bin.join(file_name);
+        std::fs::write(&script, body).unwrap();
+        let row = InstalledGame {
+            title: "My Game".to_string(),
+            platform: "Windows".to_string(),
+            rom_file_name: "My Game.zip".to_string(),
+            extracted_dir: install.to_string_lossy().into_owned(),
+            native_executable_path: script.to_string_lossy().into_owned(),
+            native_launch_parameters: "--mode \"two words\" plain".to_string(),
+            native_launch_source: "sidecar".to_string(),
+            native_working_dir: ".".to_string(),
+            ..Default::default()
+        };
+        let launch = build_native_command(&row, dir.path(), "", "windows", &which_on_path).unwrap();
+        assert_eq!(launch.cwd, install);
+        let mut child = spawn_child(launch.argv, launch.cwd, launch.env)
+            .await
+            .expect("the script starts");
+        let status = child.wait().unwrap();
+        assert!(status.success(), "the script exited with {status}");
+        let out = std::fs::read_to_string(bin.join("out.txt")).expect("the script wrote out.txt");
+        // Kept alive until here: the tempdir is deleted on drop.
+        let _keep = dir;
+        (out, install)
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_batch_file_in_a_folder_with_spaces_gets_its_args_and_working_dir() {
+        let body = "@echo off\r\n\
+                    > \"%~dp0out.txt\" echo ARGS=%*\r\n\
+                    >> \"%~dp0out.txt\" echo ARG2=%~2\r\n\
+                    >> \"%~dp0out.txt\" echo CWD=%CD%\r\n";
+        let (out, install) = run_script("start game.bat", body).await;
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "ARGS=--mode \"two words\" plain", "{out}");
+        assert_eq!(lines[1], "ARG2=two words", "{out}");
+        assert_eq!(lines[2], format!("CWD={}", install.display()), "{out}");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_cmd_file_starts_the_same_way() {
+        let body = "@echo off\r\n> \"%~dp0out.txt\" echo ARG2=%~2\r\n";
+        let (out, _install) = run_script("start.cmd", body).await;
+        assert_eq!(out.lines().next(), Some("ARG2=two words"), "{out}");
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_powershell_script_runs_through_powershell_with_its_args() {
+        let body = "$out = Join-Path $PSScriptRoot 'out.txt'\r\n\
+                    \"ARGS=\" + ($args -join '|') | Out-File -Encoding ascii $out\r\n\
+                    \"CWD=\" + (Get-Location).Path | Out-File -Encoding ascii -Append $out\r\n";
+        let (out, install) = run_script("run me.ps1", body).await;
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "ARGS=--mode|two words|plain", "{out}");
+        assert_eq!(lines[1], format!("CWD={}", install.display()), "{out}");
+    }
 }

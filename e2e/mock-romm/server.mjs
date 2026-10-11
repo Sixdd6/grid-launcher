@@ -212,6 +212,23 @@ function buildContentFixtures() {
   const linuxZipBytes = buildZip([
     { name: "TuxGame/tuxgame.sh", data: Buffer.from("#!/bin/sh\nsleep 30\n", "utf8") },
   ]);
+  // Linux / native (`native` group, rom 705): TWO launchable scripts. The
+  // automatic ranking alone picks `sidegame.sh` (exact title match); the
+  // rom's game.json `launch` section names `launch.sh`, so only the sidecar
+  // can make `launch.sh` run. `launch.sh` writes its working directory,
+  // its own path and its argv one per line to `launch-argv.log` beside
+  // itself, then sleeps so the session stays alive for Stop. `sidegame.sh`
+  // writes nothing: a log proves launch.sh ran.
+  const sideGameZipBytes = buildZip([
+    {
+      name: "SideGame/launch.sh",
+      data: Buffer.from(
+        '#!/bin/sh\n{ pwd; printf \'%s\\n\' "$0" "$@"; } > "$(dirname "$0")/launch-argv.log"\nsleep 30\n',
+        "utf8",
+      ),
+    },
+    { name: "SideGame/sidegame.sh", data: Buffer.from("#!/bin/sh\nsleep 30\n", "utf8") },
+  ]);
   const gameJsonBytes = Buffer.from(
     JSON.stringify({ version: "1.0", year: 2004, tags: ["indie"] }),
     "utf8",
@@ -245,6 +262,7 @@ function buildContentFixtures() {
     x360UpdateZipBytes,
     nativeZipBytes,
     linuxZipBytes,
+    sideGameZipBytes,
     gameJsonBytes,
     ps1ZipBytes,
     serverEmulatorZipBytes,
@@ -275,6 +293,7 @@ function contentForFile(fileName, content) {
   if (lower === "x360-update.zip") return content.x360UpdateZipBytes;
   if (lower === "mygame.zip") return content.nativeZipBytes;
   if (lower === "tuxgame.zip") return content.linuxZipBytes;
+  if (lower === "sidegame.zip") return content.sideGameZipBytes;
   // The `updates` group's native update archive: the same Windows payload,
   // under the version-tagged name that makes it NEWER than the seeded
   // install (`mygame (v1.0.0).zip`). It has to carry `MyGame/mygame.exe`,
@@ -400,7 +419,16 @@ async function loadFixtures(fixturesDir) {
   for (const detail of Object.values(romDetails)) {
     let total = 0;
     for (const file of detail.files ?? []) {
-      const bytes = contentForFile(file.file_name, content);
+      // `e2e_json` is a mock-only directive like `e2e_throttle`: the JSON
+      // body THIS file serves (a per-rom `game.json`), stripped from the
+      // detail. Without it, a file is served by name (`contentForFile`).
+      let bytes;
+      if (file.e2e_json !== undefined) {
+        bytes = Buffer.from(JSON.stringify(file.e2e_json), "utf8");
+        delete file.e2e_json;
+      } else {
+        bytes = contentForFile(file.file_name, content);
+      }
       file.file_size_bytes = bytes.length;
       total += bytes.length;
       contentByKey.set(`${detail.id}:${file.file_name}`, bytes);

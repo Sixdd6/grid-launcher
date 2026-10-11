@@ -176,6 +176,11 @@ const NO_NATIVE_INSTALL_DIR: &str =
     "Game install directory could not be found. Reinstall the game and try again.";
 /// What every "this game is not in the registry" failure says.
 pub const NOT_INSTALLED: &str = "not installed";
+
+/// [`InstallService::reload_native_launch`] for a row that is not a native
+/// (Windows/Linux) game: only those read a `game.json` launch section.
+pub const NOT_A_NATIVE_GAME: &str =
+    "launch info from game.json applies only to Windows and Linux games";
 /// `install_update` refuses native rows: those merge through
 /// `install_native_update` instead of replacing the install.
 pub const NATIVE_UPDATE_REQUIRED: &str = "Native games update through the merge path.";
@@ -1219,19 +1224,36 @@ impl InstallService {
             detail.filesize_bytes
         };
 
+        let mut file_ids = vec![archive.id];
+        let mut targets = vec![content_target(rom_id, archive, dest.clone(), size)];
+        // The update re-reads the sidecar too: its `launch` section can
+        // change with the game (`finalize_native_update`). It replaces the
+        // copy the base install left next to the game.
+        let game_json_target = specials::native::has_game_json(&detail.files).map(|sidecar| {
+            let sidecar_dest = native_game_dir.join(METADATA_FILE_NAME);
+            file_ids.push(sidecar.id);
+            targets.push(content_target(
+                rom_id,
+                sidecar,
+                sidecar_dest.clone(),
+                sidecar.file_size_bytes,
+            ));
+            sidecar_dest
+        });
+
         let title = format!("{} (update)", detail.name);
         let platform = detail.platform_name.clone();
         let job = InstallJob {
             rom_id,
             mode: InstallMode::NativeUpdate,
             content_kind: None,
-            file_ids: vec![archive.id],
-            targets: vec![content_target(rom_id, archive, dest.clone(), size)],
+            file_ids,
+            targets,
             primary_archive: dest,
             multi_file_game_dir: None,
             launch_entry: archive.file_name.clone(),
             native_game_dir: Some(native_game_dir),
-            game_json_target: None,
+            game_json_target,
             detail: detail.clone(),
             client,
         };
@@ -1242,6 +1264,146 @@ impl InstallService {
             InstallMode::NativeUpdate.kind(),
             JobPayload::Game(job),
         )
+    }
+
+    /// Native Game Settings' "Reload launch info from server": fetches the
+    /// ROM entry and its `game.json` NOW (never the local copy) and applies
+    /// the `launch` section to the installed row, without a reinstall. A
+    /// user's choice is never replaced ([`specials::native::apply_sidecar_launch`]).
+    ///
+    /// `Err` covers no row, a row that is not a native game, a busy library,
+    /// and a server that cannot be reached; every other answer is a
+    /// [`specials::native::SidecarOutcome`] the dialog words.
+    pub async fn reload_native_launch(
+        self: &Arc<Self>,
+        client: Arc<RommClient>,
+        rom_id: i64,
+    ) -> Result<specials::native::SidecarOutcome, LibraryError> {
+        self.check_library_gate()?;
+        let row = self.current_row(rom_id)?;
+        if !row.is_native() {
+            return Err(LibraryError::Extract(NOT_A_NATIVE_GAME.to_string()));
+        }
+        let detail = client.rom_detail(rom_id).await?;
+        self.sidecar_launch_from_server(&client, rom_id, row, &detail, false)
+            .await
+    }
+
+    /// The update check's automatic pickup, for a ROM entry the check has
+    /// already fetched (`detail`). Cheap by design: a user's choice ends it
+    /// before any request, and an unchanged sidecar (the local copy next to
+    /// the game has the size the server lists) is read from disk instead of
+    /// downloaded. A row that is not native answers `NoSidecar`.
+    pub async fn pick_up_native_launch(
+        &self,
+        client: &RommClient,
+        rom_id: i64,
+        detail: &RomDetail,
+    ) -> Result<specials::native::SidecarOutcome, LibraryError> {
+        self.check_library_gate()?;
+        let row = self.current_row(rom_id)?;
+        if !row.is_native() {
+            return Ok(specials::native::SidecarOutcome::NoSidecar);
+        }
+        self.sidecar_launch_from_server(client, rom_id, row, detail, true)
+            .await
+    }
+
+    /// The shared body of [`Self::reload_native_launch`] and
+    /// [`Self::pick_up_native_launch`]: reads the sidecar `detail` lists
+    /// (from disk when `prefer_local` and the local copy matches the
+    /// server's size, else from the server, saving it next to the game),
+    /// applies its `launch` section to `row` against the game folder, and
+    /// writes the launch columns only when they changed.
+    async fn sidecar_launch_from_server(
+        &self,
+        client: &RommClient,
+        rom_id: i64,
+        row: InstalledGame,
+        detail: &RomDetail,
+        prefer_local: bool,
+    ) -> Result<specials::native::SidecarOutcome, LibraryError> {
+        use specials::native::{SidecarOutcome, LAUNCH_SOURCE_USER};
+
+        let Some(file) = specials::native::has_game_json(&detail.files) else {
+            return Ok(SidecarOutcome::NoSidecar);
+        };
+        if row.native_launch_source == LAUNCH_SOURCE_USER {
+            return Ok(SidecarOutcome::KeptUserChoice);
+        }
+
+        let local = match row.native_game_dir.trim() {
+            "" => None,
+            home => Some(PathBuf::from(home).join(METADATA_FILE_NAME)),
+        };
+        let unchanged_local = local.as_ref().filter(|path| {
+            prefer_local
+                && file.file_size_bytes > 0
+                && fs::metadata(path)
+                    .is_ok_and(|meta| meta.is_file() && meta.len() == file.file_size_bytes as u64)
+        });
+        let bytes = match unchanged_local {
+            Some(path) => fs::read(path)?,
+            None => {
+                let bytes = client.rom_file_bytes(rom_id, file).await?;
+                if bytes.len() <= MAX_SIDECAR_BYTES {
+                    if let Some(path) = local
+                        .as_ref()
+                        .filter(|p| p.parent().is_some_and(Path::is_dir))
+                    {
+                        if let Err(e) = fs::write(path, &bytes) {
+                            tracing::debug!("game.json for rom {rom_id} not saved: {e}");
+                        }
+                    }
+                }
+                bytes
+            }
+        };
+        if bytes.len() > MAX_SIDECAR_BYTES {
+            return Ok(SidecarOutcome::Invalid(
+                "game.json is larger than 1 MiB".to_string(),
+            ));
+        }
+        let Some(parsed) = specials::native::parse_game_json(&bytes) else {
+            return Ok(SidecarOutcome::Invalid(
+                "game.json is not a JSON object".to_string(),
+            ));
+        };
+
+        let archives = match self.library_root() {
+            Ok(library) => candidate_archives(
+                &library,
+                &row.platform,
+                &row.archive_path,
+                &archive_name(&row.rom_file_name, &row.title, &row.platform),
+                &row.native_game_dir,
+            ),
+            Err(_) => Vec::new(),
+        };
+        let Some(folder) = specials::native::install_dir(&row, &archives) else {
+            return Ok(SidecarOutcome::Invalid(
+                "the game folder was not found".to_string(),
+            ));
+        };
+        let mut updated = row.clone();
+        let outcome = specials::native::apply_sidecar_launch(&mut updated, &folder, Some(&parsed));
+        if outcome == SidecarOutcome::Pinned {
+            make_executable(Path::new(&updated.native_executable_path));
+            let changed = updated.native_executable_path != row.native_executable_path
+                || updated.native_launch_parameters != row.native_launch_parameters
+                || updated.native_launch_source != row.native_launch_source
+                || updated.native_working_dir != row.native_working_dir;
+            if changed {
+                self.registry.update_native_launch(
+                    rom_id,
+                    &updated.native_executable_path,
+                    &updated.native_launch_parameters,
+                    &updated.native_launch_source,
+                    &updated.native_working_dir,
+                )?;
+            }
+        }
+        Ok(outcome)
     }
 
     /// Starts (or queues) a plain re-install of an already installed
@@ -2221,7 +2383,7 @@ impl InstallService {
         } else {
             match base_finalize_route(&detail.platform_slug, platform, archive) {
                 BaseRoute::Native => {
-                    archive_to_delete = self.finalize_native_base(id, job, &mut record)?;
+                    archive_to_delete = self.finalize_native_base(id, job, &mut record, warning)?;
                 }
                 BaseRoute::Ps3 => {
                     archive_to_delete = self.finalize_ps3_base(id, job, &mut record)?;
@@ -2434,9 +2596,23 @@ impl InstallService {
         let temp_dir = specials::native::update_temp_dir(&row);
         let extract = self.extract_fn(id);
 
-        let updated =
+        let mut updated =
             specials::native::apply_update(&row, &job.detail, archive, &temp_dir, &extract)
                 .map_err(LibraryError::Extract)?;
+        // The server's sidecar, fetched with the update: a pin it set is
+        // kept (or moved to its new file), a user's choice is never touched,
+        // and no sidecar leaves the row's launch fields as they are.
+        if let Some(sidecar) = &job.game_json_target {
+            let parsed = fs::read(sidecar)
+                .ok()
+                .and_then(|bytes| specials::native::parse_game_json(&bytes));
+            let home = job
+                .native_game_dir
+                .clone()
+                .unwrap_or_else(|| PathBuf::from(updated.row.native_game_dir.trim()));
+            let folder = sidecar_game_folder(&updated.row, &home);
+            apply_sidecar_launch_to(&mut updated.row, &folder, parsed.as_ref(), warning);
+        }
         self.registry.upsert(&updated.row)?;
         if !updated.warning.is_empty() {
             append_warning(warning, &updated.warning);
@@ -2535,6 +2711,7 @@ impl InstallService {
         id: u64,
         job: &'a InstallJob,
         record: &mut InstalledGame,
+        warning: &mut String,
     ) -> Result<Option<&'a Path>, LibraryError> {
         let archive = job.primary_archive.as_path();
         // Always `Some` for a native job (`plan_native_install` sets it);
@@ -2593,6 +2770,8 @@ impl InstallService {
             if let Ok(bytes) = fs::read(sidecar) {
                 if let Some(parsed) = specials::native::parse_game_json(&bytes) {
                     specials::native::apply_game_json(record, &parsed);
+                    let folder = sidecar_game_folder(record, game_dir);
+                    apply_sidecar_launch_to(record, &folder, Some(&parsed), warning);
                 }
             }
         }
@@ -4003,6 +4182,40 @@ fn move_file(from: &Path, to: &Path) -> Result<(), LibraryError> {
         }
     }
 }
+
+/// The folder a `game.json` `launch` section's paths are relative to: the
+/// extracted tree (`<home>/game`) when there is one, else the game's own
+/// home directory (a payload installed as a bare file).
+fn sidecar_game_folder(record: &InstalledGame, game_dir: &Path) -> PathBuf {
+    match record.extracted_dir.trim() {
+        "" => game_dir.to_path_buf(),
+        extracted => PathBuf::from(extracted),
+    }
+}
+
+/// [`specials::native::apply_sidecar_launch`] for a finalize: a pinned
+/// script gets its execute bit (an archive carries no Unix mode), and an
+/// invalid section becomes one finalize warning line.
+fn apply_sidecar_launch_to(
+    record: &mut InstalledGame,
+    game_folder: &Path,
+    parsed: Option<&specials::native::GameJson>,
+    warning: &mut String,
+) -> specials::native::SidecarOutcome {
+    let outcome = specials::native::apply_sidecar_launch(record, game_folder, parsed);
+    if outcome == specials::native::SidecarOutcome::Pinned {
+        make_executable(Path::new(&record.native_executable_path));
+    }
+    let line = outcome.warning();
+    if !line.is_empty() {
+        append_warning(warning, &line);
+    }
+    outcome
+}
+
+/// The largest `game.json` the launch pickup reads. A metadata sidecar is
+/// a few hundred bytes; anything this size is not one.
+const MAX_SIDECAR_BYTES: usize = 1024 * 1024;
 
 /// Appends `line` to `warning`, keeping any warning already there.
 fn append_warning(warning: &mut String, line: &str) {

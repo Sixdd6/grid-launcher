@@ -261,7 +261,33 @@ For installed native games, the details view should expose a game settings dialo
 - choose the launch executable discovered from the install directory
 - set custom launch parameters for that specific game
 
-Valid launch targets should include `.exe`, `.bat`, `.cmd`, `.ps1`, and `.sh` files where relevant.
+Valid launch targets should include `.exe`, `.bat`, `.cmd`, `.ps1`, and `.sh` files where relevant. On Windows, a `.bat`/`.cmd` starts through cmd.exe and a `.ps1` through `powershell.exe -NoProfile -ExecutionPolicy Bypass -File`; on Linux, a `.sh` starts through its shebang (the install sets its execute bit).
+
+#### Launch info in `game.json`
+A native game's RomM entry can list a `game.json` file next to the archive. Besides its metadata (`version`, `year`, `tags`, `included_dlc`), it can carry an optional `launch` section:
+
+```json
+{
+  "launch": {
+    "executable": "bin/start.bat",
+    "arguments": "-windowed \"Profile One\"",
+    "working_dir": "bin"
+  }
+}
+```
+
+- `executable` (required in the section): the launch file, relative to the game folder (the extracted archive's root). `/` and `\` both separate folders.
+- `arguments` (optional): one string, split like the Custom Launch Parameters field (quotes group words).
+- `working_dir` (optional): relative to the game folder; `"."` is the game folder itself. Without it, the game starts in the launch file's own folder.
+
+Rules:
+- Paths must stay inside the game folder: no absolute path, no drive prefix (`C:`), no `..`. The launch file must exist and be launchable. Fields of the wrong type count as missing; unknown keys are ignored.
+- At install, a valid section sets the launch file, the arguments, and the working dir. An invalid one does not stop the install: the download row shows "game.json launch section ignored: <problem>", and the launch file is chosen automatically.
+- Precedence: the player's choice in Game Settings, then `game.json`, then the automatic choice. Changing the launch file or the parameters in Game Settings makes them the player's choice, which `game.json` never replaces. Saving without changing them keeps the `game.json` launch file.
+- An update reads the server's `game.json` again: a launch file it set follows the new section, and the player's choice stays.
+- A game installed before its `game.json` had a launch section picks it up without a reinstall: automatically during the update check, or at once with "Reload launch info from server" in Game Settings, which reports what it found.
+- Game Settings marks a launch file that came from `game.json` with "Set by game.json".
+- The archive itself is never read or changed for this.
 
 # Cloud Save Synchronization
 The application now includes cloud save and state synchronization for emulator-based games using the RomM saves/states API.

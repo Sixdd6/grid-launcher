@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use grid_core::library::registry::InstalledGame;
+use grid_core::library::specials::native::SidecarOutcome;
 use grid_core::library::update_detection::{
     format_version_tag, game_has_server_update, has_newer_server_rom_version,
     is_emulators_platform, rom_file_name_version, ServerVersion,
@@ -239,6 +240,7 @@ impl UpdateService {
             }
             let client = client.clone();
             let semaphore = semaphore.clone();
+            let install = install.clone();
             tasks.push(tokio::spawn(async move {
                 let _permit = semaphore.acquire_owned().await.ok()?;
                 let detail = match client.rom_detail(rom_id).await {
@@ -248,6 +250,24 @@ impl UpdateService {
                         return None;
                     }
                 };
+                // A `game.json` launch section added (or changed) on the
+                // server reaches an installed native game here, with no
+                // reinstall. The detail is already in hand; a user's choice
+                // and an unchanged local sidecar cost no request.
+                if row.is_native() {
+                    match install
+                        .pick_up_native_launch(&client, rom_id, &detail)
+                        .await
+                    {
+                        Ok(SidecarOutcome::Invalid(problem)) => tracing::debug!(
+                            "update check: rom {rom_id} game.json launch ignored: {problem}"
+                        ),
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::debug!("update check: rom {rom_id} launch pickup skipped: {e}")
+                        }
+                    }
+                }
                 let server = ServerVersion {
                     platform: &detail.platform_name,
                     platform_slug: &detail.platform_slug,

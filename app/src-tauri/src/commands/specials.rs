@@ -133,6 +133,38 @@ pub struct NativeGameSettings {
     /// `native::executable_candidates` order (best default first: junk
     /// last, then shallowest, then closest title match).
     pub candidates: Vec<String>,
+    /// Who set the launch file: `"sidecar"` (the game's `game.json`),
+    /// `"user"` (this dialog), or `""` (the automatic ranking).
+    pub launch_source: String,
+}
+
+/// The row's install directory, its executable candidates, and the
+/// executable that launches today — what the settings form shows.
+fn resolve_native_files(
+    row: &grid_core::library::registry::InstalledGame,
+) -> Result<(Option<PathBuf>, Vec<PathBuf>, String), String> {
+    let config = Config::load(&Config::default_path()).map_err(err)?;
+    // No library path configured only costs the archive fallback: a row
+    // with a live `extracted_dir` still resolves.
+    let archives = match library_root(&config) {
+        Some(library) => candidate_archives(
+            &library,
+            &row.platform,
+            &row.archive_path,
+            &archive_name(&row.rom_file_name, &row.title, &row.platform),
+            &row.native_game_dir,
+        ),
+        None => Vec::new(),
+    };
+    let dir = native::install_dir(row, &archives);
+    let candidates = match dir.as_ref() {
+        Some(dir) => native::executable_candidates(dir, &row.title),
+        None => Vec::new(),
+    };
+    let executable = native::resolved_executable(row, &candidates)
+        .map(path_string)
+        .unwrap_or_default();
+    Ok((dir, candidates, executable))
 }
 
 #[tauri::command]
@@ -146,27 +178,7 @@ pub async fn native_game_settings(
             .find(Some(rom_id), "", "")
             .map_err(err)?
             .ok_or("game is not installed")?;
-        let config = Config::load(&Config::default_path()).map_err(err)?;
-        // No library path configured only costs the archive fallback: a row
-        // with a live `extracted_dir` still resolves.
-        let archives = match library_root(&config) {
-            Some(library) => candidate_archives(
-                &library,
-                &row.platform,
-                &row.archive_path,
-                &archive_name(&row.rom_file_name, &row.title, &row.platform),
-                &row.native_game_dir,
-            ),
-            None => Vec::new(),
-        };
-        let dir = native::install_dir(&row, &archives);
-        let candidates = match dir.as_ref() {
-            Some(dir) => native::executable_candidates(dir, &row.title),
-            None => Vec::new(),
-        };
-        let executable = native::resolved_executable(&row, &candidates)
-            .map(path_string)
-            .unwrap_or_default();
+        let (dir, candidates, executable) = resolve_native_files(&row)?;
         Ok(NativeGameSettings {
             executable,
             parameters: row.native_launch_parameters.clone(),
@@ -174,6 +186,7 @@ pub async fn native_game_settings(
             wineprefix: row.native_wineprefix.clone(),
             install_dir: dir.map(path_string).unwrap_or_default(),
             candidates: candidates.iter().map(|p| path_string(p.clone())).collect(),
+            launch_source: row.native_launch_source.clone(),
         })
     })
     .await
@@ -191,16 +204,79 @@ pub async fn set_native_game_settings(
     let registry = state.install.as_ref().map_err(Clone::clone)?.registry();
     let compat_tool = normalize_compat_for_host(host_os(), &compat_tool);
     tokio::task::spawn_blocking(move || {
-        // The `bool` is "a row matched"; a miss means the game was
-        // uninstalled between opening the form and saving it, which is a UI
-        // race rather than an error worth surfacing.
+        // A miss means the game was uninstalled between opening the form
+        // and saving it, which is a UI race rather than an error worth
+        // surfacing.
+        let Some(row) = registry.find(Some(rom_id), "", "").map_err(err)? else {
+            return Ok(());
+        };
+        // What the form showed, so a save that changes nothing keeps a
+        // game.json (or automatic) launch file instead of turning it into
+        // the user's choice.
+        let (_, _, shown) = resolve_native_files(&row)?;
+        let (source, working_dir) =
+            native::launch_origin_after_save(&row, &shown, &executable, &parameters);
         registry
             .update_native_settings(rom_id, &executable, &parameters, &compat_tool)
+            .map_err(err)?;
+        registry
+            .update_native_launch(rom_id, &executable, &parameters, &source, &working_dir)
             .map_err(err)?;
         Ok(())
     })
     .await
     .map_err(|e| format!("set_native_game_settings did not finish: {e}"))?
+}
+
+/// [`reload_native_launch`]'s answer: `outcome` is one of `"pinned"`,
+/// `"kept_user_choice"`, `"no_sidecar"`, `"no_launch"`, `"invalid"`, and
+/// `message` is the line the dialog shows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NativeLaunchReload {
+    pub outcome: String,
+    pub message: String,
+}
+
+/// The dialog's wording for a reload outcome.
+fn reload_answer(outcome: &native::SidecarOutcome) -> NativeLaunchReload {
+    use native::SidecarOutcome;
+    let (kind, message) = match outcome {
+        SidecarOutcome::Pinned => ("pinned", "Launch file set from game.json.".to_string()),
+        SidecarOutcome::KeptUserChoice => (
+            "kept_user_choice",
+            "Kept the launch file you chose here; game.json does not replace it.".to_string(),
+        ),
+        SidecarOutcome::NoSidecar => (
+            "no_sidecar",
+            "The server lists no game.json for this game.".to_string(),
+        ),
+        SidecarOutcome::NoLaunch => (
+            "no_launch",
+            "The game.json on the server has no launch section.".to_string(),
+        ),
+        SidecarOutcome::Invalid(_) => ("invalid", outcome.warning()),
+    };
+    NativeLaunchReload {
+        outcome: kind.to_string(),
+        message,
+    }
+}
+
+/// Native Game Settings' "Reload launch info from server": reads the
+/// server's `game.json` now and applies its `launch` section, without a
+/// reinstall (`InstallService::reload_native_launch`).
+#[tauri::command]
+pub async fn reload_native_launch(
+    state: State<'_, AppState>,
+    rom_id: i64,
+) -> Result<NativeLaunchReload, String> {
+    let install = state.install.as_ref().map_err(Clone::clone)?;
+    let client = state.session.client().ok_or("not connected")?;
+    let outcome = install
+        .reload_native_launch(client, rom_id)
+        .await
+        .map_err(err)?;
+    Ok(reload_answer(&outcome))
 }
 
 /// The compat tool value to STORE for `host`. A Windows host runs native
@@ -365,9 +441,48 @@ mod tests {
             wineprefix: "/games/My Game/prefix".to_string(),
             install_dir: "/games/My Game/game".to_string(),
             candidates: vec!["/games/My Game/game/MyGame/mygame.exe".to_string()],
+            launch_source: "sidecar".to_string(),
         };
         let json = serde_json::to_value(&dto).unwrap();
         assert_eq!(json["install_dir"], "/games/My Game/game");
+        assert_eq!(json["launch_source"], "sidecar");
+    }
+
+    #[test]
+    fn reload_answers_name_every_outcome() {
+        use native::SidecarOutcome;
+        let cases = [
+            (
+                SidecarOutcome::Pinned,
+                "pinned",
+                "Launch file set from game.json.",
+            ),
+            (
+                SidecarOutcome::KeptUserChoice,
+                "kept_user_choice",
+                "Kept the launch file you chose here; game.json does not replace it.",
+            ),
+            (
+                SidecarOutcome::NoSidecar,
+                "no_sidecar",
+                "The server lists no game.json for this game.",
+            ),
+            (
+                SidecarOutcome::NoLaunch,
+                "no_launch",
+                "The game.json on the server has no launch section.",
+            ),
+            (
+                SidecarOutcome::Invalid("launch.executable is missing".to_string()),
+                "invalid",
+                "game.json launch section ignored: launch.executable is missing",
+            ),
+        ];
+        for (outcome, kind, message) in cases {
+            let answer = reload_answer(&outcome);
+            assert_eq!(answer.outcome, kind);
+            assert_eq!(answer.message, message);
+        }
     }
 
     #[test]

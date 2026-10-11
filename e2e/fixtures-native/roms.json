@@ -22,6 +22,13 @@
       "fs_name_no_ext": "tuxgame",
       "platform_id": 2,
       "path_cover_small": null
+    },
+    {
+      "id": 705,
+      "name": "Side Game",
+      "fs_name_no_ext": "sidegame",
+      "platform_id": 2,
+      "path_cover_small": null
     }
   ],
   "3": [

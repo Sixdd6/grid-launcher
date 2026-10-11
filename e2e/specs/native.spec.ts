@@ -48,8 +48,13 @@ const PCGW_LOOKUP_TIMEOUT = 30_000;
  * Rom 704 is on platform 3, RomM's `win` platform under the custom display
  * name "PC Fangames & Ports": native only by its slug (user bug 2026-10-10).
  *
+ * Rom 705 is on the `Linux` platform with a `game.json` whose `launch`
+ * section names `SideGame/launch.sh` (arguments and working dir `.`) among
+ * two scripts; the automatic ranking alone would pick `sidegame.sh` (user
+ * feature 2026-10-10, launch metadata in the sidecar).
+ *
  * Queue ids across this spec's single app instance: 1 = rom 701's install,
- * 2 = rom 702's, 3 = rom 703's, 4 = rom 704's.
+ * 2 = rom 702's, 3 = rom 703's, 4 = rom 704's, 5 = rom 705's.
  */
 describe('native', () => {
   const gameDir = () => path.join(dataDir(), 'library', 'games', 'Windows', 'My Game');
@@ -406,5 +411,80 @@ describe('native', () => {
     const options = await $$(`${testId('native-settings-exe')} option`);
     expect(options.length).toBe(1);
     expect((await options[0].getValue()).endsWith(path.join('game', 'MyGame', 'mygame.exe'))).toBe(true);
+  });
+
+  // User feature 2026-10-10: the `game.json` sidecar's `launch` section
+  // pins the launch file at install. Rom 705's archive holds two scripts;
+  // the ranking alone would choose `sidegame.sh`, the sidecar names
+  // `launch.sh` with two arguments (one with a space) and working dir "."
+  // (the game folder, not the script's own `SideGame/`). Queue id 5.
+  it('launches the file, arguments and working dir the game.json launch section names', async () => {
+    await $(testId('native-settings-close')).click();
+    await $(testId('native-settings')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+    await closeDetails();
+    await $(testId('platform-btn-2')).click();
+    await openDetails(705);
+
+    await $(testId('details-install')).click();
+    await showDownloads();
+    await browser.waitUntil(
+      async () => (await $(testId('download-detail-5')).getText()).startsWith('Completed'),
+      { timeout: INSTALL_TIMEOUT, timeoutMsg: 'the sidecar-launch install never reached Completed' },
+    );
+    await showServer();
+    await $(`${testId('server-view')} ${testId('installed-badge-705')}`).waitForExist({
+      timeout: INSTALL_TIMEOUT,
+      timeoutMsg: "the installed badge never appeared on rom 705's card",
+    });
+
+    const sideGameDir = path.join(dataDir(), 'library', 'games', 'Linux', 'Side Game');
+    const installDir = path.join(sideGameDir, 'game');
+    const launchScript = path.join(installDir, 'SideGame', 'launch.sh');
+    expect(existsSync(launchScript)).toBe(true);
+    expect(existsSync(path.join(installDir, 'SideGame', 'sidegame.sh'))).toBe(true);
+
+    // Game Settings shows the sidecar's file, marked as set by game.json.
+    await $(testId('details-game-settings')).click();
+    await $(testId('native-settings-exe')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'Game Settings never listed an executable for the sidecar game',
+    });
+    expect(await $(testId('native-settings-exe')).getValue()).toBe(launchScript);
+    await expect($(testId('native-launch-source'))).toHaveText('Set by game.json');
+    expect(await $(testId('native-settings-params')).getValue()).toBe('--from-sidecar "two words"');
+
+    // The reload action re-reads the same sidecar and keeps the pin.
+    await $(testId('native-launch-reload')).click();
+    await expect($(testId('native-launch-reload-result'))).toHaveText('Launch file set from game.json.');
+    await expect($(testId('native-launch-source'))).toHaveText('Set by game.json');
+
+    await $(testId('native-settings-close')).click();
+    await $(testId('native-settings')).waitForExist({ timeout: TRANSITION_TIMEOUT, reverse: true });
+
+    const argvLog = path.join(installDir, 'SideGame', 'launch-argv.log');
+    await $(testId('details-play')).click();
+    await $(testId('details-playing-chip')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'details-playing-chip never appeared after Play on the sidecar game',
+    });
+    await browser.waitUntil(() => existsSync(argvLog), {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'launch.sh never ran: the sidecar launch file was not the one started',
+    });
+    await browser.waitUntil(() => readFileSync(argvLog, 'utf-8').split('\n').filter(Boolean).length >= 4, {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'launch.sh never finished writing its argv log',
+    });
+    // Line 1: the working dir (the game folder, from working_dir "."),
+    // line 2: the started file itself, then each argument.
+    const lines = readFileSync(argvLog, 'utf-8').split('\n').filter(Boolean);
+    expect(lines).toEqual([installDir, launchScript, '--from-sidecar', 'two words']);
+
+    await $(testId('details-stop')).click();
+    await $(testId('details-playing-chip')).waitForExist({
+      timeout: REAP_TIMEOUT,
+      reverse: true,
+      timeoutMsg: 'details-playing-chip never cleared after Stop on the sidecar game',
+    });
   });
 });

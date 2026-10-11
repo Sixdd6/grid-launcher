@@ -957,3 +957,46 @@ test("the native fixtures serve a custom-named win platform whose rom carries th
     assert.equal(detail.platform_display_name, "PC Fangames & Ports");
   });
 });
+
+// --- e2e_json (per-rom game.json bodies) -----------------------------------
+
+test("a rom file's fixture e2e_json is stripped from the detail and served as that file", async () => {
+  await withFixtureServer(nativeFixturesDir, async ({ url }) => {
+    const detail = await fetch(`${url}/api/roms/705`, { headers: authHeader() }).then((r) =>
+      r.json(),
+    );
+    const sidecar = detail.files.find((f) => f.file_name === "game.json");
+    assert.equal(sidecar.e2e_json, undefined, "the directive never reaches a client");
+    const res = await fetch(`${url}/api/roms/705/content/game.json?file_ids=${sidecar.id}`, {
+      headers: authHeader(),
+    });
+    assert.equal(res.status, 200);
+    const body = Buffer.from(await res.arrayBuffer());
+    assert.equal(body.length, sidecar.file_size_bytes);
+    const parsed = JSON.parse(body.toString("utf8"));
+    assert.equal(parsed.launch.executable, "SideGame/launch.sh");
+    assert.equal(parsed.launch.working_dir, ".");
+
+    // Rom 701's game.json is still the shared metadata-only body.
+    const other = await fetch(`${url}/api/roms/701/content/game.json?file_ids=4002`, {
+      headers: authHeader(),
+    }).then((r) => r.json());
+    assert.equal(other.launch, undefined);
+  });
+});
+
+test("sidegame.zip carries two launchable scripts, launch.sh among them", async () => {
+  await withFixtureServer(nativeFixturesDir, async ({ url }) => {
+    const detail = await fetch(`${url}/api/roms/705`, { headers: authHeader() }).then((r) =>
+      r.json(),
+    );
+    const archive = detail.files.find((f) => f.file_name === "sidegame.zip");
+    const buf = Buffer.from(
+      await fetch(`${url}/api/roms/705/content/sidegame.zip?file_ids=${archive.id}`, {
+        headers: authHeader(),
+      }).then((r) => r.arrayBuffer()),
+    );
+    assert.ok(buf.includes(Buffer.from("SideGame/launch.sh")));
+    assert.ok(buf.includes(Buffer.from("SideGame/sidegame.sh")));
+  });
+});

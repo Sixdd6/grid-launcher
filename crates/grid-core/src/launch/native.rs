@@ -8,7 +8,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::library::paths::{archive_name, candidate_archives};
+use crate::library::paths::{archive_name, candidate_archives, expand_home};
 use crate::library::registry::InstalledGame;
 use crate::library::specials::native::{executable_candidates, install_dir, resolved_executable};
 
@@ -52,7 +52,14 @@ pub struct NativeLaunch {
 ///    is non-blank. A blank tool runs the executable directly, with no
 ///    wrapper and no env overrides.
 ///
-/// `cwd` is the executable's parent directory (`.` when it has none, mirrors
+/// 5. On a Windows host with no compat tool, a `.ps1` script runs as
+///    `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <script>
+///    <args>`. A `.bat`/`.cmd` is spawned as itself: `std::process::Command`
+///    starts it through cmd.exe and escapes its arguments.
+///
+/// `cwd` is the `game.json` working directory when the sidecar pin is the
+/// file that launches ([`sidecar_working_dir`]); otherwise the executable's
+/// parent directory (`.` when it has none, mirrors
 /// [`super::spawn::prepare_emulator_launch`]'s fallback).
 pub fn build_native_command(
     row: &InstalledGame,
@@ -69,8 +76,10 @@ pub fn build_native_command(
         &name,
         &row.native_game_dir,
     );
-    let executable = install_dir(row, &archives)
-        .map(|dir| executable_candidates(&dir, &row.title))
+    let game_dir = install_dir(row, &archives);
+    let executable = game_dir
+        .as_ref()
+        .map(|dir| executable_candidates(dir, &row.title))
         .and_then(|candidates| resolved_executable(row, &candidates));
     let Some(executable) = executable else {
         return Err(
@@ -97,7 +106,24 @@ pub fn build_native_command(
     };
 
     let exe_string = executable.to_string_lossy().into_owned();
-    let mut command = Vec::with_capacity(args.len() + 1);
+    let mut command = Vec::with_capacity(args.len() + 6);
+    // A PowerShell script is not a program Windows can start: run it
+    // through powershell.exe, with no profile and no execution-policy
+    // prompt. A .bat/.cmd needs no wrapper — std::process::Command starts
+    // it through cmd.exe and escapes its arguments for batch parsing. Under
+    // Wine/Proton the tool decides what to do with the file.
+    if tool.is_empty() && host.trim().to_lowercase().starts_with("win") && is_ps1(&executable) {
+        let powershell = which("powershell.exe")
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "powershell.exe".to_string());
+        command.extend([
+            powershell,
+            "-NoProfile".to_string(),
+            "-ExecutionPolicy".to_string(),
+            "Bypass".to_string(),
+            "-File".to_string(),
+        ]);
+    }
     command.push(exe_string);
     command.extend(args);
 
@@ -126,9 +152,12 @@ pub fn build_native_command(
         tool_label = String::new();
     }
 
-    let cwd = match executable.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
-        _ => PathBuf::from("."),
+    let cwd = match sidecar_working_dir(row, game_dir.as_deref(), &executable) {
+        Some(dir) => dir,
+        None => match executable.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+            _ => PathBuf::from("."),
+        },
     };
 
     Ok(NativeLaunch {
@@ -137,6 +166,35 @@ pub fn build_native_command(
         env,
         tool_label,
     })
+}
+
+/// Whether `path` is a PowerShell script (`.ps1`, any case).
+fn is_ps1(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("ps1"))
+}
+
+/// The working directory the `game.json` `launch` section named
+/// (`row.native_working_dir`, relative to `game_dir`; `"."` = `game_dir`),
+/// when it applies: the pinned file is the one that launches (a fallback to
+/// the ranking drops it) and the folder exists. `None` = the executable's
+/// own folder.
+fn sidecar_working_dir(
+    row: &InstalledGame,
+    game_dir: Option<&Path>,
+    executable: &Path,
+) -> Option<PathBuf> {
+    let relative = row.native_working_dir.trim();
+    let game_dir = game_dir?;
+    let pinned = row.native_executable_path.trim();
+    if relative.is_empty() || pinned.is_empty() || expand_home(pinned) != executable {
+        return None;
+    }
+    let dir = relative
+        .split(['/', '\\'])
+        .filter(|part| !part.is_empty() && *part != ".")
+        .fold(game_dir.to_path_buf(), |dir, part| dir.join(part));
+    dir.is_dir().then_some(dir)
 }
 
 /// Adds `WINEPREFIX` to `env` and creates the directory when
@@ -512,6 +570,138 @@ mod tests {
         // tool applies.
         let on_linux = build_native_command(&g, dir.path(), "wine", "linux", &no_which).unwrap();
         assert_eq!(on_linux.tool_label, "wine");
+    }
+
+    // --- game.json launch: working directory and script files ----------------
+
+    /// An install with `bin/start.bat`, `bin/run.ps1`, `Game.exe` and a
+    /// `data/` folder; the row pins `pinned` (relative to the install).
+    fn sidecar_fixture(
+        pinned: &str,
+        working_dir: &str,
+    ) -> (tempfile::TempDir, PathBuf, InstalledGame) {
+        let dir = tempfile::tempdir().unwrap();
+        let install = dir.path().join("My Game").join("game");
+        fs::create_dir_all(install.join("bin")).unwrap();
+        fs::create_dir_all(install.join("data")).unwrap();
+        fs::write(install.join("bin").join("start.bat"), b"@echo off").unwrap();
+        fs::write(install.join("bin").join("run.ps1"), b"exit 0").unwrap();
+        fs::write(install.join("Game.exe"), b"MZ").unwrap();
+        let mut g = row("Game", &install);
+        let pinned = pinned.split('/').fold(install.clone(), |p, s| p.join(s));
+        g.native_executable_path = pinned.to_string_lossy().into_owned();
+        g.native_launch_source = "sidecar".to_string();
+        g.native_working_dir = working_dir.to_string();
+        (dir, install, g)
+    }
+
+    #[test]
+    fn a_sidecar_working_dir_is_the_cwd() {
+        let (dir, install, g) = sidecar_fixture("bin/start.bat", "data");
+        let result = build_native_command(&g, dir.path(), "", "windows", &no_which).unwrap();
+        assert_eq!(result.cwd, install.join("data"));
+        let (dir, install, g) = sidecar_fixture("bin/start.bat", ".");
+        let result = build_native_command(&g, dir.path(), "", "windows", &no_which).unwrap();
+        assert_eq!(result.cwd, install);
+    }
+
+    #[test]
+    fn a_blank_or_missing_working_dir_falls_back_to_the_executables_folder() {
+        let (dir, install, g) = sidecar_fixture("bin/start.bat", "");
+        let result = build_native_command(&g, dir.path(), "", "windows", &no_which).unwrap();
+        assert_eq!(result.cwd, install.join("bin"));
+        let (dir, install, g) = sidecar_fixture("bin/start.bat", "gone");
+        let result = build_native_command(&g, dir.path(), "", "windows", &no_which).unwrap();
+        assert_eq!(result.cwd, install.join("bin"));
+    }
+
+    #[test]
+    fn the_working_dir_is_ignored_when_the_pinned_file_is_gone() {
+        let (dir, install, mut g) = sidecar_fixture("bin/start.bat", "data");
+        g.native_executable_path = install
+            .join("bin")
+            .join("gone.bat")
+            .to_string_lossy()
+            .into_owned();
+        let result = build_native_command(&g, dir.path(), "", "windows", &no_which).unwrap();
+        // The ranking picks Game.exe at the root; the sidecar dir belonged
+        // to the pinned file, not to it.
+        assert_eq!(
+            result.argv,
+            vec![install.join("Game.exe").to_string_lossy().into_owned()]
+        );
+        assert_eq!(result.cwd, install);
+    }
+
+    #[test]
+    fn a_batch_file_on_a_windows_host_is_the_program_itself() {
+        // std::process::Command runs a .bat/.cmd through cmd.exe with its
+        // own batch-argument escaping, so no wrapper is added here.
+        let (dir, install, mut g) = sidecar_fixture("bin/start.bat", "");
+        g.native_launch_parameters = "--mode \"two words\"".to_string();
+        let result = build_native_command(&g, dir.path(), "", "windows", &no_which).unwrap();
+        assert_eq!(
+            result.argv,
+            vec![
+                install
+                    .join("bin")
+                    .join("start.bat")
+                    .to_string_lossy()
+                    .into_owned(),
+                "--mode".to_string(),
+                "two words".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_powershell_script_on_a_windows_host_runs_through_powershell() {
+        let (dir, install, mut g) = sidecar_fixture("bin/run.ps1", "");
+        g.native_launch_parameters = "-a \"b c\"".to_string();
+        let which = |name: &str| -> Option<PathBuf> {
+            (name == "powershell.exe").then(|| PathBuf::from("C:\\PS\\powershell.exe"))
+        };
+        let result = build_native_command(&g, dir.path(), "", "windows", &which).unwrap();
+        let script = install
+            .join("bin")
+            .join("run.ps1")
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(
+            result.argv,
+            vec![
+                "C:\\PS\\powershell.exe".to_string(),
+                "-NoProfile".to_string(),
+                "-ExecutionPolicy".to_string(),
+                "Bypass".to_string(),
+                "-File".to_string(),
+                script,
+                "-a".to_string(),
+                "b c".to_string(),
+            ]
+        );
+        assert_eq!(result.cwd, install.join("bin"));
+
+        // Not on PATH: the bare name, resolved by the OS at spawn.
+        let fallback = build_native_command(&g, dir.path(), "", "windows", &no_which).unwrap();
+        assert_eq!(fallback.argv[0], "powershell.exe");
+    }
+
+    #[test]
+    fn a_powershell_script_under_wine_is_left_to_wine() {
+        let (dir, install, g) = sidecar_fixture("bin/run.ps1", "");
+        let result = build_native_command(&g, dir.path(), "wine", "linux", &no_which).unwrap();
+        assert_eq!(
+            result.argv,
+            vec![
+                "wine".to_string(),
+                install
+                    .join("bin")
+                    .join("run.ps1")
+                    .to_string_lossy()
+                    .into_owned(),
+            ]
+        );
     }
 
     // --- invalid custom launch parameters ------------------------------------

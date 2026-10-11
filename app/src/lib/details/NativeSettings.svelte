@@ -6,7 +6,7 @@
   // dismissal) so it reads as the same design language stacked on top.
   import { api, type CompatTool, type NativeGameSettings } from '../api';
   import Icon from '../Icon.svelte';
-  import { candidateLabel, compatToolNotice, installDirOf, isWindowsHost } from './actions';
+  import { candidateLabel, compatToolNotice, installDirOf, isWindowsHost, launchSourceNote } from './actions';
   import { activateFocused, moveDialogFocus, registerDialog, type NavAction } from '../focus/dialogNav';
 
   let {
@@ -50,6 +50,17 @@
 
   let saving = $state(false);
   let saveError = $state<string | null>(null);
+
+  // "Reload launch info from server": re-reads the server's game.json and
+  // applies its launch section, then reloads the form. The answer line
+  // stays until the next reload.
+  let reloading = $state(false);
+  let reloadMessage = $state<string | null>(null);
+  let reloadFailed = $state(false);
+
+  let sourceNote = $derived(
+    settings ? launchSourceNote(settings.launch_source, selectedExecutable, settings.executable) : '',
+  );
 
   let panelEl = $state<HTMLElement | null>(null);
 
@@ -108,6 +119,23 @@
       saveError = errorMessage(err);
     } finally {
       saving = false;
+    }
+  }
+
+  async function handleReload() {
+    reloading = true;
+    reloadMessage = null;
+    reloadFailed = false;
+    try {
+      const answer = await api.reloadNativeLaunch(romId);
+      reloadMessage = answer.message;
+      reloadFailed = answer.outcome === 'invalid';
+      await load();
+    } catch (err) {
+      reloadMessage = errorMessage(err);
+      reloadFailed = true;
+    } finally {
+      reloading = false;
     }
   }
 
@@ -186,6 +214,28 @@
             {/each}
           </select>
         </label>
+        {#if sourceNote}
+          <p data-testid="native-launch-source" class="hint">{sourceNote}</p>
+        {/if}
+      {/if}
+
+      <button
+        data-testid="native-launch-reload"
+        class="reload"
+        disabled={reloading || saving}
+        onclick={handleReload}
+      >
+        {reloading ? 'Reloading…' : 'Reload launch info from server'}
+      </button>
+      {#if reloadMessage}
+        <p
+          data-testid="native-launch-reload-result"
+          class="hint"
+          class:error-hint={reloadFailed}
+          role="status"
+        >
+          {reloadMessage}
+        </p>
       {/if}
 
       <div class="section">
@@ -380,6 +430,28 @@
     background: var(--accent);
     color: #fff;
     cursor: pointer;
+  }
+
+  /* The outlined twin of `.save`: a secondary action in the same panel. */
+  .reload {
+    font: inherit;
+    font-size: 13px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-h);
+    cursor: pointer;
+  }
+
+  .reload:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  .reload:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
 
   .save:disabled {

@@ -158,3 +158,14 @@ export function candidateLabel(candidate: string, installDir: string): string {
 export function isWindowsHost(platform: string): boolean {
   return platform.toLowerCase().startsWith('win');
 }
+
+/**
+ * The note beside the Executable picker in Native Game Settings: "Set by
+ * game.json" while the launch file came from the game's `game.json`
+ * sidecar (`launchSource === 'sidecar'`) and the picker still shows that
+ * file (`selected === shown`); blank otherwise. Picking another file and
+ * saving makes it the user's choice, which a sidecar never replaces.
+ */
+export function launchSourceNote(launchSource: string, selected: string, shown: string): string {
+  return launchSource === 'sidecar' && selected === shown ? 'Set by game.json' : '';
+}
