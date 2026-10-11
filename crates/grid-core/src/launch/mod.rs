@@ -784,7 +784,10 @@ mod tests {
     #[cfg(windows)]
     async fn run_script(file_name: &str, body: &str) -> (String, PathBuf) {
         let dir = tempfile::tempdir().unwrap();
-        let install = dir.path().join("My Game (v1)").join("game");
+        // Long-name form: on a short 8.3 TEMP (the CI runner's RUNNER~1)
+        // PowerShell reports the long name as its working directory.
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        let install = root.join("My Game (v1)").join("game");
         let bin = install.join("bin dir");
         std::fs::create_dir_all(&bin).unwrap();
         let script = bin.join(file_name);
@@ -800,7 +803,7 @@ mod tests {
             native_working_dir: ".".to_string(),
             ..Default::default()
         };
-        let launch = build_native_command(&row, dir.path(), "", "windows", &which_on_path).unwrap();
+        let launch = build_native_command(&row, &root, "", "windows", &which_on_path).unwrap();
         assert_eq!(launch.cwd, install);
         let mut child = spawn_child(launch.argv, launch.cwd, launch.env)
             .await
