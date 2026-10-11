@@ -45,8 +45,8 @@ use super::candidates::{
 use super::dirs::{self, PathKey, ResolveContext};
 use super::install_match::matching_installed_emulator_games;
 use super::scope::{
-    cloud_save_block_reason, has_shared_sync_candidate, is_emulators_platform,
-    is_native_executable_platform, shared_sync_owner, SaveScope,
+    cloud_save_block_reason, has_shared_sync_candidate, is_emulators_platform, shared_sync_owner,
+    SaveScope,
 };
 use super::state::{game_key, sync_entry_for};
 use super::tokens::{
@@ -584,7 +584,13 @@ pub fn base_block_reason_for_game(
 ) -> String {
     let name = wrapper_emulator_name(ctx, entry, &game.platform);
     let flags = block_reason_flags(ctx, &name, entry, &game.platform);
-    cloud_save_block_reason(&game.platform, save_type, &name, flags.as_ref())
+    cloud_save_block_reason(
+        &game.platform_slug,
+        &game.platform,
+        save_type,
+        &name,
+        flags.as_ref(),
+    )
 }
 
 /// [`base_block_reason_for_game`] PLUS the xemu raw-image block reasons
@@ -1046,7 +1052,7 @@ pub fn details_cloud_mode_supported(
     save_type: SaveType,
     installed: bool,
 ) -> bool {
-    if is_native_executable_platform(&game.platform) {
+    if game.is_native() {
         if save_type == SaveType::State {
             return false;
         }
@@ -1136,6 +1142,7 @@ pub fn restore_enabled_for_record(
         &game.platform,
     );
     let compatibility_reason = cloud_save_block_reason(
+        &game.platform_slug,
         &game.platform,
         save_type,
         &compatibility_name,

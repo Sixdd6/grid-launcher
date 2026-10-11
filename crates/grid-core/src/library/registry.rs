@@ -52,6 +52,7 @@ CREATE TABLE installed_games (
     installed_at        INTEGER NOT NULL,
     last_played_at      INTEGER NOT NULL DEFAULT 0,
     images_version      INTEGER NOT NULL DEFAULT 0,
+    platform_slug       TEXT NOT NULL DEFAULT '',
     UNIQUE (title_key, platform_key)
 );
 ";
@@ -75,7 +76,7 @@ CREATE TABLE IF NOT EXISTS pending_play_sessions (
 
 /// The schema version this build understands. Bumped when a migration adds
 /// columns or tables (see spec: later milestones add native/PS3/PS4 fields).
-const LATEST_USER_VERSION: i64 = 7;
+const LATEST_USER_VERSION: i64 = 8;
 
 /// The columns v1 -> v2 (milestone 7) adds to `installed_games`.
 const V2_IMAGE_COLUMNS: [&str; 3] = ["cover_small_path", "cover_large_path", "screenshot_urls"];
@@ -260,6 +261,30 @@ fn migrate_6_to_7(conn: &mut Connection) -> Result<(), LibraryError> {
     tx.commit().map_err(registry_err)
 }
 
+/// The column v7 -> v8 adds: the server platform's slug (`RomDetail.
+/// platform_slug`), the identity nativeness reads
+/// (`library::platforms::is_native_platform`). A TEXT with a blank default:
+/// an existing row reads as "slug unknown", which keeps the name rule, until
+/// the connect-time backfill (`library::platform_slug_backfill`) fills it.
+const V8_COLUMN: &str = "platform_slug";
+
+/// v7 -> v8 (user bug 2026-10-10, native game on a custom-named platform):
+/// adds `platform_slug`. Same transaction + idempotent-`ADD COLUMN` shape as
+/// every migration above it, for the same reasons.
+fn migrate_7_to_8(conn: &mut Connection) -> Result<(), LibraryError> {
+    let tx = conn.transaction().map_err(registry_err)?;
+    let existing = installed_games_columns(&tx)?;
+    if !existing.iter().any(|name| name == V8_COLUMN) {
+        tx.execute_batch(&format!(
+            "ALTER TABLE installed_games ADD COLUMN {V8_COLUMN} TEXT NOT NULL DEFAULT '';"
+        ))
+        .map_err(registry_err)?;
+    }
+    tx.pragma_update(None, "user_version", 8)
+        .map_err(registry_err)?;
+    tx.commit().map_err(registry_err)
+}
+
 /// Every column of `installed_games`, in the order selected/inserted below.
 const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_path, \
      extracted_path, extracted_dir, multi_file_game_dir, description, rating, genres, \
@@ -267,7 +292,7 @@ const SELECT_COLUMNS: &str = "title, platform, rom_id, rom_file_name, archive_pa
      server_updated_at, installed_at, cover_small_path, cover_large_path, screenshot_urls, \
      native_executable_path, native_launch_parameters, native_compat_tool, native_wineprefix, \
      native_game_dir, included_dlc, ps3_trophy_paths, ps3_game_id, ps3_iso_path, ps4_game_id, \
-     ps4_content, ra_id, last_played_at, fanart_urls, images_version";
+     ps4_content, ra_id, last_played_at, fanart_urls, images_version, platform_slug";
 
 /// The path-bearing columns [`Registry::rewrite_paths`] hands to its
 /// closure as plain strings. `ps3_trophy_paths` is the ninth, handled
@@ -355,6 +380,28 @@ pub struct InstalledGame {
     /// never carried in from a caller's record.
     #[serde(default)]
     pub images_version: i64,
+    /// The server platform's slug (`RomDetail.platform_slug`), `""` when
+    /// unknown — a row from before v8 that the connect-time backfill has not
+    /// reached, or a row with no `rom_id`. Nativeness reads it first
+    /// ([`Self::is_native`]); a blank slug falls back to the `platform` name
+    /// rule. [`Registry::upsert`] never blanks a stored slug.
+    #[serde(default)]
+    pub platform_slug: String,
+}
+
+impl InstalledGame {
+    /// Whether this row is a native (host-executable) game:
+    /// [`crate::library::platforms::is_native_platform`] over the row's
+    /// slug and platform name.
+    pub fn is_native(&self) -> bool {
+        crate::library::platforms::is_native_platform(&self.platform_slug, &self.platform)
+    }
+
+    /// Whether this row is a Windows game (the compat-tool decision):
+    /// [`crate::library::platforms::is_windows_platform`].
+    pub fn is_windows(&self) -> bool {
+        crate::library::platforms::is_windows_platform(&self.platform_slug, &self.platform)
+    }
 }
 
 impl InstalledGame {
@@ -398,6 +445,7 @@ impl InstalledGame {
             last_played_at: row.get(35)?,
             fanart_urls: row.get(36)?,
             images_version: row.get(37)?,
+            platform_slug: row.get(38)?,
         })
     }
 }
@@ -469,6 +517,7 @@ impl Registry {
                 4 => migrate_4_to_5(&mut conn)?,
                 5 => migrate_5_to_6(&mut conn)?,
                 6 => migrate_6_to_7(&mut conn)?,
+                7 => migrate_7_to_8(&mut conn)?,
                 v => {
                     return Err(LibraryError::Registry(format!(
                         "no migration from user_version {v}"
@@ -514,11 +563,12 @@ impl Registry {
                 installed_at, cover_small_path, cover_large_path, screenshot_urls, fanart_urls,
                 native_executable_path, native_launch_parameters, native_compat_tool,
                 native_wineprefix, native_game_dir, included_dlc, ps3_trophy_paths,
-                ps3_game_id, ps3_iso_path, ps4_game_id, ps4_content, ra_id, images_version
+                ps3_game_id, ps3_iso_path, ps4_game_id, ps4_content, ra_id, images_version,
+                platform_slug
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
                 ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28,
-                ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39
+                ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40
             )
             ON CONFLICT(title_key, platform_key) DO UPDATE SET
                 title = excluded.title,
@@ -557,7 +607,9 @@ impl Registry {
                 ps4_game_id = excluded.ps4_game_id,
                 ps4_content = excluded.ps4_content,
                 ra_id = excluded.ra_id,
-                images_version = excluded.images_version",
+                images_version = excluded.images_version,
+                platform_slug = CASE WHEN excluded.platform_slug = ''
+                    THEN installed_games.platform_slug ELSE excluded.platform_slug END",
             params![
                 rec.title,
                 rec.platform,
@@ -598,6 +650,7 @@ impl Registry {
                 rec.ps4_content,
                 rec.ra_id,
                 IMAGES_VERSION,
+                rec.platform_slug.trim(),
             ],
         )
         .map_err(registry_err)?;
@@ -624,6 +677,25 @@ impl Registry {
                     IMAGES_VERSION,
                     rom_id
                 ],
+            )
+            .map_err(registry_err)?;
+        Ok(affected > 0)
+    }
+
+    /// Stores the server platform slug on the row for `rom_id` (the
+    /// connect-time backfill, `library::platform_slug_backfill`). A blank
+    /// `slug` writes nothing: a stored slug is never erased. Returns whether
+    /// a row changed.
+    pub fn set_platform_slug(&self, rom_id: i64, slug: &str) -> Result<bool, LibraryError> {
+        let slug = slug.trim();
+        if slug.is_empty() {
+            return Ok(false);
+        }
+        let conn = self.conn.lock().unwrap();
+        let affected = conn
+            .execute(
+                "UPDATE installed_games SET platform_slug = ?1 WHERE rom_id = ?2",
+                params![slug, rom_id],
             )
             .map_err(registry_err)?;
         Ok(affected > 0)

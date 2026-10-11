@@ -19,6 +19,7 @@ async fn rom_detail_maps_full_payload() {
             "fs_name_no_ext": "super_game",
             "platform_id": 7,
             "platform_display_name": "SNES",
+            "platform_slug": "snes",
             "fs_name": "super_game.zip",
             "summary": "A great game.",
             "regions": ["USA", "Europe"],
@@ -55,6 +56,7 @@ async fn rom_detail_maps_full_payload() {
     assert_eq!(detail.name, "Super Game");
     assert_eq!(detail.platform_id, 7);
     assert_eq!(detail.platform_name, "SNES");
+    assert_eq!(detail.platform_slug, "snes");
     assert_eq!(detail.fs_name, "super_game.zip");
     assert_eq!(detail.description, "A great game.");
     assert_eq!(detail.regions, "USA, Europe");
@@ -182,6 +184,7 @@ async fn rom_detail_minimal_payload_decodes_with_empty_strings() {
     assert_eq!(detail.regions, "");
     assert_eq!(detail.languages, "");
     assert_eq!(detail.tags, "");
+    assert_eq!(detail.platform_slug, "");
     assert_eq!(detail.revision, "");
     assert_eq!(detail.rating, "");
     assert_eq!(detail.genres, "");

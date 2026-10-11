@@ -582,6 +582,11 @@ pub struct RomDetail {
     pub name: String,
     pub platform_id: i64,
     pub platform_name: String,
+    /// The server platform's slug (`platform_slug`), `""` when the payload
+    /// has none. The platform's identity: nativeness reads it
+    /// (`library::platforms::is_native_platform`), a custom display name does
+    /// not change it.
+    pub platform_slug: String,
     pub fs_name: String,
     pub description: String,
     pub regions: String,
@@ -722,6 +727,8 @@ struct RawRomDetail {
     #[serde(default)]
     platform_display_name: String,
     #[serde(default)]
+    platform_slug: Option<String>,
+    #[serde(default)]
     fs_name: String,
     #[serde(default)]
     summary: Option<String>,
@@ -780,6 +787,7 @@ impl RawRomDetail {
             name,
             platform_id: self.platform_id,
             platform_name: self.platform_display_name,
+            platform_slug: self.platform_slug.unwrap_or_default(),
             fs_name: self.fs_name,
             description: self.summary.unwrap_or_default(),
             regions: self.regions.join(", "),

@@ -98,8 +98,12 @@ export function uploadedLine(record: CloudRecord): string {
 }
 
 /**
- * Whether `platform` names a platform whose games run as native HOST
- * executables — trimmed, case-folded, starting with "windows" or "linux".
+ * Whether the server platform runs its games as native HOST executables:
+ * its slug (`platform_slug` / `Platform.slug`), trimmed and case-folded,
+ * starts with "win" or "linux" (`win`, `win9x`, `linux`); else — the
+ * fallback for a blank slug — its name, trimmed and case-folded, starts
+ * with "windows" or "linux". User bug 2026-10-10: a custom display name
+ * ("PC Fangames & Ports" on slug `win`) does not change nativeness.
  *
  * Mirrors grid-core's `library::platforms::is_native_platform`
  * (`crates/grid-core/src/library/platforms.rs`). User ruling 2026-09-08:
@@ -110,7 +114,9 @@ export function uploadedLine(record: CloudRecord): string {
  * like a Windows one. Only the compat-tool decision stays windows-only, and
  * that lives in `details/actions.ts` (`compatToolNotice`).
  */
-export function isNativePlatform(platform: string): boolean {
+export function isNativePlatform(platformSlug: string, platform: string): boolean {
+  const slug = platformSlug.trim().toLowerCase();
+  if (slug.startsWith('win') || slug.startsWith('linux')) return true;
   const folded = platform.trim().toLowerCase();
   return folded.startsWith('windows') || folded.startsWith('linux');
 }
@@ -131,10 +137,11 @@ export const isNativeLaunchPlatform = isNativePlatform;
  * "installed" themselves by identity match, so the remaining fields are
  * harmless placeholders.
  */
-export function syntheticCloudGame(game: GameSummary, platformName: string): InstalledGame {
+export function syntheticCloudGame(game: GameSummary, platformName: string, platformSlug: string): InstalledGame {
   return {
     title: game.name,
     platform: platformName,
+    platform_slug: platformSlug,
     rom_id: game.id,
     rom_file_name: '',
     archive_path: '',

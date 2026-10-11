@@ -130,6 +130,8 @@ pub fn parse_timestamp(value: &str) -> Option<DateTime<Utc>> {
 #[derive(Debug, Clone, Copy)]
 pub struct ServerVersion<'a> {
     pub platform: &'a str,
+    /// The server platform slug (`RomDetail.platform_slug`), `""` when unknown.
+    pub platform_slug: &'a str,
     pub rom_file_name: &'a str,
     pub updated_at: &'a str,
 }
@@ -139,7 +141,13 @@ pub fn game_has_server_update(installed: &InstalledGame, server: &ServerVersion<
     if is_emulators_platform(&installed.platform) || is_emulators_platform(server.platform) {
         return false;
     }
-    if (is_windows_pc_platform(&installed.platform) || is_windows_pc_platform(server.platform))
+    // A Windows slug is a Windows platform whatever its display name (user
+    // bug 2026-10-10); the name half stays `is_windows_pc_platform`.
+    let windows_slug = |slug: &str| crate::library::platforms::is_windows_platform(slug, "");
+    if (is_windows_pc_platform(&installed.platform)
+        || is_windows_pc_platform(server.platform)
+        || windows_slug(&installed.platform_slug)
+        || windows_slug(server.platform_slug))
         && has_newer_server_rom_version(&installed.rom_file_name, server.rom_file_name)
     {
         return true;
@@ -175,6 +183,7 @@ mod tests {
     ) -> ServerVersion<'a> {
         ServerVersion {
             platform,
+            platform_slug: "",
             rom_file_name,
             updated_at,
         }
@@ -404,6 +413,22 @@ mod tests {
                 "2026-04-09T14:30:00Z"
             )
         ));
+    }
+
+    #[test]
+    fn a_windows_slug_enables_the_tag_check_for_a_custom_named_platform() {
+        // User bug 2026-10-10: slug `win`, display name "PC Fangames & Ports".
+        let mut installed = row("PC Fangames & Ports", "Game (v00009).zip", "");
+        let newer = server("PC Fangames & Ports", "Game (v00010).zip", "");
+        assert!(!game_has_server_update(&installed, &newer));
+        installed.platform_slug = "win".to_string();
+        assert!(game_has_server_update(&installed, &newer));
+        installed.platform_slug.clear();
+        let newer_with_slug = ServerVersion {
+            platform_slug: "win",
+            ..newer
+        };
+        assert!(game_has_server_update(&installed, &newer_with_slug));
     }
 
     #[test]

@@ -1690,6 +1690,63 @@ async fn native_install_lays_out_game_dir_prefix_and_game_json() {
     assert_eq!(row.included_dlc, "[\"x\"]");
 }
 
+/// User bug 2026-10-10: RomM platform 52 — slug `win`, fs_slug
+/// `win-fangames-ports`, display name "PC Fangames & Ports". The display
+/// name is not a Windows name, so only the slug can route the game onto the
+/// native path; the row stores the slug.
+#[tokio::test]
+async fn a_custom_named_windows_platform_installs_on_the_native_path_by_its_slug() {
+    let harness = Harness::new().await;
+    let staging = tempfile::tempdir().unwrap();
+    let bytes = write_zip(
+        &staging.path().join("TamrielRebuilt.zip"),
+        &[("Morrowind/Morrowind.exe", b"MZ")],
+    );
+    let mut detail = detail_json(
+        8,
+        "Tamriel Rebuilt",
+        "PC Fangames & Ports",
+        "TamrielRebuilt.zip",
+        &[
+            file_spec(81, "TamrielRebuilt.zip", bytes.len()),
+            file_spec(82, "readme.txt", 4),
+        ],
+    );
+    detail["platform_slug"] = json!("win");
+    detail["platform_fs_slug"] = json!("win-fangames-ports");
+    harness.mount_detail(8, detail).await;
+    harness
+        .mount_content(8, "TamrielRebuilt.zip", bytes, 0)
+        .await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 8)
+        .await
+        .unwrap();
+    let id = harness.newest_entry_id();
+    let entry = harness.wait_terminal(id).await;
+    assert_eq!(entry.status, DownloadStatus::Completed, "{}", entry.error);
+
+    let game_dir = harness
+        .library
+        .join("games")
+        .join("PC Fangames & Ports")
+        .join("Tamriel Rebuilt");
+    let extracted_dir = game_dir.join("game");
+    assert!(extracted_dir
+        .join("Morrowind")
+        .join("Morrowind.exe")
+        .is_file());
+
+    let row = harness.registry.find(Some(8), "", "").unwrap().unwrap();
+    assert_eq!(row.platform, "PC Fangames & Ports");
+    assert_eq!(row.platform_slug, "win");
+    assert!(row.is_native());
+    assert_eq!(row.native_game_dir, game_dir.to_string_lossy());
+    assert_eq!(row.extracted_dir, extracted_dir.to_string_lossy());
+}
+
 #[tokio::test]
 async fn native_non_archive_payload_installs_as_direct_file() {
     let harness = Harness::new().await;

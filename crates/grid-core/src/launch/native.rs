@@ -9,7 +9,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::library::paths::{archive_name, candidate_archives};
-use crate::library::platforms::is_windows_platform;
 use crate::library::registry::InstalledGame;
 use crate::library::specials::native::{executable_candidates, install_dir, resolved_executable};
 
@@ -42,7 +41,7 @@ pub struct NativeLaunch {
 ///    defensively (`LaunchService::launch` computes the same thing before
 ///    calling this) so this function is safe to call directly with an
 ///    unblanked config value too. Both are blanked outright when the row's
-///    platform is not a windows one ([`is_windows_platform`]) — user ruling
+///    platform is not a windows one ([`InstalledGame::is_windows`], which reads the slug first) — user ruling
 ///    2026-09-08: a linux-platform game runs its own executable directly,
 ///    with no wrapper, no `WINEPREFIX`, and a blank `tool_label`.
 /// 4. `"wine"` prepends `which("wine")` (falling back to the literal
@@ -89,7 +88,7 @@ pub fn build_native_command(
         default_compat_tool.trim()
     };
     let row_tool = row.native_compat_tool.trim();
-    let tool = if !is_windows_platform(&row.platform) {
+    let tool = if !row.is_windows() {
         ""
     } else if !row_tool.is_empty() {
         row_tool
@@ -455,6 +454,64 @@ mod tests {
             vec!["wine".to_string(), exe.to_string_lossy().into_owned()]
         );
         assert_eq!(result.tool_label, "wine");
+    }
+
+    /// User bug 2026-10-10: "Tamriel Rebuilt" was installed on a custom-named
+    /// Windows platform (slug `win`, display "PC Fangames & Ports") before
+    /// the slug rule, as a PLAIN extract: `extracted_dir` and
+    /// `extracted_path` are set, `native_game_dir` and `archive_path` are
+    /// blank, and the archive is gone. Once the backfill stores the slug,
+    /// the row is native, Game Settings lists its executables from the
+    /// existing extract, and it launches — with Wine/Proton, because the
+    /// slug makes it a Windows game — without a reinstall.
+    #[test]
+    fn an_existing_plain_extract_on_a_custom_named_windows_platform_launches_natively() {
+        let dir = tempfile::tempdir().unwrap();
+        let platform_dir = dir.path().join("games").join("PC Fangames & Ports");
+        let extracted = platform_dir.join("TamrielRebuilt");
+        fs::create_dir_all(extracted.join("Data Files")).unwrap();
+        let exe = extracted.join("Morrowind.exe");
+        fs::write(&exe, b"MZ").unwrap();
+        fs::write(extracted.join("Data Files").join("TR_Mainland.esm"), b"esm").unwrap();
+        let g = InstalledGame {
+            title: "Tamriel Rebuilt".to_string(),
+            platform: "PC Fangames & Ports".to_string(),
+            platform_slug: "win".to_string(),
+            rom_id: Some(52001),
+            rom_file_name: "TamrielRebuilt.zip".to_string(),
+            extracted_dir: extracted.to_string_lossy().into_owned(),
+            extracted_path: extracted
+                .join("Data Files")
+                .join("TR_Mainland.esm")
+                .to_string_lossy()
+                .into_owned(),
+            ..Default::default()
+        };
+        assert!(g.is_native() && g.is_windows());
+        assert!(g.native_game_dir.is_empty());
+
+        // What `native_game_settings` shows: the install dir is the extract,
+        // and the executable is a candidate inside it.
+        let archives = candidate_archives(
+            dir.path(),
+            &g.platform,
+            &g.archive_path,
+            &archive_name(&g.rom_file_name, &g.title, &g.platform),
+            &g.native_game_dir,
+        );
+        let install = install_dir(&g, &archives).expect("the extract resolves");
+        assert_eq!(install, extracted);
+        let candidates = executable_candidates(&install, &g.title);
+        assert_eq!(candidates, vec![exe.clone()]);
+
+        // Launch on a Windows host: the executable runs directly.
+        let on_windows = build_native_command(&g, dir.path(), "", "windows", &no_which).unwrap();
+        assert_eq!(on_windows.argv, vec![exe.to_string_lossy().into_owned()]);
+        assert_eq!(on_windows.cwd, extracted);
+        // On Linux the slug makes it a Windows game, so the default compat
+        // tool applies.
+        let on_linux = build_native_command(&g, dir.path(), "wine", "linux", &no_which).unwrap();
+        assert_eq!(on_linux.tool_label, "wine");
     }
 
     // --- invalid custom launch parameters ------------------------------------

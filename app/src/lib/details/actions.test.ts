@@ -12,29 +12,29 @@ import {
 
 describe('compatToolNotice', () => {
   it('explains why a Linux game has no compatibility tool', () => {
-    expect(compatToolNotice('Linux')).toBe('Linux games run directly.');
-    expect(compatToolNotice(' linux x86_64')).toBe('Linux games run directly.');
+    expect(compatToolNotice('', 'Linux')).toBe('Linux games run directly.');
+    expect(compatToolNotice('', ' linux x86_64')).toBe('Linux games run directly.');
   });
 
   it('is blank for a Windows game, which still picks a compatibility tool', () => {
-    expect(compatToolNotice('Windows')).toBe('');
-    expect(compatToolNotice('')).toBe('');
+    expect(compatToolNotice('', 'Windows')).toBe('');
+    expect(compatToolNotice('', '')).toBe('');
   });
 });
 
 describe('isNativePlatform', () => {
   it('matches Windows and Linux case- and whitespace-insensitively', () => {
-    expect(isNativePlatform('Windows')).toBe(true);
-    expect(isNativePlatform(' windows 10')).toBe(true);
-    expect(isNativePlatform('Linux')).toBe(true);
-    expect(isNativePlatform(' linux x86_64')).toBe(true);
+    expect(isNativePlatform('', 'Windows')).toBe(true);
+    expect(isNativePlatform('', ' windows 10')).toBe(true);
+    expect(isNativePlatform('', 'Linux')).toBe(true);
+    expect(isNativePlatform('', ' linux x86_64')).toBe(true);
   });
 
   it('does not match other platforms', () => {
-    expect(isNativePlatform('PlayStation 4')).toBe(false);
-    expect(isNativePlatform('Xbox 360')).toBe(false);
-    expect(isNativePlatform('SNES')).toBe(false);
-    expect(isNativePlatform('')).toBe(false);
+    expect(isNativePlatform('', 'PlayStation 4')).toBe(false);
+    expect(isNativePlatform('', 'Xbox 360')).toBe(false);
+    expect(isNativePlatform('', 'SNES')).toBe(false);
+    expect(isNativePlatform('', '')).toBe(false);
   });
 });
 
@@ -61,14 +61,14 @@ describe('isContentPlatform', () => {
 
 describe('installLabel', () => {
   it('reads "Install App" for native platforms', () => {
-    expect(installLabel('Windows')).toBe('Install App');
-    expect(installLabel(' windows 10')).toBe('Install App');
+    expect(installLabel('', 'Windows')).toBe('Install App');
+    expect(installLabel('', ' windows 10')).toBe('Install App');
   });
 
   it('reads "Install" for every other platform', () => {
-    expect(installLabel('PlayStation 4')).toBe('Install');
-    expect(installLabel('Xbox 360')).toBe('Install');
-    expect(installLabel('SNES')).toBe('Install');
+    expect(installLabel('', 'PlayStation 4')).toBe('Install');
+    expect(installLabel('', 'Xbox 360')).toBe('Install');
+    expect(installLabel('', 'SNES')).toBe('Install');
   });
 });
 

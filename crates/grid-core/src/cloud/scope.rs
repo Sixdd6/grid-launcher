@@ -70,9 +70,10 @@ impl SaveScope {
 /// It delegates to [`crate::library::platforms::is_native_platform`]
 /// (windows OR linux) so cloud save scope, block reasons, install blocking,
 /// and launch routing can never disagree about a linux platform. The name
-/// stays for its callers.
-pub fn is_native_executable_platform(platform: &str) -> bool {
-    crate::library::platforms::is_native_platform(platform)
+/// stays for its callers. It takes the platform slug too (user bug
+/// 2026-10-10): the slug decides first, the name is the fallback.
+pub fn is_native_executable_platform(platform_slug: &str, platform: &str) -> bool {
+    crate::library::platforms::is_native_platform(platform_slug, platform)
 }
 
 /// `is_emulators_platform` (selection.py:138-142): trimmed, case-folded
@@ -170,12 +171,13 @@ pub fn cloud_save_scope(
 /// looked up (that lookup, and its asymmetric fallback vs. the scope
 /// wrapper, is `ops.rs`'s job, not this pure function's).
 pub fn cloud_save_block_reason(
+    platform_slug: &str,
     platform: &str,
     save_type: SaveType,
     emulator_name: &str,
     core_flags: Option<&CoreFlags>,
 ) -> String {
-    if is_native_executable_platform(platform) && save_type == SaveType::State {
+    if is_native_executable_platform(platform_slug, platform) && save_type == SaveType::State {
         return "Save sync for PC games uses the save locations shown here once the game is installed. If none was filled in from PCGamingWiki, add the game's save folder.".to_string();
     }
 
@@ -310,13 +312,15 @@ mod tests {
 
     #[test]
     fn blocks_state_when_core_does_not_support_save_states() {
-        let reason = cloud_save_block_reason("Arcade", SaveType::State, "RetroArch", Some(&MAME));
+        let reason =
+            cloud_save_block_reason("", "Arcade", SaveType::State, "RetroArch", Some(&MAME));
         assert_eq!(reason, "This core does not support save states.");
     }
 
     #[test]
     fn blocks_state_when_core_is_not_cloud_sync_safe() {
-        let reason = cloud_save_block_reason("Arcade", SaveType::State, "RetroArch", Some(&FBNEO));
+        let reason =
+            cloud_save_block_reason("", "Arcade", SaveType::State, "RetroArch", Some(&FBNEO));
         assert_eq!(
             reason,
             "Save state format for this core may not be stable across devices."
@@ -325,37 +329,41 @@ mod tests {
 
     #[test]
     fn does_not_block_state_for_safe_core() {
-        let reason = cloud_save_block_reason("Arcade", SaveType::State, "RetroArch", Some(&SAFE));
+        let reason =
+            cloud_save_block_reason("", "Arcade", SaveType::State, "RetroArch", Some(&SAFE));
         assert_eq!(reason, "");
     }
 
     #[test]
     fn blocks_save_when_core_does_not_support_saves() {
-        let reason = cloud_save_block_reason("Arcade", SaveType::Save, "RetroArch", Some(&MAME));
+        let reason =
+            cloud_save_block_reason("", "Arcade", SaveType::Save, "RetroArch", Some(&MAME));
         assert_eq!(reason, "This core does not support battery saves.");
     }
 
     #[test]
     fn does_not_block_save_for_safe_core() {
-        let reason = cloud_save_block_reason("Arcade", SaveType::Save, "RetroArch", Some(&SAFE));
+        let reason =
+            cloud_save_block_reason("", "Arcade", SaveType::Save, "RetroArch", Some(&SAFE));
         assert_eq!(reason, "");
     }
 
     #[test]
     fn flag_check_skipped_when_not_retroarch_emulator() {
-        let reason = cloud_save_block_reason("Arcade", SaveType::State, "Mesen", Some(&MAME));
+        let reason = cloud_save_block_reason("", "Arcade", SaveType::State, "Mesen", Some(&MAME));
         assert_eq!(reason, "");
     }
 
     #[test]
     fn flag_check_skipped_when_no_flags_passed() {
-        let reason = cloud_save_block_reason("Arcade", SaveType::State, "RetroArch", None);
+        let reason = cloud_save_block_reason("", "Arcade", SaveType::State, "RetroArch", None);
         assert_eq!(reason, "");
     }
 
     #[test]
     fn native_platform_blocks_save_states_regardless_of_core_flags() {
-        let reason = cloud_save_block_reason("Windows", SaveType::State, "RetroArch", Some(&SAFE));
+        let reason =
+            cloud_save_block_reason("", "Windows", SaveType::State, "RetroArch", Some(&SAFE));
         assert_eq!(
             reason,
             "Save sync for PC games uses the save locations shown here once the game is installed. If none was filled in from PCGamingWiki, add the game's save folder."
@@ -364,7 +372,8 @@ mod tests {
 
     #[test]
     fn native_platform_does_not_block_save_folder_sync() {
-        let reason = cloud_save_block_reason("Windows", SaveType::Save, "RetroArch", Some(&SAFE));
+        let reason =
+            cloud_save_block_reason("", "Windows", SaveType::Save, "RetroArch", Some(&SAFE));
         assert_eq!(reason, "");
     }
 
@@ -494,20 +503,35 @@ mod tests {
 
     #[test]
     fn native_executable_platform_covers_linux() {
-        assert!(is_native_executable_platform("Linux"));
-        assert!(is_native_executable_platform(" linux x86_64"));
-        assert!(is_native_executable_platform("Windows"));
-        assert!(!is_native_executable_platform("SNES"));
+        assert!(is_native_executable_platform("", "Linux"));
+        assert!(is_native_executable_platform("", " linux x86_64"));
+        assert!(is_native_executable_platform("", "Windows"));
+        assert!(!is_native_executable_platform("", "SNES"));
+    }
+
+    #[test]
+    fn a_custom_named_windows_platform_is_native_by_its_slug() {
+        assert!(is_native_executable_platform("win", "PC Fangames & Ports"));
+        assert_eq!(
+            cloud_save_block_reason("win", "PC Fangames & Ports", SaveType::State, "", None),
+            "Save sync for PC games uses the save locations shown here once the game is installed. If none was filled in from PCGamingWiki, add the game's save folder."
+        );
+        let game = CloudGame {
+            platform: "PC Fangames & Ports".to_string(),
+            platform_slug: "win".to_string(),
+            ..Default::default()
+        };
+        assert!(game.is_native());
     }
 
     #[test]
     fn a_linux_game_blocks_states_and_allows_saves() {
         assert_eq!(
-            cloud_save_block_reason("Linux", SaveType::State, "", None),
+            cloud_save_block_reason("", "Linux", SaveType::State, "", None),
             "Save sync for PC games uses the save locations shown here once the game is installed. If none was filled in from PCGamingWiki, add the game's save folder."
         );
         assert_eq!(
-            cloud_save_block_reason("Linux", SaveType::Save, "", None),
+            cloud_save_block_reason("", "Linux", SaveType::Save, "", None),
             ""
         );
     }

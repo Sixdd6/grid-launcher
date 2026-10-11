@@ -104,12 +104,16 @@ export function lastPlayedText(lastPlayedAt: number): string {
  * reading like a complete target. Returns `''` for a native platform
  * (`isNativeLaunchPlatform`), which the caller renders as no line at all.
  */
-export function launchTargetLine(defaults: LaunchDefaults | null, platformName: string): string {
+export function launchTargetLine(
+  defaults: LaunchDefaults | null,
+  platformName: string,
+  platformSlug: string
+): string {
   // User ruling 2026-09-05: a native (Windows/Linux) game launches its own
   // executable through a compat tool, never an emulator entry, so the popup
   // must not claim a launch target for one. `''` means "render no line" —
   // Details.svelte drops the whole <p> rather than showing an empty row.
-  if (isNativeLaunchPlatform(platformName)) return '';
+  if (isNativeLaunchPlatform(platformSlug, platformName)) return '';
   const name = savedDefaultFor(defaults?.default_emulators, platformName).trim();
   if (name === '' || name === NO_EMULATOR_MARKER) return 'No default emulator';
   if (!isRetroarchName(name)) return name;

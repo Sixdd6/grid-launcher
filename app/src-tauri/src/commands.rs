@@ -247,8 +247,10 @@ pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>,
     // grid-core holds no session, so this fetch is the only way it learns the
     // platform list the autoconfig defaults assignment writes against.
     if let Ok(install) = state.install.as_ref() {
-        let names: Vec<String> = platforms.iter().map(|p| p.name.clone()).collect();
-        let assignable = autoconfig_entry::assignable_platforms(&names);
+        // G11: a platform that is native by its slug OR its name never gets
+        // a default emulator (user bug 2026-10-10: a custom-named `win`
+        // platform). The list stays the raw `name`s the defaults key by.
+        let assignable = autoconfig_entry::assignable_server_platforms(&platforms);
         install.set_known_platforms(assignable.clone());
         // The firmware triggers need the platform *id*, not just the name,
         // and grid-core holds no session to fetch it with. Recorded from the

@@ -133,36 +133,36 @@ describe('launchTargetLine', () => {
   ) => ({ default_emulators: emulators, retroarch_cores: cores, launch_args: '' });
 
   it('names the platform default emulator', () => {
-    expect(launchTargetLine(defaults({ snes: 'Snes9x' }), 'SNES')).toBe('Snes9x');
+    expect(launchTargetLine(defaults({ snes: 'Snes9x' }), 'SNES', 'snes')).toBe('Snes9x');
   });
 
   it('names the core too when the default is a RetroArch build', () => {
     expect(
-      launchTargetLine(defaults({ snes: 'RetroArch' }, { snes: 'snes9x_libretro' }), 'SNES')
+      launchTargetLine(defaults({ snes: 'RetroArch' }, { snes: 'snes9x_libretro' }), 'SNES', 'snes')
     ).toBe('RetroArch · snes9x_libretro');
   });
 
   it('says a RetroArch default has no core rather than naming half a target', () => {
-    expect(launchTargetLine(defaults({ snes: 'RetroArch' }), 'SNES')).toBe('RetroArch · no core');
+    expect(launchTargetLine(defaults({ snes: 'RetroArch' }), 'SNES', 'snes')).toBe('RetroArch · no core');
   });
 
   it('reads a remembered "(none)" the same as an absent default', () => {
-    expect(launchTargetLine(defaults({ snes: '<none>' }), 'SNES')).toBe('No default emulator');
+    expect(launchTargetLine(defaults({ snes: '<none>' }), 'SNES', 'snes')).toBe('No default emulator');
   });
 
   it('says so when nothing is configured at all', () => {
-    expect(launchTargetLine(null, 'SNES')).toBe('No default emulator');
+    expect(launchTargetLine(null, 'SNES', 'snes')).toBe('No default emulator');
   });
 
   it('renders no line for a native Windows game', () => {
-    expect(launchTargetLine(defaults({ windows: 'Wine' }), 'Windows')).toBe('');
+    expect(launchTargetLine(defaults({ windows: 'Wine' }), 'Windows', '')).toBe('');
   });
 
   it('renders no line for a native Linux game', () => {
-    expect(launchTargetLine(null, 'Linux')).toBe('');
+    expect(launchTargetLine(null, 'Linux', '')).toBe('');
   });
 
   it('still names the emulator for an emulated platform', () => {
-    expect(launchTargetLine(defaults({ snes: 'Snes9x' }), 'SNES')).toBe('Snes9x');
+    expect(launchTargetLine(defaults({ snes: 'Snes9x' }), 'SNES', 'snes')).toBe('Snes9x');
   });
 });

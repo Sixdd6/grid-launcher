@@ -17,9 +17,21 @@ export { isNativePlatform };
  * directly, so no Wine/Proton tool applies (grid-core's
  * `build_native_command` blanks the tool for the same rows).
  */
-export function compatToolNotice(platform: string): string {
-  const isWindowsGame = platform.trim().toLowerCase().startsWith('windows');
-  return isNativePlatform(platform) && !isWindowsGame ? 'Linux games run directly.' : '';
+export function compatToolNotice(platformSlug: string, platform: string): string {
+  return isNativePlatform(platformSlug, platform) && !isWindowsPlatform(platformSlug, platform)
+    ? 'Linux games run directly.'
+    : '';
+}
+
+/**
+ * The narrower half of `isNativePlatform`: a Windows server platform (slug
+ * starting with "win", else a name starting with "windows"). Mirrors
+ * grid-core's `is_windows_platform`; only the compat-tool decision reads it.
+ */
+export function isWindowsPlatform(platformSlug: string, platform: string): boolean {
+  return (
+    platformSlug.trim().toLowerCase().startsWith('win') || platform.trim().toLowerCase().startsWith('windows')
+  );
 }
 
 /**
@@ -80,8 +92,8 @@ export function isContentPlatform(platform: string): boolean {
  * plain archive, so the label reads "Install App"; every other platform
  * keeps the existing "Install".
  */
-export function installLabel(platform: string): 'Install App' | 'Install' {
-  return isNativePlatform(platform) ? 'Install App' : 'Install';
+export function installLabel(platformSlug: string, platform: string): 'Install App' | 'Install' {
+  return isNativePlatform(platformSlug, platform) ? 'Install App' : 'Install';
 }
 
 export type ContentButtons = { update: boolean; dlc: boolean };

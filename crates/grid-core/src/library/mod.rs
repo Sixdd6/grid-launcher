@@ -15,6 +15,7 @@ pub mod launch_select;
 pub mod layout_migration;
 pub mod path_change;
 pub mod paths;
+pub mod platform_slug_backfill;
 pub mod platforms;
 pub mod queue;
 pub mod reconcile;
@@ -409,7 +410,7 @@ fn ps5_unsupported_download(platform: &str, candidates: &[&RomFile], files: &[Ro
             if has_extension("pkg") {
                 return true;
             }
-            if has_extension("zar") || should_extract(platform, path) {
+            if has_extension("zar") || should_extract("", platform, path) {
                 return false;
             }
             files.iter().any(is_nested_game_file)
@@ -446,7 +447,7 @@ fn plan_install(
     // server lists its archive next to a `game.json` sidecar and any number
     // of extras, and exactly one of those is the game. Everything lands in
     // one per-game directory instead of the platform root.
-    if is_native_platform(&detail.platform_name) {
+    if is_native_platform(&detail.platform_slug, &detail.platform_name) {
         return plan_native_install(detail, &platform_root, client);
     }
 
@@ -611,16 +612,16 @@ enum BaseRoute {
 
 /// [`BaseRoute`] for `platform` and the downloaded `archive`. Pure, so the
 /// routing decision is testable without a filesystem.
-fn base_finalize_route(platform: &str, archive: &Path) -> BaseRoute {
-    if is_native_platform(platform) {
+fn base_finalize_route(platform_slug: &str, platform: &str, archive: &Path) -> BaseRoute {
+    if is_native_platform(platform_slug, platform) {
         BaseRoute::Native
     } else if is_ps3_platform(platform) {
         BaseRoute::Ps3
-    } else if is_ps4_platform(platform) && should_extract(platform, archive) {
+    } else if is_ps4_platform(platform) && should_extract(platform_slug, platform, archive) {
         BaseRoute::Eboot { ps4: true }
-    } else if is_ps5_platform(platform) && should_extract(platform, archive) {
+    } else if is_ps5_platform(platform) && should_extract(platform_slug, platform, archive) {
         BaseRoute::Eboot { ps4: false }
-    } else if should_extract(platform, archive) {
+    } else if should_extract(platform_slug, platform, archive) {
         BaseRoute::Extract
     } else {
         BaseRoute::Downloaded
@@ -1191,10 +1192,7 @@ impl InstallService {
         self.check_library_gate()?;
         let row = self.current_row(rom_id)?;
         let extracted_dir = row.extracted_dir.trim();
-        if !is_native_platform(&row.platform)
-            || extracted_dir.is_empty()
-            || !Path::new(extracted_dir).is_dir()
-        {
+        if !row.is_native() || extracted_dir.is_empty() || !Path::new(extracted_dir).is_dir() {
             return Err(LibraryError::Extract(NO_NATIVE_INSTALL_DIR.to_string()));
         }
 
@@ -1260,7 +1258,7 @@ impl InstallService {
         self.check_library_gate()?;
         let library = self.library_root()?;
         let row = self.current_row(rom_id)?;
-        if is_native_platform(&row.platform) {
+        if row.is_native() {
             return Err(LibraryError::Extract(NATIVE_UPDATE_REQUIRED.to_string()));
         }
         let detail = client.rom_detail(rom_id).await?;
@@ -2221,7 +2219,7 @@ impl InstallService {
             record.extracted_path = path_string(&job.primary_archive);
             archive_to_delete = None;
         } else {
-            match base_finalize_route(platform, archive) {
+            match base_finalize_route(&detail.platform_slug, platform, archive) {
                 BaseRoute::Native => {
                     archive_to_delete = self.finalize_native_base(id, job, &mut record)?;
                 }
@@ -2552,7 +2550,12 @@ impl InstallService {
         let mut archive_to_delete = None;
         // D13: a bare disc image or loose executable served under a native
         // platform is not an archive, whatever `should_extract`'s table says.
-        if should_extract(&job.detail.platform_name, archive) && is_extractable_archive(archive) {
+        if should_extract(
+            &job.detail.platform_slug,
+            &job.detail.platform_name,
+            archive,
+        ) && is_extractable_archive(archive)
+        {
             // Fixed at `<home>/game` whatever the archive is called, so
             // every native install has the same shape.
             let dest = game_dir.join("game");
@@ -2614,7 +2617,11 @@ impl InstallService {
         let archive = job.primary_archive.as_path();
         let title = job.detail.name.as_str();
 
-        if !should_extract(&job.detail.platform_name, archive) {
+        if !should_extract(
+            &job.detail.platform_slug,
+            &job.detail.platform_name,
+            archive,
+        ) {
             if is_appimage(archive) {
                 make_executable(archive);
             }
@@ -2794,7 +2801,7 @@ impl InstallService {
         // left a user data link behind for `merge_tree_into` to find.
         let protected_root = fs::canonicalize(job.library.join(SAVES_DIR)).ok();
 
-        if should_extract(EMULATOR_PLATFORM, archive) {
+        if should_extract("", EMULATOR_PLATFORM, archive) {
             let staging = install_dir.join(EXTRACT_TMP_DIR);
             extract_archive(archive, &staging, &mut progress)?;
             let merged = merge_tree_into(&staging, install_dir, protected_root.as_deref());
@@ -2809,7 +2816,7 @@ impl InstallService {
             }
             // A supplemental that is not an archive (an AppImage, a firmware
             // blob) is already where it belongs: a sibling of the primary.
-            if !should_extract(EMULATOR_PLATFORM, supplemental) {
+            if !should_extract("", EMULATOR_PLATFORM, supplemental) {
                 continue;
             }
             // Numbered by position in the downloaded list, which is a
@@ -2863,7 +2870,7 @@ impl InstallService {
         // rank it against the AppImage it replaces — both carry the title
         // token, so the casefolded-path tie-break can pick the OLD one
         // (`…-2609-…` sorts before `…-2612-…`).
-        let selected = if !should_extract(EMULATOR_PLATFORM, archive)
+        let selected = if !should_extract("", EMULATOR_PLATFORM, archive)
             && is_appimage(archive)
             && archive.is_file()
         {
@@ -3268,7 +3275,7 @@ async fn download_emulator(
     // written beside it. An extractable primary is left alone: finalize deletes
     // it after extraction, so a leftover one means the previous run failed and
     // skipping it is the retry shortcut of doc 03 invariant 5.
-    if !should_extract(EMULATOR_PLATFORM, &archive) {
+    if !should_extract("", EMULATOR_PLATFORM, &archive) {
         let _ = fs::remove_file(&archive);
     }
 
@@ -3575,7 +3582,7 @@ fn uninstall_steps(
         return UninstallPlan { steps, skipped };
     }
 
-    if is_native_platform(&record.platform) {
+    if record.is_native() {
         let game_dir = record.native_game_dir.trim();
         if !game_dir.is_empty() && Path::new(game_dir).is_dir() {
             push(Path::new(game_dir), RemovalLabel::Folder);
@@ -4099,6 +4106,7 @@ fn new_record(detail: &RomDetail, rom_file_name: &str) -> InstalledGame {
     InstalledGame {
         title: detail.name.clone(),
         platform: detail.platform_name.clone(),
+        platform_slug: detail.platform_slug.clone(),
         rom_id: Some(detail.id),
         rom_file_name: rom_file_name.to_string(),
         description: detail.description.clone(),
@@ -4277,6 +4285,7 @@ mod tests {
             name: "Chrono Trigger".to_string(),
             platform_id: 7,
             platform_name: "SNES".to_string(),
+            platform_slug: "snes".to_string(),
             fs_name: "chrono.zip".to_string(),
             description: String::new(),
             regions: String::new(),
@@ -4481,12 +4490,12 @@ mod tests {
         );
         assert_eq!(job.file_ids, vec![1]);
         assert_eq!(
-            base_finalize_route("PlayStation 5", &job.primary_archive),
+            base_finalize_route("", "PlayStation 5", &job.primary_archive),
             BaseRoute::Downloaded,
             "a .zar is opened in place by Kyty; it must never be extracted"
         );
         assert_eq!(
-            base_finalize_route("PlayStation 5", Path::new("ASTRO.ZAR")),
+            base_finalize_route("", "PlayStation 5", Path::new("ASTRO.ZAR")),
             BaseRoute::Downloaded
         );
     }
@@ -4541,7 +4550,7 @@ mod tests {
             PathBuf::from("/library/games/PlayStation 5/eboot.bin")
         );
         assert_eq!(
-            base_finalize_route("PlayStation 5", &job.primary_archive),
+            base_finalize_route("", "PlayStation 5", &job.primary_archive),
             BaseRoute::Downloaded
         );
     }
@@ -4555,7 +4564,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            base_finalize_route("PlayStation 5", &job.primary_archive),
+            base_finalize_route("", "PlayStation 5", &job.primary_archive),
             BaseRoute::Eboot { ps4: false }
         );
     }
@@ -4640,6 +4649,39 @@ mod tests {
         assert_eq!(
             job.targets[1].query,
             vec![("file_ids".to_string(), "2".to_string())]
+        );
+    }
+
+    /// User bug 2026-10-10: RomM platform 52 — slug `win`, display name
+    /// "PC Fangames & Ports". Its game installs on the native path, and its
+    /// finalize route is the native one.
+    #[test]
+    fn plan_native_follows_the_slug_for_a_custom_named_windows_platform() {
+        let mut detail = detail(vec![
+            rom_file(1, "artwork.png", true),
+            rom_file(2, "TamrielRebuilt.zip", true),
+            rom_file(3, "readme.txt", true),
+        ]);
+        detail.name = "Tamriel Rebuilt".to_string();
+        detail.platform_name = "PC Fangames & Ports".to_string();
+        detail.platform_slug = "win".to_string();
+        let job = plan_install(&detail, Path::new("/library"), client()).unwrap();
+
+        let game_dir = PathBuf::from("/library/games/PC Fangames & Ports/Tamriel Rebuilt");
+        assert_eq!(job.native_game_dir, Some(game_dir.clone()));
+        assert!(job.multi_file_game_dir.is_none());
+        assert_eq!(job.primary_archive, game_dir.join("TamrielRebuilt.zip"));
+        assert_eq!(
+            base_finalize_route(
+                &detail.platform_slug,
+                &detail.platform_name,
+                &job.primary_archive
+            ),
+            BaseRoute::Native
+        );
+        assert_eq!(
+            new_record(&detail, "TamrielRebuilt.zip").platform_slug,
+            "win"
         );
     }
 
@@ -5649,16 +5691,16 @@ mod tests {
     #[test]
     fn base_route_sends_ps5_through_the_eboot_branch_without_a_title_id() {
         assert_eq!(
-            base_finalize_route("PlayStation 5", Path::new("game.zip")),
+            base_finalize_route("", "PlayStation 5", Path::new("game.zip")),
             BaseRoute::Eboot { ps4: false }
         );
         assert_eq!(
-            base_finalize_route("PlayStation 4", Path::new("game.zip")),
+            base_finalize_route("", "PlayStation 4", Path::new("game.zip")),
             BaseRoute::Eboot { ps4: true }
         );
         // Nothing to extract: the download itself is the install.
         assert_eq!(
-            base_finalize_route("PlayStation 5", Path::new("game.bin")),
+            base_finalize_route("", "PlayStation 5", Path::new("game.bin")),
             BaseRoute::Downloaded
         );
         // A PS5 row never offers update/DLC content.

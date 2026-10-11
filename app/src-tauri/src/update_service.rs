@@ -250,6 +250,7 @@ impl UpdateService {
                 };
                 let server = ServerVersion {
                     platform: &detail.platform_name,
+                    platform_slug: &detail.platform_slug,
                     rom_file_name: &detail.fs_name,
                     updated_at: &detail.server_updated_at,
                 };

@@ -32,8 +32,8 @@ export function emulatorChipLabel(name: string): string {
  * never a true statement about them — the chip is not merely relabeled, it
  * does not appear.
  */
-export function showsEmulatorChip(platformLabel: string): boolean {
-  return !isNativeLaunchPlatform(platformLabel);
+export function showsEmulatorChip(platformLabel: string, platformSlug: string): boolean {
+  return !isNativeLaunchPlatform(platformSlug, platformLabel);
 }
 
 /**

@@ -23,7 +23,7 @@ function html(
   return render(SavesTab, {
     props: {
       gameTitle: 'Metroid',
-      cloudGame: syntheticCloudGame(game, 'NES'),
+      cloudGame: syntheticCloudGame(game, 'NES', ''),
       isNative: false,
       savePanelInfo,
       statePanelInfo,

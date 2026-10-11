@@ -15,7 +15,7 @@ use crate::romm::RommClient;
 use super::super::archive::cleanup_temp_archives;
 use super::super::dirs::resolved_screenshot_directories;
 use super::super::retention::prune_server_save_records;
-use super::super::scope::{is_native_executable_platform, SaveScope};
+use super::super::scope::SaveScope;
 use super::super::tokens::psp_id_tokens;
 use super::super::transfer::{
     directory_archive_upload_jobs, filter_upload_jobs_by_session_window, grouped_file_upload_jobs,
@@ -114,7 +114,7 @@ pub async fn upload_cloud_files_for_game(
     let (name, entry) = resolved_cloud_emulator_pair(ctx, caches, game, save_type);
 
     // 1. Native Windows platform -> delegate.
-    if is_native_executable_platform(&game.platform) {
+    if game.is_native() {
         return super::native::upload_native_saves_for_game(client, ctx, game, ctx.pcgw_paths)
             .await;
     }

@@ -3,25 +3,45 @@
 use regex::Regex;
 use std::sync::OnceLock;
 
-/// A game is "native" when its platform, trimmed and casefolded, starts with
-/// `windows` or `linux` (widening `is_native_executable_platform`,
-/// selection.py:145). This is the *server* platform name, not the host OS.
+/// A game is "native" when its server platform runs host executables:
+///
+/// 1. the RomM platform slug (`platform_slug` on a ROM, `slug` on a
+///    platform), trimmed and casefolded, is `win`/`linux` or starts with
+///    `win`/`linux` (`win`, `win9x`, `linux`, …). The slug is the platform's
+///    identity: a custom display name ("PC Fangames & Ports") keeps the slug
+///    `win`. A platform's `fs_slug` is never read — it is a folder name
+///    (`win-fangames-ports`), not an identity.
+/// 2. else (fallback: the rule before 2026-10-10, kept so a blank slug — a
+///    row not yet backfilled, an offline caller — keeps today's native set)
+///    the platform NAME, trimmed and casefolded, starts with `windows` or
+///    `linux` (widening `is_native_executable_platform`, selection.py:145).
+///
+/// Both halves read the *server* platform, never the host OS.
 ///
 /// User ruling 2026-09-08: linux platforms are native everywhere — install
-/// block reason, launch routing, and cloud save scope/block reasons all use
-/// this one predicate. Only the compat-tool decision is narrower; that reads
-/// [`is_windows_platform`].
-pub fn is_native_platform(platform: &str) -> bool {
+/// layout and block reason, launch routing, and cloud save scope/block
+/// reasons all use this one predicate. Only the compat-tool decision is
+/// narrower; that reads [`is_windows_platform`]. User bug 2026-10-10: the
+/// slug half exists because a custom-named Windows platform was treated as
+/// an emulated one.
+pub fn is_native_platform(platform_slug: &str, platform: &str) -> bool {
+    let slug = platform_slug.trim().to_lowercase();
+    if slug.starts_with("win") || slug.starts_with("linux") {
+        return true;
+    }
     let folded = platform.trim().to_lowercase();
     folded.starts_with("windows") || folded.starts_with("linux")
 }
 
-/// Whether `platform`, trimmed and casefolded, starts with `windows`. This is
-/// the narrower half of [`is_native_platform`] and exists for exactly one
-/// decision: whether a native game needs a Wine/Proton compat tool. A Linux
-/// platform row is native but runs its own executable directly.
-pub fn is_windows_platform(platform: &str) -> bool {
-    platform.trim().to_lowercase().starts_with("windows")
+/// Whether the server platform is a Windows one: its slug, trimmed and
+/// casefolded, starts with `win`, or (fallback) its name starts with
+/// `windows`. This is the narrower half of [`is_native_platform`] and exists
+/// for exactly one decision: whether a native game needs a Wine/Proton
+/// compat tool. A Linux platform row is native but runs its own executable
+/// directly.
+pub fn is_windows_platform(platform_slug: &str, platform: &str) -> bool {
+    platform_slug.trim().to_lowercase().starts_with("win")
+        || platform.trim().to_lowercase().starts_with("windows")
 }
 
 /// Whether `platform`, trimmed and casefolded, is exactly "playstation 3" or
@@ -125,26 +145,66 @@ mod tests {
     }
 
     #[test]
-    fn native_platform_matches_windows_case_and_whitespace_insensitively() {
-        assert!(is_native_platform("Windows"));
-        assert!(is_native_platform(" windows 10"));
-        assert!(!is_native_platform("Nintendo Wii"));
-        assert!(!is_native_platform(""));
+    fn native_platform_name_fallback_matches_windows_case_and_whitespace_insensitively() {
+        assert!(is_native_platform("", "Windows"));
+        assert!(is_native_platform("", " windows 10"));
+        assert!(!is_native_platform("", "Nintendo Wii"));
+        assert!(!is_native_platform("", ""));
     }
 
     #[test]
-    fn native_platform_also_matches_linux() {
-        assert!(is_native_platform("Linux"));
-        assert!(is_native_platform(" linux x86_64"));
-        assert!(!is_native_platform("Nintendo Linux"));
+    fn native_platform_name_fallback_also_matches_linux() {
+        assert!(is_native_platform("", "Linux"));
+        assert!(is_native_platform("", " linux x86_64"));
+        assert!(!is_native_platform("", "Nintendo Linux"));
+    }
+
+    /// User bug 2026-10-10: RomM platform 52 is slug `win`, fs_slug
+    /// `win-fangames-ports`, display name "PC Fangames & Ports".
+    #[test]
+    fn native_platform_table_follows_the_slug() {
+        let cases: &[(&str, &str, bool)] = &[
+            ("win", "Windows", true),
+            ("win", "PC Fangames & Ports", true),
+            (" WIN ", "My PC Shelf", true),
+            ("win9x", "Windows 9x", true),
+            ("win9x", "Old PC", true),
+            ("linux", "Linux", true),
+            ("linux", "Steam Deck Ports", true),
+            ("dos", "DOS", false),
+            ("dos", "PC (DOS)", false),
+            ("snes", "Super Nintendo", false),
+            // The fs_slug is never the identity: seen as a name it is not
+            // native, and the real slug decides.
+            ("snes", "win-fangames-ports", false),
+            // Name fallback: no slug, or a slug that does not decide.
+            ("", "Windows", true),
+            ("", "PC Fangames & Ports", false),
+            ("pc", "Windows Games", true),
+        ];
+        for &(slug, name, expected) in cases {
+            assert_eq!(
+                is_native_platform(slug, name),
+                expected,
+                "slug {slug:?} name {name:?}"
+            );
+        }
     }
 
     #[test]
     fn windows_platform_excludes_linux() {
-        assert!(is_windows_platform("Windows"));
-        assert!(is_windows_platform("  windows 10 "));
-        assert!(!is_windows_platform("Linux"));
-        assert!(!is_windows_platform(""));
+        assert!(is_windows_platform("", "Windows"));
+        assert!(is_windows_platform("", "  windows 10 "));
+        assert!(!is_windows_platform("", "Linux"));
+        assert!(!is_windows_platform("", ""));
+    }
+
+    #[test]
+    fn windows_platform_follows_the_slug() {
+        assert!(is_windows_platform("win", "PC Fangames & Ports"));
+        assert!(is_windows_platform("win9x", "Old PC"));
+        assert!(!is_windows_platform("linux", "Steam Deck Ports"));
+        assert!(!is_windows_platform("dos", "PC (DOS)"));
     }
 
     #[test]

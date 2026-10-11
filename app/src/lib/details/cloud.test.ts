@@ -164,32 +164,32 @@ describe('uploadButtonLabel', () => {
 
 describe('isNativePlatform', () => {
   it('is true for a platform string starting with "windows" or "linux"', () => {
-    expect(isNativePlatform('Windows')).toBe(true);
-    expect(isNativePlatform('windows')).toBe(true);
-    expect(isNativePlatform('Linux')).toBe(true);
-    expect(isNativePlatform('linux x86_64')).toBe(true);
+    expect(isNativePlatform('', 'Windows')).toBe(true);
+    expect(isNativePlatform('', 'windows')).toBe(true);
+    expect(isNativePlatform('', 'Linux')).toBe(true);
+    expect(isNativePlatform('', 'linux x86_64')).toBe(true);
   });
 
   it('is case-insensitive and trims surrounding whitespace', () => {
-    expect(isNativePlatform('  WINDOWS  ')).toBe(true);
-    expect(isNativePlatform('  LINUX  ')).toBe(true);
+    expect(isNativePlatform('', '  WINDOWS  ')).toBe(true);
+    expect(isNativePlatform('', '  LINUX  ')).toBe(true);
   });
 
   it('is false for an emulated platform', () => {
-    expect(isNativePlatform('SNES')).toBe(false);
-    expect(isNativePlatform('')).toBe(false);
+    expect(isNativePlatform('', 'SNES')).toBe(false);
+    expect(isNativePlatform('', '')).toBe(false);
   });
 
   it('is false for a platform that merely contains the word mid-string', () => {
-    expect(isNativePlatform('Not Windows')).toBe(false);
-    expect(isNativePlatform('Nintendo Linux')).toBe(false);
+    expect(isNativePlatform('', 'Not Windows')).toBe(false);
+    expect(isNativePlatform('', 'Nintendo Linux')).toBe(false);
   });
 
   // User ruling 2026-09-08: the scope/launch split is gone, so the name the
   // launch-target line still imports answers exactly the same question.
   it('is the same predicate isNativeLaunchPlatform now points at', () => {
     for (const platform of ['Windows', 'Linux', 'SNES', '']) {
-      expect(isNativeLaunchPlatform(platform)).toBe(isNativePlatform(platform));
+      expect(isNativeLaunchPlatform('', platform)).toBe(isNativePlatform('', platform));
     }
   });
 });
@@ -207,7 +207,7 @@ describe('syntheticCloudGame', () => {
       platform_display_name: '',
       genres: [],
     };
-    const synthetic = syntheticCloudGame(game, 'Emulators');
+    const synthetic = syntheticCloudGame(game, 'Emulators', '');
     expect(synthetic.title).toBe('Portal');
     expect(synthetic.platform).toBe('Emulators');
     expect(synthetic.rom_id).toBe(42);

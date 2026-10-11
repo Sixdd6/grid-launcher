@@ -45,8 +45,11 @@ const PCGW_LOOKUP_TIMEOUT = 30_000;
  * that the app spawns directly (the install chmods the selected launch file
  * itself) — the `wine` stub must stay untouched for it.
  *
+ * Rom 704 is on platform 3, RomM's `win` platform under the custom display
+ * name "PC Fangames & Ports": native only by its slug (user bug 2026-10-10).
+ *
  * Queue ids across this spec's single app instance: 1 = rom 701's install,
- * 2 = rom 702's, 3 = rom 703's.
+ * 2 = rom 702's, 3 = rom 703's, 4 = rom 704's.
  */
 describe('native', () => {
   const gameDir = () => path.join(dataDir(), 'library', 'games', 'Windows', 'My Game');
@@ -363,5 +366,45 @@ describe('native', () => {
       reverse: true,
       timeoutMsg: 'details-playing-chip never cleared after Stop on the Linux game',
     });
+  });
+
+  // User bug 2026-10-10: platform 3 is RomM's `win` platform under a custom
+  // display name, "PC Fangames & Ports" (fs_slug `win-fangames-ports`). The
+  // display name is not a Windows name, so only the platform SLUG makes rom
+  // 704 native: no emulator chip, "Install App", no emulator launch target,
+  // the native install layout, and Game Settings afterwards. Queue id 4.
+  it('treats a custom-named Windows platform as native by its slug', async () => {
+    await closeDetails();
+    await $(testId('platform-btn-3')).click();
+    await expect($(testId('server-emulator-chip'))).not.toExist();
+
+    await openDetails(704);
+    await expect($(testId('details-install'))).toHaveText('Install App');
+    await expect($(testId('details-emulator'))).not.toExist();
+
+    await $(testId('details-install')).click();
+    await showDownloads();
+    await browser.waitUntil(
+      async () => (await $(testId('download-detail-4')).getText()).startsWith('Completed'),
+      { timeout: INSTALL_TIMEOUT, timeoutMsg: 'the custom-named Windows install never reached Completed' },
+    );
+    await showServer();
+    await $(`${testId('server-view')} ${testId('installed-badge-704')}`).waitForExist({
+      timeout: INSTALL_TIMEOUT,
+      timeoutMsg: "the installed badge never appeared on rom 704's card",
+    });
+
+    const fanGameDir = path.join(dataDir(), 'library', 'games', 'PC Fangames & Ports', 'Fan Port');
+    expect(existsSync(path.join(fanGameDir, 'game', 'MyGame', 'mygame.exe'))).toBe(true);
+    expect(existsSync(path.join(fanGameDir, 'prefix'))).toBe(true);
+
+    await $(testId('details-game-settings')).click();
+    await $(testId('native-settings-exe')).waitForExist({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'Game Settings never listed an executable for the custom-named Windows game',
+    });
+    const options = await $$(`${testId('native-settings-exe')} option`);
+    expect(options.length).toBe(1);
+    expect((await options[0].getValue()).endsWith(path.join('game', 'MyGame', 'mygame.exe'))).toBe(true);
   });
 });

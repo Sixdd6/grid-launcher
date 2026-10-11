@@ -42,9 +42,10 @@ const PS3_SUFFIXES: &[&str] = &["zip", "7z", "rar", "tar", "gz", "bz2", "xz"];
 /// `PS3_SUFFIXES`; every other platform's archive is extracted only when
 /// its suffix is one of `EXTRACTABLE_SUFFIXES` (both sets are
 /// case-insensitive and now include `rar`, extracted by this engine via
-/// `unrar`).
-pub fn should_extract(platform: &str, archive: &Path) -> bool {
-    if is_native_platform(platform) {
+/// `unrar`). Nativeness reads the platform slug first
+/// ([`is_native_platform`]); pass `""` where no slug is known.
+pub fn should_extract(platform_slug: &str, platform: &str, archive: &Path) -> bool {
+    if is_native_platform(platform_slug, platform) {
         return true;
     }
     if is_arcade_platform(platform) || is_dos_platform(platform) {
@@ -822,7 +823,22 @@ mod tests {
         assert!(!is_extractable_archive(Path::new("/x/game.exe")));
         assert!(!is_extractable_archive(Path::new("/x/game")));
         // The native platform's "always extract" rule does not apply here.
-        assert!(should_extract("Windows", Path::new("/x/game.iso")));
+        assert!(should_extract("", "Windows", Path::new("/x/game.iso")));
+    }
+
+    #[test]
+    fn should_extract_treats_a_custom_named_windows_platform_as_native_by_slug() {
+        // User bug 2026-10-10: slug `win`, display name "PC Fangames & Ports".
+        assert!(should_extract(
+            "win",
+            "PC Fangames & Ports",
+            Path::new("/x/game.iso")
+        ));
+        assert!(!should_extract(
+            "",
+            "PC Fangames & Ports",
+            Path::new("/x/game.iso")
+        ));
     }
 
     // --- is_arcade_platform -------------------------------------------------
@@ -852,13 +868,13 @@ mod tests {
     fn should_extract_is_false_for_a_dos_archive() {
         for archive in ["game.zip", "game.7z", "game.rar", "game.tar.gz"] {
             assert!(
-                !should_extract("DOS", Path::new(archive)),
+                !should_extract("", "DOS", Path::new(archive)),
                 "{archive} must stay an archive for DOS"
             );
         }
-        assert!(!should_extract("MS-DOS", Path::new("game.zip")));
+        assert!(!should_extract("", "MS-DOS", Path::new("game.zip")));
         // The rule is platform-scoped: the same zip is extracted elsewhere.
-        assert!(should_extract("SNES", Path::new("game.zip")));
+        assert!(should_extract("", "SNES", Path::new("game.zip")));
     }
 
     // --- mask_zip_unix_mode -----------------------------------------------------
@@ -947,7 +963,7 @@ mod tests {
         ];
         for (platform, archive, expected) in cases {
             assert_eq!(
-                should_extract(platform, Path::new(archive)),
+                should_extract("", platform, Path::new(archive)),
                 *expected,
                 "platform={platform} archive={archive}"
             );

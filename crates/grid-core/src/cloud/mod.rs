@@ -70,6 +70,9 @@ impl SaveType {
 pub struct CloudGame {
     pub title: String,
     pub platform: String,
+    /// The server platform slug (`InstalledGame.platform_slug`), `""` when
+    /// unknown. Nativeness reads it first ([`Self::is_native`]).
+    pub platform_slug: String,
     pub rom_id: String, // string form, "" when absent (Python parity)
     pub rom_file_name: String,
     pub extracted_path: String,
@@ -80,6 +83,15 @@ pub struct CloudGame {
     pub title_id: String,      // no source yet: always ""
     pub base_title_id: String, // no source yet: always ""
     pub ps3_game_id: String,   // registry / frontend; "" for a server game
+}
+
+impl CloudGame {
+    /// Whether this game is a native (host-executable) one:
+    /// [`crate::library::platforms::is_native_platform`] over its slug and
+    /// platform name.
+    pub fn is_native(&self) -> bool {
+        crate::library::platforms::is_native_platform(&self.platform_slug, &self.platform)
+    }
 }
 
 /// Case-insensitive block lists for save-directory scanning, in

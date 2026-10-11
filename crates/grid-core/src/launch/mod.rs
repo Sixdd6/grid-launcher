@@ -26,7 +26,6 @@ use std::time::Duration;
 use crate::config::Config;
 use crate::library::extract::which_on_path;
 use crate::library::paths::expand_home;
-use crate::library::platforms::is_native_platform;
 use crate::library::registry::{installed_match, InstalledGame, Registry};
 use crate::library::relocate::LibraryGate;
 
@@ -270,48 +269,47 @@ impl LaunchService {
 
         let config = Config::load(&self.config_path)?;
 
-        let (emulator_name, argv, working_dir, extra_env, pre_launch_sync) =
-            if is_native_platform(&game.platform) {
-                // Blank on a Windows host: no compat tool makes sense there.
-                // `build_native_command` applies the same gate on `default_compat_tool`
-                // itself (and blanks the tool entirely for a linux-platform row),
-                // so this is belt-and-suspenders, not load-bearing.
-                let default_compat_tool = if host_os().starts_with("win") {
-                    ""
-                } else {
-                    config.default_compat_tool.as_str()
-                };
-                let library = expand_home(&config.library_path);
-                let native = build_native_command(
-                    &game,
-                    &library,
-                    default_compat_tool,
-                    host_os(),
-                    &which_on_path,
-                )
-                .map_err(LaunchError::Validation)?;
-                let emulator_name = if native.tool_label.is_empty() {
-                    "native".to_string()
-                } else {
-                    native.tool_label
-                };
-                (emulator_name, native.argv, native.cwd, native.env, None)
+        let (emulator_name, argv, working_dir, extra_env, pre_launch_sync) = if game.is_native() {
+            // Blank on a Windows host: no compat tool makes sense there.
+            // `build_native_command` applies the same gate on `default_compat_tool`
+            // itself (and blanks the tool entirely for a linux-platform row),
+            // so this is belt-and-suspenders, not load-bearing.
+            let default_compat_tool = if host_os().starts_with("win") {
+                ""
             } else {
-                let plan = resolve_launch(&game, &config)?;
-                // `Some` only for a RetroArch entry: the settings sync's one
-                // call site, matching Python's pre-launch
-                // `_ensure_emulator_sync_settings` (details_view_mixin.py:1457).
-                let sync = plan
-                    .is_retroarch
-                    .then(|| (plan.emulator_name.clone(), plan.emulator_path));
-                (
-                    plan.emulator_name,
-                    plan.argv,
-                    plan.working_dir,
-                    Vec::new(),
-                    sync,
-                )
+                config.default_compat_tool.as_str()
             };
+            let library = expand_home(&config.library_path);
+            let native = build_native_command(
+                &game,
+                &library,
+                default_compat_tool,
+                host_os(),
+                &which_on_path,
+            )
+            .map_err(LaunchError::Validation)?;
+            let emulator_name = if native.tool_label.is_empty() {
+                "native".to_string()
+            } else {
+                native.tool_label
+            };
+            (emulator_name, native.argv, native.cwd, native.env, None)
+        } else {
+            let plan = resolve_launch(&game, &config)?;
+            // `Some` only for a RetroArch entry: the settings sync's one
+            // call site, matching Python's pre-launch
+            // `_ensure_emulator_sync_settings` (details_view_mixin.py:1457).
+            let sync = plan
+                .is_retroarch
+                .then(|| (plan.emulator_name.clone(), plan.emulator_path));
+            (
+                plan.emulator_name,
+                plan.argv,
+                plan.working_dir,
+                Vec::new(),
+                sync,
+            )
+        };
 
         // Before the spawn, so a changed RetroAchievements credential or
         // RomM username reaches retroarch.cfg for THIS run.
@@ -436,6 +434,10 @@ impl LaunchService {
     /// `find`'s title/platform fallback can hand back a row for a different
     /// game that merely shares a title and platform, so `installed_match` is
     /// the final word — the same guard `InstallService::uninstall` uses.
+    ///
+    /// A row with no stored platform slug (registry v8 backfill not run yet)
+    /// borrows the slug the last platform fetch recorded for its platform
+    /// ([`with_known_platform_slug`]), so the native decision matches Details.
     async fn installed_game(&self, rom_id: i64) -> Result<InstalledGame, LaunchError> {
         let registry = self.registry.clone();
         let found = tokio::task::spawn_blocking(move || registry.find(Some(rom_id), "", ""))
@@ -444,6 +446,7 @@ impl LaunchService {
             .map_err(|e| LaunchError::Registry(e.to_string()))?;
         found
             .filter(|row| installed_match(row, rom_id))
+            .map(with_known_platform_slug)
             .ok_or(LaunchError::NotInstalled)
     }
 
@@ -641,10 +644,55 @@ async fn spawn_child(
     Ok(spawned?)
 }
 
+/// `row` with a blank `platform_slug` filled from the slug the last platform
+/// fetch recorded for its platform label ([`slug_for_platform`]). A stored
+/// slug is kept. Before any fetch the lookup answers `""`, and the name rule
+/// decides as before.
+fn with_known_platform_slug(row: InstalledGame) -> InstalledGame {
+    fill_platform_slug(row, slug_for_platform)
+}
+
+/// [`with_known_platform_slug`] with the lookup injected, so it is testable
+/// without the process-wide registry.
+fn fill_platform_slug(mut row: InstalledGame, lookup: impl Fn(&str) -> String) -> InstalledGame {
+    if row.platform_slug.trim().is_empty() {
+        row.platform_slug = lookup(&row.platform);
+    }
+    row
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::EmulatorEntry;
+
+    #[test]
+    fn a_row_with_no_slug_borrows_the_recorded_one_and_becomes_native() {
+        let lookup = |label: &str| {
+            if label == "PC Fangames & Ports" {
+                "win".to_string()
+            } else {
+                String::new()
+            }
+        };
+        let row = InstalledGame {
+            title: "Tamriel Rebuilt".to_string(),
+            platform: "PC Fangames & Ports".to_string(),
+            ..Default::default()
+        };
+        assert!(!row.is_native());
+        let filled = fill_platform_slug(row, lookup);
+        assert_eq!(filled.platform_slug, "win");
+        assert!(filled.is_native());
+
+        // A stored slug is never replaced.
+        let stored = InstalledGame {
+            platform: "PC Fangames & Ports".to_string(),
+            platform_slug: "linux".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(fill_platform_slug(stored, lookup).platform_slug, "linux");
+    }
 
     /// While a library move holds the gate, a launch is refused before the
     /// registry is read and no session is created.

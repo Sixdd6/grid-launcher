@@ -39,7 +39,7 @@ use grid_core::cloud::native::{
 };
 use grid_core::cloud::ops::native::manual_paths_key;
 use grid_core::cloud::ops::{self, CloudCaches, CloudContext, CloudMessage};
-use grid_core::cloud::scope::{is_native_executable_platform, SaveScope};
+use grid_core::cloud::scope::SaveScope;
 use grid_core::cloud::state::{
     apply_sync_update, auto_cloud_upload_plan, game_key, games_match_identity,
     summarize_auto_cloud_upload_result, sync_entry_for, PerTypeResult, SyncStateUpdate,
@@ -316,7 +316,7 @@ impl CloudService {
         config_path: &Path,
         game: &CloudGame,
     ) -> Vec<String> {
-        if !is_native_executable_platform(&game.platform) {
+        if !game.is_native() {
             return Vec::new();
         }
         let key = manual_paths_key(game);
@@ -361,7 +361,7 @@ impl CloudService {
     /// in `lib.rs`; a no-op for non-native platforms.
     pub fn spawn_pcgw_lookup(self: &Arc<Self>, config_path: PathBuf, record: InstalledGame) {
         let game = cloud_game_from_installed(&record);
-        if !is_native_executable_platform(&game.platform) {
+        if !game.is_native() {
             return;
         }
         let cloud = self.clone();
@@ -1438,6 +1438,10 @@ async fn reload_apply_and_save(
 pub struct CloudGameInput {
     pub title: String,
     pub platform: String,
+    /// The server platform slug; nativeness reads it first. `serde(default)`
+    /// because a caller may not know it (then the name rule decides).
+    #[serde(default)]
+    pub platform_slug: String,
     pub rom_id: Option<i64>,
     #[serde(default)]
     pub rom_file_name: String,
@@ -1462,7 +1466,7 @@ pub struct CloudGameInput {
 }
 
 /// `CloudGame` from an `InstalledGame` registry row (task ruling):
-/// title/platform/rom_id (string form, `""` when `None`)/rom_file_name/
+/// title/platform/platform_slug/rom_id (string form, `""` when `None`)/rom_file_name/
 /// archive_path/extracted_path/extracted_dir/native_game_dir/description/
 /// ps3_game_id. `title_id`/`base_title_id` stay blank: no source carries
 /// them (see `CloudGame`'s doc comment).
@@ -1470,6 +1474,7 @@ pub fn cloud_game_from_installed(game: &InstalledGame) -> CloudGame {
     CloudGame {
         title: game.title.clone(),
         platform: game.platform.clone(),
+        platform_slug: game.platform_slug.clone(),
         rom_id: game.rom_id.map(|id| id.to_string()).unwrap_or_default(),
         rom_file_name: game.rom_file_name.clone(),
         extracted_path: game.extracted_path.clone(),
@@ -1487,6 +1492,7 @@ fn cloud_game_from_input(game: &CloudGameInput) -> CloudGame {
     CloudGame {
         title: game.title.clone(),
         platform: game.platform.clone(),
+        platform_slug: game.platform_slug.clone(),
         rom_id: game.rom_id.map(|id| id.to_string()).unwrap_or_default(),
         rom_file_name: game.rom_file_name.clone(),
         extracted_path: game.extracted_path.clone(),

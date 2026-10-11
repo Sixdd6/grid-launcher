@@ -1159,6 +1159,7 @@ mod tests {
             name: "Updated Game".to_string(),
             platform_id: 1,
             platform_name: "Windows".to_string(),
+            platform_slug: "win".to_string(),
             fs_name: "".to_string(),
             description: "".to_string(),
             regions: "".to_string(),

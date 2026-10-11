@@ -289,7 +289,11 @@
   // One native predicate for the whole popup (user ruling 2026-09-08): the
   // install label, the native Game Settings button, and the Saves tab's PC
   // save-folder mode all read the same answer.
-  let isNative = $derived(isNativePlatform(subject.platformName));
+  // The server platform slug decides first (user bug 2026-10-10: a custom
+  // display name on slug `win` is still native). A registry row the
+  // backfill has not reached gets it from the ROM detail (`mergeDetail`).
+  let platformSlug = $derived(merged.platformSlug);
+  let isNative = $derived(isNativePlatform(platformSlug, subject.platformName));
   let buttons = $derived(contentButtons(contentAvailability, installedNow, liveEntry !== undefined));
 
   // The primary button's reason needs the configured emulator list, so it
@@ -301,8 +305,9 @@
       return;
     }
     const platform = subject.platformName;
+    const slug = platformSlug;
     api
-      .installBlockReason(platform)
+      .installBlockReason(platform, slug)
       .then((reason) => (installBlocked = reason))
       .catch(() => (installBlocked = ''));
   });
@@ -337,7 +342,13 @@
   // registry row when one exists, else a synthetic stand-in built from the
   // subject.
   let installedRow = $derived(installed.list.find((row) => matchesInstalled(row, summary, subject.platformName)) ?? null);
-  let cloudGame = $derived(installedRow ?? syntheticCloudGame(summary, subject.platformName));
+  // A row the slug backfill has not reached borrows the slug the ROM detail
+  // carries, so the cloud commands see the same nativeness as the popup.
+  let cloudGame = $derived(
+    installedRow
+      ? { ...installedRow, platform_slug: installedRow.platform_slug || platformSlug }
+      : syntheticCloudGame(summary, subject.platformName, platformSlug)
+  );
 
   // Q4: an installed row with no server rom id. Details offers "Link to
   // server game" and "Remove from library (keeps files)" for it instead of
@@ -398,7 +409,7 @@
   }
   // `''` from `launchTargetLine` means "no launch target to state" — today
   // only a native platform, whose game runs its own executable.
-  let launchTarget = $derived(launchTargetLine(launchDefaults, subject.platformName));
+  let launchTarget = $derived(launchTargetLine(launchDefaults, subject.platformName, platformSlug));
 
   // Server-side game updates (doc 10). `updateLabel` is null when the rom
   // has no update, which also hides the button. `version` is the header row:
@@ -802,7 +813,7 @@
               {/if}
             {:else}
               <button data-testid="details-install" title={installBlocked} disabled={pending} onclick={handleInstall}>
-                {pendingAction === 'install' ? 'Installing…' : installLabel(subject.platformName)}
+                {pendingAction === 'install' ? 'Installing…' : installLabel(platformSlug, subject.platformName)}
               </button>
             {/if}
           </div>
@@ -916,6 +927,7 @@
     romId={subject.romId}
     title={subject.name}
     platform={subject.platformName}
+    {platformSlug}
     onClose={() => (showNativeSettings = false)}
     onSaved={refreshInstalled}
   />

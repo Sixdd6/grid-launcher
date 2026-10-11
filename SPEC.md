@@ -255,6 +255,8 @@ The Saves/States should be listed in a vertical column with the name of the emul
 When the panel is showing `Emulator Saves`, the entries represent shared emulator media rather than a single game's private save files, and the UI should warn the player that restoring or deleting those entries can affect every game using that shared emulator storage.
 
 ### Native Game Settings
+A game is native when its server platform's identity (the RomM platform slug: `win`, `win9x`, `linux`, …) is a Windows or Linux one, not because of the platform's display name; a custom name such as "PC Fangames & Ports" on slug `win` is still native, and the name rule ("Windows…"/"Linux…") applies only when the slug is unknown.
+
 For installed native games, the details view should expose a game settings dialog where the player can:
 - choose the launch executable discovered from the install directory
 - set custom launch parameters for that specific game

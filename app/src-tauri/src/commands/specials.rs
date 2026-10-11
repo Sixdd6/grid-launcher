@@ -82,12 +82,25 @@ pub async fn content_availability(
 /// Why the primary Install button cannot install this game, or `""`. Config
 /// + profile work only, so this runs on the blocking pool; the platform SLUG
 /// comes from the process-wide registry through `installed_core_resolver`,
-/// which is why the caller only has to send the platform NAME.
+/// which is why the caller only has to send the platform NAME for that.
+///
+/// Nativeness reads the platform slug first (user bug 2026-10-10): the
+/// caller sends the server slug when it has one; a blank one falls back to
+/// the slug the last platform fetch recorded for this name, then to the
+/// name rule.
 #[tauri::command]
-pub async fn install_block_reason(platform: String) -> Result<String, String> {
+pub async fn install_block_reason(
+    platform: String,
+    platform_slug: Option<String>,
+) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
         let config = Config::load(&Config::default_path()).map_err(err)?;
+        let slug = match platform_slug.as_deref().map(str::trim) {
+            Some(slug) if !slug.is_empty() => slug.to_string(),
+            _ => grid_core::launch::slug_for_platform(&platform),
+        };
         Ok(grid_core::launch::selection::install_block_reason(
+            &slug,
             &platform,
             &config.emulators,
             load_profiles(),

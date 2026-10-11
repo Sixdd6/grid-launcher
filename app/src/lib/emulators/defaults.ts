@@ -21,11 +21,12 @@ export function defaultEmulatorKey(p: Pick<Platform, 'display_name' | 'name' | '
 /**
  * Whether the Emulators panel's Defaults pane offers `p` an emulator select
  * at all (design §9). A native launch platform's games run as host
- * executables, so it never needs a default emulator — the row states that
+ * executables — native by its slug first, then its label (user bug
+ * 2026-10-10) — so it never needs a default emulator — the row states that
  * fact instead of offering a choice.
  */
 export function needsEmulator(p: Pick<Platform, 'display_name' | 'name' | 'slug'>): boolean {
-  return !isNativeLaunchPlatform(platformLabel(p));
+  return !isNativeLaunchPlatform(p.slug, platformLabel(p));
 }
 
 /** The `<select>` value that means "no default emulator for this platform". */

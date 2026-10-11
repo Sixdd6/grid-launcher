@@ -23,7 +23,7 @@ use super::super::restore::{
     latest_server_record, latest_server_records_by_slot, preferred_restore_target_path,
     record_timestamp, restore_single_save_payload, restore_single_state_payload, stringify_id,
 };
-use super::super::scope::{is_native_executable_platform, SaveScope};
+use super::super::scope::SaveScope;
 use super::super::state::SyncStateUpdate;
 use super::super::tokens::{game_save_match_tokens, ps2_serial_tokens};
 use super::super::transfer::{
@@ -117,7 +117,7 @@ pub async fn restore_cloud_save_for_game(
     skip_if_known_latest: bool,
 ) -> RestoreOutcome {
     // 1. Native Windows platform -> delegate.
-    if is_native_executable_platform(&game.platform) {
+    if game.is_native() {
         let (ok, messages) = super::native::restore_native_cloud_save_for_game(
             client,
             ctx,

@@ -6,6 +6,7 @@ function row(overrides: Partial<InstalledGame>): InstalledGame {
   return {
     title: 'Chrono Trigger',
     platform: 'SNES',
+    platform_slug: '',
     rom_id: 42,
     rom_file_name: 'chrono.sfc',
     archive_path: '',
@@ -74,6 +75,7 @@ describe('fromInstalled', () => {
     const r = row({
       title: 'Chrono Cross',
       platform: 'PS1',
+      platform_slug: 'psx',
       rom_id: 99,
       cover_small_path: '/c/small.png',
       cover_large_path: '/c/large.png',
@@ -85,6 +87,7 @@ describe('fromInstalled', () => {
       romId: 99,
       name: 'Chrono Cross',
       platformName: 'PS1',
+      platformSlug: 'psx',
       coverSmall: '/c/small.png',
       coverLarge: '/c/large.png',
       screenshotUrls: [],
@@ -109,17 +112,18 @@ describe('fromInstalled', () => {
 describe('fromSummary', () => {
   it('maps path_cover_small and path_cover_large onto the subject', () => {
     const g = game({ path_cover_small: '/s.png', path_cover_large: '/l.png' });
-    const subject = fromSummary(g, 'SNES');
+    const subject = fromSummary(g, 'SNES', 'snes');
     expect(subject.coverSmall).toBe('/s.png');
     expect(subject.coverLarge).toBe('/l.png');
   });
 
   it('carries id/name/platformName through, tagged as server', () => {
     const g = game({ id: 7, name: 'Chrono Trigger' });
-    expect(fromSummary(g, 'SNES')).toEqual({
+    expect(fromSummary(g, 'SNES', 'snes')).toEqual({
       romId: 7,
       name: 'Chrono Trigger',
       platformName: 'SNES',
+      platformSlug: 'snes',
       coverSmall: null,
       coverLarge: null,
       screenshotUrls: [],
@@ -134,7 +138,8 @@ describe('fromSummary', () => {
   it('carries the summary\'s own screenshots and fanart', () => {
     const subject = fromSummary(
       game({ screenshot_urls: ['https://romm/s1.png'], fanart_urls: ['https://romm/f1.jpg'] }),
-      'SNES'
+      'SNES',
+      'snes'
     );
     expect(subject.screenshotUrls).toEqual(['https://romm/s1.png']);
     expect(subject.fanartUrls).toEqual(['https://romm/f1.jpg']);
@@ -148,7 +153,7 @@ describe('summaryOf', () => {
   });
 
   it('round-trips the romId when present', () => {
-    const subject = fromSummary(game({ id: 42 }), 'SNES');
+    const subject = fromSummary(game({ id: 42 }), 'SNES', 'snes');
     expect(summaryOf(subject).id).toBe(42);
   });
 
@@ -172,6 +177,7 @@ function detail(overrides: Partial<RomDetail>): RomDetail {
     name: 'Chrono Trigger',
     platform_id: 1,
     platform_name: 'SNES',
+    platform_slug: '',
     fs_name: 'chrono.sfc',
     description: '',
     regions: '',

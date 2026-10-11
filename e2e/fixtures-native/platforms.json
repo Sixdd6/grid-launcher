@@ -10,5 +10,14 @@
     "name": "Linux",
     "slug": "linux",
     "rom_count": 1
+  },
+  {
+    "id": 3,
+    "name": "Windows",
+    "slug": "win",
+    "fs_slug": "win-fangames-ports",
+    "rom_count": 1,
+    "custom_name": "PC Fangames & Ports",
+    "display_name": "PC Fangames & Ports"
   }
 ]

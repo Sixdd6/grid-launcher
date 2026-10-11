@@ -9,6 +9,12 @@ export type DetailsSubject = {
   romId: number | null;
   name: string;
   platformName: string;
+  /**
+   * The server platform's slug; nativeness reads it first (user bug
+   * 2026-10-10). '' when unknown: a registry row the backfill has not
+   * reached. `mergeDetail` fills it from the ROM detail.
+   */
+  platformSlug: string;
   coverSmall: string | null;
   coverLarge: string | null;
   screenshotUrls: string[];
@@ -19,11 +25,12 @@ export type DetailsSubject = {
   source: 'server' | 'installed';
 };
 
-export function fromSummary(game: GameSummary, platformName: string): DetailsSubject {
+export function fromSummary(game: GameSummary, platformName: string, platformSlug: string): DetailsSubject {
   return {
     romId: game.id,
     name: game.name,
     platformName,
+    platformSlug,
     coverSmall: game.path_cover_small,
     coverLarge: game.path_cover_large,
     screenshotUrls: game.screenshot_urls,
@@ -54,6 +61,7 @@ export function fromInstalled(row: InstalledGame): DetailsSubject {
     romId: row.rom_id,
     name: row.title,
     platformName: row.platform,
+    platformSlug: row.platform_slug,
     coverSmall: row.cover_small_path,
     coverLarge: row.cover_large_path,
     screenshotUrls: splitStored(row.screenshot_urls),
@@ -103,5 +111,6 @@ export function mergeDetail(subject: DetailsSubject, detail: RomDetail): Details
     description: detail.description || subject.description,
     rating: detail.rating || subject.rating,
     genres: detail.genres || subject.genres,
+    platformSlug: detail.platform_slug || subject.platformSlug,
   };
 }

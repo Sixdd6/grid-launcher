@@ -940,3 +940,20 @@ test("the server-emulator fixture lists an Emulators platform whose package zips
     assert.ok(buf.includes(Buffer.from("grid-launcher e2e mock forge stub: pcsx2")));
   });
 });
+
+test("the native fixtures serve a custom-named win platform whose rom carries the slug", async () => {
+  // User bug 2026-10-10: nativeness follows the slug, not the display name.
+  await withFixtureServer(nativeFixturesDir, async ({ url }) => {
+    const platforms = await fetch(`${url}/api/platforms`, { headers: authHeader() }).then((r) =>
+      r.json(),
+    );
+    const custom = platforms.find((p) => p.id === 3);
+    assert.equal(custom.slug, "win");
+    assert.equal(custom.display_name, "PC Fangames & Ports");
+    const detail = await fetch(`${url}/api/roms/704`, { headers: authHeader() }).then((r) =>
+      r.json(),
+    );
+    assert.equal(detail.platform_slug, "win");
+    assert.equal(detail.platform_display_name, "PC Fangames & Ports");
+  });
+});

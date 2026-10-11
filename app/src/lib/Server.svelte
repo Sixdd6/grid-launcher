@@ -515,7 +515,7 @@
                 </button>
               {/if}
             </span>
-            {#if showsEmulatorChip(activePlatformName)}
+            {#if showsEmulatorChip(activePlatformName, activePlatformRow?.slug ?? '')}
               <button data-testid="server-emulator-chip" class="chip link" onclick={onOpenEmulators}>
                 {emulatorChipLabel(defaultEmulator)}
               </button>
@@ -598,7 +598,7 @@
 {#if detailsGame}
   {#key detailsGame.id}
     <Details
-      subject={fromSummary(detailsGame, activePlatformName)}
+      subject={fromSummary(detailsGame, activePlatformName, activePlatformRow?.slug ?? '')}
       initialCloudMode={detailsCloudMode}
       onClose={closeDetails}
       onLibraryPathUnset={() => { showLibraryBanner = true; }}

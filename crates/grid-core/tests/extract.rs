@@ -647,9 +647,9 @@ fn extract_7z_entry_with_setuid_mode_strips_setuid_bit() {
 
 #[test]
 fn should_extract_is_reexported_and_callable() {
-    assert!(should_extract("SNES", Path::new("game.zip")));
-    assert!(!should_extract("Arcade", Path::new("game.zip")));
-    assert!(should_extract("SNES", Path::new("game.rar")));
+    assert!(should_extract("", "SNES", Path::new("game.zip")));
+    assert!(!should_extract("", "Arcade", Path::new("game.zip")));
+    assert!(should_extract("", "SNES", Path::new("game.rar")));
 }
 
 #[test]
@@ -666,7 +666,7 @@ fn should_extract_follows_the_python_table() {
     ];
     for (platform, archive, expected) in cases {
         assert_eq!(
-            should_extract(platform, Path::new(archive)),
+            should_extract("", platform, Path::new(archive)),
             *expected,
             "platform={platform} archive={archive}"
         );

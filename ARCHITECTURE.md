@@ -50,7 +50,8 @@ Modules as declared in `src/lib.rs`:
 - `library` — the install pipeline: download queue, extraction, path rules, launch-file
   selection, the SQLite registry, platform rules, install specials (PS3, extra content),
   update detection, and `relink` (Q4: links installed rows that have no server ROM id
-  to their unique server match). `server_emulator` (Q3) registers a package from the
+  to their unique server match) and `platform_slug_backfill` (fills the registry v8
+  `platform_slug` from ROM details; nativeness reads the slug first). `server_emulator` (Q3) registers a package from the
   server's "Emulators" platform as an emulator entry; `emulator_removal` removes an
   emulator's files and finds the package rows a deleted entry takes with it.
   `user_data_links` links an emulator's own-written directories into
@@ -118,8 +119,8 @@ The shell owns *when* things run; grid-core owns *what* they do.
   the `debug_prints` toggle), `gamepad/` (polling and the navigation events it emits),
   `play_session_service.rs` (play activity: queues a finished session in the registry
   outbox and flushes it on session end and after connect, restore or retry; offline, the
-  queue waits), `relink_service.rs` (after connect, restore or retry: the relink pass, then
-  the image replenish and the update recompute; `installed-changed` tells the frontend),
+  queue waits), `relink_service.rs` (after connect, restore or retry: the relink pass, the
+  platform-slug backfill, then the image replenish and the update recompute; `installed-changed` tells the frontend),
   `library_move_service.rs` (9b: when the library move runs — plan, Downloads row, close
   the `LibraryGate`, wait for launch tickets, re-check what runs, start, run on the
   blocking pool with a throttled row detail; cancel, resume, finish events; the startup

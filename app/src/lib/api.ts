@@ -78,6 +78,8 @@ export type RomDetail = {
   name: string;
   platform_id: number;
   platform_name: string;
+  /** The server platform's slug; nativeness reads it first. '' when the payload has none. */
+  platform_slug: string;
   fs_name: string;
   description: string;
   regions: string;
@@ -406,6 +408,12 @@ export type LaunchDefaults = {
 export type InstalledGame = {
   title: string;
   platform: string;
+  /**
+   * The server platform's slug (registry v8); nativeness reads it first
+   * (`isNativePlatform`). '' for a row the connect-time backfill has not
+   * reached yet — then the platform name decides.
+   */
+  platform_slug: string;
   rom_id: number | null;
   rom_file_name: string;
   archive_path: string;
@@ -781,7 +789,8 @@ export const api = {
   contentAvailability: (romId: number) =>
     invoke<ContentAvailability>('content_availability', { romId }),
   /** Why the Install button cannot install this platform's games, or ''. */
-  installBlockReason: (platform: string) => invoke<string>('install_block_reason', { platform }),
+  installBlockReason: (platform: string, platformSlug: string) =>
+    invoke<string>('install_block_reason', { platform, platformSlug }),
   nativeGameSettings: (romId: number) =>
     invoke<NativeGameSettings>('native_game_settings', { romId }),
   setNativeGameSettings: (

@@ -10,6 +10,7 @@
 
 use std::sync::Arc;
 
+use grid_core::library::platform_slug_backfill::backfill_platform_slugs;
 use grid_core::library::relink::relink_pass;
 use grid_core::library::InstallService;
 use grid_core::session::SessionManager;
@@ -39,9 +40,32 @@ pub async fn relink_now(app: &AppHandle, session: &SessionManager, install: &Ins
     }
 }
 
+/// Runs the registry v8 platform-slug backfill once (user bug 2026-10-10):
+/// rows with a rom id and no stored slug get the slug from their ROM detail,
+/// so nativeness follows the server platform identity. Offline it does
+/// nothing; a failed pass is logged and retried on the next connect.
+pub async fn backfill_slugs_now(
+    app: &AppHandle,
+    session: &SessionManager,
+    install: &InstallService,
+) {
+    let Some(client) = session.client() else {
+        return;
+    };
+    match backfill_platform_slugs(install.registry().as_ref(), &client).await {
+        Ok(filled) if !filled.is_empty() => {
+            let _ = app.emit(INSTALLED_CHANGED_EVENT, filled.len());
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!("platform slug backfill: the pass did not finish: {e}"),
+    }
+}
+
 /// The background jobs a live session starts, in one place for `connect`,
 /// `restore_session` and `retry_connect`: the play-session flush, then — in
-/// order — the relink pass, the image replenish and the update recompute.
+/// order — the relink pass, the platform-slug backfill (after relink, so a
+/// row the pass just linked gets its slug too), the image replenish and the
+/// update recompute.
 /// Returns at once.
 pub fn spawn_connected_jobs(state: &AppState, app: AppHandle) {
     let Ok(install) = state.install.as_ref() else {
@@ -56,6 +80,7 @@ pub fn spawn_connected_jobs(state: &AppState, app: AppHandle) {
     let updates = state.updates.clone();
     tauri::async_runtime::spawn(async move {
         relink_now(&app, &session, &install).await;
+        backfill_slugs_now(&app, &session, &install).await;
         images.spawn_replenish(app.clone(), session.clone(), install.clone());
         updates.spawn_refresh(app, session, install);
     });

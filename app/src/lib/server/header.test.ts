@@ -36,13 +36,13 @@ describe('emulatorChipLabel', () => {
 
 describe('showsEmulatorChip', () => {
   it('is hidden for native launch platforms', () => {
-    expect(showsEmulatorChip('Windows 9x')).toBe(false);
-    expect(showsEmulatorChip('Windows')).toBe(false);
-    expect(showsEmulatorChip('Linux')).toBe(false);
+    expect(showsEmulatorChip('Windows 9x', '')).toBe(false);
+    expect(showsEmulatorChip('Windows', '')).toBe(false);
+    expect(showsEmulatorChip('Linux', '')).toBe(false);
   });
   it('shows for anything else, including empty', () => {
-    expect(showsEmulatorChip('Super Nintendo Entertainment System')).toBe(true);
-    expect(showsEmulatorChip('')).toBe(true);
+    expect(showsEmulatorChip('Super Nintendo Entertainment System', '')).toBe(true);
+    expect(showsEmulatorChip('', '')).toBe(true);
   });
 });
 

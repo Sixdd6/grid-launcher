@@ -4,7 +4,6 @@
 //! `app_update`, or grid-core.
 
 use grid_core::import_python::ImportReport;
-use grid_core::library::platforms::is_native_platform;
 use grid_core::library::update_detection::{game_has_server_update, ServerVersion};
 use serde::Serialize;
 use tauri::{AppHandle, State};
@@ -62,6 +61,7 @@ pub async fn update_game(
     };
     let server = ServerVersion {
         platform: &detail.platform_name,
+        platform_slug: &detail.platform_slug,
         rom_file_name: &detail.fs_name,
         updated_at: &detail.server_updated_at,
     };
@@ -69,7 +69,7 @@ pub async fn update_game(
         updates.spawn_refresh(app, session, install);
         return Err(UPDATE_GONE.to_string());
     }
-    if is_native_platform(&row.platform) {
+    if row.is_native() {
         install
             .install_native_update(client, rom_id)
             .await

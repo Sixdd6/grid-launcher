@@ -13,12 +13,15 @@
     romId,
     title,
     platform,
+    platformSlug,
     onClose,
     onSaved,
   }: {
     romId: number;
     title: string;
     platform: string;
+    /** The server platform slug; decides first which compat tool applies. */
+    platformSlug: string;
     onClose: () => void;
     onSaved: () => void;
   } = $props();
@@ -32,7 +35,7 @@
   // A Linux-platform game runs its own executable, so it has no compat tool
   // and no Wine prefix (user ruling 2026-09-08). The reason is worded once,
   // in `compatToolNotice`.
-  let noCompatReason = $derived(compatToolNotice(platform));
+  let noCompatReason = $derived(compatToolNotice(platformSlug, platform));
 
   let loading = $state(true);
   let loadError = $state<string | null>(null);

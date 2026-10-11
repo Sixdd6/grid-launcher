@@ -248,12 +248,13 @@ pub fn default_emulator_name_for_platform(
 /// the launcher's own error. Recorded in
 /// `docs/porting/03-library-install.md`.
 pub fn install_block_reason(
+    platform_slug: &str,
     platform: &str,
     emulators: &[EmulatorEntry],
     profiles: &[EmulatorProfile],
     cores: CoreResolver<'_>,
 ) -> String {
-    if crate::cloud::scope::is_native_executable_platform(platform)
+    if crate::cloud::scope::is_native_executable_platform(platform_slug, platform)
         || crate::cloud::scope::is_emulators_platform(platform)
     {
         return String::new();
@@ -711,15 +712,27 @@ mod tests {
 
     #[test]
     fn install_block_reason_is_empty_for_native_and_emulators_platforms() {
-        assert_eq!(install_block_reason("Windows", &[], &[], &no_cores), "");
-        assert_eq!(install_block_reason("Emulators", &[], &[], &no_cores), "");
+        assert_eq!(install_block_reason("", "Windows", &[], &[], &no_cores), "");
+        assert_eq!(
+            install_block_reason("", "Emulators", &[], &[], &no_cores),
+            ""
+        );
     }
 
     #[test]
     fn install_block_reason_is_empty_for_a_linux_platform() {
-        assert_eq!(install_block_reason("Linux", &[], &[], &no_cores), "");
+        assert_eq!(install_block_reason("", "Linux", &[], &[], &no_cores), "");
         assert_eq!(
-            install_block_reason(" linux x86_64", &[], &[], &no_cores),
+            install_block_reason("", " linux x86_64", &[], &[], &no_cores),
+            ""
+        );
+    }
+
+    #[test]
+    fn install_block_reason_is_empty_for_a_custom_named_windows_platform() {
+        // User bug 2026-10-10: slug `win`, display name "PC Fangames & Ports".
+        assert_eq!(
+            install_block_reason("win", "PC Fangames & Ports", &[], &[], &no_cores),
             ""
         );
     }
@@ -727,7 +740,7 @@ mod tests {
     #[test]
     fn install_block_reason_names_a_missing_platform_value() {
         assert_eq!(
-            install_block_reason("   ", &[], &[], &no_cores),
+            install_block_reason("", "   ", &[], &[], &no_cores),
             "Selected game has no platform value and cannot be installed."
         );
     }
@@ -735,7 +748,7 @@ mod tests {
     #[test]
     fn install_block_reason_asks_for_an_emulator_when_none_supports_the_platform() {
         assert_eq!(
-            install_block_reason("SNES", &[], &[], &no_cores),
+            install_block_reason("", "SNES", &[], &[], &no_cores),
             "No available emulator is configured for platform 'SNES'. \
              Add/configure one in Emulators before installing this game."
         );
@@ -747,6 +760,9 @@ mod tests {
         // rule 4 ("no profile matched") calls that supported, so the single
         // configured entry covers SNES.
         let emulators = vec![entry("Snes9x", "/x/snes9x")];
-        assert_eq!(install_block_reason("SNES", &emulators, &[], &no_cores), "");
+        assert_eq!(
+            install_block_reason("", "SNES", &emulators, &[], &no_cores),
+            ""
+        );
     }
 }

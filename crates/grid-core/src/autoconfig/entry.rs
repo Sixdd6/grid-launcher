@@ -173,14 +173,34 @@ pub fn auto_configured_emulator_name(base_name: &str, variant: &str) -> String {
 /// The `linux*` half goes beyond the reference: user ruling 2026-09-08
 /// (`library/platforms.rs:10-13`) makes Linux platforms native everywhere,
 /// so no emulator default belongs under them.
+///
+/// This works on NAMES only, so it applies the name half of
+/// [`is_native_platform`] (blank slug). Every list it receives comes from
+/// [`assignable_server_platforms`], which has already dropped the platforms
+/// whose slug is native; the re-check here (and in `target_platforms`) is
+/// the idempotent guard, not the slug decision.
 pub fn assignable_platforms(platforms: &[String]) -> Vec<String> {
     platforms
         .iter()
         .filter(|platform| {
-            !is_native_platform(platform) && platform.trim().to_lowercase() != "emulators"
+            !is_native_platform("", platform) && platform.trim().to_lowercase() != "emulators"
         })
         .cloned()
         .collect()
+}
+
+/// The raw server `name`s of `platforms` that may receive a default
+/// emulator (G11): drops every platform that is native by its slug OR its
+/// name ([`is_native_platform`]; user bug 2026-10-10 — a custom-named
+/// platform with slug `win` is native whatever it is called), then applies
+/// [`assignable_platforms`]. Order and spelling are kept.
+pub fn assignable_server_platforms(platforms: &[crate::romm::Platform]) -> Vec<String> {
+    let names: Vec<String> = platforms
+        .iter()
+        .filter(|p| !is_native_platform(&p.slug, &p.name))
+        .map(|p| p.name.clone())
+        .collect();
+    assignable_platforms(&names)
 }
 
 /// The platforms one profile claims (autoconfig.py:355-379): every
@@ -764,6 +784,33 @@ mod tests {
         assert_eq!(
             assignable_platforms(&platforms),
             strings(&["Nintendo 64", "PlayStation 2"])
+        );
+    }
+
+    #[test]
+    fn assignable_server_platforms_drops_a_platform_native_by_its_slug() {
+        // User bug 2026-10-10: a custom-named platform (here also with a
+        // custom raw name) whose slug is `win` gets no emulator default.
+        let platform = |name: &str, slug: &str| crate::romm::Platform {
+            id: 1,
+            name: name.to_string(),
+            slug: slug.to_string(),
+            rom_count: 0,
+            custom_name: None,
+            display_name: String::new(),
+        };
+        let platforms = vec![
+            platform("Nintendo 64", "n64"),
+            platform("PC Fangames & Ports", "win"),
+            platform("Old PC", "win9x"),
+            platform("Deck Ports", "linux"),
+            platform("Windows", ""),
+            platform("Emulators", "emulators"),
+            platform("DOS", "dos"),
+        ];
+        assert_eq!(
+            assignable_server_platforms(&platforms),
+            strings(&["Nintendo 64", "DOS"])
         );
     }
 
