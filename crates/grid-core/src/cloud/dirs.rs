@@ -12,7 +12,9 @@
 //!    (`_split_configured_paths` / `profiles.py:133`'s
 //!    `split_configured_paths`). Non-empty wins outright — every
 //!    per-emulator override block below is skipped (`if not
-//!    configured_paths and ...` guards every one, cloud_mixin.py:647-919).
+//!    configured_paths and ...` guards every one, cloud_mixin.py:647-919;
+//!    RetroArch and RPCS3 saves are the rewrite's exceptions, see the
+//!    deviations below).
 //! 2. Otherwise the matched autoprofile's `save_directories`/
 //!    `state_directories` list.
 //! 3. Emulator-specific override paths are prepended (RetroArch prepends
@@ -76,10 +78,20 @@
 //! - The RetroArch block (cfg override + `saves`/`savefiles` /
 //!   `states`/`savestates` + portable-home fallbacks) runs even when the
 //!   entry HAS configured paths, unlike Python's `if not configured_paths`
-//!   gate and unlike every other family here, which keeps that gate. The
+//!   gate and unlike every other family here but RPCS3 saves (next item),
+//!   which keeps that gate. The
 //!   RetroArch autoprofile fills `save_paths`/`state_paths` on every entry
 //!   the app adds, so Python's gate made the override unreachable in
 //!   practice; RetroArch's own config is the truth about where it writes.
+//! - The RPCS3 save override (the `vfs.yml`-derived
+//!   `<dev_hdd0>/home/<user>/savedata` directories) also runs even when the
+//!   entry HAS configured paths, prepended ahead of them. The RPCS3
+//!   autoprofile fills `save_paths` with `portable/dev_hdd0/...` and
+//!   `dev_hdd0/...` on every entry the app adds, but GRID's own `vfs.yml`
+//!   points `/dev_hdd0/` into the library, so the configured paths never
+//!   exist and Python's gate left the entry with no save directory at all.
+//!   RPCS3's `vfs.yml` is the truth about where its savedata lives. States
+//!   are unchanged (RPCS3 has no state override).
 //! - [`resolved_sync_directory_paths`] takes `profile: Option<&EmulatorProfile>`
 //!   (the entry's ALREADY-MATCHED autoprofile), not the full profiles list
 //!   `emulator_matches_tokens`/`is_retroarch`/etc. want. Every per-emulator
@@ -481,9 +493,17 @@ pub fn resolved_sync_directory_paths(
         all_paths = merge_dedup(all_paths, fallback);
     }
 
-    if configured_paths.is_empty() {
-        let args_vec = template::split_template(&entry.args).unwrap_or_default();
+    let args_vec = template::split_template(&entry.args).unwrap_or_default();
 
+    // RPCS3's vfs.yml is the truth about where its savedata lives, so it is
+    // consulted even when the entry has configured paths — rewrite
+    // deviation, see this module's doc comment.
+    if key_is_save && autoconfig::is_rpcs3(entry, matched_profiles) {
+        let overrides = readers::rpcs3_save_path_overrides(&entry.path, &args_vec);
+        all_paths = apply_override(all_paths, overrides);
+    }
+
+    if configured_paths.is_empty() {
         if autoconfig::is_azahar(entry, matched_profiles) {
             let overrides = if key_is_save {
                 readers::azahar_save_path_overrides(&entry.path, &args_vec)
@@ -508,11 +528,6 @@ pub fn resolved_sync_directory_paths(
             } else {
                 readers::pcsx2_state_path_overrides(&entry.path, &args_vec)
             };
-            all_paths = apply_override(all_paths, overrides);
-        }
-
-        if key_is_save && autoconfig::is_rpcs3(entry, matched_profiles) {
-            let overrides = readers::rpcs3_save_path_overrides(&entry.path, &args_vec);
             all_paths = apply_override(all_paths, overrides);
         }
 
@@ -660,12 +675,14 @@ mod tests {
             ("XDG_CONFIG_HOME", None),
             ("XDG_DATA_HOME", None),
             ("USERPROFILE", None),
+            ("RPCS3_CONFIG_DIR", None),
         ])
     }
 
     /// Configured entry paths win outright for every NON-RetroArch family:
-    /// no reader is consulted at all. (RetroArch is the one exception — see
-    /// `retroarch_cfg_override_applies_even_with_configured_paths`.)
+    /// no reader is consulted at all. (RetroArch and RPCS3 saves are the
+    /// exceptions — see `retroarch_cfg_override_applies_even_with_configured_paths`
+    /// and `rpcs3_vfs_savedata_applies_even_with_configured_paths`.)
     #[test]
     fn entry_paths_win_and_skip_all_probing() {
         let _lock = crate::test_env::lock();
@@ -1311,6 +1328,77 @@ mod tests {
 
         let (resolved, _) = resolved_sync_directory_paths(&e, None, PathKey::StatePaths, &c);
         assert_eq!(resolved, vec![paths::resolve_best_effort(&states)]);
+    }
+
+    /// A portable RPCS3 install whose `portable/config/vfs.yml` maps
+    /// `/dev_hdd0/` outside the install, the way GRID's own writer does, plus
+    /// an entry carrying the autoprofile's `save_paths`. Returns
+    /// `(entry, emulator dir, vfs savedata dir)`.
+    fn rpcs3_with_vfs(root: &Path) -> (EmulatorEntry, PathBuf, PathBuf) {
+        let emulator_dir = root.join("RPCS3");
+        std::fs::create_dir_all(emulator_dir.join("portable").join("config")).unwrap();
+        let exe = emulator_dir.join("rpcs3.exe");
+        std::fs::write(&exe, b"").unwrap();
+
+        let dev_hdd0 = root.join("library").join(".vfs").join("dev_hdd0");
+        let savedata = dev_hdd0.join("home").join("00000001").join("savedata");
+        std::fs::create_dir_all(&savedata).unwrap();
+        std::fs::write(
+            emulator_dir.join("portable").join("config").join("vfs.yml"),
+            format!(
+                "\"/dev_hdd0/\": \"{}/\"\n",
+                dev_hdd0.to_string_lossy().replace('\\', "/")
+            ),
+        )
+        .unwrap();
+
+        let mut e = entry("RPCS3", &exe.to_string_lossy());
+        e.save_paths = "portable/dev_hdd0/home/00000001/savedata;\ndev_hdd0/home/00000001/savedata"
+            .to_string();
+        (e, emulator_dir, savedata)
+    }
+
+    /// GRID-installed RPCS3 entries carry the autoprofile's `save_paths`, but
+    /// GRID's `vfs.yml` moves `dev_hdd0` into the library, so those paths
+    /// never exist. The `vfs.yml` savedata must still be found.
+    #[test]
+    fn rpcs3_vfs_savedata_applies_even_with_configured_paths() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+
+        let (e, emulator_dir, savedata) = rpcs3_with_vfs(temp.path());
+        let c = ctx(Some(&emulator_dir), temp.path());
+
+        let (resolved, _) = resolved_sync_directory_paths(&e, None, PathKey::SavePaths, &c);
+        assert_eq!(resolved, vec![paths::resolve_best_effort(&savedata)]);
+    }
+
+    /// A configured path that exists is still kept, after the `vfs.yml` one.
+    #[test]
+    fn rpcs3_existing_configured_path_follows_the_vfs_savedata() {
+        let _lock = crate::test_env::lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _guard = isolated_env(temp.path());
+
+        let (e, emulator_dir, savedata) = rpcs3_with_vfs(temp.path());
+        let configured = emulator_dir
+            .join("portable")
+            .join("dev_hdd0")
+            .join("home")
+            .join("00000001")
+            .join("savedata");
+        std::fs::create_dir_all(&configured).unwrap();
+        let c = ctx(Some(&emulator_dir), temp.path());
+
+        let (resolved, _) = resolved_sync_directory_paths(&e, None, PathKey::SavePaths, &c);
+        assert_eq!(
+            resolved,
+            vec![
+                paths::resolve_best_effort(&savedata),
+                paths::resolve_best_effort(&configured),
+            ]
+        );
     }
 
     /// Layout v1 points an emulator's user-data directory at `saves/` with a
