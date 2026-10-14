@@ -23,14 +23,14 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
-use crate::config::Config;
+use crate::config::{Config, EmulatorEntry};
 use crate::library::extract::which_on_path;
 use crate::library::paths::expand_home;
 use crate::library::registry::{installed_match, InstalledGame, Registry};
 use crate::library::relocate::LibraryGate;
 
 use native::build_native_command;
-use profiles::load_profiles;
+use profiles::{load_profiles, EmulatorProfile};
 use rom::resolve_rom_path;
 use selection::{
     default_emulator_name_for_platform, emulator_entry_by_name, entry_is_retroarch,
@@ -76,8 +76,8 @@ type Listener = Arc<dyn Fn(SessionsSnapshot) + Send + Sync>;
 /// Fired once per reaped session, after that reap's snapshot emit(s), with
 /// no lock held — see [`LaunchService::add_session_finished_hook`].
 type SessionFinishedHook = Arc<dyn Fn(GameSession) + Send + Sync>;
-/// Fired with the emulator's name and path just before a RetroArch game is
-/// spawned — see [`LaunchService::set_pre_launch_hook`].
+/// Fired with the emulator's name and path just before a RetroArch or RPCS3
+/// game is spawned — see [`LaunchService::set_pre_launch_hook`].
 pub type PreLaunchHook = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
 /// Owns the running-game sessions: resolves a launch, spawns the emulator,
@@ -200,11 +200,12 @@ impl LaunchService {
         }
     }
 
-    /// Installs the RetroArch settings sync. Called once by the app layer;
+    /// Installs the pre-launch settings sync. Called once by the app layer;
     /// a second call replaces the first. Fired with the resolved emulator's
     /// name and path, and awaited, immediately before an EMULATED launch of
-    /// a RetroArch entry spawns — never for a native launch or for any
-    /// other emulator (doc 05 call-site table).
+    /// a RetroArch or RPCS3 entry spawns ([`needs_pre_launch_sync`]) — never
+    /// for a native launch or for any other emulator (doc 05 call-site
+    /// table).
     ///
     /// The hook cannot fail a launch: it returns `()` and logs its own
     /// errors, and even a panic inside it is contained (see
@@ -252,7 +253,7 @@ impl LaunchService {
     /// `windows*`/`linux*` platform row, or emulator selection, placeholder build,
     /// and the validation chain in [`prepare_emulator_launch`] for
     /// everything else; either way the result is spawned the same way. A
-    /// RetroArch entry also gets the pre-launch settings sync
+    /// RetroArch or RPCS3 entry also gets the pre-launch settings sync
     /// ([`Self::set_pre_launch_hook`]) between resolution and the spawn.
     pub async fn launch(self: &Arc<Self>, rom_id: i64) -> Result<GameSession, LaunchError> {
         let gate = self.library_gate.read().unwrap().clone();
@@ -296,11 +297,11 @@ impl LaunchService {
             (emulator_name, native.argv, native.cwd, native.env, None)
         } else {
             let plan = resolve_launch(&game, &config)?;
-            // `Some` only for a RetroArch entry: the settings sync's one
-            // call site, matching Python's pre-launch
+            // `Some` only for a RetroArch or RPCS3 entry: the settings sync's
+            // one call site, matching Python's pre-launch
             // `_ensure_emulator_sync_settings` (details_view_mixin.py:1457).
             let sync = plan
-                .is_retroarch
+                .needs_pre_launch_sync
                 .then(|| (plan.emulator_name.clone(), plan.emulator_path));
             (
                 plan.emulator_name,
@@ -312,7 +313,8 @@ impl LaunchService {
         };
 
         // Before the spawn, so a changed RetroAchievements credential or
-        // RomM username reaches retroarch.cfg for THIS run.
+        // RomM username reaches retroarch.cfg, and RPCS3's VFS folders
+        // exist, for THIS run.
         if let Some((name, path)) = pre_launch_sync {
             self.run_pre_launch_hook(name, path).await;
         }
@@ -534,12 +536,20 @@ struct LaunchPlan {
     /// The resolved entry's stored path, for the pre-launch hook. Blank
     /// when no entry matched the name (validation rejects that first).
     emulator_path: String,
-    /// Whether the resolved entry is a RetroArch build — the pre-launch
-    /// settings sync's gate, decided here because this is where the entry
-    /// and the profile list are already in hand.
-    is_retroarch: bool,
+    /// Whether the resolved entry gets the pre-launch settings sync
+    /// ([`needs_pre_launch_sync`]), decided here because this is where the
+    /// entry and the profile list are already in hand.
+    needs_pre_launch_sync: bool,
     argv: Vec<String>,
     working_dir: PathBuf,
+}
+
+/// The pre-launch settings sync's gate: a RetroArch entry (its
+/// `retroarch.cfg` credentials) or an RPCS3 entry (its VFS folders). The
+/// app layer's hook runs `autoconfig::sync_launch_settings`, which does the
+/// matching writer for each.
+fn needs_pre_launch_sync(entry: &EmulatorEntry, profiles: &[EmulatorProfile]) -> bool {
+    entry_is_retroarch(entry, profiles) || crate::autoconfig::is_rpcs3(entry, profiles)
 }
 
 /// Picks the emulator, builds the placeholders, and runs the validation
@@ -607,7 +617,7 @@ fn resolve_launch(game: &InstalledGame, config: &Config) -> Result<LaunchPlan, L
     Ok(LaunchPlan {
         emulator_name,
         emulator_path: entry.map(|e| e.path.trim().to_string()).unwrap_or_default(),
-        is_retroarch,
+        needs_pre_launch_sync: entry.is_some_and(|e| needs_pre_launch_sync(e, profiles)),
         argv,
         working_dir,
     })
@@ -664,7 +674,6 @@ fn fill_platform_slug(mut row: InstalledGame, lookup: impl Fn(&str) -> String) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::EmulatorEntry;
 
     #[test]
     fn a_row_with_no_slug_borrows_the_recorded_one_and_becomes_native() {
@@ -769,6 +778,28 @@ mod tests {
             ..Default::default()
         };
         assert!(!entry_is_retroarch(&unrelated, profiles));
+    }
+
+    #[test]
+    fn the_pre_launch_sync_runs_for_retroarch_and_rpcs3_only() {
+        let profiles = load_profiles();
+        let named = |name: &str, path: &str| EmulatorEntry {
+            name: name.to_string(),
+            path: path.to_string(),
+            ..Default::default()
+        };
+        assert!(needs_pre_launch_sync(
+            &named("RetroArch", "/x/retroarch"),
+            profiles
+        ));
+        assert!(needs_pre_launch_sync(
+            &named("RPCS3", "/x/rpcs3.exe"),
+            profiles
+        ));
+        assert!(!needs_pre_launch_sync(
+            &named("Dolphin", "/x/dolphin-emu"),
+            profiles
+        ));
     }
 
     // --- Windows script launch (game.json launch metadata, 2026-10-10) ------

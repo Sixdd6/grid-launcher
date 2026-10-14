@@ -188,6 +188,13 @@ pub fn ensure_settings(emulator_path: &str, ps3_library_path: &str) -> EnsureRes
 /// never touched; missing ones are appended via [`vfs_add_only`] as
 /// `"{key}": "{value}"`, both sides always double-quoted. The write is
 /// skipped entirely when nothing changed.
+///
+/// RPCS3 refuses a VFS root that does not exist, so after the merge the
+/// `.vfs/dev_hdd0/` and `.vfs/games/` directories are created — on every
+/// run, also when the write was skipped — but only for a key whose value
+/// in the merged file is our derived path; a user's custom path gets no
+/// directory. A directory-creation failure is logged and does not change
+/// the result.
 pub fn ensure_vfs_settings(emulator_path: &str, ps3_library_path: &str) -> EnsureResult {
     let trimmed_path = emulator_path.trim();
     let trimmed_library = ps3_library_path.trim();
@@ -211,14 +218,19 @@ pub fn ensure_vfs_settings(emulator_path: &str, ps3_library_path: &str) -> Ensur
 
     let library_expanded = paths::expand_user(trimmed_library);
     let library_path = resolve_best_effort(&library_expanded);
-    let dev_hdd0_str =
-        forward_slash_with_trailing_slash(&library_path.join(".vfs").join("dev_hdd0"));
-    let games_str = forward_slash_with_trailing_slash(&library_path.join(".vfs").join("games"));
+    let dev_hdd0_dir = library_path.join(".vfs").join("dev_hdd0");
+    let games_dir = library_path.join(".vfs").join("games");
 
     let desired: Vec<(String, String)> = vec![
         ("$(EmulatorDir)".to_string(), String::new()),
-        ("/dev_hdd0/".to_string(), dev_hdd0_str),
-        ("/games/".to_string(), games_str),
+        (
+            "/dev_hdd0/".to_string(),
+            forward_slash_with_trailing_slash(&dev_hdd0_dir),
+        ),
+        (
+            "/games/".to_string(),
+            forward_slash_with_trailing_slash(&games_dir),
+        ),
     ];
 
     let Ok(existing_content) = read_existing(&vfs_path) else {
@@ -230,7 +242,41 @@ pub fn ensure_vfs_settings(emulator_path: &str, ps3_library_path: &str) -> Ensur
         return EnsureResult::unchanged();
     }
 
+    for (key, dir) in [("/dev_hdd0/", &dev_hdd0_dir), ("/games/", &games_dir)] {
+        if vfs_value(&output, key) != Some(forward_slash_with_trailing_slash(dir)) {
+            continue;
+        }
+        if let Err(err) = std::fs::create_dir_all(dir) {
+            tracing::warn!(path = %dir.display(), error = %err, "rpcs3: VFS folder not created");
+        }
+    }
+
     EnsureResult::at(vfs_path, changed)
+}
+
+/// One vfs.yml line as `(key, value)`, both trimmed then unquoted `"` then
+/// `'` (rpcs3.py:429-458's key rule, applied to the value too). `None` for
+/// a blank line, a `#` comment, or a line with no `:`. The split is at the
+/// FIRST `:`, so a Windows drive letter stays in the value.
+fn vfs_line_entry(line: &str) -> Option<(&str, &str)> {
+    let stripped = line.trim();
+    if stripped.is_empty() || stripped.starts_with('#') {
+        return None;
+    }
+    let (raw_key, raw_value) = stripped.split_once(':')?;
+    Some((
+        raw_key.trim().trim_matches('"').trim_matches('\''),
+        raw_value.trim().trim_matches('"').trim_matches('\''),
+    ))
+}
+
+/// The value of `key`'s first line in vfs.yml `content`, if any.
+fn vfs_value(content: &str, key: &str) -> Option<String> {
+    content
+        .lines()
+        .filter_map(vfs_line_entry)
+        .find(|(line_key, _)| *line_key == key)
+        .map(|(_, value)| value.to_string())
 }
 
 /// The add-only vfs.yml comparison/append rule (rpcs3.py:429-458): for
@@ -246,23 +292,12 @@ pub fn ensure_vfs_settings(emulator_path: &str, ps3_library_path: &str) -> Ensur
 fn vfs_add_only(existing_content: &str, desired: &[(String, String)]) -> (String, bool) {
     let mut lines: Vec<String> = existing_content.lines().map(str::to_string).collect();
 
-    let mut existing_keys: HashSet<String> = HashSet::new();
-    for line in &lines {
-        let stripped = line.trim();
-        if stripped.is_empty() || stripped.starts_with('#') {
-            continue;
-        }
-        let Some(colon_index) = stripped.find(':') else {
-            continue;
-        };
-        let key = stripped[..colon_index]
-            .trim()
-            .trim_matches('"')
-            .trim_matches('\'');
-        if !key.is_empty() {
-            existing_keys.insert(key.to_string());
-        }
-    }
+    let existing_keys: HashSet<String> = lines
+        .iter()
+        .filter_map(|line| vfs_line_entry(line))
+        .map(|(key, _)| key.to_string())
+        .filter(|key| !key.is_empty())
+        .collect();
 
     let mut changed = false;
     for (key, value) in desired {
@@ -670,6 +705,52 @@ mod tests {
         let text = std::fs::read_to_string(config_dir.join("vfs.yml")).unwrap();
         assert!(text.contains("\"/dev_hdd0/\": \"/somewhere/else/\""));
         assert!(text.contains("\"/games/\":"));
+    }
+
+    #[test]
+    fn vfs_creates_the_mapped_dev_hdd0_and_games_directories() {
+        let temp = tempfile::tempdir().unwrap();
+        let exe = make_exe(temp.path());
+        let library = temp.path().join("PS3 Library");
+
+        let result = ensure_vfs_settings(exe.to_str().unwrap(), library.to_str().unwrap());
+        assert!(result.changed);
+        assert!(library.join(".vfs").join("dev_hdd0").is_dir());
+        assert!(library.join(".vfs").join("games").is_dir());
+    }
+
+    /// An install whose vfs.yml was written before the directories were
+    /// created heals on the next run, even though the write is skipped.
+    #[test]
+    fn vfs_creates_the_directories_when_the_entries_already_exist() {
+        let temp = tempfile::tempdir().unwrap();
+        let exe = make_exe(temp.path());
+        let library = temp.path().join("PS3 Library");
+        ensure_vfs_settings(exe.to_str().unwrap(), library.to_str().unwrap());
+        std::fs::remove_dir_all(library.join(".vfs")).unwrap();
+
+        let result = ensure_vfs_settings(exe.to_str().unwrap(), library.to_str().unwrap());
+        assert!(!result.changed);
+        assert!(library.join(".vfs").join("dev_hdd0").is_dir());
+        assert!(library.join(".vfs").join("games").is_dir());
+    }
+
+    #[test]
+    fn vfs_creates_no_directory_for_a_key_that_points_elsewhere() {
+        let temp = tempfile::tempdir().unwrap();
+        let exe = make_exe(temp.path());
+        let library = temp.path().join("PS3 Library");
+        let config_dir = temp.path().join("portable").join("config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::fs::write(
+            config_dir.join("vfs.yml"),
+            "\"$(EmulatorDir)\": \"\"\n\"/dev_hdd0/\": \"/somewhere/else/\"\n",
+        )
+        .unwrap();
+
+        ensure_vfs_settings(exe.to_str().unwrap(), library.to_str().unwrap());
+        assert!(!library.join(".vfs").join("dev_hdd0").exists());
+        assert!(library.join(".vfs").join("games").is_dir());
     }
 
     #[test]

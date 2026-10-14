@@ -997,8 +997,8 @@ impl SyncInputs {
 
 /// One autoconfig pass over ONE entry: `autoconfig::sync_new_emulator` for
 /// an add (entry defaults, backfill, every writer, one config save), or
-/// `autoconfig::sync_retroarch_settings_only` for a launch (the RetroArch
-/// writer alone, no entry mutation, no config save). Both have this exact
+/// `autoconfig::sync_launch_settings` for a launch (the RetroArch writer or
+/// RPCS3's VFS writer alone, no entry mutation, no config save). Both have this exact
 /// signature, so the caller names which pass it wants.
 type SyncPass = fn(&str, &autoconfig::SyncContext) -> Result<autoconfig::SyncReport, ConfigError>;
 
@@ -1044,7 +1044,7 @@ pub fn run_emulator_sync(
 /// The two LAUNCH-time call sites' sync (doc 05 call-site table): the
 /// pre-launch hook `lib.rs` installs on `LaunchService`, and
 /// [`launch_emulator`]. Writers only — a launch must never rewrite the
-/// entry or config.toml (see `autoconfig::sync_retroarch_settings_only`).
+/// entry or config.toml (see `autoconfig::sync_launch_settings`).
 /// Loads the library path itself, because neither call site has one in
 /// hand. Blocking; logs everything and returns nothing, so a failing sync
 /// can never stop a launch.
@@ -1061,7 +1061,7 @@ pub fn sync_emulator_settings(entry_name: &str, install: Option<&Arc<InstallServ
         &library_path,
         SyncInputs::from_install(install),
         false,
-        autoconfig::sync_retroarch_settings_only,
+        autoconfig::sync_launch_settings,
     );
 }
 

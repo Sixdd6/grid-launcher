@@ -451,9 +451,9 @@ pub fn run() {
                 launch.set_notify(Arc::new(move |snapshot| {
                     let _ = handle.emit("sessions-changed", snapshot);
                 }));
-                // RetroArch settings sync before every emulated launch
-                // (doc 05 call-site table). `LaunchService` fires it only
-                // for a RetroArch entry, on its blocking pool, and it logs
+                // Settings sync before every emulated launch (doc 05
+                // call-site table). `LaunchService` fires it only for a
+                // RetroArch or RPCS3 entry, on its blocking pool, and it logs
                 // its own failures — a bad sync never fails a launch.
                 let install_for_sync = state.install.as_ref().ok().cloned();
                 launch.set_pre_launch_hook(Arc::new(move |name: &str, _path: &str| {

@@ -793,11 +793,15 @@ fn counterpart_path(
         .map(|entry| entry.path.trim().to_string())
 }
 
-/// The LAUNCH-time entry point (doc 05 call-site table): the RetroArch
-/// settings writer ALONE for `entry_name`, run before every game and
-/// standalone launch of a RetroArch entry so a RetroAchievements credential
-/// or RomM username changed since the entry was added reaches
-/// `retroarch.cfg`.
+/// The LAUNCH-time entry point (doc 05 call-site table), run before a game
+/// launch of a RetroArch or RPCS3 entry and a standalone launch of a
+/// RetroArch entry:
+/// - RetroArch: the RetroArch settings writer ALONE, so a
+///   RetroAchievements credential or RomM username changed since the entry
+///   was added reaches `retroarch.cfg`.
+/// - RPCS3: [`rpcs3::ensure_vfs_settings`] ALONE, when `ps3_library_path`
+///   is set, so the VFS folders RPCS3 refuses to run without exist (an
+///   install from before that writer created them heals here).
 ///
 /// Deliberately NOT [`sync_new_emulator`]: this pass never applies profile
 /// defaults to the entry, never runs [`entry::backfill_missing_defaults`],
@@ -806,9 +810,9 @@ fn counterpart_path(
 /// `_ensure_emulator_sync_settings` runs writers only, and it keeps a
 /// launch from reverting a user's entry edits or racing a settings save.
 ///
-/// A missing entry, a blank path, or a non-RetroArch entry all return an
+/// A missing entry, a blank path, or any other emulator all return an
 /// empty report. The only `Err` is a config load failure.
-pub fn sync_retroarch_settings_only(
+pub fn sync_launch_settings(
     entry_name: &str,
     ctx: &SyncContext,
 ) -> Result<SyncReport, ConfigError> {
@@ -834,21 +838,27 @@ pub fn sync_retroarch_settings_only(
         path: path_text.to_string(),
         ..Default::default()
     };
-    if !is_retroarch(&subject, ctx.profiles) {
-        return Ok(report);
+    if is_retroarch(&subject, ctx.profiles) {
+        record(
+            &mut report,
+            &subject.name,
+            "retroarch",
+            retroarch::ensure_settings(
+                path_text,
+                true,
+                config.username.trim(),
+                ctx.ra.as_ref().and_then(RaCredentials::usable),
+            ),
+        );
     }
-
-    record(
-        &mut report,
-        &subject.name,
-        "retroarch",
-        retroarch::ensure_settings(
-            path_text,
-            true,
-            config.username.trim(),
-            ctx.ra.as_ref().and_then(RaCredentials::usable),
-        ),
-    );
+    if is_rpcs3(&subject, ctx.profiles) && !ctx.ps3_library_path.trim().is_empty() {
+        record(
+            &mut report,
+            &subject.name,
+            "rpcs3 vfs",
+            rpcs3::ensure_vfs_settings(path_text, &ctx.ps3_library_path),
+        );
+    }
     Ok(report)
 }
 
@@ -1014,7 +1024,7 @@ mod tests {
             profiles: crate::launch::profiles::load_profiles(),
             fresh_install: false,
         };
-        let report = sync_retroarch_settings_only("RetroArch", &ctx).unwrap();
+        let report = sync_launch_settings("RetroArch", &ctx).unwrap();
         assert!(report.warnings.is_empty(), "{:?}", report.warnings);
 
         assert!(
@@ -1029,6 +1039,39 @@ mod tests {
         let reloaded = Config::load(&config_path).unwrap();
         assert_eq!(reloaded.emulators[0].args, "%rom%");
         assert_eq!(reloaded.emulators[0].save_strategy, "auto");
+    }
+
+    /// An RPCS3 launch creates the VFS folders vfs.yml maps (RPCS3 refuses a
+    /// missing VFS root) and leaves config.toml alone.
+    #[test]
+    fn the_launch_time_sync_creates_the_rpcs3_vfs_folders() {
+        let _lock = lock();
+        let temp = tempfile::tempdir().unwrap();
+        let _env = isolated(temp.path());
+
+        let exe = temp.path().join("RPCS3").join("rpcs3.exe");
+        touch(&exe);
+        let config = config_with(temp.path(), vec![entry("RPCS3", exe.to_str().unwrap())]);
+        let config_path = write_config(temp.path(), &config);
+        let before = std::fs::read_to_string(&config_path).unwrap();
+        let ps3 = ps3_library_path(&config.library_path);
+
+        let ctx = SyncContext {
+            config_path: &config_path,
+            platforms: &[],
+            platform_slugs: &no_slugs(),
+            ps3_library_path: ps3.clone(),
+            ra: None,
+            profiles: crate::launch::profiles::load_profiles(),
+            fresh_install: false,
+        };
+        let report = sync_launch_settings("RPCS3", &ctx).unwrap();
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+
+        let vfs_root = PathBuf::from(&ps3).join(".vfs");
+        assert!(vfs_root.join("dev_hdd0").is_dir());
+        assert!(vfs_root.join("games").is_dir());
+        assert_eq!(std::fs::read_to_string(&config_path).unwrap(), before);
     }
 
     /// The same entry through `sync_new_emulator` DOES get the profile's
