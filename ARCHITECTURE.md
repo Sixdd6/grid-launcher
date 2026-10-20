@@ -164,6 +164,13 @@ session exists and `Shell.svelte` afterwards.
   `lib/library/`, `lib/server/`, `lib/cards/`, `lib/focus/`. Each pairs a `.svelte`
   component with a pure `.ts` module holding the logic, and a `.test.ts` beside it. Put
   new logic in the pure module: that is what vitest can reach.
+- Card grids — both card grids (Server, and Library for every rail section) are
+  `CardGrid.svelte` around `GameCard.svelte`. The grid is windowed: it renders only the
+  rows near its scroll container's visible part, and its padding carries the height of
+  the rest. `lib/cards/window.ts` owns that arithmetic (row metrics, the rendered range,
+  the scroll target for an unrendered card). `lib/imageLoad.ts` bounds the cover loads
+  and remembers each url's file, so a card that mounts again shows its cover at once;
+  `lib/visibleWarm.ts` warms background art by each card's `data-index`.
 - `lib/icons.ts` — hand-authored 24×24 icon paths. The old app's `assets/svg/` files are
   deliberately not reused.
 
