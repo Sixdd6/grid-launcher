@@ -131,6 +131,19 @@ async fn install_compat_tool_resolves_the_tag_and_retries_through_the_compat_pat
     let service =
         InstallService::with_profiles(registry, config_path.clone(), vec![ge_proton, cachyos]);
 
+    // Both profiles are Proton tools, so each install also queues the
+    // managed umu-launcher (no `umu-run` is available here). Its release
+    // route is left unmounted on the mock server: that row fails with a
+    // 404, never reaches the real GitHub, and never fails a Proton row
+    // (`umu_launcher_install.rs` covers the umu-launcher side).
+    service.set_umu_source(json!({
+        "provider": "gitea",
+        "owner": "Open-Wine-Components",
+        "repo": "umu-launcher",
+        "base_url": server.uri(),
+        "release_tag": "latest",
+    }));
+
     let hook_calls = Arc::new(AtomicUsize::new(0));
     let counted = hook_calls.clone();
     service.set_compat_tools_hook(Arc::new(move || {
@@ -175,8 +188,9 @@ async fn install_compat_tool_resolves_the_tag_and_retries_through_the_compat_pat
     let ge_id = service
         .snapshot()
         .entries
-        .first()
-        .expect("at least one entry")
+        .iter()
+        .find(|e| e.source_id == "GloriousEggroll/proton-ge-custom")
+        .expect("the GE-Proton entry exists")
         .id;
     let ge_entry = wait_terminal(&service, ge_id).await;
 

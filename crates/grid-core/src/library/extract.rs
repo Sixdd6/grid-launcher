@@ -688,8 +688,15 @@ pub(crate) fn bundled_7z_windows_path() -> Option<PathBuf> {
 /// (`cloud_transfer.py:150-165`) without duplicating this lookup.
 pub(crate) fn which_on_path(name: &str) -> Option<PathBuf> {
     let path_var = std::env::var_os("PATH")?;
+    which_in(&path_var, name)
+}
+
+/// [`which_on_path`] over an explicit `PATH` value rather than this
+/// process's own — e.g. the cleaned environment a launched child gets
+/// (`launch::spawn::clean_env`), which can differ inside an AppImage.
+pub(crate) fn which_in(path_var: &std::ffi::OsStr, name: &str) -> Option<PathBuf> {
     let file_names = executable_file_names(name);
-    std::env::split_paths(&path_var).find_map(|dir| {
+    std::env::split_paths(path_var).find_map(|dir| {
         file_names
             .iter()
             .map(|file_name| dir.join(file_name))
@@ -1041,6 +1048,24 @@ mod tests {
     }
 
     // --- which_on_path ----------------------------------------------------------
+
+    /// Unix only: on Windows the PATHEXT spelling of the returned name
+    /// differs from the file's own case.
+    #[cfg(not(windows))]
+    #[test]
+    fn which_in_searches_the_given_path_in_order() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let name = "tool";
+        fs::write(second.path().join(name), b"#!/bin/sh\n").unwrap();
+        let path_var = std::env::join_paths([first.path(), second.path()]).unwrap();
+
+        assert_eq!(which_in(&path_var, "tool"), Some(second.path().join(name)));
+        assert_eq!(which_in(&path_var, "missing-tool"), None);
+
+        fs::write(first.path().join(name), b"#!/bin/sh\n").unwrap();
+        assert_eq!(which_in(&path_var, "tool"), Some(first.path().join(name)));
+    }
 
     /// PATHEXT exists only on Windows: a bare `7z` must resolve to `7z.exe`
     /// the way the Windows shell resolves it.

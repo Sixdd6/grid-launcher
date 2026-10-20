@@ -26,6 +26,36 @@ pub struct NativeLaunch {
     pub tool_label: String,
 }
 
+/// Why [`build_native_command`] could not build a launch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NativeCommandError {
+    /// A validation failure, worded for the user.
+    Message(String),
+    /// The row runs through Proton and no `umu-run` was found. Its own
+    /// variant so the frontend can offer to install umu-launcher.
+    UmuMissing,
+}
+
+/// The [`NativeCommandError::UmuMissing`] text the user reads.
+pub const UMU_MISSING_MESSAGE: &str = "umu-run is not installed. Proton games run through \
+     umu-launcher: install it from Emulators › Compat tools, or install your distribution's \
+     umu-launcher package.";
+
+impl std::fmt::Display for NativeCommandError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NativeCommandError::Message(message) => f.write_str(message),
+            NativeCommandError::UmuMissing => f.write_str(UMU_MISSING_MESSAGE),
+        }
+    }
+}
+
+impl From<String> for NativeCommandError {
+    fn from(message: String) -> Self {
+        NativeCommandError::Message(message)
+    }
+}
+
 /// Resolves and builds a native launch for `row` (`prepare_native_launch_command`,
 /// launch.py:223-272):
 ///
@@ -46,7 +76,8 @@ pub struct NativeLaunch {
 ///    with no wrapper, no `WINEPREFIX`, and a blank `tool_label`.
 /// 4. `"wine"` prepends `which("wine")` (falling back to the literal
 ///    `"wine"` when not found); any other non-blank value requires
-///    `which("umu-run")` (missing -> the verbatim umu-run message) and sets
+///    `which("umu-run")` (missing -> [`NativeCommandError::UmuMissing`];
+///    the caller's `which` answers it with [`super::umu::locate`]) and sets
 ///    `PROTONPATH` to the tool value verbatim. Both of those branches also
 ///    set `WINEPREFIX` (creating the directory) when `row.native_wineprefix`
 ///    is non-blank. A blank tool runs the executable directly, with no
@@ -67,7 +98,7 @@ pub fn build_native_command(
     default_compat_tool: &str,
     host: &str,
     which: &dyn Fn(&str) -> Option<PathBuf>,
-) -> Result<NativeLaunch, String> {
+) -> Result<NativeLaunch, NativeCommandError> {
     let name = archive_name(&row.rom_file_name, &row.title, &row.platform);
     let archives = candidate_archives(
         library,
@@ -82,10 +113,10 @@ pub fn build_native_command(
         .map(|dir| executable_candidates(dir, &row.title))
         .and_then(|candidates| resolved_executable(row, &candidates));
     let Some(executable) = executable else {
-        return Err(
+        return Err(NativeCommandError::Message(
             "No launchable native executable is configured for this game. Use Game Settings to select one."
                 .to_string(),
-        );
+        ));
     };
 
     let args = split_template(row.native_launch_parameters.trim())
@@ -138,11 +169,8 @@ pub fn build_native_command(
         tool_label = "wine".to_string();
         set_wineprefix(row, &mut env)?;
     } else if !tool.is_empty() {
-        let Some(umu) = which("umu-run") else {
-            return Err(
-                "umu-run is not installed. Install the umu-launcher package to use Proton compatibility tools."
-                    .to_string(),
-            );
+        let Some(umu) = which(super::umu::UMU_RUN) else {
+            return Err(NativeCommandError::UmuMissing);
         };
         command.insert(0, umu.to_string_lossy().into_owned());
         env.push(("PROTONPATH".to_string(), tool.to_string()));
@@ -257,7 +285,10 @@ mod tests {
         let error = build_native_command(&g, dir.path(), "", "linux", &no_which).unwrap_err();
         assert_eq!(
             error,
-            "No launchable native executable is configured for this game. Use Game Settings to select one."
+            NativeCommandError::Message(
+                "No launchable native executable is configured for this game. Use Game Settings to select one."
+                    .to_string()
+            )
         );
     }
 
@@ -397,16 +428,15 @@ mod tests {
     }
 
     #[test]
-    fn missing_umu_run_is_the_verbatim_error() {
+    fn missing_umu_run_is_its_own_error() {
         let (dir, install, _exe) = fixture();
         let mut g = row("Game", &install);
         g.native_compat_tool = "GE-Proton9".to_string();
 
         let error = build_native_command(&g, dir.path(), "", "linux", &no_which).unwrap_err();
-        assert_eq!(
-            error,
-            "umu-run is not installed. Install the umu-launcher package to use Proton compatibility tools."
-        );
+        assert_eq!(error, NativeCommandError::UmuMissing);
+        assert_eq!(error.to_string(), UMU_MISSING_MESSAGE);
+        assert!(error.to_string().contains("Emulators › Compat tools"));
     }
 
     // --- WINEPREFIX ----------------------------------------------------------

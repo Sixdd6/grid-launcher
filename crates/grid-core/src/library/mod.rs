@@ -44,7 +44,7 @@ use crate::autoconfig::readers::{
 };
 use crate::autoconfig::rpcs3::update_games_yml;
 use crate::autoconfig::{self, RaCredentials};
-use crate::config::{CompatToolInstall, Config, EmulatorEntry};
+use crate::config::{CompatToolInstall, Config, EmulatorEntry, UmuLauncherInstall};
 use crate::images::ImageFields;
 use crate::launch::compat;
 use crate::launch::emu_install::make_executable;
@@ -57,12 +57,13 @@ use crate::launch::selection::{
 };
 use crate::launch::source::HOST_PLATFORM;
 use crate::launch::template::split_template;
-use crate::launch::{catalog, emu_install};
+use crate::launch::{catalog, emu_install, umu};
 use crate::romm::{RomDetail, RomFile, RommClient};
 use content::{content_file_ids, ContentKind};
-use download::{download_targets, FileTarget, RommProvider};
+use download::{download_targets, verify_sha256_digest, DigestOutcome, FileTarget, RommProvider};
 use extract::{
     extract_archive, extract_iso_with_system_7z, is_extractable_archive, should_extract,
+    which_on_path,
 };
 use launch_select::select_launch_file;
 use paths::{
@@ -139,6 +140,12 @@ const NO_PROTON_ENTRY_POINT: &str = "Downloaded compatibility tool has no `proto
 /// [`InstallService::install_compat_tool`]'s message when `source_id` names
 /// no compat-tool catalog profile.
 const UNKNOWN_COMPAT_TOOL_SOURCE: &str = "unknown compat tool source";
+/// [`finalize_emulator`]'s message when a downloaded umu-launcher release
+/// holds no `umu-run` ([`umu::find_umu_run`]).
+const NO_UMU_RUN: &str = "Downloaded umu-launcher has no `umu-run`";
+/// [`InstallService::install_umu_launcher`]'s refusal off Linux: umu-run
+/// (and Proton) only run there.
+const UMU_LINUX_ONLY: &str = "umu-launcher runs on Linux only";
 /// Where an emulator archive is extracted before its contents are merged
 /// into the install directory. A sibling of the archive inside the install
 /// directory, so the merge is a rename and never a cross-device copy; the
@@ -331,11 +338,24 @@ struct EmulatorJob {
     /// Filled in by the download task once the forge has resolved the
     /// release; consumed by finalize.
     resolved: Option<ResolvedPaths>,
-    /// Whether this job installs a managed compat tool (Task 12) rather than
-    /// an ordinary emulator. Decides which directory function names the
-    /// install directory ([`emu_install::compat_tool_install_dir`] vs.
-    /// [`emu_install::emulator_install_dir`]) and which finalize branch runs.
-    compat_tool: bool,
+    /// What this job installs. Decides which directory function names the
+    /// install directory and which finalize branch runs.
+    target: JobTarget,
+}
+
+/// What an [`EmulatorJob`] installs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum JobTarget {
+    /// An ordinary emulator: [`emu_install::emulator_install_dir`], an
+    /// `[[emulators]]` config entry.
+    Emulator,
+    /// A managed compat tool (Task 12):
+    /// [`emu_install::compat_tool_install_dir`], a [`CompatToolInstall`]
+    /// record.
+    CompatTool,
+    /// The managed umu-launcher: [`umu::install_dir`], the
+    /// `Config.umu_launcher` record, and a checksum check before extraction.
+    UmuLauncher,
 }
 
 /// What the download task resolved an [`EmulatorJob`] down to.
@@ -833,6 +853,9 @@ pub struct InstallService {
     /// Closed while a library move runs; every admission and removal
     /// checks it. Open by default until the app installs its own.
     library_gate: RwLock<LibraryGate>,
+    /// The forge source a managed umu-launcher install resolves
+    /// ([`umu::default_source`]; [`Self::set_umu_source`] in tests).
+    umu_source: RwLock<Value>,
 }
 
 impl InstallService {
@@ -876,6 +899,7 @@ impl InstallService {
             compat_tools_hook: RwLock::new(None),
             emulator_installed_hook: RwLock::new(None),
             library_gate: RwLock::new(LibraryGate::default()),
+            umu_source: RwLock::new(umu::default_source()),
         })
     }
 
@@ -1499,7 +1523,7 @@ impl InstallService {
             library,
             forge: self.forge()?,
             resolved: None,
-            compat_tool: false,
+            target: JobTarget::Emulator,
         };
         let title = job.profile_name.clone();
         self.admit(
@@ -1600,7 +1624,7 @@ impl InstallService {
             library: compat::managed_root(),
             forge: self.forge()?,
             resolved: None,
-            compat_tool: true,
+            target: JobTarget::CompatTool,
         };
         let title = job.profile_name.clone();
         self.admit(
@@ -1609,7 +1633,70 @@ impl InstallService {
             COMPAT_TOOL_PLATFORM,
             "compat_tool",
             JobPayload::Emulator(job),
+        )?;
+
+        // A Proton tool runs through umu-run. With none available, queue
+        // GRID's own copy behind the tool as its own row; its failure is
+        // that row's, never this install's.
+        if profile.compat_tool_type == "proton"
+            && cfg!(target_os = "linux")
+            && !self.umu_available()
+        {
+            if let Err(error) = self.install_umu_launcher().await {
+                tracing::warn!(%error, "umu-launcher could not be queued");
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether a Proton launch would find a `umu-run` now
+    /// ([`umu::locate`]): one on `PATH`, or the managed copy. An unreadable
+    /// config counts as no managed copy.
+    fn umu_available(&self) -> bool {
+        let managed = Config::load(&self.config_path)
+            .ok()
+            .and_then(|config| umu::managed_umu_run(&config));
+        umu::locate(&which_on_path, managed.as_deref()).is_some()
+    }
+
+    /// Starts (or queues) the managed umu-launcher install: the newest
+    /// upstream zipapp release, under [`umu::install_dir`] of
+    /// [`compat::managed_root`], as a `compat_tool` Downloads row. A
+    /// reinstall resolves `latest` again and replaces the copy on disk.
+    ///
+    /// `Err` only before admission: off Linux, a closed library gate, or a
+    /// forge client that cannot be built. An install that is already live is
+    /// ignored silently.
+    pub async fn install_umu_launcher(self: &Arc<Self>) -> Result<(), LibraryError> {
+        self.check_library_gate()?;
+        if !cfg!(target_os = "linux") {
+            return Err(LibraryError::Extract(UMU_LINUX_ONLY.to_string()));
+        }
+        let job = EmulatorJob {
+            source_id: umu::UMU_SOURCE_ID.to_string(),
+            profile_name: umu::UMU_TITLE.to_string(),
+            profile_args: String::new(),
+            configured_tag: "latest".to_string(),
+            raw_source: self.umu_source.read().unwrap().clone(),
+            library: compat::managed_root(),
+            forge: self.forge()?,
+            resolved: None,
+            target: JobTarget::UmuLauncher,
+        };
+        self.admit(
+            JobKey::Emulator(umu::UMU_SOURCE_ID.to_string()),
+            umu::UMU_TITLE,
+            COMPAT_TOOL_PLATFORM,
+            "compat_tool",
+            JobPayload::Emulator(job),
         )
+    }
+
+    /// Replaces the forge source [`Self::install_umu_launcher`] resolves
+    /// (default [`umu::default_source`]). A test seam: the integration
+    /// tests point it at a local server.
+    pub fn set_umu_source(&self, source: Value) {
+        *self.umu_source.write().unwrap() = source;
     }
 
     /// Cancels `entry_id`: an active download gets its flag flipped and ends
@@ -1767,7 +1854,9 @@ impl InstallService {
             // unambiguous.
             Some(JobKey::Emulator(source_id)) => {
                 self.dismiss(entry_id);
-                if catalog::find_compat_profile(&self.profiles, &source_id).is_some() {
+                if source_id == umu::UMU_SOURCE_ID {
+                    self.install_umu_launcher().await
+                } else if catalog::find_compat_profile(&self.profiles, &source_id).is_some() {
                     self.install_compat_tool(source_id).await
                 } else {
                     self.install_emulator(source_id).await
@@ -2969,6 +3058,9 @@ impl InstallService {
         };
         let install_dir = paths.install_dir.as_path();
         let archive = paths.archive.as_path();
+        if job.target == JobTarget::UmuLauncher {
+            check_umu_digest(archive, &paths.resolved)?;
+        }
         let mut progress = |processed, total| self.on_install_progress(id, processed, total);
         // Archives that have been superseded by their extracted contents.
         // Anything left out of this list stays on disk: an AppImage IS the
@@ -3009,11 +3101,19 @@ impl InstallService {
             extracted_archives.push(supplemental);
         }
 
-        if job.compat_tool {
-            let Some(proton_dir) = compat::find_proton_dir(install_dir) else {
-                return Err(LibraryError::Extract(NO_PROTON_ENTRY_POINT.to_string()));
-            };
-            self.write_compat_tool_entry(job, &proton_dir, &paths.resolved.release_tag)?;
+        if job.target != JobTarget::Emulator {
+            if job.target == JobTarget::UmuLauncher {
+                let Some(umu_run) = umu::find_umu_run(install_dir) else {
+                    return Err(LibraryError::Extract(NO_UMU_RUN.to_string()));
+                };
+                make_executable(&umu_run);
+                self.write_umu_launcher_record(&umu_run, &paths.resolved.release_tag)?;
+            } else {
+                let Some(proton_dir) = compat::find_proton_dir(install_dir) else {
+                    return Err(LibraryError::Extract(NO_PROTON_ENTRY_POINT.to_string()));
+                };
+                self.write_compat_tool_entry(job, &proton_dir, &paths.resolved.release_tag)?;
+            }
 
             // Only after a successful config write, matching the game path.
             for path in extracted_archives {
@@ -3346,6 +3446,22 @@ impl InstallService {
         Ok(())
     }
 
+    /// Records the managed umu-launcher: `umu_run` and the RESOLVED
+    /// release tag, replacing any earlier record.
+    fn write_umu_launcher_record(
+        &self,
+        umu_run: &Path,
+        release_tag: &str,
+    ) -> Result<(), LibraryError> {
+        let mut config = Config::load(&self.config_path)?;
+        config.umu_launcher = Some(UmuLauncherInstall {
+            path: path_string(umu_run),
+            release_tag: release_tag.to_string(),
+        });
+        config.save(&self.config_path)?;
+        Ok(())
+    }
+
     fn on_download_progress(&self, id: u64, downloaded: u64, total: u64, speed: f64) {
         self.queue
             .lock()
@@ -3434,11 +3550,16 @@ async fn download_emulator(
     // `job.library` already IS the managed compat-tools root for a compat
     // job ([`InstallService::install_compat_tool`]), so only the directory
     // FUNCTION differs — never an extra path segment on top.
-    let install_dir = if job.compat_tool {
-        let dir_name = emu_install::archive_file_name(&job.profile_name, &job.configured_tag, "");
-        emu_install::compat_tool_install_dir(&job.library, &file_stem_of(&dir_name))
-    } else {
-        emu_install::emulator_install_dir(&job.library, &job.profile_name)
+    // The managed umu-launcher has one fixed directory: every Proton launch
+    // shares the one copy, and a reinstall replaces it in place.
+    let install_dir = match job.target {
+        JobTarget::CompatTool => {
+            let dir_name =
+                emu_install::archive_file_name(&job.profile_name, &job.configured_tag, "");
+            emu_install::compat_tool_install_dir(&job.library, &file_stem_of(&dir_name))
+        }
+        JobTarget::UmuLauncher => umu::install_dir(&job.library),
+        JobTarget::Emulator => emu_install::emulator_install_dir(&job.library, &job.profile_name),
     };
 
     let archive_name =
@@ -3499,6 +3620,29 @@ async fn download_emulator(
 
     let provider = ForgeProvider::new(&forge, github_headers);
     download_targets(&provider, &targets, cancel, on_progress).await
+}
+
+/// The managed umu-launcher's checksum check, before anything is
+/// extracted: the archive must match the release API's SHA-256 `digest`. A
+/// mismatch (or an unreadable archive) deletes the archive, so a Retry
+/// downloads it again instead of reusing it by size. A release with no
+/// digest is accepted with a warning.
+fn check_umu_digest(archive: &Path, resolved: &ResolvedDownload) -> Result<(), LibraryError> {
+    match verify_sha256_digest(archive, &resolved.digest) {
+        Ok(DigestOutcome::Verified) => Ok(()),
+        Ok(DigestOutcome::Unavailable) => {
+            tracing::warn!(
+                release = %resolved.release_tag,
+                asset = %resolved.asset_name,
+                "umu-launcher release has no SHA-256 digest; installing it unchecked"
+            );
+            Ok(())
+        }
+        Err(error) => {
+            let _ = fs::remove_file(archive);
+            Err(error)
+        }
+    }
 }
 
 /// Resolves every `supplemental_downloads` entry of `job`'s RAW source,

@@ -4,12 +4,13 @@
 //! which is what makes retrying after a failed finalize step cheap.
 
 use std::fs;
-use std::io::Write;
-use std::path::PathBuf;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
+use sha2::{Digest, Sha256};
 
 use super::LibraryError;
 use crate::romm::{RommClient, RommError};
@@ -195,6 +196,129 @@ fn existing_matching_size(target: &FileTarget) -> Option<u64> {
     let meta = fs::metadata(&target.dest).ok()?;
     let expected = target.expected_size as u64;
     (meta.len() == expected).then_some(expected)
+}
+
+/// What [`verify_sha256_digest`] could establish about a downloaded file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DigestOutcome {
+    /// The file's SHA-256 matches the published digest.
+    Verified,
+    /// No SHA-256 digest was published (blank, or another algorithm), so
+    /// nothing was checked. The caller decides whether that is acceptable.
+    Unavailable,
+}
+
+/// The algorithm prefix of a release API asset `digest` this checks.
+const SHA256_PREFIX: &str = "sha256:";
+
+/// Checks `path` against `digest`, a release API asset `digest` field
+/// (`"sha256:<hex>"`, hex in either case). A blank digest or one naming
+/// another algorithm is [`DigestOutcome::Unavailable`]; a SHA-256 digest
+/// the file does not match is an error. The file is never removed here —
+/// a caller that wants a retry to download again deletes it.
+pub fn verify_sha256_digest(path: &Path, digest: &str) -> Result<DigestOutcome, LibraryError> {
+    let digest = digest.trim();
+    let Some(expected) = digest
+        .get(..SHA256_PREFIX.len())
+        .filter(|prefix| prefix.eq_ignore_ascii_case(SHA256_PREFIX))
+        .map(|_| digest[SHA256_PREFIX.len()..].trim().to_ascii_lowercase())
+    else {
+        return Ok(DigestOutcome::Unavailable);
+    };
+    if expected.is_empty() {
+        return Ok(DigestOutcome::Unavailable);
+    }
+
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let actual: String = hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    if actual == expected {
+        Ok(DigestOutcome::Verified)
+    } else {
+        Err(LibraryError::Extract(format!(
+            "The download of {} does not match its published SHA-256 checksum",
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        )))
+    }
+}
+
+#[cfg(test)]
+mod digest_tests {
+    use super::*;
+
+    /// SHA-256 of the three bytes `abc` (FIPS 180-2 test vector).
+    const ABC_SHA256: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+    fn abc_file(dir: &tempfile::TempDir) -> PathBuf {
+        let path = dir.path().join("asset.tar");
+        fs::write(&path, b"abc").unwrap();
+        path
+    }
+
+    #[test]
+    fn a_matching_sha256_digest_verifies_in_either_case() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = abc_file(&dir);
+        let lower = format!("sha256:{ABC_SHA256}");
+        let upper = format!("SHA256:{}", ABC_SHA256.to_uppercase());
+        assert_eq!(
+            verify_sha256_digest(&path, &lower).unwrap(),
+            DigestOutcome::Verified
+        );
+        assert_eq!(
+            verify_sha256_digest(&path, &upper).unwrap(),
+            DigestOutcome::Verified
+        );
+    }
+
+    #[test]
+    fn a_mismatching_sha256_digest_is_an_error_and_keeps_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = abc_file(&dir);
+        let wrong = format!("sha256:{}", "0".repeat(64));
+        let error = verify_sha256_digest(&path, &wrong).unwrap_err();
+        assert!(error.to_string().contains("asset.tar"), "{error}");
+        assert!(error.to_string().contains("SHA-256"), "{error}");
+        assert!(path.is_file());
+    }
+
+    #[test]
+    fn a_blank_or_foreign_digest_is_unavailable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = abc_file(&dir);
+        for digest in ["", "   ", "sha256:", "sha512:abcd", "md5:900150983cd24fb0"] {
+            assert_eq!(
+                verify_sha256_digest(&path, digest).unwrap(),
+                DigestOutcome::Unavailable,
+                "{digest:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_missing_file_with_a_digest_is_an_io_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("gone.tar");
+        let digest = format!("sha256:{ABC_SHA256}");
+        assert!(matches!(
+            verify_sha256_digest(&missing, &digest),
+            Err(LibraryError::Io(_))
+        ));
+    }
 }
 
 #[cfg(test)]

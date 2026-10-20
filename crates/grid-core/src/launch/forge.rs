@@ -31,7 +31,10 @@ use crate::library::LibraryError;
 /// A release/asset a [`ForgeClient`] resolved down to one downloadable file.
 /// `size` is the GitHub/Gitea asset's reported byte size, or `0` for a
 /// `direct` source (the reference never inspects a direct URL's size ahead
-/// of the download) or when the field is absent.
+/// of the download) or when the field is absent. `digest` is the asset's
+/// raw `digest` field as the release API reports it (GitHub:
+/// `"sha256:<hex>"`), or `""` when the API carries none — always `""` for a
+/// `direct` source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedDownload {
     pub provider: String,
@@ -41,6 +44,7 @@ pub struct ResolvedDownload {
     pub asset_name: String,
     pub download_url: String,
     pub size: i64,
+    pub digest: String,
 }
 
 /// HTTP client for forge hosts (GitHub, Gitea, arbitrary direct-download
@@ -241,6 +245,7 @@ impl ForgeClient {
             asset_name: str_field(asset, "name"),
             download_url: str_field(asset, "browser_download_url"),
             size,
+            digest: str_field(asset, "digest"),
         })
     }
 
@@ -308,6 +313,7 @@ impl ForgeClient {
             asset_name,
             download_url,
             size: 0,
+            digest: String::new(),
         })
     }
 }
@@ -854,6 +860,7 @@ mod tests {
                 asset_name: "widget-linux.zip".to_string(),
                 download_url: "https://cdn.example.com/widget-linux.zip".to_string(),
                 size: 42,
+                digest: String::new(),
             }
         );
 
@@ -970,6 +977,35 @@ mod tests {
             resolved.download_url,
             "https://cdn.example.com/build-linux.zip"
         );
+    }
+
+    #[tokio::test]
+    async fn resolve_carries_the_assets_digest_verbatim() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/repos/acme/widget/releases/latest"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "tag_name": "1.0",
+                "assets": [{
+                    "name": "widget-zipapp.tar",
+                    "browser_download_url": "https://cdn.example.com/widget-zipapp.tar",
+                    "size": 3,
+                    "digest": "sha256:ABCDEF"
+                }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let raw = json!({
+            "provider": "gitea", "owner": "acme", "repo": "widget",
+            "base_url": mock_server.uri(), "release_tag": "latest"
+        });
+        let resolved = ForgeClient::new()
+            .unwrap()
+            .resolve(&raw, "Widget")
+            .await
+            .unwrap();
+        assert_eq!(resolved.digest, "sha256:ABCDEF");
     }
 
     #[tokio::test]

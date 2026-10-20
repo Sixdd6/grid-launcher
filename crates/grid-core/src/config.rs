@@ -72,6 +72,18 @@ pub struct CompatToolInstall {
     pub release_tag: String,
 }
 
+/// The umu-launcher (`umu-run`) copy GRID downloaded and manages, shared by
+/// every Proton launch when no system `umu-run` is on PATH. `path` is the
+/// `umu-run` zipapp itself; `release_tag` is the resolved upstream tag on
+/// disk. Both default to `""` so a hand-edited table missing a key loads.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct UmuLauncherInstall {
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub release_tag: String,
+}
+
 /// Desktop-shell appearance settings (design §4, §10 Appearance). Both
 /// fields default so a config written before this table existed loads
 /// unchanged, and `Config::save` emits `[ui]` after every scalar key.
@@ -274,6 +286,11 @@ pub struct Config {
     /// while empty, so such a config round-trips unchanged.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub former_library_paths: Vec<String>,
+    /// The GRID-managed umu-launcher, `None` until one is installed. A TOML
+    /// table, so it must stay after every scalar key in this struct; not
+    /// written while `None`, so an older config round-trips unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub umu_launcher: Option<UmuLauncherInstall>,
     /// Desktop shell appearance. A TOML table, so it must stay after every
     /// scalar key in this struct.
     #[serde(default)]
@@ -322,6 +339,7 @@ impl Default for Config {
             debug_prints: true,
             library_layout_version: 0,
             former_library_paths: Vec::new(),
+            umu_launcher: None,
             ui: UiSettings::default(),
             extra: BTreeMap::new(),
         }
@@ -1098,6 +1116,46 @@ mod tests {
         );
         assert_eq!(install.source_id, "GloriousEggroll/proton-ge-custom");
         assert_eq!(install.release_tag, "GE-Proton9-20");
+    }
+
+    #[test]
+    fn a_config_without_a_umu_launcher_writes_no_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config::default();
+        assert!(cfg.umu_launcher.is_none());
+        cfg.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !written.contains("umu_launcher"),
+            "written config:\n{written}"
+        );
+    }
+
+    #[test]
+    fn umu_launcher_install_round_trips_next_to_the_scalar_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = Config {
+            library_layout_version: 1,
+            umu_launcher: Some(UmuLauncherInstall {
+                path: "/data/compat-tools/umu-launcher/umu/umu-run".into(),
+                release_tag: "1.4.4".into(),
+            }),
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            written.contains("[umu_launcher]"),
+            "written config:\n{written}"
+        );
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.library_layout_version, 1);
+        let umu = loaded.umu_launcher.expect("the umu-launcher record loads");
+        assert_eq!(umu.path, "/data/compat-tools/umu-launcher/umu/umu-run");
+        assert_eq!(umu.release_tag, "1.4.4");
+        assert!(!loaded.extra.contains_key("umu_launcher"));
     }
 
     #[test]

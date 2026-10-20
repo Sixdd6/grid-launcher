@@ -15,7 +15,9 @@ pub mod sessions;
 pub mod source;
 pub mod spawn;
 pub mod template;
+pub mod umu;
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::ExitStatus;
@@ -62,6 +64,19 @@ pub enum LaunchError {
     /// The library gate is closed (a library move runs): the reason.
     #[error("{0}")]
     LibraryBusy(String),
+    /// A Proton launch found no `umu-run` (none on `PATH`, no managed
+    /// copy). Its own variant so the app can offer to install one.
+    #[error("{}", native::UMU_MISSING_MESSAGE)]
+    UmuMissing,
+}
+
+impl From<native::NativeCommandError> for LaunchError {
+    fn from(error: native::NativeCommandError) -> Self {
+        match error {
+            native::NativeCommandError::Message(message) => LaunchError::Validation(message),
+            native::NativeCommandError::UmuMissing => LaunchError::UmuMissing,
+        }
+    }
 }
 
 // --- constants --------------------------------------------------------------
@@ -281,14 +296,32 @@ impl LaunchService {
                 config.default_compat_tool.as_str()
             };
             let library = expand_home(&config.library_path);
-            let native = build_native_command(
-                &game,
-                &library,
-                default_compat_tool,
-                host_os(),
-                &which_on_path,
-            )
-            .map_err(LaunchError::Validation)?;
+            // `umu-run` resolves through `umu::locate` (the system one, else
+            // GRID's managed copy); `used_umu` records which one this launch
+            // took. A plain block: the `Cell` must not live across an await.
+            let managed_umu = umu::managed_umu_run(&config);
+            let (native, used_umu) = {
+                let used_umu = Cell::new(None);
+                let which = |name: &str| {
+                    if name != umu::UMU_RUN {
+                        return which_on_path(name);
+                    }
+                    let found = umu::locate(&which_on_path, managed_umu.as_deref());
+                    used_umu.set(found.as_ref().map(|(_, source)| *source));
+                    found.map(|(path, _)| path)
+                };
+                let native =
+                    build_native_command(&game, &library, default_compat_tool, host_os(), &which)?;
+                (native, used_umu.get())
+            };
+            // The managed copy is a Python zipapp: check the interpreter the
+            // child will find before spawning it, every launch.
+            if used_umu == Some(umu::UmuSource::Managed) {
+                let found = tokio::task::spawn_blocking(|| umu::probe_python(&clean_env()))
+                    .await
+                    .unwrap_or(None);
+                umu::python_requirement(found).map_err(LaunchError::Validation)?;
+            }
             let emulator_name = if native.tool_label.is_empty() {
                 "native".to_string()
             } else {
