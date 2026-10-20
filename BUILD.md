@@ -155,6 +155,11 @@ On some NVIDIA/Wayland stacks WebKitGTK's DMABUF renderer cannot allocate GBM bu
 white. The app sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` at startup on Linux; export the
 variable yourself to override it.
 
+WebKitGTK 2.52.6 (Ubuntu 24.04's) can abort the web process in a JavaScriptCore
+garbage-collector thread (`JSC::MarkedBlock::aboutToMarkSlow`) soon after a large
+platform opens, which leaves an empty window. The app sets `JSC_useDFGJIT=0` at startup
+on Linux, which stops it; export the variable yourself to override it.
+
 ## Release
 
 Version numbers come from the tag, not from the tree. `app/src-tauri/tauri.conf.json`

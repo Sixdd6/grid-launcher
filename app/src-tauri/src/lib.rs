@@ -25,19 +25,43 @@ use grid_core::session::SessionManager;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
 
-/// WebKitGTK's DMABUF renderer fails to allocate GBM buffers on some
-/// NVIDIA/Wayland stacks ("Failed to create GBM buffer ... Invalid argument"),
-/// leaving the webview blank white. Returns true when the workaround variable
-/// should be set: only if the user has not already chosen a value.
+/// The webview environment variables GRID sets on Linux, each only when the
+/// user has not already chosen a value. The web process inherits them, so
+/// they must be set before the first webview is created.
+///
+/// - `WEBKIT_DISABLE_DMABUF_RENDERER=1`: WebKitGTK's DMABUF renderer fails to
+///   allocate GBM buffers on some NVIDIA/Wayland stacks ("Failed to create
+///   GBM buffer ... Invalid argument"), leaving the webview blank white.
+/// - `JSC_useDFGJIT=0`: on WebKitGTK 2.52.6 (Ubuntu 24.04's, which a bundle
+///   built there ships) the web process aborts in a garbage-collector marker
+///   thread (`WTFCrashWithInfo` <- `JSC::MarkedBlock::aboutToMarkSlow`) a few
+///   seconds after a ~2000-game platform opens, leaving an empty window
+///   (2026-10-20, twice). Another Tauri app hit the same stack on the same
+///   build and A/B tested the JSC options: only turning off the DFG tier
+///   (or the whole JIT) stopped it; concurrent GC off and a single marker did
+///   not (xnmp/tauri-explorer#1026, #1136). No upstream fix is known. Set on
+///   every WebKitGTK version, not just 2.52: the bug is unfixed upstream and
+///   unbisected, and GRID's scripts are light enough that the Baseline JIT
+///   costs nothing noticeable.
 #[cfg(any(target_os = "linux", test))]
-fn dmabuf_override_needed(existing: Option<std::ffi::OsString>) -> bool {
+const WEBKIT_ENV_OVERRIDES: [(&str, &str); 2] = [
+    ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
+    ("JSC_useDFGJIT", "0"),
+];
+
+/// Whether a workaround variable should be set: only if the user has not
+/// already chosen a value (even an empty one).
+#[cfg(any(target_os = "linux", test))]
+fn webkit_override_needed(existing: Option<std::ffi::OsString>) -> bool {
     existing.is_none()
 }
 
 #[cfg(target_os = "linux")]
 fn apply_webkit_workarounds() {
-    if dmabuf_override_needed(std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER")) {
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    for (name, value) in WEBKIT_ENV_OVERRIDES {
+        if webkit_override_needed(std::env::var_os(name)) {
+            std::env::set_var(name, value);
+        }
     }
 }
 
@@ -615,13 +639,19 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::dmabuf_override_needed;
+    use super::{webkit_override_needed, WEBKIT_ENV_OVERRIDES};
 
     #[test]
-    fn dmabuf_workaround_applies_only_when_unset() {
-        assert!(dmabuf_override_needed(None));
-        assert!(!dmabuf_override_needed(Some("0".into())));
-        assert!(!dmabuf_override_needed(Some("1".into())));
-        assert!(!dmabuf_override_needed(Some(String::new().into())));
+    fn webkit_workarounds_apply_only_when_unset() {
+        assert!(webkit_override_needed(None));
+        assert!(!webkit_override_needed(Some("0".into())));
+        assert!(!webkit_override_needed(Some("1".into())));
+        assert!(!webkit_override_needed(Some(String::new().into())));
+    }
+
+    #[test]
+    fn webkit_workarounds_disable_dmabuf_and_the_dfg_jit() {
+        assert!(WEBKIT_ENV_OVERRIDES.contains(&("WEBKIT_DISABLE_DMABUF_RENDERER", "1")));
+        assert!(WEBKIT_ENV_OVERRIDES.contains(&("JSC_useDFGJIT", "0")));
     }
 }
