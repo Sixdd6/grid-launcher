@@ -22,6 +22,8 @@
   import Icon from './Icon.svelte';
   import Image from './Image.svelte';
   import NativeSettings from './details/NativeSettings.svelte';
+  import UmuInstallOffer from './UmuInstallOffer.svelte';
+  import { isUmuMissing } from './launchError';
   import OverviewTab from './details/OverviewTab.svelte';
   import MediaTab from './details/MediaTab.svelte';
   import MediaViewer from './details/MediaViewer.svelte';
@@ -87,6 +89,10 @@
   let confirmingUninstall = $state(false);
   let pendingAction = $state<PendingAction>(null);
   let error = $state<string | null>(null);
+  // The error that offers the umu-launcher install (a Proton launch with no
+  // umu-run); `null` for any other. Compared by value, so a later action's
+  // own error never shows the offer.
+  let umuOfferFor = $state<string | null>(null);
   let panelEl = $state<HTMLElement | null>(null);
 
   // Install specials (task-16-brief.md): Cancel for a live install,
@@ -581,6 +587,7 @@
       await api.launchGame(subject.romId);
     } catch (err) {
       error = errorMessage(err);
+      umuOfferFor = isUmuMissing(err) ? error : null;
     } finally {
       pendingAction = null;
     }
@@ -908,6 +915,7 @@
 
         {#if error}
           <p data-testid="details-error" class="error" role="alert">{error}</p>
+          {#if error === umuOfferFor}<UmuInstallOffer />{/if}
         {/if}
         {#if sessions.lastWarning}
           <p data-testid="details-warning" class="error warning" role="alert">

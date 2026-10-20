@@ -3,7 +3,7 @@
 // Windows-host guard, and (fix round 1) the catalog's terminal-signature /
 // live-source-id tracking. No store/API imports here so this stays trivially
 // unit-testable — CompatTools.svelte owns the fetching/wiring.
-import type { CompatTool, DownloadEntry } from '../api';
+import type { CompatTool, DownloadEntry, UmuRunStatus } from '../api';
 
 export type CompatGroup = { title: 'Wine' | 'Proton (system)' | 'Managed'; tools: CompatTool[] };
 
@@ -75,6 +75,45 @@ export function liveCompatToolSourceIds(entries: DownloadEntry[]): Set<string> {
   return new Set(
     entries.filter((e) => e.kind === 'compat_tool' && LIVE_STATUSES.includes(e.status)).map((e) => e.source_id)
   );
+}
+
+/**
+ * The Downloads row `source_id` a managed umu-launcher install runs under
+ * (grid-core `launch::umu::UMU_SOURCE_ID`). `UmuRunStatus.source_id`
+ * carries the same value; the launch-error offer has no status in hand, so
+ * it reads this.
+ */
+export const UMU_SOURCE_ID = 'Open-Wine-Components/umu-launcher';
+
+/**
+ * The Compat tools pane's umu-run status line: the system copy and its
+ * path, GRID's own copy and its release, or nothing installed.
+ */
+export function umuStatusLabel(status: UmuRunStatus): string {
+  switch (status.source) {
+    case 'system':
+      return `umu-run: system — ${status.path}`;
+    case 'managed':
+      return status.release_tag ? `umu-run: GRID-managed ${status.release_tag}` : 'umu-run: GRID-managed';
+    default:
+      return 'umu-run: not installed';
+  }
+}
+
+/**
+ * The status line's button: Install when there is no umu-run, Reinstall
+ * (which fetches the newest release) for GRID's own copy, and none when the
+ * system copy is in use — a launch would never reach GRID's.
+ */
+export function umuActionLabel(status: UmuRunStatus): 'Install' | 'Reinstall' | null {
+  if (status.source === 'missing') return 'Install';
+  if (status.source === 'managed') return 'Reinstall';
+  return null;
+}
+
+/** Whether a umu-launcher Downloads row is live (queued through cancelling). */
+export function umuInstallBusy(entries: DownloadEntry[], sourceId: string = UMU_SOURCE_ID): boolean {
+  return liveCompatToolSourceIds(entries).has(sourceId);
 }
 
 // Re-exported rather than redefined: `isWindowsHost` already exists in

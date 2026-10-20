@@ -12,12 +12,18 @@
     compatToolTerminalSignature,
     groupCompatTools,
     liveCompatToolSourceIds,
+    umuActionLabel,
+    umuInstallBusy,
+    umuStatusLabel,
   } from './compatTools';
 
   let catalog = $state<CatalogEntry[]>([]);
   let catalogLoading = $state(true);
   let catalogError = $state<string | null>(null);
   let installingSourceIds = $state<Set<string>>(new Set());
+
+  let umuError = $state<string | null>(null);
+  let umuRequesting = $state(false);
 
   let defaultError = $state<string | null>(null);
   let defaultPending = $state(false);
@@ -34,6 +40,11 @@
   // just while the initial `installCompatTool` call is in flight.
   let compatTerminalSignature = $derived(compatToolTerminalSignature(downloads.entries));
   let liveSourceIds = $derived(liveCompatToolSourceIds(downloads.entries));
+  // The umu-run line's button stays busy for the whole background install
+  // (its Downloads row is live), like a catalog row's.
+  let umuRun = $derived(compatTools.umuRun);
+  let umuAction = $derived(umuRun ? umuActionLabel(umuRun) : null);
+  let umuBusy = $derived(umuRequesting || (umuRun !== null && umuInstallBusy(downloads.entries, umuRun.source_id)));
 
   function errorMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err);
@@ -77,6 +88,18 @@
     }
   }
 
+  async function handleUmuInstall() {
+    umuError = null;
+    umuRequesting = true;
+    try {
+      await api.installUmuLauncher();
+    } catch (err) {
+      umuError = errorMessage(err);
+    } finally {
+      umuRequesting = false;
+    }
+  }
+
   async function handleInstallClick(sourceId: string) {
     catalogError = null;
     installingSourceIds = new Set(installingSourceIds).add(sourceId);
@@ -96,6 +119,24 @@
   <h3>Compatibility tools</h3>
 
   {#if defaultError}<p data-testid="compat-error" class="error" role="alert">{defaultError}</p>{/if}
+
+  {#if umuRun}
+    <div class="umu">
+      <div class="umu-row">
+        <span data-testid="compat-umu-status" class="umu-status">{umuStatusLabel(umuRun)}</span>
+        {#if umuAction}
+          <button data-testid="compat-umu-install" disabled={umuBusy} onclick={handleUmuInstall}>
+            {umuBusy ? 'Installing…' : umuAction}
+          </button>
+        {/if}
+      </div>
+      <p class="muted">
+        Proton games run through umu-run. The first Proton launch downloads the Steam Linux Runtime (about
+        200 MB), so it takes longer than later ones.
+      </p>
+      {#if umuError}<p data-testid="compat-umu-error" class="error" role="alert">{umuError}</p>{/if}
+    </div>
+  {/if}
 
   {#if flattened.length === 0}
     <p data-testid="compat-empty" class="muted">No compatibility tools installed</p>
@@ -193,6 +234,29 @@
     font-size: 13px;
   }
 
+  .umu {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .umu-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--border);
+  }
+
+  .umu-status {
+    color: var(--text-h);
+    font-size: 13px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
   .compat-group {
     display: flex;
     flex-direction: column;
@@ -260,6 +324,7 @@
     font-size: 12px;
   }
 
+  .umu-row button,
   .catalog-row button {
     flex: none;
     font: inherit;
@@ -273,6 +338,7 @@
     white-space: nowrap;
   }
 
+  .umu-row button:disabled,
   .catalog-row button:disabled {
     opacity: 0.6;
     cursor: default;

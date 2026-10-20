@@ -1,6 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { api, type InstalledGame } from './api';
+  import UmuInstallOffer from './UmuInstallOffer.svelte';
+  import { isUmuMissing } from './launchError';
   import { installed, refresh as refreshInstalled } from './stores/installed.svelte';
   import { updates } from './stores/updates.svelte';
   import { installedKey, visibleLibraryGames } from './library';
@@ -36,6 +38,9 @@
   let subject = $state<DetailsSubject | null>(null);
   let detailsCloudMode = $state<CloudMode>('overview');
   let launchError = $state<string | null>(null);
+  // The launch error that offers the umu-launcher install (a Proton launch
+  // with no umu-run); `null` for any other.
+  let umuOfferFor = $state<string | null>(null);
   let cloudPlatforms = $state<ReadonlySet<string>>(new Set<string>());
 
   // `Date.now()` is read once per rail recompute rather than per row, so
@@ -151,6 +156,7 @@
       await api.launchGame(row.rom_id);
     } catch (err) {
       launchError = err instanceof Error ? err.message : String(err);
+      umuOfferFor = isUmuMissing(err) ? launchError : null;
     }
   }
 
@@ -349,6 +355,7 @@
 
     {#if launchError}
       <p data-testid="library-launch-error" class="error" role="alert">{launchError}</p>
+      {#if launchError === umuOfferFor}<UmuInstallOffer />{/if}
     {/if}
 
     {#if rows.length === 0}

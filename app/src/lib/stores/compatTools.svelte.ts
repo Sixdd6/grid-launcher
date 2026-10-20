@@ -14,10 +14,17 @@ import {
   type CompatTool,
   type CompatToolsDto,
   type DownloadEntry,
+  type UmuRunStatus,
 } from '../api';
 import { downloads } from './downloads.svelte';
 
-const state = $state<{ tools: CompatTool[]; defaultTool: string }>({ tools: [], defaultTool: '' });
+// `umuRun` is `null` until the first load, so the pane shows no umu-run
+// line rather than a premature "not installed".
+const state = $state<{ tools: CompatTool[]; defaultTool: string; umuRun: UmuRunStatus | null }>({
+  tools: [],
+  defaultTool: '',
+  umuRun: null,
+});
 
 export const compatTools = {
   get tools() {
@@ -26,11 +33,15 @@ export const compatTools = {
   get defaultTool() {
     return state.defaultTool;
   },
+  get umuRun() {
+    return state.umuRun;
+  },
 };
 
 function apply(dto: CompatToolsDto): void {
   state.tools = dto.tools;
   state.defaultTool = dto.default_tool;
+  state.umuRun = dto.umu_run;
 }
 
 export async function refresh(): Promise<void> {

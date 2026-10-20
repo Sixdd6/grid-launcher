@@ -193,7 +193,11 @@ mod tests {
             (
                 "specials.rs",
                 include_str!("specials.rs"),
-                &["install_compat_tool", "install_ps3_firmware"],
+                &[
+                    "install_compat_tool",
+                    "install_umu_launcher",
+                    "install_ps3_firmware",
+                ],
             ),
             (
                 "cloud.rs",

@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import type { CompatTool, DownloadEntry } from '../api';
+import type { CompatTool, DownloadEntry, UmuRunStatus } from '../api';
 import {
   compatToolLabel,
   compatToolTerminalSignature,
   groupCompatTools,
   isWindowsHost,
   liveCompatToolSourceIds,
+  UMU_SOURCE_ID,
+  umuActionLabel,
+  umuInstallBusy,
+  umuStatusLabel,
 } from './compatTools';
 
 function tool(overrides: Partial<CompatTool>): CompatTool {
@@ -187,5 +191,48 @@ describe('liveCompatToolSourceIds', () => {
       entry({ id: 2, source_id: 'a', status: 'downloading' }),
     ];
     expect(liveCompatToolSourceIds(entries)).toEqual(new Set(['a']));
+  });
+});
+
+function umu(overrides: Partial<UmuRunStatus>): UmuRunStatus {
+  return { source: 'missing', path: '', release_tag: '', source_id: UMU_SOURCE_ID, ...overrides };
+}
+
+describe('umuStatusLabel', () => {
+  it('names the system copy with its path', () => {
+    expect(umuStatusLabel(umu({ source: 'system', path: '/usr/bin/umu-run' }))).toBe(
+      'umu-run: system — /usr/bin/umu-run'
+    );
+  });
+
+  it('names the GRID-managed copy with its release', () => {
+    expect(umuStatusLabel(umu({ source: 'managed', path: '/d/umu-run', release_tag: '1.4.4' }))).toBe(
+      'umu-run: GRID-managed 1.4.4'
+    );
+    expect(umuStatusLabel(umu({ source: 'managed', path: '/d/umu-run' }))).toBe('umu-run: GRID-managed');
+  });
+
+  it('says when nothing is installed', () => {
+    expect(umuStatusLabel(umu({}))).toBe('umu-run: not installed');
+  });
+});
+
+describe('umuActionLabel', () => {
+  it('offers Install, Reinstall, or nothing for the system copy', () => {
+    expect(umuActionLabel(umu({}))).toBe('Install');
+    expect(umuActionLabel(umu({ source: 'managed' }))).toBe('Reinstall');
+    expect(umuActionLabel(umu({ source: 'system' }))).toBeNull();
+  });
+});
+
+describe('umuInstallBusy', () => {
+  it('is true only while a umu-launcher row is live', () => {
+    const live = entry({ source_id: UMU_SOURCE_ID, status: 'queued' });
+    expect(umuInstallBusy([live])).toBe(true);
+    expect(umuInstallBusy([{ ...live, status: 'installing' }])).toBe(true);
+    expect(umuInstallBusy([{ ...live, status: 'failed' }])).toBe(false);
+    expect(umuInstallBusy([{ ...live, status: 'completed' }])).toBe(false);
+    expect(umuInstallBusy([entry({ status: 'downloading' })])).toBe(false);
+    expect(umuInstallBusy([])).toBe(false);
   });
 });

@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { toLaunchFailure } from './launchError';
 
 // Field names below mirror the Rust structs' actual serde output exactly
 // (see crates/grid-core/src/session.rs and romm/mod.rs) — no
@@ -556,7 +557,13 @@ export type CompatTool = { name: string; kind: string; path: string; source: str
 /// "nothing to advise" answer — see `app/src-tauri/src/commands.rs`.
 export type EmulatorFacts = { eden_keys_present: boolean; eden_firmware_present: boolean };
 
-export type CompatToolsDto = { tools: CompatTool[]; default_tool: string };
+/// The umu-run a Proton launch would use (grid-core `launch::umu::UmuRunStatus`).
+/// `source` is `'system'` (on PATH), `'managed'` (GRID's own download, with
+/// its `release_tag`) or `'missing'`. `source_id` is the Downloads row
+/// `source_id` a managed install runs under.
+export type UmuRunStatus = { source: 'system' | 'managed' | 'missing'; path: string; release_tag: string; source_id: string };
+
+export type CompatToolsDto = { tools: CompatTool[]; default_tool: string; umu_run: UmuRunStatus };
 
 /// `pup_path` is the `PS3UPDAT.PUP` beside the RPCS3 executable, or `null`
 /// when that install has none. The Emulators panel shows the firmware note
@@ -734,7 +741,12 @@ export const api = {
   openServerPage: () => invoke<void>('open_server_page'),
   /** Reveals the config directory in the desktop file manager. Takes no path. */
   openConfigFolder: () => invoke<void>('open_config_folder'),
-  launchGame: (romId: number) => invoke<GameSession>('launch_game', { romId }),
+  /** Rejects with a `LaunchFailure` (launchError.ts): `code` is `'umu_missing'`
+   *  when a Proton launch found no umu-run. */
+  launchGame: (romId: number) =>
+    invoke<GameSession>('launch_game', { romId }).catch((err: unknown) => {
+      throw toLaunchFailure(err);
+    }),
   stopGame: (sessionId: number) => invoke<void>('stop_game', { sessionId }),
   listSessions: () => invoke<SessionsSnapshot>('list_sessions'),
   listEmulators: () => invoke<EmulatorEntry[]>('list_emulators'),
@@ -826,6 +838,8 @@ export const api = {
   setDefaultCompatTool: (value: string) => invoke<void>('set_default_compat_tool', { value }),
   listCompatToolCatalog: () => invoke<CatalogEntry[]>('list_compat_tool_catalog'),
   installCompatTool: (sourceId: string) => invoke<void>('install_compat_tool', { sourceId }),
+  /** Queues GRID's own umu-launcher (Linux only); a reinstall resolves the newest release. */
+  installUmuLauncher: () => invoke<void>('install_umu_launcher'),
   rpcs3FirmwareStatus: (emulatorName: string) =>
     invoke<Rpcs3FirmwareStatus>('rpcs3_firmware_status', { emulatorName }),
   installPs3Firmware: (emulatorName: string) =>

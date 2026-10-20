@@ -3,6 +3,8 @@
   import { api, FIRMWARE_PASS_FINISHED_EVENT, type FirmwarePassFinished, type GameSummary, type Platform } from './api';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import Details from './Details.svelte';
+  import UmuInstallOffer from './UmuInstallOffer.svelte';
+  import { isUmuMissing } from './launchError';
   import GameCard from './GameCard.svelte';
   import CardGrid from './CardGrid.svelte';
   import RailPane, { type RailPaneEntry } from './RailPane.svelte';
@@ -61,6 +63,9 @@
   // Every inline failure the grid can produce: a refused install AND a
   // refused launch, both from `primary()`. Shown in `server-error`.
   let actionError = $state<string | null>(null);
+  // The action error that offers the umu-launcher install (a Proton launch
+  // with no umu-run); `null` for any other.
+  let umuOfferFor = $state<string | null>(null);
   let cloudPlatforms = $state<ReadonlySet<string>>(new Set<string>());
   // Platform name -> default emulator name, for the header's emulator chip.
   let defaultEmulators = $state<Record<string, string>>({});
@@ -272,6 +277,7 @@
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       actionError = message;
+      umuOfferFor = isUmuMissing(err) ? message : null;
       if (message.includes('library folder')) showLibraryBanner = true;
     }
   }
@@ -539,6 +545,7 @@
 
         {#if actionError}
           <p data-testid="server-error" class="error" role="alert">{actionError}</p>
+          {#if actionError === umuOfferFor}<UmuInstallOffer />{/if}
         {/if}
 
         {#if gamesLoading}

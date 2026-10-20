@@ -23,6 +23,7 @@ use grid_core::launch::compat::{discover, which_on_path, CompatTool};
 use grid_core::launch::profiles::load_profiles;
 use grid_core::launch::selection::emulator_entry_by_name;
 use grid_core::launch::template::host_os;
+use grid_core::launch::umu::{self, UmuRunStatus};
 use grid_core::library::content::{
     content_availability as compute_availability, ContentAvailability, ContentKind,
 };
@@ -298,11 +299,13 @@ fn path_string(path: PathBuf) -> String {
 // --- compat tools -------------------------------------------------------------
 
 /// [`list_compat_tools`]'s return shape: the discovered tools plus the
-/// configured default, so the picker can render and preselect in one call.
+/// configured default, so the picker can render and preselect in one call,
+/// and the umu-run a Proton launch would use (the pane's status line).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CompatToolsDto {
     pub tools: Vec<CompatTool>,
     pub default_tool: String,
+    pub umu_run: UmuRunStatus,
 }
 
 #[tauri::command]
@@ -317,9 +320,11 @@ pub async fn list_compat_tools() -> Result<CompatToolsDto, String> {
         let tools = discover(&home, &config.compat_tool_installs, host_os(), &|name| {
             which_on_path(name)
         });
+        let umu_run = umu::status(&|name| which_on_path(name), &config);
         Ok(CompatToolsDto {
             tools,
             default_tool: config.default_compat_tool,
+            umu_run,
         })
     })
     .await
@@ -362,6 +367,17 @@ pub async fn install_compat_tool(
     ensure_library_idle(&state)?;
     let install = state.install.as_ref().map_err(Clone::clone)?;
     install.install_compat_tool(source_id).await.map_err(err)
+}
+
+/// Queues GRID's own umu-launcher (Emulators › Compat tools, and the
+/// "Install umu-launcher" offer under a Proton launch error). Its Downloads
+/// row is a `compat_tool` one; a finished install fires
+/// `compat-tools-changed` through the compat-tools hook.
+#[tauri::command]
+pub async fn install_umu_launcher(state: State<'_, AppState>) -> Result<(), String> {
+    ensure_library_idle(&state)?;
+    let install = state.install.as_ref().map_err(Clone::clone)?;
+    install.install_umu_launcher().await.map_err(err)
 }
 
 // --- RPCS3 PS3 firmware -------------------------------------------------------

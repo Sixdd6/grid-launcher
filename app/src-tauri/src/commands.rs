@@ -27,7 +27,7 @@ use grid_core::launch::source::{allow_prerelease, resolve_source, str_field, Sou
 use grid_core::launch::spawn::{
     prepare_standalone_emulator_launch, spawn_standalone_emulator, wait_for_early_exit,
 };
-use grid_core::launch::{GameSession, LaunchService, SessionsSnapshot};
+use grid_core::launch::{GameSession, LaunchError, LaunchService, SessionsSnapshot};
 use grid_core::library::emulator_removal::remove_emulator_files;
 use grid_core::library::extract::is_extractable_archive;
 use grid_core::library::paths::{layout_version_for_library_path, library_root};
@@ -814,12 +814,41 @@ async fn installed_game_by_rom_id(
     Ok(games.into_iter().find(|g| g.rom_id == Some(rom_id)))
 }
 
+/// [`launch_game`]'s error: the message the user reads, plus a `code` the
+/// frontend can act on — `"umu_missing"` when a Proton launch found no
+/// umu-run (the launch error then offers to install umu-launcher), `""`
+/// for everything else.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LaunchCommandError {
+    pub code: &'static str,
+    pub message: String,
+}
+
+impl From<String> for LaunchCommandError {
+    fn from(message: String) -> Self {
+        Self { code: "", message }
+    }
+}
+
+impl From<LaunchError> for LaunchCommandError {
+    fn from(error: LaunchError) -> Self {
+        let code = match error {
+            LaunchError::UmuMissing => "umu_missing",
+            _ => "",
+        };
+        Self {
+            code,
+            message: err(error),
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn launch_game(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
     rom_id: i64,
-) -> Result<GameSession, String> {
+) -> Result<GameSession, LaunchCommandError> {
     ensure_library_idle(&state)?;
     // 9b: held until the session is registered, so a library move that
     // closes the gate meanwhile waits for this launch (and then refuses,
@@ -863,7 +892,7 @@ pub async fn launch_game(
             .await;
     }
 
-    let session = launch.launch(rom_id).await.map_err(err)?;
+    let session = launch.launch(rom_id).await?;
 
     // Session registration parity (cloud_mixin.py:2818-2842): stamp the
     // cloud sync-state session markers at spawn.
@@ -3232,5 +3261,30 @@ mod platform_firmware_tests {
         };
         let json = serde_json::to_string(&status).unwrap();
         assert_eq!(json, r#"{"file_count":4,"has_default_emulator":true}"#);
+    }
+}
+
+#[cfg(test)]
+mod launch_error_tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_umu_run_carries_its_code() {
+        let error = LaunchCommandError::from(LaunchError::UmuMissing);
+        assert_eq!(error.code, "umu_missing");
+        assert_eq!(error.message, LaunchError::UmuMissing.to_string());
+        let json = serde_json::to_value(&error).unwrap();
+        assert_eq!(json["code"], "umu_missing");
+        assert!(json["message"].as_str().unwrap().contains("umu-run"));
+    }
+
+    #[test]
+    fn every_other_error_has_a_blank_code() {
+        let validation = LaunchCommandError::from(LaunchError::Validation("bad".to_string()));
+        assert_eq!(validation.code, "");
+        assert_eq!(validation.message, "bad");
+        let busy = LaunchCommandError::from("The library is being moved.".to_string());
+        assert_eq!(busy.code, "");
+        assert_eq!(busy.message, "The library is being moved.");
     }
 }

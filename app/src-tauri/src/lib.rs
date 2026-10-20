@@ -591,6 +591,7 @@ pub fn run() {
             commands::specials::set_default_compat_tool,
             commands::specials::list_compat_tool_catalog,
             commands::specials::install_compat_tool,
+            commands::specials::install_umu_launcher,
             commands::specials::rpcs3_firmware_status,
             commands::specials::install_ps3_firmware,
             commands::specials::cancel_download_for_rom,
