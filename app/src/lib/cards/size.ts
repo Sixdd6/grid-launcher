@@ -47,10 +47,32 @@ export function cardSizeLabel(size: CardSize): string {
 export function columnsOf(grid: HTMLElement | null): number {
   const view = grid?.ownerDocument?.defaultView;
   if (!grid || !view) return 1;
-  const template = view.getComputedStyle(grid).gridTemplateColumns;
-  if (!template || template === 'none') return 1;
-  const tracks = template.trim().split(/\s+/).filter((t) => t.length > 0);
-  return Math.max(1, tracks.length);
+  const tracks = parseTracks(view.getComputedStyle(grid).gridTemplateColumns);
+  return tracks === null ? 1 : tracks.length;
+}
+
+/**
+ * The resolved track widths of a `grid-template-columns` value, in px, or
+ * `null` when it is not resolved to px tracks.
+ *
+ * A grid inside a `hidden` view has no layout, and its computed template
+ * is the specified `repeat(auto-fill, minmax(160px, 1fr))`. Split on spaces
+ * that reads as three tracks, so anything that is not a plain px length
+ * makes the whole value unresolved.
+ */
+export function parseTracks(template: string | null | undefined): number[] | null {
+  if (!template || template === 'none') return null;
+  const parts = template.trim().split(/\s+/).filter((t) => t.length > 0);
+  if (parts.length === 0) return null;
+  const tracks: number[] = [];
+  for (const part of parts) {
+    const match = /^(\d+(?:\.\d+)?)px$/.exec(part);
+    if (!match) return null;
+    const px = Number(match[1]);
+    if (!(px > 0)) return null;
+    tracks.push(px);
+  }
+  return tracks;
 }
 
 /**
@@ -60,6 +82,10 @@ export function columnsOf(grid: HTMLElement | null): number {
  * itself, so rows stay even and no box art is cropped.
  */
 export const CARD_COVER_RATIO = '3 / 4';
+
+/** The same ratio as a number, width over height, for the windowed grid's
+ *  row arithmetic (`window.ts`). */
+export const CARD_COVER_ASPECT = 3 / 4;
 
 /** The one-line title strip under the cover, in px. */
 export const TITLE_ROW_HEIGHT_PX = 22;

@@ -11,6 +11,7 @@ import {
   cardSizeLabel,
   columnsOf,
   gridTemplate,
+  parseTracks,
   normalizeCardSize,
 } from './size';
 
@@ -67,6 +68,29 @@ describe('columnsOf', () => {
       },
     } as unknown as HTMLElement;
     expect(columnsOf(fake)).toBe(1);
+  });
+  it('is 1 for a grid in a hidden view, whose template never resolved', () => {
+    // A `hidden` view has no layout, so the computed value is the specified
+    // template: split on spaces it would read as three tracks.
+    const fake = {
+      ownerDocument: {
+        defaultView: { getComputedStyle: () => ({ gridTemplateColumns: gridTemplate('medium') }) },
+      },
+    } as unknown as HTMLElement;
+    expect(columnsOf(fake)).toBe(1);
+  });
+});
+
+describe('parseTracks', () => {
+  it('reads resolved px tracks, fractions included', () => {
+    expect(parseTracks('188.25px 188.25px 188.25px')).toEqual([188.25, 188.25, 188.25]);
+  });
+  it('is null for no layout, a hidden grid and an unresolved template', () => {
+    expect(parseTracks('')).toBe(null);
+    expect(parseTracks(undefined)).toBe(null);
+    expect(parseTracks('none')).toBe(null);
+    expect(parseTracks(gridTemplate('small'))).toBe(null);
+    expect(parseTracks('0px')).toBe(null);
   });
 });
 
