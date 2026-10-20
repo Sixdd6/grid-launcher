@@ -46,6 +46,28 @@ Install the frontend dependencies once:
 
     cd app && npm ci
 
+## Build container
+
+`scripts/ctr.sh` runs Linux builds, the gate, the end-to-end suite and the AppImage bundle
+in a rootless Podman container (Ubuntu 24.04, the CI distribution), capped at 4 CPUs and
+8 GB and run at low priority, so the desktop stays usable. The only host requirement is
+Podman.
+
+    scripts/ctr.sh build             # build the image (localhost/grid-launcher-build)
+    scripts/ctr.sh gate              # the gate below, in its order
+    scripts/ctr.sh e2e [groups...]   # scripts/e2e.sh; E2E_* variables pass through
+    scripts/ctr.sh appimage 0.9.7    # AppImage bundle, copied to ctr-out/
+    scripts/ctr.sh run <cmd...>      # any command, cwd = the repo
+    scripts/ctr.sh shell             # interactive shell
+    scripts/ctr.sh clean [--all]     # drop this checkout's volumes (--all: caches too)
+
+`CTR_CPUS` and `CTR_MEMORY` (e.g. `2`, `4g`) can lower the cap, never raise it. Only one
+grid-launcher container runs at a time; another call waits for the lock. Only the repo is
+mounted. `target/`, `app/node_modules` and `e2e/node_modules` are Podman volumes per
+checkout, so a container build never mixes with a host build in the same tree. The cargo
+and npm caches are shared volumes. Commit from the host; the container only builds and
+tests.
+
 ## Develop
 
     cd app && npx tauri dev
