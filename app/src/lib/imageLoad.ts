@@ -48,8 +48,8 @@ export type LoadSlot = {
   /** Frees the slot, or withdraws it from the queue if it was not granted
    *  yet. Safe to call more than once. */
   release: () => void;
-  /** Moves a waiting slot between the near and far lanes. No effect once
-   *  the slot is granted or released. */
+  /** Moves a waiting slot between the near and far lanes, to the back of
+   *  its new lane. No effect once the slot is granted or released. */
   setPriority: (priority: LoadPriority) => void;
 };
 
@@ -61,38 +61,48 @@ export type LoadLimiter = {
   waiting: () => number;
 };
 
-type Entry = { priority: LoadPriority; grant: () => void };
+type Entry = { grant: () => void };
 
 /**
  * A two-lane limiter. At most `max` slots are granted at once, and at most
  * `maxFar` of them to far slots. A waiting near slot always goes before a
- * waiting far one; within a lane, slots go in the order they were acquired.
+ * waiting far one; within a lane, slots go in the order they joined it.
+ *
+ * Each lane is an insertion-ordered `Set`, so joining, leaving, switching
+ * lanes and taking the next slot are all constant time: a 2500-game grid
+ * switches hundreds of slots per scroll step, and a scan of the whole queue
+ * on each switch stalled the page after a scroll.
  */
 export function createLoadLimiter(max: number, maxFar: number = max): LoadLimiter {
   let active = 0;
   let activeFar = 0;
-  const queue: Entry[] = [];
+  const lanes: Record<LoadPriority, Set<Entry>> = { near: new Set(), far: new Set() };
+
+  function take(lane: Set<Entry>): Entry | undefined {
+    const first = lane.values().next();
+    if (first.done) return undefined;
+    lane.delete(first.value);
+    return first.value;
+  }
 
   function pump(): void {
     while (active < max) {
-      let i = queue.findIndex((e) => e.priority === 'near');
-      if (i === -1 && activeFar < maxFar) i = queue.findIndex((e) => e.priority === 'far');
-      if (i === -1) return;
-      const [entry] = queue.splice(i, 1);
+      const entry = take(lanes.near) ?? (activeFar < maxFar ? take(lanes.far) : undefined);
+      if (!entry) return;
       entry.grant();
     }
   }
 
   function acquire(priority: LoadPriority = 'near'): LoadSlot {
     let state: 'waiting' | 'granted' | 'released' = 'waiting';
+    let lane = priority;
     let grantedFar = false;
     let resolve!: () => void;
     const ready = new Promise<void>((r) => (resolve = r));
     const entry: Entry = {
-      priority,
       grant: () => {
         state = 'granted';
-        grantedFar = entry.priority === 'far';
+        grantedFar = lane === 'far';
         active += 1;
         if (grantedFar) activeFar += 1;
         resolve();
@@ -101,10 +111,8 @@ export function createLoadLimiter(max: number, maxFar: number = max): LoadLimite
 
     function release(): void {
       if (state === 'released') return;
-      if (state === 'waiting') {
-        const i = queue.indexOf(entry);
-        if (i !== -1) queue.splice(i, 1);
-      } else {
+      if (state === 'waiting') lanes[lane].delete(entry);
+      else {
         active -= 1;
         if (grantedFar) activeFar -= 1;
       }
@@ -113,17 +121,23 @@ export function createLoadLimiter(max: number, maxFar: number = max): LoadLimite
     }
 
     function setPriority(next: LoadPriority): void {
-      if (state !== 'waiting' || entry.priority === next) return;
-      entry.priority = next;
+      if (state !== 'waiting' || lane === next) return;
+      lanes[lane].delete(entry);
+      lane = next;
+      lanes[lane].add(entry);
       pump();
     }
 
-    queue.push(entry);
+    lanes[lane].add(entry);
     pump();
     return { ready, release, setPriority };
   }
 
-  return { acquire, active: () => active, waiting: () => queue.length };
+  return {
+    acquire,
+    active: () => active,
+    waiting: () => lanes.near.size + lanes.far.size,
+  };
 }
 
 /** The one limiter every `Image.svelte` shares. */
