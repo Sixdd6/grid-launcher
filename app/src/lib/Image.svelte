@@ -2,6 +2,7 @@
   import { fileSrc } from './fileSrc';
   import { api } from './api';
   import { imagePaths, startImageLoad, watchNear, type LoadSlot } from './imageLoad';
+  import { leavesLetterbox } from './letterbox';
 
   let {
     url,
@@ -97,8 +98,21 @@
     };
   });
 
-  function handleImgLoad() {
+  /** Whether the loaded cover leaves bars for the backdrop to fill. False
+   *  until it has loaded: a backdrop behind art that fills its frame is never
+   *  seen, and it is the most expensive thing a card paints (`letterbox.ts`). */
+  let letterboxed = $state(false);
+
+  $effect(() => {
+    void url;
+    letterboxed = false;
+  });
+
+  function handleImgLoad(e: Event) {
     slot?.release();
+    if (!backdrop) return;
+    const img = e.currentTarget as HTMLImageElement;
+    letterboxed = leavesLetterbox(img.naturalWidth, img.naturalHeight, img.clientWidth, img.clientHeight);
   }
 
   function handleImgError() {
@@ -131,7 +145,7 @@
        most a dozen images at once, the ones near the visible area first
        (`imageLoad.ts`) — fetching all of a 2000-game platform at open
        exhausted the web process's file descriptors. -->
-  {#if backdrop}
+  {#if backdrop && letterboxed}
     <img
       class="backdrop"
       src={src}

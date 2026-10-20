@@ -177,7 +177,9 @@
   /* The user's review choice ("option B"): the frame stays 3:4 so rows
      stay even, the whole cover fits inside it, and a blurred, dimmed copy
      of the same cover fills the letterbox for square (PS1) and wide
-     (Genesis) art instead of cropping their sides. */
+     (Genesis) art instead of cropping their sides. Only then: behind a
+     cover that fills the frame it would never be seen, so `Image.svelte`
+     draws it only for art that leaves bars (`letterbox.ts`). */
   .cover :global(img) {
     position: relative;
     width: 100%;
