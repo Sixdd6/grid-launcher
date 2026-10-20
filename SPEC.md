@@ -84,7 +84,13 @@ There are several main sections to the application with buttons across the top b
   (name, executable path, arguments, with the profile auto-fill); **Platform defaults**
   shows one card per server platform with the emulator select (only compatible
   emulators, plus "(none)") and, for a RetroArch default, the core select; **Compat
-  tools** (Linux only) is the wine/proton default picker and its install catalog. Each
+  tools** (Linux only) is the wine/proton default picker and its install catalog, plus a
+  umu-run line: which umu-run a Proton launch uses ("system" with its path, "GRID-managed"
+  with its release, or "not installed"), with Install (none installed) or Reinstall (GRID's
+  copy; fetches the newest release), busy while its Downloads row runs, and a note that the
+  first Proton launch downloads the Steam Linux Runtime (about 200 MB). Installing a Proton
+  tool while no umu-run is available also queues umu-launcher as its own Downloads row; its
+  failure never fails the Proton install. Each
   emulator entry includes a name, executable path, launch arguments, save strategy,
   ignore rules, and optional custom save/state directories.
 - **Settings** is a rail of six panes: **Connection** (server URL, user, whether a
@@ -262,6 +268,8 @@ For installed native games, the details view should expose a game settings dialo
 - set custom launch parameters for that specific game
 
 Valid launch targets should include `.exe`, `.bat`, `.cmd`, `.ps1`, and `.sh` files where relevant. On Windows, a `.bat`/`.cmd` starts through cmd.exe and a `.ps1` through `powershell.exe -NoProfile -ExecutionPolicy Bypass -File`; on Linux, a `.sh` starts through its shebang (the install sets its execute bit).
+
+On Linux, a Windows game whose compat tool is a Proton install runs through `umu-run` with `PROTONPATH` set to that tool. The launch uses a system `umu-run` on `PATH` first, else GRID's own copy: the upstream umu-launcher zipapp, downloaded into the managed compat-tools folder (one shared copy, checked against the release's published SHA-256 digest; a mismatch fails the install and deletes the download). GRID's copy is a Python program, so its launch first checks that `python3` is 3.10 or newer and otherwise fails with a message saying so. With no umu-run at all, the launch fails with "umu-run is not installed…" and the Library, Server and Details launch errors offer **Install umu-launcher**, which queues the same install; the player launches again when it finishes. GRID never updates its copy on its own.
 
 #### Launch info in `game.json`
 A native game's RomM entry can list a `game.json` file next to the archive. Besides its metadata (`version`, `year`, `tags`, `included_dlc`), it can carry an optional `launch` section:

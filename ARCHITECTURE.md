@@ -46,7 +46,10 @@ Modules as declared in `src/lib.rs`:
   parsed struct has no field for one.
 - `launch` — the launch core: emulator profiles and the install catalog, forge
   (GitHub/direct) downloads, argument templates, emulator selection per platform, native
-  (Windows) launch and compat tools, process spawn and session tracking.
+  (Windows) launch and compat tools, process spawn and session tracking. `launch::umu`
+  owns umu-run: the system-then-managed lookup, the managed copy's install directory and
+  forge source, its config record (`Config.umu_launcher`) and the python3 >= 3.10 check;
+  `InstallService::install_umu_launcher` installs it.
 - `library` — the install pipeline: download queue, extraction, path rules, launch-file
   selection, the SQLite registry, platform rules, install specials (PS3, extra content),
   update detection, and `relink` (Q4: links installed rows that have no server ROM id
