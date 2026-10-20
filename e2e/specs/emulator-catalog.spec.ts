@@ -578,4 +578,52 @@ describe('emulator-catalog', () => {
     }
     await expect($(testId('emu-catalog-installed-PCSX2-pcsx2'))).not.toExist();
   });
+
+  it("installs GRID's own umu-launcher from the Compat tools pane", async () => {
+    // The previous case leaves Emulators in front on the catalog pane.
+    await openEmulators();
+    await showPage('compat');
+    const status = $(testId('compat-umu-status'));
+    await status.waitForDisplayed({
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the Compat tools pane never showed its umu-run line',
+    });
+    const before = await status.getText();
+    if (before.includes('system')) {
+      // A host with its own umu-run reports it, and a launch would never
+      // reach GRID's copy, so there is nothing to install here.
+      console.log(`emulator-catalog: skipping the umu-launcher install, the host has one (${before})`);
+      return;
+    }
+    expect(before).toBe('umu-run: not installed');
+
+    const install = $(testId('compat-umu-install'));
+    expect(await install.getText()).toBe('Install');
+    await install.click();
+
+    await browser.waitUntil(async () => (await status.getText()) === 'umu-run: GRID-managed 1.4.4-e2e', {
+      timeout: EMULATOR_INSTALL_TIMEOUT,
+      timeoutMsg: 'the umu-run line never reported the GRID-managed copy',
+    });
+    await browser.waitUntil(async () => (await install.getText()) === 'Reinstall', {
+      timeout: TRANSITION_TIMEOUT,
+      timeoutMsg: 'the umu-run button never became Reinstall',
+    });
+
+    // The managed copy: under the compat-tools root, executable, recorded
+    // in config with the resolved tag, and the forge's own stub bytes.
+    const umuRun = path.join(dataDir(), 'compat-tools', 'umu-launcher', 'umu', 'umu-run');
+    expect(existsSync(umuRun)).toBe(true);
+    expect(statSync(umuRun).mode & 0o111).toBe(0o111);
+    expect(readFileSync(umuRun, 'utf-8')).toContain('mock forge stub: umu-run');
+    await waitForConfigLine('[umu_launcher]');
+    expect(readFileSync(configPath(), 'utf-8')).toContain('release_tag = "1.4.4-e2e"');
+
+    const log = readForgeLog();
+    expect(log).toContain('/api.github.com/repos/Open-Wine-Components/umu-launcher/releases/latest');
+    expect(log).toContain(
+      '/github.com/Open-Wine-Components/umu-launcher/releases/download/1.4.4-e2e/umu-launcher-1.4.4-e2e-zipapp.tar',
+    );
+    expect(log).not.toContain('AUTH-HEADER-SEEN');
+  });
 });

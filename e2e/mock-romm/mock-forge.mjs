@@ -18,6 +18,10 @@
 //   /github.com/PCSX2/pcsx2/releases/download/…AppImage → the AppImage stub
 //   /redream.io/download                                → the download page
 //   /redream.io/download/redream.x86_64-linux-…tar.gz   → the tar.gz stub
+//   /api.github.com/repos/Open-Wine-Components/umu-launcher/releases/latest
+//                                                       → release JSON (with digest)
+//   /github.com/Open-Wine-Components/umu-launcher/releases/download/…zipapp.tar
+//                                                       → the zipapp tar stub
 //
 // Plus one control route, mirroring the RomM mock's `POST /__e2e__/offline`:
 //   POST /__e2e__/pcsx2-release/updated → from here on, PCSX2's
@@ -43,8 +47,9 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { appendFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 
-import { buildTarGz } from "./archives.mjs";
+import { buildTar, buildTarGz } from "./archives.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -142,6 +147,50 @@ export const REDREAM_MEMBER_BYTES = stubEmulatorScript("redream");
 export const REDREAM_TAR_GZ_BYTES = buildTarGz([
   { name: REDREAM_MEMBER_NAME, data: REDREAM_MEMBER_BYTES, mode: 0o755 },
 ]);
+
+/**
+ * umu-launcher's zipapp release, for the Compat tools pane's Install
+ * (grid-core `launch::umu`). The tarball holds `umu/umu-run` the way the
+ * upstream one does, written WITHOUT its executable bit so the install's
+ * own `make_executable` is what makes it runnable. The release carries a
+ * real `digest` of these bytes, so the install's SHA-256 check passes.
+ */
+export const UMU_TAG = "1.4.4-e2e";
+export const UMU_ASSET_NAME = `umu-launcher-${UMU_TAG}-zipapp.tar`;
+export const UMU_RELEASE_PATH =
+  "/api.github.com/repos/Open-Wine-Components/umu-launcher/releases/latest";
+export const UMU_DOWNLOAD_URL = `https://github.com/Open-Wine-Components/umu-launcher/releases/download/${UMU_TAG}/${UMU_ASSET_NAME}`;
+export const UMU_DOWNLOAD_PATH = `/github.com/Open-Wine-Components/umu-launcher/releases/download/${UMU_TAG}/${UMU_ASSET_NAME}`;
+export const UMU_TAR_BYTES = buildTar([
+  {
+    name: "umu/umu-run",
+    data: Buffer.from(
+      "#!/usr/bin/env python3\n# grid-launcher e2e mock forge stub: umu-run\n",
+      "utf8",
+    ),
+    mode: 0o644,
+  },
+]);
+export const UMU_DIGEST = `sha256:${createHash("sha256").update(UMU_TAR_BYTES).digest("hex")}`;
+
+/** The GitHub "latest release" payload for umu-launcher. */
+export function umuRelease() {
+  return {
+    tag_name: UMU_TAG,
+    name: UMU_TAG,
+    draft: false,
+    prerelease: false,
+    assets: [
+      {
+        name: UMU_ASSET_NAME,
+        browser_download_url: UMU_DOWNLOAD_URL,
+        size: UMU_TAR_BYTES.length,
+        state: "uploaded",
+        digest: UMU_DIGEST,
+      },
+    ],
+  };
+}
 
 /**
  * The GitHub "latest release" payload for PCSX2. `updated` serves the
@@ -264,6 +313,16 @@ function handleRequest(req, res, state) {
 
   if (req.method === "GET" && pathname === REDREAM_DOWNLOAD_PATH) {
     sendBuffer(res, 200, "application/gzip", REDREAM_TAR_GZ_BYTES);
+    return;
+  }
+
+  if (req.method === "GET" && pathname === UMU_RELEASE_PATH) {
+    sendJson(res, 200, umuRelease());
+    return;
+  }
+
+  if (req.method === "GET" && pathname === UMU_DOWNLOAD_PATH) {
+    sendBuffer(res, 200, "application/x-tar", UMU_TAR_BYTES);
     return;
   }
 

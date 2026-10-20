@@ -14,6 +14,7 @@ import path from "node:path";
 import os from "node:os";
 import zlib from "node:zlib";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 import {
   ARGV_FILE_ENV,
@@ -35,6 +36,12 @@ import {
   REDREAM_MEMBER_NAME,
   REDREAM_PAGE_PATH,
   startMockForge,
+  UMU_ASSET_NAME,
+  UMU_DIGEST,
+  UMU_DOWNLOAD_PATH,
+  UMU_DOWNLOAD_URL,
+  UMU_RELEASE_PATH,
+  UMU_TAG,
 } from "./mock-forge.mjs";
 import { TAR_BLOCK_BYTES } from "./archives.mjs";
 
@@ -252,5 +259,29 @@ test("POST /__e2e__/pcsx2-release/updated serves a newer PCSX2 release", async (
     assert.deepEqual(body, PCSX2_UPDATED_APPIMAGE_BYTES);
     // Still the same stub contract: it records its argv and stays alive.
     assert.match(body.toString("utf8"), /mock forge stub: pcsx2/);
+  });
+});
+
+// --- umu-launcher -------------------------------------------------------------
+
+test("serves umu-launcher's zipapp release with a digest of the served bytes", async () => {
+  await withForge(async ({ url }) => {
+    const release = await (await fetch(`${url}${UMU_RELEASE_PATH}`)).json();
+    assert.equal(release.tag_name, UMU_TAG);
+    assert.equal(release.assets.length, 1);
+    const [asset] = release.assets;
+    assert.equal(asset.name, UMU_ASSET_NAME);
+    assert.match(asset.name, /^umu-launcher-.*-zipapp\.tar$/);
+    assert.equal(asset.browser_download_url, UMU_DOWNLOAD_URL);
+    assert.equal(asset.digest, UMU_DIGEST);
+
+    const response = await fetch(`${url}${UMU_DOWNLOAD_PATH}`);
+    assert.equal(response.status, 200);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    assert.equal(bytes.length, asset.size);
+    assert.equal(`sha256:${createHash("sha256").update(bytes).digest("hex")}`, asset.digest);
+    // A plain (uncompressed) ustar archive whose first member is umu/umu-run.
+    assert.equal(bytes.subarray(0, 11).toString("utf8"), "umu/umu-run");
+    assert.equal(bytes.subarray(257, 262).toString("ascii"), "ustar");
   });
 });
