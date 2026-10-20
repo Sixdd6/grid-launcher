@@ -1,7 +1,7 @@
 <script lang="ts">
   import { fileSrc } from './fileSrc';
   import { api } from './api';
-  import { imageLoads, whenNear } from './imageLoad';
+  import { imageLoads, watchNear, type LoadSlot } from './imageLoad';
 
   let {
     url,
@@ -32,21 +32,22 @@
    */
   let status = $state<'loading' | 'error' | 'ready'>('loading');
 
-  // The skeleton, watched until it comes near the visible area: nothing is
-  // fetched before then (`imageLoad.ts` has why). Once near, it stays near —
-  // a later `url` change on the same element loads straight away.
+  // The skeleton, watched while it waits: its slot is near-priority while
+  // the skeleton is near the visible area and far otherwise (`imageLoad.ts`
+  // has why). It unmounts once the image is ready, which ends the watch.
   let skeletonEl = $state<HTMLElement | null>(null);
-  let near = $state(false);
+
+  /** This url's load slot. Held from the `ensure_image` call until the
+   *  `<img>` has loaded or failed, so the bound covers the asset request as
+   *  well as the IPC call. Raw: the limiter owns it, nothing renders it. */
+  let slot = $state.raw<LoadSlot | null>(null);
 
   $effect(() => {
-    if (near || !skeletonEl) return;
-    return whenNear(skeletonEl, () => (near = true));
+    const current = slot;
+    const el = skeletonEl;
+    if (!current || !el) return;
+    return watchNear(el, (near) => current.setPriority(near ? 'near' : 'far'));
   });
-
-  /** Frees this image's load slot. Held from the `ensure_image` call until
-   *  the `<img>` has loaded or failed, so the bound covers the asset request
-   *  as well as the IPC call. */
-  let releaseSlot: (() => void) | null = null;
 
   $effect(() => {
     let cancelled = false;
@@ -54,10 +55,12 @@
     // A null/blank url has nothing in flight, so it is `error` (the caller's
     // placeholder text), never a skeleton that would shimmer forever.
     status = url ? 'loading' : 'error';
-    if (!url || !near) return;
-    const slot = imageLoads.acquire();
-    releaseSlot = slot.release;
-    slot.ready
+    if (!url) return;
+    // Far until the watch above says otherwise: an image that mounts off
+    // screen must not go ahead of the ones on it.
+    const own = imageLoads.acquire('far');
+    slot = own;
+    own.ready
       .then(() => api.ensureImage(url))
       .then((path) => {
         if (cancelled) return;
@@ -67,23 +70,23 @@
       .catch(() => {
         // offline/missing image: the caller decides whether to keep showing
         // the placeholder (covers) or drop the tile entirely (screenshots)
-        slot.release();
+        own.release();
         if (cancelled) return;
         status = 'error';
         onerror?.();
       });
     return () => {
       cancelled = true;
-      slot.release();
+      own.release();
     };
   });
 
   function handleImgLoad() {
-    releaseSlot?.();
+    slot?.release();
   }
 
   function handleImgError() {
-    releaseSlot?.();
+    slot?.release();
     src = null;
     status = 'error';
     onerror?.();
@@ -100,10 +103,10 @@
        opened 302-card platform averaged 84 ms per frame with 27 frames over
        50 ms; eager + `decoding="async"` makes it 28.6 ms with none, the same
        as a warm second pass. Decoding asynchronously keeps the open off the
-       main thread. What loads is bounded before this tag ever mounts: only
-       images near the visible area, at most a dozen at once (`imageLoad.ts`)
-       — fetching all of a 2000-game platform at open exhausted the web
-       process's file descriptors. -->
+       main thread. What loads is bounded before this tag ever mounts: at
+       most a dozen images at once, the ones near the visible area first
+       (`imageLoad.ts`) — fetching all of a 2000-game platform at open
+       exhausted the web process's file descriptors. -->
   {#if backdrop}
     <img
       class="backdrop"

@@ -3,8 +3,9 @@ import {
   createLoadLimiter,
   IMAGE_NEAR_MARGIN,
   MAX_CONCURRENT_IMAGE_LOADS,
+  MAX_FAR_IMAGE_LOADS,
   resetNearWatchesForTest,
-  whenNear,
+  watchNear,
 } from './imageLoad';
 
 /** Lets every resolved promise's callbacks run. */
@@ -61,6 +62,74 @@ describe('createLoadLimiter', () => {
   it('keeps the shared limit well under a file-descriptor limit', () => {
     expect(MAX_CONCURRENT_IMAGE_LOADS).toBeGreaterThan(0);
     expect(MAX_CONCURRENT_IMAGE_LOADS).toBeLessThanOrEqual(32);
+    expect(MAX_FAR_IMAGE_LOADS).toBeLessThan(MAX_CONCURRENT_IMAGE_LOADS);
+  });
+});
+
+describe('createLoadLimiter lanes', () => {
+  /** Acquires `priority` slots tagged with `name`, recording grant order. */
+  function track(limiter: ReturnType<typeof createLoadLimiter>, granted: string[]) {
+    return (name: string, priority: 'near' | 'far') => {
+      const slot = limiter.acquire(priority);
+      void slot.ready.then(() => granted.push(name));
+      return slot;
+    };
+  }
+
+  it('serves every waiting near slot before any far one', async () => {
+    const limiter = createLoadLimiter(1, 1);
+    const granted: string[] = [];
+    const take = track(limiter, granted);
+    const first = take('first', 'near');
+    take('far-a', 'far');
+    take('near-b', 'near');
+    first.release();
+    await flush();
+    expect(granted).toEqual(['first', 'near-b']);
+  });
+
+  it('grants at most maxFar far slots, leaving the rest for near ones', async () => {
+    const limiter = createLoadLimiter(4, 2);
+    const granted: string[] = [];
+    const take = track(limiter, granted);
+    ['f1', 'f2', 'f3'].forEach((n) => take(n, 'far'));
+    await flush();
+    expect(granted).toEqual(['f1', 'f2']);
+    take('n1', 'near');
+    take('n2', 'near');
+    await flush();
+    expect(granted).toEqual(['f1', 'f2', 'n1', 'n2']);
+    expect(limiter.waiting()).toBe(1);
+  });
+
+  it('moves a waiting slot between lanes as it comes near and leaves', async () => {
+    const limiter = createLoadLimiter(1, 0);
+    const granted: string[] = [];
+    const take = track(limiter, granted);
+    const blocker = take('blocker', 'near');
+    const passed = take('passed', 'near');
+    const onScreen = take('on-screen', 'near');
+    // Scrolled past before its turn: it drops behind what is on screen.
+    passed.setPriority('far');
+    blocker.release();
+    await flush();
+    expect(granted).toEqual(['blocker', 'on-screen']);
+
+    // Back in view: near again, and next once a slot frees (no far lane
+    // here, so as a far slot it would never be served).
+    passed.setPriority('near');
+    onScreen.release();
+    await flush();
+    expect(granted).toEqual(['blocker', 'on-screen', 'passed']);
+  });
+
+  it('ignores a priority change once granted', async () => {
+    const limiter = createLoadLimiter(1, 1);
+    const slot = limiter.acquire('far');
+    slot.setPriority('near');
+    limiter.acquire('far');
+    slot.release();
+    expect(limiter.active()).toBe(1);
   });
 });
 
@@ -99,7 +168,7 @@ class StubObserver {
   }
 }
 
-describe('whenNear', () => {
+describe('watchNear', () => {
   const original = Reflect.get(globalThis, 'IntersectionObserver');
   // `scrollParent` walks `parentElement`; a stand-in with none has no
   // scrolling ancestor, so the root is the viewport (`null`).
@@ -117,40 +186,39 @@ describe('whenNear', () => {
     else Reflect.set(globalThis, 'IntersectionObserver', original);
   });
 
-  it('calls back once the element comes near, then stops watching it', () => {
+  it('reports every change of nearness, with the near margin', () => {
     const target = el();
-    const onNear = vi.fn();
-    whenNear(target, onNear);
+    const onChange = vi.fn();
+    watchNear(target, onChange);
     const observer = StubObserver.instances[0];
     expect(observer.options?.rootMargin).toBe(IMAGE_NEAR_MARGIN);
 
-    observer.enter(target, false);
-    expect(onNear).not.toHaveBeenCalled();
     observer.enter(target);
-    expect(onNear).toHaveBeenCalledTimes(1);
-    expect(observer.targets).not.toContain(target);
+    observer.enter(target, false);
+    observer.enter(target);
+    expect(onChange.mock.calls).toEqual([[true], [false], [true]]);
   });
 
   it('shares one observer per scroll container', () => {
-    whenNear(el(), () => {});
-    whenNear(el(), () => {});
+    watchNear(el(), () => {});
+    watchNear(el(), () => {});
     expect(StubObserver.instances).toHaveLength(1);
     expect(StubObserver.instances[0].targets).toHaveLength(2);
   });
 
   it('stops watching when cancelled', () => {
     const target = el();
-    const onNear = vi.fn();
-    const stop = whenNear(target, onNear);
+    const onChange = vi.fn();
+    const stop = watchNear(target, onChange);
     stop();
     StubObserver.instances[0].enter(target);
-    expect(onNear).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
   });
 
-  it('calls back at once without IntersectionObserver', () => {
+  it('reports near at once without IntersectionObserver', () => {
     Reflect.deleteProperty(globalThis, 'IntersectionObserver');
-    const onNear = vi.fn();
-    whenNear(el(), onNear);
-    expect(onNear).toHaveBeenCalledTimes(1);
+    const onChange = vi.fn();
+    watchNear(el(), onChange);
+    expect(onChange.mock.calls).toEqual([[true]]);
   });
 });

@@ -79,6 +79,12 @@
 //
 // Standalone:
 //   node server.mjs --port 8931 [--throttle-ms 100] [--fixtures-dir ../fixtures-x]
+//                   [--cover-delay-ms 40]
+//
+// `--cover-delay-ms` (`coverDelayMs`) holds every cover response that long
+// before answering, like a remote RomM: the `large-platform` group needs
+// cover downloads that take real time, or a queue that serves the wrong
+// cards first would still look instant against a local mock.
 //
 // `--fixtures-dir` exposes the library API's existing `fixturesDir` option on
 // the command line (relative paths resolve against the process's working
@@ -758,6 +764,9 @@ async function handleRequest(req, res, state) {
   // Static-style cover/screenshot asset: not under /api, no auth required —
   // mirrors RomM serving these images directly off disk.
   if (req.method === "GET" && (COVER_PATH_RE.test(pathname) || SCREENSHOT_PATH_RE.test(pathname))) {
+    if (state.coverDelayMs > 0 && COVER_PATH_RE.test(pathname)) {
+      await new Promise((resolve) => setTimeout(resolve, state.coverDelayMs));
+    }
     sendBuffer(res, 200, "image/png", state.pngBytes);
     return;
   }
@@ -1026,16 +1035,18 @@ async function handleRequest(req, res, state) {
 /**
  * Starts the mock RomM server.
  *
- * @param {{port?: number, fixturesDir?: string, defaultThrottleMs?: number}} [options]
+ * @param {{port?: number, fixturesDir?: string, defaultThrottleMs?: number, coverDelayMs?: number}} [options]
  * @returns {Promise<{port: number, url: string, close: () => Promise<void>, requestLog: Array<{method: string, path: string}>}>}
  */
 export async function startMockRomm({
   port = 0,
   fixturesDir = DEFAULT_FIXTURES_DIR,
   defaultThrottleMs = 0,
+  coverDelayMs = 0,
 } = {}) {
   const state = await loadFixtures(fixturesDir);
   state.requestLog = [];
+  state.coverDelayMs = coverDelayMs;
   // Server-wide fallback used when a content request carries no explicit
   // ?e2e_throttle=: set by e2e.sh for the `downloads` stage group only, so
   // every content download made through this instance is throttled without
@@ -1107,6 +1118,7 @@ if (isMainModule()) {
   const args = process.argv.slice(2);
   let port = 0;
   let defaultThrottleMs = 0;
+  let coverDelayMs = 0;
   let fixturesDir = DEFAULT_FIXTURES_DIR;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port" && args[i + 1]) {
@@ -1115,13 +1127,16 @@ if (isMainModule()) {
     } else if (args[i] === "--throttle-ms" && args[i + 1]) {
       defaultThrottleMs = Number(args[i + 1]);
       i++;
+    } else if (args[i] === "--cover-delay-ms" && args[i + 1]) {
+      coverDelayMs = Number(args[i + 1]);
+      i++;
     } else if (args[i] === "--fixtures-dir" && args[i + 1]) {
       fixturesDir = path.resolve(args[i + 1]);
       i++;
     }
   }
 
-  const handle = await startMockRomm({ port, defaultThrottleMs, fixturesDir });
+  const handle = await startMockRomm({ port, defaultThrottleMs, coverDelayMs, fixturesDir });
   console.log(`mock RomM server listening at ${handle.url}`);
 
   const shutdown = async () => {

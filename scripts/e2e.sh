@@ -468,8 +468,9 @@ mock_args_for_group() {
     # treats it as "no update".
     updates) printf -- '--fixtures-dir fixtures-updates' ;;
     # One "Arcade" platform of 2500 generated ROMs (`e2e_synthetic` in
-    # roms.json; see mock-romm/server.mjs).
-    large-platform) printf -- '--fixtures-dir fixtures-large-platform' ;;
+    # roms.json; see mock-romm/server.mjs), with covers that take 40ms each
+    # like a remote server's.
+    large-platform) printf -- '--fixtures-dir fixtures-large-platform --cover-delay-ms 40' ;;
     *) printf '' ;;
   esac
 }
