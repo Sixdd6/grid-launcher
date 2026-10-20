@@ -8,6 +8,7 @@ function card(missing: boolean | undefined) {
   return render(GameCard, {
     props: {
       testId: 'library-card-7',
+      index: 3,
       badgeId: 7,
       title: 'Mario',
       platform: 'SNES',
@@ -25,6 +26,12 @@ function card(missing: boolean | undefined) {
     },
   }).body;
 }
+
+describe('GameCard index', () => {
+  it('renders its position in the whole list as data-index, for the warmer', () => {
+    expect(card(false)).toContain('data-index="3"');
+  });
+});
 
 describe('GameCard missing badge (9c)', () => {
   it('shows the MISSING badge and a Locate… primary for a missing game', () => {

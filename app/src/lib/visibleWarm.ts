@@ -74,22 +74,36 @@ export function attachScrollGate(scroller: Element | Window): () => void {
 }
 
 export type VisibleWarmer = {
-  /** Observes every current child of `grid`. Call again after the list
-   *  changes: a refresh or a filter adds children this has never seen. */
+  /** Observes every current child of `grid` and stops watching the ones
+   *  that left it. Call again after the list changes (a refresh or a filter
+   *  adds children this has never seen) and after the windowed grid renders
+   *  a different range of cards. */
   observe: (grid: HTMLElement) => void;
   /** Stops watching everything. Call from the view's effect teardown. */
   disconnect: () => void;
 };
 
+/** The card's index in the view's whole list, from its `data-index`, or
+ *  `null` when it has none. The windowed grid renders a slice of the list,
+ *  so a card's position among the grid's children is not its index. */
+function indexOf(target: Element): number | null {
+  const raw = (target as HTMLElement).dataset?.index;
+  if (raw === undefined || raw === '') return null;
+  const index = Number(raw);
+  return Number.isInteger(index) && index >= 0 ? index : null;
+}
+
 /**
- * A warmer for one grid. `subjectAt` maps a child's position in the grid to
- * the game it renders — the view owns the list, so it owns that lookup — and
- * returns `null` when the index no longer names a row.
+ * A warmer for one grid. `subjectAt` maps a card's index in the view's list
+ * (its `data-index`) to the game it renders — the view owns the list, so it
+ * owns that lookup — and returns `null` when the index no longer names a
+ * row.
  *
  * Warming is once per element: the entry's target is unobserved as soon as
  * it has been warmed, so a card that scrolls in and out again costs nothing.
  * `warmBackground` de-duplicates a second time by URL, which covers the same
- * game appearing in two views.
+ * game appearing in two views, and a card the windowed grid unmounted and
+ * mounted again as a new element.
  */
 export function createVisibleWarmer(
   subjectAt: (index: number) => BackgroundSubject | null
@@ -102,17 +116,15 @@ export function createVisibleWarmer(
   }
 
   let observer: IntersectionObserver | null = null;
-  // The grid the entries' targets are children of, for the index lookup.
-  // Held rather than re-passed: the callback is the browser's to call.
-  let watched: HTMLElement | null = null;
+  // Every target being watched, so `observe` can let go of the cards the
+  // windowed grid unmounted: an observer holds its targets, detached or not.
+  const watching = new Set<Element>();
 
   function onEntries(entries: IntersectionObserverEntry[]): void {
-    const grid = watched;
-    if (grid === null) return;
     for (const entry of entries) {
       if (!entry.isIntersecting) continue;
-      const index = Array.prototype.indexOf.call(grid.children, entry.target);
-      if (index < 0) continue;
+      const index = indexOf(entry.target);
+      if (index === null) continue;
       const subject = subjectAt(index);
       if (subject === null) continue;
       // Stop watching only once the card is DEALT WITH. With the background
@@ -120,26 +132,35 @@ export function createVisibleWarmer(
       // warms for real if the setting comes back.
       if (!warmBackground(subject)) continue;
       observer?.unobserve(entry.target);
+      watching.delete(entry.target);
     }
   }
 
   function observe(grid: HTMLElement): void {
-    watched = grid;
     // `null` means the viewport, which is the right answer when nothing
     // between the grid and the document scrolls.
     observer ??= new IntersectionObserver(onEntries, {
       root: scrollParent(grid),
       rootMargin: WARM_ROOT_MARGIN,
     });
+    const children = new Set(Array.from(grid.children));
+    for (const target of watching) {
+      if (children.has(target)) continue;
+      observer.unobserve(target);
+      watching.delete(target);
+    }
     // `observe` on an element already being watched is a no-op per spec, so
     // re-running this after a refresh only picks up the new children.
-    for (const child of Array.from(grid.children)) observer.observe(child);
+    for (const child of children) {
+      observer.observe(child);
+      watching.add(child);
+    }
   }
 
   function disconnect(): void {
     observer?.disconnect();
     observer = null;
-    watched = null;
+    watching.clear();
   }
 
   return { observe, disconnect };

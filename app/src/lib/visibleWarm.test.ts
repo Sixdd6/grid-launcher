@@ -53,11 +53,16 @@ class StubObserver {
 
 const original = Reflect.get(globalThis, 'IntersectionObserver');
 
-/** Three childless stand-ins for cards: the warmer only ever compares them
- *  by identity against `grid.children`, so no DOM is needed. */
-function fakeGrid(count: number): { grid: HTMLElement; children: unknown[] } {
-  const children = Array.from({ length: count }, (_, i) => ({ card: i }));
+/** Childless stand-ins for cards: the warmer reads each one's `data-index`
+ *  and compares them by identity against `grid.children`, so no DOM is
+ *  needed. `first` is the first card's index in the view's whole list. */
+function fakeGrid(count: number, first = 0): { grid: HTMLElement; children: unknown[] } {
+  const children = Array.from({ length: count }, (_, i) => card(first + i));
   return { grid: { children, parentElement: null } as unknown as HTMLElement, children };
+}
+
+function card(index: number): unknown {
+  return { dataset: { index: String(index) } };
 }
 
 beforeEach(() => {
@@ -142,12 +147,44 @@ describe('createVisibleWarmer', () => {
     warmer.observe(grid);
 
     const first = [...children];
-    const extra = { card: 2 };
+    const extra = card(2);
     (grid.children as unknown as unknown[]).push(extra);
     warmer.observe(grid);
 
     expect(StubObserver.instances).toHaveLength(1);
     expect(StubObserver.instances[0].targets).toEqual([...first, extra]);
+  });
+
+  it('warms the subject at the card’s data-index, not its position', () => {
+    // The windowed grid renders a slice: its first child is card 40.
+    const { grid, children } = fakeGrid(3, 40);
+    createVisibleWarmer(subject).observe(grid);
+
+    StubObserver.instances[0].enter(children[1]);
+    expect(warmBackground).toHaveBeenCalledExactlyOnceWith(subject(41));
+  });
+
+  it('warms nothing for a child with no data-index', () => {
+    const grid = { children: [{ dataset: {} }], parentElement: null } as unknown as HTMLElement;
+    createVisibleWarmer(subject).observe(grid);
+
+    StubObserver.instances[0].enter(grid.children[0]);
+    expect(warmBackground).not.toHaveBeenCalled();
+  });
+
+  it('stops watching the cards the window unmounted and picks up the new ones', () => {
+    const { grid, children } = fakeGrid(3);
+    const warmer = createVisibleWarmer(subject);
+    warmer.observe(grid);
+
+    // Scrolled down: cards 0 and 1 unmounted, 3 and 4 mounted.
+    const kept = children[2];
+    const next = [card(3), card(4)];
+    (grid as unknown as { children: unknown[] }).children = [kept, ...next];
+    warmer.observe(grid);
+
+    expect(StubObserver.instances).toHaveLength(1);
+    expect(StubObserver.instances[0].targets).toEqual([kept, ...next]);
   });
 
   it('disconnects the observer when the view goes away', () => {

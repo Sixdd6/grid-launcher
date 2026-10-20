@@ -14,6 +14,7 @@
 
   let {
     testId,
+    index,
     badgeId,
     title,
     platform,
@@ -30,6 +31,10 @@
     onHoverEnd,
   }: {
     testId: string;
+    /** The card's position in the view's whole list, as `data-index`: the
+     *  windowed grid renders a slice, so the background warmer cannot use
+     *  the card's position among the grid's children (`visibleWarm.ts`). */
+    index: number;
     badgeId: string | number;
     title: string;
     platform: string;
@@ -64,6 +69,7 @@
 
 <div
   data-testid={testId}
+  data-index={index}
   class="card"
   class:focused
   onclick={onOpen}
@@ -135,7 +141,10 @@
     will-change: transform;
     /* No content-visibility: with real covers, laying out and painting each
        row as it scrolled in cost more per frame (64 ms) than painting every
-       card once at open (+100 ms for 300 cards). */
+       card once at open (+100 ms for 300 cards). What bounds the per-frame
+       cost now is `CardGrid`'s window: only the rows near the visible part
+       are in the DOM, so a 2000-game platform costs what a screenful does
+       (2026-10-20, `cards/window.ts`). */
   }
 
   /* D-UI-9: hover scales 1.05. Focus (arrow keys) uses the same

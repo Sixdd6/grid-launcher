@@ -363,6 +363,17 @@
     };
   });
 
+  $effect(() => {
+    // The windowed grid renders only the rows near the visible part, so a
+    // scroll swaps its children too. Re-observing picks up the new cards and
+    // lets go of the unmounted ones. No teardown: what is queued is still
+    // wanted, and the effect above owns the warmer's lifetime.
+    const el = grid?.element();
+    if (!el) return;
+    void grid?.range();
+    warmer.observe(el);
+  });
+
   /** The pointer only feeds the background while the overlay is closed —
    *  the details popup owns the art for as long as it is open — and only
    *  while the pointer IS the active input method: a card scrolling under a
@@ -386,7 +397,8 @@
   function moveSelection(action: NavDirection) {
     if (detailsGame) return; // grid navigation is suspended while the overlay is open
     focusIndex = moveFocus(focusIndex, action, grid?.columns() ?? 1, visible.length);
-    grid?.element()?.children[focusIndex]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    // The windowed grid may not have the card rendered; it scrolls to its row.
+    grid?.scrollToIndex(focusIndex);
   }
 
   function onKey(e: KeyboardEvent) {
@@ -559,10 +571,17 @@
               : `No games match “${search.trim()}”`}
           </p>
         {:else}
-          <CardGrid bind:this={grid} gridId="server-grid" size={uiSettings.cardSizeServer}>
-            {#each visible as game, i (game.id)}
+          <CardGrid
+            bind:this={grid}
+            gridId="server-grid"
+            size={uiSettings.cardSizeServer}
+            items={visible}
+            key={(game) => game.id}
+          >
+            {#snippet card(game, i)}
               <GameCard
                 testId={`game-card-${game.id}`}
+                index={i}
                 badgeId={game.id}
                 title={game.name}
                 platform={activePlatformName}
@@ -584,7 +603,7 @@
                 onHoverStart={() => hoverStart(game)}
                 onHoverEnd={hover.end}
               />
-            {/each}
+            {/snippet}
           </CardGrid>
         {/if}
       </div>
