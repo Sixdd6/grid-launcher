@@ -109,7 +109,15 @@ case "${1:-}" in
     ensure_image; podman_args
     locked podman run -it "${args[@]}" "$IMAGE" nice -n 19 bash ;;
   gate) in_ctr bash -c "$GATE" ;;
-  e2e) shift; in_ctr scripts/e2e.sh "$@" ;;
+  e2e)
+    shift
+    # e2e.sh installs dependencies only when a node_modules folder is missing, but here
+    # each one is a volume mount point and always exists; install into an empty volume.
+    in_ctr bash -c 'set -euo pipefail
+      for d in app e2e; do
+        [ -e "$d/node_modules/.package-lock.json" ] || (cd "$d" && npm ci --no-audit --no-fund)
+      done
+      exec scripts/e2e.sh "$@"' _ "$@" ;;
   appimage)
     version=${2:-0.0.0-dev}
     printf %s "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' \
