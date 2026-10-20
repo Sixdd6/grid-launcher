@@ -268,7 +268,7 @@
     border-radius: 6px;
     border: none;
     background: var(--accent);
-    color: #fff;
+    color: var(--on-primary);
     cursor: pointer;
     white-space: nowrap;
   }

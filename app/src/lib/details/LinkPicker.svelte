@@ -9,14 +9,9 @@
   // clamped rule the grids use, one column wide); ArrowUp on the first row
   // returns to the search box; Enter or Space on a row links it. Tab is
   // trapped inside the dialog and focus returns to the opener on close.
-  // Gamepad: `Shell.handleNav` offers every `nav` event to the open dialogs
-  // first (focus/dialogNav.ts). Up / down walk the search box and the rows,
-  // accept enters the list from the search box or links the focused row, back
-  // closes the picker. Nothing reaches the views underneath.
   import { api, type GameSummary } from '../api';
   import Icon from '../Icon.svelte';
   import { moveFocus } from '../focus/grid';
-  import { activateFocused, moveDialogFocus, registerDialog, type NavAction } from '../focus/dialogNav';
   import { linkCandidates } from './unlinked';
 
   let {
@@ -152,25 +147,6 @@
     }
     items[moveFocus(current, e.key === 'ArrowDown' ? 'down' : 'up', 1, items.length)].focus();
   }
-
-  /** A gamepad `nav` action, routed here while the picker is open. */
-  export function handleNav(action: NavAction): boolean {
-    if (action === 'back') {
-      onClose();
-      return true;
-    }
-    if (action === 'accept') {
-      if (document.activeElement === searchEl) {
-        rows()[0]?.focus();
-        return true;
-      }
-      return activateFocused(panelEl);
-    }
-    // The search box first, then the rows: the same walk the arrow keys make.
-    return moveDialogFocus([...(searchEl ? [searchEl] : []), ...rows()], action);
-  }
-
-  $effect(() => registerDialog(handleNav));
 
   function onBackdropClick(e: MouseEvent) {
     if (e.target === e.currentTarget) onClose();

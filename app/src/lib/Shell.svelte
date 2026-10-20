@@ -22,8 +22,6 @@
   import { noteInput, notePointerAt } from './stores/inputMode.svelte';
   import { pushToast } from './stores/toasts.svelte';
   import { chipLabel, hostOf, initialView, VIEWS, viewForDigit, viewLabel, type View } from './shell';
-  import type { NavDirection } from './focus/grid';
-  import { routeDialogNav } from './focus/dialogNav';
   // The same guard the grid views use for Ctrl+F: an accelerator must stay
   // out of the way while focus sits in a text-entry control (where
   // Ctrl+<n> can be an editor chord) or a modal dialog owns the screen and
@@ -35,20 +33,10 @@
   // views afterward is a user action — a pill, Ctrl+1..5, or `show()`.
   let view = $state<View>(initialView(session.connected));
 
-  let library = $state<ReturnType<typeof Library> | null>(null);
-  let server = $state<ReturnType<typeof Server> | null>(null);
   let settings = $state<ReturnType<typeof Settings> | null>(null);
   let emulators = $state<ReturnType<typeof Emulators> | null>(null);
   let serverMenuOpen = $state(false);
   let sessionEl = $state<HTMLElement | null>(null);
-
-  export function handleNav(action: NavDirection | 'accept' | 'back') {
-    // An open dialog (link picker, remove confirm, game settings) owns the
-    // gamepad: it gets the action and nothing reaches the view underneath.
-    if (routeDialogNav(action)) return;
-    if (view === 'library') library?.handleNav(action);
-    else if (view === 'server') server?.handleNav(action);
-  }
 
   /** Programmatic navigation, for the footer strip and the update badge. */
   export function show(next: View) {
@@ -234,7 +222,7 @@
      not: each view scrolls inside its own container, and a `display: none`
      subtree drops its scroll position. -->
 <div data-testid="library-view" class="view" hidden={view !== 'library'}>
-  <Library active={view === 'library'} bind:this={library} />
+  <Library active={view === 'library'} />
 </div>
 <div data-testid="server-view" class="view" hidden={view !== 'server'}>
   <Server
@@ -244,7 +232,6 @@
       view = 'emulators';
       emulators?.show('defaults');
     }}
-    bind:this={server}
   />
 </div>
 <div data-testid="downloads-view" class="view" hidden={view !== 'downloads'}>
@@ -332,7 +319,7 @@
 
   .pill.active {
     background: var(--primary);
-    color: #fff;
+    color: var(--on-primary);
   }
 
   .session {
@@ -383,7 +370,7 @@
     border-radius: var(--r-pill);
     border: none;
     background: var(--primary);
-    color: #fff;
+    color: var(--on-primary);
     cursor: pointer;
   }
 

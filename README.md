@@ -30,7 +30,7 @@ Emulators, Settings.
 - Covers, screenshots, descriptions and trailers, cached on disk so the library still
   renders when the server is unreachable.
 - RetroAchievements login, so a supported emulator starts already signed in.
-- Light and dark themes, following the OS by default. Gamepad navigation.
+- Light and dark themes, following the OS by default.
 
 ## Install
 

@@ -292,7 +292,7 @@
     border-radius: var(--r-chip);
     border: none;
     background: var(--primary);
-    color: #fff;
+    color: var(--on-primary);
     cursor: pointer;
     transition: background var(--m-fast) ease;
   }

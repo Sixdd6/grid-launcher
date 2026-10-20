@@ -7,7 +7,6 @@
   import { api, type CompatTool, type NativeGameSettings } from '../api';
   import Icon from '../Icon.svelte';
   import { candidateLabel, compatToolNotice, installDirOf, isWindowsHost, launchSourceNote } from './actions';
-  import { activateFocused, moveDialogFocus, registerDialog, type NavAction } from '../focus/dialogNav';
 
   let {
     romId,
@@ -145,25 +144,6 @@
       onClose();
     }
   }
-
-  /** A gamepad `nav` action, routed here while the dialog is open. Up / down
-   *  walk the controls in page order; accept presses a button or opens a
-   *  list; back closes the dialog. */
-  export function handleNav(action: NavAction): boolean {
-    if (action === 'back') {
-      onClose();
-      return true;
-    }
-    if (action === 'accept') return activateFocused(panelEl);
-    const controls = panelEl
-      ? Array.from(
-          panelEl.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled])'),
-        )
-      : [];
-    return moveDialogFocus(controls, action);
-  }
-
-  $effect(() => registerDialog(handleNav));
 
   // Return focus to whatever opened the dialog once it unmounts, if that
   // element is still on the page. Read at setup, before the panel takes focus.
@@ -428,7 +408,7 @@
     border-radius: 6px;
     border: none;
     background: var(--accent);
-    color: #fff;
+    color: var(--on-primary);
     cursor: pointer;
   }
 

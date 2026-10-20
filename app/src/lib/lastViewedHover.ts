@@ -1,5 +1,5 @@
 // Shared dwell-timer factory for feeding `lastViewed` from a card grid's
-// hover events and from keyboard/gamepad focus (design §3). Library.svelte
+// hover events and from keyboard focus (design §3). Library.svelte
 // and Server.svelte each mount one per input rather than duplicating the
 // timer bookkeeping.
 import { HOVER_DELAY_MS, PREFETCH_DELAY_MS } from './background';

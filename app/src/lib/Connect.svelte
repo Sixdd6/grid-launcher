@@ -173,7 +173,7 @@
     border-radius: 6px;
     border: none;
     background: var(--accent);
-    color: #fff;
+    color: var(--on-primary);
     cursor: pointer;
   }
 
@@ -209,7 +209,7 @@
 
   .error {
     margin: 0;
-    color: #e5484d;
+    color: var(--danger);
     font-size: 14px;
   }
 </style>

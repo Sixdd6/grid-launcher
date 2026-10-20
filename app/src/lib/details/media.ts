@@ -2,8 +2,6 @@
 // §7). Pure: `MediaTab.svelte` renders these items and `MediaViewer.svelte`
 // walks them, but neither decides what is in the list or what comes next.
 
-import type { NavAction } from '../focus/dialogNav';
-
 export type MediaItem =
   | { kind: 'screenshot'; url: string; caption: string }
   | { kind: 'youtube'; videoId: string; caption: string }
@@ -157,36 +155,6 @@ export function nextIndex(current: number, count: number): number {
 export function prevIndex(current: number, count: number): number {
   if (count <= 0) return 0;
   return (current - 1 + count) % count;
-}
-
-/** What the fullscreen viewer does with one gamepad `nav` action. */
-export type ViewerNav =
-  | { kind: 'page'; index: number }
-  | { kind: 'close' }
-  | { kind: 'activate' }
-  | { kind: 'focus' }
-  | { kind: 'none' };
-
-/**
- * Gamepad routing for the viewer, mirroring its keyboard: left / right page
- * (wrapping, like the arrow keys and the on-screen buttons), back closes,
- * accept presses the focused control, up / down walk the controls. Paging a
- * single-item viewer does nothing.
- */
-export function viewerNav(action: NavAction, index: number, count: number): ViewerNav {
-  switch (action) {
-    case 'left':
-      return count > 1 ? { kind: 'page', index: prevIndex(index, count) } : { kind: 'none' };
-    case 'right':
-      return count > 1 ? { kind: 'page', index: nextIndex(index, count) } : { kind: 'none' };
-    case 'back':
-      return { kind: 'close' };
-    case 'accept':
-      return { kind: 'activate' };
-    case 'up':
-    case 'down':
-      return { kind: 'focus' };
-  }
 }
 
 /** Design §7 Overview: "screenshot strip (first six of `merged_screenshots`)". */

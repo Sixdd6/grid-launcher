@@ -21,7 +21,7 @@ The repository is a Cargo workspace with a Svelte frontend:
 - On Linux, the Tauri system libraries (Debian/Ubuntu names, as installed in
   `build.yml`):
 
-      libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libudev-dev
+      libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
 
 - For the end-to-end suite, additionally:
 

@@ -1087,7 +1087,7 @@
     border-radius: var(--r-chip);
     border: none;
     background: var(--primary);
-    color: #fff;
+    color: var(--on-primary);
     cursor: pointer;
     white-space: nowrap;
     transition: background var(--m-fast) ease;
@@ -1108,6 +1108,7 @@
 
   .row-actions button.confirm {
     background: var(--danger);
+    color: var(--on-danger);
   }
 
   .row-text {

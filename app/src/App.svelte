@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { listen } from '@tauri-apps/api/event';
   import Connect from './lib/Connect.svelte';
   import { connectPrefill } from './lib/connectPrefill';
   import Shell from './lib/Shell.svelte';
@@ -17,10 +16,7 @@
   import LibraryUnreachableDialog from './lib/LibraryUnreachableDialog.svelte';
   import { initReplenishListener } from './lib/stores/installed.svelte';
   import { initUiSettings } from './lib/stores/uiSettings.svelte';
-  import { noteDirectional } from './lib/stores/inputMode.svelte';
-  import { routeDialogNav } from './lib/focus/dialogNav';
 
-  let shell = $state<ReturnType<typeof Shell> | null>(null);
   let restored = false; // restore() must fire once on mount, not on every phase change
 
   // Declared before the restore effect below, and reading no reactive state,
@@ -33,7 +29,6 @@
   $effect(() => {
     const un = initReplenishListener();
     return () => {
-      un.then((f) => f());
     };
   });
 
@@ -42,7 +37,6 @@
   $effect(() => {
     const un = initAppUpdate();
     return () => {
-      un.then((f) => f());
     };
   });
 
@@ -65,14 +59,12 @@
   $effect(() => {
     const un = initLibraryUnreachable();
     return () => {
-      un.then((f) => f());
     };
   });
 
   $effect(() => {
     const un = initLibraryMove();
     return () => {
-      un.then((f) => f());
     };
   });
 
@@ -81,7 +73,6 @@
   $effect(() => {
     const un = listenUnauthorized();
     return () => {
-      un.then((f) => f());
     };
   });
 
@@ -91,7 +82,6 @@
   $effect(() => {
     const un = initUiSettings();
     return () => {
-      un.then((f) => f());
     };
   });
 
@@ -100,21 +90,11 @@
       restored = true;
       restore();
     }
-    const un = listen<{ action: 'up' | 'down' | 'left' | 'right' | 'accept' | 'back' }>('nav', (e) => {
-      // The gamepad moves a selection, so it puts the app in directional
-      // mode — the grid views' own key handlers do the same for the keyboard.
-      noteDirectional('gamepad');
-      // Without a mounted shell (e.g. the unreachable-library dialog shows
-      // instead), a registered dialog still gets the gamepad.
-      if (shell) shell.handleNav(e.payload.action);
-      else routeDialogNav(e.payload.action);
-    });
     const unDownloads = session.phase === 'shell' ? initDownloads() : undefined;
     const unSessions = session.phase === 'shell' ? initSessions() : undefined;
     const unCompatTools = session.phase === 'shell' ? initCompatTools() : undefined;
     const unUpdates = session.phase === 'shell' ? initUpdates() : undefined;
     return () => {
-      un.then((f) => f());
       unDownloads?.then((f) => f());
       unSessions?.then((f) => f());
       unCompatTools?.then((f) => f());
@@ -128,7 +108,7 @@
 {#if libraryUnreachable.blocking}
   <LibraryUnreachableDialog />
 {:else if session.phase === 'shell'}
-  <Shell bind:this={shell} />
+  <Shell />
 {:else if session.phase === 'none'}
   <Connect prefill={connectPrefill(session)} />
 {/if}

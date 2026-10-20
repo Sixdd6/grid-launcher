@@ -20,6 +20,13 @@
   --primary: #553e98;
   --primary-hover: #6043c8;
   --primary-pressed: #45307c;
+  /* Labels on filled buttons, and the warning colour used as text. Light
+     keeps white on the dark fills (8.3:1 on --primary, 5.6:1 on --danger);
+     dark puts the theme background on its lighter fills, where white is
+     only 3.65:1 on --primary and 3.2:1 on --danger. */
+  --on-primary: #ffffff;
+  --on-danger: #ffffff;
+  --warning-text: #8a5a00;
   --secondary: #9e8cd6;
   --accent-warm: #e1a38d;
   --favourite: #ff4f6b;
@@ -89,6 +96,9 @@
     --primary: #8b74e8;
     --primary-hover: #a18fff;
     --primary-pressed: #6043c8;
+    --on-primary: #07070f;
+    --on-danger: #07070f;
+    --warning-text: #fbbf24;
   }
 }
 
@@ -109,6 +119,9 @@
   --primary: #8b74e8;
   --primary-hover: #a18fff;
   --primary-pressed: #6043c8;
+  --on-primary: #07070f;
+  --on-danger: #07070f;
+  --warning-text: #fbbf24;
 }
 
 :root[data-theme='light'] {
@@ -127,6 +140,9 @@
   --primary: #553e98;
   --primary-hover: #6043c8;
   --primary-pressed: #45307c;
+  --on-primary: #ffffff;
+  --on-danger: #ffffff;
+  --warning-text: #8a5a00;
 }
 
 body {

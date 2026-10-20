@@ -8,7 +8,6 @@
   // box; `removeConfirmMessage` stays the dialog's accessible description, so
   // the full sentence is what a screen reader hears.
   import { removeConfirmMessage } from './unlinked';
-  import { activateFocused, moveDialogFocus, registerDialog, type NavAction } from '../focus/dialogNav';
 
   let {
     title,
@@ -86,22 +85,6 @@
       trapTab(e);
     }
   }
-
-  /** A gamepad `nav` action, routed here while the dialog is open: the two
-   *  buttons are a row, so left / right and up / down both move between them. */
-  export function handleNav(action: NavAction): boolean {
-    if (action === 'back') {
-      cancel();
-      return true;
-    }
-    if (action === 'accept') return activateFocused(panelEl);
-    const buttons = panelEl
-      ? Array.from(panelEl.querySelectorAll<HTMLElement>('button:not([disabled])'))
-      : [];
-    return moveDialogFocus(buttons, action, true);
-  }
-
-  $effect(() => registerDialog(handleNav));
 
   function onBackdropClick(e: MouseEvent) {
     if (e.target === e.currentTarget) cancel();
@@ -265,14 +248,11 @@
     outline-offset: 2px;
   }
 
-  /* Same danger fill as Details' `.confirm` buttons, but the label is the
-     theme background rather than white: white on the dark theme's #ff5050 is
-     about 3:1, `--bg` on it is about 6.6:1, and on the light theme's #c62828
-     it is about 5:1. */
+  /* Same danger fill as Details' `.confirm` buttons. */
   .btn.danger {
     background: var(--danger);
     border-color: var(--danger);
-    color: var(--bg);
+    color: var(--on-danger);
     font-weight: 600;
   }
 

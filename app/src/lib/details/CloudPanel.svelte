@@ -472,7 +472,7 @@
     border-radius: 6px;
     border: none;
     background: var(--accent);
-    color: #fff;
+    color: var(--on-primary);
     cursor: pointer;
   }
 
@@ -501,7 +501,7 @@
   }
 
   .message.warn {
-    color: var(--warning);
+    color: var(--warning-text);
   }
 
   .native-paths h4,
@@ -570,7 +570,7 @@
     border-radius: 6px;
     border: none;
     background: var(--accent);
-    color: #fff;
+    color: var(--on-primary);
     cursor: pointer;
   }
 
@@ -683,7 +683,7 @@
     border-radius: 6px;
     border: none;
     background: var(--accent);
-    color: #fff;
+    color: var(--on-primary);
     cursor: pointer;
   }
 

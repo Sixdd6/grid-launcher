@@ -397,10 +397,7 @@
     border-radius: var(--r-chip);
     border: 1px solid transparent;
     background: var(--primary);
-    /* Not #fff: on the dark theme's lighter primary, white is 3.65:1 (2.66:1
-       on hover), under AA for 12px text. --bg is 5.5:1 or better in both
-       themes, the same choice as LibraryPage's `.primary`. */
-    color: var(--bg);
+    color: var(--on-primary);
     cursor: pointer;
     white-space: nowrap;
     transition: background var(--m-fast) ease;
@@ -430,9 +427,7 @@
      carries a phase ("Copying • games/ · 1.2 of 5.6 GB", "Updating paths…",
      "Removing the old copies…") or a failure reason, so it wraps instead of
      being cut off; the full text is also the tooltip. A thin --primary edge
-     marks it as the one job that is not a download. Its filled buttons take
-     the theme background as the label (about 5.4:1 on the dark theme's
-     #8b74e8; white there is about 3.6:1). */
+     marks it as the one job that is not a download. */
   .row.move {
     box-shadow: inset 3px 0 0 var(--primary);
   }
@@ -443,7 +438,6 @@
   }
 
   .row.move .row-actions button:not(.secondary) {
-    color: var(--bg);
     font-weight: 600;
   }
 

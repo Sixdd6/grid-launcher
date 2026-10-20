@@ -116,7 +116,7 @@ The shell owns *when* things run; grid-core owns *what* they do.
   process, banner only, nothing downloaded), `python_import.rs` (the startup presence
   check for a Python-era config), `config_write.rs` (one config writer at a time, so two
   load-modify-save cycles cannot lose an update), `logging.rs` (the tracing filter and
-  the `debug_prints` toggle), `gamepad/` (polling and the navigation events it emits),
+  the `debug_prints` toggle),
   `play_session_service.rs` (play activity: queues a finished session in the registry
   outbox and flushes it on session end and after connect, restore or retry; offline, the
   queue waits), `relink_service.rs` (after connect, restore or retry: the relink pass, the

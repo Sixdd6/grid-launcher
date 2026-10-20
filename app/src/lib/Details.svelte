@@ -651,7 +651,7 @@
         {#if missing.showMissing}
           <!-- A notice, not a plain action list: danger edge, Locate… as the one
                primary action, the typed path as a secondary group, and the
-               destructive choice last. DOM order is the Tab/gamepad order. -->
+               destructive choice last. DOM order is the Tab order. -->
           <div class="action notice" data-testid="details-missing" role="group" aria-labelledby="details-missing-title">
             <span id="details-missing-title" class="chip unlinked missing">Files not found</span>
             <p class="meta-line">{missing.playBlocked}</p>
@@ -1116,7 +1116,7 @@
   .chip.playing {
     background: var(--primary);
     border-color: var(--primary);
-    color: #fff;
+    color: var(--on-primary);
     text-transform: uppercase;
     letter-spacing: 0.03em;
   }
@@ -1232,7 +1232,7 @@
     border-radius: var(--r-control);
     border: none;
     background: var(--primary);
-    color: #fff;
+    color: var(--on-primary);
     cursor: pointer;
     transition: background var(--m-fast) ease;
   }
@@ -1243,6 +1243,7 @@
 
   .action button.confirm {
     background: var(--danger);
+    color: var(--on-danger);
   }
 
   .action button.secondary {

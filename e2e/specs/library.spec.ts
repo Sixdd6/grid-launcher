@@ -215,7 +215,7 @@ describe('library', () => {
   // and the close reverted the art to rom 101's fanart — undoing the art of
   // the game the user had just clicked. Two things now stop that: a click
   // sets `focusIndex` to the clicked card, and the dwell only runs while a
-  // directional input (keyboard or gamepad) is the active mode.
+  // directional input (the keyboard) is the active mode.
   it("closing details keeps that game's background", async () => {
     await $(testId('platform-btn-1')).click();
     await $(testId('game-card-103')).waitForExist({ timeout: TRANSITION_TIMEOUT });

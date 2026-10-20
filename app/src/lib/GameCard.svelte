@@ -111,7 +111,7 @@
     </button>
 
     <!-- The four overlay controls stay in the Tab order: `:focus-within`
-         then reveals the overlay, so a keyboard or gamepad user reaches
+         then reveals the overlay, so a keyboard user reaches
          Play/Install, Cloud sync and More. The card ROOT is not focusable —
          the views drive selection with the `focused` class instead. -->
     <div class="actions">
@@ -138,7 +138,7 @@
        card once at open (+100 ms for 300 cards). */
   }
 
-  /* D-UI-9: hover scales 1.05. Focus (gamepad/arrow keys) uses the same
+  /* D-UI-9: hover scales 1.05. Focus (arrow keys) uses the same
      scale so the two selection models look identical. */
   .card:hover,
   .card.focused {
@@ -252,7 +252,7 @@
     border: none;
     border-radius: var(--r-pill);
     background: var(--primary);
-    color: #fff;
+    color: var(--on-primary);
     cursor: pointer;
     white-space: nowrap;
   }

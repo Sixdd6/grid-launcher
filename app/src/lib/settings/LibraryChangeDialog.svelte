@@ -13,8 +13,7 @@
   //
   // Same modal shape as RemoveConfirm / LinkPicker: backdrop + role="dialog",
   // Escape / backdrop / Cancel close it (Escape steps back first), Tab is
-  // trapped, focus returns to the opener, and gamepad `nav` comes here first
-  // while it is open (focus/dialogNav.ts).
+  // trapped, and focus returns to the opener.
   //
   // Focus on each step lands on the first control that is safe to press: the
   // folder field, then "Leave on disk", then "Back". The dialog's label and
@@ -28,7 +27,6 @@
     type StartFreshPreview,
   } from '../api';
   import { pickFolder } from '../pickers';
-  import { activateFocused, moveDialogFocus, registerDialog, type NavAction } from '../focus/dialogNav';
   import {
     canMove,
     canStartFresh,
@@ -302,18 +300,6 @@
       trapTab(e);
     }
   }
-
-  /** A gamepad `nav` action, routed here while the dialog is open. */
-  export function handleNav(action: NavAction): boolean {
-    if (action === 'back') {
-      back();
-      return true;
-    }
-    if (action === 'accept') return activateFocused(panelEl);
-    return moveDialogFocus(focusables(), action);
-  }
-
-  $effect(() => registerDialog(handleNav));
 
   function onBackdropClick(e: MouseEvent) {
     if (e.target === e.currentTarget) cancel();
@@ -1236,13 +1222,11 @@
     cursor: default;
   }
 
-  /* The primary action ("Start move"): the --primary fill with the theme
-     background as the label, as the Library pane's Change… button (about 5.4:1
-     on the dark theme's #8b74e8, about 7.6:1 on the light theme's #553e98). */
+  /* The primary action ("Start move"). */
   .btn.primary {
     background: var(--primary);
     border-color: var(--primary);
-    color: var(--bg);
+    color: var(--on-primary);
     font-weight: 600;
   }
 
@@ -1251,13 +1235,11 @@
     border-color: var(--primary-hover);
   }
 
-  /* Same danger fill as RemoveConfirm: the label is the theme background
-     rather than white (about 6.6:1 on the dark theme's #ff5050, about 5:1 on
-     the light theme's #c62828). */
+  /* Same danger fill as RemoveConfirm. */
   .btn.danger {
     background: var(--danger);
     border-color: var(--danger);
-    color: var(--bg);
+    color: var(--on-danger);
     font-weight: 600;
   }
 

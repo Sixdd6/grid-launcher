@@ -158,7 +158,7 @@
   // rested on it for more than 120ms.
   const hover = createHoverViewed();
 
-  // Keyboard/gamepad selection feeds the background through the SAME 120ms
+  // Keyboard selection feeds the background through the SAME 120ms
   // dwell as the pointer, so holding an arrow key across the grid does not
   // start a fetch per card. A separate timer from `hover`: sharing one would
   // let a mouse move cancel a keyboard selection's pending swap.
@@ -254,18 +254,8 @@
     searchEl?.select();
   }
 
-  export function handleNav(action: NavDirection | 'accept' | 'back') {
-    if (action === 'back') {
-      if (subject) closeDetails();
-      return;
-    }
-    if (action === 'accept') {
-      if (!subject) {
-        const row = rows[focusIndex];
-        if (row) openDetails(row);
-      }
-      return;
-    }
+  /** Arrow-key grid movement. */
+  function moveSelection(action: NavDirection) {
     if (subject) return; // grid navigation is suspended while the overlay is open
     focusIndex = moveFocus(focusIndex, action, grid?.columns() ?? 1, rows.length);
     grid?.element()?.children[focusIndex]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -291,7 +281,7 @@
     if (action) {
       e.preventDefault();
       noteDirectional('keyboard');
-      handleNav(action);
+      moveSelection(action);
     }
   }
 

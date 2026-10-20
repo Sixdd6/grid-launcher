@@ -4,7 +4,6 @@ mod commands;
 mod config_write;
 mod covers_dir;
 mod firmware_service;
-mod gamepad;
 mod images;
 mod library_move_service;
 mod logging;
@@ -287,7 +286,6 @@ pub fn run() {
                 app.handle().clone(),
                 app.state::<AppState>().app_update.clone(),
             );
-            gamepad::spawn(app.handle().clone());
             // Grant the asset protocol the exact directory the session caches
             // covers in. The static scope in tauri.conf.json is
             // `$CACHE/grid-launcher/covers`, which matches the `ProjectDirs`

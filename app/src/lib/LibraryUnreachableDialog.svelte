@@ -10,11 +10,9 @@
   // monospace box, then the two choices as large buttons ("Relocate the
   // library…" is the primary and takes focus). The folder field is additive to
   // the picker, as for every Browse in the app: it is the path the end-to-end
-  // suite drives. Escape is swallowed on purpose; the gamepad `back` is
-  // consumed and does nothing.
+  // suite drives. Escape is swallowed on purpose.
   import { tick } from 'svelte';
   import { pickFolder } from './pickers';
-  import { activateFocused, moveDialogFocus, registerDialog, type NavAction } from './focus/dialogNav';
   import {
     RELOCATE_PICKER_TITLE,
     relocateError,
@@ -102,15 +100,6 @@
     }
   }
 
-  /** A gamepad `nav` action, routed here while the dialog is open. `back`
-   *  is consumed and does nothing: there is no way to dismiss this dialog. */
-  export function handleNav(action: NavAction): boolean {
-    if (action === 'back') return true;
-    if (action === 'accept') return activateFocused(panelEl);
-    return moveDialogFocus(focusables(), action);
-  }
-
-  $effect(() => registerDialog(handleNav));
 </script>
 
 {#if copy}
@@ -379,7 +368,7 @@
     background: var(--surface);
   }
 
-  /* The two choices: full width, tall enough for a thumb or a gamepad
+  /* The two choices: full width, tall enough for a thumb or a pointer
      cursor, stacked with the safe path first. */
   .actions {
     display: flex;
@@ -405,12 +394,10 @@
     border-color: var(--text-muted);
   }
 
-  /* The label is the theme background rather than white: about 5.4:1 on the
-     dark theme's #8b74e8, about 7.6:1 on the light theme's #553e98. */
   .big.primary {
     background: var(--primary);
     border-color: var(--primary);
-    color: var(--bg);
+    color: var(--on-primary);
   }
 
   .big.primary:hover:not(:disabled) {

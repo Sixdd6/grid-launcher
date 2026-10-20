@@ -165,7 +165,7 @@
 
   .cloud-toggle button.active {
     background: var(--primary);
-    color: #fff;
+    color: var(--on-primary);
     border-color: var(--primary);
   }
 

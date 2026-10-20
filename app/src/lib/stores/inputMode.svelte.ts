@@ -4,9 +4,10 @@
 //
 // User ruling 2026-09-05: selection follows the active input method. A
 // pointer user hovers, so no card carries the selection grow until a
-// directional input (keyboard or gamepad) happens.
+// directional input (the keyboard) happens. The app takes no gamepad input
+// (user ruling 2026-10-20; a later TV mode owns that).
 
-export type InputKind = 'pointer' | 'keyboard' | 'gamepad';
+export type InputKind = 'pointer' | 'keyboard';
 
 /** A pointer position in client (viewport) coordinates. */
 export type PointerPoint = { x: number; y: number };
@@ -57,7 +58,7 @@ export const inputMode = {
   get current(): InputKind {
     return state.current;
   },
-  /** Keyboard and gamepad move a selection; the pointer only hovers. */
+  /** The keyboard moves a selection; the pointer only hovers. */
   get directional(): boolean {
     return state.current !== 'pointer';
   },
@@ -77,10 +78,10 @@ export function noteInput(kind: InputKind): void {
 }
 
 /**
- * Records a keyboard or gamepad input and remembers where the pointer was
+ * Records a keyboard input and remembers where the pointer was
  * sitting at that moment, which is what `notePointerAt` measures against.
  */
-export function noteDirectional(kind: 'keyboard' | 'gamepad'): void {
+export function noteDirectional(kind: 'keyboard'): void {
   noteInput(kind);
 }
 

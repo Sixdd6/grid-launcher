@@ -28,12 +28,6 @@ describe('inputMode', () => {
     expect(inputMode.directional).toBe(true);
   });
 
-  it('treats the gamepad as directional', () => {
-    noteInput('gamepad');
-    expect(inputMode.current).toBe('gamepad');
-    expect(inputMode.directional).toBe(true);
-  });
-
   it('drops back out of directional mode when the pointer moves again', () => {
     noteInput('keyboard');
     noteInput('pointer');
@@ -47,9 +41,9 @@ describe('inputMode', () => {
     noteInput('pointer');
     noteInput('pointer');
     expect(inputMode.current).toBe('pointer');
-    noteInput('gamepad');
-    noteInput('gamepad');
-    expect(inputMode.current).toBe('gamepad');
+    noteInput('keyboard');
+    noteInput('keyboard');
+    expect(inputMode.current).toBe('keyboard');
   });
 
   it('resets to the pointer default', () => {

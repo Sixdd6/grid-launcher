@@ -2,13 +2,11 @@
   import { api } from '../api';
   import Icon from '../Icon.svelte';
   import Image from '../Image.svelte';
-  import { activateFocused, moveDialogFocus, registerDialog, type NavAction } from '../focus/dialogNav';
   import {
     nextIndex,
     prevIndex,
     trailerPoster,
     videoLoadMessage,
-    viewerNav,
     type MediaItem,
   } from './media';
 
@@ -139,32 +137,6 @@
       go(prevIndex(index, items.length));
     }
   }
-
-  /** A gamepad `nav` action, routed here while the viewer is open, so it
-   *  never reaches the Details popup underneath (`viewerNav` has the rules). */
-  export function handleNav(action: NavAction): boolean {
-    const nav = viewerNav(action, index, items.length);
-    switch (nav.kind) {
-      case 'page':
-        go(nav.index);
-        return true;
-      case 'close':
-        onClose();
-        return true;
-      case 'activate':
-        return activateFocused(viewerEl);
-      case 'focus': {
-        const buttons = viewerEl
-          ? Array.from(viewerEl.querySelectorAll<HTMLElement>('button:not([disabled])'))
-          : [];
-        return moveDialogFocus(buttons, action);
-      }
-      case 'none':
-        return false;
-    }
-  }
-
-  $effect(() => registerDialog(handleNav));
 
   function onBackdropClick(e: MouseEvent) {
     if (e.target === e.currentTarget) onClose();
@@ -392,7 +364,7 @@
     border-radius: var(--r-control);
     border: none;
     background: var(--primary);
-    color: #fff;
+    color: var(--on-primary);
     cursor: pointer;
     transition: background var(--m-fast) ease;
   }

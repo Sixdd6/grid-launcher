@@ -358,7 +358,7 @@
     border-radius: var(--r-chip);
     border: 1px solid transparent;
     background: var(--primary);
-    color: var(--bg);
+    color: var(--on-primary);
     font-weight: 600;
     cursor: pointer;
     transition: background var(--m-fast) ease;
