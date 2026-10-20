@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createLoadLimiter,
+  createPathMemo,
   IMAGE_NEAR_MARGIN,
+  IMAGE_PATH_MEMO_SIZE,
   MAX_CONCURRENT_IMAGE_LOADS,
   MAX_FAR_IMAGE_LOADS,
   resetNearWatchesForTest,
+  startImageLoad,
   watchNear,
 } from './imageLoad';
 
@@ -130,6 +133,114 @@ describe('createLoadLimiter lanes', () => {
     limiter.acquire('far');
     slot.release();
     expect(limiter.active()).toBe(1);
+  });
+});
+
+describe('createPathMemo', () => {
+  it('remembers, forgets and evicts the oldest entry past its limit', () => {
+    const memo = createPathMemo(2);
+    memo.set('a', '/a');
+    memo.set('b', '/b');
+    memo.set('c', '/c');
+    expect(memo.get('a')).toBe(undefined);
+    expect(memo.get('c')).toBe('/c');
+    memo.delete('c');
+    expect(memo.get('c')).toBe(undefined);
+    expect(memo.size()).toBe(1);
+  });
+
+  it('moves a re-set url to the back of the eviction order', () => {
+    const memo = createPathMemo(2);
+    memo.set('a', '/a');
+    memo.set('b', '/b');
+    memo.set('a', '/a2');
+    memo.set('c', '/c');
+    expect(memo.get('a')).toBe('/a2');
+    expect(memo.get('b')).toBe(undefined);
+  });
+
+  it('is bounded well past one screen of covers', () => {
+    expect(IMAGE_PATH_MEMO_SIZE).toBeGreaterThanOrEqual(1024);
+  });
+});
+
+describe('startImageLoad', () => {
+  /** A backend call the test settles by hand. */
+  function deferred() {
+    const calls: { url: string; resolve: (p: string) => void; reject: (e: unknown) => void }[] = [];
+    const ensure = (url: string) =>
+      new Promise<string>((resolve, reject) => calls.push({ url, resolve, reject }));
+    return { calls, ensure };
+  }
+
+  it('asks the backend once its slot is granted, and remembers the file', async () => {
+    const limiter = createLoadLimiter(1);
+    const memo = createPathMemo(8);
+    const { calls, ensure } = deferred();
+    const load = startImageLoad('u', ensure, limiter, memo);
+    await flush();
+    expect(calls.map((c) => c.url)).toEqual(['u']);
+    calls[0].resolve('/cache/u.png');
+    await expect(load.path).resolves.toBe('/cache/u.png');
+    expect(memo.get('u')).toBe('/cache/u.png');
+    // Still held: the `<img>` has not loaded yet.
+    expect(limiter.active()).toBe(1);
+    load.done();
+    expect(limiter.active()).toBe(0);
+  });
+
+  it('holds a granted slot until the backend call settles, even once cancelled', async () => {
+    const limiter = createLoadLimiter(1);
+    const memo = createPathMemo(8);
+    const { calls, ensure } = deferred();
+    const first = startImageLoad('a', ensure, limiter, memo);
+    startImageLoad('b', ensure, limiter, memo);
+    await flush();
+    first.cancel();
+    await flush();
+    // The scrolled-past card's fetch is still running, so the next one waits.
+    expect(limiter.active()).toBe(1);
+    expect(calls.map((c) => c.url)).toEqual(['a']);
+    calls[0].resolve('/a');
+    await flush();
+    expect(calls.map((c) => c.url)).toEqual(['a', 'b']);
+    // Its file is still remembered for when the card comes back.
+    expect(memo.get('a')).toBe('/a');
+  });
+
+  it('withdraws a waiting slot at once when cancelled', async () => {
+    const limiter = createLoadLimiter(1);
+    const { calls, ensure } = deferred();
+    startImageLoad('a', ensure, limiter, createPathMemo(8));
+    const waiting = startImageLoad('b', ensure, limiter, createPathMemo(8));
+    waiting.cancel();
+    expect(limiter.waiting()).toBe(0);
+    calls[0]?.resolve('/a');
+    await flush();
+    expect(calls.map((c) => c.url)).toEqual(['a']);
+  });
+
+  it('never calls the backend for a load cancelled between grant and call', async () => {
+    const limiter = createLoadLimiter(1);
+    const { calls, ensure } = deferred();
+    const load = startImageLoad('a', ensure, limiter, createPathMemo(8));
+    // Granted synchronously, but the backend call waits for a microtask.
+    load.cancel();
+    await flush();
+    expect(calls).toHaveLength(0);
+    expect(limiter.active()).toBe(0);
+  });
+
+  it('frees the slot and rejects when the backend fails', async () => {
+    const limiter = createLoadLimiter(1);
+    const memo = createPathMemo(8);
+    const { calls, ensure } = deferred();
+    const load = startImageLoad('a', ensure, limiter, memo);
+    await flush();
+    calls[0].reject(new Error('offline'));
+    await expect(load.path).rejects.toThrow('offline');
+    expect(limiter.active()).toBe(0);
+    expect(memo.get('a')).toBe(undefined);
   });
 });
 

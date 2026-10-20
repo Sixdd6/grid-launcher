@@ -1,7 +1,7 @@
 <script lang="ts">
   import { fileSrc } from './fileSrc';
   import { api } from './api';
-  import { imageLoads, watchNear, type LoadSlot } from './imageLoad';
+  import { imagePaths, startImageLoad, watchNear, type LoadSlot } from './imageLoad';
 
   let {
     url,
@@ -49,19 +49,36 @@
     return watchNear(el, (near) => current.setPriority(near ? 'near' : 'far'));
   });
 
+  /** Bumped to load again after a remembered file failed to decode. */
+  let retry = $state(0);
+  /** Whether the `<img>` on screen came from `imagePaths`, not a fresh
+   *  `ensure_image`. Plain: only the error handler reads it. */
+  let remembered = false;
+
   $effect(() => {
+    void retry;
     let cancelled = false;
     src = null;
+    slot = null;
     // A null/blank url has nothing in flight, so it is `error` (the caller's
     // placeholder text), never a skeleton that would shimmer forever.
     status = url ? 'loading' : 'error';
     if (!url) return;
+    // A card the windowed grid unmounted and mounted again: the file is
+    // already on disk, so render it now instead of queueing behind the
+    // images that have never loaded.
+    const known = imagePaths.get(url);
+    remembered = known !== undefined;
+    if (known !== undefined) {
+      src = fileSrc(known);
+      status = 'ready';
+      return;
+    }
     // Far until the watch above says otherwise: an image that mounts off
     // screen must not go ahead of the ones on it.
-    const own = imageLoads.acquire('far');
-    slot = own;
-    own.ready
-      .then(() => api.ensureImage(url))
+    const load = startImageLoad(url, (u) => api.ensureImage(u));
+    slot = load.slot;
+    load.path
       .then((path) => {
         if (cancelled) return;
         src = fileSrc(path);
@@ -70,14 +87,13 @@
       .catch(() => {
         // offline/missing image: the caller decides whether to keep showing
         // the placeholder (covers) or drop the tile entirely (screenshots)
-        own.release();
         if (cancelled) return;
         status = 'error';
         onerror?.();
       });
     return () => {
       cancelled = true;
-      own.release();
+      load.cancel();
     };
   });
 
@@ -87,6 +103,14 @@
 
   function handleImgError() {
     slot?.release();
+    if (remembered && url) {
+      // The remembered file is gone or broken (the cache was cleared): forget
+      // it and load once more the normal way, which fetches it again.
+      imagePaths.delete(url);
+      remembered = false;
+      retry += 1;
+      return;
+    }
     src = null;
     status = 'error';
     onerror?.();

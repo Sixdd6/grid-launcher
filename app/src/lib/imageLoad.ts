@@ -21,6 +21,11 @@
 // a platform the cards on screen waited behind every card passed on the way
 // (2026-10-20, the `large-platform` e2e group).
 //
+// The windowed grid unmounts the cards it scrolls past, which changes two
+// things (`startImageLoad`, `imagePaths`): a slot already granted is held
+// until its backend call settles even if its card is gone, and a card that
+// comes back renders the file it already resolved without queueing again.
+//
 // Not the browser's `loading="lazy"`: that waits until the image is ON
 // screen, and the first scroll through a fresh platform paid for every
 // fetch and decode mid-scroll (see the note in Image.svelte).
@@ -142,6 +147,107 @@ export function createLoadLimiter(max: number, maxFar: number = max): LoadLimite
 
 /** The one limiter every `Image.svelte` shares. */
 export const imageLoads = createLoadLimiter(MAX_CONCURRENT_IMAGE_LOADS, MAX_FAR_IMAGE_LOADS);
+
+/** About forty screens of covers at the default size: far more than one
+ *  session scrolls back to, and a few hundred kilobytes at most. */
+export const IMAGE_PATH_MEMO_SIZE = 4096;
+
+export type PathMemo = {
+  get: (url: string) => string | undefined;
+  set: (url: string, path: string) => void;
+  delete: (url: string) => void;
+  size: () => number;
+};
+
+/**
+ * Which local file each image url resolved to, so a card that remounts (the
+ * windowed grid unmounts the rows it scrolls past) renders its `<img>` at
+ * once instead of waiting for a slot and an IPC call it already made. At
+ * most `limit` entries; the oldest goes first.
+ */
+export function createPathMemo(limit: number): PathMemo {
+  const paths = new Map<string, string>();
+  return {
+    get: (url) => paths.get(url),
+    set: (url, path) => {
+      paths.delete(url);
+      paths.set(url, path);
+      while (paths.size > limit) {
+        const oldest = paths.keys().next();
+        if (oldest.done) break;
+        paths.delete(oldest.value);
+      }
+    },
+    delete: (url) => void paths.delete(url),
+    size: () => paths.size,
+  };
+}
+
+/** The memo every `Image.svelte` shares. */
+export const imagePaths = createPathMemo(IMAGE_PATH_MEMO_SIZE);
+
+export type ImageLoad = {
+  /** This load's slot, for its priority while it waits. */
+  slot: LoadSlot;
+  /** The local file, once the slot is granted and the backend has it.
+   *  Never settles for a load cancelled before its slot was granted. */
+  path: Promise<string>;
+  /** The caller is done with the image: the `<img>` loaded or failed. */
+  done: () => void;
+  /** The caller went away. A waiting slot leaves the queue at once; a
+   *  granted one is held until its backend call settles. */
+  cancel: () => void;
+};
+
+/**
+ * One image's load: wait for a slot, ask the backend for the file, and
+ * remember where it is.
+ *
+ * The slot is NOT freed while the backend call is still running, even if
+ * the caller cancels. The backend keeps fetching a cover whether or not
+ * anyone still wants it, so freeing the slot early would let the next image
+ * start another fetch on top of it: a fast scroll through a windowed grid
+ * unmounts dozens of cards a second, and the backend's queue would grow
+ * without bound (2026-10-20).
+ */
+export function startImageLoad(
+  url: string,
+  ensure: (url: string) => Promise<string>,
+  limiter: LoadLimiter = imageLoads,
+  memo: PathMemo = imagePaths
+): ImageLoad {
+  const slot = limiter.acquire('far');
+  let cancelled = false;
+  let inFlight = false;
+  const path = slot.ready.then(() => {
+    if (cancelled) return new Promise<string>(() => {});
+    inFlight = true;
+    return ensure(url).then(
+      (resolved) => {
+        inFlight = false;
+        memo.set(url, resolved);
+        if (cancelled) slot.release();
+        return resolved;
+      },
+      (error: unknown) => {
+        inFlight = false;
+        slot.release();
+        throw error;
+      }
+    );
+  });
+  // A cancelled load's rejection has no one to report to.
+  path.catch(() => {});
+  return {
+    slot,
+    path,
+    done: () => slot.release(),
+    cancel: () => {
+      cancelled = true;
+      if (!inFlight) slot.release();
+    },
+  };
+}
 
 type Watch = {
   observer: IntersectionObserver;
