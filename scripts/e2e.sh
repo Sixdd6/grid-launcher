@@ -87,6 +87,9 @@ STAGE_GROUPS=(
   # needs its own starting state, so its seed runs before every spec
   # (group_seeds_per_spec).
   "library-move:specs/library-move-a.spec.ts specs/library-move-b.spec.ts specs/library-move-c.spec.ts specs/library-move-d.spec.ts"
+  # A 2500-game platform: covers load only near the visible area, a bounded
+  # number at once, and the webview survives opening it (2026-10-20 crash).
+  "large-platform:specs/large-platform.spec.ts"
 )
 
 # Run only the named groups by passing them as arguments, e.g.
@@ -464,6 +467,9 @@ mock_args_for_group() {
     # ABSENT from rom-details.json so the mock answers 404 and the check
     # treats it as "no update".
     updates) printf -- '--fixtures-dir fixtures-updates' ;;
+    # One "Arcade" platform of 2500 generated ROMs (`e2e_synthetic` in
+    # roms.json; see mock-romm/server.mjs).
+    large-platform) printf -- '--fixtures-dir fixtures-large-platform' ;;
     *) printf '' ;;
   esac
 }

@@ -369,8 +369,39 @@ async function loadFirmwareFixtures(fixturesDir) {
   }
 }
 
+// `roms.json` may give a platform `{"e2e_synthetic": <count>}` instead of a
+// list: a mock-only directive that generates that many plain ROM summaries
+// (ids from 10001, each with its own cover paths). The `large-platform`
+// stage group uses it for a 2500-game platform without a 2500-entry fixture.
+export function expandSyntheticRoms(romsByPlatform, platforms) {
+  const out = {};
+  for (const [platformId, value] of Object.entries(romsByPlatform)) {
+    if (Array.isArray(value) || typeof value?.e2e_synthetic !== "number") {
+      out[platformId] = value;
+      continue;
+    }
+    const platform = platforms.find((p) => String(p.id) === platformId);
+    const displayName = platform?.display_name ?? "";
+    out[platformId] = Array.from({ length: value.e2e_synthetic }, (_, i) => {
+      const id = 10001 + i;
+      const name = `Synthetic Game ${String(i + 1).padStart(4, "0")}`;
+      return {
+        id,
+        name,
+        fs_name_no_ext: name,
+        platform_id: Number(platformId),
+        platform_display_name: displayName,
+        metadatum: { rom_id: id, genres: [] },
+        path_cover_small: `/assets/romm/resources/roms/${id}/cover/small.png`,
+        path_cover_large: `/assets/romm/resources/roms/${id}/cover/large.png`,
+      };
+    });
+  }
+  return out;
+}
+
 async function loadFixtures(fixturesDir) {
-  const [platforms, romsByPlatform, romDetails, savesByRom, firmwareByPlatformRaw] =
+  const [platforms, romsByPlatformRaw, romDetails, savesByRom, firmwareByPlatformRaw] =
     await Promise.all([
       readFile(path.join(fixturesDir, "platforms.json"), "utf8").then(JSON.parse),
       readFile(path.join(fixturesDir, "roms.json"), "utf8").then(JSON.parse),
@@ -378,6 +409,7 @@ async function loadFixtures(fixturesDir) {
       loadSaveFixtures(fixturesDir),
       loadFirmwareFixtures(fixturesDir),
     ]);
+  const romsByPlatform = expandSyntheticRoms(romsByPlatformRaw, platforms);
 
   const saveContentById = new Map();
   const saveRecordsByRom = {};

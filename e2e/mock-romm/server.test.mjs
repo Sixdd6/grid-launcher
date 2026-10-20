@@ -13,7 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFile, rm } from "node:fs/promises";
 
-import { startMockRomm } from "./server.mjs";
+import { expandSyntheticRoms, startMockRomm } from "./server.mjs";
 
 const TOKEN = "FAKE-E2E-TOKEN-not-real";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -999,4 +999,34 @@ test("sidegame.zip carries two launchable scripts, launch.sh among them", async 
     assert.ok(buf.includes(Buffer.from("SideGame/launch.sh")));
     assert.ok(buf.includes(Buffer.from("SideGame/sidegame.sh")));
   });
+});
+
+// --- synthetic platforms ------------------------------------------------
+
+test("expandSyntheticRoms generates N summaries and leaves lists alone", () => {
+  const platforms = [{ id: 1, display_name: "Arcade" }];
+  const out = expandSyntheticRoms({ 1: { e2e_synthetic: 3 }, 2: [{ id: 5 }] }, platforms);
+  assert.equal(out[1].length, 3);
+  assert.deepEqual(
+    out[1].map((r) => r.id),
+    [10001, 10002, 10003],
+  );
+  assert.equal(out[1][0].platform_display_name, "Arcade");
+  assert.equal(out[1][2].path_cover_small, "/assets/romm/resources/roms/10003/cover/small.png");
+  assert.deepEqual(out[2], [{ id: 5 }]);
+});
+
+test("the large-platform fixture serves 2500 roms through limit/offset", async () => {
+  const dir = path.join(__dirname, "../fixtures-large-platform");
+  const handle = await startMockRomm({ port: 0, fixturesDir: dir });
+  try {
+    const res = await fetch(`${handle.url}/api/roms?platform_ids=1&limit=1000&offset=2000`, {
+      headers: authHeader(),
+    });
+    const { items } = await res.json();
+    assert.equal(items.length, 500);
+    assert.equal(items[499].id, 12500);
+  } finally {
+    await handle.close();
+  }
 });

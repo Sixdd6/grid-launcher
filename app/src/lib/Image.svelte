@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fileSrc } from './fileSrc';
   import { api } from './api';
+  import { imageLoads, whenNear } from './imageLoad';
 
   let {
     url,
@@ -31,34 +32,58 @@
    */
   let status = $state<'loading' | 'error' | 'ready'>('loading');
 
+  // The skeleton, watched until it comes near the visible area: nothing is
+  // fetched before then (`imageLoad.ts` has why). Once near, it stays near —
+  // a later `url` change on the same element loads straight away.
+  let skeletonEl = $state<HTMLElement | null>(null);
+  let near = $state(false);
+
+  $effect(() => {
+    if (near || !skeletonEl) return;
+    return whenNear(skeletonEl, () => (near = true));
+  });
+
+  /** Frees this image's load slot. Held from the `ensure_image` call until
+   *  the `<img>` has loaded or failed, so the bound covers the asset request
+   *  as well as the IPC call. */
+  let releaseSlot: (() => void) | null = null;
+
   $effect(() => {
     let cancelled = false;
     src = null;
     // A null/blank url has nothing in flight, so it is `error` (the caller's
     // placeholder text), never a skeleton that would shimmer forever.
     status = url ? 'loading' : 'error';
-    if (url) {
-      api
-        .ensureImage(url)
-        .then((path) => {
-          if (cancelled) return;
-          src = fileSrc(path);
-          status = 'ready';
-        })
-        .catch(() => {
-          // offline/missing image: the caller decides whether to keep showing
-          // the placeholder (covers) or drop the tile entirely (screenshots)
-          if (cancelled) return;
-          status = 'error';
-          onerror?.();
-        });
-    }
+    if (!url || !near) return;
+    const slot = imageLoads.acquire();
+    releaseSlot = slot.release;
+    slot.ready
+      .then(() => api.ensureImage(url))
+      .then((path) => {
+        if (cancelled) return;
+        src = fileSrc(path);
+        status = 'ready';
+      })
+      .catch(() => {
+        // offline/missing image: the caller decides whether to keep showing
+        // the placeholder (covers) or drop the tile entirely (screenshots)
+        slot.release();
+        if (cancelled) return;
+        status = 'error';
+        onerror?.();
+      });
     return () => {
       cancelled = true;
+      slot.release();
     };
   });
 
+  function handleImgLoad() {
+    releaseSlot?.();
+  }
+
   function handleImgError() {
+    releaseSlot?.();
     src = null;
     status = 'error';
     onerror?.();
@@ -74,10 +99,11 @@
        decoded as it scrolled in, and the FIRST scroll through a freshly
        opened 302-card platform averaged 84 ms per frame with 27 frames over
        50 ms; eager + `decoding="async"` makes it 28.6 ms with none, the same
-       as a warm second pass. Fetching them all at open is cheap — a cover is
-       a local cache file served over the asset protocol, not a network
-       request — and decoding asynchronously keeps the open off the main
-       thread. -->
+       as a warm second pass. Decoding asynchronously keeps the open off the
+       main thread. What loads is bounded before this tag ever mounts: only
+       images near the visible area, at most a dozen at once (`imageLoad.ts`)
+       — fetching all of a 2000-game platform at open exhausted the web
+       process's file descriptors. -->
   {#if backdrop}
     <img
       class="backdrop"
@@ -95,11 +121,12 @@
     loading="eager"
     decoding="async"
     draggable="false"
+    onload={handleImgLoad}
     onerror={handleImgError}
     {...rest}
   />
 {:else if status === 'loading'}
-  <div class="skeleton" aria-hidden="true" {...rest}></div>
+  <div class="skeleton" aria-hidden="true" bind:this={skeletonEl} {...rest}></div>
 {:else}
   <div class="placeholder" {...rest}>{placeholder}</div>
 {/if}
