@@ -11,6 +11,7 @@ import {
   viewableIndex,
   viewableItems,
   videoLoadMessage,
+  viewerNav,
   youtubeThumbnailUrl,
   YOUTUBE_THUMBNAIL_BASE,
   type MediaItem,
@@ -335,5 +336,25 @@ describe('videoLoadMessage', () => {
     expect(videoLoadMessage('  not connected  ')).toBe(
       'This video could not be loaded (not connected).'
     );
+  });
+});
+
+describe('viewerNav', () => {
+  it('pages left and right with wrap-around', () => {
+    expect(viewerNav('right', 0, 3)).toEqual({ kind: 'page', index: 1 });
+    expect(viewerNav('right', 2, 3)).toEqual({ kind: 'page', index: 0 });
+    expect(viewerNav('left', 0, 3)).toEqual({ kind: 'page', index: 2 });
+  });
+
+  it('does not page a single item', () => {
+    expect(viewerNav('left', 0, 1)).toEqual({ kind: 'none' });
+    expect(viewerNav('right', 0, 1)).toEqual({ kind: 'none' });
+  });
+
+  it('closes on back, activates on accept, walks controls on up and down', () => {
+    expect(viewerNav('back', 1, 3)).toEqual({ kind: 'close' });
+    expect(viewerNav('accept', 1, 3)).toEqual({ kind: 'activate' });
+    expect(viewerNav('up', 1, 3)).toEqual({ kind: 'focus' });
+    expect(viewerNav('down', 1, 3)).toEqual({ kind: 'focus' });
   });
 });
