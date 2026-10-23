@@ -2,7 +2,7 @@
 # Podman build container for Linux builds, the gate and the end-to-end suite, with a
 # CPU and memory cap so the desktop stays usable. See BUILD.md "Build container".
 #
-#   scripts/ctr.sh build              build or rebuild the image
+#   scripts/ctr.sh build              build or rebuild the image (fresh: newer base, no cache)
 #   scripts/ctr.sh run <cmd...>       run a command in a throwaway container, cwd = repo
 #   scripts/ctr.sh shell              interactive shell in the same setup
 #   scripts/ctr.sh gate               run the gate (CLAUDE.md / BUILD.md), in its order
@@ -48,8 +48,10 @@ locked() {
 CACHE_PREFIX=grid-launcher
 VOL_PREFIX=${CTR_VOL_PREFIX:-grid-launcher-$(printf %s "$repo" | sha256sum | cut -c1-8)}
 
+# A newer base image and no layer cache, so a rebuild is also a security refresh
+# (the image's apt packages and the latest Node/Rust releases).
 build() {
-  podman build --pull=missing -t "$IMAGE" -f scripts/container/Containerfile scripts/container
+  podman build --pull=newer --no-cache -t "$IMAGE" -f scripts/container/Containerfile scripts/container
 }
 
 podman_args() {

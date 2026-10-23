@@ -17,7 +17,7 @@ The repository is a Cargo workspace with a Svelte frontend:
 ## Prerequisites
 
 - Rust stable, with `rustfmt` and `clippy`.
-- Node 22.
+- Node 24.
 - On Linux, the Tauri system libraries (Debian/Ubuntu names, as installed in
   `build.yml`):
 
@@ -35,7 +35,7 @@ The repository is a Cargo workspace with a Svelte frontend:
     and the Windows SDK).
   - Rust stable on the MSVC toolchain (`stable-x86_64-pc-windows-msvc`), with `rustfmt`
     and `clippy`.
-  - Node 22.
+  - Node 24.
   - Git for Windows. Its Git Bash runs the `.sh` scripts and the gate.
   - WebView2 ships with Windows 11.
 
