@@ -2,15 +2,21 @@
 # Podman build container for Linux builds, the gate and the end-to-end suite, with a
 # CPU and memory cap so the desktop stays usable. See BUILD.md "Build container".
 #
-#   scripts/ctr.sh build              build or rebuild the image (fresh: newer base, no cache)
+#   scripts/ctr.sh build              build or rebuild both images (fresh: newer base, no cache)
 #   scripts/ctr.sh run <cmd...>       run a command in a throwaway container, cwd = repo
 #   scripts/ctr.sh shell              interactive shell in the same setup
 #   scripts/ctr.sh gate               run the gate (CLAUDE.md / BUILD.md), in its order
 #   scripts/ctr.sh e2e [groups...]    run scripts/e2e.sh (env E2E_* is passed through)
-#   scripts/ctr.sh appimage [ver]     build the AppImage (default version 0.0.0-dev) and
-#                                     copy it to ctr-out/ in the repo
+#   scripts/ctr.sh appimage [ver]     build the AppImage exactly as the release job does
+#                                     (default version 0.0.0-dev) into ctr-out/
 #   scripts/ctr.sh clean [--all]      remove this checkout's target and node_modules volumes
 #                                     (--all: also the shared cargo and npm cache volumes)
+#
+# Two images, each matching the CI job it stands in for (.github/workflows/build.yml):
+# Ubuntu 24.04 for the gate, e2e, run and shell (the check and e2e jobs), and Ubuntu
+# 22.04 for appimage (the AppImage job), so a local AppImage bundles the same
+# WebKitGTK as a released one. Each has its own target/ volume: builds against two
+# glibc versions must not share one.
 #
 # Only the repo is mounted (read-write). No $HOME, no display or D-Bus socket, no keyring:
 # the e2e runner starts its own Xvfb, D-Bus session and gnome-keyring inside the container.
@@ -20,7 +26,10 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 repo=$(pwd -P)
 
-IMAGE=${CTR_IMAGE:-localhost/grid-launcher-build:latest}
+CHECK_UBUNTU=24.04
+RELEASE_UBUNTU=22.04
+IMAGE_REPO=localhost/grid-launcher-build
+IMAGE=$IMAGE_REPO:$CHECK_UBUNTU
 # Owner limit (2026-10-20): at most 4 CPUs and 8 GB for grid-launcher containers, in total.
 # CTR_CPUS / CTR_MEMORY (in MB or with a g/m suffix) may lower the limit, never raise it.
 MAX_CPUS=4
@@ -47,12 +56,15 @@ locked() {
 # The cargo registry/git and npm cache volumes are shared by every checkout.
 CACHE_PREFIX=grid-launcher
 VOL_PREFIX=${CTR_VOL_PREFIX:-grid-launcher-$(printf %s "$repo" | sha256sum | cut -c1-8)}
+TARGET_VOLUME=$VOL_PREFIX-target
 
 # A newer base image and no layer cache, so a rebuild is also a security refresh
 # (the image's apt packages and the latest Node/Rust releases).
-build() {
-  podman build --pull=newer --no-cache -t "$IMAGE" -f scripts/container/Containerfile scripts/container
+build_image() {
+  podman build --pull=newer --no-cache --build-arg "UBUNTU_VERSION=$1" -t "$IMAGE_REPO:$1" \
+    -f scripts/container/Containerfile scripts/container
 }
+build() { build_image "$CHECK_UBUNTU" && build_image "$RELEASE_UBUNTU"; }
 
 podman_args() {
   # Create the mount points as the host user, so they are not left owned by a subuid.
@@ -65,7 +77,7 @@ podman_args() {
     # RLIMIT_CORE=1 keeps crashing test processes out of the host's systemd-coredump.
     --ulimit core=1:1
     -v "$repo:/work:rw"
-    -v "$VOL_PREFIX-target:/work/target"
+    -v "$TARGET_VOLUME:/work/target"
     -v "$VOL_PREFIX-app-node_modules:/work/app/node_modules"
     -v "$VOL_PREFIX-e2e-node_modules:/work/e2e/node_modules"
     -v "$CACHE_PREFIX-cargo-registry:/opt/cargo/registry"
@@ -86,7 +98,7 @@ podman_args() {
   fi
 }
 
-ensure_image() { podman image exists "$IMAGE" || locked build; }
+ensure_image() { podman image exists "$IMAGE" || locked build_image "${IMAGE##*:}"; }
 
 # Low priority inside the container on top of the cgroup cap.
 in_ctr() { ensure_image; podman_args; locked podman run "${args[@]}" "$IMAGE" nice -n 19 ionice -c3 "$@"; }
@@ -125,11 +137,33 @@ case "${1:-}" in
     printf %s "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$' \
       || { echo "ctr.sh: version '$version' is not semver" >&2; exit 2; }
     mkdir -p ctr-out
+    IMAGE=$IMAGE_REPO:$RELEASE_UBUNTU
+    TARGET_VOLUME=$VOL_PREFIX-release-target
+    # The release job's steps (build-linux in build.yml): build, then repack with
+    # appimagetool to embed the update information. Same tool, version and digest as
+    # there; keep the two in step.
     in_ctr bash -c 'set -euo pipefail
-      (cd app && npm ci && npx tauri build --bundles appimage --config "{\"version\":\"$1\"}")
-      cp -v target/release/bundle/appimage/*.AppImage ctr-out/' _ "$version" ;;
+      version=$1
+      (cd app && npm ci --no-audit --no-fund && npx tauri build --bundles appimage --config "{\"version\":\"$version\"}")
+      tool=target/tools/appimagetool-1.9.1
+      if [ ! -x "$tool" ]; then
+        mkdir -p target/tools
+        curl -fsSL -o "$tool.part" \
+          https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+        echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  $tool.part" | sha256sum -c -
+        chmod +x "$tool.part" && mv "$tool.part" "$tool"
+      fi
+      out=grid-launcher-$version-x86_64.AppImage
+      work=$(mktemp -d)
+      (cd "$work" && "/work/target/release/bundle/appimage/GRID Launcher_${version}_amd64.AppImage" --appimage-extract >/dev/null)
+      rm -f "ctr-out/$out" "ctr-out/$out.zsync"
+      (cd ctr-out && "/work/$tool" --appimage-extract-and-run \
+        -u "gh-releases-zsync|Sixdd6|grid-launcher|latest|grid-launcher-*-x86_64.AppImage.zsync" \
+        "$work/squashfs-root" "$out")
+      rm -rf "$work"
+      ls -l "ctr-out/$out" "ctr-out/$out.zsync"' _ "$version" ;;
   clean)
-    for v in target app-node_modules e2e-node_modules; do podman volume rm -f "$VOL_PREFIX-$v" >/dev/null; done
+    for v in target release-target app-node_modules e2e-node_modules; do podman volume rm -f "$VOL_PREFIX-$v" >/dev/null; done
     if [ "${2:-}" = "--all" ]; then
       for v in cargo-registry cargo-git npm; do podman volume rm -f "$CACHE_PREFIX-$v" >/dev/null; done
     fi

@@ -49,14 +49,17 @@ Install the frontend dependencies once:
 ## Build container
 
 `scripts/ctr.sh` runs Linux builds, the gate, the end-to-end suite and the AppImage bundle
-in a rootless Podman container (Ubuntu 24.04, the CI distribution), capped at 4 CPUs and
-8 GB and run at low priority, so the desktop stays usable. The only host requirement is
-Podman.
+in a rootless Podman container, capped at 4 CPUs and 8 GB and run at low priority, so the
+desktop stays usable. The only host requirement is Podman. There are two images, each
+matching the CI job it stands in for: Ubuntu 24.04 (`localhost/grid-launcher-build:24.04`)
+for the gate, e2e, `run` and `shell`, like the check and e2e jobs; Ubuntu 22.04
+(`:22.04`) for `appimage`, like the AppImage job, so a local AppImage bundles the same
+WebKitGTK as a released one (2.50.4 today, against 24.04's 2.52.6).
 
-    scripts/ctr.sh build             # build the image (localhost/grid-launcher-build)
+    scripts/ctr.sh build             # rebuild both images (newer base, no cache, apt upgrade)
     scripts/ctr.sh gate              # the gate below, in its order
     scripts/ctr.sh e2e [groups...]   # scripts/e2e.sh; E2E_* variables pass through
-    scripts/ctr.sh appimage 0.9.7    # AppImage bundle, copied to ctr-out/
+    scripts/ctr.sh appimage 0.9.7    # the release job's AppImage and .zsync, in ctr-out/
     scripts/ctr.sh run <cmd...>      # any command, cwd = the repo
     scripts/ctr.sh shell             # interactive shell
     scripts/ctr.sh clean [--all]     # drop this checkout's volumes (--all: caches too)
@@ -64,7 +67,10 @@ Podman.
 `CTR_CPUS` and `CTR_MEMORY` (e.g. `2`, `4g`) can lower the cap, never raise it. Only one
 grid-launcher container runs at a time; another call waits for the lock. Only the repo is
 mounted. `target/`, `app/node_modules` and `e2e/node_modules` are Podman volumes per
-checkout, so a container build never mixes with a host build in the same tree. The cargo
+checkout (the 22.04 image has its own `target/` volume), so a container build never mixes
+with a host build in the same tree. `appimage` builds, then repacks with the same
+checksum-pinned `appimagetool` and update information as the release job, so its output
+is named and laid out like a released AppImage. The cargo
 and npm caches are shared volumes. Commit from the host; the container only builds and
 tests.
 
