@@ -21,7 +21,10 @@ jobs:
     name: Check (Linux)
     # Runs on release events too: both build jobs `needs` it, so a tag can
     # never ship artifacts from a tree CI has not tested.
-    runs-on: ubuntu-latest
+    # A fixed image, not ubuntu-latest: that label moves to Ubuntu 26 from
+    # 2026-10-19, and the apt package names below are the 24.04 ones (the
+    # same distribution as scripts/ctr.sh). Move deliberately.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: System dependencies (Tauri on Linux)
@@ -87,7 +90,7 @@ jobs:
     name: End-to-end
     # Runs on every trigger (release, workflow_dispatch); both build jobs
     # `need` it.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: System dependencies (Tauri on Linux + E2E harness)
@@ -115,7 +118,7 @@ jobs:
     # One job so the semver rules live in exactly one place; both build jobs
     # read `needs.version.outputs.version`. Seconds on a plain runner.
     if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
