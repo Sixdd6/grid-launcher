@@ -14,41 +14,41 @@ flate2 = "1.1.10"
 futures-util = "0.3.34"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif", "bmp"] }
 keyring = "4.2.0"
-liblzma = "0.4.8"
+liblzma = "0.4.9"
 mime_guess = "2.0.5"
 percent-encoding = "2.3.2"
-regex = "1.11.3"
-reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "json", "query", "stream", "multipart"] }
+regex = "1.13.1"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "query", "stream", "multipart"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 secrecy = "0.10.3"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = { version = "1.0.151", features = ["preserve_order"] }
-sevenz-rust2 = "0.22.2"
-sha2 = "0.11.0"
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+sevenz-rust2 = "0.24.1"
+sha2 = "0.11.1"
 tar = "0.4.46"
 tempfile = "3.27.0"
-thiserror = "2.0.20"
-tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
-toml = "1.1.4"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+toml = "1.1.8"
 tracing = "0.1.44"
 unrar = "0.5.8"
 url = "2.5.8"
-zip = "8.6.0"
+zip = "9.0.5"
 
 [dev-dependencies]
 futures = "0.3.34"
 secrecy = "0.10.3"
-serde_json = "1.0.151"
+serde_json = "1.0.154"
 wiremock = "0.6.5"
 
 [target."cfg(unix)".dependencies]
-libc = "0.2.189"
+libc = "0.2.191"
 
 [target."cfg(windows)".dependencies]
 # NTFS junctions: the Windows stand-in for the relative symlink
 # `library::user_data_links` creates on unix (a symlink needs a privilege a
 # normal user does not have).
-junction = "2.0.0"
+junction = "2.1.0"
 # NTFS sparse files for the FATX test image builder (FSCTL_SET_SPARSE), and
 # the allocated-size probe its test uses. Already in the tree via `junction`.
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Ioctl"] }

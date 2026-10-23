@@ -197,7 +197,9 @@ pub fn archive_is_udata_tdata(payload: &[u8]) -> bool {
         let Ok(entry) = archive.by_index(i) else {
             continue;
         };
-        let name = entry.name();
+        let Ok(name) = entry.name() else {
+            continue;
+        };
         if name == "UDATA"
             || name == "TDATA"
             || name.starts_with("UDATA/")
@@ -417,7 +419,7 @@ mod tests {
         let bytes = std::fs::read(&archive_path).unwrap();
         let mut zip = ZipArchive::new(Cursor::new(bytes)).unwrap();
         let mut names: Vec<String> = (0..zip.len())
-            .map(|i| zip.by_index(i).unwrap().name().to_string())
+            .map(|i| zip.by_index(i).unwrap().name().unwrap().to_string())
             .collect();
         names.sort();
         assert_eq!(

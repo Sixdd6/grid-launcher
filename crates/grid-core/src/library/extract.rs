@@ -250,7 +250,10 @@ fn extract_zip(archive: &Path, dest: &Path, progress: ExtractProgress) -> Result
         let mut entry = zip
             .by_index(i)
             .map_err(|e| LibraryError::Extract(format!("zip: {e}")))?;
-        let raw_name = entry.name().to_string();
+        let raw_name = entry
+            .name()
+            .map_err(|e| LibraryError::Extract(format!("zip: {e}")))?
+            .into_owned();
         // `enclosed_name()` treats both `/` and `\` as separators and
         // rejects a path that would resolve above the extraction root
         // (any `..` that pops the stack empty), satisfying the backslash

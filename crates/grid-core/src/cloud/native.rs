@@ -376,7 +376,10 @@ pub fn restore_native_multi_dir_archive(
         let mut entry = archive
             .by_index(i)
             .map_err(|e| format!("failed to read archive entry: {e}"))?;
-        let member_name = entry.name().to_string();
+        // A name that does not decode is skipped, like a malformed one below.
+        let Ok(member_name) = entry.name().map(|name| name.into_owned()) else {
+            continue;
+        };
         if member_name == "_grid_launcher_dirs.json" || member_name.ends_with('/') {
             continue;
         }

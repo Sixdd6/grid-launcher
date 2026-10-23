@@ -221,7 +221,7 @@ fn write_zip_members(
 
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| fail(e.to_string()))?;
-        let raw_name = entry.name().to_string();
+        let raw_name = entry.name().map_err(|e| fail(e.to_string()))?.into_owned();
         if raw_name.ends_with('/') || raw_name.starts_with("__MACOSX") {
             continue;
         }

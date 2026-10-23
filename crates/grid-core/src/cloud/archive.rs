@@ -666,9 +666,9 @@ fn extract_payload_zip_filtered(
     let mut extracted = 0usize;
     for i in 0..archive.len() {
         if let Some(only) = top_level {
-            let wanted = archive
-                .name_for_index(i)
-                .is_some_and(|name| only.contains(top_level_component(&name.replace('\\', "/"))));
+            let wanted = archive.name_for_index(i).is_some_and(|name| {
+                name.is_ok_and(|name| only.contains(top_level_component(&name.replace('\\', "/"))))
+            });
             if !wanted {
                 continue;
             }
@@ -684,7 +684,10 @@ fn extract_payload_zip_filtered(
             Err(err) => return Err(format!("failed to read archive entry: {err}")),
         };
 
-        let raw_name = entry.name().to_string();
+        // A name that does not decode is skipped, like an unsafe one below.
+        let Ok(raw_name) = entry.name().map(|name| name.into_owned()) else {
+            continue;
+        };
         let normalized = raw_name.replace('\\', "/");
         if normalized.ends_with('/') {
             continue; // directory entry
@@ -725,6 +728,9 @@ pub fn archive_top_level_entries(bytes: &[u8]) -> Result<Vec<(String, bool)>, St
         .map_err(|_| "Downloaded save is not a zip archive.".to_string())?;
     let mut entries: Vec<(String, bool)> = Vec::new();
     for raw_name in archive.file_names() {
+        let Ok(raw_name) = raw_name else {
+            continue; // a name that does not decode, left out like an unsafe one
+        };
         let normalized = raw_name.replace('\\', "/");
         if !is_safe_member_name(&normalized) {
             continue;
@@ -757,6 +763,9 @@ pub fn payload_zip_file_members(
         .map_err(|_| "Downloaded save is not a zip archive.".to_string())?;
     let mut members: Vec<String> = Vec::new();
     for raw_name in archive.file_names() {
+        let Ok(raw_name) = raw_name else {
+            continue; // a name that does not decode, left out like an unsafe one
+        };
         let normalized = raw_name.replace('\\', "/");
         if normalized.ends_with('/') || !is_safe_member_name(&normalized) {
             continue;
@@ -790,7 +799,7 @@ pub fn archive_member_bytes(bytes: &[u8], name: &str) -> Option<Vec<u8>> {
     let index = (0..archive.len()).find(|&i| {
         archive
             .name_for_index(i)
-            .is_some_and(|n| n.replace('\\', "/").eq_ignore_ascii_case(&wanted))
+            .is_some_and(|n| n.is_ok_and(|n| n.replace('\\', "/").eq_ignore_ascii_case(&wanted)))
     })?;
     let mut entry = archive.by_index(index).ok()?;
     let mut out = Vec::new();
@@ -968,7 +977,7 @@ mod tests {
         let file = fs::File::open(path).unwrap();
         let mut archive = ZipArchive::new(file).unwrap();
         (0..archive.len())
-            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .map(|i| archive.by_index(i).unwrap().name().unwrap().to_string())
             .collect()
     }
 

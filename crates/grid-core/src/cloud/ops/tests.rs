@@ -2558,7 +2558,10 @@ fn uploaded_save(requests: &[wiremock::Request]) -> (String, Vec<u8>) {
 
 fn zip_names(bytes: &[u8]) -> Vec<String> {
     let archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
-    let mut names: Vec<String> = archive.file_names().map(str::to_string).collect();
+    let mut names: Vec<String> = archive
+        .file_names()
+        .map(|name| name.unwrap().into_owned())
+        .collect();
     names.sort();
     names
 }
