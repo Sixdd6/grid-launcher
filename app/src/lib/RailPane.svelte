@@ -73,8 +73,10 @@
     overflow-y: auto;
   }
 
+  /* Labels start 16px in (the rail's 8px + 8px here): the same left edge as
+     the top bar's brandmark above, which sits at the bar's 16px inset. */
   .rail-heading {
-    margin: 12px 10px 4px;
+    margin: 12px 8px 4px;
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.1em;
@@ -89,7 +91,7 @@
     font: inherit;
     font-size: 13px;
     text-align: left;
-    padding: 7px 10px;
+    padding: 7px 8px;
     border: none;
     border-radius: var(--r-row);
     background: transparent;

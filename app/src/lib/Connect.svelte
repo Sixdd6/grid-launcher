@@ -156,23 +156,23 @@
   input[type='password'] {
     font: inherit;
     padding: 8px 10px;
-    border-radius: 6px;
+    border-radius: var(--r-chip);
     border: 1px solid var(--border);
     background: var(--bg);
     color: var(--text-h);
   }
 
   input:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--primary);
     outline-offset: 1px;
   }
 
   button {
     font: inherit;
     padding: 10px 16px;
-    border-radius: 6px;
+    border-radius: var(--r-chip);
     border: none;
-    background: var(--accent);
+    background: var(--primary);
     color: var(--on-primary);
     cursor: pointer;
   }

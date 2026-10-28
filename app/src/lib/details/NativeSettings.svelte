@@ -289,7 +289,7 @@
     overflow-y: auto;
     box-sizing: border-box;
     padding: 24px;
-    border-radius: 12px;
+    border-radius: var(--r-dialog);
     background: var(--bg);
     border: 1px solid var(--border);
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
@@ -299,7 +299,7 @@
   }
 
   .panel:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--primary);
     outline-offset: 2px;
   }
 
@@ -337,7 +337,7 @@
   select {
     font: inherit;
     padding: 8px 10px;
-    border-radius: 6px;
+    border-radius: var(--r-chip);
     border: 1px solid var(--border);
     background: var(--bg);
     color: var(--text-h);
@@ -345,7 +345,7 @@
 
   input:focus-visible,
   select:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--primary);
     outline-offset: 1px;
   }
 
@@ -390,7 +390,7 @@
     flex-direction: column;
     gap: 8px;
     padding: 10px 12px;
-    border-radius: 8px;
+    border-radius: var(--r-row);
     border: 1px solid var(--border);
   }
 
@@ -405,9 +405,9 @@
     width: 100%;
     font: inherit;
     padding: 10px 16px;
-    border-radius: 6px;
+    border-radius: var(--r-chip);
     border: none;
-    background: var(--accent);
+    background: var(--primary);
     color: var(--on-primary);
     cursor: pointer;
   }
@@ -417,7 +417,7 @@
     font: inherit;
     font-size: 13px;
     padding: 8px 12px;
-    border-radius: 6px;
+    border-radius: var(--r-chip);
     border: 1px solid var(--border);
     background: var(--bg);
     color: var(--text-h);
@@ -425,7 +425,7 @@
   }
 
   .reload:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--primary);
     outline-offset: 1px;
   }
 

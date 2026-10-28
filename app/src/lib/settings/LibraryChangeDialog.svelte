@@ -634,7 +634,7 @@
     max-height: calc(100vh - 48px);
     box-sizing: border-box;
     padding: 24px;
-    border-radius: 12px;
+    border-radius: var(--r-dialog);
     background: var(--bg);
     border: 1px solid var(--border);
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
@@ -645,7 +645,7 @@
   }
 
   .panel:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--primary);
     outline-offset: 2px;
   }
 

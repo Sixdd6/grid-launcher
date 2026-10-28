@@ -41,19 +41,22 @@
      dark amber (about 5.4:1 on --bg) and dark mode a bright one. */
   --gold: #8a5a00;
 
-  /* `--accent` predates the redesign and is still read by pre-redesign
-     components (focus rings, progress fills). It tracks --primary. */
-  --accent: var(--primary);
-
   /* Type */
   --sans: 'Segoe UI', system-ui, Inter, Roboto, sans-serif;
 
-  /* Radii (design §4: 4 controls / 6 chips / 8 rows / 14 cards / 100 pills) */
+  /* Radii (design §4: 4 controls / 6 chips / 8 rows / 14 cards / 100 pills;
+     the modal panels — details, pickers, confirmations — take 12) */
   --r-control: 4px;
   --r-chip: 6px;
   --r-row: 8px;
+  --r-dialog: 12px;
   --r-card: 14px;
   --r-pill: 100px;
+
+  /* One height for every control in a toolbar row (search, selects), so a
+     search field and the selects beside it share top and bottom edges
+     whatever their font size. Form fields size by padding instead. */
+  --control-h: 32px;
 
   /* Motion */
   --m-fast: 150ms;

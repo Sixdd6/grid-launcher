@@ -741,7 +741,9 @@
     flex: 1 1 240px;
     min-width: 120px;
     font: inherit;
-    padding: 6px 10px;
+    height: var(--control-h);
+    box-sizing: border-box;
+    padding: 0 10px;
     border-radius: var(--r-control);
     border: 1px solid var(--border);
     background: var(--surface-2);
@@ -759,7 +761,9 @@
   .control select {
     font: inherit;
     font-size: 12px;
-    padding: 5px 8px;
+    height: var(--control-h);
+    box-sizing: border-box;
+    padding: 0 8px;
     border-radius: var(--r-control);
     border: 1px solid var(--border);
     background: var(--surface-2);

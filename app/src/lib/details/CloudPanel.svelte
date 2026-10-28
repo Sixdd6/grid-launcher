@@ -469,9 +469,9 @@
     width: 100%;
     font: inherit;
     padding: 10px 16px;
-    border-radius: 6px;
+    border-radius: var(--r-chip);
     border: none;
-    background: var(--accent);
+    background: var(--primary);
     color: var(--on-primary);
     cursor: pointer;
   }
@@ -534,7 +534,7 @@
     justify-content: space-between;
     gap: 8px;
     padding: 6px 8px;
-    border-radius: 6px;
+    border-radius: var(--r-chip);
     border: 1px solid var(--border);
     font-size: 13px;
     word-break: break-all;
@@ -558,7 +558,7 @@
     flex: 1;
     font: inherit;
     padding: 6px 8px;
-    border-radius: 6px;
+    border-radius: var(--r-chip);
     border: 1px solid var(--border);
     background: var(--bg);
     color: var(--text-h);
@@ -567,9 +567,9 @@
   .add-path button {
     font: inherit;
     padding: 6px 12px;
-    border-radius: 6px;
+    border-radius: var(--r-chip);
     border: none;
-    background: var(--accent);
+    background: var(--primary);
     color: var(--on-primary);
     cursor: pointer;
   }
@@ -590,7 +590,7 @@
     justify-content: space-between;
     gap: 12px;
     padding: 10px;
-    border-radius: 8px;
+    border-radius: var(--r-row);
     border: 1px solid var(--border);
   }
 
@@ -627,7 +627,7 @@
   .record-actions button {
     font: inherit;
     padding: 6px 12px;
-    border-radius: 6px;
+    border-radius: var(--r-chip);
     border: 1px solid var(--border);
     background: transparent;
     color: var(--text);
@@ -680,9 +680,9 @@
   .confirm-actions button {
     font: inherit;
     padding: 8px 16px;
-    border-radius: 6px;
+    border-radius: var(--r-chip);
     border: none;
-    background: var(--accent);
+    background: var(--primary);
     color: var(--on-primary);
     cursor: pointer;
   }

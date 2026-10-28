@@ -246,7 +246,7 @@
     justify-content: space-between;
     gap: 12px;
     padding: 8px 10px;
-    border-radius: 8px;
+    border-radius: var(--r-row);
     background: var(--border);
   }
 
@@ -299,7 +299,7 @@
     justify-content: space-between;
     gap: 12px;
     padding: 8px 10px;
-    border-radius: 8px;
+    border-radius: var(--r-row);
     background: var(--border);
   }
 
@@ -330,9 +330,9 @@
     font: inherit;
     font-size: 12px;
     padding: 4px 10px;
-    border-radius: 6px;
+    border-radius: var(--r-chip);
     border: none;
-    background: var(--accent);
+    background: var(--primary);
     color: var(--on-primary);
     cursor: pointer;
     white-space: nowrap;

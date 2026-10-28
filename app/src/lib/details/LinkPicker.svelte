@@ -254,7 +254,7 @@
     height: min(560px, calc(100vh - 48px));
     box-sizing: border-box;
     padding: 24px;
-    border-radius: 12px;
+    border-radius: var(--r-dialog);
     background: var(--bg);
     border: 1px solid var(--border);
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
@@ -264,7 +264,7 @@
   }
 
   .panel:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--primary);
     outline-offset: 2px;
   }
 
@@ -285,15 +285,15 @@
   input {
     flex: none;
     font: inherit;
-    padding: 9px 10px;
-    border-radius: var(--r-control);
+    padding: 8px 10px;
+    border-radius: var(--r-chip);
     border: 1px solid var(--border);
     background: var(--bg);
     color: var(--text-h);
   }
 
   input:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--primary);
     outline-offset: 1px;
   }
 
@@ -422,7 +422,7 @@
   }
 
   .btn:focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--primary);
     outline-offset: 2px;
   }
 </style>
