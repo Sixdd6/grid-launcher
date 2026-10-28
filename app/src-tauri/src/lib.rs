@@ -447,6 +447,21 @@ pub fn run() {
                             fresh: installed.fresh,
                         },
                     );
+                    // First-run setup: the defaults the user chose for this
+                    // emulator's platforms, applied now that its entry exists.
+                    // Off the hook's thread: it loads and saves the config.
+                    let setup_handle = handle.clone();
+                    let setup_name = installed.name.clone();
+                    tauri::async_runtime::spawn_blocking(move || {
+                        let outcomes = commands::setup::apply_after_install(
+                            &Config::default_path(),
+                            &setup_name,
+                        );
+                        if !outcomes.is_empty() {
+                            let _ =
+                                setup_handle.emit(commands::setup::SETUP_DEFAULTS_EVENT, outcomes);
+                        }
+                    });
                     // A REINSTALL over an existing entry keeps whatever
                     // firmware is already there; a managed compat tool has
                     // no firmware at all.
@@ -631,6 +646,9 @@ pub fn run() {
             commands::logging::set_debug_prints,
             commands::relink::list_server_roms_for_platform,
             commands::setup::setup_platform_options,
+            commands::setup::setup_status,
+            commands::setup::skip_platform_setup,
+            commands::setup::start_platform_setup,
             commands::relink::link_installed_row,
             commands::relink::remove_from_library,
             commands::relink::locate_installed_row,

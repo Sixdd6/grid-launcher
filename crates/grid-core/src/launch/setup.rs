@@ -21,8 +21,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::autoconfig::cores;
 use crate::autoconfig::entry::assignable_server_platforms;
-use crate::config::Config;
+use crate::config::{Config, EmulatorEntry, PendingDefault};
 use crate::romm::Platform;
+
+use super::selection::NO_EMULATOR;
 
 use super::catalog::{catalog_entries_for_host, mark_installed, CatalogEntry};
 use super::profiles::{platform_matches_keywords, profile_available_on_host, EmulatorProfile};
@@ -187,6 +189,158 @@ pub fn retroarch_core_for(slug: &str, name: &str) -> Option<String> {
         candidates = cores::cores_for_platform(name, cores::compatibility_map());
     }
     candidates.into_iter().next()
+}
+
+/// One platform the user ticked, and the emulator they kept or picked.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct SetupChoice {
+    /// The platform's display label, as [`PlatformSetup::label`].
+    pub platform: String,
+    pub source_id: String,
+}
+
+/// What starting setup does: the catalog installs to queue (each emulator
+/// once, and none already configured) and the defaults to apply as they land.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetupPlan {
+    pub installs: Vec<String>,
+    /// Profile names of chosen emulators that are already configured: their
+    /// defaults can be applied at once.
+    pub already_installed: Vec<String>,
+    pub pending: BTreeMap<String, PendingDefault>,
+}
+
+/// Checks `choices` against the options `rows` offered and plans the work.
+/// A choice for an unknown platform, or an emulator not offered for it, is
+/// refused: the screen only offers what [`platform_setup`] listed.
+pub fn plan_setup(rows: &[PlatformSetup], choices: &[SetupChoice]) -> Result<SetupPlan, String> {
+    let mut plan = SetupPlan {
+        installs: Vec::new(),
+        already_installed: Vec::new(),
+        pending: BTreeMap::new(),
+    };
+    for choice in choices {
+        let row = rows
+            .iter()
+            .find(|r| r.label == choice.platform)
+            .ok_or_else(|| format!("{} is not a platform setup offers", choice.platform))?;
+        let option = row
+            .options
+            .iter()
+            .find(|o| o.source_id == choice.source_id)
+            .ok_or_else(|| format!("that emulator is not offered for {}", row.label))?;
+        let list = if option.installed {
+            &mut plan.already_installed
+        } else {
+            &mut plan.installs
+        };
+        let key = if option.installed {
+            &option.name
+        } else {
+            &option.source_id
+        };
+        if !list.contains(key) {
+            list.push(key.clone());
+        }
+        plan.pending.insert(
+            row.label.clone(),
+            PendingDefault {
+                emulator: option.name.clone(),
+                name: row.name.clone(),
+                slug: row.slug.clone(),
+                retroarch: option.kind == OptionKind::Retroarch,
+            },
+        );
+    }
+    Ok(plan)
+}
+
+/// What happened to one pending default.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum PendingOutcome {
+    /// The platform's default is now `emulator` (and `core`, for RetroArch).
+    Assigned {
+        platform: String,
+        emulator: String,
+        core: Option<String>,
+    },
+    /// RetroArch installed, but no core for the platform is on disk: the
+    /// platform is left without a default rather than pointed at RetroArch
+    /// with nothing to run (user requirement 2026-10-28).
+    CoreMissing { platform: String, emulator: String },
+    /// The user had chosen "(none)" for the platform since; it is kept.
+    KeptNone { platform: String },
+}
+
+/// Applies the pending defaults waiting on `emulator_name`, which has just
+/// installed (or was already configured), and drops them from the pending
+/// list. Overrides a default the automatic assignment made, never an explicit
+/// "(none)". `cores_on_disk` returns the installed cores compatible with a
+/// pending platform for a RetroArch entry (production:
+/// `autoconfig::installed_compatible_cores`). Pending entries for other
+/// emulators, and for an emulator with no configured entry yet, are kept.
+pub fn apply_pending_defaults(
+    config: &mut Config,
+    emulator_name: &str,
+    cores_on_disk: &dyn Fn(&PendingDefault, &EmulatorEntry) -> Vec<String>,
+) -> Vec<PendingOutcome> {
+    let wanted = emulator_name.trim();
+    let Some(entry) = config
+        .emulators
+        .iter()
+        .find(|e| e.name.trim().eq_ignore_ascii_case(wanted))
+        .cloned()
+    else {
+        return Vec::new();
+    };
+    let labels: Vec<String> = config
+        .setup
+        .pending
+        .iter()
+        .filter(|(_, p)| p.emulator.trim().eq_ignore_ascii_case(wanted))
+        .map(|(label, _)| label.clone())
+        .collect();
+
+    let mut outcomes = Vec::new();
+    for label in labels {
+        let Some(pending) = config.setup.pending.remove(&label) else {
+            continue;
+        };
+        let current = config.default_emulators.get(&label).map(|v| v.trim());
+        if current == Some(NO_EMULATOR) {
+            outcomes.push(PendingOutcome::KeptNone { platform: label });
+            continue;
+        }
+        let core = if pending.retroarch {
+            let found = cores_on_disk(&pending, &entry);
+            let Some(first) = found.first().cloned() else {
+                outcomes.push(PendingOutcome::CoreMissing {
+                    platform: label,
+                    emulator: entry.name.clone(),
+                });
+                continue;
+            };
+            let current_core = config.retroarch_cores.get(&label).cloned();
+            let core = match current_core {
+                Some(c) if found.contains(&c) => c,
+                _ => first,
+            };
+            config.retroarch_cores.insert(label.clone(), core.clone());
+            Some(core)
+        } else {
+            None
+        };
+        config
+            .default_emulators
+            .insert(label.clone(), entry.name.clone());
+        outcomes.push(PendingOutcome::Assigned {
+            platform: label,
+            emulator: entry.name.clone(),
+            core,
+        });
+    }
+    outcomes
 }
 
 #[cfg(test)]
@@ -395,5 +549,224 @@ mod tests {
     fn the_rom_count_and_slug_come_through() {
         let row = one("Sony PlayStation 2", "ps2", "win32");
         assert_eq!((row.slug.as_str(), row.rom_count), ("ps2", 10));
+    }
+
+    // --- plan_setup ----------------------------------------------------------
+
+    fn rows() -> Vec<PlatformSetup> {
+        setup_for(
+            &[
+                platform("Sony PlayStation 2", "ps2", 9),
+                platform("Super Nintendo Entertainment System", "snes", 40),
+                platform("Nintendo Entertainment System", "nes", 30),
+            ],
+            "linux",
+        )
+    }
+
+    fn choose(rows: &[PlatformSetup], label: &str) -> SetupChoice {
+        let row = rows.iter().find(|r| r.label == label).unwrap();
+        SetupChoice {
+            platform: label.to_string(),
+            source_id: row.recommended.clone().unwrap(),
+        }
+    }
+
+    #[test]
+    fn plan_installs_each_emulator_once_and_records_every_platform() {
+        let rows = rows();
+        let plan = plan_setup(
+            &rows,
+            &[
+                choose(&rows, "Sony PlayStation 2"),
+                choose(&rows, "Super Nintendo Entertainment System"),
+                choose(&rows, "Nintendo Entertainment System"),
+            ],
+        )
+        .unwrap();
+        // PCSX2, and RetroArch once for both SNES and NES.
+        assert_eq!(plan.installs.len(), 2, "{:?}", plan.installs);
+        assert_eq!(plan.pending.len(), 3);
+        assert!(plan.pending["Super Nintendo Entertainment System"].retroarch);
+        assert_eq!(
+            plan.pending["Super Nintendo Entertainment System"].slug,
+            "snes"
+        );
+        assert!(!plan.pending["Sony PlayStation 2"].retroarch);
+    }
+
+    #[test]
+    fn plan_refuses_an_emulator_not_offered_for_the_platform() {
+        let rows = rows();
+        let ps2_id = rows[0].recommended.clone().unwrap();
+        let err = plan_setup(
+            &rows,
+            &[SetupChoice {
+                platform: "Super Nintendo Entertainment System".into(),
+                source_id: ps2_id,
+            }],
+        )
+        .unwrap_err();
+        assert!(err.contains("not offered"), "{err}");
+        assert!(plan_setup(
+            &rows,
+            &[SetupChoice {
+                platform: "Nope".into(),
+                source_id: "x/y".into()
+            }]
+        )
+        .is_err());
+    }
+
+    // --- apply_pending_defaults ------------------------------------------------
+
+    fn pending(emulator: &str, name: &str, slug: &str, retroarch: bool) -> PendingDefault {
+        PendingDefault {
+            emulator: emulator.into(),
+            name: name.into(),
+            slug: slug.into(),
+            retroarch,
+        }
+    }
+
+    fn config_with(entries: &[&str], pend: &[(&str, PendingDefault)]) -> Config {
+        let mut config = Config::default();
+        for name in entries {
+            config.emulators.push(EmulatorEntry {
+                name: name.to_string(),
+                path: format!("/emu/{name}"),
+                ..Default::default()
+            });
+        }
+        for (label, p) in pend {
+            config.setup.pending.insert(label.to_string(), p.clone());
+        }
+        config
+    }
+
+    fn cores(
+        list: &'static [&'static str],
+    ) -> impl Fn(&PendingDefault, &EmulatorEntry) -> Vec<String> {
+        move |_, _| list.iter().map(|c| c.to_string()).collect()
+    }
+
+    #[test]
+    fn a_standalone_choice_becomes_the_default_and_overrides_an_automatic_one() {
+        let mut config = config_with(
+            &["Xenia Edge (Xbox 360)"],
+            &[(
+                "Xbox 360",
+                pending(
+                    "Xenia Edge (Xbox 360)",
+                    "Microsoft Xbox 360",
+                    "xbox360",
+                    false,
+                ),
+            )],
+        );
+        config
+            .default_emulators
+            .insert("Xbox 360".into(), "Xenia Canary (Xbox 360)".into());
+        let out = apply_pending_defaults(&mut config, "Xenia Edge (Xbox 360)", &cores(&[]));
+        assert_eq!(
+            config.default_emulators["Xbox 360"],
+            "Xenia Edge (Xbox 360)"
+        );
+        assert!(config.setup.pending.is_empty());
+        assert!(matches!(
+            out[0],
+            PendingOutcome::Assigned { core: None, .. }
+        ));
+    }
+
+    #[test]
+    fn retroarch_is_assigned_with_its_core_when_the_core_is_on_disk() {
+        let mut config = config_with(
+            &["RetroArch (Multi-System)"],
+            &[(
+                "SNES",
+                pending("RetroArch (Multi-System)", "Super Nintendo", "snes", true),
+            )],
+        );
+        let out = apply_pending_defaults(
+            &mut config,
+            "RetroArch (Multi-System)",
+            &cores(&["snes9x", "bsnes"]),
+        );
+        assert_eq!(config.default_emulators["SNES"], "RetroArch (Multi-System)");
+        assert_eq!(config.retroarch_cores["SNES"], "snes9x");
+        assert_eq!(
+            out,
+            [PendingOutcome::Assigned {
+                platform: "SNES".into(),
+                emulator: "RetroArch (Multi-System)".into(),
+                core: Some("snes9x".into())
+            }]
+        );
+    }
+
+    #[test]
+    fn retroarch_without_a_core_on_disk_is_not_made_the_default() {
+        let mut config = config_with(
+            &["RetroArch (Multi-System)"],
+            &[(
+                "Arcade",
+                pending("RetroArch (Multi-System)", "Arcade", "arcade", true),
+            )],
+        );
+        let out = apply_pending_defaults(&mut config, "RetroArch (Multi-System)", &cores(&[]));
+        assert!(!config.default_emulators.contains_key("Arcade"));
+        assert!(!config.retroarch_cores.contains_key("Arcade"));
+        assert!(config.setup.pending.is_empty(), "not retried forever");
+        assert!(matches!(out[0], PendingOutcome::CoreMissing { .. }));
+    }
+
+    #[test]
+    fn an_explicit_none_is_kept() {
+        let mut config = config_with(
+            &["PCSX2 (Playstation 2)"],
+            &[(
+                "PS2",
+                pending("PCSX2 (Playstation 2)", "Sony PlayStation 2", "ps2", false),
+            )],
+        );
+        config
+            .default_emulators
+            .insert("PS2".into(), NO_EMULATOR.into());
+        let out = apply_pending_defaults(&mut config, "PCSX2 (Playstation 2)", &cores(&[]));
+        assert_eq!(config.default_emulators["PS2"], NO_EMULATOR);
+        assert_eq!(
+            out,
+            [PendingOutcome::KeptNone {
+                platform: "PS2".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn pending_defaults_wait_for_their_own_emulator() {
+        let mut config = config_with(
+            &["PCSX2 (Playstation 2)"],
+            &[
+                (
+                    "PS2",
+                    pending("PCSX2 (Playstation 2)", "Sony PlayStation 2", "ps2", false),
+                ),
+                (
+                    "Dreamcast",
+                    pending("Redream (Sega Dreamcast)", "Sega Dreamcast", "dc", false),
+                ),
+            ],
+        );
+        // Redream has not installed (no entry): nothing happens for it.
+        assert!(
+            apply_pending_defaults(&mut config, "Redream (Sega Dreamcast)", &cores(&[])).is_empty()
+        );
+        assert_eq!(config.setup.pending.len(), 2);
+        apply_pending_defaults(&mut config, "PCSX2 (Playstation 2)", &cores(&[]));
+        assert_eq!(
+            config.setup.pending.keys().collect::<Vec<_>>(),
+            ["Dreamcast"]
+        );
     }
 }

@@ -158,6 +158,36 @@ pub enum ConfigError {
     Serialize(#[from] toml::ser::Error),
 }
 
+/// First-run emulator setup state (`[setup]`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetupState {
+    /// The platform picker was finished or skipped; it is not shown again on
+    /// its own (Emulators › Set up platforms… still opens it).
+    #[serde(default)]
+    pub completed: bool,
+    /// Platform label → the default setup will apply once that platform's
+    /// emulator has installed. An entry stays until its emulator installs,
+    /// so a failed install that is retried still gets its default.
+    #[serde(default)]
+    pub pending: BTreeMap<String, PendingDefault>,
+}
+
+/// One default first-run setup is waiting to apply.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingDefault {
+    /// The emulator profile name the user chose.
+    pub emulator: String,
+    /// The platform's raw server name and slug: the RetroArch core check
+    /// resolves cores from them, as the launch path does.
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub slug: String,
+    /// The choice is RetroArch: assign it only if a core is on disk.
+    #[serde(default)]
+    pub retroarch: bool,
+}
+
 /// App configuration. Secrets are NEVER part of this struct — they live in
 /// the OS keyring only (see secrets.rs).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -295,6 +325,10 @@ pub struct Config {
     /// scalar key in this struct.
     #[serde(default)]
     pub ui: UiSettings,
+    /// First-run emulator setup (`launch::setup`). A TOML table, so it stays
+    /// after every scalar key too.
+    #[serde(default)]
+    pub setup: SetupState,
     /// Unknown keys survive load/save round trips for forward compatibility.
     #[serde(flatten)]
     pub extra: BTreeMap<String, toml::Value>,
@@ -341,6 +375,7 @@ impl Default for Config {
             former_library_paths: Vec::new(),
             umu_launcher: None,
             ui: UiSettings::default(),
+            setup: SetupState::default(),
             extra: BTreeMap::new(),
         }
     }

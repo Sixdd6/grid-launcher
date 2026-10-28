@@ -428,6 +428,36 @@ export type PlatformSetup = {
   core: string | null;
 };
 
+/** One ticked platform and the emulator kept or picked for it. */
+export type SetupChoice = { platform: string; source_id: string };
+
+/** What happened to one platform's setup default (grid-core
+ *  `launch::setup::PendingOutcome`), from `startPlatformSetup` or the
+ *  `setup-defaults` event. */
+export type SetupOutcome =
+  | { outcome: 'assigned'; platform: string; emulator: string; core: string | null }
+  | { outcome: 'core_missing'; platform: string; emulator: string }
+  | { outcome: 'kept_none'; platform: string };
+
+export type SetupStatus = {
+  /** Show the platform picker: a fresh install that never finished setup. */
+  needed: boolean;
+  /** Platform labels still waiting on their emulator's install. */
+  pending: string[];
+};
+
+export type SetupStarted = {
+  /** Catalog `source_id`s queued for install. */
+  queued: string[];
+  /** Defaults applied at once (emulators already configured). */
+  applied: SetupOutcome[];
+  /** Installs that could not be queued. */
+  errors: string[];
+};
+
+/** Event: setup defaults applied after an emulator installed. */
+export const SETUP_DEFAULTS_EVENT = 'setup-defaults';
+
 export type LaunchDefaults = {
   default_emulators: Record<string, string>;
   retroarch_cores: Record<string, string>;
@@ -810,6 +840,10 @@ export const api = {
   /** First-run setup: the server's platforms that need an emulator, with
    *  what GRID can install for each and its recommendation. */
   setupPlatformOptions: () => invoke<PlatformSetup[]>('setup_platform_options'),
+  setupStatus: () => invoke<SetupStatus>('setup_status'),
+  skipPlatformSetup: () => invoke<void>('skip_platform_setup'),
+  startPlatformSetup: (choices: SetupChoice[]) =>
+    invoke<SetupStarted>('start_platform_setup', { choices }),
   installEmulator: (sourceId: string) => invoke<void>('install_emulator', { sourceId }),
   /**
    * The row's "Update from Source" check. Runs one release request against
