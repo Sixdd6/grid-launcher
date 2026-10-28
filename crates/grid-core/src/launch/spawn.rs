@@ -288,9 +288,9 @@ pub fn spawn_standalone_emulator(argv: &[String], working_dir: &Path) -> Result<
         command.creation_flags(CREATE_NEW_PROCESS_GROUP);
     }
 
-    command
-        .spawn()
-        .map_err(|e| format!("Failed to launch emulator:\n{e}"))
+    command.spawn().map_err(|e| {
+        super::wrong_machine(program).unwrap_or_else(|| format!("Failed to launch emulator:\n{e}"))
+    })
 }
 
 /// Blocks for the early-exit window and reports a child that is already
@@ -1277,6 +1277,34 @@ mod tests {
         let err = spawn_standalone_emulator(&argv, dir.path()).unwrap_err();
         assert!(
             err.starts_with("Failed to launch emulator:\n"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// An ELF program for a processor this computer is not.
+    #[cfg(target_os = "linux")]
+    fn foreign_elf(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let machine: u16 = if cfg!(target_arch = "x86_64") { 40 } else { 62 };
+        let mut bytes = vec![0u8; 64];
+        bytes[..4].copy_from_slice(b"\x7fELF");
+        bytes[4] = 1;
+        bytes[5] = 1;
+        bytes[18..20].copy_from_slice(&machine.to_le_bytes());
+        std::fs::write(path, bytes).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn spawn_standalone_explains_a_program_for_another_processor() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("pico8");
+        foreign_elf(&program);
+        let argv = vec![program.to_string_lossy().into_owned()];
+        let err = spawn_standalone_emulator(&argv, dir.path()).unwrap_err();
+        assert!(
+            err.starts_with("This emulator can't run on this computer: pico8 is built for "),
             "unexpected error: {err}"
         );
     }

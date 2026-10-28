@@ -7,7 +7,7 @@ const opt = (source_id: string, name: string, kind: SetupOption['kind'] = 'stand
   name,
   kind,
   installed,
-  server: kind === 'server' ? { rom_id: 1, file_id: 2, file_name: `${name} (v1.0) (arch-linux).zip`, version: '1.0', folder: 'x' } : null,
+  server: kind === 'server' ? { rom_id: 1, file_id: 2, file_name: `${name} (v1.0) (arch-linux-x64).zip`, version: '1.0', folder: 'x' } : null,
   needs_core: kind === 'retroarch',
 });
 

@@ -32,8 +32,11 @@ RomM shows each folder as one entry in the Emulators platform (named `ps2`,
 Each build is one file, named:
 
 ```
-<Emulator> (v<version>) (arch-<system>).<extension>
+<Emulator> (v<version>) (arch-<system>-<cpu>).<extension>
 ```
+
+The two tags may come in either order, but both must come after the emulator's
+name.
 
 - **`<Emulator>`** — the emulator's name as GRID knows it, without the platform
   in brackets: `PCSX2`, `DuckStation`, `Dolphin`, `RetroArch`, `Pico-8`,
@@ -42,9 +45,19 @@ Each build is one file, named:
 - **`(v<version>)`** — the version, in RomM's version-tag style: `v` followed by
   numbers separated by dots, optionally ending in letters (`v2.0.2`, `v1.21`,
   `v0.2.7a6`). GRID compares versions number by number to find the newest.
-- **`(arch-<system>)`** — the system the build runs on: `arch-linux`,
-  `arch-windows` or `arch-macos`. Exactly one per file. A file without it is
-  ignored. Builds are assumed to be for 64-bit x86 PCs.
+- **`(arch-<system>-<cpu>)`** — what the build runs on. Exactly one per file;
+  a file without it, or with only the system (`arch-linux`), is ignored.
+  - `<system>`: `linux`, `windows` or `macos`.
+  - `<cpu>`:
+    - `x64` — 64-bit Intel and AMD PCs, and Intel Macs (`x86_64` and `amd64`
+      are read too)
+    - `arm64` — 64-bit ARM: Apple-chip Macs, 64-bit Raspberry Pi OS, ARM
+      Windows laptops (`aarch64` is read too)
+    - `armhf` — 32-bit ARM: 32-bit Raspberry Pi OS
+    - `universal` — macOS only: one build for both Intel and Apple-chip Macs
+
+  For example: `arch-linux-x64`, `arch-windows-x64`, `arch-linux-armhf`,
+  `arch-macos-universal`.
 - **`<extension>`** — what GRID knows how to install:
   - `.AppImage` (kept as it is)
   - `.zip`, `.7z`, `.tar.gz`, `.tgz`, `.tar.xz` (unpacked)
@@ -53,28 +66,40 @@ Each build is one file, named:
 ## Several versions
 
 A folder may hold several versions of the same emulator. GRID installs the
-newest one for the system it is running on. When a newer version is added
+newest one for the system and processor it is running on. A Mac takes a
+`universal` build when there is no newer one for its own processor; at the
+same version, the build for its own processor wins. When a newer version is added
 later, GRID offers it as an update for the one already installed.
+
+## A build for the wrong processor
+
+GRID reads the program inside each build before it registers it. A build whose
+program is for another processor or system — a Raspberry Pi zip tagged
+`arch-linux-x64`, say — fails to install, and the Downloads row says what the
+program is built for and which file's tag to check. Nothing is registered.
 
 ## Example
 
 ```
 roms/emulators/
   ps2/
-    PCSX2 (v2.0.2) (arch-linux).AppImage
-    PCSX2 (v2.0.2) (arch-windows).zip
-    PCSX2 (v1.6.0) (arch-windows).zip
+    PCSX2 (v2.0.2) (arch-linux-x64).AppImage
+    PCSX2 (v2.0.2) (arch-windows-x64).zip
+    PCSX2 (v1.6.0) (arch-windows-x64).zip
   pico/
-    Pico-8 (v0.2.7a6) (arch-linux).zip
-    Pico-8 (v0.2.7a6) (arch-windows).zip
+    Pico-8 (v0.2.7a6) (arch-linux-x64).zip
+    Pico-8 (v0.2.7a6) (arch-linux-armhf).zip
+    Pico-8 (v0.2.7a6) (arch-windows-x64).zip
   multi/
-    RetroArch (v1.19.1) (arch-linux).AppImage
-    Dolphin (v2412) (arch-windows).7z
+    RetroArch (v1.19.1) (arch-linux-x64).AppImage
+    Dolphin (v2412) (arch-windows-x64).7z
+    Dolphin (v2412) (arch-macos-universal).7z
 ```
 
-On a Linux PC, GRID offers PCSX2 2.0.2 for PlayStation 2, Pico-8 0.2.7a6 for
-Pico-8, and RetroArch 1.19.1 for the platforms RetroArch has a core for. The
-Windows-only Dolphin build is not offered on Linux.
+On a Linux PC, GRID offers PCSX2 2.0.2 for PlayStation 2, the x64 Pico-8
+0.2.7a6 for Pico-8, and RetroArch 1.19.1 for the platforms RetroArch has a core
+for. A 32-bit Raspberry Pi gets the `armhf` Pico-8 instead. The Windows and
+macOS Dolphin builds are not offered on Linux.
 
 After adding or renaming files, rescan the Emulators platform in RomM so it
 picks up the change.

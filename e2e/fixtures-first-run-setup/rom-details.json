@@ -16,19 +16,19 @@
     "files": [
       {
         "id": 5051,
-        "file_name": "PCSX2 (v1.6.0) (arch-linux).zip",
+        "file_name": "PCSX2 (v1.6.0) (arch-linux-x64).zip",
         "file_size_bytes": 0,
         "is_top_level": true
       },
       {
         "id": 5052,
-        "file_name": "PCSX2 (v2.0.2) (arch-linux).zip",
+        "file_name": "PCSX2 (v2.0.2) (arch-linux-x64).zip",
         "file_size_bytes": 0,
         "is_top_level": true
       },
       {
         "id": 5053,
-        "file_name": "PCSX2 (v2.0.2) (arch-windows).zip",
+        "file_name": "PCSX2 (v2.0.2) (arch-windows-x64).zip",
         "file_size_bytes": 0,
         "is_top_level": true
       }

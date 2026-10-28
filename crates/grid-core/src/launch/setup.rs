@@ -23,11 +23,12 @@ use crate::autoconfig::cores;
 use crate::autoconfig::entry::assignable_server_platforms;
 use crate::config::{Config, EmulatorEntry, PendingDefault};
 use crate::library::emulator_package::{
-    newest_for_os, parse_package_file, PackageFile, PackageOs, MULTI_FOLDER,
+    newest_for_host, parse_package_file, PackageFile, PackageOs, MULTI_FOLDER,
 };
 use crate::library::{server_emulator_source_id, ServerEmulatorRequest};
 use crate::romm::Platform;
 
+use super::binary_target::Cpu;
 use super::selection::NO_EMULATOR;
 
 use super::catalog::{catalog_entries_for_host, mark_installed, CatalogEntry};
@@ -132,7 +133,7 @@ fn server_builds<'a>(
     host: &str,
     table: &Recommendations,
 ) -> Vec<ServerBuild<'a>> {
-    let Some(os) = PackageOs::for_host(host) else {
+    let (Some(os), Some(cpu)) = (PackageOs::for_host(host), Cpu::host()) else {
         return Vec::new();
     };
     let mut builds = Vec::new();
@@ -144,7 +145,7 @@ fn server_builds<'a>(
             .filter_map(|(id, name)| parse_package_file(name).map(|f| (*id, f)))
             .collect();
         let files: Vec<PackageFile> = parsed.iter().map(|(_, f)| f.clone()).collect();
-        for newest in newest_for_os(&files, os) {
+        for newest in newest_for_host(&files, os, cpu) {
             let Some(profile) = profile_for_emulator(&newest.emulator, profiles, table) else {
                 continue;
             };
@@ -1087,9 +1088,9 @@ mod tests {
             3432,
             "pico",
             &[
-                (1, "Pico-8 (v0.2.7a6) (arch-linux).zip"),
-                (2, "Pico-8 (v0.2.7a6) (arch-windows).zip"),
-                (3, "Pico-8 (v0.2.6) (arch-linux).zip"),
+                (1, "Pico-8 (v0.2.7a6) (arch-linux-x64).zip"),
+                (2, "Pico-8 (v0.2.7a6) (arch-windows-x64).zip"),
+                (3, "Pico-8 (v0.2.6) (arch-linux-x64).zip"),
             ],
         )
     }
@@ -1116,7 +1117,7 @@ mod tests {
 
     #[test]
     fn the_catalog_download_stays_recommended_and_a_folder_serves_only_its_platform() {
-        let ps2 = folder(7, "ps2", &[(1, "PCSX2 (v2.0.2) (arch-linux).AppImage")]);
+        let ps2 = folder(7, "ps2", &[(1, "PCSX2 (v2.0.2) (arch-linux-x64).AppImage")]);
         let rows = with_packages(
             &[
                 platform("Sony PlayStation 2", "ps2", 9),
@@ -1140,7 +1141,11 @@ mod tests {
 
     #[test]
     fn a_build_for_another_system_is_not_offered() {
-        let windows_only = folder(8, "pico", &[(1, "Pico-8 (v0.2.7a6) (arch-windows).zip")]);
+        let windows_only = folder(
+            8,
+            "pico",
+            &[(1, "Pico-8 (v0.2.7a6) (arch-windows-x64).zip")],
+        );
         let row = with_packages(
             &[platform("Pico-8", "pico", 23)],
             &[windows_only],
@@ -1156,8 +1161,8 @@ mod tests {
             9,
             "multi",
             &[
-                (1, "Dolphin (v2412) (arch-linux).AppImage"),
-                (2, "RetroArch (v1.19.1) (arch-linux).AppImage"),
+                (1, "Dolphin (v2412) (arch-linux-x64).AppImage"),
+                (2, "RetroArch (v1.19.1) (arch-linux-x64).AppImage"),
             ],
         );
         let rows = with_packages(
@@ -1199,7 +1204,7 @@ mod tests {
             "pico",
             &[
                 (1, "pico-8 (linux) (v0.2.7a6).zip"),
-                (2, "Some Homebrew (v1.0) (arch-linux).zip"),
+                (2, "Some Homebrew (v1.0) (arch-linux-x64).zip"),
             ],
         );
         let row = with_packages(
@@ -1246,7 +1251,7 @@ mod tests {
             [ServerEmulatorRequest {
                 rom_id: 3432,
                 file_id: 1,
-                file_name: "Pico-8 (v0.2.7a6) (arch-linux).zip".into(),
+                file_name: "Pico-8 (v0.2.7a6) (arch-linux-x64).zip".into(),
                 version: "0.2.7a6".into(),
                 folder: "pico".into(),
                 profile_name: "Pico-8".into(),
@@ -1313,10 +1318,10 @@ mod tests {
             700,
             "ps2",
             &[
-                (1, "PCSX2 (v1.6.0) (arch-linux).AppImage"),
-                (2, "PCSX2 (v2.0.2) (arch-linux).AppImage"),
-                (3, "PCSX2 (v2.0.2) (arch-windows).zip"),
-                (4, "Mystery Emu (v1.0) (arch-linux).zip"),
+                (1, "PCSX2 (v1.6.0) (arch-linux-x64).AppImage"),
+                (2, "PCSX2 (v2.0.2) (arch-linux-x64).AppImage"),
+                (3, "PCSX2 (v2.0.2) (arch-windows-x64).zip"),
+                (4, "Mystery Emu (v1.0) (arch-linux-x64).zip"),
             ],
         );
         let builds = server_folder_builds(

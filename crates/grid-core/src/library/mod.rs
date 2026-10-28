@@ -47,6 +47,7 @@ use crate::autoconfig::rpcs3::update_games_yml;
 use crate::autoconfig::{self, RaCredentials};
 use crate::config::{CompatToolInstall, Config, EmulatorEntry, UmuLauncherInstall};
 use crate::images::ImageFields;
+use crate::launch::binary_target::{self, BinaryTarget};
 use crate::launch::compat;
 use crate::launch::emu_install::make_executable;
 use crate::launch::forge::{ForgeClient, ForgeProvider, ResolvedDownload};
@@ -3360,9 +3361,28 @@ impl InstallService {
         } else {
             emu_install::select_executable(&job.profile_name, install_dir, archive)
         };
+        // A build for another processor (a Raspberry Pi zip on a PC) would
+        // only fail at launch with the kernel's "Exec format error": refuse
+        // it here, and say why.
         let Some(exe) = selected else {
-            return Err(LibraryError::Extract(NO_EMULATOR_EXECUTABLE.to_string()));
+            let other_machine = job.romm.as_ref().and_then(|_| {
+                emu_install::package_executable_for_another_machine(
+                    &job.profile_name,
+                    install_dir,
+                    archive,
+                    cfg!(windows),
+                )
+            });
+            return Err(LibraryError::Extract(match other_machine {
+                Some((path, target)) => wrong_machine_message(job, &path, &target),
+                None => NO_EMULATOR_EXECUTABLE.to_string(),
+            }));
         };
+        if let Some(target) = binary_target::host_mismatch(&exe) {
+            return Err(LibraryError::Extract(wrong_machine_message(
+                job, &exe, &target,
+            )));
+        }
         make_executable(&exe);
 
         // Links go in BEFORE the config entry and autoconfig run — a save
@@ -3881,6 +3901,22 @@ async fn download_server_build(
         expected_size: 0,
     }];
     download_targets(&RommProvider(&build.client), &targets, cancel, on_progress).await
+}
+
+/// The install error for a build whose program cannot run on this computer.
+/// A server build points at its file name's tag, which is what was wrong.
+fn wrong_machine_message(job: &EmulatorJob, exe: &Path, target: &BinaryTarget) -> String {
+    let why = binary_target::mismatch_message(exe, target);
+    match &job.romm {
+        Some(build) => format!(
+            "This {} build can't run on this computer: {why} Check the (arch-…) tag of \"{}\" on your server.",
+            job.profile_name, build.file_name
+        ),
+        None => format!(
+            "This {} build can't run on this computer: {why}",
+            job.profile_name
+        ),
+    }
 }
 
 /// Sets the executable bit (unix) on every file under `dir` whose name is

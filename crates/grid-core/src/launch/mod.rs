@@ -2,6 +2,7 @@
 //! for the behavior this module tree ports from `grid_launcher/emulator/`
 //! and `grid_launcher/ui/mixins/emulator_ui_mixin.py`.
 
+pub mod binary_target;
 pub mod catalog;
 pub mod compat;
 pub mod emu_install;
@@ -20,7 +21,7 @@ pub mod umu;
 
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -681,11 +682,25 @@ async fn spawn_child(
             const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
             command.creation_flags(CREATE_NEW_PROCESS_GROUP);
         }
-        command.spawn()
+        command.spawn().map_err(|e| (e, argv[0].clone()))
     })
     .await
     .map_err(|e| std::io::Error::other(format!("the spawn did not finish: {e}")))?;
-    Ok(spawned?)
+    spawned.map_err(|(error, program)| match wrong_machine(&program) {
+        Some(message) => LaunchError::Validation(message),
+        None => LaunchError::Io(error),
+    })
+}
+
+/// After a failed spawn: when the program is built for another processor or
+/// system, the error in words, instead of the kernel's "Exec format error".
+pub(crate) fn wrong_machine(program: &str) -> Option<String> {
+    let path = Path::new(program);
+    let target = binary_target::host_mismatch(path)?;
+    Some(format!(
+        "This emulator can't run on this computer: {} Install a build for this computer.",
+        binary_target::mismatch_message(path, &target)
+    ))
 }
 
 /// `row` with a blank `platform_slug` filled from the slug the last platform

@@ -132,7 +132,7 @@ fn pcsx2(version: &str, file_id: i64) -> ServerEmulatorRequest {
     ServerEmulatorRequest {
         rom_id: 700,
         file_id,
-        file_name: format!("PCSX2 (v{version}) (arch-linux).AppImage"),
+        file_name: format!("PCSX2 (v{version}) (arch-linux-x64).AppImage"),
         version: version.to_string(),
         folder: "ps2".to_string(),
         profile_name: PCSX2.to_string(),
@@ -173,7 +173,7 @@ async fn only_the_chosen_build_is_downloaded_and_it_registers_with_its_source() 
         .library
         .join("emulators")
         .join(PCSX2)
-        .join("PCSX2 (v2.0.2) (arch-linux).AppImage");
+        .join("PCSX2 (v2.0.2) (arch-linux-x64).AppImage");
     assert_eq!(PathBuf::from(&entry.path), expected);
     assert_eq!(entry.source_id, "romm:ps2/pcsx2 (playstation 2)");
     assert_eq!(entry.source_provider, "romm");
@@ -244,7 +244,7 @@ async fn a_zipped_build_is_unpacked_and_its_linux_executable_registered() {
         .install(ServerEmulatorRequest {
             rom_id: 3432,
             file_id: 1,
-            file_name: "Pico-8 (v0.2.7a6) (arch-linux).zip".to_string(),
+            file_name: "Pico-8 (v0.2.7a6) (arch-linux-x64).zip".to_string(),
             version: "0.2.7a6".to_string(),
             folder: "pico".to_string(),
             profile_name: "Pico-8".to_string(),
@@ -261,9 +261,9 @@ async fn a_zipped_build_is_unpacked_and_its_linux_executable_registered() {
 async fn a_server_view_install_of_a_standard_folder_installs_its_emulator_from_one_file() {
     let harness = Harness::new("").await;
     let files = [
-        (71, "PCSX2 (v2.0.2) (arch-windows).zip"),
-        (72, "PCSX2 (v2.0.2) (arch-linux).AppImage"),
-        (73, "PCSX2 (v1.6.0) (arch-linux).AppImage"),
+        (71, "PCSX2 (v2.0.2) (arch-windows-x64).zip"),
+        (72, "PCSX2 (v2.0.2) (arch-linux-x64).AppImage"),
+        (73, "PCSX2 (v1.6.0) (arch-linux-x64).AppImage"),
     ];
     Mock::given(method("GET"))
         .and(path("/api/roms/700"))
@@ -313,4 +313,72 @@ async fn a_server_view_install_of_a_standard_folder_installs_its_emulator_from_o
     assert_eq!(row.source_id, "romm:ps2/pcsx2 (playstation 2)");
     assert_eq!(row.kind, "emulator");
     assert_eq!(harness.entry(PCSX2).source_installed_tag, "2.0.2");
+}
+
+/// An ELF header for a processor this computer is not: a Raspberry Pi
+/// build's `pico8` on a PC.
+fn foreign_elf() -> Vec<u8> {
+    let machine: u16 = if cfg!(target_arch = "x86_64") { 40 } else { 62 };
+    let mut bytes = vec![0u8; 64];
+    bytes[..4].copy_from_slice(b"\x7fELF");
+    bytes[4] = 1;
+    bytes[5] = 1;
+    bytes[18..20].copy_from_slice(&machine.to_le_bytes());
+    bytes
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn a_build_for_another_processor_fails_the_install_and_says_why() {
+    let harness = Harness::new("").await;
+    let zip = zip_bytes(&[
+        ("pico-8/pico8", foreign_elf().as_slice()),
+        ("pico-8/pico8.dat", b"data"),
+    ]);
+    harness.serve_file(3432, 1, zip, 1).await;
+    let file_name = "Pico-8 (v0.2.7a6) (arch-linux-x64).zip";
+    harness
+        .service
+        .install_server_emulator(
+            harness.client.clone(),
+            ServerEmulatorRequest {
+                rom_id: 3432,
+                file_id: 1,
+                file_name: file_name.to_string(),
+                version: "0.2.7a6".to_string(),
+                folder: "pico".to_string(),
+                profile_name: "Pico-8".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let entry = loop {
+        let entry = harness.service.snapshot().entries.remove(0);
+        if matches!(
+            entry.status,
+            DownloadStatus::Failed | DownloadStatus::Completed
+        ) {
+            break entry;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting on the install"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(entry.status, DownloadStatus::Failed);
+    assert!(
+        entry
+            .error
+            .starts_with("This Pico-8 build can't run on this computer: pico8 is built for "),
+        "{}",
+        entry.error
+    );
+    assert!(entry.error.contains(file_name), "{}", entry.error);
+    assert!(Config::load(&harness.config_path)
+        .unwrap()
+        .emulators
+        .is_empty());
 }

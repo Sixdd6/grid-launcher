@@ -114,9 +114,17 @@ Steps 1â€“5 are done. The Server view's details panel does not show "Installingâ
 standard folder, because its rows are emulator jobs with no ROM id. The Downloads row
 shows the progress.
 
+## Processors (user decisions, 2026-10-28)
+A Raspberry Pi build of Pico-8 tagged `arch-linux` installed on a PC and failed
+at launch with "Exec format error". So:
+- The arch tag names the processor too: `(arch-<system>-<cpu>)`, cpu one of `x64`,
+  `arm64`, `armhf`, `universal` (macOS only), with aliases `x86_64`, `amd64`,
+  `aarch64`. A bare `(arch-linux)` is no longer valid.
+- Every emulator install reads the chosen program's header
+  (`launch/binary_target.rs`), skips programs for another processor, and fails
+  with a plain message when nothing runs here. A failed launch explains the same.
+
 ## Not covered (say if wanted)
-- CPU architectures other than x86-64: arm64 builds would need an extra tag, such
-  as `arch-linux-arm64`.
 - Migrating your current Pico-8 package: repackage it on the server as
   `roms/emulators/pico/Pico-8 (v0.2.7a6) (arch-linux).zip` and the Windows twin,
   then rescan.

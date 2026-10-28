@@ -19,6 +19,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use super::binary_target;
 use super::profiles::{profile_for_entry, EmulatorProfile};
 use crate::library::extract::extract_archive;
 use crate::library::paths::{sanitize_component, saves_dir, EMULATORS_DIR};
@@ -403,6 +404,10 @@ fn select_executable_where(
 /// The same scoring as [`select_executable`] ranks what is left. `archive`
 /// is the fallback when `install_dir` yields nothing, and only when it is
 /// itself a host-appropriate launchable file (an AppImage served as-is).
+///
+/// A program whose header says it is built for another processor or system
+/// ([`binary_target::host_mismatch`]) is skipped too: a Raspberry Pi build's
+/// `pico8` must not be picked on a PC.
 pub fn select_package_executable(
     title: &str,
     install_dir: &Path,
@@ -410,8 +415,25 @@ pub fn select_package_executable(
     windows: bool,
 ) -> Option<PathBuf> {
     select_executable_where(title, install_dir, archive, |path| {
-        runs_on_host(path, windows)
+        runs_on_host(path, windows) && binary_target::host_mismatch(path).is_none()
     })
+}
+
+/// When [`select_package_executable`] finds nothing, the program it would
+/// have picked had the header not been read, and what that program is built
+/// for: why the install failed, in words. `None` when there is no such
+/// program either.
+pub fn package_executable_for_another_machine(
+    title: &str,
+    install_dir: &Path,
+    archive: &Path,
+    windows: bool,
+) -> Option<(PathBuf, binary_target::BinaryTarget)> {
+    let path = select_executable_where(title, install_dir, archive, |path| {
+        runs_on_host(path, windows)
+    })?;
+    let target = binary_target::host_mismatch(&path)?;
+    Some((path, target))
 }
 
 /// Whether a launchable file's suffix belongs to the host's binaries. An
