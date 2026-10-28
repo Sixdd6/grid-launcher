@@ -178,6 +178,55 @@ fn server_builds<'a>(
     builds
 }
 
+/// The newest build on the server for the emulator a server install's
+/// `source_id` names (`romm:<folder>/<emulator>`), as the request that
+/// installs it: what Emulators › Installed compares with the version on disk,
+/// and what its Update installs. `None` when that folder no longer has a build
+/// of the emulator for this system.
+pub fn newest_server_build(
+    packages: &[ServerPackage],
+    profiles: &[EmulatorProfile],
+    config: &Config,
+    host: &str,
+    table: &Recommendations,
+    source_id: &str,
+) -> Option<ServerEmulatorRequest> {
+    server_builds(packages, profiles, config, host, table)
+        .into_iter()
+        .find(|build| build.source_id == source_id)
+        .map(ServerBuild::into_request)
+}
+
+/// What installing one Emulators-platform folder from the Server view
+/// installs: the newest build of each emulator GRID knows for this system.
+/// Empty for a ROM that does not follow the packaging standard, which then
+/// installs as a plain ROM.
+pub fn server_folder_builds(
+    package: &ServerPackage,
+    profiles: &[EmulatorProfile],
+    config: &Config,
+    host: &str,
+    table: &Recommendations,
+) -> Vec<ServerEmulatorRequest> {
+    server_builds(std::slice::from_ref(package), profiles, config, host, table)
+        .into_iter()
+        .map(ServerBuild::into_request)
+        .collect()
+}
+
+impl ServerBuild<'_> {
+    fn into_request(self) -> ServerEmulatorRequest {
+        ServerEmulatorRequest {
+            rom_id: self.info.rom_id,
+            file_id: self.info.file_id,
+            file_name: self.info.file_name,
+            version: self.info.version,
+            folder: self.info.folder,
+            profile_name: self.profile.name.clone(),
+        }
+    }
+}
+
 /// The profile a build's emulator name names: its full name, or its name
 /// without the platform suffix ("PCSX2" for "PCSX2 (Playstation 2)"),
 /// case-insensitive. Compat tools and profiles setup does not offer are
@@ -1228,5 +1277,69 @@ mod tests {
         assert_eq!(config.default_emulators["Pico-8"], "Pico-8 (server)");
         assert!(matches!(out[0], PendingOutcome::Assigned { .. }));
         assert!(config.setup.pending.is_empty());
+    }
+
+    #[test]
+    fn an_installed_server_build_finds_its_newest_version_for_this_system() {
+        let packages = [pico_folder()];
+        let newest = newest_server_build(
+            &packages,
+            load_profiles(),
+            &Config::default(),
+            "linux",
+            recommendations(),
+            "romm:pico/pico-8",
+        )
+        .unwrap();
+        assert_eq!((newest.file_id, newest.version.as_str()), (1, "0.2.7a6"));
+        assert_eq!(newest.profile_name, "Pico-8");
+        // A folder with no build of it for this system offers nothing.
+        assert_eq!(
+            newest_server_build(
+                &packages,
+                load_profiles(),
+                &Config::default(),
+                "darwin",
+                recommendations(),
+                "romm:pico/pico-8",
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_server_view_install_of_a_folder_takes_each_emulators_newest_build() {
+        let ps2 = folder(
+            700,
+            "ps2",
+            &[
+                (1, "PCSX2 (v1.6.0) (arch-linux).AppImage"),
+                (2, "PCSX2 (v2.0.2) (arch-linux).AppImage"),
+                (3, "PCSX2 (v2.0.2) (arch-windows).zip"),
+                (4, "Mystery Emu (v1.0) (arch-linux).zip"),
+            ],
+        );
+        let builds = server_folder_builds(
+            &ps2,
+            load_profiles(),
+            &Config::default(),
+            "linux",
+            recommendations(),
+        );
+        let picked: Vec<(i64, &str)> = builds
+            .iter()
+            .map(|b| (b.file_id, b.profile_name.as_str()))
+            .collect();
+        assert_eq!(picked, [(2, "PCSX2 (Playstation 2)")]);
+        // The old, non-standard layout installs as a plain ROM.
+        let old = folder(3432, "pico-8", &[(1, "pico-8 (linux) (v0.2.7a6).zip")]);
+        assert!(server_folder_builds(
+            &old,
+            load_profiles(),
+            &Config::default(),
+            "linux",
+            recommendations()
+        )
+        .is_empty());
     }
 }

@@ -20,7 +20,7 @@ use grid_core::library::{EmulatorInstalled, InstallService, ServerEmulatorReques
 use grid_core::romm::RommClient;
 use grid_core::secrets::Credential;
 use secrecy::SecretString;
-use wiremock::matchers::{method, path_regex, query_param};
+use wiremock::matchers::{method, path, path_regex, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 const PCSX2: &str = "PCSX2 (Playstation 2)";
@@ -255,4 +255,62 @@ async fn a_zipped_build_is_unpacked_and_its_linux_executable_registered() {
     assert!(entry.path.ends_with("/pico8"), "{}", entry.path);
     assert_eq!(entry.source_id, "romm:pico/pico-8");
     assert_eq!(entry.source_installed_tag, "0.2.7a6");
+}
+
+#[tokio::test]
+async fn a_server_view_install_of_a_standard_folder_installs_its_emulator_from_one_file() {
+    let harness = Harness::new("").await;
+    let files = [
+        (71, "PCSX2 (v2.0.2) (arch-windows).zip"),
+        (72, "PCSX2 (v2.0.2) (arch-linux).AppImage"),
+        (73, "PCSX2 (v1.6.0) (arch-linux).AppImage"),
+    ];
+    Mock::given(method("GET"))
+        .and(path("/api/roms/700"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": 700,
+            "name": "ps2",
+            "fs_name_no_ext": "ps2",
+            "platform_id": 99,
+            "platform_display_name": "Emulators",
+            "fs_name": "ps2",
+            "summary": "",
+            "regions": [],
+            "languages": [],
+            "tags": [],
+            "revision": null,
+            "fs_size_bytes": 0,
+            "updated_at": "2026-01-01T00:00:00Z",
+            "files": files.iter().map(|(id, name)| serde_json::json!({
+                "id": id,
+                "file_name": name,
+                "file_size_bytes": 0,
+                "is_top_level": true,
+                "category": null,
+            })).collect::<Vec<_>>(),
+        })))
+        .mount(&harness.server)
+        .await;
+    harness.serve_file(700, 72, APPIMAGE.to_vec(), 1).await;
+    harness.serve_file(700, 71, b"MZ".to_vec(), 0).await;
+    harness.serve_file(700, 73, APPIMAGE.to_vec(), 0).await;
+
+    harness
+        .service
+        .install(harness.client.clone(), 700)
+        .await
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while harness.installed.lock().unwrap().is_empty() {
+        assert!(
+            Instant::now() < deadline,
+            "timed out waiting on the install"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let row = harness.service.snapshot().entries.remove(0);
+    assert_eq!(row.source_id, "romm:ps2/pcsx2 (playstation 2)");
+    assert_eq!(row.kind, "emulator");
+    assert_eq!(harness.entry(PCSX2).source_installed_tag, "2.0.2");
 }

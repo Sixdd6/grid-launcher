@@ -7,11 +7,11 @@ use grid_core::cloud::scope::is_emulators_platform;
 use grid_core::config::Config;
 use grid_core::launch::profiles::load_profiles;
 use grid_core::launch::setup::{
-    apply_pending_defaults, plan_setup, platform_setup, recommendations, PendingOutcome,
-    PlatformSetup, ServerPackage, SetupChoice,
+    apply_pending_defaults, newest_server_build, plan_setup, platform_setup, recommendations,
+    PendingOutcome, PlatformSetup, ServerPackage, SetupChoice,
 };
 use grid_core::launch::source::HOST_PLATFORM;
-use grid_core::library::server_emulator_source_id;
+use grid_core::library::{server_emulator_source_id, ServerEmulatorRequest};
 use grid_core::romm::Platform;
 use serde::Serialize;
 use tauri::State;
@@ -43,6 +43,29 @@ pub async fn setup_platform_options(
         recommendations(),
         &packages,
     ))
+}
+
+/// The newest build on the server for an installed server emulator
+/// (`source_id` = `romm:<folder>/<emulator>`): Emulators › Installed's update
+/// check and its Update read this.
+pub(crate) async fn server_emulator_update(
+    state: &State<'_, AppState>,
+    source_id: &str,
+) -> Result<ServerEmulatorRequest, String> {
+    let platforms = list_platforms(state.clone()).await?;
+    let packages = server_packages(state, &platforms).await;
+    let config = Config::load(&Config::default_path()).map_err(err)?;
+    newest_server_build(
+        &packages,
+        load_profiles(),
+        &config,
+        HOST_PLATFORM,
+        recommendations(),
+        source_id,
+    )
+    .ok_or_else(|| {
+        "Your server no longer has a build of this emulator for this system.".to_string()
+    })
 }
 
 /// The folders on the server's Emulators platform

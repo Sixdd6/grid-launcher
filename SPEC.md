@@ -155,6 +155,7 @@ There are several main sections to the application with buttons across the top b
 - Save strategy should support `auto`, `single_file`, and `folder` modes.
 - Users should be able to define ignored files/extensions and semicolon-separated save/state directories for cloud sync handling.
 - The app should support default emulator assignment per platform, including RetroArch core selection where applicable.
+- Installing a folder from the server's "Emulators" platform that follows the packaging standard (`docs/server-emulator-packages.md`) installs each emulator in it that GRID knows, from just its newest build for this system, the same way first-run setup does: under `emulators/<Name>`, registered with its server source and version. Emulators › Installed's **Update** for such an entry compares that version with the newest build for this system in the same folder (number by number, so 2.0.10 is newer than 2.0.9) and installs it over the same entry. A package that does not follow the standard installs as below.
 - A package installed from the server's "Emulators" platform is registered as an emulator. It is downloaded and extracted under `games/Emulators/<package>` like a game, and its hidden library row is kept. GRID then picks the executable for this system (`.exe` on Windows; an AppImage, `.sh` or executable file on Linux) and matches it to a bundled emulator profile. A match gives the profile's name and arguments; no match gives the ROM title and `%rom%`. When another emulator entry already has that name, the package is added as "<Name> (server)", so a catalog entry and its update source stay unchanged. The profile's user-data folders are linked into `saves/`, the emulator is configured and gets default platforms like a catalog install, and its Downloads row shows the Emulator badge. Reinstalling the package updates the same entry and keeps the user's arguments. Deleting the emulator under Emulators › Installed also uninstalls its server package.
 
 ## Sub Views
@@ -181,15 +182,20 @@ alphabetical order, none ticked:
   `platform-emulators.json`, then keyword matching); RetroArch is recommended only for a
   platform no standalone emulator serves (NES, SNES, Game Boy, Arcade…), and is offered
   at all only when a RetroArch core is known for the platform.
-- The server's own emulators are offered too: each package on its "Emulators" platform
-  that GRID can match to a known emulator — by the package's name ("Pico-8", "PCSX2") —
-  appears for the platforms that emulator serves, as "<Name> · from your server", after
-  the catalog download (which stays the recommendation) and before RetroArch. Where the
-  catalog has nothing for a platform (Pico-8), the server package is the recommendation.
-  A package whose file names say it is built only for another OS is not offered, and
-  neither is one GRID cannot match (it stays installable from the Server view). A chosen
-  package installs like a server game and registers as an emulator; the platform's
-  default goes to its entry whatever name it gets (e.g. "Pico-8 (server)").
+- The server's own emulators are offered too, when its "Emulators" platform follows the
+  packaging standard (`docs/server-emulator-packages.md`): one folder per platform named by
+  its slug, plus a shared `multi` folder, each holding builds named
+  `<Emulator> (v<version>) (arch-linux|arch-windows|arch-macos).<ext>`. For each emulator
+  GRID knows, the newest build for this system appears as "<Name> <version> · from your
+  server": a slug folder for its own platform, `multi` for the platforms the emulator
+  serves (RetroArch only where a core is known). It comes after the catalog download
+  (which stays the recommendation) and before catalog RetroArch; where the catalog has
+  nothing for a platform (Pico-8), the server build is the recommendation. Files that do
+  not follow the standard, builds for another system and emulators GRID does not know are
+  not offered. A chosen build downloads just that one file, installs under
+  `emulators/<Name>` and registers with its source (`romm:<folder>/<emulator>`) and
+  version; the platform's default goes to its entry whatever name it gets (e.g. "Pico-8
+  (server)").
 - A platform nothing installable serves shows "No emulator available" and cannot be
   ticked; one whose recommended emulator is already configured shows "Installed".
 - **Install N emulators** (N counts emulators, not platforms) queues one catalog install

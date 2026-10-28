@@ -1229,6 +1229,19 @@ impl InstallService {
         self.check_library_gate()?;
         let library = self.library_root()?;
         let detail = client.rom_detail(rom_id).await?;
+        // A folder on the Emulators platform packaged to the standard
+        // (docs/server-emulator-packages.md) installs its emulators, each
+        // from just its newest build for this system.
+        if is_emulators_platform(&detail.platform_name) {
+            let builds = self.standard_folder_builds(&detail);
+            if !builds.is_empty() {
+                for request in builds {
+                    self.install_server_emulator(client.clone(), request)
+                        .await?;
+                }
+                return Ok(());
+            }
+        }
         let job = plan_install(&detail, &library, client)?;
         let key = JobKey::Rom(job.rom_id);
         let title = job.detail.name.clone();
@@ -1580,6 +1593,29 @@ impl InstallService {
     /// already holds it: then `<Name> (server)`, so neither is replaced. An
     /// entry this build already installed (same source id) keeps its name:
     /// that is an update. A build already downloading or queued is ignored.
+    /// The builds a Server-view install of an Emulators-platform ROM
+    /// installs, when it is a folder packaged to the standard; empty
+    /// otherwise.
+    fn standard_folder_builds(&self, detail: &RomDetail) -> Vec<ServerEmulatorRequest> {
+        let package = crate::launch::setup::ServerPackage {
+            rom_id: detail.id,
+            folder: detail.fs_name.clone(),
+            files: detail
+                .files
+                .iter()
+                .map(|f| (f.id, f.file_name.clone()))
+                .collect(),
+        };
+        let config = Config::load(&self.config_path).unwrap_or_default();
+        crate::launch::setup::server_folder_builds(
+            &package,
+            &self.profiles,
+            &config,
+            HOST_PLATFORM,
+            crate::launch::setup::recommendations(),
+        )
+    }
+
     pub async fn install_server_emulator(
         self: &Arc<Self>,
         client: Arc<RommClient>,

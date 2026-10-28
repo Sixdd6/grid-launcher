@@ -29,6 +29,7 @@ use grid_core::launch::spawn::{
     prepare_standalone_emulator_launch, spawn_standalone_emulator, wait_for_early_exit,
 };
 use grid_core::launch::{GameSession, LaunchError, LaunchService, SessionsSnapshot};
+use grid_core::library::emulator_package::compare_versions;
 use grid_core::library::emulator_removal::remove_emulator_files;
 use grid_core::library::extract::is_extractable_archive;
 use grid_core::library::paths::{layout_version_for_library_path, library_root};
@@ -1900,10 +1901,55 @@ fn update_source_for(name: &str) -> Result<(String, SourceMap), String> {
 /// cached (`SourceVersionCheckWorker`, workers.py:439-510): one release
 /// request against the entry's own source, compared with the tag on disk.
 #[tauri::command]
-pub async fn check_emulator_update(name: String) -> Result<VersionCheck, String> {
-    run_emulator_update_check(name)
+pub async fn check_emulator_update(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<VersionCheck, String> {
+    let lookup = name.clone();
+    let entry = tokio::task::spawn_blocking(move || server_entry(&lookup))
         .await
-        .map_err(update_check_error)
+        .map_err(|e| format!("check_emulator_update did not finish: {e}"))??;
+    match entry {
+        Some((source_id, installed)) => {
+            let newest = setup::server_emulator_update(&state, &source_id)
+                .await
+                .map_err(update_check_error)?;
+            Ok(server_version_check(&installed, &newest.version))
+        }
+        None => run_emulator_update_check(name)
+            .await
+            .map_err(update_check_error),
+    }
+}
+
+/// An entry installed from the server's Emulators platform: its
+/// `romm:<folder>/<emulator>` source and the version on disk. `None` for
+/// every other entry (catalog, manual).
+fn server_entry(name: &str) -> Result<Option<(String, String)>, String> {
+    let config = Config::load(&Config::default_path()).map_err(err)?;
+    Ok(emulator_entry_by_name(&config.emulators, name)
+        .filter(|e| e.source_id.starts_with(SERVER_SOURCE_PREFIX))
+        .map(|e| (e.source_id.clone(), e.source_installed_tag.clone())))
+}
+
+const SERVER_SOURCE_PREFIX: &str = "romm:";
+
+/// A server build is out of date when the server's newest version for this
+/// system compares higher than the one on disk (`compare_versions`: number by
+/// number, so `2.0.10` beats `2.0.9`). A blank installed version is never up
+/// to date.
+fn server_version_check(installed: &str, available: &str) -> VersionCheck {
+    let installed = installed.trim();
+    VersionCheck {
+        installed_display: if installed.is_empty() {
+            "unknown".to_string()
+        } else {
+            installed.to_string()
+        },
+        available_display: available.to_string(),
+        up_to_date: !installed.is_empty()
+            && compare_versions(available, installed) != std::cmp::Ordering::Greater,
+    }
 }
 
 /// The toast text for a failed check. `NO_SOURCE_DOWNLOAD` is an ANSWER, not
@@ -1956,6 +2002,17 @@ pub async fn update_emulator(state: State<'_, AppState>, name: String) -> Result
     })
     .await
     .map_err(|e| format!("update_emulator did not finish: {e}"))??;
+    if source_id.starts_with(SERVER_SOURCE_PREFIX) {
+        let request = setup::server_emulator_update(&state, &source_id).await?;
+        let client = state
+            .session
+            .client()
+            .ok_or("Not connected to your server.")?;
+        return install
+            .install_server_emulator(client, request)
+            .await
+            .map_err(err);
+    }
     install.install_emulator(source_id).await.map_err(err)
 }
 
@@ -3135,6 +3192,16 @@ mod update_check_error_tests {
             update_check_error("unknown emulator source: acme".to_string()),
             "Could not check for updates:\nunknown emulator source: acme"
         );
+    }
+
+    #[test]
+    fn a_server_build_is_out_of_date_only_when_the_server_has_a_higher_version() {
+        assert!(!server_version_check("2.0.2", "2.0.10").up_to_date);
+        assert!(server_version_check("2.0.10", "2.0.9").up_to_date);
+        assert!(server_version_check("0.2.7a6", "0.2.7a6").up_to_date);
+        let blank = server_version_check("", "1.0");
+        assert!(!blank.up_to_date);
+        assert_eq!(blank.installed_display, "unknown");
     }
 }
 

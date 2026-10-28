@@ -109,6 +109,11 @@ used for DLC and update content (`library/content.rs`).
 5. Server-view install of a standard folder.
 6. e2e fixtures and specs, SPEC, design system note.
 
+## Status (2026-10-28)
+Steps 1–5 are done. The Server view's details panel does not show "Installing…" for a
+standard folder, because its rows are emulator jobs with no ROM id. The Downloads row
+shows the progress.
+
 ## Not covered (say if wanted)
 - CPU architectures other than x86-64: arm64 builds would need an extra tag, such
   as `arch-linux-arm64`.
