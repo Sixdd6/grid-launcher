@@ -235,7 +235,7 @@
     }}
   />
 </div>
-<div data-testid="downloads-view" class="view" hidden={view !== 'downloads'}>
+<div data-testid="downloads-view" class="view scrolls" hidden={view !== 'downloads'}>
   <Downloads />
 </div>
 <div class="view" hidden={view !== 'emulators'}>
@@ -245,10 +245,10 @@
   <Settings active={view === 'settings'} bind:this={settings} />
 </div>
 
-<!-- Mounted outside the view roots, and never hidden. The footer strip is
-     `position: fixed` global chrome, and `hidden` on an ancestor is
-     `display: none` — inside a view root the strip would vanish from every
-     other view. -->
+<!-- Mounted outside the view roots, and never hidden: `hidden` on an
+     ancestor is `display: none`, so inside a view root the strip would
+     vanish from every other view. It is the last row of `#app`'s column,
+     so the views end where it starts. -->
 <DownloadsFooter onOpen={() => (view = 'downloads')} />
 
 <!-- First-run setup's installs, followed until dismissed (fixed, like the
@@ -443,9 +443,11 @@
        The background art sits at z -1 so these wrappers still paint over
        it in DOM order. */
     position: relative;
-    /* Clearance under the fixed 28px download strip (design §3), applied
-       once here instead of a bottom padding per view. */
-    padding-bottom: calc(var(--footer-h) + 24px);
+    /* No bottom padding: the download strip is a row of `#app`'s column
+       under the views (DownloadsFooter.svelte), not a fixed overlay, so
+       nothing needs clearing — and a rail view's rail runs to the bottom
+       edge. A view that scrolls as a whole gets its breathing room from
+       `.view.scrolls` below. */
     box-sizing: border-box;
     /* The app's scroll boundary. `#app` is exactly one viewport tall, so a
        view that overflows scrolls HERE and never on the document; the fixed
@@ -454,6 +456,12 @@
        rail views) sit at `height: 100%` and never reach this one.
        Does not create a stacking context, so the note above still holds. */
     overflow-y: auto;
+  }
+
+  /* Downloads is the one view with no rail: it scrolls as a whole, so its
+     last row keeps some room above the window's (or the strip's) edge. */
+  .view.scrolls {
+    padding-bottom: 24px;
   }
 
 </style>

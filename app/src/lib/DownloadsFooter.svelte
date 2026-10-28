@@ -45,11 +45,12 @@
 </footer>
 
 <style>
+  /* The last row of `#app`'s column (Shell.svelte), not a fixed overlay:
+     while it shows, the views above end where it starts, so no view needs
+     to reserve its height. `flex: none` keeps it from being squeezed. */
   .strip {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    flex: none;
+    position: relative;
     height: var(--footer-h);
     box-sizing: border-box;
     display: flex;
