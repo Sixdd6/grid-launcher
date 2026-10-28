@@ -9,6 +9,7 @@
 
 pub mod content;
 pub mod download;
+pub mod emulator_package;
 pub mod emulator_removal;
 pub mod extract;
 pub mod launch_select;
