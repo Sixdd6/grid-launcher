@@ -181,6 +181,15 @@ alphabetical order, none ticked:
   `platform-emulators.json`, then keyword matching); RetroArch is recommended only for a
   platform no standalone emulator serves (NES, SNES, Game Boy, Arcade…), and is offered
   at all only when a RetroArch core is known for the platform.
+- The server's own emulators are offered too: each package on its "Emulators" platform
+  that GRID can match to a known emulator — by the package's name ("Pico-8", "PCSX2") —
+  appears for the platforms that emulator serves, as "<Name> · from your server", after
+  the catalog download (which stays the recommendation) and before RetroArch. Where the
+  catalog has nothing for a platform (Pico-8), the server package is the recommendation.
+  A package whose file names say it is built only for another OS is not offered, and
+  neither is one GRID cannot match (it stays installable from the Server view). A chosen
+  package installs like a server game and registers as an emulator; the platform's
+  default goes to its entry whatever name it gets (e.g. "Pico-8 (server)").
 - A platform nothing installable serves shows "No emulator available" and cannot be
   ticked; one whose recommended emulator is already configured shows "Installed".
 - **Install N emulators** (N counts emulators, not platforms) queues one catalog install

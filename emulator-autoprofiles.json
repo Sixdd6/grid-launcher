@@ -364,7 +364,7 @@
     "screenshot_directories": ["user/screenshots"]
   },
   {
-    "match_tokens": ["pico8.exe"],
+    "match_tokens": ["pico8.exe", "pico8", "pico8_64", "pico8_dyn"],
     "name": "Pico-8",
     "args": "-run \"%rom%\"",
     "all_platforms": false,

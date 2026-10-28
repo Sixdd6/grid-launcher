@@ -1,1 +1,26 @@
-{}
+{
+  "505": {
+    "id": 505,
+    "name": "PCSX2",
+    "fs_name_no_ext": "pcsx2-server",
+    "platform_id": 5,
+    "platform_display_name": "Emulators",
+    "fs_name": "pcsx2-server.zip",
+    "summary": "A server Emulators-platform package: the mock forge's PCSX2 AppImage stub, zipped.",
+    "regions": [],
+    "languages": [],
+    "tags": [],
+    "revision": null,
+    "fs_size_bytes": 0,
+    "updated_at": "2026-01-01T00:00:00Z",
+    "files": [
+      {
+        "id": 5051,
+        "file_name": "pcsx2-server.zip",
+        "file_size_bytes": 0,
+        "is_top_level": true
+      }
+    ],
+    "metadatum": null
+  }
+}

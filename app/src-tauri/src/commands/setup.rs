@@ -3,13 +3,15 @@
 use std::path::Path;
 
 use grid_core::autoconfig::installed_compatible_cores;
+use grid_core::cloud::scope::is_emulators_platform;
 use grid_core::config::Config;
 use grid_core::launch::profiles::load_profiles;
 use grid_core::launch::setup::{
     apply_pending_defaults, plan_setup, platform_setup, recommendations, PendingOutcome,
-    PlatformSetup, SetupChoice,
+    PlatformSetup, ServerPackage, SetupChoice,
 };
 use grid_core::launch::source::HOST_PLATFORM;
+use grid_core::romm::Platform;
 use serde::Serialize;
 use tauri::State;
 
@@ -20,8 +22,9 @@ use super::{ensure_library_idle, err, list_platforms, AppState};
 pub const SETUP_DEFAULTS_EVENT: &str = "setup-defaults";
 
 /// The setup screen's rows: every server platform that needs an emulator,
-/// with the emulators GRID can install for it on this OS and the one it
-/// recommends. Fetches the platforms through [`list_platforms`], so the
+/// with the emulators GRID can install for it on this OS — catalog
+/// downloads and the server's own Emulators-platform packages — and the one
+/// it recommends. Fetches the platforms through [`list_platforms`], so the
 /// install service learns them (names, labels, slugs, ids) exactly as the
 /// Server view's fetch would, before setup queues anything.
 #[tauri::command]
@@ -29,6 +32,7 @@ pub async fn setup_platform_options(
     state: State<'_, AppState>,
 ) -> Result<Vec<PlatformSetup>, String> {
     let platforms = list_platforms(state.clone()).await?;
+    let packages = server_packages(&state, &platforms).await;
     let config = Config::load(&Config::default_path()).map_err(err)?;
     Ok(platform_setup(
         &platforms,
@@ -36,7 +40,61 @@ pub async fn setup_platform_options(
         &config,
         HOST_PLATFORM,
         recommendations(),
+        &packages,
     ))
+}
+
+/// The packages on the server's Emulators platform, with their file names
+/// (which say which OS a build is for) and whether each is installed. Best
+/// effort: a server with no such platform, or one that cannot be read, just
+/// offers catalog downloads.
+async fn server_packages(
+    state: &State<'_, AppState>,
+    platforms: &[Platform],
+) -> Vec<ServerPackage> {
+    let Some(client) = state.session.client() else {
+        return Vec::new();
+    };
+    let Some(shelf) = platforms
+        .iter()
+        .find(|p| is_emulators_platform(p.label()) || is_emulators_platform(&p.name))
+    else {
+        return Vec::new();
+    };
+    let games = match client.games(shelf.id).await {
+        Ok(games) => games,
+        Err(e) => {
+            tracing::warn!("setup: the Emulators platform could not be read: {e}");
+            return Vec::new();
+        }
+    };
+    let installed: Vec<i64> = match state.install.as_ref() {
+        Ok(install) => {
+            let registry = install.registry();
+            tauri::async_runtime::spawn_blocking(move || registry.all())
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .map(|rows| rows.iter().filter_map(|r| r.rom_id).collect())
+                .unwrap_or_default()
+        }
+        Err(_) => Vec::new(),
+    };
+    let mut packages = Vec::new();
+    for game in games {
+        let file_names = match client.rom_detail(game.id).await {
+            Ok(detail) => detail.files.into_iter().map(|f| f.file_name).collect(),
+            // Without its files the OS cannot be judged: offered as portable.
+            Err(_) => Vec::new(),
+        };
+        packages.push(ServerPackage {
+            rom_id: game.id,
+            title: game.name,
+            file_names,
+            installed: installed.contains(&game.id),
+        });
+    }
+    packages
 }
 
 /// Whether the app should show the platform picker after connecting.
@@ -112,6 +170,8 @@ pub async fn skip_platform_setup() -> Result<(), String> {
 pub struct SetupStarted {
     /// Catalog `source_id`s queued for install.
     pub queued: Vec<String>,
+    /// Server Emulators-platform packages (ROM ids) queued for install.
+    pub queued_server: Vec<i64>,
     /// Defaults applied at once, for emulators that were already configured.
     pub applied: Vec<PendingOutcome>,
     /// Installs that could not be queued, as user-facing lines.
@@ -142,7 +202,12 @@ pub async fn start_platform_setup(
     config.setup.completed = true;
     let mut applied = Vec::new();
     for name in &plan.already_installed {
-        applied.extend(apply_pending_defaults(&mut config, name, &cores_on_disk));
+        applied.extend(apply_pending_defaults(
+            &mut config,
+            name,
+            None,
+            &cores_on_disk,
+        ));
     }
     config.save(&path).map_err(err)?;
 
@@ -155,21 +220,46 @@ pub async fn start_platform_setup(
             Err(e) => errors.push(e.to_string()),
         }
     }
+    // A server package installs like any other ROM; registering it as an
+    // emulator happens when it lands (`server_emulator`).
+    let mut queued_server = Vec::new();
+    if !plan.server_installs.is_empty() {
+        match state.session.client() {
+            Some(client) => {
+                for rom_id in plan.server_installs {
+                    match install.install(client.clone(), rom_id).await {
+                        Ok(()) => queued_server.push(rom_id),
+                        Err(e) => errors.push(e.to_string()),
+                    }
+                }
+            }
+            None => {
+                errors.push("Not connected: the server's emulators were not installed.".to_string())
+            }
+        }
+    }
     Ok(SetupStarted {
         queued,
+        queued_server,
         applied,
         errors,
     })
 }
 
 /// The emulator-installed hook's half of setup: applies the pending defaults
-/// waiting on `emulator_name` and saves. An empty result means there was
-/// nothing pending for it (the config is not rewritten). Blocking.
-pub fn apply_after_install(config_path: &Path, emulator_name: &str) -> Vec<PendingOutcome> {
+/// waiting on `emulator_name` (or, for a server package, on its
+/// `server_rom_id`) and saves. An empty result means there was nothing
+/// pending for it (the config is not rewritten). Blocking.
+pub fn apply_after_install(
+    config_path: &Path,
+    emulator_name: &str,
+    server_rom_id: Option<i64>,
+) -> Vec<PendingOutcome> {
     let Ok(mut config) = Config::load(config_path) else {
         return Vec::new();
     };
-    let outcomes = apply_pending_defaults(&mut config, emulator_name, &cores_on_disk);
+    let outcomes =
+        apply_pending_defaults(&mut config, emulator_name, server_rom_id, &cores_on_disk);
     if !outcomes.is_empty() {
         if let Err(e) = config.save(config_path) {
             tracing::warn!("setup defaults were not saved: {e}");

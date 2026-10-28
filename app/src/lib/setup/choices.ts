@@ -66,9 +66,15 @@ export function primaryLabel(installCount: number, tickedCount: number): string 
   return `Install ${installCount} emulator${installCount === 1 ? '' : 's'}`;
 }
 
-/** An option's line in the select. RetroArch names the core it will use. */
+/** An option's line in the select. RetroArch names the core it will use; a
+ *  server package says where it comes from. */
 export function optionLabel(option: SetupOption, core: string | null): string {
   const name = option.name.replace(/\s*\(.*\)\s*$/, '');
-  const base = option.kind === 'retroarch' && core ? `${name} · ${core} core` : name;
+  const base =
+    option.kind === 'retroarch' && core
+      ? `${name} · ${core} core`
+      : option.kind === 'server'
+        ? `${name} · from your server`
+        : name;
   return option.installed ? `${base} (installed)` : base;
 }

@@ -7,6 +7,7 @@ const opt = (source_id: string, name: string, kind: SetupOption['kind'] = 'stand
   name,
   kind,
   installed,
+  rom_id: kind === 'server' ? 1 : null,
 });
 
 const pcsx2 = opt('PCSX2/pcsx2', 'PCSX2 (Playstation 2)');
@@ -98,6 +99,10 @@ describe('toInstall and the button', () => {
 });
 
 describe('optionLabel', () => {
+  it('says where a server package comes from', () => {
+    expect(optionLabel(opt('romm:3432', 'Pico-8', 'server'), null)).toBe('Pico-8 · from your server');
+  });
+
   it('drops the platform suffix and names RetroArch’s core', () => {
     expect(optionLabel(pcsx2, null)).toBe('PCSX2');
     expect(optionLabel(retroarch, 'snes9x')).toBe('RetroArch · snes9x core');

@@ -405,10 +405,15 @@ export type CatalogEntry = {
 export type SetupOption = {
   source_id: string;
   name: string;
-  /** `retroarch` only where a core is known for the platform. */
-  kind: 'standalone' | 'retroarch';
+  /** `standalone`: a catalog download. `server`: a package on the RomM
+   *  server's Emulators platform. `retroarch` only where a core is known. */
+  kind: 'standalone' | 'server' | 'retroarch';
   /** Already configured. */
   installed: boolean;
+  /** A server package's ROM id; `null` for a catalog download. */
+  rom_id: number | null;
+  /** An installed server package's entry name (may end " (server)"). */
+  entry?: string;
 };
 
 /** One row of the first-run platform picker (grid-core
@@ -449,6 +454,8 @@ export type SetupStatus = {
 export type SetupStarted = {
   /** Catalog `source_id`s queued for install. */
   queued: string[];
+  /** Server Emulators-platform packages (ROM ids) queued for install. */
+  queued_server: number[];
   /** Defaults applied at once (emulators already configured). */
   applied: SetupOutcome[];
   /** Installs that could not be queued. */

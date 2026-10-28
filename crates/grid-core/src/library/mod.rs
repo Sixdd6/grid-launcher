@@ -792,6 +792,11 @@ pub struct EmulatorInstalled {
     /// future compat-tool branch that starts firing the hook must not
     /// silently trigger a firmware pass for a compat tool.
     pub compat_tool: bool,
+    /// The server ROM id of a package installed from the server's Emulators
+    /// platform; `None` for a catalog install. First-run setup matches the
+    /// defaults it chose for a server package by this, because the entry's
+    /// name is only decided at install time (`server_emulator`'s suffix).
+    pub server_rom_id: Option<i64>,
 }
 
 /// Notified after an ordinary emulator install writes its config entry and
@@ -3236,6 +3241,7 @@ impl InstallService {
                 name: job.profile_name.clone(),
                 fresh,
                 compat_tool: false,
+                server_rom_id: None,
             });
         }
         Ok(())
@@ -3326,6 +3332,7 @@ impl InstallService {
                 name: plan.name,
                 fresh,
                 compat_tool: false,
+                server_rom_id: record.rom_id,
             });
         }
     }

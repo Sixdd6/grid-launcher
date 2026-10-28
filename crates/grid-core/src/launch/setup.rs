@@ -58,7 +58,10 @@ pub fn recommendations() -> &'static Recommendations {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum OptionKind {
+    /// A catalog download (GitHub and the like).
     Standalone,
+    /// A package on the RomM server's Emulators platform.
+    Server,
     Retroarch,
 }
 
@@ -68,8 +71,117 @@ pub struct SetupOption {
     pub source_id: String,
     pub name: String,
     pub kind: OptionKind,
-    /// Already configured (catalog rule: same name or same source).
+    /// Already configured (catalog rule: same name or same source; a server
+    /// package: installed, with its entry found).
     pub installed: bool,
+    /// A server package's ROM id; `None` for a catalog download.
+    pub rom_id: Option<i64>,
+    /// An installed server package's emulator entry name, which may carry the
+    /// " (server)" suffix: what its defaults are set to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entry: Option<String>,
+}
+
+/// One package on the server's Emulators platform, as setup sees it before
+/// anything is downloaded.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServerPackage {
+    pub rom_id: i64,
+    /// The ROM's name, which identifies the emulator ("Pico-8").
+    pub title: String,
+    /// The package's file names: they tell which OS a build is for.
+    pub file_names: Vec<String>,
+    /// Already installed (a library row for this ROM).
+    pub installed: bool,
+}
+
+/// The emulator a server package is, judged before downloading it: the
+/// package's name equals a profile's name, or its name without the platform
+/// suffix ("Pico-8", "PCSX2" for "PCSX2 (Playstation 2)"), case-insensitive.
+/// A package whose file names say it is built only for another OS is not
+/// offered. RetroArch and compat tools are never matched: setup offers
+/// RetroArch from the catalog, with its core rule. An unmatched package is
+/// left out of setup (user decision 2026-10-28); the Server view still
+/// installs it.
+pub fn identify_package<'a>(
+    package: &ServerPackage,
+    profiles: &'a [EmulatorProfile],
+    host: &str,
+) -> Option<&'a EmulatorProfile> {
+    if !package_fits_host(&package.file_names, host) {
+        return None;
+    }
+    let title = package.title.trim().to_lowercase();
+    if title.is_empty() {
+        return None;
+    }
+    profiles
+        .iter()
+        .filter(|p| !p.is_compat_tool && !p.all_platforms && !p.platform_keywords.is_empty())
+        .find(|p| {
+            let full = p.name.trim().to_lowercase();
+            let short = full.split(" (").next().unwrap_or(&full).trim().to_string();
+            title == full || title == short
+        })
+}
+
+/// The OS a package file is built for, from its name: `win32`, `linux`,
+/// `darwin`, or `None` when the name does not say.
+fn os_of_file(file_name: &str) -> Option<&'static str> {
+    let name = file_name.to_lowercase();
+    if name.contains("windows")
+        || name.contains("win64")
+        || name.contains("win32")
+        || name.ends_with(".exe")
+        || name.ends_with(".msi")
+    {
+        Some("win32")
+    } else if name.contains("macos")
+        || name.contains("darwin")
+        || name.contains("osx")
+        || name.ends_with(".dmg")
+    {
+        Some("darwin")
+    } else if name.contains("linux") || name.ends_with(".appimage") {
+        Some("linux")
+    } else {
+        None
+    }
+}
+
+/// Whether a package has something for `host`: no file names an OS (it may
+/// well be portable), or one of them names this one.
+fn package_fits_host(file_names: &[String], host: &str) -> bool {
+    let hints: Vec<&str> = file_names.iter().filter_map(|f| os_of_file(f)).collect();
+    hints.is_empty() || hints.iter().any(|os| host.starts_with(os))
+}
+
+/// A server package matched to its emulator, with its existing entry when it
+/// is installed.
+struct MatchedPackage<'a> {
+    profile: &'a EmulatorProfile,
+    package: &'a ServerPackage,
+    entry: Option<String>,
+}
+
+/// An installed server package's entry: `<Name> (server)` when the plain
+/// name was taken, else `<Name>` — never a catalog entry (non-blank
+/// `source_id`), which a server package does not own.
+fn server_entry_name(config: &Config, profile_name: &str) -> Option<String> {
+    let suffixed = format!(
+        "{profile_name}{}",
+        crate::library::server_emulator::SERVER_SUFFIX
+    );
+    config
+        .emulators
+        .iter()
+        .find(|e| e.name.trim().eq_ignore_ascii_case(&suffixed))
+        .or_else(|| {
+            config.emulators.iter().find(|e| {
+                e.name.trim().eq_ignore_ascii_case(profile_name) && e.source_id.trim().is_empty()
+            })
+        })
+        .map(|e| e.name.trim().to_string())
 }
 
 /// One row of the setup screen.
@@ -91,14 +203,15 @@ pub struct PlatformSetup {
 }
 
 /// Every assignable platform of `platforms` with its setup options, as `host`
-/// (a `sys.platform`-shaped slug: `linux`, `win32`) would list them. Platforms
-/// keep the server's order; the screen sorts.
+/// (a `sys.platform`-shaped slug: `linux`, `win32`) would list them, including
+/// the server's own emulator `packages`. Platforms keep the given order.
 pub fn platform_setup(
     platforms: &[Platform],
     profiles: &[EmulatorProfile],
     config: &Config,
     host: &str,
     table: &Recommendations,
+    packages: &[ServerPackage],
 ) -> Vec<PlatformSetup> {
     let mut rows = catalog_entries_for_host(profiles, host);
     mark_installed(&mut rows, config);
@@ -118,17 +231,40 @@ pub fn platform_setup(
         })
         .collect();
 
+    let matched: Vec<MatchedPackage> = packages
+        .iter()
+        .filter_map(|package| {
+            let profile = identify_package(package, profiles, host)?;
+            let entry = package
+                .installed
+                .then(|| server_entry_name(config, profile.name.trim()))
+                .flatten();
+            Some(MatchedPackage {
+                profile,
+                package,
+                entry,
+            })
+        })
+        .collect();
+
     let assignable = assignable_server_platforms(platforms);
     platforms
         .iter()
         .filter(|p| assignable.contains(&p.name))
-        .map(|p| platform_row(p, &installable, table))
+        .map(|p| platform_row(p, &installable, &matched, table))
         .collect()
+}
+
+/// The `source_id` a server package's option carries: unique across the
+/// screen, and never a catalog `owner/repo`.
+pub fn server_source_id(rom_id: i64) -> String {
+    format!("romm:{rom_id}")
 }
 
 fn platform_row(
     platform: &Platform,
     installable: &[(&EmulatorProfile, &CatalogEntry)],
+    server: &[MatchedPackage],
     table: &Recommendations,
 ) -> PlatformSetup {
     let option = |(profile, row): &(&EmulatorProfile, &CatalogEntry), kind| SetupOption {
@@ -136,6 +272,8 @@ fn platform_row(
         name: profile.name.trim().to_string(),
         kind,
         installed: row.installed,
+        rom_id: None,
+        entry: None,
     };
 
     let mut standalone: Vec<&(&EmulatorProfile, &CatalogEntry)> = installable
@@ -161,6 +299,23 @@ fn platform_row(
         .iter()
         .map(|entry| option(entry, OptionKind::Standalone))
         .collect();
+
+    // The server's own packages come after the catalog's downloads (user
+    // decision 2026-10-28: the catalog stays the recommendation), and before
+    // RetroArch, which only serves platforms nothing standalone does.
+    options.extend(
+        server
+            .iter()
+            .filter(|m| platform_matches_keywords(&platform.name, &m.profile.platform_keywords))
+            .map(|m| SetupOption {
+                source_id: server_source_id(m.package.rom_id),
+                name: m.profile.name.trim().to_string(),
+                kind: OptionKind::Server,
+                installed: m.entry.is_some(),
+                rom_id: Some(m.package.rom_id),
+                entry: m.entry.clone(),
+            }),
+    );
 
     let core = retroarch_core_for(&platform.slug, &platform.name);
     if core.is_some() {
@@ -204,8 +359,11 @@ pub struct SetupChoice {
 /// once, and none already configured) and the defaults to apply as they land.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetupPlan {
+    /// Catalog `source_id`s to install.
     pub installs: Vec<String>,
-    /// Profile names of chosen emulators that are already configured: their
+    /// Server Emulators-platform packages (ROM ids) to install.
+    pub server_installs: Vec<i64>,
+    /// Entry names of chosen emulators that are already configured: their
     /// defaults can be applied at once.
     pub already_installed: Vec<String>,
     pub pending: BTreeMap<String, PendingDefault>,
@@ -217,6 +375,7 @@ pub struct SetupPlan {
 pub fn plan_setup(rows: &[PlatformSetup], choices: &[SetupChoice]) -> Result<SetupPlan, String> {
     let mut plan = SetupPlan {
         installs: Vec::new(),
+        server_installs: Vec::new(),
         already_installed: Vec::new(),
         pending: BTreeMap::new(),
     };
@@ -230,26 +389,32 @@ pub fn plan_setup(rows: &[PlatformSetup], choices: &[SetupChoice]) -> Result<Set
             .iter()
             .find(|o| o.source_id == choice.source_id)
             .ok_or_else(|| format!("that emulator is not offered for {}", row.label))?;
-        let list = if option.installed {
-            &mut plan.already_installed
-        } else {
-            &mut plan.installs
-        };
-        let key = if option.installed {
-            &option.name
-        } else {
-            &option.source_id
-        };
-        if !list.contains(key) {
-            list.push(key.clone());
+        // An installed server package's entry may carry the " (server)"
+        // suffix: its defaults go to that entry, by name.
+        let entry_name = option.entry.clone().unwrap_or_else(|| option.name.clone());
+        let mut server_rom_id = None;
+        if option.installed {
+            if !plan.already_installed.contains(&entry_name) {
+                plan.already_installed.push(entry_name.clone());
+            }
+        } else if let Some(rom_id) = option.rom_id {
+            // Not installed yet: its entry's name is decided at install time,
+            // so the default waits for this ROM, not for a name.
+            server_rom_id = Some(rom_id);
+            if !plan.server_installs.contains(&rom_id) {
+                plan.server_installs.push(rom_id);
+            }
+        } else if !plan.installs.contains(&option.source_id) {
+            plan.installs.push(option.source_id.clone());
         }
         plan.pending.insert(
             row.label.clone(),
             PendingDefault {
-                emulator: option.name.clone(),
+                emulator: entry_name,
                 name: row.name.clone(),
                 slug: row.slug.clone(),
                 retroarch: option.kind == OptionKind::Retroarch,
+                server_rom_id,
             },
         );
     }
@@ -276,7 +441,9 @@ pub enum PendingOutcome {
 
 /// Applies the pending defaults waiting on `emulator_name`, which has just
 /// installed (or was already configured), and drops them from the pending
-/// list. Overrides a default the automatic assignment made, never an explicit
+/// list. A server package's install passes its `server_rom_id`: the defaults
+/// chosen for that ROM apply to the entry whatever name it got; the others
+/// wait on a name. Overrides a default the automatic assignment made, never an explicit
 /// "(none)". `cores_on_disk` returns the installed cores compatible with a
 /// pending platform for a RetroArch entry (production:
 /// `autoconfig::installed_compatible_cores`). Pending entries for other
@@ -284,6 +451,7 @@ pub enum PendingOutcome {
 pub fn apply_pending_defaults(
     config: &mut Config,
     emulator_name: &str,
+    server_rom_id: Option<i64>,
     cores_on_disk: &dyn Fn(&PendingDefault, &EmulatorEntry) -> Vec<String>,
 ) -> Vec<PendingOutcome> {
     let wanted = emulator_name.trim();
@@ -299,7 +467,11 @@ pub fn apply_pending_defaults(
         .setup
         .pending
         .iter()
-        .filter(|(_, p)| p.emulator.trim().eq_ignore_ascii_case(wanted))
+        .filter(|(_, p)| match (server_rom_id, p.server_rom_id) {
+            (Some(installed), Some(chosen)) => installed == chosen,
+            (_, None) => p.emulator.trim().eq_ignore_ascii_case(wanted),
+            (None, Some(_)) => false,
+        })
         .map(|(label, _)| label.clone())
         .collect();
 
@@ -368,6 +540,7 @@ mod tests {
             &Config::default(),
             host,
             recommendations(),
+            &[],
         )
     }
 
@@ -509,6 +682,7 @@ mod tests {
             &Config::default(),
             "linux",
             &table,
+            &[],
         )
         .remove(0);
         assert!(row.options.is_empty(), "{:?}", names(&row));
@@ -563,6 +737,7 @@ mod tests {
             &config,
             "linux",
             recommendations(),
+            &[],
         )
         .remove(0);
         assert!(row.options[0].installed);
@@ -649,6 +824,7 @@ mod tests {
             name: name.into(),
             slug: slug.into(),
             retroarch,
+            server_rom_id: None,
         }
     }
 
@@ -690,7 +866,7 @@ mod tests {
         config
             .default_emulators
             .insert("Xbox 360".into(), "Xenia Canary (Xbox 360)".into());
-        let out = apply_pending_defaults(&mut config, "Xenia Edge (Xbox 360)", &cores(&[]));
+        let out = apply_pending_defaults(&mut config, "Xenia Edge (Xbox 360)", None, &cores(&[]));
         assert_eq!(
             config.default_emulators["Xbox 360"],
             "Xenia Edge (Xbox 360)"
@@ -714,6 +890,7 @@ mod tests {
         let out = apply_pending_defaults(
             &mut config,
             "RetroArch (Multi-System)",
+            None,
             &cores(&["snes9x", "bsnes"]),
         );
         assert_eq!(config.default_emulators["SNES"], "RetroArch (Multi-System)");
@@ -737,7 +914,8 @@ mod tests {
                 pending("RetroArch (Multi-System)", "Arcade", "arcade", true),
             )],
         );
-        let out = apply_pending_defaults(&mut config, "RetroArch (Multi-System)", &cores(&[]));
+        let out =
+            apply_pending_defaults(&mut config, "RetroArch (Multi-System)", None, &cores(&[]));
         assert!(!config.default_emulators.contains_key("Arcade"));
         assert!(!config.retroarch_cores.contains_key("Arcade"));
         assert!(config.setup.pending.is_empty(), "not retried forever");
@@ -756,7 +934,7 @@ mod tests {
         config
             .default_emulators
             .insert("PS2".into(), NO_EMULATOR.into());
-        let out = apply_pending_defaults(&mut config, "PCSX2 (Playstation 2)", &cores(&[]));
+        let out = apply_pending_defaults(&mut config, "PCSX2 (Playstation 2)", None, &cores(&[]));
         assert_eq!(config.default_emulators["PS2"], NO_EMULATOR);
         assert_eq!(
             out,
@@ -783,13 +961,154 @@ mod tests {
         );
         // Redream has not installed (no entry): nothing happens for it.
         assert!(
-            apply_pending_defaults(&mut config, "Redream (Sega Dreamcast)", &cores(&[])).is_empty()
+            apply_pending_defaults(&mut config, "Redream (Sega Dreamcast)", None, &cores(&[]))
+                .is_empty()
         );
         assert_eq!(config.setup.pending.len(), 2);
-        apply_pending_defaults(&mut config, "PCSX2 (Playstation 2)", &cores(&[]));
+        apply_pending_defaults(&mut config, "PCSX2 (Playstation 2)", None, &cores(&[]));
         assert_eq!(
             config.setup.pending.keys().collect::<Vec<_>>(),
             ["Dreamcast"]
         );
+    }
+
+    // --- server Emulators-platform packages -----------------------------------
+
+    fn package(rom_id: i64, title: &str, files: &[&str], installed: bool) -> ServerPackage {
+        ServerPackage {
+            rom_id,
+            title: title.to_string(),
+            file_names: files.iter().map(|f| f.to_string()).collect(),
+            installed,
+        }
+    }
+
+    fn with_packages(
+        platforms: &[Platform],
+        packages: &[ServerPackage],
+        config: &Config,
+    ) -> Vec<PlatformSetup> {
+        platform_setup(
+            platforms,
+            load_profiles(),
+            config,
+            "linux",
+            recommendations(),
+            packages,
+        )
+    }
+
+    /// The real server's Pico-8 package: a folder with a Linux and a Windows zip.
+    fn pico8() -> ServerPackage {
+        package(
+            3432,
+            "Pico-8",
+            &[
+                "pico-8 (linux) (v0.2.7a6).zip",
+                "pico-8 (windows) (v0.2.7a6).zip",
+            ],
+            false,
+        )
+    }
+
+    #[test]
+    fn a_server_package_serves_a_platform_the_catalog_cannot() {
+        let row = with_packages(
+            &[platform("Pico-8", "pico", 23)],
+            &[pico8()],
+            &Config::default(),
+        )
+        .remove(0);
+        assert_eq!(row.options[0].kind, OptionKind::Server);
+        assert_eq!(row.options[0].name, "Pico-8");
+        assert_eq!(row.options[0].rom_id, Some(3432));
+        assert_eq!(row.recommended.as_deref(), Some("romm:3432"));
+    }
+
+    #[test]
+    fn the_catalog_download_stays_recommended_over_a_server_package() {
+        let server_pcsx2 = package(7, "PCSX2", &["pcsx2-linux.AppImage"], false);
+        let row = with_packages(
+            &[platform("Sony PlayStation 2", "ps2", 9)],
+            &[server_pcsx2],
+            &Config::default(),
+        )
+        .remove(0);
+        let kinds: Vec<OptionKind> = row.options.iter().map(|o| o.kind).collect();
+        assert_eq!(kinds[0], OptionKind::Standalone);
+        assert_eq!(kinds[1], OptionKind::Server);
+        assert_eq!(recommended_name(&row), Some("PCSX2 (Playstation 2)"));
+        assert_ne!(row.recommended.as_deref(), Some("romm:7"));
+    }
+
+    #[test]
+    fn a_package_built_only_for_another_os_is_left_out() {
+        let windows_only = package(8, "Pico-8", &["pico-8 (windows).zip", "pico8.exe"], false);
+        assert!(identify_package(&windows_only, load_profiles(), "linux").is_none());
+        assert!(identify_package(&windows_only, load_profiles(), "win32").is_some());
+        // No OS in any name: it may be portable, so it is offered.
+        let unmarked = package(9, "Pico-8", &["pico8-0.2.7.zip"], false);
+        assert!(identify_package(&unmarked, load_profiles(), "linux").is_some());
+    }
+
+    #[test]
+    fn an_unrecognised_package_is_left_out() {
+        let mystery = package(10, "Some Homebrew Thing", &["thing.zip"], false);
+        assert!(identify_package(&mystery, load_profiles(), "linux").is_none());
+        // RetroArch on the server is not matched: setup offers it from the
+        // catalog, with its core rule.
+        let retroarch = package(11, "RetroArch", &["RetroArch-linux.AppImage"], false);
+        assert!(identify_package(&retroarch, load_profiles(), "linux").is_none());
+    }
+
+    #[test]
+    fn an_installed_server_package_points_at_its_suffixed_entry() {
+        let mut config = Config::default();
+        config.emulators.push(EmulatorEntry {
+            name: "Pico-8 (server)".to_string(),
+            path: "/lib/games/Emulators/Pico-8/pico8".to_string(),
+            ..Default::default()
+        });
+        let mut pkg = pico8();
+        pkg.installed = true;
+        let row = with_packages(&[platform("Pico-8", "pico", 23)], &[pkg], &config).remove(0);
+        assert!(row.options[0].installed);
+        assert_eq!(row.options[0].entry.as_deref(), Some("Pico-8 (server)"));
+    }
+
+    #[test]
+    fn plan_installs_a_server_package_and_waits_for_that_rom() {
+        let rows = with_packages(
+            &[platform("Pico-8", "pico", 23)],
+            &[pico8()],
+            &Config::default(),
+        );
+        let plan = plan_setup(
+            &rows,
+            &[SetupChoice {
+                platform: "Pico-8".into(),
+                source_id: "romm:3432".into(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(plan.server_installs, [3432]);
+        assert!(plan.installs.is_empty());
+        assert_eq!(plan.pending["Pico-8"].server_rom_id, Some(3432));
+    }
+
+    #[test]
+    fn a_server_packages_default_lands_on_whatever_name_its_entry_got() {
+        let mut p = pending("Pico-8", "Pico-8", "pico", false);
+        p.server_rom_id = Some(3432);
+        let mut config = config_with(&["Pico-8 (server)"], &[("Pico-8", p)]);
+        // Another emulator's install, even one named like the profile, does
+        // not apply it.
+        assert!(
+            apply_pending_defaults(&mut config, "Pico-8 (server)", None, &cores(&[])).is_empty()
+        );
+        let out = apply_pending_defaults(&mut config, "Pico-8 (server)", Some(3432), &cores(&[]));
+        assert_eq!(config.default_emulators["Pico-8"], "Pico-8 (server)");
+        assert!(matches!(out[0], PendingOutcome::Assigned { .. }));
+        assert!(config.setup.pending.is_empty());
     }
 }

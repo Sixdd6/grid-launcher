@@ -21,7 +21,8 @@ async function screenshot(name: string): Promise<void> {
  * library folder, and the platform picker follows.
  *
  * Fixtures (fixtures-first-run-setup): PS2 and Dreamcast, whose standalone
- * emulators the mock forge serves (PCSX2, Redream); Zeebo, which nothing
+ * emulators the mock forge serves (PCSX2, Redream), and an Emulators platform
+ * hosting a PCSX2 package, which PS2 also offers; Zeebo, which nothing
  * installable serves; and SNES, which only RetroArch serves (with a core).
  * RetroArch's two-archive install has no mock forge route, so SNES is shown
  * but not ticked: its rules are covered by grid-core's launch::setup tests.
@@ -53,6 +54,7 @@ describe('first-run setup: pick platforms, install their emulators', () => {
         (r as HTMLElement).dataset.testid!.replace('setup-row-', ''),
       ),
     );
+    // The Emulators platform holds emulators, not games: never a row.
     expect(order).toEqual(['dc', 'ps2', 'snes', 'zeebo']);
     await expect($(testId('setup-unavailable-zeebo'))).toExist();
     await expect($(testId('setup-check-zeebo'))).toBeDisabled();
@@ -64,7 +66,23 @@ describe('first-run setup: pick platforms, install their emulators', () => {
   it('pre-selects the recommended emulator for a ticked platform', async () => {
     await $(testId('setup-check-ps2')).click();
     await $(testId('setup-check-dc')).click();
+    // The catalog download stays recommended; the server's own PCSX2 package
+    // is the alternative, and is what this run installs.
     await expect($(testId('setup-emulator-ps2'))).toHaveValue('PCSX2/pcsx2');
+    const ps2Options = await browser.execute(() =>
+      Array.from((document.querySelector('[data-testid="setup-emulator-ps2"]') as HTMLSelectElement).options).map(
+        (o) => `${o.value}=${o.textContent?.trim()}`,
+      ),
+    );
+    expect(ps2Options.slice(0, 2)).toEqual(['PCSX2/pcsx2=PCSX2', 'romm:505=PCSX2 · from your server']);
+    // A real selection fires `change`; WebKitGTK's WebDriver select does not,
+    // so make the same choice the way the browser reports it.
+    await browser.execute(() => {
+      const select = document.querySelector('[data-testid="setup-emulator-ps2"]') as HTMLSelectElement;
+      select.value = 'romm:505';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await expect($(testId('setup-emulator-ps2'))).toHaveValue('romm:505');
     // SNES offers RetroArch only (with its core). Ticked to read the select,
     // then unticked: the mock forge cannot serve RetroArch.
     await $(testId('setup-check-snes')).click();
@@ -125,13 +143,18 @@ describe('first-run setup: pick platforms, install their emulators', () => {
       { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the chosen defaults never reached config.toml' },
     );
     // The Server view stayed in front the whole time: its header must pick
-    // the new default up without being left and re-entered. Dreamcast is the
-    // platform it opened on (alphabetical).
+    // the new default up without being left and re-entered. Selecting a
+    // platform in the rail re-reads nothing, so Dreamcast's chip can only show
+    // Redream if the view refreshed its defaults while it stayed open.
+    await $(testId('platform-btn-2')).click();
     await browser.waitUntil(
       async () => (await $(testId('server-emulator-chip')).getText()).includes('Redream'),
       { timeout: TRANSITION_TIMEOUT, timeoutMsg: "the Server header never showed Dreamcast's new default" },
     );
     const config = readFileSync(configPath(), 'utf-8');
+    // PCSX2 came from the server's package (installed like a game, under
+    // games/Emulators), not from the catalog download.
+    expect(config).toMatch(/path = ".*games\/Emulators\/[^"]*pcsx2[^"]*"/i);
     expect(config).toMatch(/\[setup\]\s*\ncompleted = true/);
     expect(config).not.toContain('[setup.pending');
 

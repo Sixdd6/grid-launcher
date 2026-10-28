@@ -9,7 +9,7 @@
   // themselves are ordinary Downloads rows; this only follows them.
   let { onOpenDownloads }: { onOpenDownloads: () => void } = $props();
 
-  let progress = $derived(summarize(setupRun.queued, downloads.entries));
+  let progress = $derived(summarize(setupRun.queued, downloads.entries, setupRun.queuedServer));
   let notes = $derived(outcomeNotes(setupRun.outcomes));
   let finished = $derived(progress.running === 0);
   let assigned = $derived(assignedCount(setupRun.outcomes));
@@ -38,7 +38,7 @@
       <p class="line">{assigned} {assigned === 1 ? 'platform is' : 'platforms are'} ready to play.</p>
     {/if}
     {#each progress.failed as entry (entry.id)}
-      <p class="line failed" data-testid={`setup-failed-${entry.source_id}`}>
+      <p class="line failed" data-testid={`setup-failed-${entry.source_id || `romm-${entry.rom_id}`}`}>
         {entry.title} didn't install.
         <button class="link" onclick={() => retry(entry.id)}>Retry</button>
       </p>
