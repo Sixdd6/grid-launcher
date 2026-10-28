@@ -2,11 +2,18 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { api, type DownloadEntry, type GameSummary, type InstalledGame } from '../api';
 import { downloads } from './downloads.svelte';
 
-const state = $state<{ list: InstalledGame[] }>({ list: [] });
+// `$state.raw`: the list is only ever replaced whole (by `refresh`), never
+// edited in place, so a deep proxy over every row bought nothing and made
+// each read of a field on a large library go through a proxy trap.
+let list = $state.raw<InstalledGame[]>([]);
+// Rebuilt beside `list` so `isInstalled` is a set lookup, not a scan of
+// every row: the Server header counts installed games across a whole
+// platform, and that was games × rows string compares.
+let index = $state.raw<InstalledIndex>(buildInstalledIndex([]));
 
 export const installed = {
   get list() {
-    return state.list;
+    return list;
   },
 };
 
@@ -18,9 +25,14 @@ let refreshSeq = 0;
 
 export async function refresh(): Promise<void> {
   const seq = ++refreshSeq;
-  const list = await api.listInstalled();
+  const next = await api.listInstalled();
   if (seq !== refreshSeq) return;
-  state.list = list;
+  setList(next);
+}
+
+function setList(next: InstalledGame[]): void {
+  list = next;
+  index = buildInstalledIndex(next);
 }
 
 /**
@@ -64,8 +76,37 @@ export function matchesInstalled(row: InstalledGame, game: GameSummary, platform
   );
 }
 
+/** The identity half of `matchesInstalled`: title and platform, trimmed and
+ *  case-folded. NUL cannot appear in either, so the halves cannot run together. */
+function identityKey(title: string, platform: string): string {
+  return `${title.trim().toLowerCase()}\u0000${platform.trim().toLowerCase()}`;
+}
+
+/** `matchesInstalled` over a whole registry, precomputed: rows WITH a rom_id
+ *  match by id only, rows without one by identity only — the same split. */
+export interface InstalledIndex {
+  romIds: ReadonlySet<number>;
+  identities: ReadonlySet<string>;
+}
+
+export function buildInstalledIndex(rows: readonly InstalledGame[]): InstalledIndex {
+  const romIds = new Set<number>();
+  const identities = new Set<string>();
+  for (const row of rows) {
+    if (row.rom_id !== null) romIds.add(row.rom_id);
+    else identities.add(identityKey(row.title, row.platform));
+  }
+  return { romIds, identities };
+}
+
+/** Pure: true exactly when some row of the indexed registry
+ *  `matchesInstalled` the game. */
+export function indexHas(index: InstalledIndex, game: GameSummary, platformName: string): boolean {
+  return index.romIds.has(game.id) || index.identities.has(identityKey(game.name, platformName));
+}
+
 export function isInstalled(game: GameSummary, platformName: string): boolean {
-  return state.list.some((row) => matchesInstalled(row, game, platformName));
+  return indexHas(index, game, platformName);
 }
 
 const previousStatuses = new Map<number, DownloadEntry['status']>();

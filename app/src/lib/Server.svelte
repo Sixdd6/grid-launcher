@@ -52,7 +52,10 @@
   }: { active: boolean; onOpenEmulators?: () => void } = $props();
 
   let platforms = $state<Platform[]>([]);
-  let games = $state<GameSummary[]>([]);
+  // `$state.raw`: a platform can hold thousands of games and the list is only
+  // ever replaced whole, so a deep proxy over every game (and its screenshot
+  // and genre arrays) cost time on load and on every read for nothing.
+  let games = $state.raw<GameSummary[]>([]);
   let activePlatform = $state<number | null>(null);
   let search = $state('');
   let focusIndex = $state(0);

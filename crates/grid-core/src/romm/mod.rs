@@ -8,6 +8,7 @@ pub use play_sessions::{play_sessions_body, IngestResult, IngestStatus, PlaySess
 
 use crate::secrets::Credential;
 use base64::Engine;
+use futures_util::{StreamExt, TryStreamExt};
 use secrecy::ExposeSecret;
 use serde::Deserialize;
 
@@ -432,9 +433,18 @@ impl RawGameSummary {
 #[derive(Deserialize)]
 struct Paged<T> {
     items: Vec<T>,
+    /// The size of the whole result set. Only the first request asks for it
+    /// (`with_total`); the later ones send `with_total=false` and get null.
+    #[serde(default)]
+    total: Option<usize>,
 }
 
 const PAGE_SIZE: usize = 200;
+
+/// How many `/api/roms` pages are in flight at once after the first. Enough
+/// to hide the round trip on a large platform without a burst of requests
+/// against a small home server.
+const PAGE_CONCURRENCY: usize = 4;
 
 impl RommClient {
     pub async fn platforms(&self) -> Result<Vec<Platform>, RommError> {
@@ -442,42 +452,79 @@ impl RommClient {
         Ok(all.into_iter().filter(|p| p.rom_count > 0).collect())
     }
 
-    /// Pages through /api/roms with limit 200 until a short page, per
+    /// Pages through /api/roms with limit 200, per
     /// docs/porting/01-romm-api.md row 3. Filters by the plural, repeatable
     /// `platform_ids` query param (not a singular `platform_id`) — confirmed
     /// against openapi.json's `/api/roms` parameter list and
     /// `grid_launcher/server/catalog.py:163`'s
-    /// `{"platform_ids": [platform_id]}`. Also disables the char index and
-    /// filter-values side payloads (both default to `true` server-side and
-    /// are unused here) to match the existing Python client's request shape.
+    /// `{"platform_ids": [platform_id]}`.
+    ///
+    /// The first page asks for the `total`; the pages after it are then
+    /// fetched [`PAGE_CONCURRENCY`] at a time, in order. Without a total (an
+    /// older server), or when the last of those pages is still full (the
+    /// platform grew meanwhile), it carries on one page at a time until a
+    /// short page.
     pub async fn games(&self, platform_id: i64) -> Result<Vec<GameSummary>, RommError> {
-        let mut out = Vec::new();
-        let mut offset = 0usize;
-        loop {
-            let page: Paged<RawGameSummary> = self
-                .get_json(
-                    "/api/roms",
-                    &[
-                        ("platform_ids", platform_id.to_string()),
-                        ("limit", PAGE_SIZE.to_string()),
-                        ("offset", offset.to_string()),
-                        ("with_char_index", "false".to_string()),
-                        ("with_filter_values", "false".to_string()),
-                    ],
-                )
-                .await?;
-            let n = page.items.len();
-            out.extend(
-                page.items
-                    .into_iter()
-                    .map(|raw| raw.into_summary(&self.base)),
-            );
-            if n < PAGE_SIZE {
-                break;
+        let first = self.games_page(platform_id, 0, true).await?;
+        let mut last_len = first.items.len();
+        let mut out = self.summaries(first.items);
+        let mut offset = PAGE_SIZE;
+        if last_len < PAGE_SIZE {
+            return Ok(out);
+        }
+        if let Some(total) = first.total.filter(|&t| t > PAGE_SIZE) {
+            let pages: Vec<Paged<RawGameSummary>> =
+                futures_util::stream::iter((PAGE_SIZE..total).step_by(PAGE_SIZE))
+                    .map(|off| self.games_page(platform_id, off, false))
+                    .buffered(PAGE_CONCURRENCY)
+                    .try_collect()
+                    .await?;
+            for page in pages {
+                last_len = page.items.len();
+                out.extend(self.summaries(page.items));
+                offset += PAGE_SIZE;
             }
+        }
+        while last_len == PAGE_SIZE {
+            let page = self.games_page(platform_id, offset, false).await?;
+            last_len = page.items.len();
+            out.extend(self.summaries(page.items));
             offset += PAGE_SIZE;
         }
         Ok(out)
+    }
+
+    /// One `/api/roms` page of a platform. Turns off every side payload GRID
+    /// does not read: the char index and filter values (as the Python client
+    /// did) and the rom id index — all three default to `true` server-side,
+    /// and the id index is the full ordered id list of the platform, rebuilt
+    /// on every page. `with_total` only where the caller needs the count.
+    async fn games_page(
+        &self,
+        platform_id: i64,
+        offset: usize,
+        with_total: bool,
+    ) -> Result<Paged<RawGameSummary>, RommError> {
+        self.get_json(
+            "/api/roms",
+            &[
+                ("platform_ids", platform_id.to_string()),
+                ("limit", PAGE_SIZE.to_string()),
+                ("offset", offset.to_string()),
+                ("with_char_index", "false".to_string()),
+                ("with_filter_values", "false".to_string()),
+                ("with_rom_id_index", "false".to_string()),
+                ("with_total", with_total.to_string()),
+            ],
+        )
+        .await
+    }
+
+    fn summaries(&self, items: Vec<RawGameSummary>) -> Vec<GameSummary> {
+        items
+            .into_iter()
+            .map(|raw| raw.into_summary(&self.base))
+            .collect()
     }
 
     /// `GET /api/firmware?platform_id=<id>` (`fetch_platform_firmware`,

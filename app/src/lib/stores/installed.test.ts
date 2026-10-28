@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GameSummary, InstalledGame } from '../api';
-import { matchesInstalled } from './installed.svelte';
+import { buildInstalledIndex, indexHas, matchesInstalled } from './installed.svelte';
 
 function row(overrides: Partial<InstalledGame>): InstalledGame {
   return {
@@ -100,5 +100,36 @@ describe('matchesInstalled', () => {
     // duplicate-title library would badge/uninstall the wrong game.
     const r = row({ rom_id: 7, title: 'Chrono Trigger', platform: 'SNES' });
     expect(matchesInstalled(r, game({ id: 42, name: 'Chrono Trigger' }), 'SNES')).toBe(false);
+  });
+});
+
+describe('buildInstalledIndex / indexHas', () => {
+  // A registry mixing id rows, identity-only rows and near misses: the index
+  // must answer exactly what scanning every row with `matchesInstalled` does.
+  const rows = [
+    row({ rom_id: 42, title: 'Chrono Trigger', platform: 'SNES' }),
+    row({ rom_id: 7, title: 'Earthbound', platform: 'SNES' }),
+    row({ rom_id: null, title: '  Secret of Mana ', platform: 'snes' }),
+    row({ rom_id: null, title: 'Sonic', platform: 'Genesis' }),
+  ];
+  const games = [
+    game({ id: 42, name: 'Chrono Trigger' }),
+    game({ id: 99, name: 'Earthbound' }), // title of an id row, other id
+    game({ id: 7, name: 'Renamed on server' }),
+    game({ id: 5, name: 'secret of mana' }),
+    game({ id: 6, name: 'Sonic' }), // identity row on another platform
+    game({ id: 8, name: 'Zelda' }),
+  ];
+
+  it.each(['SNES', 'Genesis', ' snes '])('agrees with matchesInstalled on %j', (platform) => {
+    const index = buildInstalledIndex(rows);
+    for (const g of games) {
+      const scanned = rows.some((r) => matchesInstalled(r, g, platform));
+      expect(indexHas(index, g, platform), `${g.name} on ${platform}`).toBe(scanned);
+    }
+  });
+
+  it('is empty for an empty registry', () => {
+    expect(indexHas(buildInstalledIndex([]), game({}), 'SNES')).toBe(false);
   });
 });

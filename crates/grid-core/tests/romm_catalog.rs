@@ -112,3 +112,92 @@ async fn games_falls_back_to_fs_name_when_name_is_null() {
     assert_eq!(games[0].name, "Some Game (USA)");
     assert_eq!(games[1].name, "Named Game");
 }
+
+/// Mounts one `/api/roms` page for platform 7: `count` roms from `first_id`,
+/// answered after `delay_ms`, carrying `total` as given (null = absent).
+async fn mount_page(
+    server: &MockServer,
+    offset: usize,
+    first_id: i64,
+    count: i64,
+    total: serde_json::Value,
+    delay_ms: u64,
+) {
+    let items: Vec<_> = (first_id..first_id + count).map(rom).collect();
+    Mock::given(method("GET"))
+        .and(path("/api/roms"))
+        .and(query_param("platform_ids", "7"))
+        .and(query_param("offset", offset.to_string()))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({"items": items, "total": total}))
+                .set_delay(std::time::Duration::from_millis(delay_ms)),
+        )
+        .expect(1)
+        .mount(server)
+        .await;
+}
+
+/// A large platform: the pages after the first are fetched together, yet the
+/// result keeps server order even when an early page answers last. Every
+/// request turns off the rom id index; only the first asks for the total.
+#[tokio::test]
+async fn games_fetch_later_pages_concurrently_in_order() {
+    let server = MockServer::start().await;
+    let total = serde_json::json!(650);
+    mount_page(&server, 0, 0, 200, total.clone(), 0).await;
+    // Each later page takes 300ms, the first of them answering last of all:
+    // fetched one at a time that is 900ms or more, together about 300ms.
+    mount_page(&server, 200, 200, 200, serde_json::Value::Null, 350).await;
+    mount_page(&server, 400, 400, 200, serde_json::Value::Null, 300).await;
+    mount_page(&server, 600, 600, 50, serde_json::Value::Null, 300).await;
+
+    let started = std::time::Instant::now();
+    let games = client(&server.uri()).games(7).await.unwrap();
+    assert_eq!(games.len(), 650);
+    assert!(games.iter().enumerate().all(|(i, g)| g.id == i as i64));
+
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 4);
+    for req in &requests {
+        let q: Vec<(String, String)> = req.url.query_pairs().into_owned().collect();
+        let has = |k: &str, v: &str| q.iter().any(|(a, b)| a == k && b == v);
+        assert!(has("with_rom_id_index", "false"), "{}", req.url);
+        let first = has("offset", "0");
+        assert!(
+            has("with_total", if first { "true" } else { "false" }),
+            "{}",
+            req.url
+        );
+    }
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < std::time::Duration::from_millis(800),
+        "took {elapsed:?}"
+    );
+}
+
+/// A server that sends no total (older RomM) still gets every page, one at a
+/// time until a short page.
+#[tokio::test]
+async fn games_without_a_total_page_until_short_page() {
+    let server = MockServer::start().await;
+    mount_page(&server, 0, 0, 200, serde_json::Value::Null, 0).await;
+    mount_page(&server, 200, 200, 200, serde_json::Value::Null, 0).await;
+    mount_page(&server, 400, 400, 3, serde_json::Value::Null, 0).await;
+    let games = client(&server.uri()).games(7).await.unwrap();
+    assert_eq!(games.len(), 403);
+    assert_eq!(games[402].id, 402);
+}
+
+/// The platform grew between the first page and the rest: the page the
+/// total called last is full, so paging carries on past it.
+#[tokio::test]
+async fn games_keep_paging_when_the_platform_grew() {
+    let server = MockServer::start().await;
+    mount_page(&server, 0, 0, 200, serde_json::json!(400), 0).await;
+    mount_page(&server, 200, 200, 200, serde_json::Value::Null, 0).await;
+    mount_page(&server, 400, 400, 10, serde_json::Value::Null, 0).await;
+    let games = client(&server.uri()).games(7).await.unwrap();
+    assert_eq!(games.len(), 410);
+}
