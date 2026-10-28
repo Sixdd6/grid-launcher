@@ -425,7 +425,7 @@ fn glob_match(pattern: &str, text: &str) -> bool {
 /// basename (`_match_token_matches_executable`, profiles.py:178): a token
 /// containing `*` or `?` is matched as a glob, everything else by exact
 /// equality.
-fn token_matches_executable(token: &str, executable_name: &str) -> bool {
+pub(crate) fn token_matches_executable(token: &str, executable_name: &str) -> bool {
     if token.is_empty() || executable_name.is_empty() {
         return false;
     }

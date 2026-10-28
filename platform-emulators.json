@@ -6,6 +6,7 @@
     "psp": ["PPSSPP (Playstation Portable)"],
     "ps3": ["RPCS3 (Playstation 3)"],
     "psvita": ["Vita3K (Playstation Vita)"],
+    "ps4": ["ShadPS4 (Playstation 4)"],
     "ps4--1": ["ShadPS4 (Playstation 4)"],
     "ps5": ["KytyPS5 (Playstation 5)"],
     "ngc": ["Dolphin (GameCube, Wii)"],

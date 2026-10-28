@@ -308,6 +308,10 @@ function contentForFile(fileName, content) {
   if (lower === "mygame (v1.1.0).zip") return content.nativeZipBytes;
   if (lower === "ps1.zip") return content.ps1ZipBytes;
   if (lower === "pcsx2-server.zip") return content.serverEmulatorZipBytes;
+  // Server PCSX2 builds named to docs/server-emulator-packages.md
+  // (`PCSX2 (v2.0.2) (arch-linux).zip`): every version and system gets the
+  // same stub; which file was fetched shows in the request log.
+  if (lower.startsWith("pcsx2 (v") && lower.endsWith(".zip")) return content.serverEmulatorZipBytes;
   if (lower.endsWith(".zip")) return content.zipBytes;
   return dummyBytes(64, 0x00);
 }

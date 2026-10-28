@@ -452,12 +452,12 @@ pub fn run() {
                     // Off the hook's thread: it loads and saves the config.
                     let setup_handle = handle.clone();
                     let setup_name = installed.name.clone();
-                    let setup_rom = installed.server_rom_id;
+                    let setup_source = installed.server_source.clone();
                     tauri::async_runtime::spawn_blocking(move || {
                         let outcomes = commands::setup::apply_after_install(
                             &Config::default_path(),
                             &setup_name,
-                            setup_rom,
+                            setup_source.as_deref(),
                         );
                         if !outcomes.is_empty() {
                             let _ =

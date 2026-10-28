@@ -405,15 +405,30 @@ export type CatalogEntry = {
 export type SetupOption = {
   source_id: string;
   name: string;
-  /** `standalone`: a catalog download. `server`: a package on the RomM
+  /** `standalone`: a catalog download. `server`: a build on the RomM
    *  server's Emulators platform. `retroarch` only where a core is known. */
   kind: 'standalone' | 'server' | 'retroarch';
   /** Already configured. */
   installed: boolean;
-  /** A server package's ROM id; `null` for a catalog download. */
-  rom_id: number | null;
-  /** An installed server package's entry name (may end " (server)"). */
+  /** A server build (`docs/server-emulator-packages.md`); `null` for a
+   *  catalog download. */
+  server: ServerBuildInfo | null;
+  /** An installed server build's entry name (may end " (server)"). */
   entry?: string;
+  /** RetroArch, from the catalog or the server: it becomes a default only
+   *  when a core for the platform is on disk. */
+  needs_core: boolean;
+};
+
+/** Where a server build comes from (grid-core `launch::setup::ServerBuildInfo`). */
+export type ServerBuildInfo = {
+  rom_id: number;
+  file_id: number;
+  file_name: string;
+  /** From the file's `(v…)` tag. */
+  version: string;
+  /** The platform's slug, or `multi`. */
+  folder: string;
 };
 
 /** One row of the first-run platform picker (grid-core
@@ -452,10 +467,9 @@ export type SetupStatus = {
 };
 
 export type SetupStarted = {
-  /** Catalog `source_id`s queued for install. */
+  /** The `source_id`s queued for install: catalog `owner/repo`s and server
+   *  builds' `romm:<folder>/<emulator>`, each its Downloads row's source. */
   queued: string[];
-  /** Server Emulators-platform packages (ROM ids) queued for install. */
-  queued_server: number[];
   /** Defaults applied at once (emulators already configured). */
   applied: SetupOutcome[];
   /** Installs that could not be queued. */

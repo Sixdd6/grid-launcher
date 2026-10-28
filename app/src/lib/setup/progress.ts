@@ -14,44 +14,32 @@ export type SetupProgress = {
 
 const RUNNING = new Set<DownloadEntry['status']>(['queued', 'downloading', 'installing', 'cancelling']);
 
-/** The key one queued install's Downloads row is found by: a catalog
- *  emulator by its `source_id`, a server package (a game job) by its ROM. */
-function rowKey(entry: DownloadEntry): string | null {
-  if (entry.job === 'emulator') return entry.source_id;
-  if (entry.job === 'game') return `romm:${entry.rom_id}`;
-  return null;
-}
-
 /**
  * Where setup's installs stand, from the Downloads rows of the emulators it
- * queued: catalog emulators (`job: 'emulator'`, by `source_id`) and server
- * packages (`job: 'game'`, by ROM id). An emulator with no row yet counts as
- * running: it was admitted and its row is on its way. When an emulator has
- * several rows (a retry), the newest one (highest `id`) decides.
+ * queued, found by `source_id`: catalog emulators (`owner/repo`) and server
+ * builds (`romm:<folder>/<emulator>`) alike. An emulator with no row yet
+ * counts as running: it was admitted and its row is on its way. When an
+ * emulator has several rows (a retry), the newest one (highest `id`) decides.
  */
-export function summarize(
-  queued: readonly string[],
-  entries: readonly DownloadEntry[],
-  queuedServer: readonly number[] = [],
-): SetupProgress {
-  const wanted = [...queued, ...queuedServer.map((id) => `romm:${id}`)];
+export function summarize(queued: readonly string[], entries: readonly DownloadEntry[]): SetupProgress {
   const latest = new Map<string, DownloadEntry>();
   for (const entry of entries) {
-    const key = rowKey(entry);
-    if (key === null || !wanted.includes(key)) continue;
+    if (entry.job !== 'emulator') continue;
+    const key = entry.source_id;
+    if (!queued.includes(key)) continue;
     const seen = latest.get(key);
     if (seen === undefined || entry.id > seen.id) latest.set(key, entry);
   }
   let done = 0;
   let running = 0;
   const failed: DownloadEntry[] = [];
-  for (const id of wanted) {
+  for (const id of queued) {
     const entry = latest.get(id);
     if (entry === undefined || RUNNING.has(entry.status)) running += 1;
     else if (entry.status === 'completed') done += 1;
     else failed.push(entry);
   }
-  return { total: wanted.length, done, running, failed };
+  return { total: queued.length, done, running, failed };
 }
 
 /** The card's headline: "Setting up 3 emulators · 1 done", then the end state. */

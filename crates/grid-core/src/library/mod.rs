@@ -342,6 +342,52 @@ struct EmulatorJob {
     /// What this job installs. Decides which directory function names the
     /// install directory and which finalize branch runs.
     target: JobTarget,
+    /// The `[[emulators]]` entry this job writes, and its install directory's
+    /// name. The profile name for a catalog install; for a build from the
+    /// RomM server it takes " (server)" when a catalog or hand-added entry
+    /// already holds the plain name ([`InstallService::install_server_emulator`]).
+    entry_name: String,
+    /// Set for a build from the RomM server's Emulators platform: the one
+    /// file to download from it instead of resolving a forge release.
+    romm: Option<RommBuild>,
+}
+
+/// A build from the RomM server's Emulators platform
+/// (`docs/server-emulator-packages.md`): one file of a platform folder.
+#[derive(Clone)]
+struct RommBuild {
+    client: Arc<RommClient>,
+    rom_id: i64,
+    file_id: i64,
+    file_name: String,
+    /// The version from the file's `(v…)` tag.
+    version: String,
+    /// The folder (the ROM's `fs_name`): a platform slug, or `multi`.
+    folder: String,
+}
+
+/// The `source_id` an emulator installed from the RomM server's Emulators
+/// platform records: `romm:<folder>/<emulator>`, lower-case. Stable across
+/// versions, so an update finds the entry it replaces, and distinct per
+/// emulator, so two emulators in the shared `multi` folder never collide.
+pub fn server_emulator_source_id(folder: &str, emulator: &str) -> String {
+    format!(
+        "romm:{}/{}",
+        folder.trim().to_lowercase(),
+        emulator.trim().to_lowercase()
+    )
+}
+
+/// A request to install one server build ([`InstallService::install_server_emulator`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServerEmulatorRequest {
+    pub rom_id: i64,
+    pub file_id: i64,
+    pub file_name: String,
+    pub version: String,
+    pub folder: String,
+    /// The GRID emulator profile the file name named.
+    pub profile_name: String,
 }
 
 /// What an [`EmulatorJob`] installs.
@@ -793,11 +839,11 @@ pub struct EmulatorInstalled {
     /// future compat-tool branch that starts firing the hook must not
     /// silently trigger a firmware pass for a compat tool.
     pub compat_tool: bool,
-    /// The server ROM id of a package installed from the server's Emulators
-    /// platform; `None` for a catalog install. First-run setup matches the
-    /// defaults it chose for a server package by this, because the entry's
-    /// name is only decided at install time (`server_emulator`'s suffix).
-    pub server_rom_id: Option<i64>,
+    /// For a build installed from the RomM server's Emulators platform, its
+    /// [`server_emulator_source_id`]; `None` otherwise. First-run setup
+    /// matches the defaults it chose for a server build by this, because the
+    /// entry's name is only decided at install time (the " (server)" suffix).
+    pub server_source: Option<String>,
 }
 
 /// Notified after an ordinary emulator install writes its config entry and
@@ -851,6 +897,9 @@ pub struct InstallService {
     /// its own to fetch these with.
     platform_slugs: RwLock<BTreeMap<String, String>>,
     platform_labels: RwLock<BTreeMap<String, String>>,
+    /// Every server-build request admitted this session, by its source id,
+    /// so a failed one can be retried (`retry` has only the job key).
+    server_requests: Mutex<HashMap<String, ServerEmulatorRequest>>,
     /// `None` until the app installs one; a finalized compat-tool install
     /// then triggers no notification.
     compat_tools_hook: RwLock<Option<CompatToolsHook>>,
@@ -904,6 +953,7 @@ impl InstallService {
             platform_ids: RwLock::new(BTreeMap::new()),
             platform_slugs: RwLock::new(BTreeMap::new()),
             platform_labels: RwLock::new(BTreeMap::new()),
+            server_requests: Mutex::new(HashMap::new()),
             compat_tools_hook: RwLock::new(None),
             emulator_installed_hook: RwLock::new(None),
             library_gate: RwLock::new(LibraryGate::default()),
@@ -1520,6 +1570,67 @@ impl InstallService {
     /// for a profile that came out of [`catalog::find_profile`], which
     /// requires an owner and a repo — the check keeps that assumption from
     /// turning into a panic) or a forge client that cannot be built.
+    /// Starts (or queues) the install of one build from the RomM server's
+    /// Emulators platform (`docs/server-emulator-packages.md`): only that
+    /// file is downloaded, then it is unpacked (or kept, an AppImage) under
+    /// `emulators/<entry name>` and registered as the profile its file name
+    /// named, with `source_id` [`server_emulator_source_id`] and the version.
+    ///
+    /// The entry name is the profile's, unless a catalog or hand-added entry
+    /// already holds it: then `<Name> (server)`, so neither is replaced. An
+    /// entry this build already installed (same source id) keeps its name:
+    /// that is an update. A build already downloading or queued is ignored.
+    pub async fn install_server_emulator(
+        self: &Arc<Self>,
+        client: Arc<RommClient>,
+        request: ServerEmulatorRequest,
+    ) -> Result<(), LibraryError> {
+        self.check_library_gate()?;
+        let library = self.library_root()?;
+        let profile = self
+            .profiles
+            .iter()
+            .find(|p| p.name == request.profile_name && !p.is_compat_tool)
+            .ok_or_else(|| {
+                LibraryError::Registry(format!("unknown emulator: {}", request.profile_name))
+            })?;
+        let source_id = server_emulator_source_id(&request.folder, &request.profile_name);
+        let config = Config::load(&self.config_path)?;
+        let entry_name = server_entry_name(&config, &profile.name, &source_id);
+
+        self.server_requests
+            .lock()
+            .unwrap()
+            .insert(source_id.clone(), request.clone());
+        let job = EmulatorJob {
+            source_id: source_id.clone(),
+            profile_name: profile.name.clone(),
+            profile_args: profile.args.clone(),
+            configured_tag: request.version.clone(),
+            raw_source: Value::Null,
+            library,
+            forge: self.forge()?,
+            resolved: None,
+            target: JobTarget::Emulator,
+            entry_name: entry_name.clone(),
+            romm: Some(RommBuild {
+                client,
+                rom_id: request.rom_id,
+                file_id: request.file_id,
+                file_name: request.file_name,
+                version: request.version,
+                folder: request.folder,
+            }),
+        };
+        self.admit(
+            JobKey::Emulator(source_id),
+            &entry_name,
+            EMULATOR_PLATFORM,
+            "emulator",
+            JobPayload::Emulator(job),
+        )
+    }
+
     fn admit_emulator_profile(
         self: &Arc<Self>,
         profile: &EmulatorProfile,
@@ -1545,6 +1656,8 @@ impl InstallService {
             forge: self.forge()?,
             resolved: None,
             target: JobTarget::Emulator,
+            entry_name: profile.name.clone(),
+            romm: None,
         };
         let title = job.profile_name.clone();
         self.admit(
@@ -1646,6 +1759,8 @@ impl InstallService {
             forge: self.forge()?,
             resolved: None,
             target: JobTarget::CompatTool,
+            entry_name: profile.name.clone(),
+            romm: None,
         };
         let title = job.profile_name.clone();
         self.admit(
@@ -1703,6 +1818,8 @@ impl InstallService {
             forge: self.forge()?,
             resolved: None,
             target: JobTarget::UmuLauncher,
+            entry_name: umu::UMU_TITLE.to_string(),
+            romm: None,
         };
         self.admit(
             JobKey::Emulator(umu::UMU_SOURCE_ID.to_string()),
@@ -1874,6 +1991,18 @@ impl InstallService {
             // the catalog by `is_compat_tool`), so this dispatch is
             // unambiguous.
             Some(JobKey::Emulator(source_id)) => {
+                let server = self
+                    .server_requests
+                    .lock()
+                    .unwrap()
+                    .get(&source_id)
+                    .cloned();
+                if let Some(request) = server {
+                    let client = client
+                        .ok_or_else(|| LibraryError::Registry("not connected".to_string()))?;
+                    self.dismiss(entry_id);
+                    return self.install_server_emulator(client, request).await;
+                }
                 self.dismiss(entry_id);
                 if source_id == umu::UMU_SOURCE_ID {
                     self.install_umu_launcher().await
@@ -3162,7 +3291,7 @@ impl InstallService {
             config
                 .emulators
                 .iter()
-                .find(|existing| existing.name == job.profile_name)
+                .find(|existing| existing.name == job.entry_name)
                 .map(|existing| existing.path.clone())
         });
 
@@ -3170,11 +3299,28 @@ impl InstallService {
         // rank it against the AppImage it replaces — both carry the title
         // token, so the casefolded-path tie-break can pick the OLD one
         // (`…-2609-…` sorts before `…-2612-…`).
+        // A build from the RomM server may have been zipped without Unix
+        // permissions (on Windows, say): its emulator's own executable names
+        // get their executable bit back before the pick, which only counts an
+        // extensionless file that has one.
+        if job.romm.is_some() {
+            if let Some(profile) = self.profiles.iter().find(|p| p.name == job.profile_name) {
+                mark_profile_executables(install_dir, profile);
+            }
+        }
         let selected = if !should_extract("", EMULATOR_PLATFORM, archive)
             && is_appimage(archive)
             && archive.is_file()
         {
             Some(archive.to_path_buf())
+        } else if job.romm.is_some() {
+            // Only this host's binaries: a build may carry a stray `.exe`.
+            emu_install::select_package_executable(
+                &job.profile_name,
+                install_dir,
+                archive,
+                cfg!(windows),
+            )
         } else {
             emu_install::select_executable(&job.profile_name, install_dir, archive)
         };
@@ -3192,7 +3338,14 @@ impl InstallService {
         // `<exe dir>/PCSX2` and nothing else. Never the install root — every
         // reader derives its directory from the executable, and
         // `select_executable` legally picks a nested binary.
-        if let Some(profile) = catalog::find_profile(&self.profiles, &job.source_id) {
+        // A server build's source id is not a catalog one: its profile is
+        // found by the name its file gave.
+        let job_profile = catalog::find_profile(&self.profiles, &job.source_id).or_else(|| {
+            self.profiles
+                .iter()
+                .find(|p| job.romm.is_some() && p.name == job.profile_name)
+        });
+        if let Some(profile) = job_profile {
             if !profile.user_data.is_empty() {
                 let root = user_data_root(profile, &exe);
                 if let Err(e) = std::fs::create_dir_all(&root) {
@@ -3208,7 +3361,7 @@ impl InstallService {
         }
 
         let fresh = self.write_emulator_entry(job, &paths.resolved, &exe)?;
-        self.sync_autoconfig(&job.profile_name, fresh, warning);
+        self.sync_autoconfig(&job.entry_name, fresh, warning);
 
         // Only after a successful config write, matching the game path.
         for path in extracted_archives {
@@ -3239,10 +3392,10 @@ impl InstallService {
         let hook = self.emulator_installed_hook.read().unwrap().clone();
         if let Some(hook) = hook {
             hook(EmulatorInstalled {
-                name: job.profile_name.clone(),
+                name: job.entry_name.clone(),
                 fresh,
                 compat_tool: false,
-                server_rom_id: None,
+                server_source: job.romm.as_ref().map(|_| job.source_id.clone()),
             });
         }
         Ok(())
@@ -3333,7 +3486,7 @@ impl InstallService {
                 name: plan.name,
                 fresh,
                 compat_tool: false,
-                server_rom_id: record.rom_id,
+                server_source: None,
             });
         }
     }
@@ -3394,7 +3547,7 @@ impl InstallService {
         let position = config
             .emulators
             .iter()
-            .position(|existing| existing.name == job.profile_name);
+            .position(|existing| existing.name == job.entry_name);
         // An update starts from the EXISTING entry, so everything the user
         // owns — their edited `args`, and the cloud-save fields
         // `autoconfig::entry` and the save panel fill in — survives it.
@@ -3406,7 +3559,7 @@ impl InstallService {
                 ..Default::default()
             },
         };
-        entry.name = job.profile_name.clone();
+        entry.name = job.entry_name.clone();
         entry.path = path_string(exe);
         entry.source_id = job.source_id.clone();
         entry.source_provider = resolved.provider.clone();
@@ -3550,6 +3703,9 @@ async fn download_emulator(
     cancel: &AtomicBool,
     on_progress: &mut (dyn FnMut(u64, u64, f64) + Send),
 ) -> Result<(), LibraryError> {
+    if let Some(build) = job.romm.clone() {
+        return download_server_build(job, &build, cancel, on_progress).await;
+    }
     let forge = job.forge.clone();
     let primary = forge
         .resolve(&job.raw_source, &job.profile_name)
@@ -3584,7 +3740,7 @@ async fn download_emulator(
             emu_install::compat_tool_install_dir(&job.library, &file_stem_of(&dir_name))
         }
         JobTarget::UmuLauncher => umu::install_dir(&job.library),
-        JobTarget::Emulator => emu_install::emulator_install_dir(&job.library, &job.profile_name),
+        JobTarget::Emulator => emu_install::emulator_install_dir(&job.library, &job.entry_name),
     };
 
     let archive_name =
@@ -3645,6 +3801,106 @@ async fn download_emulator(
 
     let provider = ForgeProvider::new(&forge, github_headers);
     download_targets(&provider, &targets, cancel, on_progress).await
+}
+
+/// Downloads one build from the RomM server's Emulators platform: just that
+/// file (`file_ids`), into `emulators/<entry name>/` under its own name, and
+/// records it for finalize as a resolved download from provider `romm`.
+async fn download_server_build(
+    job: &mut EmulatorJob,
+    build: &RommBuild,
+    cancel: &AtomicBool,
+    on_progress: &mut (dyn FnMut(u64, u64, f64) + Send),
+) -> Result<(), LibraryError> {
+    let install_dir = emu_install::emulator_install_dir(&job.library, &job.entry_name);
+    let archive = install_dir.join(safe_file_name(&build.file_name, &build.file_name)?);
+    // As for a forge AppImage: a kept file must not be reused by size.
+    if !should_extract("", EMULATOR_PLATFORM, &archive) {
+        let _ = fs::remove_file(&archive);
+    }
+    let url_path = format!(
+        "/api/roms/{}/content/{}",
+        build.rom_id,
+        encode_file_segment(&build.file_name)
+    );
+    job.resolved = Some(ResolvedPaths {
+        install_dir,
+        archive: archive.clone(),
+        supplementals: Vec::new(),
+        resolved: ResolvedDownload {
+            provider: "romm".to_string(),
+            owner: String::new(),
+            repo: build.folder.clone(),
+            release_tag: build.version.clone(),
+            asset_name: build.file_name.clone(),
+            download_url: url_path.clone(),
+            size: 0,
+            digest: String::new(),
+        },
+    });
+    let targets = vec![FileTarget {
+        url_path,
+        query: vec![("file_ids".to_string(), build.file_id.to_string())],
+        dest: archive,
+        expected_size: 0,
+    }];
+    download_targets(&RommProvider(&build.client), &targets, cancel, on_progress).await
+}
+
+/// Sets the executable bit (unix) on every file under `dir` whose name is
+/// one of `profile`'s executable names (`match_tokens`, exact or glob). A
+/// no-op on Windows, and for anything that is already executable.
+fn mark_profile_executables(dir: &Path, profile: &EmulatorProfile) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let Ok(read) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in read.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                mark_profile_executables(&path, profile);
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            let named = profile.match_tokens.iter().any(|token| {
+                crate::launch::profiles::token_matches_executable(&token.to_lowercase(), &name)
+            });
+            if !named {
+                continue;
+            }
+            if let Ok(meta) = entry.metadata() {
+                let mut perms = meta.permissions();
+                if perms.mode() & 0o111 == 0 {
+                    perms.set_mode(perms.mode() | 0o755);
+                    let _ = fs::set_permissions(&path, perms);
+                }
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (dir, profile);
+    }
+}
+
+/// The entry name a server build registers under: the one an entry with the
+/// same `source_id` already has (an update), else the profile's own name if
+/// free, else `<Name> (server)`.
+fn server_entry_name(config: &Config, profile_name: &str, source_id: &str) -> String {
+    if let Some(existing) = config.emulators.iter().find(|e| e.source_id == source_id) {
+        return existing.name.clone();
+    }
+    let taken = config
+        .emulators
+        .iter()
+        .any(|e| e.name.trim().eq_ignore_ascii_case(profile_name.trim()));
+    if taken {
+        format!("{profile_name}{}", server_emulator::SERVER_SUFFIX)
+    } else {
+        profile_name.to_string()
+    }
 }
 
 /// The managed umu-launcher's checksum check, before anything is

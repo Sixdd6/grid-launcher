@@ -1577,7 +1577,7 @@ async fn emulator_installed_hook_reports_fresh_true_then_false() {
             name: "Test Emu".to_string(),
             fresh: true,
             compat_tool: false,
-            server_rom_id: None,
+            server_source: None,
         }
     );
     assert_eq!(
@@ -1586,7 +1586,7 @@ async fn emulator_installed_hook_reports_fresh_true_then_false() {
             name: "Test Emu".to_string(),
             fresh: false,
             compat_tool: false,
-            server_rom_id: None,
+            server_source: None,
         }
     );
 }

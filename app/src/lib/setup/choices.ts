@@ -67,14 +67,11 @@ export function primaryLabel(installCount: number, tickedCount: number): string 
 }
 
 /** An option's line in the select. RetroArch names the core it will use; a
- *  server package says where it comes from. */
+ *  server build gives its version and says where it comes from. */
 export function optionLabel(option: SetupOption, core: string | null): string {
   const name = option.name.replace(/\s*\(.*\)\s*$/, '');
-  const base =
-    option.kind === 'retroarch' && core
-      ? `${name} · ${core} core`
-      : option.kind === 'server'
-        ? `${name} · from your server`
-        : name;
+  const versioned = option.server ? `${name} ${option.server.version}` : name;
+  const withCore = option.needs_core && core ? `${versioned} · ${core} core` : versioned;
+  const base = option.server ? `${withCore} · from your server` : withCore;
   return option.installed ? `${base} (installed)` : base;
 }

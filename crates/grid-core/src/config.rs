@@ -187,10 +187,11 @@ pub struct PendingDefault {
     /// The choice is RetroArch: assign it only if a core is on disk.
     #[serde(default)]
     pub retroarch: bool,
-    /// The choice is a package on the server's Emulators platform: applied
-    /// when the install of THIS ROM finishes, whatever name its entry gets.
+    /// The choice is a build from the server's Emulators platform: applied
+    /// when THIS build's install finishes (its `romm:<folder>/<emulator>`
+    /// source id), whatever name its entry gets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub server_rom_id: Option<i64>,
+    pub server_source: Option<String>,
 }
 
 /// App configuration. Secrets are NEVER part of this struct — they live in

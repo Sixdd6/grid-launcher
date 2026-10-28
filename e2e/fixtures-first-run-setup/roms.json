@@ -1,7 +1,47 @@
 {
-  "1": [{"id": 501, "name": "Gran Turismo 3", "fs_name_no_ext": "Gran Turismo 3", "platform_id": 1, "path_cover_small": null}],
-  "2": [{"id": 502, "name": "Jet Set Radio", "fs_name_no_ext": "Jet Set Radio", "platform_id": 2, "path_cover_small": null}],
-  "3": [{"id": 503, "name": "Zenonia", "fs_name_no_ext": "Zenonia", "platform_id": 3, "path_cover_small": null}],
-  "4": [{"id": 504, "name": "Chrono Trigger", "fs_name_no_ext": "Chrono Trigger", "platform_id": 4, "path_cover_small": null}],
-  "5": [{"id": 505, "name": "PCSX2", "fs_name_no_ext": "pcsx2-server", "platform_id": 5, "path_cover_small": null}]
+  "1": [
+    {
+      "id": 501,
+      "name": "Gran Turismo 3",
+      "fs_name_no_ext": "Gran Turismo 3",
+      "platform_id": 1,
+      "path_cover_small": null
+    }
+  ],
+  "2": [
+    {
+      "id": 502,
+      "name": "Jet Set Radio",
+      "fs_name_no_ext": "Jet Set Radio",
+      "platform_id": 2,
+      "path_cover_small": null
+    }
+  ],
+  "3": [
+    {
+      "id": 503,
+      "name": "Zenonia",
+      "fs_name_no_ext": "Zenonia",
+      "platform_id": 3,
+      "path_cover_small": null
+    }
+  ],
+  "4": [
+    {
+      "id": 504,
+      "name": "Chrono Trigger",
+      "fs_name_no_ext": "Chrono Trigger",
+      "platform_id": 4,
+      "path_cover_small": null
+    }
+  ],
+  "5": [
+    {
+      "id": 505,
+      "name": "ps2",
+      "fs_name_no_ext": "ps2",
+      "platform_id": 5,
+      "path_cover_small": null
+    }
+  ]
 }

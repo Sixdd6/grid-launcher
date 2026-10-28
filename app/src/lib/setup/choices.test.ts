@@ -7,7 +7,8 @@ const opt = (source_id: string, name: string, kind: SetupOption['kind'] = 'stand
   name,
   kind,
   installed,
-  rom_id: kind === 'server' ? 1 : null,
+  server: kind === 'server' ? { rom_id: 1, file_id: 2, file_name: `${name} (v1.0) (arch-linux).zip`, version: '1.0', folder: 'x' } : null,
+  needs_core: kind === 'retroarch',
 });
 
 const pcsx2 = opt('PCSX2/pcsx2', 'PCSX2 (Playstation 2)');
@@ -99,8 +100,10 @@ describe('toInstall and the button', () => {
 });
 
 describe('optionLabel', () => {
-  it('says where a server package comes from', () => {
-    expect(optionLabel(opt('romm:3432', 'Pico-8', 'server'), null)).toBe('Pico-8 · from your server');
+  it('gives a server build’s version and says where it comes from', () => {
+    expect(optionLabel(opt('romm:pico/pico-8', 'Pico-8', 'server'), null)).toBe('Pico-8 1.0 · from your server');
+    const retroarch = { ...opt('romm:multi/retroarch (multi-system)', 'RetroArch (Multi-System)', 'server'), needs_core: true };
+    expect(optionLabel(retroarch, 'snes9x')).toBe('RetroArch 1.0 · snes9x core · from your server');
   });
 
   it('drops the platform suffix and names RetroArch’s core', () => {

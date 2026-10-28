@@ -22,11 +22,15 @@ async function screenshot(name: string): Promise<void> {
  *
  * Fixtures (fixtures-first-run-setup): PS2 and Dreamcast, whose standalone
  * emulators the mock forge serves (PCSX2, Redream), and an Emulators platform
- * hosting a PCSX2 package, which PS2 also offers; Zeebo, which nothing
+ * whose `ps2` folder holds PCSX2 builds packaged to the standard
+ * (docs/server-emulator-packages.md: 1.6.0 and 2.0.2 for Linux, 2.0.2 for
+ * Windows), which PS2 also offers; Zeebo, which nothing
  * installable serves; and SNES, which only RetroArch serves (with a core).
  * RetroArch's two-archive install has no mock forge route, so SNES is shown
  * but not ticked: its rules are covered by grid-core's launch::setup tests.
  */
+const SERVER_PCSX2 = 'romm:ps2/pcsx2 (playstation 2)';
+
 describe('first-run setup: pick platforms, install their emulators', () => {
   const library = path.join(dataDir(), 'library');
 
@@ -66,23 +70,23 @@ describe('first-run setup: pick platforms, install their emulators', () => {
   it('pre-selects the recommended emulator for a ticked platform', async () => {
     await $(testId('setup-check-ps2')).click();
     await $(testId('setup-check-dc')).click();
-    // The catalog download stays recommended; the server's own PCSX2 package
-    // is the alternative, and is what this run installs.
+    // The catalog download stays recommended; the server's newest Linux
+    // PCSX2 build is the alternative, and is what this run installs.
     await expect($(testId('setup-emulator-ps2'))).toHaveValue('PCSX2/pcsx2');
     const ps2Options = await browser.execute(() =>
       Array.from((document.querySelector('[data-testid="setup-emulator-ps2"]') as HTMLSelectElement).options).map(
         (o) => `${o.value}=${o.textContent?.trim()}`,
       ),
     );
-    expect(ps2Options.slice(0, 2)).toEqual(['PCSX2/pcsx2=PCSX2', 'romm:505=PCSX2 · from your server']);
+    expect(ps2Options.slice(0, 2)).toEqual(['PCSX2/pcsx2=PCSX2', `${SERVER_PCSX2}=PCSX2 2.0.2 · from your server`]);
     // A real selection fires `change`; WebKitGTK's WebDriver select does not,
     // so make the same choice the way the browser reports it.
-    await browser.execute(() => {
+    await browser.execute((value) => {
       const select = document.querySelector('[data-testid="setup-emulator-ps2"]') as HTMLSelectElement;
-      select.value = 'romm:505';
+      select.value = value;
       select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
-    await expect($(testId('setup-emulator-ps2'))).toHaveValue('romm:505');
+    }, SERVER_PCSX2);
+    await expect($(testId('setup-emulator-ps2'))).toHaveValue(SERVER_PCSX2);
     // SNES offers RetroArch only (with its core). Ticked to read the select,
     // then unticked: the mock forge cannot serve RetroArch.
     await $(testId('setup-check-snes')).click();
@@ -152,9 +156,17 @@ describe('first-run setup: pick platforms, install their emulators', () => {
       { timeout: TRANSITION_TIMEOUT, timeoutMsg: "the Server header never showed Dreamcast's new default" },
     );
     const config = readFileSync(configPath(), 'utf-8');
-    // PCSX2 came from the server's package (installed like a game, under
-    // games/Emulators), not from the catalog download.
-    expect(config).toMatch(/path = ".*games\/Emulators\/[^"]*pcsx2[^"]*"/i);
+    // PCSX2 came from the server's build, not from the catalog download,
+    // and registered with its folder, emulator and version.
+    expect(config).toMatch(/path = ".*\/emulators\/PCSX2 \(Playstation 2\)\/[^"]*pcsx2[^"]*"/i);
+    expect(config).toContain(`source_id = "${SERVER_PCSX2}"`);
+    expect(config).toContain('source_installed_tag = "2.0.2"');
+    // Only the newest Linux build was downloaded: not the older one, not the
+    // Windows one.
+    const requests = (await (await fetch(`${mockUrl()}/__e2e__/requests`)).json()) as { path: string }[];
+    const fetched = requests.filter((r) => r.path.startsWith('/api/roms/505/content/')).map((r) => r.path);
+    expect(fetched.length).toBeGreaterThan(0);
+    expect(fetched.every((p) => p.includes('file_ids=5052'))).toBe(true);
     expect(config).toMatch(/\[setup\]\s*\ncompleted = true/);
     expect(config).not.toContain('[setup.pending');
 

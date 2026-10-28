@@ -9,10 +9,9 @@ import { SETUP_DEFAULTS_EVENT, type SetupOutcome, type SetupStarted } from '../a
 const state = $state<{
   active: boolean;
   queued: string[];
-  queuedServer: number[];
   errors: string[];
   outcomes: SetupOutcome[];
-}>({ active: false, queued: [], queuedServer: [], errors: [], outcomes: [] });
+}>({ active: false, queued: [], errors: [], outcomes: [] });
 
 export const setupRun = {
   get active() {
@@ -20,9 +19,6 @@ export const setupRun = {
   },
   get queued() {
     return state.queued;
-  },
-  get queuedServer() {
-    return state.queuedServer;
   },
   get errors() {
     return state.errors;
@@ -35,12 +31,10 @@ export const setupRun = {
 /** Called with `startPlatformSetup`'s answer as the picker hands over. */
 export function startSetupRun(started: SetupStarted): void {
   state.queued = started.queued;
-  state.queuedServer = started.queued_server;
   state.errors = started.errors;
   state.outcomes = started.applied;
   state.active =
     started.queued.length > 0 ||
-    started.queued_server.length > 0 ||
     started.errors.length > 0 ||
     started.applied.length > 0;
 }

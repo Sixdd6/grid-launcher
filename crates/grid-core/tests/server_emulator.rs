@@ -265,7 +265,7 @@ async fn installing_a_known_package_registers_links_and_configures_it() {
             name: PCSX2.to_string(),
             fresh: true,
             compat_tool: false,
-            server_rom_id: Some(1),
+            server_source: None,
         }]
     );
 }

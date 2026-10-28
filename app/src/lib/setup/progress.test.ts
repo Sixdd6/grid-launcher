@@ -33,19 +33,13 @@ describe('summarize', () => {
   });
 });
 
-describe('summarize with server packages', () => {
-  it('follows a server package by its ROM’s game row', () => {
+describe('summarize with server builds', () => {
+  it('follows a server build by its source id, like a catalog emulator', () => {
     const p = summarize(
-      ['PCSX2/pcsx2'],
-      [row(1, 'PCSX2/pcsx2', 'completed'), { ...row(2, '', 'installing', 'game'), rom_id: 3432 } as DownloadEntry],
-      [3432],
+      ['PCSX2/pcsx2', 'romm:pico/pico-8'],
+      [row(1, 'PCSX2/pcsx2', 'completed'), row(2, 'romm:pico/pico-8', 'installing')],
     );
     expect([p.total, p.done, p.running]).toEqual([2, 1, 1]);
-  });
-
-  it('ignores game rows for other ROMs', () => {
-    const p = summarize([], [{ ...row(5, '', 'failed', 'game'), rom_id: 99 } as DownloadEntry], [3432]);
-    expect([p.total, p.running, p.failed.length]).toEqual([1, 1, 0]);
   });
 });
 
