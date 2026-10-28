@@ -46,8 +46,13 @@ set -uo pipefail
 REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 E2E_DIR="$REPO_DIR/e2e"
 APP_DIR="$REPO_DIR/app"
-APP_BINARY="$REPO_DIR/target/debug/app"
-BUILD_STAMP="$REPO_DIR/target/debug/.e2e-build-stamp"
+# E2E_RELEASE=1 builds and runs an optimized e2e binary instead, for timing
+# work: a debug build parses JSON several times slower than what ships.
+E2E_PROFILE=debug
+E2E_DEBUG_FLAG=--debug
+if [[ "${E2E_RELEASE:-}" == "1" ]]; then E2E_PROFILE=release; E2E_DEBUG_FLAG=; fi
+APP_BINARY="$REPO_DIR/target/$E2E_PROFILE/app"
+BUILD_STAMP="$REPO_DIR/target/$E2E_PROFILE/.e2e-build-stamp"
 
 # A stage group = "name:spec [spec...]". Each group gets one fresh data
 # directory and one mock server; each spec inside it is a separate `wdio run`
@@ -90,7 +95,15 @@ STAGE_GROUPS=(
   # A 2500-game platform: covers load only near the visible area, a bounded
   # number at once, and the webview survives opening it (2026-10-20 crash).
   "large-platform:specs/large-platform.spec.ts"
+  # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
+  # times for load, scroll and hover on the same 2500-game platform, or on a
+  # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
+  # BUILD.md "Performance probe" has how to run and read it.
+  "large-platform-perf:specs/large-platform-perf.spec.ts"
 )
+
+# Groups that run only when named on the command line.
+OPT_IN_GROUPS=(large-platform-perf)
 
 # Run only the named groups by passing them as arguments, e.g.
 # `scripts/e2e.sh library downloads` — already supported by the
@@ -186,14 +199,14 @@ if [[ "${E2E_INNER:-}" != "1" ]]; then
     # and is what pulls @wdio/tauri-plugin into the frontend bundle.
     rm -f "$BUILD_STAMP"
     ( cd "$APP_DIR" && VITE_E2E=1 npx tauri build \
-        --debug --no-bundle --features e2e --config src-tauri/tauri.e2e.conf.json ) \
+        $E2E_DEBUG_FLAG --no-bundle --features e2e --config src-tauri/tauri.e2e.conf.json ) \
       || die "build failed"
     [[ -x "$APP_BINARY" ]] || die "the build reported success but $APP_BINARY is missing"
     {
       printf 'fingerprint=%s\n' "$(build_fingerprint)"
       printf 'git_head=%s\n' "$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
       printf 'built_at=%s\n' "$(date -Is)"
-      printf 'command=VITE_E2E=1 npx tauri build --debug --no-bundle --features e2e --config src-tauri/tauri.e2e.conf.json\n'
+      printf 'command=VITE_E2E=1 npx tauri build %s --no-bundle --features e2e --config src-tauri/tauri.e2e.conf.json\n' "$E2E_DEBUG_FLAG"
     } > "$BUILD_STAMP"
   fi
 
@@ -380,8 +393,11 @@ failed_groups=()
 ran_any=0
 
 group_matches() {
-  (( ${#selected[@]} == 0 )) && return 0
   local want
+  if (( ${#selected[@]} == 0 )); then
+    for want in "${OPT_IN_GROUPS[@]}"; do [[ "$want" == "$1" ]] && return 1; done
+    return 0
+  fi
   for want in "${selected[@]}"; do [[ "$want" == "$1" ]] && return 0; done
   return 1
 }
@@ -470,7 +486,7 @@ mock_args_for_group() {
     # One "Arcade" platform of 2500 generated ROMs (`e2e_synthetic` in
     # roms.json; see mock-romm/server.mjs), with covers that take 40ms each
     # like a remote server's.
-    large-platform) printf -- '--fixtures-dir fixtures-large-platform --cover-delay-ms 40' ;;
+    large-platform|large-platform-perf) printf -- '--fixtures-dir fixtures-large-platform --cover-delay-ms 40' ;;
     *) printf '' ;;
   esac
 }

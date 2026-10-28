@@ -144,6 +144,35 @@ Stage groups are defined in `scripts/e2e.sh` (`STAGE_GROUPS`); their specs live 
 `e2e/specs/`, fixtures in `e2e/fixtures*/`, seeds in `e2e/seed/`, and the mock servers in
 `e2e/mock-romm/`.
 
+### Performance probe
+
+`large-platform-perf` measures how a large platform loads, scrolls and hovers in the
+real webview. It asserts nothing and never runs in a default pass (`OPT_IN_GROUPS`):
+name it to run it. Time a release build, because a debug build parses the ROM list
+several times slower than what ships:
+
+    E2E_RELEASE=1 scripts/ctr.sh e2e large-platform-perf
+
+`E2E_RELEASE=1` builds and runs `target/release/app` with its own build stamp, so it
+does not disturb the debug e2e build. To include the network, point the probe at a real
+RomM server (read-only; use a test account):
+
+    E2E_RELEASE=1 E2E_LIVE_URL=http://host:port E2E_LIVE_PLATFORM=<id> E2E_LIVE_TOKEN="$TOKEN" scripts/ctr.sh e2e large-platform-perf
+
+`ctr.sh` passes `E2E_*` variables into the container by name, so the token never
+appears on a command line inside it. Results are the `PERF` lines in the output:
+
+- `first open` / `reselect` — click to first card, first cover and ten covers.
+- `list_games` — the backend call alone: fetch, parse and IPC.
+- `cold scroll` — scrolling onto rows whose covers are still loading.
+- `scroll 60px/frame`, `scroll 400px/frame`, `jump to middle` — scrolling.
+- `hover flick` / `browse` / `rest` — pointer browsing, with the number of background
+  art changes. WebDriver pointer moves do not reach the WebKitGTK page, so the spec
+  drives hover from inside the page.
+
+Frame times are `requestAnimationFrame` intervals: about 16 ms is 60 fps. The container
+renders in software under Xvfb, so compare runs with each other, not with a desktop.
+
 ## Local bundles
 
     cd app && npx tauri build --bundles appimage    # Linux
