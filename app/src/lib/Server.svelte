@@ -15,7 +15,7 @@
   import { updates } from './stores/updates.svelte';
   import { hostOf } from './shell';
   import { session, retry } from './stores/session.svelte';
-  import { subjectFromSummary } from './background';
+  import { HOVER_DELAY_MS, PREFETCH_DELAY_MS, subjectFromSummary } from './background';
   import { createHoverViewed } from './lastViewedHover';
   import { dropPendingWarms } from './backgroundPrefetch';
   import { attachScrollGate, createVisibleWarmer, scrollParent } from './visibleWarm';
@@ -286,8 +286,13 @@
   }
 
   // Design §3: a card becomes the background only after the pointer has
-  // rested on it for more than 120ms.
-  const hover = createHoverViewed();
+  // rested on it for more than 120ms — counted from its last move, so
+  // browsing across cards does not cross-fade the art on each one.
+  const hover = createHoverViewed(
+    HOVER_DELAY_MS,
+    PREFETCH_DELAY_MS,
+    typeof window === 'undefined' ? null : window,
+  );
 
   // Keyboard selection feeds the background through the SAME 120ms
   // dwell as the pointer, so holding an arrow key across the grid does not

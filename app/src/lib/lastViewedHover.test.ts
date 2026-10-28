@@ -114,3 +114,64 @@ describe('createHoverViewed', () => {
     expect(noteViewed).not.toHaveBeenCalled();
   });
 });
+
+describe('createHoverViewed with restartOn (pointer hover)', () => {
+  const move = (target: EventTarget) => target.dispatchEvent(new Event('pointermove'));
+
+  it('waits for the pointer to stop: every move restarts the dwell', () => {
+    const target = new EventTarget();
+    const hover = createHoverViewed(120, 0, target);
+    hover.start(subject('https://romm/cover.png'));
+    for (let i = 0; i < 10; i++) {
+      vi.advanceTimersByTime(100);
+      move(target);
+    }
+    expect(noteViewed).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(119);
+    expect(noteViewed).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(noteViewed).toHaveBeenCalledExactlyOnceWith(subject('https://romm/cover.png'));
+  });
+
+  it('still starts the fetch on entry, not on the stop', () => {
+    const target = new EventTarget();
+    const hover = createHoverViewed(120, 0, target);
+    hover.start(subject('https://romm/cover.png'));
+    expect(prefetchBackground).toHaveBeenCalledExactlyOnceWith(subject('https://romm/cover.png'));
+  });
+
+  it('crossing cards without stopping changes nothing', () => {
+    const target = new EventTarget();
+    const hover = createHoverViewed(120, 0, target);
+    for (const name of ['a', 'b', 'c', 'd']) {
+      hover.end();
+      hover.start(subject(`https://romm/${name}.png`));
+      for (let t = 0; t < 150; t += 10) {
+        vi.advanceTimersByTime(10);
+        move(target);
+      }
+    }
+    expect(noteViewed).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(120);
+    expect(noteViewed).toHaveBeenCalledExactlyOnceWith(subject('https://romm/d.png'));
+  });
+
+  it('stops listening once the dwell fires or the pointer leaves', () => {
+    const target = new EventTarget();
+    const remove = vi.spyOn(target, 'removeEventListener');
+    const hover = createHoverViewed(120, 0, target);
+    hover.start(subject('https://romm/cover.png'));
+    vi.advanceTimersByTime(120);
+    expect(remove).toHaveBeenCalledWith('pointermove', expect.any(Function));
+    // A move after the dwell fired must not note the subject again.
+    move(target);
+    vi.advanceTimersByTime(500);
+    expect(noteViewed).toHaveBeenCalledTimes(1);
+
+    hover.start(subject('https://romm/other.png'));
+    hover.end();
+    move(target);
+    vi.advanceTimersByTime(500);
+    expect(noteViewed).toHaveBeenCalledTimes(1);
+  });
+});
