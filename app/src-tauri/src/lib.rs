@@ -542,6 +542,7 @@ pub fn run() {
             commands::ensure_image,
             commands::video_url,
             commands::ensure_background_variant,
+            commands::ensure_card_backdrop,
             commands::open_youtube_video,
             commands::install_game,
             commands::cancel_install,

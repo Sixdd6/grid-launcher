@@ -195,22 +195,18 @@
     object-fit: cover;
   }
 
-  /* Round 8: the blurred copy is rasterised at a QUARTER of the cover's
-     size and scaled up by 4 — the upscale supplies most of the softening,
-     so a 2.5px blur at quarter size reads like the old 10px blur at full
-     size while touching one sixteenth of the pixels. Measured on a
-     302-card platform with real covers: 64 → 28 ms per scroll frame with
-     the content-visibility change above, and no frame over 50 ms. */
+  /* The letterbox fill behind square and wide art. Its image arrives already
+     cropped, blurred and darkened (`images::backdrop`: 48x64, the quarter-size
+     box the old CSS blurred), so this only scales it up. It used to be the
+     cover itself under `filter: blur(2.5px) brightness(0.45)`, and that blur
+     on every paint ran a platform of square covers at 35ms a frame against
+     14ms with no backdrop (2026-10-28). */
   .cover :global(img.backdrop) {
     position: absolute;
-    top: -12px;
-    left: -12px;
-    width: calc((100% + 24px) / 4);
-    height: calc((100% + 24px) / 4);
-    transform: scale(4);
-    transform-origin: top left;
+    inset: 0;
+    width: 100%;
+    height: 100%;
     object-fit: cover;
-    filter: blur(2.5px) brightness(0.45);
     pointer-events: none;
   }
 

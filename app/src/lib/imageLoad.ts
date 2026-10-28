@@ -186,6 +186,9 @@ export function createPathMemo(limit: number): PathMemo {
 /** The memo every `Image.svelte` shares. */
 export const imagePaths = createPathMemo(IMAGE_PATH_MEMO_SIZE);
 
+/** The same, for card backdrops (`ensureCardBackdrop`), keyed by cover url. */
+export const backdropPaths = createPathMemo(IMAGE_PATH_MEMO_SIZE);
+
 export type ImageLoad = {
   /** This load's slot, for its priority while it waits. */
   slot: LoadSlot;

@@ -189,17 +189,40 @@ pub async fn ensure_background_variant(
     url: &str,
     sigma: u8,
 ) -> Result<PathBuf, ImageError> {
+    ensure_built_variant(
+        cache,
+        client,
+        url,
+        &background_variant_ext(sigma),
+        move |source, dir, key| build_background_variant(source, dir, key, sigma),
+    )
+    .await
+}
+
+/// The file `<key>.<ext>` for `url`'s source, built by `build` (blocking) on
+/// first use and shared by every caller after: concurrent requests for the
+/// same file wait on one build, and a source that fails to decode is
+/// remembered so it is not fetched and decoded again on every request.
+/// Keyed by key AND extension, so two variants of one source (two blur
+/// levels, a background and a card backdrop) never wait on — or inherit the
+/// failure of — each other.
+pub(crate) async fn ensure_built_variant<F>(
+    cache: &ImageCache,
+    client: Option<&RommClient>,
+    url: &str,
+    ext: &str,
+    build: F,
+) -> Result<PathBuf, ImageError>
+where
+    F: Fn(&Path, &Path, &str) -> Result<PathBuf, ImageError> + Send + Copy + 'static,
+{
     let key = image_key(url);
-    let ext = background_variant_ext(sigma);
-    // Keyed by key AND sigma, not by key alone: two blur levels of one source
-    // are two separate files, so one must never wait on — or inherit the
-    // failure of — the other.
     let slot = format!("{key}.{ext}");
     loop {
         if let Some(e) = cache.variant_failed().lock().await.get(&slot) {
             return Err(e.clone());
         }
-        if let Some(path) = cache.find_with_extension(&key, &ext) {
+        if let Some(path) = cache.find_with_extension(&key, ext) {
             return Ok(path);
         }
 
@@ -218,7 +241,7 @@ pub async fn ensure_background_variant(
         map.insert(slot.clone(), Arc::new(Notify::new()));
         drop(map);
 
-        let result = build_once(cache, client, url, key.clone(), sigma).await;
+        let result = build_once(cache, client, url, key.clone(), build).await;
         if let Err(e @ ImageError::Decode) = &result {
             cache
                 .variant_failed()
@@ -235,16 +258,19 @@ pub async fn ensure_background_variant(
 
 /// Fetches the source (or takes the cache hit) and builds the variant off the
 /// async runtime. Called with `<key>.<ext>` registered in the in-flight map.
-async fn build_once(
+async fn build_once<F>(
     cache: &ImageCache,
     client: Option<&RommClient>,
     url: &str,
     key: String,
-    sigma: u8,
-) -> Result<PathBuf, ImageError> {
+    build: F,
+) -> Result<PathBuf, ImageError>
+where
+    F: Fn(&Path, &Path, &str) -> Result<PathBuf, ImageError> + Send + Copy + 'static,
+{
     let source = cache.ensure(client, url).await?;
     let dir = cache.dir().to_path_buf();
-    tokio::task::spawn_blocking(move || build_background_variant(&source, &dir, &key, sigma))
+    tokio::task::spawn_blocking(move || build(&source, &dir, &key))
         .await
-        .map_err(|e| ImageError::Io(format!("background variant did not finish: {e}")))?
+        .map_err(|e| ImageError::Io(format!("image variant did not finish: {e}")))?
 }

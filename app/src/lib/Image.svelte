@@ -1,7 +1,7 @@
 <script lang="ts">
   import { fileSrc } from './fileSrc';
   import { api } from './api';
-  import { imagePaths, startImageLoad, watchNear, type LoadSlot } from './imageLoad';
+  import { backdropPaths, imagePaths, startImageLoad, watchNear, type LoadSlot } from './imageLoad';
   import { coverFit, type CoverFit } from './letterbox';
 
   let {
@@ -110,6 +110,37 @@
     fit = null;
   });
 
+  /** The letterboxed cover's backdrop: a small, already blurred and darkened
+   *  JPEG the backend builds once (`ensureCardBackdrop`), scaled up behind
+   *  the bars. No CSS filter: blurring the cover on every paint made a
+   *  platform of square covers scroll at 35ms a frame (`images::backdrop`).
+   *  Until it arrives, or if it cannot be built, the bars stay plain. */
+  let backdropSrc = $state<string | null>(null);
+
+  $effect(() => {
+    backdropSrc = null;
+    const cover = url;
+    if (!backdrop || fit !== 'letterbox' || !cover) return;
+    const known = backdropPaths.get(cover);
+    if (known !== undefined) {
+      backdropSrc = fileSrc(known);
+      return;
+    }
+    let cancelled = false;
+    api
+      .ensureCardBackdrop(cover)
+      .then((path) => {
+        backdropPaths.set(cover, path);
+        if (!cancelled) backdropSrc = fileSrc(path);
+      })
+      .catch(() => {
+        // Plain bars: the cover itself is what matters.
+      });
+    return () => {
+      cancelled = true;
+    };
+  });
+
   function handleImgLoad(e: Event) {
     slot?.release();
     if (!backdrop) return;
@@ -147,10 +178,10 @@
        most a dozen images at once, the ones near the visible area first
        (`imageLoad.ts`) — fetching all of a 2000-game platform at open
        exhausted the web process's file descriptors. -->
-  {#if backdrop && fit === 'letterbox'}
+  {#if backdrop && fit === 'letterbox' && backdropSrc}
     <img
       class="backdrop"
-      src={src}
+      src={backdropSrc}
       alt=""
       aria-hidden="true"
       loading="eager"

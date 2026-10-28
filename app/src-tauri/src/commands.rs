@@ -484,6 +484,31 @@ pub async fn ensure_background_variant(
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// A game card's letterbox backdrop for a cover (`images::backdrop`): a tiny
+/// pre-blurred, pre-darkened JPEG the card scales up behind square and wide
+/// art, instead of blurring the cover with a CSS filter on every paint. Same
+/// resolution and host filter as [`ensure_image`].
+#[tauri::command]
+pub async fn ensure_card_backdrop(
+    state: State<'_, AppState>,
+    url: String,
+) -> Result<String, String> {
+    let base = state.session.server_url();
+    let resolved = filter_to_server_host(&resolve_image_url(&url, &base), &base);
+    if resolved.is_empty() {
+        return Err("the image is not hosted on the connected server".to_string());
+    }
+    let client = state.session.client();
+    let path = grid_core::images::backdrop::ensure_card_backdrop(
+        state.session.cache(),
+        client.as_deref(),
+        &resolved,
+    )
+    .await
+    .map_err(err)?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 pub async fn install_game(state: State<'_, AppState>, rom_id: i64) -> Result<(), String> {
     ensure_library_idle(&state)?;
