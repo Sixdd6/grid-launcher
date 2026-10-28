@@ -124,6 +124,13 @@ describe('first-run setup: pick platforms, install their emulators', () => {
       },
       { timeout: TRANSITION_TIMEOUT, timeoutMsg: 'the chosen defaults never reached config.toml' },
     );
+    // The Server view stayed in front the whole time: its header must pick
+    // the new default up without being left and re-entered. Dreamcast is the
+    // platform it opened on (alphabetical).
+    await browser.waitUntil(
+      async () => (await $(testId('server-emulator-chip')).getText()).includes('Redream'),
+      { timeout: TRANSITION_TIMEOUT, timeoutMsg: "the Server header never showed Dreamcast's new default" },
+    );
     const config = readFileSync(configPath(), 'utf-8');
     expect(config).toMatch(/\[setup\]\s*\ncompleted = true/);
     expect(config).not.toContain('[setup.pending');

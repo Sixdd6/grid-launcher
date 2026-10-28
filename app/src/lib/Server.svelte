@@ -1,6 +1,14 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { api, FIRMWARE_PASS_FINISHED_EVENT, type FirmwarePassFinished, type GameSummary, type Platform } from './api';
+  import {
+    api,
+    EMULATOR_INSTALLED_EVENT,
+    FIRMWARE_PASS_FINISHED_EVENT,
+    SETUP_DEFAULTS_EVENT,
+    type FirmwarePassFinished,
+    type GameSummary,
+    type Platform,
+  } from './api';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import Details from './Details.svelte';
   import UmuInstallOffer from './UmuInstallOffer.svelte';
@@ -207,6 +215,20 @@
     return () => {
       stopped = true;
       unlisten?.();
+    };
+  });
+
+  // Defaults also change while this view is in front: an emulator install
+  // assigns them automatically, and first-run setup applies the ones the user
+  // chose just after (`setup-defaults`). Without these the header's emulator
+  // chip read "No default emulator" until the view was left and re-entered.
+  $effect(() => {
+    const offs = [
+      listen(EMULATOR_INSTALLED_EVENT, () => loadLaunchDefaults()),
+      listen(SETUP_DEFAULTS_EVENT, () => loadLaunchDefaults()),
+    ];
+    return () => {
+      for (const off of offs) off.then((un) => un());
     };
   });
 

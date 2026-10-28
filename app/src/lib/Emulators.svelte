@@ -9,6 +9,7 @@
   import {
     api,
     EMULATOR_INSTALLED_EVENT,
+    SETUP_DEFAULTS_EVENT,
     type CatalogEntry,
     type EmulatorInstalledEvent,
     type EmulatorEntry,
@@ -540,6 +541,18 @@
       updateChecking = null;
     }
   }
+
+  // First-run setup applies the defaults the user chose just after each
+  // emulator's install finishes — after the Downloads row this view refreshes
+  // on has completed — so re-read them when it says it has.
+  $effect(() => {
+    const pending = listen(SETUP_DEFAULTS_EVENT, () => {
+      refreshDefaults();
+    });
+    return () => {
+      pending.then((unlisten) => unlisten());
+    };
+  });
 
   // The completion toast for an install OR an update, worded by the backend's
   // `fresh` flag. Mounted once for the session: the install runs in the
