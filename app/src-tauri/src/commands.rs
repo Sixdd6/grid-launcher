@@ -240,6 +240,17 @@ fn platform_slugs_for_install(platforms: &[Platform]) -> BTreeMap<String, String
     map
 }
 
+/// Server platform `name` → display label, only for the platforms whose label
+/// differs from their `name` (a custom name). The autoconfig defaults match on
+/// the `name` and store under the label through this map.
+fn platform_labels_by_name(platforms: &[Platform]) -> BTreeMap<String, String> {
+    platforms
+        .iter()
+        .filter(|p| p.label() != p.name)
+        .map(|p| (p.name.clone(), p.label().to_string()))
+        .collect()
+}
+
 #[tauri::command]
 pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>, String> {
     let client = state.session.client().ok_or("not connected")?;
@@ -263,6 +274,9 @@ pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>,
         // keeps a name-keyed fallback (see `platform_slugs_for_install`) for
         // the autoconfig backfill call below, which still iterates names.
         install.set_platform_slugs(platform_slugs_for_install(&platforms));
+        // The autoconfig backfill matches by raw `name` but must STORE each
+        // default under the label, like every reader of `default_emulators`.
+        install.set_platform_labels(platform_labels_by_name(&platforms));
         // The label-keyed map again, into grid-core's process-wide registry:
         // the launch resolver, cloud ops, firmware routing and the install
         // service's PS3/Xenia helpers all read a rom's own display name
@@ -286,11 +300,13 @@ pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>,
             let ra = install.ra_credentials();
             let profiles = load_profiles();
             let slugs = install.platform_slugs();
+            let labels = install.platform_labels();
             let outcome = tokio::task::spawn_blocking(move || {
                 let ctx = autoconfig::SyncContext {
                     config_path: &config_path,
                     platforms: &assignable,
                     platform_slugs: &slugs,
+                    platform_labels: &labels,
                     ps3_library_path: String::new(),
                     ra,
                     profiles,
@@ -1027,6 +1043,7 @@ pub async fn emulator_facts(name: String) -> Result<EmulatorFacts, String> {
 pub struct SyncInputs {
     platforms: Vec<String>,
     platform_slugs: BTreeMap<String, String>,
+    platform_labels: BTreeMap<String, String>,
     ra: Option<RaCredentials>,
 }
 
@@ -1038,11 +1055,13 @@ impl SyncInputs {
             Some(install) => Self {
                 platforms: install.known_platforms(),
                 platform_slugs: install.platform_slugs(),
+                platform_labels: install.platform_labels(),
                 ra: install.ra_credentials(),
             },
             None => Self {
                 platforms: Vec::new(),
                 platform_slugs: BTreeMap::new(),
+                platform_labels: BTreeMap::new(),
                 ra: None,
             },
         }
@@ -1071,6 +1090,7 @@ pub fn run_emulator_sync(
     let SyncInputs {
         platforms,
         platform_slugs,
+        platform_labels,
         ra,
     } = inputs;
     let config_path = Config::default_path();
@@ -1078,6 +1098,7 @@ pub fn run_emulator_sync(
         config_path: &config_path,
         platforms: &platforms,
         platform_slugs: &platform_slugs,
+        platform_labels: &platform_labels,
         ps3_library_path: autoconfig::ps3_library_path(library_path),
         ra,
         profiles: load_profiles(),
@@ -2929,6 +2950,22 @@ mod merge_tests {
                 ("Windows".to_string(), "win".to_string()),
                 ("Windows 9x".to_string(), "win".to_string()),
             ])
+        );
+    }
+
+    #[test]
+    fn platform_labels_by_name_lists_only_platforms_whose_label_differs() {
+        let snes = Platform {
+            id: 1,
+            name: "Super Nintendo Entertainment System".to_string(),
+            slug: "snes".to_string(),
+            rom_count: 3,
+            custom_name: None,
+            display_name: "Super Nintendo Entertainment System".to_string(),
+        };
+        assert_eq!(
+            platform_labels_by_name(&[windows_9x_platform(), snes]),
+            BTreeMap::from([("Windows".to_string(), "Windows 9x".to_string())])
         );
     }
 

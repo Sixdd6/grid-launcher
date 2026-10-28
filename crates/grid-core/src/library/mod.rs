@@ -844,6 +844,7 @@ pub struct InstallService {
     /// RetroArch cores slug-first (D-RC-2) and grid-core holds no session of
     /// its own to fetch these with.
     platform_slugs: RwLock<BTreeMap<String, String>>,
+    platform_labels: RwLock<BTreeMap<String, String>>,
     /// `None` until the app installs one; a finalized compat-tool install
     /// then triggers no notification.
     compat_tools_hook: RwLock<Option<CompatToolsHook>>,
@@ -896,6 +897,7 @@ impl InstallService {
             game_finalized_hook: RwLock::new(None),
             platform_ids: RwLock::new(BTreeMap::new()),
             platform_slugs: RwLock::new(BTreeMap::new()),
+            platform_labels: RwLock::new(BTreeMap::new()),
             compat_tools_hook: RwLock::new(None),
             emulator_installed_hook: RwLock::new(None),
             library_gate: RwLock::new(LibraryGate::default()),
@@ -972,6 +974,19 @@ impl InstallService {
     /// until the app has fetched them once.
     pub fn platform_slugs(&self) -> BTreeMap<String, String> {
         self.platform_slugs.read().unwrap().clone()
+    }
+
+    /// Records server platform `name` → display label for the platforms whose
+    /// label differs, so the autoconfig defaults are stored under the label
+    /// (`autoconfig::SyncContext::platform_labels`).
+    pub fn set_platform_labels(&self, labels: BTreeMap<String, String>) {
+        *self.platform_labels.write().unwrap() = labels;
+    }
+
+    /// The map [`Self::set_platform_labels`] last recorded; empty until the
+    /// app has fetched the platforms once.
+    pub fn platform_labels(&self) -> BTreeMap<String, String> {
+        self.platform_labels.read().unwrap().clone()
     }
 
     /// The current RetroAchievements pair, or `None` when no provider is
@@ -3333,10 +3348,12 @@ impl InstallService {
             .unwrap_or_default();
         let platforms = self.known_platforms();
         let platform_slugs = self.platform_slugs();
+        let platform_labels = self.platform_labels();
         let ctx = autoconfig::SyncContext {
             config_path: &self.config_path,
             platforms: &platforms,
             platform_slugs: &platform_slugs,
+            platform_labels: &platform_labels,
             ps3_library_path: autoconfig::ps3_library_path(&library_path),
             ra: self.ra_credentials(),
             profiles: &self.profiles,

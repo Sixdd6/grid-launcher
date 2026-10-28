@@ -427,6 +427,11 @@ pub struct SyncContext<'a> {
     /// closure capture the map keeps `DefaultsContext` — and every test
     /// built against it — unchanged.
     pub platform_slugs: &'a BTreeMap<String, String>,
+    /// Server platform NAME → display label, for the platforms whose label
+    /// differs (a custom name). Platform defaults are stored under the label
+    /// (`entry::DefaultsContext::storage_key`); an absent entry means the
+    /// label is the name.
+    pub platform_labels: &'a BTreeMap<String, String>,
     /// `<library>/games/PlayStation 3`, or `""` when no library path is set.
     /// Build it with [`ps3_library_path`].
     pub ps3_library_path: String,
@@ -614,10 +619,17 @@ pub fn sync_new_emulator(entry_name: &str, ctx: &SyncContext) -> Result<SyncRepo
     let is_retroarch_name = |name: &str| -> bool {
         matches_tokens_by_name(name, &["retroarch"], &snapshot, ctx.profiles)
     };
+    let storage_key = |platform: &str| -> String {
+        ctx.platform_labels
+            .get(platform)
+            .cloned()
+            .unwrap_or_else(|| platform.to_string())
+    };
     let defaults_ctx = entry::DefaultsContext {
         platforms: ctx.platforms,
         installed_cores: &installed_cores,
         is_retroarch: &is_retroarch_name,
+        storage_key: &storage_key,
     };
     entry::backfill_missing_defaults(&mut config, ctx.profiles, &defaults_ctx);
     config.save(ctx.config_path)?;
@@ -899,10 +911,17 @@ pub fn backfill_all_defaults(ctx: &SyncContext) -> Result<bool, ConfigError> {
     let is_retroarch_name = |name: &str| -> bool {
         matches_tokens_by_name(name, &["retroarch"], &snapshot, ctx.profiles)
     };
+    let storage_key = |platform: &str| -> String {
+        ctx.platform_labels
+            .get(platform)
+            .cloned()
+            .unwrap_or_else(|| platform.to_string())
+    };
     let defaults_ctx = entry::DefaultsContext {
         platforms: ctx.platforms,
         installed_cores: &installed_cores,
         is_retroarch: &is_retroarch_name,
+        storage_key: &storage_key,
     };
     let changed = entry::backfill_missing_defaults(&mut config, ctx.profiles, &defaults_ctx);
     if changed {
@@ -988,6 +1007,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
@@ -1019,6 +1039,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: crate::launch::profiles::load_profiles(),
@@ -1060,6 +1081,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: ps3.clone(),
             ra: None,
             profiles: crate::launch::profiles::load_profiles(),
@@ -1093,6 +1115,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: crate::launch::profiles::load_profiles(),
@@ -1137,6 +1160,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
@@ -1191,6 +1215,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
@@ -1242,6 +1267,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
@@ -1432,6 +1458,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
@@ -1464,6 +1491,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
@@ -1499,6 +1527,7 @@ mod tests {
             config_path: &config_path,
             platforms: &platforms,
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
@@ -1545,6 +1574,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
@@ -1585,6 +1615,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &[],
@@ -1623,6 +1654,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &[],
@@ -1662,6 +1694,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: ps3,
             ra: None,
             profiles: &[],
@@ -1706,6 +1739,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &[],
@@ -1742,6 +1776,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &[],
@@ -1790,6 +1825,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &[],
@@ -1834,6 +1870,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &[],
@@ -1870,6 +1907,7 @@ mod tests {
             config_path: &config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &[],
@@ -1922,6 +1960,7 @@ mod tests {
             config_path: &config_path,
             platforms: &platforms,
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
@@ -1959,6 +1998,7 @@ mod tests {
             config_path: &config_path,
             platforms: &platforms,
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
@@ -2232,6 +2272,7 @@ mod tests {
             config_path: &config_path,
             platforms: &platforms,
             platform_slugs: &slugs,
+            platform_labels: &BTreeMap::new(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: &profiles,
@@ -2284,6 +2325,7 @@ mod tests {
             config_path,
             platforms: &[],
             platform_slugs: &no_slugs(),
+            platform_labels: &no_slugs(),
             ps3_library_path: String::new(),
             ra: None,
             profiles: crate::launch::profiles::load_profiles(),

@@ -70,6 +70,26 @@ pub struct DefaultsContext<'a> {
     /// `emulator_name -> is this RetroArch?` — the ported
     /// `_is_retroarch_emulator_name` predicate (emulator_ui_mixin.py:1916).
     pub is_retroarch: &'a dyn Fn(&str) -> bool,
+    /// Server platform `name` -> the key `default_emulators` and
+    /// `retroarch_cores` are stored under: the platform's display label,
+    /// which is what the Emulators panel, launch and firmware read. Matching
+    /// (keywords, cores) stays on the raw `name` in `platforms`; only reads
+    /// and writes of the two maps go through this. Production maps a
+    /// custom-named platform to its label; tests pass the identity.
+    pub storage_key: &'a dyn Fn(&str) -> String,
+}
+
+/// Moves a value stored under a platform's raw server `name` to its label
+/// `key`, from builds that keyed the automatic defaults by `name` (where the
+/// launch path never looked them up). A value already under the label is the
+/// one that was in effect, so it wins and the stale raw entry is dropped.
+fn adopt_legacy_key(map: &mut BTreeMap<String, String>, raw: &str, key: &str) {
+    if raw == key {
+        return;
+    }
+    if let Some(value) = map.remove(raw) {
+        map.entry(key.to_string()).or_insert(value);
+    }
 }
 
 /// Profile list values flattened the way the reference does
@@ -278,41 +298,45 @@ pub fn assign_profile_platform_defaults(
     let incoming_is_retroarch = (ctx.is_retroarch)(emulator_name);
 
     for platform in &targets {
+        let key = (ctx.storage_key)(platform);
+        adopt_legacy_key(&mut resolved_defaults, platform, &key);
+        adopt_legacy_key(&mut resolved_core_defaults, platform, &key);
         let current_default = resolved_defaults
-            .get(platform)
+            .get(&key)
             .map(|value| value.trim())
             .unwrap_or("");
         if current_default == NO_EMULATOR {
             continue;
         }
         if current_default.is_empty() {
-            resolved_defaults.insert(platform.clone(), emulator_name.to_string());
+            resolved_defaults.insert(key, emulator_name.to_string());
             continue;
         }
         if !incoming_is_retroarch && (ctx.is_retroarch)(current_default) {
-            resolved_defaults.insert(platform.clone(), emulator_name.to_string());
+            resolved_defaults.insert(key, emulator_name.to_string());
         }
     }
 
     if incoming_is_retroarch {
         let folded_name = emulator_name.to_lowercase();
         for platform in &targets {
+            let key = (ctx.storage_key)(platform);
             let claimed = resolved_defaults
-                .get(platform)
+                .get(&key)
                 .map(|value| value.trim().to_lowercase())
                 .unwrap_or_default();
             if claimed != folded_name {
                 continue;
             }
             let existing_core = resolved_core_defaults
-                .get(platform)
+                .get(&key)
                 .map(|value| value.trim())
                 .unwrap_or("");
             if !existing_core.is_empty() {
                 continue;
             }
             if let Some(first) = (ctx.installed_cores)(platform, emulator_name).first() {
-                resolved_core_defaults.insert(platform.clone(), first.clone());
+                resolved_core_defaults.insert(key, first.clone());
             }
         }
     }
@@ -648,6 +672,11 @@ mod tests {
             .collect()
     }
 
+    /// The storage key of a platform whose label is its `name`.
+    fn same_key(platform: &str) -> String {
+        platform.to_string()
+    }
+
     fn no_cores(_platform: &str, _emulator: &str) -> Vec<String> {
         Vec::new()
     }
@@ -839,6 +868,7 @@ mod tests {
             platforms: &platforms,
             installed_cores: &no_cores,
             is_retroarch: &is_retroarch_name,
+            storage_key: &same_key,
         };
         let (entries, _, _) = auto_configure_emulator_settings(
             None,
@@ -1037,6 +1067,7 @@ mod tests {
             platforms,
             installed_cores,
             is_retroarch: &is_retroarch_name,
+            storage_key: &same_key,
         };
         assign_profile_platform_defaults(
             game,
@@ -1643,6 +1674,7 @@ mod tests {
             platforms,
             installed_cores,
             is_retroarch: &is_retroarch_name,
+            storage_key: &same_key,
         };
         backfill_missing_defaults(config, profiles, &ctx)
     }
@@ -1797,5 +1829,102 @@ mod tests {
             config.retroarch_cores,
             map(&[("Super Nintendo", "some_core")])
         );
+    }
+
+    // --- storage key: defaults live under the platform's label ---------------
+
+    /// "Sony PlayStation 2" carries the custom label "My PS2" on the server.
+    fn labelled(platform: &str) -> String {
+        if platform == "Sony PlayStation 2" {
+            "My PS2".to_string()
+        } else {
+            platform.to_string()
+        }
+    }
+
+    fn assign_labelled(
+        emulator_name: &str,
+        profile: &EmulatorProfile,
+        defaults: &BTreeMap<String, String>,
+        core_defaults: &BTreeMap<String, String>,
+        installed_cores: &dyn Fn(&str, &str) -> Vec<String>,
+    ) -> (BTreeMap<String, String>, BTreeMap<String, String>) {
+        let platforms = strings(&["Sony PlayStation 2", "Nintendo 64"]);
+        let ctx = DefaultsContext {
+            platforms: &platforms,
+            installed_cores,
+            is_retroarch: &is_retroarch_name,
+            storage_key: &labelled,
+        };
+        assign_profile_platform_defaults(
+            None,
+            emulator_name,
+            profile,
+            defaults,
+            core_defaults,
+            &ctx,
+        )
+    }
+
+    #[test]
+    fn a_custom_named_platform_gets_its_default_under_its_label() {
+        // Matching still runs on the raw name ("playstation 2" is in it).
+        let profile = keyword_profile("PCSX2", &["playstation 2"]);
+        let (defaults, _) = assign_labelled(
+            "PCSX2",
+            &profile,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &no_cores,
+        );
+        assert_eq!(defaults, map(&[("My PS2", "PCSX2")]));
+    }
+
+    #[test]
+    fn a_default_stored_under_the_raw_name_moves_to_the_label() {
+        let profile = keyword_profile("PCSX2", &["playstation 2"]);
+        let before = map(&[("Sony PlayStation 2", "PCSX2")]);
+        let (defaults, _) =
+            assign_labelled("PCSX2", &profile, &before, &BTreeMap::new(), &no_cores);
+        assert_eq!(defaults, map(&[("My PS2", "PCSX2")]));
+    }
+
+    #[test]
+    fn the_labels_value_wins_over_a_stale_raw_name_value() {
+        // The label's value is the one launch used; the raw one was never read.
+        let profile = keyword_profile("PCSX2", &["playstation 2"]);
+        let before = map(&[("Sony PlayStation 2", "Old Emu"), ("My PS2", "Chosen Emu")]);
+        let (defaults, _) =
+            assign_labelled("PCSX2", &profile, &before, &BTreeMap::new(), &no_cores);
+        assert_eq!(defaults, map(&[("My PS2", "Chosen Emu")]));
+    }
+
+    #[test]
+    fn an_explicit_none_under_the_label_is_kept() {
+        let profile = keyword_profile("PCSX2", &["playstation 2"]);
+        let before = map(&[("My PS2", NO_EMULATOR)]);
+        let (defaults, _) =
+            assign_labelled("PCSX2", &profile, &before, &BTreeMap::new(), &no_cores);
+        assert_eq!(defaults, map(&[("My PS2", NO_EMULATOR)]));
+    }
+
+    #[test]
+    fn a_retroarch_core_is_found_by_raw_name_and_stored_under_the_label() {
+        let cores = |platform: &str, _emulator: &str| -> Vec<String> {
+            if platform == "Sony PlayStation 2" {
+                vec!["pcsx2_libretro".to_string()]
+            } else {
+                Vec::new()
+            }
+        };
+        let (defaults, core_defaults) = assign_labelled(
+            "RetroArch (Multi-System)",
+            &retroarch_profile(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &cores,
+        );
+        assert_eq!(defaults, map(&[("My PS2", "RetroArch (Multi-System)")]));
+        assert_eq!(core_defaults, map(&[("My PS2", "pcsx2_libretro")]));
     }
 }
