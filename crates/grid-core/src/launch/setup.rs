@@ -40,7 +40,8 @@ pub struct Recommendations {
     /// RomM slug → emulator profile names, most preferred first.
     #[serde(default)]
     pub recommended: BTreeMap<String, Vec<String>>,
-    /// Profile names setup never offers (experimental emulators).
+    /// Profile names setup never offers. Empty today: KytyPS5 was held back
+    /// as experimental, and is offered for PS5 at the user's request.
     #[serde(default)]
     pub not_offered: Vec<String>,
 }
@@ -491,13 +492,35 @@ mod tests {
     }
 
     #[test]
-    fn an_experimental_emulator_is_not_offered() {
+    fn ps5_recommends_kytyps5() {
         let row = one("PlayStation 5", "ps5", "linux");
-        assert!(
-            !names(&row).iter().any(|n| n.starts_with("KytyPS5")),
-            "{:?}",
-            names(&row)
-        );
+        assert_eq!(recommended_name(&row), Some("KytyPS5 (Playstation 5)"));
+    }
+
+    #[test]
+    fn a_profile_the_table_does_not_offer_is_left_out() {
+        let table = Recommendations {
+            not_offered: vec!["KytyPS5 (Playstation 5)".to_string()],
+            ..Default::default()
+        };
+        let row = platform_setup(
+            &[platform("PlayStation 5", "ps5", 2)],
+            load_profiles(),
+            &Config::default(),
+            "linux",
+            &table,
+        )
+        .remove(0);
+        assert!(row.options.is_empty(), "{:?}", names(&row));
+        assert_eq!(row.recommended, None);
+    }
+
+    #[test]
+    fn zeebo_has_nothing_to_offer() {
+        // The e2e first-run-setup fixture's "No emulator available" platform.
+        let row = one("Zeebo", "zeebo", "linux");
+        assert!(row.options.is_empty(), "{:?}", names(&row));
+        assert_eq!(row.core, None);
     }
 
     #[test]

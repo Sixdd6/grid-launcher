@@ -98,7 +98,7 @@ STAGE_GROUPS=(
   # First-run setup: a fresh profile connects, picks platforms in the
   # platform picker, and lands in the shell while their emulators install
   # from the mock forge (PCSX2, Redream). Its own fixtures: PS2, Dreamcast, a
-  # platform with no emulator (PS5) and one only RetroArch serves (SNES).
+  # platform with no emulator (Zeebo) and one only RetroArch serves (SNES).
   "first-run-setup:specs/first-run-setup.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a

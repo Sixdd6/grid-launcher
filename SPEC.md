@@ -180,8 +180,7 @@ first, none ticked:
   platform's standalone emulator (an ordered list per platform in
   `platform-emulators.json`, then keyword matching); RetroArch is recommended only for a
   platform no standalone emulator serves (NES, SNES, Game Boy, Arcade…), and is offered
-  at all only when a RetroArch core is known for the platform. Experimental emulators
-  (KytyPS5) are not offered.
+  at all only when a RetroArch core is known for the platform.
 - A platform nothing installable serves shows "No emulator available" and cannot be
   ticked; one whose recommended emulator is already configured shows "Installed".
 - **Install N emulators** (N counts emulators, not platforms) queues one catalog install

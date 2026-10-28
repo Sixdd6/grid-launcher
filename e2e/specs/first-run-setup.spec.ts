@@ -21,7 +21,7 @@ async function screenshot(name: string): Promise<void> {
  * library folder, and the platform picker follows.
  *
  * Fixtures (fixtures-first-run-setup): PS2 and Dreamcast, whose standalone
- * emulators the mock forge serves (PCSX2, Redream); PS5, which nothing
+ * emulators the mock forge serves (PCSX2, Redream); Zeebo, which nothing
  * installable serves; and SNES, which only RetroArch serves (with a core).
  * RetroArch's two-archive install has no mock forge route, so SNES is shown
  * but not ticked: its rules are covered by grid-core's launch::setup tests.
@@ -47,15 +47,15 @@ describe('first-run setup: pick platforms, install their emulators', () => {
       timeoutMsg: 'the platform picker never appeared after connecting',
     });
     await $(testId('setup-row-ps2')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    // Most games first: SNES (30), PS2 (9), Dreamcast (4), PS5 (2).
+    // Most games first: SNES (30), PS2 (9), Dreamcast (4), Zeebo (2).
     const order = await browser.execute(() =>
       Array.from(document.querySelectorAll('[data-testid^="setup-row-"]')).map((r) =>
         (r as HTMLElement).dataset.testid!.replace('setup-row-', ''),
       ),
     );
-    expect(order).toEqual(['snes', 'ps2', 'dc', 'ps5']);
-    await expect($(testId('setup-unavailable-ps5'))).toExist();
-    await expect($(testId('setup-check-ps5'))).toBeDisabled();
+    expect(order).toEqual(['snes', 'ps2', 'dc', 'zeebo']);
+    await expect($(testId('setup-unavailable-zeebo'))).toExist();
+    await expect($(testId('setup-check-zeebo'))).toBeDisabled();
     // Nothing ticked yet, so nothing to install.
     await expect($(testId('setup-install'))).toBeDisabled();
     await screenshot('1-picker');
