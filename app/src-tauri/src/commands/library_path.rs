@@ -474,3 +474,17 @@ mod tests {
             .is_file());
     }
 }
+
+/// The library folder the Connect form suggests on a first run
+/// (`~/Games/GRID`, `%USERPROFILE%\Games\GRID`); `""` when the home folder
+/// cannot be found, and the field stays empty for the user to fill.
+#[tauri::command]
+pub fn suggested_library_path() -> String {
+    grid_core::platform::home_dir()
+        .map(|home| {
+            grid_core::platform::suggested_library_path(&home)
+                .to_string_lossy()
+                .into_owned()
+        })
+        .unwrap_or_default()
+}

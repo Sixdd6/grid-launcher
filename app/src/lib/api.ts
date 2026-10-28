@@ -767,6 +767,9 @@ export const api = {
     invoke<InstalledGame>('locate_installed_row', { title, platform, folder }),
   getLibraryPath: () => invoke<string>('get_library_path'),
   setLibraryPath: (path: string) => invoke<void>('set_library_path', { path }),
+  /** The folder the first-run form suggests (`~/Games/GRID`); `''` when the
+   *  home folder is unknown. */
+  suggestedLibraryPath: () => invoke<string>('suggested_library_path'),
   /** Settings › Library: can `path` become the library folder? Creates nothing. */
   checkLibraryPath: (path: string) => invoke<LibraryPathCheck>('check_library_path', { path }),
   /** What Start fresh › Delete would remove from the current library. Reads only. */

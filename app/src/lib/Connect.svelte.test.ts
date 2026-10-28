@@ -61,10 +61,18 @@ describe('Connect', () => {
     expect(body).not.toContain('data-testid="connect-reason"');
   });
 
-  it('leaves the library path blank so an imported one survives', () => {
+  it('shows no library field until it knows whether a folder is stored', () => {
+    // SSR runs no effect, so the stored-path check never answers here. The
+    // field must not render (and flash) before it does: a reconnect with a
+    // stored folder never shows it. `connectForm.test.ts` covers the rules.
     session.serverUrl = 'https://romm.example.test';
     session.username = 'importer';
     const { body } = render(Connect);
-    expect(input(body, 'library-path')).not.toMatch(/value="[^"]+"/);
+    expect(input(body, 'library-path')).toBe('');
+  });
+
+  it('keeps Connect disabled until the form is complete', () => {
+    const { body } = render(Connect);
+    expect(body).toMatch(/<button[^>]*data-testid="connect-submit"[^>]*disabled/);
   });
 });

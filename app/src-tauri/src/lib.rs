@@ -646,6 +646,7 @@ pub fn run() {
             commands::logging::set_debug_prints,
             commands::relink::list_server_roms_for_platform,
             commands::setup::setup_platform_options,
+            commands::library_path::suggested_library_path,
             commands::setup::setup_status,
             commands::setup::skip_platform_setup,
             commands::setup::start_platform_setup,

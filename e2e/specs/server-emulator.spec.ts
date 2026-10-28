@@ -70,19 +70,13 @@ describe('server-emulator', () => {
     });
     await $(testId('connect-server-url')).setValue(mockUrl());
     await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
+    // A fresh profile has no library folder: Connect asks for one.
+    await $(testId('connect-library-path')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await $(testId('connect-library-path')).setValue(library());
     await $(testId('connect-submit')).click();
     await $(testId('platform-btn-1')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
       timeoutMsg: 'the server view never rendered a platform button after connecting',
-    });
-
-    await show('server');
-    await $(testId('library-path-input')).setValue(library());
-    await $(testId('library-path-save')).click();
-    await $(testId('library-path-banner')).waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      reverse: true,
-      timeoutMsg: 'the library-path banner never hid after saving a path',
     });
   });
 

@@ -22,6 +22,13 @@ pub fn home_dir() -> Option<PathBuf> {
     env_home()
 }
 
+/// The library folder first-run setup suggests: `Games/GRID` in the home
+/// folder (`~/Games/GRID`, `%USERPROFILE%\Games\GRID`). Nothing is created
+/// here; the first install creates it.
+pub fn suggested_library_path(home: &Path) -> PathBuf {
+    home.join("Games").join("GRID")
+}
+
 /// `$HOME` when it is set and non-blank once trimmed.
 fn env_home() -> Option<PathBuf> {
     let raw = std::env::var("HOME").ok()?;
@@ -148,6 +155,14 @@ mod tests {
         assert_eq!(
             canonicalize(&dir).unwrap(),
             std::fs::canonicalize(&dir).unwrap()
+        );
+    }
+
+    #[test]
+    fn the_suggested_library_is_games_grid_in_home() {
+        assert_eq!(
+            suggested_library_path(Path::new("/home/me")),
+            Path::new("/home/me").join("Games").join("GRID")
         );
     }
 }

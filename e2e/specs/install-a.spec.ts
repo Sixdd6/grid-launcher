@@ -1,7 +1,8 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   APP_START_TIMEOUT,
+  configPath,
   dataDir,
   FIXTURE_TOKEN,
   INSTALL_TIMEOUT,
@@ -48,6 +49,9 @@ describe('install (a): connect, set library path, install', () => {
     });
     await $(testId('connect-server-url')).setValue(mockUrl());
     await $(testId('connect-secret')).setValue(FIXTURE_TOKEN);
+    // A fresh profile has no library folder: Connect asks for one.
+    await $(testId('connect-library-path')).waitForExist({ timeout: TRANSITION_TIMEOUT });
+    await $(testId('connect-library-path')).setValue(path.join(dataDir(), 'library'));
     await $(testId('connect-submit')).click();
     await $(testId('platform-btn-1')).waitForExist({
       timeout: TRANSITION_TIMEOUT,
@@ -63,20 +67,11 @@ describe('install (a): connect, set library path, install', () => {
     });
   });
 
-  it('shows the library-path banner when unset, and hides it once a path is saved', async () => {
+  it('stores the library folder typed at Connect, so no banner asks for it again', async () => {
     await showServer();
-    const banner = $(testId('library-path-banner'));
-    await expect(banner).toExist();
-
-    const libraryPath = path.join(dataDir(), 'library');
-    await $(testId('library-path-input')).setValue(libraryPath);
-    await $(testId('library-path-save')).click();
-
-    await banner.waitForExist({
-      timeout: TRANSITION_TIMEOUT,
-      reverse: true,
-      timeoutMsg: 'the library-path banner never hid after saving a path',
-    });
+    await expect($(testId('library-path-banner'))).not.toExist();
+    const config = readFileSync(configPath(), 'utf8');
+    expect(config).toContain(`library_path = ${JSON.stringify(path.join(dataDir(), 'library'))}`);
   });
 
   it('installs a game from the details overlay through to the installed badge', async () => {
