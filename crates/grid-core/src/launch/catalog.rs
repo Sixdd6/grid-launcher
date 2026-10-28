@@ -205,7 +205,10 @@ pub fn catalog_entries(profiles: &[EmulatorProfile]) -> Vec<CatalogEntry> {
 /// [`catalog_entries`] as `host` (a `sys.platform`-shaped slug) would list
 /// it: the same rows, gated by that host's `platforms` allowlist instead of
 /// this build's.
-fn catalog_entries_for_host(profiles: &[EmulatorProfile], host: &str) -> Vec<CatalogEntry> {
+pub(crate) fn catalog_entries_for_host(
+    profiles: &[EmulatorProfile],
+    host: &str,
+) -> Vec<CatalogEntry> {
     catalog_entries_filtered(profiles, false, host)
 }
 

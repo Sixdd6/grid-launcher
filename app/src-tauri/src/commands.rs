@@ -3,6 +3,7 @@ pub mod library_move;
 pub mod library_path;
 pub mod logging;
 pub mod relink;
+pub mod setup;
 pub mod specials;
 pub mod updates;
 

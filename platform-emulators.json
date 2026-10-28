@@ -1,0 +1,21 @@
+{
+  "_comment": "First-run setup recommendations (crates/grid-core/src/launch/setup.rs). 'recommended' maps a RomM platform slug to emulator profile names in order of preference; the first one installable on this OS is pre-selected. A platform not listed here takes the keyword-matched standalone emulators in name order. RetroArch is never listed: setup uses it only for platforms with no standalone emulator, and only when a core is known for the platform. 'not_offered' names profiles setup never shows.",
+  "recommended": {
+    "psx": ["DuckStation (Playstation 1)"],
+    "ps2": ["PCSX2 (Playstation 2)"],
+    "psp": ["PPSSPP (Playstation Portable)"],
+    "ps3": ["RPCS3 (Playstation 3)"],
+    "psvita": ["Vita3K (Playstation Vita)"],
+    "ps4--1": ["ShadPS4 (Playstation 4)"],
+    "ngc": ["Dolphin (GameCube, Wii)"],
+    "wii": ["Dolphin (GameCube, Wii)"],
+    "wiiu": ["Cemu (Wii U)"],
+    "3ds": ["Azahar (Nintendo 3DS)"],
+    "new-nintendo-3ds": ["Azahar (Nintendo 3DS)"],
+    "switch": ["Eden (Nintendo Switch)"],
+    "xbox": ["Xemu (Xbox)"],
+    "xbox360": ["Xenia Canary (Xbox 360)", "Xenia Edge (Xbox 360)"],
+    "dc": ["Redream (Sega Dreamcast)"]
+  },
+  "not_offered": ["KytyPS5 (Playstation 5)"]
+}

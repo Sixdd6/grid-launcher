@@ -400,6 +400,34 @@ export type CatalogEntry = {
   installed: boolean;
 };
 
+/** One emulator first-run setup can install for a platform
+ *  (grid-core `launch::setup::SetupOption`). */
+export type SetupOption = {
+  source_id: string;
+  name: string;
+  /** `retroarch` only where a core is known for the platform. */
+  kind: 'standalone' | 'retroarch';
+  /** Already configured. */
+  installed: boolean;
+};
+
+/** One row of the first-run platform picker (grid-core
+ *  `launch::setup::PlatformSetup`). */
+export type PlatformSetup = {
+  /** The display label: shown, and the key platform defaults use. */
+  label: string;
+  name: string;
+  slug: string;
+  rom_count: number;
+  /** Standalone first, in recommendation order; RetroArch last. */
+  options: SetupOption[];
+  /** The pre-selected option's `source_id`; `null` when nothing installable
+   *  serves the platform. */
+  recommended: string | null;
+  /** The core RetroArch would use here; `null` when RetroArch is not offered. */
+  core: string | null;
+};
+
 export type LaunchDefaults = {
   default_emulators: Record<string, string>;
   retroarch_cores: Record<string, string>;
@@ -779,6 +807,9 @@ export const api = {
   setRetroarchCore: (platform: string, core: string) =>
     invoke<void>('set_retroarch_core', { platform, core }),
   listEmulatorCatalog: () => invoke<CatalogEntry[]>('list_emulator_catalog'),
+  /** First-run setup: the server's platforms that need an emulator, with
+   *  what GRID can install for each and its recommendation. */
+  setupPlatformOptions: () => invoke<PlatformSetup[]>('setup_platform_options'),
   installEmulator: (sourceId: string) => invoke<void>('install_emulator', { sourceId }),
   /**
    * The row's "Update from Source" check. Runs one release request against

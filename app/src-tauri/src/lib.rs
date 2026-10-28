@@ -630,6 +630,7 @@ pub fn run() {
             commands::logging::get_debug_prints,
             commands::logging::set_debug_prints,
             commands::relink::list_server_roms_for_platform,
+            commands::setup::setup_platform_options,
             commands::relink::link_installed_row,
             commands::relink::remove_from_library,
             commands::relink::locate_installed_row,

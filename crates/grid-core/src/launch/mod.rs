@@ -12,6 +12,7 @@ pub mod profiles;
 pub mod rom;
 pub mod selection;
 pub mod sessions;
+pub mod setup;
 pub mod source;
 pub mod spawn;
 pub mod template;
