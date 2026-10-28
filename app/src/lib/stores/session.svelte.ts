@@ -11,8 +11,29 @@ function assign(next: ShellSession) {
   session.username = next.username; session.lastError = next.lastError; session.rejected = next.rejected;
 }
 
+/**
+ * A connected session goes to the first-run platform picker instead of the
+ * shell when setup is needed (a fresh install: `setup_status`). Offline, or
+ * when the check itself fails, it goes straight to the shell: the picker
+ * needs the server's platforms, and Emulators › Set up platforms… is always
+ * there later.
+ */
+async function withSetupCheck(next: ShellSession): Promise<ShellSession> {
+  if (next.phase !== 'shell' || !next.connected) return next;
+  try {
+    return (await api.setupStatus()).needed ? { ...next, phase: 'setup' } : next;
+  } catch {
+    return next;
+  }
+}
+
+/** The picker was finished or skipped: on to the shell. */
+export function finishSetup() {
+  if (session.phase === 'setup') session.phase = 'shell';
+}
+
 export async function restore() {
-  try { assign(applyRestore(await api.restoreSession())); }
+  try { assign(await withSetupCheck(applyRestore(await api.restoreSession()))); }
   catch { assign({ phase: 'none', connected: false, serverUrl: '', username: '', lastError: null }); }
 }
 
@@ -34,7 +55,9 @@ export async function connect(serverUrl: string, username: string, secret: strin
   session.busy = true; session.error = null;
   try {
     const state = await api.connect(serverUrl, username, secret, useToken);
-    assign({ phase: 'shell', connected: true, serverUrl: state.server_url, username: state.username, lastError: null });
+    assign(
+      await withSetupCheck({ phase: 'shell', connected: true, serverUrl: state.server_url, username: state.username, lastError: null }),
+    );
   } catch (e) { session.error = String(e); }
   finally { session.busy = false; }
 }

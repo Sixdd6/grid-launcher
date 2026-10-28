@@ -82,6 +82,7 @@ There are several main sections to the application with buttons across the top b
   button; **Add from catalog** has a search box, one row per catalog entry with its
   provider and an Install / Installed button, and a Manual tab for the hand-typed form
   (name, executable path, arguments, with the profile auto-fill); **Platform defaults**
+  has **Set up platforms…** (the first-run platform picker, see First Run Setup) and
   shows one card per server platform with the emulator select (only compatible
   emulators, plus "(none)") and, for a RetroArch default, the core select; **Compat
   tools** (Linux only) is the wine/proton default picker and its install catalog, plus a
@@ -159,13 +160,42 @@ There are several main sections to the application with buttons across the top b
 ## Sub Views
 
 ### First Run Setup
-On first launch, or when required configuration is missing, the app should prompt for:
+On first launch, or when required configuration is missing, the Connect screen asks for:
 - Server URL
-- API token
-- Library path
+- API token (or username and password)
+- Library folder — only while none is stored. It is pre-filled with `~/Games/GRID`
+  (`%USERPROFILE%\Games\GRID` on Windows), has Browse…, and is required: nothing can
+  install without it. A folder that cannot be stored stops the connect with the reason.
 
-The user must complete this setup before continuing into the main application. The
-library path can be changed later under Settings › Library.
+The Connect button stays disabled until every shown field is filled. The library folder
+can be changed later under Settings › Library.
+
+**Choose your platforms.** After the first successful connect of a fresh install (setup
+never finished or skipped, no emulator configured, no game installed), a platform picker
+comes before the shell. It lists the server's platforms that need an emulator (native PC
+platforms and the "Emulators" platform are left out) with their ROM counts, most games
+first, none ticked:
+- Ticking a platform pre-selects GRID's recommended emulator for it; a select offers the
+  other compatible emulators installable on this system. The recommendation is the
+  platform's standalone emulator (an ordered list per platform in
+  `platform-emulators.json`, then keyword matching); RetroArch is recommended only for a
+  platform no standalone emulator serves (NES, SNES, Game Boy, Arcade…), and is offered
+  at all only when a RetroArch core is known for the platform. Experimental emulators
+  (KytyPS5) are not offered.
+- A platform nothing installable serves shows "No emulator available" and cannot be
+  ticked; one whose recommended emulator is already configured shows "Installed".
+- **Install N emulators** (N counts emulators, not platforms) queues one catalog install
+  per chosen emulator and opens the app at once. A card over the views follows the
+  installs ("Setting up 3 emulators · 1 done"), with Retry for a failed one, and ends
+  with how many platforms are ready.
+- As each emulator installs, every platform it was chosen for gets it as its default
+  emulator, replacing an automatic default but never an explicit "(none)". A RetroArch
+  choice becomes the default only when a compatible core is actually installed; otherwise
+  the platform is left without a default and the card says so. A chosen default waits
+  for its own emulator, so a failed install that is retried still gets it.
+- **Skip for now** opens the app with nothing installed. Either way the picker is not
+  shown again on its own; **Emulators › Platform defaults › Set up platforms…** opens it
+  any time (Cancel closes it).
 
 If the server rejects the stored credential (HTTP 401), at startup or during a session, the app returns to this screen. The server URL (and username, for a password) is filled in, the credential field is empty, and a line explains why ("The server rejected your token. Enter a new one."). The stored credential stays in the OS keyring until a new connect succeeds. When the server is unreachable or denies permission (HTTP 403), the app stays open and shows "Not connected" with Retry.
 

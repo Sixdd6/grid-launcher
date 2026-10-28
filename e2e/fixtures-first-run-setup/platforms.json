@@ -1,0 +1,6 @@
+[
+  { "id": 1, "name": "Sony PlayStation 2", "slug": "ps2", "rom_count": 9 },
+  { "id": 2, "name": "Sega Dreamcast", "slug": "dc", "rom_count": 4 },
+  { "id": 3, "name": "PlayStation 5", "slug": "ps5", "rom_count": 2 },
+  { "id": 4, "name": "Super Nintendo Entertainment System", "slug": "snes", "rom_count": 30 }
+]

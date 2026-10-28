@@ -54,6 +54,11 @@ const appEnv: Record<string, string> = {
   ...(process.env.E2E_PLAY_SESSION_MIN_SECS !== undefined
     ? { GRID_LAUNCHER_E2E_PLAY_SESSION_MIN_SECS: process.env.E2E_PLAY_SESSION_MIN_SECS }
     : {}),
+  // GRID_LAUNCHER_E2E_FIRST_RUN_SETUP shows the first-run platform picker
+  // after connecting (setup_status, e2e feature only). Every other group
+  // connects a fresh profile and expects the shell straight after, so e2e.sh
+  // sets E2E_FIRST_RUN_SETUP for the `first-run-setup` group only.
+  ...(process.env.E2E_FIRST_RUN_SETUP ? { GRID_LAUNCHER_E2E_FIRST_RUN_SETUP: '1' } : {}),
   // GRID_LAUNCHER_E2E_FORCE_COPY_MOVE makes a library move copy every folder
   // instead of renaming it (grid-core library/relocate.rs `probe_strategy`,
   // e2e feature only). e2e.sh sets E2E_FORCE_COPY_MOVE for the

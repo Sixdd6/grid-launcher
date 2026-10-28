@@ -167,8 +167,9 @@ pub struct SetupState {
     pub completed: bool,
     /// Platform label → the default setup will apply once that platform's
     /// emulator has installed. An entry stays until its emulator installs,
-    /// so a failed install that is retried still gets its default.
-    #[serde(default)]
+    /// so a failed install that is retried still gets its default. Not
+    /// written while empty, so a finished setup leaves no empty table.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub pending: BTreeMap<String, PendingDefault>,
 }
 

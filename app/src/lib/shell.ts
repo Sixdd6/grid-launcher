@@ -4,7 +4,8 @@ import type { AuthKind, RestoreOutcome, SessionUnauthorized } from './api';
  *  array is also the `Ctrl+<n>` accelerator. */
 export const VIEWS = ['library', 'server', 'downloads', 'emulators', 'settings'] as const;
 export type View = (typeof VIEWS)[number];
-export type SessionPhase = 'loading' | 'none' | 'shell';
+/** `setup`: connected, showing the first-run platform picker before the shell. */
+export type SessionPhase = 'loading' | 'none' | 'setup' | 'shell';
 export type ShellSession = {
   phase: SessionPhase;
   connected: boolean;
@@ -39,11 +40,12 @@ export function applyRestore(outcome: RestoreOutcome): ShellSession {
 
 /**
  * The `session-unauthorized` event (a 401 mid-session). It acts only on a
- * live shell: on any other phase there is no session for it to end, and
+ * live session — the shell, or the first-run platform picker, which talks to
+ * the server too: on any other phase there is no session for it to end, and
  * resetting a Connect form the user is typing into would lose their input.
  */
 export function applyUnauthorizedEvent(phase: SessionPhase, info: SessionUnauthorized): ShellSession | null {
-  if (phase !== 'shell') return null;
+  if (phase !== 'shell' && phase !== 'setup') return null;
   return applyRestore({ kind: 'unauthorized', ...info });
 }
 

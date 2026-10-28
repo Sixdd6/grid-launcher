@@ -3,6 +3,7 @@
   import Server from './Server.svelte';
   import Downloads from './Downloads.svelte';
   import DownloadsFooter from './DownloadsFooter.svelte';
+  import SetupProgress from './setup/SetupProgress.svelte';
   import Emulators from './Emulators.svelte';
   import BackgroundArt from './BackgroundArt.svelte';
   import Icon from './Icon.svelte';
@@ -249,6 +250,10 @@
      `display: none` — inside a view root the strip would vanish from every
      other view. -->
 <DownloadsFooter onOpen={() => (view = 'downloads')} />
+
+<!-- First-run setup's installs, followed until dismissed (fixed, like the
+     strip above, so it shows over every view). -->
+<SetupProgress onOpenDownloads={() => (view = 'downloads')} />
 
 
 <style>

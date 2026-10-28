@@ -47,9 +47,30 @@ pub struct SetupStatus {
     pub pending: Vec<String>,
 }
 
-/// `needed` only for a fresh install: setup never finished or skipped, no
-/// emulator configured and no game installed. Someone upgrading from a build
-/// without setup has one or the other, and never sees the picker on its own.
+/// The `e2e` build shows the picker only when this is set: every stage group
+/// but `first-run-setup` connects a fresh profile and expects the shell
+/// straight after (e2e.sh sets `E2E_FIRST_RUN_SETUP`, which `wdio.conf.ts`
+/// turns into this). A release build never reads it.
+const E2E_FIRST_RUN_SETUP_VAR: &str = "GRID_LAUNCHER_E2E_FIRST_RUN_SETUP";
+
+/// Whether the picker is shown: a fresh install only — setup never finished
+/// or skipped, no emulator configured and no game installed. Someone
+/// upgrading from a build without setup has one or the other. In an `e2e`
+/// build it is also off unless the stage opted in.
+fn setup_needed(
+    completed: bool,
+    has_emulators: bool,
+    has_games: bool,
+    e2e: bool,
+    e2e_opt_in: bool,
+) -> bool {
+    if e2e && !e2e_opt_in {
+        return false;
+    }
+    !completed && !has_emulators && !has_games
+}
+
+/// `needed` only for a fresh install (see [`setup_needed`]).
 #[tauri::command]
 pub async fn setup_status(state: State<'_, AppState>) -> Result<SetupStatus, String> {
     let config = Config::load(&Config::default_path()).map_err(err)?;
@@ -66,7 +87,13 @@ pub async fn setup_status(state: State<'_, AppState>) -> Result<SetupStatus, Str
         Err(_) => true,
     };
     Ok(SetupStatus {
-        needed: !config.setup.completed && config.emulators.is_empty() && !has_games,
+        needed: setup_needed(
+            config.setup.completed,
+            !config.emulators.is_empty(),
+            has_games,
+            cfg!(feature = "e2e"),
+            std::env::var_os(E2E_FIRST_RUN_SETUP_VAR).is_some(),
+        ),
         pending: config.setup.pending.keys().cloned().collect(),
     })
 }
@@ -159,4 +186,31 @@ fn cores_on_disk(
     entry: &grid_core::config::EmulatorEntry,
 ) -> Vec<String> {
     installed_compatible_cores(&pending.name, &pending.slug, entry)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::setup_needed;
+
+    #[test]
+    fn a_fresh_install_needs_setup() {
+        assert!(setup_needed(false, false, false, false, false));
+    }
+
+    #[test]
+    fn finished_or_skipped_setup_is_not_offered_again() {
+        assert!(!setup_needed(true, false, false, false, false));
+    }
+
+    #[test]
+    fn an_upgrade_with_an_emulator_or_a_game_never_sees_it() {
+        assert!(!setup_needed(false, true, false, false, false));
+        assert!(!setup_needed(false, false, true, false, false));
+    }
+
+    #[test]
+    fn an_e2e_build_shows_it_only_to_the_stage_that_opts_in() {
+        assert!(!setup_needed(false, false, false, true, false));
+        assert!(setup_needed(false, false, false, true, true));
+    }
 }

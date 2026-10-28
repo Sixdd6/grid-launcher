@@ -42,7 +42,10 @@ describe('applyUnauthorizedEvent', () => {
       phase: 'none', connected: false, serverUrl: 'https://h', username: 'u', lastError: null, rejected: 'token',
     });
   });
-  it('ignores the event outside the shell, so a form being typed into is never reset', () => {
+  it('takes the first-run platform picker to the connect screen too', () => {
+    expect(applyUnauthorizedEvent('setup', info)?.phase).toBe('none');
+  });
+  it('ignores the event outside a live session, so a form being typed into is never reset', () => {
     expect(applyUnauthorizedEvent('none', info)).toBeNull();
     expect(applyUnauthorizedEvent('loading', info)).toBeNull();
   });

@@ -2,8 +2,10 @@
   import Connect from './lib/Connect.svelte';
   import { connectPrefill } from './lib/connectPrefill';
   import Shell from './lib/Shell.svelte';
+  import PlatformSetup from './lib/setup/PlatformSetup.svelte';
   import Toast from './lib/Toast.svelte';
-  import { session, restore, listenUnauthorized } from './lib/stores/session.svelte';
+  import { session, restore, listenUnauthorized, finishSetup } from './lib/stores/session.svelte';
+  import { initSetupRun, startSetupRun } from './lib/stores/setupRun.svelte';
   import { init as initDownloads } from './lib/stores/downloads.svelte';
   import { init as initSessions } from './lib/stores/sessions.svelte';
   import { init as initCompatTools } from './lib/stores/compatTools.svelte';
@@ -76,6 +78,15 @@
     };
   });
 
+  // First-run setup's defaults land as emulators install, which can be long
+  // after the picker handed over: one listener for the app's whole life.
+  $effect(() => {
+    const un = initSetupRun();
+    return () => {
+      un.then((f) => f());
+    };
+  });
+
   // The theme must be on `<html>` before the first paint the user sees, so
   // this registers alongside the other pre-shell effects rather than inside
   // Shell.svelte.
@@ -107,6 +118,13 @@
      cannot be reached, the blocking dialog replaces the whole app. -->
 {#if libraryUnreachable.blocking}
   <LibraryUnreachableDialog />
+{:else if session.phase === 'setup'}
+  <PlatformSetup
+    onDone={(started) => {
+      if (started !== null) startSetupRun(started);
+      finishSetup();
+    }}
+  />
 {:else if session.phase === 'shell'}
   <Shell />
 {:else if session.phase === 'none'}

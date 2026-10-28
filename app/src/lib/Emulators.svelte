@@ -17,6 +17,7 @@
     type Platform,
     type PlatformRef,
     type ProfileSummary,
+    type SetupStarted,
     type VersionCheck,
   } from './api';
   import { tick } from 'svelte';
@@ -49,6 +50,8 @@
     type EmulatorPageCounts,
   } from './emulators/pages';
   import CompatTools from './emulators/CompatTools.svelte';
+  import PlatformSetup from './setup/PlatformSetup.svelte';
+  import { startSetupRun } from './stores/setupRun.svelte';
   import EmulatorForm from './emulators/EmulatorForm.svelte';
   import { dynamicEmulatorNotes, emulatorNotes } from './emulators/notes';
   import { installedToastText, updateConfirmText, upToDateText } from './emulators/update';
@@ -346,6 +349,17 @@
     } finally {
       listLoading = false;
     }
+  }
+
+  // Platform defaults › Set up platforms…: the first-run picker again, in a
+  // dialog. What it queues shows in the shell's setup card like a first run.
+  let setupOpen = $state(false);
+
+  function closeSetup(started: SetupStarted | null) {
+    setupOpen = false;
+    if (started !== null) startSetupRun(started);
+    refreshEmulators();
+    refreshDefaults();
   }
 
   async function refreshPlatformsAndDefaults() {
@@ -805,7 +819,12 @@
     <!-- Platform defaults -->
     <section data-testid="emu-page-defaults" class="pane" hidden={page !== 'defaults'} aria-label={emulatorPageLabel('defaults')}>
       <div class="view-content pane-inner">
-        <h2>{emulatorPageLabel('defaults')}</h2>
+        <div class="pane-head">
+          <h2>{emulatorPageLabel('defaults')}</h2>
+          <button data-testid="emu-setup-platforms" class="add-btn" onclick={() => (setupOpen = true)}>
+            Set up platforms…
+          </button>
+        </div>
         {#if defaultsError}
           <p class="error" role="alert">{defaultsError}</p>
         {/if}
@@ -894,6 +913,20 @@
   </div>
 </section>
 
+{#if setupOpen}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="setup-backdrop"
+    onkeydown={(e) => {
+      if (e.key === 'Escape') setupOpen = false;
+    }}
+  >
+    <div class="setup-dialog" role="dialog" aria-modal="true" aria-label="Set up platforms" data-testid="emu-setup-dialog">
+      <PlatformSetup mode="later" onDone={closeSetup} />
+    </div>
+  </div>
+{/if}
+
 <style>
   .emulators {
     display: flex;
@@ -942,6 +975,33 @@
     color: var(--text-h);
     font-size: 18px;
     font-weight: 600;
+  }
+
+  .pane-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  /* Set up platforms…: the picker over a dimmed shell, like Details. */
+  .setup-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: grid;
+    place-items: center;
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  .setup-dialog {
+    width: min(680px, calc(100vw - 48px));
+    height: min(720px, calc(100vh - 48px));
+    border-radius: var(--r-dialog);
+    border: 1px solid var(--border);
+    background: var(--bg);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    overflow: hidden;
   }
 
   h3 {

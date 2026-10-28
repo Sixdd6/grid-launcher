@@ -95,6 +95,11 @@ STAGE_GROUPS=(
   # A 2500-game platform: covers load only near the visible area, a bounded
   # number at once, and the webview survives opening it (2026-10-20 crash).
   "large-platform:specs/large-platform.spec.ts"
+  # First-run setup: a fresh profile connects, picks platforms in the
+  # platform picker, and lands in the shell while their emulators install
+  # from the mock forge (PCSX2, Redream). Its own fixtures: PS2, Dreamcast, a
+  # platform with no emulator (PS5) and one only RetroArch serves (SNES).
+  "first-run-setup:specs/first-run-setup.spec.ts"
   # Measurement only, never part of a default run (OPT_IN_GROUPS): frame
   # times for load, scroll and hover on the same 2500-game platform, or on a
   # real server with E2E_LIVE_URL / E2E_LIVE_TOKEN / E2E_LIVE_PLATFORM.
@@ -457,6 +462,7 @@ mock_args_for_group() {
     # from e2e/fixtures so the shared set — and every assertion the other
     # groups and mock-romm/server.test.mjs make about it — stays untouched.
     emulator-catalog) printf -- '--fixtures-dir fixtures-emulator-catalog' ;;
+    first-run-setup) printf -- '--fixtures-dir fixtures-first-run-setup' ;;
     # An "Emulators" platform with one package (rom 801) that zips the mock
     # forge's PCSX2 AppImage stub, plus a PS2 platform for the defaults.
     server-emulator) printf -- '--fixtures-dir fixtures-server-emulator' ;;
@@ -500,7 +506,7 @@ mock_args_for_group() {
 # `Sixdd6/grid-launcher`'s latest release through the same ForgeClient, so
 # the same redirect points it at the mock forge's release route.
 group_needs_forge() {
-  [[ "$1" == "emulator-catalog" || "$1" == "updates" ]]
+  [[ "$1" == "emulator-catalog" || "$1" == "updates" || "$1" == "first-run-setup" ]]
 }
 
 # The `launch` group's data dir is pre-seeded (Ruling A, task-7-brief.md):
@@ -715,6 +721,12 @@ EOF
       # GRID_LAUNCHER_E2E_PLAY_SESSION_MIN_SECS, read by the e2e build only.
       if [[ "$name" == "launch" ]]; then
         export E2E_PLAY_SESSION_MIN_SECS=0
+      fi
+      # Only the `first-run-setup` group sees the platform picker after
+      # connecting (wdio.conf.ts turns this into
+      # GRID_LAUNCHER_E2E_FIRST_RUN_SETUP, read by the e2e build only).
+      if [[ "$name" == "first-run-setup" ]]; then
+        export E2E_FIRST_RUN_SETUP=1
       fi
       # Only the `library-move` group: the whole run is on one disk, where
       # every library folder would move by rename. This forces the Copy path
