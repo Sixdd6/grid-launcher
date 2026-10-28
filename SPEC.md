@@ -56,7 +56,7 @@ There are several main sections to the application with buttons across the top b
     reason.
   - **Remove from library (keeps files)** — the same action as for a game with no server
     id below: the Library row goes, no file is touched.
-- **Server** mirrors Library: a rail of the server's platforms with ROM counts, a
+- **Server** mirrors Library: a rail of the server's platforms (alphabetical by name) with ROM counts, a
   platform header (name, ROM count, installed count, a firmware chip with an Install
   action when the server offers firmware, and the platform's default emulator chip
   linking to the Emulators view), a search box that filters the loaded platform list by
@@ -173,8 +173,8 @@ can be changed later under Settings › Library.
 **Choose your platforms.** After the first successful connect of a fresh install (setup
 never finished or skipped, no emulator configured, no game installed), a platform picker
 comes before the shell. It lists the server's platforms that need an emulator (native PC
-platforms and the "Emulators" platform are left out) with their ROM counts, most games
-first, none ticked:
+platforms and the "Emulators" platform are left out) with their ROM counts, in
+alphabetical order, none ticked:
 - Ticking a platform pre-selects GRID's recommended emulator for it; a select offers the
   other compatible emulators installable on this system. The recommendation is the
   platform's standalone emulator (an ordered list per platform in

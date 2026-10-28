@@ -47,13 +47,13 @@ describe('first-run setup: pick platforms, install their emulators', () => {
       timeoutMsg: 'the platform picker never appeared after connecting',
     });
     await $(testId('setup-row-ps2')).waitForExist({ timeout: TRANSITION_TIMEOUT });
-    // Most games first: SNES (30), PS2 (9), Dreamcast (4), Zeebo (2).
+    // Alphabetical by name.
     const order = await browser.execute(() =>
       Array.from(document.querySelectorAll('[data-testid^="setup-row-"]')).map((r) =>
         (r as HTMLElement).dataset.testid!.replace('setup-row-', ''),
       ),
     );
-    expect(order).toEqual(['snes', 'ps2', 'dc', 'zeebo']);
+    expect(order).toEqual(['dc', 'ps2', 'snes', 'zeebo']);
     await expect($(testId('setup-unavailable-zeebo'))).toExist();
     await expect($(testId('setup-check-zeebo'))).toBeDisabled();
     // Nothing ticked yet, so nothing to install.

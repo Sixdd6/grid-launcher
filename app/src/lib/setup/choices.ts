@@ -5,9 +5,10 @@ import type { PlatformSetup, SetupChoice, SetupOption } from '../api';
 /** Ticked platforms: display label → the chosen option's `source_id`. */
 export type Selection = Readonly<Record<string, string>>;
 
-/** Most games first (design: sorted by ROM count), then by name. */
+/** Alphabetical by the shown name, ignoring case — the order every platform
+ *  list uses (the backend's `list_platforms` sorts the same way). */
 export function sortRows(rows: readonly PlatformSetup[]): PlatformSetup[] {
-  return [...rows].sort((a, b) => b.rom_count - a.rom_count || a.label.localeCompare(b.label));
+  return [...rows].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
 }
 
 /**

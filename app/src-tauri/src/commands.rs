@@ -255,7 +255,10 @@ fn platform_labels_by_name(platforms: &[Platform]) -> BTreeMap<String, String> {
 #[tauri::command]
 pub async fn list_platforms(state: State<'_, AppState>) -> Result<Vec<Platform>, String> {
     let client = state.session.client().ok_or("not connected")?;
-    let platforms = client.platforms().await.map_err(err)?;
+    let mut platforms = client.platforms().await.map_err(err)?;
+    // Alphabetical by what each list shows (the Server rail, Platform
+    // defaults, first-run setup); RomM's own order reads as random.
+    grid_core::romm::sort_by_label(&mut platforms);
     // grid-core holds no session, so this fetch is the only way it learns the
     // platform list the autoconfig defaults assignment writes against.
     if let Ok(install) = state.install.as_ref() {

@@ -30,8 +30,15 @@ const nes = row('NES', 400, [retroarch], 'mesen');
 const ps5 = row('PlayStation 5', 3, []);
 
 describe('sortRows', () => {
-  it('puts the most games first, then sorts by name', () => {
-    expect(sortRows([ps2, snes, ps5, nes]).map((r) => r.label)).toEqual(['NES', 'Super Nintendo', 'PlayStation 2', 'PlayStation 5']);
+  it('sorts alphabetically, ignoring case', () => {
+    const lower = row('atari 2600', 5, [retroarch], 'stella');
+    expect(sortRows([ps2, snes, ps5, nes, lower]).map((r) => r.label)).toEqual([
+      'atari 2600',
+      'NES',
+      'PlayStation 2',
+      'PlayStation 5',
+      'Super Nintendo',
+    ]);
   });
 });
 

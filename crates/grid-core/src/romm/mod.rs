@@ -288,6 +288,17 @@ impl Platform {
     }
 }
 
+/// Sorts platforms the way every platform list shows them: by [`Platform::label`],
+/// ignoring case, then by the label as written so the order is total.
+pub fn sort_by_label(platforms: &mut [Platform]) {
+    platforms.sort_by(|a, b| {
+        a.label()
+            .to_lowercase()
+            .cmp(&b.label().to_lowercase())
+            .then_with(|| a.label().cmp(b.label()))
+    });
+}
+
 /// One firmware file the server offers for a platform. The wire schema
 /// carries more fields (`file_size_bytes`, `crc_hash`, ...) this crate does
 /// not read; `#[serde(default)]` on `file_name` means an item missing it
@@ -1110,7 +1121,29 @@ mod credential_stripping_tests {
 
 #[cfg(test)]
 mod platform_tests {
-    use super::Platform;
+    use super::{sort_by_label, Platform};
+
+    #[test]
+    fn platforms_sort_by_label_ignoring_case() {
+        let mut platforms: Vec<Platform> = [
+            "Super Nintendo",
+            "arcade",
+            "Sony PlayStation 2",
+            "Atari 2600",
+        ]
+        .iter()
+        .enumerate()
+        .map(|(i, name)| parse(serde_json::json!({"id": i, "name": name, "slug": "s"})))
+        .collect();
+        // A custom name sorts by what is shown, not by the raw name.
+        platforms[1].display_name = "Zinc".to_string();
+        sort_by_label(&mut platforms);
+        let labels: Vec<&str> = platforms.iter().map(Platform::label).collect();
+        assert_eq!(
+            labels,
+            ["Atari 2600", "Sony PlayStation 2", "Super Nintendo", "Zinc"]
+        );
+    }
 
     fn parse(value: serde_json::Value) -> Platform {
         serde_json::from_value(value).expect("platform decodes")
